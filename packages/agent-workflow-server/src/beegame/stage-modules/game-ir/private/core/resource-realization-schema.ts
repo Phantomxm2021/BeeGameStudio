@@ -276,7 +276,7 @@ export type ResourceRealizationBudgetValue = Readonly<{
   unit: string
 }>
 export type ResourceRealizationDeliveryArtifactValue = Readonly<{
-  artifactClass: 'runtime-resource' | 'content-definition' | 'generated-output'
+  artifactClass: 'runtime-resource' | 'generated-output'
   path: string
   format: string
   runtimeRole: string
@@ -424,7 +424,7 @@ export const RESOURCE_REALIZATION_DOMAIN_MANIFEST: Readonly<
     valueJsonSchema: projectionValueSchema(
       {
         artifactClass: projectionEnum(
-          ['runtime-resource', 'content-definition', 'generated-output'],
+          ['runtime-resource', 'generated-output'],
           'artifact class',
         ),
         path: projectionText('safe artifact path'),
@@ -465,13 +465,11 @@ const SOURCE_KINDS = new Set([
 ])
 const ARTIFACT_CLASSES = new Set([
   'runtime-resource',
-  'content-definition',
   'generated-output',
 ])
 const FORMAT = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const ROOTS: Readonly<Record<string, string>> = Object.freeze({
   'runtime-resource': 'assets/runtime',
-  'content-definition': 'assets/content',
   'generated-output': 'assets/generated',
 })
 

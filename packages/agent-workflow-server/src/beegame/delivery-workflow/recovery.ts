@@ -6,7 +6,6 @@ import { transitionDeliveryRun } from './transition'
 import { isPublicStageActive } from './public-stage-routing'
 import {
   computeDocumentRevision,
-  computeResourceContentDigest,
   computeResourceRevision,
   computeWorkspaceRevision,
 } from './revision'

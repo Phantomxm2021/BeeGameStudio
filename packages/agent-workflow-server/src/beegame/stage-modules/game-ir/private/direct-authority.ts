@@ -183,8 +183,9 @@ export function renderDirectGameIrAuthority(input: {
   return [
     '# Game IR CLI task',
     '',
-    'Convert the requirements in the eight source documents into a complete six-domain Game IR JSON object.',
-    'Use your judgment to select only the nodes needed to build and verify the described playable scope. Include each canonical module exactly once, but do not emit a node merely because its kind exists. Do not invent requirements absent from the documents.',
+    'Create the smallest six-domain Game IR execution projection needed by downstream resource delivery, content configuration, target implementation and acceptance.',
+    'Use your judgment to select only requirements those downstream consumers must address. Keep supporting prose and unconsumed detail in the source documents instead of copying them into IR.',
+    'Include each canonical module exactly once. Do not emit a node merely because its kind exists, and do not split every sentence, scalar, UI string or example into a separate node. Do not invent requirements absent from the documents.',
     'Preserve concrete resource acceptance facts from the source documents in acquisition-profile.acceptanceCriteria. Do not collapse visual medium, palette, material, lighting or cross-asset coherence into broad style tags.',
     'Every node must cite one exact source section from the catalog. IDs must be globally unique. Every reference and edge must resolve to an emitted node with the exact target kind.',
     '',

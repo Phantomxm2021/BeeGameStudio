@@ -1,392 +1,114 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
 import {
-  type BeeGameAssetManifest,
+  parseCanonicalBeeGameAssetManifest,
   writeBeeGameAssetManifest,
+  type BeeGameAssetManifest,
 } from './asset-contracts'
-import { validateBeeGameContentDocuments } from './content-contracts'
 
-const TEST_ACQUISITION_PROFILE = { dimensions: ['agnostic'] as const, asset_kinds: ['data'] as const, usage_tags: [], capabilities: [], styles: [] }
+const workspaces: string[] = []
 
-const canonicalContentManifest: BeeGameAssetManifest = {
-  version: 8,
-  project_target: {
-    asset_format_capabilities: ['json', 'yaml'],
-    runtime_asset_root: 'assets/runtime',
-    content_root: 'assets/content',
-    generated_asset_root: 'assets/generated',
-  },
-  requirements: [{ id: 'req-model', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }],
-  resources: [
-    {
-      id: 'res-model',
-      source: {
-        type: 'agent-authored',
-        created_at: '2026-08-05T00:00:00.000Z',
-        reason: 'canonical test resource',
-      },
-      root_path: 'assets/runtime/model.glb',
-      file_paths: ['assets/runtime/model.glb'],
-      provisional: true,
-      status: 'verified',
-      selected_at: '2026-08-05T00:00:00.000Z',
-      selection_reason: ['Canonical test resource.'],
+afterEach(async () => {
+  for (const workspace of workspaces.splice(0))
+    await rm(workspace, { recursive: true, force: true })
+})
+
+function manifest(fulfills: string[] = ['req-model']): BeeGameAssetManifest {
+  return {
+    version: 9,
+    project_target: {
+      asset_format_capabilities: ['json'],
+      runtime_asset_root: 'assets/runtime',
+      generated_asset_root: 'assets/generated',
     },
-  ],
+    requirements: [
+      {
+        id: 'req-model',
+        required: true,
+        acquisition_profile: {
+          dimensions: ['agnostic'],
+          asset_kinds: ['data'],
+          usage_tags: [],
+          capabilities: [],
+          styles: [],
+        },
+      },
+    ],
+    resources: [
+      {
+        id: 'res-model',
+        fulfills,
+        source: {
+          type: 'agent-authored',
+          created_at: '2026-09-15T00:00:00.000Z',
+          reason: 'test fixture',
+        },
+        root_path: 'assets/runtime/model.json',
+        file_paths: ['assets/runtime/model.json'],
+        provisional: false,
+        status: 'verified',
+        selected_at: '2026-09-15T00:00:00.000Z',
+        selection_reason: ['Matches the requirement.'],
+        dimension: 'agnostic',
+        asset_kind: 'data',
+      },
+    ],
+  }
 }
 
-describe('modular v8 asset and content audit', () => {
-  test('rejects the malformed content envelope and invented registry identities before mutation', () => {
-    const audit = validateBeeGameContentDocuments(
-      [
-        {
-          path: 'assets/content/resource-registry.json',
-          value: {
-            id: 'beegame-content-v1-resource-registry',
-            kind: 'resource-registry',
-            fulfills: [],
-            resources: [],
-            data: {
-              bindings: [
-                {
-                  requirementId: 'REQ_RUNTIME_ENTITY_COMMANDER',
-                  resourceIds: ['res-model'],
-                },
-              ],
-            },
-          },
-        },
-      ],
-      canonicalContentManifest,
-    )
+async function writeFixture(value: BeeGameAssetManifest): Promise<string> {
+  const workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-audit-'))
+  workspaces.push(workspace)
+  await mkdir(join(workspace, 'assets/runtime'), { recursive: true })
+  await writeFile(join(workspace, 'assets/runtime/model.json'), '{}\n')
+  await writeBeeGameAssetManifest(workspace, value)
+  return workspace
+}
 
-    expect(audit.issues).toEqual(
-      expect.arrayContaining([
-        'assets/content/resource-registry.json: schema must be beegame-content-v1.',
-        'assets/content/resource-registry.json: unknown registry requirement: REQ_RUNTIME_ENTITY_COMMANDER.',
-        'Required requirement is not covered: req-model.',
-      ]),
-    )
-  })
+describe('Manifest-owned resource bindings', () => {
+  test('accepts a verified resource that fulfills a current requirement', async () => {
+    const workspace = await writeFixture(manifest())
 
-  test('accepts a project-required mixed content set with canonical bindings', () => {
-    const audit = validateBeeGameContentDocuments(
-      [
-        {
-          path: 'assets/content/resource-registry.json',
-          value: {
-            schema: 'beegame-content-v1',
-            id: 'registry',
-            kind: 'resource-registry',
-            fulfills: ['req-model'],
-            resources: ['res-model'],
-            data: {
-              bindings: [
-                {
-                  requirementId: 'req-model',
-                  resourceIds: ['res-model'],
-                },
-              ],
-            },
-          },
-        },
-        {
-          path: 'assets/content/world.yaml',
-          value: {
-            schema: 'beegame-content-v1',
-            id: 'world',
-            kind: 'world-definition',
-            fulfills: [],
-            resources: [],
-            data: { worlds: {} },
-          },
-        },
-      ],
-      canonicalContentManifest,
-    )
+    const audit = auditAssetContract(workspace)
 
     expect(audit.valid).toBe(true)
-    expect(audit.files.map(file => file.id)).toEqual(['registry', 'world'])
-    expect(audit.resourceBindings).toEqual([
+    expect(audit.bindings).toEqual([
       { requirementId: 'req-model', resourceIds: ['res-model'] },
     ])
   })
 
-  test('audits JSON and YAML references without an assembly graph', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-audit-'))
-    try {
-      await mkdir(join(workspace, 'assets/runtime'), { recursive: true })
-      await mkdir(join(workspace, 'assets', 'content'), { recursive: true })
-      await writeFile(join(workspace, 'assets/runtime/world.svg'), '<svg/>')
-      await writeBeeGameAssetManifest(workspace, {
-        version: 8,
-        project_target: {
-          asset_format_capabilities: ['svg', 'yaml'],
-          runtime_asset_root: 'assets/runtime',
-          content_root: 'assets/content',
-          generated_asset_root: 'assets/generated',
-        },
-        requirements: [{ id: 'world.layout', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }],
-        resources: [
-          {
-            id: 'world-art',
-            source: {
-              type: 'agent-authored',
-              created_at: new Date().toISOString(),
-              reason: 'placeholder',
-            },
-            root_path: 'assets/runtime/world.svg',
-            file_paths: ['assets/runtime/world.svg'],
-            provisional: true,
-            status: 'verified',
-            selected_at: new Date().toISOString(),
-            selection_reason: ['Project-authored material.'],
-          },
-        ],
-      })
-      await writeFile(
-        join(workspace, 'assets/content/resource-registry.json'),
-        JSON.stringify({
-          schema: 'beegame-content-v1',
-          id: 'registry',
-          kind: 'resource-registry',
-          fulfills: ['world.layout'],
-          resources: ['world-art'],
-          data: {
-            bindings: [
-              {
-                requirementId: 'world.layout',
-                resourceIds: ['world-art'],
-              },
-            ],
-          },
-        }),
-      )
-      await writeFile(
-        join(workspace, 'assets/content/world.yaml'),
-        'schema: beegame-content-v1\nid: world\nkind: scene-definitions\nfulfills: []\nresources: []\ndata:\n  objects: []\n',
-      )
-      const audit = auditAssetContract(workspace)
-      expect(audit.valid).toBe(true)
-      expect(
-        audit.content.files.find(
-          file => file.path === 'assets/content/world.yaml',
-        ),
-      ).toMatchObject({
-        id: 'world',
-        kind: 'scene-definitions',
-      })
-    } finally {
-      await rm(workspace, { recursive: true, force: true })
-    }
+  test('rejects a required requirement without a Manifest binding', async () => {
+    const workspace = await writeFixture(manifest([]))
+
+    const audit = auditAssetContract(workspace)
+
+    expect(audit.valid).toBe(false)
+    expect(audit.issues.join('\n')).toContain(
+      'req-model: Required requirement has no resource binding.',
+    )
   })
 
-  test('rejects a bound resource whose real source bypasses the requirement sourcing policy', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-audit-'))
-    try {
-      await mkdir(join(workspace, 'assets/runtime'), { recursive: true })
-      await mkdir(join(workspace, 'assets/content'), { recursive: true })
-      await writeFile(join(workspace, 'assets/runtime/world.svg'), '<svg/>')
-      await writeBeeGameAssetManifest(workspace, {
-        version: 8,
-        project_target: {
-          asset_format_capabilities: ['svg'],
-          runtime_asset_root: 'assets/runtime',
-          content_root: 'assets/content',
-          generated_asset_root: 'assets/generated',
-        },
-        requirements: [{
-          id: 'world.visual',
-          required: true,
-          acquisition_profile: {
-            ...TEST_ACQUISITION_PROFILE,
-            sourcing_policy: {
-              allowed_source_kinds: ['web'],
-              license_constraints: ['Commercial reuse allowed.'],
-              responsible_party: 'resource-agent',
-              handoff_criteria: ['Web provenance recorded.'],
-            },
-          },
-        }],
-        resources: [{
-          id: 'world-art',
-          source: {
-            type: 'agent-authored',
-            created_at: new Date().toISOString(),
-            reason: 'Incorrect source for this requirement.',
-          },
-          root_path: 'assets/runtime/world.svg',
-          file_paths: ['assets/runtime/world.svg'],
-          provisional: false,
-          status: 'verified',
-          selected_at: new Date().toISOString(),
-          selection_reason: ['Local authored fallback.'],
-        }],
-      })
-      await writeFile(
-        join(workspace, 'assets/content/resource-registry.json'),
-        JSON.stringify({
-          schema: 'beegame-content-v1',
-          id: 'registry',
-          kind: 'resource-registry',
-          fulfills: ['world.visual'],
-          resources: ['world-art'],
-          data: {
-            bindings: [{
-              requirementId: 'world.visual',
-              resourceIds: ['world-art'],
-            }],
-          },
-        }),
-      )
-
-      expect(auditAssetContract(workspace).issues).toContain(
-        'world.visual: Bound resource world-art uses disallowed source kind agent-authored.',
-      )
-    } finally {
-      await rm(workspace, { recursive: true, force: true })
-    }
+  test('rejects a resource binding to an unknown requirement', () => {
+    expect(() =>
+      parseCanonicalBeeGameAssetManifest({
+        ...manifest(),
+        resources: [{ ...manifest().resources[0], fulfills: ['req-unknown'] }],
+      }),
+    ).toThrow(/unknown requirement/i)
   })
 
-  test('enforces JSON ownership for events and waves and YAML ownership for scenes', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-audit-'))
-    try {
-      await mkdir(join(workspace, 'assets/content'), { recursive: true })
-      await writeBeeGameAssetManifest(workspace, {
-        version: 8,
+  test('rejects the removed content_root target field', () => {
+    expect(() =>
+      parseCanonicalBeeGameAssetManifest({
+        ...manifest(),
         project_target: {
-          asset_format_capabilities: ['json', 'yaml'],
-          runtime_asset_root: 'assets/runtime',
+          ...manifest().project_target,
           content_root: 'assets/content',
-          generated_asset_root: 'assets/generated',
         },
-        requirements: [],
-        resources: [],
-      })
-      const header = {
-        schema: 'beegame-content-v1',
-        fulfills: [],
-        resources: [],
-        data: {},
-      }
-      await writeFile(
-        join(workspace, 'assets/content/events.yaml'),
-        'schema: beegame-content-v1\nid: events\nkind: event-definitions\nfulfills: []\nresources: []\ndata: {}\n',
-      )
-      await writeFile(
-        join(workspace, 'assets/content/scene.json'),
-        JSON.stringify({ ...header, id: 'scene', kind: 'scene-definitions' }),
-      )
-
-      expect(auditAssetContract(workspace).issues).toEqual(
-        expect.arrayContaining([
-          expect.stringContaining('events.yaml: YAML kind must be one of'),
-          expect.stringContaining('scene.json: JSON kind must be one of'),
-        ]),
-      )
-
-      await rm(join(workspace, 'assets/content/events.yaml'))
-      await rm(join(workspace, 'assets/content/scene.json'))
-      await writeFile(
-        join(workspace, 'assets/content/events.json'),
-        JSON.stringify({ ...header, id: 'events', kind: 'event-definitions' }),
-      )
-      await writeFile(
-        join(workspace, 'assets/content/waves.json'),
-        JSON.stringify({ ...header, id: 'waves', kind: 'wave-definitions' }),
-      )
-      await writeFile(
-        join(workspace, 'assets/content/scene.yaml'),
-        'schema: beegame-content-v1\nid: scene\nkind: scene-definitions\nfulfills: []\nresources: []\ndata: {}\n',
-      )
-      expect(auditAssetContract(workspace).valid).toBe(true)
-    } finally {
-      await rm(workspace, { recursive: true, force: true })
-    }
-  })
-
-  test('rejects unregistered manifest modules instead of creating a second inventory', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-audit-'))
-    try {
-      await mkdir(join(workspace, 'assets/content'), { recursive: true })
-      await writeBeeGameAssetManifest(workspace, {
-        version: 8,
-        project_target: {
-          asset_format_capabilities: ['json'],
-          runtime_asset_root: 'assets/runtime',
-          content_root: 'assets/content',
-          generated_asset_root: 'assets/generated',
-        },
-        requirements: [],
-        resources: [],
-      })
-      await writeFile(
-        join(workspace, 'assets/content/project.json'),
-        JSON.stringify({
-          schema: 'beegame-content-v1',
-          id: 'project',
-          kind: 'resource-registry',
-          fulfills: [],
-          resources: [],
-          data: {},
-        }),
-      )
-      await mkdir(join(workspace, 'assets/manifest/resources'), {
-        recursive: true,
-      })
-      await writeFile(
-        join(workspace, 'assets/manifest/resources/orphan.json'),
-        '{}',
-      )
-      expect(auditAssetContract(workspace).issues).toContain(
-        'Unregistered manifest module: assets/manifest/resources/orphan.json',
-      )
-    } finally {
-      await rm(workspace, { recursive: true, force: true })
-    }
-  })
-
-  test('rejects implementation-owned content definitions from the resource inventory', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-audit-'))
-    try {
-      await mkdir(join(workspace, 'assets/runtime/scenes'), { recursive: true })
-      await mkdir(join(workspace, 'assets/content'), { recursive: true })
-      await writeFile(join(workspace, 'assets/runtime/scenes/main.tscn'), '[gd_scene]\n')
-      await writeBeeGameAssetManifest(workspace, {
-        version: 8,
-        project_target: {
-          asset_format_capabilities: ['tscn'],
-          runtime_asset_root: 'assets/runtime',
-          content_root: 'assets/content',
-          generated_asset_root: 'assets/generated',
-        },
-        requirements: [],
-        resources: [{
-          id: 'main-scene',
-          source: {
-            type: 'agent-authored',
-            created_at: new Date().toISOString(),
-            reason: 'incorrect cross-stage output',
-          },
-          root_path: 'assets/runtime/scenes/main.tscn',
-          file_paths: ['assets/runtime/scenes/main.tscn'],
-          provisional: false,
-          status: 'verified',
-          selected_at: new Date().toISOString(),
-          selection_reason: ['Incorrectly treated implementation output as a resource.'],
-          asset_kind: 'scene',
-          technical_facts: { artifactClass: 'content-definition' },
-        }],
-      })
-
-      expect(auditAssetContract(workspace).issues).toContain(
-        'main-scene: Implementation-owned content-definition must not be declared as a resource; remove its Manifest requirement, resource module, and resource-registry binding.',
-      )
-    } finally {
-      await rm(workspace, { recursive: true, force: true })
-    }
+      }),
+    ).toThrow(/unknown fields/i)
   })
 })

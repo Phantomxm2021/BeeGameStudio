@@ -6,7 +6,14 @@ import { writeBeeGameAssetManifest } from './asset-contracts'
 import { auditResourceDeliveryReadiness } from './resource-delivery-readiness'
 
 const roots: string[] = []
-const TEST_ACQUISITION_PROFILE = { dimensions: ['agnostic'] as const, asset_kinds: ['data'] as const, usage_tags: [], capabilities: [], styles: [] }
+const TEST_ACQUISITION_PROFILE = {
+  dimensions: ['agnostic'] as const,
+  asset_kinds: ['data'] as const,
+  usage_tags: [],
+  capabilities: [],
+  styles: [],
+}
+
 afterEach(async () =>
   Promise.all(
     roots.splice(0).map(root => rm(root, { recursive: true, force: true })),
@@ -14,62 +21,65 @@ afterEach(async () =>
 )
 
 describe('resource delivery readiness', () => {
-  it('requires verified resources and JSON/YAML coverage', async () => {
-    const workspace = await mkdtemp(join(tmpdir(), 'beegame-content-'))
+  it('uses Manifest bindings and does not require content files', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-resources-'))
     roots.push(workspace)
     await mkdir(join(workspace, 'assets/runtime'), { recursive: true })
-    await mkdir(join(workspace, 'assets', 'content'), { recursive: true })
-    await writeFile(
-      join(workspace, 'assets/runtime/player.svg'),
-      '<svg xmlns="http://www.w3.org/2000/svg"/>',
-    )
+    await writeFile(join(workspace, 'assets/runtime/player.json'), '{}\n')
     await writeBeeGameAssetManifest(workspace, {
-      version: 8,
+      version: 9,
       project_target: {
-        asset_format_capabilities: ['svg', 'json', 'yaml'],
+        asset_format_capabilities: ['json'],
         resource_library_usage: 'preferred',
         runtime_asset_root: 'assets/runtime',
-        content_root: 'assets/content',
         generated_asset_root: 'assets/generated',
       },
-      requirements: [{ id: 'visual.player', required: true, acquisition_profile: TEST_ACQUISITION_PROFILE }],
+      requirements: [
+        {
+          id: 'visual.player',
+          required: true,
+          acquisition_profile: TEST_ACQUISITION_PROFILE,
+        },
+      ],
       resources: [
         {
           id: 'player-art',
+          fulfills: ['visual.player'],
           source: {
             type: 'agent-authored',
             created_at: new Date().toISOString(),
-            reason: 'placeholder',
+            reason: 'fixture resource',
           },
-          root_path: 'assets/runtime/player.svg',
-          file_paths: ['assets/runtime/player.svg'],
-          provisional: true,
+          root_path: 'assets/runtime/player.json',
+          file_paths: ['assets/runtime/player.json'],
+          provisional: false,
           status: 'verified',
           selected_at: new Date().toISOString(),
-          selection_reason: ['No suitable library material was selected.'],
+          selection_reason: ['Matches the requirement.'],
+          dimension: 'agnostic',
+          asset_kind: 'data',
         },
       ],
     })
-    expect(
-      auditResourceDeliveryReadiness({ workspacePath: workspace }).ready,
-    ).toBe(false)
-    await writeFile(
-      join(workspace, 'assets/content/resource-registry.json'),
-      JSON.stringify({
-        schema: 'beegame-content-v1',
-        id: 'registry',
-        kind: 'resource-registry',
-        fulfills: ['visual.player'],
-        resources: ['player-art'],
-        data: {
-          bindings: [
-            { requirementId: 'visual.player', resourceIds: ['player-art'] },
-          ],
-        },
-      }),
-    )
+
     expect(
       auditResourceDeliveryReadiness({ workspacePath: workspace }),
-    ).toMatchObject({ ready: true, contentFileCount: 1 })
+    ).toMatchObject({
+      ready: true,
+      requirementCount: 1,
+      boundRequirementCount: 1,
+      resourceCount: 1,
+    })
+  })
+
+  it('rejects the retired assets/content root', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-resources-'))
+    roots.push(workspace)
+    await mkdir(join(workspace, 'assets/content'), { recursive: true })
+
+    const result = auditResourceDeliveryReadiness({ workspacePath: workspace })
+
+    expect(result.ready).toBe(false)
+    expect(result.issues.join('\n')).toContain('Retired resource content root')
   })
 })

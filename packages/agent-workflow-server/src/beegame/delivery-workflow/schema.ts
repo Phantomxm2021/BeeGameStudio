@@ -31,6 +31,7 @@ export const DELIVERY_PHASES = [
   'DOCUMENT_DRAFTING',
   'DOCUMENT_REVIEW',
   'RESOURCE_PREPARATION',
+  'GAME_CONTENT',
   'IMPLEMENTATION',
   'ACCEPTANCE',
   'DELIVERY',
@@ -62,6 +63,7 @@ export const DISPATCH_STATUSES = [
 export const WORKER_TYPES = [
   'document-author',
   'resource-planner',
+  'content-author',
   'implementation-worker',
   'acceptance-validator',
   'change-impact-analyzer',
@@ -72,6 +74,7 @@ const revisionSchema: z.ZodType<Revision> = z
   .object({
     document: z.string().min(1),
     resource: z.string().min(1).optional(),
+    content: z.string().min(1).optional(),
     implementation: z.string().min(1).optional(),
     workspace: z.string().min(1),
   })
@@ -136,7 +139,7 @@ const resourceProductionStateSchema = z
             .strict(),
         ),
         catalogObserved: z.boolean(),
-        contentDigest: z.string().min(1),
+        resourceDigest: z.string().min(1),
         acceptedAt: z.string().datetime(),
       })
       .strict()
@@ -188,6 +191,7 @@ export const evidenceRefSchema: z.ZodType<EvidenceRef> = z
     kind: z.enum([
       'document_review',
       'resource_preparation',
+      'game_content',
       'acceptance',
     ]),
     revision: z.string().min(1),
@@ -443,6 +447,20 @@ export const acceptedWorkflowUnitSchema: z.ZodType<AcceptedWorkflowUnit> =
     z
       .object({
         ...acceptedWorkflowUnitBase,
+        kind: z.literal('game-content'),
+        receiptRef: z.literal('content/index.json'),
+        payload: z
+          .strictObject({
+            receiptRef: z.literal('content/index.json'),
+            irRevision: sha256DigestSchema,
+            assetManifestRevision: sha256DigestSchema,
+            contentIds: z.array(z.string().min(1)).min(1),
+          }),
+      })
+      .strict(),
+    z
+      .object({
+        ...acceptedWorkflowUnitBase,
         kind: z.literal('implementation-task'),
         payload: z
           .object({
@@ -541,6 +559,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     evidence: z
       .object({
         resourcePreparation: evidenceRefSchema.optional(),
+        gameContent: evidenceRefSchema.optional(),
         acceptance: evidenceRefSchema.optional(),
       })
       .strict(),
@@ -551,6 +570,16 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     // Old project review state is unsupported, not a migration/read compatibility surface.
     foundationAuditState: z.never().optional(),
     resourceProductionState: resourceProductionStateSchema,
+    gameContentReceipt: z
+      .strictObject({
+        schemaVersion: z.literal('game-content-ready.v1'),
+        contentRevision: sha256DigestSchema,
+        irRevision: sha256DigestSchema,
+        assetManifestRevision: sha256DigestSchema,
+        indexPath: z.literal('content/index.json'),
+        contentIds: z.array(z.string().min(1)).min(1),
+      })
+      .optional(),
     usage: workflowUsageSchema.optional(),
     currentMessage: z.string().min(1).optional(),
     thinking: z.enum(['working', 'waiting', 'idle']).optional(),
@@ -571,6 +600,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
     const requiresCompletedFoundation =
       run.phase === 'DOCUMENT_REVIEW' ||
       run.phase === 'RESOURCE_PREPARATION' ||
+      run.phase === 'GAME_CONTENT' ||
       run.phase === 'IMPLEMENTATION' ||
       run.phase === 'ACCEPTANCE' ||
       run.phase === 'DELIVERY'
@@ -668,12 +698,17 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
           message: 'IR completion must bind the accepted Foundation revision' })
     }
     const entersDownstream = run.documentStep === 'CHECKLIST_DRAFTING' ||
-      ['RESOURCE_PREPARATION', 'IMPLEMENTATION', 'ACCEPTANCE', 'DELIVERY'].includes(run.phase)
+      ['RESOURCE_PREPARATION', 'GAME_CONTENT', 'IMPLEMENTATION', 'ACCEPTANCE', 'DELIVERY'].includes(run.phase)
     if (run.foundationReviewStage?.acceptedReview && entersDownstream &&
         (run.gameIrStage?.outcome?.status !== 'completed' ||
           run.gameIrStage.outcome.billingStatus !== 'settled' || run.gameIrStage.control.action !== 'run'))
       context.addIssue({ code: 'custom', path: ['gameIrStage'],
         message: 'Accepted Foundation documents require settled IR completion before downstream work' })
+    if (run.gameContentReceipt &&
+        (run.gameContentReceipt.irRevision !== run.resourceProductionState.irResultId ||
+          run.gameContentReceipt.assetManifestRevision !== run.revision.resource))
+      context.addIssue({ code: 'custom', path: ['gameContentReceipt'],
+        message: 'Scene/UI content receipt must bind the current Game IR and Asset Manifest revisions' })
   })
 
 export const parseDeliveryRun = (value: unknown): DeliveryRun => deliveryRunSchema.parse(value)

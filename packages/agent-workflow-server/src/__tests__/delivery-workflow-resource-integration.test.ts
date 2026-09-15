@@ -3,7 +3,7 @@ import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 import { transitionDeliveryRun } from '../beegame/delivery-workflow/transition'
 
 describe('canonical resource-content workflow', () => {
-  it('moves passed resources directly to implementation', () => {
+  it('moves passed resources to the isolated Scene/UI content phase', () => {
     const run = {
       ...createTestDeliveryRun({
         runId: 'resource-review',
@@ -19,7 +19,7 @@ describe('canonical resource-content workflow', () => {
         deliveryReceipt: {
           bindings: [],
           catalogObserved: false,
-          contentDigest: 'content-digest',
+          resourceDigest: 'resource-digest',
           acceptedAt: new Date().toISOString(),
         },
       },
@@ -29,7 +29,7 @@ describe('canonical resource-content workflow', () => {
       type: 'resource_preparation_ready',
       resourceRevision: 'b'.repeat(64),
       evidence: {
-        path: '.beegame/workflow/evidence/resources.json',
+        path: 'assets/asset-manifest.json',
         kind: 'resource_preparation',
         revision: 'b'.repeat(64),
         status: 'passed',
@@ -38,7 +38,7 @@ describe('canonical resource-content workflow', () => {
     })
 
     expect(next).toMatchObject({
-      phase: 'IMPLEMENTATION',
+      phase: 'GAME_CONTENT',
       documentStep: undefined,
     })
   })

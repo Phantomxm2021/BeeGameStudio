@@ -1,6 +1,7 @@
 import { computeResourceRevision, computeWorkspaceRevision } from './revision'
 import { createRunStore } from './run-store'
 import { isWorkflowEvidenceFile } from './evidence'
+import { CANONICAL_ASSET_MANIFEST } from './types'
 
 export type WorkflowDeliveryGate = {
   allowed: boolean
@@ -37,17 +38,19 @@ export async function evaluateWorkflowDeliveryGate(input: {
       issues: ['Current workflow has no passed resource-preparation evidence.'],
     }
   }
+  if (run.evidence.gameContent?.status !== 'passed' || !run.gameContentReceipt) {
+    return {
+      allowed: false,
+      issues: ['Current workflow has no accepted Scene/UI content package.'],
+    }
+  }
   if (
-    !run.evidence.resourcePreparation.path ||
-    !isWorkflowEvidenceFile(
-      input.workspacePath,
-      run.evidence.resourcePreparation.path,
-    )
+    run.evidence.resourcePreparation.path !== CANONICAL_ASSET_MANIFEST
   ) {
     return {
       allowed: false,
       issues: [
-        'Current resource-delivery evidence file is missing or invalid.',
+        'Current resource-delivery evidence does not reference the canonical Asset Manifest.',
       ],
     }
   }
@@ -67,6 +70,17 @@ export async function evaluateWorkflowDeliveryGate(input: {
     input.workspacePath,
     run.revision.document,
   )
+  if (
+    !run.revision.content ||
+    run.evidence.gameContent.revision !== run.revision.content ||
+    run.gameContentReceipt.contentRevision !== run.revision.content ||
+    run.gameContentReceipt.assetManifestRevision !== currentResourceRevision
+  ) {
+    return {
+      allowed: false,
+      issues: ['Accepted Scene/UI content is not bound to the current IR and Asset Manifest revisions.'],
+    }
+  }
   if (
     !run.revision.resource ||
     run.evidence.resourcePreparation.revision !== currentResourceRevision ||

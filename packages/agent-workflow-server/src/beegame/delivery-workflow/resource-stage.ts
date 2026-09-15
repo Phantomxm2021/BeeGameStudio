@@ -1,20 +1,14 @@
 import { auditAssetContract } from '../asset-contract-audit'
 import {
-  BEEGAME_RESOURCE_ROOTS,
   readBeeGameAssetManifestSync,
   type BeeGameAssetRequirement,
   type BeeGameProjectResource,
 } from '../asset-contracts'
 import {
-  auditBeeGameContent,
-  BEEGAME_CONTENT_SCHEMA,
-} from '../content-contracts'
-import {
   auditResourceDeliveryReadiness,
   confirmedResourceLibraryUsage,
 } from '../resource-delivery-readiness'
 import {
-  computeResourceContentDigest,
   computeResourceRevision,
 } from './revision'
 import { resourceIrDeliveryIssues } from './resource-ir-delivery'
@@ -36,7 +30,7 @@ export function resourcePreparationAllowedPaths(
 
 export function currentResourceContractIssues(workspacePath: string): string[] {
   const audit = auditAssetContract(workspacePath)
-  return [...new Set([...audit.issues, ...audit.content.issues])]
+  return [...new Set(audit.issues)]
 }
 
 function directoryScope(path: string): string {
@@ -225,7 +219,7 @@ export function resourceIrManifestIssues(
     manifest.resources.map(resource => [resource.id, resource]),
   )
   const bindingsByRequirement = new Map(
-    auditBeeGameContent(workspacePath, manifest).resourceBindings.map(binding => [
+    auditAssetContract(workspacePath).bindings.map(binding => [
       binding.requirementId,
       binding.resourceIds,
     ]),
@@ -347,10 +341,7 @@ export async function startResourcePreparation(input: {
       resourceLibraryUsage: confirmedResourceLibraryUsage(
         input.run.confirmedBriefContext,
       ),
-      contentRoot: BEEGAME_RESOURCE_ROOTS.content,
-      schema: BEEGAME_CONTENT_SCHEMA,
-      contentKind: 'resource-registry',
-      currentContentIssues: [
+      currentResourceIssues: [
         ...currentResourceContractIssues(input.workspacePath),
         ...(input.run.blockedReason ? [input.run.blockedReason] : []),
       ],
@@ -381,7 +372,7 @@ export async function completeResourceTask(input: {
       .filter(requirement => requirement.required)
       .map(requirement => requirement.id)
     const bindingsByRequirement = new Map(
-      audit.content.resourceBindings.map(binding => [
+      audit.bindings.map(binding => [
         binding.requirementId,
         binding.resourceIds,
       ]),
@@ -399,8 +390,9 @@ export async function completeResourceTask(input: {
             catalogObserved: audit.resources.some(
               resource => resource.sourceType === 'resource-library',
             ),
-            contentDigest: await computeResourceContentDigest(
+            resourceDigest: await computeResourceRevision(
               input.workspacePath,
+              input.run.revision.document,
             ),
             acceptedAt: new Date().toISOString(),
           }
@@ -418,7 +410,6 @@ export async function completeResourceTask(input: {
       !audit.valid ||
       irManifestIssues.length > 0 ||
       missingRequirementIds.length > 0 ||
-      !audit.content.valid ||
       !readiness.ready
     ) {
       const issues = [...new Set([
@@ -427,7 +418,6 @@ export async function completeResourceTask(input: {
         ...(missingRequirementIds.length
           ? [`Missing verified resource bindings: ${missingRequirementIds.join(', ')}`]
           : []),
-        ...audit.content.issues,
         ...readiness.readinessIssues,
       ])]
       return {

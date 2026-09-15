@@ -14,7 +14,7 @@ export type DownstreamIr = {
 }
 
 export function consumesGameIr(worker: string): boolean {
-  return ['resource-planner', 'implementation-worker', 'acceptance-validator'].includes(worker)
+  return ['resource-planner', 'content-author', 'implementation-worker', 'acceptance-validator'].includes(worker)
 }
 
 export function downstreamIrForWorker(worker: string, ir: DownstreamIr): DownstreamIr {
@@ -40,7 +40,7 @@ export function downstreamIrForRequest(
 }
 
 export function isDownstreamIrPhase(phase: string): boolean {
-  return ['RESOURCE_PREPARATION', 'IMPLEMENTATION', 'ACCEPTANCE'].includes(phase)
+  return ['RESOURCE_PREPARATION', 'GAME_CONTENT', 'IMPLEMENTATION', 'ACCEPTANCE'].includes(phase)
 }
 
 /** Read through the public module, which validates committed files and receipts. */

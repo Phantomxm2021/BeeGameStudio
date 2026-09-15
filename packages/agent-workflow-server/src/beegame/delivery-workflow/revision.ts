@@ -100,7 +100,7 @@ function stableJson(value: unknown): string {
     .join(',')}}`
 }
 
-/** Hash the complete canonical resource inventory and JSON/YAML content. */
+/** Hash the complete canonical resource inventory and its real resource files. */
 export async function computeResourceRevision(
   workspacePath: string,
   documentRevision: string,
@@ -115,17 +115,9 @@ export async function computeResourceRevision(
   const resourceFiles = [
     ...new Set(manifest?.resources.flatMap(value => value.file_paths) ?? []),
   ]
-  const contentFiles: string[] = []
-  const contentRoot = isRecord(manifest?.project_target)
-    ? manifest.project_target.content_root
-    : undefined
-  if (typeof contentRoot === 'string')
-    await collectFiles(root, join(root, contentRoot), contentFiles).catch(
-      () => undefined,
-    )
   const materialDigest = await digestFiles(
     root,
-    [...resourceFiles, ...contentFiles],
+    resourceFiles,
     '<missing>',
   )
   const hash = createHash('sha256')
@@ -135,33 +127,6 @@ export async function computeResourceRevision(
     .update('\0')
     .update(materialDigest)
   return hash.digest('hex')
-}
-
-/** Hash the current canonical content root independently from resource inventory. */
-export async function computeResourceContentDigest(
-  workspacePath: string,
-): Promise<string> {
-  const root = resolve(workspacePath)
-  let manifest: ReturnType<typeof readBeeGameAssetManifestSync> | undefined
-  try {
-    manifest = readBeeGameAssetManifestSync(root)
-  } catch {
-    // Content cannot be accepted until the Manifest is available.
-  }
-  const contentRoot = isRecord(manifest?.project_target)
-    ? manifest.project_target.content_root
-    : undefined
-  const contentFiles: string[] = []
-  if (typeof contentRoot === 'string')
-    await collectFiles(root, join(root, contentRoot), contentFiles).catch(
-      () => undefined,
-    )
-  const digest = await digestFiles(root, contentFiles, '<missing>')
-  return createHash('sha256')
-    .update(typeof contentRoot === 'string' ? contentRoot : '<missing>')
-    .update('\0')
-    .update(digest)
-    .digest('hex')
 }
 
 export async function computeImplementationRevision(

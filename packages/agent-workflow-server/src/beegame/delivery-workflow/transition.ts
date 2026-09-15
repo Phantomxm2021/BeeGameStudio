@@ -8,6 +8,7 @@ DeliveryRun,
 EvidenceRef,
 EvidenceStatus,
 } from './types'
+import type { BeeGameContentReadyReceipt } from '../game-content-package'
 
 export class WorkflowTransitionError extends Error {
   constructor(
@@ -29,6 +30,18 @@ export type DeliveryTransition =
     } & EvidenceEvent)
   | ({
       type: 'resource_preparation_needs_action'
+      reason: string
+    } & EvidenceEvent)
+  | ({
+      type: 'game_content_ready'
+      contentRevision: string
+    } & EvidenceEvent)
+  | ({
+      type: 'game_content_published'
+      receipt: BeeGameContentReadyReceipt
+    } & EvidenceEvent)
+  | ({
+      type: 'game_content_needs_action'
       reason: string
     } & EvidenceEvent)
   | { type: 'resource_preparation_required'; reason?: string }
@@ -106,7 +119,7 @@ export function assertDeliveryRunInvariants(run: DeliveryRun): DeliveryRun {
 
 function withEvidence(
   run: DeliveryRun,
-  key: 'resourcePreparation' | 'acceptance',
+  key: 'resourcePreparation' | 'gameContent' | 'acceptance',
   evidence: EvidenceRef,
 ): DeliveryRun {
   return {
@@ -147,6 +160,7 @@ function enterResourcePreparation(
     revision: {
       ...run.revision,
       resource: undefined,
+      content: undefined,
       implementation: undefined,
     },
     tasks: [],
@@ -156,6 +170,7 @@ function enterResourcePreparation(
       currentTask: 'RESOURCE_DELIVERY',
       irResultId: run.resourceProductionState.irResultId,
     },
+    gameContentReceipt: undefined,
     updatedAt: timestamp(),
   }
 }
@@ -185,8 +200,8 @@ export function transitionDeliveryRun(
       next = {
         ...withEvidence(run, 'resourcePreparation', event.evidence),
         revision: { ...run.revision, resource: event.resourceRevision },
-        // Resource readiness is the input to the single implementation turn.
-        phase: 'IMPLEMENTATION',
+        // Scene/UI content is authored only after resources are accepted.
+        phase: 'GAME_CONTENT',
         documentStep: undefined,
         status: 'running',
         blockedReason: undefined,
@@ -194,6 +209,66 @@ export function transitionDeliveryRun(
           ...run.resourceProductionState,
           currentTask: 'RESOURCE_DELIVERED',
         },
+      }
+      break
+    case 'game_content_ready':
+      requirePhase(run, 'GAME_CONTENT')
+      requireEvidence(event.evidence, event.contentRevision, ['passed'])
+      next = {
+        ...withEvidence(run, 'gameContent', event.evidence),
+        revision: { ...run.revision, content: event.contentRevision },
+        phase: 'IMPLEMENTATION',
+        status: 'running',
+        blockedReason: undefined,
+      }
+      break
+    case 'game_content_published': {
+      if (!['IMPLEMENTATION', 'ACCEPTANCE', 'DELIVERY'].includes(run.phase))
+        fail(`content publishing is unavailable during ${run.phase}`)
+      if (run.activeDispatch || run.activeTaskId)
+        fail('content cannot be published while workflow work is active')
+      requireEvidence(event.evidence, event.receipt.contentRevision, ['passed'])
+      if (
+        event.receipt.irRevision !== run.resourceProductionState.irResultId ||
+        event.receipt.assetManifestRevision !== run.revision.resource
+      )
+        fail('published content does not bind the current IR and resources')
+      const implementationReady = Boolean(
+        run.revision.implementation &&
+          run.tasks.length > 0 &&
+          run.tasks.every(task => task.status === 'completed'),
+      )
+      next = {
+        ...run,
+        phase: implementationReady ? 'ACCEPTANCE' : 'IMPLEMENTATION',
+        status: 'running',
+        documentStep: undefined,
+        activeTaskId: undefined,
+        activeDispatch: undefined,
+        revision: {
+          ...run.revision,
+          content: event.receipt.contentRevision,
+        },
+        evidence: {
+          ...(run.evidence.resourcePreparation
+            ? { resourcePreparation: run.evidence.resourcePreparation }
+            : {}),
+          gameContent: event.evidence,
+        },
+        gameContentReceipt: event.receipt,
+        blockedReason: undefined,
+        completedAt: undefined,
+        updatedAt: timestamp(),
+      }
+      break
+    }
+    case 'game_content_needs_action':
+      requirePhase(run, 'GAME_CONTENT')
+      requireEvidence(event.evidence, event.evidence.revision, ['failed', 'blocked'])
+      next = {
+        ...withEvidence(run, 'gameContent', event.evidence),
+        status: 'needs_action',
+        blockedReason: event.reason,
       }
       break
     case 'resource_preparation_needs_action':
@@ -329,6 +404,10 @@ export function transitionDeliveryRun(
       requirePhase(run, 'DELIVERY')
       if (run.evidence.acceptance?.status !== 'passed')
         fail('delivery requires passed acceptance evidence')
+      if (run.evidence.gameContent?.status !== 'passed' ||
+          !run.gameContentReceipt ||
+          run.gameContentReceipt.contentRevision !== run.revision.content)
+        fail('delivery requires the accepted Scene/UI content package')
       {
         const completedAt = timestamp()
         next = {
@@ -420,6 +499,7 @@ export function transitionDeliveryRun(
           // in the next prompt. It is cleared by successful completion.
           blockedReason:
             run.phase === 'RESOURCE_PREPARATION' ||
+            run.phase === 'GAME_CONTENT' ||
             run.phase === 'IMPLEMENTATION'
               ? run.blockedReason
               : undefined,

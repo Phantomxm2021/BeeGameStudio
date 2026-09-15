@@ -1,5 +1,4 @@
 import { readBeeGameAssetManifest } from '../asset-contracts'
-import { auditAssetContract } from '../asset-contract-audit'
 import { transitionDeliveryRun } from './transition'
 import { isWorkflowEvidenceFile } from './evidence'
 import { resourceIrDeliveryIssues } from './resource-ir-delivery'
@@ -69,7 +68,6 @@ export function implementationCompletionIssue(input: {
           workspacePath: input.workspacePath,
           artifactClasses: [
             'runtime-resource',
-            'content-definition',
             'generated-output',
           ],
         })
@@ -98,18 +96,19 @@ export async function startNextImplementationTask(input: {
 > {
   const task = nextRunnableTask(input.run)
   if (!task) return { run: input.run }
+  const content = input.run.gameContentReceipt
+  if (!content || !input.run.revision.content ||
+      content.contentRevision !== input.run.revision.content ||
+      !sameIds(task.contentIds, [...content.contentIds]))
+    throw new Error('implementation requires the exact accepted Scene/UI content package')
   const started = transitionDeliveryRun(input.run, {
     type: 'task_started',
     taskId: task.id,
     revision: input.revision,
   })
   const manifest = await readBeeGameAssetManifest(input.workspacePath)
-  const contract = auditAssetContract(input.workspacePath)
   const resourcesById = new Map(
     manifest.resources.map(resource => [resource.id, resource]),
-  )
-  const contentById = new Map(
-    contract.content.files.map(file => [file.id, file]),
   )
   const resources = task.resourceIds.map(id => {
     const resource = resourcesById.get(id)
@@ -118,12 +117,6 @@ export async function startNextImplementationTask(input: {
         `implementation task references unavailable resource ${id}`,
       )
     return { id, rootPath: resource.root_path, filePaths: resource.file_paths }
-  })
-  const content = task.contentIds.map(id => {
-    const file = contentById.get(id)
-    if (!file)
-      throw new Error(`implementation task references unknown content ${id}`)
-    return file
   })
   const request: WorkerDispatchRequest = {
     runId: started.runId,
@@ -139,7 +132,6 @@ export async function startNextImplementationTask(input: {
       task,
       currentRevision: input.revision,
       resources,
-      content,
       ...(input.run.blockedReason
         ? { currentImplementationIssues: [input.run.blockedReason] }
         : {}),

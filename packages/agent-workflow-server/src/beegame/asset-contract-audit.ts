@@ -7,10 +7,6 @@ import {
   readBeeGameAssetManifestSync,
   type BeeGameAssetManifest,
 } from './asset-contracts'
-import {
-  auditBeeGameContent,
-  type BeeGameContentAudit,
-} from './content-contracts'
 
 export type AssetRequirementAudit = {
   id: string
@@ -34,33 +30,26 @@ export type AssetContractAudit = {
   manifestPath: string
   requirements: AssetRequirementAudit[]
   resources: AssetResourceAudit[]
-  content: BeeGameContentAudit
+  bindings: Array<{ requirementId: string; resourceIds: string[] }>
   issues: string[]
 }
 
 export function auditAssetContract(workspacePath: string): AssetContractAudit {
   const workspace = resolve(workspacePath)
   const manifestPath = resolve(workspace, 'assets', 'asset-manifest.json')
-  const emptyContent: BeeGameContentAudit = {
-    valid: false,
-    files: [],
-    validPaths: [],
-    invalidPaths: [],
-    hasGlobalIssues: false,
-    coveredRequirementIds: [],
-    referencedResourceIds: [],
-    resourceBindings: [],
-    issues: [],
-  }
   const empty: Omit<AssetContractAudit, 'present' | 'valid'> = {
     manifestPath,
     requirements: [],
     resources: [],
-    content: emptyContent,
+    bindings: [],
     issues: [],
   }
+  if (existsSync(resolve(workspace, 'assets', 'content')))
+    empty.issues.push(
+      'Retired resource content root exists: assets/content. Move game content to the later content/ package stage.',
+    )
   if (!existsSync(manifestPath))
-    return { present: false, valid: true, ...empty }
+    return { present: false, valid: empty.issues.length === 0, ...empty }
 
   let manifest: BeeGameAssetManifest
   try {
@@ -91,7 +80,7 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
     const issues: string[] = []
     if (resource.technical_facts?.artifactClass === 'content-definition')
       issues.push(
-        'Implementation-owned content-definition must not be declared as a resource; remove its Manifest requirement, resource module, and resource-registry binding.',
+        'Game Content Package definitions must not be declared as resources; remove the content-definition from the Manifest.',
       )
     for (const filePath of resource.file_paths) {
       const absolute = projectFile(workspace, filePath)
@@ -133,7 +122,6 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
       issues,
     }
   })
-  const content = auditBeeGameContent(workspace, manifest)
   const requirements = manifest.requirements.map(requirement => ({
     id: requirement.id,
     required: requirement.required !== false,
@@ -148,7 +136,21 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
   const resourceById = new Map(
     manifest.resources.map(resource => [resource.id, resource]),
   )
-  for (const binding of content.resourceBindings) {
+  const bindings = manifest.requirements.flatMap(requirement => {
+    const resourceIds = manifest.resources
+      .filter(resource => resource.fulfills.includes(requirement.id))
+      .map(resource => resource.id)
+    return resourceIds.length ? [{ requirementId: requirement.id, resourceIds }] : []
+  })
+  for (const requirement of manifest.requirements)
+    if (
+      requirement.required !== false &&
+      !bindings.some(binding => binding.requirementId === requirement.id)
+    )
+      requirementAuditById
+        .get(requirement.id)
+        ?.issues.push('Required requirement has no resource binding.')
+  for (const binding of bindings) {
     const allowed = manifestRequirementById.get(binding.requirementId)
       ?.acquisition_profile.sourcing_policy?.allowed_source_kinds
     if (!allowed) continue
@@ -168,7 +170,6 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
     ...resources.flatMap(resource =>
       resource.issues.map(issue => `${resource.id}: ${issue}`),
     ),
-    ...content.issues,
   ]
   return {
     present: true,
@@ -176,7 +177,7 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
     manifestPath,
     requirements,
     resources,
-    content,
+    bindings,
     issues,
   }
 }

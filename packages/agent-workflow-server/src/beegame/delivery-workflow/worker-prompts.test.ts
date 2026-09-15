@@ -52,6 +52,7 @@ describe('worker prompts', () => {
     const workerTypes = [
       'document-author',
       'resource-planner',
+      'content-author',
       'implementation-worker',
       'acceptance-validator',
     ] as const
@@ -66,6 +67,8 @@ describe('worker prompts', () => {
         phase:
           workerType === 'document-author'
             ? 'DOCUMENT_REVIEW'
+            : workerType === 'content-author'
+              ? 'GAME_CONTENT'
             : workerType === 'implementation-worker'
                 ? 'IMPLEMENTATION'
                 : workerType === 'acceptance-validator'
@@ -103,14 +106,13 @@ describe('worker prompts', () => {
     })
 
     expect(prompt).toContain('Complete resource delivery in one normal CLI turn')
-    expect(prompt).toContain('minimal resource-binding registry')
+    expect(prompt).toContain('canonical Manifest, including requirement-to-resource bindings')
     expect(prompt).toContain('Work autonomously with the available native tools')
     expect(prompt).toContain('choose how to search, inspect, select, create and combine resources')
     expect(prompt).toContain('Do not use arbitrary placeholders')
     expect(prompt).toContain('never fabricate library provenance')
     expect(prompt).toContain('"indexFields":["version","project_target","modules"]')
-    expect(prompt).toContain('"resourceRegistryDataFields":["bindings"]')
-    expect(prompt).toContain('"bindingFields":["requirementId","resourceIds"]')
+    expect(prompt).toContain('"fulfills"')
     expect(prompt).toContain('"webSourceFields":["type","source_url","page_url","license","license_url","author","retrieved_at"]')
     expect(prompt).toContain('when acquisition_profile.coverage is present')
     expect(prompt).toContain('"coverage":{"type":"non_empty_array"')
@@ -132,9 +134,25 @@ describe('worker prompts', () => {
       },
     })
 
-    expect(prompt).toContain('Start from the injected fixed published IR modules')
+    expect(prompt).toContain('Implement the injected fixed Game IR and contract.gameContent package')
+    expect(prompt).toContain('load content/index.json')
+    expect(prompt).toContain('Do not copy their editable values into source code')
     expect(prompt).toContain('Do not proactively reread all canonical documents')
     expect(prompt).toContain('do not create a new verification framework')
+  })
+
+  test('Scene/UI author is one direct CLI turn with no orchestration policy', () => {
+    const prompt = buildWorkerPrompt({
+      runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+      workerType: 'content-author', phase: 'GAME_CONTENT', revision: 'revision',
+      allowedPaths: ['content/'],
+      contract: { gameIr: { resultId: 'result', foundationRevision: 'foundation', publicationId: 'publication', modules: [] } },
+    })
+    expect(prompt).toContain('one normal CLI turn')
+    expect(prompt).toContain('Scene2D and UI content package')
+    expect(prompt).toContain('Do not embed asset paths or URLs')
+    expect(prompt).not.toContain('subagent')
+    expect(prompt).not.toContain('iteration')
   })
 
   test('resource repair is a focused host-error correction rather than replanning', () => {
@@ -143,7 +161,7 @@ describe('worker prompts', () => {
       workerType: 'resource-planner', phase: 'RESOURCE_PREPARATION', revision: 'revision',
       allowedPaths: ['assets/'],
       contract: {
-        currentContentIssues: ['scene.yaml: received "scene-definition", which is not allowed'],
+        currentResourceIssues: ['resource binding is missing'],
         systemDeliveryContract: buildSystemDeliveryContract(),
         gameIr: { resultId: 'result', foundationRevision: 'foundation', publicationId: 'publication', modules: [] },
       },
@@ -197,6 +215,8 @@ describe('worker prompts', () => {
     expect(prompt).toContain('ACCEPTANCE: PASS')
     expect(prompt).toContain('ACCEPTANCE: FAIL')
     expect(prompt).toContain('TASK <id>: PASS|FAIL')
+    expect(prompt).toContain('CONTENT <id>: PASS|FAIL')
+    expect(prompt).toContain('ASSET <id>: PASS|FAIL')
     expect(prompt).toContain('Do not claim an ID without observing it')
     expect(prompt).not.toContain('SubmitValidationResult')
   })

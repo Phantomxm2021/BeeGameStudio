@@ -89,30 +89,6 @@ describe('delivery worker session credentials', () => {
     }
   })
 
-  test('accepts a valid existing resource plan when a retry only repairs content', async () => {
-    const workspacePath = await createResourceWorkspace()
-    try {
-      await writeBeeGameAssetManifest(workspacePath, resourcePlanManifest())
-      await mkdir(join(workspacePath, 'assets/content'), { recursive: true })
-      const contentPath = join(workspacePath, 'assets/content/resource-registry.json')
-      await writeFile(contentPath, '{}')
-
-      const terminal = await runResourceTerminal({
-        workspacePath,
-        workerType: 'resource-planner',
-        toolName: 'Write',
-        toolInput: { file_path: contentPath },
-      })
-
-      expect(terminal).toMatchObject({
-        workerType: 'resource-planner',
-        status: 'completed',
-      })
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
-  })
-
   test('derives implementation terminal after normal agent completion', async () => {
     let submittedPrompt = ''
     const sessions = {
@@ -203,6 +179,8 @@ describe('delivery worker session credentials', () => {
             text: [
               'TASK DIRECT_IMPLEMENTATION: PASS — expected scene is visible in the browser',
               'CHECKLIST AC-1: PASS — interaction produced the specified response',
+              'CONTENT scene.main: PASS — scene hierarchy is represented at runtime',
+              'ASSET asset.background: PASS — registered background loaded successfully',
               'ACCEPTANCE: PASS',
             ].join('\n'),
             createdAt: new Date(),
@@ -225,6 +203,8 @@ describe('delivery worker session credentials', () => {
         contract: {
           taskIds: ['DIRECT_IMPLEMENTATION'],
           checklistIds: ['AC-1'],
+          contentIds: ['scene.main'],
+          resourceIds: ['asset.background'],
         },
       })
       await port.submit('dispatch-acceptance', 'Run acceptance')
@@ -488,12 +468,11 @@ function checklistAuthorityFixture(): ChecklistAuthority {
 
 function resourcePlanManifest() {
   return {
-    version: 8 as const,
+    version: 9 as const,
     project_target: {
       asset_format_capabilities: ['dat', 'json'],
       resource_library_usage: 'optional' as const,
       runtime_asset_root: 'assets/runtime',
-      content_root: 'assets/content',
       generated_asset_root: 'assets/generated',
     },
     requirements: [

@@ -43,12 +43,12 @@ test('requires every concrete artifact of a required IR variant', async () => {
   roots.push(workspace)
   const ir = gameIr(
     [variant('primary', { kind: 'required' })],
-    [artifact('scene', 'primary', 'src/scene.ts', 'content-definition')],
+    [artifact('scene', 'primary', 'src/scene.ts', 'generated-output')],
   )
   expect(resourceIrDeliveryIssues({
     gameIr: ir,
     workspacePath: workspace,
-    artifactClasses: ['content-definition'],
+    artifactClasses: ['generated-output'],
   })).toEqual(['IR delivery artifact is invalid: src/scene.ts (missing).'])
 
   await mkdir(join(workspace, 'src'), { recursive: true })
@@ -56,7 +56,7 @@ test('requires every concrete artifact of a required IR variant', async () => {
   expect(resourceIrDeliveryIssues({
     gameIr: ir,
     workspacePath: workspace,
-    artifactClasses: ['content-definition'],
+    artifactClasses: ['generated-output'],
   })).toEqual([])
 })
 
@@ -102,7 +102,7 @@ test('defers a mixed-class alternative to the stage that can complete either var
     ],
     [
       artifact('image', 'resource-choice', 'assets/runtime/image.png', 'runtime-resource'),
-      artifact('code', 'code-choice', 'src/presentation.ts', 'content-definition'),
+      artifact('code', 'code-choice', 'src/presentation.ts', 'generated-output'),
     ],
   )
   expect(resourceIrDeliveryIssues({

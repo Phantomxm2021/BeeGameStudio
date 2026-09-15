@@ -56,12 +56,14 @@ export const CANONICAL_DOCUMENT_ARTIFACTS = [
 ] as const
 
 export const CANONICAL_ASSET_MANIFEST = 'assets/asset-manifest.json' as const
+export const CANONICAL_GAME_CONTENT_INDEX = 'content/index.json' as const
 export const WORKFLOW_EVIDENCE_DIRECTORY =
   '.beegame/workflow/evidence/' as const
 
 export const CANONICAL_PROJECT_ARTIFACTS = [
   ...CANONICAL_DOCUMENT_ARTIFACTS,
   CANONICAL_ASSET_MANIFEST,
+  CANONICAL_GAME_CONTENT_INDEX,
 ] as const
 
 export type DeliveryPhase =
@@ -69,6 +71,7 @@ export type DeliveryPhase =
   | 'DOCUMENT_DRAFTING'
   | 'DOCUMENT_REVIEW'
   | 'RESOURCE_PREPARATION'
+  | 'GAME_CONTENT'
   | 'IMPLEMENTATION'
   | 'ACCEPTANCE'
   | 'DELIVERY'
@@ -103,6 +106,7 @@ export type ImplementationTaskStatus =
 export type DispatchWorkerType =
   | 'document-author'
   | 'resource-planner'
+  | 'content-author'
   | 'implementation-worker'
   | 'acceptance-validator'
   | 'change-impact-analyzer'
@@ -119,10 +123,11 @@ export type DispatchStatus =
 export type EvidenceKind =
   | 'document_review'
   | 'resource_preparation'
+  | 'game_content'
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 59 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 61 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
   'RESOURCE_DELIVERY',
@@ -139,7 +144,7 @@ export type ResourceInventoryBinding = {
 export type ResourceDeliveryReceipt = {
   bindings: ResourceInventoryBinding[]
   catalogObserved: boolean
-  contentDigest: string
+  resourceDigest: string
   acceptedAt: string
 }
 
@@ -153,6 +158,7 @@ export type ResourceProductionState = {
 export type Revision = {
   document: string
   resource?: string
+  content?: string
   implementation?: string
   workspace: string
 }
@@ -212,6 +218,7 @@ export type AcceptedWorkflowUnit = {
   kind:
     | 'document'
     | 'resource-delivery'
+    | 'game-content'
     | 'implementation-task'
     | 'acceptance'
   phase: DeliveryPhase
@@ -272,6 +279,7 @@ export type DeliveryRun = {
   activeDispatch?: DispatchRecord
   evidence: {
     resourcePreparation?: EvidenceRef
+    gameContent?: EvidenceRef
     acceptance?: EvidenceRef
   }
   /** Sole durable cursor for the initial eight-document authoring pass. */
@@ -285,6 +293,8 @@ export type DeliveryRun = {
   foundationAuditState?: never
   /** Sole task/checkpoint state for Resource Production. */
   resourceProductionState: ResourceProductionState
+  /** Accepted engine-neutral Scene/UI package for downstream implementation. */
+  gameContentReceipt?: import('../game-content-package').BeeGameContentReadyReceipt
   usage?: WorkflowUsage
   /** Latest durable progress text for the workflow card. */
   currentMessage?: string

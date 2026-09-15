@@ -83,6 +83,7 @@ import {
   uploadBeeGameAsset,
   type BeeGameAssetManifest,
 } from './beegame/asset-contracts'
+import { parseBeeGameContentDocument } from './beegame/game-content-package'
 import type { ResourceSelectionRuntimeConfig } from './beegame/resource-selection-config'
 import { listDirectories } from './filesystem/directories'
 import { getDefaultWorkspacePath } from './filesystem/default-workspace'
@@ -3247,6 +3248,139 @@ export function createAgentWorkflowApp(
     }
   })
 
+  app.get('/api/projects/:id/game-content', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(
+        c.req.raw,
+        user,
+        c.req.param('id'),
+        dashboardRepository,
+      )
+      if (!project?.root_path)
+        return c.json({ error: 'Project not found' }, 404)
+      const workspacePath = await resolveSessionWorkspacePath(
+        project.root_path,
+        options.defaultWorkspacePath,
+      )
+      const run = await createRunStore(workspacePath, user.id).load()
+      const irReady =
+        run?.gameIrStage?.outcome?.status === 'completed' &&
+        run.gameIrStage.outcome.billingStatus === 'settled'
+      if (!irReady) return c.json({ state: 'awaiting_ir' })
+      if (!run.revision.resource)
+        return c.json({ state: 'awaiting_assets' })
+      if (!run.gameContentReceipt)
+        return c.json({ state: 'awaiting_content' })
+      const controller = getDeliveryController({
+        request: c.req.raw,
+        user,
+        projectId: project.id,
+        workspacePath,
+      })
+      const snapshot = await controller.loadGameContentForEditing()
+      return c.json({
+        state:
+          snapshot.contentRevision === run.revision.content
+            ? 'ready'
+            : 'draft',
+        acceptedContentRevision: run.revision.content,
+        ...snapshot,
+      })
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 409)
+    }
+  })
+
+  app.put('/api/projects/:id/game-content/document', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.create')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(
+        c.req.raw,
+        user,
+        c.req.param('id'),
+        dashboardRepository,
+      )
+      if (!project?.root_path)
+        return c.json({ error: 'Project not found' }, 404)
+      const body = z
+        .strictObject({
+          path: z.string().min(1),
+          expectedRevision: z.string().regex(/^[a-f0-9]{64}$/),
+          document: z.unknown(),
+        })
+        .parse(await readJson(c.req.raw))
+      const workspacePath = await resolveSessionWorkspacePath(
+        project.root_path,
+        options.defaultWorkspacePath,
+      )
+      const controller = getDeliveryController({
+        request: c.req.raw,
+        user,
+        projectId: project.id,
+        workspacePath,
+      })
+      return c.json(
+        await controller.saveGameContentEdit({
+          path: body.path,
+          expectedRevision: body.expectedRevision,
+          document: parseBeeGameContentDocument(body.document),
+        }),
+      )
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 409)
+    }
+  })
+
+  app.post('/api/projects/:id/game-content/publish', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.create')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(
+        c.req.raw,
+        user,
+        c.req.param('id'),
+        dashboardRepository,
+      )
+      if (!project?.root_path)
+        return c.json({ error: 'Project not found' }, 404)
+      const body = z
+        .strictObject({
+          contentRevision: z.string().regex(/^[a-f0-9]{64}$/),
+        })
+        .parse(await readJson(c.req.raw))
+      const workspacePath = await resolveSessionWorkspacePath(
+        project.root_path,
+        options.defaultWorkspacePath,
+      )
+      const controller = getDeliveryController({
+        request: c.req.raw,
+        user,
+        projectId: project.id,
+        workspacePath,
+      })
+      const run = await controller.publishGameContentEdits(
+        body.contentRevision,
+      )
+      return c.json(
+        {
+          state: 'published',
+          contentRevision: run.revision.content,
+          workflowPhase: run.phase,
+          workflowStatus: run.status,
+        },
+        202,
+      )
+    } catch (err) {
+      return c.json({ error: toErrorMessage(err) }, 409)
+    }
+  })
+
   app.post('/api/projects/:id/permissions/:toolUseID', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'agent.approve_tool')
@@ -3691,7 +3825,7 @@ export function createAgentWorkflowApp(
         if (!project.root_path)
           return c.json({
             contract_state: 'missing',
-            version: 8,
+            version: 9,
             requirements: [],
             resources: [],
           })
@@ -5609,7 +5743,7 @@ async function getBeeGameProjectRuntimeState(input: {
   const assetManifest = await readBeeGameAssetManifest(
     sessionRef.workspacePath,
   ).catch(() => ({
-    version: 8 as const,
+    version: 9 as const,
     requirements: [],
     resources: [],
     project_target: undefined,
@@ -6218,6 +6352,7 @@ type LastProvenWorkflowSummary = {
   lastProvenUnitKind:
     | 'document'
     | 'resource-delivery'
+    | 'game-content'
     | 'implementation-task'
     | 'acceptance'
   lastProvenItemId?: string
@@ -6333,6 +6468,8 @@ function workflowMessageKey(workflow: JsonObject): string {
       return 'workflow.documentReview'
     case 'RESOURCE_PREPARATION':
       return 'workflow.resourcePreparation'
+    case 'GAME_CONTENT':
+      return 'workflow.gameContent'
     case 'IMPLEMENTATION':
       return 'workflow.implementation'
     case 'ACCEPTANCE':
@@ -6440,6 +6577,8 @@ function workflowViewForDisplay(
   const assetPhase = workflow.phase === 'RESOURCE_PREPARATION'
   const displayTaskSource = workflow.documentStep === 'GAME_IR_COMPILATION'
     ? [{ id: 'game-ir-public-stage', title: 'IR 编译', status: workflow.status, attempt: 0, operation: 'produce' }]
+    : workflow.phase === 'GAME_CONTENT'
+    ? [{ id: 'scene-ui-content', title: 'Scene / UI Content', status: workflow.status, attempt: 0, operation: 'produce' }]
     : foundationDisplay
     ? [{ id: 'foundation-public-stage', title: 'Foundation Reviewer',
         status: foundationDisplay!.taskStatus,
@@ -6531,7 +6670,7 @@ function workflowViewForDisplay(
     : undefined
   const evidence = isObject(workflow.evidence)
     ? Object.fromEntries(
-        ['resourcePreparation', 'acceptance'].flatMap(
+        ['resourcePreparation', 'gameContent', 'acceptance'].flatMap(
           key => {
             const value = (workflow.evidence as Record<string, unknown>)[key]
             if (!isObject(value) || typeof value.status !== 'string') return []

@@ -216,7 +216,7 @@ Validator 之后任何会影响文档、实现、资源、测试或运行表现�
 - `docs/AUDIO_DESIGN.md`
 - `docs/ASSET_PLAN.md`
 
-Foundation 文档必须来自当前确认简报，不得套用某个示例游戏。八份文档的集合、事实归属与最低完整性以 `beegame-foundation-document-authority-plan.md` 为唯一权威。八份文档经独立 Foundation Review 达到 READY 后，才创建 `docs/acceptance/gameplay-checklist.md`；Checklist 结构通过后才进入 Resource Production 并由服务创建 `assets/asset-manifest.json`。资源文件与 JSON/YAML 内容描述通过门禁后，独立 Comprehensive Review 对九份项目文档、Manifest 和内容描述执行实施前审计。Checklist、Manifest 或实现不得提前与 Foundation 并行创建。
+Foundation 文档必须来自当前确认简报，不得套用某个示例游戏。八份文档的集合、事实归属与最低完整性以 `beegame-foundation-document-authority-plan.md` 为唯一权威。八份文档经独立 Foundation Review 达到 READY 后，才创建 `docs/acceptance/gameplay-checklist.md`；Checklist 结构通过后依次进入 Game IR、Resource Delivery、Game Content Package、Target Implementation 与 Acceptance。Resource Delivery 先发布真实资源和 Asset Manifest，Game Content 随后用同版本 IR + Manifest 生成 Scene/UI 等引擎中立配置；任何后续产物不得提前与 Foundation 并行创建。
 
 ### 5.2 已有项目和修改需求
 

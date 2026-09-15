@@ -31,7 +31,7 @@ import { createDeliveryWorkflowController } from '../beegame/delivery-workflow/c
 import { createBeeGameDeliveryWorkerPort } from '../beegame/delivery-worker-session-port'
 import {
   computeDocumentRevision,
-  computeResourceContentDigest,
+  computeResourceRevision,
   computeWorkspaceRevision,
 } from '../beegame/delivery-workflow/revision'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
@@ -62,8 +62,6 @@ import {
   registerBeeGameAuthoredResources,
   writeBeeGameAssetManifest,
 } from '../beegame/asset-contracts'
-import { computeResourceRevision } from '../beegame/delivery-workflow/revision'
-
 const RECOVERY_OWNER_ID = 'recovery-owner'
 
 test('current delivery schema rejects removed remediation state', () => {
@@ -110,6 +108,7 @@ const CANONICAL_RECEIPT_WORKERS: readonly DispatchWorkerType[] = [
 
 const PUBLIC_IR_CONSUMER_WORKERS: readonly DispatchWorkerType[] = [
   'resource-planner',
+  'content-author',
   'implementation-worker',
   'acceptance-validator',
 ]
@@ -273,41 +272,6 @@ async function commitMatrixFoundationDocument(input: {
   })
 }
 
-function matrixContentDocument() {
-  return {
-    path: 'assets/content/matrix.json',
-    schema: 'beegame-content-v1' as const,
-    id: 'matrix-content',
-    kind: 'resource-registry' as const,
-    fulfills: ['matrix-requirement'],
-    resources: ['matrix-resource'],
-    data: {
-      bindings: [
-        {
-          requirementId: 'matrix-requirement',
-          resourceIds: ['matrix-resource'],
-        },
-      ],
-    },
-  }
-}
-
-function resourceContentDocumentMap(
-  document: ReturnType<typeof matrixContentDocument>,
-) {
-  const { path, ...value } = document
-  return { [path]: value }
-}
-
-async function writeMatrixContent(workspacePath: string): Promise<void> {
-  await mkdir(join(workspacePath, 'assets/content'), { recursive: true })
-  const { path: _path, ...document } = matrixContentDocument()
-  await writeFile(
-    join(workspacePath, 'assets/content/matrix.json'),
-    JSON.stringify(document),
-  )
-}
-
 async function writeMatrixEvidence(
   workspacePath: string,
   name: string,
@@ -374,12 +338,11 @@ async function matrixTerminal(input: {
   }
   if (request.workerType === 'resource-planner') {
     await writeBeeGameAssetManifest(workspacePath, {
-      version: 8,
+      version: 9,
       project_target: {
         asset_format_capabilities: ['dat', 'json'],
         resource_library_usage: 'optional',
         runtime_asset_root: 'assets/runtime',
-        content_root: 'assets/content',
         generated_asset_root: 'assets/generated',
       },
       requirements: [
@@ -512,12 +475,11 @@ async function createWorkerRecoveryRun(input: {
   const needsVerifiedInventory = needsDeliveryArtifacts
   if (needsManifest) {
     await writeBeeGameAssetManifest(input.workspacePath, {
-      version: 8,
+      version: 9,
       project_target: {
         asset_format_capabilities: ['dat', 'json'],
         resource_library_usage: 'optional',
         runtime_asset_root: 'assets/runtime',
-        content_root: 'assets/content',
         generated_asset_root: 'assets/generated',
       },
       requirements:
@@ -544,6 +506,7 @@ async function createWorkerRecoveryRun(input: {
     await registerBeeGameAuthoredResources(input.workspacePath, [
       {
         id: 'matrix-resource',
+        fulfills: ['matrix-requirement'],
         root_path: 'assets/runtime/matrix.dat',
         file_paths: ['assets/runtime/matrix.dat'],
         provisional: true,
@@ -553,11 +516,7 @@ async function createWorkerRecoveryRun(input: {
       },
     ])
   }
-  if (needsDeliveryArtifacts) await writeMatrixContent(input.workspacePath)
   workspaceRevision = await computeWorkspaceRevision(input.workspacePath)
-  const contentDigest = needsManifest
-    ? await computeResourceContentDigest(input.workspacePath)
-    : undefined
   const resourceRevision = needsManifest
     ? await computeResourceRevision(input.workspacePath, documentRevision)
     : undefined
@@ -590,8 +549,8 @@ async function createWorkerRecoveryRun(input: {
     evidence: resourcePreparation ? { resourcePreparation } : {},
     resourceProductionState: {
       currentTask: 'RESOURCE_DELIVERED',
-      ...(contentDigest ? { irResultId: 'a'.repeat(64) } : {}),
-      ...(contentDigest
+      ...(resourceRevision ? { irResultId: 'a'.repeat(64) } : {}),
+      ...(resourceRevision
         ? {
             deliveryReceipt: {
               bindings: needsVerifiedInventory
@@ -603,7 +562,7 @@ async function createWorkerRecoveryRun(input: {
                   ]
                 : [],
               catalogObserved: true,
-              contentDigest,
+              resourceDigest: resourceRevision,
               acceptedAt: RECOVERY_ACCEPTED_AT,
             },
           }
@@ -628,6 +587,8 @@ async function createWorkerRecoveryRun(input: {
       evidence: {},
       resourceProductionState: { currentTask: 'RESOURCE_DELIVERY' },
     }
+  if (input.workerType === 'content-author')
+    return { ...common, phase: 'GAME_CONTENT', tasks: [] }
   if (input.workerType === 'implementation-worker')
     return { ...common, phase: 'IMPLEMENTATION', tasks: [task] }
   const completedTask: ImplementationTask = {
@@ -951,8 +912,8 @@ describe('delivery workflow recovery', () => {
 
   test('retains the exact-resume checkpoint vocabulary for persisted worker types', () => {
     // Author, Reviewer and IR own their recovery behind public ports;
-    // only the six current downstream worker kinds use this checkpoint matrix.
-    expect(WORKER_TYPES).toHaveLength(6)
+    // only the current downstream worker kinds use this checkpoint matrix.
+    expect(WORKER_TYPES).toHaveLength(7)
     expect(EXACT_RESUME_WORKER_CHECKPOINTS).toEqual([
       'before-dispatch',
       'open',
@@ -962,7 +923,7 @@ describe('delivery workflow recovery', () => {
     ])
     expect(
       WORKER_TYPES.flatMap(workerType => exactResumeCheckpointsForWorker(workerType)),
-    ).toHaveLength(25)
+    ).toHaveLength(29)
     expect(CANONICAL_RECEIPT_WORKERS).toEqual([
       'document-author',
     ])

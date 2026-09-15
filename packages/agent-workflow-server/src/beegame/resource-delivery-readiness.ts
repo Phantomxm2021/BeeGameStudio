@@ -16,14 +16,13 @@ export type ResourceDeliveryReadiness = {
   manifestPolicy?: ResourceLibraryUsage
   targetFormats: string[]
   requirementCount: number
-  coveredRequirementCount: number
+  boundRequirementCount: number
   resourceCount: number
   libraryResourceCount: number
   webResourceCount: number
   authoredResourceCount: number
   provisionalResourceCount: number
   failedResourceCount: number
-  contentFileCount: number
   catalogObserved: boolean
 }
 
@@ -49,7 +48,7 @@ export function auditResourceDeliveryReadiness(input: {
   const readinessIssues: string[] = []
   const contract = auditAssetContract(input.workspacePath)
   if (!contract.present) issues.push('assets/asset-manifest.json is missing.')
-  else if (!contract.valid)
+  if (!contract.valid)
     issues.push(
       ...contract.issues.map(issue => `resource delivery contract: ${issue}`),
     )
@@ -103,14 +102,13 @@ export function auditResourceDeliveryReadiness(input: {
     ...(policy ? { manifestPolicy: policy } : {}),
     targetFormats,
     requirementCount: requirements.length,
-    coveredRequirementCount: contract.content.coveredRequirementIds.length,
+    boundRequirementCount: contract.bindings.length,
     resourceCount: resources.length,
     libraryResourceCount,
     webResourceCount,
     authoredResourceCount,
     provisionalResourceCount,
     failedResourceCount,
-    contentFileCount: contract.content.files.length,
     catalogObserved,
   }
 }

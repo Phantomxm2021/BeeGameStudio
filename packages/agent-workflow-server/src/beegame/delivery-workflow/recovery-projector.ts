@@ -3,6 +3,8 @@ import { assertNoRetiredFoundationReviewRun } from './retired-foundation-review'
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { readAuthoredDocumentReceipt } from '../authored-document-receipt'
+import { readBeeGameAssetManifestSync } from '../asset-contracts'
+import { recoverBeeGameContentRevision } from '../game-content-package'
 import { authorUnitPredecessors, validateAuthorCompletedProofs } from './historical-document-evidence'
 import { RETIRED_FOUNDATION_AUTHOR, assertNoRetiredAuthorRun, assertNoRetiredAuthorHandoff } from './retired-foundation-author'
 import { isRecord, record, stringValue, stringArray, sameStrings } from './recovery-values'
@@ -40,6 +42,7 @@ export { inspectWorkflowSnapshot }
 export type { WorkflowSnapshotInspection }
 
 const RESOURCE_DELIVERY_UNIT_ID = 'resource:delivery' as const
+const GAME_CONTENT_UNIT_ID = 'game-content:delivery' as const
 const ACCEPTANCE_UNIT_ID = 'acceptance:delivery' as const
 
 type RecoveryErrorCode =
@@ -97,6 +100,7 @@ function fixedUnitIds(): string[] {
   return [
     ...CANONICAL_FOUNDATION_DOCUMENTS.map(documentUnitId),
     RESOURCE_DELIVERY_UNIT_ID,
+    GAME_CONTENT_UNIT_ID,
   ]
 }
 
@@ -104,6 +108,7 @@ function expectedFixedPredecessors(unitId: string): string[] | undefined {
   const authorPredecessors = authorUnitPredecessors(unitId)
   if (authorPredecessors) return authorPredecessors
   if (unitId === RESOURCE_DELIVERY_UNIT_ID) return []
+  if (unitId === GAME_CONTENT_UNIT_ID) return [RESOURCE_DELIVERY_UNIT_ID]
   return undefined
 }
 
@@ -115,6 +120,7 @@ function expectedKind(
   )
     return 'document'
   if (unitId === RESOURCE_DELIVERY_UNIT_ID) return 'resource-delivery'
+  if (unitId === GAME_CONTENT_UNIT_ID) return 'game-content'
   if (unitId === ACCEPTANCE_UNIT_ID) return 'acceptance'
   return undefined
 }
@@ -150,6 +156,16 @@ function assertUnitPayloadIdentity(unit: AcceptedWorkflowUnit): void {
       recoveryError(
         'recovery_checkpoint_conflict',
         `implementation checkpoint ${unit.unitId} has contradictory task identity`,
+      )
+  } else if (unit.kind === 'game-content') {
+    if (unit.unitId !== GAME_CONTENT_UNIT_ID ||
+        unit.receiptRef !== 'content/index.json' ||
+        payload.receiptRef !== unit.receiptRef ||
+        payload.irRevision !== unit.dependencyDigests.gameIr ||
+        payload.assetManifestRevision !== unit.dependencyDigests.resource)
+      recoveryError(
+        'recovery_checkpoint_conflict',
+        'game content checkpoint has contradictory identity',
       )
   }
 }
@@ -398,16 +414,16 @@ function historicalResourceFacts(input: {
       'recovery_checkpoint_missing',
       'snapshot Resource Delivery receipt has no accepted journal event',
     )
-  if (delivery && journalGate?.dependencyDigests.content) {
-    if (delivery.contentDigest !== journalGate.dependencyDigests.content)
+  if (delivery && journalGate?.dependencyDigests.resource) {
+    if (delivery.resourceDigest !== journalGate.dependencyDigests.resource)
       recoveryError(
         'recovery_checkpoint_conflict',
-        'snapshot and journal contradict the direct Resource Delivery content digest',
+        'snapshot and journal contradict the direct Resource Delivery digest',
       )
   } else if (delivery) {
     recoveryError(
       'recovery_checkpoint_missing',
-      'snapshot Resource Content digest has no dispatch-bound accepted journal event',
+      'snapshot Resource Delivery digest has no dispatch-bound accepted journal event',
     )
   }
   const evidence = record(record(input.snapshot.evidence)?.resourcePreparation)
@@ -423,6 +439,31 @@ function historicalResourceFacts(input: {
         'snapshot-passed Resource Gate has no accepted journal event',
       )
   }
+  const content = record(input.snapshot.gameContentReceipt)
+  const contentProof = input.proofs.get(GAME_CONTENT_UNIT_ID)?.unit
+  const contentPayload = contentProof ? acceptedUnitPayload(contentProof) : undefined
+  if (content) {
+    if (!contentProof)
+      recoveryError(
+        'recovery_checkpoint_missing',
+        'snapshot Scene/UI content receipt has no accepted journal event',
+      )
+    if (content.contentRevision !== contentProof.inputRevision ||
+        content.irRevision !== contentPayload?.irRevision ||
+        content.assetManifestRevision !== contentPayload?.assetManifestRevision ||
+        stableValue(content.contentIds) !== stableValue(contentPayload?.contentIds))
+      recoveryError(
+        'recovery_checkpoint_conflict',
+        'snapshot and journal contradict the Scene/UI content receipt',
+      )
+  }
+  const contentEvidence = record(record(input.snapshot.evidence)?.gameContent)
+  if (contentEvidence?.status === 'passed' &&
+      (!contentProof || contentEvidence.revision !== contentProof.inputRevision))
+    recoveryError(
+      contentProof ? 'recovery_checkpoint_conflict' : 'recovery_checkpoint_missing',
+      'snapshot-passed Scene/UI content has no matching accepted journal event',
+    )
 }
 
 function reconcileSourceRevision(input: {
@@ -480,6 +521,9 @@ async function snapshotRevision(
     document,
     ...((stringValue(raw?.resource) ?? latest?.resource)
       ? { resource: stringValue(raw?.resource) ?? latest?.resource }
+      : {}),
+    ...((stringValue(raw?.content) ?? latest?.content)
+      ? { content: stringValue(raw?.content) ?? latest?.content }
       : {}),
     ...((stringValue(raw?.implementation) ?? latest?.implementation)
       ? {
@@ -642,6 +686,11 @@ function assertRawCompletedClaimsHaveAcceptedProof(input: {
   const evidence = record(input.snapshot?.evidence)
   for (const claim of [
     {
+      value: record(evidence?.gameContent),
+      unitId: GAME_CONTENT_UNIT_ID,
+      label: 'Scene/UI content',
+    },
+    {
       value: record(evidence?.acceptance),
       unitId: ACCEPTANCE_UNIT_ID,
       label: 'Acceptance',
@@ -683,6 +732,11 @@ function assertSnapshotCompletedClaims(input: {
 
   const evidence = record(input.snapshot?.evidence)
   for (const claim of [
+    {
+      value: record(evidence?.gameContent),
+      unitId: GAME_CONTENT_UNIT_ID,
+      label: 'Scene/UI content',
+    },
     {
       value: record(evidence?.acceptance),
       unitId: ACCEPTANCE_UNIT_ID,
@@ -730,7 +784,7 @@ function expectedPredecessors(input: {
     candidate => `implementation:${candidate.id}` === input.unitId,
   )
   if (task)
-    return ['resource:delivery']
+    return [GAME_CONTENT_UNIT_ID]
   if (input.unitId === ACCEPTANCE_UNIT_ID)
     return input.tasks.map(task => `implementation:${task.id}`)
   return undefined
@@ -888,6 +942,26 @@ async function validateAcceptedArtifacts(input: {
         )
       continue
     }
+    if (unit.kind === 'game-content') {
+      let current: string
+      try {
+        current = recoverBeeGameContentRevision(
+          input.workspacePath,
+          readBeeGameAssetManifestSync(input.workspacePath),
+        )
+      } catch {
+        recoveryError(
+          'recovery_artifact_digest_mismatch',
+          'accepted Scene/UI content package is unavailable or invalid',
+        )
+      }
+      if (current !== unit.inputRevision)
+        recoveryError(
+          'recovery_artifact_digest_mismatch',
+          'Scene/UI content package changed after acceptance',
+        )
+      continue
+    }
     for (const [path, expected] of Object.entries(unit.dependencyDigests)) {
       const absolute = resolveWorkspaceRelativePath(input.workspacePath, path)
       if (!absolute)
@@ -936,6 +1010,7 @@ function rawActiveUnitId(input: {
   if (snapshot.phase === 'RESOURCE_PREPARATION') {
     if (resourceTask === 'RESOURCE_DELIVERED') return RESOURCE_DELIVERY_UNIT_ID
   }
+  if (snapshot.phase === 'GAME_CONTENT') return GAME_CONTENT_UNIT_ID
   if (snapshot.phase === 'ACCEPTANCE') return ACCEPTANCE_UNIT_ID
   return undefined
 }
@@ -1007,11 +1082,15 @@ function buildProjectionRun(input: {
   const gate = replayed.has(RESOURCE_DELIVERY_UNIT_ID)
     ? input.proofs.get(RESOURCE_DELIVERY_UNIT_ID)?.unit
     : undefined
+  const content = replayed.has(GAME_CONTENT_UNIT_ID)
+    ? input.proofs.get(GAME_CONTENT_UNIT_ID)?.unit
+    : undefined
   const acceptance = replayed.has(ACCEPTANCE_UNIT_ID)
     ? input.proofs.get(ACCEPTANCE_UNIT_ID)?.unit
     : undefined
   const gatePayload = gate ? acceptedUnitPayload(gate) : undefined
   const inventoryPayload = gatePayload
+  const contentPayload = content ? acceptedUnitPayload(content) : undefined
   const acceptancePayload = acceptance
     ? acceptedUnitPayload(acceptance)
     : undefined
@@ -1020,7 +1099,7 @@ function buildProjectionRun(input: {
   let documentStep: DeliveryRun['documentStep']
   let currentItemId: string | undefined
   let resourceTask: DeliveryRun['resourceProductionState']['currentTask'] =
-    'RESOURCE_DELIVERY'
+    gate ? 'RESOURCE_DELIVERED' : 'RESOURCE_DELIVERY'
   const activeUnitId = input.activeUnitId
   if (activeUnitId === 'foundation-audit:derive') {
     phase = 'DOCUMENT_REVIEW'
@@ -1028,6 +1107,9 @@ function buildProjectionRun(input: {
   } else if (activeUnitId === RESOURCE_DELIVERY_UNIT_ID) {
     phase = 'DOCUMENT_REVIEW'
     documentStep = 'FOUNDATION_REVIEW'
+  } else if (activeUnitId === GAME_CONTENT_UNIT_ID) {
+    phase = 'GAME_CONTENT'
+    resourceTask = 'RESOURCE_DELIVERED'
   } else if (
     input.tasks.some(task => `implementation:${task.id}` === activeUnitId)
   ) {
@@ -1095,6 +1177,7 @@ function buildProjectionRun(input: {
     revision: {
       ...input.revision,
       ...(gate ? { resource: gate.inputRevision } : {}),
+      ...(content ? { content: content.inputRevision } : {}),
     },
     ...(currentItemId ? { currentItemId } : {}),
     tasks: projectedTasks,
@@ -1113,6 +1196,17 @@ function buildProjectionRun(input: {
               revision: gate.inputRevision,
               status: 'passed' as const,
               observedAt: gate.acceptedAt,
+            },
+          }
+        : {}),
+      ...(content
+        ? {
+            gameContent: {
+              path: content.receiptRef ?? 'content/index.json',
+              kind: 'game_content' as const,
+              revision: content.inputRevision,
+              status: 'passed' as const,
+              observedAt: content.acceptedAt,
             },
           }
         : {}),
@@ -1140,17 +1234,29 @@ function buildProjectionRun(input: {
       ...(stringValue(gate?.dependencyDigests.gameIr)
         ? { irResultId: stringValue(gate?.dependencyDigests.gameIr) }
         : {}),
-      ...(gatePayload?.bindings && gate?.dependencyDigests.content
+      ...(gatePayload?.bindings && gate?.dependencyDigests.resource
         ? {
             deliveryReceipt: {
               bindings: inventoryPayload?.bindings as never,
               catalogObserved: inventoryPayload?.catalogObserved as boolean,
-              contentDigest: gate!.dependencyDigests.content,
+              resourceDigest: gate!.dependencyDigests.resource,
               acceptedAt: gate!.acceptedAt,
             },
           }
         : {}),
     },
+    ...(content && contentPayload
+      ? {
+          gameContentReceipt: {
+            schemaVersion: 'game-content-ready.v1' as const,
+            contentRevision: content.inputRevision,
+            irRevision: stringValue(contentPayload.irRevision)!,
+            assetManifestRevision: stringValue(contentPayload.assetManifestRevision)!,
+            indexPath: 'content/index.json' as const,
+            contentIds: stringArray(contentPayload.contentIds)!,
+          },
+        }
+      : {}),
     usage,
     thinking: activeUnitId ? 'idle' : undefined,
     lastProgressAt:

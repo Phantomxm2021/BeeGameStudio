@@ -8,9 +8,6 @@ import {
   RESOURCE_DIMENSIONS,
   RESOURCE_USAGE_TAGS,
 } from '@bee-game-studio/beegame-resource-core'
-import {
-  BEEGAME_CONTENT_SCHEMA,
-} from '../content-contracts'
 import { CANONICAL_ASSET_MANIFEST } from './types'
 
 export function buildSystemDeliveryContract() {
@@ -25,7 +22,6 @@ export function buildSystemDeliveryContract() {
         'asset_format_capabilities',
         'resource_library_usage',
         'runtime_asset_root',
-        'content_root',
         'generated_asset_root',
       ],
       modules: {
@@ -74,6 +70,7 @@ export function buildSystemDeliveryContract() {
           cardinality: 'one_per_resource',
           fields: [
             'id',
+            'fulfills',
             'source',
             'root_path',
             'file_paths',
@@ -124,20 +121,9 @@ export function buildSystemDeliveryContract() {
         'each resource-realization acquisition-profile node maps to one requirement whose id is the described logical resource requirementId; copy required, name, purpose, dimensions, assetKinds, usageTags, capabilities, styles, acceptanceCriteria, sourcingPolicy and coverage exactly, changing only camelCase field names to the documented snake_case Manifest names',
         'dependencies are Resource Library provenance objects, not resource ids; omit dependencies for direct agent-authored resources',
         'omit optional resource fields when they are not needed',
-        'use exactly one canonical Manifest, one content root and canonical asset paths; do not create a secondary loader',
+        'each resource fulfills array contains the current IR requirement ids satisfied by that resource',
+        'use exactly one canonical Manifest and canonical asset paths; do not create assets/content, a secondary registry or another loader',
       ],
-    },
-    content: {
-      schema: BEEGAME_CONTENT_SCHEMA,
-      requiredFields: ['schema', 'id', 'kind', 'fulfills', 'resources', 'data'],
-      referenceSemantics: {
-        fulfills: 'manifest-requirement-ids',
-        resources: 'manifest-resource-ids',
-        physicalPathsOwnedBy: 'canonical-asset-manifest',
-      },
-      factOwnership: 'single',
-      resourceRegistryDataFields: ['bindings'],
-      bindingFields: ['requirementId', 'resourceIds'],
     },
   } as const
 }

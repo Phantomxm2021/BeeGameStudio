@@ -17,9 +17,38 @@ describe('accepted workflow unit journal', () => {
       } }
     const units = deriveAcceptedWorkflowUnits(previous, next)
     expect(units.map(value => value.unitId)).toEqual(['implementation:DIRECT_IMPLEMENTATION', 'acceptance:delivery'])
-    expect(units[0]?.predecessorUnitIds).toEqual(['resource:delivery'])
+    expect(units[0]?.predecessorUnitIds).toEqual(['game-content:delivery'])
     expect(units[1]?.predecessorUnitIds).toEqual(['implementation:DIRECT_IMPLEMENTATION'])
     for (const unit of units) expect(unit.dependencyDigests).toEqual({ gameIr: 'b'.repeat(64) })
+  })
+
+  test('records the accepted Scene/UI package between resources and implementation', () => {
+    const previous = createTestDeliveryRun({ ownerId: 'owner', projectId: 'project' })
+    const contentRevision = 'c'.repeat(64)
+    const resourceRevision = 'b'.repeat(64)
+    const irRevision = 'a'.repeat(64)
+    const next: DeliveryRun = {
+      ...previous,
+      phase: 'IMPLEMENTATION',
+      revision: { ...previous.revision, resource: resourceRevision, content: contentRevision },
+      resourceProductionState: { currentTask: 'RESOURCE_DELIVERED', irResultId: irRevision,
+        deliveryReceipt: { bindings: [], catalogObserved: false, resourceDigest: resourceRevision,
+          acceptedAt: previous.updatedAt } },
+      gameContentReceipt: { schemaVersion: 'game-content-ready.v1', contentRevision,
+        irRevision, assetManifestRevision: resourceRevision, indexPath: 'content/index.json',
+        contentIds: ['scene.main', 'ui.hud'] },
+      evidence: { gameContent: { kind: 'game_content', path: 'content/index.json',
+        status: 'passed', revision: contentRevision, observedAt: previous.updatedAt } },
+    }
+    expect(deriveAcceptedWorkflowUnits(previous, next)).toEqual([
+      expect.objectContaining({
+        unitId: 'game-content:delivery', kind: 'game-content',
+        predecessorUnitIds: ['resource:delivery'], inputRevision: contentRevision,
+        dependencyDigests: { gameIr: irRevision, resource: resourceRevision },
+        payload: { receiptRef: 'content/index.json', irRevision,
+          assetManifestRevision: resourceRevision, contentIds: ['scene.main', 'ui.hud'] },
+      }),
+    ])
   })
 
   test('does not duplicate Reviewer semantics into accepted-unit events', () => {
@@ -55,7 +84,7 @@ describe('accepted workflow unit journal', () => {
             { requirementId: 'requirement', resourceIds: ['resource'] },
           ],
           catalogObserved: true,
-          contentDigest: 'content-digest',
+          resourceDigest: 'resource-digest',
           acceptedAt: previous.updatedAt,
         },
       },
@@ -77,7 +106,7 @@ describe('accepted workflow unit journal', () => {
         predecessorUnitIds: [],
         dependencyDigests: {
           gameIr: 'a'.repeat(64),
-          content: 'content-digest',
+          resource: 'resource-digest',
         },
         payload: {
           receiptRef: 'assets/asset-manifest.json',

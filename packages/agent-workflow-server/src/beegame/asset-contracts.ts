@@ -66,7 +66,6 @@ export type BeeGameAssetProjectTarget = {
   asset_format_capabilities: string[]
   resource_library_usage?: ResourceLibraryUsage
   runtime_asset_root: string
-  content_root: string
   generated_asset_root: string
 }
 
@@ -140,6 +139,7 @@ export type BeeGameProjectResourceSource =
 
 export type BeeGameProjectResource = {
   id: string
+  fulfills: string[]
   source: BeeGameProjectResourceSource
   root_path: string
   file_paths: string[]
@@ -162,14 +162,14 @@ export type BeeGameProjectResource = {
 }
 
 export type BeeGameAssetManifest = {
-  version: 8
+  version: 9
   project_target?: BeeGameAssetProjectTarget
   requirements: BeeGameAssetRequirement[]
   resources: BeeGameProjectResource[]
 }
 
 type BeeGameAssetManifestIndex = {
-  version: 8
+  version: 9
   project_target?: BeeGameAssetProjectTarget
   modules: {
     requirements: string
@@ -179,7 +179,6 @@ type BeeGameAssetManifestIndex = {
 
 export const BEEGAME_RESOURCE_ROOTS = {
   runtime: 'assets/runtime',
-  content: 'assets/content',
   generated: 'assets/generated',
 } as const
 
@@ -196,6 +195,7 @@ export type BeeGameAssetUploadOptions = {
 
 export type BeeGameAuthoredResourceInput = {
   id: string
+  fulfills?: string[]
   root_path: string
   file_paths: string[]
   provisional: boolean
@@ -215,7 +215,7 @@ export type BeeGameAuthoredResourceInput = {
 const ASSET_MANIFEST_PATH = 'assets/asset-manifest.json'
 const ASSET_REQUIREMENTS_MODULE_ROOT = 'assets/manifest/requirements'
 const ASSET_RESOURCE_MODULE_ROOT = 'assets/manifest/resources'
-export const CURRENT_ASSET_MANIFEST_VERSION = 8
+export const CURRENT_ASSET_MANIFEST_VERSION = 9
 
 export class BeeGameAssetManifestError extends Error {
   readonly code = 'invalid_asset_manifest'
@@ -232,7 +232,6 @@ export const CANONICAL_ASSET_MANIFEST_EXAMPLE = {
     asset_format_capabilities: ['<actual-target-supported-format>'],
     resource_library_usage: 'preferred',
     runtime_asset_root: BEEGAME_RESOURCE_ROOTS.runtime,
-    content_root: BEEGAME_RESOURCE_ROOTS.content,
     generated_asset_root: BEEGAME_RESOURCE_ROOTS.generated,
   },
   modules: {
@@ -426,6 +425,7 @@ export async function uploadBeeGameAsset(
   const now = new Date().toISOString()
   const resource: BeeGameProjectResource = {
     id,
+    fulfills: [],
     source: { type: 'user-provided', created_at: now, filename },
     root_path: relativePath,
     file_paths: [relativePath],
@@ -551,6 +551,7 @@ export async function registerBeeGameAuthoredResources(
     )
     const resource: BeeGameProjectResource = {
       id,
+      fulfills: uniqueStrings(input.fulfills ?? existing?.fulfills ?? []),
       source: {
         type: 'agent-authored',
         created_at:
@@ -630,7 +631,7 @@ function validateManifest(value: unknown): string[] {
   )
   const resourceIds = new Set<string>()
   resources.forEach((item, index) =>
-    validateResource(item, index, target, resourceIds, issues),
+    validateResource(item, index, target, requirementIds, resourceIds, issues),
   )
   return issues
 }
@@ -652,7 +653,6 @@ function validateTarget(
       'asset_format_capabilities',
       'resource_library_usage',
       'runtime_asset_root',
-      'content_root',
       'generated_asset_root',
     ],
     'project_target',
@@ -670,16 +670,11 @@ function validateTarget(
     issues.push(
       'project_target.asset_format_capabilities must contain direct lowercase filename extensions using only ASCII letters and digits, without dots or descriptive media labels.',
     )
-  for (const field of [
-    'runtime_asset_root',
-    'content_root',
-    'generated_asset_root',
-  ] as const)
+  for (const field of ['runtime_asset_root', 'generated_asset_root'] as const)
     if (!isProjectPath(value[field]))
       issues.push(`project_target.${field} must be a workspace-relative path.`)
   const expectedRoots = {
     runtime_asset_root: BEEGAME_RESOURCE_ROOTS.runtime,
-    content_root: BEEGAME_RESOURCE_ROOTS.content,
     generated_asset_root: BEEGAME_RESOURCE_ROOTS.generated,
   } as const
   for (const [field, expected] of Object.entries(expectedRoots))
@@ -872,6 +867,7 @@ function validateResource(
   value: unknown,
   index: number,
   target: BeeGameAssetProjectTarget | undefined,
+  requirementIds: Set<string>,
   ids: Set<string>,
   issues: string[],
 ): void {
@@ -884,6 +880,7 @@ function validateResource(
     value,
     [
       'id',
+      'fulfills',
       'source',
       'root_path',
       'file_paths',
@@ -911,6 +908,19 @@ function validateResource(
   if (!id) issues.push(`${path}.id must be a trimmed non-empty string.`)
   else if (ids.has(id)) issues.push(`${path}.id is duplicated: ${id}.`)
   else ids.add(id)
+  const fulfills =
+    Array.isArray(value.fulfills) && value.fulfills.every(isTrimmedString)
+      ? (value.fulfills as string[])
+      : []
+  if (
+    !Array.isArray(value.fulfills) ||
+    !value.fulfills.every(isTrimmedString) ||
+    new Set(fulfills).size !== fulfills.length
+  )
+    issues.push(`${path}.fulfills must be an array of unique non-empty requirement IDs.`)
+  for (const requirementId of fulfills)
+    if (!requirementIds.has(requirementId))
+      issues.push(`${path}.fulfills references an unknown requirement: ${requirementId}.`)
   validateResourceSource(value.source, `${path}.source`, issues)
   const rootPath = isProjectPath(value.root_path) ? String(value.root_path) : ''
   if (!rootPath)

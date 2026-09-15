@@ -15,7 +15,7 @@
 
 ## 1. 插入位置与当前基线
 
-目标顺序：Foundation Author → Reviewer/Revision 闭环 → 通过文档发布与接纳 → Game IR → Checklist → 资源准备 → 任务规划 → 实现/审计 → 验收 → 交付。
+目标顺序：Foundation Author → Reviewer/Revision 闭环 → 通过文档发布与接纳 → Game IR → Checklist → Resource Delivery（真实资源 + Manifest）→ Game Content Package（Scene/UI 等）→ 目标实现 → 验收 → 交付。
 
 当前三个 Foundation 模块已接入公开生命周期，真实闭环已到达 `acceptedReview.kind=passed`、零问题与八份规范文档摘要一致的停点。`foundation-review-link.ts` 先调用 `publishFoundationAcceptedArtifacts`，再记录 `acceptedReview`；此处是 Game IR 新公开交接的前置边界。当前 `game-ir-isolation-recovery` 工作树没有 IR 源码或路由，但兄弟工作树已有领域实现及旧编排接线；缺少的是适配当前架构并验收后的公开模块，而不是整套 IR。
 
@@ -221,7 +221,7 @@ IR 位于资源生产之前，因此可声明资源需求与计划约束，但�
 | IR-5 应用最小接线与 IR 真实验收 | 新公开 `game-ir-link`（名称 IR-0 冻结）接在 published/accepted 后；编排只存调用/结果引用，UI 只读公开状态；停在 IR 完成，不启动 Checklist；真实运行须另获授权 | 先离线走公开接线，再以新项目覆盖数值/公式、场景/资源、交互/状态三类；联合核对六域内容、来源、journal、发布、reader、用量与 UI；未通过不得切消费者 | IR-4；真实范围/费用停止条件批准 |
 | IR-6 缺陷回流与失效交接 | 适配旧 defect DTO；新增当前公开回流协议，经 Reviewer 独立核验；实现 Foundation 变更使 IR 当前接纳失效及旧候选拒绝 | compiler/provider/发布错误不成为业务 Issue；回流去重、跨版本拒绝、原文保护；有效修订产生新 IR identity，不恢复热改旧 run | IR-4；与 IR-5 离线部分可独立推进 |
 | IR-7 Checklist 公开桥接 | 按 P5.1 独立模块契约接入；内容仍依据八文档，IR 提供稳定 scenario/node ID；唯一 bridge 绑定文档/IR/Checklist 版本；替换完成后直接进入资源的旧交接 | 用实际公开入口、持久化和恢复走通 Checklist 发布→bridge 接纳→资源准入；不得只测 transition 枚举；无 bridge/版本不符不能进入资源，reader 不受旧 drafting-only 条件阻挡；重跑 IR-6 失效回归 | IR-5、IR-6、P5.1 契约 |
-| IR-8 逐消费者切换 | 配合 P5.2—P5.7，按 Resource Planner → Curator → Content → Atomic Planner → Implementation → Auditor → Acceptance 顺序迁移，资源产物绑定 requirement/variant/artifact；P5.8 全链失效 | 每个消费者在同一变更单元切唯一 reader 并删本消费者旧 reader/prompt；新资源证据不回写 IR；上一消费者验收后再切下一项，禁止靠下游修补 IR 质量 | IR-7；对应 P5 模块就绪 |
+| IR-8 逐消费者切换 | 按 Resource Delivery → Game Content Package → Target Implementation → Acceptance 顺序迁移；Resource Delivery 先独立发布真实资源及 requirement→resource Manifest 绑定，Game Content 随后消费同版本 IR + Manifest | 每个消费者在同一变更单元切唯一 reader 并删除旧 reader/prompt；不保留 Planner/Curator/Content 固定多 Agent 轨道、Atomic Planner、实现后 Auditor 或兼容入口；新资源证据不回写 IR | IR-7；[Game Content Package 实践方案](./engine-neutral-content-package-practice-plan-2026-09-15.md) |
 | IR-9 全链与退役收尾 | 离线全链、静态依赖闭包、版本/故障矩阵；另获授权后的新项目完整真实验收；删除无生产消费者的旧实现与仅服务旧轨的测试 | 没有 fallback/双写/私有读取；完整 Idea→交付证据，当前 Foundation 回归通过；文档、代码入口与实际状态一致 | IR-8 |
 
 - [x] IR-0 回收基线与契约冻结。2026-09-07 固定清单/公开边界主审通过，隔离基线 903 pass / 2 个已知 fail，见执行证据；不等于整改准入通过。

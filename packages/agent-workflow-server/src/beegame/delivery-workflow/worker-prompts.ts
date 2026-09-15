@@ -10,6 +10,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   assertSharedDocumentWorker(request)
   const consumesPublishedIr = [
     'resource-planner',
+    'content-author',
     'implementation-worker',
     'acceptance-validator',
   ].includes(request.workerType)
@@ -80,19 +81,34 @@ function workerInstruction(request: WorkerDispatchRequest): string {
       ].join(' ')
     case 'resource-planner':
       if (
+        Array.isArray(request.contract.currentResourceIssues) &&
+        request.contract.currentResourceIssues.length > 0
+      )
+        return [
+          'Continue the same direct CLI resource task using the complete injected Game IR.',
+          'Fix the deterministic contract errors in contract.currentResourceIssues, preserve valid work, and finish the resource delivery normally.',
+        ].join(' ')
+      return [
+        'Complete resource delivery in one normal CLI turn. Use the complete injected Game IR, contract.systemDeliveryContract and contract.resourceLibraryUsage as the product and output contract. Work autonomously with the available native tools and choose how to search, inspect, select, create and combine resources.',
+        'Deliver real runtime assets that satisfy the IR together as one coherent game presentation. Do not use arbitrary placeholders. This stage owns only runtime assets and the canonical Manifest, including requirement-to-resource bindings. Scene, UI, VFX, gameplay configuration and source code belong to later stages.',
+        'Keep all durable output under assets/ and follow contract.systemDeliveryContract for Manifest paths, fields, bindings, hashes and provenance. Do not create assets/content or another resource registry. Do not download executable code or install packages. Use a web resource only when its source and commercial-use/web-redistribution license can be recorded.',
+        'When Resource Library usage is required, reuse only verified library resources already materialized in the project; if none exist, never fabricate library provenance. The host will report the missing user-provided library selection as needs_action.',
+        'End normally with a concise summary. The host performs only deterministic contract validation after the CLI turn.',
+      ].join(' ')
+    case 'content-author':
+      if (
         Array.isArray(request.contract.currentContentIssues) &&
         request.contract.currentContentIssues.length > 0
       )
         return [
-          'Continue the same direct CLI resource task using the complete injected Game IR.',
-          'Fix the deterministic contract errors in contract.currentContentIssues, preserve valid work, and finish the resource delivery normally.',
+          'Continue the same direct CLI Scene/UI content task.',
+          'Fix only the deterministic package errors in contract.currentContentIssues, preserve valid work, and finish normally.',
         ].join(' ')
       return [
-        'Complete resource delivery in one normal CLI turn. Use the complete injected Game IR, contract.systemDeliveryContract and contract.resourceLibraryUsage as the product and output contract. Work autonomously with the available native tools and choose how to search, inspect, select, create and combine resources.',
-        'Deliver real runtime assets that satisfy the IR together as one coherent game presentation. Do not use arbitrary placeholders. This stage owns runtime assets, the canonical Manifest, and the minimal resource-binding registry under assets/. Scenes, source code, gameplay configuration and all other content definitions belong to implementation.',
-        'Keep all durable output under assets/ and follow contract.systemDeliveryContract for Manifest paths, fields, bindings, hashes and provenance. Do not download executable code or install packages. Use a web resource only when its source and commercial-use/web-redistribution license can be recorded.',
-        'When Resource Library usage is required, reuse only verified library resources already materialized in the project; if none exist, never fabricate library provenance. The host will report the missing user-provided library selection as needs_action.',
-        'End normally with a concise summary. The host performs only deterministic contract validation after the CLI turn.',
+        'Create the engine-neutral Scene2D and UI content package in one normal CLI turn from the injected fixed Game IR and Asset Manifest.',
+        'Write content/index.json, scene files under content/scenes/, and UI files under content/ui/. Keep world-space Scene content and screen-space UI content separate.',
+        'Reference IR nodes through irRefs and verified Manifest resources through assetRefs. Do not embed asset paths or URLs, create a second resource registry, write target-engine code, or expand into VFX, characters, animation, audio or gameplay implementation.',
+        'Finish after the coherent Scene/UI package is complete. The host performs deterministic schema, revision, reference and hierarchy validation.',
       ].join(' ')
     case 'implementation-worker':
       if (
@@ -104,14 +120,15 @@ function workerInstruction(request: WorkerDispatchRequest): string {
           'Fix the deterministic host errors in contract.currentImplementationIssues, preserve valid work, run only the relevant checks, and finish normally.',
         ].join(' ')
       return [
-        'Complete contract.task within allowedPaths in one normal CLI turn. Start from the injected fixed published IR modules as the implementation specification and use the Manifest only to locate delivered runtime assets.',
-        'Do not proactively reread all canonical documents, recompile the IR, or rescan every content definition. Consult only the specific referenced source needed when an exact IR fact is missing or contradictory, and report that contradiction without creating a second specification.',
+        'Complete contract.task within allowedPaths in one normal CLI turn. Implement the injected fixed Game IR and contract.gameContent package for the selected target, and use the Manifest only to locate their referenced runtime assets.',
+        'The running game must load content/index.json and its registered Scene/UI documents as runtime data. Do not copy their editable values into source code or a second generated configuration.',
+        'Do not proactively reread all canonical documents, recompile the IR, or redesign the Scene/UI package. Consult only the specific referenced source needed when an exact IR fact is missing or contradictory, and report that contradiction without creating a second specification.',
         'Work normally with native tools. Audit the completed implementation once against the published IR and checklist and correct substantive functional or IR conflicts. Run existing non-runtime checks once when they exist; do not create a new verification framework or large one-off harness. If no check exists, perform only brief targeted static sanity checks. Runtime acceptance is a separate phase.',
       ].join(' ')
     case 'acceptance-validator':
       return [
-        'Run the implemented game and verify the published IR and checklist as a read-only acceptance pass. Use the project\'s existing runtime and test tooling; do not modify project files.',
-        'In the final response, report one evidence line for every ID in contract.taskIds and contract.checklistIds, using exactly `TASK <id>: PASS|FAIL — <concrete observation>` or `CHECKLIST <id>: PASS|FAIL — <concrete observation>`. Mention relevant resource or content IDs naturally in those observations when they support the result; do not enumerate unrelated artifacts. Do not claim an ID without observing it.',
+        'Run the implemented game and verify the published IR, accepted Scene/UI package and checklist as a read-only acceptance pass. Use the project\'s existing runtime and test tooling; do not modify project files.',
+        'In the final response, report one evidence line for every ID in contract.taskIds, contract.checklistIds, contract.contentIds and contract.resourceIds, using exactly `TASK <id>: PASS|FAIL — <observation>`, `CHECKLIST <id>: PASS|FAIL — <observation>`, `CONTENT <id>: PASS|FAIL — <observation>`, or `ASSET <id>: PASS|FAIL — <observation>`. Do not claim an ID without observing it.',
         'After those evidence lines, end with exactly ACCEPTANCE: PASS only when every reported item passed; otherwise end with exactly ACCEPTANCE: FAIL.',
       ].join(' ')
     case 'change-impact-analyzer':
@@ -135,7 +152,9 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
           ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
           : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
     case 'resource-planner':
-      return 'Finish the complete assets/ resource contract, verify the Manifest, local resources and content, then end the turn normally. The host owns deterministic acceptance and receipt generation.'
+      return 'Finish the complete assets/ resource contract, verify the Manifest and local resources, then end the turn normally. The host owns deterministic acceptance and receipt generation.'
+    case 'content-author':
+      return 'Finish the Scene2D and UI package under content/, then end the turn normally. The host validates the package and creates its receipt.'
     case 'implementation-worker':
       return 'Finish the implementation and deterministic checks, then end the turn normally with a concise summary. The host verifies expected artifacts and persists workflow evidence.'
     case 'acceptance-validator':

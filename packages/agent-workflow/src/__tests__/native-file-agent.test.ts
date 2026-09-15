@@ -28,6 +28,20 @@ test('stream activity is observable without leaking payloads', async () => {
   expect(progress.some(p=>p.message==='等待上游模型响应')).toBe(true)
  } finally {await rm(dir,{recursive:true,force:true})}
 })
+test('max-token truncation is correlated with an incomplete tool input', async () => {
+ const dir=await realpath(await mkdtemp(join(tmpdir(),'native-truncated-tool-')))
+ const workspace=join(dir,'workspace');await mkdir(workspace)
+ try {
+  const result=await runNativeFileAgent({command:[process.execPath,join(import.meta.dir,'fixtures/native-file-truncated-tool.ts')],env:{},
+   workspacePath:workspace,writablePaths:['output.json'],prompt:'offline',logPath:join(dir,'log.jsonl')})
+  expect(result.failure).toBeUndefined()
+  const events=(await readFile(join(dir,'log.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+  expect(events.find(event=>event.event==='tool_result')).toMatchObject({data:{
+   responseStopReason:'max_tokens',failureCause:'response_truncated_tool_input'}})
+  expect(events.find(event=>event.event==='response.truncated_tool_input')).toMatchObject({data:{
+   tool:'Write',responseStopReason:'max_tokens',modelContinues:true}})
+ } finally {await rm(dir,{recursive:true,force:true})}
+})
 for(const mode of ['files','working-files','retry-limit'] as const)test('real native CLI: '+mode,async()=>{
  const dir=await realpath(await mkdtemp(join(tmpdir(),'native-file-boundary-')))
  const workspace=join(dir,'workspace');await mkdir(workspace)

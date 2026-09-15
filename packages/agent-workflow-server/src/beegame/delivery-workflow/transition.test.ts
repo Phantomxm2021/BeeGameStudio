@@ -57,7 +57,7 @@ test('resource delivery state cannot contradict its single receipt', () => {
       deliveryReceipt: {
         bindings: [],
         catalogObserved: false,
-        contentDigest: 'content',
+        resourceDigest: 'resource',
         acceptedAt: run.updatedAt,
       },
     },
@@ -105,7 +105,7 @@ test('resource restart clears receipts without clearing the published IR binding
       deliveryReceipt: {
         bindings: [{ requirementId: 'world.visual', resourceIds: ['world'] }],
         catalogObserved: true,
-        contentDigest: 'content-digest',
+        resourceDigest: 'resource-digest',
         acceptedAt: '2026-08-05T00:00:00.000Z',
       },
     },
@@ -165,4 +165,103 @@ test('failed acceptance stops for attention instead of automatically rerunning i
   expect(explicitlyRetried.blockedReason).toContain(
     '.beegame/workflow/evidence/acceptance.json',
   )
+})
+
+test('publishing an edited Scene/UI package preserves implementation and reruns acceptance', () => {
+  const irRevision = 'a'.repeat(64)
+  const resourceRevision = 'b'.repeat(64)
+  const oldContentRevision = 'c'.repeat(64)
+  const newContentRevision = 'd'.repeat(64)
+  const implementationRevision = 'e'.repeat(64)
+  const observedAt = '2026-09-16T00:00:00.000Z'
+  const run = {
+    ...createTestDeliveryRun({ projectId: 'content-edit', ownerId: 'owner' }),
+    phase: 'DELIVERY' as const,
+    status: 'completed' as const,
+    documentStep: undefined,
+    completedAt: observedAt,
+    revision: {
+      document: 'f'.repeat(64),
+      resource: resourceRevision,
+      content: oldContentRevision,
+      implementation: implementationRevision,
+      workspace: implementationRevision,
+    },
+    resourceProductionState: {
+      currentTask: 'RESOURCE_DELIVERED' as const,
+      irResultId: irRevision,
+      deliveryReceipt: {
+        bindings: [],
+        catalogObserved: false,
+        resourceDigest: resourceRevision,
+        acceptedAt: observedAt,
+      },
+    },
+    gameContentReceipt: {
+      schemaVersion: 'game-content-ready.v1' as const,
+      contentRevision: oldContentRevision,
+      irRevision,
+      assetManifestRevision: resourceRevision,
+      indexPath: 'content/index.json' as const,
+      contentIds: ['scene.main', 'ui.hud'],
+    },
+    tasks: [{
+      id: 'DIRECT_IMPLEMENTATION',
+      title: 'Implement directly',
+      checklistIds: [],
+      resourceIds: [],
+      contentIds: ['scene.main', 'ui.hud'],
+      allowedPaths: ['./'],
+      status: 'completed' as const,
+      attempt: 1,
+      completedRevision: implementationRevision,
+      evidenceRefs: ['.beegame/workflow/evidence/implementation.json'],
+    }],
+    evidence: {
+      resourcePreparation: {
+        kind: 'resource_preparation' as const,
+        path: 'assets/asset-manifest.json',
+        status: 'passed' as const,
+        revision: resourceRevision,
+        observedAt,
+      },
+      gameContent: {
+        kind: 'game_content' as const,
+        path: 'content/index.json',
+        status: 'passed' as const,
+        revision: oldContentRevision,
+        observedAt,
+      },
+      acceptance: {
+        kind: 'acceptance' as const,
+        path: '.beegame/workflow/evidence/acceptance.json',
+        status: 'passed' as const,
+        revision: implementationRevision,
+        observedAt,
+      },
+    },
+  }
+
+  const published = transitionDeliveryRun(run, {
+    type: 'game_content_published',
+    receipt: {
+      ...run.gameContentReceipt,
+      contentRevision: newContentRevision,
+    },
+    evidence: {
+      kind: 'game_content',
+      path: 'content/index.json',
+      status: 'passed',
+      revision: newContentRevision,
+      observedAt,
+    },
+  })
+
+  expect(published.phase).toBe('ACCEPTANCE')
+  expect(published.status).toBe('running')
+  expect(published.revision.content).toBe(newContentRevision)
+  expect(published.revision.implementation).toBe(implementationRevision)
+  expect(published.tasks).toEqual(run.tasks)
+  expect(published.evidence.acceptance).toBeUndefined()
+  expect(published.completedAt).toBeUndefined()
 })

@@ -1,226 +1,217 @@
-# BeeGame 资源与内容描述合同
+# BeeGame 资源与 Game Content Package 合同
 
-## 1. 目的
+状态：Resource Delivery、Manifest 绑定及 Scene2D/UI Content Authoring 已接入生产 Workflow。VFX、角色、动画、音频和玩法配置仍明确留在后续阶段。
 
-BeeGame 按人类游戏开发者的常规方式处理资源：先获得真实资源文件，再用少量 JSON/YAML 描述这些资源如何被游戏使用，最后由目标运行时加载或构建。
-
-系统不把“组装过程”提升为持久化领域对象，也不存在一个 requirement 对应一个中间组装记录的机械映射层。
-
-唯一流程是：
+## 1. 唯一流程
 
 ```text
-基础文档审计
-  -> 下载或创作真实资源文件
-  -> 编写 JSON 资源映射、事件与波次，以及 YAML 世界/场景描述
-  -> 资源与内容门禁
-  -> 实现玩法并消费语义 ID
+已发布 Game IR
+  -> Resource Agent 获取或制作真实资源
+  -> Asset Manifest 发布资源事实
+  -> Content Agent 生成 Game Content Package
+  -> 目标实现 Agent 消费 Content Package 与 Manifest
   -> 目标运行时验收
 ```
 
-## 2. 权威文件
+Resource 和 Content 是两个独立阶段。资源阶段不写 Scene、UI 或玩法配置；Content 阶段不下载资源、不修改 Manifest、不写目标引擎代码。
 
-### 2.1 Canonical Asset Manifest v8
+完整实施顺序与验收计划见[引擎中立 Game Content Package 实践方案](./engine-neutral-content-package-practice-plan-2026-09-15.md)。
 
-Asset Manifest 只记录项目实际拥有的资源，不描述场景布局、事件流程或玩法行为。它是一个模块化文件集合，不是一个无限增长的 JSON：
+## 2. 权威边界
+
+### 2.1 Asset Manifest
+
+Asset Manifest 只记录：
+
+- Game IR 声明的逻辑资源需求；
+- 项目实际拥有的本地资源；
+- 文件路径、hash、来源、许可证、依赖与验证状态；
+- 资源需求到真实资源的绑定。
+
+Manifest 不记录场景层级、位置、UI、事件、动画状态或目标引擎对象。
+
+资源文件仍位于：
+
+```text
+assets/runtime/**
+assets/generated/**
+assets/asset-manifest.json
+assets/manifest/**
+```
+
+旧 `assets/content/**` 不再是目标合同。生产接线切换时必须删除其 reader、writer、Prompt 和测试，不保留兼容入口。
+
+### 2.2 Game Content Package
+
+Content Package 位于独立根目录：
+
+```text
+content/
+  index.json
+  scenes/*.scene.json
+  ui/*.ui.json
+```
+
+第一阶段只接受 `scene-2d`、`ui-screen`、`ui-hud` 和 `ui-flow`。未实现的 VFX、角色等类型不得以任意 `data` 冒充已支持。
+
+这些文件不是目标引擎代码的临时输入副本，而是 Scene/UI Editor 直接加载、修改和保存的唯一可编辑权威。目标实现也直接消费同一 Package；禁止再派生第二套持久化 Scene/UI 配置。Game IR 保留规则和需求，不重复拥有完整节点树。
+
+## 3. 根索引
+
+`content/index.json` 使用固定 schema：
 
 ```json
 {
-  "version": 8,
-  "project_target": {
-    "runtime_asset_root": "assets/runtime",
-    "content_root": "assets/content",
-    "generated_asset_root": "assets/generated",
-    "resource_library_usage": "required",
-    "asset_format_capabilities": ["png", "svg", "glb", "wav", "json", "yaml"]
-  },
-  "modules": {
-    "requirements": "assets/manifest/requirements/<content-digest>.json",
-    "resources": [
-      "assets/manifest/resources/<identity-digest>-<content-digest>.json"
+  "schema": "beegame-content-package.v1",
+  "id": "game-content",
+  "dimension": "2d",
+  "irRevision": "<published-ir-revision>",
+  "assetManifestRevision": "<published-manifest-revision>",
+  "entryScene": "scene.main",
+  "files": [
+    "scenes/main.scene.json",
+    "ui/hud.ui.json"
+  ]
+}
+```
+
+根索引是唯一 package 入口。它必须列出全部叶子文件，并绑定同一项目的 IR 与 Manifest revision。不得存在未注册叶子文件或第二份索引。
+
+## 4. 公共叶子头
+
+所有叶子文件使用 JSON 和相同公共头：
+
+```json
+{
+  "schema": "beegame-content.v1",
+  "id": "scene.main",
+  "kind": "scene-2d",
+  "irRefs": ["world.main"],
+  "assetRefs": ["asset.background"],
+  "data": {}
+}
+```
+
+- `irRefs` 必须解析到绑定 revision 的真实 IR node；
+- `assetRefs` 必须解析到绑定 Manifest 中的 verified resource；
+- `data` 只能通过 `assetRef` 使用资源，不能写资源路径、URL 或 data URI；
+- 一个事实只保留一个 owner，不把完整 IR node 或 Manifest record 复制到叶子文件。
+
+## 5. Scene2D
+
+Scene 与 UI 永远分离。`scene-2d` 保存世界空间节点：
+
+```json
+{
+  "schema": "beegame-content.v1",
+  "id": "scene.main",
+  "kind": "scene-2d",
+  "irRefs": ["world.main"],
+  "assetRefs": ["asset.background"],
+  "data": {
+    "cameraNodeId": "camera.main",
+    "nodes": [
+      { "id": "world", "kind": "group" },
+      {
+        "id": "background",
+        "parentId": "world",
+        "kind": "sprite",
+        "layer": "background",
+        "zIndex": 0,
+        "assetRef": "asset.background",
+        "transform": { "position": [0, 0], "scale": [1, 1] }
+      },
+      {
+        "id": "camera.main",
+        "parentId": "world",
+        "kind": "camera",
+        "transform": { "position": [0, 0] }
+      }
     ]
   }
 }
 ```
 
-requirements 模块保存唯一 requirements 数组；每个 resources 模块保存恰好一个 resource record。模块文件名由身份摘要与内容摘要确定，根索引中的 resources 路径按 resource ID 稳定排序。模块先落盘、根索引最后原子替换，因此中断不会让已提交索引指向半份新内容；提交后清理未被索引引用的模块。服务端读取时可返回一个内存聚合对象供 Gate、Reviewer、API 和实现消费，但不得把聚合对象持久化为第二份 Manifest。
+第一阶段验证：节点 ID 唯一、parent 引用闭合、层级无循环、camera 引用存在、节点资源已在公共头声明。
 
-Manifest 不包含：
+编辑器稳定字段为 `transform`、`assetRef` 与 `components`；移动、旋转、缩放和资源替换直接更新这些字段。
 
-- 中间组装记录；
-- `imports`、slots、selection receipt、no-match 或 fallback；
-- 场景位置、旋转、缩放或事件逻辑；
-- 构建步骤、目标引擎对象或运行时验收状态；
-- Agent 自述式验证文字。
+`kind` 和 `data` 表达引擎中立语义，不允许出现 React component、Unity GameObject、Godot Node 或 Unreal Actor 等目标实现类型。
 
-这三个根目录、模块路径和 `resource_library_usage` 都由 Workflow 根据系统合同与确认简报写入，Agent 不能提交、改写或降级它们。系统只读取当前模块合同，不双写 resources，也不维护旧副本。
+## 6. UI
 
-### 2.2 `assets/content/**/*.json`
-
-JSON 用于机器稳定读取的资源映射和数据定义，例如：
-
-- 实体与资源映射；
-- 动画状态映射；
-- UI、字体和音频 cue 映射；
-- 事件、触发器与波次；
-- 玩法参数表；
-- 资源尺寸、pivot、骨骼、动画、循环点等适配信息。
-
-合法 `kind` 只有：`resource-registry`、`entity-definitions`、`ui-configuration`、`audio-configuration`、`event-definitions`、`wave-definitions`、`numeric-configuration`。
-
-### 2.3 `assets/content/**/*.yaml`
-
-YAML 用于更适合人类与 Agent 编排的结构：
-
-- 世界与场景结构；
-- 场景实例、层级、位置、旋转和缩放；
-- 场景对象的空间组织。
-
-合法 `kind` 只有：`world-definition`、`scene-definitions`、`hierarchy-definition`、`placement-definitions`。
-
-JSON 与 YAML 不保存同一事实。每项数据必须只有一个 owner；禁止为兼容而同时维护两份映射。
-
-### 2.4 `assets/generated/**`
-
-仅存放目标构建工具生成的资源，例如字体编译结果、音频转码结果、图集或引擎导入产物。该目录可删除并重建，不是权威输入，也不产生第二套资源身份。
-
-## 3. 内容文件公共头
-
-每个内容文件包含最小公共头，业务数据位于 `data`：
-
-```yaml
-schema: beegame-content-v1
-id: main-scene
-kind: scene-definitions
-fulfills:
-  - IMG.SCENE.COAST_NIGHT
-resources:
-  - coast-background
-  - lighthouse-model
-data:
-  instances: []
-```
+UI 保存屏幕空间结构，不写入 Scene 文件：
 
 ```json
 {
-  "schema": "beegame-content-v1",
-  "id": "game-audio",
-  "kind": "audio-configuration",
-  "fulfills": ["SFX.WEAPON.HIT", "BGM.PHASE"],
-  "resources": ["weapon-audio-bank", "phase-music-bank"],
-  "data": {}
+  "schema": "beegame-content.v1",
+  "id": "ui.hud",
+  "kind": "ui-hud",
+  "irRefs": ["presentation.hud"],
+  "assetRefs": [],
+  "data": {
+    "rootId": "hud.root",
+    "nodes": [
+      { "id": "hud.root", "role": "hud" },
+      {
+        "id": "score",
+        "parentId": "hud.root",
+        "role": "status-text",
+        "text": "0",
+        "layout": {
+          "anchor": "top-right",
+          "position": [-24, 24],
+          "size": [220, 48]
+        },
+        "bindings": { "text": "game.score.formatted" },
+        "actions": { "click": "score.details.open" }
+      }
+    ]
+  }
 }
 ```
 
-公共头只提供确定性审计所需的身份和引用。`data` 的具体结构由项目文档与目标运行时决定，不能在共享合同中绑定 Web、Unity、Godot、Unreal 或其他引擎概念。
+第一阶段验证：唯一根节点存在且无 parent、其他节点均有 parent、parent 引用闭合、层级无循环、资源引用已声明。
 
-同一内容文件应表达一个完整、可消费的领域单元。禁止按 requirement 机械拆成一文件一职责；一个文件可以覆盖多个 requirements，一个资源也可以被多个内容文件复用。
+编辑器稳定字段为 `layout`、`assetRef`、`bindings`、`actions` 与 `style`；锚点、位置、尺寸、缩放、资源、状态绑定和动作修改直接写回这些字段。
 
-## 4. 资源模型
+UI 与 Scene 只能通过稳定状态、事件或锚点 ID 关联，不能互相嵌入完整节点树。
 
-资源是项目本地一个独立、可替换的真实文件根，可以来自 Resource Library，也可以由 Agent 创作。
+## 7. Workflow 职责
 
-### 4.1 Resource Library 资源
+Workflow 只做：
 
-必须保留 Pack ID、版本、element ID、依赖闭包、本地路径与完整性信息。
+- 向一次直接 CLI Content 任务交付冻结的 IR 与 Manifest；
+- 只允许 Content Agent 写 `content/**`；
+- 保存 Content Package revision 和 digest；
+- 执行 JSON、ID、版本、引用、层级和路径旁路校验；
+- 将同一 Content Package 交给目标实现 Agent。
 
-### 4.2 Agent 创作资源
+Workflow 不做：
 
-必须：
+- 固定 Agent 工具或文件操作步骤；
+- 规定 Subagent、Skill 或搜索方式；
+- 根据节点数量、时间或 tokens 判断内容质量；
+- 自动追加审计、修订或完善轮次；
+- 生成引擎对象或维护 Engine Adapter。
 
-- 位于 `runtime_asset_root` 或 `generated_asset_root`；
-- 是独立文件，不隐藏在玩法源码中；
-- 标记 `provisional: true` 时仍然可被目标工具加载或构建；
-- 与正式资源使用相同的语义 ID 和内容描述接口。
+## 8. 正确实施顺序与完成标准
 
-程序资源可以存在，但必须是独立文件，并由目标资源构建器产生普通媒体或引擎可加载产物。构建器不创建持久化中间组装记录。
+### 8.1 Resource Delivery 前置阶段
 
-## 5. 替换规则
+1. Resource Agent 只消费已发布 Game IR；
+2. 自主搜索、选择或制作真实资源；
+3. Manifest 独立保存 requirement→resource 绑定；
+4. 资源通过不再依赖旧 `assets/content`；
+5. 删除资源阶段的 Scene/UI 配置职责和旧 Content reader/writer。
 
-资源替换优先保持语义资源 ID 不变。可以：
+Resource Delivery 未完成时，Content Authoring 不得启动。
 
-1. 直接替换同一路径文件；或
-2. 修改 Asset Manifest 中该资源的文件路径；
-3. 当尺寸、pivot、单位、骨骼、动画名、循环点等发生变化时，只修改对应 JSON/YAML 描述；
-4. 重新执行资源门禁和目标运行时验收。
+### 8.2 Scene/UI Content 阶段
 
-仅替换兼容资源时，玩法代码不得变化。
-
-## 6. Workflow 所有权
-
-### Resource Production Agents
-
-同一 Resource Production phase 只允许三个串行、能力隔离的任务：
-
-- Resource Planner 只提交 Manifest plan，不访问 Catalog 或内容文件；
-- Resource Curator 浏览 Pack、检查元素、下载真实资源，并为缺失内容创建独立 provisional 文件；
-- Resource Content Author 只通过唯一 `CommitResourceContent` 提交完整 JSON/YAML 候选集；服务端验证、序列化并发布 `assets/content`，Agent 不持有通用文件写入能力；若编排时发现原料缺口，只提交精确 requirement ID，由唯一 Resource Curator 补齐；
-- 三者都不写玩法代码，也不建立第二份资源事实。
-
-每个任务提交 canonical artifact 后立即结束 dispatch。服务根据 Manifest 和内容文件派生下一个任务，不依靠 Worker prose、历史失败或固定次数续跑。
-
-### Resource service
-
-- 提供 Pack 摘要、所选 Pack 元素检查、精确下载、依赖、provenance、路径和完整性事实；
-- 不选择美术适用性，不自动绑定 requirement。
-
-### Workflow service
-
-- 是 Asset Manifest 的唯一写入边界；
-- 从 canonical Manifest 与库存 receipt 派生冻结的 requirement、resource、binding 与 baseline revision 投影，不要求 Agent 重读 Manifest 模块；
-- 使用唯一 canonical validator 在 mutation 前和 Gate 中验证公共头、resource-registry bindings、requirement 覆盖、资源引用、路径和格式；
-- 以 dispatch-bound prepared/committed receipt 和整个 content root 暂存发布处理恢复，拒绝迟到或基线已变化的提交；
-- receipt 是 Resource Content 唯一持久终态权威；`tool.completed` 与模型 prose 只用于传输和展示，重启后不得以事件缺失否定已提交 receipt，也不得重新派发模型；
-- 不创建中间组装状态机。
-
-### Implementation Agent
-
-- 读取内容描述并通过语义 ID 消费资源；
-- 编写目标运行时加载器、玩法、表现与交互；
-- 不下载资源、不修改 Asset Manifest、不生成替代媒体。
-
-### Validator
-
-- 在真实目标运行时验证资源加载、场景、事件、动画、音频和玩法；
-- 验收事实属于当前运行 evidence，不回写为另一套资源状态。
-
-## 7. 资源与内容门禁
-
-进入实现前必须满足：
-
-1. 每个 required requirement 至少被一个内容文件公共头覆盖；
-2. 每个内容文件引用的 resource ID 都存在且 verified；
-3. 每个保留 resource 至少被一个内容文件引用；
-4. 所有资源文件与依赖真实存在，路径不越界；
-5. JSON 可解析，YAML 使用安全 schema 且禁止重复键；
-6. 内容文件 ID 唯一，资源 ID 唯一，requirement ID 唯一；
-7. provisional 与正式资源采用相同引用方式；
-8. 不存在源码内嵌的可替换媒体；
-9. 不存在中间组装清单、第二资源库存或兼容 reader；
-10. Resource Library 为 required 时，至少存在一项真实、完整 provenance 的导入资源。
-
-门禁只验证结构事实。美术适配、场景合理性和事件一致性由 Reviewer 审计，真实加载与行为由 Runtime Acceptance 验证。
-
-## 8. 引擎中立性
-
-共享合同只认识资源文件、JSON/YAML 内容描述和可丢弃生成目录。
-
-- Web 可以读取 JSON/YAML 后生成模块或运行时对象；
-- Unity 可以由 Editor importer 生成 Scene、Prefab 或 ScriptableObject；
-- Godot 可以生成 `.tscn`、`.tres` 或运行时节点；
-- Unreal 可以生成 Level、Blueprint 或 Data Asset；
-- 自研引擎可以生成自己的资源包。
-
-这些输出属于目标适配器，不进入共享 Manifest schema。
-
-## 9. 明确删除
-
-- Manifest 中间组装记录；
-- 中间组装 phase、worker 和 stage；
-- 中间组装任务和前端展示；
-- 中间组装 output、member、status、evidence 与 replacement graph；
-- Implementation 的中间组装 ID/output binding；
-- 描述性中间组装文件；
-- 固定 WOFF2、TSX、Prefab 或特定引擎输出的共享层规则；
-- 旧版 reader、migration、feedback、shadow、fallback 与双轨测试。
-
-本项目处于开发阶段，不保留旧 Manifest 的运行时兼容。
+1. `content/index.json`、Scene2D、UI schema 与读取审计通过；
+2. IR node、verified asset、入口 Scene 和节点层级引用可确定性验证；
+3. Scene 与 UI 分文件、分职责；
+4. 资源路径旁路被拒绝；
+5. VFX 等未实现类型被明确拒绝；
+6. 只接入一次直接 CLI Content Authoring 调用，不启动整游戏实现。

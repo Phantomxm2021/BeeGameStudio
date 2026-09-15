@@ -44,6 +44,14 @@ export const resourcePlannerTerminalSchema = base
   })
   .strict()
 
+export const contentAuthorTerminalSchema = base
+  .extend({
+    workerType: z.literal('content-author'),
+    status: z.literal('completed'),
+    writtenPaths: z.array(z.string().min(1)),
+  })
+  .strict()
+
 export const implementationWorkerTerminalSchema = base
   .extend({
     workerType: z.literal('implementation-worker'),
@@ -136,6 +144,7 @@ export const questionAnswerTerminalSchema = z
 export const workerTerminalSchema = z.discriminatedUnion('workerType', [
   documentAuthorTerminalSchema,
   resourcePlannerTerminalSchema,
+  contentAuthorTerminalSchema,
   implementationWorkerTerminalSchema,
   acceptanceValidatorTerminalSchema,
   changeImpactTerminalSchema,

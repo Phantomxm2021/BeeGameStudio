@@ -159,7 +159,8 @@ function terminalEvidencePath(result: WorkerTerminalResult): string | undefined 
 }
 function workerRequiresEvidence(workerType: WorkerDispatchRequest['workerType']): boolean {
     return (workerType !== 'document-author' &&
-        workerType !== 'resource-planner');
+        workerType !== 'resource-planner' &&
+        workerType !== 'content-author');
 }
 export function createDeliveryDispatcher(options: {
     store: RunStore;

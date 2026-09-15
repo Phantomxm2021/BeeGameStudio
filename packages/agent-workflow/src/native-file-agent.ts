@@ -90,6 +90,8 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
   let timer: ReturnType<typeof setTimeout> | undefined
   let failure: string | undefined, result: Record<string, unknown> | undefined
   const modelIds = new Set<string>(), toolIds = new Set<string>()
+  const toolResponseStopReasons = new Map<string, string>()
+  let responseStopReason: string | undefined
   const diagnostics = createNativeToolDiagnostics()
   let stdoutBytes = 0, stderrBytes = 0, streamEvents = 0
   let lastStdoutAt: string | undefined, lastStderrAt: string | undefined
@@ -166,6 +168,9 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
       await log('stream_event', { type: safeType(event.type),
         deltaType: event.delta ? safeType(event.delta.type) : undefined,
         bytes: Buffer.byteLength(JSON.stringify(event)), count: streamEvents })
+      if (event.type === 'message_start') responseStopReason = undefined
+      if (event.type === 'message_delta' && typeof event.delta?.stop_reason === 'string')
+        responseStopReason = event.delta.stop_reason
       if (event.type === 'content_block_delta' && Date.now() - lastProgressAt >= 1000) {
         lastProgressAt = Date.now()
         await input.onProgress?.({ modelResponses: modelIds.size,
@@ -206,6 +211,7 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
       for (const block of message.message.content) {
         if (block.type !== 'tool_use' || toolIds.has(block.id)) continue
         toolIds.add(block.id)
+        if (responseStopReason) toolResponseStopReasons.set(String(block.id), responseStopReason)
         const path = block.input?.file_path ?? block.input?.path
         const progress = { modelResponses: modelIds.size,
           message: block.name + (typeof path === 'string' ? ' ' + relative(root, resolve(root, path)) : '') }
@@ -217,7 +223,18 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
       for (const block of message.message.content) if (block.type === 'tool_result') {
         lastActivityAt = new Date().toISOString()
         const diagnostic = diagnostics.finished(block, message.parent_tool_use_id)
-        await log('tool_result', { id: block.tool_use_id, isError: block.is_error === true, ...diagnostic })
+        const stopReason = toolResponseStopReasons.get(String(block.tool_use_id))
+        toolResponseStopReasons.delete(String(block.tool_use_id))
+        const resultText = typeof block.content === 'string' ? block.content : JSON.stringify(block.content ?? '')
+        const truncatedToolInput = stopReason === 'max_tokens' && block.is_error === true &&
+          /InputValidationError[\s\S]*required parameter[\s\S]*missing/i.test(resultText)
+        await log('tool_result', { id: block.tool_use_id, isError: block.is_error === true, ...diagnostic,
+          ...(stopReason ? { responseStopReason: stopReason } : {}),
+          ...(truncatedToolInput ? { failureCause: 'response_truncated_tool_input' } : {}) })
+        if (truncatedToolInput) await log('response.truncated_tool_input', {
+          id: block.tool_use_id, tool: diagnostic.tool, responseStopReason: stopReason,
+          modelContinues: true,
+        })
         if (diagnostic.retrievalStatus === 'timeout' || diagnostic.retrievalStatus === 'not_ready')
           await input.onProgress?.({ modelResponses: modelIds.size, message: '正在等待委派任务返回；本次取结果尚未完成' })
       }

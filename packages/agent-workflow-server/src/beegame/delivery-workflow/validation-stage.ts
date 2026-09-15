@@ -26,6 +26,9 @@ export function enterAcceptance(run: DeliveryRun): DeliveryRun {
     throw new Error(
       'cannot enter acceptance before implementation is complete',
     )
+  if (!run.gameContentReceipt || !run.revision.content ||
+      run.gameContentReceipt.contentRevision !== run.revision.content)
+    throw new Error('cannot enter acceptance without the accepted Scene/UI content package')
   return {
     ...run,
     phase: 'ACCEPTANCE',
@@ -40,10 +43,15 @@ export async function startAcceptance(input: {
   workspacePath: string
   dispatcher: Dispatcher
   expectedChecklistIds: string[]
+  expectedContentIds: string[]
+  expectedResourceIds: string[]
   currentImplementationRevision?: string
 }): Promise<unknown> {
   if (input.run.phase !== 'ACCEPTANCE')
     throw new Error('acceptance requires ACCEPTANCE phase')
+  if (!input.run.gameContentReceipt || !input.run.revision.content ||
+      input.run.gameContentReceipt.contentRevision !== input.run.revision.content)
+    throw new Error('acceptance requires the accepted Scene/UI content package')
   return input.dispatcher.dispatch({
     runId: input.run.runId,
     ownerId: input.run.ownerId,
@@ -61,6 +69,8 @@ export async function startAcceptance(input: {
         checklistIds: task.checklistIds,
       })),
       checklistIds: input.expectedChecklistIds,
+      contentIds: input.expectedContentIds,
+      resourceIds: input.expectedResourceIds,
     },
   })
 }

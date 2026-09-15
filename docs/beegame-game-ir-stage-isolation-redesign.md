@@ -411,7 +411,7 @@ Game IR 开发期间加入的 Reviewer/Revision 修复默认不移植。只有�
 
 ### Phase 8：Consumer 单轨迁移
 
-按 Resource Planner、Resource Curator、Content、Implementation、Comprehensive Reviewer、Acceptance 顺序逐个迁移。每个 consumer 在同一提交中切换唯一 reader 并删除旧 reader，不保留 fallback 或双写。
+按 Resource Delivery、Game Content Package、Target Implementation、Acceptance 顺序逐个迁移。Resource Delivery 必须先发布真实资源与 Manifest，Game Content 才能引用真实资源生成 Scene/UI 等配置。每个 consumer 在同一提交中切换唯一 reader 并删除旧 reader，不保留固定多 Agent 分工、Atomic Planner、实现后独立 Auditor、fallback 或双写。
 
 Checklist 继续以 READY Foundation raw Markdown projection 为内容 authority；Game IR 只提供稳定 ID traceability，不重写 Checklist 业务内容。
 

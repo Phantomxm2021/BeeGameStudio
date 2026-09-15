@@ -39,4 +39,4 @@ export type FoundationAuthoringContext = {
   revision: { document: string; workspace: string }
 }
 export const CANONICAL_ASSET_MANIFEST = 'assets/asset-manifest.json' as const
-export const CURRENT_ASSET_MANIFEST_VERSION = 8 as const
+export const CURRENT_ASSET_MANIFEST_VERSION = 9 as const

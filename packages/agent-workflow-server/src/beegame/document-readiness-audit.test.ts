@@ -68,21 +68,6 @@ function completeDocument(path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number])
   return renderTestCompleteGameDocument(path, completeSubmission(path))
 }
 
-async function writeMinimalContent(workspace: string): Promise<void> {
-  await mkdir(join(workspace, 'assets', 'content'), { recursive: true })
-  await writeFile(
-    join(workspace, 'assets', 'content', 'project.json'),
-    JSON.stringify({
-      schema: 'beegame-content-v1',
-      id: 'project-content',
-      kind: 'resource-registry',
-      fulfills: [],
-      resources: [],
-      data: { bindings: [] },
-    }),
-  )
-}
-
 describe('document readiness audit', () => {
   let workspace = ''
 
@@ -218,15 +203,13 @@ describe('document readiness audit', () => {
           : `# ${path}\n`,
       )
     }
-    await writeMinimalContent(workspace)
     await writeBeeGameAssetManifest(workspace, {
-      version: 8,
+      version: 9,
       project_target: {
         platform: 'selected-target',
         runtime: 'project-native',
         asset_format_capabilities: ['glb'],
         runtime_asset_root: 'assets/runtime',
-        content_root: 'assets/content',
         generated_asset_root: 'assets/generated',
       },
       requirements: [],
@@ -251,7 +234,6 @@ describe('document readiness audit', () => {
       )
     }
     await mkdir(join(workspace, 'assets'), { recursive: true })
-    await writeMinimalContent(workspace)
     await writeFile(
       join(workspace, 'assets', 'asset-manifest.json'),
       JSON.stringify({
@@ -279,15 +261,13 @@ describe('document readiness audit', () => {
           : `# ${path}\n`,
       )
     }
-    await writeMinimalContent(workspace)
     await writeBeeGameAssetManifest(workspace, {
-      version: 8,
+      version: 9,
       project_target: {
         platform: 'selected-target',
         runtime: 'project-native',
         asset_format_capabilities: ['glb'],
         runtime_asset_root: 'assets/runtime',
-        content_root: 'assets/content',
         generated_asset_root: 'assets/generated',
       },
       requirements: [],
@@ -312,13 +292,11 @@ describe('document readiness audit', () => {
           : `# ${path}\n`,
       )
     }
-    await writeMinimalContent(workspace)
     await writeBeeGameAssetManifest(workspace, {
-      version: 8,
+      version: 9,
       project_target: {
         asset_format_capabilities: ['glb'],
         runtime_asset_root: 'assets/runtime',
-        content_root: 'assets/content',
         generated_asset_root: 'assets/generated',
       },
       requirements: [],

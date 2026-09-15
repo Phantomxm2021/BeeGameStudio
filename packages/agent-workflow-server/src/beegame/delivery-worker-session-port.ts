@@ -18,6 +18,7 @@ import { implementationWorkerTerminalSchema } from './delivery-workflow/worker-c
 import {
   acceptanceValidatorTerminalSchema,
   changeImpactTerminalSchema,
+  contentAuthorTerminalSchema,
   documentAuthorTerminalSchema,
   questionAnswerTerminalSchema,
   resourcePlannerTerminalSchema,
@@ -39,6 +40,7 @@ function taskTypeForWorker(
 ): 'edit_turn' | 'agent_turn' {
   return workerType === 'document-author' ||
     workerType === 'resource-planner' ||
+    workerType === 'content-author' ||
     workerType === 'implementation-worker'
     ? 'edit_turn'
     : 'agent_turn'
@@ -322,6 +324,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
               events,
             })
           }
+          if (request?.workerType === 'content-author') {
+            return createDeterministicContentAuthorTerminal({ request, events })
+          }
           if (request && isDocumentAuthor(request)) {
             const targetPath = request.allowedPaths?.[0]
             if (!targetPath)
@@ -419,6 +424,8 @@ async function createDeterministicStructuredTerminal(input: {
       return createNaturalQuestionAnswerTerminal(input)
     case 'resource-planner':
       return createDeterministicResourcePlannerTerminal(input)
+    case 'content-author':
+      return createDeterministicContentAuthorTerminal(input)
     default:
       throw new Error(`retired delivery worker: ${input.request.workerType}`)
   }
@@ -530,13 +537,17 @@ async function createNaturalAcceptanceTerminal(input: {
   const expected = {
     task: submittedStringArray(contract.taskIds),
     checklist: submittedStringArray(contract.checklistIds),
+    content: submittedStringArray(contract.contentIds),
+    asset: submittedStringArray(contract.resourceIds),
   }
   const observations = acceptanceObservations(report)
   const actual = {
     task: observations.filter(item => item.kind === 'task').map(item => item.id),
     checklist: observations.filter(item => item.kind === 'checklist').map(item => item.id),
+    content: observations.filter(item => item.kind === 'content').map(item => item.id),
+    asset: observations.filter(item => item.kind === 'asset').map(item => item.id),
   }
-  for (const kind of ['task', 'checklist'] as const)
+  for (const kind of ['task', 'checklist', 'content', 'asset'] as const)
     assertExactAcceptanceCoverage(expected[kind], actual[kind], kind)
   const failed = observations.filter(item => item.status === 'FAIL')
   if ((verdict === 'PASS') !== (failed.length === 0))
@@ -569,7 +580,7 @@ async function createNaturalAcceptanceTerminal(input: {
 }
 
 type AcceptanceObservation = {
-  kind: 'task' | 'checklist'
+  kind: 'task' | 'checklist' | 'content' | 'asset'
   id: string
   status: 'PASS' | 'FAIL'
   observation: string
@@ -578,7 +589,7 @@ type AcceptanceObservation = {
 function acceptanceObservations(report: string): AcceptanceObservation[] {
   return report.split(/\r?\n/u).flatMap(line => {
     const match = line.match(
-      /^(TASK|CHECKLIST)\s+(\S+):\s*(PASS|FAIL)\s+[—-]\s+(.+)$/u,
+      /^(TASK|CHECKLIST|CONTENT|ASSET)\s+(\S+):\s*(PASS|FAIL)\s+[—-]\s+(.+)$/u,
     )
     if (!match) return []
     return [{
@@ -643,7 +654,6 @@ async function createDeterministicResourcePlannerTerminal(input: {
     ...new Set([
       ...(contract.present ? ['assets/asset-manifest.json'] : []),
       ...contract.resources.flatMap(resource => resource.filePaths),
-      ...contract.content.files.map(file => file.path),
       ...observedMutationPaths,
     ]),
   ]
@@ -665,6 +675,25 @@ async function createDeterministicResourcePlannerTerminal(input: {
     revision: input.request.revision,
     workerType: 'resource-planner' as const,
     status: 'completed' as const,
+    writtenPaths,
+  })
+}
+
+function createDeterministicContentAuthorTerminal(input: {
+  request: WorkerDispatchRequest
+  events: ReturnType<BeeGameSessionManager['events']>
+}) {
+  if (input.request.workerType !== 'content-author')
+    throw new Error('content author terminal received another worker type')
+  const writtenPaths = [...new Set(
+    completedMutationPaths(input.request.workspacePath, input.events).filter(
+      path => path === 'content' || path.startsWith('content/'),
+    ),
+  )]
+  return contentAuthorTerminalSchema.parse({
+    workerType: 'content-author',
+    revision: input.request.revision,
+    status: 'completed',
     writtenPaths,
   })
 }

@@ -4,7 +4,6 @@ import { resolveWorkspaceRelativePath } from './revision'
 
 type ArtifactClass =
   | 'runtime-resource'
-  | 'content-definition'
   | 'generated-output'
 
 type Artifact = {
@@ -93,7 +92,6 @@ function artifactIssue(
   registeredResourcePaths?: ReadonlySet<string>,
 ): string | undefined {
   if (
-    artifact.artifactClass !== 'content-definition' &&
     registeredResourcePaths &&
     !registeredResourcePaths.has(artifact.path)
   )

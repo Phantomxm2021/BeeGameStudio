@@ -2,6 +2,11 @@ import { afterEach, expect, test } from 'bun:test'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { GameIrOperations, GameIrPublishedView } from '../stage-modules/game-ir/public'
+import {
+  writeBeeGameAssetManifest,
+  type BeeGameAssetManifest,
+} from '../asset-contracts'
+import { acceptBeeGameContentPackage } from '../game-content-package'
 import { foundationPublicDigest } from '../foundation-public-result'
 import { createDeliveryWorkflowController } from './controller'
 import { acceptedIrInput } from './game-ir-link'
@@ -71,7 +76,7 @@ test('resource repair keeps the complete IR publication', () => {
     runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
     workerType: 'resource-planner',
     phase: 'RESOURCE_PREPARATION', revision: 'revision',
-    contract: { currentContentIssues: ['received "scene-definition", which is not allowed'] },
+    contract: { currentResourceIssues: ['resource binding is missing'] },
   } as WorkerDispatchRequest
 
   expect(downstreamIrForRequest(request, ir)).toEqual({
@@ -115,7 +120,7 @@ async function fixture() {
   return { ...f, run, view, ir, controller, requests, save }
 }
 
-test('resource and implementation receive the same complete IR publication', async () => {
+test('resource and Scene/UI content receive the same complete IR publication', async () => {
   const f = await fixture()
   await f.controller.resume(f.run)
   const resource = f.requests[0]!
@@ -123,20 +128,139 @@ test('resource and implementation receive the same complete IR publication', asy
   const gameIr = resource.contract.gameIr as { resultId: string; modules: unknown[] }
   expect(gameIr.resultId).toBe(foundationPublicDigest(f.view.ready))
   expect(gameIr.modules).toHaveLength(6)
-  const implementation: DeliveryRun = { ...f.run, phase: 'IMPLEMENTATION',
+  const content: DeliveryRun = { ...f.run, phase: 'GAME_CONTENT',
+    revision: { ...f.run.revision, resource: fixtureDigest('resource') },
     resourceProductionState: { currentTask: 'RESOURCE_DELIVERED', irResultId: gameIr.resultId,
-      deliveryReceipt: { bindings: [], catalogObserved: false, contentDigest: fixtureDigest('content'),
+      deliveryReceipt: { bindings: [], catalogObserved: false, resourceDigest: fixtureDigest('resource'),
         acceptedAt: new Date().toISOString() } } }
-  await f.save(implementation)
+  await f.save(content)
   await f.controller.dispatcher.dispatch({ runId: f.run.runId, ownerId: f.run.ownerId, projectId: f.run.projectId,
-    workspacePath: f.workspace, workerType: 'implementation-worker', phase: 'IMPLEMENTATION', revision: f.run.revision.workspace,
-    taskId: 'DIRECT_IMPLEMENTATION', allowedPaths: ['src/'], contract: { task: { id: 'DIRECT_IMPLEMENTATION' } } })
+    workspacePath: f.workspace, workerType: 'content-author', phase: 'GAME_CONTENT', revision: fixtureDigest('resource'),
+    allowedPaths: ['content/'], contract: {} })
   expect((f.requests[1]!.contract.gameIr as { modules: unknown[] }).modules).toHaveLength(6)
   expect((f.requests[1]!.contract.gameIr as { resultId: string }).resultId).toBe(gameIr.resultId)
   expect(f.requests[1]!.protectedPaths).toContain('docs/GDD.md')
   expect(f.requests[1]!.protectedPaths).toContain('.beegame/ir/')
   expect(f.requests[1]!.protectedPaths).toContain('.beegame/workflow/game-ir/')
   expect(f.requests[1]!.protectedPaths).toContain('assets/')
+})
+
+test('Scene/UI edits stay draft until explicitly published to implementation', async () => {
+  const f = await fixture()
+  const node = {
+    id: 'world.main',
+    kind: 'world.scene',
+    producerMode: 'agent-authored',
+    value: {},
+    references: [],
+    edges: [],
+    bindings: {},
+  }
+  f.view.candidate = {
+    ...f.view.candidate,
+    modules: f.view.candidate.modules.map((module, index) =>
+      index === 0 ? { ...module, nodes: [node] } : module,
+    ),
+  } as GameIrPublishedView['candidate']
+  const irRevision = foundationPublicDigest(f.view.ready)
+  const resourceRevision = fixtureDigest('editable resources')
+  const manifest: BeeGameAssetManifest = {
+    version: 9,
+    requirements: [],
+    resources: [],
+  }
+  await writeBeeGameAssetManifest(f.workspace, manifest)
+  const writeJson = async (path: string, value: unknown) => {
+    const absolute = join(f.workspace, path)
+    await mkdir(dirname(absolute), { recursive: true })
+    await writeFile(absolute, `${JSON.stringify(value, null, 2)}\n`)
+  }
+  await writeJson('content/index.json', {
+    schema: 'beegame-content-package.v1',
+    id: 'game-content',
+    dimension: '2d',
+    irRevision,
+    assetManifestRevision: resourceRevision,
+    entryScene: 'scene.main',
+    files: ['scenes/main.scene.json', 'ui/hud.ui.json'],
+  })
+  await writeJson('content/scenes/main.scene.json', {
+    schema: 'beegame-content.v1',
+    id: 'scene.main',
+    kind: 'scene-2d',
+    irRefs: ['world.main'],
+    assetRefs: [],
+    data: { nodes: [{ id: 'world', kind: 'group' }] },
+  })
+  await writeJson('content/ui/hud.ui.json', {
+    schema: 'beegame-content.v1',
+    id: 'ui.hud',
+    kind: 'ui-hud',
+    irRefs: ['world.main'],
+    assetRefs: [],
+    data: { rootId: 'hud', nodes: [{ id: 'hud', role: 'hud' }] },
+  })
+  const authority = {
+    irRevision,
+    assetManifestRevision: resourceRevision,
+    irNodeIds: ['world.main'],
+    manifest,
+  }
+  const receipt = acceptBeeGameContentPackage(f.workspace, authority)
+  const observedAt = new Date().toISOString()
+  const completed: DeliveryRun = {
+    ...f.run,
+    phase: 'DELIVERY',
+    documentStep: undefined,
+    status: 'completed',
+    completedAt: observedAt,
+    revision: {
+      ...f.run.revision,
+      resource: resourceRevision,
+      content: receipt.contentRevision,
+    },
+    resourceProductionState: {
+      currentTask: 'RESOURCE_DELIVERED',
+      irResultId: irRevision,
+      deliveryReceipt: {
+        bindings: [],
+        catalogObserved: false,
+        resourceDigest: resourceRevision,
+        acceptedAt: observedAt,
+      },
+    },
+    gameContentReceipt: receipt,
+    evidence: {
+      gameContent: {
+        path: receipt.indexPath,
+        kind: 'game_content',
+        revision: receipt.contentRevision,
+        status: 'passed',
+        observedAt,
+      },
+    },
+  }
+  await f.save(completed)
+
+  const loaded = await f.controller.loadGameContentForEditing()
+  const scene = loaded.documents.find(document => document.path.startsWith('scenes/'))!
+  const edited = structuredClone(scene.document)
+  if (edited.kind !== 'scene-2d') throw new Error('expected scene')
+  edited.data.nodes[0]!.transform = { position: [40, 24], scale: [1.2, 1.2] }
+  const saved = await f.controller.saveGameContentEdit({
+    path: scene.path,
+    expectedRevision: scene.revision,
+    document: edited,
+  })
+  expect(saved.contentRevision).not.toBe(receipt.contentRevision)
+  expect((await f.controller.store.load())!.revision.content).toBe(receipt.contentRevision)
+  expect(f.requests).toHaveLength(0)
+
+  const published = await f.controller.publishGameContentEdits(saved.contentRevision)
+  expect(published.phase).toBe('IMPLEMENTATION')
+  expect(published.revision.content).toBe(saved.contentRevision)
+  expect(published.gameContentReceipt?.contentRevision).toBe(saved.contentRevision)
+  expect(f.requests).toHaveLength(0)
 })
 
 test('a composite document revision after Checklist does not replace the frozen Foundation IR revision', async () => {
@@ -166,7 +290,7 @@ test('unproven existing resource receipts and a different IR binding cannot reac
   const gameIr = await readDownstreamIr({ run: f.run, workspacePath: f.workspace, ir: f.ir })
   expect(() => assertResourceIr(f.run, gameIr, true)).not.toThrow()
   const old: DeliveryRun = { ...f.run, resourceProductionState: { currentTask: 'RESOURCE_DELIVERED',
-    deliveryReceipt: { acceptedAt: new Date().toISOString(), contentDigest: fixtureDigest('old'), bindings: [], catalogObserved: false } } }
+    deliveryReceipt: { acceptedAt: new Date().toISOString(), resourceDigest: fixtureDigest('old'), bindings: [], catalogObserved: false } } }
   expect(() => assertResourceIr(old, gameIr, true)).toThrow('not bound')
   await f.save({ ...old, resourceProductionState: { ...old.resourceProductionState, irResultId: fixtureDigest('different IR') } })
   await f.controller.resume(f.run)
