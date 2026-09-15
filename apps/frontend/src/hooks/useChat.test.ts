@@ -114,6 +114,7 @@ describe('useChat clarification gate handling', () => {
     projectStoreState.loadPendingPermissions.mockClear();
     projectStoreState.loadProjectRuntimeState.mockReset();
     projectStoreState.loadProjectRuntimeState.mockResolvedValue(undefined);
+    chatStoreState.messages = [];
     Object.values(chatStoreState).forEach((value) => {
       if (typeof value === 'function' && 'mockClear' in value) {
         value.mockClear();
@@ -214,6 +215,59 @@ describe('useChat clarification gate handling', () => {
       });
     });
     expect(chatStoreState.removeMessage).toHaveBeenCalledWith('thinking-turn-1');
+  });
+
+  it('keeps streamed thought content when think_end completes the activity', () => {
+    renderHook(() => useChat({ projectId: 'proj_1' }));
+
+    act(() => {
+      latestWebSocketOptions.onMessage?.({
+        type: 'think_start',
+        task_id: 'task_1',
+        sender: 'beegame',
+        content: 'Thinking',
+        message_id: 'thinking-turn-2',
+        timestamp: 100,
+        turnId: 'turn-2',
+      });
+    });
+    chatStoreState.messages = [{
+      id: 'thinking-turn-2',
+      messageId: 'thinking-turn-2',
+      sender: 'beegame',
+      content: 'Thinking',
+      thought: 'Checking the preview entry.',
+      taskId: 'task_1',
+      turnId: 'turn-2',
+      type: 'thought',
+      taskKind: 'assistant_thinking',
+      timestamp: 101,
+    }];
+
+    act(() => {
+      latestWebSocketOptions.onMessage?.({
+        type: 'thought',
+        task_id: 'task_1',
+        sender: 'beegame',
+        content: 'Checking the preview entry.',
+        message_id: 'thinking-turn-2',
+        timestamp: 101,
+        turnId: 'turn-2',
+      });
+      latestWebSocketOptions.onMessage?.({
+        type: 'think_end',
+        task_id: 'task_1',
+        sender: 'beegame',
+        message_id: 'thinking-turn-2',
+        turnId: 'turn-2',
+      });
+    });
+
+    expect(chatStoreState.removeMessage).not.toHaveBeenCalled();
+    expect(chatStoreState.finalizeMessage).toHaveBeenLastCalledWith(
+      'task_1', 'Thinking', 'beegame', 'thought', undefined, undefined, undefined,
+      { taskKind: 'assistant_thinking', turnId: 'turn-2' }, 101, 'thinking-turn-2',
+    );
   });
 
   it('renders context updates as collapsed chat-visible system evidence', () => {
@@ -451,6 +505,9 @@ describe('useChat clarification gate handling', () => {
         tool_status: 'completed',
         tool_detail: 'Command: game-engine build',
         tool_output: 'Build passed',
+        tool_diff: '--- a/src/StartScreen.tsx\n+++ b/src/StartScreen.tsx\n@@\n-old\n+new',
+        structured_patch: { files: ['src/StartScreen.tsx'] },
+        tool_input: { file_path: 'src/StartScreen.tsx', content: 'new' },
         is_subagent_tool: false,
         timestamp: Date.now(),
       });
@@ -465,6 +522,9 @@ describe('useChat clarification gate handling', () => {
       toolStatus: 'completed',
       toolDetail: 'Command: game-engine build',
       toolOutput: 'Build passed',
+      toolDiff: '--- a/src/StartScreen.tsx\n+++ b/src/StartScreen.tsx\n@@\n-old\n+new',
+      toolStructuredPatch: { files: ['src/StartScreen.tsx'] },
+      toolInput: { file_path: 'src/StartScreen.tsx', content: 'new' },
       isSubagentTool: false,
     }));
   });
@@ -508,10 +568,12 @@ describe('useChat clarification gate handling', () => {
     const onError = vi.fn();
     const { result } = renderHook(() => useChat({ projectId: 'proj_1', onError }));
 
+    let accepted = true;
     await act(async () => {
-      await result.current.sendMessage('please continue');
+      accepted = await result.current.sendMessage('please continue');
     });
 
+    expect(accepted).toBe(false);
     expect(api.sendMessage).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledTimes(1);
     expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
@@ -530,10 +592,12 @@ describe('useChat clarification gate handling', () => {
 
     const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
 
+    let accepted = false;
     await act(async () => {
-      await result.current.sendMessage('continue from paused state');
+      accepted = await result.current.sendMessage('continue from paused state');
     });
 
+    expect(accepted).toBe(true);
     expect(api.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       content: 'continue from paused state',
       project_id: 'proj_1',
@@ -565,6 +629,34 @@ describe('useChat clarification gate handling', () => {
     }));
   });
 
+  it('ignores a late send response after the chat hook unmounts', async () => {
+    let resolveSend: ((value: unknown) => void) | undefined;
+    vi.mocked(api.sendMessage).mockImplementationOnce(
+      () => new Promise(resolve => {
+        resolveSend = resolve;
+      }),
+    );
+    const { result, unmount } = renderHook(() => useChat({ projectId: 'proj_1' }));
+
+    let sendPromise: Promise<boolean> | undefined;
+    act(() => {
+      sendPromise = result.current.sendMessage('late response');
+    });
+    unmount();
+    resolveSend?.({ task_id: 'late-task', command_id: 'late-task', state: 'running' });
+
+    let accepted = true;
+    await act(async () => {
+      accepted = await sendPromise!;
+    });
+
+    expect(accepted).toBe(false);
+    expect(chatStoreState.addMessage).toHaveBeenCalledTimes(1);
+    expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({ content: 'late response' }));
+    expect(projectStoreState.loadProjectRuntimeState).not.toHaveBeenCalled();
+    expect(api.getChatHistory).not.toHaveBeenCalled();
+  });
+
   it('surfaces backend send failures in chat and toast', async () => {
     const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const showToastError = vi.fn();
@@ -572,10 +664,12 @@ describe('useChat clarification gate handling', () => {
     vi.mocked(api.sendMessage).mockRejectedValue(new Error('Credit 不足。本次请求需要预扣 50 credits，你当前有 0 credits。'));
     const { result } = renderHook(() => useChat({ projectId: 'proj_1', onError, showToastError }));
 
+    let accepted = true;
     await act(async () => {
-      await result.current.sendMessage('fix the issue');
+      accepted = await result.current.sendMessage('fix the issue');
     });
 
+    expect(accepted).toBe(false);
     expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
       sender: 'system',
       content: 'Credit 不足。本次请求需要预扣 50 credits，你当前有 0 credits。',

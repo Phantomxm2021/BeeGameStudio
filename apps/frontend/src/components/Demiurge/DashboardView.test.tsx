@@ -17,6 +17,7 @@ const loadCurrentUser = vi.fn().mockResolvedValue(undefined);
 const setIsSyncing = vi.fn();
 const setActiveProject = vi.fn().mockResolvedValue(undefined);
 const toggleTheme = vi.fn();
+const setTheme = vi.fn();
 const showSuccess = vi.fn();
 const showError = vi.fn();
 const showWarning = vi.fn();
@@ -92,10 +93,8 @@ const status = {
 };
 
 let capturedRightSidebarProps: Record<string, any> | null = null;
-let capturedTopBarProps: Record<string, any> | null = null;
 let capturedSideMenuProps: Record<string, any> | null = null;
 let capturedUseChatOptions: Record<string, any> | null = null;
-let renderWorkflowCard = false;
 let mockedPhaseInfo = {
   current_phase: 0,
   phase_name: 'phase_0',
@@ -130,6 +129,7 @@ let mockedCurrentUser: Record<string, any> | null = {
 };
 
 vi.mock('../../store/systemStore', () => ({
+  applyThemeToDocument: vi.fn(),
   useSystemStore: (selector?: (state: Record<string, any>) => unknown) => {
     const state = {
       status,
@@ -145,6 +145,7 @@ vi.mock('../../store/systemStore', () => ({
       isSyncing: mockedIsSyncing,
       isDark: true,
       toggleTheme,
+      setTheme,
       hasPermission: mockedHasPermission,
       currentUser: mockedCurrentUser,
       authenticationStatus: mockedAuthenticationStatus,
@@ -272,8 +273,7 @@ vi.mock('../../services/beeGameAdapter', () => ({
 }));
 
 vi.mock('./TopBar', () => ({
-  TopBar: (props: Record<string, any>) => {
-    capturedTopBarProps = props;
+  TopBar: () => {
     return <div data-testid="top-bar" />;
   },
 }));
@@ -286,11 +286,10 @@ vi.mock('./SideMenu', () => ({
 }));
 
 vi.mock('./RightSidebar', async () => {
-  const { WorkflowCard } = await vi.importActual<typeof import('./WorkflowCard')>('./WorkflowCard');
   return { RightSidebar: (props: Record<string, any>) => {
     capturedRightSidebarProps = props;
-    if (renderWorkflowCard && props.projectStatus?.workflow) {
-      return <WorkflowCard workflow={props.projectStatus.workflow} onAction={props.onWorkflowAction} />;
+    if (props.projectStatus?.workflow?.nextAction) {
+      return <button type="button" onClick={() => props.onWorkflowAction?.(props.projectStatus.workflow.nextAction)}>继续</button>;
     }
     return <div data-testid="right-sidebar" />;
   }};
@@ -301,10 +300,8 @@ describe('DashboardView runtime loading', () => {
     vi.clearAllMocks();
     vi.restoreAllMocks();
     capturedRightSidebarProps = null;
-    capturedTopBarProps = null;
     capturedSideMenuProps = null;
     capturedUseChatOptions = null;
-    renderWorkflowCard = false;
     mockedPhaseInfo = { current_phase: 0, phase_name: 'phase_0', history: [] };
     mockedMessages = [];
     mockedTokenUsage = {};
@@ -531,7 +528,6 @@ describe('DashboardView runtime loading', () => {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
-    renderWorkflowCard = true;
     mockedProjectStatus = {
       project_id: 'proj_1',
       phase: 'paused',
@@ -671,7 +667,7 @@ describe('DashboardView runtime loading', () => {
     await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
 
     expect(capturedRightSidebarProps?.progress).toBeLessThan(20);
-    await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
+    await userEvent.click(screen.getByTestId('beegame-project-info-trigger'));
     expect(screen.queryByText('需要处理')).not.toBeInTheDocument();
     expect(screen.queryByText('构建方案')).not.toBeInTheDocument();
     expect(screen.queryByText('构建方案 · 0%')).not.toBeInTheDocument();
@@ -703,7 +699,7 @@ describe('DashboardView runtime loading', () => {
 
     expect(screen.queryByTestId('top-bar')).not.toBeInTheDocument();
     expect(screen.queryByText('实现构建 · 50%')).not.toBeInTheDocument();
-    await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
+    await userEvent.click(screen.getByTestId('beegame-project-info-trigger'));
     expect(screen.queryByText('构建中')).not.toBeInTheDocument();
     expect(screen.queryByText('实现构建')).not.toBeInTheDocument();
     expect(screen.queryByText('实现构建 · 50%')).not.toBeInTheDocument();
@@ -722,7 +718,7 @@ describe('DashboardView runtime loading', () => {
 
     render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-    await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
+    await userEvent.click(screen.getByTestId('beegame-project-info-trigger'));
     expect(screen.queryByText('Agent 状态')).not.toBeInTheDocument();
     expect(screen.queryByText('需要处理')).not.toBeInTheDocument();
     expect(screen.queryByText('未通过')).not.toBeInTheDocument();
@@ -749,7 +745,7 @@ describe('DashboardView runtime loading', () => {
 
     await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
 
-    await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
+    await userEvent.click(screen.getByTestId('beegame-project-info-trigger'));
     expect(screen.queryByText('构建中')).not.toBeInTheDocument();
     expect(screen.queryByText('实现构建')).not.toBeInTheDocument();
     expect(screen.queryByText('实现构建 · 0%')).not.toBeInTheDocument();
@@ -786,16 +782,13 @@ describe('DashboardView runtime loading', () => {
 
     await waitFor(() => expect(apiMocks.getCreditSummary).toHaveBeenCalledWith('proj_1'));
 
-    await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
+    await userEvent.click(screen.getByTestId('beegame-project-info-trigger'));
     const hint = screen.getByTestId('beegame-project-hint');
-    expect(within(hint).getByText('1,234')).toBeInTheDocument();
-    expect(within(hint).getByText('63')).toBeInTheDocument();
-    expect(within(hint).getByText('89')).toBeInTheDocument();
     expect(within(hint).getByText('2')).toBeInTheDocument();
-    expect(within(hint).getByText('输入')).toBeInTheDocument();
-    expect(within(hint).getByText('缓存输入')).toBeInTheDocument();
-    expect(within(hint).getByText('输出')).toBeInTheDocument();
     expect(within(hint).getByText('Credit')).toBeInTheDocument();
+    expect(within(hint).queryByText('输入')).not.toBeInTheDocument();
+    expect(within(hint).queryByText('缓存输入')).not.toBeInTheDocument();
+    expect(within(hint).queryByText('输出')).not.toBeInTheDocument();
     expect(within(hint).queryByText('平台')).not.toBeInTheDocument();
     expect(within(hint).queryByText('Agent 状态')).not.toBeInTheDocument();
     expect(within(hint).queryByText('处理总量（含缓存）')).not.toBeInTheDocument();
@@ -832,12 +825,12 @@ describe('DashboardView runtime loading', () => {
     render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
     await waitFor(() => expect(apiMocks.getCreditSummary).toHaveBeenCalledWith('proj_1'));
-    await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
+    await userEvent.click(screen.getByTestId('beegame-project-info-trigger'));
     const hint = screen.getByTestId('beegame-project-hint');
-    expect(within(hint).getByText('4,530,369')).toBeInTheDocument();
-    expect(within(hint).getByText('36,931,943')).toBeInTheDocument();
-    expect(within(hint).getByText('569,805')).toBeInTheDocument();
     expect(within(hint).getByText('895')).toBeInTheDocument();
+    expect(within(hint).queryByText('4,530,369')).not.toBeInTheDocument();
+    expect(within(hint).queryByText('36,931,943')).not.toBeInTheDocument();
+    expect(within(hint).queryByText('569,805')).not.toBeInTheDocument();
     expect(within(hint).queryByText('42,032,117')).not.toBeInTheDocument();
     expect(within(hint).queryByText('35,097,910')).not.toBeInTheDocument();
   });
@@ -857,12 +850,12 @@ describe('DashboardView runtime loading', () => {
     render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
     await waitFor(() => expect(apiMocks.getCreditSummary).toHaveBeenCalledWith('proj_1'));
-    await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
+    await userEvent.click(screen.getByTestId('beegame-project-info-trigger'));
     const hint = screen.getByTestId('beegame-project-hint');
-    expect(within(hint).getByText('80,000')).toBeInTheDocument();
-    expect(within(hint).getByText('30,000')).toBeInTheDocument();
-    expect(within(hint).getByText('15,000')).toBeInTheDocument();
     expect(within(hint).getByText('12')).toBeInTheDocument();
+    expect(within(hint).queryByText('80,000')).not.toBeInTheDocument();
+    expect(within(hint).queryByText('30,000')).not.toBeInTheDocument();
+    expect(within(hint).queryByText('15,000')).not.toBeInTheDocument();
     expect(within(hint).queryByText('25,000')).not.toBeInTheDocument();
     expect(within(hint).queryByText('5,000')).not.toBeInTheDocument();
     expect(within(hint).queryByText('125,000')).not.toBeInTheDocument();
@@ -880,7 +873,7 @@ describe('DashboardView runtime loading', () => {
     render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
     await waitFor(() => expect(apiMocks.getCreditSummary).toHaveBeenCalled());
-    await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
+    await userEvent.click(screen.getByTestId('beegame-project-info-trigger'));
     expect(screen.getByText('2')).toBeInTheDocument();
   });
 
@@ -910,14 +903,14 @@ describe('DashboardView runtime loading', () => {
     expect(within(screen.getByTestId('beegame-shell-top-nav')).queryByText('Web')).not.toBeInTheDocument();
     expect(screen.getByTestId('beegame-project-trigger')).not.toHaveAttribute('aria-describedby');
 
-    await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
+    await userEvent.click(screen.getByTestId('beegame-project-info-trigger'));
 
-    expect(screen.getByTestId('beegame-project-hint')).toHaveClass('absolute', 'right-0', 'top-[calc(100%+0.75rem)]');
-    expect(screen.getByTestId('beegame-project-hint')).not.toHaveClass('left-5');
-    expect(screen.getByText('输入')).toBeInTheDocument();
-    expect(screen.getByText('缓存输入')).toBeInTheDocument();
-    expect(screen.getByText('输出')).toBeInTheDocument();
+    expect(screen.getByTestId('beegame-project-hint')).toHaveClass('border-b');
+    expect(screen.getByTestId('beegame-project-hint')).not.toHaveClass('backdrop-blur-xl');
     expect(screen.getByText('Credit')).toBeInTheDocument();
+    expect(screen.queryByText('输入')).not.toBeInTheDocument();
+    expect(screen.queryByText('缓存输入')).not.toBeInTheDocument();
+    expect(screen.queryByText('输出')).not.toBeInTheDocument();
     expect(screen.queryByText('平台')).not.toBeInTheDocument();
     expect(screen.queryByText('Web')).not.toBeInTheDocument();
     expect(screen.queryByText('新增输入 Tokens')).not.toBeInTheDocument();
@@ -953,7 +946,7 @@ describe('DashboardView runtime loading', () => {
     render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
     expect(screen.getByRole('button', { name: '发布游戏' })).toBeEnabled();
-    await userEvent.hover(screen.getByTestId('beegame-project-info-trigger'));
+    await userEvent.click(screen.getByTestId('beegame-project-info-trigger'));
     expect(screen.queryByText('custom-engine')).not.toBeInTheDocument();
     expect(screen.queryByText('Web')).not.toBeInTheDocument();
   });
@@ -978,10 +971,8 @@ describe('DashboardView runtime loading', () => {
     expect(screen.getByRole('button', { name: '播放预览' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '发布游戏' })).toBeDisabled();
 
-    await user.click(screen.getByRole('button', { name: '用户菜单' }));
-    await user.click(
-      within(screen.getByTestId('beegame-user-settings-menu')).getByRole('menuitem', { name: '历史项目' }),
-    );
+    await user.click(screen.getByTestId('beegame-profile-trigger'));
+    await user.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: '历史项目' }));
     await user.click(await screen.findByText('other-project'));
 
     expect(setActiveProject).not.toHaveBeenCalled();
@@ -1012,22 +1003,22 @@ describe('DashboardView runtime loading', () => {
     expect(capturedRightSidebarProps).not.toHaveProperty('variant');
   });
 
-  it('groups live preview controls in a shadcn button group and removes the bottom runtime strip', async () => {
+  it('keeps primary preview controls in the workspace header and secondary actions in the menu', async () => {
     render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
     await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
 
-    const primaryControls = screen.getByRole('group', { name: '预览操作' });
-    const onlineControls = screen.getByRole('group', { name: '打开线上版本' });
-    expect(within(primaryControls).getByRole('button', { name: '播放预览' })).toBeInTheDocument();
-    expect(within(primaryControls).getByRole('button', { name: '发布游戏' })).toBeEnabled();
-    expect(within(onlineControls).getByRole('button', { name: '刷新预览' })).toBeInTheDocument();
-    expect(within(onlineControls).getByRole('button', { name: '打开线上版本' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '预览' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '播放预览' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '播放预览' }).parentElement).toHaveClass('rounded-full');
+    expect(screen.getByRole('button', { name: '发布游戏' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '发布游戏' })).toHaveClass('rounded-full');
+    expect(screen.getByTestId('beegame-preview-surface')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '预览操作' })).toBeInTheDocument();
     expect(screen.queryByText('实时预览')).not.toBeInTheDocument();
     expect(screen.queryByText('Live Preview')).not.toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: '刷新预览' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '预览操作' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '预览操作' }));
+    expect(screen.getByRole('menuitem', { name: '刷新预览' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: '打开线上版本' })).toBeInTheDocument();
     expect(screen.queryByTestId('beegame-preview-runtime-strip')).not.toBeInTheDocument();
     expect(screen.queryByTestId('beegame-preview-metric-grid')).not.toBeInTheDocument();
   });
@@ -1044,31 +1035,41 @@ describe('DashboardView runtime loading', () => {
 
     await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
 
-    await user.click(screen.getByRole('button', { name: '返回项目列表' }));
+    const backButton = screen.getByRole('button', { name: '返回主页' });
+    expect(backButton).toHaveAttribute('title', '返回主页');
+    await user.click(backButton);
     expect(onBack).toHaveBeenCalledTimes(1);
 
     expect(screen.queryByRole('combobox', { name: '语言' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '用户菜单' }));
+    await user.click(screen.getByTestId('beegame-project-info-trigger'));
+    const projectMenu = screen.getByRole('menu');
+    expect(within(projectMenu).getByTestId('beegame-project-hint')).toBeInTheDocument();
+    expect(within(projectMenu).getByText('Credit')).toBeInTheDocument();
+    expect(within(projectMenu).queryByRole('menuitem', { name: '个人主页' })).not.toBeInTheDocument();
+    expect(within(projectMenu).queryByRole('menuitem', { name: 'Credit 商店' })).not.toBeInTheDocument();
+    expect(within(projectMenu).queryByRole('menuitem', { name: '系统设置' })).not.toBeInTheDocument();
+    expect(within(projectMenu).queryByRole('menuitem', { name: '历史项目' })).not.toBeInTheDocument();
+    expect(within(projectMenu).queryByRole('menuitem', { name: '退出登录' })).not.toBeInTheDocument();
 
-    const userSettingsMenu = screen.getByTestId('beegame-user-settings-menu');
+    await user.click(screen.getByTestId('beegame-profile-trigger'));
+
+    const userSettingsMenu = screen.getByRole('menu');
     expect(userSettingsMenu).toBeInTheDocument();
-    expect(screen.getByTestId('beegame-shell-top-nav')).not.toContainElement(userSettingsMenu);
-    expect(userSettingsMenu).toHaveAttribute('data-surface', 'frosted-glass');
-    expect(within(userSettingsMenu).getByText('Nova Player')).toBeInTheDocument();
-    expect(within(userSettingsMenu).getByText('nova@example.com')).toBeInTheDocument();
-    expect(within(userSettingsMenu).getByText('162 credits')).toBeInTheDocument();
+    expect(userSettingsMenu).not.toHaveAttribute('data-surface', 'frosted-glass');
     expect(within(userSettingsMenu).queryByRole('combobox', { name: '语言' })).not.toBeInTheDocument();
     expect(within(userSettingsMenu).getByRole('menuitem', { name: '个人主页' })).toBeInTheDocument();
     expect(within(userSettingsMenu).getByRole('menuitem', { name: 'Credit 商店' })).toBeInTheDocument();
     expect(within(userSettingsMenu).getByRole('menuitem', { name: '系统设置' })).toBeInTheDocument();
     expect(within(userSettingsMenu).getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();
     expect(within(userSettingsMenu).getByRole('menuitem', { name: '退出登录' })).toBeInTheDocument();
+    expect(within(userSettingsMenu).queryByRole('menuitem', { name: 'Resources' })).not.toBeInTheDocument();
+    expect(within(userSettingsMenu).getByTestId('beegame-profile-menu-user')).toHaveTextContent('Nova Player');
 
     await user.click(within(userSettingsMenu).getByRole('menuitem', { name: '系统设置' }));
 
     const settingsDialog = await screen.findByRole('dialog', { name: '系统设置' });
-    expect(screen.queryByTestId('beegame-user-settings-menu')).not.toBeInTheDocument();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     expect(within(settingsDialog).getByRole('tab', { name: '技能' })).toBeInTheDocument();
     await user.selectOptions(within(settingsDialog).getByRole('combobox', { name: '语言选择' }), 'en');
     expect(onSetLang).toHaveBeenCalledWith('en');
@@ -1081,15 +1082,48 @@ describe('DashboardView runtime loading', () => {
 
     await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
 
-    await user.click(screen.getByRole('button', { name: '用户菜单' }));
+    await user.click(screen.getByTestId('beegame-profile-trigger'));
     await user.click(
-      within(screen.getByTestId('beegame-user-settings-menu')).getByRole('menuitem', { name: '个人主页' }),
+      within(screen.getByRole('menu')).getByRole('menuitem', { name: '个人主页' }),
     );
 
     const profileDialog = await screen.findByRole('dialog');
     expect(within(profileDialog).getByText('Nova Player')).toBeInTheDocument();
     expect(within(profileDialog).getByText('nova@example.com')).toBeInTheDocument();
     expect(within(profileDialog).getByText('162 credits')).toBeInTheDocument();
+  });
+
+  it('shows Resources in the profile menu only for users with resource permission', async () => {
+    mockedCurrentUser = {
+      ...mockedCurrentUser,
+      permissions: ['resources.manage'],
+    };
+
+    render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('beegame-profile-trigger'));
+
+    expect(screen.getByRole('menuitem', { name: 'Resources' })).toBeInTheDocument();
+  });
+
+  it('keeps preview/build controls compact and renders the profile avatar fallback', async () => {
+    render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
+
+    expect(screen.getByTestId('beegame-preview-split-control')).toHaveClass('min-w-10', 'min-[900px]:min-w-[148px]');
+    expect(screen.getByRole('button', { name: /Build|部署|发布游戏/ })).toHaveClass('min-w-10', 'min-[900px]:min-w-[112px]');
+    expect(screen.getByTestId('beegame-profile-trigger')).toHaveTextContent('N');
+  });
+
+  it('uses the current user avatar URL when available', async () => {
+    mockedCurrentUser.avatarUrl = 'https://example.test/avatar.png';
+    render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId('beegame-live-preview-page')).toBeInTheDocument());
+
+    expect(screen.getByTestId('beegame-profile-trigger').querySelector('img')).toHaveAttribute('src', 'https://example.test/avatar.png');
   });
 
   it('keeps the top bar popover layer above the right-side chat panel', async () => {
@@ -1100,9 +1134,9 @@ describe('DashboardView runtime loading', () => {
     const topNav = await screen.findByTestId('beegame-shell-top-nav');
     expect(topNav).toHaveClass('z-[90]');
 
-    await user.click(screen.getByRole('button', { name: '用户菜单' }));
+    await user.click(screen.getByTestId('beegame-project-info-trigger'));
 
-    expect(screen.getByTestId('beegame-user-settings-menu')).toHaveClass('z-[140]');
+    expect(screen.getByRole('menu')).toBeInTheDocument();
     expect(capturedRightSidebarProps).not.toHaveProperty('variant');
   });
 
@@ -1124,7 +1158,7 @@ describe('DashboardView runtime loading', () => {
     expect(screen.getByRole('button', { name: '停止预览' })).toBeInTheDocument();
   });
 
-  it('groups online preview actions after the primary preview actions', async () => {
+  it('keeps preview actions available while a built iframe is live', async () => {
     mockedProjectStatus = {
       ...mockedProjectStatus,
       build_report: {
@@ -1136,12 +1170,9 @@ describe('DashboardView runtime loading', () => {
 
     render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
 
-    const actionGroups = await screen.findAllByRole('group');
-    expect(actionGroups).toHaveLength(2);
-    expect(within(actionGroups[0]).getByRole('button', { name: '停止预览' })).toBeInTheDocument();
-    expect(within(actionGroups[0]).getByRole('button', { name: '发布游戏' })).toBeInTheDocument();
-    expect(within(actionGroups[1]).getByRole('button', { name: '刷新预览' })).toBeInTheDocument();
-    expect(within(actionGroups[1]).getByRole('button', { name: '打开线上版本' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '停止预览' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '发布游戏' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '预览操作' })).toBeInTheDocument();
   });
 
   it('stops the managed preview without stopping the BeeGame runtime', async () => {
@@ -1160,7 +1191,8 @@ describe('DashboardView runtime loading', () => {
 
     const frame = await screen.findByTestId('beegame-live-preview-frame');
     expect(frame).toHaveAttribute('src', 'http://127.0.0.1:5178');
-    await user.click(screen.getByRole('button', { name: '刷新预览' }));
+    await user.click(screen.getByRole('button', { name: '预览操作' }));
+    await user.click(screen.getByRole('menuitem', { name: '刷新预览' }));
     await waitFor(() => expect(apiMocks.restartProjectPreview).toHaveBeenCalledWith('proj_1'));
     await waitFor(() => {
       expect(screen.getByTestId('beegame-live-preview-frame')).toHaveAttribute(
@@ -1185,7 +1217,8 @@ describe('DashboardView runtime loading', () => {
       });
     });
     observer.observe(previewSurface, { childList: true, subtree: true });
-    await user.click(screen.getByRole('button', { name: '停止预览' }));
+    await user.click(screen.getByRole('button', { name: '预览操作' }));
+    await user.click(screen.getByRole('menuitem', { name: '停止预览' }));
     await waitFor(() => expect(apiMocks.stopProjectPreview).toHaveBeenCalledWith('proj_1'));
     await waitFor(() => expect(screen.queryByTestId('beegame-live-preview-frame')).not.toBeInTheDocument());
     observer.disconnect();
@@ -1567,7 +1600,8 @@ describe('DashboardView runtime loading', () => {
     const previewSurface = await screen.findByTestId('beegame-preview-surface');
     expect(within(previewSurface).getByTestId('beegame-preview-error-overlay')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: '刷新预览' }));
+    await user.click(screen.getByRole('button', { name: '预览操作' }));
+    await user.click(screen.getByRole('menuitem', { name: '刷新预览' }));
 
     await waitFor(() => expect(apiMocks.restartProjectPreview).toHaveBeenCalledWith('proj_1'));
     await waitFor(() => {

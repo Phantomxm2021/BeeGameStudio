@@ -104,13 +104,13 @@ export const AGENT_UI_MAP: Record<string, { name: string; role: string; x: numbe
     },
     'hephaestus': {
         name: 'Implementation', role: '工程实现', x: row4(0), y: LAYER_CONFIG.implementation.y, icon: Code,
-        color: 'bg-emerald-500', text: 'text-emerald-500', border: 'border-emerald-500/50',
+        color: 'bg-muted', text: 'text-foreground', border: 'border-success-500/50',
         bio: '实现游戏逻辑、系统和运行入口。',
         layer: 'implementation', phase: 'Build'
     },
     'sankta': {
         name: 'Interface', role: '界面实现', x: row4(1), y: LAYER_CONFIG.implementation.y, icon: Zap,
-        color: 'bg-amber-500', text: 'text-amber-500', border: 'border-amber-500/50',
+        color: 'bg-muted', text: 'text-foreground', border: 'border-warning-500/50',
         bio: '实现界面、交互反馈和可操作流程。',
         layer: 'implementation', phase: 'Interface'
     },
@@ -128,7 +128,7 @@ export const AGENT_UI_MAP: Record<string, { name: string; role: string; x: numbe
     },
     'argus': {
         name: 'Review', role: '体验检查', x: row2(0), y: LAYER_CONFIG.verification.y, icon: Shield,
-        color: 'bg-red-500', text: 'text-red-500', border: 'border-red-500/50',
+        color: 'bg-muted', text: 'text-foreground', border: 'border-destructive-500/50',
         bio: '检查可运行性、玩家路径和已知缺口。',
         layer: 'verification', phase: 'Review'
     },

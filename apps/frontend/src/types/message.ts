@@ -22,6 +22,15 @@ export type MessageType =
   | 'system_status'
   | 'structured_output'
 
+export type AssistantContentBlock = {
+  type: 'thinking' | 'text' | 'tool_use' | 'tool_result'
+  text?: string
+  toolUseId?: string
+  toolName?: string
+  toolInput?: unknown
+  isError?: boolean
+}
+
 export type RenderHint =
   | 'default'
   | 'document'
@@ -250,6 +259,9 @@ export interface Message {
   /** reasoning/thought content (optional) */
   thought?: string
 
+  /** Ordered assistant content blocks from the raw response message. */
+  contentBlocks?: AssistantContentBlock[]
+
   /** Collaborative message delivery kind for replay diagnostics (optional) */
   deliveryKind?: 'new' | 'replay'
 
@@ -258,6 +270,15 @@ export interface Message {
 
   /** Task ID associated with this message (optional, used for aggregation) */
   taskId?: string
+
+  /** Backend turn identity used to group one agent response across events. */
+  turnId?: string
+
+  /** Input order retained when timestamps from a turn are replayed out of order. */
+  sourceIndex?: number
+
+  /** Snake_case compatibility alias for persisted/event payloads. */
+  turn_id?: string
 
   /** Artifact ID associated with this message (optional, used for artifact preview) */
   artifactId?: string
@@ -282,10 +303,26 @@ export interface Message {
 
   /** Structured tool display metadata for tool cards */
   toolName?: string
+  toolUseId?: string
   toolStatus?: 'running' | 'completed' | 'failed'
   toolDetail?: string
   toolOutput?: string
+  /** Explicit file patch supplied by a write/edit tool result. */
+  toolDiff?: string
+  toolPatch?: string
+  toolBefore?: string
+  toolAfter?: string
+  toolStructuredPatch?: unknown
+  toolInput?: unknown
   isSubagentTool?: boolean
+  subagentPrompt?: string
+  subagentOutput?: string
+  subagentTrace?: string
+
+  /** Structured sources attached to an assistant response. */
+  sources?: Array<{ id?: string; title?: string; domain?: string; url?: string }>
+  /** Alias accepted from runtimes that call response sources citations. */
+  citations?: Array<{ id?: string; title?: string; domain?: string; url?: string }>
 }
 
 /**
@@ -338,6 +375,9 @@ export interface ProjectEventMessage {
   /** Message content (optional, used for token and error_paused types) */
   content?: string
 
+  /** Ordered assistant message blocks preserved from the raw response. */
+  content_blocks?: AssistantContentBlock[]
+
   /** Task ID associated with this message */
   task_id: string
 
@@ -349,6 +389,12 @@ export interface ProjectEventMessage {
 
   /** Stable backend message identity for reconcile/deduplication */
   message_id?: string
+
+  /** Stable backend turn identity shared by one agent response. */
+  turnId?: string
+
+  /** Snake_case compatibility alias for event payloads. */
+  turn_id?: string
 
   /** Stable client message identity for optimistic user messages */
   client_message_id?: string
@@ -376,6 +422,21 @@ export interface ProjectEventMessage {
 
   /** Structured tool card output summary */
   tool_output?: string
+  tool_input?: unknown
+  tool_diff?: string
+  tool_patch?: string
+  tool_before?: string
+  tool_after?: string
+  structured_patch?: unknown
+
+  /** Complete structured subagent fields; display adapters must not truncate these. */
+  subagent_prompt?: string
+  subagent_output?: string
+  subagent_trace?: string
+
+  /** Structured response grounding metadata passed through from runtime events. */
+  sources?: Array<{ id?: string; title?: string; domain?: string; url?: string }>
+  citations?: Array<{ id?: string; title?: string; domain?: string; url?: string }>
 
   /** Workspace-relative path from structured file tool input */
   artifact_path?: string

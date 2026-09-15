@@ -13,6 +13,7 @@ interface LandingActionsProps {
     currentUserDisplayName?: string;
     currentUserEmail?: string;
     currentUserAvatarUrl?: string;
+    className?: string;
     creditBalance?: number;
     canManageResources?: boolean;
     onToggleSettings: () => void;
@@ -36,6 +37,7 @@ export function LandingActions({
     currentUserDisplayName,
     currentUserEmail,
     currentUserAvatarUrl,
+    className = 'absolute right-4 top-4 z-50 flex items-center gap-2 sm:right-8 sm:top-8',
     creditBalance,
     onToggleSettings,
     onOpenResourceLibrary,
@@ -49,7 +51,7 @@ export function LandingActions({
     return (
         <AccountActionsMenu
             lang={lang}
-            className="absolute right-4 top-4 z-50 flex items-center gap-2 sm:right-8 sm:top-8"
+            className={className}
             isTransitioning={isTransitioning}
             isSettingsOpen={isSettingsOpen}
             isHistoryOpen={isHistoryOpen}

@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'motion/react';
 
 interface HeroIntroProps {
     title: string;
@@ -7,21 +7,23 @@ interface HeroIntroProps {
 }
 
 export function HeroIntro({ title, subtitle, isTransitioning }: HeroIntroProps) {
+    const prefersReducedMotion = useReducedMotion();
+
     return (
         <motion.section
-            initial={{ y: 18, opacity: 0 }}
+            initial={prefersReducedMotion ? { opacity: 0 } : { y: 10, opacity: 0 }}
             animate={
                 isTransitioning
-                    ? { y: -8, opacity: 0, filter: 'blur(8px)' }
-                    : { y: 0, opacity: 1, filter: 'blur(0px)' }
+                    ? prefersReducedMotion ? { opacity: 0 } : { y: -4, opacity: 0 }
+                    : prefersReducedMotion ? { opacity: 1 } : { y: 0, opacity: 1 }
             }
-            transition={{ duration: isTransitioning ? 0.45 : 0.5, ease: 'easeOut' }}
-            className="relative z-10 mb-8 flex w-full max-w-[860px] flex-col items-center px-6 text-center"
+            transition={{ duration: prefersReducedMotion ? 0 : 0.18, ease: 'easeOut' }}
+            className="relative z-10 flex w-full max-w-[860px] flex-col items-center px-6 text-center"
         >
-            <h1 className="type-large-title max-w-full text-zinc-950 dark:text-white">
+            <h1 className="max-w-full text-xl font-semibold leading-7 tracking-tight text-foreground sm:text-2xl sm:leading-[34px]">
                 {title}
             </h1>
-            <p className="type-body mt-4 text-zinc-500 dark:text-zinc-400">
+            <p className="mt-2 max-w-xl text-sm text-muted-foreground sm:text-base">
                 {subtitle}
             </p>
         </motion.section>

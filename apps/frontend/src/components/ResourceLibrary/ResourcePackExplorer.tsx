@@ -100,7 +100,7 @@ export function ResourcePackExplorer({
     <div className="h-full w-full" onContextMenu={(event) => setContextNode(nodesById.get((event.target as Element).closest('[data-resource-node]')?.getAttribute('data-resource-node') || 'root'))}>
       <Tree<ExplorerNode>
       aria-label="Pack files"
-      className="overflow-hidden bg-transparent text-[#c6c6cc]"
+      className="overflow-hidden bg-transparent text-foreground"
       data={[tree]}
       disableDrag
       disableDrop
@@ -172,8 +172,8 @@ function ExplorerNodeRow({ node, selectedElementId, selectedElementIds, selected
   return <div
       className={`relative flex h-[30px] min-w-0 items-center gap-1 rounded-[5px] pr-2 text-[12px] leading-none transition-colors ${
         isSelected
-          ? 'bg-[#5b3d17] text-[#f5d19b]'
-          : 'text-[#b9bac1] hover:bg-white/[0.055] hover:text-[#f0f0f2]'
+          ? 'bg-accent text-accent-foreground'
+          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
       }`}
       style={style}
       draggable={!isFolder}
@@ -191,22 +191,22 @@ function ExplorerNodeRow({ node, selectedElementId, selectedElementIds, selected
       {node.level > 0 ? (
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute top-0 bottom-0 w-px bg-white/[0.07]"
+          className="pointer-events-none absolute top-0 bottom-0 w-px bg-border-subtle"
           style={{ left: guideLeft }}
         />
       ) : null}
       {isFolder ? (
         <ChevronRight
           aria-hidden="true"
-          className={`h-3 w-3 shrink-0 text-[#888a93] transition-transform ${node.isOpen ? 'rotate-90' : ''}`}
+          className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${node.isOpen ? 'rotate-90' : ''}`}
         />
       ) : (
         <span aria-hidden="true" className="w-3 shrink-0" />
       )}
       {isFolder ? (
-        node.isOpen ? <FolderOpen aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#c6a367]" /> : <Folder aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#aaaeb7]" />
+        node.isOpen ? <FolderOpen aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-primary" /> : <Folder aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       ) : (
-        <File aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-[#838691]" />
+        <File aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       )}
       <span className="min-w-0 truncate">{node.data.name}</span>
     </div>

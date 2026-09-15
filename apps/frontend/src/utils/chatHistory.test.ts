@@ -79,6 +79,30 @@ describe('normalizeChatHistory semantic metadata', () => {
         });
     });
 
+    it('preserves file write diff fields from persisted tool history', () => {
+        const messages = normalizeChatHistory([
+            {
+                id: 'write-1',
+                message_id: 'write-1',
+                sender: 'beegame',
+                content: 'Write completed: src/StartScreen.tsx',
+                type: 'tool_result',
+                tool_name: 'Write',
+                tool_use_id: 'tool-write-1',
+                tool_diff: '--- a/src/StartScreen.tsx\n+++ b/src/StartScreen.tsx\n@@\n-old\n+new',
+                structured_patch: { files: ['src/StartScreen.tsx'] },
+                tool_input: { file_path: 'src/StartScreen.tsx', content: 'new' },
+                timestamp: '2026-06-21T00:00:00Z',
+            },
+        ]);
+
+        expect(messages[0]).toMatchObject({
+            toolDiff: '--- a/src/StartScreen.tsx\n+++ b/src/StartScreen.tsx\n@@\n-old\n+new',
+            toolStructuredPatch: { files: ['src/StartScreen.tsx'] },
+            toolInput: { file_path: 'src/StartScreen.tsx', content: 'new' },
+        });
+    });
+
     it('keeps backend message ids and deduplicates optimistic user history by client identity', () => {
         const messages = normalizeChatHistory([
             {
@@ -108,5 +132,39 @@ describe('normalizeChatHistory semantic metadata', () => {
         expect(messages[0].messageId).toBe('msg_backend_1');
         expect(messages[0].clientMessageId).toBe('client-msg-1');
         expect(messages[0].dedupeKey).toBeTruthy();
+    });
+
+    it('preserves source order inside a turn when replay timestamps are reversed', () => {
+        const messages = normalizeChatHistory([
+            { id: 'thought-1', sender: 'beegame', content: 'Thinking', type: 'thought', turnId: 'turn-replay', timestamp: 300 },
+            { id: 'tool-1', sender: 'system', content: 'Read completed', type: 'tool', turnId: 'turn-replay', timestamp: 100 },
+            { id: 'agent-1', sender: 'agent', content: 'Final response', turnId: 'turn-replay', timestamp: 200 },
+        ]);
+
+        expect(messages.map((message) => message.id)).toEqual(['thought-1', 'tool-1', 'agent-1']);
+        expect(messages.every((message) => message.turnId === 'turn-replay')).toBe(true);
+    });
+
+    it('preserves adapter-normalized camelCase tool block fields', () => {
+        const messages = normalizeChatHistory([{
+            id: 'assistant-tool',
+            sender: 'beegame',
+            content: '',
+            type: 'text',
+            timestamp: 1,
+            contentBlocks: [{
+                type: 'tool_use',
+                toolUseId: 'tool-canonical-1',
+                toolName: 'Write',
+                toolInput: { file_path: 'docs/checklist.md' },
+            }],
+        }]);
+
+        expect(messages[0].contentBlocks?.[0]).toMatchObject({
+            type: 'tool_use',
+            toolUseId: 'tool-canonical-1',
+            toolName: 'Write',
+            toolInput: { file_path: 'docs/checklist.md' },
+        });
     });
 });

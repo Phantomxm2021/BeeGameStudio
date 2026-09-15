@@ -24,7 +24,7 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({
     sender, 
     content, 
     onPreview,
-    agentColor = 'text-zinc-500', // Changed to text color for minimalist icon
+    agentColor = 'text-[var(--text-secondary)]',
     artifactType
 }) => {
     // Extract metadata from content using the processor
@@ -36,10 +36,18 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({
 
     return (
         <div
-            className="group cursor-pointer rounded-2xl border border-zinc-200/50 dark:border-zinc-700/50 bg-white/80 dark:bg-zinc-900/60 p-5 backdrop-blur-md transition-all hover:-translate-y-px hover:bg-zinc-50 dark:hover:bg-zinc-800/80 hover:shadow-lg hover:shadow-zinc-200/20 dark:hover:shadow-none overflow-hidden"
+            className="group cursor-pointer overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4 transition-colors hover:bg-[var(--surface-hover)] focus-within:ring-2 focus-within:ring-[var(--ring)]"
             onClick={onPreview}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onPreview();
+                }
+            }}
         >
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
                 {/* Minimalist Icon Section */}
                 <div className={`flex-shrink-0 ${agentColor.replace('bg-', 'text-')} opacity-80 group-hover:opacity-100 transition-opacity`}>
                     {isGDD ? <BookOpen className="w-6 h-6" /> : <FileText className="w-6 h-6" />}
@@ -48,26 +56,26 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({
                 {/* Content Section */}
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-0.5">
-                        <h3 className="type-footnote text-zinc-900 dark:text-zinc-100 truncate pr-4 group-hover:text-black dark:group-hover:text-white transition-colors">
+                    <h3 className="type-footnote truncate pr-4 text-[var(--text-primary)] transition-colors">
                             {displayTitle}
                         </h3>
                     </div>
 
-                    <p className="type-footnote text-zinc-500 dark:text-zinc-400 line-clamp-1 opacity-70 mb-2">
+                    <p className="type-footnote mb-2 line-clamp-1 text-[var(--text-secondary)]">
                         {summary}
                     </p>
 
                     {/* Footer Info - Decoupled to avoid overlaps */}
-                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800/50">
-                        <div className="type-caption-1 flex items-center text-zinc-400 dark:text-zinc-500">
+                    <div className="mt-3 flex items-center justify-between border-t border-[var(--border)] pt-3">
+                        <div className="type-caption-1 flex items-center text-[var(--text-muted)]">
                             <span className="truncate max-w-[80px]">{sender}</span>
                             <span className="mx-1.5 opacity-30">•</span>
                             <span className="whitespace-nowrap">{normalizedArtifactType || (isGDD ? 'GDD' : 'Artifact')}</span>
                         </div>
                         
-                        <div className="type-footnote flex items-center text-zinc-900 dark:text-zinc-200 opacity-40 group-hover:opacity-100 transition-all duration-300">
+                        <div className="type-footnote flex items-center text-[var(--text-secondary)]">
                             <span className="mr-1 hidden sm:inline">Open Preview</span>
-                            <ChevronRight className="w-3 h-3 text-zinc-400 dark:text-zinc-500 group-hover:text-zinc-900 dark:group-hover:text-zinc-100" />
+                            <ChevronRight className="h-3 w-3 text-[var(--text-muted)]" />
                         </div>
                     </div>
                 </div>

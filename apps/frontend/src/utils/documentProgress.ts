@@ -41,9 +41,9 @@ export const BEEGAME_DOCUMENT_BASELINE = [
   { path: 'docs/GDD.md', name: 'GDD', stage: 1 },
   { path: 'docs/LEVEL_SCENE_DESIGN.md', name: 'Level / Scene Design', stage: 2 },
   { path: 'docs/BALANCE_DESIGN.md', name: 'Balance Design', stage: 2 },
-  { path: 'docs/UI_UX_SPEC.md', name: 'UI / UX', stage: 2 },
   { path: 'docs/TECHNICAL_DESIGN.md', name: 'Technical Design', stage: 3 },
   { path: 'docs/ART_DIRECTION.md', name: 'Art Direction', stage: 3 },
+  { path: 'docs/UI_UX_SPEC.md', name: 'UI / UX', stage: 3 },
   { path: 'docs/AUDIO_DESIGN.md', name: 'Audio Design', stage: 3 },
   { path: 'docs/ASSET_PLAN.md', name: 'Asset Plan', stage: 3 },
 ] as const;

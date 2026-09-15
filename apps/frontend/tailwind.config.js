@@ -7,28 +7,45 @@ export default {
   ],
   theme: {
     extend: {
+      // Product typography is explicit so the root remains 16px and the
+      // spacing scale keeps its 4px rhythm across browser and desktop.
+      fontSize: {
+        xs: ['11px', { lineHeight: '16px' }],
+        sm: ['12px', { lineHeight: '18px' }],
+        base: ['13px', { lineHeight: '20px' }],
+        md: ['14px', { lineHeight: '20px' }],
+        lg: ['16px', { lineHeight: '24px' }],
+        xl: ['20px', { lineHeight: '28px' }],
+        '2xl': ['28px', { lineHeight: '34px' }],
+      },
       // Custom color palette for XRMOD Demiurge
       colors: {
-        border: 'hsl(var(--border))',
-        input: 'hsl(var(--input))',
-        ring: 'hsl(var(--ring))',
-        background: 'hsl(var(--background))',
-        foreground: 'hsl(var(--foreground))',
+        border: 'var(--border)',
+        'border-subtle': 'var(--border-subtle)',
+        'border-strong': 'var(--border-strong)',
+        input: 'var(--input)',
+        ring: 'var(--ring)',
+        background: 'var(--background)',
+        foreground: 'var(--foreground)',
         muted: {
-          DEFAULT: 'hsl(var(--muted))',
-          foreground: 'hsl(var(--muted-foreground))',
+          DEFAULT: 'var(--muted)',
+          foreground: 'var(--muted-foreground)',
         },
         popover: {
-          DEFAULT: 'hsl(var(--popover))',
-          foreground: 'hsl(var(--popover-foreground))',
+          DEFAULT: 'var(--popover)',
+          foreground: 'var(--popover-foreground)',
         },
         accent: {
-          DEFAULT: 'hsl(var(--accent))',
-          foreground: 'hsl(var(--accent-foreground))',
+          DEFAULT: 'var(--accent)',
+          foreground: 'var(--accent-foreground)',
         },
-        destructive: 'hsl(var(--destructive))',
-        // Primary brand colors
+        destructive: 'var(--destructive)',
+        success: 'var(--success)',
+        warning: 'var(--warning)',
+        info: 'var(--info)',
         primary: {
+          DEFAULT: 'var(--primary)',
+          foreground: 'var(--primary-foreground)',
           50: '#eff6ff',
           100: '#dbeafe',
           200: '#bfdbfe',
@@ -41,42 +58,28 @@ export default {
           900: '#1e3a8a',
           950: '#172554',
         },
-        // Agent-specific colors
-        agent: {
-          logos: '#3b82f6',      // Blue
-          metis: '#a855f7',      // Purple
-          tecton: '#10b981',     // Green
-          hephaestus: '#f97316', // Orange
-          morphe: '#ec4899',     // Pink
-          harmonia: '#06b6d4',   // Cyan
-          mnemosyne: '#6366f1',  // Indigo
-          sophia: '#eab308',     // Yellow
-          prometheus: '#ef4444', // Red
-          athena: '#14b8a6',     // Teal
+        secondary: {
+          DEFAULT: 'var(--secondary)',
+          foreground: 'var(--secondary-foreground)',
         },
-        // Status colors
-        status: {
-          idle: '#6b7280',       // Gray
-          working: '#10b981',    // Green
-          error: '#ef4444',      // Red
-          warning: '#f59e0b',    // Amber
-          success: '#10b981',    // Green
+        card: {
+          DEFAULT: 'var(--card)',
+          foreground: 'var(--card-foreground)',
         },
-        // Dark theme colors
-        dark: {
-          bg: {
-            primary: '#0f172a',   // slate-900
-            secondary: '#1e293b', // slate-800
-            tertiary: '#334155',  // slate-700
-          },
-          text: {
-            primary: '#f1f5f9',   // slate-100
-            secondary: '#cbd5e1', // slate-300
-            tertiary: '#94a3b8',  // slate-400
-          },
-          border: '#334155',      // slate-700
+        surface: {
+          1: 'var(--surface-1)',
+          2: 'var(--surface-2)',
+          3: 'var(--surface-3)',
+          hover: 'var(--surface-hover)',
+        },
+        text: {
+          primary: 'var(--text-primary)',
+          secondary: 'var(--text-secondary)',
+          muted: 'var(--text-muted)',
+          disabled: 'var(--text-disabled)',
         },
       },
+      // Semantic tokens are the only product color source.
       // Custom font families
       fontFamily: {
         sans: [
@@ -108,41 +111,16 @@ export default {
       },
       // Custom border radius
       borderRadius: {
-        '4xl': '2rem',
+        xs: 'var(--radius-xs)',
+        sm: 'var(--radius-sm)',
+        md: 'var(--radius-md)',
+        lg: 'var(--radius-lg)',
+        xl: 'var(--radius-xl)',
+        '2xl': 'var(--radius-2xl)',
       },
-      // Custom box shadows
-      boxShadow: {
-        'glow': '0 0 20px rgba(59, 130, 246, 0.5)',
-        'glow-lg': '0 0 30px rgba(59, 130, 246, 0.6)',
-        'agent': '0 4px 20px rgba(0, 0, 0, 0.15)',
-        'card': '0 2px 8px rgba(0, 0, 0, 0.1)',
-      },
-      // Custom animations
-      animation: {
-        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
-        'spin-slow': 'spin 3s linear infinite',
-        'bounce-slow': 'bounce 2s infinite',
-        'fade-in': 'fadeIn 0.3s ease-in',
-        'slide-up': 'slideUp 0.3s ease-out',
-        'slide-down': 'slideDown 0.3s ease-out',
-      },
-      keyframes: {
-        fadeIn: {
-          '0%': { opacity: '0' },
-          '100%': { opacity: '1' },
-        },
-        slideUp: {
-          '0%': { transform: 'translateY(10px)', opacity: '0' },
-          '100%': { transform: 'translateY(0)', opacity: '1' },
-        },
-        slideDown: {
-          '0%': { transform: 'translateY(-10px)', opacity: '0' },
-          '100%': { transform: 'translateY(0)', opacity: '1' },
-        },
-      },
-      // Custom backdrop blur
-      backdropBlur: {
-        xs: '2px',
+      // Keep ordinary utility transitions inside the product motion budget.
+      transitionDuration: {
+        DEFAULT: '120ms',
       },
     },
   },

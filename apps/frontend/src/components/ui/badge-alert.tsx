@@ -1,11 +1,12 @@
 "use client";
 
-import type { Variants } from "framer-motion";
-import { motion, useAnimation } from "framer-motion";
+import type { Variants } from 'motion/react';
+import { motion, useAnimation, useReducedMotion } from 'motion/react';
 import type { HTMLAttributes } from "react";
 import { forwardRef, useCallback, useImperativeHandle, useRef } from "react";
 
 import { cn } from "@/lib/utils";
+import { motionDurations, motionEasing } from "@/lib/motion";
 
 export interface BadgeAlertIconHandle {
   startAnimation: () => void;
@@ -22,15 +23,16 @@ const ICON_VARIANTS: Variants = {
     scale: [1, 1.1, 1.1, 1.1, 1],
     rotate: [0, -3, 3, -2, 2, 0],
     transition: {
-      duration: 0.5,
+      duration: motionDurations.hover / 1000,
       times: [0, 0.2, 0.4, 0.6, 1],
-      ease: "easeInOut",
+      ease: motionEasing,
     },
   },
 };
 const BadgeAlertIcon = forwardRef<BadgeAlertIconHandle, BadgeAlertIconProps>(
   ({ onMouseEnter, onMouseLeave, className, size = 28, ...props }, ref) => {
     const controls = useAnimation();
+    const prefersReducedMotion = useReducedMotion();
     const isControlledRef = useRef(false);
 
     useImperativeHandle(ref, () => {
@@ -47,10 +49,10 @@ const BadgeAlertIcon = forwardRef<BadgeAlertIconHandle, BadgeAlertIconProps>(
         if (isControlledRef.current) {
           onMouseEnter?.(e);
         } else {
-          controls.start("animate");
+          if (!prefersReducedMotion) controls.start("animate");
         }
       },
-      [controls, onMouseEnter]
+      [controls, onMouseEnter, prefersReducedMotion]
     );
 
     const handleMouseLeave = useCallback(
@@ -58,10 +60,10 @@ const BadgeAlertIcon = forwardRef<BadgeAlertIconHandle, BadgeAlertIconProps>(
         if (isControlledRef.current) {
           onMouseLeave?.(e);
         } else {
-          controls.start("normal");
+          if (!prefersReducedMotion) controls.start("normal");
         }
       },
-      [controls, onMouseLeave]
+      [controls, onMouseLeave, prefersReducedMotion]
     );
 
     return (
@@ -72,7 +74,7 @@ const BadgeAlertIcon = forwardRef<BadgeAlertIconHandle, BadgeAlertIconProps>(
         {...props}
       >
         <motion.svg
-          animate={controls}
+          animate={prefersReducedMotion ? "normal" : controls}
           fill="none"
           height={size}
           stroke="currentColor"

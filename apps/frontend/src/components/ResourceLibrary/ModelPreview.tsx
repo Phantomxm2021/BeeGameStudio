@@ -900,23 +900,23 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
 
   return <div className="relative h-full min-h-64 w-full">
     <div ref={host} className="h-full min-h-64 w-full" />
-    <div className="absolute left-1/2 top-3 z-10 inline-flex -translate-x-1/2 rounded-lg border border-white/[0.1] bg-zinc-950/80 p-1 shadow-lg backdrop-blur">
-      <button type="button" aria-label="Albedo preview" title="原色预览" onClick={() => setPreviewMode('albedo')} className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium transition ${previewMode === 'albedo' ? 'bg-white/[0.12] text-white' : 'text-zinc-500 hover:text-zinc-200'}`}>
+    <div className="absolute left-1/2 top-3 z-10 inline-flex -translate-x-1/2 rounded-lg border border-border bg-background/95 p-1 shadow-lg">
+      <button type="button" aria-label="Albedo preview" title="原色预览" onClick={() => setPreviewMode('albedo')} className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium transition ${previewMode === 'albedo' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
         <Palette className="h-3.5 w-3.5" />原色
       </button>
-      <button type="button" aria-label="Studio lighting preview" title="工作室光照" onClick={() => setPreviewMode('lit')} className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium transition ${previewMode === 'lit' ? 'bg-white/[0.12] text-white' : 'text-zinc-500 hover:text-zinc-200'}`}>
+      <button type="button" aria-label="Studio lighting preview" title="工作室光照" onClick={() => setPreviewMode('lit')} className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium transition ${previewMode === 'lit' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
         <Sun className="h-3.5 w-3.5" />光照
       </button>
     </div>
     {animations.length > 0 ? (
-      <div className="absolute bottom-3 left-1/2 w-[min(31rem,calc(100%-1.5rem))] -translate-x-1/2 rounded-xl border border-white/[0.12] bg-zinc-950/88 px-2.5 py-2 shadow-xl backdrop-blur">
+      <div className="absolute bottom-3 left-1/2 w-[min(31rem,calc(100%-1.5rem))] -translate-x-1/2 rounded-xl border border-border bg-background/95 px-2.5 py-2 shadow-lg">
         <div className="flex items-center gap-2">
           <button
             type="button"
             aria-label={isPlaying ? 'Pause animation' : 'Play animation'}
             title={isPlaying ? 'Pause animation' : 'Play animation'}
             onClick={togglePlayback}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-100 transition hover:bg-white/[0.1]"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-foreground transition hover:bg-accent"
           >
             {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
           </button>
@@ -924,23 +924,23 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
             aria-label="Model animation"
             value={selectedAnimation}
             onChange={event => setSelectedAnimation(Number(event.target.value))}
-            className="type-caption-2 min-w-0 flex-1 truncate rounded-md border-0 bg-transparent px-1 py-1 text-zinc-200 outline-none"
+            className="type-caption-2 min-w-0 flex-1 truncate rounded-md border-0 bg-transparent px-1 py-1 text-foreground outline-none"
           >
             {animations.map((clip, index) => <option key={`${clip.uuid}:${index}`} value={index}>{clip.name || `Animation ${index + 1}`}</option>)}
           </select>
-          <span className="type-code-sm shrink-0 text-zinc-500">{formatAnimationTime(timelineTime)} / {formatAnimationTime(activeDuration)}</span>
+          <span className="type-code-sm shrink-0 text-muted-foreground">{formatAnimationTime(timelineTime)} / {formatAnimationTime(activeDuration)}</span>
           <button
             type="button"
             aria-label={isLooping ? 'Disable animation loop' : 'Enable animation loop'}
             title={isLooping ? 'Loop enabled' : 'Loop disabled'}
             onClick={() => setIsLooping(value => !value)}
-            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition ${isLooping ? 'bg-white/[0.12] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.08] hover:text-zinc-200'}`}
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition ${isLooping ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
           >
             <Repeat2 className="h-3.5 w-3.5" />
           </button>
         </div>
-        <div className="relative mt-2 h-2 rounded-full bg-white/[0.12] focus-within:ring-2 focus-within:ring-emerald-300/50">
-          <div className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-emerald-300/90 shadow-[0_0_10px_rgba(110,231,183,0.3)]" style={{ width: `${timelineProgress}%` }} />
+        <div className="relative mt-2 h-2 rounded-full bg-accent focus-within:ring-2 focus-within:ring-ring/50">
+          <div className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-primary" style={{ width: `${timelineProgress}%` }} />
           <input
             type="range"
             min={0}
@@ -954,7 +954,7 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
         </div>
       </div>
     ) : null}
-    {error && <p className="absolute inset-0 grid place-items-center text-sm text-zinc-300">{error}</p>}
+    {error && <p className="absolute inset-0 grid place-items-center text-sm text-foreground">{error}</p>}
   </div>
 }
 

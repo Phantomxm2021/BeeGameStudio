@@ -81,6 +81,33 @@ describe('BeeGame session runtime resilience', () => {
     resetModelConfigs()
   })
 
+  test('notifies live event subscribers and removes them on unsubscribe', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-event-subscriber-'))
+    const workspacePath = join(root, 'workspace')
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async () => undefined,
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({ workspacePath, userId: 'user-1' })
+    const received: string[] = []
+    const retained: string[] = []
+    const unsubscribe = manager.subscribeEvents(session.id, event => {
+      received.push(event.type)
+    })
+    manager.subscribeEvents(session.id, event => {
+      retained.push(event.type)
+    })
+
+    unsubscribe()
+    manager.stop(session.id)
+    expect(received).toEqual([])
+    expect(retained).toEqual(['session.stopped'])
+    await manager.dispose()
+  })
+
   test('rejects retired document sessions before creating a worker or touching a document', async () => {
     root = await mkdtemp(join(tmpdir(), 'retired-markdown-session-'))
     let starts = 0

@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useProjectEventPolling } from './useProjectEventPolling';
 
-const { pollMessages } = vi.hoisted(() => ({
+const { pollMessages, streamMessages } = vi.hoisted(() => ({
   pollMessages: vi.fn(),
+  streamMessages: vi.fn(),
 }));
 
 vi.mock('../services/apiClient', () => ({
@@ -11,12 +12,13 @@ vi.mock('../services/apiClient', () => ({
 }));
 
 vi.mock('../services/beeGameAdapter', () => ({
-  beeGameAdapter: { pollMessages },
+  beeGameAdapter: { pollMessages, streamMessages },
 }));
 
 describe('useProjectEventPolling project event polling', () => {
   beforeEach(() => {
     pollMessages.mockResolvedValue({ lastEventId: 0, messages: [] });
+    streamMessages.mockRejectedValue(Object.assign(new Error('SSE unsupported'), { status: 404 }));
   });
 
   afterEach(() => {
@@ -45,6 +47,36 @@ describe('useProjectEventPolling project event polling', () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect(webSocketConstructor).not.toHaveBeenCalled();
     vi.stubGlobal('WebSocket', NativeWebSocket);
+  });
+
+  it('uses the SSE stream and advances its event cursor', async () => {
+    streamMessages.mockImplementationOnce(async (
+      _projectId: string,
+      _afterEventId: number,
+      callbacks: { onOpen?: () => void; onMessage: (message: unknown) => void; onCursor?: (id: number) => void },
+      signal: AbortSignal,
+    ) => {
+      callbacks.onOpen?.();
+      callbacks.onCursor?.(7);
+      callbacks.onMessage({ type: 'token', task_id: 'task-1', sender: 'agent', content: 'streamed' });
+      await new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true }));
+      return 7;
+    });
+    const onMessage = vi.fn();
+    const { result, unmount } = renderHook(() => useProjectEventPolling({
+      projectId: 'project-sse',
+      onMessage,
+    }));
+
+    await waitFor(() => expect(result.current.state).toBe('connected'));
+    expect(streamMessages).toHaveBeenCalledWith(
+      'project-sse',
+      0,
+      expect.objectContaining({ onOpen: expect.any(Function), onCursor: expect.any(Function) }),
+      expect.any(AbortSignal),
+    );
+    expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({ content: 'streamed' }));
+    unmount();
   });
 
   it('recovers polling without closing the active chat transport', async () => {
@@ -85,5 +117,41 @@ describe('useProjectEventPolling project event polling', () => {
 
     act(() => result.current.reconnect());
     await waitFor(() => expect(result.current.state).toBe('connected'));
+  });
+
+  it('ignores a poll result that resolves after switching projects', async () => {
+    let resolveFirstPoll: (value: { lastEventId: number; messages: unknown[] }) => void = () => undefined;
+    const oldProjectCallback = vi.fn();
+    const newProjectCallback = vi.fn();
+    pollMessages.mockImplementation((projectId: string) => {
+      if (projectId === 'project-1') {
+        return new Promise((resolve) => { resolveFirstPoll = resolve; });
+      }
+      return Promise.resolve({
+        lastEventId: 2,
+        messages: [{ type: 'token', task_id: 'task-2', sender: 'agent', content: 'new-project' }],
+      });
+    });
+
+    const { result, rerender } = renderHook(
+      ({ projectId, onMessage }: { projectId: string; onMessage: ReturnType<typeof vi.fn> }) => useProjectEventPolling({ projectId, onMessage }),
+      { initialProps: { projectId: 'project-1', onMessage: oldProjectCallback } },
+    );
+    await waitFor(() => expect(pollMessages).toHaveBeenCalledWith('project-1', 0));
+
+    rerender({ projectId: 'project-2', onMessage: newProjectCallback });
+    await waitFor(() => expect(result.current.state).toBe('connected'));
+    expect(newProjectCallback).toHaveBeenCalledWith(expect.objectContaining({ content: 'new-project' }));
+
+    await act(async () => {
+      resolveFirstPoll({
+        lastEventId: 1,
+        messages: [{ type: 'token', task_id: 'task-1', sender: 'agent', content: 'old-project' }],
+      });
+      await Promise.resolve();
+    });
+
+    expect(oldProjectCallback).not.toHaveBeenCalled();
+    expect(newProjectCallback).not.toHaveBeenCalledWith(expect.objectContaining({ content: 'old-project' }));
   });
 });

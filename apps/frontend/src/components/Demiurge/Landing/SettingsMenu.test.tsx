@@ -340,17 +340,17 @@ describe('SettingsMenu model settings', () => {
         await waitFor(() => expect(listModelConfigs).toHaveBeenCalled());
 
         const dialog = screen.getByRole('dialog', { name: '系统设置' });
-        expect(dialog.className).toContain('items-center');
-        expect(dialog.className).toContain('justify-center');
-        expect(dialog.className).toContain('bg-zinc-950/55');
+        expect(dialog.className).toContain('max-w-none');
+        expect(dialog.className).toContain('overflow-hidden');
+        expect(dialog.className).not.toContain('bg-zinc-950/55');
         expect(dialog.className).not.toContain('right-4');
         expect(dialog.className).not.toContain('top-20');
+        expect(dialog).toHaveAttribute('aria-label', '系统设置');
         expect(screen.getByTestId('settings-modal-sidebar')).toBeInTheDocument();
-        const settingsShell = screen.getByTestId('settings-modal-shell');
         const settingsContent = screen.getByTestId('settings-modal-content');
         const settingsScrollArea = screen.getByTestId('settings-modal-scroll-area');
-        expect(settingsShell).toHaveClass('h-[min(620px,calc(100vh-2rem))]');
-        expect(settingsShell).toHaveClass('w-[min(820px,calc(100vw-2rem))]');
+        expect(dialog).toHaveClass('h-[min(680px,calc(100dvh-1rem))]');
+        expect(dialog).toHaveClass('w-[min(820px,calc(100vw-1rem))]');
         expect(settingsContent).toBeInTheDocument();
         expect(settingsScrollArea).toHaveClass('overflow-y-auto');
         expect(settingsScrollArea).toHaveClass('min-h-0');
@@ -363,7 +363,7 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('tab', { name: 'MCP' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '工作区' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '网页' })).not.toBeInTheDocument();
-        expect(screen.queryByText('深色模式')).not.toBeInTheDocument();
+        expect(screen.getByText(/深色模式|浅色模式/)).toBeInTheDocument();
         expect(screen.queryByLabelText('Subagents')).not.toBeInTheDocument();
         expect(screen.queryByRole('switch', { name: '自动记忆' })).not.toBeInTheDocument();
         expect(screen.queryByText('Let the runtime decide when delegation is useful. BeeGame will not force it.')).not.toBeInTheDocument();
@@ -377,6 +377,18 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('button', { name: '选择工作路径' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
+    });
+
+    it('exposes the persisted theme toggle in General settings', async () => {
+        renderSettings();
+        await waitFor(() => expect(listModelConfigs).toHaveBeenCalled());
+
+        const themeSwitch = screen.getByRole('switch', { name: '主题切换' });
+        const before = themeSwitch.getAttribute('aria-checked');
+        await userEvent.click(themeSwitch);
+        expect(themeSwitch).toHaveAttribute('aria-checked', before === 'true' ? 'false' : 'true');
+        await userEvent.click(themeSwitch);
+        expect(themeSwitch).toHaveAttribute('aria-checked', before ?? 'true');
     });
 
     it('shows platform administration inside the same settings modal for privileged users', async () => {

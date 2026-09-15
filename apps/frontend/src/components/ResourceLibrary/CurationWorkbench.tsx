@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Dialog, DialogContent, DialogTitle } from '../ui/dialog'
 import type {
   ResourceCurationQueue,
   ResourceProcessingJob,
@@ -94,31 +95,33 @@ export function CurationWorkbench({ packId, api, onClose }: { packId: string; ap
     }
   }
 
-  return <div role="dialog" aria-modal="true" aria-label="资源整理" className="fixed inset-0 z-[230] grid place-items-center bg-black/60 p-4 backdrop-blur-sm">
-    <section className="flex max-h-[82vh] w-full max-w-2xl min-w-0 flex-col overflow-hidden rounded-2xl border border-white/15 bg-[#17181d] shadow-2xl">
-      <header className="flex shrink-0 items-start justify-between gap-4 border-b border-white/10 p-5">
-        <div><p className="type-caption-1 text-[#c6a367]">Resource Library</p><h2 className="type-title-2 mt-1 text-zinc-50">资源整理</h2><p className="type-caption-2 mt-1 text-zinc-500">AI 分析完成后自动写入用途标签。</p></div>
-        <button type="button" aria-label="关闭资源整理" onClick={onClose} className="glass-icon-button h-8 w-8">×</button>
+  return <Dialog open onOpenChange={value => { if (!value) onClose?.() }}>
+    <DialogContent aria-label="资源整理" className="max-h-[calc(100dvh-1.5rem)] max-w-2xl overflow-hidden p-0 sm:max-h-[82vh]">
+      <section className="flex h-full max-h-[calc(100dvh-1.5rem)] min-h-0 w-full min-w-0 flex-col overflow-hidden bg-background text-foreground sm:max-h-[82vh]">
+      <header className="flex shrink-0 items-start justify-between gap-4 border-b border-border p-5">
+        <div><p className="text-xs font-medium text-muted-foreground">资源库</p><DialogTitle className="mt-1 text-lg">资源整理</DialogTitle><p className="mt-1 text-sm text-muted-foreground">AI 分析完成后自动写入用途标签。</p></div>
+        <button type="button" aria-label="关闭资源整理" onClick={onClose} className="grid h-8 w-8 place-items-center rounded-md border border-border text-muted-foreground hover:bg-accent hover:text-foreground">×</button>
       </header>
-      <div role="tablist" aria-label="资源整理视图" className="flex shrink-0 border-b border-white/10 px-5">
+      <div role="tablist" aria-label="资源整理视图" className="flex shrink-0 border-b border-border px-5">
         <TabButton active={activeTab === 'curation'} onClick={() => setActiveTab('curation')} controls="resource-curation-panel">资源整理</TabButton>
         <TabButton active={activeTab === 'ai'} onClick={() => setActiveTab('ai')} controls="resource-ai-panel">AI 处理</TabButton>
       </div>
-      {loading ? <p className="p-6 type-caption-2 text-zinc-500">正在加载整理状态…</p> : error ? <p role="alert" className="m-5 rounded-xl bg-red-400/10 p-3 type-caption-2 text-red-200">{error}</p> : activeTab === 'curation' ? <div id="resource-curation-panel" role="tabpanel" className="min-h-0 flex-1 overflow-y-auto p-5">
-        {!queue?.items.length ? <p className="rounded-xl border border-emerald-200/15 bg-emerald-300/10 p-4 type-caption-2 text-emerald-100">所有可分析资源都已写入用途标签。</p> : <>
-          <div className="mb-3 flex items-center justify-between gap-3"><span className="type-caption-1 text-zinc-200">待分析资源</span><span className="type-caption-2 text-zinc-500">{queue.items.length} 项</span></div>
-          <div className="space-y-2">{queue.items.map(item => <div key={item.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><p className="truncate type-caption-1 text-zinc-100">{item.name}</p><p className="mt-1 truncate type-caption-2 text-zinc-500">{item.path}</p></div>)}</div>
+      {loading ? <p className="p-6 text-sm text-muted-foreground">正在加载整理状态…</p> : error ? <p role="alert" className="m-5 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive-foreground">{error}</p> : activeTab === 'curation' ? <div id="resource-curation-panel" role="tabpanel" className="min-h-0 flex-1 overflow-y-auto p-5">
+        {!queue?.items.length ? <p className="rounded-lg border border-success-500/30 bg-muted p-4 text-sm text-success">所有可分析资源都已写入用途标签。</p> : <>
+          <div className="mb-3 flex items-center justify-between gap-3"><span className="text-sm font-medium text-foreground">待分析资源</span><span className="text-xs text-muted-foreground">{queue.items.length} 项</span></div>
+          <div className="space-y-2">{queue.items.map(item => <div key={item.id} className="rounded-lg border border-border bg-muted/40 p-3"><p className="truncate text-sm font-medium text-foreground">{item.name}</p><p className="mt-1 truncate text-xs text-muted-foreground">{item.path}</p></div>)}</div>
         </>}
-        {canStartSemanticCuration ? <button type="button" disabled={semanticStarting} onClick={() => void startSemanticCuration()} className="secondary-pill mt-4 type-button px-3 py-2 disabled:opacity-50">{semanticStarting ? '启动中…' : 'AI 整理用途'}</button> : null}
+        {canStartSemanticCuration ? <button type="button" disabled={semanticStarting} onClick={() => void startSemanticCuration()} className="rounded-md border border-border bg-secondary text-secondary-foreground mt-4 type-button px-3 py-2 disabled:opacity-50">{semanticStarting ? '启动中…' : 'AI 整理用途'}</button> : null}
       </div> : <div id="resource-ai-panel" role="tabpanel" className="min-h-0 flex-1 overflow-y-auto p-5">
-        {semanticJob ? <SemanticProcessingPanel job={semanticJob} queue={queue} now={now} canRetry={canRetrySemanticCuration} canReanalyze={canStartFullSemanticCuration} retrying={semanticStarting} onRetry={() => void retrySemanticCuration()} onReanalyze={() => void startSemanticCuration('all')} /> : <div className="flex min-h-48 flex-col items-center justify-center rounded-xl border border-dashed border-white/15 p-6 text-center"><p className="type-caption-1 text-zinc-200">尚未开始 AI 整理</p><div className="mt-4 flex flex-wrap justify-center gap-2">{canStartSemanticCuration ? <button type="button" disabled={semanticStarting} onClick={() => void startSemanticCuration()} className="secondary-pill type-button px-3 py-2 disabled:opacity-50">{semanticStarting ? '启动中…' : 'AI 整理用途'}</button> : null}{canStartFullSemanticCuration ? <button type="button" disabled={semanticStarting} onClick={() => void startSemanticCuration('all')} className="secondary-pill type-button px-3 py-2 disabled:opacity-50">重新全部分析</button> : null}</div></div>}
+        {semanticJob ? <SemanticProcessingPanel job={semanticJob} queue={queue} now={now} canRetry={canRetrySemanticCuration} canReanalyze={canStartFullSemanticCuration} retrying={semanticStarting} onRetry={() => void retrySemanticCuration()} onReanalyze={() => void startSemanticCuration('all')} /> : <div className="flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed border-border p-6 text-center"><p className="text-sm font-medium text-foreground">尚未开始 AI 整理</p><div className="mt-4 flex flex-wrap justify-center gap-2">{canStartSemanticCuration ? <button type="button" disabled={semanticStarting} onClick={() => void startSemanticCuration()} className="rounded-md border border-border bg-secondary text-secondary-foreground type-button px-3 py-2 disabled:opacity-50">{semanticStarting ? '启动中…' : 'AI 整理用途'}</button> : null}{canStartFullSemanticCuration ? <button type="button" disabled={semanticStarting} onClick={() => void startSemanticCuration('all')} className="rounded-md border border-border bg-secondary text-secondary-foreground type-button px-3 py-2 disabled:opacity-50">重新全部分析</button> : null}</div></div>}
       </div>}
-    </section>
-  </div>
+      </section>
+    </DialogContent>
+  </Dialog>
 }
 
 function TabButton({ active, onClick, controls, children }: { active: boolean; onClick: () => void; controls: string; children: string }) {
-  return <button type="button" role="tab" aria-selected={active} aria-controls={controls} onClick={onClick} className={`border-b-2 px-4 py-3 type-button transition ${active ? 'border-sky-300 text-sky-100' : 'border-transparent text-zinc-500 hover:text-zinc-200'}`}>{children}</button>
+  return <button type="button" role="tab" aria-selected={active} aria-controls={controls} onClick={onClick} className={`border-b-2 px-4 py-3 type-button transition ${active ? 'border-info-300 text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>{children}</button>
 }
 
 function SemanticProcessingPanel({ job, queue, now, canRetry, canReanalyze, retrying, onRetry, onReanalyze }: { job: ResourceProcessingJob; queue?: ResourceCurationQueue; now: number; canRetry: boolean; canReanalyze: boolean; retrying: boolean; onRetry: () => void; onReanalyze: () => void }) {
@@ -128,18 +131,18 @@ function SemanticProcessingPanel({ job, queue, now, canRetry, canReanalyze, retr
   const failures = job.failures ?? []
   const names = new Map((queue?.items ?? []).map(item => [item.id, item.name]))
   return <div className="space-y-5">
-    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-3"><div><span className="type-caption-1 text-zinc-200">{job.retryOfJobId ? '失败项重试' : job.analysisMode === 'all' ? '全量分析' : '未分类分析'}</span><span className="ml-3 type-caption-1 text-zinc-400">{processed} / {job.totalItems}</span></div><span role="status" className={`type-caption-2 ${job.status === 'failed' ? 'text-red-300' : job.status === 'completed' ? 'text-emerald-300' : 'text-sky-300'}`}>阶段：{statusText}</span></div>
+    <div className="rounded-lg border border-border bg-muted/40 p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-3"><div><span className="text-sm font-medium text-foreground">{job.retryOfJobId ? '失败项重试' : job.analysisMode === 'all' ? '全量分析' : '未分类分析'}</span><span className="ml-3 text-sm text-muted-foreground">{processed} / {job.totalItems}</span></div><span role="status" className={`text-sm ${job.status === 'failed' ? 'text-destructive' : job.status === 'completed' ? 'text-success' : 'text-info'}`}>阶段：{statusText}</span></div>
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3"><UsageValue label="输入" value={job.usage?.inputTokens ?? 0} /><UsageValue label="缓存输入" value={job.usage?.cacheReadTokens ?? 0} /><UsageValue label="输出" value={job.usage?.outputTokens ?? 0} /><UsageValue label="总 tokens" value={job.usage?.totalTokens ?? 0} /><UsageValue label="Credit" value={formatCredits(job.usage?.creditsMicro ?? 0)} /></div>
-      <div className="mt-4 border-t border-white/10 pt-3 type-caption-2 text-zinc-500">运行时长：{formatRuntime(job.createdAt, job.status === 'queued' || job.status === 'running' ? now : Date.parse(job.updatedAt))}</div>
+      <div className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">运行时长：{formatRuntime(job.createdAt, job.status === 'queued' || job.status === 'running' ? now : Date.parse(job.updatedAt))}</div>
     </div>
-    <div><div className="mb-3 flex items-center justify-between gap-3"><span className="type-caption-1 text-zinc-200">处理列表</span><span className="type-caption-2 text-zinc-500">{failures.length ? `${failures.length} 项失败` : job.status === 'completed' ? '全部完成' : '处理中'}</span></div>{failures.length ? <div className="space-y-2">{failures.map(failure => <div key={`${failure.elementId}:${failure.error}`} className="flex items-start gap-3 rounded-xl border border-red-200/20 bg-red-300/10 p-3"><span role="img" aria-label="处理失败" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-red-300/60 text-red-200">×</span><div className="min-w-0"><p className="type-caption-1 text-red-100">{names.get(failure.elementId) ?? failure.elementId}</p><p className="mt-1 break-words type-caption-2 text-red-200/80">{failure.error}</p></div></div>)}</div> : <p className="rounded-xl border border-white/10 p-4 type-caption-2 text-zinc-500">{job.status === 'completed' ? '没有失败项，标签已自动写入。' : '正在处理资源…'}</p>}</div>
-    {canRetry || canReanalyze ? <div className="flex justify-end gap-2">{canReanalyze ? <button type="button" disabled={retrying} onClick={onReanalyze} className="secondary-pill type-button px-3 py-2 disabled:opacity-50">重新全部分析</button> : null}{canRetry ? <button type="button" disabled={retrying} onClick={onRetry} className="secondary-pill type-button px-3 py-2 disabled:opacity-50">{retrying ? '重试中…' : '重试失败项'}</button> : null}</div> : null}
+    <div><div className="mb-3 flex items-center justify-between gap-3"><span className="type-caption-1 text-foreground">处理列表</span><span className="type-caption-2 text-muted-foreground">{failures.length ? `${failures.length} 项失败` : job.status === 'completed' ? '全部完成' : '处理中'}</span></div>{failures.length ? <div className="space-y-2">{failures.map(failure => <div key={`${failure.elementId}:${failure.error}`} className="flex items-start gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3"><span role="img" aria-label="处理失败" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-destructive/60 text-destructive">×</span><div className="min-w-0"><p className="type-caption-1 text-destructive">{names.get(failure.elementId) ?? failure.elementId}</p><p className="mt-1 break-words type-caption-2 text-destructive/80">{failure.error}</p></div></div>)}</div> : <p className="rounded-xl border border-border p-4 type-caption-2 text-muted-foreground">{job.status === 'completed' ? '没有失败项，标签已自动写入。' : '正在处理资源…'}</p>}</div>
+    {canRetry || canReanalyze ? <div className="flex justify-end gap-2">{canReanalyze ? <button type="button" disabled={retrying} onClick={onReanalyze} className="rounded-md border border-border bg-secondary text-secondary-foreground type-button px-3 py-2 disabled:opacity-50">重新全部分析</button> : null}{canRetry ? <button type="button" disabled={retrying} onClick={onRetry} className="rounded-md border border-border bg-secondary text-secondary-foreground type-button px-3 py-2 disabled:opacity-50">{retrying ? '重试中…' : '重试失败项'}</button> : null}</div> : null}
   </div>
 }
 
 function UsageValue({ label, value }: { label: string; value: number | string }) {
-  return <div className="rounded-lg border border-white/10 bg-black/10 p-3"><div className="type-caption-2 text-zinc-500">{label}</div><div className="mt-1 text-base font-semibold text-zinc-100">{typeof value === 'number' ? new Intl.NumberFormat('en-US').format(value) : value}</div></div>
+  return <div className="rounded-lg border border-border bg-background p-3"><div className="text-xs text-muted-foreground">{label}</div><div className="mt-1 text-base font-semibold text-foreground">{typeof value === 'number' ? new Intl.NumberFormat('en-US').format(value) : value}</div></div>
 }
 
 function processingStage(status: ResourceProcessingJob['status']): string {

@@ -33,7 +33,7 @@ describe('Toast Component', () => {
     );
     
     expect(screen.getByText('操作成功')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveClass('bg-green-500');
+    expect(screen.getByRole('alert')).toHaveClass('bg-success/10', 'text-success');
   });
 
   it('should render error toast with correct styling', () => {
@@ -49,7 +49,7 @@ describe('Toast Component', () => {
     );
     
     expect(screen.getByText('操作失败')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveClass('bg-red-500');
+    expect(screen.getByRole('alert')).toHaveClass('bg-destructive/10', 'text-destructive');
   });
 
   it('should render warning toast with correct styling', () => {
@@ -65,7 +65,7 @@ describe('Toast Component', () => {
     );
     
     expect(screen.getByText('请注意')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveClass('bg-yellow-500');
+    expect(screen.getByRole('alert')).toHaveClass('bg-warning/10', 'text-warning');
   });
 
   it('should call onDismiss when close button is clicked', () => {

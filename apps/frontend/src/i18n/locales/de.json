@@ -17,6 +17,7 @@
     "settings": "Einstellungen",
     "theme": "Design wechseln",
     "darkMode": "Dunkelmodus",
+    "lightMode": "Hellmodus",
     "language": "Sprache",
     "systemSettings": "Systemeinstellungen",
     "offline": "Server nicht erreichbar",

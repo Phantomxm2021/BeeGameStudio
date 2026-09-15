@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { Message, MessageType } from '../types/message';
+import type { AssistantContentBlock, Message, MessageType } from '../types/message';
 import {
   getSupabaseSessionUser,
   isHttpOnlySessionsEnabled,
@@ -14,11 +14,18 @@ function hasCloudSession(): boolean {
 }
 
 interface ChatMessageSemantic {
+  turnId?: Message['turnId'];
+  contentBlocks?: AssistantContentBlock[];
   renderHint?: Message['renderHint'];
   artifactType?: string;
   taskKind?: string;
   nextAction?: string;
   requiresUserAction?: boolean;
+  subagentPrompt?: string;
+  subagentOutput?: string;
+  subagentTrace?: string;
+  sources?: Message['sources'];
+  citations?: Message['citations'];
 }
 
 interface ChatState {
@@ -43,7 +50,7 @@ interface ChatState {
     timestamp?: number,
     messageId?: string
   ) => void;
-  updateThought: (taskId: string, thought: string, sender: string, timestamp?: number, messageId?: string) => void;
+  updateThought: (taskId: string, thought: string, sender: string, timestamp?: number, messageId?: string, turnId?: string) => void;
   removeMessage: (messageId: string) => void;
   finalizeMessage: (
     taskId: string,
@@ -163,6 +170,9 @@ function reconcileHistory(current: Message[], incoming: Message[]): Message[] {
     merged = upsertMessage(merged, message);
   }
   return merged.sort((a, b) => {
+    if (a.turnId && a.turnId === b.turnId) {
+      return (a.sourceIndex ?? 0) - (b.sourceIndex ?? 0);
+    }
     if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
     return a.id.localeCompare(b.id);
   });
@@ -211,8 +221,15 @@ export const useChatStore = create<ChatState>()(
               renderHint: semantic?.renderHint || existing.renderHint,
               artifactType: semantic?.artifactType || existing.artifactType,
               taskKind: semantic?.taskKind || existing.taskKind,
+              turnId: semantic?.turnId || existing.turnId,
+              contentBlocks: semantic?.contentBlocks || existing.contentBlocks,
               nextAction: semantic?.nextAction || existing.nextAction,
               requiresUserAction: semantic?.requiresUserAction ?? existing.requiresUserAction,
+              subagentPrompt: semantic?.subagentPrompt || existing.subagentPrompt,
+              subagentOutput: semantic?.subagentOutput || existing.subagentOutput,
+              subagentTrace: semantic?.subagentTrace || existing.subagentTrace,
+              sources: semantic?.sources || existing.sources,
+              citations: semantic?.citations || existing.citations,
             });
             return {
               messages: updatedMessages,
@@ -237,8 +254,15 @@ export const useChatStore = create<ChatState>()(
             renderHint: semantic?.renderHint,
             artifactType: semantic?.artifactType,
             taskKind: semantic?.taskKind,
-            nextAction: semantic?.nextAction,
+              turnId: semantic?.turnId,
+              contentBlocks: semantic?.contentBlocks,
+              nextAction: semantic?.nextAction,
             requiresUserAction: semantic?.requiresUserAction,
+            subagentPrompt: semantic?.subagentPrompt,
+            subagentOutput: semantic?.subagentOutput,
+            subagentTrace: semantic?.subagentTrace,
+            sources: semantic?.sources,
+            citations: semantic?.citations,
           });
           const finalId = messageId || fallbackId;
           return {
@@ -253,7 +277,7 @@ export const useChatStore = create<ChatState>()(
           };
         }),
 
-      updateThought: (taskId, thought, sender, timestamp, messageId) =>
+      updateThought: (taskId, thought, sender, timestamp, messageId, turnId) =>
         set((state) => {
           const key = `${taskId || 'na'}_${sender}`;
           const existingId = state.lastStreamingIdByTask[key];
@@ -263,11 +287,12 @@ export const useChatStore = create<ChatState>()(
           if (existingIndex !== -1 && existingIndex < state.messages.length) {
             const existing = state.messages[existingIndex];
             const updatedMessages = [...state.messages];
-            updatedMessages[existingIndex] = mergeMessages(existing, {
+              updatedMessages[existingIndex] = mergeMessages(existing, {
               ...existing,
               messageId: messageId || existing.messageId,
               id: messageId || existing.id,
               thought: `${existing.thought || ''}${thought}`,
+              turnId: turnId || existing.turnId,
               timestamp: now,
             });
             return {
@@ -285,6 +310,7 @@ export const useChatStore = create<ChatState>()(
             sender,
             content: '',
             thought,
+            turnId,
             taskId,
             timestamp: now,
           });
@@ -332,8 +358,14 @@ export const useChatStore = create<ChatState>()(
             renderHint: semantic?.renderHint,
             artifactType: semantic?.artifactType,
             taskKind: semantic?.taskKind,
+            turnId: semantic?.turnId,
             nextAction: semantic?.nextAction,
             requiresUserAction: semantic?.requiresUserAction,
+            subagentPrompt: semantic?.subagentPrompt,
+            subagentOutput: semantic?.subagentOutput,
+            subagentTrace: semantic?.subagentTrace,
+            sources: semantic?.sources,
+            citations: semantic?.citations,
           });
           const newStreamingMap = { ...state.lastStreamingIdByTask };
           delete newStreamingMap[key];

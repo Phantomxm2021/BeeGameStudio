@@ -538,6 +538,7 @@
     "settings": "Settings",
     "theme": "Theme",
     "darkMode": "Dark Mode",
+    "lightMode": "Light Mode",
     "language": "Language",
     "systemSettings": "System Settings",
     "offline": "Server Unreachable",

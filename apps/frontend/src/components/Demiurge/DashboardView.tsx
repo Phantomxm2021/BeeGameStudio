@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
 import { LoaderCircle } from 'lucide-react';
 import { useSystemStore } from '../../store/systemStore';
@@ -9,7 +10,7 @@ import { useToast } from '../../hooks/useToast';
 import { isAuthenticationServiceUnavailable } from '../../services/apiClient';
 import type { Language } from './AgentsConfig';
 
-import { BeeGameLivePreviewPage } from './BeeGameLivePreviewPage';
+import { BeeGameLivePreviewPage, type DashboardStatus } from './BeeGameLivePreviewPage';
 import { RightSidebar } from './RightSidebar';
 import type { BeeGameDeploymentPayload, ChatAttachmentPayload, PendingToolPermissionItem } from '../../services/api';
 import { api } from '../../services/api';
@@ -108,15 +109,30 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   const creditRefreshPromiseRef = useRef<{ projectId: string; promise: Promise<void> } | null>(null);
   const reconnectResumeProjectRef = useRef<string | null>(null);
   const activeCreditProjectRef = useRef(projectId);
-  activeCreditProjectRef.current = projectId;
   const previousBeeGameStatusRef = useRef<string | null>(null);
   const { i18n } = useTranslation('beegame');
   const translateBeeGame = useMemo(() => i18n.getFixedT(normalizeI18nLanguage(lang), 'beegame'), [i18n, lang]);
 
   // Zustand State
-  const { isSyncing, isDark, hasPermission, currentUser, authenticationStatus } = useSystemStore();
-  const { projects, pendingPermissions, projectStatus, isOpeningProject, loadProjectRuntimeState } = useProjectStore();
-  const { messages } = useChatStore();
+  const { isSyncing, isDark, hasPermission, currentUser, authenticationStatus } = useSystemStore(
+    useShallow(state => ({
+      isSyncing: state.isSyncing,
+      isDark: state.isDark,
+      hasPermission: state.hasPermission,
+      currentUser: state.currentUser,
+      authenticationStatus: state.authenticationStatus,
+    })),
+  );
+  const { projects, pendingPermissions, projectStatus, isOpeningProject, loadProjectRuntimeState } = useProjectStore(
+    useShallow(state => ({
+      projects: state.projects,
+      pendingPermissions: state.pendingPermissions,
+      projectStatus: state.projectStatus,
+      isOpeningProject: state.isOpeningProject,
+      loadProjectRuntimeState: state.loadProjectRuntimeState,
+    })),
+  );
+  const { messages } = useChatStore(useShallow(state => ({ messages: state.messages })));
   const { showSuccess, showError, showWarning } = useToast();
 
   const refreshCredits = useCallback((): Promise<void> => {
@@ -194,6 +210,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   });
 
   useEffect(() => {
+    activeCreditProjectRef.current = projectId;
+    // Credit and deployment summaries belong to the selected project.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCreditBalance(null);
     setCreditSummary(null);
     setDeploymentHistory([]);
@@ -525,13 +544,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   }, [currentStatus, projectStatus?.build_report?.build_url]);
 
   return (
-    <div
-      className={`${isDark ? 'dark' : ''} h-screen w-full flex overflow-hidden font-sans bg-zinc-50 dark:bg-zinc-950 transition-colors duration-700`}
-    >
+    <div className={`${isDark ? 'dark' : ''} h-full w-full overflow-hidden bg-background font-sans text-foreground`}>
       <BeeGameLivePreviewPage
         lang={lang}
         projectName={displayProjectName}
-        status={currentStatus === 'idle' ? 'idle' : (currentStatus as any)}
+        status={currentStatus === 'idle' ? 'idle' : (currentStatus as DashboardStatus)}
         phaseLabel={phaseLabel}
         handoffNotice={isFoundationAuthoringPaused ? phaseLabel : undefined}
         credits={creditSummary}
@@ -579,15 +596,15 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         onOpenExternal={url => window.open(url, '_blank', 'noopener,noreferrer')}
         onBack={onBack}
         onSetLang={onSetLang}
-      />
+        collaboration={
+          <RightSidebar
 
-      <RightSidebar
         projectId={projectId}
         lang={lang}
         messages={displayMessages}
         progress={progressPercent}
-        onSendMessage={(message, attachments?: ChatAttachmentPayload[], supersedesMessageId?: string) => {
-          if (isProjectWorkspaceMutationLocked) return Promise.resolve();
+        onSendMessage={async (message, attachments?: ChatAttachmentPayload[], supersedesMessageId?: string) => {
+          if (isProjectWorkspaceMutationLocked) return false;
           return sendMessage(message, undefined, attachments, supersedesMessageId);
         }}
         isLoading={isLoading}
@@ -615,21 +632,23 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         currentUserDisplayName={currentUser?.displayName}
         currentUserEmail={currentUser?.email}
         currentUserAvatarUrl={currentUser?.avatarUrl}
+          />
+        }
       />
       {isProjectStarting ? (
         <div
-          className="fixed inset-0 z-[200] flex items-center justify-center overflow-hidden bg-black/95 px-6 backdrop-blur-2xl"
+          className="fixed inset-0 z-[200] flex items-center justify-center overflow-hidden bg-background/95 px-6"
           role="status"
           aria-live="polite"
           aria-label={translateBeeGame('dashboard.starting.title')}
         >
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,rgba(52,211,153,0.11),transparent_34%)]" />
+          <div className="pointer-events-none absolute inset-0 bg-primary/5" />
           <div className="relative flex max-w-md flex-col items-center text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] shadow-[0_20px_70px_rgba(16,185,129,0.12)]">
-              <LoaderCircle className="h-6 w-6 animate-spin text-emerald-300" aria-hidden="true" />
+            <div className="flex h-16 w-16 items-center justify-center rounded-full border border-border/10 bg-muted shadow-[0_20px_70px_rgba(16,185,129,0.12)]">
+              <LoaderCircle className="h-6 w-6 animate-spin text-foreground" aria-hidden="true" />
             </div>
-            <h2 className="type-title-2 mt-7 text-white">{translateBeeGame('dashboard.starting.title')}</h2>
-            <p className="type-body mt-3 max-w-sm text-zinc-400">
+            <h2 className="type-title-2 mt-7 text-foreground">{translateBeeGame('dashboard.starting.title')}</h2>
+            <p className="type-body mt-3 max-w-sm text-muted-foreground">
               {translateBeeGame('dashboard.starting.description')}
             </p>
           </div>

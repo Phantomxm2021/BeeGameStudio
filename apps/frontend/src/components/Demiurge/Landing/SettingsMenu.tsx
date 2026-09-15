@@ -1,22 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import {
-  Bot,
-  Brain,
   BookOpenText,
   Cpu,
   FolderOpen,
   Globe,
   KeyRound,
-  MoreHorizontal,
   Network,
   Plus,
   Plus as FaPlus,
   ReceiptText,
-  Search,
   ShieldCheck,
   Ticket,
-  Trash2,
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -49,8 +43,6 @@ import {
   type McpServerConfig,
   type McpServerInput,
   type McpServerTestResult,
-  type McpServerScope,
-  type McpServerTransport,
 } from '../../../services/mcpServersApi';
 import {
   deleteUserSkill,
@@ -81,13 +73,30 @@ import {
   getProjectLifecycleOverview,
   planProjectRetention,
   runProjectRetention,
-  type BeeGameProjectLifecycleDeletion,
   type BeeGameProjectLifecycleOverview,
-  type BeeGameProjectLifecycleProject,
   type BeeGameProjectRetentionResult,
 } from '../../../services/projectLifecycleApi';
 import { useSystemStore } from '../../../store/systemStore';
 import { useToastContext } from '../../../contexts/ToastContext';
+import { InvitationSettingsPanel } from '../../Settings/InvitationSettingsPanel';
+import { UserSkillsSettingsPanel } from '../../Settings/UserSkillsSettingsPanel';
+import { ModelConfigPanel } from '../../Settings/ModelConfigPanel';
+import { WebToolsPanel } from '../../Settings/WebToolsPanel';
+import { Dialog, DialogContent } from '../../ui/dialog';
+import { UsageBillingPanel, type BillingPackFormState, type BillingSettingsCopy } from '../../Settings/BillingSettingsPanel';
+import { ProjectLifecyclePanel, type ProjectLifecycleSettingsCopy } from '../../Settings/ProjectLifecycleSettingsPanel';
+import { RuntimeSettingsPanel, type RuntimeCapabilityCopy } from '../../Settings/RuntimeSettingsPanel';
+import {
+  McpServerFormPopover,
+  McpSettingsPanel,
+  type McpSettingsCopy,
+} from '../../Settings/McpSettingsPanel';
+import {
+  isMcpFormSaveable,
+  toPopoverAnchorRect,
+  type McpServerForm,
+  type PopoverAnchorRect,
+} from '../../Settings/McpSettingsPanel.types';
 interface SettingsMenuProps {
   isOpen: boolean;
   lang: Language;
@@ -107,39 +116,11 @@ interface SettingsMenuProps {
 
 type SettingsSection = 'personal' | 'skills' | 'platform';
 type SettingsTab = 'general' | 'runtime' | 'mcp' | 'skills' | 'model' | 'invitations' | 'projects' | 'credit';
-type PopoverAnchorRect = {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-  width: number;
-};
 type McpFormAnchor =
   | { kind: 'new'; rect: PopoverAnchorRect }
   | { kind: 'edit'; serverId: string; rect: PopoverAnchorRect }
   | null;
 
-type McpServerForm = {
-  id: string;
-  name: string;
-  enabled: boolean;
-  transport: McpServerTransport;
-  scope: McpServerScope;
-  command: string;
-  argsText: string;
-  url: string;
-  cwd: string;
-  envText: string;
-  autoStart: boolean;
-};
-
-type BillingPackFormState = {
-  priceId: string;
-  credits: string;
-  displayName: string;
-  sortOrder: string;
-  enabled: boolean;
-};
 
 export function SettingsMenu({
   isOpen,
@@ -169,6 +150,8 @@ export function SettingsMenu({
   const userSkillsCopy = getUserSkillsSettingsCopy(translateSettings);
   const { showError, showSuccess } = useToastContext();
   const currentUser = useSystemStore(state => state.currentUser);
+  const isDark = useSystemStore(state => state.isDark);
+  const toggleTheme = useSystemStore(state => state.toggleTheme);
   const hasPermission = useSystemStore(state => state.hasPermission);
   const canOpenPlatformSettings = currentUser?.role === 'owner';
   const effectiveCanManageWorkspace =
@@ -998,38 +981,32 @@ export function SettingsMenu({
     }
   }, [activeSection, activeTab, effectiveCanManageSkills, hasPlatformSettings, platformTabs]);
 
-  if (!isOpen) return null;
-
   return (
-    <div
-      role="dialog"
-      aria-label={t.settings}
-      className="fixed inset-0 z-[220] flex items-center justify-center bg-zinc-950/55 p-4 text-zinc-950 backdrop-blur-sm dark:text-white"
-    >
-      <div
-        onClick={event => event.stopPropagation()}
-        data-surface="frosted-glass"
-        data-style-source="pixelfork"
-        data-glass-density="reinforced"
-        data-testid="settings-modal-shell"
-        className="input-surface glass-panel h-[min(620px,calc(100vh-2rem))] w-[min(820px,calc(100vw-2rem))] overflow-hidden rounded-[32px] text-zinc-100"
+    <Dialog open={isOpen} onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent
+        aria-label={t.settings}
+        className="h-[min(680px,calc(100dvh-1rem))] w-[min(820px,calc(100vw-1rem))] max-w-none overflow-hidden p-0 text-foreground sm:h-[min(620px,calc(100dvh-2rem))] sm:w-[min(820px,calc(100vw-2rem))]"
       >
-        <div className="relative z-10 flex h-full min-h-0">
+        <div
+          onClick={event => event.stopPropagation()}
+          data-testid="settings-modal-shell"
+          className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground sm:flex-row"
+        >
           <aside
             data-testid="settings-modal-sidebar"
-            className="flex w-44 shrink-0 flex-col border-r border-white/10 bg-white/[0.025] p-3 backdrop-blur-xl"
+            className="flex h-auto w-full shrink-0 flex-col border-b border-border bg-muted/30 p-2 sm:h-full sm:w-44 sm:border-b-0 sm:border-r sm:p-3"
           >
-            <div className="mb-4 flex items-center justify-between">
+            <div className="mb-2 flex items-center justify-between sm:mb-4">
               <button
                 type="button"
                 aria-label={text.closeSettings}
                 onClick={onClose}
-                className="glass-icon-button inline-flex h-10 w-10 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="space-y-1.5" role="tablist" aria-label={t.systemSettings}>
+            <div className="flex gap-1.5 overflow-x-auto pb-1 sm:block sm:space-y-1.5 sm:overflow-visible sm:pb-0" role="tablist" aria-label={t.systemSettings}>
               {sectionTabs.map(tab => {
                 const Icon = tab.icon;
                 const selected = activeSection === tab.id;
@@ -1043,7 +1020,7 @@ export function SettingsMenu({
                       setActiveSection(tab.id);
                       setActiveTab('general');
                     }}
-                    className={`type-button flex h-10 w-full items-center gap-2.5 rounded-2xl px-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 ${selected ? 'bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`}
+                    className={`flex h-9 min-w-max items-center gap-2 rounded-lg px-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:w-full ${selected ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground'}`}
                   >
                     <Icon className="h-4 w-4" />
                     {tab.label}
@@ -1052,9 +1029,9 @@ export function SettingsMenu({
               })}
             </div>
             {activeSection === 'platform' ? (
-              <div className="mt-4 border-t border-white/10 pt-3">
-                <div className="type-caption-1 mb-2 px-3 text-zinc-500">{adminCopy.platform}</div>
-                <div className="space-y-1.5" role="tablist" aria-label={adminCopy.platform}>
+                <div className="mt-2 border-t border-border pt-2 sm:mt-4 sm:pt-3">
+                <div className="type-caption-1 mb-2 px-3 text-muted-foreground">{adminCopy.platform}</div>
+                <div className="flex gap-1.5 overflow-x-auto pb-1 sm:block sm:space-y-1.5 sm:overflow-visible sm:pb-0" role="tablist" aria-label={adminCopy.platform}>
                   {platformTabs.map(tab => {
                     const Icon = tab.icon;
                     const selected = activeTab === tab.id;
@@ -1065,7 +1042,7 @@ export function SettingsMenu({
                         role="tab"
                         aria-selected={selected}
                         onClick={() => setActiveTab(tab.id)}
-                        className={`type-button flex h-10 w-full items-center gap-2.5 rounded-2xl px-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 ${selected ? 'bg-white/10 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]' : 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100'}`}
+                    className={`flex h-9 min-w-max items-center gap-2 rounded-lg px-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:w-full ${selected ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground'}`}
                       >
                         <Icon className="h-4 w-4" />
                         {tab.label}
@@ -1077,18 +1054,18 @@ export function SettingsMenu({
             ) : null}
           </aside>
 
-          <main data-testid="settings-modal-content" className="relative flex min-w-0 flex-1 flex-col">
+          <main data-testid="settings-modal-content" className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <header className="shrink-0 px-6 pb-3 pt-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="type-caption-1 text-zinc-500">
+                  <div className="text-xs text-muted-foreground">
                     {activeSection === 'platform'
                       ? adminCopy.platform
                       : activeSection === 'skills'
                         ? userSkillsCopy.tab
                         : t.systemSettings}
                   </div>
-                  <h2 className="type-title-3 mt-3 text-zinc-100">{activeTabLabel}</h2>
+                  <h2 className="mt-2 text-xl font-semibold text-foreground">{activeTabLabel}</h2>
                 </div>
                 {activeSection === 'platform' && activeTab === 'mcp' && effectiveCanManageMcp ? (
                   <div className="relative mt-2">
@@ -1104,7 +1081,7 @@ export function SettingsMenu({
                         setIsMcpActionMenuOpen(current => !current);
                         event.currentTarget.dataset.anchor = 'mcp-actions';
                       }}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-zinc-100 shadow-sm shadow-black/20 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-background text-foreground shadow-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <Plus className="h-4 w-4" />
                     </button>
@@ -1113,7 +1090,7 @@ export function SettingsMenu({
                         <div className="fixed inset-0 z-[250]" onMouseDown={() => setIsMcpActionMenuOpen(false)} />
                         <div
                           role="menu"
-                          className="input-surface absolute right-0 top-12 z-[260] w-56 overflow-hidden rounded-3xl border border-white/15 p-1.5 shadow-2xl shadow-black/40"
+                          className="absolute right-0 top-12 z-[260] w-56 overflow-hidden rounded-lg border border-border bg-background p-1.5 shadow-lg"
                           onMouseDown={event => event.stopPropagation()}
                         >
                           <button
@@ -1124,12 +1101,12 @@ export function SettingsMenu({
                               void handleDiscoverActiveMcpServers();
                             }}
                             disabled={isScanningActiveMcp}
-                            className="type-button flex h-10 w-full items-center gap-3 rounded-2xl px-3 text-left text-zinc-100 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="flex h-10 w-full items-center gap-3 rounded-md px-3 text-left text-sm text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             <Network className="h-4 w-4 text-orange-300" />
                             {isScanningActiveMcp ? mcpCopy.form.scanning : mcpCopy.form.scanActive}
                           </button>
-                          <div className="my-1 h-px bg-white/10" />
+                          <div className="my-1 h-px bg-border" />
                           <button
                             type="button"
                             role="menuitem"
@@ -1143,9 +1120,9 @@ export function SettingsMenu({
                                 rect: toPopoverAnchorRect((anchor ?? event.currentTarget).getBoundingClientRect()),
                               });
                             }}
-                            className="type-button flex h-10 w-full items-center gap-3 rounded-2xl px-3 text-left text-zinc-100 transition-colors hover:bg-white/10"
+                            className="flex h-10 w-full items-center gap-3 rounded-md px-3 text-left text-sm text-foreground transition-colors hover:bg-accent"
                           >
-                            <Plus className="h-4 w-4 text-zinc-400" />
+                            <Plus className="h-4 w-4 text-muted-foreground" />
                             {mcpCopy.newServer}
                           </button>
                         </div>
@@ -1185,7 +1162,7 @@ export function SettingsMenu({
                       title={userSkillsCopy.importFileLabel}
                       onClick={() => userSkillImportInputRef.current?.click()}
                       disabled={isSavingUserSkill}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/5 text-zinc-100 shadow-sm shadow-black/20 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-background text-foreground shadow-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <FaPlus className="h-4 w-4" />
                     </button>
@@ -1194,23 +1171,23 @@ export function SettingsMenu({
               </div>
             </header>
 
-            <div className="mx-6 h-px shrink-0 bg-white/10" />
+            <div className="mx-6 h-px shrink-0 bg-border" />
 
             <div
               data-testid="settings-modal-scroll-area"
               className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-2 [scrollbar-gutter:stable]"
             >
               {activeSection === 'personal' && activeTab === 'general' ? (
-                <div className="divide-y divide-white/10">
+                <div className="divide-y divide-border">
                   <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
-                    <span className="type-subheadline flex items-center gap-2.5 text-zinc-100">
-                      <Globe className="h-4 w-4 text-zinc-400" />
+                    <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <Globe className="h-4 w-4 text-muted-foreground" />
                       {t.language}
                     </span>
                     <select
                       value={lang}
                       onChange={event => onSetLang(event.target.value as Language)}
-                      className="glass-control type-input h-11 w-full rounded-2xl px-3"
+                      className="h-10 w-full rounded-lg border border-input bg-background px-3 text-[16px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30 min-[900px]:text-md"
                     >
                       {LANGUAGE_OPTIONS.map(option => (
                         <option key={option.code} value={option.code}>
@@ -1219,76 +1196,54 @@ export function SettingsMenu({
                       ))}
                     </select>
                   </label>
+                  <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
+                    <span className="text-sm font-medium text-foreground">{t.theme}</span>
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                      <span className="text-sm text-muted-foreground">{isDark ? t.darkMode : t.lightMode}</span>
+                      <Switch checked={isDark} aria-label={t.theme} onCheckedChange={() => toggleTheme()} />
+                    </div>
+                  </div>
                 </div>
               ) : null}
 
               {activeSection === 'platform' && activeTab === 'general' ? (
-                <div className="divide-y divide-white/10">
+                <div className="divide-y divide-border">
                   {effectiveCanManageWorkspace ? (
                     <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
-                      <span className="type-subheadline flex items-center gap-2.5 text-zinc-100">
-                        <FolderOpen className="h-4 w-4 text-zinc-400" />
+                      <span className="flex items-center gap-2 text-sm font-medium text-foreground">
+                        <FolderOpen className="h-4 w-4 text-muted-foreground" />
                         {text.workspacePath}
                       </span>
                       <div className="min-w-0 space-y-2">
-                        <div className="type-code-sm max-w-full whitespace-normal break-all rounded-2xl border border-white/15 bg-white/[0.04] px-3 py-3 text-zinc-100">
+                        <div className="max-w-full whitespace-normal break-all rounded-lg border border-border bg-muted px-3 py-3 font-mono text-xs text-foreground">
                           {workspacePath || adminCopy.workspaceManaged}
                         </div>
-                        <div className="type-footnote text-zinc-500">{adminCopy.workspaceNote}</div>
+                        <div className="text-xs text-muted-foreground">{adminCopy.workspaceNote}</div>
                         {workspaceStatus ? (
-                          <div className="type-footnote text-emerald-400">{workspaceStatus}</div>
+                          <div className="text-xs text-foreground dark:text-foreground">{workspaceStatus}</div>
                         ) : null}
                       </div>
                     </div>
                   ) : null}
 
                   {effectiveCanManageSecrets ? (
-                    <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-start">
-                      <span className="type-subheadline flex items-center gap-2.5 text-zinc-100 sm:mt-2.5">
-                        <Search className="h-4 w-4 text-zinc-400" />
-                        {text.webSearch}
-                      </span>
-                      <div className="min-w-0 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <select
-                            aria-label={text.searchBackend}
-                            value={webSearchAdapter}
-                            onChange={event => setWebSearchAdapter(event.target.value as WebSearchAdapter)}
-                            className="type-input h-11 min-w-0 flex-1 rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                          >
-                            <option value="tavily">Tavily</option>
-                            <option value="api">Anthropic API</option>
-                            <option value="bing">Bing</option>
-                            <option value="brave">Brave</option>
-                            <option value="exa">Exa</option>
-                          </select>
-                        </div>
-                        {webSearchKeyField ? (
-                          <input
-                            aria-label={webSearchKeyField === 'brave' ? 'BRAVE_SEARCH_API_KEY' : 'EXA_API_KEY'}
-                            type="password"
-                            value={webSearchKeyValue}
-                            onChange={event => {
-                              if (webSearchKeyField === 'brave') {
-                                setBraveApiKey(event.target.value);
-                              } else {
-                                setExaApiKey(event.target.value);
-                              }
-                            }}
-                            placeholder={
-                              webSearchKeyPreview
-                                ? `${savedPrefix}${webSearchKeyPreview}`
-                                : webSearchKeyField === 'brave'
-                                  ? 'BRAVE_SEARCH_API_KEY'
-                                  : 'EXA_API_KEY'
-                            }
-                            className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                          />
-                        ) : null}
-                        {webToolsStatus ? <div className="type-footnote text-emerald-400">{webToolsStatus}</div> : null}
-                      </div>
-                    </div>
+                    <WebToolsPanel
+                      label={text.webSearch}
+                      searchBackend={text.searchBackend}
+                      adapter={webSearchAdapter}
+                      keyField={webSearchKeyField}
+                      keyValue={webSearchKeyValue}
+                      keyPreview={webSearchKeyPreview}
+                      savedPrefix={savedPrefix}
+                      status={webToolsStatus}
+                      onAdapterChange={setWebSearchAdapter}
+                      onKeyChange={value => {
+                        if (webSearchKeyField === 'brave') setBraveApiKey(value);
+                        if (webSearchKeyField === 'exa') setExaApiKey(value);
+                      }}
+                    />
                   ) : null}
+
                 </div>
               ) : null}
 
@@ -1339,112 +1294,52 @@ export function SettingsMenu({
               ) : null}
 
               {activeSection === 'platform' && activeTab === 'runtime' && effectiveCanManageRuntimeSettings ? (
-                <div className="divide-y divide-white/10">
-                  {getRuntimeCapabilityItems(capabilityCopy).map(item => (
-                    <CapabilityToggleRow
-                      key={item.key}
-                      item={item}
-                      checked={runtimeSettings[item.key]}
-                      onToggle={() => updateRuntimeSetting(item.key)}
-                    />
-                  ))}
-                  {runtimeSettingsStatus ? (
-                    <div className="type-footnote py-2 text-amber-300">{runtimeSettingsStatus}</div>
-                  ) : null}
-                </div>
+                <RuntimeSettingsPanel
+                  copy={capabilityCopy}
+                  settings={runtimeSettings}
+                  status={runtimeSettingsStatus}
+                  onToggle={updateRuntimeSetting}
+                />
               ) : null}
 
               {activeSection === 'platform' && activeTab === 'model' && effectiveCanManageModelConfig ? (
-                <>
-                  <form
-                    className="divide-y divide-white/10"
-                    autoComplete="off"
-                    onSubmit={event => {
-                      event.preventDefault();
-                      if (!isSaveDisabled) void handleSaveSettings();
-                    }}
-                  >
-                    <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
-                      <span className="type-subheadline text-zinc-100">{text.provider}</span>
-                      <select
-                        aria-label={text.provider}
-                        value={provider}
-                        onChange={event => setProvider(event.target.value as ModelProviderKind)}
-                        className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                      >
-                        <option value="openai-compatible">OpenAI Compatible</option>
-                        <option value="anthropic-compatible">Anthropic API Compatible</option>
-                        <option value="gemini">Gemini</option>
-                        <option value="grok">Grok</option>
-                      </select>
-                    </label>
-
-                    <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
-                      <span className="type-subheadline text-zinc-100">{text.baseUrl}</span>
-                      <input
-                        aria-label={text.baseUrl}
-                        value={baseUrl}
-                        onChange={event => setBaseUrl(event.target.value)}
-                        placeholder="https://api.example.com/v1"
-                        className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                      />
-                    </label>
-
-                    <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
-                      <span className="type-subheadline text-zinc-100">{text.apiKey}</span>
-                      <input
-                        aria-label={text.apiKey}
-                        type="password"
-                        autoComplete="new-password"
-                        value={apiKey}
-                        onChange={event => setApiKey(event.target.value)}
-                        placeholder={apiKeyPreview ? `${savedPrefix}${apiKeyPreview}` : 'sk-...'}
-                        className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                      />
-                    </label>
-
-                    <div className="grid gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-start">
-                      <span className="type-subheadline text-zinc-100 sm:mt-2.5">{text.models}</span>
-                      <div className="grid gap-2">
-                        <label className="grid gap-2 sm:grid-cols-[6rem_1fr] sm:items-center">
-                          <span className="type-caption-1 text-zinc-500">{text.fast}</span>
-                          <input
-                            aria-label={text.fastModel}
-                            value={fastModel}
-                            onChange={event => setFastModel(event.target.value)}
-                            placeholder="qwen3.5-flash"
-                            className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                          />
-                        </label>
-                        <label className="grid gap-2 sm:grid-cols-[6rem_1fr] sm:items-center">
-                          <span className="type-caption-1 text-zinc-500">{text.balanced}</span>
-                          <input
-                            aria-label={text.balancedModel}
-                            value={balancedModel}
-                            onChange={event => setBalancedModel(event.target.value)}
-                            placeholder="qwen3.7-plus"
-                            className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                          />
-                        </label>
-                        <label className="grid gap-2 sm:grid-cols-[6rem_1fr] sm:items-center">
-                          <span className="type-caption-1 text-zinc-500">{text.strong}</span>
-                          <input
-                            aria-label={text.strongModel}
-                            value={strongModel}
-                            onChange={event => setStrongModel(event.target.value)}
-                            placeholder="qwen3.7-max"
-                            className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                          />
-                        </label>
-                      </div>
-                    </div>
-                  </form>
-
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="type-footnote text-emerald-400">{status}</span>
-                  </div>
-                </>
+                <ModelConfigPanel
+                  labels={{
+                    provider: text.provider,
+                    baseUrl: text.baseUrl,
+                    apiKey: text.apiKey,
+                    models: text.models,
+                    fast: text.fast,
+                    balanced: text.balanced,
+                    strong: text.strong,
+                    fastModel: text.fastModel,
+                    balancedModel: text.balancedModel,
+                    strongModel: text.strongModel,
+                  }}
+                  provider={provider}
+                  baseUrl={baseUrl}
+                  apiKey={apiKey}
+                  fastModel={fastModel}
+                  balancedModel={balancedModel}
+                  strongModel={strongModel}
+                  apiKeyPreview={apiKeyPreview}
+                  savedPrefix={savedPrefix}
+                  onProviderChange={setProvider}
+                  onBaseUrlChange={setBaseUrl}
+                  onApiKeyChange={setApiKey}
+                  onFastModelChange={setFastModel}
+                  onBalancedModelChange={setBalancedModel}
+                  onStrongModelChange={setStrongModel}
+                  onSubmit={event => {
+                    event.preventDefault();
+                    if (!isSaveDisabled) void handleSaveSettings();
+                  }}
+                />
               ) : null}
+              {activeSection === 'platform' && activeTab === 'model' && status ? (
+                <p role="status" className="mt-3 text-sm text-destructive">{status}</p>
+              ) : null}
+
               {activeSection === 'platform' && activeTab === 'mcp' && effectiveCanManageMcp ? (
                 <McpSettingsPanel
                   copy={mcpCopy}
@@ -1498,13 +1393,13 @@ export function SettingsMenu({
             activeTab !== 'projects' &&
             activeTab !== 'credit' &&
             (activeTab !== 'general' || hasGeneralSaveAction) ? (
-              <div className="flex items-center justify-end border-t border-white/10 bg-white/[0.02] px-6 py-4">
+              <div className="flex items-center justify-end border-t border-border bg-muted/30 px-6 py-4">
                 <button
                   type="button"
                   aria-label={text.saveSettings}
                   onClick={handleSaveSettings}
                   disabled={isSaveDisabled}
-                  className="primary-pill inline-flex h-11 items-center px-6 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-md border border-transparent bg-primary text-primary-foreground inline-flex h-11 items-center px-6 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isSavingCurrentTab ? text.saving : text.saveSettings}
                 </button>
@@ -1512,8 +1407,8 @@ export function SettingsMenu({
             ) : null}
           </main>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1772,11 +1667,18 @@ function mcpFormToInput(form: McpServerForm): McpServerInput {
   };
 }
 
-function isMcpFormSaveable(form: McpServerForm): boolean {
-  return (
-    Boolean(form.name.trim()) && (form.transport === 'stdio' ? Boolean(form.command.trim()) : Boolean(form.url.trim()))
-  );
+function uniqueUserSkills(skills: UserSkill[]): UserSkill[] {
+  const seen = new Set<string>();
+  const unique: UserSkill[] = [];
+  for (const skill of skills) {
+    const key = skill.slug || skill.name;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(skill);
+  }
+  return unique.sort((left, right) => left.name.localeCompare(right.name));
 }
+
 
 function mcpServerToInput(server: McpServerConfig): McpServerInput {
   return {
@@ -1809,83 +1711,6 @@ function discoveredMcpServerToInput(server: DiscoveredMcpServer | ActiveDiscover
   };
 }
 
-type RuntimeCapabilityCopy = {
-  title: string;
-  items: Record<
-    keyof RuntimeSettingsConfig,
-    {
-      label: string;
-      description: string;
-      note: string;
-      scope: 'immediate' | 'newSession' | 'restart';
-    }
-  >;
-};
-
-type BillingSettingsCopy = {
-  tab: string;
-  title: string;
-  description: string;
-  packsTitle: string;
-  packsDescription: string;
-  savePack: string;
-  saving: string;
-  priceId: string;
-  credits: string;
-  displayName: string;
-  sortOrder: string;
-  enabled: string;
-  disabled: string;
-  edit: string;
-  noPacks: string;
-  noEvents: string;
-  noReference: string;
-  positiveCreditsRequired: string;
-  packSaved: string;
-  packSaveFailed: string;
-  auditUnavailable: string;
-  billingUnavailable: string;
-  metrics: {
-    consumed: string;
-    weightedTokens: string;
-  };
-};
-
-type ProjectLifecycleSettingsCopy = {
-  tab: string;
-  title: string;
-  description: string;
-  quotaUsage: string;
-  quotaRemaining: string;
-  storageCleanup: string;
-  projectsValue: (count: number) => string;
-  projectsLimitValue: (used: number, limit: number) => string;
-  unlimited: string;
-  remainingValue: (count: number) => string;
-  supabaseEnabled: string;
-  localOnly: string;
-  retentionTitle: string;
-  retentionDescription: string;
-  dryRun: string;
-  runRetention: string;
-  retentionSummary: (planned: number, deleted: number, retained: number) => string;
-  lastRetentionRun: string;
-  dryRunLabel: string;
-  deletedRunLabel: (count: number) => string;
-  activeProjects: string;
-  recentCleanup: string;
-  noActiveProjects: string;
-  noRecentCleanup: string;
-  noWorkspacePath: string;
-  snapshotSaved: string;
-  noSnapshot: string;
-  dryRunStatus: (count: number) => string;
-  runStatus: (count: number) => string;
-  dryRunFailed: string;
-  runFailed: string;
-  unavailable: string;
-};
-
 type UserSkillsSettingsCopy = {
   tab: string;
   title: string;
@@ -1905,1197 +1730,3 @@ type UserSkillsSettingsCopy = {
   unavailable: string;
   runtimeNote: string;
 };
-
-type RuntimeCapabilityItem = {
-  key: keyof RuntimeSettingsConfig;
-  label: string;
-  description: string;
-  note: string;
-  scope: 'immediate' | 'newSession' | 'restart';
-};
-
-type RuntimeSettingsCapabilityItem = RuntimeCapabilityItem & {
-  key: keyof RuntimeSettingsConfig;
-};
-
-type McpSettingsCopy = {
-  title: string;
-  intro: string;
-  configured: string;
-  newServer: string;
-  noServers: string;
-  form: {
-    name: string;
-    enabled: string;
-    transport: string;
-    scope: string;
-    command: string;
-    args: string;
-    url: string;
-    cwd: string;
-    env: string;
-    argsHint: string;
-    envHint: string;
-    stdio: string;
-    sse: string;
-    http: string;
-    beegame: string;
-    global: string;
-    project: string;
-    edit: string;
-    delete: string;
-    cancel: string;
-    save: string;
-    saving: string;
-    scanLocal: string;
-    scanActive: string;
-    scanning: string;
-    discovered: string;
-    activeDiscovered: string;
-    noDiscovered: string;
-    noActiveDiscovered: string;
-    importServer: string;
-    existing: string;
-    source: string;
-    testConnection: string;
-    testingConnection: string;
-    available: string;
-    unavailable: string;
-    untested: string;
-    advanced: string;
-    actions: string;
-  };
-  rows: Array<{
-    title: string;
-    description: string;
-    note: string;
-  }>;
-};
-
-function getMcpHealthLabel(copy: McpSettingsCopy, health: McpServerTestResult | undefined, isTesting: boolean): string {
-  if (isTesting) return copy.form.testingConnection;
-  if (!health) return copy.form.untested;
-  return health.ok ? copy.form.available : copy.form.unavailable;
-}
-
-function getMcpHealthClass(health: McpServerTestResult | undefined, isTesting: boolean): string {
-  if (isTesting) return 'text-orange-300';
-  if (!health) return 'text-zinc-500';
-  return health.ok ? 'text-emerald-400' : 'text-red-400';
-}
-
-function InvitationSettingsPanel({
-  copy,
-  required,
-  invitations,
-  newCode,
-  newLabel,
-  newMaxUses,
-  status,
-  isSaving,
-  onToggleRequired,
-  onNewCodeChange,
-  onNewLabelChange,
-  onNewMaxUsesChange,
-  onCreate,
-  onToggleInvitation,
-  onDeleteInvitation,
-}: {
-  copy: ReturnType<typeof getAdminSettingsCopy>['invitation'];
-  required: boolean;
-  invitations: InvitationRecord[];
-  newCode: string;
-  newLabel: string;
-  newMaxUses: string;
-  status: string;
-  isSaving: boolean;
-  onToggleRequired: () => void;
-  onNewCodeChange: (value: string) => void;
-  onNewLabelChange: (value: string) => void;
-  onNewMaxUsesChange: (value: string) => void;
-  onCreate: () => void;
-  onToggleInvitation: (invitation: InvitationRecord) => void;
-  onDeleteInvitation: (id: string) => void;
-}) {
-  return (
-    <div className="space-y-5 py-2">
-      <div className="divide-y divide-white/10 border-y border-white/10">
-        <div className="flex min-h-16 items-center justify-between gap-4 py-3">
-          <div className="min-w-0">
-            <div className="type-subheadline flex items-center gap-2.5 text-zinc-100">
-              <Ticket className="h-4 w-4 text-zinc-400" />
-              {copy.title}
-            </div>
-            <div className="type-footnote mt-1 text-zinc-500">{copy.description}</div>
-          </div>
-          <Switch checked={required} aria-label={copy.title} onCheckedChange={onToggleRequired} />
-        </div>
-
-        <div className="grid gap-3 py-3 sm:grid-cols-[10.5rem_1fr]">
-          <span className="type-subheadline text-zinc-100 sm:mt-2.5">{copy.newCode}</span>
-          <div className="grid gap-2">
-            <input
-              aria-label={copy.codeAria}
-              value={newCode}
-              onChange={event => onNewCodeChange(event.target.value)}
-              placeholder={copy.codePlaceholder}
-              className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-            />
-            <div className="grid gap-2 sm:grid-cols-[1fr_9rem]">
-              <input
-                aria-label={copy.labelAria}
-                value={newLabel}
-                onChange={event => onNewLabelChange(event.target.value)}
-                placeholder={copy.labelPlaceholder}
-                className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-              />
-              <input
-                aria-label={copy.maxUsesAria}
-                inputMode="numeric"
-                value={newMaxUses}
-                onChange={event => onNewMaxUsesChange(event.target.value)}
-                placeholder={copy.maxUsesPlaceholder}
-                className="type-input h-11 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-              />
-            </div>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={onCreate}
-                disabled={isSaving || !newCode.trim()}
-                className="primary-pill inline-flex h-10 items-center px-5 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {copy.create}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <div className="type-caption-1 text-zinc-500">{copy.list}</div>
-        {invitations.length ? (
-          <div className="divide-y divide-white/10 overflow-hidden rounded-3xl border border-white/10">
-            {invitations.map(invitation => {
-              const invitationCode = String(invitation.code || '').trim();
-              const primaryLabel = invitation.label || invitationCode || copy.unnamed;
-              return (
-                <div key={invitation.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`h-2 w-2 shrink-0 rounded-full ${invitation.enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`}
-                      />
-                      <span className="type-footnote truncate text-zinc-100">{primaryLabel}</span>
-                    </div>
-                    {invitationCode ? (
-                      <div className="type-code mt-1 truncate pl-4 text-zinc-300">{copy.codeValue(invitationCode)}</div>
-                    ) : null}
-                    <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">
-                      {copy.usedCount(invitation.usedCount, invitation.maxUses)}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onToggleInvitation(invitation)}
-                      disabled={isSaving}
-                      className="type-button h-9 rounded-full border border-white/15 px-3 text-zinc-100 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {invitation.enabled ? copy.disable : copy.enable}
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={copy.deleteAria}
-                      onClick={() => onDeleteInvitation(invitation.id)}
-                      disabled={isSaving || invitation.usedCount > 0}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-35"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="type-footnote rounded-3xl border border-white/10 px-4 py-4 text-zinc-500">{copy.empty}</div>
-        )}
-        {status ? <div className="type-footnote text-amber-300">{status}</div> : null}
-      </div>
-    </div>
-  );
-}
-
-function UserSkillsSettingsPanel({
-  copy,
-  skills,
-  isSaving,
-  onImport,
-  onToggle,
-  onDelete,
-}: {
-  copy: UserSkillsSettingsCopy;
-  skills: UserSkill[];
-  isSaving: boolean;
-  onImport: (file: File) => void;
-  onToggle: (skill: UserSkill) => void;
-  onDelete: (skill: UserSkill) => void;
-}) {
-  const [isDragActive, setIsDragActive] = useState(false);
-  const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'copy';
-    setIsDragActive(true);
-  };
-  const handleDragLeave = (event: DragEvent<HTMLDivElement>) => {
-    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
-      return;
-    }
-    setIsDragActive(false);
-  };
-  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    setIsDragActive(false);
-    const file = event.dataTransfer.files.item?.(0) ?? event.dataTransfer.files[0];
-    if (file) onImport(file);
-  };
-  return (
-    <div className="space-y-4 py-2">
-      <section
-        data-testid="user-skills-drop-zone"
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        className={`rounded-3xl transition-colors ${isDragActive ? 'bg-white/[0.045] ring-2 ring-white/25' : ''}`}
-      >
-        {skills.length ? (
-          <div className="max-h-[240px] overflow-y-auto rounded-3xl border border-white/10 [scrollbar-gutter:stable]">
-            <div className="divide-y divide-white/10">
-              {skills.map(skill => (
-                <div key={skill.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                  <div className="min-w-0 flex-1 px-2 py-1">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`h-2 w-2 shrink-0 rounded-full ${skill.enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`}
-                      />
-                      <span className="type-footnote truncate text-zinc-100">{skill.name}</span>
-                      <span className="type-caption-1 text-zinc-500">
-                        {skill.enabled ? copy.enabled : copy.disabled}
-                      </span>
-                    </div>
-                    <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">{skill.description}</div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Switch
-                      checked={skill.enabled}
-                      aria-label={skill.enabled ? copy.disabled : copy.enabled}
-                      disabled={isSaving}
-                      onCheckedChange={() => onToggle(skill)}
-                    />
-                    <button
-                      type="button"
-                      aria-label={copy.delete}
-                      title={copy.delete}
-                      onClick={() => onDelete(skill)}
-                      disabled={isSaving}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-colors hover:bg-red-500/10 hover:text-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="flex min-h-[190px] flex-col items-center justify-center rounded-3xl border border-dashed border-white/20 bg-white/[0.025] px-6 py-8 text-center">
-            <div className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-full border border-white/20 text-zinc-400">
-              <BookOpenText className="h-5 w-5" />
-            </div>
-            <div className="type-callout text-zinc-100">{copy.empty}</div>
-            <p className="type-footnote mt-3 max-w-md text-zinc-500">{copy.emptyDescription}</p>
-          </div>
-        )}
-      </section>
-    </div>
-  );
-}
-
-function uniqueUserSkills(skills: UserSkill[]): UserSkill[] {
-  const seen = new Set<string>();
-  const unique: UserSkill[] = [];
-  for (const skill of skills) {
-    const key = skill.slug || skill.name;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(skill);
-  }
-  return unique.sort((left, right) => left.name.localeCompare(right.name));
-}
-
-function McpSettingsPanel({
-  copy,
-  servers,
-  discovered,
-  activeDiscovered,
-  healthById,
-  testingServerId,
-  status,
-  isSaving,
-  onEdit,
-  activeEditServerId,
-  activeEditAnchorRect,
-  form,
-  onFormChange,
-  onCloseForm,
-  onSaveForm,
-  onTest,
-  onDelete,
-  onImport,
-  onImportActive,
-}: {
-  copy: McpSettingsCopy;
-  servers: McpServerConfig[];
-  discovered: DiscoveredMcpServer[];
-  activeDiscovered: ActiveDiscoveredMcpServer[];
-  healthById: Record<string, McpServerTestResult>;
-  testingServerId: string;
-  status: string;
-  isSaving: boolean;
-  onEdit: (server: McpServerConfig, rect: PopoverAnchorRect) => void;
-  activeEditServerId: string;
-  activeEditAnchorRect: PopoverAnchorRect | null;
-  form: McpServerForm;
-  onFormChange: (form: McpServerForm) => void;
-  onCloseForm: () => void;
-  onSaveForm: () => void;
-  onTest: (server: McpServerConfig) => void;
-  onDelete: (id: string) => void;
-  onImport: (server: DiscoveredMcpServer) => void;
-  onImportActive: (server: ActiveDiscoveredMcpServer) => void;
-}) {
-  const [activeServerMenuId, setActiveServerMenuId] = useState('');
-  return (
-    <div className="space-y-4 py-2">
-      <p className="type-callout max-w-2xl text-zinc-400">{copy.intro}</p>
-
-      <div className="divide-y divide-white/10 border-y border-white/10">
-        <div className="type-caption-1 py-3 text-zinc-500">{copy.configured}</div>
-        {servers.length ? (
-          servers.map(server => (
-            <div key={server.id} className="flex items-center justify-between gap-3 py-3">
-              <button
-                type="button"
-                onClick={event => onEdit(server, toPopoverAnchorRect(event.currentTarget.getBoundingClientRect()))}
-                className="min-w-0 flex-1 rounded-2xl px-2 py-1 text-left transition-colors hover:bg-white/5"
-              >
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`h-2 w-2 shrink-0 rounded-full ${server.enabled ? 'bg-emerald-400' : 'bg-zinc-600'}`}
-                  />
-                  <span className="type-footnote truncate text-zinc-100">{server.name}</span>
-                </div>
-                <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">
-                  {server.transport} · {server.scope}
-                </div>
-                <div className="type-footnote mt-1 flex items-center gap-2 pl-4">
-                  <span className={getMcpHealthClass(healthById[server.id], testingServerId === server.id)}>
-                    {getMcpHealthLabel(copy, healthById[server.id], testingServerId === server.id)}
-                  </span>
-                  {healthById[server.id]?.message ? (
-                    <span className="truncate text-zinc-500">{healthById[server.id].message}</span>
-                  ) : null}
-                </div>
-              </button>
-              <div className="relative flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  aria-label={copy.form.actions}
-                  aria-haspopup="menu"
-                  aria-expanded={activeServerMenuId === server.id}
-                  data-mcp-row-action={server.id}
-                  onClick={() => setActiveServerMenuId(current => (current === server.id ? '' : server.id))}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/15 text-zinc-300 transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35"
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </button>
-                {activeServerMenuId === server.id ? (
-                  <>
-                    <div className="fixed inset-0 z-[250]" onMouseDown={() => setActiveServerMenuId('')} />
-                    <div
-                      role="menu"
-                      className="input-surface absolute right-0 top-10 z-[260] w-44 overflow-hidden rounded-3xl border border-white/15 p-1.5 shadow-2xl shadow-black/40"
-                      onMouseDown={event => event.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setActiveServerMenuId('');
-                          onTest(server);
-                        }}
-                        disabled={isSaving || testingServerId === server.id}
-                        className="type-button flex h-9 w-full items-center gap-3 rounded-2xl px-3 text-left text-zinc-100 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Network className="h-3.5 w-3.5 text-orange-300" />
-                        {testingServerId === server.id ? copy.form.testingConnection : copy.form.testConnection}
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={event => {
-                          const anchor = Array.from(document.querySelectorAll('[data-mcp-row-action]')).find(
-                            element => element.getAttribute('data-mcp-row-action') === server.id,
-                          );
-                          setActiveServerMenuId('');
-                          onEdit(server, toPopoverAnchorRect((anchor ?? event.currentTarget).getBoundingClientRect()));
-                        }}
-                        className="type-button flex h-9 w-full items-center gap-3 rounded-2xl px-3 text-left text-zinc-100 transition-colors hover:bg-white/10"
-                      >
-                        <FolderOpen className="h-3.5 w-3.5 text-zinc-400" />
-                        {copy.form.edit}
-                      </button>
-                      <div className="my-1 h-px bg-white/10" />
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setActiveServerMenuId('');
-                          onDelete(server.id);
-                        }}
-                        disabled={isSaving}
-                        className="type-button flex h-9 w-full items-center gap-3 rounded-2xl px-3 text-left text-red-200 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        {copy.form.delete}
-                      </button>
-                    </div>
-                  </>
-                ) : null}
-                {activeEditServerId === server.id ? (
-                  <McpServerFormPopover
-                    mode="edit"
-                    copy={copy}
-                    form={form}
-                    status={status}
-                    isSaving={isSaving}
-                    anchorRect={activeEditAnchorRect}
-                    onChange={onFormChange}
-                    onClose={onCloseForm}
-                    onSave={onSaveForm}
-                  />
-                ) : null}
-              </div>
-            </div>
-          ))
-        ) : (
-          <div className="type-callout py-4 text-zinc-500">{copy.noServers}</div>
-        )}
-      </div>
-
-      {activeDiscovered.length ? (
-        <div className="divide-y divide-white/10 border-y border-white/10">
-          <div className="type-caption-1 py-3 text-zinc-500">{copy.form.activeDiscovered}</div>
-          {activeDiscovered.map(server => (
-            <div key={`${server.endpoint}:${server.name}`} className="flex items-center justify-between gap-3 py-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-                  <span className="type-footnote truncate text-zinc-100">{server.name}</span>
-                  <span className="type-footnote text-emerald-400">{copy.form.available}</span>
-                </div>
-                <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">
-                  {server.transport} · {server.endpoint}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => onImportActive(server)}
-                disabled={isSaving || server.exists}
-                className="type-button h-8 shrink-0 rounded-full border border-white/15 px-3 text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {server.exists ? copy.form.existing : copy.form.importServer}
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {discovered.length ? (
-        <div className="divide-y divide-white/10 border-y border-white/10">
-          <div className="type-caption-1 py-3 text-zinc-500">{copy.form.discovered}</div>
-          {discovered.map(server => (
-            <div key={`${server.sourcePath}:${server.name}`} className="flex items-center justify-between gap-3 py-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`h-2 w-2 shrink-0 rounded-full ${server.exists ? 'bg-zinc-600' : 'bg-emerald-400'}`}
-                  />
-                  <span className="type-footnote truncate text-zinc-100">{server.name}</span>
-                </div>
-                <div className="type-footnote mt-1 truncate pl-4 text-zinc-500">
-                  {server.transport} · {copy.form.source}: {server.sourcePath}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => onImport(server)}
-                disabled={isSaving || server.exists}
-                className="type-button h-8 shrink-0 rounded-full border border-white/15 px-3 text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {server.exists ? copy.form.existing : copy.form.importServer}
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {status ? <div className="type-footnote text-amber-300">{status}</div> : null}
-    </div>
-  );
-}
-
-function McpServerFormPopover({
-  mode,
-  copy,
-  form,
-  status,
-  isSaving,
-  anchorRect,
-  onChange,
-  onClose,
-  onSave,
-}: {
-  mode: 'create' | 'edit';
-  copy: McpSettingsCopy;
-  form: McpServerForm;
-  status: string;
-  isSaving: boolean;
-  anchorRect: PopoverAnchorRect | null;
-  onChange: (form: McpServerForm) => void;
-  onClose: () => void;
-  onSave: () => void;
-}) {
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const update = (patch: Partial<McpServerForm>) => onChange({ ...form, ...patch });
-  const saveDisabled = isSaving || !isMcpFormSaveable(form);
-  if (!anchorRect) return null;
-
-  const placement = getPopoverPlacement(anchorRect);
-  return createPortal(
-    <div className="fixed inset-0 z-[350]" onMouseDown={onClose}>
-      <div
-        className="fixed z-[360]"
-        style={{ left: placement.left, top: placement.top }}
-        onMouseDown={event => event.stopPropagation()}
-        onClick={event => event.stopPropagation()}
-      >
-        <div
-          className="absolute -top-2 h-4 w-4 rotate-45 border-l border-t border-white/15 bg-zinc-950/80"
-          style={{ left: placement.arrowLeft }}
-        />
-        <div className="input-surface relative flex max-h-[min(480px,calc(100vh-8rem))] w-[min(360px,calc(100vw-3rem))] flex-col overflow-hidden rounded-3xl border border-white/15 shadow-2xl shadow-black/50">
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2 [scrollbar-gutter:stable]">
-            <div className="relative z-10 divide-y divide-white/10">
-              <label className="grid gap-2 py-3">
-                <span className="type-caption-1 text-zinc-500">{copy.form.name}</span>
-                <input
-                  aria-label={copy.form.name}
-                  value={form.name}
-                  onChange={event => update({ name: event.target.value })}
-                  className="type-input h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                />
-              </label>
-
-              <div className="flex items-center justify-between gap-3 py-3">
-                <span className="type-footnote text-zinc-100">{copy.form.enabled}</span>
-                <Switch
-                  checked={form.enabled}
-                  aria-label={copy.form.enabled}
-                  onCheckedChange={() => update({ enabled: !form.enabled })}
-                />
-              </div>
-
-              <label className="grid gap-2 py-3">
-                <span className="type-caption-1 text-zinc-500">{copy.form.transport}</span>
-                <select
-                  aria-label={copy.form.transport}
-                  value={form.transport}
-                  onChange={event => update({ transport: event.target.value as McpServerTransport })}
-                  className="type-input h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                >
-                  <option value="stdio">{copy.form.stdio}</option>
-                  <option value="sse">{copy.form.sse}</option>
-                  <option value="http">{copy.form.http}</option>
-                </select>
-              </label>
-
-              {form.transport !== 'stdio' ? (
-                <label className="grid gap-2 py-3">
-                  <span className="type-caption-1 text-zinc-500">{copy.form.url}</span>
-                  <input
-                    aria-label={copy.form.url}
-                    value={form.url}
-                    onChange={event => update({ url: event.target.value })}
-                    placeholder="http://127.0.0.1:3000/mcp"
-                    className="type-input h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                  />
-                </label>
-              ) : null}
-
-              <div className="py-2">
-                <button
-                  type="button"
-                  aria-expanded={advancedOpen}
-                  onClick={() => setAdvancedOpen(current => !current)}
-                  className="type-button flex h-9 w-full items-center justify-between rounded-2xl px-2 text-left text-zinc-200 transition-colors hover:bg-white/5"
-                >
-                  <span>{copy.form.advanced}</span>
-                  <span className={`text-zinc-500 transition-transform ${advancedOpen ? 'rotate-180' : ''}`}>⌄</span>
-                </button>
-                {advancedOpen ? (
-                  <div className="mt-1 divide-y divide-white/10">
-                    {form.transport === 'stdio' ? (
-                      <>
-                        <label className="grid gap-2 py-3">
-                          <span className="type-caption-1 text-zinc-500">{copy.form.command}</span>
-                          <input
-                            aria-label={copy.form.command}
-                            value={form.command}
-                            onChange={event => update({ command: event.target.value })}
-                            placeholder="npx"
-                            className="type-code h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                          />
-                        </label>
-                        <label className="grid gap-2 py-3">
-                          <span className="type-caption-1 text-zinc-500">{copy.form.args}</span>
-                          <div className="space-y-1">
-                            <textarea
-                              aria-label={copy.form.args}
-                              value={form.argsText}
-                              onChange={event => update({ argsText: event.target.value })}
-                              rows={3}
-                              className="type-code w-full resize-none rounded-2xl border border-white/15 bg-white/[0.04] px-3 py-2 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                            />
-                            <div className="type-footnote text-zinc-500">{copy.form.argsHint}</div>
-                          </div>
-                        </label>
-                      </>
-                    ) : null}
-                    <label className="grid gap-2 py-3">
-                      <span className="type-caption-1 text-zinc-500">{copy.form.scope}</span>
-                      <select
-                        aria-label={copy.form.scope}
-                        value={form.scope}
-                        onChange={event => update({ scope: event.target.value as McpServerScope })}
-                        className="type-input h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                      >
-                        <option value="beegame">{copy.form.beegame}</option>
-                        <option value="project">{copy.form.project}</option>
-                        <option value="global">{copy.form.global}</option>
-                      </select>
-                    </label>
-
-                    <label className="grid gap-2 py-3">
-                      <span className="type-caption-1 text-zinc-500">{copy.form.cwd}</span>
-                      <input
-                        aria-label={copy.form.cwd}
-                        value={form.cwd}
-                        onChange={event => update({ cwd: event.target.value })}
-                        className="type-code h-10 w-full rounded-2xl border border-white/15 bg-white/[0.04] px-3 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                      />
-                    </label>
-
-                    <label className="grid gap-2 py-3">
-                      <span className="type-caption-1 text-zinc-500">{copy.form.env}</span>
-                      <div className="space-y-1">
-                        <textarea
-                          aria-label={copy.form.env}
-                          value={form.envText}
-                          onChange={event => update({ envText: event.target.value })}
-                          rows={3}
-                          className="type-code w-full resize-none rounded-2xl border border-white/15 bg-white/[0.04] px-3 py-2 text-zinc-100 outline-none transition-colors focus:border-white/35 focus:bg-white/[0.06]"
-                        />
-                        <div className="type-footnote text-zinc-500">{copy.form.envHint}</div>
-                      </div>
-                    </label>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-            {status ? <div className="type-footnote py-2 text-amber-300">{status}</div> : null}
-          </div>
-
-          {mode === 'create' ? (
-            <footer className="relative z-10 flex shrink-0 items-center justify-end gap-2 border-t border-white/10 bg-white/[0.02] px-4 py-3">
-              <button type="button" onClick={onClose} className="secondary-pill type-button h-9 px-4 text-zinc-200">
-                {copy.form.cancel}
-              </button>
-              <button
-                type="button"
-                onClick={onSave}
-                disabled={saveDisabled}
-                className="primary-pill h-9 px-4 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isSaving ? copy.form.saving : copy.form.save}
-              </button>
-            </footer>
-          ) : null}
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-function toPopoverAnchorRect(rect: DOMRect): PopoverAnchorRect {
-  return {
-    top: rect.top,
-    right: rect.right,
-    bottom: rect.bottom,
-    left: rect.left,
-    width: rect.width,
-  };
-}
-
-function getPopoverPlacement(anchorRect: PopoverAnchorRect): {
-  left: number;
-  top: number;
-  arrowLeft: number;
-} {
-  const viewportWidth = typeof window === 'undefined' ? 1024 : window.innerWidth;
-  const popoverWidth = Math.min(360, Math.max(280, viewportWidth - 32));
-  const margin = 16;
-  const preferredLeft = anchorRect.right - popoverWidth;
-  const left = Math.min(Math.max(margin, preferredLeft), Math.max(margin, viewportWidth - popoverWidth - margin));
-  const anchorCenter = anchorRect.left + anchorRect.width / 2;
-  return {
-    left,
-    top: anchorRect.bottom + 12,
-    arrowLeft: Math.min(Math.max(18, anchorCenter - left - 8), popoverWidth - 34),
-  };
-}
-
-function getRuntimeCapabilityItems(copy: RuntimeCapabilityCopy): RuntimeSettingsCapabilityItem[] {
-  return [
-    'autoMemoryEnabled',
-    'autoDreamEnabled',
-    'skillSearchEnabled',
-    'treeSitterBashEnabled',
-    'webBrowserToolEnabled',
-    'bashClassifierEnabled',
-    'mcpSkillsEnabled',
-    'resourceLibraryEnabled',
-  ].map(key => ({
-    key: key as keyof RuntimeSettingsConfig,
-    ...copy.items[key as keyof RuntimeSettingsConfig],
-  }));
-}
-
-function CapabilityToggleRow({
-  item,
-  checked,
-  onToggle,
-}: {
-  item: RuntimeCapabilityItem;
-  checked: boolean;
-  onToggle: () => void;
-}) {
-  const Icon = item.scope === 'restart' ? ShieldCheck : item.key === 'autoDreamEnabled' ? Brain : Bot;
-  return (
-    <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <Icon className="h-4 w-4 text-zinc-500" />
-          <span className="type-footnote text-zinc-100">{item.label}</span>
-        </div>
-        <div className="type-footnote mt-1 space-y-0.5 text-zinc-500">
-          <div className="text-zinc-400">{item.description}</div>
-          <div>{item.note}</div>
-        </div>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-label={item.label}
-        aria-checked={checked}
-        onClick={onToggle}
-        className={`relative h-7 w-12 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 ${checked ? 'border-emerald-300/60 bg-emerald-400' : 'border-white/15 bg-white/[0.04]'}`}
-      >
-        <span
-          className={`absolute left-1 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-zinc-50 shadow-sm transition-transform ${checked ? 'translate-x-5' : 'translate-x-0'}`}
-        />
-      </button>
-    </div>
-  );
-}
-
-function ProjectLifecyclePanel({
-  overview,
-  status,
-  retentionResult,
-  copy,
-  isRetentionRunning,
-  onPlanRetention,
-  onRunRetention,
-}: {
-  overview: BeeGameProjectLifecycleOverview | null;
-  status: string;
-  retentionResult: BeeGameProjectRetentionResult | null;
-  copy: ProjectLifecycleSettingsCopy;
-  isRetentionRunning: boolean;
-  onPlanRetention: () => void;
-  onRunRetention: () => void;
-}) {
-  const quota = overview?.quota;
-  const projectLimit = quota?.limit ?? null;
-  const quotaValue =
-    projectLimit === null
-      ? copy.projectsValue(quota?.used ?? 0)
-      : copy.projectsLimitValue(quota?.used ?? 0, projectLimit);
-  const remainingValue = projectLimit === null ? copy.unlimited : copy.remainingValue(quota?.remaining ?? 0);
-  const projects = overview?.projects ?? [];
-  const deletions = overview?.recentDeletions ?? [];
-  const retentionRuns = overview?.recentRetentionRuns ?? [];
-  return (
-    <div className="space-y-4 py-3">
-      <div>
-        <h3 className="type-subheadline text-zinc-100">{copy.title}</h3>
-        <p className="type-footnote mt-1 text-zinc-500">{copy.description}</p>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-3">
-        <CreditMetric label={copy.quotaUsage} value={quotaValue} />
-        <CreditMetric label={copy.quotaRemaining} value={remainingValue} />
-        <CreditMetric
-          label={copy.storageCleanup}
-          value={overview?.storage.supabaseStorageConfigured ? copy.supabaseEnabled : copy.localOnly}
-        />
-      </div>
-      {status ? (
-        <div className="type-footnote rounded-2xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-amber-200">
-          {status}
-        </div>
-      ) : null}
-      <div className="space-y-2 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="type-caption-1 text-zinc-500">{copy.retentionTitle}</div>
-            <div className="type-footnote text-zinc-300">{copy.retentionDescription}</div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              disabled={isRetentionRunning}
-              onClick={onPlanRetention}
-              className="glass-control type-button h-9 rounded-full px-3 text-zinc-100 disabled:opacity-60"
-            >
-              {copy.dryRun}
-            </button>
-            <button
-              type="button"
-              disabled={isRetentionRunning}
-              onClick={onRunRetention}
-              className="glass-control type-button h-9 rounded-full px-3 text-zinc-100 disabled:opacity-60"
-            >
-              {copy.runRetention}
-            </button>
-          </div>
-        </div>
-        {retentionResult ? (
-          <div className="type-caption-1 text-zinc-500">
-            {copy.retentionSummary(
-              retentionResult.summary.deploymentRecordsPlannedForDeletion,
-              retentionResult.summary.deploymentRecordsDeleted,
-              retentionResult.summary.deploymentRecordsRetained,
-            )}
-          </div>
-        ) : null}
-        {retentionRuns.length ? (
-          <div className="space-y-1">
-            <div className="type-caption-1 text-zinc-500">{copy.lastRetentionRun}</div>
-            <div className="max-h-24 space-y-1 overflow-y-auto pr-1">
-              {retentionRuns.map(run => (
-                <div key={`${run.ranAt}-${run.deploymentRecordsDeleted}`} className="type-footnote text-zinc-300">
-                  {run.dryRun ? copy.dryRunLabel : copy.deletedRunLabel(run.deploymentRecordsDeleted)}
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </div>
-      <div className="space-y-2">
-        <div className="type-caption-1 text-zinc-500">{copy.activeProjects}</div>
-        <div className="overflow-hidden rounded-2xl border border-white/10">
-          {projects.length ? (
-            <div className="max-h-80 divide-y divide-white/10 overflow-y-auto">
-              {projects.map(project => (
-                <ProjectLifecycleRow key={project.id} project={project} copy={copy} />
-              ))}
-            </div>
-          ) : (
-            <div className="type-footnote px-3 py-4 text-zinc-500">{copy.noActiveProjects}</div>
-          )}
-        </div>
-      </div>
-      <div className="space-y-2">
-        <div className="type-caption-1 text-zinc-500">{copy.recentCleanup}</div>
-        <div className="overflow-hidden rounded-2xl border border-white/10">
-          {deletions.length ? (
-            <div className="max-h-64 divide-y divide-white/10 overflow-y-auto">
-              {deletions.map(deletion => (
-                <ProjectLifecycleDeletionRow
-                  key={`${deletion.projectId}-${deletion.deletedAt}`}
-                  deletion={deletion}
-                  copy={copy}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="type-footnote px-3 py-4 text-zinc-500">{copy.noRecentCleanup}</div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ProjectLifecycleRow({
-  project,
-  copy,
-}: {
-  project: BeeGameProjectLifecycleProject;
-  copy: ProjectLifecycleSettingsCopy;
-}) {
-  return (
-    <div className="grid gap-2 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-      <div className="min-w-0">
-        <div className="type-footnote break-all text-zinc-100">{project.name}</div>
-        <div className="type-caption-1 break-all text-zinc-500">{project.rootPath || copy.noWorkspacePath}</div>
-      </div>
-      <div className="type-caption-1 max-w-full break-all text-zinc-500 sm:max-w-48 sm:text-right">
-        {project.lifecycle.phaseName || (project.lifecycle.hasRuntimeSnapshot ? copy.snapshotSaved : copy.noSnapshot)}
-      </div>
-    </div>
-  );
-}
-
-function ProjectLifecycleDeletionRow({
-  deletion,
-  copy,
-}: {
-  deletion: BeeGameProjectLifecycleDeletion;
-  copy: ProjectLifecycleSettingsCopy;
-}) {
-  return (
-    <div className="grid gap-2 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-      <div className="min-w-0">
-        <div className="type-footnote break-all text-zinc-100">{deletion.projectId}</div>
-        <div className="type-caption-1 break-all text-zinc-500">
-          {deletion.deletedWorkspacePath || copy.noWorkspacePath}
-        </div>
-      </div>
-      <div className="type-caption-1 max-w-full break-all text-zinc-500 sm:max-w-48 sm:text-right">
-        {deletion.cleanupOutcome}
-      </div>
-    </div>
-  );
-}
-
-function UsageBillingPanel({
-  summary,
-  status,
-  billingCreditPacks,
-  billingEvents,
-  packForm,
-  copy,
-  isSavingPack,
-  onPackFormChange,
-  onSavePack,
-}: {
-  summary: BeeGameUsageSummary | null;
-  status: string;
-  billingCreditPacks: BeeGameBillingCreditPack[];
-  billingEvents: BeeGameBillingEvent[];
-  packForm: BillingPackFormState;
-  copy: BillingSettingsCopy;
-  isSavingPack: boolean;
-  onPackFormChange: (form: BillingPackFormState) => void;
-  onSavePack: () => void;
-}) {
-  const recentBillingEvents = billingEvents.slice(0, 8);
-  return (
-    <div className="space-y-4 py-3">
-      <div>
-        <h3 className="type-subheadline text-zinc-100">{copy.title}</h3>
-        <p className="type-footnote mt-1 text-zinc-500">{copy.description}</p>
-      </div>
-      <div className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.025] p-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h4 className="type-footnote text-zinc-100">{copy.packsTitle}</h4>
-            <p className="type-caption-1 mt-1 text-zinc-500">{copy.packsDescription}</p>
-          </div>
-          <button
-            type="button"
-            className="type-button shrink-0 rounded-full border border-white/10 px-3 py-1.5 text-zinc-200 hover:border-amber-300/40 hover:text-amber-100 disabled:opacity-50"
-            disabled={isSavingPack}
-            onClick={onSavePack}
-          >
-            {isSavingPack ? copy.saving : copy.savePack}
-          </button>
-        </div>
-        <div className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(7rem,.7fr)_minmax(0,1fr)]">
-          <input
-            className="type-input min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-zinc-100 outline-none focus:border-amber-300/50"
-            placeholder={copy.priceId}
-            value={packForm.priceId}
-            onChange={event => onPackFormChange({ ...packForm, priceId: event.target.value })}
-          />
-          <input
-            className="type-input min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-zinc-100 outline-none focus:border-amber-300/50"
-            placeholder={copy.credits}
-            inputMode="numeric"
-            value={packForm.credits}
-            onChange={event => onPackFormChange({ ...packForm, credits: event.target.value })}
-          />
-          <input
-            className="type-input min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-zinc-100 outline-none focus:border-amber-300/50 sm:col-span-2 xl:col-span-1"
-            placeholder={copy.displayName}
-            value={packForm.displayName}
-            onChange={event => onPackFormChange({ ...packForm, displayName: event.target.value })}
-          />
-        </div>
-        <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(7rem,10rem)_auto] sm:items-center">
-          <input
-            className="type-input min-w-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-zinc-100 outline-none focus:border-amber-300/50"
-            placeholder={copy.sortOrder}
-            inputMode="numeric"
-            value={packForm.sortOrder}
-            onChange={event => onPackFormChange({ ...packForm, sortOrder: event.target.value })}
-          />
-          <label className="type-callout flex min-w-0 items-center gap-2 rounded-xl border border-white/10 px-3 py-2 text-zinc-300">
-            <input
-              type="checkbox"
-              checked={packForm.enabled}
-              onChange={event => onPackFormChange({ ...packForm, enabled: event.target.checked })}
-            />
-            {copy.enabled}
-          </label>
-        </div>
-        <div className="overflow-hidden rounded-2xl border border-white/10">
-          {billingCreditPacks.length ? (
-            <div className="max-h-64 divide-y divide-white/10 overflow-y-auto">
-              {billingCreditPacks.map(pack => (
-                <BillingCreditPackRow
-                  key={pack.priceId}
-                  pack={pack}
-                  copy={copy}
-                  onEdit={() =>
-                    onPackFormChange({
-                      priceId: pack.priceId,
-                      credits: String(pack.credits),
-                      displayName: pack.displayName ?? '',
-                      sortOrder: String(pack.sortOrder),
-                      enabled: pack.enabled,
-                    })
-                  }
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="type-footnote px-3 py-4 text-zinc-500">{copy.noPacks}</div>
-          )}
-        </div>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <CreditMetric label={copy.metrics.consumed} value={`${formatCreditAmount(summary?.consumedCredits ?? 0)} credits`} />
-        <CreditMetric label={copy.metrics.weightedTokens} value={String(summary?.weightedTokens ?? 0)} />
-      </div>
-      {status ? (
-        <div className="type-footnote rounded-2xl border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-amber-200">
-          {status}
-        </div>
-      ) : null}
-      <div className="overflow-hidden rounded-2xl border border-white/10">
-        {recentBillingEvents.length ? (
-          <div className="max-h-64 divide-y divide-white/10 overflow-y-auto">
-            {recentBillingEvents.map((event, index) => (
-              <BillingEventRow key={event.id ?? `${event.eventType}-${index}`} event={event} copy={copy} />
-            ))}
-          </div>
-        ) : (
-          <div className="type-footnote px-3 py-4 text-zinc-500">{copy.noEvents}</div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function BillingCreditPackRow({
-  pack,
-  copy,
-  onEdit,
-}: {
-  pack: BeeGameBillingCreditPack;
-  copy: BillingSettingsCopy;
-  onEdit: () => void;
-}) {
-  return (
-    <div className="grid min-w-0 gap-2 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
-      <div className="min-w-0">
-        <div className="type-footnote truncate text-zinc-100">{pack.displayName || `${pack.credits} credits`}</div>
-        <div className="type-caption-1 break-all text-zinc-500">{pack.priceId}</div>
-      </div>
-      <div className="type-caption-1 text-zinc-400">{pack.enabled ? copy.enabled : copy.disabled}</div>
-      <button
-        type="button"
-        className="type-button rounded-full border border-white/10 px-3 py-1.5 text-zinc-200 hover:border-amber-300/40 hover:text-amber-100"
-        onClick={onEdit}
-      >
-        {copy.edit}
-      </button>
-    </div>
-  );
-}
-
-function BillingEventRow({ event, copy }: { event: BeeGameBillingEvent; copy: BillingSettingsCopy }) {
-  return (
-    <div className="grid min-w-0 gap-2 px-3 py-3 sm:grid-cols-[8rem_minmax(0,1fr)_auto] sm:items-center">
-      <div>
-        <div className="type-footnote text-zinc-100">{event.status}</div>
-        <div className="type-caption-1 text-zinc-500">{formatCreditAmount(event.credits ?? 0)} credits</div>
-      </div>
-      <div className="min-w-0">
-        <div className="type-footnote truncate text-zinc-300">{event.eventType}</div>
-        <div className="type-caption-1 break-all text-zinc-500">
-          {event.priceId || event.providerEventId || event.errorMessage || copy.noReference}
-        </div>
-      </div>
-      <div className="type-caption-1 text-zinc-500">
-        {event.createdAt ? formatBillingEventTime(event.createdAt) : ''}
-      </div>
-    </div>
-  );
-}
-
-function CreditMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.035] px-3 py-2">
-      <div className="type-caption-1 text-zinc-500">{label}</div>
-      <div className="type-subheadline mt-1 text-zinc-100">{value}</div>
-    </div>
-  );
-}
-
-function formatCreditAmount(value: number): string {
-  return Math.max(0, Number(value) || 0).toLocaleString(undefined, {
-    maximumFractionDigits: 1,
-  });
-}
-
-function formatBillingEventTime(value: string): string {
-  const time = Date.parse(value);
-  if (!Number.isFinite(time)) return value;
-  return new Date(time).toLocaleString();
-}

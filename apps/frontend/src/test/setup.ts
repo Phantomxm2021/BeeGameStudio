@@ -1,7 +1,12 @@
-import { afterEach, beforeAll } from 'vitest';
+import { afterEach, beforeAll, expect } from 'vitest';
 import { cleanup } from '@testing-library/react';
-import '@testing-library/jest-dom/vitest';
+import * as matchers from '@testing-library/jest-dom/matchers';
 import '../i18n';
+
+// Extend the exact Vitest instance running this workspace. The monorepo also
+// contains an older Vitest version, so jest-dom's convenience entrypoint can
+// otherwise register its matchers on the wrong instance.
+expect.extend(matchers);
 
 // Mock localStorage for all tests
 const localStorageMock = (() => {

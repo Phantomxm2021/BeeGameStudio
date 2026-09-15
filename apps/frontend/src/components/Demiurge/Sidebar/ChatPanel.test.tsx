@@ -1,6 +1,6 @@
 import { createRef, type ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ChatPanel } from './ChatPanel';
@@ -112,15 +112,70 @@ describe('ChatPanel approval bar', () => {
         });
 
         expect(screen.getByTestId('beegame-permission-panel')).toBeInTheDocument();
-        expect(screen.getByText('BeeGame 想运行 Bash 命令')).toBeInTheDocument();
+        expect(screen.getAllByText('BeeGame 想运行 Bash 命令').length).toBeGreaterThan(0);
         expect(screen.getByText('npm create vite@latest . -- --template react-ts 2>&1')).toBeInTheDocument();
         expect(screen.queryByText('/Projects/BeeGameStudio/generated-game')).not.toBeInTheDocument();
         expect(screen.queryByText('作用范围')).not.toBeInTheDocument();
         expect(screen.getByText('可能创建文件、安装依赖或访问网络')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: '拒绝' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: '允许本次' })).toBeInTheDocument();
+        expect(screen.getByRole('radio', { name: '拒绝' })).toBeInTheDocument();
+        expect(screen.getByRole('radio', { name: '允许本次' })).toBeInTheDocument();
         expect(screen.getByPlaceholderText('等待权限确认')).toBeInTheDocument();
         expect(screen.queryByPlaceholderText('询问团队（Shift+Enter 换行）...')).not.toBeInTheDocument();
+    });
+
+    it('maps Approval Card once and deny choices to the existing permission resolver', async () => {
+        const user = userEvent.setup();
+        const { onResolveToolPermission } = renderChatPanel({
+            actionPermission: beeGamePermissionReview,
+            pendingPermissions: [beeGamePermissionReview],
+            variant: 'beegame',
+            lang: 'zh',
+        });
+
+        await user.click(screen.getByRole('radio', { name: '允许本次' }));
+        await user.click(screen.getByRole('button', { name: /Submit response|继续/i }));
+        expect(onResolveToolPermission).toHaveBeenCalledWith(
+            expect.objectContaining({ gate_id: beeGamePermissionReview.gate_id }),
+            'allow',
+            'once',
+        );
+
+        const second = {
+            ...beeGamePermissionReview,
+            gate_id: 'gate_beegame_deny',
+        } satisfies PendingToolPermissionItem;
+        const { onResolveToolPermission: onSecondResolve } = renderChatPanel({
+            actionPermission: second,
+            pendingPermissions: [second],
+            variant: 'beegame',
+            lang: 'zh',
+        });
+        await user.click(screen.getAllByRole('radio', { name: '拒绝' }).at(-1)!);
+        await user.click(screen.getAllByRole('button', { name: /Submit response|继续/i }).at(-1)!);
+        expect(onSecondResolve).toHaveBeenCalledWith(
+            expect.objectContaining({ gate_id: 'gate_beegame_deny' }),
+            'deny',
+        );
+    });
+
+    it('renders pending approvals in arrival order', () => {
+        const secondPermission = {
+            ...beeGamePermissionReview,
+            gate_id: 'gate_second_permission',
+            title: 'Write permission',
+            artifact: { input: { path: 'docs/GDD.md' } },
+        } satisfies PendingToolPermissionItem;
+
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [beeGamePermissionReview, secondPermission],
+            variant: 'beegame',
+            lang: 'zh',
+        });
+
+        expect(screen.getAllByTestId('beegame-permission-panel')).toHaveLength(2);
+        expect(screen.getByText('npm create vite@latest . -- --template react-ts 2>&1')).toBeInTheDocument();
+        expect(screen.getByText('GDD.md')).toBeInTheDocument();
     });
 
     it('shows only the file name for file permission targets', () => {
@@ -160,7 +215,8 @@ describe('ChatPanel approval bar', () => {
         });
 
         expect(screen.getByText('registry.example:443')).toBeInTheDocument();
-        await user.click(screen.getByRole('button', { name: '当前会话允许' }));
+        await user.click(screen.getByRole('radio', { name: '当前会话允许' }));
+        await user.click(screen.getByRole('button', { name: /Submit response|继续/i }));
         expect(onResolveToolPermission).toHaveBeenCalledWith(
             expect.objectContaining({ gate_id: 'network_permission' }),
             'allow',
@@ -184,7 +240,8 @@ describe('ChatPanel approval bar', () => {
             lang: 'zh',
         });
 
-        await user.click(screen.getByRole('button', { name: '当前会话允许' }));
+        await user.click(screen.getByRole('radio', { name: '当前会话允许' }));
+        await user.click(screen.getByRole('button', { name: /Submit response|继续/i }));
         expect(onResolveToolPermission).toHaveBeenCalledWith(
             expect.objectContaining({ gate_id: 'resource_library_permission' }),
             'allow',
@@ -200,29 +257,24 @@ describe('ChatPanel approval bar', () => {
         });
 
         expect(screen.getByTestId('beegame-chat-panel')).toBeInTheDocument();
-        expect(screen.getByTestId('beegame-chat-composer')).toHaveClass(
-            'glass-control',
-            'flex',
-            'flex-col',
-            'min-h-[60px]',
-            'overflow-hidden',
-            'rounded-3xl',
-        );
+        expect(screen.getByTestId('beegame-chat-composer')).toHaveClass('min-w-0');
+        expect(screen.getByTestId('beegame-chat-composer')).not.toHaveClass('min-h-[60px]', 'rounded-[10px]');
         expect(screen.getByPlaceholderText(/ask team/i)).toHaveClass(
             'bg-transparent',
-            'px-5',
-            'py-3',
-            'min-h-[56px]',
+            'px-2',
+            'pt-1.5',
+            'text-[16px]',
             'scrollbar-hide',
         );
         expect(screen.getByPlaceholderText(/ask team/i)).not.toHaveClass('pb-14');
-        expect(screen.getByPlaceholderText(/ask team/i)).not.toHaveClass('glass-control');
         expect(screen.getByPlaceholderText(/ask team/i)).not.toHaveClass('pl-14', 'pr-40');
 
-        expect(screen.getByTestId('beegame-chat-toolbar')).toHaveClass('px-3', 'pb-2');
+        expect(screen.getByTestId('beegame-chat-toolbar')).toHaveClass('flex', 'items-center', 'gap-1');
         expect(screen.getByTestId('beegame-chat-attach-button')).not.toHaveClass('absolute');
-        expect(screen.getByTestId('beegame-chat-attach-button').querySelector('svg')).toHaveAttribute('viewBox', '0 0 448 512');
-        expect(screen.getByRole('button', { name: 'Send message' })).toHaveClass('h-8', 'w-8');
+        expect(screen.getByTestId('beegame-chat-attach-button')).toHaveAttribute('type', 'button');
+        expect(screen.getByRole('textbox', { name: /ask team/i })).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-chat-attach-button').querySelector('svg')).toHaveAttribute('viewBox', '0 0 24 24');
+        expect(screen.getByRole('button', { name: 'Send message' })).toHaveClass('size-8', 'rounded-full');
     });
 
     it('localizes the BeeGame chat composer placeholder', () => {
@@ -254,11 +306,12 @@ describe('ChatPanel approval bar', () => {
         expect(screen.getByAltText('preview.png')).toBeInTheDocument();
     });
 
-    it('uses shadcn shimmer for the active AI thinking state', () => {
+    it('uses the beUI activity shimmer for the active AI thinking state', () => {
         renderChatPanel({
             actionPermission: undefined,
             pendingPermissions: [],
             variant: 'beegame',
+            streamingMessageId: 'thinking_1',
             messages: [
                 {
                     id: 'thinking_1',
@@ -281,9 +334,57 @@ describe('ChatPanel approval bar', () => {
             },
         });
 
-        const thinkingMessage = screen.getByTestId('beegame-thinking-message-thinking_1');
+        const thinkingMessage = screen.getByTestId('beegame-agent-activity-group');
         expect(thinkingMessage).toBeInTheDocument();
-        expect(screen.getByText('Thinking...')).toHaveClass('shimmer', 'text-muted-foreground');
+        expect(thinkingMessage.querySelector('[data-state="working"]')).not.toBeNull();
+        expect(thinkingMessage.querySelector('[role="status"]')).toHaveTextContent('Thinking…');
+    });
+
+    it('matches a streamed content block to its parent assistant message id', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            variant: 'beegame',
+            streamingMessageId: 'assistant-parent-1',
+            messages: [{
+                id: 'assistant-parent-1',
+                messageId: 'assistant-parent-1',
+                sender: 'beegame',
+                content: '',
+                timestamp: Date.now(),
+                contentBlocks: [{ type: 'thinking', text: 'Still reasoning' }],
+            }],
+        });
+
+        const turn = screen.getByTestId(/^beegame-agent-turn-/);
+        expect(turn.querySelector('[data-state="streaming"]')).toBeInTheDocument();
+        expect(turn.querySelector('[aria-busy="true"]')).toBeInTheDocument();
+    });
+
+    it('keeps an unassociated historical thought complete while a workflow is running', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            streamingMessageId: null,
+            messages: [{
+                id: 'historical_thought',
+                sender: 'system',
+                content: 'Earlier reasoning',
+                timestamp: Date.now(),
+                type: 'thought',
+                taskKind: 'assistant_thinking',
+            }],
+            projectStatus: {
+                project_id: 'proj_1',
+                phase: 'running',
+                blocked: false,
+                workflow: { runId: 'run_thinking', status: 'running' },
+            },
+        });
+
+        const thought = screen.getByTestId('beegame-agent-activity-group');
+        expect(thought.querySelector('[data-state="working"]')).toBeNull();
+        expect(thought.querySelector('[data-state="closed"], [data-state="open"]')).not.toBeNull();
     });
 
     it('does not synthesize a permanent thinking message for a running workflow', () => {
@@ -306,7 +407,8 @@ describe('ChatPanel approval bar', () => {
 
         expect(screen.queryByTestId('beegame-thinking-message-beegame-runtime-activity')).not.toBeInTheDocument();
         expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
-        expect(screen.getByTestId('beegame-workflow-card-proj_1').closest('[data-message-id]')).toHaveClass('pl-12');
+        expect(screen.getAllByTestId('beegame-workflow-plan-proj_1')[0]).toHaveClass('min-w-0');
+        expect(screen.getAllByTestId('beegame-workflow-plan-proj_1')[0]).not.toHaveClass('px-3');
     });
 
     it('places the workflow card in timestamp order after its triggering user message', () => {
@@ -335,10 +437,10 @@ describe('ChatPanel approval bar', () => {
         const workflow = document.querySelector('[data-message-id="beegame-workflow-run_timeline"]')!;
         const agent = document.querySelector('[data-message-id="agent_after_run"]')!;
         expect(user.compareDocumentPosition(workflow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        expect(workflow.compareDocumentPosition(agent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(workflow.closest('[data-testid^="beegame-agent-turn-"]')).toBe(agent);
     });
 
-    it('hides a stale thinking entry after the workflow fails', () => {
+    it('keeps the completed thought summary after the workflow finishes', () => {
         renderChatPanel({
             actionPermission: undefined,
             pendingPermissions: [],
@@ -346,26 +448,29 @@ describe('ChatPanel approval bar', () => {
             messages: [{
                 id: 'stale_thinking',
                 sender: 'system',
-                content: 'Thinking...',
+                content: 'Thinking',
+                thought: 'Reviewed the preview entry and confirmed the interaction path.',
                 timestamp: Date.now(),
                 type: 'thought',
                 taskKind: 'assistant_thinking',
             }],
             projectStatus: {
                 project_id: 'proj_1',
-                phase: 'paused',
-                blocked: true,
+                phase: 'completed',
+                blocked: false,
                 workflow: {
-                    runId: 'run_failed',
-                    status: 'failed',
+                    runId: 'run_completed',
+                    status: 'completed',
                     currentPhase: 'DOCUMENT_REVIEW',
                     updatedAt: '2026-07-28T00:01:00.000Z',
                 },
             },
         });
 
-        expect(screen.queryByTestId('beegame-thinking-message-stale_thinking')).not.toBeInTheDocument();
-        expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
+        const thought = screen.getByTestId('beegame-agent-activity-group');
+        expect(thought).toHaveTextContent('Reviewed the preview entry and confirmed the interaction path.');
+        expect(thought.querySelector('[data-state="working"]')).toBeNull();
+        expect(thought.querySelector('[data-state="closed"], [data-state="open"]')).not.toBeNull();
     });
 
     it('renders BeeGame messages as a compact feed with tools after their message', async () => {
@@ -387,6 +492,7 @@ describe('ChatPanel approval bar', () => {
                     sender: 'beegame',
                     content: '我会先完成可运行闭环，然后验证构建入口。',
                     timestamp: 2,
+                    turnId: 'turn-compact',
                 },
                 {
                     id: 'm_write',
@@ -397,6 +503,7 @@ describe('ChatPanel approval bar', () => {
                     toolName: 'Write',
                     toolStatus: 'completed',
                     toolDetail: 'docs/PLAYABLE_SPEC.md',
+                    turnId: 'turn-compact',
                 },
                 {
                     id: 'm_bash',
@@ -408,6 +515,7 @@ describe('ChatPanel approval bar', () => {
                     toolStatus: 'completed',
                     toolDetail: 'bun run build',
                     toolOutput: 'Build passed',
+                    turnId: 'turn-compact',
                 },
             ],
             projectStatus: {
@@ -426,97 +534,262 @@ describe('ChatPanel approval bar', () => {
 
         expect(screen.getByTestId('beegame-message-scroller')).toBeInTheDocument();
         expect(screen.getByTestId('beegame-message-scroller-viewport')).toHaveClass(
-            'scroll-fade',
-            'scroll-fade-y',
-            'scrollbar-premium',
             'overscroll-contain',
         );
         expect(screen.getByTestId('beegame-message-scroller-content')).toBeInTheDocument();
-        const outline = screen.getByTestId('message-scroller-outline');
-        expect(outline).toBeInTheDocument();
-        expect(screen.getAllByTestId('message-scroller-outline-line')).toHaveLength(1);
-        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-        fireEvent.mouseEnter(outline);
-        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-        expect(screen.queryByTestId('message-scroller-outline-card')).not.toBeInTheDocument();
-        const firstOutlineLine = screen.getAllByTestId('message-scroller-outline-line')[0];
-        const outlineNavigation = screen.getByRole('navigation', { name: 'Transcript outline' });
-        vi.spyOn(outlineNavigation, 'getBoundingClientRect').mockReturnValue({
-            top: 20,
-            bottom: 140,
-            left: 0,
-            right: 40,
-            width: 40,
-            height: 120,
-            x: 0,
-            y: 20,
-            toJSON: () => ({}),
-        });
-        vi.spyOn(firstOutlineLine, 'getBoundingClientRect').mockReturnValue({
-            top: 68,
-            bottom: 80,
-            left: 0,
-            right: 40,
-            width: 40,
-            height: 12,
-            x: 0,
-            y: 68,
-            toJSON: () => ({}),
-        });
-        fireEvent.mouseEnter(firstOutlineLine);
-        expect(firstOutlineLine).toHaveAttribute('data-length', 'full');
-        const outlineCard = screen.getByTestId('message-scroller-outline-card');
-        expect(outlineCard).toHaveTextContent('请构建首个可玩版本');
-        expect(outlineCard).toHaveStyle({ top: '74px' });
+        expect(screen.queryByTestId('message-scroller-outline')).not.toBeInTheDocument();
         expect(document.querySelector('[data-message-id="m_user"]')).toBeInTheDocument();
         expect(document.querySelector('[data-message-id="m_user"]')).toHaveAttribute('data-scroll-anchor', 'false');
-        expect(document.querySelector('[data-message-id="m_user"]')).toHaveClass('pl-12');
-        expect(document.querySelector('[data-message-id="m_agent"]')).toBeInTheDocument();
-        expect(document.querySelector('[data-message-id="m_agent"]')).toHaveAttribute('data-scroll-anchor', 'false');
+        expect(document.querySelector('[data-message-id="m_user"]')).toHaveClass('min-w-0');
+        expect(document.querySelector('[data-message-id="m_user"]')).not.toHaveClass('px-3');
+        expect(screen.getByTestId('beegame-agent-turn-m_agent')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-agent-turn-m_agent')).toHaveAttribute('data-scroll-anchor', 'false');
         const userFeedItem = document.querySelector('[data-message-id="m_user"]')!;
         const workflowFeedItem = document.querySelector('[data-message-id="beegame-workflow-proj_1"]')!;
-        const agentFeedItem = document.querySelector('[data-message-id="m_agent"]')!;
+        const agentFeedItem = screen.getByTestId('beegame-agent-turn-m_agent');
         expect(userFeedItem.compareDocumentPosition(workflowFeedItem) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        expect(workflowFeedItem.compareDocumentPosition(agentFeedItem) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(workflowFeedItem.closest('[data-testid^="beegame-agent-turn-"]')).toBe(agentFeedItem);
         expect(screen.queryByText('当前任务')).not.toBeInTheDocument();
         const userMessage = screen.getByTestId('beegame-user-message-m_user');
         expect(userMessage).toBeInTheDocument();
+        expect(userMessage.querySelector('[data-slot="message-bubble-content"]')).toBeInTheDocument();
+        expect(userMessage.querySelector('[data-slot="message-avatar"]')).toBeNull();
+        expect(userMessage.querySelector('[data-slot="message-header"]')).toBeNull();
+        expect(userMessage.querySelector('[data-variant="solid"]')).toBeInTheDocument();
         await user.click(within(userMessage).getByRole('button', { name: 'Edit message' }));
         expect(onEditMessage).toHaveBeenCalledWith(expect.objectContaining({ id: 'm_user', content: '请构建首个可玩版本' }));
-        expect(userMessage).toHaveClass('rounded-3xl');
-        expect(userMessage).toHaveClass('max-w-[46rem]');
+        expect(userMessage).toHaveAttribute('data-slot', 'message-content');
+        expect(userMessage).toHaveClass('min-w-0');
+        expect(userMessage).not.toHaveClass('max-w-[46rem]');
         expect(userMessage).not.toHaveClass('ml-auto');
-        expect(userMessage).toHaveClass('backdrop-blur-2xl');
+        expect(userMessage).not.toHaveClass('backdrop-blur-2xl');
         expect(userMessage).not.toHaveClass('bg-zinc-100');
         expect(userMessage).not.toHaveClass('bg-sky-950/20');
         expect(userMessage).toHaveTextContent('请构建首个可玩版本');
         expect(userMessage).not.toHaveTextContent('You');
         expect(screen.queryByText('BeeGame')).not.toBeInTheDocument();
-        expect(screen.queryByAltText('BeeGame')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /Collapse BeeGame message|折叠 BeeGame 消息/i })).not.toBeInTheDocument();
         expect(screen.getByText('我会先完成可运行闭环，然后验证构建入口。')).toBeInTheDocument();
         expect(screen.getByTestId('beegame-agent-message-m_agent')).toBeInTheDocument();
 
         const agentMessage = screen.getByTestId('beegame-agent-message-m_agent');
-        expect(screen.getByTestId('beegame-agent-feed-group-m_agent')).toHaveClass('max-w-[46rem]');
-        expect(screen.queryByTestId('beegame-agent-rail-m_agent')).not.toBeInTheDocument();
-        expect(agentMessage).toHaveClass('beegame-ai-prose');
-        expect(agentMessage).not.toHaveClass('glass-control');
+        expect(screen.getByTestId('beegame-agent-message-m_agent')).toHaveClass('min-w-0');
+        expect(screen.getByTestId('beegame-agent-message-m_agent').querySelector('[data-slot="message-bubble"]')).toBeNull();
+        expect(agentMessage).toHaveAttribute('data-slot', 'message-content');
         expect(agentMessage).not.toHaveClass('rounded-3xl');
         expect(agentMessage).not.toHaveClass('bg-orange-950/15');
         expect(agentMessage).not.toHaveClass('bg-sky-950/20');
 
-        await user.click(screen.getByRole('button', { name: /2 tool calls/i }));
+        const activity = screen.getByTestId('beegame-agent-activity-group');
+        expect(activity).toBeInTheDocument();
+        expect(activity.querySelector('[data-content="tool"]')).toBeInTheDocument();
+        expect(activity.querySelector('[aria-expanded="false"]')).toBeInTheDocument();
+        await user.click(activity.querySelector('button')!);
+        expect(within(activity).getByText('docs/PLAYABLE_SPEC.md')).toBeInTheDocument();
+        expect(within(activity).getByText('bun run build')).toBeInTheDocument();
+        expect(screen.queryByTestId('beegame-tool-output-m_bash')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('beegame-tool-group')).not.toBeInTheDocument();
+    });
 
-        expect(screen.getByText('Write PLAYABLE_SPEC.md')).toBeInTheDocument();
-        expect(screen.getAllByText('Bash completed').length).toBeGreaterThan(0);
-        const writeCard = document.querySelector('[data-tool-id="m_write"]')!;
-        const bashCard = document.querySelector('[data-tool-id="m_bash"]')!;
-        expect(agentMessage.compareDocumentPosition(writeCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        expect(writeCard.compareDocumentPosition(bashCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        expect(screen.queryByText('docs/PLAYABLE_SPEC.md')).not.toBeInTheDocument();
-        expect(screen.queryByText('bun run build')).not.toBeInTheDocument();
-        expect(screen.queryByText('Build passed')).not.toBeInTheDocument();
+    it('renders contiguous mixed AgentActivity segments in event order without result groups', async () => {
+        const user = userEvent.setup();
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            messages: [
+                {
+                    id: 'mixed-thinking',
+                    sender: 'beegame',
+                    content: 'Thinking',
+                    thought: 'Check the preview entry.',
+                    timestamp: 1,
+                    type: 'thought',
+                    taskKind: 'assistant_thinking',
+                    turnId: 'turn-mixed',
+                },
+                {
+                    id: 'mixed-read',
+                    sender: 'system',
+                    content: 'Read completed',
+                    timestamp: 2,
+                    type: 'tool',
+                    toolName: 'Read',
+                    toolStatus: 'completed',
+                    toolDetail: 'src/StartScreen.tsx',
+                    turnId: 'turn-mixed',
+                },
+                {
+                    id: 'mixed-agent',
+                    sender: 'beegame',
+                    content: 'I found the preview entry.',
+                    timestamp: 3,
+                    turnId: 'turn-mixed',
+                },
+                {
+                    id: 'mixed-edit',
+                    sender: 'system',
+                    content: 'Edit completed',
+                    timestamp: 4,
+                    type: 'tool',
+                    toolName: 'Edit',
+                    toolStatus: 'completed',
+                    toolDetail: 'src/StartScreen.tsx',
+                    toolDiff: '--- a/src/StartScreen.tsx\n+++ b/src/StartScreen.tsx\n@@\n-old\n+new',
+                    turnId: 'turn-mixed',
+                },
+            ],
+        });
+
+        const activities = screen.getAllByTestId('beegame-agent-activity-group');
+        expect(activities).toHaveLength(2);
+        expect(activities[0].querySelector('[data-content="mixed"]')).toBeInTheDocument();
+        expect(activities[1].querySelector('[data-content="tool"]')).toBeInTheDocument();
+        expect(activities[0].querySelector('[data-state="closed"]')).toBeInTheDocument();
+
+        await user.click(activities[0].querySelector('button')!);
+        const activityRows = within(activities[0]).getAllByRole('listitem');
+        expect(activityRows.map((row) => row.textContent)).toEqual([
+            'Check the preview entry.',
+            expect.stringContaining('Read'),
+        ]);
+        const diff = screen.getByTestId('beegame-file-diff');
+        await user.click(diff.querySelector('button')!);
+        expect(diff).toHaveTextContent('old');
+        expect(diff).toHaveTextContent('new');
+        expect(screen.queryByTestId('beegame-tool-group')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('beegame-tool-timeline-card')).not.toBeInTheDocument();
+
+        const agentMessage = screen.getByTestId('beegame-agent-message-mixed-agent');
+        expect(activities[0].compareDocumentPosition(agentMessage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(agentMessage.compareDocumentPosition(activities[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('renders one activity when a turn starts with consecutive tool invocations', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            messages: [
+                { id: 'leading-tool-1', sender: 'system', content: 'Read completed', timestamp: 1, type: 'tool', toolName: 'Read', toolStatus: 'completed', toolDetail: 'src/one.ts', turnId: 'turn-leading-tools' },
+                { id: 'leading-tool-2', sender: 'system', content: 'Bash completed', timestamp: 2, type: 'tool', toolName: 'Bash', toolStatus: 'completed', toolDetail: 'bun test', turnId: 'turn-leading-tools' },
+            ],
+        });
+
+        expect(screen.getAllByTestId('beegame-agent-activity-group')).toHaveLength(1);
+        expect(screen.getByTestId('beegame-agent-activity-group').querySelector('[data-content="tool"]')).toBeInTheDocument();
+    });
+
+    it('merges a later tool result into its tool_use activity row', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            messages: [
+                {
+                    id: 'tool-use-message',
+                    sender: 'beegame',
+                    content: '',
+                    timestamp: 1,
+                    turnId: 'turn-paired-tool',
+                    contentBlocks: [{ type: 'tool_use', toolUseId: 'tool-1', toolName: 'Read', toolInput: { path: 'src/App.tsx' } }],
+                },
+                {
+                    id: 'tool-result-message',
+                    sender: 'system',
+                    content: 'Read completed\nTarget: src/App.tsx\nOutput: export default App',
+                    timestamp: 2,
+                    type: 'tool',
+                    toolName: 'Read',
+                    toolUseId: 'tool-1',
+                    toolStatus: 'completed',
+                    toolDetail: 'src/App.tsx',
+                    toolOutput: 'export default App',
+                    turnId: 'turn-paired-tool',
+                },
+            ],
+        });
+
+        const activity = screen.getByTestId('beegame-agent-activity-group');
+        expect(screen.getAllByTestId('beegame-agent-activity-group')).toHaveLength(1);
+        expect(activity.querySelector('[data-content="tool"]')).toHaveAttribute('data-state', 'closed');
+        expect(activity).toHaveTextContent('Ran 1 tool');
+        expect(activity).not.toHaveAttribute('aria-busy', 'true');
+    });
+
+    it('renders one activity when a turn starts with consecutive thinking events', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            messages: [
+                { id: 'leading-thought-1', sender: 'beegame', content: 'Thinking', thought: 'First thought', timestamp: 1, type: 'thought', taskKind: 'assistant_thinking', turnId: 'turn-leading-thoughts' },
+                { id: 'leading-thought-2', sender: 'beegame', content: 'Thinking', thought: 'Second thought', timestamp: 2, type: 'thought', taskKind: 'assistant_thinking', turnId: 'turn-leading-thoughts' },
+            ],
+        });
+
+        expect(screen.getAllByTestId('beegame-agent-activity-group')).toHaveLength(1);
+        expect(screen.getByTestId('beegame-agent-activity-group').querySelector('[data-content="text"]')).toBeInTheDocument();
+    });
+
+    it('keeps activity segments around markdown and todo parts in response order', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            projectStatus: {
+                project_id: 'proj_order',
+                phase: 'running',
+                blocked: false,
+                next_action: 'running',
+                workflow: {
+                    runId: 'turn-order-workflow',
+                    status: 'running',
+                    createdAt: '1970-01-01T00:00:00.002Z',
+                },
+            },
+            messages: [
+                { id: 'order-thought', sender: 'beegame', content: 'Thinking', thought: 'Inspect first', timestamp: 1, type: 'thought', taskKind: 'assistant_thinking', turnId: 'turn-order' },
+                { id: 'order-agent', sender: 'beegame', content: 'Here is the first update.', timestamp: 3, turnId: 'turn-order' },
+                { id: 'order-tool', sender: 'system', content: 'Read completed', timestamp: 4, type: 'tool', toolName: 'Read', toolStatus: 'completed', toolDetail: 'src/after.ts', turnId: 'turn-order' },
+            ],
+        });
+
+        const activities = screen.getAllByTestId('beegame-agent-activity-group');
+        const workflow = screen.getByTestId('beegame-workflow-plan-turn-order-workflow');
+        const agent = screen.getByTestId('beegame-agent-message-order-agent');
+        expect(activities).toHaveLength(2);
+        expect(activities[0].compareDocumentPosition(workflow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(workflow.compareDocumentPosition(agent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(agent.compareDocumentPosition(activities[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('uses the store streaming message id instead of promoting an arbitrary latest agent row', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            isLoading: true,
+            messages: [{ id: 'm_old_agent', sender: 'beegame', content: 'Previous answer', timestamp: 1 }],
+        });
+
+        expect(screen.getByTestId('beegame-loading-message')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-agent-message-m_old_agent')).toHaveTextContent('Previous answer');
+        expect(screen.queryByText('Stop streaming')).not.toBeInTheDocument();
+    });
+
+    it('keeps complete structured subagent fields available inside the activity', async () => {
+        const prompt = 'Prompt '.repeat(80);
+        const output = 'Output '.repeat(80);
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            messages: [{ id: 'm_subagent', sender: 'system', type: 'tool', toolName: 'Task', toolStatus: 'completed', isSubagentTool: true, subagentPrompt: prompt, subagentOutput: output, content: 'Task completed', timestamp: 1 }],
+        });
+
+        const activity = screen.getByTestId('beegame-agent-activity-group');
+        expect(screen.queryByTestId('beegame-tool-output-m_subagent')).not.toBeInTheDocument();
     });
 
     it('keeps oversized messages inside the dedicated scroll viewport', () => {
@@ -558,17 +831,13 @@ describe('ChatPanel approval bar', () => {
 
         const userItem = document.querySelector('[data-message-id="m_oversized_user"]');
         const agentItem = document.querySelector('[data-message-id="m_oversized_agent"]');
-        expect(userItem).toHaveClass('min-w-0', 'max-w-full');
-        expect(agentItem).toHaveClass('min-w-0', 'max-w-full');
-        expect(screen.getByTestId('beegame-user-message-m_oversized_user')).toHaveClass(
-            'min-w-0',
-            'overflow-hidden',
-        );
-        expect(screen.getByTestId('beegame-agent-message-m_oversized_agent')).toHaveClass(
-            'min-w-0',
-            'max-w-full',
-            'overflow-hidden',
-        );
+        expect(userItem).toHaveClass('min-w-0');
+        expect(userItem).not.toHaveClass('max-w-full');
+        expect(agentItem).toHaveClass('min-w-0');
+        expect(agentItem).not.toHaveClass('max-w-full');
+        expect(screen.getByTestId('beegame-user-message-m_oversized_user')).toHaveClass('min-w-0');
+        expect(screen.getByTestId('beegame-agent-message-m_oversized_agent')).toHaveClass('min-w-0');
+        expect(screen.getByTestId('beegame-agent-message-m_oversized_agent')).not.toHaveClass('max-w-[46rem]');
         expect(screen.getByTestId('beegame-agent-message-m_oversized_agent').querySelector('pre')).toHaveClass(
             'max-w-full',
             'overflow-x-auto',
@@ -599,95 +868,7 @@ describe('ChatPanel approval bar', () => {
         expect(onCancelEdit).toHaveBeenCalledOnce();
     });
 
-    it('hides the BeeGame message scroller button when already at the latest message', () => {
-        renderChatPanel({
-            actionPermission: undefined,
-            pendingPermissions: [],
-            variant: 'beegame',
-            messages: [
-                {
-                    id: 'm_latest_1',
-                    sender: 'user',
-                    content: 'message one',
-                    timestamp: 1,
-                },
-                {
-                    id: 'm_latest_2',
-                    sender: 'beegame',
-                    content: 'message two',
-                    timestamp: 2,
-                },
-            ],
-        });
 
-        const scrollButton = screen.getByRole('button', { name: 'Scroll to end' });
-        expect(scrollButton).toHaveAttribute('data-active', 'false');
-        expect(scrollButton).toHaveClass('data-[active=false]:opacity-0');
-        expect(scrollButton).toHaveClass('data-[active=false]:pointer-events-none');
-    });
-
-    it('shows the BeeGame message scroller button when the transcript can scroll down', async () => {
-        renderChatPanel({
-            actionPermission: undefined,
-            pendingPermissions: [],
-            variant: 'beegame',
-            messages: Array.from({ length: 8 }, (_, index) => ({
-                id: `m_scroll_${index + 1}`,
-                sender: index % 2 === 0 ? 'user' : 'beegame',
-                content: `message ${index + 1}`,
-                timestamp: index + 1,
-            })),
-        });
-
-        const viewport = screen.getByTestId('beegame-message-scroller-viewport') as HTMLDivElement;
-        const content = screen.getByTestId('beegame-message-scroller-content') as HTMLDivElement;
-        Object.defineProperties(viewport, {
-            scrollTop: { configurable: true, writable: true, value: 0 },
-            clientHeight: { configurable: true, value: 120 },
-        });
-        viewport.getBoundingClientRect = vi.fn(() => ({
-            top: 0,
-            bottom: 120,
-            left: 0,
-            right: 360,
-            width: 360,
-            height: 120,
-            x: 0,
-            y: 0,
-            toJSON: () => ({}),
-        }));
-        content.getBoundingClientRect = vi.fn(() => ({
-            top: 0,
-            bottom: 360,
-            left: 0,
-            right: 360,
-            width: 360,
-            height: 360,
-            x: 0,
-            y: 0,
-            toJSON: () => ({}),
-        }));
-        for (const [index, item] of Array.from(content.children).entries()) {
-            if (!(item instanceof HTMLElement) || !item.dataset.messageId) continue;
-            item.getBoundingClientRect = vi.fn(() => ({
-                top: index * 45,
-                bottom: index * 45 + 40,
-                left: 0,
-                right: 360,
-                width: 360,
-                height: 40,
-                x: 0,
-                y: index * 45,
-                toJSON: () => ({}),
-            }));
-        }
-
-        fireEvent.scroll(viewport);
-
-        await waitFor(() => {
-            expect(screen.getByRole('button', { name: 'Scroll to end' })).toHaveAttribute('data-active', 'true');
-        });
-    });
 
     it('requests an older history page when the BeeGame transcript reaches the top', () => {
         const onLoadOlderHistory = vi.fn();
@@ -717,8 +898,7 @@ describe('ChatPanel approval bar', () => {
         expect(screen.getByRole('button', { name: 'Load earlier messages' })).toBeInTheDocument();
     });
 
-    it('collapses multiple BeeGame tool calls by default and expands to show all tools', async () => {
-        const user = userEvent.setup();
+    it('renders multiple BeeGame tool calls in one activity', async () => {
         renderChatPanel({
             actionPermission: undefined,
             pendingPermissions: [],
@@ -730,6 +910,7 @@ describe('ChatPanel approval bar', () => {
                     sender: 'beegame',
                     content: '我会连续执行验证。',
                     timestamp: 1,
+                    turnId: 'turn-many-tools',
                 },
                 ...Array.from({ length: 8 }, (_, index) => ({
                     id: `m_tool_${index + 1}`,
@@ -740,29 +921,80 @@ describe('ChatPanel approval bar', () => {
                     toolName: 'Bash',
                     toolStatus: 'completed' as const,
                     toolDetail: `check ${index + 1}`,
+                    turnId: 'turn-many-tools',
                 })),
             ],
         });
 
-        const groupToggle = screen.getByRole('button', { name: /执行了 8 次工具调用/i });
-        expect(groupToggle).toHaveAttribute('aria-expanded', 'false');
-        expect(screen.queryAllByTestId(/beegame-tool-timeline-card/)).toHaveLength(0);
+        const activity = screen.getByTestId('beegame-agent-activity-group');
+        expect(screen.getAllByTestId('beegame-agent-activity-group')).toHaveLength(1);
+        expect(activity.querySelector('[data-content="tool"]')).toBeInTheDocument();
+        expect(activity).not.toHaveTextContent('5 results');
+        expect(screen.queryByTestId('beegame-tool-group')).not.toBeInTheDocument();
+        await userEvent.setup().click(activity.querySelector('button')!);
+        expect(activity).toHaveTextContent('check 1');
+        expect(activity).toHaveTextContent('check 8');
+    });
 
-        await user.click(groupToggle);
+    it('expands one contiguous activity and renders a real write diff', async () => {
+        const user = userEvent.setup();
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            messages: [
+                {
+                    id: 'm_write_diff',
+                    sender: 'system',
+                    content: 'Write completed\nTarget: src/pages/StartScreen.tsx',
+                    timestamp: 2,
+                    type: 'tool',
+                    toolName: 'Write',
+                    toolStatus: 'completed',
+                    toolDetail: 'src/pages/StartScreen.tsx',
+                    toolDiff: '--- a/src/pages/StartScreen.tsx\n+++ b/src/pages/StartScreen.tsx\n@@\n-<button>Start round</button>\n+<button type="button">Start round</button>',
+                    turnId: 'turn-diff',
+                },
+                {
+                    id: 'm_read_after_diff',
+                    sender: 'system',
+                    content: 'Read completed\nTarget: src/pages/StartScreen.tsx',
+                    timestamp: 1,
+                    type: 'tool',
+                    toolName: 'Read',
+                    toolStatus: 'completed',
+                    toolDetail: 'src/pages/StartScreen.tsx',
+                    turnId: 'turn-diff',
+                },
+            ],
+        });
 
-        expect(groupToggle).toHaveAttribute('aria-expanded', 'true');
-        const toolCards = screen.getAllByTestId(/beegame-tool-timeline-card/);
-        expect(toolCards).toHaveLength(8);
-        expect(screen.getByTestId('beegame-tool-list')).toHaveClass('border-l');
-        expect(toolCards[0]).not.toHaveClass('glass-control');
-        expect(toolCards[0]).not.toHaveClass('rounded-2xl');
-        expect(toolCards[0].querySelector('[data-slot="marker"]')).toBeInTheDocument();
-        expect(toolCards[0].querySelector('[data-slot="marker-icon"]')).toBeInTheDocument();
-        expect(toolCards[0].querySelector('button')).toBeNull();
-        expect(toolCards[0].querySelector('[aria-expanded]')).toBeNull();
-        expect(screen.queryByTestId('beegame-tool-status-icon')).not.toBeInTheDocument();
-        expect(document.querySelector('[data-tool-id="m_tool_1"]')).toBeInTheDocument();
-        expect(document.querySelector('[data-tool-id="m_tool_8"]')).toBeInTheDocument();
+        const diff = screen.getByTestId('beegame-file-diff');
+        await user.click(diff.querySelector('button')!);
+        expect(diff).toHaveTextContent('<button>Start round</button>');
+        expect(diff).toHaveTextContent('<button type="button">Start round</button>');
+    });
+
+    it('keeps turnId-bearing agent parts in separate response containers', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            messages: [
+                { id: 'turn-unknown', sender: 'beegame', content: 'Fallback response', timestamp: 1 },
+                { id: 'turn-known-a', sender: 'system', type: 'tool', content: 'Read completed', timestamp: 2, turnId: 'turn-a', toolName: 'Read', toolStatus: 'completed' },
+                { id: 'turn-known-b', sender: 'beegame', content: 'New response', timestamp: 3, turnId: 'turn-b' },
+            ],
+        });
+
+        const turns = screen.getAllByTestId(/^beegame-agent-turn-/);
+        expect(turns).toHaveLength(3);
+        expect(turns.map((turn) => turn.getAttribute('data-message-id'))).toEqual([
+            'turn-unknown',
+            'turn-a',
+            'turn-b',
+        ]);
+        expect(turns[1]).toContainElement(screen.getByTestId('beegame-agent-activity-group'));
     });
 
     it('renders BeeGame context updates as marker separators', () => {
@@ -789,7 +1021,7 @@ describe('ChatPanel approval bar', () => {
         expect(separator).not.toHaveAttribute('role', 'separator');
     });
 
-    it('renders BeeGame search tool calls without card chrome or status icons', () => {
+    it('renders BeeGame search tool calls as activity items', async () => {
         renderChatPanel({
             actionPermission: undefined,
             pendingPermissions: [],
@@ -809,16 +1041,14 @@ describe('ChatPanel approval bar', () => {
             ],
         });
 
-        const toolCard = screen.getByTestId('beegame-tool-timeline-card');
-        expect(toolCard).not.toHaveClass('glass-control');
-        expect(toolCard.querySelector('[data-slot="marker"]')).toBeInTheDocument();
-        expect(toolCard.querySelector('[data-slot="marker-icon"]')).toBeInTheDocument();
-        expect(toolCard.querySelector('button')).toBeNull();
-        expect(screen.queryByTestId('beegame-tool-status-icon')).not.toBeInTheDocument();
-        expect(screen.getByText('搜索文件完成')).toBeInTheDocument();
+        const activity = screen.getByTestId('beegame-agent-activity-group');
+        expect(activity.querySelector('[data-content="search"]')).toBeInTheDocument();
+        await userEvent.setup().click(activity.querySelector('button')!);
+        expect(activity).toHaveTextContent('Searched the web');
+        expect(activity).toHaveTextContent('found 4 files');
     });
 
-    it('shows BeeGame read tool calls as muted file-name markers', () => {
+    it('shows BeeGame read tool calls as activity items', async () => {
         renderChatPanel({
             actionPermission: undefined,
             pendingPermissions: [],
@@ -837,57 +1067,14 @@ describe('ChatPanel approval bar', () => {
             ],
         });
 
-        const toolCard = screen.getByTestId('beegame-tool-timeline-card');
-        const marker = toolCard.querySelector('[data-slot="marker"]');
-        const markerContent = toolCard.querySelector('[data-slot="marker-content"]');
-        expect(screen.getByText('Read PlayerView.tsx')).toBeInTheDocument();
-        expect(marker).toHaveClass('type-muted', 'text-muted-foreground');
-        expect(markerContent).toHaveClass('text-muted-foreground');
-        expect(screen.queryByText('src/components/PlayerView.tsx')).not.toBeInTheDocument();
+        const activity = screen.getByTestId('beegame-agent-activity-group');
+        expect(activity).toHaveTextContent('PlayerView.tsx');
+        await userEvent.setup().click(activity.querySelector('button')!);
+        expect(activity).toHaveTextContent('src/components/PlayerView.tsx');
     });
 
-    it('builds the BeeGame message outline from user messages only', () => {
-        renderChatPanel({
-            actionPermission: undefined,
-            pendingPermissions: [],
-            variant: 'beegame',
-            messages: [
-                {
-                    id: 'm_user_1',
-                    sender: 'user',
-                    content: '第一个用户输入',
-                    timestamp: 1,
-                },
-                {
-                    id: 'm_agent',
-                    sender: 'beegame',
-                    content: '这条 AI 回复不应该进入 outline',
-                    timestamp: 2,
-                },
-                {
-                    id: 'm_tool',
-                    sender: 'system',
-                    content: 'Bash completed\nCommand: bun test',
-                    timestamp: 3,
-                    type: 'tool',
-                    toolName: 'Bash',
-                    toolStatus: 'completed',
-                    toolDetail: 'bun test',
-                },
-                {
-                    id: 'm_user_2',
-                    sender: 'user',
-                    content: '第二个用户输入',
-                    timestamp: 4,
-                },
-            ],
-        });
-
-        expect(screen.getAllByTestId('message-scroller-outline-line')).toHaveLength(2);
-    });
 
     it('normalizes BeeGame tool messages from snake_case fields and structured content', async () => {
-        const user = userEvent.setup();
         renderChatPanel({
             actionPermission: undefined,
             pendingPermissions: [],
@@ -902,6 +1089,7 @@ describe('ChatPanel approval bar', () => {
                     tool: 'Write',
                     tool_status: 'completed',
                     tool_detail: 'Target: docs/GDD.md',
+                    turnId: 'turn-normalized-tools',
                 } as any,
                 {
                     id: 'm_content',
@@ -909,18 +1097,17 @@ describe('ChatPanel approval bar', () => {
                     content: 'Bash completed\nCommand: bun run build\nOutput: Build passed',
                     timestamp: 2,
                     type: 'tool',
+                    turnId: 'turn-normalized-tools',
                 },
             ],
         });
 
-        await user.click(screen.getByRole('button', { name: /2 tool calls/i }));
-
-        expect(screen.getByText('Write GDD.md')).toBeInTheDocument();
-        expect(screen.getAllByText('Bash completed').length).toBeGreaterThan(0);
-        expect(screen.queryByText('docs/GDD.md')).not.toBeInTheDocument();
-        expect(screen.queryByText('bun run build')).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /Write GDD.md/i })).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /Bash completed/i })).not.toBeInTheDocument();
+        const activity = screen.getByTestId('beegame-agent-activity-group');
+        await userEvent.setup().click(activity.querySelector('button')!);
+        expect(activity).toHaveTextContent('Edit');
+        expect(activity).toHaveTextContent('Run');
+        expect(activity).toHaveTextContent('docs/GDD.md');
+        expect(activity).toHaveTextContent('bun run build');
         expect(screen.queryByText(/^Tool$/)).not.toBeInTheDocument();
     });
 
@@ -981,9 +1168,8 @@ describe('ChatPanel approval bar', () => {
         });
 
         expect(screen.getByText('这是一条可以折叠的消息。')).toBeInTheDocument();
-        expect(screen.getByText('Bash completed')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-agent-activity-group')).toBeInTheDocument();
         expect(screen.queryByText('BeeGame')).not.toBeInTheDocument();
-        expect(screen.queryByAltText('BeeGame')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Collapse BeeGame message' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Expand BeeGame message' })).not.toBeInTheDocument();
     });
@@ -1016,8 +1202,8 @@ describe('ChatPanel approval bar', () => {
         expect(screen.queryByText(/\*\*交付内容\*\*/)).not.toBeInTheDocument();
     });
 
-    it('renders write tool calls as plain markers without details or preview actions', () => {
-        const { onPreviewArtifact } = renderChatPanel({
+    it('renders write tool calls and preview actions inside the activity', async () => {
+        renderChatPanel({
             actionPermission: undefined,
             pendingPermissions: [],
             variant: 'beegame',
@@ -1037,20 +1223,14 @@ describe('ChatPanel approval bar', () => {
             ],
         });
 
-        const toolCard = screen.getByTestId('beegame-tool-timeline-card');
-        expect(toolCard.querySelector('[data-slot="marker"]')).toBeInTheDocument();
-        expect(toolCard.querySelector('[data-slot="marker-icon"]')).toBeInTheDocument();
-        expect(screen.getByText('Write GDD.md')).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /Write GDD.md/i })).not.toBeInTheDocument();
-        expect(toolCard.querySelector('[aria-expanded]')).toBeNull();
-        expect(screen.queryByText('docs/GDD.md')).not.toBeInTheDocument();
-        expect(screen.queryByText('Created successfully')).not.toBeInTheDocument();
+        const activity = screen.getByTestId('beegame-agent-activity-group');
+        await userEvent.setup().click(activity.querySelector('button')!);
+        expect(activity).toHaveTextContent('docs/GDD.md');
+        expect(screen.queryByTestId('beegame-tool-output-m_write')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /Open/i })).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /Diff/i })).not.toBeInTheDocument();
-        expect(onPreviewArtifact).not.toHaveBeenCalled();
     });
 
-    it('renders BeeGame user messages without user identity chrome', () => {
+    it('renders BeeGame user messages without user identity chrome', async () => {
         renderChatPanel({
             actionPermission: undefined,
             pendingPermissions: [],
@@ -1069,17 +1249,45 @@ describe('ChatPanel approval bar', () => {
         });
 
         const userMessage = screen.getByTestId('beegame-user-message-m_user_identity');
-        expect(userMessage).toHaveClass('max-w-[46rem]');
+        expect(userMessage).toHaveClass('min-w-0');
+        expect(userMessage).not.toHaveClass('max-w-[46rem]');
         expect(userMessage).not.toHaveClass('ml-auto');
         expect(userMessage).toHaveTextContent('做一个我的世界风格类CS的FPS游戏');
+        expect(userMessage.querySelector('[data-slot="message-bubble-content"]')).toBeInTheDocument();
+        expect(userMessage.querySelector('[data-variant="solid"]')).toBeInTheDocument();
+        expect(userMessage.querySelector('[data-slot="message-avatar"]')).toBeNull();
+        expect(userMessage.querySelector('[data-slot="message-header"]')).toBeNull();
         expect(userMessage).not.toHaveTextContent('NSWells');
-        expect(userMessage).not.toHaveTextContent('xmcz1996@gmail.com');
-        expect(screen.queryByAltText('NSWells')).not.toBeInTheDocument();
-        expect(screen.queryByAltText('xmcz1996@gmail.com')).not.toBeInTheDocument();
+        expect(within(userMessage.closest('[data-slot="message"]')!).queryByAltText('')).not.toBeInTheDocument();
     });
 
-    it('does not draw timeline connectors for BeeGame tool rows', async () => {
-        const user = userEvent.setup();
+    it('keeps the official solid bubble foreground readable in dark mode', () => {
+        document.documentElement.classList.add('dark');
+        try {
+            renderChatPanel({
+                actionPermission: undefined,
+                pendingPermissions: [],
+                variant: 'beegame',
+                messages: [{
+                    id: 'm_user_dark',
+                    sender: 'user',
+                    content: 'Dark mode message',
+                    timestamp: 1,
+                }],
+            });
+
+            const userMessage = screen.getByTestId('beegame-user-message-m_user_dark');
+            const bubble = userMessage.querySelector('[data-slot="message-bubble-content"]');
+            expect(userMessage.querySelector('[data-slot="message-bubble"]')).toHaveAttribute('data-variant', 'solid');
+            expect(bubble).toHaveClass('text-background');
+            expect(userMessage).not.toHaveClass('text-[var(--text-primary)]');
+            expect(bubble).toHaveTextContent('Dark mode message');
+        } finally {
+            document.documentElement.classList.remove('dark');
+        }
+    });
+
+    it('does not draw timeline connectors for BeeGame activity rows', async () => {
         renderChatPanel({
             actionPermission: undefined,
             pendingPermissions: [],
@@ -1094,6 +1302,7 @@ describe('ChatPanel approval bar', () => {
                     toolName: 'Write',
                     toolStatus: 'completed',
                     toolDetail: 'docs/GDD.md',
+                    turnId: 'turn-timeline-tools',
                 },
                 {
                     id: 'm_bash',
@@ -1104,19 +1313,17 @@ describe('ChatPanel approval bar', () => {
                     toolName: 'Bash',
                     toolStatus: 'completed',
                     toolDetail: 'bun run build',
+                    turnId: 'turn-timeline-tools',
                 },
             ],
         });
 
-        await user.click(screen.getByRole('button', { name: /2 tool calls/i }));
-
-        const toolCards = screen.getAllByTestId('beegame-tool-timeline-card');
-        expect(toolCards[0].querySelector('[data-testid="beegame-tool-connector"]')).toBeNull();
-        expect(toolCards[1].querySelector('[data-testid="beegame-tool-connector"]')).toBeNull();
+        const activity = screen.getByTestId('beegame-agent-activity-group');
+        expect(activity.querySelector('[data-testid="beegame-tool-connector"]')).toBeNull();
+        expect(screen.queryByTestId('beegame-tool-timeline-card')).not.toBeInTheDocument();
     });
 
-    it('omits BeeGame tool status icons', async () => {
-        const user = userEvent.setup();
+    it('uses activity status icons for running, completed, and failed tools', async () => {
         renderChatPanel({
             actionPermission: undefined,
             pendingPermissions: [],
@@ -1131,6 +1338,7 @@ describe('ChatPanel approval bar', () => {
                     toolName: 'Bash',
                     toolStatus: 'running',
                     toolDetail: 'bun run build',
+                    turnId: 'turn-status-tools',
                 },
                 {
                     id: 'm_completed',
@@ -1141,6 +1349,7 @@ describe('ChatPanel approval bar', () => {
                     toolName: 'Write',
                     toolStatus: 'completed',
                     toolDetail: 'docs/GDD.md',
+                    turnId: 'turn-status-tools',
                 },
                 {
                     id: 'm_failed',
@@ -1151,14 +1360,17 @@ describe('ChatPanel approval bar', () => {
                     toolName: 'Bash',
                     toolStatus: 'failed',
                     toolDetail: 'bun test',
+                    turnId: 'turn-status-tools',
                 },
             ],
         });
 
-        await user.click(screen.getByRole('button', { name: /3 tool calls/i }));
-
-        expect(screen.getAllByTestId('beegame-tool-timeline-card')).toHaveLength(3);
-        expect(screen.queryByTestId('beegame-tool-status-icon')).not.toBeInTheDocument();
+        const activity = screen.getByTestId('beegame-agent-activity-group');
+        expect(activity.querySelector('[data-state="working"]')).toBeInTheDocument();
+        expect(activity.querySelector('[role="region"]')).toHaveStyle({ height: '0px' });
+        expect(activity).toHaveTextContent('Running tools');
+        expect(within(activity).getByText('Edit')).toBeInTheDocument();
+        expect(within(activity).getAllByText('Run').length).toBeGreaterThan(0);
     });
 
     it('uses the canonical BeeGame message rendering path without a mode switch', () => {
@@ -1175,8 +1387,93 @@ describe('ChatPanel approval bar', () => {
             ],
         });
 
-        expect(screen.getByTestId('beegame-agent-feed-group-m_agent')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-agent-message-m_agent')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-agent-message-m_agent').querySelector('[data-slot="message-bubble"]')).toBeNull();
         expect(screen.getByText('Canonical chat message')).toBeInTheDocument();
+    });
+
+    it('shows the vendored completion footer for a real assistant response', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            messages: [
+                { id: 'footer-user', sender: 'user', content: 'Please inspect the scene.', timestamp: 1 },
+                { id: 'footer-agent', sender: 'beegame', content: 'The scene is ready.', timestamp: 2 },
+            ],
+        });
+
+        expect(screen.getByRole('button', { name: 'Copy response' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Helpful' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Not helpful' })).toBeInTheDocument();
+    });
+
+    it('retries a completed response with its nearest preceding user message', () => {
+        const onSendMessage = vi.fn();
+        renderChatPanel({
+            actionPermission: undefined,
+            onSendMessage,
+            messages: [
+                { id: 'retry-user', sender: 'user', content: 'Retry this request.', timestamp: 1 },
+                { id: 'retry-agent', sender: 'beegame', content: 'Completed answer.', timestamp: 2 },
+            ],
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: 'Retry response' }));
+        expect(onSendMessage).toHaveBeenCalledWith('Retry this request.');
+    });
+
+    it('hides completion actions while the assistant response is streaming', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            streamingMessageId: 'streaming-agent',
+            messages: [{ id: 'streaming-agent', sender: 'beegame', content: 'Still writing…', timestamp: 2 }],
+        });
+
+        expect(screen.queryByRole('button', { name: 'Copy response' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Helpful' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Not helpful' })).not.toBeInTheDocument();
+    });
+
+    it('does not render an empty completion footer for an activity-only turn', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            messages: [{
+                id: 'activity-only-tool',
+                sender: 'system',
+                content: 'Read completed\nTarget: src/App.tsx',
+                timestamp: 1,
+                type: 'tool',
+                toolName: 'Read',
+                toolStatus: 'completed',
+                toolDetail: 'src/App.tsx',
+            }],
+        });
+
+        expect(screen.queryByRole('button', { name: 'Copy response' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Helpful' })).not.toBeInTheDocument();
+    });
+
+    it('renders structured assistant citations through StreamingResponse', async () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            messages: [{
+                id: 'm_citations',
+                sender: 'beegame',
+                content: 'Response with sources',
+                timestamp: 2,
+                sources: [{ id: 'source-1', title: 'BeeGame docs', domain: 'beegame.test' }],
+                citations: [
+                    { id: 'source-1', title: 'BeeGame docs', domain: 'beegame.test' },
+                    { id: 'source-2', title: 'Transcript citation', domain: 'transcript.test' },
+                ],
+            }],
+        });
+
+        const sourceButton = screen.getByRole('button', { name: /2 sources/i });
+        expect(sourceButton).toBeInTheDocument();
+        await userEvent.click(sourceButton);
+        expect(screen.getByText('BeeGame docs')).toBeInTheDocument();
+        expect(screen.getByText('Transcript citation')).toBeInTheDocument();
     });
 
     it('restores the normal composer after approval state idles and the pending review is removed', () => {

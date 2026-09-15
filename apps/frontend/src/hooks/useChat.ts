@@ -2,7 +2,7 @@
  * useChat Hook
  *
  * Manages chat functionality including:
- * - WebSocket message routing and processing
+ * - Runtime event streaming with polling fallback and message routing
  * - Message type handling (token, status, tool_start, tool_end, usage, error_paused)
  * - Chat operations (sendMessage, continueTask, stopTask)
  * - Loading state management
@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useProjectEventPolling } from './useProjectEventPolling'
 import { useChatStore } from '../store/chatStore'
 import { useProjectStore } from '../store/projectStore'
@@ -85,7 +86,7 @@ export interface UseChatReturn {
     terminationNode?: string,
     attachments?: ChatAttachmentPayload[],
     supersedesMessageId?: string,
-  ) => Promise<void>
+  ) => Promise<boolean>
 
   /**
    * Continue a paused task
@@ -126,14 +127,14 @@ export interface UseChatReturn {
   /** Whether the task is paused and can be continued */
   canContinue: boolean
 
-  /** WebSocket connection state */
+  /** Runtime event transport state */
   wsState: ProjectEventPollingState
 }
 
 /**
  * Custom hook for managing chat functionality
  *
- * This hook integrates WebSocket communication, message routing,
+ * This hook integrates runtime event streaming, message routing,
  * and chat operations (send, continue, stop) into a single interface.
  *
  * @param options - Configuration options for the chat
@@ -166,6 +167,22 @@ export const useChat = ({
   showToastError,
   showToastSuccess,
 }: UseChatOptions): UseChatReturn => {
+  // A project id alone is insufficient for async guards: navigating A → B → A
+  // must still invalidate work started by the first A instance, and an
+  // unmounted hook must not write into the shared stores when its request
+  // eventually settles.
+  const lifecycleRef = useRef({ projectId, generation: 0, mounted: true })
+  useEffect(() => {
+    const lifecycle = lifecycleRef.current
+    lifecycle.projectId = projectId
+    lifecycle.generation += 1
+    lifecycle.mounted = true
+    return () => {
+      lifecycle.mounted = false
+      lifecycle.generation += 1
+    }
+  }, [projectId])
+
   // State management
   const [isLoading, setIsLoading] = useState(false)
   const [isStopping, setIsStopping] = useState(false)
@@ -191,9 +208,24 @@ export const useChat = ({
     setCurrentSender,
     setIsStreaming,
     loadHistory,
-  } = useChatStore()
-  const pendingPermissions = useProjectStore(state => state.pendingPermissions)
-  const projectStatus = useProjectStore(state => state.projectStatus)
+  } = useChatStore(
+    useShallow(state => ({
+      addMessage: state.addMessage,
+      updateMessage: state.updateMessage,
+      updateThought: state.updateThought,
+      removeMessage: state.removeMessage,
+      finalizeMessage: state.finalizeMessage,
+      setCurrentSender: state.setCurrentSender,
+      setIsStreaming: state.setIsStreaming,
+      loadHistory: state.loadHistory,
+    })),
+  )
+  const { pendingPermissions, projectStatus } = useProjectStore(
+    useShallow(state => ({
+      pendingPermissions: state.pendingPermissions,
+      projectStatus: state.projectStatus,
+    })),
+  )
   const removePendingPermission = useProjectStore(
     state => state.removePendingPermission,
   )
@@ -205,7 +237,14 @@ export const useChat = ({
     updateLastP2PRoute,
     loadCurrentUser,
     setIsSyncing,
-  } = useSystemStore()
+  } = useSystemStore(
+    useShallow(state => ({
+      updateTokenUsage: state.updateTokenUsage,
+      updateLastP2PRoute: state.updateLastP2PRoute,
+      loadCurrentUser: state.loadCurrentUser,
+      setIsSyncing: state.setIsSyncing,
+    })),
+  )
   const projectRuntimeDisplay = toProjectRuntimeDisplayModel(projectStatus)
   const waitingPermission = getWaitingPermissionState(
     projectRuntimeDisplay,
@@ -279,7 +318,7 @@ export const useChat = ({
     [addMessage, onError, showToastError],
   )
 
-  // Use refs to avoid handleProjectEventMessage dependency churn and event polling restarts
+  // Use refs to avoid handleProjectEventMessage dependency churn and transport restarts
   const latestRefs = useRef({
     projectId,
     onError,
@@ -306,7 +345,7 @@ export const useChat = ({
   }
 
   /**
-   * Handle incoming WebSocket messages
+   * Handle incoming runtime events
    * Routes messages to appropriate handlers based on type
    *
    * Requirements: 1.2, 7.1, 7.2
@@ -330,11 +369,18 @@ export const useChat = ({
               message.artifact_id,
               message.document_title,
               {
+                turnId: message.turnId || message.turn_id,
+                contentBlocks: message.content_blocks,
                 renderHint: message.render_hint,
                 artifactType: message.artifact_type,
                 taskKind: message.task_kind,
                 nextAction: message.next_action,
                 requiresUserAction: message.requires_user_action,
+                sources: message.sources,
+                citations: message.citations,
+                subagentPrompt: message.subagent_prompt,
+                subagentOutput: message.subagent_output,
+                subagentTrace: message.subagent_trace,
               },
               message.timestamp,
               message.message_id,
@@ -355,11 +401,18 @@ export const useChat = ({
               message.artifact_id,
               message.document_title,
               {
+                turnId: message.turnId || message.turn_id,
+                contentBlocks: message.content_blocks,
                 renderHint: message.render_hint,
                 artifactType: message.artifact_type,
                 taskKind: message.task_kind,
                 nextAction: message.next_action,
                 requiresUserAction: message.requires_user_action,
+                sources: message.sources,
+                citations: message.citations,
+                subagentPrompt: message.subagent_prompt,
+                subagentOutput: message.subagent_output,
+                subagentTrace: message.subagent_trace,
               },
               message.timestamp,
               message.message_id,
@@ -377,6 +430,7 @@ export const useChat = ({
               message.sender,
               message.timestamp,
               message.message_id,
+              message.turnId || message.turn_id,
             )
             setCurrentSender(message.sender)
           }
@@ -392,7 +446,11 @@ export const useChat = ({
               false,
               undefined,
               undefined,
-              { taskKind: 'assistant_thinking' },
+              {
+                taskKind: 'assistant_thinking',
+                turnId: message.turnId || message.turn_id,
+                contentBlocks: message.content_blocks,
+              },
               message.timestamp,
               message.message_id,
             )
@@ -401,7 +459,36 @@ export const useChat = ({
           break
 
         case 'think_end':
-          if (message.message_id) removeMessage(message.message_id)
+          if (message.message_id) {
+            const thoughtMessage = useChatStore.getState().messages.find(candidate => (
+              candidate.id === message.message_id || candidate.messageId === message.message_id
+            ))
+            const thought = thoughtMessage?.thought?.trim() || ''
+            const eventContent = message.content?.trim() || ''
+            const hasActualThought = Boolean(thought || (eventContent && eventContent !== 'Thinking'))
+
+            if (!hasActualThought) {
+              removeMessage(message.message_id)
+              setIsStreaming(false)
+              break
+            }
+
+            finalizeMessage(
+              thoughtMessage?.taskId || message.task_id,
+              thoughtMessage?.content || (eventContent && eventContent !== 'Thinking' ? eventContent : 'Thinking'),
+              thoughtMessage?.sender || message.sender || 'beegame',
+              'thought',
+              thoughtMessage?.isDocument,
+              thoughtMessage?.artifactId,
+              thoughtMessage?.documentTitle,
+              {
+                taskKind: thoughtMessage?.taskKind || 'assistant_thinking',
+                turnId: thoughtMessage?.turnId || message.turnId || message.turn_id,
+              },
+              thoughtMessage?.timestamp || message.timestamp,
+              thoughtMessage?.messageId || thoughtMessage?.id || message.message_id,
+            )
+          }
           break
 
         case 'status':
@@ -613,12 +700,23 @@ export const useChat = ({
               type: 'tool',
               taskKind: 'tool_execution',
               toolName: message.tool,
+              toolUseId: message.tool_use_id,
               toolStatus: message.tool_status || 'running',
               toolDetail: message.tool_detail,
               toolOutput: message.tool_output,
+              toolDiff: message.tool_diff,
+              toolPatch: message.tool_patch,
+              toolBefore: message.tool_before,
+              toolAfter: message.tool_after,
+              toolStructuredPatch: message.structured_patch,
+              toolInput: message.tool_input,
               artifactId: message.artifact_id,
               artifactPath: message.artifact_path,
+              turnId: message.turnId || message.turn_id,
               isSubagentTool: message.is_subagent_tool,
+              subagentPrompt: message.subagent_prompt,
+              subagentOutput: message.subagent_output,
+              subagentTrace: message.subagent_trace,
             })
             refs.onTaskEvent?.('tool_start', message)
           }
@@ -656,12 +754,23 @@ export const useChat = ({
               type: 'tool',
               taskKind: 'tool_execution',
               toolName: message.tool,
+              toolUseId: message.tool_use_id,
               toolStatus: message.tool_status || status,
               toolDetail: message.tool_detail,
-              toolOutput: message.tool_output || outputSummary,
+              toolOutput: message.subagent_output || message.tool_output || outputSummary,
+              toolDiff: message.tool_diff,
+              toolPatch: message.tool_patch,
+              toolBefore: message.tool_before,
+              toolAfter: message.tool_after,
+              toolStructuredPatch: message.structured_patch,
+              toolInput: message.tool_input,
               artifactId: message.artifact_id,
               artifactPath: message.artifact_path,
+              turnId: message.turnId || message.turn_id,
               isSubagentTool: message.is_subagent_tool,
+              subagentPrompt: message.subagent_prompt,
+              subagentOutput: message.subagent_output,
+              subagentTrace: message.subagent_trace,
             })
             refs.onTaskEvent?.('tool_end', message)
           }
@@ -733,7 +842,7 @@ export const useChat = ({
   )
 
   /**
-   * Synchronize all state with backend after reconnection
+   * Synchronize all state with backend after event transport reconnects
    * Requirements: 7.2
    */
   const syncAfterReconnect = useCallback(async () => {
@@ -775,9 +884,9 @@ export const useChat = ({
   ])
 
   /**
-   * Handle WebSocket close
+   * Handle runtime event transport disconnect
    */
-  const handleWebSocketClose = useCallback(() => {
+  const handleTransportClose = useCallback(() => {
     // A transport disconnect does not mean the server-owned BeeGame turn
     // stopped. Keep the runtime lock until the authoritative runtime snapshot
     // or a terminal status event says otherwise.
@@ -801,11 +910,11 @@ export const useChat = ({
     setCurrentTaskId(null)
   }, [projectId, projectStatus])
 
-  // Initialize WebSocket connection
+  // Initialize the reconnect-safe runtime event transport
   const { state: wsState, reconnect } = useProjectEventPolling({
     projectId,
     onMessage: handleProjectEventMessage,
-    onClose: handleWebSocketClose,
+    onClose: handleTransportClose,
     onOpen: syncAfterReconnect, // Trigger sync on connect/reconnect
     showToastError,
   })
@@ -823,8 +932,14 @@ export const useChat = ({
     ) => {
       if (waitingPermission.isBlockingChat) {
         emitWaitingPermissionBlock(waitingPermission.message)
-        return
+        return false
       }
+      const requestProjectId = projectId
+      const requestGeneration = lifecycleRef.current.generation
+      const isCurrentRequest = () =>
+        lifecycleRef.current.mounted &&
+        lifecycleRef.current.projectId === requestProjectId &&
+        lifecycleRef.current.generation === requestGeneration
       try {
         setIsLoading(true)
         setCanContinue(false)
@@ -857,10 +972,13 @@ export const useChat = ({
           supersedes_message_id: supersedesMessageId,
         })) as SendMessageResponse
 
+        if (!isCurrentRequest()) return false
         setCurrentTaskId(response.task_id)
         void syncAfterReconnect()
+        return true
       } catch (error) {
         console.error('[useChat] Failed to send message:', error)
+        if (!isCurrentRequest()) return false
         setIsLoading(false)
         const errorMessage = getErrorDisplayMessage(
           error,
@@ -877,6 +995,7 @@ export const useChat = ({
 
         showToastError?.(errorMessage)
         onError?.(error instanceof Error ? error : new Error(errorMessage))
+        return false
       }
     },
     [

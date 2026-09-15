@@ -4,17 +4,17 @@ import type {
 } from '../../../viewModels/displayModels';
 
 export const TASK_STATUS_COLORS: Record<string, string> = {
-    'released': 'bg-emerald-500 text-white',
-    'in_progress': 'bg-blue-600 text-white shadow-[0_4px_12px_rgba(37,99,235,0.3)] animate-pulse',
-    'in_review': 'bg-amber-500 text-white',
-    'verified': 'bg-emerald-600 text-white',
-    'failed': 'bg-rose-600 text-white',
-    'pending': 'bg-zinc-400 text-white dark:bg-zinc-600',
-    'to_do': 'bg-zinc-400 text-white dark:bg-zinc-600',
-    'blocked': 'bg-red-600 text-white',
-    'invalidated': 'bg-orange-600 text-white',
-    'changes_requested': 'bg-fuchsia-600 text-white',
-    'paused': 'bg-violet-600 text-white',
+    'released': 'border border-[var(--success)]/40 bg-[var(--surface-2)] text-[var(--success)]',
+    'in_progress': 'border border-[var(--selection)]/40 bg-[var(--surface-2)] text-[var(--selection)] animate-pulse',
+    'in_review': 'border border-[var(--warning)]/40 bg-[var(--surface-2)] text-[var(--warning)]',
+    'verified': 'border border-[var(--success)]/40 bg-[var(--surface-2)] text-[var(--success)]',
+    'failed': 'border border-[var(--destructive)]/40 bg-[var(--surface-2)] text-[var(--destructive)]',
+    'pending': 'bg-[var(--surface-3)] text-[var(--text-secondary)]',
+    'to_do': 'bg-[var(--surface-3)] text-[var(--text-secondary)]',
+    'blocked': 'border border-[var(--destructive)]/40 bg-[var(--surface-2)] text-[var(--destructive)]',
+    'invalidated': 'border border-[var(--warning)]/40 bg-[var(--surface-2)] text-[var(--warning)]',
+    'changes_requested': 'border border-[var(--selection)]/40 bg-[var(--surface-2)] text-[var(--selection)]',
+    'paused': 'bg-[var(--surface-3)] text-[var(--text-secondary)]',
 };
 
 export const getCanonicalTaskStatus = (task: Pick<ProjectTask, 'task_status' | 'lifecycle_status'>): string => {
