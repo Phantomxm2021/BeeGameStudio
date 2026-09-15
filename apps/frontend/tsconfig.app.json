@@ -17,7 +17,8 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@beegame/scene-editor": ["src/types/scene-editor-runtime.ts"]
     },
 
     /* Linting */

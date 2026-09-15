@@ -21,6 +21,7 @@ import { ArtifactPreviewModal } from './Sidebar/ArtifactPreviewModal';
 import { EditorUnavailableDialog } from './Sidebar/EditorUnavailableDialog';
 import { buildArtifactViewModel, type ArtifactEditorKind } from './Sidebar/artifactViewModel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../beui/motion/tabs';
+import { SceneEditorOverlay } from '../Workspace/SceneEditorOverlay';
 
 const dedupeAttachments = (attachments: ChatAttachmentPayload[]): ChatAttachmentPayload[] => {
     const seen = new Set<string>();
@@ -122,6 +123,7 @@ export function RightSidebar({
     const [previewTitle, setPreviewTitle] = useState('');
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
     const [unavailableEditor, setUnavailableEditor] = useState<ArtifactEditorKind | null>(null);
+    const [isSceneEditorOpen, setIsSceneEditorOpen] = useState(false);
     const [hasOlderHistory, setHasOlderHistory] = useState(false);
     const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
     const submittedDraftRef = useRef<{ projectId: string; content: string; attachments: ChatAttachmentPayload[]; supersedesMessageId?: string } | null>(null);
@@ -364,6 +366,10 @@ export function RightSidebar({
     };
 
     const handleOpenEditor = (kind: ArtifactEditorKind) => {
+        if (kind === 'scene') {
+            setIsSceneEditorOpen(true);
+            return;
+        }
         setUnavailableEditor(kind);
     };
 
@@ -600,6 +606,12 @@ export function RightSidebar({
                 kind={unavailableEditor}
                 onClose={() => setUnavailableEditor(null)}
             />
+            {isSceneEditorOpen ? (
+                <SceneEditorOverlay
+                    projectId={projectId}
+                    onClose={() => setIsSceneEditorOpen(false)}
+                />
+            ) : null}
         </>
     );
 }

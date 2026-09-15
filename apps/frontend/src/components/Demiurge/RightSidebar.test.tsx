@@ -84,7 +84,7 @@ describe('RightSidebar tabs', () => {
         expect(screen.queryByRole('button', { name: '任务看板' })).not.toBeInTheDocument();
     });
 
-    it('opens an isolated unavailable editor dialog from the Scene entry', async () => {
+    it('opens the independent Scene Editor from the Scene entry', async () => {
         const user = userEvent.setup();
         render(
             <RightSidebar
@@ -106,8 +106,9 @@ describe('RightSidebar tabs', () => {
 
         await user.click(screen.getByRole('tab', { name: /^Artifacts/ }));
         await user.click(await screen.findByRole('button', { name: 'Scene' }));
-        expect(screen.getByRole('heading', { name: 'Scene Editor' })).toBeInTheDocument();
-        expect(screen.getByText(/not available yet/i)).toBeInTheDocument();
+        expect(await screen.findByRole('dialog', { name: 'Scene Editor' })).toBeInTheDocument();
+        await user.click(screen.getByRole('button', { name: 'Close Scene Editor' }));
+        expect(screen.queryByRole('dialog', { name: 'Scene Editor' })).not.toBeInTheDocument();
     });
 
     it('shows durable foundation completion in the deliverables tab count before opening it', () => {
