@@ -67,20 +67,10 @@ function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets,
           {(['directional', 'point', 'spot', 'ambient'] as const).map(kind => <DropdownMenuItem key={kind} onSelect={() => addLight(kind)}><Lightbulb size={14} />Add {kind} light</DropdownMenuItem>)}
         </DropdownMenuSubContent>
       </DropdownMenuSub>
-      <DropdownMenuSub>
-        <DropdownMenuSubTrigger><Box size={14} />Library<ChevronRight className="submenu-chevron" size={13} /></DropdownMenuSubTrigger>
-        <DropdownMenuSubContent>
-          <DropdownMenuItem onSelect={openAssets}><Box size={14} />Asset library</DropdownMenuItem>
-        </DropdownMenuSubContent>
-      </DropdownMenuSub>
-      <DropdownMenuSub>
-        <DropdownMenuSubTrigger><ChevronDown size={14} />Scene<ChevronRight className="submenu-chevron" size={13} /></DropdownMenuSubTrigger>
-        <DropdownMenuSubContent>
-          <DropdownMenuItem onSelect={openSettings}><ChevronDown size={14} />Scene settings</DropdownMenuItem>
-          <DropdownMenuItem onSelect={toggleGizmos}><Axis3D size={14} />Toggle gizmos</DropdownMenuItem>
-          <DropdownMenuItem onSelect={save}><Save size={14} />Save scene</DropdownMenuItem>
-        </DropdownMenuSubContent>
-      </DropdownMenuSub>
+      <DropdownMenuItem onSelect={openAssets}><Box size={14} />Asset library</DropdownMenuItem>
+      <DropdownMenuItem onSelect={openSettings}><ChevronDown size={14} />Scene settings</DropdownMenuItem>
+      <DropdownMenuItem onSelect={toggleGizmos}><Axis3D size={14} />Toggle gizmos</DropdownMenuItem>
+      <DropdownMenuItem onSelect={save}><Save size={14} />Save scene</DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
 }

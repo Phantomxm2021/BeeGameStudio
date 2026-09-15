@@ -263,7 +263,6 @@
 }
 
 .scene-editor-host .ui-dropdown-item,.scene-editor-portal .ui-dropdown-item { display: flex; align-items: center; gap: 9px; min-height: 32px; padding: 7px 10px; border-radius: 4px; outline: none; font-size: 11px; cursor: default; user-select: none; }
-.scene-editor-host .submenu-chevron,.scene-editor-portal .submenu-chevron { margin-left: auto; color: #8e93a0; }
 .scene-editor-host .ui-dropdown-item[data-highlighted],.scene-editor-portal .ui-dropdown-item[data-highlighted] { background: #34343e; color: #fff; }
 .scene-editor-host .asset-library-dialog { width: min(640px, calc(100vw - 24px)); }
 .scene-editor-host .asset-library-body { padding: 16px 20px; overflow: auto; min-height: 0; }
