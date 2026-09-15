@@ -37,9 +37,6 @@ process.env.BEEGAME_ALLOW_DEV_AUTH_TOKENS =
 const { createAgentWorkflowApp } = await import(
   '../packages/agent-workflow-server/src/app.ts'
 )
-const { createResourceSelectionClient } = await import(
-  '../packages/agent-workflow-server/src/beegame/resource-selection-client.ts'
-)
 const { resolveResourceSelectionRuntimeConfig } = await import(
   '../packages/agent-workflow-server/src/beegame/resource-selection-config.ts'
 )
@@ -60,7 +57,6 @@ const server = Bun.serve({
     defaultWorkspacePath: resolve(configuredWorkspacePath),
     ...(resourceSelectionConfig
       ? {
-          resourceSelectionClient: createResourceSelectionClient(resourceSelectionConfig),
           resourceSelectionRuntimeConfig: resourceSelectionConfig,
         }
       : {}),

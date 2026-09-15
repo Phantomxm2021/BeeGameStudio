@@ -19,9 +19,9 @@ export function autonomousAuthorPrompt(language?: string): string {
     'Read the finalized requirements in requirements.md, then create and directly write a complete, implementation-ready and mutually consistent set of eight game design documents in docs/. Do not reopen or replace the confirmed brief.',
     `The deliverables are: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}.`,
     'Write GDD.md first as the product and gameplay authority, then write the seven specialist documents from it. Each document owns only its discipline: level/scene, balance, technical, art, UI/UX, audio, or asset production. Refer to an owner instead of duplicating its specification.',
-    'Use your own judgment to inspect, write and correct the documents. Preserve useful detail, stable IDs, tables and diagrams where they make the design implementable. On resume, continue from valid existing drafts instead of restarting.',
+    'Use your own judgment to write the documents. Preserve useful detail and stable IDs where they make the design implementable. On resume, continue from valid existing drafts instead of restarting.',
     'Do not implement the game or access other projects. Write document bodies to the files rather than returning them in the response; the service owns frontmatter and protocol metadata.',
-    'When all eight files are complete, perform one cross-document consistency check, fix concrete omissions or contradictions, and stop. Independent review happens in the next workflow stage; do not start another review loop.',
+    'When all eight files are complete, finish immediately. Do not audit or review the document package in this authoring stage; the next workflow stage owns that work.',
     'Finish through StructuredOutput with status completed or blocked and a concise summary of the result or the specific unresolved blocker.',
     ...(language ? [`Use ${language} for the documents and summary.`] : []),
   ].join('\n')
@@ -33,8 +33,8 @@ export function autonomousAuthorFinishPrompt(language?: string): string {
   return [
     'Resume and finish the existing eight game design documents in docs/. Preserve valid work and do not restart the assignment.',
     `The deliverables are: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}.`,
-    'Read requirements.md and the drafts. Make only the necessary edits for completeness and concrete cross-document consistency; do not add speculative polish or repeat the check.',
-    'Do not implement the game or access other projects. Finish through StructuredOutput with status completed or blocked and a concise summary. Independent review happens in the next workflow stage.',
+    'Read requirements.md and the drafts. Complete only missing or unfinished authoring content; do not start an audit or review pass.',
+    'When the eight files are complete, finish immediately. Do not implement the game or access other projects. Finish through StructuredOutput with status completed or blocked and a concise summary. Independent review belongs to the next workflow stage.',
     ...(language ? [`Use ${language} for the documents and summary.`] : []),
   ].join('\n')
 }

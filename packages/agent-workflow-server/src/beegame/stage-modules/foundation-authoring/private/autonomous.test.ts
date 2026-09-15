@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { authorDigest, type AuthorConfiguration, type AuthorResult, type AuthorStartInput } from './contract'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './domain/types'
 import { createAutonomousAuthorLifecycle } from './autonomous-lifecycle'
-import { autonomousAuthorPrompt, createAutonomousAuthorUsageMeter, runAutonomousAuthor, type AutonomousNativeExecutor } from './autonomous-native'
+import { autonomousAuthorFinishPrompt, autonomousAuthorPrompt, createAutonomousAuthorUsageMeter, runAutonomousAuthor, type AutonomousNativeExecutor } from './autonomous-native'
 import { captureAuthorBaseline, captureAutonomousDocuments, initializeAutonomousFiles, publishAutonomousDocuments } from './autonomous-files'
 import { createAuthorPersistence } from './persistence'
 import type { AuthorOperations } from './contract'
@@ -100,14 +100,23 @@ test('autonomous author invokes one complete file bundle and preserves the publi
   expect(calls).toBe(1); expect(f.submissions).toHaveLength(1)
 })
 
-test('the task prompt gives one author a natural-language assignment without a custom scheduler', () => {
+test('the task prompt gives one author a natural-language assignment and leaves review to the next stage', () => {
   const prompt = autonomousAuthorPrompt('zh')
   expect(prompt).toContain('Read the finalized requirements in requirements.md')
   expect(prompt).toContain('Write GDD.md first')
   expect(prompt).toContain('Use your own judgment')
-  expect(prompt).toContain('one cross-document consistency check')
-  expect(prompt).toContain('Independent review happens in the next workflow stage')
+  expect(prompt).toContain('finish immediately')
+  expect(prompt).toContain('Do not audit or review the document package in this authoring stage')
+  expect(prompt).not.toContain('cross-document consistency check')
   expect(prompt).not.toMatch(/Agent tool|delegat|run_in_background|expected_output_files|\.reference|authoring-reference|deliveryInterfaces|Attempt policy/)
+})
+
+test('the finishing prompt completes unfinished authoring without starting a review pass', () => {
+  const prompt = autonomousAuthorFinishPrompt('zh')
+  expect(prompt).toContain('Complete only missing or unfinished authoring content')
+  expect(prompt).toContain('finish immediately')
+  expect(prompt).toContain('Independent review belongs to the next workflow stage')
+  expect(prompt).not.toMatch(/cross-document consistency|necessary edits for.*consistency|repeat the check/)
 })
 
 test('native author submits one file-agent call without delegation policy', async () => {
