@@ -12,7 +12,7 @@ import { cors } from 'hono/cors'
 import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync, realpathSync } from 'node:fs'
 import { mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { extname, isAbsolute, join, relative, resolve } from 'node:path'
 import {
   listModelConfigs,
   mapModelConfigToRuntime,
@@ -3920,6 +3920,61 @@ export function createAgentWorkflowApp(
     }
   })
 
+  app.get('/api/projects/:id/assets/resources/:resourceId/file', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(
+        c.req.raw,
+        user,
+        c.req.param('id'),
+        dashboardRepository,
+      )
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const workspace = await resolveBeeGameProjectArtifactReference({
+        request: c.req.raw,
+        user,
+        project,
+        defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions,
+        dashboardRepository,
+      })
+      if (!workspace) return c.json({ error: 'Project workspace not found' }, 404)
+      const manifest = await readBeeGameAssetManifest(workspace.workspacePath)
+      const resource = manifest.resources.find(
+        item => item.id === c.req.param('resourceId'),
+      )
+      if (!resource || resource.status !== 'verified')
+        return c.json({ error: 'Verified project resource not found' }, 404)
+      const requestedPath = c.req.query('path') || resource.root_path
+      if (!resource.file_paths.includes(requestedPath))
+        return c.json({ error: 'Resource file is not registered' }, 404)
+      const target = resolve(workspace.workspacePath, requestedPath)
+      if (!isPathInsideWorkspace(workspace.workspacePath, target))
+        return c.json({ error: 'Resource file path is invalid' }, 400)
+      const canonicalTarget = await realpath(target)
+      if (!isPathInsideWorkspace(workspace.workspacePath, canonicalTarget))
+        return c.json({ error: 'Resource file path is invalid' }, 400)
+      const file = await readFile(canonicalTarget)
+      const body = file.buffer.slice(
+        file.byteOffset,
+        file.byteOffset + file.byteLength,
+      ) as ArrayBuffer
+      const filename = requestedPath.split('/').at(-1)?.replaceAll('"', '') || 'resource'
+      return new Response(new Blob([body], { type: projectResourceContentType(requestedPath) }), {
+        headers: {
+          'content-type': projectResourceContentType(requestedPath),
+          'content-disposition': `inline; filename="${filename}"`,
+          'cache-control': 'private, no-store',
+          'x-content-type-options': 'nosniff',
+        },
+      })
+    } catch (err) {
+      return tracedRouteError(c, 'project.assets.file', err, 404)
+    }
+  })
+
   app.post('/api/projects/:id/assets/resources/:resourceId/upload', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, ROUTE_PERMISSION.assetIntegration)
@@ -4500,6 +4555,23 @@ function isPathInsideWorkspace(
     relativePath === '' ||
     (!relativePath.startsWith('..') && !isAbsolute(relativePath))
   )
+}
+
+function projectResourceContentType(path: string): string {
+  return ({
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+    '.avif': 'image/avif',
+    '.bmp': 'image/bmp',
+    '.svg': 'image/svg+xml',
+    '.json': 'application/json',
+    '.glb': 'model/gltf-binary',
+    '.gltf': 'model/gltf+json',
+    '.bin': 'application/octet-stream',
+  } as Record<string, string>)[extname(path).toLowerCase()] ?? 'application/octet-stream'
 }
 
 function requirePermission(

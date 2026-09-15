@@ -3,12 +3,15 @@ import type { SceneDocument } from '../../../../packages/scene-editor/src/model'
 
 export type {
   SceneDocument,
+  SceneAsset,
   SceneNode,
   Transform,
 } from '../../../../packages/scene-editor/src/model';
 
 export interface SceneEditorProps {
   initialDocument?: SceneDocument;
+  initialView?: { position: [number, number, number]; target: [number, number, number]; showGizmos?: boolean };
+  initialProjection?: 'perspective' | 'orthographic';
   storageKey?: string;
   onSave?: (document: SceneDocument) => void | Promise<void>;
   onClose?: () => void;

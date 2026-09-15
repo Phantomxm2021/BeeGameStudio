@@ -896,6 +896,19 @@ export const beeGameAdapter = {
     )
   },
 
+  async loadProjectAssetFile(
+    projectId: string,
+    resourceId: string,
+    path: string,
+  ): Promise<Blob> {
+    const query = new URLSearchParams({ path })
+    const response = await authenticatedFetch(
+      `/api/projects/${encodeURIComponent(projectId)}/assets/resources/${encodeURIComponent(resourceId)}/file?${query.toString()}`,
+    )
+    if (!response.ok) await readResponse<never>(response)
+    return response.blob()
+  },
+
   async saveProjectGameContentDocument(
     projectId: string,
     input: {

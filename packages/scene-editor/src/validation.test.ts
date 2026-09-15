@@ -48,6 +48,18 @@ describe('scene DTO validation', () => {
   })
 
   it('checks node and asset references, dependency closure and safe paths', () => {
+    const remoteAsset = makeFixture()
+    remoteAsset.assets.sprite = {
+      id: 'sprite',
+      name: 'sprite.png',
+      mimeType: 'image/png',
+      path: 'sprites/sprite.png',
+      uri: 'blob:https://example.test/sprite',
+    }
+    expect(() => assertSceneDocument(remoteAsset)).not.toThrow()
+    remoteAsset.assets.sprite.uri = 'javascript:alert(1)'
+    expect(() => assertSceneDocument(remoteAsset)).toThrow(/browser-loadable URI/)
+
     const missingNodeAsset = makeFixture()
     missingNodeAsset.nodes.hive.assetId = 'missing'
     expect(() => assertSceneDocument(missingNodeAsset)).toThrow(/missing asset/)

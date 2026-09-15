@@ -29,7 +29,7 @@ const SCENE_TOOLS: { mode: Mode; label: string; key: string }[] = [
 
 const TOOL_ICONS = { hand: Hand, translate: Move, rotate: Rotate3D, scale: Scaling }
 
-export interface SceneEditorProps { initialDocument?: SceneDocument; storageKey?: string; assetLibrary?: AssetLibrarySource; initialView?: SceneViewportProps['initialView']; initialExpanded?: Record<string, boolean>; onSave?: (document: SceneDocument) => void | Promise<void>; onClose?: () => void }
+export interface SceneEditorProps { initialDocument?: SceneDocument; storageKey?: string; assetLibrary?: AssetLibrarySource; initialView?: SceneViewportProps['initialView']; initialProjection?: 'perspective' | 'orthographic'; initialExpanded?: Record<string, boolean>; onSave?: (document: SceneDocument) => void | Promise<void>; onClose?: () => void }
 
 function ViewDropdown({ label, value, options, onChange }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void }) {
   return <DropdownMenu>
@@ -77,7 +77,7 @@ function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets,
   </DropdownMenu>
 }
 
-export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-editor.draft.v2', assetLibrary, initialView, initialExpanded, onSave, onClose }: SceneEditorProps = {}) {
+export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-editor.draft.v2', assetLibrary, initialView, initialProjection = 'perspective', initialExpanded, onSave, onClose }: SceneEditorProps = {}) {
   const [document, setDocument] = useState<SceneDocument>(() => {
     if (initialDocument) return initialDocument
     try { const saved = localStorage.getItem(storageKey); return saved ? importPackage(JSON.parse(saved)) : makeEmptyScene() } catch { return makeEmptyScene() }
@@ -94,7 +94,7 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
   const selected = selectedIds[0] ?? ''
   const [query, setQuery] = useState(''), [mode, setMode] = useState<Mode>('translate'), [space, setSpace] = useState<'local' | 'world'>('world')
   const [showGizmos, setShowGizmos] = useState(initialView?.showGizmos ?? true)
-  const [snap, setSnap] = useState(false), [ortho, setOrtho] = useState(false), [focus, setFocus] = useState(0), [notice, setNotice] = useState('')
+  const [snap, setSnap] = useState(false), [ortho, setOrtho] = useState(initialProjection === 'orthographic'), [focus, setFocus] = useState(0), [notice, setNotice] = useState('')
   const [assetLibraryOpen, setAssetLibraryOpen] = useState(false), [sceneSettingsOpen, setSceneSettingsOpen] = useState(false)
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set()), [unpickableIds, setUnpickableIds] = useState<Set<string>>(() => new Set()), [expanded, setExpanded] = useState<Record<string, boolean>>(initialExpanded ?? {})
   const [renaming, setRenaming] = useState<string | null>(null), [contextMenu, setContextMenu] = useState<ContextMenu>(null), [dropPreview, setDropPreview] = useState<{ id: string; position: DropPosition } | null>(null)

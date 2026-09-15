@@ -1,4 +1,4 @@
-import type { SceneDocument, SceneNode, Transform } from '@beegame/scene-editor';
+import type { SceneAsset, SceneDocument, SceneNode, Transform } from '@beegame/scene-editor';
 import type {
   BeeGameContentNode,
   BeeGameSceneContentDocument,
@@ -6,11 +6,11 @@ import type {
 
 const DEFAULT_MATERIAL = {
   mode: 'unlit' as const,
-  color: '#8192b5',
+  color: '#ffffff',
   metalness: 0,
   roughness: 1,
   opacity: 1,
-  alphaMode: 'opaque' as const,
+  alphaMode: 'blend' as const,
 };
 
 function editorKind(kind: string): SceneNode['kind'] {
@@ -46,6 +46,7 @@ export function sceneContentToEditorDocument(input: {
   documentRevision: string;
   irRevision: string;
   assetManifestRevision: string;
+  assets?: Record<string, SceneAsset>;
 }): SceneDocument {
   const children = childrenByParent(input.document.data.nodes);
   const nodes = Object.fromEntries(
@@ -60,7 +61,14 @@ export function sceneContentToEditorDocument(input: {
         visible: node.enabled !== false,
         locked: false,
         transform: editorTransform(node),
-        ...(kind === 'plane' ? { material: DEFAULT_MATERIAL } : {}),
+        ...(kind === 'plane' ? {
+          material: {
+            ...DEFAULT_MATERIAL,
+            ...(node.assetRef && input.assets?.[node.assetRef]
+              ? { textureAssetId: node.assetRef }
+              : {}),
+          },
+        } : {}),
         unknown: { canonicalNode: structuredClone(node) },
       };
       return [node.id, editorNode];
@@ -88,7 +96,7 @@ export function sceneContentToEditorDocument(input: {
       .filter(node => !node.parentId)
       .map(node => node.id),
     nodes,
-    assets: {},
+    assets: input.assets ?? {},
     diagnostics: [],
   };
 }

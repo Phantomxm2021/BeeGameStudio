@@ -138,10 +138,11 @@ export function assertSceneNode(input: unknown, path = 'node'): asserts input is
 }
 
 function assertAsset(input: unknown, path: string): asserts input is SceneAsset {
-  const value = record(input, path); keys(value, ['id', 'name', 'mimeType', 'path', 'bytes', 'dependencies', 'diagnostics'], path)
+  const value = record(input, path); keys(value, ['id', 'name', 'mimeType', 'path', 'bytes', 'uri', 'dependencies', 'diagnostics'], path)
   text(value.id, `${path}.id`); text(value.name, `${path}.name`); text(value.mimeType, `${path}.mimeType`); const assetPath = text(value.path, `${path}.path`)
   if (assetPath.startsWith('/') || assetPath.includes('\\') || /^[A-Za-z]:/.test(assetPath) || assetPath.split('/').some(segment => segment === '..' || segment === '')) invalid(`${path}.path`, 'must be a safe relative path')
   if (value.bytes !== undefined && (typeof value.bytes !== 'string' || !/^data:[^,]*;base64,[A-Za-z0-9+/]*={0,2}$/.test(value.bytes))) invalid(`${path}.bytes`, 'expected a base64 data URI')
+  if (value.uri !== undefined && (typeof value.uri !== 'string' || !/^(blob:|data:|https?:\/\/|\/)/.test(value.uri))) invalid(`${path}.uri`, 'expected a browser-loadable URI')
   if (value.dependencies !== undefined) { if (!Array.isArray(value.dependencies) || new Set(value.dependencies).size !== value.dependencies.length) invalid(`${path}.dependencies`, 'expected unique dependency references'); value.dependencies.forEach((dependency, index) => text(dependency, `${path}.dependencies[${index}]`)) }
   if (value.diagnostics !== undefined) { if (!Array.isArray(value.diagnostics)) invalid(`${path}.diagnostics`, 'expected string array'); value.diagnostics.forEach((diagnostic, index) => text(diagnostic, `${path}.diagnostics[${index}]`)) }
 }

@@ -201,7 +201,7 @@ export interface BeeGameProjectResourcePayload {
 
 export interface BeeGameAssetManifestPayload {
   contract_state?: 'missing' | 'ready'
-  version: 8
+  version: 9
   project_target?: {
     platform?: string
     runtime?: string

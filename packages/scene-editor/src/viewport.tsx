@@ -280,7 +280,7 @@ function disposeOwned(object: THREE.Object3D | null | undefined) {
   })
 }
 
-function localAssetUri(asset: SceneAsset | undefined) { return asset?.bytes?.startsWith('data:') ? asset.bytes : undefined }
+function localAssetUri(asset: SceneAsset | undefined) { return asset?.bytes?.startsWith('data:') ? asset.bytes : asset?.uri }
 
 function useLocalTexture(uri: string | undefined, onDiagnostic?: (message: string) => void) {
   const [texture, setTexture] = useState<THREE.Texture | null>(null)
@@ -298,7 +298,7 @@ function useLocalTexture(uri: string | undefined, onDiagnostic?: (message: strin
 
 function materialProps(material: SceneNode['material'], texture: THREE.Texture | null) {
   if (!material) return { color: '#8192b5', opacity: 1, transparent: false }
-  return { color: material.color, opacity: material.opacity, transparent: material.alphaMode === 'blend', alphaTest: material.alphaMode === 'mask' ? .5 : 0, map: texture ?? undefined }
+  return { color: material.color, opacity: material.opacity, transparent: material.alphaMode === 'blend', depthWrite: material.alphaMode !== 'blend', alphaTest: material.alphaMode === 'mask' ? .5 : 0, map: texture ?? undefined }
 }
 
 function Primitive({ node, assets, diagnose }: { node: SceneNode; assets: Record<string, SceneAsset>; diagnose: (message: string) => void }) {

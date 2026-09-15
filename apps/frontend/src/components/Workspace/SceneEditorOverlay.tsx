@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import type { SceneDocument } from '@beegame/scene-editor';
+import type { SceneAsset, SceneDocument } from '@beegame/scene-editor';
 import '@beegame/scene-editor/styles.css';
 import {
   beeGameAdapter,
@@ -40,11 +40,15 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
 
   useEffect(() => {
     let active = true;
+    const objectUrls: string[] = [];
     setInitialDocument(undefined);
     setLoadError('');
     canonicalRef.current = undefined;
-    void beeGameAdapter.getProjectGameContent(projectId)
-      .then(snapshot => {
+    void Promise.all([
+      beeGameAdapter.getProjectGameContent(projectId),
+      beeGameAdapter.getProjectAssets(projectId),
+    ])
+      .then(async ([snapshot, manifest]) => {
         if (!active) return;
         if ((snapshot.state !== 'ready' && snapshot.state !== 'draft') || !snapshot.index) {
           setLoadError(`Scene content is not available yet (${snapshot.state.replaceAll('_', ' ')}).`);
@@ -59,18 +63,53 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           return;
         }
         const document = scene.document as BeeGameSceneContentDocument;
+        const loadedAssets = await Promise.all(
+          manifest.resources
+            .filter(resource => resource.status === 'verified' && document.assetRefs.includes(resource.id))
+            .map(async resource => {
+              const path = preferredSceneImagePath(resource.root_path, resource.file_paths);
+              if (!path) return undefined;
+              try {
+                const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path);
+                const uri = URL.createObjectURL(blob);
+                if (!active) {
+                  URL.revokeObjectURL(uri);
+                  return undefined;
+                }
+                objectUrls.push(uri);
+                return {
+                  id: resource.id,
+                  name: path.split('/').at(-1) ?? resource.id,
+                  mimeType: blob.type || imageMimeType(path),
+                  path,
+                  uri,
+                } satisfies SceneAsset;
+              } catch {
+                return undefined;
+              }
+            }),
+        );
+        if (!active) return;
+        const assets: Record<string, SceneAsset> = {};
+        for (const asset of loadedAssets) {
+          if (asset) assets[asset.id] = asset;
+        }
         canonicalRef.current = { path: scene.path, revision: scene.revision, document };
         setInitialDocument(sceneContentToEditorDocument({
           document,
           documentRevision: scene.revision,
           irRevision: snapshot.index.irRevision,
           assetManifestRevision: snapshot.index.assetManifestRevision,
+          assets,
         }));
       })
       .catch(error => {
         if (active) setLoadError(error instanceof Error ? error.message : String(error));
       });
-    return () => { active = false; };
+    return () => {
+      active = false;
+      objectUrls.forEach(url => URL.revokeObjectURL(url));
+    };
   }, [projectId]);
 
   const save = async (document: SceneDocument) => {
@@ -97,6 +136,8 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           <Suspense fallback={<div className="grid h-full place-items-center bg-[#3c3f43] text-xs text-white/60">Loading Scene Editor…</div>}>
             <SceneEditor
               initialDocument={initialDocument}
+              initialProjection="orthographic"
+              initialView={{ position: [0, 20, 0.001], target: [0, 0, 0] }}
               onSave={save}
               onClose={onClose}
             />
@@ -107,4 +148,17 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
       </div>
     </div>
   );
+}
+
+const SCENE_IMAGE = /\.(?:png|jpe?g|webp|gif|avif|bmp)$/i;
+
+function preferredSceneImagePath(rootPath: string, filePaths: string[]): string | undefined {
+  if (SCENE_IMAGE.test(rootPath)) return rootPath;
+  return filePaths.find(path => SCENE_IMAGE.test(path));
+}
+
+function imageMimeType(path: string): string {
+  const extension = path.split('.').at(-1)?.toLowerCase();
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
+  return extension ? `image/${extension}` : 'application/octet-stream';
 }

@@ -19,7 +19,7 @@ export interface SceneNode {
   /** Kept through round trips so adapters never erase content they do not own. */
   unknown?: Record<string, unknown>
 }
-export interface SceneAsset { id: string; name: string; mimeType: string; path: string; bytes?: string; dependencies?: string[]; diagnostics?: string[] }
+export interface SceneAsset { id: string; name: string; mimeType: string; path: string; bytes?: string; uri?: string; dependencies?: string[]; diagnostics?: string[] }
 export interface SourceBinding {
   source: { kind: 'fixture'; fixtureId: string; fixtureDigest: string } | { kind: 'published-ir'; publicationId: string; candidateDigest: string; sourceInputDigest: string }
   contentDigest: string; contentRevision: string; contentSchemaVersion: string; adapterId: string; adapterVersion: string

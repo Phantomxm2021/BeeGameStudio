@@ -3561,10 +3561,13 @@ describe('beeGameAdapter prompt rules', () => {
       }
       if (path === '/api/projects/project_runtime/assets' && !init?.method) {
         return jsonResponse({
-          version: 8,
+          version: 9,
           requirements: [{ id: 'title_logo', name: 'Title logo', required: true }],
           resources: [],
           });
+      }
+      if (path === '/api/projects/project_runtime/assets/resources/title_logo/file?path=assets%2Fruntime%2Ftitle-logo.png' && !init?.method) {
+        return new Response('png-bytes', { headers: { 'content-type': 'image/png' } });
       }
       if (path === '/api/projects/project_runtime/game-content' && !init?.method) {
         return jsonResponse({
@@ -3617,6 +3620,11 @@ describe('beeGameAdapter prompt rules', () => {
     const rollback = await beeGameAdapter.rollbackProjectDeployment('project_runtime', 'deploy_project');
     const assets = await beeGameAdapter.getProjectAssets('project_runtime');
     const content = await beeGameAdapter.getProjectGameContent('project_runtime');
+    const assetFile = await beeGameAdapter.loadProjectAssetFile(
+      'project_runtime',
+      'title_logo',
+      'assets/runtime/title-logo.png',
+    );
     const savedContent = await beeGameAdapter.saveProjectGameContentDocument(
       'project_runtime',
       { path: 'scenes/main.scene.json', expectedRevision: contentRevision, document: sceneDocument },
@@ -3633,7 +3641,8 @@ describe('beeGameAdapter prompt rules', () => {
     expect(deployments).toEqual([]);
     expect(deployment.url).toBe('/deployments/deploy_project/');
     expect(rollback.url).toBe('/deployments/deploy_rollback/');
-    expect(assets.version).toBe(8);
+    expect(assets.version).toBe(9);
+    expect(assetFile.type).toBe('image/png');
     expect(assets.requirements[0]?.id).toBe('title_logo');
     expect(content.state).toBe('ready');
     expect(savedContent.document).toEqual(sceneDocument);

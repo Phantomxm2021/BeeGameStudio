@@ -6,18 +6,23 @@ import { SceneEditorOverlay } from './SceneEditorOverlay';
 
 const api = vi.hoisted(() => ({
   getProjectGameContent: vi.fn(),
+  getProjectAssets: vi.fn(),
+  loadProjectAssetFile: vi.fn(),
   saveProjectGameContentDocument: vi.fn(),
 }));
 
 vi.mock('../../services/beeGameAdapter', () => ({ beeGameAdapter: api }));
 
 vi.mock('@beegame/scene-editor', () => ({
-  SceneEditor: ({ initialDocument, onSave }: {
+  SceneEditor: ({ initialDocument, initialProjection, onSave }: {
     initialDocument: SceneDocument;
+    initialProjection: string;
     onSave: (document: SceneDocument) => Promise<void>;
   }) => (
     <div>
       <span>{initialDocument.nodes.background?.name}</span>
+      <span>{initialProjection}</span>
+      <span>{initialDocument.assets['asset.background']?.uri}</span>
       <button type="button" onClick={() => void onSave(initialDocument)}>Save project scene</button>
     </div>
   ),
@@ -30,11 +35,11 @@ const canonicalScene = {
   id: 'scene.main',
   kind: 'scene-2d' as const,
   irRefs: ['world.main'],
-  assetRefs: [],
+  assetRefs: ['asset.background'],
   data: {
     nodes: [
       { id: 'world', kind: 'group' },
-      { id: 'background', parentId: 'world', name: 'Project Background', kind: 'sprite' },
+      { id: 'background', parentId: 'world', name: 'Project Background', kind: 'sprite', assetRef: 'asset.background' },
     ],
   },
 };
@@ -42,6 +47,8 @@ const canonicalScene = {
 describe('SceneEditorOverlay project connection', () => {
   beforeEach(() => {
     api.getProjectGameContent.mockReset();
+    api.getProjectAssets.mockReset();
+    api.loadProjectAssetFile.mockReset();
     api.saveProjectGameContentDocument.mockReset();
     api.getProjectGameContent.mockResolvedValue({
       state: 'ready',
@@ -61,6 +68,25 @@ describe('SceneEditorOverlay project connection', () => {
         document: canonicalScene,
       }],
     });
+    api.getProjectAssets.mockResolvedValue({
+      version: 9,
+      requirements: [],
+      resources: [{
+        id: 'asset.background',
+        status: 'verified',
+        root_path: 'assets/runtime/background.png',
+        file_paths: ['assets/runtime/background.png'],
+      }],
+    });
+    api.loadProjectAssetFile.mockResolvedValue(new Blob(['image'], { type: 'image/png' }));
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:project-background'),
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    });
     api.saveProjectGameContentDocument.mockResolvedValue({
       path: 'scenes/main.scene.json',
       revision: assetRevision,
@@ -74,7 +100,14 @@ describe('SceneEditorOverlay project connection', () => {
     render(<SceneEditorOverlay projectId="project-1" onClose={vi.fn()} />);
 
     expect(await screen.findByText('Project Background')).toBeInTheDocument();
+    expect(screen.getByText('orthographic')).toBeInTheDocument();
+    expect(screen.getByText('blob:project-background')).toBeInTheDocument();
     expect(api.getProjectGameContent).toHaveBeenCalledWith('project-1');
+    expect(api.loadProjectAssetFile).toHaveBeenCalledWith(
+      'project-1',
+      'asset.background',
+      'assets/runtime/background.png',
+    );
 
     await user.click(screen.getByRole('button', { name: 'Save project scene' }));
     await waitFor(() => expect(api.saveProjectGameContentDocument).toHaveBeenCalledWith(

@@ -37,6 +37,7 @@ vi.mock('../../services/beeGameAdapter', () => ({
     isBeeGameProjectPackageArtifactId: (id: string) => id.startsWith('beegame-project-package:'),
     beeGameAdapter: {
         getProjectGameContent: vi.fn().mockResolvedValue({ state: 'awaiting_content' }),
+        getProjectAssets: vi.fn().mockResolvedValue({ version: 9, requirements: [], resources: [] }),
     },
 }));
 
