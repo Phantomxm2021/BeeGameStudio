@@ -1,0 +1,23 @@
+.ui-editor-overlay { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; background: #181a1f; color: #eef0f4; }
+.ui-editor-toolbar { height: 48px; display: flex; align-items: center; gap: 12px; padding: 0 14px; border-bottom: 1px solid #343841; background: #24272d; }
+.ui-editor-toolbar select, .ui-editor-toolbar button, .ui-editor-inspector input { border: 1px solid #454b57; border-radius: 4px; background: #191b20; color: inherit; padding: 5px 8px; }
+.ui-editor-toolbar button { cursor: pointer; }
+.ui-editor-toolbar button:disabled { cursor: default; opacity: .45; }
+.ui-editor-message { min-width: 0; flex: 1; overflow: hidden; color: #aeb4c0; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.ui-editor-main { min-height: 0; flex: 1; display: grid; grid-template-columns: 220px minmax(0, 1fr) 260px; }
+.ui-editor-tree, .ui-editor-inspector { overflow: auto; padding: 12px; background: #22252b; }
+.ui-editor-tree { border-right: 1px solid #343841; }
+.ui-editor-tree button { width: 100%; display: flex; justify-content: space-between; gap: 8px; border: 0; border-radius: 4px; padding: 7px 8px; background: transparent; color: inherit; text-align: left; }
+.ui-editor-tree button.selected { background: #3b465b; }
+.ui-editor-tree small { color: #929aaa; }
+.ui-editor-stage-wrap { min-width: 0; display: grid; place-items: center; overflow: auto; padding: 30px; background: #111318; }
+.ui-editor-stage { position: relative; width: min(1280px, 100%); aspect-ratio: 16 / 9; overflow: hidden; background: #292d34; box-shadow: 0 12px 40px #0008; }
+.ui-editor-node { box-sizing: border-box; min-width: 1px; min-height: 1px; outline: 1px dashed #8590a24d; }
+.ui-editor-node.selected { outline: 2px solid #f2a646; outline-offset: -1px; }
+.ui-editor-node > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.ui-editor-node > span { position: relative; z-index: 1; display: grid; width: 100%; height: 100%; place-items: center; }
+.ui-editor-inspector { border-left: 1px solid #343841; }
+.ui-editor-inspector label { display: grid; gap: 5px; margin-bottom: 12px; color: #aeb4c0; font-size: 12px; }
+.ui-editor-inspector input { width: 100%; box-sizing: border-box; }
+.ui-editor-pair { display: grid; grid-template-columns: 1fr 70px 70px; align-items: center; gap: 6px; margin-bottom: 12px; color: #aeb4c0; font-size: 12px; }
+.ui-editor-inspector p { overflow-wrap: anywhere; color: #aeb4c0; font-size: 12px; }

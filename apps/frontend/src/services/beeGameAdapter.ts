@@ -306,6 +306,39 @@ export type BeeGameSceneContentDocument = {
   data: { nodes: BeeGameContentNode[]; cameraNodeId?: string }
 }
 
+export type BeeGameUiContentNode = {
+  id: string
+  parentId?: string
+  role: string
+  name?: string
+  text?: string
+  assetRef?: string
+  layout?: {
+    anchor?: string
+    position?: [number, number]
+    size?: [number, number]
+    rotation?: number
+    scale?: [number, number]
+  }
+  bindings?: Record<string, string>
+  actions?: Record<string, string>
+  style?: Record<string, unknown>
+  data?: Record<string, unknown>
+}
+
+export type BeeGameUiContentDocument = {
+  schema: 'beegame-content.v1'
+  id: string
+  kind: 'ui-screen' | 'ui-hud' | 'ui-flow'
+  irRefs: string[]
+  assetRefs: string[]
+  data: { rootId: string; nodes: BeeGameUiContentNode[] }
+}
+
+export type BeeGameEditableContentDocument =
+  | BeeGameSceneContentDocument
+  | BeeGameUiContentDocument
+
 export type BeeGameGameContentSnapshot = {
   state: 'awaiting_ir' | 'awaiting_assets' | 'awaiting_content' | 'ready' | 'draft'
   acceptedContentRevision?: string
@@ -322,15 +355,17 @@ export type BeeGameGameContentSnapshot = {
   documents?: Array<{
     path: string
     revision: string
-    document: BeeGameSceneContentDocument | Record<string, unknown>
+    document: BeeGameEditableContentDocument | Record<string, unknown>
   }>
 }
 
-export type BeeGameContentDocumentSaveResult = {
+export type BeeGameContentDocumentSaveResult<
+  Document extends BeeGameEditableContentDocument = BeeGameEditableContentDocument,
+> = {
   path: string
   revision: string
   contentRevision: string
-  document: BeeGameSceneContentDocument
+  document: Document
 }
 
 export async function getBeeGameWorkspaceSettings(): Promise<BeeGameWorkspaceSettings> {
@@ -910,15 +945,15 @@ export const beeGameAdapter = {
     return response.blob()
   },
 
-  async saveProjectGameContentDocument(
+  async saveProjectGameContentDocument<Document extends BeeGameEditableContentDocument>(
     projectId: string,
     input: {
       path: string
       expectedRevision: string
-      document: BeeGameSceneContentDocument
+      document: Document
     },
-  ): Promise<BeeGameContentDocumentSaveResult> {
-    return putJson<BeeGameContentDocumentSaveResult>(
+  ): Promise<BeeGameContentDocumentSaveResult<Document>> {
+    return putJson<BeeGameContentDocumentSaveResult<Document>>(
       `/api/projects/${encodeURIComponent(projectId)}/game-content/document`,
       input,
     )

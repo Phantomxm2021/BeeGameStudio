@@ -1,9 +1,9 @@
 # 引擎中立 Game Content Package 实践方案
 
 日期：2026-09-15  
-状态：Scene2D/UI 唯一可编辑格式、生产 Workflow 消费、无界面读写闭环及项目 API 已实现；Scene Editor 已接入 Scene2D，UI Editor 尚未接入。
+状态：Scene2D/UI 唯一可编辑格式、生产 Workflow 消费、无界面读写闭环及项目 API 已实现；Scene Editor 与 UI Editor 均已接入各自的权威内容文件。
 
-执行进度（2026-09-16）：Scene2D/UI Content Package schema、引用/层级/资源旁路校验、直接 CLI Content Authoring、生产阶段接线及下游消费均已落盘。项目 API 明确区分 `awaiting_ir`、`awaiting_assets`、`awaiting_content`、`ready` 与 `draft`，因此仅有 IR 时不会呈现一个伪造的空 Scene。Scene Editor 直接加载入口 Scene、读取同一 Manifest 中已验证且登记的图片资源，并以 revision 检查原子保存回同一份 Scene 文件；没有本地副本或第二套资源注册表。UI Editor、Spritesheet/Atlas frame 与 clip 的稳定可编辑字段，以及 VFX、角色等内容类型仍未实施。
+执行进度（2026-09-16）：Scene2D/UI Content Package schema、引用/层级/资源旁路校验、直接 CLI Content Authoring、生产阶段接线及下游消费均已落盘。项目 API 明确区分 `awaiting_ir`、`awaiting_assets`、`awaiting_content`、`ready` 与 `draft`，因此仅有 IR 时不会呈现一个伪造的空 Scene。Scene Editor 直接加载入口 Scene、解析 Manifest 图片及 Atlas frame；UI Editor 独立加载 UI 文件、层级、文本、布局与 Manifest 图片。二者均以 revision 检查原子保存回原文件，没有本地权威副本或第二套资源注册表。Sprite Animation clip、VFX、角色等内容类型仍未实施。
 
 ## 1. 结论
 

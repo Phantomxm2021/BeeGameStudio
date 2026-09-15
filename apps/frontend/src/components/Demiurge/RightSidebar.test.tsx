@@ -22,9 +22,9 @@ vi.mock('../../services/api', () => ({
         getArtifactReviewStatus: vi.fn().mockResolvedValue({}),
         getArtifactContent: vi.fn().mockResolvedValue(''),
         downloadProjectPackage: vi.fn().mockResolvedValue({ blob: new Blob(['zip']), filename: 'project.zip' }),
-        getProjectAssets: vi.fn().mockResolvedValue({ version: 8, requirements: [], resources: [] }),
+        getProjectAssets: vi.fn().mockResolvedValue({ version: 9, requirements: [], resources: [] }),
         uploadProjectAsset: vi.fn().mockResolvedValue({
-            manifest: { version: 8, requirements: [], resources: [] },
+            manifest: { version: 9, requirements: [], resources: [] },
       resource: { id: 'user-resource' },
       path: 'assets/resources/user-resource/file.bin',
       message: 'Resource added',
@@ -113,6 +113,33 @@ describe('RightSidebar tabs', () => {
         expect(await screen.findByRole('dialog', { name: 'Scene Editor' })).toBeInTheDocument();
         await user.keyboard('{Escape}');
         expect(screen.queryByRole('dialog', { name: 'Scene Editor' })).not.toBeInTheDocument();
+    });
+
+    it('opens the independent UI Editor from the UI entry', async () => {
+        const user = userEvent.setup();
+        render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="en"
+                messages={[]}
+                progress={0}
+                onSendMessage={vi.fn()}
+                isLoading={false}
+                waitingPermission={{
+                    kind: 'none',
+                    isBlockingChat: false,
+                    isWaitingStatus: false,
+                    message: '',
+                    placeholder: 'Type...',
+                }}
+            />
+        );
+
+        await user.click(screen.getByRole('tab', { name: /^Artifacts/ }));
+        await user.click(await screen.findByRole('button', { name: 'UI' }));
+        expect(await screen.findByRole('dialog', { name: 'UI Editor' })).toBeInTheDocument();
+        await user.keyboard('{Escape}');
+        expect(screen.queryByRole('dialog', { name: 'UI Editor' })).not.toBeInTheDocument();
     });
 
     it('shows durable foundation completion in the deliverables tab count before opening it', () => {
