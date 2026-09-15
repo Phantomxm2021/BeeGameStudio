@@ -3497,7 +3497,16 @@ describe('beeGameAdapter prompt rules', () => {
     );
   });
 
-  it('manages preview and deployment through project scoped endpoints', async () => {
+  it('manages runtime and editable content through project scoped endpoints', async () => {
+    const contentRevision = 'a'.repeat(64);
+    const sceneDocument = {
+      schema: 'beegame-content.v1' as const,
+      id: 'scene.main',
+      kind: 'scene-2d' as const,
+      irRefs: ['world.main'],
+      assetRefs: [],
+      data: { nodes: [{ id: 'world', kind: 'group' }] },
+    };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
       if (path === '/api/projects/project_runtime/preview' && init?.method === 'POST') {
@@ -3557,6 +3566,30 @@ describe('beeGameAdapter prompt rules', () => {
           resources: [],
           });
       }
+      if (path === '/api/projects/project_runtime/game-content' && !init?.method) {
+        return jsonResponse({
+          state: 'ready',
+          contentRevision,
+          index: {
+            schema: 'beegame-content-package.v1',
+            id: 'game-content',
+            dimension: '2d',
+            irRevision: contentRevision,
+            assetManifestRevision: contentRevision,
+            entryScene: 'scene.main',
+            files: ['scenes/main.scene.json'],
+          },
+          documents: [{ path: 'scenes/main.scene.json', revision: contentRevision, document: sceneDocument }],
+        });
+      }
+      if (path === '/api/projects/project_runtime/game-content/document' && init?.method === 'PUT') {
+        return jsonResponse({
+          path: 'scenes/main.scene.json',
+          revision: contentRevision,
+          contentRevision,
+          document: sceneDocument,
+        });
+      }
       if (path ===
             '/api/projects/project_runtime/assets/resources/title_logo/upload' && init?.method === 'POST') {
         return jsonResponse({
@@ -3583,6 +3616,11 @@ describe('beeGameAdapter prompt rules', () => {
     const deployment = await beeGameAdapter.deployProject('project_runtime');
     const rollback = await beeGameAdapter.rollbackProjectDeployment('project_runtime', 'deploy_project');
     const assets = await beeGameAdapter.getProjectAssets('project_runtime');
+    const content = await beeGameAdapter.getProjectGameContent('project_runtime');
+    const savedContent = await beeGameAdapter.saveProjectGameContentDocument(
+      'project_runtime',
+      { path: 'scenes/main.scene.json', expectedRevision: contentRevision, document: sceneDocument },
+    );
     const upload = await beeGameAdapter.uploadProjectAsset(
       'project_runtime',
       'title_logo',
@@ -3597,6 +3635,12 @@ describe('beeGameAdapter prompt rules', () => {
     expect(rollback.url).toBe('/deployments/deploy_rollback/');
     expect(assets.version).toBe(8);
     expect(assets.requirements[0]?.id).toBe('title_logo');
+    expect(content.state).toBe('ready');
+    expect(savedContent.document).toEqual(sceneDocument);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/project_runtime/game-content/document',
+      expect.objectContaining({ method: 'PUT' }),
+    );
     expect(upload.path).toBe('public/assets/title-logo.png');
   });
 

@@ -35,6 +35,9 @@ vi.mock('../../services/api', () => ({
 
 vi.mock('../../services/beeGameAdapter', () => ({
     isBeeGameProjectPackageArtifactId: (id: string) => id.startsWith('beegame-project-package:'),
+    beeGameAdapter: {
+        getProjectGameContent: vi.fn().mockResolvedValue({ state: 'awaiting_content' }),
+    },
 }));
 
 const getChatInput = () => screen.getByRole('textbox') as HTMLTextAreaElement;

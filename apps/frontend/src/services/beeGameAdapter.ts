@@ -274,6 +274,64 @@ export type BeeGameWorkspaceSettings = {
   isDefault: boolean
 }
 
+export type BeeGameContentNode = {
+  id: string
+  parentId?: string
+  name?: string
+  kind: string
+  enabled?: boolean
+  transform?: {
+    position: [number, number]
+    rotation?: number
+    scale?: [number, number]
+  }
+  layer?: string
+  zIndex?: number
+  assetRef?: string
+  components?: Array<{
+    type: string
+    assetRef?: string
+    data?: Record<string, unknown>
+  }>
+  data?: Record<string, unknown>
+}
+
+export type BeeGameSceneContentDocument = {
+  schema: 'beegame-content.v1'
+  id: string
+  kind: 'scene-2d'
+  irRefs: string[]
+  assetRefs: string[]
+  data: { nodes: BeeGameContentNode[]; cameraNodeId?: string }
+}
+
+export type BeeGameGameContentSnapshot = {
+  state: 'awaiting_ir' | 'awaiting_assets' | 'awaiting_content' | 'ready' | 'draft'
+  acceptedContentRevision?: string
+  contentRevision?: string
+  index?: {
+    schema: 'beegame-content-package.v1'
+    id: string
+    dimension: '2d'
+    irRevision: string
+    assetManifestRevision: string
+    entryScene: string
+    files: string[]
+  }
+  documents?: Array<{
+    path: string
+    revision: string
+    document: BeeGameSceneContentDocument | Record<string, unknown>
+  }>
+}
+
+export type BeeGameContentDocumentSaveResult = {
+  path: string
+  revision: string
+  contentRevision: string
+  document: BeeGameSceneContentDocument
+}
+
 export async function getBeeGameWorkspaceSettings(): Promise<BeeGameWorkspaceSettings> {
   return { workspacePath: await resolveDefaultWorkspacePath(), isDefault: true }
 }
@@ -827,6 +885,28 @@ export const beeGameAdapter = {
   ): Promise<BeeGameAssetManifestPayload> {
     return getJson<BeeGameAssetManifestPayload>(
       `/api/projects/${encodeURIComponent(projectId)}/assets`,
+    )
+  },
+
+  async getProjectGameContent(
+    projectId: string,
+  ): Promise<BeeGameGameContentSnapshot> {
+    return getJson<BeeGameGameContentSnapshot>(
+      `/api/projects/${encodeURIComponent(projectId)}/game-content`,
+    )
+  },
+
+  async saveProjectGameContentDocument(
+    projectId: string,
+    input: {
+      path: string
+      expectedRevision: string
+      document: BeeGameSceneContentDocument
+    },
+  ): Promise<BeeGameContentDocumentSaveResult> {
+    return putJson<BeeGameContentDocumentSaveResult>(
+      `/api/projects/${encodeURIComponent(projectId)}/game-content/document`,
+      input,
     )
   },
 
@@ -2709,6 +2789,15 @@ async function getJson<T>(path: string): Promise<T> {
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const response = await authenticatedFetch(path, {
     method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return readResponse<T>(response)
+}
+
+async function putJson<T>(path: string, body: unknown): Promise<T> {
+  const response = await authenticatedFetch(path, {
+    method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
