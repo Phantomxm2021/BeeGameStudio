@@ -25,7 +25,7 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
     <div className="scene-editor-host fixed inset-0 z-[100] flex flex-col bg-[#09090b]" role="dialog" aria-modal="true" aria-label="Scene Editor">
       <div className="min-h-0 flex-1">
         <Suspense fallback={<div className="grid h-full place-items-center bg-[#3c3f43] text-xs text-white/60">Loading Scene Editor…</div>}>
-          <SceneEditor storageKey={`beegame.scene-editor.project.${projectId}.v1`} />
+          <SceneEditor storageKey={`beegame.scene-editor.project.${projectId}.v1`} onClose={onClose} />
         </Suspense>
       </div>
     </div>

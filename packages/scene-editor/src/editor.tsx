@@ -29,7 +29,7 @@ const SCENE_TOOLS: { mode: Mode; label: string; key: string }[] = [
 
 const TOOL_ICONS = { hand: Hand, translate: Move, rotate: Rotate3D, scale: Scaling }
 
-export interface SceneEditorProps { initialDocument?: SceneDocument; storageKey?: string; assetLibrary?: AssetLibrarySource; initialView?: SceneViewportProps['initialView']; initialExpanded?: Record<string, boolean> }
+export interface SceneEditorProps { initialDocument?: SceneDocument; storageKey?: string; assetLibrary?: AssetLibrarySource; initialView?: SceneViewportProps['initialView']; initialExpanded?: Record<string, boolean>; onClose?: () => void }
 
 function ViewDropdown({ label, value, options, onChange }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void }) {
   return <DropdownMenu>
@@ -45,7 +45,7 @@ function ViewDropdown({ label, value, options, onChange }: { label: string; valu
   </DropdownMenu>
 }
 
-function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets, openSettings, toggleGizmos }: {
+function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets, openSettings, toggleGizmos, closeEditor }: {
   canUndo: boolean
   canRedo: boolean
   undo: () => void
@@ -55,6 +55,7 @@ function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets,
   openAssets: () => void
   openSettings: () => void
   toggleGizmos: () => void
+  closeEditor?: () => void
 }) {
   return <DropdownMenu>
     <DropdownMenuTrigger className="icon-button toolbar-menu-trigger" aria-label="Scene actions" title="Scene actions"><Menu size={18} /></DropdownMenuTrigger>
@@ -71,11 +72,12 @@ function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets,
       <DropdownMenuItem onSelect={openSettings}><ChevronDown size={14} />Scene settings</DropdownMenuItem>
       <DropdownMenuItem onSelect={toggleGizmos}><Axis3D size={14} />Toggle gizmos</DropdownMenuItem>
       <DropdownMenuItem onSelect={save}><Save size={14} />Save scene</DropdownMenuItem>
+      {closeEditor && <DropdownMenuItem onSelect={closeEditor}><X size={14} />Close editor</DropdownMenuItem>}
     </DropdownMenuContent>
   </DropdownMenu>
 }
 
-export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-editor.draft.v2', assetLibrary, initialView, initialExpanded }: SceneEditorProps = {}) {
+export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-editor.draft.v2', assetLibrary, initialView, initialExpanded, onClose }: SceneEditorProps = {}) {
   const [document, setDocument] = useState<SceneDocument>(() => {
     if (initialDocument) return initialDocument
     try { const saved = localStorage.getItem(storageKey); return saved ? importPackage(JSON.parse(saved)) : makeEmptyScene() } catch { return makeEmptyScene() }
@@ -208,6 +210,7 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
             openAssets={() => setAssetLibraryOpen(true)}
             openSettings={() => setSceneSettingsOpen(true)}
             toggleGizmos={() => setShowGizmos(value => !value)}
+            closeEditor={onClose}
           />
           <span className="toolbar-divider" />
           <div className="scene-tools" role="toolbar" aria-label="Scene tools" aria-orientation="horizontal">
