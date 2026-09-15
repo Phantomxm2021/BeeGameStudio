@@ -32,14 +32,9 @@ This report records the current worktree state. Layout review used `docs/design/
 
 The repository-wide lint inventory remains outside this round’s scope; this report does not relabel those unrelated findings as fixed or newly introduced. No production backend, third-party account, deployment, or signed desktop artifact was exercised in this Chat/feed round.
 
-## Agent response fixture sample
+## Agent response fixture sample (historical)
 
-- `apps/frontend/src/dev/DevWorkbenchFixture.tsx` now composes one read-only response from existing adapter/test shapes: the history `assistant.message` source/citation fields from `services/beeGameAdapter.test.ts` (917–973), the `think_start`/`assistant_thinking` shape from `hooks/useChat.test.ts`, the Read/Write/artifact fields and Agent subagent shape from `services/beeGameAdapter.test.ts` (2495–2537, 2612–2647, 2720–2752), and the existing workflow task model from `types/message.ts`/display model tests.
-- The fixture visibly includes AgentActivity, the real workflow TodoList, collapsed ToolResult rows (including a failed subagent with complete prompt/output/trace), the existing artifact Open path, StreamingResponse, and citations. It drives `streamingMessageId` through the existing chat store and clears it after the fixture send simulation; no production protocol or backend behavior was changed.
-- The repository has no separate FileDiff/CodeBlock registry component or matching structured diff sample. Tool output therefore remains an honest `ToolResultOutput` text block rather than inventing a diff schema.
-- Fixture shape test: **2 files, 42 tests passed** (ChatPanel plus `DevWorkbenchFixture.test.ts`). Raw output: [`fixture-agent-focused.log`](../../output/frontend-refactor/fixture-agent-focused.log).
-- Full frontend Vitest after the fixture addition: **65 files, 664 tests passed**. Raw output: [`fixture-agent-full.log`](../../output/frontend-refactor/fixture-agent-full.log).
-- Fixture typecheck/production build passed: [`fixture-agent-build.log`](../../output/frontend-refactor/fixture-agent-build.log). Dev fixture, Chat feed, Markdown adapter, and registry ESLint passed: [`fixture-agent-eslint-all.log`](../../output/frontend-refactor/fixture-agent-eslint-all.log). `git diff --check` passed: [`fixture-agent-diff-check.log`](../../output/frontend-refactor/fixture-agent-diff-check.log).
+The temporary `/__workbench_fixture` route and its static preview were removed in commit `99e326489`. The canonical transcript is retained only as regression-test data under `apps/frontend/src/test/fixtures`; production now renders through the runtime-backed `App` route.
 
 ## Final Agent turn grouping verification
 

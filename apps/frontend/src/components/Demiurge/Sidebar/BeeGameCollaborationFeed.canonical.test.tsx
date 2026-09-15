@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { ChatDisplayMessage } from '../viewModels/displayModels';
-import { BeeGameCollaborationFeed } from '../components/Demiurge/Sidebar/BeeGameCollaborationFeed';
-import { sampleMessages } from './DevWorkbenchFixture';
+import { BeeGameCollaborationFeed } from './BeeGameCollaborationFeed';
+import { sampleMessages } from '../../../test/fixtures/canonicalTranscript';
 
 const CHECKLIST_TURN_ID = 'beegame-turn-beegame_191b560f8a9046b18e1efed2fafa8f07-1';
 const IMPLEMENTATION_TURN_ID = 'beegame-turn-beegame_0889307bbd6142f186543e33306e9b01-1';
@@ -11,7 +11,7 @@ const CHECKLIST_MIXED_MESSAGE_ID = '021789434990692846a816464a9af9c0791e0f68a2ce
 const CHECKLIST_FINAL_MESSAGE_ID = '021789435028095846a816464a9af9c0791e0f68a2ce03cdcd201';
 const IMPLEMENTATION_MIXED_MESSAGE_ID = '0217894385633113d0449b03f13da7ad7c0359f0f1d760c19f272';
 
-describe('DevWorkbenchFixture canonical transcript', () => {
+describe('BeeGameCollaborationFeed canonical transcript', () => {
   it('starts with the real idea and keeps three independent turns in source order', () => {
     expect(sampleMessages[0]).toMatchObject({
       sender: 'user',
