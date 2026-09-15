@@ -78,7 +78,14 @@ export function createAuthorUsageJournal(store: ReturnType<typeof createAuthorPe
             sessionId: entry.dispatchId, turnId: entry.dispatchId,
             eventId: `usage-terminal:foundation-authoring:${identity.runId}:${entry.dispatchId}:${authorDigest(entry.usage)}`,
             usage: { ...entry.usage }, metadata: { producer: 'foundation-authoring', runId: identity.runId, dispatchId: entry.dispatchId } }
-          try { await billing.submitUsage(input) } catch { continue }
+          try { await billing.submitUsage(input) }
+          catch (error) {
+            console.warn('[foundation-authoring] usage billing submission failed', {
+              eventId: input.eventId,
+              message: error instanceof Error ? error.message : String(error),
+            })
+            continue
+          }
           // A failed local receipt write deliberately leaves the same authority key replayable.
           entry.submitted = true
           await store.save(key, journal)

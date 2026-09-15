@@ -19,7 +19,6 @@ import {
   RESOURCE_EMBEDDED_COMPONENT_KINDS,
   RESOURCE_RELATION_KINDS,
   RESOURCE_USAGE_TAGS,
-  withResourceExternalTransport,
   type ResourceAcquisitionProfile,
   type ResourceEmbeddedComponentKind,
   type ResourceLibraryUsage,
@@ -29,7 +28,6 @@ import {
   parseBeeGameProgrammaticAudioText,
   type BeeGameProgrammaticAudioResource,
 } from './programmatic-audio-resource'
-import { auditBeeGameContent } from './content-contracts'
 
 export const BEEGAME_RESOURCE_STATUSES = [
   'available',
@@ -83,6 +81,13 @@ export type BeeGameAssetRequirement = {
     usage_tags: ResourceAcquisitionProfile['usageTags']
     capabilities: ResourceAcquisitionProfile['capabilities']
     styles: ResourceAcquisitionProfile['styles']
+    acceptance_criteria?: readonly string[]
+    sourcing_policy?: {
+      allowed_source_kinds: readonly string[]
+      license_constraints: readonly string[]
+      responsible_party: string
+      handoff_criteria: readonly string[]
+    }
     coverage?: readonly BeeGameAssetCoverageObligation[]
   }
 }
@@ -119,6 +124,15 @@ export type BeeGameProjectResourceSource =
       reason: string
     }
   | {
+      type: 'web'
+      source_url: string
+      page_url: string
+      license: string
+      license_url?: string
+      author?: string
+      retrieved_at: string
+    }
+  | {
       type: 'user-provided'
       created_at: string
       filename: string
@@ -134,8 +148,13 @@ export type BeeGameProjectResource = {
   status: BeeGameResourceStatus
   selected_at: string
   selection_reason: string[]
+  dimension?: string
   asset_kind?: string
   capabilities?: string[]
+  usage_tags?: string[]
+  styles?: string[]
+  relation_kinds?: string[]
+  embedded_kinds?: string[]
   content_profile?: Record<string, unknown>
   technical_facts?: Record<string, string | number | boolean>
   dependencies?: BeeGameResourceDependency[]
@@ -175,38 +194,6 @@ export type BeeGameAssetUploadOptions = {
   persist?: (manifest: BeeGameAssetManifest) => Promise<void>
 }
 
-export type BeeGameResolvedLibraryResourceInput = {
-  id: string
-  destination_path: string
-  pack_id: string
-  pack_version: string
-  element_id: string
-  element_path: string
-  source_url: string
-  source_hash: string
-  selection_reason: string[]
-  asset_kind?: string
-  capabilities?: string[]
-  content_profile?: Record<string, unknown>
-  technical_facts?: Record<string, string | number | boolean>
-  delivery?: {
-    disposition: 'direct' | 'convert'
-    source_format: string
-    target_format: string
-    adapter_id?: string
-  }
-  dependencies?: Array<{
-    key: string
-    parent_key: string
-    element_id: string
-    element_path: string
-    reference_path: string
-    source_url: string
-    source_hash: string
-    kind?: string
-  }>
-}
-
 export type BeeGameAuthoredResourceInput = {
   id: string
   root_path: string
@@ -214,8 +201,13 @@ export type BeeGameAuthoredResourceInput = {
   provisional: boolean
   reason: string
   selection_reason: string[]
+  dimension?: string
   asset_kind?: string
   capabilities?: string[]
+  usage_tags?: string[]
+  styles?: string[]
+  relation_kinds?: string[]
+  embedded_kinds?: string[]
   content_profile?: Record<string, unknown>
   technical_facts?: Record<string, string | number | boolean>
   replace_existing_provisional?: boolean
@@ -410,101 +402,6 @@ export async function writeBeeGameAssetManifest(
   )
 }
 
-export async function publishBeeGameResourceInventoryFromStaging(
-  workspacePath: string,
-  stagingWorkspacePath: string,
-  resourceIds: readonly string[],
-  frozenOutputHashes: Readonly<Record<string, Readonly<Record<string, string>>>>,
-): Promise<BeeGameAssetManifest> {
-  const root = normalizeWorkspacePath(workspacePath)
-  const stagingRoot = normalizeWorkspacePath(stagingWorkspacePath)
-  const current = await readBeeGameAssetManifest(root)
-  const staged = await readBeeGameAssetManifest(stagingRoot)
-  if (
-    JSON.stringify({
-      project_target: current.project_target,
-      requirements: current.requirements,
-    }) !==
-    JSON.stringify({
-      project_target: staged.project_target,
-      requirements: staged.requirements,
-    })
-  ) {
-    throw new Error('Staged resource inventory does not match the current canonical resource plan')
-  }
-  const ids = uniqueStrings(resourceIds)
-  if (ids.length !== resourceIds.length)
-    throw new Error('Staged resource inventory IDs must be unique')
-  const stagedById = new Map(staged.resources.map(resource => [resource.id, resource]))
-  const currentOwnerByPath = new Map(
-    current.resources.flatMap(resource =>
-      resource.file_paths.map(path => [path, resource.id] as const),
-    ),
-  )
-  const selected = ids.map(id => {
-    const resource = stagedById.get(id)
-    if (!resource || resource.status !== 'verified')
-      throw new Error(`Staged resource is not verified: ${id}`)
-    if (!resource.local_file_hashes)
-      throw new Error(`Staged resource has no local file hashes: ${id}`)
-    if (JSON.stringify(resource.local_file_hashes) !== JSON.stringify(frozenOutputHashes[id]))
-      throw new Error(`Staged resource output hashes differ from the durable receipt: ${id}`)
-    const currentResource = current.resources.find(item => item.id === id)
-    const replacingProvisional = Boolean(
-      currentResource?.provisional &&
-      currentResource.source.type === 'agent-authored' &&
-      resource.source.type === 'resource-library',
-    )
-    if (
-      currentResource &&
-      !replacingProvisional &&
-      (currentResource.root_path !== resource.root_path ||
-        currentResource.file_paths.length !== resource.file_paths.length ||
-        currentResource.file_paths.some(path => !resource.file_paths.includes(path)))
-    ) {
-      throw new Error(`Staged resource paths differ from the current stable resource: ${id}`)
-    }
-    return resource
-  })
-  const targetPaths = new Set<string>()
-  const writes: Array<{ targetPath: string; bytes: Uint8Array }> = []
-  for (const resource of selected) {
-    for (const path of resource.file_paths) {
-      if (targetPaths.has(path))
-        throw new Error(`Staged resource file path is shared by multiple resources: ${path}`)
-      targetPaths.add(path)
-      const expected = resource.local_file_hashes?.[path]
-      if (!isSha256(expected))
-        throw new Error(`Staged resource file hash is invalid: ${path}`)
-      const bytes = new Uint8Array(
-        await readFile(resolveInsideWorkspace(stagingRoot, path)),
-      )
-      if (sha256(bytes) !== expected)
-        throw new Error(`Staged resource file differs from its canonical hash: ${path}`)
-      const targetPath = resolveInsideWorkspace(root, path)
-      const currentOwner = currentOwnerByPath.get(path)
-      if (currentOwner && currentOwner !== resource.id)
-        throw new Error(`Staged resource file path belongs to another resource: ${path}`)
-      if (existsSync(targetPath) && !currentOwner) {
-        const existingHash = sha256(new Uint8Array(await readFile(targetPath)))
-        if (existingHash !== expected)
-          throw new Error(`Staged resource file conflicts with an unrelated workspace file: ${path}`)
-      }
-      writes.push({ targetPath, bytes })
-    }
-  }
-  const updated = selected.reduce(replaceResource, current)
-  const rollback = await commitResourceWrites(writes)
-  try {
-    await writeManifestAtomically(root, updated)
-  } catch (error) {
-    await rollback()
-    await writeManifestAtomically(root, current)
-    throw error
-  }
-  return updated
-}
-
 export async function uploadBeeGameAsset(
   workspacePath: string,
   resourceId: string,
@@ -554,214 +451,6 @@ export async function uploadBeeGameAsset(
     path: relativePath,
     message: `Project resource ${id} was added at ${relativePath}.`,
   }
-}
-
-export async function addBeeGameLibraryResourceToWorkspace(
-  workspacePath: string,
-  input: BeeGameResolvedLibraryResourceInput,
-  fetchImpl: (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ) => Promise<Response> = fetch,
-  deliveryOptions: {
-    convert?: (
-      files: Array<{ name: string; bytes: Uint8Array }>,
-      delivery: NonNullable<BeeGameResolvedLibraryResourceInput['delivery']>,
-    ) => Promise<{ filename: string; bytes: Uint8Array }>
-  } = {},
-): Promise<{
-  manifest: BeeGameAssetManifest
-  resource: BeeGameProjectResource
-}> {
-  const root = normalizeWorkspacePath(workspacePath)
-  const manifest = await readBeeGameAssetManifest(root)
-  const target = requireProjectTarget(manifest)
-  const id = normalizeId(input.id)
-  if (!id) throw new Error('Resource id is required')
-  const existing = manifest.resources.find(resource => resource.id === id)
-  const replacingProvisional = Boolean(
-    existing?.provisional && existing.source.type === 'agent-authored',
-  )
-  if (existing && !isSamePinnedLibraryResource(existing, input) && !replacingProvisional)
-    throw new Error(`Resource id belongs to a different source: ${id}`)
-
-  const filename = sanitizeFilename(input.element_path)
-  const delivery = input.delivery
-  const converts = delivery?.disposition === 'convert'
-  if (!converts) assertFilenameFormatAllowed(filename, target.asset_format_capabilities)
-  if (delivery && normalizeFormat(extname(filename).slice(1)) !== normalizeFormat(delivery.source_format))
-    throw new Error(`Resource source format differs from the selected delivery capability: ${filename}`)
-  if (delivery && !target.asset_format_capabilities.includes(normalizeFormat(delivery.target_format)))
-    throw new Error(`Resource delivery target format is not supported by the target: ${delivery.target_format}`)
-  const sourceTargetPath = converts
-    ? resolveInsideDeclaredRoot(
-        root,
-        target.generated_asset_root,
-        join(target.generated_asset_root, id, 'source', filename),
-      )
-    : resolveResourceDestination(
-        root,
-        target.runtime_asset_root,
-        input.destination_path,
-        filename,
-      )
-  if (existing && !replacingProvisional && (await resourceFilesMatchHashes(root, existing)))
-    return { manifest, resource: existing }
-
-  const rootBytes = await downloadResource(input.source_url, fetchImpl)
-  if (!isSha256(input.source_hash) || sha256(rootBytes) !== input.source_hash)
-    throw new Error(`Resource source differs from the frozen Catalog content hash: ${input.element_id}`)
-  assertDetectedFormat(filename, rootBytes)
-  const dependencies = await prepareDependencies({
-    root,
-    declaredAssetRoot: converts ? target.generated_asset_root : target.runtime_asset_root,
-    rootTargetPath: sourceTargetPath,
-    dependencies: input.dependencies ?? [],
-    ...(converts ? {} : { allowedFormats: target.asset_format_capabilities }),
-    fetchImpl,
-  })
-  const converted = converts
-    ? await (() => {
-        if (!deliveryOptions.convert || !delivery)
-          throw new Error(`Resource delivery adapter is unavailable: ${delivery?.adapter_id ?? 'unknown'}`)
-        return deliveryOptions.convert(
-          [
-            { name: filename, bytes: rootBytes },
-            ...dependencies.map(dependency => ({
-              name: dependency.input.element_path,
-              bytes: dependency.bytes,
-            })),
-          ],
-          delivery,
-        )
-      })()
-    : undefined
-  if (converted) {
-    assertFilenameFormatAllowed(converted.filename, target.asset_format_capabilities)
-    assertDetectedFormat(converted.filename, converted.bytes)
-  }
-  const deliveredTargetPath = converted
-    ? resolveInsideDeclaredRoot(
-        root,
-        target.generated_asset_root,
-        join(target.generated_asset_root, id, 'delivery', sanitizeFilename(converted.filename)),
-      )
-    : sourceTargetPath
-  const rootPath = normalizeRelativePath(root, deliveredTargetPath)
-  if (existing && existing.root_path !== rootPath && !replacingProvisional)
-    throw new Error(`Resource destination changed for pinned resource: ${id}`)
-  const sourcePath = normalizeRelativePath(root, sourceTargetPath)
-  const filePaths = [
-    rootPath,
-    ...(sourcePath === rootPath ? [] : [sourcePath]),
-    ...dependencies.map(dependency =>
-      normalizeRelativePath(root, dependency.targetPath),
-    ),
-  ]
-  const pathOwners = new Map(
-    manifest.resources.flatMap(resource =>
-      resource.file_paths.map(path => [path, resource.id] as const),
-    ),
-  )
-  for (const path of filePaths) {
-    const owner = pathOwners.get(path)
-    if (owner && owner !== id)
-      throw new Error(`Resource destination path belongs to another resource: ${path}`)
-  }
-  const localFileHashes = Object.fromEntries([
-    [rootPath, sha256(converted?.bytes ?? rootBytes)],
-    ...(sourcePath === rootPath ? [] : [[sourcePath, sha256(rootBytes)]]),
-    ...dependencies.map(
-      dependency =>
-        [
-          normalizeRelativePath(root, dependency.targetPath),
-          sha256(dependency.bytes),
-        ] as const,
-    ),
-  ])
-  if (existsSync(deliveredTargetPath) && !existing) {
-    const existingHash = sha256(new Uint8Array(await readFile(deliveredTargetPath)))
-    if (existingHash !== localFileHashes[rootPath])
-      throw new Error(`Resource target already exists with different content: ${rootPath}`)
-  }
-  const resource: BeeGameProjectResource = {
-    id,
-    source: {
-      type: 'resource-library',
-      pack_id: requiredString(input.pack_id, 'Pack id'),
-      pack_version: requiredString(input.pack_version, 'Pack version'),
-      element_id: requiredString(input.element_id, 'Element id'),
-      element_path: requiredString(input.element_path, 'Element path'),
-    },
-    root_path: rootPath,
-    file_paths: filePaths,
-    local_file_hashes: localFileHashes,
-    provisional: false,
-    status: 'verified',
-    selected_at: new Date().toISOString(),
-    selection_reason: nonEmptyStrings(
-      input.selection_reason,
-      'Resource selection reasons',
-    ),
-    ...(input.asset_kind ? { asset_kind: input.asset_kind } : {}),
-    ...(input.capabilities?.length
-      ? { capabilities: uniqueStrings(input.capabilities) }
-      : {}),
-    ...(input.content_profile
-      ? { content_profile: structuredClone(input.content_profile) }
-      : {}),
-    ...(input.technical_facts
-      ? { technical_facts: { ...input.technical_facts } }
-      : {}),
-    ...(dependencies.length
-      ? {
-          dependencies: dependencies.map(dependency => ({
-            key: dependency.input.key,
-            parent_key: dependency.input.parent_key,
-            element_id: dependency.input.element_id,
-            element_path: dependency.input.element_path,
-            reference_path: dependency.input.reference_path,
-            local_path: normalizeRelativePath(root, dependency.targetPath),
-            ...(dependency.input.kind ? { kind: dependency.input.kind } : {}),
-          })),
-        }
-      : {}),
-  }
-  const updated = replaceResource(manifest, resource)
-  const retainedPaths = new Set(updated.resources.flatMap(item => item.file_paths))
-  const obsoletePaths = replacingProvisional
-    ? existing!.file_paths.filter(path => !retainedPaths.has(path))
-    : []
-  const obsoleteSnapshots = await Promise.all(obsoletePaths.map(async path => {
-    try {
-      return { path, bytes: await readFile(resolveInsideWorkspace(root, path)) }
-    } catch {
-      return { path }
-    }
-  }))
-  const rollback = await commitResourceWrites([
-    { targetPath: sourceTargetPath, bytes: rootBytes },
-    ...(converted ? [{ targetPath: deliveredTargetPath, bytes: converted.bytes }] : []),
-    ...dependencies.map(dependency => ({
-      targetPath: dependency.targetPath,
-      bytes: dependency.bytes,
-    })),
-  ])
-  try {
-    await writeManifestAtomically(root, updated)
-    await Promise.all(obsoletePaths.map(path => rm(resolveInsideWorkspace(root, path), { force: true })))
-  } catch (error) {
-    await rollback()
-    await Promise.all(obsoleteSnapshots.map(async snapshot => {
-      if (!snapshot.bytes) return
-      const absolute = resolveInsideWorkspace(root, snapshot.path)
-      await mkdir(dirname(absolute), { recursive: true })
-      await writeFile(absolute, snapshot.bytes)
-    }))
-    await writeManifestAtomically(root, manifest)
-    throw error
-  }
-  return { manifest: updated, resource }
 }
 
 export async function registerBeeGameAuthoredResources(
@@ -880,10 +569,15 @@ export async function registerBeeGameAuthoredResources(
         input.selection_reason,
         'Authored resource selection reasons',
       ),
+      ...(input.dimension ? { dimension: input.dimension } : {}),
       ...(input.asset_kind ? { asset_kind: input.asset_kind } : {}),
       ...(input.capabilities?.length
         ? { capabilities: uniqueStrings(input.capabilities) }
         : {}),
+      ...(input.usage_tags?.length ? { usage_tags: uniqueStrings(input.usage_tags) } : {}),
+      ...(input.styles?.length ? { styles: uniqueStrings(input.styles) } : {}),
+      ...(input.relation_kinds?.length ? { relation_kinds: uniqueStrings(input.relation_kinds) } : {}),
+      ...(input.embedded_kinds?.length ? { embedded_kinds: uniqueStrings(input.embedded_kinds) } : {}),
       ...(input.content_profile
         ? { content_profile: structuredClone(input.content_profile) }
         : {}),
@@ -906,88 +600,6 @@ export async function registerBeeGameAuthoredResources(
       .filter(path => !retainedPaths.has(path))
       .map(path => rm(resolveInsideWorkspace(root, path), { force: true })),
   )
-  return updated
-}
-
-export async function removeBeeGameUnboundResources(
-  workspacePath: string,
-  resourceIds: readonly string[],
-): Promise<BeeGameAssetManifest> {
-  const root = normalizeWorkspacePath(workspacePath)
-  const manifest = await readBeeGameAssetManifest(root)
-  requireProjectTarget(manifest)
-  const ids = uniqueStrings(resourceIds.map(normalizeId))
-  if (!ids.length) throw new Error('At least one resource id is required.')
-  const requirementIds = new Set(manifest.requirements.map(item => item.id))
-  const protectedIds = ids.filter(id => requirementIds.has(id))
-  if (protectedIds.length)
-    throw new Error(
-      `Requirement resource identities must be repaired in place: ${protectedIds.join(', ')}.`,
-    )
-  const existingIds = new Set(manifest.resources.map(item => item.id))
-  const missingIds = ids.filter(id => !existingIds.has(id))
-  if (missingIds.length)
-    throw new Error(
-      `Resource identities do not exist: ${missingIds.join(', ')}.`,
-    )
-  const referencedIds = new Set(
-    auditBeeGameContent(root, manifest).referencedResourceIds,
-  )
-  const stillReferenced = ids.filter(id => referencedIds.has(id))
-  if (stillReferenced.length)
-    throw new Error(
-      `Remove resource references from JSON/YAML before pruning inventory: ${stillReferenced.join(', ')}.`,
-    )
-  const removed = manifest.resources.filter(resource =>
-    ids.includes(resource.id),
-  )
-  const updated = parseCanonicalBeeGameAssetManifest({
-    ...manifest,
-    resources: manifest.resources.filter(
-      resource => !ids.includes(resource.id),
-    ),
-  })
-  const retainedPaths = new Set(
-    updated.resources.flatMap(resource => resource.file_paths),
-  )
-  const obsoletePaths = [
-    ...new Set(
-      removed
-        .flatMap(resource => resource.file_paths)
-        .filter(path => !retainedPaths.has(path)),
-    ),
-  ]
-  const snapshots = await Promise.all(
-    obsoletePaths.map(async path => {
-      try {
-        return {
-          path,
-          bytes: await readFile(resolveInsideWorkspace(root, path)),
-        }
-      } catch {
-        return { path }
-      }
-    }),
-  )
-  await writeManifestAtomically(root, updated)
-  try {
-    await Promise.all(
-      obsoletePaths.map(path =>
-        rm(resolveInsideWorkspace(root, path), { force: true }),
-      ),
-    )
-  } catch (error) {
-    await Promise.all(
-      snapshots.map(async snapshot => {
-        if (!snapshot.bytes) return
-        const absolute = resolveInsideWorkspace(root, snapshot.path)
-        await mkdir(dirname(absolute), { recursive: true })
-        await writeFile(absolute, snapshot.bytes)
-      }),
-    )
-    await writeManifestAtomically(root, manifest)
-    throw error
-  }
   return updated
 }
 
@@ -1126,7 +738,16 @@ function validateAcquisitionProfile(
   }
   rejectUnknownKeys(
     value,
-    ['dimensions', 'asset_kinds', 'usage_tags', 'capabilities', 'styles', 'coverage'],
+    [
+      'dimensions',
+      'asset_kinds',
+      'usage_tags',
+      'capabilities',
+      'styles',
+      'acceptance_criteria',
+      'sourcing_policy',
+      'coverage',
+    ],
     path,
     issues,
   )
@@ -1158,11 +779,42 @@ function validateAcquisitionProfile(
   )
   if (!Array.isArray(value.styles) || !value.styles.every(isTrimmedString))
     issues.push(`${path}.styles must be an array of trimmed non-empty strings.`)
+  if (
+    value.acceptance_criteria !== undefined &&
+    (!Array.isArray(value.acceptance_criteria) ||
+      value.acceptance_criteria.length === 0 ||
+      !value.acceptance_criteria.every(isTrimmedString))
+  )
+    issues.push(
+      `${path}.acceptance_criteria must be a non-empty array of trimmed non-empty strings when present.`,
+    )
+  if (value.sourcing_policy !== undefined)
+    validateSourcingPolicy(value.sourcing_policy, `${path}.sourcing_policy`, issues)
   if (value.coverage !== undefined) {
     validateCoverage(value.coverage, `${path}.coverage`, issues)
     if (Array.isArray(value.capabilities) && value.capabilities.length > 0)
       issues.push(`${path}.capabilities must be empty when coverage declares multiple resource parts.`)
   }
+}
+
+function validateSourcingPolicy(value: unknown, path: string, issues: string[]): void {
+  if (!isRecord(value)) {
+    issues.push(`${path} must be an object.`)
+    return
+  }
+  rejectUnknownKeys(
+    value,
+    ['allowed_source_kinds', 'license_constraints', 'responsible_party', 'handoff_criteria'],
+    path,
+    issues,
+  )
+  const sourceKinds = ['resource-library', 'web', 'agent-authored', 'user-provided'] as const
+  validateEnumArray(value.allowed_source_kinds, sourceKinds, `${path}.allowed_source_kinds`, issues, true)
+  for (const field of ['license_constraints', 'handoff_criteria'] as const)
+    if (!Array.isArray(value[field]) || value[field].length === 0 || !value[field].every(isTrimmedString))
+      issues.push(`${path}.${field} must be a non-empty array of trimmed non-empty strings.`)
+  if (!isTrimmedString(value.responsible_party))
+    issues.push(`${path}.responsible_party must be a trimmed non-empty string.`)
 }
 
 function validateCoverage(value: unknown, path: string, issues: string[]): void {
@@ -1240,8 +892,13 @@ function validateResource(
       'status',
       'selected_at',
       'selection_reason',
+      'dimension',
       'asset_kind',
       'capabilities',
+      'usage_tags',
+      'styles',
+      'relation_kinds',
+      'embedded_kinds',
       'content_profile',
       'technical_facts',
       'dependencies',
@@ -1288,9 +945,24 @@ function validateResource(
     issues.push(
       `${path}.selection_reason must be a non-empty array of non-empty strings.`,
     )
+  if (
+    value.dimension !== undefined &&
+    !(RESOURCE_DIMENSIONS as readonly unknown[]).includes(value.dimension)
+  )
+    issues.push(`${path}.dimension must be a canonical resource dimension.`)
   const assetKind = trimmedString(value.asset_kind)
   if (value.asset_kind !== undefined && !assetKind)
     issues.push(`${path}.asset_kind must be a trimmed non-empty string.`)
+  if (value.usage_tags !== undefined)
+    validateEnumArray(value.usage_tags, RESOURCE_USAGE_TAGS, `${path}.usage_tags`, issues)
+  if (value.capabilities !== undefined)
+    validateEnumArray(value.capabilities, RESOURCE_CAPABILITIES, `${path}.capabilities`, issues)
+  if (value.styles !== undefined && !nonEmptyStringArray(value.styles))
+    issues.push(`${path}.styles must be a non-empty array of non-empty strings.`)
+  if (value.relation_kinds !== undefined)
+    validateEnumArray(value.relation_kinds, RESOURCE_RELATION_KINDS, `${path}.relation_kinds`, issues)
+  if (value.embedded_kinds !== undefined)
+    validateEnumArray(value.embedded_kinds, RESOURCE_EMBEDDED_COMPONENT_KINDS, `${path}.embedded_kinds`, issues)
   if (assetKind && AUDIO_ASSET_KINDS.has(assetKind)) {
     const allowedExtensions = PLAYABLE_AUDIO_ASSET_KINDS.has(assetKind)
       ? AUDIO_FILE_EXTENSIONS
@@ -1359,6 +1031,34 @@ function validateResourceSource(
     if (!trimmedString(value.created_at))
       issues.push(`${path}.created_at is required.`)
     if (!trimmedString(value.reason)) issues.push(`${path}.reason is required.`)
+    return
+  }
+  if (value.type === 'web') {
+    rejectUnknownKeys(
+      value,
+      [
+        'type',
+        'source_url',
+        'page_url',
+        'license',
+        'license_url',
+        'author',
+        'retrieved_at',
+      ],
+      path,
+      issues,
+    )
+    for (const field of [
+      'source_url',
+      'page_url',
+      'license',
+      'retrieved_at',
+    ])
+      if (!trimmedString(value[field]))
+        issues.push(`${path}.${field} is required.`)
+    for (const field of ['license_url', 'author'])
+      if (value[field] !== undefined && !trimmedString(value[field]))
+        issues.push(`${path}.${field} must be a non-empty string when present.`)
     return
   }
   if (value.type === 'user-provided') {
@@ -1471,198 +1171,6 @@ function requireProjectTarget(
   return manifest.project_target
 }
 
-function isSamePinnedLibraryResource(
-  resource: BeeGameProjectResource,
-  input: BeeGameResolvedLibraryResourceInput,
-): boolean {
-  return (
-    resource.source.type === 'resource-library' &&
-    resource.source.pack_id === input.pack_id &&
-    resource.source.pack_version === input.pack_version &&
-    resource.source.element_id === input.element_id &&
-    resource.source.element_path === input.element_path
-  )
-}
-
-async function prepareDependencies(input: {
-  root: string
-  declaredAssetRoot: string
-  rootTargetPath: string
-  dependencies: NonNullable<BeeGameResolvedLibraryResourceInput['dependencies']>
-  allowedFormats?: string[]
-  fetchImpl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
-}): Promise<
-  Array<{
-    input: NonNullable<
-      BeeGameResolvedLibraryResourceInput['dependencies']
-    >[number]
-    targetPath: string
-    bytes: Uint8Array
-  }>
-> {
-  const targets = new Map<string, string>([['root', input.rootTargetPath]])
-  const result: Array<{
-    input: NonNullable<
-      BeeGameResolvedLibraryResourceInput['dependencies']
-    >[number]
-    targetPath: string
-    bytes: Uint8Array
-  }> = []
-  for (const dependency of input.dependencies) {
-    if (input.allowedFormats)
-      assertFilenameFormatAllowed(dependency.element_path, input.allowedFormats)
-    const parent = targets.get(dependency.parent_key)
-    if (!parent)
-      throw new Error(
-        `Resource dependency parent is missing: ${dependency.parent_key}`,
-      )
-    const targetPath = resolveInsideDeclaredRoot(
-      input.root,
-      input.declaredAssetRoot,
-      resolve(dirname(parent), dependency.reference_path),
-    )
-    const bytes = await downloadResource(dependency.source_url, input.fetchImpl)
-    if (!isSha256(dependency.source_hash) || sha256(bytes) !== dependency.source_hash)
-      throw new Error(`Resource dependency differs from the frozen Catalog content hash: ${dependency.element_id}`)
-    assertDetectedFormat(dependency.element_path, bytes)
-    targets.set(dependency.key, targetPath)
-    result.push({ input: dependency, targetPath, bytes })
-  }
-  return result
-}
-
-async function downloadResource(
-  url: string,
-  fetchImpl: (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ) => Promise<Response>,
-): Promise<Uint8Array> {
-  const resourceUrl = requiredString(url, 'Resource URL')
-  const response = await withResourceExternalTransport({
-    service: 'resource-object',
-    operation: 'download resource content',
-    execute: () => fetchImpl(resourceUrl),
-  })
-  if (!response.ok)
-    throw new Error(`Resource download failed (${response.status})`)
-  const bytes = new Uint8Array(await response.arrayBuffer())
-  if (!bytes.byteLength)
-    throw new Error('Resource download returned an empty file')
-  return bytes
-}
-
-async function resourceFilesMatchHashes(
-  root: string,
-  resource: BeeGameProjectResource,
-): Promise<boolean> {
-  if (!resource.local_file_hashes) return false
-  for (const path of resource.file_paths) {
-    const expected = resource.local_file_hashes[path]
-    if (!isSha256(expected)) return false
-    try {
-      const actual = sha256(
-        new Uint8Array(await readFile(resolveInsideWorkspace(root, path))),
-      )
-      if (actual !== expected) return false
-    } catch {
-      return false
-    }
-  }
-  return true
-}
-
-async function writeManifestAtomically(
-  root: string,
-  manifest: BeeGameAssetManifest,
-): Promise<void> {
-  const validated = parseCanonicalBeeGameAssetManifest(manifest)
-  const manifestPath = resolveInsideWorkspace(root, ASSET_MANIFEST_PATH)
-  const requirementsBytes = encodeJson({
-    requirements: validated.requirements,
-  })
-  const requirementsModulePath = `${ASSET_REQUIREMENTS_MODULE_ROOT}/${sha256(
-    requirementsBytes,
-  ).slice(0, 24)}.json`
-  const requirementsPath = resolveInsideWorkspace(root, requirementsModulePath)
-  const resourceModules = validated.resources
-    .toSorted((left, right) => left.id.localeCompare(right.id))
-    .map(resource => ({
-      path: `${ASSET_RESOURCE_MODULE_ROOT}/${createHash('sha256')
-        .update(resource.id)
-        .digest('hex')
-        .slice(0, 12)}-${sha256(encodeJson(resource)).slice(0, 12)}.json`,
-      resource,
-    }))
-  const index: BeeGameAssetManifestIndex = {
-    version: CURRENT_ASSET_MANIFEST_VERSION,
-    ...(validated.project_target
-      ? { project_target: validated.project_target }
-      : {}),
-    modules: {
-      requirements: requirementsModulePath,
-      resources: resourceModules.map(module => module.path),
-    },
-  }
-  const resourceModuleDirectory = resolveInsideWorkspace(
-    root,
-    ASSET_RESOURCE_MODULE_ROOT,
-  )
-  const previousResourceModules = existsSync(resourceModuleDirectory)
-    ? readdirSync(resourceModuleDirectory, { withFileTypes: true })
-        .filter(entry => entry.isFile())
-        .map(entry => `${ASSET_RESOURCE_MODULE_ROOT}/${entry.name}`)
-    : []
-  const requirementsModuleDirectory = resolveInsideWorkspace(
-    root,
-    ASSET_REQUIREMENTS_MODULE_ROOT,
-  )
-  const previousRequirementModules = existsSync(requirementsModuleDirectory)
-    ? readdirSync(requirementsModuleDirectory, { withFileTypes: true })
-        .filter(entry => entry.isFile())
-        .map(entry => `${ASSET_REQUIREMENTS_MODULE_ROOT}/${entry.name}`)
-    : []
-  const writes = [
-    {
-      targetPath: requirementsPath,
-      bytes: requirementsBytes,
-    },
-    ...resourceModules.map(module => ({
-      targetPath: resolveInsideWorkspace(root, module.path),
-      bytes: encodeJson(module.resource),
-    })),
-    { targetPath: manifestPath, bytes: encodeJson(index) },
-  ]
-  const temporaryPaths: string[] = []
-  try {
-    for (const write of writes) {
-      await mkdir(dirname(write.targetPath), { recursive: true })
-      const temporaryPath = `${write.targetPath}.${randomUUID()}.tmp`
-      temporaryPaths.push(temporaryPath)
-      await writeFile(temporaryPath, write.bytes)
-    }
-    for (let index = 0; index < writes.length; index += 1)
-      await rename(temporaryPaths[index]!, writes[index]!.targetPath)
-    const currentPaths = new Set(resourceModules.map(module => module.path))
-    currentPaths.add(requirementsModulePath)
-    await Promise.all(
-      [...previousRequirementModules, ...previousResourceModules]
-        .filter(path => !currentPaths.has(path))
-        .map(path => rm(resolveInsideWorkspace(root, path), { force: true })),
-    )
-  } finally {
-    await Promise.all(
-      temporaryPaths.map(path =>
-        rm(path, { force: true }).catch(() => undefined),
-      ),
-    )
-  }
-}
-
-function encodeJson(value: unknown): Uint8Array {
-  return new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`)
-}
-
 async function commitResourceWrites(
   writes: Array<{ targetPath: string; bytes: Uint8Array }>,
 ): Promise<() => Promise<void>> {
@@ -1702,21 +1210,6 @@ async function rollbackResourceWrites(
       await writeFile(snapshot.targetPath, snapshot.previous)
     else await rm(snapshot.targetPath, { force: true })
   }
-}
-
-function resolveResourceDestination(
-  root: string,
-  runtimeAssetRoot: string,
-  destination: string,
-  filename: string,
-): string {
-  const normalized = normalizedProjectPath(destination)
-  const hasExtension = Boolean(extname(normalized))
-  return resolveInsideDeclaredRoot(
-    root,
-    runtimeAssetRoot,
-    hasExtension ? normalized : join(normalized, filename),
-  )
 }
 
 function resolveInsideDeclaredRoot(
@@ -1809,35 +1302,98 @@ function assertFilenameFormatAllowed(
     )
 }
 
-function assertDetectedFormat(filename: string, bytes: Uint8Array): void {
-  const declared = normalizeFormat(extname(filename).slice(1))
-  const detected = detectResourceBinaryFormat(bytes)
-  if (detected && declared && !formatsAgree(declared, detected))
-    throw new Error(`Resource binary format mismatch: ${filename}`)
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+async function writeManifestAtomically(
+  root: string,
+  manifest: BeeGameAssetManifest,
+): Promise<void> {
+  const validated = parseCanonicalBeeGameAssetManifest(manifest)
+  const manifestPath = resolveInsideWorkspace(root, ASSET_MANIFEST_PATH)
+  const requirementsBytes = encodeJson({
+    requirements: validated.requirements,
+  })
+  const requirementsModulePath = `${ASSET_REQUIREMENTS_MODULE_ROOT}/${sha256(
+    requirementsBytes,
+  ).slice(0, 24)}.json`
+  const requirementsPath = resolveInsideWorkspace(root, requirementsModulePath)
+  const resourceModules = validated.resources
+    .toSorted((left, right) => left.id.localeCompare(right.id))
+    .map(resource => ({
+      path: `${ASSET_RESOURCE_MODULE_ROOT}/${createHash('sha256')
+        .update(resource.id)
+        .digest('hex')
+        .slice(0, 12)}-${sha256(encodeJson(resource)).slice(0, 12)}.json`,
+      resource,
+    }))
+  const index: BeeGameAssetManifestIndex = {
+    version: CURRENT_ASSET_MANIFEST_VERSION,
+    ...(validated.project_target
+      ? { project_target: validated.project_target }
+      : {}),
+    modules: {
+      requirements: requirementsModulePath,
+      resources: resourceModules.map(module => module.path),
+    },
+  }
+  const resourceModuleDirectory = resolveInsideWorkspace(
+    root,
+    ASSET_RESOURCE_MODULE_ROOT,
+  )
+  const previousResourceModules = existsSync(resourceModuleDirectory)
+    ? readdirSync(resourceModuleDirectory, { withFileTypes: true })
+        .filter(entry => entry.isFile())
+        .map(entry => `${ASSET_RESOURCE_MODULE_ROOT}/${entry.name}`)
+    : []
+  const requirementsModuleDirectory = resolveInsideWorkspace(
+    root,
+    ASSET_REQUIREMENTS_MODULE_ROOT,
+  )
+  const previousRequirementModules = existsSync(requirementsModuleDirectory)
+    ? readdirSync(requirementsModuleDirectory, { withFileTypes: true })
+        .filter(entry => entry.isFile())
+        .map(entry => `${ASSET_REQUIREMENTS_MODULE_ROOT}/${entry.name}`)
+    : []
+  const writes = [
+    {
+      targetPath: requirementsPath,
+      bytes: requirementsBytes,
+    },
+    ...resourceModules.map(module => ({
+      targetPath: resolveInsideWorkspace(root, module.path),
+      bytes: encodeJson(module.resource),
+    })),
+    { targetPath: manifestPath, bytes: encodeJson(index) },
+  ]
+  const temporaryPaths: string[] = []
+  try {
+    for (const write of writes) {
+      await mkdir(dirname(write.targetPath), { recursive: true })
+      const temporaryPath = `${write.targetPath}.${randomUUID()}.tmp`
+      temporaryPaths.push(temporaryPath)
+      await writeFile(temporaryPath, write.bytes)
+    }
+    for (let index = 0; index < writes.length; index += 1)
+      await rename(temporaryPaths[index]!, writes[index]!.targetPath)
+    const currentPaths = new Set(resourceModules.map(module => module.path))
+    currentPaths.add(requirementsModulePath)
+    await Promise.all(
+      [...previousRequirementModules, ...previousResourceModules]
+        .filter(path => !currentPaths.has(path))
+        .map(path => rm(resolveInsideWorkspace(root, path), { force: true })),
+    )
+  } finally {
+    await Promise.all(
+      temporaryPaths.map(path =>
+        rm(path, { force: true }).catch(() => undefined),
+      ),
+    )
+  }
 }
 
-function detectResourceBinaryFormat(bytes: Uint8Array): string | undefined {
-  const ascii = new TextDecoder('latin1').decode(bytes.subarray(0, 32))
-  if (ascii.startsWith('glTF')) return 'glb'
-  if (ascii.startsWith('OggS')) return 'ogg'
-  if (
-    ascii.startsWith('ID3') ||
-    (bytes[0] === 0xff && ((bytes[1] ?? 0) & 0xe0) === 0xe0)
-  )
-    return 'mp3'
-  if (ascii.startsWith('Kaydara FBX Binary')) return 'fbx'
-  if (bytes[0] === 0x89 && ascii.slice(1, 4) === 'PNG') return 'png'
-  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpg'
-  if (ascii.startsWith('RIFF') && ascii.slice(8, 12) === 'WAVE') return 'wav'
-  return undefined
-}
-
-function formatsAgree(left: string, right: string): boolean {
-  return (
-    left === right ||
-    (left === 'jpeg' && right === 'jpg') ||
-    (left === 'jpg' && right === 'jpeg')
-  )
+function encodeJson(value: unknown): Uint8Array {
+  return new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`)
 }
 
 function normalizeFormat(value: string): string {
@@ -1994,8 +1550,4 @@ function trimmedString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() && value === value.trim()
     ? value
     : undefined
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }

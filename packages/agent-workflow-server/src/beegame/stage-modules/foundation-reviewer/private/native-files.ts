@@ -53,7 +53,7 @@ export async function runFileReview(input: {
   let modelMessages = 0
   const response = await runNativeFileAgent({
     command: input.configuration.command, env: { ...nativeFileAgentEnvironment(input.configuration.env),
-      BEEGAME_EXTERNAL_REVIEW: '1', BEEGAME_STRUCTURED_OUTPUT_IS_TERMINAL: '1' },
+      BEEGAME_STRUCTURED_OUTPUT_IS_TERMINAL: '1' },
     responseTrace: true,
     workspacePath, writablePaths: [...source.documents.map(document => document.path)], allowWorkingFiles: true,
     readOnlyPaths: ['requirements.md', 'review-context'],

@@ -46,7 +46,8 @@ export type FileAgentInput = {
   allowWorkingFiles?: boolean
   readOnlyPaths?: readonly string[]
   prompt: string
-  schema: object
+  /** Optional terminal payload contract. File-producing tasks may omit it. */
+  schema?: object
   logPath: string
   /** Opt-in response evidence, including detached child queries; no hidden reasoning. */
   responseTrace?: boolean
@@ -76,12 +77,10 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
   const command = [...input.command, '--print', '--verbose',
     '--input-format=stream-json', '--output-format=stream-json',
     '--include-partial-messages', '--replay-user-messages', '--permission-prompt-tool=stdio',
-    '--json-schema', JSON.stringify(input.schema), '--no-session-persistence', ...access.flags]
+    ...(input.schema ? ['--json-schema', JSON.stringify(input.schema)] : []),
+    '--no-session-persistence', ...access.flags]
   const child = spawn(command[0]!, command.slice(1), {
-    // Preserve the user-required core guard: QueryEngine.ts stops after five
-    // failed StructuredOutput calls. Removing host document resubmission does
-    // not remove or replace this native protection.
-    cwd: root, env: { ...input.env, ...access.environment, MAX_STRUCTURED_OUTPUT_RETRIES: '5',
+    cwd: root, env: { ...input.env, ...access.environment,
       BEEGAME_NATIVE_RESPONSE_TRACE: input.responseTrace ? '1' : '0',
       BEEGAME_NATIVE_DIAGNOSTICS: input.responseTrace ? '1' : '0' },
     shell: false, stdio: ['pipe', 'pipe', 'pipe'],

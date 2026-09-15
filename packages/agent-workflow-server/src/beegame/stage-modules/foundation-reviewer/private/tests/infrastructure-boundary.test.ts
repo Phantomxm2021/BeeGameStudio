@@ -53,6 +53,10 @@ test('Reviewer source dependencies, including erased type imports, use only priv
   const resolveImport = resolver()
   const approved = new Set(['billing', 'runtime-configuration'].map(name => resolve(moduleRoot, '../../../', name, 'public.ts')))
   approved.add(resolve(repository, 'packages/agent-workflow/src/native-file-agent.ts'))
+  // Existing stage-neutral primitives are shared with IR. They expose no
+  // other stage's execution state and must remain dependency-free below.
+  const shared = ['journal-storage', 'native-usage'].map(name => resolve(moduleRoot, '../../stage-runtime', `${name}.ts`))
+  for (const path of shared) approved.add(path)
   const violations: string[] = []
   const paths = await sources(moduleRoot)
   for (const path of paths) {
@@ -66,6 +70,11 @@ test('Reviewer source dependencies, including erased type imports, use only priv
     }
   }
   expect(paths.length).toBeGreaterThan(5)
+  for (const path of shared) {
+    const found = imports(path, await readFile(path, 'utf8'))
+    if (found.dynamic || found.specifiers.some(specifier => !specifier.startsWith('node:') && specifier !== 'zod/v4'))
+      violations.push(path + ' -> shared primitive depends on stage or workflow code')
+  }
   expect(violations).toEqual([])
 })
 

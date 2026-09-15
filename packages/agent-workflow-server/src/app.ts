@@ -205,6 +205,8 @@ import {
   type FoundationAuthoringHostOptions,
 } from './beegame/foundation-authoring-host'
 import { createFoundationReviewerHost, type FoundationReviewerHostOptions, type FoundationReviewerHost } from './beegame/foundation-reviewer-host'
+import { createGameIrHost, type GameIrHostOptions, type GameIrHost } from './beegame/game-ir-host'
+import { isPublicStageActive } from './beegame/delivery-workflow/public-stage-routing'
 import { resolveNativeRuntimeCommand } from './beegame/native-runtime-process-path'
 import { evaluateWorkflowDeliveryGate } from './beegame/delivery-workflow/delivery-gate'
 import type {
@@ -421,6 +423,7 @@ export type AgentWorkflowAppOptions = {
     options: FoundationAuthoringHostOptions,
   ) => FoundationAuthoringHost
   foundationReviewerHostFactory?: (options: FoundationReviewerHostOptions) => FoundationReviewerHost
+  gameIrHostFactory?: (options: GameIrHostOptions) => GameIrHost
 }
 
 export const ROUTE_PERMISSION = {
@@ -699,7 +702,6 @@ export function createAgentWorkflowApp(
       ),
     dashboardRepository.createSessionUsageBillingBackend(),
     Boolean(supabaseRuntimeEnvClient),
-    options.resourceSelectionRuntimeConfig,
   )
   const deliveryControllers = new Map<
     string,
@@ -747,11 +749,6 @@ export function createAgentWorkflowApp(
       userDataRoot: getCurrentUserDataRoot(input.request),
       ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
       ...(input.language ? { language: input.language } : {}),
-      ...(options.resourceSelectionRuntimeConfig
-        ? {
-            resourceSelectionConfig: options.resourceSelectionRuntimeConfig,
-          }
-        : {}),
       ...(input.briefContext
         ? { confirmedBriefContext: input.briefContext }
         : {}),
@@ -781,12 +778,14 @@ export function createAgentWorkflowApp(
     )(authoringHostOptions)
     const { language: _authorLanguage, ...reviewHostOptions } = authoringHostOptions
     const reviewer = (options.foundationReviewerHostFactory ?? createFoundationReviewerHost)(reviewHostOptions)
+    const ir = (options.gameIrHostFactory ?? createGameIrHost)(reviewHostOptions)
     const controller = createDeliveryWorkflowController({
       workspacePath: workspaceKey,
       ownerId: input.user.id,
       workerPort,
       author,
       reviewer,
+      ir,
     })
     deliveryControllers.set(key, {
       controller,
@@ -951,7 +950,7 @@ export function createAgentWorkflowApp(
       // Foundation authoring is a public stage module. Its Continue and
       // Retry routes must go through the controller so the module's opaque
       // handle and durable control sequence remain authoritative.
-      if (inspection.currentRun.authorStage || inspection.currentRun.foundationReviewStage) {
+      if (isPublicStageActive(inspection.currentRun)) {
         if (input.taskId)
           throw new WorkflowStoreError(
             'taskId is not supported for public foundation authoring',
@@ -1113,7 +1112,7 @@ export function createAgentWorkflowApp(
         )
       }
       const controller = getDeliveryController(input)
-      const reconciled = existing.authorStage || existing.foundationReviewStage || existing.phase === 'DOCUMENT_DRAFTING'
+      const reconciled = isPublicStageActive(existing) || existing.phase === 'DOCUMENT_DRAFTING'
         ? existing
         : await reconcileRunOnStartup({
         store,
@@ -1126,7 +1125,7 @@ export function createAgentWorkflowApp(
         },
       })
       if (reconciled) {
-        if (reconciled.authorStage || reconciled.foundationReviewStage)
+        if (isPublicStageActive(reconciled))
           await controller.ensureProgress(reconciled)
         else await controller.resume(reconciled)
       }
@@ -2900,10 +2899,7 @@ export function createAgentWorkflowApp(
         workflowWorkspacePath &&
         workflowStore &&
         workflowRun &&
-        ((workflowRun.foundationReviewStage && workflowRun.status !== 'stopped') || (workflowRun.authorStage &&
-          (['starting', 'running'].includes(workflowRun.authorStage.status) ||
-            workflowRun.authorStage.status === 'completed' && workflowRun.status !== 'stopped')) ||
-          (!workflowRun.authorStage && workflowRun.status === 'running'))
+        (isPublicStageActive(workflowRun) && workflowRun.status !== 'stopped' || workflowRun.status === 'running')
       ) {
         const controller = getDeliveryController({
           request: c.req.raw,
@@ -2911,7 +2907,7 @@ export function createAgentWorkflowApp(
           projectId: workflowRun.projectId,
           workspacePath: workflowWorkspacePath,
         })
-        if (workflowRun.authorStage || workflowRun.foundationReviewStage) {
+        if (isPublicStageActive(workflowRun)) {
           workflowStopResult = await controller.stopFoundation(
             workflowRun,
             'user stopped workflow',
@@ -3225,7 +3221,7 @@ export function createAgentWorkflowApp(
         projectId: run.projectId,
         workspacePath: project.root_path,
       })
-      if (run.authorStage || run.foundationReviewStage) {
+      if (isPublicStageActive(run)) {
         return c.json(await controller.stopFoundation(run, reason))
       }
       const stopBridge = createWorkflowDispatchStopBridge({
@@ -6221,12 +6217,8 @@ type LastProvenWorkflowSummary = {
   lastProvenUnitId: string
   lastProvenUnitKind:
     | 'document'
-    | 'resource-inventory'
-    | 'resource-content'
-    | 'resource-gate'
-    | 'atomic-plan'
+    | 'resource-delivery'
     | 'implementation-task'
-    | 'implementation-audit'
     | 'acceptance'
   lastProvenItemId?: string
 }
@@ -6308,6 +6300,7 @@ function workflowThinkingStatus(
   workflow: JsonObject,
 ): 'working' | 'waiting' | 'idle' {
   if (workflowStatus(workflow) !== 'running') return 'idle'
+  if (workflow.documentStep === 'GAME_IR_COMPILATION') return 'working'
   if (isObject(workflow.authorStage) && ['starting', 'running'].includes(String(workflow.authorStage.status))) return 'working'
   if (isObject(workflow.foundationReviewStage)) {
     const invocation = isObject(workflow.foundationReviewStage.invocation)
@@ -6340,12 +6333,8 @@ function workflowMessageKey(workflow: JsonObject): string {
       return 'workflow.documentReview'
     case 'RESOURCE_PREPARATION':
       return 'workflow.resourcePreparation'
-    case 'ATOMIC_TASK_PLANNING':
-      return 'workflow.atomicTaskPlanning'
     case 'IMPLEMENTATION':
       return 'workflow.implementation'
-    case 'IMPLEMENTATION_AUDIT':
-      return 'workflow.implementationAudit'
     case 'ACCEPTANCE':
       return 'workflow.acceptance'
     case 'DELIVERY':
@@ -6358,10 +6347,15 @@ function workflowMessageKey(workflow: JsonObject): string {
 function workflowNextAction(
   workflow: JsonObject,
 ): 'resume' | 'retry' | undefined {
+  if (workflow.documentStep === 'GAME_IR_COMPILATION' && isObject(workflow.gameIrStage)) {
+    const outcome = workflow.gameIrStage.outcome
+    if (isObject(outcome) && outcome.status === 'needs_action' && outcome.resumable === false) return undefined
+  }
   const publicAuthor = projectPublicAuthorDisplay(workflow.authorStage)
   if (publicAuthor?.completed && !workflow.foundationReviewStage)
     return workflowStatus(workflow) === 'stopped' ? 'resume' : undefined
-  const foundation = projectFoundationReviewDisplay(workflow.foundationReviewStage, workflow.status)
+  const foundation = workflow.documentStep === 'FOUNDATION_REVIEW'
+    ? projectFoundationReviewDisplay(workflow.foundationReviewStage, workflow.status) : undefined
   if (foundation?.resumeAvailable) return 'resume'
   if (foundation?.terminal) return undefined
   if (workflow.workflowStateError === true)
@@ -6394,13 +6388,14 @@ function workflowViewForDisplay(
     phase: workflow.phase,
     documentStep: displayDocumentStep,
   })
-  const foundationDisplay = projectFoundationReviewDisplay(workflow.foundationReviewStage, workflow.status)
+  const foundationDisplay = workflow.documentStep === 'FOUNDATION_REVIEW'
+    ? projectFoundationReviewDisplay(workflow.foundationReviewStage, workflow.status) : undefined
   const reviewReport = isObject(workflow.foundationReviewStage)
     ? displayFoundationReviewReport(workflow.foundationReviewStage.acceptedReview)
     : undefined
   const authorTiming = !workflow.foundationReviewStage && projectDeliveryProgress(workflow)?.stageId === 'DOCUMENT_DRAFTING'
     ? projectPublicAuthorTiming(workflow.authorStage) : undefined
-  const foundationTiming = isObject(workflow.foundationReviewStage) &&
+  const foundationTiming = workflow.documentStep === 'FOUNDATION_REVIEW' && isObject(workflow.foundationReviewStage) &&
     Number.isFinite(Number(workflow.elapsedMs)) && Number(workflow.elapsedMs) >= 0
     ? { elapsedMs: Number(workflow.elapsedMs), scope: 'merged_foundation_stage_elapsed',
         includesModelNetworkWait: true, includesToolAndSubtaskWait: true,
@@ -6443,11 +6438,13 @@ function workflowViewForDisplay(
     workflow.phase === 'DOCUMENT_DRAFTING' ||
     workflow.phase === 'DOCUMENT_REVIEW'
   const assetPhase = workflow.phase === 'RESOURCE_PREPARATION'
-  const displayTaskSource = isObject(workflow.foundationReviewStage)
+  const displayTaskSource = workflow.documentStep === 'GAME_IR_COMPILATION'
+    ? [{ id: 'game-ir-public-stage', title: 'IR 编译', status: workflow.status, attempt: 0, operation: 'produce' }]
+    : foundationDisplay
     ? [{ id: 'foundation-public-stage', title: 'Foundation Reviewer',
         status: foundationDisplay!.taskStatus,
         attempt: 0, operation: 'review' }]
-    : publicAuthor
+    : publicAuthor && (workflow.phase === 'DOCUMENT_DRAFTING' || !workflow.foundationReviewStage)
     ? publicAuthor.tasks
     : documentPhase && workspacePath
       ? projectDocumentDisplayTasks({
@@ -6534,7 +6531,7 @@ function workflowViewForDisplay(
     : undefined
   const evidence = isObject(workflow.evidence)
     ? Object.fromEntries(
-        ['resourcePreparation', 'implementationAudit', 'acceptance'].flatMap(
+        ['resourcePreparation', 'acceptance'].flatMap(
           key => {
             const value = (workflow.evidence as Record<string, unknown>)[key]
             if (!isObject(value) || typeof value.status !== 'string') return []
@@ -6608,10 +6605,10 @@ function workflowViewForDisplay(
       ? { activeSince: workflow.activeSince }
       : {}),
     ...(authorTiming ?? {}),
-    ...(isObject(workflow.foundationReviewStage) && Number.isFinite(Number(workflow.foundationReviewStage.currentCallElapsedMs)) && Number(workflow.foundationReviewStage.currentCallElapsedMs) >= 0
+    ...(workflow.documentStep === 'FOUNDATION_REVIEW' && isObject(workflow.foundationReviewStage) && Number.isFinite(Number(workflow.foundationReviewStage.currentCallElapsedMs)) && Number(workflow.foundationReviewStage.currentCallElapsedMs) >= 0
       ? { currentCallElapsedMs: Number(workflow.foundationReviewStage.currentCallElapsedMs) }
       : {}),
-    ...(isObject(workflow.foundationReviewStage) && Number.isFinite(Number(workflow.foundationReviewStage.historicalElapsedMs)) && Number(workflow.foundationReviewStage.historicalElapsedMs) >= 0
+    ...(workflow.documentStep === 'FOUNDATION_REVIEW' && isObject(workflow.foundationReviewStage) && Number.isFinite(Number(workflow.foundationReviewStage.historicalElapsedMs)) && Number(workflow.foundationReviewStage.historicalElapsedMs) >= 0
       ? { historicalElapsedMs: Number(workflow.foundationReviewStage.historicalElapsedMs) }
       : {}),
     ...(workflow.resumeOnReconnect === true
@@ -6727,7 +6724,8 @@ export function workflowStageSnapshotsForDisplay(
     const blockReason = snapshot.block
       ? projectWorkflowDisplayReason(snapshot.block)
       : undefined
-    const foundationDisplay = isLive ? projectFoundationReviewDisplay(workflow.foundationReviewStage, workflow.status) : undefined
+    const foundationDisplay = isLive && workflow.documentStep === 'FOUNDATION_REVIEW'
+      ? projectFoundationReviewDisplay(workflow.foundationReviewStage, workflow.status) : undefined
     const block = foundationDisplay?.block ?? (blockReason
       ? {
           ...blockReason,
@@ -6783,10 +6781,8 @@ function resourceProductionTaskForDisplay(
     ? workflow.resourceProductionState.currentTask
     : undefined
   switch (value) {
-    case 'RESOURCE_PLAN':
-    case 'RESOURCE_INVENTORY':
-    case 'RESOURCE_CONTENT':
-    case 'RESOURCE_GATE':
+    case 'RESOURCE_DELIVERY':
+    case 'RESOURCE_DELIVERED':
       return value
     default:
       throw new Error('resource workflow is missing its canonical task cursor')
@@ -8761,8 +8757,6 @@ function buildConfirmedBriefPrompt(
     'Treat response language, document language, and player-visible game language as separate confirmed requirements even when they have the same value. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.',
     '',
     'Use the confirmed brief as the source of truth and preserve its explicit choices and constraints. Deliver a playable project whose current documentation, asset contract, implementation, tests, and player-visible behavior agree with one another. New projects require an implementable and testable documentation baseline. Changes to intended behavior or presentation require the affected project documents and acceptance expectations to remain current.',
-    'A delivery claim requires the workflow document review, implementation audit, and acceptance stages to pass against the current workspace revision. A build result or the presence of files alone is not delivery evidence. Apply the confirmed resource_library_usage policy without assuming a particular engine, platform, Pack, asset format, or scene layout strategy.',
-    'BeeGame Studio Workflow owns phase transitions, worker dispatch, evidence validation, implementation ordering, verification, and repair decisions. Workers choose concrete tools and implementation details within their phase contracts.',
     '',
     'Confirmed brief:',
     confirmedBrief,

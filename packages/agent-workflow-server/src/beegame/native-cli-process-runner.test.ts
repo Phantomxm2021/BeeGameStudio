@@ -10,11 +10,7 @@ const fixturePath = fileURLToPath(
   new URL('./fixtures/native-runtime-fixture.ts', import.meta.url),
 )
 
-function startRuntime(
-  options: {
-    workflowJsonSchema?: Record<string, unknown>
-  } = {},
-) {
+function startRuntime() {
   return createNativeCliProcessRunner({
     command: [process.execPath, fixturePath],
     observabilityFactory: () => ({
@@ -29,9 +25,6 @@ function startRuntime(
     sessionId: 'session-1',
     cwd: process.cwd(),
     env: {},
-    ...(options.workflowJsonSchema
-      ? { workflowJsonSchema: options.workflowJsonSchema }
-      : {}),
   })
 }
 
@@ -140,28 +133,6 @@ describe('native CLI process runner', () => {
     ).toBe(false)
   })
 
-  test('disables built-in tools for a StructuredOutput workflow turn while retaining its JSON schema', () => {
-    const schema = {
-      type: 'object',
-      properties: { taskId: { type: 'string' } },
-      required: ['taskId'],
-      additionalProperties: false,
-    }
-    const command = nativeRuntimeCommand({
-      sessionId: 'beegame_fact_extractor',
-      cwd: process.cwd(),
-      env: {},
-      workflowWorker: true,
-      workflowWorkerType: 'foundation-fact-extractor',
-      workflowJsonSchema: schema,
-    })
-
-    expect(command).toContain('--json-schema')
-    expect(command[command.indexOf('--json-schema') + 1]).toBe(JSON.stringify(schema))
-    expect(command).toContain('--tools')
-    expect(command[command.indexOf('--tools') + 1]).toBe('')
-  })
-
   test('forwards native messages and resolves only on result', async () => {
     const runtime = await startRuntime()
     const messages: Record<string, unknown>[] = []
@@ -178,42 +149,6 @@ describe('native CLI process runner', () => {
       'result',
     ])
     expect(messages.at(-1)?.received_session_id).toBe('')
-    runtime.dispose?.()
-  })
-
-  test('completes a structured turn when the validated StructuredOutput tool succeeds', async () => {
-    const runtime = await startRuntime({
-      workflowJsonSchema: {
-        type: 'object',
-        properties: { version: { const: 3 } },
-        required: ['version'],
-        additionalProperties: false,
-      },
-    })
-    const messages: Record<string, unknown>[] = []
-
-    await expect(
-      Promise.race([
-        runtime.submit({
-          prompt: 'structured-success-without-result',
-          signal: new AbortController().signal,
-          onMessage: message => messages.push(message),
-          requestPermission: async () => ({ behavior: 'deny' }),
-        }),
-        new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new Error('structured turn did not terminate')),
-            500,
-          ),
-        ),
-      ]),
-    ).resolves.toBeUndefined()
-    expect(messages.at(-1)).toMatchObject({
-      type: 'result',
-      subtype: 'success',
-      structured_output: { version: 3 },
-    })
-    expect(messages.filter(message => message.type === 'result')).toHaveLength(1)
     runtime.dispose?.()
   })
 
@@ -315,7 +250,14 @@ describe('native CLI process runner', () => {
       onMessage: message => messages.push(message),
       requestPermission: async request => {
         requests.push(request)
-        return { behavior: 'allow', scope: 'once' }
+        return {
+          behavior: 'allow',
+          scope: 'session',
+          updatedPermissions: request.permissionSuggestions?.map(suggestion => ({
+            ...suggestion,
+            destination: 'session',
+          })),
+        }
       },
     })
 
@@ -325,6 +267,14 @@ describe('native CLI process runner', () => {
         toolName: 'Write',
         message: 'Write requires permission.',
         input: { file_path: 'docs/GDD.md', content: 'test' },
+        permissionSuggestions: [
+          {
+            type: 'addRules',
+            rules: [{ toolName: 'Write', ruleContent: 'docs/GDD.md' }],
+            behavior: 'allow',
+            destination: 'localSettings',
+          },
+        ],
       },
     ])
     expect(messages.at(-1)).toMatchObject({

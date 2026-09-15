@@ -39,7 +39,6 @@ import type {
   BeeGameUsageBillingUsage as Usage,
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import { recordConfirmedBriefEvidence } from './confirmed-brief-evidence'
-import type { ResourceContentCommitContract } from './native-resource-content-tool'
 import { appendBoundedDiagnosticRecord } from './bounded-diagnostic-log'
 import {
   parseNativeBackgroundTaskLaunch,
@@ -47,7 +46,6 @@ import {
 } from './native-background-task-output'
 import { createNativeCliProcessRunner } from './native-cli-process-runner'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
-import type { ResourceSelectionRuntimeConfig } from './resource-selection-config'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { createRunStore } from './delivery-workflow/run-store'
 import {
@@ -251,21 +249,15 @@ export type BeeGameSessionRunnerStartInput = {
   env: Record<string, string>
   /** Sanitized evidence of the selected versus forwarded launch settings. */
   runtimeLaunchContract?: RuntimeLaunchContract
-  /** Platform-owned resource credentials stay in the worker closure, not its shell environment. */
-  resourceSelectionConfig?: ResourceSelectionRuntimeConfig
   /** Workflow identity is propagated into the native permission boundary. */
   workflowWorker?: boolean
   workflowWorkerType?: string
-  workflowModelTier?: 'fast' | 'balanced' | 'strong'
   workflowDispatchId?: string
   workflowAllowedPaths?: string[]
   workflowAllowedTools?: string[]
   workflowProjectReadScope?: 'empty' | 'allowed'
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
-  /** Native structured-output authority for workers that must return JSON. */
-  workflowJsonSchema?: Record<string, unknown>
-  workflowResourceContentCommitContract?: ResourceContentCommitContract
   language?: BeeGameSessionLanguage
   /** Native background tasks may outlive the foreground turn that spawned them. */
   onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
@@ -357,6 +349,7 @@ export type DashboardPermissionRequest = {
   toolName: string
   message: string
   input: Record<string, unknown>
+  permissionSuggestions?: Record<string, unknown>[]
 }
 
 export type DashboardPermissionDecision = {
@@ -364,6 +357,7 @@ export type DashboardPermissionDecision = {
   message?: string
   /** Ephemeral approval scope. Never persisted across isolated sessions. */
   scope?: 'once' | 'session'
+  updatedPermissions?: Record<string, unknown>[]
 }
 
 type PendingPermission = DashboardPermissionRequest & {
@@ -389,15 +383,11 @@ type SessionRecord = {
   workflowRunId?: string
   workflowDispatchId?: string
   workflowWorkerType?: string
-  workflowModelTier?: 'fast' | 'balanced' | 'strong'
   workflowAllowedPaths?: string[]
   workflowAllowedTools?: string[]
   workflowProjectReadScope?: 'empty' | 'allowed'
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
-  workflowJsonSchema?: Record<string, unknown>
-  workflowResourceContentCommitContract?: ResourceContentCommitContract
-  atomicTaskPlannerEvidenceWriteGranted?: boolean
   runtime: RuntimeModelConfig | undefined
   userId: string
   authToken?: string
@@ -415,7 +405,6 @@ type SessionRecord = {
   pendingPermissions: Map<string, PendingPermission>
   toolUses: Map<string, { toolName: string; input?: unknown }>
   /** Tool-use blocks observed before their streamed JSON input is complete. */
-  streamingToolUses: Map<string, string>
   assistantPartialTextByMessage: Map<string, string>
   activeAssistantMessageId: string | null
   emittedAssistantMessageIds: Set<string>
@@ -468,38 +457,6 @@ function workflowDocumentFromToolEvent(
   )
     ? relativePath
     : undefined
-}
-
-function resourceWorkerActivityMessage(
-  record: SessionRecord,
-  event: BeeGameEvent,
-): string | undefined {
-  if (
-    record.workflowWorkerType !== 'resource-curator' ||
-    event.type !== 'tool.started'
-  )
-    return undefined
-  if (event.payload?.toolName === 'CommitResourceInventory') {
-    return record.language === 'zh-TW'
-      ? '正在提交資源庫存…'
-      : record.language === 'zh'
-        ? '正在提交资源库存…'
-        : 'Committing the resource inventory…'
-  }
-  if (event.payload?.toolName !== 'ResourceLibrary') return undefined
-  const input = event.payload.input
-  if (!input || typeof input !== 'object' || Array.isArray(input))
-    return undefined
-  const action = String((input as Record<string, unknown>).action ?? '')
-  const traditional = record.language === 'zh-TW'
-  const chinese = record.language === 'zh' || traditional
-  if (action === 'match_requirements')
-    return chinese
-      ? traditional
-        ? '正在匹配資源需求…'
-        : '正在匹配资源需求…'
-      : 'Matching resource requirements…'
-  return undefined
 }
 
 function documentAuthorActivityMessage(
@@ -560,11 +517,7 @@ function documentAuthorActivityMessage(
 }
 
 function isResourceProductionWorker(workerType?: string): boolean {
-  return (
-    workerType === 'resource-planner' ||
-    workerType === 'resource-curator' ||
-    workerType === 'resource-content-author'
-  )
+  return workerType === 'resource-planner'
 }
 
 export type StartBeeGameSessionInput = {
@@ -583,14 +536,11 @@ export type StartBeeGameSessionInput = {
   workflowRunId?: string
   workflowDispatchId?: string
   workflowWorkerType?: string
-  workflowModelTier?: 'fast' | 'balanced' | 'strong'
   workflowAllowedPaths?: string[]
   workflowAllowedTools?: string[]
   workflowProjectReadScope?: 'empty' | 'allowed'
   workflowProtectedPaths?: string[]
   workflowReadOnlyPaths?: string[]
-  workflowJsonSchema?: Record<string, unknown>
-  workflowResourceContentCommitContract?: ResourceContentCommitContract
 }
 
 export type BeeGameSessionInternalMetadata = {
@@ -642,7 +592,6 @@ export class BeeGameSessionManager {
     ) => Record<string, string> | Promise<Record<string, string>> = () => ({}),
     private readonly usageBillingBackend: BeeGameSessionUsageBillingBackend = {},
     private readonly allowExternalRuntimeEnv = false,
-    private readonly resourceSelectionConfig?: ResourceSelectionRuntimeConfig,
   ) {
     const configuredDataRoot =
       dashboardDataRoot?.trim() ||
@@ -730,7 +679,6 @@ export class BeeGameSessionManager {
       ...(input.workflowWorkerType
         ? { workflowWorkerType: input.workflowWorkerType }
         : {}),
-      ...(input.workflowModelTier ? { workflowModelTier: input.workflowModelTier } : {}),
       ...(input.workflowAllowedPaths
         ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
         : {}),
@@ -745,15 +693,6 @@ export class BeeGameSessionManager {
         : {}),
       ...(input.workflowReadOnlyPaths
         ? { workflowReadOnlyPaths: [...input.workflowReadOnlyPaths] }
-        : {}),
-      ...(input.workflowJsonSchema
-        ? { workflowJsonSchema: structuredClone(input.workflowJsonSchema) }
-        : {}),
-      ...(input.workflowResourceContentCommitContract
-        ? {
-            workflowResourceContentCommitContract:
-              input.workflowResourceContentCommitContract,
-          }
         : {}),
       runtime,
       userId: input.userId,
@@ -774,7 +713,6 @@ export class BeeGameSessionManager {
       abortController: null,
       pendingPermissions: new Map(),
       toolUses: new Map(),
-      streamingToolUses: new Map(),
       assistantPartialTextByMessage: new Map(),
       activeAssistantMessageId: null,
       emittedAssistantMessageIds: new Set(),
@@ -1023,14 +961,6 @@ export class BeeGameSessionManager {
         event => event.id > after && !isThinkingProtocolControlEvent(event),
       )
       .map(event => formatBeeGameEventForDisplay(event, record.language))
-  }
-
-  hasInFlightToolSubmission(sessionId: string, toolName: string): boolean {
-    const record = this.sessions.get(sessionId)
-    if (!record) return false
-    return [...record.streamingToolUses.values()].some(
-      name => name === toolName,
-    )
   }
 
   transcript(sessionId: string): Array<{
@@ -1413,7 +1343,9 @@ export class BeeGameSessionManager {
         record.runtime,
         await this.loadAdditionalRuntimeEnv(record),
       )
-      const env = buildRuntimeEnv(selectedEnvironment)
+      const env: Record<string, string> = {
+        ...buildRuntimeEnv(selectedEnvironment),
+      }
       const runner =
         record.runner ??
         (await this.runner.start({
@@ -1432,12 +1364,6 @@ export class BeeGameSessionManager {
             selectedEnvironment,
             env,
           ),
-          ...(this.resourceSelectionConfig &&
-          env.BEEGAME_RESOURCE_LIBRARY_ENABLED !== '0' &&
-          (!record.workflowWorker ||
-            record.workflowWorkerType === 'resource-curator')
-            ? { resourceSelectionConfig: this.resourceSelectionConfig }
-            : {}),
           ...(record.language ? { language: record.language } : {}),
           ...(record.workflowWorker ? { workflowWorker: true } : {}),
           ...(record.workflowWorkerType
@@ -1460,15 +1386,6 @@ export class BeeGameSessionManager {
             : {}),
           ...(record.workflowReadOnlyPaths
             ? { workflowReadOnlyPaths: [...record.workflowReadOnlyPaths] }
-            : {}),
-          ...(record.workflowJsonSchema
-            ? { workflowJsonSchema: structuredClone(record.workflowJsonSchema) }
-            : {}),
-          ...(record.workflowResourceContentCommitContract
-            ? {
-                workflowResourceContentCommitContract:
-                  record.workflowResourceContentCommitContract,
-              }
             : {}),
           requestPermission: request => this.requestPermission(record, request),
         }))
@@ -1588,7 +1505,6 @@ export class BeeGameSessionManager {
       signal,
       onMessage: message => {
         appendProjectAgentRawLog(record, message)
-        trackStreamingToolUse(record, message)
         if (isSDKExecutionError(message)) {
           executionError = new Error(getSDKExecutionErrorDetail(message))
         }
@@ -1641,13 +1557,6 @@ export class BeeGameSessionManager {
           }
         }
         for (const toolEvent of mapSDKMessageToToolEvents(record, message)) {
-          if (
-            toolEvent.type === 'tool.completed' ||
-            toolEvent.type === 'tool.failed'
-          ) {
-            const toolUseId = getStringField(toolEvent.payload, 'toolUseID')
-            if (toolUseId) record.streamingToolUses.delete(toolUseId)
-          }
           this.append(record, toolEvent.type, toolEvent.text, toolEvent.payload)
         }
       },
@@ -1853,7 +1762,18 @@ export class BeeGameSessionManager {
     if (!pending) throw new Error('Permission request not found')
 
     record.pendingPermissions.delete(toolUseID)
-    pending.resolve(decision)
+    const resolvedDecision =
+      decision.behavior === 'allow' &&
+      decision.scope === 'session' &&
+      decision.updatedPermissions === undefined
+        ? {
+            ...decision,
+            updatedPermissions: (pending.permissionSuggestions ?? []).map(
+              suggestion => ({ ...suggestion, destination: 'session' }),
+            ),
+          }
+        : decision
+    pending.resolve(resolvedDecision)
     this.append(
       record,
       'permission.resolved',
@@ -1886,29 +1806,6 @@ export class BeeGameSessionManager {
         reason: 'workflow_tool_not_allowed',
       })
       return Promise.resolve({ behavior: 'deny', scope: 'once', message: toolRestriction })
-    }
-    if (
-      request.toolName === 'CommitResourceInventoryAuthority' ||
-      request.toolName === 'CommitResourceContentAuthority'
-    ) {
-      const authority = authorizeBeeGamePlatformMutation(record, request)
-      this.append(
-        record,
-        'permission.resolved',
-        `${request.toolName}: ${authority.behavior}`,
-        {
-          type: 'permission.resolved',
-          toolUseID: request.toolUseID,
-          toolName: request.toolName,
-          decision: authority.behavior,
-          scope: 'once',
-          autoApproved: authority.behavior === 'allow',
-          autoDenied: authority.behavior === 'deny',
-          reason: 'platform_mutation_authority',
-          input: request.input,
-        },
-      )
-      return Promise.resolve({ ...authority, scope: 'once' })
     }
     const workflowMutation = workflowFileMutationAuthority(record, request)
     if (workflowMutation) {
@@ -2043,10 +1940,6 @@ export class BeeGameSessionManager {
       // Raw tool/system labels remain telemetry. Resource preparation exposes
       // only a small structural activity vocabulary so the card can explain
       // real work without leaking tool inputs or JSON.
-      const resourceActivityMessage = resourceWorkerActivityMessage(
-        record,
-        event,
-      )
       const documentActivityMessage = documentAuthorActivityMessage(
         record,
         event,
@@ -2054,7 +1947,7 @@ export class BeeGameSessionManager {
       const progressMessage = isResourceProductionWorker(
         record.workflowWorkerType,
       )
-        ? (resourceActivityMessage ?? '')
+        ? ''
         : record.workflowWorkerType === 'document-author'
           ? (documentActivityMessage ?? '')
           : event.type === 'assistant.message'
@@ -2225,11 +2118,7 @@ export class BeeGameSessionManager {
 export function isResourceWorkerDurableProgress(event: BeeGameEvent): boolean {
   if (event.type !== 'tool.completed') return false
   const toolName = getDashboardPayloadString(event.payload, 'toolName')
-  if (isFileMutationTool(toolName)) return true
-  if (toolName === 'AssetManifest') return true
-  if (toolName === 'CommitResourceInventory') return true
-  if (toolName === 'CommitResourceContent') return true
-  return false
+  return isFileMutationTool(toolName)
 }
 
 export function isDocumentAuthorDurableProgress(event: BeeGameEvent): boolean {
@@ -3743,35 +3632,6 @@ export function workflowToolRestriction(
   return `This workflow worker may use only: ${allowed.join(', ')}.`
 }
 
-function authorizeBeeGamePlatformMutation(
-  record: SessionRecord,
-  request: DashboardPermissionRequest,
-): { behavior: 'allow' | 'deny'; message?: string } {
-  const dispatchId = request.input.dispatchId
-  const activeInventoryAuthority =
-    request.toolName === 'CommitResourceInventoryAuthority' &&
-    record.workflowWorker === true &&
-    record.workflowWorkerType === 'resource-curator' &&
-    typeof dispatchId === 'string' &&
-    dispatchId === record.workflowDispatchId &&
-    record.session.status === 'running'
-  const activeContentAuthority =
-    request.toolName === 'CommitResourceContentAuthority' &&
-    record.workflowWorker === true &&
-    record.workflowWorkerType === 'resource-content-author' &&
-    typeof dispatchId === 'string' &&
-    dispatchId === record.workflowDispatchId &&
-    dispatchId === record.workflowResourceContentCommitContract?.dispatchId &&
-    record.session.status === 'running'
-  if (activeInventoryAuthority || activeContentAuthority) {
-    return { behavior: 'allow' }
-  }
-  return {
-    behavior: 'deny',
-    message: 'Platform mutation dispatch is no longer active.',
-  }
-}
-
 function authorizeProjectWorkspaceFileMutation(
   record: SessionRecord,
   request: DashboardPermissionRequest,
@@ -3886,6 +3746,7 @@ type WorkflowFileMutationAuthority = {
   behavior: 'allow' | 'deny'
   reason:
     | 'workflow_allowed_path'
+    | 'workflow_protected_path'
     | 'workflow_path_not_allowed'
     | 'workflow_workspace_boundary'
     | 'workflow_mutation_target_invalid'
@@ -3919,17 +3780,17 @@ function workflowFileMutationAuthority(
       message:
         'Workflow workers may not mutate files outside the project workspace.',
     }
+  const protectedPath = (record.workflowProtectedPaths ?? []).find(entry =>
+    pathMatchesConfiguredScope(record.session.cwd, targetPath, entry),
+  )
+  if (protectedPath)
+    return {
+      behavior: 'deny',
+      reason: 'workflow_protected_path',
+      message: `Workflow workers may not mutate protected project authority: ${protectedPath}.`,
+    }
   const allowed = (record.workflowAllowedPaths ?? []).some(entry => {
-    const configuredPath = entry.trim()
-    if (!configuredPath) return false
-    const directoryScope = /[\\/]$/u.test(configuredPath)
-    const allowedPath = resolveProspectivePath(
-      record.session.cwd,
-      configuredPath,
-    )
-    if (!directoryScope) return targetPath === allowedPath
-    const child = relative(allowedPath, targetPath)
-    return child !== '' && !child.startsWith('..') && !isAbsolute(child)
+    return pathMatchesConfiguredScope(record.session.cwd, targetPath, entry)
   })
   return allowed
     ? { behavior: 'allow', reason: 'workflow_allowed_path' }
@@ -3938,6 +3799,20 @@ function workflowFileMutationAuthority(
         reason: 'workflow_path_not_allowed',
         message: 'Workflow workers may mutate only their assigned project paths.',
       }
+}
+
+function pathMatchesConfiguredScope(
+  cwd: string,
+  targetPath: string,
+  entry: string,
+): boolean {
+  const configuredPath = entry.trim()
+  if (!configuredPath) return false
+  const directoryScope = /[\\/]$/u.test(configuredPath)
+  const scopedPath = resolveProspectivePath(cwd, configuredPath)
+  if (!directoryScope) return targetPath === scopedPath
+  const child = relative(scopedPath, targetPath)
+  return child !== '' && !child.startsWith('..') && !isAbsolute(child)
 }
 
 function resolveProspectivePath(cwd: string, artifactPath: string): string {
@@ -4671,20 +4546,6 @@ function extractStreamTextDelta(message: DashboardSDKMessage): string {
   const delta = getObjectField(event, 'delta')
   if (!delta || getStringField(delta, 'type') !== 'text_delta') return ''
   return getStringField(delta, 'text')
-}
-
-function trackStreamingToolUse(
-  record: SessionRecord,
-  message: DashboardSDKMessage,
-): void {
-  if (message.type !== 'stream_event') return
-  const event = getObjectField(message, 'event') ?? message
-  if (getStringField(event, 'type') !== 'content_block_start') return
-  const block = getObjectField(event, 'content_block')
-  if (getStringField(block, 'type') !== 'tool_use') return
-  const toolUseId = getStringField(block, 'id')
-  const toolName = getStringField(block, 'name')
-  if (toolUseId && toolName) record.streamingToolUses.set(toolUseId, toolName)
 }
 
 function mapStreamingToolInputActivity(message: DashboardSDKMessage): {

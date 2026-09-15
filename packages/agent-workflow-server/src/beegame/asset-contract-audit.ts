@@ -49,6 +49,7 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
     hasGlobalIssues: false,
     coveredRequirementIds: [],
     referencedResourceIds: [],
+    resourceBindings: [],
     issues: [],
   }
   const empty: Omit<AssetContractAudit, 'present' | 'valid'> = {
@@ -88,6 +89,10 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
 
   const resources = manifest.resources.map(resource => {
     const issues: string[] = []
+    if (resource.technical_facts?.artifactClass === 'content-definition')
+      issues.push(
+        'Implementation-owned content-definition must not be declared as a resource; remove its Manifest requirement, resource module, and resource-registry binding.',
+      )
     for (const filePath of resource.file_paths) {
       const absolute = projectFile(workspace, filePath)
       if (!absolute) {
@@ -134,8 +139,32 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
     required: requirement.required !== false,
     issues: [] as string[],
   }))
+  const requirementAuditById = new Map(
+    requirements.map(requirement => [requirement.id, requirement]),
+  )
+  const manifestRequirementById = new Map(
+    manifest.requirements.map(requirement => [requirement.id, requirement]),
+  )
+  const resourceById = new Map(
+    manifest.resources.map(resource => [resource.id, resource]),
+  )
+  for (const binding of content.resourceBindings) {
+    const allowed = manifestRequirementById.get(binding.requirementId)
+      ?.acquisition_profile.sourcing_policy?.allowed_source_kinds
+    if (!allowed) continue
+    for (const resourceId of binding.resourceIds) {
+      const sourceType = resourceById.get(resourceId)?.source.type
+      if (sourceType && !allowed.includes(sourceType))
+        requirementAuditById.get(binding.requirementId)?.issues.push(
+          `Bound resource ${resourceId} uses disallowed source kind ${sourceType}.`,
+        )
+    }
+  }
   const issues = [
     ...empty.issues,
+    ...requirements.flatMap(requirement =>
+      requirement.issues.map(issue => `${requirement.id}: ${issue}`),
+    ),
     ...resources.flatMap(resource =>
       resource.issues.map(issue => `${resource.id}: ${issue}`),
     ),

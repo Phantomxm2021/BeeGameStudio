@@ -1,14 +1,20 @@
-import { DELIVERY_PHASES } from './schema'
 export const DELIVERY_PROGRESS_STAGES = [
-  ...DELIVERY_PHASES.slice(0, 3),
+  'BRIEF_CONFIRMED',
+  'DOCUMENT_DRAFTING',
+  'DOCUMENT_REVIEW',
+  'GAME_IR_COMPILATION',
   'CHECKLIST_AUTHORING',
-  ...DELIVERY_PHASES.slice(3),
+  'RESOURCE_PREPARATION',
+  'IMPLEMENTATION',
+  'ACCEPTANCE',
+  'DELIVERY',
 ] as const
 
 export const DELIVERY_PROGRESS_SUBSTAGES = [
   'INITIAL_DRAFTING',
   'INITIAL_REVIEW',
   'REPAIRING',
+  'GAME_IR_COMPILATION',
   'CHECKLIST_DRAFTING',
 ] as const
 
@@ -29,7 +35,10 @@ export type DeliveryProgress = {
 export function projectDeliveryProgress(
   workflow: Record<string, unknown>,
 ): DeliveryProgress | undefined {
-  if (!DELIVERY_PHASES.includes(workflow.phase as never)) return undefined
+  if (
+    !DELIVERY_PROGRESS_STAGES.includes(workflow.phase as DeliveryProgressStage)
+  )
+    return undefined
   const authorStage = workflow.authorStage
   const authorLinkPresent =
     Boolean(authorStage) &&
@@ -54,7 +63,9 @@ export function projectDeliveryProgress(
       substage: 'INITIAL_DRAFTING',
     }
   const stageId =
-    workflow.phase === 'DOCUMENT_REVIEW' &&
+    workflow.phase === 'DOCUMENT_REVIEW' && workflow.documentStep === 'GAME_IR_COMPILATION'
+      ? 'GAME_IR_COMPILATION'
+      : workflow.phase === 'DOCUMENT_REVIEW' &&
     workflow.documentStep === 'CHECKLIST_DRAFTING'
       ? CHECKLIST_AUTHORING_STAGE
       : (workflow.phase as DeliveryProgressStage)
@@ -63,7 +74,9 @@ export function projectDeliveryProgress(
       ? 'INITIAL_DRAFTING'
       : workflow.documentStep === 'FOUNDATION_REVIEW'
         ? 'INITIAL_REVIEW'
-        : workflow.documentStep === 'CHECKLIST_DRAFTING'
+        : workflow.documentStep === 'GAME_IR_COMPILATION'
+          ? 'GAME_IR_COMPILATION'
+          : workflow.documentStep === 'CHECKLIST_DRAFTING'
           ? 'CHECKLIST_DRAFTING'
           : undefined
   return {

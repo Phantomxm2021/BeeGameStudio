@@ -83,9 +83,16 @@ describe('delivery progress projection', () => {
       }),
     ).toMatchObject({
       stageId: 'CHECKLIST_AUTHORING',
-      phaseIndex: 4,
-      phaseCount: 10,
+      phaseIndex: 5,
+      phaseCount: 9,
       substage: 'CHECKLIST_DRAFTING',
     })
+  })
+
+  test('shows IR between accepted Foundation and Checklist, despite retained completed links', () => {
+    expect(projectDeliveryProgress({ phase: 'DOCUMENT_REVIEW', documentStep: 'GAME_IR_COMPILATION',
+      authorStage: { status: 'completed' }, foundationReviewStage: { acceptedReview: {} } }))
+      .toMatchObject({ stageId: 'GAME_IR_COMPILATION', phaseIndex: 4, phaseCount: 9,
+        substage: 'GAME_IR_COMPILATION' })
   })
 })

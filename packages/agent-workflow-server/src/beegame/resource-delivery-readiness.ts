@@ -19,6 +19,7 @@ export type ResourceDeliveryReadiness = {
   coveredRequirementCount: number
   resourceCount: number
   libraryResourceCount: number
+  webResourceCount: number
   authoredResourceCount: number
   provisionalResourceCount: number
   failedResourceCount: number
@@ -50,7 +51,7 @@ export function auditResourceDeliveryReadiness(input: {
   if (!contract.present) issues.push('assets/asset-manifest.json is missing.')
   else if (!contract.valid)
     issues.push(
-      ...contract.issues.map(issue => `resource-content contract: ${issue}`),
+      ...contract.issues.map(issue => `resource delivery contract: ${issue}`),
     )
   const manifest = readManifest(input.workspacePath)
   const policy = manifest?.project_target?.resource_library_usage
@@ -63,6 +64,9 @@ export function auditResourceDeliveryReadiness(input: {
   ).length
   const authoredResourceCount = resources.filter(
     item => item.source.type === 'agent-authored',
+  ).length
+  const webResourceCount = resources.filter(
+    item => item.source.type === 'web',
   ).length
   const provisionalResourceCount = resources.filter(
     item => item.provisional,
@@ -88,15 +92,6 @@ export function auditResourceDeliveryReadiness(input: {
     readinessIssues.push(
       'Required Resource Library usage has no verified library resource.',
     )
-  if (
-    effectivePolicy === 'preferred' &&
-    libraryResourceCount === 0 &&
-    !catalogObserved
-  )
-    readinessIssues.push(
-      'Preferred Resource Library usage requires current catalog exploration before an authored-only inventory can be accepted.',
-    )
-
   return {
     valid: issues.length === 0,
     issues,
@@ -111,6 +106,7 @@ export function auditResourceDeliveryReadiness(input: {
     coveredRequirementCount: contract.content.coveredRequirementIds.length,
     resourceCount: resources.length,
     libraryResourceCount,
+    webResourceCount,
     authoredResourceCount,
     provisionalResourceCount,
     failedResourceCount,

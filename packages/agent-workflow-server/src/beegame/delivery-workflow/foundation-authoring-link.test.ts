@@ -44,7 +44,7 @@ async function fixture() {
       documents: CANONICAL_FOUNDATION_DOCUMENTS.map(path => ({ path, digest: 'c'.repeat(64), byteLength: 20,
         artifactPath: `.beegame/workflow/foundation-authoring/artifacts/${'a'.repeat(64)}/${path}` })) } }
   }
-  return { run, store, bridge, author, starts, resumes, stops, complete, set stopHook(value: () => Promise<void>) { stopHook = value },
+  return { run, workspace, store, bridge, author, starts, resumes, stops, complete, set stopHook(value: () => Promise<void>) { stopHook = value },
     set outcome(value: AuthorResult) { outcome = value }, handle }
 }
 
@@ -78,6 +78,21 @@ test('orchestration persists public Author timing without reading its private at
     const projected = await f.bridge.ensureProgress(f.run)
     expect(projected.authorStage?.timing).toEqual({ currentCallElapsedMs: 123, historicalElapsedMs: 456 })
     expect((await f.store.load())?.authorStage?.timing).toEqual(projected.authorStage?.timing)
+  } finally { f.bridge.dispose() }
+})
+
+test('timing-only polling does not append duplicate public-result events', async () => {
+  const f = await fixture()
+  try {
+    await f.bridge.start(f.run)
+    f.outcome = { status: 'running', handle: f.handle, timing: { currentCallElapsedMs: 123, historicalElapsedMs: 456 } }
+    await f.bridge.ensureProgress(f.run)
+    const before = (await readFile(join(f.workspace, '.beegame/workflow/events.jsonl'), 'utf8')).trim().split('\n').length
+    f.outcome = { status: 'running', handle: f.handle, timing: { currentCallElapsedMs: 999, historicalElapsedMs: 456 } }
+    const unchanged = await f.bridge.ensureProgress(f.run)
+    const after = (await readFile(join(f.workspace, '.beegame/workflow/events.jsonl'), 'utf8')).trim().split('\n').length
+    expect(after).toBe(before)
+    expect(unchanged.authorStage?.timing).toEqual({ currentCallElapsedMs: 123, historicalElapsedMs: 456 })
   } finally { f.bridge.dispose() }
 })
 

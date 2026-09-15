@@ -7,6 +7,7 @@ import { assertSharedDocumentWorker } from './retired-foundation-author';
 import { assertNoRetiredFoundationWorker } from './retired-foundation-review';
 import type { RunStore,WorkflowLock } from './run-store';
 import { parseDispatchRecord } from './schema';
+import { isPublicStageActive } from './public-stage-routing';
 import type { DeliveryRun,DeliveryWorkerPort,DispatchRecord,WorkerDispatchRequest,WorkflowUsage,} from './types';
 import { parseWorkerTerminalResult,type WorkerTerminalResult } from './worker-contracts';
 import { buildWorkerPrompt } from './worker-prompts';
@@ -80,12 +81,7 @@ function resourceTaskPerformance(input: {
     finishedAt: string;
 }): Record<string, unknown> | undefined {
     if (!input.request ||
-        ![
-            'resource-planner',
-            'resource-curator',
-            'resource-content-author',
-        ].includes(input.request.workerType) ||
-        !('taskMetrics' in input.result))
+        input.request.workerType !== 'resource-planner')
         return undefined;
     const startedAt = Date.parse(input.dispatch.startedAt);
     const finishedAt = Date.parse(input.finishedAt);
@@ -95,7 +91,6 @@ function resourceTaskPerformance(input: {
             ? Math.max(0, finishedAt - startedAt)
             : 0,
         usage: usageDelta(input.currentUsage, input.dispatch.startingUsage),
-        ...input.result.taskMetrics,
     };
 }
 async function documentPerformance(input: {
@@ -164,26 +159,12 @@ function terminalEvidencePath(result: WorkerTerminalResult): string | undefined 
 }
 function workerRequiresEvidence(workerType: WorkerDispatchRequest['workerType']): boolean {
     return (workerType !== 'document-author' &&
-        workerType !== 'resource-planner' &&
-        workerType !== 'resource-curator' &&
-        workerType !== 'resource-content-author');
-}
-function assertSingleResourceWorkAuthority(request: WorkerDispatchRequest, run: DeliveryRun): void {
-    const taskByWorker = {
-        'resource-planner': 'RESOURCE_PLAN',
-        'resource-curator': 'RESOURCE_INVENTORY',
-        'resource-content-author': 'RESOURCE_CONTENT',
-    } as const;
-    const task = taskByWorker[request.workerType as keyof typeof taskByWorker];
-    if (!task)
-        return;
+        workerType !== 'resource-planner');
 }
 export function createDeliveryDispatcher(options: {
     store: RunStore;
     workerPort: DeliveryWorkerPort;
     credits?: DispatchCredits;
-    /** Queue controller progress after a durable foundation retry boundary. */
-    onRetryable?: (runId: string, taskId: string) => Promise<void> | void;
     onTerminal?: (record: DispatchRecord, result: WorkerTerminalResult, request?: WorkerDispatchRequest) => Promise<void>;
 }) {
     const byKey = new Map<string, DispatchRecord>();
@@ -260,10 +241,9 @@ export function createDeliveryDispatcher(options: {
         const run = await options.store.load();
         if (!run)
             throw new DispatchError('not_found', 'delivery run does not exist');
-        if (run.authorStage)
+        if (isPublicStageActive(run))
             throw new DispatchError('blocked', 'public author invocation cannot use legacy worker dispatch');
         assertSharedDocumentWorker(request);
-        assertSingleResourceWorkAuthority(request, run);
         if (run.status !== 'running')
             throw new DispatchError('blocked', 'delivery run is not running');
         const durableDispatch = run.activeDispatch;
@@ -334,7 +314,6 @@ export function createDeliveryDispatcher(options: {
                 const current = await options.store.load(lease);
                 if (!current || current.runId !== run.runId)
                     throw new DispatchError('not_found', 'delivery run does not exist');
-                assertSingleResourceWorkAuthority(request, current);
                 if (current.status !== 'running')
                     throw new DispatchError('blocked', 'delivery run is not running');
                 const active = current.activeDispatch?.status === 'running' ? current.activeDispatch : undefined;
@@ -353,6 +332,10 @@ export function createDeliveryDispatcher(options: {
                     ...next,
                     lastProgressAt: record.startedAt,
                     currentMessage: undefined,
+                    // Any prior rejection has already been copied into the new
+                    // request contract. Do not display it as a current block
+                    // while the replacement CLI turn is running.
+                    blockedReason: undefined,
                     currentItemId: request.workerType === 'document-author' && request.taskId
                         ? request.taskId
                         : undefined,
@@ -448,7 +431,7 @@ export function createDeliveryDispatcher(options: {
         result?: WorkerTerminalResult;
     }> {
         const run = await options.store.load();
-        if (run?.authorStage)
+        if (run && isPublicStageActive(run))
             throw new DispatchError('blocked', 'public author invocation cannot accept legacy worker terminals');
         const location = run ? dispatchLocation(run, dispatchId) : undefined;
         if (!run || !location)
@@ -530,7 +513,6 @@ export function createDeliveryDispatcher(options: {
             throw new DispatchError('invalid_terminal', 'invalid worker terminal result');
         }
         const status = result.workerType === 'document-author' ||
-            result.workerType === 'atomic-task-planner' ||
             result.workerType === 'change-impact-analyzer' ||
             result.workerType === 'question-answerer'
             ? 'completed'
@@ -646,7 +628,8 @@ export function createDeliveryDispatcher(options: {
     }
     async function replayTerminal(record: DispatchRecord, onTerminal = options.onTerminal): Promise<void> {
         assertNoRetiredFoundationWorker(record);
-        if ((await options.store.load())?.authorStage)
+        const current = await options.store.load();
+        if (current && isPublicStageActive(current))
             throw new DispatchError('blocked', 'public author invocation cannot replay legacy worker terminals');
         if (record.request)
             assertSharedDocumentWorker(record.request);

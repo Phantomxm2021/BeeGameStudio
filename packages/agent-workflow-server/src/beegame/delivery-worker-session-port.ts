@@ -14,15 +14,12 @@ import {
   type DispatchRecord,
   type WorkerDispatchRequest,
 } from './delivery-workflow/types'
-import { atomicTaskPlannerTerminalSchema } from './delivery-workflow/worker-contracts'
 import { implementationWorkerTerminalSchema } from './delivery-workflow/worker-contracts'
 import {
   acceptanceValidatorTerminalSchema,
   changeImpactTerminalSchema,
   documentAuthorTerminalSchema,
-  implementationAuditorTerminalSchema,
   questionAnswerTerminalSchema,
-  resourceCuratorTerminalSchema,
   resourcePlannerTerminalSchema,
 } from './delivery-workflow/worker-contracts'
 import type {
@@ -30,15 +27,11 @@ import type {
   BeeGameEvent,
   BeeGameSessionLanguage,
 } from './session-manager'
-import type { ResourceSelectionRuntimeConfig } from './resource-selection-config'
-import {
-  createResourceContentTerminalFromReceipt,
-  readResourceContentCommitReceipt,
-  resourceContentCommitContractSchema,
-} from './native-resource-content-tool'
-import { readCurrentCommittedResourceInventoryReceipt } from './resource-inventory-commit'
 import { assertSharedDocumentWorker } from './delivery-workflow/retired-foundation-author'
-import { buildChecklistAuthorityProjection } from './checklist-authority-projection'
+import {
+  buildChecklistAuthorityProjection,
+  type ChecklistAuthority,
+} from './checklist-authority-projection'
 import { documentAuthoringMetrics } from './document-authoring-metrics'
 
 function taskTypeForWorker(
@@ -46,8 +39,6 @@ function taskTypeForWorker(
 ): 'edit_turn' | 'agent_turn' {
   return workerType === 'document-author' ||
     workerType === 'resource-planner' ||
-    workerType === 'resource-curator' ||
-    workerType === 'resource-content-author' ||
     workerType === 'implementation-worker'
     ? 'edit_turn'
     : 'agent_turn'
@@ -68,11 +59,12 @@ export async function buildDocumentAuthorAuthorityBlock(
       targetPath !== request.contract.checklistCandidatePath
     )
       throw new Error('checklist author target is invalid')
-    if (typeof request.contract.approvedDocumentRevision !== 'string')
-      throw new Error('checklist authority revision is missing')
-    const projection = await buildChecklistAuthorityProjection({
-      workspacePath: request.workspacePath,
-      approvedDocumentRevision: request.contract.approvedDocumentRevision,
+    const checklistAuthority = request.contract.checklistAuthority
+    if (!checklistAuthority || typeof checklistAuthority !== 'object')
+      throw new Error('checklist authority snapshot is missing')
+    const projection = buildChecklistAuthorityProjection({
+      checklistAuthority: checklistAuthority as ChecklistAuthority,
+      approvedDocumentRevision: request.revision,
     })
     return [
       `Write the Checklist candidate only at ${targetPath}. The service will validate it and atomically publish it to ${String(request.contract.checklistCanonicalPath)} only when valid. A failed candidate is diagnostic-only and cannot become authority.`,
@@ -93,7 +85,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
   userDataRoot?: string
   modelConfigId?: string
   language?: BeeGameSessionLanguage
-  resourceSelectionConfig?: ResourceSelectionRuntimeConfig
   confirmedBriefContext?: string
   getConfirmedBriefContext?: () => Promise<string | undefined>
 }): DeliveryWorkerPort {
@@ -124,11 +115,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
         request.contract.documentSet === 'checklist'
           ? await buildDocumentAuthorAuthorityBlock(request)
           : ''
-      if (request.workerType === 'atomic-task-planner') {
-        await mkdir(join(request.workspacePath, '.beegame/workflow/evidence'), {
-          recursive: true,
-        })
-      }
       const authToken = await input.getAuthToken?.()
       const session = input.sessions.start({
         workspacePath: request.workspacePath,
@@ -143,56 +129,20 @@ export function createBeeGameDeliveryWorkerPort(input: {
         ...(input.language ? { language: input.language } : {}),
         // Resource selection is a dedicated post-review capability. All
         // other workers consume the resulting manifest as read-only input.
-        ...(request.workerType === 'resource-curator'
-          ? { resourceSelectionConfig: input.resourceSelectionConfig }
-          : {}),
         workflowWorker: true,
         workflowRunId: request.runId,
         workflowDispatchId: dispatchId,
         workflowWorkerType: request.workerType,
-        ...(request.workerType === 'document-author' && request.contract.documentSet === 'checklist'
+        ...(request.workerType === 'document-author' &&
+        request.contract.documentSet === 'checklist'
           ? { workflowAllowedTools: ['Write', 'Edit'] }
           : {}),
-        ...(request.contract.modelTier === 'fast' || request.contract.modelTier === 'balanced' || request.contract.modelTier === 'strong' ? { workflowModelTier: request.contract.modelTier } : {}),
         workflowAllowedPaths: request.allowedPaths ?? [],
         ...(request.projectReadScope
           ? { workflowProjectReadScope: request.projectReadScope }
           : {}),
-        ...(request.workerType !== 'resource-content-author' &&
-        request.protectedPaths
+        ...(request.protectedPaths
           ? { workflowProtectedPaths: [...request.protectedPaths] }
-          : {}),
-        ...(request.workerType === 'resource-content-author'
-            ? {
-                workflowReadOnlyPaths: [
-                  ...(Array.isArray(request.contract.authorityPaths)
-                    ? request.contract.authorityPaths.filter(
-                        (path): path is string => typeof path === 'string',
-                      )
-                    : []),
-                  ...(Array.isArray(request.contract.repairPaths)
-                    ? request.contract.repairPaths.filter(
-                        (path): path is string => typeof path === 'string',
-                      )
-                    : []),
-                ],
-              }
-            : {}),
-        ...(request.workerType === 'resource-content-author'
-          ? {
-              workflowResourceContentCommitContract:
-                resourceContentCommitContractSchema.parse({
-                  dispatchId,
-                  inventoryRevision: request.contract.inventoryRevision,
-                  baselineResourceRevision:
-                    request.contract.baselineResourceRevision,
-                  requiredRequirementIds:
-                    request.contract.requiredRequirementIds,
-                  verifiedResourceIds: request.contract.verifiedResourceIds,
-                  inventoryBindings: request.contract.inventoryBindings,
-                  writablePaths: request.contract.repairPaths ?? [],
-                }),
-            }
           : {}),
       })
       sessions.set(dispatchId, session.id)
@@ -219,8 +169,12 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const confirmedBriefContext =
         input.confirmedBriefContext ??
         (await input.getConfirmedBriefContext?.())
+      const workerBriefContext =
+        request?.workerType === 'document-author'
+          ? confirmedBriefContext
+          : undefined
       const languageInstruction = input.language
-        ? `User-facing status language: ${input.language}. Write any status/message text in this language; keep structured tool enum values unchanged.`
+        ? `User-facing status language: ${input.language}. Write status and final-response prose in this language; keep contract identifiers and enum values unchanged.`
         : ''
       const documentAuthorAuthorityBlock =
         documentAuthorityBlocks.get(dispatchId) ||
@@ -231,44 +185,12 @@ export function createBeeGameDeliveryWorkerPort(input: {
         request && request.workerType !== 'document-author'
           ? "Bee Game Studio's native tools, reasoning, permissions, context management, and normal completion behavior remain unchanged. Use native capabilities as needed to complete and verify this task."
           : ''
-      const atomicTaskEvidenceInstruction =
-        request?.workerType === 'atomic-task-planner'
-          ? 'Submit the complete plan through SubmitAtomicTaskPlan exactly once. The workflow service persists the accepted plan as canonical evidence.'
-          : ''
-      const implementationResultInstruction =
-        request?.workerType === 'implementation-worker'
-          ? 'Submit the final result through SubmitImplementationResult exactly once. Validate the active contract and current project files; the workflow service owns task identity, revision, and canonical evidence persistence.'
-          : ''
-      const validationResultInstruction =
-        request?.workerType === 'implementation-auditor' ||
-        request?.workerType === 'acceptance-validator'
-          ? 'Submit the final verdict through SubmitValidationResult exactly once. Do not author workflow evidence or return terminal JSON. The workflow service owns revision, complete contract ID coverage, and canonical evidence persistence.'
-          : ''
-      const workflowResultInstruction =
-        request?.workerType === 'document-author'
-          ? ''
-          : request?.workerType === 'change-impact-analyzer'
-              ? 'Submit the analysis through SubmitChangeImpactResult exactly once. Do not author workflow evidence or return terminal JSON.'
-              : request?.workerType === 'question-answerer'
-                ? 'Submit the answer through SubmitQuestionAnswerResult exactly once. Do not author workflow evidence or return terminal JSON.'
-                : ''
-      const assetManifestInstruction =
-        request?.workerType === 'resource-planner'
-          ? 'Use AssetManifest submit_resource_plan as the only mutation and stop after it is accepted.'
-          : request?.workerType === 'resource-curator'
-            ? 'Use ResourceLibrary match_requirements once, then CommitResourceInventory as the only mutation and terminal operation.'
-            : ''
       const workerPrompt = [
         languageInstruction,
-        confirmedBriefContext,
+        workerBriefContext,
         documentAuthorAuthorityBlock,
         prompt,
         nativeToolAutonomyInstruction,
-        atomicTaskEvidenceInstruction,
-        implementationResultInstruction,
-        validationResultInstruction,
-        workflowResultInstruction,
-        assetManifestInstruction,
       ]
         .filter(Boolean)
         .join('\n\n')
@@ -277,7 +199,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
           records.get(dispatchId)?.workerType ?? 'question-answerer',
         ),
         displayKind: 'workflow_worker',
-        ...(confirmedBriefContext ? { confirmedBriefContext } : {}),
+        ...(workerBriefContext
+          ? { confirmedBriefContext: workerBriefContext }
+          : {}),
         ...(authToken ? { authToken } : {}),
         ...(input.language ? { language: input.language } : {}),
       })
@@ -352,25 +276,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
       if (!sessionId) return false
       return hasInFlightResourceMutation(input.sessions.events(sessionId))
     },
-    async hasInFlightTerminalSubmission(dispatchId) {
-      const sessionId = sessions.get(dispatchId)
-      const request = requests.get(dispatchId)
-      if (!sessionId || !request) return false
-      const terminalToolName = structuredSubmissionToolName(request)
-      if (!terminalToolName) return false
-      return (
-        Boolean(
-          input.sessions.hasInFlightToolSubmission?.(
-            sessionId,
-            terminalToolName,
-          ),
-        ) ||
-        hasInFlightTool(
-          sessionEvents(sessionId).slice(eventOffsets.get(dispatchId) ?? 0),
-          terminalToolName,
-        )
-      )
-    },
     async waitForTerminal(dispatchId) {
       const sessionId = sessions.get(dispatchId)
       if (!sessionId) throw new Error('worker session is not registered')
@@ -381,51 +286,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
         const eventOffset = eventOffsets.get(dispatchId) ?? 0
         const events = sessionEvents(sessionId).slice(eventOffset)
         const request = requests.get(dispatchId)
-        if (request?.workerType === 'resource-curator') {
-          const receipt = await readCurrentCommittedResourceInventoryReceipt(
-            request.workspacePath,
-          )
-          if (receipt) {
-            const contract = auditAssetContract(request.workspacePath)
-            return resourceCuratorTerminalSchema.parse({
-              revision: request.revision,
-              workerType: 'resource-curator',
-              status: 'completed',
-              catalogObserved: true,
-              resourceIds: contract.resources.map(resource => resource.id),
-              bindings: receipt.bindings,
-              writtenPaths: [
-                'assets/asset-manifest.json',
-                ...contract.resources.flatMap(resource => resource.filePaths),
-              ],
-              taskMetrics: resourceTaskMetrics(events),
-            })
-          }
-        }
-        if (request?.workerType === 'resource-content-author') {
-          const receipt = readResourceContentCommitReceipt(
-            request.workspacePath,
-            request.dispatchId ?? dispatchId,
-          )
-          if (receipt?.status === 'committed')
-            return createResourceContentTerminalFromReceipt({
-              workspacePath: request.workspacePath,
-              revision: request.revision,
-              receipt,
-            })
-          if (receipt?.status === 'prepared') {
-            await new Promise(resolve => setTimeout(resolve, 250))
-            continue
-          }
-        }
-        // The accepted structured submission is durable workflow evidence, but
-        // Bee Game Studio still owns its normal turn completion. Drain the native
-        // turn before the workflow controller is allowed to close the session.
-        if (request && hasCompletedStructuredSubmission(request, events)) {
-          if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
-            await input.sessions.waitForWorkflowWorkerIdle(sessionId)
-          return createDeterministicStructuredTerminal({ request, events })
-        }
         const result = [...events]
           .reverse()
           .find(
@@ -447,12 +307,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
               error.name = 'WorkerNeedsActionError'
             throw error
           }
-          if (result.type === 'result' || result.type === 'turn.empty') {
-            const missingTerminal = request
-              ? missingStructuredTerminalError(request, events)
-              : undefined
-            if (missingTerminal) throw missingTerminal
-          }
           if (result.type !== 'result')
           {
             const error = new Error(
@@ -468,14 +322,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
               events,
             })
           }
-          if (request?.workerType === 'resource-curator')
-            throw new Error(
-              'resource curator completed without an accepted durable inventory receipt',
-            )
-          if (request?.workerType === 'resource-content-author')
-            throw new Error(
-              'resource content author completed without an accepted durable receipt',
-            )
           if (request && isDocumentAuthor(request)) {
             const targetPath = request.allowedPaths?.[0]
             if (!targetPath)
@@ -507,7 +353,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
           }
           if (request)
             return createDeterministicStructuredTerminal({ request, events })
-          throw new Error('worker has no structured terminal result channel')
+          throw new Error('worker has no terminal result handler')
         }
         if (
           typeof input.sessions.isWorkflowWorkerOpen === 'function' &&
@@ -554,64 +400,6 @@ function createDeterministicDocumentAuthorTerminal(
   })
 }
 
-function structuredSubmissionToolName(
-  request: WorkerDispatchRequest,
-): string | undefined {
-  switch (request.workerType) {
-    case 'document-author':
-      return undefined
-    case 'atomic-task-planner':
-      return 'SubmitAtomicTaskPlan'
-    case 'implementation-worker':
-      return 'SubmitImplementationResult'
-    case 'implementation-auditor':
-    case 'acceptance-validator':
-      return 'SubmitValidationResult'
-    case 'change-impact-analyzer':
-      return 'SubmitChangeImpactResult'
-    case 'question-answerer':
-      return 'SubmitQuestionAnswerResult'
-    case 'resource-content-author':
-      return undefined
-    case 'resource-planner':
-    case 'resource-curator':
-      return undefined
-  }
-}
-
-function hasCompletedStructuredSubmission(
-  request: WorkerDispatchRequest,
-  events: ReturnType<BeeGameSessionManager['events']>,
-): boolean {
-  const toolName = structuredSubmissionToolName(request)
-  return Boolean(
-    toolName &&
-      events.some(
-        event =>
-          event.type === 'tool.completed' &&
-          event.payload?.toolName === toolName,
-      ),
-  )
-}
-
-function missingStructuredTerminalError(
-  request: WorkerDispatchRequest,
-  events: ReturnType<BeeGameSessionManager['events']>,
-): Error | undefined {
-  const toolName = structuredSubmissionToolName(request)
-  if (!toolName) return undefined
-  if (
-    events.some(
-      event =>
-        event.type === 'tool.failed' && event.payload?.toolName === toolName,
-    )
-  )
-    return undefined
-  const error = new Error(`missing_required_terminal_submission: ${toolName}`)
-  error.name = 'WorkerNeedsActionError'
-  return error
-}
-
 async function createDeterministicStructuredTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
@@ -621,54 +409,19 @@ async function createDeterministicStructuredTerminal(input: {
       throw new Error(
         'canonical document completion must use its commit receipt',
       )
-    case 'atomic-task-planner':
-      return createDeterministicAtomicTaskPlannerTerminal(input)
     case 'implementation-worker':
       return createDeterministicImplementationWorkerTerminal(input)
-    case 'implementation-auditor':
     case 'acceptance-validator':
-      return createDeterministicValidationTerminal(input)
+      return createNaturalAcceptanceTerminal(input)
     case 'change-impact-analyzer':
-      return createDeterministicChangeImpactTerminal(input)
+      return createNaturalChangeImpactTerminal(input)
     case 'question-answerer':
-      return createDeterministicQuestionAnswerTerminal(input)
+      return createNaturalQuestionAnswerTerminal(input)
     case 'resource-planner':
       return createDeterministicResourcePlannerTerminal(input)
-    case 'resource-curator':
-      throw new Error(
-        'resource curator terminal requires a committed durable inventory receipt',
-      )
-    case 'resource-content-author':
-      throw new Error(
-        'resource content terminal requires a committed durable content receipt',
-      )
+    default:
+      throw new Error(`retired delivery worker: ${input.request.workerType}`)
   }
-}
-
-function completedToolInputs(
-  events: ReturnType<BeeGameSessionManager['events']>,
-  toolName: string,
-): Record<string, unknown>[] {
-  return [...events].reverse().flatMap(event => {
-    if (event.type !== 'tool.completed' || event.payload?.toolName !== toolName)
-      return []
-    const toolInput = event.payload.input
-    return toolInput &&
-      typeof toolInput === 'object' &&
-      !Array.isArray(toolInput)
-      ? [toolInput as Record<string, unknown>]
-      : []
-  })
-}
-
-function failedToolCount(
-  events: ReturnType<BeeGameSessionManager['events']>,
-  toolName: string,
-): number {
-  return events.filter(
-    event =>
-      event.type === 'tool.failed' && event.payload?.toolName === toolName,
-  ).length
 }
 
 async function writeCanonicalTerminalEvidence(input: {
@@ -689,22 +442,42 @@ async function writeCanonicalTerminalEvidence(input: {
   )
 }
 
-async function createDeterministicChangeImpactTerminal(input: {
+function finalResultText(
+  events: ReturnType<BeeGameSessionManager['events']>,
+): string {
+  const text = [...events]
+    .reverse()
+    .find(event => event.type === 'result' && event.text.trim())
+    ?.text.trim()
+  if (!text) throw new Error('worker completed without a final response')
+  return text
+}
+
+function parseIdLine(report: string, label: string): string[] {
+  const value = report.match(new RegExp(`(?:^|\\n)${label}:\\s*(.+?)\\s*$`, 'imu'))?.[1]?.trim()
+  if (!value) throw new Error(`change impact report is missing ${label}`)
+  if (value.toUpperCase() === 'NONE') return []
+  return [...new Set(value.split(',').map(id => id.trim()).filter(Boolean))]
+}
+
+async function createNaturalChangeImpactTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
-  const candidate = completedToolInputs(
-    input.events,
-    'SubmitChangeImpactResult',
-  )[0]
-  if (!candidate)
-    throw new Error(
-      'worker terminal result is missing a valid SubmitChangeImpactResult call',
-    )
+  const report = finalResultText(input.events)
+  const classification = report.match(
+    /(?:^|\n)CLASSIFICATION:\s*(question|implementation_only|documents_required)\s*$/imu,
+  )?.[1]?.toLowerCase()
+  const rationale = report.match(/(?:^|\n)RATIONALE:\s*(.+?)\s*$/imu)?.[1]?.trim()
+  if (!classification || !rationale)
+    throw new Error('change impact worker completed without the required final report')
   const evidencePath = `.beegame/workflow/evidence/change-impact-${input.request.dispatchId}.json`
   const terminal = changeImpactTerminalSchema.parse({
     workerType: 'change-impact-analyzer',
-    ...candidate,
+    classification,
+    affectedRequirementIds: parseIdLine(report, 'AFFECTED_REQUIREMENTS'),
+    affectedChecklistIds: parseIdLine(report, 'AFFECTED_CHECKLIST'),
+    rationale,
     evidencePath,
   })
   await writeCanonicalTerminalEvidence({
@@ -715,22 +488,15 @@ async function createDeterministicChangeImpactTerminal(input: {
   return terminal
 }
 
-async function createDeterministicQuestionAnswerTerminal(input: {
+async function createNaturalQuestionAnswerTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
-  const candidate = completedToolInputs(
-    input.events,
-    'SubmitQuestionAnswerResult',
-  )[0]
-  if (!candidate)
-    throw new Error(
-      'worker terminal result is missing a valid SubmitQuestionAnswerResult call',
-    )
+  const answer = finalResultText(input.events)
   const evidencePath = `.beegame/workflow/evidence/question-answer-${input.request.dispatchId}.json`
   const terminal = questionAnswerTerminalSchema.parse({
     workerType: 'question-answerer',
-    ...candidate,
+    answer,
     evidencePath,
   })
   await writeCanonicalTerminalEvidence({
@@ -741,130 +507,101 @@ async function createDeterministicQuestionAnswerTerminal(input: {
   return terminal
 }
 
-async function createDeterministicValidationTerminal(input: {
+async function createNaturalAcceptanceTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
-  const candidates = [...input.events].reverse().flatMap(event => {
-    if (
-      event.type !== 'tool.completed' ||
-      event.payload?.toolName !== 'SubmitValidationResult'
+  const report = [...input.events]
+    .reverse()
+    .find(
+      event =>
+        (event.type === 'result' || event.type === 'assistant.message') &&
+        /(?:^|\n)ACCEPTANCE:\s*(?:PASS|FAIL)\s*$/iu.test(event.text.trim()),
     )
-      return []
-    const toolInput = event.payload.input
-    return toolInput &&
-      typeof toolInput === 'object' &&
-      !Array.isArray(toolInput)
-      ? [toolInput as Record<string, unknown>]
-      : []
+    ?.text.trim()
+  if (!report)
+    throw new Error('acceptance worker completed without a final report')
+  const verdict = report.match(/(?:^|\n)ACCEPTANCE:\s*(PASS|FAIL)\s*$/iu)?.[1]
+  if (!verdict)
+    throw new Error(
+      'acceptance report must end with ACCEPTANCE: PASS or ACCEPTANCE: FAIL',
+    )
+  const contract = input.request.contract
+  const expected = {
+    task: submittedStringArray(contract.taskIds),
+    checklist: submittedStringArray(contract.checklistIds),
+  }
+  const observations = acceptanceObservations(report)
+  const actual = {
+    task: observations.filter(item => item.kind === 'task').map(item => item.id),
+    checklist: observations.filter(item => item.kind === 'checklist').map(item => item.id),
+  }
+  for (const kind of ['task', 'checklist'] as const)
+    assertExactAcceptanceCoverage(expected[kind], actual[kind], kind)
+  const failed = observations.filter(item => item.status === 'FAIL')
+  if ((verdict === 'PASS') !== (failed.length === 0))
+    throw new Error('acceptance verdict conflicts with per-ID evidence')
+  const evidencePath = `.beegame/workflow/evidence/${input.request.workerType}-${input.request.dispatchId}.json`
+  const terminal = acceptanceValidatorTerminalSchema.parse({
+    workerType: 'acceptance-validator',
+    revision: input.request.revision,
+    status: verdict === 'PASS' ? 'passed' : 'failed',
+    validatedTaskIds: actual.task,
+    checklistIds: actual.checklist,
+    findings:
+      verdict === 'PASS'
+        ? []
+        : failed.map(item => ({
+            taskIds: item.kind === 'task' ? [item.id] : [],
+            checklistIds: item.kind === 'checklist' ? [item.id] : [],
+            artifactPaths: ['.'],
+            description: `${item.kind.toUpperCase()} ${item.id}: ${item.observation}`,
+            requiredAction: 'Review and correct this observed acceptance failure.',
+          })),
+    evidencePath,
   })
-  const errors: string[] = []
-  for (const candidate of candidates) {
-    try {
-      const contract = input.request.contract
-      const taskIds = submittedStringArray(contract.taskIds)
-      const checklistIds = submittedStringArray(contract.checklistIds)
-      const resourceIds = submittedStringArray(contract.resourceIds)
-      const contentIds = submittedStringArray(contract.contentIds)
-      const evidencePath = `.beegame/workflow/evidence/${input.request.workerType}-${input.request.dispatchId}.json`
-      const findings = deriveValidationFindings(
-        candidate.findings,
-        contract.tasks,
-      )
-      const common = {
-        workerType: input.request.workerType,
-        revision: input.request.revision,
-        status: candidate.status,
-        checklistIds,
-        resourceIds,
-        contentIds,
-        findings,
-        evidencePath,
-      }
-      const terminal =
-        input.request.workerType === 'implementation-auditor'
-          ? implementationAuditorTerminalSchema.parse({
-              ...common,
-              auditedTaskIds: taskIds,
-            })
-          : acceptanceValidatorTerminalSchema.parse({
-              ...common,
-              validatedTaskIds: taskIds,
-            })
-      const absolutePath = resolveWorkflowEvidencePath(
-        input.request.workspacePath,
-        evidencePath,
-      )
-      if (!absolutePath) throw new Error('validation evidence path is invalid')
-      await mkdir(dirname(absolutePath), { recursive: true })
-      await writeFile(absolutePath, `${JSON.stringify(terminal)}\n`, 'utf8')
-      return terminal
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error))
-    }
-  }
-  throw new Error(
-    errors.length
-      ? `validation result does not match the active contract: ${errors.join('; ')}`
-      : 'worker terminal result is missing a valid SubmitValidationResult call',
-  )
+  await writeCanonicalTerminalEvidence({
+    workspacePath: input.request.workspacePath,
+    evidencePath,
+    value: { ...terminal, report },
+  })
+  return terminal
 }
 
-function deriveValidationFindings(
-  value: unknown,
-  taskValue: unknown,
-): unknown[] {
-  const tasks = Array.isArray(taskValue)
-    ? taskValue.flatMap(task => {
-        if (!task || typeof task !== 'object' || Array.isArray(task)) return []
-        const record = task as Record<string, unknown>
-        if (typeof record.id !== 'string') return []
-        return [
-          {
-            id: record.id,
-            allowedPaths: submittedStringArray(record.allowedPaths),
-            checklistIds: submittedStringArray(record.checklistIds),
-          },
-        ]
-      })
-    : []
-  return Array.isArray(value)
-    ? value.map(finding => {
-        const record = finding as Record<string, unknown>
-        const artifactPaths = submittedStringArray(record.artifactPaths)
-        const owners = tasks.filter(task =>
-          artifactPaths.some(artifactPath =>
-            task.allowedPaths.some(scope =>
-              validationScopeContains(scope, artifactPath),
-            ),
-          ),
-        )
-        return {
-          artifactPaths,
-          description: record.description,
-          requiredAction: record.requiredAction,
-          taskIds: [...new Set(owners.map(owner => owner.id))],
-          checklistIds: [
-            ...new Set(owners.flatMap(owner => owner.checklistIds)),
-          ],
-        }
-      })
-    : []
+type AcceptanceObservation = {
+  kind: 'task' | 'checklist'
+  id: string
+  status: 'PASS' | 'FAIL'
+  observation: string
 }
 
-function validationScopeContains(scope: string, artifactPath: string): boolean {
-  const normalize = (value: string): string => {
-    let normalized = value.replaceAll('\\', '/')
-    while (normalized.startsWith('./')) normalized = normalized.slice(2)
-    while (normalized.endsWith('/')) normalized = normalized.slice(0, -1)
-    return normalized
-  }
-  const normalizedScope = normalize(scope)
-  const normalizedArtifact = normalize(artifactPath)
-  return (
-    normalizedArtifact === normalizedScope ||
-    normalizedArtifact.startsWith(`${normalizedScope}/`)
+function acceptanceObservations(report: string): AcceptanceObservation[] {
+  return report.split(/\r?\n/u).flatMap(line => {
+    const match = line.match(
+      /^(TASK|CHECKLIST)\s+(\S+):\s*(PASS|FAIL)\s+[—-]\s+(.+)$/u,
+    )
+    if (!match) return []
+    return [{
+      kind: match[1].toLowerCase() as AcceptanceObservation['kind'],
+      id: match[2],
+      status: match[3] as AcceptanceObservation['status'],
+      observation: match[4].trim(),
+    }]
+  })
+}
+
+function assertExactAcceptanceCoverage(
+  expected: string[],
+  actual: string[],
+  kind: string,
+): void {
+  const unique = new Set(actual)
+  if (
+    unique.size !== actual.length ||
+    expected.length !== actual.length ||
+    expected.some(id => !unique.has(id))
   )
+    throw new Error(`acceptance report does not cover every ${kind} exactly once`)
 }
 
 const WORKSPACE_MUTATION_TOOLS = new Set([
@@ -886,33 +623,9 @@ function hasInFlightResourceMutation(events: BeeGameEvent[]): boolean {
     if (event.type !== 'tool.started') continue
     const toolName = String(event.payload?.toolName ?? '')
     if (
-      WORKSPACE_MUTATION_TOOLS.has(toolName) ||
-      toolName === 'CommitResourceInventory' ||
-      toolName === 'AssetManifest' ||
-      toolName === 'CommitResourceContent'
+      WORKSPACE_MUTATION_TOOLS.has(toolName)
     )
       active.set(toolUseId, true)
-  }
-  return active.size > 0
-}
-
-function hasInFlightTool(
-  events: BeeGameEvent[],
-  expectedToolName: string,
-): boolean {
-  const active = new Set<string>()
-  for (const event of events) {
-    const toolUseId = String(event.payload?.toolUseID ?? '')
-    if (!toolUseId) continue
-    if (event.type === 'tool.completed' || event.type === 'tool.failed') {
-      active.delete(toolUseId)
-      continue
-    }
-    if (
-      event.type === 'tool.started' &&
-      String(event.payload?.toolName ?? '') === expectedToolName
-    )
-      active.add(toolUseId)
   }
   return active.size > 0
 }
@@ -921,7 +634,6 @@ async function createDeterministicResourcePlannerTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
-  const taskMetrics = resourceTaskMetrics(input.events)
   const contract = auditAssetContract(input.request.workspacePath)
   const observedMutationPaths = completedMutationPaths(
     input.request.workspacePath,
@@ -937,120 +649,24 @@ async function createDeterministicResourcePlannerTerminal(input: {
   ]
   if (input.request.workerType !== 'resource-planner')
     throw new Error('resource planner terminal received another worker type')
-  const submission = completedToolInputs(input.events, 'AssetManifest').find(
-    candidate => candidate.action === 'submit_resource_plan',
-  )
-  if (!submission || !contract.present || contract.requirements.length === 0)
+  if (!contract.present)
     throw new Error(
-      'resource planner completed without an accepted canonical resource plan',
+      'resource planner completed without assets/asset-manifest.json',
+    )
+  if (contract.requirements.length === 0)
+    throw new Error(
+      `resource planner canonical resource plan was rejected: ${
+        contract.issues.length
+          ? contract.issues.join('; ')
+          : 'requirements must contain at least one canonical requirement'
+      }`,
     )
   return resourcePlannerTerminalSchema.parse({
     revision: input.request.revision,
     workerType: 'resource-planner' as const,
     status: 'completed' as const,
-    writtenPaths: ['assets/asset-manifest.json'],
-    taskMetrics,
+    writtenPaths,
   })
-}
-
-function resourceTaskMetrics(
-  events: ReturnType<BeeGameSessionManager['events']>,
-) {
-  const completed = events.filter(event => event.type === 'tool.completed')
-  const catalogCalls = completed.flatMap(event => {
-    if (event.payload?.toolName !== 'ResourceLibrary') return []
-    const input = event.payload.input
-    if (!input || typeof input !== 'object' || Array.isArray(input)) return []
-    const action = (input as Record<string, unknown>).action
-    if (typeof action !== 'string' || !action) return []
-    const output = event.payload.output
-    const serialized =
-      typeof output === 'string' ? output : JSON.stringify(output ?? null)
-    return [{ action, bytes: new TextEncoder().encode(serialized).byteLength }]
-  })
-  const canonicalMutationCount = completed.filter(event => {
-    const toolName = String(event.payload?.toolName ?? '')
-    if (WORKSPACE_MUTATION_TOOLS.has(toolName)) return true
-    const input = event.payload?.input
-    const action =
-      input && typeof input === 'object' && !Array.isArray(input)
-        ? String((input as Record<string, unknown>).action ?? '')
-        : ''
-    if (toolName === 'CommitResourceInventory') return true
-    return toolName === 'AssetManifest' && action === 'submit_resource_plan'
-  }).length
-  return {
-    catalogPayloadBytes: catalogCalls.reduce(
-      (total, call) => total + call.bytes,
-      0,
-    ),
-    catalogCallTypes: [...new Set(catalogCalls.map(call => call.action))],
-    canonicalMutationCount,
-  }
-}
-
-async function createDeterministicAtomicTaskPlannerTerminal(input: {
-  request: WorkerDispatchRequest
-  events: ReturnType<BeeGameSessionManager['events']>
-}) {
-  const candidates = [...input.events].reverse().flatMap(event => {
-    if (
-      event.type !== 'tool.completed' ||
-      event.payload?.toolName !== 'SubmitAtomicTaskPlan'
-    )
-      return []
-    const toolInput = event.payload.input
-    return toolInput &&
-      typeof toolInput === 'object' &&
-      !Array.isArray(toolInput)
-      ? [toolInput as Record<string, unknown>]
-      : []
-  })
-  const errors: string[] = []
-  for (const candidate of candidates) {
-    try {
-      const evidencePath = `.beegame/workflow/evidence/atomic-task-plan-${input.request.dispatchId}.json`
-      const ownership = normalizeSubmittedOwnership(candidate.ownership)
-      const terminal = atomicTaskPlannerTerminalSchema.parse({
-        workerType: 'atomic-task-planner',
-        revision: input.request.revision,
-        status: 'completed',
-        tasks: normalizePlannedAtomicTasks(candidate.tasks, ownership),
-        evidencePath,
-      })
-      const absolutePath = resolveWorkflowEvidencePath(
-        input.request.workspacePath,
-        evidencePath,
-      )
-      if (!absolutePath) throw new Error('atomic task evidence path is invalid')
-      await mkdir(dirname(absolutePath), { recursive: true })
-      await writeFile(
-        absolutePath,
-        `${JSON.stringify({
-          workerType: 'atomic-task-planner',
-          status: 'completed',
-          revision: input.request.revision,
-          tasks: candidate.tasks,
-          ownership,
-        })}\n`,
-        'utf8',
-      )
-      return terminal
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error))
-    }
-  }
-  throw new Error(
-    errors.length
-      ? `atomic task evidence does not match the executable task schema: ${errors.join('; ')}`
-      : 'worker terminal result is missing a valid SubmitAtomicTaskPlan call',
-  )
-}
-
-function submittedStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === 'string')
-    : []
 }
 
 function sameStringSet(
@@ -1062,192 +678,30 @@ function sameStringSet(
   return a.length === b.length && a.every((value, index) => value === b[index])
 }
 
+function submittedStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : []
+}
+
 function createDeterministicImplementationWorkerTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
-  const candidates = [...input.events].reverse().flatMap(event => {
-    if (
-      event.type !== 'tool.completed' ||
-      event.payload?.toolName !== 'SubmitImplementationResult'
-    )
-      return []
-    const toolInput = event.payload.input
-    return toolInput &&
-      typeof toolInput === 'object' &&
-      !Array.isArray(toolInput)
-      ? [toolInput as Record<string, unknown>]
-      : []
-  })
-  const errors: string[] = []
-  for (const candidate of candidates) {
-    try {
-      const evidencePath = `.beegame/workflow/evidence/implementation-${input.request.dispatchId}.json`
-      const task =
-        input.request.contract.task &&
-        typeof input.request.contract.task === 'object' &&
-        !Array.isArray(input.request.contract.task)
-          ? (input.request.contract.task as Record<string, unknown>)
-          : {}
-      const verificationObservations = Array.isArray(
-        candidate.verificationObservations,
-      )
-        ? candidate.verificationObservations
-        : []
-      const verificationCount = Array.isArray(task.verification)
-        ? task.verification.length
-        : 0
-      if (verificationObservations.length !== verificationCount)
-        throw new Error(
-          `verification observations must contain exactly ${verificationCount} entries`,
-        )
-      const {
-        verificationObservations: _verificationObservations,
-        ...candidateTerminal
-      } = candidate
-      return implementationWorkerTerminalSchema.parse({
-        ...candidateTerminal,
-        verifiedArtifacts: submittedStringArray(task.expectedArtifacts),
-        verificationResults: (
-          task.verification as Array<Record<string, unknown>>
-        ).map((verification, verificationIndex) => ({
-          verificationIndex,
-          status: verification.kind === 'runtime' ? 'deferred' : 'passed',
-          observations: [verificationObservations[verificationIndex]],
-        })),
-        workerType: 'implementation-worker',
-        taskId: input.request.taskId,
-        revision: input.request.revision,
-        evidenceRefs: [evidencePath],
-        evidencePath,
-      })
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error))
-    }
-  }
-  throw new Error(
-    errors.length
-      ? `implementation result does not match the active task schema: ${errors.join('; ')}`
-      : 'worker terminal result is missing a valid SubmitImplementationResult call',
-  )
-}
-
-function normalizeSubmittedOwnership(
-  value: unknown,
-): Record<string, Record<string, string>> {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new Error('atomic task ownership must be an object')
-  const record = value as Record<string, unknown>
-  const fields = ['checklistItems'] as const
-  if (
-    Object.keys(record).some(
-      key => !fields.includes(key as (typeof fields)[number]),
-    )
-  )
-    throw new Error('atomic task ownership contains unknown fields')
-  return Object.fromEntries(
-    fields.map(field => {
-      const entries = record[field]
-      if (!Array.isArray(entries))
-        throw new Error(`atomic task ownership.${field} must be an array`)
-      const mapping: Record<string, string> = {}
-      for (const entry of entries) {
-        if (!entry || typeof entry !== 'object' || Array.isArray(entry))
-          throw new Error(
-            `atomic task ownership.${field} entries must be objects`,
-          )
-        const item = entry as Record<string, unknown>
-        if (
-          typeof item.id !== 'string' ||
-          !item.id ||
-          typeof item.taskId !== 'string' ||
-          !item.taskId
-        )
-          throw new Error(
-            `atomic task ownership.${field} entries require id and taskId`,
-          )
-        if (mapping[item.id])
-          throw new Error(
-            `atomic task ownership.${field} duplicates ${item.id}`,
-          )
-        mapping[item.id] = item.taskId
-      }
-      return [field, mapping]
-    }),
-  )
-}
-
-function normalizePlannedAtomicTasks(
-  value: unknown,
-  ownershipValue: unknown,
-): unknown {
-  if (!Array.isArray(value)) return value
-  if (
-    !ownershipValue ||
-    typeof ownershipValue !== 'object' ||
-    Array.isArray(ownershipValue)
-  )
-    throw new Error('atomic task ownership must be an object')
-  const ownership = ownershipValue as Record<string, unknown>
-  const ownershipFields = [['checklistItems', 'checklistIds']] as const
-  if (
-    Object.keys(ownership).some(
-      key => !ownershipFields.some(([field]) => field === key),
-    )
-  )
-    throw new Error('atomic task ownership contains unknown fields')
-  const taskIds = new Set(
-    value.flatMap(task =>
-      task && typeof task === 'object' && !Array.isArray(task)
-        ? [String((task as Record<string, unknown>).id ?? '')]
-        : [],
-    ),
-  )
-  const owned = new Map<string, Record<string, string[]>>()
-  for (const [ownershipField, taskField] of ownershipFields) {
-    const mapping = ownership[ownershipField]
-    if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping))
-      throw new Error(
-        `atomic task ownership.${ownershipField} must be an object`,
-      )
-    for (const [id, taskIdValue] of Object.entries(mapping)) {
-      if (!id || typeof taskIdValue !== 'string' || !taskIdValue)
-        throw new Error(
-          `atomic task ownership.${ownershipField} must map non-empty IDs to task IDs`,
-        )
-      if (!taskIds.has(taskIdValue))
-        throw new Error(
-          `atomic task ownership assigns ${id} to unknown task ${taskIdValue}`,
-        )
-      const taskOwnership = owned.get(taskIdValue) ?? {}
-      taskOwnership[taskField] = [...(taskOwnership[taskField] ?? []), id]
-      owned.set(taskIdValue, taskOwnership)
-    }
-  }
-  return value.map(task => {
-    if (!task || typeof task !== 'object' || Array.isArray(task)) return task
-    const record = task as Record<string, unknown>
-    const forbiddenWorkerOwnedFields = [
-      'checklistIds',
-      'status',
-      'attempt',
-      'startedRevision',
-      'completedRevision',
-      'evidenceRefs',
-      'kind',
-      'summary',
-      'requirementIds',
-      'deliverables',
-      'acceptanceCriteria',
-    ]
-    if (forbiddenWorkerOwnedFields.some(field => field in record)) return task
-    return {
-      ...task,
-      checklistIds: owned.get(String(record.id))?.checklistIds ?? [],
-      status: 'pending',
-      attempt: 0,
-      evidenceRefs: [],
-    }
+  const changedPaths = [...new Set(
+    completedMutationPaths(input.request.workspacePath, input.events),
+  )]
+  const evidencePath = `.beegame/workflow/evidence/implementation-${input.request.dispatchId}.json`
+  return implementationWorkerTerminalSchema.parse({
+    workerType: 'implementation-worker',
+    taskId: input.request.taskId,
+    revision: input.request.revision,
+    status: 'completed',
+    changedPaths,
+    verifiedArtifacts: changedPaths,
+    verificationResults: [],
+    evidenceRefs: [evidencePath],
+    evidencePath,
   })
 }
 

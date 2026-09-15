@@ -7,20 +7,18 @@ type ResourceDeliveryReadiness,
 } from '../resource-delivery-readiness'
 import type { createFoundationAuthoring } from '../stage-modules/foundation-authoring/public'
 import type { createFoundationReviewer } from '../stage-modules/foundation-reviewer/public'
+import type { GameIrOperations } from '../stage-modules/game-ir/public'
+import { createGameIrLink } from './game-ir-link'
+import { assertDispatchedIr, assertResourceIr, consumesGameIr, downstreamIrForRequest, isDownstreamIrPhase, readDownstreamIr } from './downstream-ir'
+import { isFoundationStageActive, isIrStageActive, isPublicStageActive } from './public-stage-routing'
 import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
-import {
-applyAtomicTaskPlan,
-AtomicTaskPlanError,
-readAtomicTaskPlanningDocuments,
-validateAtomicTaskGraph,
-type AtomicTaskContractFacts,
-} from './atomic-task-planner'
 import {
 buildChangeImpactDispatch,
 buildQuestionAnswerDispatch,
 createChangeRequest,
 } from './change-request'
 import { createDeliveryDispatcher } from './dispatch'
+import { directImplementationTask } from './direct-implementation-task'
 import {
 completeDocumentDraft,
 startChecklistDraftStage,
@@ -35,7 +33,6 @@ startNextImplementationTask,
 } from './implementation-stage'
 import {
 completeResourceTask,
-reconcileCurrentResourcePreparation,
 startResourcePreparation,
 } from './resource-stage'
 import { RETIRED_FOUNDATION_AUTHOR } from './retired-foundation-author'
@@ -45,6 +42,7 @@ computeResourceRevision,
 computeWorkspaceRevision,
 } from './revision'
 import { createRunStore } from './run-store'
+import { stopRun } from './recovery'
 import { transitionDeliveryRun } from './transition'
 import type {
 DeliveryRun,
@@ -56,11 +54,9 @@ import {
 CANONICAL_DOCUMENT_ARTIFACTS
 } from './types'
 import {
-enterImplementationAudit,
+enterAcceptance,
 reconcileAcceptance,
-reconcileImplementationAudit,
 startAcceptance,
-startImplementationAudit,
 } from './validation-stage'
 import {
 type WorkerTerminalResult
@@ -71,24 +67,41 @@ export function createDeliveryWorkflowController(input: {
   workerPort: DeliveryWorkerPort
   author?: ReturnType<typeof createFoundationAuthoring>
   reviewer?: ReturnType<typeof createFoundationReviewer>
+  ir?: GameIrOperations
   handoffRecoveryGraceMs?: number
 }) {
   const store = createRunStore(input.workspacePath, input.ownerId)
+  const irLink = input.ir ? createGameIrLink({ store, ir: input.ir,
+    onCompleted: run => { void ensureProgress(run).catch(() => undefined) } }) : undefined
   const reviewLink = input.reviewer ? createFoundationReviewLink({ workspacePath: input.workspacePath,
-    store, reviewer: input.reviewer }) : undefined
+    store, reviewer: input.reviewer,
+    ...(irLink ? { onCompleted: (run: DeliveryRun) => { void ensureProgress(run).catch(() => undefined) } } : {}) }) : undefined
   const authorLink = input.author ? createFoundationAuthoringLink({ store, author: input.author,
     ...(reviewLink ? { onCompleted: (run: DeliveryRun) => ensureProgress(run) } : {}) }) : undefined
   async function progressPublicFoundation(run: DeliveryRun, resume = false) {
+    if (run.foundationReviewStage?.acceptedReview && irLink && run.status !== 'stopped' &&
+        run.foundationReviewStage.control.action !== 'stop') return irLink.ensureProgress(run)
     if (run.foundationReviewStage || run.authorStage?.status === 'completed') {
       if (reviewLink) return resume ? reviewLink.resume(run) : reviewLink.ensureProgress(run)
       return run
     }
     return resume ? requireAuthorLink().resume(run) : requireAuthorLink().ensureProgress(run)
   }
-  async function stopFoundation(run: DeliveryRun, reason: string) {
+  async function stopFoundation(run: DeliveryRun, reason: string): Promise<DeliveryRun> {
     const current = await store.load()
     if (!current || current.runId !== run.runId) throw new Error('Foundation stop run changed')
-    if ((current.foundationReviewStage || current.authorStage?.status === 'completed') && reviewLink) return reviewLink.stop(current, reason)
+    if (!isPublicStageActive(current)) return stopRun({ store, runId: current.runId, reason,
+      sessionIsOpen: dispatch => dispatcher.workerIsOpen(dispatch.dispatchId),
+      stopDispatch: (dispatchId, stopReason) => dispatcher.stop(dispatchId, stopReason) })
+    if (isIrStageActive(current)) {
+      if (!irLink) throw new Error('IR public module is required')
+      const stopped = await irLink.stop(current, reason)
+      return isIrStageActive(stopped) ? stopped : stopFoundation(stopped, reason)
+    }
+    if ((current.foundationReviewStage || current.authorStage?.status === 'completed') && reviewLink) {
+      const stopped = await reviewLink.stop(current, reason)
+      return isFoundationStageActive(stopped) ? stopped : stopFoundation(stopped, reason)
+    }
     const stopped = await requireAuthorLink().stop(current, reason)
     return stopped.authorStage?.status === 'completed' && reviewLink ? reviewLink.stop(stopped, reason) : stopped
   }
@@ -113,22 +126,32 @@ export function createDeliveryWorkflowController(input: {
     return current
   }
 
-  dispatcher = createDeliveryDispatcher({
+  const transportDispatcher = createDeliveryDispatcher({
     store,
     workerPort: input.workerPort,
-    onRetryable: async (runId) => {
-      const current = await store.load()
-      if (!current || current.runId !== runId || current.status !== 'running') return
-      if (current.authorStage || current.foundationReviewStage) return
-      assertNoRetiredFoundationReviewRun(current)
-      // A dispatch failure may be reconciled from inside handleTerminal's
-      // serialization lane. Queue the next progress pass instead of awaiting
-      // that same lane and deadlocking terminal reconciliation.
-      void ensureProgress(current).catch(() => undefined)
-    },
     onTerminal: async (record, result, request) =>
       handleTerminal(record, result, request),
   })
+  dispatcher = {
+    ...transportDispatcher,
+    async dispatch(request) {
+      if (!consumesGameIr(request.workerType)) return transportDispatcher.dispatch(request)
+      const run = await store.load()
+      if (!run || run.runId !== request.runId) throw new Error('IR consumer run changed')
+      const gameIr = await readDownstreamIr({ run, workspacePath: input.workspacePath, ir: input.ir })
+      assertResourceIr(run, gameIr, request.workerType === 'resource-planner')
+      const active = run.activeDispatch
+      if (active && active.phase === request.phase && active.workerType === request.workerType &&
+          active.taskId === request.taskId && active.revision === request.revision &&
+          (active.status === 'running' || active.status === 'completed'))
+        assertDispatchedIr(active.request, gameIr)
+      return transportDispatcher.dispatch({ ...request,
+        protectedPaths: [...new Set([...(request.protectedPaths ?? []), ...CANONICAL_DOCUMENT_ARTIFACTS,
+          '.beegame/ir/', '.beegame/workflow/game-ir/',
+          ...(request.workerType === 'implementation-worker' ? ['assets/'] : [])])],
+        contract: { ...request.contract, gameIr: downstreamIrForRequest(request, gameIr) } })
+    },
+  }
 
   async function persist(
     run: DeliveryRun,
@@ -181,16 +204,17 @@ export function createDeliveryWorkflowController(input: {
   }
 
   async function contractFactsFor(run: DeliveryRun): Promise<
-    AtomicTaskContractFacts & {
+    {
+      checklistIds: string[]
       resourceIds: string[]
       contentIds: string[]
       resourceReadiness: ResourceDeliveryReadiness
     }
   > {
-    return plannerContractFacts(
+    return implementationContractFacts(
       input.workspacePath,
       run.confirmedBriefContext,
-      run.resourceProductionState.inventoryReceipt?.catalogObserved ?? false,
+      run.resourceProductionState.deliveryReceipt?.catalogObserved ?? false,
     )
   }
 
@@ -211,8 +235,20 @@ export function createDeliveryWorkflowController(input: {
     const run = await store.load()
     // Foundation author terminals belong exclusively to the public module.
     // Late callbacks from the retired worker path cannot update its link.
-    if (run?.authorStage || run?.foundationReviewStage || record.phase === 'DOCUMENT_DRAFTING') return
+    if (run && isPublicStageActive(run) || record.phase === 'DOCUMENT_DRAFTING') return
     if (!run || run.activeDispatch?.dispatchId !== record.dispatchId) return
+    if (consumesGameIr(record.workerType)) {
+      try {
+        const gameIr = await readDownstreamIr({ run, workspacePath: input.workspacePath, ir: input.ir })
+        assertResourceIr(run, gameIr, record.workerType === 'resource-planner')
+        assertDispatchedIr(run.activeDispatch.request, gameIr)
+      } catch (error) {
+        await persist({ ...run, status: 'needs_action',
+          blockedReason: error instanceof Error ? error.message : 'IR consumer binding failed' },
+          'ir.consumer.rejected', { dispatchId: record.dispatchId })
+        return
+      }
+    }
     let next: DeliveryRun = { ...run, activeDispatch: undefined }
     if (result.workerType === 'change-impact-analyzer') {
       const message =
@@ -254,7 +290,7 @@ export function createDeliveryWorkflowController(input: {
         phase:
           result.classification === 'documents_required'
             ? 'DOCUMENT_DRAFTING'
-            : 'ATOMIC_TASK_PLANNING',
+            : 'IMPLEMENTATION',
         documentStep:
           result.classification === 'documents_required'
             ? 'FOUNDATION_DRAFTING'
@@ -270,14 +306,7 @@ export function createDeliveryWorkflowController(input: {
         tasks:
           result.classification === 'documents_required'
             ? []
-            : next.tasks.map(task => ({
-                ...task,
-                status: 'pending',
-                attempt: 0,
-                evidenceRefs: [],
-                startedRevision: undefined,
-                completedRevision: undefined,
-              })),
+            : [],
         evidence:
           result.classification === 'documents_required'
             ? {}
@@ -294,7 +323,7 @@ export function createDeliveryWorkflowController(input: {
             : next.foundationAuditState,
         resourceProductionState:
           result.classification === 'documents_required'
-            ? { currentTask: 'RESOURCE_PLAN' }
+            ? { currentTask: 'RESOURCE_DELIVERY' }
             : next.resourceProductionState,
         blockedReason: undefined,
       }
@@ -342,6 +371,7 @@ export function createDeliveryWorkflowController(input: {
         workspacePath: input.workspacePath,
         terminal: result,
         documentSet: 'checklist',
+        ir: input.ir,
       })
       if (next.blockedReason && next.status === 'running') {
         next = {
@@ -359,11 +389,7 @@ export function createDeliveryWorkflowController(input: {
       await resumeUnlocked(next)
       return
     }
-    if (
-      result.workerType === 'resource-planner' ||
-      result.workerType === 'resource-curator' ||
-      result.workerType === 'resource-content-author'
-    ) {
+    if (result.workerType === 'resource-planner') {
       if (await documentRevisionChanged(next)) {
         await restartDocumentStage(
           next,
@@ -372,54 +398,25 @@ export function createDeliveryWorkflowController(input: {
         return
       }
       next = await completeResourceTask({
-        run: next,
+        // Resource completion validates the durable artifacts against the exact
+        // IR injected into this dispatch. Keep that dispatch available until
+        // completion has derived the binding and receipts; completeResourceTask
+        // clears it in the returned run.
+        run,
         workspacePath: input.workspacePath,
         terminal: result,
       })
       next = await persist(
         next,
-        next.phase === 'RESOURCE_PREPARATION' && next.status === 'running'
-          ? 'resource.preparation.progressed'
-          : next.phase === 'DOCUMENT_REVIEW'
-            ? 'resource.preparation.ready'
+          next.phase === 'RESOURCE_PREPARATION' && next.status === 'running'
+            ? 'resource.preparation.progressed'
+            : next.phase === 'IMPLEMENTATION' && next.status === 'running'
+              ? 'resource.preparation.ready'
+            : next.phase === 'DOCUMENT_REVIEW'
+              ? 'resource.preparation.ready'
             : 'resource.preparation.needs_action',
       )
       await resumeUnlocked(next)
-      return
-    }
-    if (result.workerType === 'atomic-task-planner') {
-      if (await documentRevisionChanged(next)) {
-        await restartDocumentStage(
-          next,
-          'canonical documents changed before atomic task planning; document review and downstream work must be rerun',
-        )
-        return
-      }
-      if (
-        resourcePreparationMissing(next) ||
-        (await resourceRevisionChanged(next))
-      ) {
-        await restartResourcePreparation(
-          next,
-          'approved resources changed before atomic task planning; resource preparation must be rerun',
-        )
-        return
-      }
-      next = applyAtomicTaskPlan({
-        run: { ...next, phase: 'ATOMIC_TASK_PLANNING' },
-        terminal: result,
-        facts: await contractFactsFor(next),
-        workspacePath: input.workspacePath,
-      })
-      await persist(next, 'tasks.planned', { taskGraph: next.tasks })
-      await startNextImplementationTask({
-        run: next,
-        workspacePath: input.workspacePath,
-        revision: next.revision.workspace,
-        dispatcher,
-        beforeDispatch: started =>
-          persist(started, 'task.started').then(() => undefined),
-      })
       return
     }
     if (result.workerType === 'implementation-worker') {
@@ -436,7 +433,7 @@ export function createDeliveryWorkflowController(input: {
       ) {
         await restartResourcePreparation(
           next,
-          'resource preparation is missing or approved resources changed during implementation; resource preparation and task planning must be rerun',
+          'resource delivery is missing or approved resources changed during implementation; resource delivery must be rerun',
         )
         return
       }
@@ -456,6 +453,7 @@ export function createDeliveryWorkflowController(input: {
         completionFailureReason = implementationCompletionIssue({
           task: activeTask,
           workspacePath: input.workspacePath,
+          gameIr: run.activeDispatch?.request?.contract.gameIr,
           terminal: result,
         })
       }
@@ -483,15 +481,12 @@ export function createDeliveryWorkflowController(input: {
           )
           return
         }
-        next = await persist(enterImplementationAudit(next), 'phase.entered')
-        await startImplementationAudit({
+        next = await persist(enterAcceptance(next), 'phase.entered')
+        await startAcceptance({
           run: next,
           workspacePath: input.workspacePath,
           dispatcher,
           expectedChecklistIds: auditFacts.checklistIds,
-          expectedResourceIds: auditFacts.resourceIds,
-          expectedContentIds: auditFacts.contentIds,
-          resourceReadiness: auditFacts.resourceReadiness,
         })
       } else {
         await startNextImplementationTask({
@@ -503,83 +498,6 @@ export function createDeliveryWorkflowController(input: {
             persist(started, 'task.started').then(() => undefined),
         })
       }
-      return
-    }
-    if (result.workerType === 'implementation-auditor') {
-      if (await documentRevisionChanged(next)) {
-        await restartDocumentStage(
-          next,
-          'canonical documents changed before implementation audit; document review and downstream work must be rerun',
-        )
-        return
-      }
-      if (
-        resourcePreparationMissing(next) ||
-        (await resourceRevisionChanged(next))
-      ) {
-        await restartResourcePreparation(
-          next,
-          'resource preparation is missing or approved resources changed before implementation audit; resource preparation and task planning must be rerun',
-        )
-        return
-      }
-      const auditFacts = await contractFactsFor(next)
-      next = reconcileImplementationAudit({
-        run: { ...next, phase: 'IMPLEMENTATION_AUDIT' },
-        workspacePath: input.workspacePath,
-        terminal: result,
-        expectedChecklistIds: auditFacts.checklistIds,
-        expectedResourceIds: auditFacts.resourceIds,
-        expectedContentIds: auditFacts.contentIds,
-        currentImplementationRevision: await computeWorkspaceRevision(
-          input.workspacePath,
-        ),
-      })
-      if (result.status !== 'passed') {
-        if (result.status === 'blocked') {
-          await persist(next, 'implementation.audit.reconciled', {
-            findings: result.findings,
-          })
-          return
-        }
-        if (findingsRequireTaskReplan(next, result.findings)) {
-          await restartAtomicTaskPlanning(
-            next,
-            'implementation audit found required artifacts outside every existing task scope; the atomic task graph must be rebuilt',
-          )
-          return
-        }
-        const invalidatedTaskIds = affectedImplementationTaskIds(
-          next,
-          result.findings,
-        )
-        next = resetImplementationTasks(next, invalidatedTaskIds)
-        await persist(next, 'implementation.audit.remediation_planned', {
-          findings: result.findings,
-          invalidatedTaskIds,
-        })
-        await startNextImplementationTask({
-          run: next,
-          workspacePath: input.workspacePath,
-          revision: next.revision.workspace,
-          dispatcher,
-          beforeDispatch: started =>
-            persist(started, 'task.started').then(() => undefined),
-        })
-        return
-      }
-      await persist(next, 'implementation.audit.reconciled')
-      const acceptanceFacts = await contractFactsFor(next)
-      await startAcceptance({
-        run: next,
-        workspacePath: input.workspacePath,
-        dispatcher,
-        expectedChecklistIds: acceptanceFacts.checklistIds,
-        expectedResourceIds: acceptanceFacts.resourceIds,
-        expectedContentIds: acceptanceFacts.contentIds,
-        currentImplementationRevision:
-          next.revision.implementation ?? next.revision.workspace,
-      })
       return
     }
     if (result.workerType === 'acceptance-validator') {
@@ -596,7 +514,7 @@ export function createDeliveryWorkflowController(input: {
       ) {
         await restartResourcePreparation(
           next,
-          'resource preparation is missing or approved resources changed before acceptance; resource preparation and task planning must be rerun',
+          'resource delivery is missing or approved resources changed before acceptance; resource delivery must be rerun',
         )
         return
       }
@@ -606,128 +524,21 @@ export function createDeliveryWorkflowController(input: {
         workspacePath: input.workspacePath,
         terminal: result,
         expectedChecklistIds: acceptanceFacts.checklistIds,
-        expectedResourceIds: acceptanceFacts.resourceIds,
-        expectedContentIds: acceptanceFacts.contentIds,
         currentImplementationRevision: await computeWorkspaceRevision(
           input.workspacePath,
         ),
       })
       if (next.phase === 'DELIVERY')
         next = transitionDeliveryRun(next, { type: 'delivery_completed' })
-      if (result.status === 'failed') {
-        if (findingsRequireTaskReplan(next, result.findings)) {
-          await restartAtomicTaskPlanning(
-            next,
-            'acceptance found required artifacts outside every existing task scope; the atomic task graph must be rebuilt',
-          )
-          return
-        }
-        const invalidatedTaskIds = affectedImplementationTaskIds(
-          next,
-          result.findings,
-        )
-        next = resetImplementationTasks(next, invalidatedTaskIds)
-        await persist(next, 'acceptance.remediation_planned', {
-          findings: result.findings,
-          invalidatedTaskIds,
-        })
-        await startNextImplementationTask({
-          run: next,
-          workspacePath: input.workspacePath,
-          revision: next.revision.workspace,
-          dispatcher,
-          beforeDispatch: started =>
-            persist(started, 'task.started').then(() => undefined),
-        })
-      } else {
-        await persist(
-          next,
-          next.status === 'completed'
-            ? 'run.completed'
+      await persist(
+        next,
+        next.status === 'completed'
+          ? 'run.completed'
+          : result.status === 'failed'
+            ? 'acceptance.needs_action'
             : 'acceptance.reconciled',
-        )
-      }
-    }
-  }
-
-  function affectedImplementationTaskIds(
-    run: DeliveryRun,
-    findings: Array<{ taskIds: string[] }>,
-  ): string[] {
-    const affected = new Set(findings.flatMap(finding => finding.taskIds))
-    let changed = true
-    while (changed) {
-      changed = false
-      for (const task of run.tasks) {
-        if (
-          !affected.has(task.id) &&
-          task.dependsOn.some(dependencyId => affected.has(dependencyId))
-        ) {
-          affected.add(task.id)
-          changed = true
-        }
-      }
-    }
-    return run.tasks.map(task => task.id).filter(taskId => affected.has(taskId))
-  }
-
-  function findingsRequireTaskReplan(
-    run: DeliveryRun,
-    findings: Array<{ artifactPaths: string[] }>,
-  ): boolean {
-    return findings.some(finding =>
-      finding.artifactPaths.some(
-        artifactPath =>
-          !run.tasks.some(task =>
-            task.allowedPaths.some(scope => {
-              const normalizedArtifact = normalizeTaskPath(artifactPath)
-              const normalizedScope = normalizeTaskPath(scope)
-              return (
-                normalizedArtifact === normalizedScope ||
-                normalizedArtifact.startsWith(`${normalizedScope}/`)
-              )
-            }),
-          ),
-      ),
-    )
-  }
-
-  function normalizeTaskPath(path: string): string {
-    let normalized = path.replaceAll('\\', '/')
-    while (normalized.startsWith('./')) normalized = normalized.slice(2)
-    while (normalized.endsWith('/')) normalized = normalized.slice(0, -1)
-    return normalized
-  }
-
-  function resetImplementationTasks(
-    run: DeliveryRun,
-    invalidatedTaskIds: string[],
-  ): DeliveryRun {
-    const invalidated = new Set(invalidatedTaskIds)
-    return {
-      ...run,
-      phase: 'IMPLEMENTATION',
-      status: 'running',
-      activeTaskId: undefined,
-      activeDispatch: undefined,
-      blockedReason: undefined,
-      revision: { ...run.revision, implementation: undefined },
-      evidence: {
-        ...run.evidence,
-        implementationAudit: undefined,
-        acceptance: undefined,
-      },
-      tasks: run.tasks.map(task =>
-        invalidated.has(task.id)
-          ? {
-              ...task,
-              status: 'pending',
-              startedRevision: undefined,
-              completedRevision: undefined,
-              evidenceRefs: [],
-            }
-          : task,
-      ),
+        result.status === 'failed' ? { findings: result.findings } : undefined,
+      )
     }
   }
 
@@ -766,6 +577,9 @@ export function createDeliveryWorkflowController(input: {
   function resourcePreparationMissing(run: DeliveryRun): boolean {
     const evidence = run.evidence.resourcePreparation
     return (
+      run.resourceProductionState.currentTask !== 'RESOURCE_DELIVERED' ||
+      !run.resourceProductionState.irResultId ||
+      !run.resourceProductionState.deliveryReceipt ||
       !run.revision.resource ||
       evidence?.status !== 'passed' ||
       evidence.revision !== run.revision.resource
@@ -791,31 +605,30 @@ export function createDeliveryWorkflowController(input: {
     throw new Error(RETIRED_FOUNDATION_AUTHOR)
   }
 
-  async function restartAtomicTaskPlanning(
+  async function ensureDirectImplementationTask(
     run: DeliveryRun,
-    reason: string,
-  ): Promise<void> {
-    const invalidated: DeliveryRun = {
+  ): Promise<DeliveryRun> {
+    if (run.phase !== 'IMPLEMENTATION' || run.tasks.length > 0) return run
+    const facts = await contractFactsFor(run)
+    const prepared: DeliveryRun = {
       ...run,
-      phase: 'ATOMIC_TASK_PLANNING',
-      status: 'running',
+      tasks: [directImplementationTask(facts)],
       activeTaskId: undefined,
       activeDispatch: undefined,
-      blockedReason: reason,
-      revision: { ...run.revision, implementation: undefined },
-      tasks: [],
-      evidence: {
-        ...run.evidence,
-        implementationAudit: undefined,
-        acceptance: undefined,
-      },
     }
-    await persist(invalidated, 'atomic.task.plan.invalidated')
-    await resumeUnlocked(invalidated)
+    const committed = await persist(prepared, 'implementation.task.created', {
+      implementationTask: prepared.tasks[0],
+    })
+    return committed
   }
 
   async function resumeUnlocked(run: DeliveryRun): Promise<void> {
-    if (run.authorStage || run.foundationReviewStage) {
+    if (isIrStageActive(run)) {
+      if (!irLink) throw new Error('IR public module is required')
+      await irLink.ensureProgress(run)
+      return
+    }
+    if (isFoundationStageActive(run)) {
       await progressPublicFoundation(run)
       return
     }
@@ -825,6 +638,17 @@ export function createDeliveryWorkflowController(input: {
     }
     assertNoRetiredFoundationReviewRun(run)
     if (run.status !== 'running') return
+    if (isDownstreamIrPhase(run.phase)) {
+      try {
+        const gameIr = await readDownstreamIr({ run, workspacePath: input.workspacePath, ir: input.ir })
+        assertResourceIr(run, gameIr, run.phase === 'RESOURCE_PREPARATION')
+      } catch (error) {
+        await persist({ ...run, status: 'needs_action',
+          blockedReason: error instanceof Error ? error.message : 'IR consumer binding failed' },
+          'ir.consumer.rejected')
+        return
+      }
+    }
     // Replay a terminal from a phase that owns top-level dispatches. Foundation
     // review and revision terminals are nested under their own durable tasks
     // and never enter this route.
@@ -861,6 +685,7 @@ export function createDeliveryWorkflowController(input: {
           run,
           workspacePath: input.workspacePath,
           dispatcher,
+          ir: input.ir,
         })
       }
       return
@@ -873,18 +698,6 @@ export function createDeliveryWorkflowController(input: {
         )
         return
       }
-      const reconciledResources = await reconcileCurrentResourcePreparation({
-        run,
-        workspacePath: input.workspacePath,
-      })
-      if (reconciledResources) {
-        const saved = await persist(
-          reconciledResources,
-          'resource.preparation.reconciled',
-        )
-        await resumeUnlocked(saved)
-        return
-      }
       await startResourcePreparation({
         run,
         workspacePath: input.workspacePath,
@@ -892,45 +705,9 @@ export function createDeliveryWorkflowController(input: {
       })
       return
     }
-    if (run.phase === 'ATOMIC_TASK_PLANNING') {
-      if (await documentRevisionChanged(run)) {
-        await restartDocumentStage(
-          run,
-          'canonical documents changed while task planning was paused; document review must be rerun',
-        )
-        return
-      }
-      if (resourcePreparationMissing(run)) {
-        await restartResourcePreparation(
-          run,
-          'resource preparation evidence is missing; the resource stage must be completed before task planning',
-        )
-        return
-      }
-      const planningFacts = await contractFactsFor(run)
-      await dispatcher.dispatch({
-        runId: run.runId,
-        ownerId: run.ownerId,
-        projectId: run.projectId,
-        workspacePath: input.workspacePath,
-        workerType: 'atomic-task-planner',
-        phase: run.phase,
-        revision: run.revision.document,
-        allowedPaths: [],
-        contract: {
-          checklistIds: planningFacts.checklistIds,
-          resourceIds: planningFacts.resourceIds,
-          contentIds: planningFacts.contentIds,
-          planningDocuments: await readAtomicTaskPlanningDocuments(
-            input.workspacePath,
-          ),
-          ...(run.changeRequest ? { changeRequest: run.changeRequest } : {}),
-        },
-      })
-      return
-    }
     if (run.phase === 'IMPLEMENTATION') {
-      if (await documentRevisionChanged(run)) {
+      const documentChanged = await documentRevisionChanged(run)
+      if (documentChanged) {
         await restartDocumentStage(
           run,
           'canonical documents changed while implementation was paused; document review must be rerun',
@@ -944,16 +721,7 @@ export function createDeliveryWorkflowController(input: {
         )
         return
       }
-      try {
-        validateAtomicTaskGraph(run.tasks, await contractFactsFor(run))
-      } catch (error) {
-        if (!(error instanceof AtomicTaskPlanError)) throw error
-        await restartAtomicTaskPlanning(
-          run,
-          `atomic task graph is no longer valid: ${error.message}`,
-        )
-        return
-      }
+      run = await ensureDirectImplementationTask(run)
       await startNextImplementationTask({
         run,
         workspacePath: input.workspacePath,
@@ -961,40 +729,6 @@ export function createDeliveryWorkflowController(input: {
         dispatcher,
         beforeDispatch: started =>
           persist(started, 'task.started').then(() => undefined),
-      })
-      return
-    }
-    if (run.phase === 'IMPLEMENTATION_AUDIT') {
-      if (await documentRevisionChanged(run)) {
-        await restartDocumentStage(
-          run,
-          'canonical documents changed while implementation audit was paused; document review must be rerun',
-        )
-        return
-      }
-      if (resourcePreparationMissing(run)) {
-        await restartResourcePreparation(
-          run,
-          'resource preparation evidence is missing; implementation audit cannot start before the resource stage is complete',
-        )
-        return
-      }
-      const auditFacts = await contractFactsFor(run)
-      if (!auditFacts.resourceReadiness.ready) {
-        await persist(
-          resourceDeliveryBlocked(run, auditFacts.resourceReadiness),
-          'resource.delivery.needs_action',
-        )
-        return
-      }
-      await startImplementationAudit({
-        run,
-        workspacePath: input.workspacePath,
-        dispatcher,
-        expectedChecklistIds: auditFacts.checklistIds,
-        expectedResourceIds: auditFacts.resourceIds,
-        expectedContentIds: auditFacts.contentIds,
-        resourceReadiness: auditFacts.resourceReadiness,
       })
       return
     }
@@ -1019,8 +753,6 @@ export function createDeliveryWorkflowController(input: {
         workspacePath: input.workspacePath,
         dispatcher,
         expectedChecklistIds: acceptanceFacts.checklistIds,
-        expectedResourceIds: acceptanceFacts.resourceIds,
-        expectedContentIds: acceptanceFacts.contentIds,
       })
     }
   }
@@ -1064,7 +796,12 @@ export function createDeliveryWorkflowController(input: {
     return serialize(async () => {
       const latest = await store.load()
       if (!latest || latest.runId !== run.runId) return
-      if (latest.authorStage || latest.foundationReviewStage) {
+      if (isIrStageActive(latest)) {
+        if (!irLink) throw new Error('IR public module is required')
+        await irLink.resume(latest)
+        return
+      }
+      if (isFoundationStageActive(latest)) {
         await progressPublicFoundation(latest, true)
         return
       }
@@ -1079,7 +816,7 @@ export function createDeliveryWorkflowController(input: {
         await resumeUnlocked(current)
         return
       }
-      await resumeUnlocked(run)
+      await resumeUnlocked(latest)
     })
   }
 
@@ -1087,7 +824,12 @@ export function createDeliveryWorkflowController(input: {
     return serialize(async () => {
       const latest = await store.load()
       if (!latest || latest.runId !== run.runId) return
-      if (latest.authorStage || latest.foundationReviewStage) {
+      if (isIrStageActive(latest)) {
+        if (!irLink) throw new Error('IR public module is required')
+        await irLink.ensureProgress(latest)
+        return
+      }
+      if (isFoundationStageActive(latest)) {
         await progressPublicFoundation(latest)
         return
       }
@@ -1116,7 +858,7 @@ export function createDeliveryWorkflowController(input: {
   function requestChange(run: DeliveryRun, message: string): Promise<unknown> {
     return serialize(async () => {
       const latest = await store.load()
-      if (latest?.authorStage || latest?.foundationReviewStage) throw new Error('Foundation result is awaiting public handoff acceptance; legacy change routing is unavailable')
+      if (latest && isPublicStageActive(latest)) throw new Error('Public document stage is still active; change routing is unavailable')
       return requestChangeUnlocked(run, message)
     })
   }
@@ -1131,12 +873,10 @@ export function createDeliveryWorkflowController(input: {
       try {
         await serialize(async () => {
           const current = await store.load()
-          if (current && ((current.foundationReviewStage && current.status === 'running') ||
-              (current.authorStage && (['starting', 'running'].includes(current.authorStage.status) ||
-              (reviewLink && current.authorStage.status === 'completed' && current.status !== 'stopped')))))
+          if (current && isPublicStageActive(current) && current.status !== 'stopped')
             await stopFoundation(current, 'Application host is shutting down.')
         })
-      } finally { authorLink?.dispose(); reviewLink?.dispose() }
+      } finally { authorLink?.dispose(); reviewLink?.dispose(); irLink?.dispose() }
     },
     resume,
     ensureProgress,
@@ -1150,12 +890,13 @@ function isCanonicalDocumentPath(path: string): boolean {
   return CANONICAL_DOCUMENT_ARTIFACTS.includes(normalized as never)
 }
 
-async function plannerContractFacts(
+async function implementationContractFacts(
   workspacePath: string,
   confirmedBriefContext?: string,
   catalogObserved = false,
 ): Promise<
-  AtomicTaskContractFacts & {
+  {
+    checklistIds: string[]
     resourceIds: string[]
     contentIds: string[]
     resourceReadiness: ResourceDeliveryReadiness

@@ -198,13 +198,16 @@ function toReceipt(
     usage: cloneUsage(usage),
     duplicate: recorded.duplicate || debited.duplicate,
     recorded: {
-      eventId: recorded.event.id,
+      // The stage-facing event identity is the authority's idempotency key.
+      // The storage row UUID is an implementation detail and cannot bind a
+      // receipt back to the sealed workflow usage fact.
+      eventId: recorded.event.idempotencyKey,
       duplicate: recorded.duplicate,
       weightedTokensDelta: recorded.event.weightedTokensDelta,
       creditsMicro: recorded.event.creditsMicro,
     },
     debited: {
-      eventId: debited.event.id,
+      eventId: debited.event.idempotencyKey,
       duplicate: debited.duplicate,
       weightedTokensDelta: debited.event.weightedTokensDelta,
       creditsMicro: debited.event.creditsMicro,

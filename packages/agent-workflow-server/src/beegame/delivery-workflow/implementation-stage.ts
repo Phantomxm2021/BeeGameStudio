@@ -1,28 +1,24 @@
-import { existsSync } from 'node:fs'
 import { readBeeGameAssetManifest } from '../asset-contracts'
 import { auditAssetContract } from '../asset-contract-audit'
 import { transitionDeliveryRun } from './transition'
 import { isWorkflowEvidenceFile } from './evidence'
-import { resolveWorkspaceRelativePath } from './revision'
-import type { AtomicTask, DeliveryRun, WorkerDispatchRequest } from './types'
+import { resourceIrDeliveryIssues } from './resource-ir-delivery'
+import type { ImplementationTask, DeliveryRun, WorkerDispatchRequest } from './types'
 import type { WorkerTerminalResult } from './worker-contracts'
 
 type Dispatcher = { dispatch(request: WorkerDispatchRequest): Promise<unknown> }
 
-export function nextRunnableTask(run: DeliveryRun): AtomicTask | undefined {
+export function nextRunnableTask(run: DeliveryRun): ImplementationTask | undefined {
   if (
     run.phase !== 'IMPLEMENTATION' ||
     run.status !== 'running' ||
     run.activeTaskId
   )
     return undefined
-  return run.tasks.find(
-    task =>
-      (task.status === 'pending' || task.status === 'failed') &&
-      run.tasks
-        .filter(candidate => task.dependsOn.includes(candidate.id))
-        .every(candidate => candidate.status === 'completed'),
-  )
+  const task = run.tasks[0]
+  return task && (task.status === 'pending' || task.status === 'failed')
+    ? task
+    : undefined
 }
 
 export function implementationComplete(run: DeliveryRun): boolean {
@@ -34,8 +30,9 @@ export function implementationComplete(run: DeliveryRun): boolean {
 }
 
 export function implementationCompletionIssue(input: {
-  task: AtomicTask
+  task: ImplementationTask
   workspacePath?: string
+  gameIr?: unknown
   terminal: Extract<
     WorkerTerminalResult,
     { workerType: 'implementation-worker' }
@@ -45,36 +42,6 @@ export function implementationCompletionIssue(input: {
   const allowedPaths = input.task.allowedPaths
   const outOfScope = input.terminal.changedPaths.filter(
     path => !pathAllowed(path, allowedPaths),
-  )
-  const verifiedArtifactsMatch = sameIds(
-    input.terminal.verifiedArtifacts,
-    input.task.expectedArtifacts,
-  )
-  const missingFiles = input.workspacePath
-    ? input.task.expectedArtifacts.filter(path => {
-        const resolved = resolveWorkspaceRelativePath(
-          input.workspacePath!,
-          path,
-        )
-        return !resolved || !existsSync(resolved)
-      })
-    : []
-  const expectedIndexes = input.task.verification.map((_, index) => index)
-  const actualIndexes = input.terminal.verificationResults.map(
-    result => result.verificationIndex,
-  )
-  const verificationCoverageMatches = sameNumbers(
-    actualIndexes,
-    expectedIndexes,
-  )
-  const invalidVerification = input.terminal.verificationResults.find(
-    result => {
-      const verification = input.task.verification[result.verificationIndex]
-      return (
-        !verification ||
-        (result.status === 'deferred' && verification.kind !== 'runtime')
-      )
-    },
   )
   const missingEvidence =
     input.workspacePath &&
@@ -89,28 +56,23 @@ export function implementationCompletionIssue(input: {
   ])
   const issues = [
     ...(outOfScope.length ? [`out of scope: ${outOfScope.join(',')}`] : []),
-    ...(!verifiedArtifactsMatch
-      ? ['verified artifacts do not match the active task expected artifacts']
-      : []),
-    ...(missingFiles.length
-      ? [`missing files: ${missingFiles.join(',')}`]
-      : []),
-    ...(!verificationCoverageMatches
-      ? [
-          'verification results do not cover every active task verification exactly once',
-        ]
-      : []),
-    ...(invalidVerification
-      ? [
-          `verification ${invalidVerification.verificationIndex} may be deferred only when its kind is runtime`,
-        ]
-      : []),
     ...(missingEvidence ? ['missing evidence file'] : []),
     ...(invalidEvidenceRefs.length
       ? [`invalid evidence refs: ${invalidEvidenceRefs.join(',')}`]
       : []),
     ...(!evidenceRefsMatch
       ? ['evidenceRefs must contain exactly the canonical evidencePath']
+      : []),
+    ...(input.workspacePath && input.gameIr
+      ? resourceIrDeliveryIssues({
+          gameIr: input.gameIr,
+          workspacePath: input.workspacePath,
+          artifactClasses: [
+            'runtime-resource',
+            'content-definition',
+            'generated-output',
+          ],
+        })
       : []),
   ]
   return issues.length
@@ -121,15 +83,6 @@ export function implementationCompletionIssue(input: {
 function sameIds(left: readonly string[], right: readonly string[]): boolean {
   const a = [...new Set(left)].sort()
   const b = [...new Set(right)].sort()
-  return a.length === b.length && a.every((value, index) => value === b[index])
-}
-
-function sameNumbers(
-  left: readonly number[],
-  right: readonly number[],
-): boolean {
-  const a = [...new Set(left)].sort((x, y) => x - y)
-  const b = [...new Set(right)].sort((x, y) => x - y)
   return a.length === b.length && a.every((value, index) => value === b[index])
 }
 
@@ -187,6 +140,9 @@ export async function startNextImplementationTask(input: {
       currentRevision: input.revision,
       resources,
       content,
+      ...(input.run.blockedReason
+        ? { currentImplementationIssues: [input.run.blockedReason] }
+        : {}),
     },
   }
   await input.beforeDispatch?.(started)
@@ -201,6 +157,7 @@ function pathAllowed(path: string, allowedPaths: string[]): boolean {
     const scope = stripTrailingSlash(
       stripDotSlash(allowed.replaceAll('\\', '/')),
     )
+    if (scope === '.' || scope === '') return true
     return normalized === scope || normalized.startsWith(`${scope}/`)
   })
 }

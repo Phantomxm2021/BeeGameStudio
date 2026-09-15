@@ -61,6 +61,6 @@ export function createTestDeliveryRun(input: InitialRunInput): DeliveryRun {
           ? []
           : [...CANONICAL_FOUNDATION_DOCUMENTS],
     },
-    resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
+    resourceProductionState: { currentTask: 'RESOURCE_DELIVERY' },
   }
 }

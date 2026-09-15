@@ -1,8 +1,9 @@
 import { RETIRED_FOUNDATION_AUTHOR } from './retired-foundation-author'
 import { assertNoRetiredFoundationReviewRun } from './retired-foundation-review'
 import { parseDeliveryRun } from './schema'
+import { isPublicStageActive } from './public-stage-routing'
 import type {
-AtomicTask,
+ImplementationTask,
 DeliveryRun,
 EvidenceRef,
 EvidenceStatus,
@@ -31,7 +32,6 @@ export type DeliveryTransition =
       reason: string
     } & EvidenceEvent)
   | { type: 'resource_preparation_required'; reason?: string }
-  | { type: 'tasks_planned'; tasks: AtomicTask[] }
   | { type: 'task_started'; taskId: string; revision: string }
   | {
       type: 'task_completed'
@@ -40,12 +40,6 @@ export type DeliveryTransition =
       evidenceRefs: string[]
     }
   | { type: 'task_failed'; taskId: string; reason: string }
-  | ({
-      type:
-        | 'implementation_audit_passed'
-        | 'implementation_audit_failed'
-        | 'implementation_audit_blocked'
-    } & EvidenceEvent)
   | ({
       type: 'acceptance_passed' | 'acceptance_failed' | 'acceptance_blocked'
     } & EvidenceEvent)
@@ -59,61 +53,22 @@ function fail(message: string): never {
   throw new WorkflowTransitionError('invalid_transition', message)
 }
 
-function assertTaskGraph(tasks: AtomicTask[]): void {
-  const ids = new Set<string>()
-  for (const task of tasks) {
-    if (ids.has(task.id))
-      throw new WorkflowTransitionError(
-        'invariant_violation',
-        `duplicate atomic task id: ${task.id}`,
-      )
-    ids.add(task.id)
-    if (!task.expectedArtifacts.length)
-      throw new WorkflowTransitionError(
-        'invariant_violation',
-        `task ${task.id} has no expected artifact`,
-      )
-    if (!task.allowedPaths.length)
-      throw new WorkflowTransitionError(
-        'invariant_violation',
-        `task ${task.id} has no allowed paths`,
-      )
-    if (!task.verification.length)
-      throw new WorkflowTransitionError(
-        'invariant_violation',
-        `task ${task.id} has no verification`,
-      )
-  }
-  for (const task of tasks) {
-    for (const dependency of task.dependsOn) {
-      if (!ids.has(dependency))
-        throw new WorkflowTransitionError(
-          'invariant_violation',
-          `task ${task.id} depends on unknown task ${dependency}`,
-        )
-    }
-  }
-  const visiting = new Set<string>()
-  const visited = new Set<string>()
-  const visit = (id: string): void => {
-    if (visiting.has(id))
-      throw new WorkflowTransitionError(
-        'invariant_violation',
-        'atomic task graph contains a cycle',
-      )
-    if (visited.has(id)) return
-    visiting.add(id)
-    const task = tasks.find(candidate => candidate.id === id)
-    for (const dependency of task?.dependsOn ?? []) visit(dependency)
-    visiting.delete(id)
-    visited.add(id)
-  }
-  for (const task of tasks) visit(task.id)
+function assertDirectImplementationTask(tasks: ImplementationTask[]): void {
+  if (tasks.length > 1 || (tasks[0] && tasks[0].id !== 'DIRECT_IMPLEMENTATION'))
+    throw new WorkflowTransitionError(
+      'invariant_violation',
+      'implementation must use the single direct implementation task',
+    )
+  if (tasks[0] && !tasks[0].allowedPaths.length)
+    throw new WorkflowTransitionError(
+      'invariant_violation',
+      'direct implementation task has no allowed paths',
+    )
 }
 
 export function assertDeliveryRunInvariants(run: DeliveryRun): DeliveryRun {
   parseDeliveryRun(run)
-  assertTaskGraph(run.tasks)
+  assertDirectImplementationTask(run.tasks)
   if (
     run.activeTaskId &&
     !run.tasks.some(task => task.id === run.activeTaskId)
@@ -151,7 +106,7 @@ export function assertDeliveryRunInvariants(run: DeliveryRun): DeliveryRun {
 
 function withEvidence(
   run: DeliveryRun,
-  key: 'resourcePreparation' | 'implementationAudit' | 'acceptance',
+  key: 'resourcePreparation' | 'acceptance',
   evidence: EvidenceRef,
 ): DeliveryRun {
   return {
@@ -196,7 +151,11 @@ function enterResourcePreparation(
     },
     tasks: [],
     evidence: {},
-    resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
+    // Keep the published IR binding while restarting resource production.
+    resourceProductionState: {
+      currentTask: 'RESOURCE_DELIVERY',
+      irResultId: run.resourceProductionState.irResultId,
+    },
     updatedAt: timestamp(),
   }
 }
@@ -206,7 +165,7 @@ export function transitionDeliveryRun(
   event: DeliveryTransition,
 ): DeliveryRun {
   const run = assertDeliveryRunInvariants(input)
-  if (run.foundationReviewStage) fail('Public Foundation chain must be controlled through its stage ports')
+  if (isPublicStageActive(run)) fail('Public document stages must be controlled through their stage ports')
   assertNoRetiredFoundationReviewRun(run)
   let next: DeliveryRun
   switch (event.type) {
@@ -226,13 +185,14 @@ export function transitionDeliveryRun(
       next = {
         ...withEvidence(run, 'resourcePreparation', event.evidence),
         revision: { ...run.revision, resource: event.resourceRevision },
-        phase: 'ATOMIC_TASK_PLANNING',
+        // Resource readiness is the input to the single implementation turn.
+        phase: 'IMPLEMENTATION',
         documentStep: undefined,
         status: 'running',
         blockedReason: undefined,
         resourceProductionState: {
           ...run.resourceProductionState,
-          currentTask: 'RESOURCE_GATE',
+          currentTask: 'RESOURCE_DELIVERED',
         },
       }
       break
@@ -252,35 +212,12 @@ export function transitionDeliveryRun(
       next = enterResourcePreparation(run, { reason: event.reason })
       break
     }
-    case 'tasks_planned':
-      requirePhase(run, 'ATOMIC_TASK_PLANNING')
-      if (
-        !run.revision.resource ||
-        run.evidence.resourcePreparation?.status !== 'passed' ||
-        run.evidence.resourcePreparation.revision !== run.revision.resource
-      )
-        fail('task planning requires passed resource-content evidence')
-      assertTaskGraph(event.tasks)
-      if (!event.tasks.length) fail('atomic task graph must not be empty')
-      next = {
-        ...run,
-        tasks: event.tasks,
-        phase: 'IMPLEMENTATION',
-        activeTaskId: undefined,
-        updatedAt: timestamp(),
-      }
-      break
     case 'task_started': {
       requirePhase(run, 'IMPLEMENTATION')
       const task = run.tasks.find(candidate => candidate.id === event.taskId)
       if (!task) fail(`unknown task ${event.taskId}`)
       if (task.status !== 'pending' && task.status !== 'failed')
         fail(`task ${event.taskId} is not runnable`)
-      const dependencies = run.tasks.filter(candidate =>
-        task.dependsOn.includes(candidate.id),
-      )
-      if (dependencies.some(candidate => candidate.status !== 'completed'))
-        fail(`task ${event.taskId} has incomplete dependencies`)
       if (run.activeTaskId)
         fail('another implementation task is already active')
       next = {
@@ -350,43 +287,6 @@ export function transitionDeliveryRun(
         updatedAt: timestamp(),
       }
       break
-    case 'implementation_audit_passed':
-      requirePhase(run, 'IMPLEMENTATION_AUDIT')
-      requireEvidence(
-        event.evidence,
-        run.revision.implementation ?? run.revision.workspace,
-        ['passed'],
-      )
-      next = {
-        ...withEvidence(run, 'implementationAudit', event.evidence),
-        phase: 'ACCEPTANCE',
-      }
-      break
-    case 'implementation_audit_failed':
-      requirePhase(run, 'IMPLEMENTATION_AUDIT')
-      requireEvidence(
-        event.evidence,
-        run.revision.implementation ?? run.revision.workspace,
-        ['failed'],
-      )
-      next = {
-        ...withEvidence(run, 'implementationAudit', event.evidence),
-        phase: 'IMPLEMENTATION',
-      }
-      break
-    case 'implementation_audit_blocked':
-      requirePhase(run, 'IMPLEMENTATION_AUDIT')
-      requireEvidence(
-        event.evidence,
-        run.revision.implementation ?? run.revision.workspace,
-        ['blocked'],
-      )
-      next = {
-        ...withEvidence(run, 'implementationAudit', event.evidence),
-        status: 'needs_action',
-        blockedReason: 'implementation audit is blocked and requires attention',
-      }
-      break
     case 'acceptance_passed':
       requirePhase(run, 'ACCEPTANCE')
       requireEvidence(
@@ -408,7 +308,8 @@ export function transitionDeliveryRun(
       )
       next = {
         ...withEvidence(run, 'acceptance', event.evidence),
-        phase: 'IMPLEMENTATION',
+        status: 'needs_action',
+        blockedReason: 'runtime acceptance found issues that require attention',
       }
       break
     case 'acceptance_blocked':
@@ -478,6 +379,30 @@ export function transitionDeliveryRun(
       )
         fail('retry task must be a failed task')
       {
+        if (
+          run.phase === 'ACCEPTANCE' &&
+          run.evidence.acceptance?.status === 'failed'
+        ) {
+          next = {
+            ...run,
+            phase: 'IMPLEMENTATION',
+            status: 'running',
+            activeTaskId: undefined,
+            activeDispatch: undefined,
+            blockedReason: `Runtime acceptance failed; inspect ${run.evidence.acceptance.path}`,
+            revision: { ...run.revision, implementation: undefined },
+            evidence: { ...run.evidence, acceptance: undefined },
+            tasks: run.tasks.map(task => ({
+              ...task,
+              status: 'pending' as const,
+              startedRevision: undefined,
+              completedRevision: undefined,
+              evidenceRefs: [],
+            })),
+            updatedAt: timestamp(),
+          }
+          break
+        }
         next = {
           ...run,
           status: 'running',
@@ -491,7 +416,13 @@ export function transitionDeliveryRun(
                 ),
               }
             : {}),
-          blockedReason: undefined,
+          // Direct CLI retries need the host's deterministic rejection reason
+          // in the next prompt. It is cleared by successful completion.
+          blockedReason:
+            run.phase === 'RESOURCE_PREPARATION' ||
+            run.phase === 'IMPLEMENTATION'
+              ? run.blockedReason
+              : undefined,
           updatedAt: timestamp(),
         }
       }

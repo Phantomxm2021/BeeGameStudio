@@ -110,6 +110,9 @@ describe('modular v8 asset and content audit', () => {
 
     expect(audit.valid).toBe(true)
     expect(audit.files.map(file => file.id)).toEqual(['registry', 'world'])
+    expect(audit.resourceBindings).toEqual([
+      { requirementId: 'req-model', resourceIds: ['res-model'] },
+    ])
   })
 
   test('audits JSON and YAML references without an assembly graph', async () => {
@@ -176,6 +179,73 @@ describe('modular v8 asset and content audit', () => {
         id: 'world',
         kind: 'scene-definitions',
       })
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects a bound resource whose real source bypasses the requirement sourcing policy', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-audit-'))
+    try {
+      await mkdir(join(workspace, 'assets/runtime'), { recursive: true })
+      await mkdir(join(workspace, 'assets/content'), { recursive: true })
+      await writeFile(join(workspace, 'assets/runtime/world.svg'), '<svg/>')
+      await writeBeeGameAssetManifest(workspace, {
+        version: 8,
+        project_target: {
+          asset_format_capabilities: ['svg'],
+          runtime_asset_root: 'assets/runtime',
+          content_root: 'assets/content',
+          generated_asset_root: 'assets/generated',
+        },
+        requirements: [{
+          id: 'world.visual',
+          required: true,
+          acquisition_profile: {
+            ...TEST_ACQUISITION_PROFILE,
+            sourcing_policy: {
+              allowed_source_kinds: ['web'],
+              license_constraints: ['Commercial reuse allowed.'],
+              responsible_party: 'resource-agent',
+              handoff_criteria: ['Web provenance recorded.'],
+            },
+          },
+        }],
+        resources: [{
+          id: 'world-art',
+          source: {
+            type: 'agent-authored',
+            created_at: new Date().toISOString(),
+            reason: 'Incorrect source for this requirement.',
+          },
+          root_path: 'assets/runtime/world.svg',
+          file_paths: ['assets/runtime/world.svg'],
+          provisional: false,
+          status: 'verified',
+          selected_at: new Date().toISOString(),
+          selection_reason: ['Local authored fallback.'],
+        }],
+      })
+      await writeFile(
+        join(workspace, 'assets/content/resource-registry.json'),
+        JSON.stringify({
+          schema: 'beegame-content-v1',
+          id: 'registry',
+          kind: 'resource-registry',
+          fulfills: ['world.visual'],
+          resources: ['world-art'],
+          data: {
+            bindings: [{
+              requirementId: 'world.visual',
+              resourceIds: ['world-art'],
+            }],
+          },
+        }),
+      )
+
+      expect(auditAssetContract(workspace).issues).toContain(
+        'world.visual: Bound resource world-art uses disallowed source kind agent-authored.',
+      )
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
@@ -273,6 +343,47 @@ describe('modular v8 asset and content audit', () => {
       )
       expect(auditAssetContract(workspace).issues).toContain(
         'Unregistered manifest module: assets/manifest/resources/orphan.json',
+      )
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('rejects implementation-owned content definitions from the resource inventory', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'beegame-audit-'))
+    try {
+      await mkdir(join(workspace, 'assets/runtime/scenes'), { recursive: true })
+      await mkdir(join(workspace, 'assets/content'), { recursive: true })
+      await writeFile(join(workspace, 'assets/runtime/scenes/main.tscn'), '[gd_scene]\n')
+      await writeBeeGameAssetManifest(workspace, {
+        version: 8,
+        project_target: {
+          asset_format_capabilities: ['tscn'],
+          runtime_asset_root: 'assets/runtime',
+          content_root: 'assets/content',
+          generated_asset_root: 'assets/generated',
+        },
+        requirements: [],
+        resources: [{
+          id: 'main-scene',
+          source: {
+            type: 'agent-authored',
+            created_at: new Date().toISOString(),
+            reason: 'incorrect cross-stage output',
+          },
+          root_path: 'assets/runtime/scenes/main.tscn',
+          file_paths: ['assets/runtime/scenes/main.tscn'],
+          provisional: false,
+          status: 'verified',
+          selected_at: new Date().toISOString(),
+          selection_reason: ['Incorrectly treated implementation output as a resource.'],
+          asset_kind: 'scene',
+          technical_facts: { artifactClass: 'content-definition' },
+        }],
+      })
+
+      expect(auditAssetContract(workspace).issues).toContain(
+        'main-scene: Implementation-owned content-definition must not be declared as a resource; remove its Manifest requirement, resource module, and resource-registry binding.',
       )
     } finally {
       await rm(workspace, { recursive: true, force: true })

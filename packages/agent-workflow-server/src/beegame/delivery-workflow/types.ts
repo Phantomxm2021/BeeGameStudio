@@ -1,20 +1,13 @@
 import type { HistoricalAuthorDraftState } from './historical-author-checkpoint'
 import type { FoundationReviewLinkState } from './foundation-review-link'
+import type { GameIrStageLink } from './game-ir-link'
 import type {
   AuthorDocumentsResult,
   AuthorHandle,
 } from '../stage-modules/foundation-authoring/public'
 
-export const CANONICAL_FOUNDATION_DOCUMENTS = [
-  'docs/GDD.md',
-  'docs/LEVEL_SCENE_DESIGN.md',
-  'docs/BALANCE_DESIGN.md',
-  'docs/TECHNICAL_DESIGN.md',
-  'docs/ART_DIRECTION.md',
-  'docs/UI_UX_SPEC.md',
-  'docs/AUDIO_DESIGN.md',
-  'docs/ASSET_PLAN.md',
-] as const
+import { CANONICAL_FOUNDATION_DOCUMENTS, type FoundationDocumentPath } from '../foundation-documents'
+export { CANONICAL_FOUNDATION_DOCUMENTS, type FoundationDocumentPath } from '../foundation-documents'
 
 export const CANONICAL_PROJECT_DOCUMENTS = [
   ...CANONICAL_FOUNDATION_DOCUMENTS,
@@ -35,9 +28,6 @@ export const CANONICAL_PROJECT_DOCUMENT_IDS = {
   (typeof CANONICAL_PROJECT_DOCUMENTS)[number],
   string
 >
-
-export type FoundationDocumentPath =
-  (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]
 
 export type AuthorStageLink = {
   timing?: { currentCallElapsedMs: number; historicalElapsedMs: number }
@@ -79,15 +69,14 @@ export type DeliveryPhase =
   | 'DOCUMENT_DRAFTING'
   | 'DOCUMENT_REVIEW'
   | 'RESOURCE_PREPARATION'
-  | 'ATOMIC_TASK_PLANNING'
   | 'IMPLEMENTATION'
-  | 'IMPLEMENTATION_AUDIT'
   | 'ACCEPTANCE'
   | 'DELIVERY'
 
 export type DocumentWorkflowStep =
   | 'FOUNDATION_DRAFTING'
   | 'FOUNDATION_REVIEW'
+  | 'GAME_IR_COMPILATION'
   | 'CHECKLIST_DRAFTING'
 
 /**
@@ -104,7 +93,7 @@ export type DeliveryRunStatus =
   | 'failed'
   | 'stopped'
 
-export type AtomicTaskStatus =
+export type ImplementationTaskStatus =
   | 'pending'
   | 'running'
   | 'completed'
@@ -114,11 +103,7 @@ export type AtomicTaskStatus =
 export type DispatchWorkerType =
   | 'document-author'
   | 'resource-planner'
-  | 'resource-curator'
-  | 'resource-content-author'
-  | 'atomic-task-planner'
   | 'implementation-worker'
-  | 'implementation-auditor'
   | 'acceptance-validator'
   | 'change-impact-analyzer'
   | 'question-answerer'
@@ -134,17 +119,14 @@ export type DispatchStatus =
 export type EvidenceKind =
   | 'document_review'
   | 'resource_preparation'
-  | 'implementation_audit'
   | 'acceptance'
 export type EvidenceStatus = 'ready' | 'passed' | 'failed' | 'blocked'
 
-export const DELIVERY_RUN_SCHEMA_VERSION = 57 as const
+export const DELIVERY_RUN_SCHEMA_VERSION = 59 as const
 
 export const RESOURCE_PRODUCTION_TASKS = [
-  'RESOURCE_PLAN',
-  'RESOURCE_INVENTORY',
-  'RESOURCE_CONTENT',
-  'RESOURCE_GATE',
+  'RESOURCE_DELIVERY',
+  'RESOURCE_DELIVERED',
 ] as const
 
 export type ResourceProductionTask = (typeof RESOURCE_PRODUCTION_TASKS)[number]
@@ -154,22 +136,18 @@ export type ResourceInventoryBinding = {
   resourceIds: string[]
 }
 
-export type ResourceInventoryReceipt = {
-  revision: string
+export type ResourceDeliveryReceipt = {
   bindings: ResourceInventoryBinding[]
   catalogObserved: boolean
-  acceptedAt: string
-}
-
-export type ResourceContentReceipt = {
   contentDigest: string
   acceptedAt: string
 }
 
 export type ResourceProductionState = {
   currentTask: ResourceProductionTask
-  inventoryReceipt?: ResourceInventoryReceipt
-  contentReceipt?: ResourceContentReceipt
+  /** Published IR accepted by the resource planner; retained by its descendants. */
+  irResultId?: string
+  deliveryReceipt?: ResourceDeliveryReceipt
 }
 
 export type Revision = {
@@ -179,23 +157,14 @@ export type Revision = {
   workspace: string
 }
 
-export type TaskVerification = {
-  kind: 'test' | 'build' | 'runtime' | 'file' | 'asset'
-  commandOrAction: string
-  expectedResult: string
-}
-
-export type AtomicTask = {
+export type ImplementationTask = {
   id: string
   title: string
   checklistIds: string[]
   resourceIds: string[]
   contentIds: string[]
-  dependsOn: string[]
   allowedPaths: string[]
-  expectedArtifacts: string[]
-  verification: TaskVerification[]
-  status: AtomicTaskStatus
+  status: ImplementationTaskStatus
   attempt: number
   startedRevision?: string
   completedRevision?: string
@@ -242,12 +211,8 @@ export type AcceptedWorkflowUnit = {
   unitId: string
   kind:
     | 'document'
-    | 'resource-inventory'
-    | 'resource-content'
-    | 'resource-gate'
-    | 'atomic-plan'
+    | 'resource-delivery'
     | 'implementation-task'
-    | 'implementation-audit'
     | 'acceptance'
   phase: DeliveryPhase
   predecessorUnitIds: string[]
@@ -284,14 +249,6 @@ export type WorkflowUnitAcceptedEvent = WorkflowEvent & {
   unit: AcceptedWorkflowUnit
 }
 
-export type TasksPlannedEvent = WorkflowEvent & {
-  type: 'tasks.planned'
-  phase: 'IMPLEMENTATION'
-  status: 'running'
-  activeTaskId?: string
-  taskGraph: AtomicTask[]
-}
-
 export type DeliveryRun = {
   schemaVersion: typeof DELIVERY_RUN_SCHEMA_VERSION
   runId: string
@@ -311,11 +268,10 @@ export type DeliveryRun = {
   activeTaskId?: string
   /** Canonical project artifact currently being processed by a document worker. */
   currentItemId?: string
-  tasks: AtomicTask[]
+  tasks: ImplementationTask[]
   activeDispatch?: DispatchRecord
   evidence: {
     resourcePreparation?: EvidenceRef
-    implementationAudit?: EvidenceRef
     acceptance?: EvidenceRef
   }
   /** Sole durable cursor for the initial eight-document authoring pass. */
@@ -323,6 +279,7 @@ export type DeliveryRun = {
   foundationDraftState: HistoricalAuthorDraftState
   /** Public author lifecycle handoff; never contains private checkpoints or worker state. */
   authorStage?: AuthorStageLink
+  gameIrStage?: GameIrStageLink
   foundationReviewStage?: FoundationReviewLinkState
   /** Reserved solely to reject obsolete snapshots; no old project state is accepted. */
   foundationAuditState?: never
@@ -359,7 +316,6 @@ export type WorkerDispatchRequest = {
   protectedPaths?: string[]
   /** Explicit project-read scope; fact workers use the empty scope. */
   projectReadScope?: 'empty' | 'allowed'
-  workflowJsonSchema?: Record<string, unknown>
   contract: Record<string, unknown>
 }
 
@@ -374,9 +330,7 @@ export type DeliveryWorkerPort = {
     options?: { preserveSession?: boolean },
   ): Promise<void>
   status(dispatchId: string): Promise<DispatchRecord>
-  /** True while a write or Resource Library import is still in flight. */
+  /** True while a native workspace mutation is still in flight. */
   hasInFlightMutation?(dispatchId: string): Promise<boolean>
-  /** True while the worker's sole structured terminal tool is streaming. */
-  hasInFlightTerminalSubmission?(dispatchId: string): Promise<boolean>
   waitForTerminal?(dispatchId: string): Promise<unknown>
 }

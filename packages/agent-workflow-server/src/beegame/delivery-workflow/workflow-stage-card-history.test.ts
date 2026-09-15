@@ -263,7 +263,7 @@ describe('workflow stage card history', () => {
     expect(
       isWorkflowStageCardSnapshot({
         ...snapshot,
-        phaseCount: 9,
+        phaseCount: 10,
       }),
     ).toBe(false)
     expect(

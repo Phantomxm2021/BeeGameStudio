@@ -139,6 +139,7 @@ class RemoteUsageBillingClient implements BeeGameUsageBillingClient {
         buildUsageBillingUrl(this.baseUrl, path),
         {
           method: 'POST',
+          signal: AbortSignal.timeout(30_000),
           headers: {
             'content-type': 'application/json',
             'x-beegame-credit-control-token': this.token,

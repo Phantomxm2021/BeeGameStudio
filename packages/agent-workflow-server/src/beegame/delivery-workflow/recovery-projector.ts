@@ -3,24 +3,18 @@ import { assertNoRetiredFoundationReviewRun } from './retired-foundation-review'
 import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { readAuthoredDocumentReceipt } from '../authored-document-receipt'
-import {
-  computeResourceContentRootDigest,
-  readResourceContentCommitReceipt,
-} from '../native-resource-content-tool'
 import { authorUnitPredecessors, validateAuthorCompletedProofs } from './historical-document-evidence'
 import { RETIRED_FOUNDATION_AUTHOR, assertNoRetiredAuthorRun, assertNoRetiredAuthorHandoff } from './retired-foundation-author'
 import { isRecord, record, stringValue, stringArray, sameStrings } from './recovery-values'
 import {
   computeDocumentRevision,
-  computeResourceContentDigest,
-  computeResourceInventoryRevision,
   computeResourceRevision,
   computeWorkspaceRevision,
   resolveWorkspaceRelativePath,
 } from './revision'
 import {
   acceptedWorkflowUnitSchema,
-  parseAtomicTask,
+  parseImplementationTask,
   parseDeliveryRun,
   workflowUnitAcceptedEventSchema,
 } from './schema'
@@ -34,7 +28,7 @@ import {
   CANONICAL_FOUNDATION_DOCUMENTS,
   DELIVERY_RUN_SCHEMA_VERSION,
   type AcceptedWorkflowUnit,
-  type AtomicTask,
+  type ImplementationTask,
   type DeliveryRun,
   type Revision,
   type WorkflowEvent,
@@ -45,11 +39,7 @@ import {
 export { inspectWorkflowSnapshot }
 export type { WorkflowSnapshotInspection }
 
-const RESOURCE_INVENTORY_UNIT_ID = 'resource:inventory' as const
-const RESOURCE_CONTENT_UNIT_ID = 'resource:content' as const
-const RESOURCE_GATE_UNIT_ID = 'resource:gate' as const
-const ATOMIC_PLAN_UNIT_ID = 'plan:atomic' as const
-const IMPLEMENTATION_AUDIT_UNIT_ID = 'audit:implementation' as const
+const RESOURCE_DELIVERY_UNIT_ID = 'resource:delivery' as const
 const ACCEPTANCE_UNIT_ID = 'acceptance:delivery' as const
 
 type RecoveryErrorCode =
@@ -106,21 +96,14 @@ function documentUnitId(path: string): string {
 function fixedUnitIds(): string[] {
   return [
     ...CANONICAL_FOUNDATION_DOCUMENTS.map(documentUnitId),
-    RESOURCE_INVENTORY_UNIT_ID,
-    RESOURCE_CONTENT_UNIT_ID,
-    RESOURCE_GATE_UNIT_ID,
-    ATOMIC_PLAN_UNIT_ID,
+    RESOURCE_DELIVERY_UNIT_ID,
   ]
 }
 
 function expectedFixedPredecessors(unitId: string): string[] | undefined {
   const authorPredecessors = authorUnitPredecessors(unitId)
   if (authorPredecessors) return authorPredecessors
-  if (unitId === RESOURCE_INVENTORY_UNIT_ID)
-    return [documentUnitId(CANONICAL_FOUNDATION_DOCUMENTS.at(-1)!)]
-  if (unitId === RESOURCE_CONTENT_UNIT_ID) return [RESOURCE_INVENTORY_UNIT_ID]
-  if (unitId === RESOURCE_GATE_UNIT_ID) return [RESOURCE_CONTENT_UNIT_ID]
-  if (unitId === ATOMIC_PLAN_UNIT_ID) return [RESOURCE_GATE_UNIT_ID]
+  if (unitId === RESOURCE_DELIVERY_UNIT_ID) return []
   return undefined
 }
 
@@ -131,11 +114,7 @@ function expectedKind(
     CANONICAL_FOUNDATION_DOCUMENTS.some(path => documentUnitId(path) === unitId)
   )
     return 'document'
-  if (unitId === RESOURCE_INVENTORY_UNIT_ID) return 'resource-inventory'
-  if (unitId === RESOURCE_CONTENT_UNIT_ID) return 'resource-content'
-  if (unitId === RESOURCE_GATE_UNIT_ID) return 'resource-gate'
-  if (unitId === ATOMIC_PLAN_UNIT_ID) return 'atomic-plan'
-  if (unitId === IMPLEMENTATION_AUDIT_UNIT_ID) return 'implementation-audit'
+  if (unitId === RESOURCE_DELIVERY_UNIT_ID) return 'resource-delivery'
   if (unitId === ACCEPTANCE_UNIT_ID) return 'acceptance'
   return undefined
 }
@@ -165,20 +144,6 @@ function assertUnitPayloadIdentity(unit: AcceptedWorkflowUnit): void {
       recoveryError(
         'recovery_checkpoint_conflict',
         `document checkpoint ${unit.unitId} has contradictory identity`,
-      )
-  } else if (unit.kind === 'resource-content') {
-    const expectedReceiptRef = unit.dispatchId
-      ? `.beegame/workflow/resource-content-commits/${unit.dispatchId}.json`
-      : undefined
-    if (
-      payload.contentDigest !== unit.inputRevision ||
-      unit.dependencyDigests.content !== payload.contentDigest ||
-      !isCanonicalDispatchId(unit.dispatchId) ||
-      unit.receiptRef !== expectedReceiptRef
-    )
-      recoveryError(
-        'recovery_checkpoint_conflict',
-        'Resource Content checkpoint has contradictory canonical digest',
       )
   } else if (unit.kind === 'implementation-task') {
     if (`implementation:${stringValue(payload.taskId) ?? ''}` !== unit.unitId)
@@ -414,36 +379,32 @@ function historicalResourceFacts(input: {
   revision: Revision
 }): void {
   const state = record(input.snapshot.resourceProductionState)
-  const inventory = record(state?.inventoryReceipt)
-  if (inventory) {
-    const unit = {
-      eventSchemaVersion: 1,
-      unitId: RESOURCE_INVENTORY_UNIT_ID,
-      kind: 'resource-inventory',
-      phase: 'RESOURCE_PREPARATION',
-      predecessorUnitIds: [
-        documentUnitId(CANONICAL_FOUNDATION_DOCUMENTS.at(-1)!),
-      ],
-      inputRevision: inventory.revision,
-      dependencyDigests: {},
-      acceptedAt: inventory.acceptedAt,
-      payload: {
-        bindings: inventory.bindings,
-        catalogObserved: inventory.catalogObserved,
-      },
-    } as AcceptedWorkflowUnit
-    assertSnapshotClaimMatchesJournal(input.proofs, unit)
-  }
-  const content = record(state?.contentReceipt)
-  const journalContent = input.proofs.get(RESOURCE_CONTENT_UNIT_ID)?.unit
-  if (content && journalContent) {
-    const payload = acceptedUnitPayload(journalContent)
-    if (content.contentDigest !== payload.contentDigest)
+  const journalGate = input.proofs.get(RESOURCE_DELIVERY_UNIT_ID)?.unit
+  const gatePayload = journalGate
+    ? acceptedUnitPayload(journalGate)
+    : undefined
+  const delivery = record(state?.deliveryReceipt)
+  if (delivery && gatePayload?.bindings) {
+    if (
+      stableValue(delivery.bindings) !== stableValue(gatePayload.bindings) ||
+      delivery.catalogObserved !== gatePayload.catalogObserved
+    )
       recoveryError(
         'recovery_checkpoint_conflict',
-        'snapshot and journal contradict the canonical Resource Content digest',
+        'snapshot and journal contradict the direct Resource Delivery receipt',
       )
-  } else if (content) {
+  } else if (delivery)
+    recoveryError(
+      'recovery_checkpoint_missing',
+      'snapshot Resource Delivery receipt has no accepted journal event',
+    )
+  if (delivery && journalGate?.dependencyDigests.content) {
+    if (delivery.contentDigest !== journalGate.dependencyDigests.content)
+      recoveryError(
+        'recovery_checkpoint_conflict',
+        'snapshot and journal contradict the direct Resource Delivery content digest',
+      )
+  } else if (delivery) {
     recoveryError(
       'recovery_checkpoint_missing',
       'snapshot Resource Content digest has no dispatch-bound accepted journal event',
@@ -451,7 +412,6 @@ function historicalResourceFacts(input: {
   }
   const evidence = record(record(input.snapshot.evidence)?.resourcePreparation)
   if (evidence?.status === 'passed') {
-    const journalGate = input.proofs.get(RESOURCE_GATE_UNIT_ID)?.unit
     if (journalGate && evidence.revision !== journalGate.inputRevision)
       recoveryError(
         'recovery_checkpoint_conflict',
@@ -531,96 +491,87 @@ async function snapshotRevision(
   }
 }
 
-function planTaskIds(proofs: Map<string, ProvenUnit>): string[] | undefined {
-  const plan = proofs.get(ATOMIC_PLAN_UNIT_ID)?.unit
-  if (!plan) return undefined
-  const taskIds = stringArray(acceptedUnitPayload(plan).taskIds)
-  if (
-    !taskIds ||
-    taskIds.length === 0 ||
-    new Set(taskIds).size !== taskIds.length
-  )
-    recoveryError(
-      'recovery_checkpoint_conflict',
-      'atomic plan checkpoint has an invalid task identity set',
+function directTaskIds(
+  events: WorkflowEvent[],
+  runId: string | undefined,
+): string[] | undefined {
+  for (const event of events.toReversed()) {
+    if (
+      event.type !== 'implementation.task.created' ||
+      (runId && event.runId !== runId) ||
+      !record(event.implementationTask)
     )
-  return taskIds
-}
-
-function parseTaskGraph(value: unknown, source: 'snapshot' | 'journal') {
-  if (!Array.isArray(value)) return undefined
-  const tasks: AtomicTask[] = []
-  for (const task of value) {
-    try {
-      tasks.push(parseAtomicTask(task))
-    } catch {
+      continue
+    const task = parseImplementationTaskReceipt(event.implementationTask, 'journal')
+    if (!task)
       recoveryError(
         'recovery_checkpoint_conflict',
-        `${source} atomic task graph is outside the current schema`,
+        'direct implementation task receipt is missing',
       )
-    }
+    return [task.id]
   }
-  return tasks
+  return undefined
 }
 
-function taskPlanTopology(task: AtomicTask) {
+function parseImplementationTaskReceipt(value: unknown, source: 'snapshot' | 'journal') {
+  if (!record(value)) return undefined
+  try {
+    return parseImplementationTask(value)
+  } catch {
+    recoveryError(
+      'recovery_checkpoint_conflict',
+      `${source} implementation task is outside the current schema`,
+    )
+  }
+}
+
+function taskIdentity(task: ImplementationTask) {
   return {
     id: task.id,
     title: task.title,
     checklistIds: task.checklistIds,
     resourceIds: task.resourceIds,
     contentIds: task.contentIds,
-    dependsOn: task.dependsOn,
     allowedPaths: task.allowedPaths,
-    expectedArtifacts: task.expectedArtifacts,
-    verification: task.verification,
   }
 }
 
-function sameTaskPlan(left: AtomicTask[], right: AtomicTask[]): boolean {
-  return (
-    stableValue(left.map(taskPlanTopology)) ===
-    stableValue(right.map(taskPlanTopology))
-  )
+function sameTask(left: ImplementationTask, right: ImplementationTask): boolean {
+  return stableValue(taskIdentity(left)) === stableValue(taskIdentity(right))
 }
 
-function journalTasks(input: {
+function journalTask(input: {
   events: WorkflowEvent[]
   runId?: string
   taskIds: string[]
-}): AtomicTask[] | undefined {
-  let acceptedGraph: AtomicTask[] | undefined
+}): ImplementationTask | undefined {
+  let acceptedTask: ImplementationTask | undefined
   for (const event of input.events) {
     if (
-      event.type !== 'tasks.planned' ||
+      event.type !== 'implementation.task.created' ||
       (input.runId && event.runId !== input.runId)
     )
       continue
-    if (event.taskGraph === undefined) continue
-    const candidate = parseTaskGraph(event.taskGraph, 'journal')
-    if (!candidate)
+    if (event.implementationTask === undefined) continue
+    const task = parseImplementationTaskReceipt(event.implementationTask, 'journal')
+    if (!task)
       recoveryError(
         'recovery_checkpoint_conflict',
-        'tasks.planned journal receipt has an invalid task graph',
+        'direct implementation journal receipt has an invalid task',
       )
-    if (
-      !sameStrings(
-        candidate.map(task => task.id),
-        input.taskIds,
-      )
-    )
+    if (!sameStrings([task.id], input.taskIds))
       recoveryError(
         'recovery_checkpoint_conflict',
-        'tasks.planned journal receipt contradicts the accepted plan',
+        'direct implementation journal receipt contradicts its task identity',
       )
-    if (acceptedGraph && !sameTaskPlan(acceptedGraph, candidate))
+    if (acceptedTask && !sameTask(acceptedTask, task))
       recoveryError(
         'recovery_checkpoint_conflict',
-        'tasks.planned journal receipts contain contradictory task graphs',
+        'direct implementation journal receipts contain contradictory tasks',
       )
-    acceptedGraph = candidate
+    acceptedTask = task
   }
-  return acceptedGraph
+  return acceptedTask
 }
 
 function snapshotTasks(input: {
@@ -628,26 +579,29 @@ function snapshotTasks(input: {
   taskIds: string[] | undefined
   events: WorkflowEvent[]
   runId?: string
-}): AtomicTask[] {
+}): ImplementationTask[] {
   const { snapshot, taskIds } = input
   if (!taskIds) return []
-  const snapshotGraph = parseTaskGraph(snapshot?.tasks, 'snapshot')
-  const journalGraph = journalTasks({
+  const snapshotValues = snapshot?.tasks
+  const snapshotTask = Array.isArray(snapshotValues) && snapshotValues.length === 1
+    ? parseImplementationTaskReceipt(snapshotValues[0], 'snapshot')
+    : undefined
+  const acceptedTask = journalTask({
     events: input.events,
     runId: input.runId,
     taskIds,
   })
-  if (!journalGraph)
+  if (!acceptedTask)
     recoveryError(
       'recovery_checkpoint_missing',
-      'accepted atomic plan has no tasks.planned journal receipt',
+      'direct implementation has no canonical task journal receipt',
     )
-  if (snapshotGraph && !sameTaskPlan(snapshotGraph, journalGraph))
+  if (snapshotTask && !sameTask(snapshotTask, acceptedTask))
     recoveryError(
       'recovery_checkpoint_conflict',
-      'snapshot atomic task graph contradicts its journal receipt',
+      'snapshot direct task contradicts its journal receipt',
     )
-  const tasks = journalGraph
+  const tasks = [acceptedTask]
   if (
     !sameStrings(
       tasks.map(task => task.id),
@@ -656,7 +610,7 @@ function snapshotTasks(input: {
   )
     recoveryError(
       'recovery_checkpoint_conflict',
-      'snapshot atomic task graph contradicts the accepted plan',
+      'snapshot direct task contradicts its journal identity',
     )
   return tasks
 }
@@ -669,9 +623,9 @@ function assertRawCompletedClaimsHaveAcceptedProof(input: {
     for (const value of input.snapshot.tasks) {
       const rawTask = record(value)
       if (rawTask?.status !== 'completed') continue
-      let task: AtomicTask
+      let task: ImplementationTask
       try {
-        task = parseAtomicTask(value)
+        task = parseImplementationTask(value)
       } catch {
         recoveryError(
           'recovery_checkpoint_conflict',
@@ -688,11 +642,6 @@ function assertRawCompletedClaimsHaveAcceptedProof(input: {
   const evidence = record(input.snapshot?.evidence)
   for (const claim of [
     {
-      value: record(evidence?.implementationAudit),
-      unitId: IMPLEMENTATION_AUDIT_UNIT_ID,
-      label: 'Implementation Audit',
-    },
-    {
       value: record(evidence?.acceptance),
       unitId: ACCEPTANCE_UNIT_ID,
       label: 'Acceptance',
@@ -708,7 +657,7 @@ function assertRawCompletedClaimsHaveAcceptedProof(input: {
 function assertSnapshotCompletedClaims(input: {
   snapshot: Record<string, unknown> | undefined
   proofs: Map<string, ProvenUnit>
-  tasks: AtomicTask[]
+  tasks: ImplementationTask[]
 }): void {
   for (const task of input.tasks) {
     if (task.status !== 'completed') continue
@@ -734,11 +683,6 @@ function assertSnapshotCompletedClaims(input: {
 
   const evidence = record(input.snapshot?.evidence)
   for (const claim of [
-    {
-      value: record(evidence?.implementationAudit),
-      unitId: IMPLEMENTATION_AUDIT_UNIT_ID,
-      label: 'Implementation Audit',
-    },
     {
       value: record(evidence?.acceptance),
       unitId: ACCEPTANCE_UNIT_ID,
@@ -772,14 +716,13 @@ function completeUnitGraph(input: { taskIds?: string[] }): string[] {
   return [
     ...graph,
     ...input.taskIds.map(taskId => `implementation:${taskId}`),
-    IMPLEMENTATION_AUDIT_UNIT_ID,
     ACCEPTANCE_UNIT_ID,
   ]
 }
 
 function expectedPredecessors(input: {
   unitId: string
-  tasks: AtomicTask[]
+  tasks: ImplementationTask[]
 }): string[] | undefined {
   const fixed = expectedFixedPredecessors(input.unitId)
   if (fixed) return fixed
@@ -787,17 +730,16 @@ function expectedPredecessors(input: {
     candidate => `implementation:${candidate.id}` === input.unitId,
   )
   if (task)
-    return task.dependsOn.map(dependency => `implementation:${dependency}`)
-  if (input.unitId === IMPLEMENTATION_AUDIT_UNIT_ID)
+    return ['resource:delivery']
+  if (input.unitId === ACCEPTANCE_UNIT_ID)
     return input.tasks.map(task => `implementation:${task.id}`)
-  if (input.unitId === ACCEPTANCE_UNIT_ID) return [IMPLEMENTATION_AUDIT_UNIT_ID]
   return undefined
 }
 
 function assertCurrentUnitGraph(input: {
   proofs: Map<string, ProvenUnit>
   graph: string[]
-  tasks: AtomicTask[]
+  tasks: ImplementationTask[]
   journal: WorkflowUnitAcceptedEvent[]
 }): string[] {
   const graphSet = new Set(input.graph)
@@ -932,76 +874,7 @@ async function validateAcceptedArtifacts(input: {
         'recovery_artifact_digest_mismatch',
         'final accepted document proof contradicts the current document revision',
       )
-    if (unit.kind === 'resource-inventory') {
-      if (
-        unit.inputRevision !==
-        (await computeResourceInventoryRevision(input.workspacePath))
-      )
-        recoveryError(
-          'recovery_artifact_digest_mismatch',
-          'canonical resource inventory changed after acceptance',
-        )
-      continue
-    }
-    if (unit.kind === 'resource-content') {
-      const dispatchId = unit.dispatchId
-      const expectedReceiptRef = dispatchId
-        ? `.beegame/workflow/resource-content-commits/${dispatchId}.json`
-        : undefined
-      if (!dispatchId || unit.receiptRef !== expectedReceiptRef)
-        recoveryError(
-          'recovery_checkpoint_conflict',
-          'accepted Resource Content checkpoint has no exact dispatch receipt identity',
-        )
-      let receipt: ReturnType<typeof readResourceContentCommitReceipt>
-      try {
-        receipt = readResourceContentCommitReceipt(
-          input.workspacePath,
-          dispatchId,
-        )
-      } catch {
-        recoveryError(
-          'recovery_checkpoint_conflict',
-          'accepted Resource Content receipt is outside the canonical schema',
-        )
-      }
-      if (!receipt)
-        recoveryError(
-          'recovery_checkpoint_missing',
-          'accepted Resource Content checkpoint has no exact canonical receipt',
-        )
-      if (receipt.status !== 'committed' || receipt.action !== 'commit')
-        recoveryError(
-          'recovery_checkpoint_conflict',
-          'accepted Resource Content receipt contradicts its dispatch identity',
-        )
-      let currentRootDigest: string
-      try {
-        currentRootDigest = computeResourceContentRootDigest(
-          input.workspacePath,
-        )
-      } catch {
-        recoveryError(
-          'recovery_artifact_digest_mismatch',
-          'canonical Resource Content root cannot be inspected',
-        )
-      }
-      if (receipt.finalRootDigest !== currentRootDigest)
-        recoveryError(
-          'recovery_artifact_digest_mismatch',
-          'accepted Resource Content receipt does not match canonical content',
-        )
-      const currentDigest = await computeResourceContentDigest(
-        input.workspacePath,
-      )
-      if (unit.inputRevision !== currentDigest)
-        recoveryError(
-          'recovery_artifact_digest_mismatch',
-          'canonical Resource Content digest changed after acceptance',
-        )
-      continue
-    }
-    if (unit.kind === 'resource-gate') {
+    if (unit.kind === 'resource-delivery') {
       if (
         unit.inputRevision !==
         (await computeResourceRevision(
@@ -1061,13 +934,8 @@ function rawActiveUnitId(input: {
     record(snapshot.resourceProductionState)?.currentTask,
   )
   if (snapshot.phase === 'RESOURCE_PREPARATION') {
-    if (resourceTask === 'RESOURCE_INVENTORY') return RESOURCE_INVENTORY_UNIT_ID
-    if (resourceTask === 'RESOURCE_CONTENT') return RESOURCE_CONTENT_UNIT_ID
-    if (resourceTask === 'RESOURCE_GATE') return RESOURCE_GATE_UNIT_ID
+    if (resourceTask === 'RESOURCE_DELIVERED') return RESOURCE_DELIVERY_UNIT_ID
   }
-  if (snapshot.phase === 'ATOMIC_TASK_PLANNING') return ATOMIC_PLAN_UNIT_ID
-  if (snapshot.phase === 'IMPLEMENTATION_AUDIT')
-    return IMPLEMENTATION_AUDIT_UNIT_ID
   if (snapshot.phase === 'ACCEPTANCE') return ACCEPTANCE_UNIT_ID
   return undefined
 }
@@ -1107,7 +975,7 @@ function buildProjectionRun(input: {
   replayedUnitIds: string[]
   activeUnitId?: string
   revision: Revision
-  tasks: AtomicTask[]
+  tasks: ImplementationTask[]
   ownerId: string
   projectId: string
   confirmedBriefContext: string
@@ -1136,27 +1004,14 @@ function buildProjectionRun(input: {
     replayed.has(documentUnitId(path)),
   )
 
-  const inventory = replayed.has(RESOURCE_INVENTORY_UNIT_ID)
-    ? input.proofs.get(RESOURCE_INVENTORY_UNIT_ID)?.unit
-    : undefined
-  const content = replayed.has(RESOURCE_CONTENT_UNIT_ID)
-    ? input.proofs.get(RESOURCE_CONTENT_UNIT_ID)?.unit
-    : undefined
-  const gate = replayed.has(RESOURCE_GATE_UNIT_ID)
-    ? input.proofs.get(RESOURCE_GATE_UNIT_ID)?.unit
-    : undefined
-  const audit = replayed.has(IMPLEMENTATION_AUDIT_UNIT_ID)
-    ? input.proofs.get(IMPLEMENTATION_AUDIT_UNIT_ID)?.unit
+  const gate = replayed.has(RESOURCE_DELIVERY_UNIT_ID)
+    ? input.proofs.get(RESOURCE_DELIVERY_UNIT_ID)?.unit
     : undefined
   const acceptance = replayed.has(ACCEPTANCE_UNIT_ID)
     ? input.proofs.get(ACCEPTANCE_UNIT_ID)?.unit
     : undefined
-  const inventoryPayload = inventory
-    ? acceptedUnitPayload(inventory)
-    : undefined
-  const contentPayload = content ? acceptedUnitPayload(content) : undefined
   const gatePayload = gate ? acceptedUnitPayload(gate) : undefined
-  const auditPayload = audit ? acceptedUnitPayload(audit) : undefined
+  const inventoryPayload = gatePayload
   const acceptancePayload = acceptance
     ? acceptedUnitPayload(acceptance)
     : undefined
@@ -1165,34 +1020,22 @@ function buildProjectionRun(input: {
   let documentStep: DeliveryRun['documentStep']
   let currentItemId: string | undefined
   let resourceTask: DeliveryRun['resourceProductionState']['currentTask'] =
-    'RESOURCE_PLAN'
+    'RESOURCE_DELIVERY'
   const activeUnitId = input.activeUnitId
   if (activeUnitId === 'foundation-audit:derive') {
     phase = 'DOCUMENT_REVIEW'
     documentStep = 'FOUNDATION_REVIEW'
-  } else if (activeUnitId === RESOURCE_INVENTORY_UNIT_ID) {
-    phase = 'DOCUMENT_REVIEW'
-    documentStep = 'FOUNDATION_REVIEW'
-  } else if (activeUnitId === RESOURCE_CONTENT_UNIT_ID) {
-    phase = 'DOCUMENT_REVIEW'
-    documentStep = 'FOUNDATION_REVIEW'
-  } else if (activeUnitId === RESOURCE_GATE_UNIT_ID) {
-    phase = 'DOCUMENT_REVIEW'
-    documentStep = 'FOUNDATION_REVIEW'
-  } else if (activeUnitId === ATOMIC_PLAN_UNIT_ID) {
+  } else if (activeUnitId === RESOURCE_DELIVERY_UNIT_ID) {
     phase = 'DOCUMENT_REVIEW'
     documentStep = 'FOUNDATION_REVIEW'
   } else if (
     input.tasks.some(task => `implementation:${task.id}` === activeUnitId)
   ) {
     phase = 'IMPLEMENTATION'
-    resourceTask = 'RESOURCE_GATE'
-  } else if (activeUnitId === IMPLEMENTATION_AUDIT_UNIT_ID) {
-    phase = 'IMPLEMENTATION_AUDIT'
-    resourceTask = 'RESOURCE_GATE'
+    resourceTask = 'RESOURCE_DELIVERED'
   } else if (activeUnitId === ACCEPTANCE_UNIT_ID) {
     phase = 'ACCEPTANCE'
-    resourceTask = 'RESOURCE_GATE'
+    resourceTask = 'RESOURCE_DELIVERED'
   }
 
   const snapshotCreatedAt = timestampFromSnapshot(input.snapshot, 'createdAt')
@@ -1273,23 +1116,6 @@ function buildProjectionRun(input: {
             },
           }
         : {}),
-      ...(audit
-        ? {
-            implementationAudit: {
-              path:
-                audit.receiptRef ??
-                stringValue(auditPayload?.receiptRef) ??
-                recoveryError(
-                  'recovery_checkpoint_missing',
-                  'Implementation Audit checkpoint has no canonical receipt',
-                ),
-              kind: 'implementation_audit' as const,
-              revision: audit.inputRevision,
-              status: 'passed' as const,
-              observedAt: audit.acceptedAt,
-            },
-          }
-        : {}),
       ...(acceptance
         ? {
             acceptance: {
@@ -1311,21 +1137,16 @@ function buildProjectionRun(input: {
     foundationDraftState: { completedPaths: documents },
     resourceProductionState: {
       currentTask: resourceTask,
-      ...(inventory
+      ...(stringValue(gate?.dependencyDigests.gameIr)
+        ? { irResultId: stringValue(gate?.dependencyDigests.gameIr) }
+        : {}),
+      ...(gatePayload?.bindings && gate?.dependencyDigests.content
         ? {
-            inventoryReceipt: {
-              revision: inventory.inputRevision,
+            deliveryReceipt: {
               bindings: inventoryPayload?.bindings as never,
               catalogObserved: inventoryPayload?.catalogObserved as boolean,
-              acceptedAt: inventory.acceptedAt,
-            },
-          }
-        : {}),
-      ...(content
-        ? {
-            contentReceipt: {
-              contentDigest: contentPayload?.contentDigest as string,
-              acceptedAt: content.acceptedAt,
+              contentDigest: gate!.dependencyDigests.content,
+              acceptedAt: gate!.acceptedAt,
             },
           }
         : {}),
@@ -1461,7 +1282,7 @@ export async function projectExactResumeRun(input: {
     historicalResourceFacts({ snapshot, proofs, revision })
   }
   assertRawCompletedClaimsHaveAcceptedProof({ snapshot, proofs })
-  const taskIds = planTaskIds(proofs)
+  const taskIds = directTaskIds(input.events, journalMetadata.runId)
   const tasks = snapshotTasks({
     snapshot,
     taskIds,
@@ -1477,12 +1298,7 @@ export async function projectExactResumeRun(input: {
     journal: acceptedEvents,
   })
   const graphActiveUnitId = graph[replayedUnitIds.length]
-  const activeUnitId =
-    graphActiveUnitId === RESOURCE_INVENTORY_UNIT_ID &&
-          !proofs.has(RESOURCE_INVENTORY_UNIT_ID) &&
-          !record(snapshot?.foundationAuditState)
-        ? 'foundation-audit:derive'
-        : graphActiveUnitId
+  const activeUnitId = graphActiveUnitId
   if (activeUnitId?.startsWith('document:'))
     recoveryError('recovery_checkpoint_conflict', RETIRED_FOUNDATION_AUTHOR)
   const rawProofInspection =

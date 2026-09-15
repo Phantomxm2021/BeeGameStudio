@@ -1,78 +1,320 @@
 import { auditAssetContract } from '../asset-contract-audit'
 import {
   BEEGAME_RESOURCE_ROOTS,
-  readBeeGameAssetManifest,
+  readBeeGameAssetManifestSync,
+  type BeeGameAssetRequirement,
+  type BeeGameProjectResource,
 } from '../asset-contracts'
 import {
+  auditBeeGameContent,
   BEEGAME_CONTENT_SCHEMA,
-  BEEGAME_JSON_CONTENT_KINDS,
-  BEEGAME_YAML_CONTENT_KINDS,
 } from '../content-contracts'
 import {
   auditResourceDeliveryReadiness,
   confirmedResourceLibraryUsage,
-  type ResourceDeliveryReadiness,
 } from '../resource-delivery-readiness'
 import {
-  computeResourceInventoryRevision,
   computeResourceContentDigest,
   computeResourceRevision,
 } from './revision'
-import { resolveResourceProductionTask } from './resource-task-resolver'
+import { resourceIrDeliveryIssues } from './resource-ir-delivery'
+import { buildSystemDeliveryContract } from './system-delivery-contract'
 import { transitionDeliveryRun } from './transition'
-import {
-  type DeliveryRun,
-  type ResourceContentReceipt,
-  type ResourceProductionTask,
-  type WorkerDispatchRequest,
-} from './types'
+import { type DeliveryRun, type WorkerDispatchRequest } from './types'
 import type { WorkerTerminalResult } from './worker-contracts'
 
 type Dispatcher = { dispatch(request: WorkerDispatchRequest): Promise<unknown> }
-type ResourceAudit = ResourceDeliveryReadiness
-
-const RESOURCE_CONTENT_AUTHORITY_PATHS = [
-  'docs/GDD.md',
-  'docs/LEVEL_SCENE_DESIGN.md',
-  'docs/BALANCE_DESIGN.md',
-  'docs/TECHNICAL_DESIGN.md',
-  'docs/UI_UX_SPEC.md',
-  'docs/AUDIO_DESIGN.md',
-] as const
-
-export function resourceContentAuthorityPaths(): string[] {
-  return [...RESOURCE_CONTENT_AUTHORITY_PATHS]
-}
-
-export async function resourceContentReceiptMatchesWorkspace(
-  workspacePath: string,
-  receipt: ResourceContentReceipt,
-): Promise<boolean> {
-  return (
-    receipt.contentDigest ===
-    (await computeResourceContentDigest(workspacePath))
-  )
-}
 
 export function resourcePreparationAllowedPaths(
-  task: ResourceProductionTask,
 ): string[] {
-  if (task === 'RESOURCE_PLAN') return ['assets/asset-manifest.json']
-  if (task === 'RESOURCE_INVENTORY')
-    return [
-      'assets/asset-manifest.json',
-      directoryScope(BEEGAME_RESOURCE_ROOTS.runtime),
-      directoryScope(BEEGAME_RESOURCE_ROOTS.generated),
-    ]
-  if (task === 'RESOURCE_CONTENT')
-    return [directoryScope(BEEGAME_RESOURCE_ROOTS.content)]
-  return []
+  // Resource preparation is one native CLI turn.  The host still validates
+  // the manifest, inventory and content separately, but the worker must be
+  // able to create the complete asset contract without crossing phase/task
+  // boundaries that would force it into a planner/curator/author protocol.
+  return [directoryScope('assets')]
+}
+
+export function currentResourceContractIssues(workspacePath: string): string[] {
+  const audit = auditAssetContract(workspacePath)
+  return [...new Set([...audit.issues, ...audit.content.issues])]
 }
 
 function directoryScope(path: string): string {
   let normalized = path.replaceAll('\\', '/')
   while (normalized.endsWith('/')) normalized = normalized.slice(0, -1)
   return `${normalized}/`
+}
+
+function currentResourceIrResultId(run: DeliveryRun): string | undefined {
+  if (run.resourceProductionState.irResultId) {
+    return run.resourceProductionState.irResultId
+  }
+  const value = run.activeDispatch?.request?.contract.gameIr
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const resultId = (value as Record<string, unknown>).resultId
+  return typeof resultId === 'string' && resultId.trim() ? resultId : undefined
+}
+
+function object(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every(item => typeof item === 'string')
+    ? value
+    : undefined
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  const a = [...new Set(left)].sort()
+  const b = [...new Set(right)].sort()
+  return a.length === b.length && a.every((value, index) => value === b[index])
+}
+
+const COVERAGE_FIELDS = [
+  ['assetKinds', 'asset_kinds'],
+  ['usageTags', 'usage_tags'],
+  ['capabilities', 'capabilities'],
+  ['relationKinds', 'relation_kinds'],
+  ['embeddedKinds', 'embedded_kinds'],
+] as const
+
+function normalizedCoverage(
+  value: unknown,
+  source: 'ir' | 'manifest',
+): string | undefined {
+  if (value === undefined) return JSON.stringify([])
+  if (!Array.isArray(value)) return undefined
+  const items: string[] = []
+  for (const entry of value) {
+    const item = object(entry)
+    if (!item) return undefined
+    const normalized: Record<string, string[]> = {}
+    for (const [irField, manifestField] of COVERAGE_FIELDS) {
+      const field = source === 'ir' ? irField : manifestField
+      if (item[field] === undefined) continue
+      const values = stringArray(item[field])
+      if (!values) return undefined
+      normalized[manifestField] = [...new Set(values)].sort()
+    }
+    items.push(JSON.stringify(normalized))
+  }
+  return JSON.stringify(items.sort())
+}
+
+function sourcingPolicyMatches(
+  irValue: unknown,
+  manifestValue: unknown,
+): boolean {
+  const ir = object(irValue)
+  const manifest = object(manifestValue)
+  if (!ir || !manifest) return false
+  const irAllowed = stringArray(ir.allowedSourceKinds)
+  const irLicenses = stringArray(ir.licenseConstraints)
+  const irHandoff = stringArray(ir.handoffCriteria)
+  const manifestAllowed = stringArray(manifest.allowed_source_kinds)
+  const manifestLicenses = stringArray(manifest.license_constraints)
+  const manifestHandoff = stringArray(manifest.handoff_criteria)
+  return Boolean(
+    irAllowed && irLicenses && irHandoff &&
+    manifestAllowed && manifestLicenses && manifestHandoff &&
+    sameStrings(irAllowed, manifestAllowed) &&
+    sameStrings(irLicenses, manifestLicenses) &&
+    sameStrings(irHandoff, manifestHandoff) &&
+    ir.responsibleParty === manifest.responsible_party,
+  )
+}
+
+function intersectsNormalized(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  const values = new Set(right.map(value => value.trim().toLowerCase()))
+  return left.some(value => values.has(value.trim().toLowerCase()))
+}
+
+function resourceCovers(
+  resource: BeeGameProjectResource,
+  obligation: {
+    asset_kinds?: readonly string[]
+    usage_tags?: readonly string[]
+    capabilities?: readonly string[]
+    relation_kinds?: readonly string[]
+    embedded_kinds?: readonly string[]
+  },
+): boolean {
+  if (
+    obligation.asset_kinds?.length &&
+    (!resource.asset_kind || !obligation.asset_kinds.some(value => value === resource.asset_kind))
+  )
+    return false
+  if (
+    obligation.usage_tags?.length &&
+    !intersectsNormalized(obligation.usage_tags, resource.usage_tags ?? [])
+  )
+    return false
+  for (const [required, actual] of [
+    [obligation.capabilities, resource.capabilities],
+    [obligation.relation_kinds, resource.relation_kinds],
+    [obligation.embedded_kinds, resource.embedded_kinds],
+  ] as const)
+    if (required?.length && !required.every(value => actual?.includes(value)))
+      return false
+  return true
+}
+
+function boundResourcesFulfill(
+  requirement: BeeGameAssetRequirement,
+  resources: readonly BeeGameProjectResource[],
+): boolean {
+  const profile = requirement.acquisition_profile
+  const eligible = resources.filter(resource =>
+    Boolean(
+      resource.dimension && profile.dimensions.some(value => value === resource.dimension) &&
+      (!profile.styles.length || intersectsNormalized(profile.styles, resource.styles ?? [])),
+    ),
+  )
+  const obligations = profile.coverage?.length
+    ? profile.coverage
+    : [{
+        asset_kinds: profile.asset_kinds,
+        usage_tags: profile.usage_tags,
+        capabilities: profile.capabilities,
+      }]
+  return obligations.every(obligation =>
+    eligible.some(resource => resourceCovers(resource, obligation)),
+  )
+}
+
+/** Verify the durable resource contract still represents the injected IR. */
+export function resourceIrManifestIssues(
+  run: DeliveryRun,
+  workspacePath: string,
+): string[] {
+  const gameIr = object(run.activeDispatch?.request?.contract.gameIr)
+  const modules = Array.isArray(gameIr?.modules) ? gameIr.modules : []
+  const resourceModule = modules
+    .map(object)
+    .find(module => module?.moduleId === 'resource-realization')
+  const nodes = Array.isArray(resourceModule?.nodes)
+    ? resourceModule.nodes.map(object).filter(Boolean) as Record<string, unknown>[]
+    : []
+  if (!gameIr || !resourceModule || !nodes.length)
+    return ['The resource dispatch has no complete resource-realization IR module.']
+
+  const requirementByLogicalNode = new Map<string, string>()
+  for (const node of nodes) {
+    if (node.kind !== 'resource-realization.logical-resource') continue
+    const value = object(node.value)
+    if (typeof node.id === 'string' && typeof value?.requirementId === 'string')
+      requirementByLogicalNode.set(node.id, value.requirementId)
+  }
+
+  let manifest
+  try {
+    manifest = readBeeGameAssetManifestSync(workspacePath)
+  } catch {
+    return []
+  }
+  const manifestById = new Map(
+    manifest.requirements.map(requirement => [requirement.id, requirement]),
+  )
+  const resourcesById = new Map(
+    manifest.resources.map(resource => [resource.id, resource]),
+  )
+  const bindingsByRequirement = new Map(
+    auditBeeGameContent(workspacePath, manifest).resourceBindings.map(binding => [
+      binding.requirementId,
+      binding.resourceIds,
+    ]),
+  )
+  const expectedIds = new Set<string>()
+  const issues: string[] = []
+  for (const node of nodes) {
+    if (node.kind !== 'resource-realization.acquisition-profile') continue
+    const edges = Array.isArray(node.edges) ? node.edges.map(object) : []
+    const describes = edges.find(edge => edge?.type === 'describes')
+    const requirementId =
+      typeof describes?.targetId === 'string'
+        ? requirementByLogicalNode.get(describes.targetId)
+        : undefined
+    if (!requirementId) {
+      issues.push(`IR acquisition profile ${String(node.id)} has no logical resource requirement.`)
+      continue
+    }
+    expectedIds.add(requirementId)
+    const requirement = manifestById.get(requirementId)
+    if (!requirement) {
+      issues.push(`Manifest requirement is missing for IR requirement: ${requirementId}.`)
+      continue
+    }
+    const value = object(node.value) ?? {}
+    const profile = requirement.acquisition_profile
+    const comparisons: Array<[string, readonly string[] | undefined, readonly string[]]> = [
+      ['dimensions', stringArray(value.dimensions), profile.dimensions],
+      ['assetKinds', stringArray(value.assetKinds), profile.asset_kinds],
+      ['usageTags', stringArray(value.usageTags), profile.usage_tags],
+      ['capabilities', stringArray(value.capabilities), profile.capabilities],
+      ['styles', stringArray(value.styles), profile.styles],
+      ['acceptanceCriteria', stringArray(value.acceptanceCriteria) ?? [], profile.acceptance_criteria ?? []],
+    ]
+    for (const [field, expected, actual] of comparisons)
+      if (!expected || !sameStrings(expected, actual))
+        issues.push(`Manifest requirement ${requirementId} does not preserve IR ${field}.`)
+    if (value.required !== requirement.required)
+      issues.push(`Manifest requirement ${requirementId} does not preserve IR required.`)
+    if (value.name !== requirement.name)
+      issues.push(`Manifest requirement ${requirementId} does not preserve IR name.`)
+    if (value.purpose !== requirement.purpose)
+      issues.push(`Manifest requirement ${requirementId} does not preserve IR purpose.`)
+    if (
+      normalizedCoverage(value.coverage, 'ir') !==
+      normalizedCoverage(profile.coverage, 'manifest')
+    )
+      issues.push(`Manifest requirement ${requirementId} does not preserve IR coverage.`)
+    if (!sourcingPolicyMatches(value.sourcingPolicy, profile.sourcing_policy))
+      issues.push(`Manifest requirement ${requirementId} does not preserve IR sourcingPolicy.`)
+    const boundResources = (bindingsByRequirement.get(requirementId) ?? [])
+      .map(resourceId => resourcesById.get(resourceId))
+      .filter(Boolean) as BeeGameProjectResource[]
+    if (boundResources.length && !boundResourcesFulfill(requirement, boundResources))
+      issues.push(
+        `Bound resources do not satisfy IR acquisition profile for ${requirementId}.`,
+      )
+  }
+  for (const requirement of manifest.requirements)
+    if (!expectedIds.has(requirement.id))
+      issues.push(`Manifest requirement is not defined by the injected IR: ${requirement.id}.`)
+
+  const targetNode = nodes.find(
+    node => node.kind === 'resource-realization.delivery-target',
+  )
+  const target = object(targetNode?.value)
+  const manifestTarget = manifest.project_target
+  if (!target || !manifestTarget) {
+    issues.push('Manifest project_target does not preserve the IR delivery target.')
+  } else {
+    const formats = stringArray(target.assetFormatCapabilities)
+    if (!formats || !sameStrings(formats, manifestTarget.asset_format_capabilities))
+      issues.push('Manifest project_target does not preserve IR assetFormatCapabilities.')
+    if (target.platform !== manifestTarget.platform)
+      issues.push('Manifest project_target does not preserve IR platform.')
+    if (target.runtime !== manifestTarget.runtime)
+      issues.push('Manifest project_target does not preserve IR runtime.')
+  }
+  issues.push(
+    ...resourceIrDeliveryIssues({
+      gameIr,
+      workspacePath,
+      artifactClasses: ['runtime-resource', 'generated-output'],
+      registeredResourcePaths: new Set(
+        manifest.resources.flatMap(resource => resource.file_paths),
+      ),
+    }),
+  )
+  return issues
 }
 
 export async function startResourcePreparation(input: {
@@ -87,93 +329,32 @@ export async function startResourcePreparation(input: {
   if (input.run.activeDispatch?.status === 'running')
     return input.run.activeDispatch
 
-  const resolution = await resolveResourceProductionTask(input)
-  if (resolution.task === 'RESOURCE_GATE')
-    throw new Error(
-      'resource gate is deterministic and cannot dispatch a worker',
-    )
-
   const common = {
     runId: input.run.runId,
     ownerId: input.run.ownerId,
     projectId: input.run.projectId,
     workspacePath: input.workspacePath,
     phase: 'RESOURCE_PREPARATION' as const,
-    taskId: resolution.task,
+    taskId: 'RESOURCE_PREPARATION',
     revision: input.run.revision.document,
-    allowedPaths: resourcePreparationAllowedPaths(resolution.task),
-  }
-  if (resolution.task === 'RESOURCE_PLAN')
-    return input.dispatcher.dispatch({
-      ...common,
-      workerType: 'resource-planner',
-      contract: {
-        task: resolution.task,
-        resourceLibraryUsage: confirmedResourceLibraryUsage(
-          input.run.confirmedBriefContext,
-        ),
-        authorityPaths: [
-          'docs/ASSET_PLAN.md',
-          'docs/ART_DIRECTION.md',
-          'docs/TECHNICAL_DESIGN.md',
-        ],
-      },
-    })
-  if (resolution.task === 'RESOURCE_INVENTORY')
-    return input.dispatcher.dispatch({
-      ...common,
-      workerType: 'resource-curator',
-      contract: {
-        task: resolution.task,
-        resourceLibraryUsage: confirmedResourceLibraryUsage(
-          input.run.confirmedBriefContext,
-        ),
-        authorityPaths: [
-          'docs/ASSET_PLAN.md',
-          'docs/ART_DIRECTION.md',
-          'docs/TECHNICAL_DESIGN.md',
-        ],
-      },
-    })
-  const assetAudit = auditAssetContract(input.workspacePath)
-  const contentAudit = assetAudit.content
-  const repairPaths = new Set<string>()
-  for (const path of contentAudit.invalidPaths) repairPaths.add(path)
-  if (contentAudit.hasGlobalIssues) {
-    for (const file of contentAudit.files) {
-      if (file.kind === 'resource-registry') repairPaths.add(file.path)
-    }
-    if (!contentAudit.files.length && !contentAudit.invalidPaths.length)
-      repairPaths.add(
-        `${BEEGAME_RESOURCE_ROOTS.content}/resource-registry.json`,
-      )
+    allowedPaths: resourcePreparationAllowedPaths(),
   }
   return input.dispatcher.dispatch({
     ...common,
-    workerType: 'resource-content-author',
+    workerType: 'resource-planner',
     contract: {
-      task: resolution.task,
+      task: 'RESOURCE_PREPARATION',
+      resourceLibraryUsage: confirmedResourceLibraryUsage(
+        input.run.confirmedBriefContext,
+      ),
       contentRoot: BEEGAME_RESOURCE_ROOTS.content,
       schema: BEEGAME_CONTENT_SCHEMA,
-      jsonKinds: BEEGAME_JSON_CONTENT_KINDS,
-      yamlKinds: BEEGAME_YAML_CONTENT_KINDS,
-      requiredRequirementIds: assetAudit.requirements
-        .filter(requirement => requirement.required)
-        .map(requirement => requirement.id),
-      verifiedResourceIds: assetAudit.resources
-        .filter(resource => resource.status === 'verified')
-        .map(resource => resource.id),
-      inventoryBindings:
-        input.run.resourceProductionState.inventoryReceipt?.bindings ?? [],
-      inventoryRevision:
-        input.run.resourceProductionState.inventoryReceipt?.revision,
-      baselineResourceRevision: await computeResourceRevision(
-        input.workspacePath,
-        '',
-      ),
-      authorityPaths: resourceContentAuthorityPaths(),
-      repairPaths: [...repairPaths],
-      currentContentIssues: contentAudit.issues,
+      contentKind: 'resource-registry',
+      currentContentIssues: [
+        ...currentResourceContractIssues(input.workspacePath),
+        ...(input.run.blockedReason ? [input.run.blockedReason] : []),
+      ],
+      systemDeliveryContract: buildSystemDeliveryContract(),
     },
   })
 }
@@ -183,225 +364,108 @@ export async function completeResourceTask(input: {
   workspacePath: string
   terminal: Extract<
     WorkerTerminalResult,
-    {
-      workerType:
-        | 'resource-planner'
-        | 'resource-curator'
-        | 'resource-content-author'
-    }
+    { workerType: 'resource-planner' }
   >
 }): Promise<DeliveryRun> {
   if (input.run.phase !== 'RESOURCE_PREPARATION')
     throw new Error('resource production is not the active phase')
-  const expectedWorker = {
-    RESOURCE_PLAN: 'resource-planner',
-    RESOURCE_INVENTORY: 'resource-curator',
-    RESOURCE_CONTENT: 'resource-content-author',
-    RESOURCE_GATE: undefined,
-  } as const
-  if (
-    expectedWorker[input.run.resourceProductionState.currentTask] !==
-    input.terminal.workerType
-  )
-    throw new Error(
-      `resource terminal does not own ${input.run.resourceProductionState.currentTask}`,
-    )
   if (input.terminal.workerType === 'resource-planner') {
-    const next: DeliveryRun = {
-      ...input.run,
-      activeDispatch: undefined,
-      blockedReason: undefined,
-      resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
-    }
-    const resolution = await resolveResourceProductionTask({
-      run: next,
-      workspacePath: input.workspacePath,
-    })
-    if (resolution.task === 'RESOURCE_PLAN')
-      throw new Error('resource planner terminal has no canonical plan')
-    return next
-  }
-  if (input.terminal.workerType === 'resource-curator') {
-    const revision = await computeResourceInventoryRevision(input.workspacePath)
-    const next: DeliveryRun = {
-      ...input.run,
-      activeDispatch: undefined,
-      blockedReason: undefined,
-      resourceProductionState: {
-        currentTask: 'RESOURCE_CONTENT',
-        inventoryReceipt: {
-          revision,
-          bindings: input.terminal.bindings,
-          catalogObserved: input.terminal.catalogObserved,
-          acceptedAt: new Date().toISOString(),
-        },
-      },
-    }
-    const resolution = await resolveResourceProductionTask({
-      run: next,
-      workspacePath: input.workspacePath,
-    })
-    if (resolution.task === 'RESOURCE_INVENTORY')
-      throw new Error(
-        'resource curator terminal has no valid inventory checkpoint',
-      )
-    return next
-  }
-  if (input.terminal.status === 'needs_inventory') {
-    const manifest = await readBeeGameAssetManifest(input.workspacePath)
-    const requirementIds = new Set(
-      manifest.requirements.map(requirement => requirement.id),
-    )
-    if (
-      input.terminal.missingRequirementIds.length === 0 ||
-      input.terminal.missingRequirementIds.some(id => !requirementIds.has(id))
-    )
-      throw new Error(
-        'resource content inventory request must contain exact current Manifest requirement IDs',
-      )
+    if (input.run.resourceProductionState.currentTask === 'RESOURCE_DELIVERED')
+      throw new Error('resource preparation is already complete')
     const audit = auditAssetContract(input.workspacePath)
-    const verifiedResourceIds = new Set(
-      audit.resources
-        .filter(
-          resource =>
-            resource.status === 'verified' && resource.issues.length === 0,
-        )
-        .map(resource => resource.id),
+    const irManifestIssues = resourceIrManifestIssues(
+      input.run,
+      input.workspacePath,
     )
-    const bindings = new Map(
-      (input.run.resourceProductionState.inventoryReceipt?.bindings ?? []).map(
-        binding => [binding.requirementId, binding.resourceIds] as const,
+    const requiredIds = audit.requirements
+      .filter(requirement => requirement.required)
+      .map(requirement => requirement.id)
+    const bindingsByRequirement = new Map(
+      audit.content.resourceBindings.map(binding => [
+        binding.requirementId,
+        binding.resourceIds,
+      ]),
+    )
+    const missingRequirementIds = requiredIds.filter(
+      requirementId => !bindingsByRequirement.has(requirementId),
+    )
+    const deliveryReceipt =
+      audit.present && !missingRequirementIds.length
+        ? {
+            bindings: requiredIds.map(requirementId => ({
+              requirementId,
+              resourceIds: [...bindingsByRequirement.get(requirementId)!],
+            })),
+            catalogObserved: audit.resources.some(
+              resource => resource.sourceType === 'resource-library',
+            ),
+            contentDigest: await computeResourceContentDigest(
+              input.workspacePath,
+            ),
+            acceptedAt: new Date().toISOString(),
+          }
+        : undefined
+    const boundIrResultId = currentResourceIrResultId(input.run)
+    const readiness = auditResourceDeliveryReadiness({
+      workspacePath: input.workspacePath,
+      confirmedPolicy: confirmedResourceLibraryUsage(
+        input.run.confirmedBriefContext,
       ),
-    )
-    const stillSatisfied = input.terminal.missingRequirementIds.filter(id =>
-      (bindings.get(id) ?? []).some(resourceId =>
-        verifiedResourceIds.has(resourceId),
-      ),
-    )
-    if (stillSatisfied.length)
-      throw new Error(
-        `resource content inventory request does not identify a real inventory gap: ${stillSatisfied.join(', ')}`,
-      )
-    return {
+      catalogObserved: deliveryReceipt?.catalogObserved ?? false,
+    })
+    if (
+      !audit.present ||
+      !audit.valid ||
+      irManifestIssues.length > 0 ||
+      missingRequirementIds.length > 0 ||
+      !audit.content.valid ||
+      !readiness.ready
+    ) {
+      const issues = [...new Set([
+        ...audit.issues,
+        ...irManifestIssues,
+        ...(missingRequirementIds.length
+          ? [`Missing verified resource bindings: ${missingRequirementIds.join(', ')}`]
+          : []),
+        ...audit.content.issues,
+        ...readiness.readinessIssues,
+      ])]
+      return {
+        ...input.run,
+        activeDispatch: undefined,
+        status: 'needs_action',
+        blockedReason: issues.join('; ') || 'resource preparation is incomplete',
+        resourceProductionState: {
+          ...input.run.resourceProductionState,
+          ...(boundIrResultId ? { irResultId: boundIrResultId } : {}),
+        },
+      }
+    }
+    const accepted: DeliveryRun = {
       ...input.run,
       activeDispatch: undefined,
       blockedReason: undefined,
-      resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
-    }
-  }
-  const next: DeliveryRun = {
-    ...input.run,
-    activeDispatch: undefined,
-    blockedReason: undefined,
-    resourceProductionState: {
-      ...input.run.resourceProductionState,
-      currentTask: 'RESOURCE_GATE',
-      contentReceipt: {
-        contentDigest: await computeResourceContentDigest(input.workspacePath),
-        acceptedAt: new Date().toISOString(),
-      },
-    },
-  }
-  const resolution = await resolveResourceProductionTask({
-    run: next,
-    workspacePath: input.workspacePath,
-  })
-  if (resolution.task !== 'RESOURCE_GATE')
-    throw new Error(
-      'resource content terminal has no complete canonical content',
-    )
-  return next
-}
-
-export async function reconcileCurrentResourcePreparation(input: {
-  run: DeliveryRun
-  workspacePath: string
-}): Promise<DeliveryRun | undefined> {
-  if (
-    input.run.phase !== 'RESOURCE_PREPARATION' ||
-    input.run.activeDispatch?.status === 'running'
-  )
-    return undefined
-  const resolution = await resolveResourceProductionTask(input)
-  if (resolution.task !== 'RESOURCE_GATE') {
-    if (input.run.resourceProductionState.currentTask === resolution.task)
-      return undefined
-    return {
-      ...input.run,
       resourceProductionState: {
-        ...input.run.resourceProductionState,
-        currentTask: resolution.task,
-        ...(resolution.inventoryReceiptValid
-          ? {}
-          : { inventoryReceipt: undefined, contentReceipt: undefined }),
+        currentTask: 'RESOURCE_DELIVERED',
+        ...(boundIrResultId ? { irResultId: boundIrResultId } : {}),
+        deliveryReceipt,
       },
     }
-  }
-
-  const contentReceipt = input.run.resourceProductionState.contentReceipt
-  if (
-    !contentReceipt ||
-    !(await resourceContentReceiptMatchesWorkspace(
+    const resourceRevision = await computeResourceRevision(
       input.workspacePath,
-      contentReceipt,
-    ))
-  )
-    return {
-      ...input.run,
-      status: 'needs_action',
-      blockedReason:
-        'resource content receipt is missing or its canonical content digest changed before the resource gate',
+      input.run.revision.document,
+    )
+    const evidence = {
+      path: 'assets/asset-manifest.json',
+      kind: 'resource_preparation' as const,
+      revision: resourceRevision,
+      status: 'passed' as const,
+      observedAt: new Date().toISOString(),
     }
-
-  const readiness = auditResourcesForPreparation({
-    workspacePath: input.workspacePath,
-    confirmedBriefContext: input.run.confirmedBriefContext,
-    catalogObserved:
-      input.run.resourceProductionState.inventoryReceipt?.catalogObserved ??
-      false,
-  })
-  if (!readiness.ready)
-    return {
-      ...input.run,
-      status: 'needs_action',
-      blockedReason: [...readiness.issues, ...readiness.readinessIssues].join(
-        '; ',
-      ),
-      resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
-    }
-
-  const resourceRevision = await computeResourceRevision(
-    input.workspacePath,
-    input.run.revision.document,
-  )
-  const evidence = {
-    path: 'assets/asset-manifest.json',
-    kind: 'resource_preparation' as const,
-    revision: resourceRevision,
-    status: 'passed' as const,
-    observedAt: new Date().toISOString(),
+    return transitionDeliveryRun(
+      accepted,
+      { type: 'resource_preparation_ready', resourceRevision, evidence },
+    )
   }
-  return transitionDeliveryRun(
-    { ...input.run, activeDispatch: undefined },
-    { type: 'resource_preparation_ready', resourceRevision, evidence },
-  )
-}
-
-export async function auditResourceInventoryPolicy(
-  workspacePath: string,
-): Promise<string[]> {
-  const audit = auditResourceDeliveryReadiness({ workspacePath })
-  return [...audit.issues, ...audit.readinessIssues]
-}
-
-export function auditResourcesForPreparation(input: {
-  workspacePath: string
-  confirmedBriefContext?: string
-  catalogObserved?: boolean
-}): ResourceAudit {
-  return auditResourceDeliveryReadiness({
-    workspacePath: input.workspacePath,
-    confirmedPolicy: confirmedResourceLibraryUsage(input.confirmedBriefContext),
-    catalogObserved: input.catalogObserved ?? false,
-  })
+  throw new Error('retired resource worker terminal')
 }

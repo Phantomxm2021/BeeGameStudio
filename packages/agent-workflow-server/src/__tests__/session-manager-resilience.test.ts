@@ -110,9 +110,6 @@ describe('BeeGame session runtime resilience', () => {
   test('treats canonical resource mutations as durable progress', () => {
     for (const [toolName, input] of [
       ['Write', {}],
-      ['AssetManifest', { action: 'submit_resource_plan' }],
-      ['CommitResourceInventory', { decisions: [] }],
-      ['CommitResourceContent', { action: 'commit' }],
     ] as const) {
       expect(
         isResourceWorkerDurableProgress({
@@ -346,164 +343,7 @@ describe('BeeGame session runtime resilience', () => {
     })
   })
 
-  test('tracks a terminal tool from stream start until its result', async () => {
-    root = await mkdtemp(join(tmpdir(), 'beegame-streaming-terminal-'))
-    const workspacePath = join(root, 'workspace')
-    let releaseStream!: () => void
-    const streamGate = new Promise<void>(resolve => {
-      releaseStream = resolve
-    })
-    const runner: BeeGameSessionRunner = {
-      start: async () => ({
-        submit: async input => {
-          input.onMessage({
-            type: 'stream_event',
-            event: {
-              type: 'content_block_start',
-              index: 0,
-              content_block: {
-                type: 'tool_use',
-                id: 'plan-terminal-1',
-                name: 'SubmitAtomicTaskPlan',
-                input: {},
-              },
-            },
-          } as DashboardSDKMessage)
-          await streamGate
-          input.onMessage({
-            type: 'assistant',
-            message: {
-              content: [
-                {
-                  type: 'tool_use',
-                  id: 'plan-terminal-1',
-                  name: 'SubmitAtomicTaskPlan',
-                  input: {},
-                },
-              ],
-            },
-          })
-          input.onMessage({
-            type: 'user',
-            message: {
-              content: [
-                {
-                  type: 'tool_result',
-                  tool_use_id: 'plan-terminal-1',
-                  content: 'accepted',
-                },
-              ],
-            },
-          })
-        },
-        stop: () => undefined,
-      }),
-    }
-    const manager = new BeeGameSessionManager(runner, root)
-    const session = manager.start({
-      workspacePath,
-      userId: 'user-1',
-      workflowWorker: true,
-      workflowRunId: 'run-1',
-      workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'atomic-task-planner',
-    })
-
-    const send = manager.send(session.id, 'plan implementation tasks')
-    for (let attempt = 0; attempt < 50; attempt += 1) {
-      if (manager.hasInFlightToolSubmission(session.id, 'SubmitAtomicTaskPlan'))
-        break
-      await new Promise(resolve => setTimeout(resolve, 2))
-    }
-    expect(
-      manager.hasInFlightToolSubmission(session.id, 'SubmitAtomicTaskPlan'),
-    ).toBe(true)
-    releaseStream()
-    await send
-    expect(
-      manager.hasInFlightToolSubmission(session.id, 'SubmitAtomicTaskPlan'),
-    ).toBe(false)
-  })
-
-  test('publishes structural resource activity without claiming durable progress', async () => {
-    root = await mkdtemp(join(tmpdir(), 'beegame-resource-worker-progress-'))
-    const workspacePath = join(root, 'workspace')
-    const store = createRunStore(workspacePath, 'user-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-1',
-      projectId: 'project-1',
-      ownerId: 'user-1',
-      confirmedBriefDigest: 'brief-1',
-      checklistApproved: true,
-    })
-    const startedAt = new Date().toISOString()
-    await store.save({
-      ...initial,
-      phase: 'RESOURCE_PREPARATION',
-      lastProgressAt: startedAt,
-      activeDispatch: {
-        dispatchId: 'dispatch-1',
-        workerType: 'resource-curator',
-        phase: 'RESOURCE_PREPARATION',
-        revision: initial.revision.document,
-        status: 'running',
-        startedAt,
-      },
-    })
-    const runner: BeeGameSessionRunner = {
-      start: async () => ({
-        submit: async input => {
-          input.onMessage({
-            type: 'assistant',
-            message: {
-              content: [
-                {
-                  type: 'tool_use',
-                  id: 'resource-catalog-1',
-                  name: 'ResourceLibrary',
-                  input: {
-                    action: 'match_requirements',
-                  },
-                },
-              ],
-            },
-          })
-          input.onMessage({
-            type: 'assistant',
-            message: {
-              content: [
-                {
-                  type: 'text',
-                  text: 'Now I will inspect more resources.',
-                },
-              ],
-            },
-          } as DashboardSDKMessage)
-        },
-        stop: () => undefined,
-      }),
-    }
-    const manager = new BeeGameSessionManager(runner, root)
-    const session = manager.start({
-      workspacePath,
-      userId: 'user-1',
-      language: 'zh',
-      workflowWorker: true,
-      workflowRunId: 'run-1',
-      workflowDispatchId: 'dispatch-1',
-      workflowWorkerType: 'resource-curator',
-    })
-
-    await manager.send(session.id, 'prepare resources')
-    await waitForIdle(manager, session.id)
-    const run = await store.load()
-
-    expect(run?.currentMessage).toBe('正在匹配资源需求…')
-    expect(run?.lastProgressAt).toBe(startedAt)
-    manager.dispose()
-  })
-
-  test('does not grant Resource Library access to unrelated workflow workers', async () => {
+  test('leaves unsupported external tools on the existing permission path', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-non-resource-permission-'))
     const workspacePath = join(root, 'workspace')
     let decisionPromise: Promise<DashboardPermissionDecision> | undefined
@@ -512,11 +352,9 @@ describe('BeeGame session runtime resilience', () => {
         submit: async () => {
           decisionPromise = startInput.requestPermission?.({
             toolUseID: 'implementation-import-1',
-            toolName: 'ResourceLibrary',
-            message: 'Use resource matching outside the resource phase',
-            input: {
-              action: 'match_requirements',
-            },
+            toolName: 'UnknownExternalTool',
+            message: 'Use an unsupported external tool',
+            input: {},
           })
         },
         stop: () => undefined,
@@ -545,7 +383,7 @@ describe('BeeGame session runtime resilience', () => {
     expect(pending).toEqual([
       expect.objectContaining({
         toolUseID: 'implementation-import-1',
-        toolName: 'ResourceLibrary',
+        toolName: 'UnknownExternalTool',
       }),
     ])
     manager.resolveProjectPermission(
@@ -858,6 +696,64 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
+  test('returns native permission suggestions as session-only rules', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-session-tool-permission-'))
+    const workspacePath = join(root, 'workspace')
+    await mkdir(workspacePath, { recursive: true })
+    let decisionPromise: Promise<DashboardPermissionDecision> | undefined
+    const runner: BeeGameSessionRunner = {
+      start: async startInput => ({
+        submit: async () => {
+          decisionPromise = startInput.requestPermission?.({
+            toolUseID: 'project-session-bash-request',
+            toolName: 'Bash',
+            message: 'Run a shell command',
+            input: { command: 'npm run build' },
+            permissionSuggestions: [
+              {
+                type: 'addRules',
+                rules: [{ toolName: 'Bash', ruleContent: 'npm run:*' }],
+                behavior: 'allow',
+                destination: 'localSettings',
+              },
+            ],
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      projectId: 'project-1',
+      userId: 'user-1',
+    })
+
+    await manager.send(session.id, 'build the project')
+    await waitForIdle(manager, session.id)
+    manager.resolveProjectPermission(
+      'user-1',
+      'project-1',
+      workspacePath,
+      'project-session-bash-request',
+      { behavior: 'allow', scope: 'session' },
+    )
+
+    expect(await decisionPromise).toEqual({
+      behavior: 'allow',
+      scope: 'session',
+      updatedPermissions: [
+        {
+          type: 'addRules',
+          rules: [{ toolName: 'Bash', ruleContent: 'npm run:*' }],
+          behavior: 'allow',
+          destination: 'session',
+        },
+      ],
+    })
+    manager.dispose()
+  })
+
   test('preserves the project boundary denial when the workflow turn fails', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-project-boundary-failure-'))
     const workspacePath = join(root, 'workspace')
@@ -973,6 +869,51 @@ describe('BeeGame session runtime resilience', () => {
       autoDenied: true,
       reason: 'workflow_path_not_allowed',
     })
+    manager.dispose()
+  })
+
+  test('protected authority overrides a broad workflow write scope', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-workflow-protected-path-'))
+    const workspacePath = join(root, 'workspace')
+    await mkdir(join(workspacePath, 'docs'), { recursive: true })
+    let decisionPromise: Promise<DashboardPermissionDecision> | undefined
+    const runner: BeeGameSessionRunner = {
+      start: async startInput => ({
+        submit: async () => {
+          decisionPromise = startInput.requestPermission?.({
+            toolUseID: 'protected-document-write',
+            toolName: 'Edit',
+            message: 'Edit protected authority',
+            input: { file_path: join(workspacePath, 'docs', 'GDD.md') },
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      projectId: 'project-1',
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'implementation-worker',
+      workflowAllowedPaths: ['./'],
+      workflowProtectedPaths: ['docs/GDD.md', '.beegame/ir/'],
+    })
+
+    await manager.send(session.id, 'implement without changing authority')
+    await waitForIdle(manager, session.id)
+
+    expect(await decisionPromise).toEqual({
+      behavior: 'deny',
+      scope: 'once',
+      message: 'Workflow workers may not mutate protected project authority: docs/GDD.md.',
+    })
+    expect(
+      manager.events(session.id).find(event => event.type === 'permission.resolved')?.payload,
+    ).toMatchObject({ autoDenied: true, reason: 'workflow_protected_path' })
     manager.dispose()
   })
 
@@ -2021,6 +1962,31 @@ describe('BeeGame session runtime resilience', () => {
         .events(session.id)
         .some(event => event.payload?.type === 'billing.usage_record_failed'),
     ).toBe(false)
+    manager.dispose()
+  })
+
+  test('does not override native verification behavior for delivery workflow workers', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-workflow-review-owner-'))
+    const workspacePath = join(root, 'workspace')
+    let runtimeEnv: Record<string, string> | undefined
+    const runner: BeeGameSessionRunner = {
+      start: async input => {
+        runtimeEnv = input.env
+        return { submit: async () => {}, stop: () => undefined }
+      },
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowWorkerType: 'implementation-worker',
+    })
+
+    await manager.send(session.id, 'implement the task')
+    await waitForIdle(manager, session.id)
+
+    expect(runtimeEnv?.BEEGAME_EXTERNAL_REVIEW).toBeUndefined()
     manager.dispose()
   })
 })

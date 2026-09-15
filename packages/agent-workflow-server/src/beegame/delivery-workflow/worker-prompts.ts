@@ -8,26 +8,12 @@ import { assertSharedDocumentWorker } from './retired-foundation-author'
 
 export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   assertSharedDocumentWorker(request)
-  const resourceContentReadPaths =
-    request.workerType === 'resource-content-author'
-      ? [
-          ...(Array.isArray(request.contract.authorityPaths)
-            ? request.contract.authorityPaths
-            : []),
-          ...(Array.isArray(request.contract.repairPaths)
-            ? request.contract.repairPaths
-            : []),
-        ].filter(
-          (path, index, paths): path is string =>
-            typeof path === 'string' && paths.indexOf(path) === index,
-        )
-      : []
-  const pathScopeLabel = resourceContentReadPaths.length
-    ? 'Readable task paths'
-    : 'Writable paths'
-  const pathScope = resourceContentReadPaths.length
-    ? resourceContentReadPaths.join(', ')
-    : request.allowedPaths?.length
+  const consumesPublishedIr = [
+    'resource-planner',
+    'implementation-worker',
+    'acceptance-validator',
+  ].includes(request.workerType)
+  const pathScope = request.allowedPaths?.length
       ? request.allowedPaths.join(', ')
       : 'read-only'
   const canonicalArtifacts =
@@ -35,21 +21,27 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
           request.contract.documentSet === 'checklist'
         ? CANONICAL_PROJECT_DOCUMENTS
         : CANONICAL_PROJECT_ARTIFACTS)
+  const gameIrInstruction = formatGameIrInstruction(request)
   return [
     `BeeGame delivery worker: ${request.workerType}`,
     `Phase: ${request.phase}`,
     `Run: ${request.runId}`,
     `Revision: ${request.revision}`,
     `Workspace root: ${request.workspacePath}`,
-    `${pathScopeLabel}: ${pathScope}`,
+    `Writable paths: ${pathScope}`,
     `Canonical artifacts: ${canonicalArtifacts.join(', ')}`,
-    'The durable confirmed brief context and its digest are the product authority for this run.',
-    'Confirmed Brief settings are higher authority than free-form idea text; on conflict, do not preserve both sides as simultaneous requirements.',
+    consumesPublishedIr
+      ? ''
+      : 'The durable confirmed brief context and its digest are the product authority for this run.',
+    consumesPublishedIr
+      ? ''
+      : 'Confirmed Brief settings are higher authority than free-form idea text; on conflict, do not preserve both sides as simultaneous requirements.',
     undefined,
     undefined,
     workerInstruction(request),
     'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
     'Use Bee Game Studio normally. Its native tools, thinking, permissions, context management, and completion behavior remain available. Do not bind a resource decision to a particular game engine or platform unless the approved target explicitly requires it.',
+    gameIrInstruction,
     terminalInstruction(request),
     formatContract(request),
     undefined,
@@ -57,36 +49,19 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
 }
 
 function formatContract(request: WorkerDispatchRequest): string {
-  if (request.workerType === 'resource-content-author')
-    return JSON.stringify(formatResourceContentContract(request.contract))
   const { confirmedBriefContext: _confirmedBriefContext, ...contract } = request.contract
   return JSON.stringify(contract)
 }
 
-function formatResourceContentContract(
-  contract: Record<string, unknown>,
-): Record<string, unknown> {
-  const allowedKeys = [
-    'task',
-    'contentRoot',
-    'schema',
-    'jsonKinds',
-    'yamlKinds',
-    'authorityPaths',
-    'repairPaths',
-    'currentContentIssues',
-    'requiredRequirementIds',
-    'verifiedResourceIds',
-    'inventoryBindings',
-    'inventoryRevision',
-    'baselineResourceRevision',
-  ] as const
-  const projection = Object.fromEntries(
-    allowedKeys.flatMap(key =>
-      Object.hasOwn(contract, key) ? [[key, contract[key]]] : [],
-    ),
-  )
-  return projection
+function formatGameIrInstruction(request: WorkerDispatchRequest): string {
+  const gameIr = request.contract.gameIr
+  if (gameIr === undefined) return ''
+  if (typeof gameIr !== 'object' || Array.isArray(gameIr))
+    throw new Error('gameIr contract must be an object')
+  return [
+    'The injected contract.gameIr is the sole fixed Game IR version for this dispatch. Use its resultId, foundationRevision and publicationId to identify the stable publication, and use its module values, node IDs, references and edges exactly as authority.',
+    'Source documents and other prose explain design only; they must not silently produce a second specification. If they conflict with contract.gameIr, report the contradiction as an actionable finding for this worker and do not recompile, regenerate or mutate Game IR.',
+  ].join(' ')
 }
 
 function workerInstruction(request: WorkerDispatchRequest): string {
@@ -104,51 +79,47 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         '',
       ].join(' ')
     case 'resource-planner':
+      if (
+        Array.isArray(request.contract.currentContentIssues) &&
+        request.contract.currentContentIssues.length > 0
+      )
+        return [
+          'Continue the same direct CLI resource task using the complete injected Game IR.',
+          'Fix the deterministic contract errors in contract.currentContentIssues, preserve valid work, and finish the resource delivery normally.',
+        ].join(' ')
       return [
-        'Create the canonical Resource Production plan from only contract.authorityPaths and the confirmed brief. ASSET_PLAN owns the complete resource duties, ART_DIRECTION owns presentation constraints, and TECHNICAL_DESIGN owns runtime-consumable output formats. Do not reopen review or read other project documents.',
-        'Use AssetManifest submit_resource_plan exactly once. The service owns Manifest version, resource policy and canonical roots. Submit runtime target capabilities and complete stable requirements. Every requirement must include one structured acquisition_profile containing only canonical dimensions, asset kinds, usage tags, source-intrinsic required capabilities and approved style values. Composition, placement, scaling, connection, scene assembly and runtime behavior are content or implementation duties, never source-intrinsic acquisition constraints. Never infer this profile from IDs or filenames.',
-        'Never use target output formats as source-format admission rules. Source material may use another format when the current target adapter declares a deterministic direct or conversion delivery capability.',
-        'Do not browse the Resource Library, create or download files, write JSON/YAML, or implement gameplay. A successful plan submission ends this dispatch.',
-      ].join(' ')
-    case 'resource-curator':
-      return [
-        'Acquire or author the complete resource inventory for the established Manifest plan. Read only contract.authorityPaths and the Manifest. Do not modify requirements or content files.',
-        'Call ResourceLibrary match_requirements once. For a matched requirement, choose one returned bundle and judge only its authored metadata and technical facts, never filename, keywords, regular expressions, project names or requirement IDs. A no-match requirement may use one or more independently replaceable placeholders when its declared duties need separate resources; never mix library and placeholder decisions for one requirement.',
-        'A suitable candidate may satisfy its requirement through direct delivery or a declared target conversion adapter. Choose exact candidate identities. Use a placeholder decision for every service-proven no-match group so missing library material never stops delivery.',
-        'Submit one complete decision set through CommitResourceInventory. If a prior submission created a prepared or applying durable receipt, submit decisions: [] to resume that exact receipt instead of reconstructing decisions. It is the only mutation and terminal operation, preserves exact dependency closure, resumes durable progress after interruption, and derives bindings from the committed inventory. Do not write content or gameplay code.',
-      ].join(' ')
-    case 'resource-content-author': {
-      const writablePaths = Array.isArray(request.contract.repairPaths)
-        ? request.contract.repairPaths.filter(
-            (path): path is string => typeof path === 'string',
-          )
-        : []
-      return [
-        `Build the engine-neutral JSON/YAML documents at the exact writable paths in contract.repairPaths: ${writablePaths.length ? writablePaths.join(', ') : '<none>'}. Submit one documents object keyed by those exact paths. Bee Game Studio's native tools remain available for inspection, reasoning, and verification. Use contract.authorityPaths, contract.requiredRequirementIds, contract.verifiedResourceIds, and contract.inventoryBindings as the task authority. CommitResourceContent is the atomic delivery interface for the final document set and preserves every canonical document outside the writable path list.`,
-        'Use exactly contract.schema. JSON owns only contract.jsonKinds and YAML owns only contract.yamlKinds. Every submitted document contains exactly path, schema, id, kind, fulfills, resources and data. One coherent document may fulfill several requirements. fulfills contains only exact contract requirement IDs and resources contains only exact contract resource IDs. The single resource-registry data.bindings is the only requirement-to-resource binding representation and must agree with contract.inventoryBindings. Never duplicate the same fact in JSON and YAML.',
-        'When the complete writable set is ready, call CommitResourceContent once. The service serializes JSON/YAML and validates the merged set before replacing any file.',
-        'The service preserves every canonical document outside the exact writable path list during the atomic commit; never read, resubmit or rewrite those documents.',
-        'If verified inventory is genuinely missing, call CommitResourceContent needs_inventory with the exact missing requirement IDs. Do not invent a path, identity or embedded substitute.',
-      ].join(' ')
-    }
-    case 'atomic-task-planner':
-      return [
-        'Use contract.planningDocuments plus resourceIds and contentIds as the acceptance authority. Bee Game Studio may inspect the current workspace and use its native tools as needed to produce a correct plan.',
-        'Submit one dependency graph through SubmitAtomicTaskPlan. Each task owns durable implementation artifacts and project-owned verification actions. Checklist items have one owner; resource and content IDs are read-only dependencies.',
-        'Resources and content are ready before implementation. Tasks consume declared files; they do not download, generate substitute media or mutate assets/asset-manifest.json.',
-        'Do not create trailing cleanup, final verification or acceptance tasks. The workflow owns those phases.',
+        'Complete resource delivery in one normal CLI turn. Use the complete injected Game IR, contract.systemDeliveryContract and contract.resourceLibraryUsage as the product and output contract. Work autonomously with the available native tools and choose how to search, inspect, select, create and combine resources.',
+        'Deliver real runtime assets that satisfy the IR together as one coherent game presentation. Do not use arbitrary placeholders. This stage owns runtime assets, the canonical Manifest, and the minimal resource-binding registry under assets/. Scenes, source code, gameplay configuration and all other content definitions belong to implementation.',
+        'Keep all durable output under assets/ and follow contract.systemDeliveryContract for Manifest paths, fields, bindings, hashes and provenance. Do not download executable code or install packages. Use a web resource only when its source and commercial-use/web-redistribution license can be recorded.',
+        'When Resource Library usage is required, reuse only verified library resources already materialized in the project; if none exist, never fabricate library provenance. The host will report the missing user-provided library selection as needs_action.',
+        'End normally with a concise summary. The host performs only deterministic contract validation after the CLI turn.',
       ].join(' ')
     case 'implementation-worker':
+      if (
+        Array.isArray(request.contract.currentImplementationIssues) &&
+        request.contract.currentImplementationIssues.length > 0
+      )
+        return [
+          'Continue the same direct CLI implementation task using the complete injected Game IR.',
+          'Fix the deterministic host errors in contract.currentImplementationIssues, preserve valid work, run only the relevant checks, and finish normally.',
+        ].join(' ')
       return [
-        'Implement the active atomic task completely within allowedPaths. Treat current source, direct dependencies, verified resources, declared JSON/YAML content, and canonical design documents as available context.',
-        'Bee Game Studio may inspect the project and use its native tools as needed. Keep changes within the active task deliverables; resource acquisition and manifest changes remain separate workflow deliverables.',
-        'Execute every deterministic test, build, file and asset verification with project-owned tooling. Runtime checks are deferred to acceptance.',
+        'Complete contract.task within allowedPaths in one normal CLI turn. Start from the injected fixed published IR modules as the implementation specification and use the Manifest only to locate delivered runtime assets.',
+        'Do not proactively reread all canonical documents, recompile the IR, or rescan every content definition. Consult only the specific referenced source needed when an exact IR fact is missing or contradictory, and report that contradiction without creating a second specification.',
+        'Work normally with native tools. Audit the completed implementation once against the published IR and checklist and correct substantive functional or IR conflicts. Run existing non-runtime checks once when they exist; do not create a new verification framework or large one-off harness. If no check exists, perform only brief targeted static sanity checks. Runtime acceptance is a separate phase.',
       ].join(' ')
-    case 'implementation-auditor':
     case 'acceptance-validator':
+      return [
+        'Run the implemented game and verify the published IR and checklist as a read-only acceptance pass. Use the project\'s existing runtime and test tooling; do not modify project files.',
+        'In the final response, report one evidence line for every ID in contract.taskIds and contract.checklistIds, using exactly `TASK <id>: PASS|FAIL — <concrete observation>` or `CHECKLIST <id>: PASS|FAIL — <concrete observation>`. Mention relevant resource or content IDs naturally in those observations when they support the result; do not enumerate unrelated artifacts. Do not claim an ID without observing it.',
+        'After those evidence lines, end with exactly ACCEPTANCE: PASS only when every reported item passed; otherwise end with exactly ACCEPTANCE: FAIL.',
+      ].join(' ')
     case 'change-impact-analyzer':
+      return 'Review the requested change against the project as a read-only worker. Decide its actual impact autonomously; do not modify project files.'
     case 'question-answerer':
-      return 'Perform the assigned review or analysis as a read-only worker. Do not modify project files.'
+      return 'Answer the requested project question as a read-only worker. Do not modify project files.'
+    default:
+      throw new Error(`retired delivery worker: ${request.workerType}`)
   }
 }
 
@@ -164,22 +135,17 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
           ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
           : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
     case 'resource-planner':
-      return 'Call AssetManifest submit_resource_plan exactly once. Do not continue after the accepted call.'
-    case 'resource-curator':
-      return 'Call CommitResourceInventory exactly once with the complete bounded-match decision set, or with decisions: [] when resuming an existing prepared/applying receipt. The committed receipt is the terminal; do not return terminal JSON.'
-    case 'resource-content-author':
-      return 'Call CommitResourceContent exactly once with exactly the frozen writable document paths, or with the exact needs_inventory requirement IDs. The accepted call is the terminal; do not return terminal JSON or completion prose.'
-    case 'atomic-task-planner':
-      return 'Call SubmitAtomicTaskPlan exactly once. Assign every checklist ID to one task and declare resource/content dependencies directly on tasks.'
+      return 'Finish the complete assets/ resource contract, verify the Manifest, local resources and content, then end the turn normally. The host owns deterministic acceptance and receipt generation.'
     case 'implementation-worker':
-      return 'Call SubmitImplementationResult exactly once with status, changedPaths and one concise verification observation per task verification. Do not submit resource-binding arrays, verifiedArtifacts, terminal JSON or workflow evidence.'
-    case 'implementation-auditor':
+      return 'Finish the implementation and deterministic checks, then end the turn normally with a concise summary. The host verifies expected artifacts and persists workflow evidence.'
     case 'acceptance-validator':
-      return 'Call SubmitValidationResult exactly once with status and findings. Passed requires no findings; failed or blocked requires actionable findings. Do not submit ownership IDs, terminal JSON or workflow evidence.'
+      return 'Run runtime acceptance normally, report the required per-ID evidence lines, and finish with the required plain-text ACCEPTANCE verdict line.'
     case 'change-impact-analyzer':
-      return 'Call SubmitChangeImpactResult exactly once with classification, affected IDs and rationale.'
+      return 'End with exactly four plain-text lines: `CLASSIFICATION: question|implementation_only|documents_required`, `AFFECTED_REQUIREMENTS: <comma-separated IDs or NONE>`, `AFFECTED_CHECKLIST: <comma-separated IDs or NONE>`, and `RATIONALE: <concise single-line rationale>`.'
     case 'question-answerer':
-      return 'Call SubmitQuestionAnswerResult exactly once with only the answer.'
+      return 'End normally with the answer in the final response.'
+    default:
+      throw new Error(`retired delivery worker: ${request.workerType}`)
   }
 }
 

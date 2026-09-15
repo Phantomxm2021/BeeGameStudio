@@ -13,7 +13,7 @@ afterEach(async () =>
   ),
 )
 
-describe('resource-content readiness', () => {
+describe('resource delivery readiness', () => {
   it('requires verified resources and JSON/YAML coverage', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'beegame-content-'))
     roots.push(workspace)
@@ -27,7 +27,7 @@ describe('resource-content readiness', () => {
       version: 8,
       project_target: {
         asset_format_capabilities: ['svg', 'json', 'yaml'],
-        resource_library_usage: 'optional',
+        resource_library_usage: 'preferred',
         runtime_asset_root: 'assets/runtime',
         content_root: 'assets/content',
         generated_asset_root: 'assets/generated',

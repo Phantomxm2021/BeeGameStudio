@@ -22,24 +22,23 @@ async function workspace() {
 }
 
 describe('workflow display tasks', () => {
-  test('projects the four resource tasks from the durable cursor', async () => {
+  test('projects one direct resource delivery task instead of internal cursors', async () => {
     const tasks = projectAssetDisplayTasks({
       workspacePath: await workspace(),
       phase: 'RESOURCE_PREPARATION',
       workflowStatus: 'running',
       thinking: 'working',
       activeDispatch: {
-        workerType: 'resource-content-author',
+        workerType: 'resource-planner',
         status: 'running',
       },
-      resourceProductionTask: 'RESOURCE_CONTENT',
+      resourceProductionTask: 'RESOURCE_DELIVERY',
     })
-    expect(tasks.map(task => task.status)).toEqual([
-      'completed',
-      'completed',
-      'running',
-      'pending',
-    ])
+    expect(tasks).toEqual([expect.objectContaining({
+      id: 'RESOURCE_DELIVERY',
+      title: '资源获取与交付',
+      status: 'running',
+    })])
   })
 
   test('projects parallel foundation authoring from durable document states', async () => {

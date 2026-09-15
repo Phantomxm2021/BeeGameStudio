@@ -103,6 +103,7 @@ describe('remote usage billing client', () => {
     expect(request?.headers.get('x-beegame-credit-control-token')).toBe(
       'service-token',
     )
+    expect(request?.signal).toBeInstanceOf(AbortSignal)
     expect(await request?.json()).toMatchObject({
       userId: 'user-1',
       sessionId: 'session-1',

@@ -1,5 +1,4 @@
 import { z } from 'zod/v4'
-import { atomicTaskSchema } from './schema'
 
 const base = z.object({ revision: z.string().min(1) }).strict()
 
@@ -37,59 +36,11 @@ export const documentAuthorTerminalSchema = z
   })
   .strict()
 
-const resourceTaskMetricsSchema = z
-  .object({
-    catalogPayloadBytes: z.number().int().nonnegative(),
-    catalogCallTypes: z.array(z.string().min(1)),
-    canonicalMutationCount: z.number().int().nonnegative(),
-  })
-  .strict()
-
 export const resourcePlannerTerminalSchema = base
   .extend({
     workerType: z.literal('resource-planner'),
     status: z.literal('completed'),
     writtenPaths: z.array(z.string().min(1)),
-    taskMetrics: resourceTaskMetricsSchema,
-  })
-  .strict()
-
-export const resourceCuratorTerminalSchema = base
-  .extend({
-    workerType: z.literal('resource-curator'),
-    status: z.literal('completed'),
-    catalogObserved: z.boolean(),
-    resourceIds: z.array(z.string().min(1)),
-    bindings: z.array(
-      z
-        .object({
-          requirementId: z.string().min(1),
-          resourceIds: z.array(z.string().min(1)).min(1),
-        })
-        .strict(),
-    ),
-    writtenPaths: z.array(z.string().min(1)),
-    taskMetrics: resourceTaskMetricsSchema,
-  })
-  .strict()
-
-export const resourceContentAuthorTerminalSchema = base
-  .extend({
-    workerType: z.literal('resource-content-author'),
-    status: z.enum(['completed', 'needs_inventory']),
-    contentIds: z.array(z.string().min(1)),
-    writtenPaths: z.array(z.string().min(1)),
-    missingRequirementIds: z.array(z.string().min(1)),
-    taskMetrics: resourceTaskMetricsSchema,
-  })
-  .strict()
-
-export const atomicTaskPlannerTerminalSchema = base
-  .extend({
-    workerType: z.literal('atomic-task-planner'),
-    status: z.literal('completed'),
-    tasks: z.array(atomicTaskSchema).min(1),
-    evidencePath: z.string().min(1),
   })
   .strict()
 
@@ -147,28 +98,12 @@ function requireActionableFindings(
   }
 }
 
-export const implementationAuditorTerminalSchema = base
-  .extend({
-    workerType: z.literal('implementation-auditor'),
-    status: z.enum(['passed', 'failed', 'blocked']),
-    auditedTaskIds: z.array(z.string().min(1)),
-    checklistIds: z.array(z.string().min(1)),
-    resourceIds: z.array(z.string().min(1)),
-    contentIds: z.array(z.string().min(1)),
-    findings: z.array(implementationFindingSchema),
-    evidencePath: z.string().min(1),
-  })
-  .strict()
-  .superRefine(requireActionableFindings)
-
 export const acceptanceValidatorTerminalSchema = base
   .extend({
     workerType: z.literal('acceptance-validator'),
     status: z.enum(['passed', 'failed', 'blocked']),
     validatedTaskIds: z.array(z.string().min(1)),
     checklistIds: z.array(z.string().min(1)),
-    resourceIds: z.array(z.string().min(1)),
-    contentIds: z.array(z.string().min(1)),
     findings: z.array(implementationFindingSchema),
     evidencePath: z.string().min(1),
   })
@@ -190,11 +125,6 @@ export const changeImpactTerminalSchema = z
   })
   .strict()
 
-export const changeImpactSubmissionSchema = changeImpactTerminalSchema.omit({
-  workerType: true,
-  evidencePath: true,
-})
-
 export const questionAnswerTerminalSchema = z
   .object({
     workerType: z.literal('question-answerer'),
@@ -203,21 +133,10 @@ export const questionAnswerTerminalSchema = z
   })
   .strict()
 
-export const questionAnswerSubmissionSchema = questionAnswerTerminalSchema.omit(
-  {
-    workerType: true,
-    evidencePath: true,
-  },
-)
-
 export const workerTerminalSchema = z.discriminatedUnion('workerType', [
   documentAuthorTerminalSchema,
   resourcePlannerTerminalSchema,
-  resourceCuratorTerminalSchema,
-  resourceContentAuthorTerminalSchema,
-  atomicTaskPlannerTerminalSchema,
   implementationWorkerTerminalSchema,
-  implementationAuditorTerminalSchema,
   acceptanceValidatorTerminalSchema,
   changeImpactTerminalSchema,
   questionAnswerTerminalSchema,

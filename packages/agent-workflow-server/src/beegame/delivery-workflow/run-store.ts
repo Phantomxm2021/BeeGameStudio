@@ -3,6 +3,7 @@ import { dirname, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import {
   mkdir,
+  link,
   open,
   readFile,
   rename,
@@ -26,6 +27,7 @@ import type {
   WorkflowUsage,
 } from './types'
 import { DELIVERY_RUN_SCHEMA_VERSION } from './types'
+import { isPublicStageActive } from './public-stage-routing'
 import { sanitizeWorkflowDisplayMessage } from './workflow-display-message'
 import { assertNoRetiredAuthorRun, assertNoRetiredAuthorHandoff } from './retired-foundation-author'
 import { assertNoRetiredFoundationReviewRun } from './retired-foundation-review'
@@ -362,7 +364,7 @@ export function createInitialDeliveryRun(input: {
     tasks: [],
     evidence: {},
     foundationDraftState: { completedPaths: [] },
-    resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
+    resourceProductionState: { currentTask: 'RESOURCE_DELIVERY' },
     createdAt: timestamp,
     updatedAt: timestamp,
   }
@@ -423,12 +425,16 @@ export function createRunStore(workspacePath: string, ownerId: string) {
   ): Promise<WorkflowLock> {
     const lease = createLease(runId, purpose)
     await mkdir(filePaths.directory, { recursive: true })
+    const pendingPath = `${filePaths.lock}.${lease.leaseId}.pending`
     try {
-      await writeFile(filePaths.lock, `${JSON.stringify(lease)}\n`, {
+      await writeFile(pendingPath, `${JSON.stringify(lease)}\n`, {
         flag: 'wx',
       })
+      await link(pendingPath, filePaths.lock)
     } catch {
       throw new WorkflowStoreError('workflow project is locked', 'locked')
+    } finally {
+      await unlink(pendingPath).catch(() => undefined)
     }
     return lease
   }
@@ -791,24 +797,10 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         : undefined
     const ordinaryEvent = {
       ...ordinaryEventBase,
-      // tasks.planned has a strict event schema; all other workflow events
-      // retain the catch-all stage card extension.
-      ...(stageSnapshot && event.type !== 'tasks.planned'
-        ? { stageSnapshot }
-        : {}),
+      ...(stageSnapshot ? { stageSnapshot } : {}),
     } as WorkflowEvent
-    const stageSnapshotEvent =
-      stageSnapshot && event.type === 'tasks.planned'
-        ? ({
-            ...ordinaryEventBase,
-            eventId: randomUUID(),
-            type: 'workflow.stage_snapshot',
-            stageSnapshot,
-          } as WorkflowEvent)
-        : undefined
     const pendingEvents: WorkflowEvent[] = [
       ordinaryEvent,
-      ...(stageSnapshotEvent ? [stageSnapshotEvent] : []),
       ...acceptedUnits.map(
         unit =>
           ({
@@ -1075,7 +1067,7 @@ export function createRunStore(workspacePath: string, ownerId: string) {
       if (!run) return run
       // The public author module owns execution recovery. This store may
       // observe its orchestration link, but cannot repair private author state.
-      if (run.authorStage) return run
+      if (isPublicStageActive(run)) return run
       // Public links return above; empty pre-invocation snapshots pass too.
       // Only records with actual obsolete Author execution evidence are rejected.
       assertNoRetiredAuthorRun(run)

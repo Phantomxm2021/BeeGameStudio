@@ -34,7 +34,7 @@ const start = (): AuthorStartInput => {
     inputDigest: authorDigest({ ownerId: 'owner', projectId: 'project', input }) }
 }
 
-test('finishing retains advisory time thresholds but drops legacy output caps', () => {
+test('explicit diagnostic thresholds remain available without output caps', () => {
   expect(boundedFinishExecutionLimits(defaultAuthorExecutionLimits)).toEqual(caps)
   const smaller = { maxActiveMs: 99, maxNoDocumentProgressMs: 22 }
   expect(boundedFinishExecutionLimits(smaller)).toEqual({ maxActiveMs: 99, maxNoDocumentProgressMs: 22 })
@@ -42,7 +42,7 @@ test('finishing retains advisory time thresholds but drops legacy output caps', 
   expect(defaultAuthorExecutionLimits.maxActiveMs).toBe(30 * 60_000)
 })
 
-test('an explicit resumed old candidate finishes unchanged drafts with bounded limits and two sealed usages', async () => {
+test('an explicit resumed old candidate finishes unchanged drafts without production time limits and seals two usages', async () => {
   const root = await workspace()
   // Retained, valid baseline documents must not force a fresh full budget.
   for (const path of CANONICAL_FOUNDATION_DOCUMENTS) await writeFile(join(root, path), `# ${path}\n\nKeep this existing design decision.\n`)
@@ -59,11 +59,11 @@ test('an explicit resumed old candidate finishes unchanged drafts with bounded l
     await input.onUsage(usage)
     if (calls === 1) {
       expect(input.finishOnly).not.toBe(true)
-      expect(input.executionLimits).toEqual(defaultAuthorExecutionLimits)
+      expect(input.executionLimits).toBeUndefined()
       return { failure: 'active_time_budget', usage }
     }
     expect(input.finishOnly).toBe(true)
-    expect(input.executionLimits).toEqual(caps)
+    expect(input.executionLimits).toBeUndefined()
     for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
       expect(await readFile(join(candidate, path), 'utf8')).toBe(await readFile(join(root, path), 'utf8'))
     await input.onProgress({ modelResponses: 1, message: 'Checking preserved drafts' })
@@ -118,7 +118,7 @@ test('native finish mode exceeds the retired output cap while preserving scope a
     onUsage: async () => {}, onProgress: async () => {},
   }, async input => {
     expect(input.prompt).toContain('Preserve valid work')
-    expect(input.env.BEEGAME_EXTERNAL_REVIEW).toBe('1')
+    expect(input.env.BEEGAME_EXTERNAL_REVIEW).toBeUndefined()
     expect(input.prompt).toContain('do not restart the assignment')
     expect(input.prompt).toContain('do not add speculative polish or repeat the check')
     expect(input.prompt).not.toContain('"maxOutputTokens"')

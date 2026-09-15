@@ -4,11 +4,13 @@ import { GATE_REFERENCE_DESCRIPTION, parseAcceptanceChecklist } from './acceptan
 test('accepts scenario sources and the fixed owner-gate form', () => {
   const result = parseAcceptanceChecklist([
     '- [ ] PATH-01 [docs/GDD.md#core_loop] Start a session, complete the loop, and record the stated reward evidence.',
+    '- [ ] AC-01 [docs/GDD.md#AC-01] Start the accepted IR scenario and record its observable outcome.',
     `- [ ] BAL-01 [docs/BALANCE_DESIGN.md#formulas] ${GATE_REFERENCE_DESCRIPTION}`,
   ].join('\n'))
   expect(result.issues).toEqual([])
   expect(result.tasks.map(task => task.source)).toEqual([
     '[docs/GDD.md#core_loop]',
+    '[docs/GDD.md#AC-01]',
     '[docs/BALANCE_DESIGN.md#formulas]',
   ])
 })

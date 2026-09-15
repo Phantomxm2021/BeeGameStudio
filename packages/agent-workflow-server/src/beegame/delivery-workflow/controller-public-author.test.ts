@@ -126,7 +126,7 @@ test('legacy dispatch, terminal replay and recovery cannot mutate a linked autho
     await expect(retryRun(input)).rejects.toThrow('not legacy recovery')
     await expect(stopRun({ ...input, reason: 'old stop' })).rejects.toThrow('not legacy recovery')
     expect(await f.controller.store.reconcile(async () => { throw new Error('Must not inspect old worker sessions') })).toEqual(before)
-    await expect(f.controller.requestChange(f.run, 'change the brief')).rejects.toThrow('public handoff acceptance')
+    await expect(f.controller.requestChange(f.run, 'change the brief')).rejects.toThrow('Public document stage is still active')
     expect(await f.controller.store.load()).toEqual(before)
     expect(f.calls.legacy).toBe(0)
   } finally { await f.controller.dispose() }

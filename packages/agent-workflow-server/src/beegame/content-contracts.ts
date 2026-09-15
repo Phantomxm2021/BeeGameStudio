@@ -41,6 +41,7 @@ export type BeeGameContentAudit = {
   hasGlobalIssues: boolean
   coveredRequirementIds: string[]
   referencedResourceIds: string[]
+  resourceBindings: Array<{ requirementId: string; resourceIds: string[] }>
   issues: string[]
 }
 
@@ -63,6 +64,7 @@ export function auditBeeGameContent(
       hasGlobalIssues: true,
       coveredRequirementIds: [],
       referencedResourceIds: [],
+      resourceBindings: [],
       issues: ['project_target is required before content preparation.'],
     }
   const workspace = resolve(workspacePath)
@@ -80,6 +82,7 @@ export function auditBeeGameContent(
       hasGlobalIssues: true,
       coveredRequirementIds: [],
       referencedResourceIds: [],
+      resourceBindings: [],
       issues: [`Content root does not exist: ${target.content_root}.`],
     }
   const documents: BeeGameContentDocument[] = []
@@ -140,6 +143,10 @@ export function validateBeeGameContentDocuments(
   const ids = new Set<string>()
   const paths = new Set<string>()
   let registryCount = 0
+  const resourceBindings: Array<{
+    requirementId: string
+    resourceIds: string[]
+  }> = []
   for (const document of documents) {
     const path = document.path.replaceAll('\\', '/')
     const issueStart = issues.length
@@ -177,12 +184,16 @@ export function validateBeeGameContentDocuments(
     if (!kind) issues.push(`${path}: kind must be a trimmed non-empty string.`)
     else if (extension === '.json' && !JSON_CONTENT_KINDS.has(kind))
       issues.push(
-        `${path}: JSON kind must be one of ${BEEGAME_JSON_CONTENT_KINDS.join(', ')}.`,
+        `${path}: JSON kind must be one of ${BEEGAME_JSON_CONTENT_KINDS.join(', ')}; received ${JSON.stringify(kind)}, which is not allowed.`,
       )
-    else if (extension !== '.json' && !YAML_CONTENT_KINDS.has(kind))
+    else if (extension !== '.json' && !YAML_CONTENT_KINDS.has(kind)) {
+      const pluralKind = YAML_CONTENT_KINDS.has(`${kind}s`)
+        ? `${kind}s`
+        : undefined
       issues.push(
-        `${path}: YAML kind must be one of ${BEEGAME_YAML_CONTENT_KINDS.join(', ')}.`,
+        `${path}: YAML kind must be one of ${BEEGAME_YAML_CONTENT_KINDS.join(', ')}; received ${JSON.stringify(kind)}, which is not allowed.${pluralKind ? ` Replace the exact field value ${JSON.stringify(kind)} with ${JSON.stringify(pluralKind)}.` : ''}`,
       )
+    }
     if (
       !Array.isArray(value.fulfills) ||
       fulfills.length !== value.fulfills.length
@@ -218,6 +229,7 @@ export function validateBeeGameContentDocuments(
         resources,
         requirementIds,
         verifiedResourceIds,
+        resourceBindings,
         issues,
       })
     }
@@ -259,6 +271,7 @@ export function validateBeeGameContentDocuments(
     hasGlobalIssues,
     coveredRequirementIds: [...covered],
     referencedResourceIds: [...referenced],
+    resourceBindings,
     issues,
   }
 }
@@ -270,6 +283,7 @@ function validateResourceRegistry(input: {
   resources: string[]
   requirementIds: Set<string>
   verifiedResourceIds: Set<string>
+  resourceBindings: Array<{ requirementId: string; resourceIds: string[] }>
   issues: string[]
 }): void {
   const data = input.value.data
@@ -325,6 +339,12 @@ function validateResourceRegistry(input: {
           `${input.path}: unknown or unverified registry resource: ${resourceId}.`,
         )
     }
+    if (
+      input.requirementIds.has(requirementId) &&
+      resourceIds.length > 0 &&
+      resourceIds.every(resourceId => input.verifiedResourceIds.has(resourceId))
+    )
+      input.resourceBindings.push({ requirementId, resourceIds })
   }
   if (!sameSet(boundRequirements, new Set(input.fulfills)))
     input.issues.push(

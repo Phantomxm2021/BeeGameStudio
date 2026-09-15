@@ -16,6 +16,11 @@ function canonical(value: unknown): string {
   if (value && typeof value === 'object') return `{${Object.keys(value).filter(key => (value as Record<string, unknown>)[key] !== undefined).sort().map(key => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(',')}}`
   return JSON.stringify(value) ?? 'null'
 }
+function withoutAuthorTiming(run: DeliveryRun): DeliveryRun {
+  if (!run.authorStage?.timing) return run
+  const { timing: _timing, ...authorStage } = run.authorStage
+  return { ...run, authorStage }
+}
 function requestFor(run: DeliveryRun, requestId: string): AuthorStartInput {
   const input = { confirmedBrief: run.confirmedBriefContext, confirmedBriefDigest: run.confirmedBriefDigest,
     ...(run.changeRequest ? { changeRequest: run.changeRequest } : {}) }
@@ -108,7 +113,9 @@ export function createFoundationAuthoringLink(input: { store: RunStore; author: 
         result = await input.author.getResult(link.handle)
       }
       const next = project(run, result)
-      if (canonical(next) === canonical(run)) return run
+      const semanticChange = canonical(withoutAuthorTiming(next)) !== canonical(withoutAuthorTiming(run))
+      const firstTimingObservation = !run.authorStage?.timing && !!next.authorStage?.timing
+      if (!semanticChange && !firstTimingObservation) return run
       return save(next, lease, 'foundation.authoring.public_result')
     })
   }

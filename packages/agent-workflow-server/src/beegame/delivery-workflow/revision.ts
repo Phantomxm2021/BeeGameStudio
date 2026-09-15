@@ -164,28 +164,6 @@ export async function computeResourceContentDigest(
     .digest('hex')
 }
 
-/** Hash only the canonical Manifest and its registered local resource files. */
-export async function computeResourceInventoryRevision(
-  workspacePath: string,
-): Promise<string> {
-  const root = resolve(workspacePath)
-  let manifest: ReturnType<typeof readBeeGameAssetManifestSync> | undefined
-  try {
-    manifest = readBeeGameAssetManifestSync(root)
-  } catch {
-    // The resolver treats a missing or malformed Manifest as RESOURCE_PLAN.
-  }
-  const resourceFiles = [
-    ...new Set(manifest?.resources.flatMap(value => value.file_paths) ?? []),
-  ]
-  const materialDigest = await digestFiles(root, resourceFiles, '<missing>')
-  return createHash('sha256')
-    .update(manifest ? stableJson(manifest) : '<missing>')
-    .update('\0')
-    .update(materialDigest)
-    .digest('hex')
-}
-
 export async function computeImplementationRevision(
   workspacePath: string,
 ): Promise<string> {

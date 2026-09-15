@@ -4,7 +4,6 @@ import {
   CANONICAL_ASSET_MANIFEST,
   CANONICAL_FOUNDATION_DOCUMENTS,
   CANONICAL_PROJECT_DOCUMENTS,
-  RESOURCE_PRODUCTION_TASKS,
   type ResourceProductionTask,
   type DocumentWorkflowStep,
 } from './types'
@@ -150,67 +149,27 @@ export function projectDocumentDisplayTasks(
   })
 }
 
-/**
- * Projects resource work from the canonical modular manifest and content files.
- * only inventory authority: the UI does not infer work from chat text or keep
- * a second resource/task model.
- */
+/** Projects the single direct resource CLI turn; internal validation cursors are not user tasks. */
 export function projectAssetDisplayTasks(
   input: AssetDisplayTaskInput,
 ): DocumentDisplayTask[] {
   const dispatch = objectValue(input.activeDispatch)
-  const workerType = stringValue(dispatch?.workerType)
   const dispatchStatus = stringValue(dispatch?.status)
-  const active =
-    input.workflowStatus === 'running' &&
-    input.thinking === 'working' &&
-    dispatchStatus === 'running'
-
-  const currentIndex = RESOURCE_PRODUCTION_TASKS.indexOf(
-    input.resourceProductionTask,
-  )
-  const workerByTask: Record<ResourceProductionTask, string | undefined> = {
-    RESOURCE_PLAN: 'resource-planner',
-    RESOURCE_INVENTORY: 'resource-curator',
-    RESOURCE_CONTENT: 'resource-content-author',
-    RESOURCE_GATE: undefined,
-  }
-  const titleByTask: Record<ResourceProductionTask, string> = {
-    RESOURCE_PLAN: '资源需求与生产计划',
-    RESOURCE_INVENTORY: '完整资源库存',
-    RESOURCE_CONTENT: 'JSON / YAML 内容描述',
-    RESOURCE_GATE: '资源与内容门禁',
-  }
-  return RESOURCE_PRODUCTION_TASKS.map((task, index) => {
-    const current = index === currentIndex
-    const dispatchOwnsTask = workerByTask[task] === workerType
-    return {
-      id: task,
-      title: titleByTask[task],
-      status:
-        index < currentIndex
-          ? ('completed' as const)
-          : !current
-            ? ('pending' as const)
-            : workflowStopped(input.workflowStatus)
-              ? ('stopped' as const)
-              : workflowFailed(input.workflowStatus)
-                ? ('failed' as const)
-                : task === 'RESOURCE_GATE'
-                  ? input.workflowStatus === 'running'
-                    ? ('running' as const)
-                    : ('pending' as const)
-                  : dispatchOwnsTask
-                    ? dispatchTaskStatus(
-                        dispatchStatus,
-                        active,
-                        input.workflowStatus,
-                      )
-                    : ('pending' as const),
-      attempt: 0,
-      operation: 'produce' as const,
-    }
-  })
+  return [{
+    id: 'RESOURCE_DELIVERY',
+    title: '资源获取与交付',
+    status: workflowStopped(input.workflowStatus)
+      ? 'stopped'
+      : workflowFailed(input.workflowStatus)
+        ? 'failed'
+        : input.workflowStatus === 'running'
+          ? 'running'
+          : dispatchStatus === 'completed'
+            ? 'completed'
+            : 'pending',
+    attempt: 0,
+    operation: 'produce',
+  }]
 }
 
 function dispatchTaskStatus(

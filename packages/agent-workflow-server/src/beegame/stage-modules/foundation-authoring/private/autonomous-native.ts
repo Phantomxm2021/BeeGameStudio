@@ -4,7 +4,7 @@ import { nativeFileAgentEnvironment, runNativeFileAgent, type FileAgentInput, ty
 import type { AuthorUsage } from './contract'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './domain/types'
 import { autonomousAuthorReadOnlyPaths } from './autonomous-files'
-import { boundedFinishExecutionLimits, defaultAuthorExecutionLimits, startAuthorBudget, type AuthorExecutionLimits } from './execution-budget'
+import { boundedFinishExecutionLimits, startAuthorBudget, type AuthorExecutionLimits } from './execution-budget'
 
 export const autonomousAuthorReportSchema = z.strictObject({
   status: z.enum(['completed', 'blocked']),
@@ -144,33 +144,34 @@ export type AutonomousNativeExecutor = (input: AutonomousNativeInput) => Promise
 export async function runAutonomousAuthor(input: AutonomousNativeInput,
   execute: (input: FileAgentInput) => Promise<FileAgentResult> = runNativeFileAgent): Promise<AutonomousNativeOutcome> {
   const meter = createAutonomousAuthorUsageMeter()
-  const configuredLimits = input.executionLimits ?? defaultAuthorExecutionLimits
-  const limits = input.finishOnly ? boundedFinishExecutionLimits(configuredLimits) : configuredLimits
+  const limits = input.executionLimits && input.finishOnly
+    ? boundedFinishExecutionLimits(input.executionLimits)
+    : input.executionLimits
   let lastModelResponses = 0
-  const budget = await startAuthorBudget(input.workspacePath, limits, async warning => {
+  const budget = limits ? await startAuthorBudget(input.workspacePath, limits, async warning => {
     const message = warning === 'active_time_warning'
       ? '运行时间较长，任务继续；时间阈值仅告警，不自动终止'
       : '文档较长时间未变化，任务继续；这不代表模型停止生成'
     await appendFile(input.logPath, JSON.stringify({ at: new Date().toISOString(), event: warning,
       data: { advisoryOnly: true, modelContinues: true } }) + '\n', { mode: 0o600 })
     await input.onProgress({ modelResponses: lastModelResponses, message })
-  })
+  }) : undefined
   let lastUsage = ''
   let result: FileAgentResult
   try {
     result = await execute({
     command: input.configuration.command,
-    // The workflow owns independent review after Author completes. Do not let
-    // generic CLI completion nudges insert another verification stage here.
-    env: { ...nativeFileAgentEnvironment(input.configuration.env), BEEGAME_EXTERNAL_REVIEW: '1' },
+    env: nativeFileAgentEnvironment(input.configuration.env),
     workspacePath: input.workspacePath, logPath: input.logPath,
     responseTrace: true,
     writablePaths: [...CANONICAL_FOUNDATION_DOCUMENTS], allowWorkingFiles: true,
-    readOnlyPaths: autonomousAuthorReadOnlyPaths, signal: AbortSignal.any([input.signal, budget.signal]),
+    readOnlyPaths: autonomousAuthorReadOnlyPaths,
+    signal: budget ? AbortSignal.any([input.signal, budget.signal]) : input.signal,
     prompt: input.finishOnly ? autonomousAuthorFinishPrompt(input.language) : autonomousAuthorPrompt(input.language),
     schema: z.toJSONSchema(autonomousAuthorReportSchema, { target: 'draft-7' }),
     onProgress: progress => {
       lastModelResponses = progress.modelResponses
+      if (!budget) return input.onProgress(progress)
       const documents = budget.progress()
       return input.onProgress({ ...progress, message: progress.message +
         ' · 本次已观察到 ' + documents.changedDocuments + '/8 份文档内容变化（非验收进度）' +
@@ -182,9 +183,9 @@ export async function runAutonomousAuthor(input: AutonomousNativeInput,
       const encoded = JSON.stringify(value)
       if (encoded !== lastUsage) { await input.onUsage(value); lastUsage = encoded }
     },
-  }) } finally { await budget.close() }
+  }) } finally { await budget?.close() }
   const total = meter.snapshot()
-  const failure = input.signal.aborted ? 'stopped' : budget.failure() ?? result.failure ?? (!total ? 'usage_unavailable' : undefined)
+  const failure = input.signal.aborted ? 'stopped' : budget?.failure() ?? result.failure ?? (!total ? 'usage_unavailable' : undefined)
   if (failure) return { failure, usage: total }
   const report = autonomousAuthorReportSchema.safeParse(result.result?.structured_output)
   return report.success ? { report: report.data, usage: total } : { failure: 'invalid_completion', usage: total }

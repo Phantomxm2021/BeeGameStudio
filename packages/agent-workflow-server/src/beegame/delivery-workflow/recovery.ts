@@ -3,16 +3,13 @@ import { assertNoRetiredFoundationReviewRun, retiredFoundationRunningDispatches 
 import { createHash, randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import { transitionDeliveryRun } from './transition'
+import { isPublicStageActive } from './public-stage-routing'
 import {
   computeDocumentRevision,
   computeResourceContentDigest,
   computeResourceRevision,
   computeWorkspaceRevision,
 } from './revision'
-import {
-  auditAssetContract,
-  type AssetContractAudit,
-} from '../asset-contract-audit'
 import {
   DELIVERY_RUN_SCHEMA_VERSION,
   type AcceptedWorkflowUnit,
@@ -31,10 +28,6 @@ import {
   projectExactResumeRun,
   proveExactRawActiveUnitId,
 } from './recovery-projector'
-import {
-  createResourceContentTerminalFromReceipt,
-  reconcileResourceContentCommitReceipt,
-} from '../native-resource-content-tool'
 
 export {
   inspectWorkflowSnapshot,
@@ -44,36 +37,6 @@ export {
 
 const workspaceRecoveryQueues = new Map<string, Promise<void>>()
 const workspaceResumeQueues = new Map<string, Promise<DeliveryRun>>()
-export function shouldRefreshProvisionalResourceInventory(
-  run: Pick<DeliveryRun, 'phase' | 'resourceProductionState'>,
-  audit: Pick<AssetContractAudit, 'valid' | 'requirements' | 'resources'>,
-): boolean {
-  if (
-    !audit.valid ||
-    run.phase !== 'RESOURCE_PREPARATION' ||
-    run.resourceProductionState.currentTask !== 'RESOURCE_GATE'
-  )
-    return false
-
-  const requiredRequirementIds = new Set(
-    audit.requirements
-      .filter(requirement => requirement.required)
-      .map(requirement => requirement.id),
-  )
-  const boundResourceIds = new Set(
-    run.resourceProductionState.inventoryReceipt?.bindings
-      .filter(binding => requiredRequirementIds.has(binding.requirementId))
-      .flatMap(binding => binding.resourceIds) ?? [],
-  )
-  return audit.resources.some(
-    resource =>
-      resource.provisional &&
-      resource.status === 'verified' &&
-      resource.issues.length === 0 &&
-      boundResourceIds.has(resource.id),
-  )
-}
-
 export class WorkflowRecoveryTransactionError extends Error {
   constructor(
     message: string,
@@ -220,116 +183,6 @@ async function reconcileActiveCanonicalReceipt(input: {
     if (snapshotRecord(request.contract)?.documentSet !== 'checklist')
       recoveryConflict(RETIRED_FOUNDATION_AUTHOR)
     return { inspection: input.inspection, events: input.events, acceptedUnits: [] }
-  }
-
-  if (dispatch.workerType === 'resource-content-author') {
-    const identity = assertActiveRequestIdentity({
-      ...input,
-      snapshot,
-      dispatch,
-      request,
-    })
-    const receipt = await reconcileResourceContentCommitReceipt({
-      workspacePath: input.workspacePath,
-      dispatchId: identity.dispatchId,
-      assertMutationAuthority: input.assertMutationAuthority,
-    })
-    if (!receipt)
-      return {
-        inspection: input.inspection,
-        events: input.events,
-        acceptedUnits: [],
-      }
-    const contract = snapshotRecord(request.contract)
-    const resourceState = snapshotRecord(snapshot.resourceProductionState)
-    const inventory = snapshotRecord(resourceState?.inventoryReceipt)
-    if (
-      request.phase !== 'RESOURCE_PREPARATION' ||
-      contract?.task !== 'RESOURCE_CONTENT' ||
-      resourceState?.currentTask !== 'RESOURCE_CONTENT' ||
-      !inventory ||
-      contract.inventoryRevision !== inventory.revision
-    )
-      recoveryConflict(
-        'Resource Content receipt does not prove the exact active production unit',
-      )
-    const confirmedBriefDigest = createHash('sha256')
-      .update(input.confirmedBriefContext)
-      .digest('hex')
-    const [documentRevision, workspaceRevision] = await Promise.all([
-      computeDocumentRevision(input.workspacePath, confirmedBriefDigest),
-      computeWorkspaceRevision(input.workspacePath),
-    ])
-    const revision = {
-      document: documentRevision,
-      workspace: workspaceRevision,
-    }
-    const acceptedAt = new Date().toISOString()
-    if (receipt.action === 'needs_inventory') {
-      const parsedValue = {
-        ...snapshot,
-        revision,
-        status: 'running',
-        activeDispatch: undefined,
-        resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
-        updatedAt: acceptedAt,
-      }
-      return {
-        inspection: { ...input.inspection, parsedValue },
-        events: input.events,
-        acceptedUnits: [],
-      }
-    }
-    const terminal = createResourceContentTerminalFromReceipt({
-      workspacePath: input.workspacePath,
-      revision: stringValue(dispatch.revision) ?? documentRevision,
-      receipt,
-    })
-    if (terminal.status !== 'completed')
-      recoveryConflict('Resource Content receipt is not a committed terminal')
-    const contentDigest = await computeResourceContentDigest(
-      input.workspacePath,
-    )
-    const unit: AcceptedWorkflowUnit = {
-      eventSchemaVersion: 1,
-      unitId: 'resource:content',
-      kind: 'resource-content',
-      phase: 'RESOURCE_PREPARATION',
-      predecessorUnitIds: ['resource:inventory'],
-      inputRevision: contentDigest,
-      dependencyDigests: { content: contentDigest },
-      dispatchId: identity.dispatchId,
-      receiptRef: `.beegame/workflow/resource-content-commits/${identity.dispatchId}.json`,
-      acceptedAt,
-      payload: { contentDigest },
-    }
-    const parsedValue = {
-      ...snapshot,
-      revision,
-      phase: 'RESOURCE_PREPARATION',
-      status: 'running',
-      activeDispatch: undefined,
-      resourceProductionState: {
-        ...resourceState,
-        currentTask: 'RESOURCE_GATE',
-        contentReceipt: { contentDigest, acceptedAt },
-      },
-      updatedAt: acceptedAt,
-    }
-    if (acceptedUnitAlreadyJournaled(input.events, unit.unitId))
-      return {
-        inspection: { ...input.inspection, parsedValue },
-        events: input.events,
-        acceptedUnits: [],
-      }
-    return {
-      inspection: { ...input.inspection, parsedValue },
-      events: [
-        ...input.events,
-        acceptedEvent({ ...input, unit, runId: identity.runId, revision }),
-      ],
-      acceptedUnits: [unit],
-    }
   }
 
   return {
@@ -508,6 +361,10 @@ export async function recoverAndResumeRun(input: {
       // Shutdown must be acknowledged before rejection. Unsupported projects
       // must never reach receipt reconciliation or reconstruct a review state.
       if (stoppedRecord) assertNoRetiredFoundationReviewRun(stoppedRecord)
+      // The historical projector cannot reconstruct public IR provenance.
+      // Never replace an invalid linked snapshot with an unbound legacy run.
+      if (stoppedRecord?.gameIrStage)
+        recoveryConflict('Public IR workflow snapshot is invalid; exact source and resource bindings must be restored before resuming')
       const runId = stringValue(stoppedRecord?.runId)
       if (!runId)
         throw new WorkflowStoreError(
@@ -604,67 +461,13 @@ export async function recoverAndResumeRun(input: {
 }
 
 
-async function restoreResourceContentCommit(
-  run: DeliveryRun,
-  workspacePath?: string,
-  store?: RunStore,
-): Promise<DeliveryRun> {
-  const dispatch = run.activeDispatch
-  if (
-    !workspacePath ||
-    !dispatch ||
-    dispatch.workerType !== 'resource-content-author' ||
-    dispatch.terminalResult
-  )
-    return run
-  const assertMutationAuthority = async () => {
-    if (!store)
-      recoveryConflict(
-        'Resource Content receipt recovery has no workflow store authority',
-      )
-    const current = (await store.inspectWorkflowSnapshot()).currentRun
-    if (
-      !current ||
-      current.runId !== run.runId ||
-      current.activeDispatch?.dispatchId !== dispatch.dispatchId ||
-      current.activeDispatch.terminalResult
-    )
-      recoveryConflict(
-        'Resource Content receipt recovery lost exact dispatch authority',
-      )
-  }
-  const receipt = await reconcileResourceContentCommitReceipt({
-    workspacePath,
-    dispatchId: dispatch.dispatchId,
-    assertMutationAuthority,
-  })
-  if (!receipt) return run
-  const finishedAt = new Date().toISOString()
-  return {
-    ...run,
-    activeDispatch: {
-      ...dispatch,
-      status: 'completed',
-      finishedAt,
-      failureReason: undefined,
-      terminalResult: createResourceContentTerminalFromReceipt({
-        workspacePath,
-        revision: dispatch.revision,
-        receipt,
-      }),
-    },
-    blockedReason: undefined,
-    updatedAt: finishedAt,
-  }
-}
-
 export async function reconcileRunOnStartup(input: {
   store: RunStore
   sessionIsOpen?: (dispatch: DispatchRecord) => Promise<boolean>
 }): Promise<DeliveryRun | null> {
   const initial = await input.store.load()
   if (!initial) return null
-  if (initial.authorStage) return initial
+  if (isPublicStageActive(initial)) return initial
   const acquired = await acquireAndLoad({
     store: input.store,
     runId: initial.runId,
@@ -701,7 +504,7 @@ async function acquireAndLoad(input: {
   })
   try {
     const beforeRecovery = await input.store.load(lease)
-    if (beforeRecovery && !beforeRecovery.authorStage) {
+    if (beforeRecovery && !isPublicStageActive(beforeRecovery)) {
       assertNoRetiredAuthorRun(beforeRecovery)
       assertNoRetiredFoundationReviewRun(beforeRecovery)
     }
@@ -711,7 +514,7 @@ async function acquireAndLoad(input: {
     )
     if (!run || run.runId !== input.runId)
       throw new Error('delivery run not found')
-    if (run.authorStage)
+    if (isPublicStageActive(run))
       throw new Error('Public author invocation must be controlled through its module, not legacy recovery')
     return { run, lease, unlock: () => input.store.unlock(lease) }
   } catch (error) {
@@ -735,12 +538,6 @@ export async function resumeRun(input: {
       foundationFactRunning
     )
       return acquired.run
-    acquired.run = await restoreResourceContentCommit(
-      acquired.run,
-      input.workspacePath,
-      input.store,
-    )
-    if (acquired.run.status === 'completed') return acquired.run
     const retryable =
       acquired.run.status === 'needs_action' ||
       acquired.run.status === 'blocked' ||
@@ -784,11 +581,6 @@ export async function retryRun(input: {
 }): Promise<DeliveryRun> {
   const acquired = await acquireAndLoad(input)
   try {
-    acquired.run = await restoreResourceContentCommit(
-      acquired.run,
-      input.workspacePath,
-      input.store,
-    )
     // A successful retry can race a duplicate browser request or a stale
     // workflow-card snapshot. The first request has already resumed the same
     // durable run, so repeating it must be an idempotent read rather than an
@@ -798,27 +590,13 @@ export async function retryRun(input: {
       !acquired.run.activeDispatch?.terminalResult
     )
       return acquired.run
-    const resourceRefresh =
-      input.workspacePath &&
-      shouldRefreshProvisionalResourceInventory(
-        acquired.run,
-        auditAssetContract(input.workspacePath),
-      )
-    const retryBaseRun = resourceRefresh
-        ? {
-            ...acquired.run,
-            resourceProductionState: {
-              currentTask: 'RESOURCE_INVENTORY' as const,
-            },
-          }
-        : acquired.run
     const replayable =
       !input.taskId && acquired.run.activeDispatch?.terminalResult
     const resumed =
       transitionDeliveryRun(
         {
-          ...retryBaseRun,
-          activeDispatch: replayable ? retryBaseRun.activeDispatch : undefined,
+          ...acquired.run,
+          activeDispatch: replayable ? acquired.run.activeDispatch : undefined,
         },
         { type: 'retry', ...(input.taskId ? { taskId: input.taskId } : {}) },
       )

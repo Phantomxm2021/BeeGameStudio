@@ -37,28 +37,17 @@ export async function evaluateWorkflowDeliveryGate(input: {
       issues: ['Current workflow has no passed resource-preparation evidence.'],
     }
   }
-  if (run.evidence.implementationAudit?.status !== 'passed') {
-    return {
-      allowed: false,
-      issues: ['Current workflow has no passed implementation-audit evidence.'],
-    }
-  }
   if (
     !run.evidence.resourcePreparation.path ||
     !isWorkflowEvidenceFile(
       input.workspacePath,
       run.evidence.resourcePreparation.path,
-    ) ||
-    !run.evidence.implementationAudit.path ||
-    !isWorkflowEvidenceFile(
-      input.workspacePath,
-      run.evidence.implementationAudit.path,
     )
   ) {
     return {
       allowed: false,
       issues: [
-        'Current resource-production or implementation-audit evidence file is missing or invalid.',
+        'Current resource-delivery evidence file is missing or invalid.',
       ],
     }
   }
@@ -91,14 +80,6 @@ export async function evaluateWorkflowDeliveryGate(input: {
     }
   }
   const acceptedRevision = run.evidence.acceptance.revision
-  if (run.evidence.implementationAudit.revision !== currentRevision) {
-    return {
-      allowed: false,
-      issues: [
-        'Workspace changed after implementation audit; run the audit again.',
-      ],
-    }
-  }
   if (acceptedRevision !== currentRevision) {
     return {
       allowed: false,

@@ -352,6 +352,7 @@ function workflowStatus(run: DeliveryRun): DeliveryRunStatus {
 
 function workflowThinking(run: DeliveryRun): 'working' | 'waiting' | 'idle' {
   if (run.status !== 'running') return 'idle'
+  if (run.documentStep === 'GAME_IR_COMPILATION') return 'working'
   if (run.authorStage && ['starting', 'running'].includes(run.authorStage.status)) return 'working'
   return run.activeDispatch?.status === 'running' ? 'working' : 'waiting'
 }
@@ -359,12 +360,14 @@ function documentTasks(
   run: DeliveryRun,
   workspacePath: string,
 ): DocumentDisplayTask[] {
-  if (run.foundationReviewStage) return [{ id: 'foundation-public-stage',
+  if (run.documentStep === 'GAME_IR_COMPILATION') return [{ id: 'game-ir-public-stage',
+    title: 'IR 编译', status: run.status === 'needs_action' ? 'blocked' : run.status, attempt: 0, operation: 'produce' }]
+  if (run.documentStep === 'FOUNDATION_REVIEW' && run.foundationReviewStage) return [{ id: 'foundation-public-stage',
     title: 'Foundation Document Review',
     status: projectFoundationReviewDisplay(run.foundationReviewStage, run.status)!.taskStatus,
     attempt: 0, operation: 'review' }]
   const publicAuthorDisplay = projectPublicAuthorDisplay(run.authorStage)
-  if (publicAuthorDisplay) return publicAuthorDisplay.tasks
+  if (publicAuthorDisplay && (run.phase === 'DOCUMENT_DRAFTING' || !run.foundationReviewStage)) return publicAuthorDisplay.tasks
   const documentStep = run.documentStep
   const input: Parameters<typeof projectDocumentDisplayTasks>[0] = {
     workspacePath,
@@ -383,13 +386,11 @@ function documentTasks(
 
 function resourceTask(run: DeliveryRun): ResourceProductionTask {
   switch (run.resourceProductionState.currentTask) {
-    case 'RESOURCE_PLAN':
-    case 'RESOURCE_INVENTORY':
-    case 'RESOURCE_CONTENT':
-    case 'RESOURCE_GATE':
+    case 'RESOURCE_DELIVERY':
+    case 'RESOURCE_DELIVERED':
       return run.resourceProductionState.currentTask
     default:
-      return 'RESOURCE_PLAN'
+      return 'RESOURCE_DELIVERY'
   }
 }
 
@@ -407,7 +408,7 @@ function resourceTasks(
   })
 }
 
-function atomicTasks(run: DeliveryRun): WorkflowStageCardTask[] {
+function implementationTasks(run: DeliveryRun): WorkflowStageCardTask[] {
   return run.tasks.map(task => {
     const value = task as unknown as Record<string, unknown>
     const status = TASK_STATUSES.includes(
@@ -521,7 +522,7 @@ export function projectCurrentStageCard(input: {
     ? normalizeDisplayTasks(documentTasks(run, input.workspacePath))
     : run.phase === 'RESOURCE_PREPARATION'
       ? normalizeDisplayTasks(resourceTasks(run, input.workspacePath))
-      : atomicTasks(run)
+      : implementationTasks(run)
   const elapsed = elapsedTiming(run, input.timing)
   const documentStep = run.documentStep
   const message = run.status === 'running'
@@ -538,8 +539,11 @@ export function projectCurrentStageCard(input: {
     : run.currentItemId?.startsWith('docs/')
       ? run.currentItemId
       : undefined
-  const foundationDisplay = projectFoundationReviewDisplay(run.foundationReviewStage, run.status)
-  const nextAction = foundationDisplay?.resumeAvailable ? 'resume' : blockedReason && !foundationDisplay?.terminal
+  const foundationDisplay = run.documentStep === 'FOUNDATION_REVIEW'
+    ? projectFoundationReviewDisplay(run.foundationReviewStage, run.status) : undefined
+  const irOutcome = run.documentStep === 'GAME_IR_COMPILATION' ? run.gameIrStage?.outcome : undefined
+  const nextAction = irOutcome?.status === 'needs_action' && !irOutcome.resumable ? undefined
+    : foundationDisplay?.resumeAvailable ? 'resume' : blockedReason && !foundationDisplay?.terminal
     ? run.status === 'stopped'
       ? 'resume'
       : 'retry'

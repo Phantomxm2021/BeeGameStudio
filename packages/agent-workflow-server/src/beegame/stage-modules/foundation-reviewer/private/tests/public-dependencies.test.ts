@@ -12,6 +12,8 @@ test('public Reviewer bundles the whole lifecycle without another stage, old run
   const toolDiagnostics = await realpath(resolve(dirname(fileRunner), 'native-tool-diagnostics.ts'))
   const diagnostics = await realpath(resolve(dirname(fileRunner), 'native-diagnostics.ts'))
   const responseTrace = await realpath(resolve(dirname(fileRunner), 'native-response-trace.ts'))
+  const sharedPrimitives = await Promise.all(['journal-storage', 'native-usage']
+    .map(name => realpath(resolve(root, '../../stage-runtime', `${name}.ts`))))
   const loaded = new Set<string>()
   const allowedNode = new Set(['node:crypto', 'node:fs', 'node:fs/promises', 'node:path', 'node:os', 'node:child_process', 'node:string_decoder'])
   const built = await Bun.build({ entrypoints: [resolve(root, 'public.ts')], target: 'bun',
@@ -30,7 +32,7 @@ test('public Reviewer bundles the whole lifecycle without another stage, old run
       })
       build.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async args => {
         const path = await realpath(args.path)
-        if ((!path.startsWith(root + sep) && !path.startsWith(zodRoot + sep) && !path.startsWith(diffRoot + sep) && ![fileRunner, taskAccess, toolDiagnostics, diagnostics, responseTrace].includes(path)) || path.includes(`${sep}tests${sep}`))
+        if ((!path.startsWith(root + sep) && !path.startsWith(zodRoot + sep) && !path.startsWith(diffRoot + sep) && ![fileRunner, taskAccess, toolDiagnostics, diagnostics, responseTrace, ...sharedPrimitives].includes(path)) || path.includes(`${sep}tests${sep}`))
           throw new Error(`Reviewer lifecycle dependency escaped ${path}`)
         loaded.add(path)
         return { contents: await readFile(path, 'utf8'), loader: path.endsWith('.ts') ? 'ts' : 'js' }

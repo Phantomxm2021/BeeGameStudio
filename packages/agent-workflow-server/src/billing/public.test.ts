@@ -110,8 +110,10 @@ describe('public bounded usage billing client', () => {
       eventId: 'event-1',
       idempotencyKey: 'event-1',
       duplicate: false,
-      recorded: { eventId: 'record-event', duplicate: false },
-      debited: { eventId: 'debit-event', duplicate: false },
+      // Authority storage row ids deliberately differ. Public receipts bind
+      // both operations to the submitted idempotent usage event instead.
+      recorded: { eventId: 'event-1', duplicate: false },
+      debited: { eventId: 'event-1', duplicate: false },
     })
   })
 

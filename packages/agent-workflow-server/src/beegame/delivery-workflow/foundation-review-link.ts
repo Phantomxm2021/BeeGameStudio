@@ -1,6 +1,7 @@
 import { type createFoundationReviewer, type ReviewerHandle, type ReviewerStartInput, type ReviewerResult, type ReviewerReviewResult } from '../stage-modules/foundation-reviewer/public'
 import type { DeliveryRun } from './types'
 import type { RunStore, WorkflowLock } from './run-store'
+import { isFoundationStageActive } from './public-stage-routing'
 import { createHash } from 'node:crypto'
 import type { AuthorDocumentsResult } from '../stage-modules/foundation-authoring/public'
 import { foundationAuthorWorkspaceBaseline, publishFoundationAcceptedArtifacts } from './foundation-accepted-artifacts'
@@ -29,7 +30,8 @@ export type FoundationReviewLinkState = {
   observationError?: boolean
 }
 
-const PASSED_STOP = 'Foundation document review and correction completed. Checklist handoff awaits acceptance.'
+const PASSED_STOP = 'Foundation document review and correction completed. Explicit continuation is required.'
+const AUTO_HANDOFF = 'Foundation document review and correction completed. Starting Game IR compilation.'
 
 function isComplete(link: FoundationReviewLinkState) {
   return Boolean(link.acceptedReview)
@@ -62,6 +64,7 @@ export function createFoundationReviewLink(input: {
   store: RunStore
   reviewer: ReturnType<typeof createFoundationReviewer>
   pollIntervalMs?: number
+  onCompleted?(run: DeliveryRun): void
 }) {
   const timers = new Map<string, ReturnType<typeof setTimeout>>()
   let closed = false
@@ -116,20 +119,21 @@ export function createFoundationReviewLink(input: {
     const outcome = link.invocation.outcome
     const stopping = link.control.action === 'stop'
     const complete = isComplete(link)
-    const status = complete ? (stopping ? 'stopped' : 'needs_action')
+    const status = complete ? (stopping ? 'stopped' : input.onCompleted ? 'running' : 'needs_action')
       : !link.invocation.handle ? (stopping ? 'needs_action' : 'running')
       : outcome?.status === 'stopped' ? 'stopped'
       : outcome?.status === 'needs_action' ? 'needs_action'
       : outcome?.status === 'failed' ? 'failed'
       : stopping && outcome?.status !== 'running' ? 'needs_action' : 'running'
-    const reason = complete ? PASSED_STOP : outcome?.status === 'needs_action' || outcome?.status === 'failed' ? outcome.reason
+    const reason = complete ? (status === 'needs_action' ? PASSED_STOP : undefined)
+      : outcome?.status === 'needs_action' || outcome?.status === 'failed' ? outcome.reason
       : stopping ? link.control.reason ?? 'Foundation stage stop is awaiting acknowledgment.'
       : outcome?.status === 'completed' && outcome.billingStatus !== 'settled' ? 'Foundation public result is awaiting billing settlement.' : undefined
     return { ...run, foundationReviewStage: link,
       phase: 'DOCUMENT_REVIEW',
       documentStep: 'FOUNDATION_REVIEW',
       status, thinking: status === 'running' ? 'working' : 'idle', blockedReason: reason,
-      currentMessage: complete ? PASSED_STOP : stopping && status !== 'stopped'
+      currentMessage: complete ? (input.onCompleted ? AUTO_HANDOFF : PASSED_STOP) : stopping && status !== 'stopped'
         ? '停止请求已提交，正在等待执行退出或清理确认。' : status === 'running'
         ? outcome?.progress ? `模型响应 ${outcome.progress.modelResponses} · ${outcome.progress.message}` : 'Foundation document review is running.' : undefined }
   }
@@ -223,6 +227,7 @@ export function createFoundationReviewLink(input: {
   }
   async function tick(runId: string) {
     return locked(runId, async (current, lock) => {
+      if (!isFoundationStageActive(current)) return current
       let run = await initialize(current, lock)
       if (!run.foundationReviewStage) return run
       const link = structuredClone(run.foundationReviewStage)
@@ -241,7 +246,13 @@ export function createFoundationReviewLink(input: {
   }
   async function ensureProgress(run: DeliveryRun): Promise<DeliveryRun> {
     if (closed) return (await input.store.load()) ?? run
-    try { const next = await tick(run.runId); watch(next); return next }
+    try {
+      const next = await tick(run.runId)
+      watch(next)
+      if (next.foundationReviewStage?.acceptedReview && next.status !== 'stopped' &&
+          next.foundationReviewStage.control.action !== 'stop') input.onCompleted?.(next)
+      return next
+    }
     catch (error) {
       const timer = timers.get(run.runId)
       if (timer) clearTimeout(timer)
@@ -258,7 +269,8 @@ export function createFoundationReviewLink(input: {
     }
   }
   async function control(run: DeliveryRun, action: 'run' | 'stop', reason?: string) {
-    await locked(run.runId, async (current, lock) => {
+    const handedOff = await locked(run.runId, async (current, lock) => {
+      if (!isFoundationStageActive(current)) return current
       assertBoundary(current)
       const original = current.foundationReviewStage
       if (!original) {
@@ -280,6 +292,7 @@ export function createFoundationReviewLink(input: {
       }
       await save(project(current, link), lock, `foundation.public_review.${action}_requested`)
     })
+    if (handedOff && !isFoundationStageActive(handedOff)) return handedOff
     return ensureProgress(run)
   }
   return {

@@ -13,7 +13,7 @@ import { authorBaselineSchema, autonomousPreparedSchema, captureAuthorBaseline, 
   publishAutonomousDocuments, validateAutonomousEvidence, validateAutonomousPrepared, validateAutonomousResult,
   readAutonomousFile, type AuthorBaseline, type AutonomousPrepared } from './autonomous-files'
 import { runAutonomousAuthor, type AutonomousNativeExecutor } from './autonomous-native'
-import { authorExecutionLimitsSchema, boundedFinishExecutionLimits, defaultAuthorExecutionLimits, type AuthorExecutionLimits } from './execution-budget'
+import { authorExecutionLimitsSchema, boundedFinishExecutionLimits, type AuthorExecutionLimits } from './execution-budget'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './domain/types'
 
 export const AUTONOMOUS_AUTHOR_MODE = 'autonomous.v1' as const
@@ -217,12 +217,19 @@ export function createAutonomousAuthorLifecycle(configuration: AuthorConfigurati
       if (abort.signal.aborted) { await acknowledgeStop(); return }
       const model = infrastructure.runtimeConfiguration ? await infrastructure.runtimeConfiguration.resolve({ ownerId: reg.start.ownerId }) : config.model
       poll = setInterval(() => { void checkControl() }, 50)
-      const limits = reg.executionLimits ?? defaultAuthorExecutionLimits
-      const attemptLimits = finishOnly ? boundedFinishExecutionLimits(limits) : limits
+      // Production authoring has no workflow time wall. Explicit limits are a
+      // test/diagnostic injection only and are never recovered from an older
+      // registration created by a previous production default.
+      const configuredLimits = config.executionLimits
+        ? reg.executionLimits ?? authorExecutionLimitsSchema.parse(config.executionLimits)
+        : undefined
+      const attemptLimits = configuredLimits && finishOnly
+        ? boundedFinishExecutionLimits(configuredLimits)
+        : configuredLimits
       const attemptStartedAt = state.attempt!.startedAt
       const outcome = await execute({ configuration: model, workspacePath: candidatePath(id), logPath: nativeLog(id, attemptId),
         signal: abort.signal, language: config.language,
-        executionLimits: attemptLimits,
+        ...(attemptLimits ? { executionLimits: attemptLimits } : {}),
         finishOnly,
         attemptStartedAt,
         onUsage: value => journal.observe(attemptId, value),
@@ -328,7 +335,9 @@ export function createAutonomousAuthorLifecycle(configuration: AuthorConfigurati
       if (!reg) {
         reg = { mode: AUTONOMOUS_AUTHOR_MODE, handle: { protocolVersion: 1, producer: 'foundation-authoring', id: randomUUID() },
           start, workspacePath, createdAt: new Date().toISOString(), baseline: await captureAuthorBaseline(workspacePath),
-          executionLimits: authorExecutionLimitsSchema.parse(config.executionLimits ?? defaultAuthorExecutionLimits) }
+          ...(config.executionLimits
+            ? { executionLimits: authorExecutionLimitsSchema.parse(config.executionLimits) }
+            : {}) }
         await store.create(key, reg)
         reg = (await store.load<Registration>(key))!
       }

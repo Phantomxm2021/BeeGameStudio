@@ -1,58 +1,115 @@
-import { afterEach, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { buildChecklistAuthorityProjection } from './checklist-authority-projection'
-import { getGameDocumentContract } from './delivery-workflow/game-document-contracts'
-import { CANONICAL_FOUNDATION_DOCUMENTS } from './delivery-workflow/types'
+import { createHash } from 'node:crypto'
+import { expect, test } from 'bun:test'
+import {
+  buildChecklistAuthorityProjection,
+  type ChecklistAuthority,
+} from './checklist-authority-projection'
+import { CANONICAL_FOUNDATION_DOCUMENTS } from './foundation-documents'
 
-const workspaces: string[] = []
+function sha256(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex')
+}
 
-afterEach(async () => {
-  await Promise.all(workspaces.splice(0).map(path => rm(path, { recursive: true })))
-})
-
-test('projects explicit scenario blocks and gate identities, never a prior checklist baseline', async () => {
-  const workspacePath = await mkdtemp(join(tmpdir(), 'checklist-projection-'))
-  workspaces.push(workspacePath)
-  await Promise.all(CANONICAL_FOUNDATION_DOCUMENTS.map(async path => {
-    const contract = getGameDocumentContract(path)
-    const body = [
-      '# Document',
-      '<!-- beegame-executive-summary -->',
-      '## Executive Summary',
-      'summary must not project',
-      ...contract.sections.flatMap(section => [
-        `<!-- beegame-section:${section.sectionId} -->`,
-        `## ${section.title}`,
-        `${section.checklistMode} ${section.sectionId}`,
-      ]),
-      '<!-- beegame-production-materials -->',
-      '## Production Materials',
-      ...contract.productionMaterials.flatMap(material => [
-        `<!-- beegame-material:${material.materialId} -->`,
-        `### ${material.title}`,
-        `${material.checklistMode} ${material.materialId}`,
-      ]),
-      '<!-- beegame-audit-appendix -->',
-      '## Audit Appendix',
-      'audit must not project',
+function authority(
+  overrides: Partial<ChecklistAuthority> = {},
+): ChecklistAuthority {
+  const documents = CANONICAL_FOUNDATION_DOCUMENTS.map((path, index) => {
+    const content = [
+      `# ${['游戏愿景', '場景設計', '数值平衡', '技术架构', '视觉方向', '用户界面', '音频设计', '资产计划'][index]}`,
+      `自然语言正文 ${index + 1}，不依赖旧标记。`,
     ].join('\n')
-    await mkdir(join(workspacePath, path, '..'), { recursive: true })
-    await writeFile(join(workspacePath, path), body)
-  }))
+    return { path, content, digest: sha256(content) }
+  })
+  const documentSetDigest = sha256(
+    JSON.stringify(documents.map(document => [document.path, document.digest])),
+  )
+  return {
+    foundationRevision: documentSetDigest,
+    documentSetDigest,
+    documents,
+    irResultId: 'ir-publication-1',
+    irModules: [
+      {
+        moduleId: 'implementation-verification',
+        nodes: [
+          {
+            id: 'acceptance-collect-coin',
+            kind: 'implementation-verification.acceptance-scenario',
+            value: {
+              label: '集めた硬貨が表示される',
+              precondition: '玩家进入关卡',
+              action: '收集一枚硬貨',
+              expectedOutcome: '分数增加一枚硬貨',
+            },
+            bindings: {
+              source: {
+                documentPath: 'docs/GDD.md',
+                sectionId: '玩法概述',
+                sourcePointer: '/value/action',
+              },
+            },
+          },
+        ],
+      },
+    ],
+    ...overrides,
+  }
+}
 
-  const projection = await buildChecklistAuthorityProjection({
-    workspacePath,
-    approvedDocumentRevision: 'revision-1',
+test('projects complete accepted documents and verified scenarios without legacy markers', () => {
+  const input = authority()
+  const projection = buildChecklistAuthorityProjection({
+    checklistAuthority: input,
+    approvedDocumentRevision: input.foundationRevision,
   })
 
-  expect(projection).toContain('Approved document revision: revision-1')
-  expect(projection).toContain('scenario core_loop')
-  expect(projection).toContain('--- GATE REFERENCE docs/BALANCE_DESIGN.md#material.variable-parameter-table')
-  expect(projection).not.toContain('summary must not project')
-  expect(projection).not.toContain('audit must not project')
-  expect(projection).not.toContain('exclude product_vision')
-  expect(projection).not.toContain('exclude asset-inventory-table')
-  expect(projection).not.toContain('gate_reference formulas')
+  expect(projection).toContain(
+    'Approved foundation revision: ' + input.foundationRevision,
+  )
+  expect(projection).toContain('Verified IR result: ir-publication-1')
+  expect(projection).toContain('# 游戏愿景')
+  expect(projection).toContain('# 場景設計')
+  expect(projection).toContain('acceptance-collect-coin')
+  expect(projection).toContain('source excerpt references')
+  expect(projection).not.toContain('beegame-section:')
+  expect(projection).not.toContain('beegame-material:')
+})
+
+test('rejects altered document bytes, document-set digest, or approved revision', () => {
+  const input = authority()
+  const changedDocuments = input.documents.map(document =>
+    document.path === 'docs/GDD.md'
+      ? { ...document, content: document.content + '\n篡改' }
+      : document,
+  )
+  expect(() =>
+    buildChecklistAuthorityProjection({
+      checklistAuthority: { ...input, documents: changedDocuments },
+      approvedDocumentRevision: input.foundationRevision,
+    }),
+  ).toThrow('document digest mismatch')
+  expect(() =>
+    buildChecklistAuthorityProjection({
+      checklistAuthority: { ...input, documentSetDigest: '0'.repeat(64) },
+      approvedDocumentRevision: input.foundationRevision,
+    }),
+  ).toThrow('document set digest mismatch')
+  expect(() =>
+    buildChecklistAuthorityProjection({
+      checklistAuthority: input,
+      approvedDocumentRevision: '0'.repeat(64),
+    }),
+  ).toThrow('does not match approved document revision')
+})
+
+test('does not require a fixed number of IR scenarios', () => {
+  const input = authority({
+    irModules: [{ moduleId: 'implementation-verification', nodes: [] }],
+  })
+  expect(
+    buildChecklistAuthorityProjection({
+      checklistAuthority: input,
+      approvedDocumentRevision: input.foundationRevision,
+    }),
+  ).not.toContain('VERIFIED ACCEPTANCE SCENARIO')
 })

@@ -47,7 +47,7 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
   DELIVERY_RUN_SCHEMA_VERSION,
   type AcceptedWorkflowUnit,
-  type AtomicTask,
+  type ImplementationTask,
   type DeliveryRun,
   type DispatchWorkerType,
   type FoundationDocumentPath,
@@ -58,15 +58,11 @@ import { parseDeliveryRun } from '../beegame/delivery-workflow/schema'
 import { seedHistoricalAuthoredDocument } from './historical-authored-document-fixture'
 import { getGameDocumentContract } from '../beegame/delivery-workflow/game-document-contracts'
 import { renderTestCompleteGameDocument } from './complete-game-document-fixture'
-import { createNativeResourceContentTool } from '../beegame/native-resource-content-tool'
 import {
   registerBeeGameAuthoredResources,
   writeBeeGameAssetManifest,
 } from '../beegame/asset-contracts'
-import {
-  computeResourceInventoryRevision,
-  computeResourceRevision,
-} from '../beegame/delivery-workflow/revision'
+import { computeResourceRevision } from '../beegame/delivery-workflow/revision'
 
 const RECOVERY_OWNER_ID = 'recovery-owner'
 
@@ -110,7 +106,12 @@ const LEGACY_AUTHOR_RETIRED_ERROR =
 
 const CANONICAL_RECEIPT_WORKERS: readonly DispatchWorkerType[] = [
   'document-author',
-  'resource-content-author',
+]
+
+const PUBLIC_IR_CONSUMER_WORKERS: readonly DispatchWorkerType[] = [
+  'resource-planner',
+  'implementation-worker',
+  'acceptance-validator',
 ]
 
 type ExactResumeWorkerCheckpoint =
@@ -187,23 +188,14 @@ function exactResumeCheckpointsForWorker(
   )
 }
 
-function matrixAtomicTask(): AtomicTask {
+function matrixImplementationTask(): ImplementationTask {
   return {
-    id: 'matrix-task',
+    id: 'DIRECT_IMPLEMENTATION',
     title: 'Synthetic task',
     checklistIds: ['CHECK-001'],
     resourceIds: [],
     contentIds: ['matrix-content'],
-    dependsOn: [],
     allowedPaths: ['src/'],
-    expectedArtifacts: ['src/output.ts'],
-    verification: [
-      {
-        kind: 'test',
-        commandOrAction: 'synthetic verification',
-        expectedResult: 'synthetic success',
-      },
-    ],
     status: 'pending',
     attempt: 0,
     evidenceRefs: [],
@@ -365,11 +357,6 @@ async function matrixTerminal(input: {
     workspacePath,
     `${request.workerType}-${request.dispatchId}`,
   )
-  const taskMetrics = {
-    catalogPayloadBytes: 0,
-    catalogCallTypes: [],
-    canonicalMutationCount: 1,
-  }
   if (request.workerType === 'document-author') {
     const targetPath =
       request.taskId! as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number]
@@ -409,87 +396,8 @@ async function matrixTerminal(input: {
       revision: request.revision,
       status: 'completed' as const,
       writtenPaths: ['assets/asset-manifest.json'],
-      taskMetrics,
     }
   }
-  if (request.workerType === 'resource-curator') {
-    await mkdir(join(workspacePath, 'assets/runtime'), { recursive: true })
-    await writeFile(join(workspacePath, 'assets/runtime/matrix.dat'), 'data')
-    await registerBeeGameAuthoredResources(workspacePath, [
-      {
-        id: 'matrix-resource',
-        root_path: 'assets/runtime/matrix.dat',
-        file_paths: ['assets/runtime/matrix.dat'],
-        provisional: true,
-        reason: 'Synthetic matrix authority.',
-        selection_reason: ['Covers the synthetic requirement.'],
-        asset_kind: 'data',
-      },
-    ])
-    return {
-      workerType: request.workerType,
-      revision: request.revision,
-      status: 'completed' as const,
-      catalogObserved: true,
-      resourceIds: ['matrix-resource'],
-      bindings: [
-        {
-          requirementId: 'matrix-requirement',
-          resourceIds: ['matrix-resource'],
-        },
-      ],
-      writtenPaths: ['assets/asset-manifest.json', 'assets/runtime/matrix.dat'],
-      taskMetrics,
-    }
-  }
-  if (request.workerType === 'resource-content-author') {
-    if (input.persistCanonicalReceipt) {
-      const tool = createNativeResourceContentTool({
-        buildTool: definition => definition,
-        workspacePath,
-        contract: {
-          dispatchId: request.dispatchId!,
-          inventoryRevision: String(request.contract.inventoryRevision),
-          baselineResourceRevision: String(
-            request.contract.baselineResourceRevision,
-          ),
-          requiredRequirementIds: matrixStringArray(
-            request.contract.requiredRequirementIds,
-          ),
-          verifiedResourceIds: matrixStringArray(
-            request.contract.verifiedResourceIds,
-          ),
-          inventoryBindings: request.contract.inventoryBindings as Array<{
-            requirementId: string
-            resourceIds: string[]
-          }>,
-          writablePaths: ['assets/content/matrix.json'],
-        },
-        assertMutationAuthority: () => undefined,
-      }) as { call(value: unknown): Promise<unknown> }
-      await tool.call({
-        action: 'commit',
-        documents: resourceContentDocumentMap(matrixContentDocument()),
-      })
-    } else await writeMatrixContent(workspacePath)
-    return {
-      workerType: request.workerType,
-      revision: request.revision,
-      status: 'completed' as const,
-      contentIds: ['matrix-content'],
-      writtenPaths: ['assets/content/matrix.json'],
-      missingRequirementIds: [],
-      taskMetrics,
-    }
-  }
-  if (request.workerType === 'atomic-task-planner')
-    return {
-      workerType: request.workerType,
-      revision: request.revision,
-      status: 'completed' as const,
-      tasks: [matrixAtomicTask()],
-      evidencePath,
-    }
   if (request.workerType === 'implementation-worker') {
     await mkdir(join(workspacePath, 'src'), { recursive: true })
     await writeFile(join(workspacePath, 'src/output.ts'), 'export {}\n')
@@ -514,18 +422,6 @@ async function matrixTerminal(input: {
   const checklistIds = matrixStringArray(request.contract.checklistIds)
   const resourceIds = matrixStringArray(request.contract.resourceIds)
   const contentIds = matrixStringArray(request.contract.contentIds)
-  if (request.workerType === 'implementation-auditor')
-    return {
-      workerType: request.workerType,
-      revision: request.revision,
-      status: 'passed' as const,
-      auditedTaskIds: ['matrix-task'],
-      checklistIds,
-      resourceIds,
-      contentIds,
-      findings: [],
-      evidencePath,
-    }
   if (request.workerType === 'acceptance-validator')
     return {
       workerType: request.workerType,
@@ -609,15 +505,11 @@ async function createWorkerRecoveryRun(input: {
     'document-author',
     'resource-planner',
   ].includes(input.workerType)
-  const needsInventoryGap = input.workerType === 'resource-curator'
   const needsDeliveryArtifacts = [
-    'atomic-task-planner',
     'implementation-worker',
-    'implementation-auditor',
     'acceptance-validator',
   ].includes(input.workerType)
-  const needsVerifiedInventory =
-    input.workerType === 'resource-content-author' || needsDeliveryArtifacts
+  const needsVerifiedInventory = needsDeliveryArtifacts
   if (needsManifest) {
     await writeBeeGameAssetManifest(input.workspacePath, {
       version: 8,
@@ -629,7 +521,7 @@ async function createWorkerRecoveryRun(input: {
         generated_asset_root: 'assets/generated',
       },
       requirements:
-        needsInventoryGap || needsVerifiedInventory
+        needsVerifiedInventory
           ? [
               {
                 id: 'matrix-requirement',
@@ -663,9 +555,6 @@ async function createWorkerRecoveryRun(input: {
   }
   if (needsDeliveryArtifacts) await writeMatrixContent(input.workspacePath)
   workspaceRevision = await computeWorkspaceRevision(input.workspacePath)
-  const inventoryRevision = needsManifest
-    ? await computeResourceInventoryRevision(input.workspacePath)
-    : undefined
   const contentDigest = needsManifest
     ? await computeResourceContentDigest(input.workspacePath)
     : undefined
@@ -681,7 +570,7 @@ async function createWorkerRecoveryRun(input: {
     workspaceRevision,
     checklistApproved: true,
   })
-  const task = matrixAtomicTask()
+  const task = matrixImplementationTask()
   const resourcePreparation = resourceRevision
     ? {
         path: '.beegame/workflow/evidence/resource-gate.json',
@@ -700,11 +589,11 @@ async function createWorkerRecoveryRun(input: {
     },
     evidence: resourcePreparation ? { resourcePreparation } : {},
     resourceProductionState: {
-      currentTask: 'RESOURCE_GATE',
-      ...(inventoryRevision
+      currentTask: 'RESOURCE_DELIVERED',
+      ...(contentDigest ? { irResultId: 'a'.repeat(64) } : {}),
+      ...(contentDigest
         ? {
-            inventoryReceipt: {
-              revision: inventoryRevision,
+            deliveryReceipt: {
               bindings: needsVerifiedInventory
                 ? [
                     {
@@ -714,13 +603,6 @@ async function createWorkerRecoveryRun(input: {
                   ]
                 : [],
               catalogObserved: true,
-              acceptedAt: RECOVERY_ACCEPTED_AT,
-            },
-          }
-        : {}),
-      ...(contentDigest
-        ? {
-            contentReceipt: {
               contentDigest,
               acceptedAt: RECOVERY_ACCEPTED_AT,
             },
@@ -736,7 +618,7 @@ async function createWorkerRecoveryRun(input: {
       documentStep: 'FOUNDATION_DRAFTING',
       foundationDraftState: { completedPaths: [] },
       evidence: {},
-      resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
+      resourceProductionState: { currentTask: 'RESOURCE_DELIVERY' },
     }
   if (input.workerType === 'resource-planner')
     return {
@@ -744,61 +626,22 @@ async function createWorkerRecoveryRun(input: {
       phase: 'RESOURCE_PREPARATION',
       documentStep: undefined,
       evidence: {},
-      resourceProductionState: { currentTask: 'RESOURCE_PLAN' },
+      resourceProductionState: { currentTask: 'RESOURCE_DELIVERY' },
     }
-  if (input.workerType === 'resource-curator')
-    return {
-      ...common,
-      phase: 'RESOURCE_PREPARATION',
-      documentStep: undefined,
-      evidence: {},
-      resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
-    }
-  if (input.workerType === 'resource-content-author')
-    return {
-      ...common,
-      phase: 'RESOURCE_PREPARATION',
-      documentStep: undefined,
-      evidence: {},
-      resourceProductionState: {
-        ...common.resourceProductionState,
-        currentTask: 'RESOURCE_CONTENT',
-        contentReceipt: undefined,
-      },
-    }
-  if (input.workerType === 'atomic-task-planner')
-    return { ...common, phase: 'ATOMIC_TASK_PLANNING', tasks: [] }
   if (input.workerType === 'implementation-worker')
     return { ...common, phase: 'IMPLEMENTATION', tasks: [task] }
-  const completedTask: AtomicTask = {
+  const completedTask: ImplementationTask = {
     ...task,
     status: 'completed',
     completedRevision: workspaceRevision,
     evidenceRefs: ['.beegame/workflow/evidence/matrix-task.json'],
   }
-  if (input.workerType === 'implementation-auditor')
-    return {
-      ...common,
-      phase: 'IMPLEMENTATION_AUDIT',
-      tasks: [completedTask],
-      revision: { ...common.revision, implementation: workspaceRevision },
-    }
   if (input.workerType === 'acceptance-validator')
     return {
       ...common,
       phase: 'ACCEPTANCE',
       tasks: [completedTask],
       revision: { ...common.revision, implementation: workspaceRevision },
-      evidence: {
-        ...common.evidence,
-        implementationAudit: {
-          path: '.beegame/workflow/evidence/implementation-audit.json',
-          kind: 'implementation_audit',
-          revision: workspaceRevision,
-          status: 'passed',
-          observedAt: RECOVERY_ACCEPTED_AT,
-        },
-      },
     }
   if (input.workerType === 'change-impact-analyzer')
     return {
@@ -816,268 +659,6 @@ async function createWorkerRecoveryRun(input: {
 
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex')
-}
-
-async function createResourceRecoveryFixture() {
-  const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-exact-resume-'))
-  await mkdir(join(workspacePath, 'docs'), { recursive: true })
-  for (const path of CANONICAL_FOUNDATION_DOCUMENTS)
-    await writeFile(join(workspacePath, path), matrixCompleteDocument(path))
-  for (const [index, path] of CANONICAL_PROJECT_DOCUMENTS.entries()) {
-    if (CANONICAL_FOUNDATION_DOCUMENTS.includes(path as never))
-      await commitMatrixFoundationDocument({
-        workspacePath,
-        dispatchId: `fixture-document-${index}`,
-        path: path as (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
-      })
-    else {
-      await mkdir(join(workspacePath, 'docs/acceptance'), { recursive: true })
-      await writeFile(join(workspacePath, path), '# Fixture')
-    }
-  }
-  await writeBeeGameAssetManifest(workspacePath, {
-    version: 8,
-    project_target: {
-      asset_format_capabilities: ['dat', 'json'],
-      resource_library_usage: 'optional',
-      runtime_asset_root: 'assets/runtime',
-      content_root: 'assets/content',
-      generated_asset_root: 'assets/generated',
-    },
-    requirements: [
-      {
-        id: 'fixture-requirement',
-        required: true,
-        acquisition_profile: TEST_ACQUISITION_PROFILE,
-      },
-    ],
-    resources: [],
-  })
-  await mkdir(join(workspacePath, 'assets/runtime'), { recursive: true })
-  await writeFile(join(workspacePath, 'assets/runtime/fixture.dat'), 'fixture')
-  await registerBeeGameAuthoredResources(workspacePath, [
-    {
-      id: 'fixture-resource',
-      root_path: 'assets/runtime/fixture.dat',
-      file_paths: ['assets/runtime/fixture.dat'],
-      provisional: true,
-      reason: 'Synthetic recovery authority.',
-      selection_reason: ['Provides deterministic inventory coverage.'],
-      asset_kind: 'data',
-    },
-  ])
-
-  const confirmedBriefDigest = sha256(RECOVERY_BRIEF)
-  const documentRevision = await computeDocumentRevision(
-    workspacePath,
-    confirmedBriefDigest,
-  )
-  const inventoryRevision =
-    await computeResourceInventoryRevision(workspacePath)
-  const resourceContentDispatchId = 'fixture-resource-content'
-  const resourceContentTool = createNativeResourceContentTool({
-    buildTool: definition => definition,
-    workspacePath,
-    contract: {
-      dispatchId: resourceContentDispatchId,
-      inventoryRevision,
-      baselineResourceRevision: await computeResourceRevision(
-        workspacePath,
-        '',
-      ),
-      requiredRequirementIds: ['fixture-requirement'],
-      verifiedResourceIds: ['fixture-resource'],
-      inventoryBindings: [
-        {
-          requirementId: 'fixture-requirement',
-          resourceIds: ['fixture-resource'],
-        },
-      ],
-      writablePaths: ['assets/content/resource-registry.json'],
-    },
-    assertMutationAuthority: () => undefined,
-  }) as { call(value: unknown): Promise<unknown> }
-  await resourceContentTool.call({
-    action: 'commit',
-    documents: {
-      'assets/content/resource-registry.json': {
-        schema: 'beegame-content-v1',
-        id: 'fixture-resource-registry',
-        kind: 'resource-registry',
-        fulfills: ['fixture-requirement'],
-        resources: ['fixture-resource'],
-        data: {
-          bindings: [
-            {
-              requirementId: 'fixture-requirement',
-              resourceIds: ['fixture-resource'],
-            },
-          ],
-        },
-      },
-    },
-  })
-  const workspaceRevision = await computeWorkspaceRevision(workspacePath)
-  const contentDigest = await computeResourceContentDigest(workspacePath)
-  const resourceRevision = await computeResourceRevision(
-    workspacePath,
-    documentRevision,
-  )
-  const revision = {
-    document: documentRevision,
-    resource: resourceRevision,
-    workspace: workspaceRevision,
-  }
-  const acceptedUnits: AcceptedWorkflowUnit[] = [
-    ...CANONICAL_FOUNDATION_DOCUMENTS.map((path, index) => ({
-      eventSchemaVersion: 1 as const,
-      unitId: `document:${path}`,
-      kind: 'document' as const,
-      phase: 'DOCUMENT_DRAFTING' as const,
-      predecessorUnitIds:
-        index === 0
-          ? []
-          : [`document:${CANONICAL_FOUNDATION_DOCUMENTS[index - 1]}`],
-      inputRevision: documentRevision,
-      dependencyDigests: {},
-      dispatchId: `fixture-document-${index}`,
-      receiptRef: `.beegame/workflow/document-commits/fixture-document-${index}.json`,
-      acceptedAt: RECOVERY_ACCEPTED_AT,
-      payload: { path, revision: documentRevision },
-    })),
-    {
-      eventSchemaVersion: 1,
-      unitId: 'resource:inventory',
-      kind: 'resource-inventory',
-      phase: 'RESOURCE_PREPARATION',
-      predecessorUnitIds: [
-        `document:${CANONICAL_FOUNDATION_DOCUMENTS.at(-1)!}`,
-      ],
-      inputRevision: inventoryRevision,
-      dependencyDigests: {},
-      acceptedAt: RECOVERY_ACCEPTED_AT,
-      payload: {
-        bindings: [
-          {
-            requirementId: 'fixture-requirement',
-            resourceIds: ['fixture-resource'],
-          },
-        ],
-        catalogObserved: true,
-      },
-    },
-    {
-      eventSchemaVersion: 1,
-      unitId: 'resource:content',
-      kind: 'resource-content',
-      phase: 'RESOURCE_PREPARATION',
-      predecessorUnitIds: ['resource:inventory'],
-      inputRevision: contentDigest,
-      dependencyDigests: { content: contentDigest },
-      dispatchId: resourceContentDispatchId,
-      receiptRef: `.beegame/workflow/resource-content-commits/${resourceContentDispatchId}.json`,
-      acceptedAt: RECOVERY_ACCEPTED_AT,
-      payload: { contentDigest },
-    },
-    {
-      eventSchemaVersion: 1,
-      unitId: 'resource:gate',
-      kind: 'resource-gate',
-      phase: 'DOCUMENT_REVIEW',
-      predecessorUnitIds: ['resource:content'],
-      inputRevision: resourceRevision,
-      dependencyDigests: {},
-      receiptRef: '.beegame/workflow/evidence/resource-gate.json',
-      acceptedAt: RECOVERY_ACCEPTED_AT,
-      payload: { receiptRef: '.beegame/workflow/evidence/resource-gate.json' },
-    },
-  ]
-  const base = createTestDeliveryRun({
-    runId: RECOVERY_RUN_ID,
-    projectId: RECOVERY_PROJECT_ID,
-    ownerId: RECOVERY_OWNER_ID,
-    confirmedBriefContext: RECOVERY_BRIEF,
-    checklistApproved: true,
-  })
-  const usage = {
-    input_tokens: 0,
-    cache_read_tokens: 0,
-    cache_creation_tokens: 0,
-    completion_tokens: 0,
-    total_tokens: 0,
-  }
-  const journalRun: DeliveryRun = {
-    ...base,
-    revision,
-    usage,
-  }
-  const store = createRunStore(workspacePath, RECOVERY_OWNER_ID)
-  await store.commit(journalRun, {
-    runId: journalRun.runId,
-    type: 'run.created',
-    phase: journalRun.phase,
-    status: journalRun.status,
-    revision,
-    projectId: journalRun.projectId,
-    ownerId: journalRun.ownerId,
-    createdAt: journalRun.createdAt,
-  })
-  await store.commit(
-    journalRun,
-    {
-      runId: journalRun.runId,
-      type: 'usage.updated',
-      phase: journalRun.phase,
-      status: journalRun.status,
-      revision,
-      usage,
-      createdAt: RECOVERY_ACCEPTED_AT,
-    },
-    acceptedUnits,
-  )
-
-  const snapshot = {
-    ...journalRun,
-    schemaVersion: DELIVERY_RUN_SCHEMA_VERSION,
-    invalidRecoveryMarker: true,
-    phase: 'DOCUMENT_REVIEW' as const,
-    documentStep: 'FOUNDATION_REVIEW' as const,
-    evidence: {
-      resourcePreparation: {
-        path: '.beegame/workflow/evidence/resource-gate.json',
-        kind: 'resource_preparation' as const,
-        revision: resourceRevision,
-        status: 'passed' as const,
-        observedAt: RECOVERY_ACCEPTED_AT,
-      },
-    },
-    resourceProductionState: {
-      currentTask: 'RESOURCE_GATE' as const,
-      inventoryReceipt: {
-        revision: inventoryRevision,
-        bindings: [
-          {
-            requirementId: 'fixture-requirement',
-            resourceIds: ['fixture-resource'],
-          },
-        ],
-        catalogObserved: true,
-        acceptedAt: RECOVERY_ACCEPTED_AT,
-      },
-      contentReceipt: { contentDigest, acceptedAt: RECOVERY_ACCEPTED_AT },
-    },
-  }
-  await writeFile(
-    store.paths.snapshot,
-    `${JSON.stringify(snapshot, null, 2)}\n`,
-  )
-  return {
-    workspacePath,
-    store,
-    snapshot,
-    journalRun,
-    resourceRevision,
-  }
 }
 
 async function createCanonicalReceiptRecoveryFixture(input?: {
@@ -1368,8 +949,10 @@ describe('delivery workflow recovery', () => {
     expect(await readFile(store.paths.events, 'utf8')).toBe(beforeEvents)
   })
 
-  test('defines every exact-resume checkpoint for every persisted worker type', () => {
-    expect(WORKER_TYPES).toHaveLength(13)
+  test('retains the exact-resume checkpoint vocabulary for persisted worker types', () => {
+    // Author, Reviewer and IR own their recovery behind public ports;
+    // only the six current downstream worker kinds use this checkpoint matrix.
+    expect(WORKER_TYPES).toHaveLength(6)
     expect(EXACT_RESUME_WORKER_CHECKPOINTS).toEqual([
       'before-dispatch',
       'open',
@@ -1379,16 +962,22 @@ describe('delivery workflow recovery', () => {
     ])
     expect(
       WORKER_TYPES.flatMap(workerType => exactResumeCheckpointsForWorker(workerType)),
-    ).toHaveLength(42)
+    ).toHaveLength(25)
     expect(CANONICAL_RECEIPT_WORKERS).toEqual([
       'document-author',
-      'resource-content-author',
     ])
   })
 
   for (const workerType of WORKER_TYPES) {
-    for (const checkpoint of exactResumeCheckpointsForWorker(workerType)) {
-      test(`${workerType} keeps semantic dispatch count stable at ${checkpoint}`, async () => {
+    const checkpoints = PUBLIC_IR_CONSUMER_WORKERS.includes(workerType)
+      ? (['before-dispatch'] as const)
+      : exactResumeCheckpointsForWorker(workerType)
+    for (const checkpoint of checkpoints) {
+      test(
+        PUBLIC_IR_CONSUMER_WORKERS.includes(workerType)
+          ? `${workerType} rejects historical recovery without public IR`
+          : `${workerType} keeps semantic dispatch count stable at ${checkpoint}`,
+        async () => {
         workspace = await mkdtemp(join(tmpdir(), 'beegame-worker-matrix-'))
         const run = await createWorkerRecoveryRun({
           workspacePath: workspace,
@@ -1444,6 +1033,21 @@ describe('delivery workflow recovery', () => {
           )
           expect(started).toHaveLength(0)
           expect(await readFile(store.paths.snapshot, 'utf8')).toBe(before)
+          return
+        }
+
+        // These historical matrix runs deliberately have no public IR link.
+        // Recovery must fail closed instead of reconstructing an IR binding from
+        // the documents or dispatching a worker with an unbound contract.
+        if (PUBLIC_IR_CONSUMER_WORKERS.includes(workerType)) {
+          await resumeFromDisk(false)
+          const rejected = await store.load()
+          expect(started).toHaveLength(0)
+          expect(rejected?.status).toBe('needs_action')
+          expect(rejected?.activeDispatch).toBeUndefined()
+          expect(rejected?.blockedReason).toBe(
+            'Downstream work requires a completed and settled IR result',
+          )
           return
         }
 
@@ -1519,7 +1123,8 @@ describe('delivery workflow recovery', () => {
               matrixWorkerUnitKey(originalRequest),
           ),
         ).toHaveLength(1)
-      })
+        },
+      )
     }
   }
 
@@ -1635,169 +1240,6 @@ describe('delivery workflow recovery', () => {
       ),
     ).toHaveLength(0)
   })
-
-  test('recovers committed resource content but rejects retired Author continuation', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-resource-receipt-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-resource-receipt',
-      projectId: 'project-1',
-      ownerId: 'owner-1',
-      confirmedBriefDigest: 'brief-1',
-      checklistApproved: true,
-    })
-    await writeBeeGameAssetManifest(workspace, {
-      version: 8,
-      project_target: {
-        asset_format_capabilities: ['dat', 'json'],
-        resource_library_usage: 'optional',
-        runtime_asset_root: 'assets/runtime',
-        content_root: 'assets/content',
-        generated_asset_root: 'assets/generated',
-      },
-      requirements: [
-        {
-          id: 'world.visual',
-          required: true,
-          acquisition_profile: TEST_ACQUISITION_PROFILE,
-        },
-      ],
-      resources: [],
-    })
-    await mkdir(join(workspace, 'assets/runtime'), { recursive: true })
-    await writeFile(join(workspace, 'assets/runtime/world.dat'), 'world')
-    await registerBeeGameAuthoredResources(workspace, [
-      {
-        id: 'world-resource',
-        root_path: 'assets/runtime/world.dat',
-        file_paths: ['assets/runtime/world.dat'],
-        provisional: true,
-        reason: 'Durable recovery fixture.',
-        selection_reason: ['Exercises retry reconciliation.'],
-        asset_kind: 'data',
-      },
-    ])
-    const commitContract = {
-      dispatchId: 'resource-content-dispatch',
-      inventoryRevision: await computeResourceInventoryRevision(workspace),
-      baselineResourceRevision: await computeResourceRevision(workspace, ''),
-      requiredRequirementIds: ['world.visual'],
-      verifiedResourceIds: ['world-resource'],
-      inventoryBindings: [
-        {
-          requirementId: 'world.visual',
-          resourceIds: ['world-resource'],
-        },
-      ],
-      writablePaths: ['assets/content/resource-registry.json'],
-    }
-    const tool = createNativeResourceContentTool({
-      buildTool: definition => definition,
-      workspacePath: workspace,
-      contract: commitContract,
-      assertMutationAuthority: () => undefined,
-    }) as { call(input: unknown): Promise<unknown> }
-    await tool.call({
-      action: 'commit',
-      documents: {
-        'assets/content/resource-registry.json': {
-          schema: 'beegame-content-v1',
-          id: 'resource-registry',
-          kind: 'resource-registry',
-          fulfills: ['world.visual'],
-          resources: ['world-resource'],
-          data: {
-            bindings: [
-              {
-                requirementId: 'world.visual',
-                resourceIds: ['world-resource'],
-              },
-            ],
-          },
-        },
-      },
-    })
-    const request: WorkerDispatchRequest = {
-      dispatchId: commitContract.dispatchId,
-      runId: initial.runId,
-      ownerId: initial.ownerId,
-      projectId: initial.projectId,
-      workspacePath: workspace,
-      workerType: 'resource-content-author',
-      phase: 'RESOURCE_PREPARATION',
-      revision: initial.revision.document,
-      contract: {
-        ...commitContract,
-      },
-    }
-    await store.save({
-      ...initial,
-      phase: 'RESOURCE_PREPARATION',
-      status: 'failed',
-      resourceProductionState: {
-        currentTask: 'RESOURCE_CONTENT',
-      },
-      activeDispatch: {
-        dispatchId: commitContract.dispatchId,
-        workerType: 'resource-content-author',
-        phase: 'RESOURCE_PREPARATION',
-        revision: request.revision,
-        status: 'failed',
-        startedAt: new Date().toISOString(),
-        finishedAt: new Date().toISOString(),
-        failureReason: 'transport result mapping failed',
-        request,
-      },
-      blockedReason: 'transport result mapping failed',
-    })
-
-    const retried = await retryRun({
-      store,
-      runId: initial.runId,
-      workspacePath: workspace,
-    })
-
-    expect(retried.status).toBe('running')
-    expect(retried.activeDispatch).toMatchObject({
-      dispatchId: commitContract.dispatchId,
-      status: 'completed',
-      terminalResult: {
-        workerType: 'resource-content-author',
-        status: 'completed',
-        contentIds: ['resource-registry'],
-        writtenPaths: ['assets/content/resource-registry.json'],
-      },
-    })
-
-    const resumedAuthorDispatches: WorkerDispatchRequest[] = []
-    const controller = createDeliveryWorkflowController({
-      workspacePath: workspace,
-      ownerId: initial.ownerId,
-      workerPort: {
-        async start(nextRequest) {
-          resumedAuthorDispatches.push(nextRequest)
-          return {
-            sessionId: 'recovery-next-session',
-            dispatchId: nextRequest.dispatchId!,
-          }
-        },
-        async submit() {},
-        async stop() {},
-        async status() {
-          throw new Error('not used')
-        },
-      },
-    })
-
-    await expect(controller.resume(retried)).rejects.toThrow(
-      LEGACY_AUTHOR_RETIRED_ERROR,
-    )
-
-    const progressed = await store.load()
-    expect(resumedAuthorDispatches).toHaveLength(0)
-    expect(progressed?.activeDispatch).toMatchObject({ status: 'failed', failureReason: expect.stringContaining('retired') })
-    expect(await readFile(join(workspace, '.beegame/workflow/resource-content-commits', `${commitContract.dispatchId}.json`), 'utf8')).toContain('committed')
-  }, 2_000)
 
   test('treats a duplicate retry for an already resumed run as idempotent', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-retry-idempotent-'))
@@ -2085,21 +1527,12 @@ describe('delivery workflow recovery', () => {
       checklistApproved: true,
     })
     const task = {
-      id: 'task-1',
+      id: 'DIRECT_IMPLEMENTATION',
       title: 'Build the runtime entry point',
       checklistIds: [],
       resourceIds: [],
       contentIds: [],
-      dependsOn: [],
       allowedPaths: ['src/'],
-      expectedArtifacts: ['src/main.ts'],
-      verification: [
-        {
-          kind: 'build' as const,
-          commandOrAction: 'bun run build',
-          expectedResult: 'Build exits successfully',
-        },
-      ],
       status: 'running' as const,
       attempt: 1,
       startedRevision: initial.revision.workspace,
@@ -2183,21 +1616,12 @@ describe('delivery workflow recovery', () => {
       checklistApproved: true,
     })
     const task = {
-      id: 'task-1',
+      id: 'DIRECT_IMPLEMENTATION',
       title: 'Build the runtime entry point',
       checklistIds: [],
       resourceIds: [],
       contentIds: [],
-      dependsOn: [],
       allowedPaths: ['src/'],
-      expectedArtifacts: ['src/main.ts'],
-      verification: [
-        {
-          kind: 'build' as const,
-          commandOrAction: 'bun run build',
-          expectedResult: 'Build exits successfully',
-        },
-      ],
       status: 'running' as const,
       attempt: 1,
       startedRevision: initial.revision.workspace,
@@ -2258,7 +1682,7 @@ describe('delivery workflow recovery', () => {
       },
       activeDispatch: {
         dispatchId: 'dispatch-1',
-        workerType: 'resource-curator' as const,
+        workerType: 'resource-planner' as const,
         phase: 'RESOURCE_PREPARATION' as const,
         revision: initial.revision.document,
         status: 'failed' as const,
@@ -2275,45 +1699,6 @@ describe('delivery workflow recovery', () => {
     const retried = await retryRun({ store, runId: failed.runId })
 
     expect(retried).toMatchObject({ status: 'running' })
-  })
-
-  test('retries a failed Resource Inventory from its durable cursor', async () => {
-    workspace = await mkdtemp(join(tmpdir(), 'beegame-inventory-retry-'))
-    const store = createRunStore(workspace, 'owner-1')
-    const initial = createTestDeliveryRun({
-      runId: 'run-1',
-      projectId: 'project-1',
-      ownerId: 'owner-1',
-      confirmedBriefDigest: 'brief-1',
-      checklistApproved: true,
-    })
-    await store.save({
-      ...initial,
-      phase: 'RESOURCE_PREPARATION',
-      status: 'failed',
-      blockedReason: 'resource inventory worker failed before commit',
-      resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
-      activeDispatch: {
-        dispatchId: 'dispatch-inventory',
-        workerType: 'resource-curator',
-        phase: 'RESOURCE_PREPARATION',
-        taskId: 'RESOURCE_INVENTORY',
-        revision: initial.revision.document,
-        status: 'failed',
-        failureReason: 'resource inventory worker failed before commit',
-        startedAt: new Date().toISOString(),
-        finishedAt: new Date().toISOString(),
-      },
-    })
-
-    const retried = await retryRun({ store, runId: initial.runId })
-
-    expect(retried).toMatchObject({
-      phase: 'RESOURCE_PREPARATION',
-      status: 'running',
-      resourceProductionState: { currentTask: 'RESOURCE_INVENTORY' },
-    })
-    expect(retried.activeDispatch).toBeUndefined()
   })
 
   test('starts retry idle timing from the new dispatch instead of stale run progress', async () => {
@@ -2354,7 +1739,7 @@ describe('delivery workflow recovery', () => {
       ownerId: initial.ownerId,
       projectId: initial.projectId,
       workspacePath: workspace,
-      workerType: 'resource-curator',
+      workerType: 'resource-planner',
       phase: 'RESOURCE_PREPARATION',
       revision: initial.revision.document,
       contract: {},
@@ -2675,7 +2060,7 @@ describe('delivery workflow recovery', () => {
       ownerId: initial.ownerId,
       projectId: initial.projectId,
       workspacePath: workspace,
-      workerType: 'resource-curator',
+      workerType: 'resource-planner',
       phase: 'RESOURCE_PREPARATION',
       revision: initial.revision.document,
       allowedPaths: ['assets/', '.beegame/workflow/evidence/'],
@@ -2734,7 +2119,7 @@ describe('delivery workflow recovery', () => {
       ownerId: initial.ownerId,
       projectId: initial.projectId,
       workspacePath: workspace,
-      workerType: 'resource-curator',
+      workerType: 'resource-planner',
       phase: 'RESOURCE_PREPARATION',
       revision: initial.revision.document,
       allowedPaths: ['assets/', '.beegame/workflow/evidence/'],
@@ -2799,7 +2184,7 @@ describe('delivery workflow recovery', () => {
       ownerId: initial.ownerId,
       projectId: initial.projectId,
       workspacePath: workspace,
-      workerType: 'resource-curator',
+      workerType: 'resource-planner',
       phase: 'RESOURCE_PREPARATION',
       revision: initial.revision.document,
       allowedPaths: ['assets/', '.beegame/workflow/evidence/'],
@@ -2878,7 +2263,7 @@ describe('delivery workflow recovery', () => {
       ownerId: initial.ownerId,
       projectId: initial.projectId,
       workspacePath: workspace,
-      workerType: 'resource-curator',
+      workerType: 'resource-planner',
       phase: 'RESOURCE_PREPARATION',
       revision: initial.revision.document,
       contract: {},
@@ -2995,7 +2380,7 @@ describe('delivery workflow recovery', () => {
       ownerId: initial.ownerId,
       projectId: initial.projectId,
       workspacePath: workspace,
-      workerType: 'resource-curator',
+      workerType: 'resource-planner',
       phase: 'RESOURCE_PREPARATION',
       revision: initial.revision.document,
       contract: {},
@@ -3041,7 +2426,7 @@ describe('delivery workflow recovery', () => {
       ownerId: initial.ownerId,
       projectId: initial.projectId,
       workspacePath: workspace,
-      workerType: 'resource-curator',
+      workerType: 'resource-planner',
       phase: 'RESOURCE_PREPARATION',
       revision: initial.revision.document,
       contract: {},

@@ -1,4 +1,5 @@
 import { checklistAuthorityModeForSource } from './delivery-workflow/game-document-contracts'
+import { CANONICAL_FOUNDATION_DOCUMENTS } from './foundation-documents'
 
 export type AcceptanceChecklistTask = Readonly<{
   id: string
@@ -41,7 +42,8 @@ export function parseAcceptanceChecklist(
       issues.push(`${path}: Checklist task ${identifier.value} has no Checklist authority source tag.`)
       continue
     }
-    const mode = checklistAuthorityModeForSource(source.path, source.blockId)
+    const configuredMode = checklistAuthorityModeForSource(source.path, source.blockId)
+    const mode = configuredMode ?? (CANONICAL_FOUNDATION_DOCUMENTS.includes(source.path as never) ? 'scenario' : undefined)
     if (!mode || mode === 'exclude') {
       issues.push(`${path}: Checklist task ${identifier.value} cites an excluded or unknown source: ${source.raw}.`)
       continue
@@ -71,7 +73,7 @@ function checklistSource(value: string): {
   blockId: string
   description: string
 } | undefined {
-  const match = /^\[(docs\/[A-Za-z0-9_./-]+\.md)#([a-z0-9._-]+)\]\s+(.+)$/u.exec(value)
+  const match = /^\[(docs\/[A-Za-z0-9_./-]+\.md)#([A-Za-z0-9._-]+)\]\s+(.+)$/u.exec(value)
   if (!match) return undefined
   return {
     raw: `[${match[1]}#${match[2]}]`,
