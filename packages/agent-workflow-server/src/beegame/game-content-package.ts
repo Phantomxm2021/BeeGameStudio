@@ -64,6 +64,7 @@ const sceneNodeSchema = z
     layer: identifier.optional(),
     zIndex: finiteNumber.optional(),
     assetRef: identifier.optional(),
+    frameRef: identifier.optional(),
     components: z.array(contentComponentSchema).optional(),
     data: z.record(z.string(), z.unknown()).optional(),
   })
@@ -300,6 +301,27 @@ function validateNoResourcePathBypass(
   }
 }
 
+function hasUsableSpriteFrame(
+  resource: BeeGameAssetManifest['resources'][number],
+  frameRef: string,
+): boolean {
+  const profile = resource.content_profile
+  if (!isRecord(profile) || !Array.isArray(profile.components)) return false
+  return profile.components.some(component => {
+    if (!isRecord(component) || component.id !== frameRef) return false
+    if (component.kind !== 'sprite-frame' && component.kind !== 'atlas-region')
+      return false
+    if (!isRecord(component.specs)) return false
+    const { x, y, width, height } = component.specs
+    return (
+      typeof x === 'number' && Number.isFinite(x) && x >= 0 &&
+      typeof y === 'number' && Number.isFinite(y) && y >= 0 &&
+      typeof width === 'number' && Number.isFinite(width) && width > 0 &&
+      typeof height === 'number' && Number.isFinite(height) && height > 0
+    )
+  })
+}
+
 function validateDocument(input: {
   path: string
   document: BeeGameContentDocument
@@ -330,6 +352,23 @@ function validateDocument(input: {
           input.issues.push(
             `${input.path}: node ${node.id} component ${component.type} uses undeclared assetRef ${component.assetRef}.`,
           )
+    if ('frameRef' in node && node.frameRef) {
+      if ('kind' in node && node.kind !== 'sprite')
+        input.issues.push(
+          `${input.path}: node ${node.id} frameRef is only valid for a sprite.`,
+        )
+      if (!node.assetRef)
+        input.issues.push(
+          `${input.path}: node ${node.id} frameRef requires assetRef.`,
+        )
+      else {
+        const resource = resourceById.get(node.assetRef)
+        if (resource && !hasUsableSpriteFrame(resource, node.frameRef))
+          input.issues.push(
+            `${input.path}: node ${node.id} frameRef does not resolve to a usable sprite frame: ${node.frameRef}.`,
+          )
+      }
+    }
   }
   validateTree({
     path: input.path,

@@ -23,6 +23,7 @@ vi.mock('@beegame/scene-editor', () => ({
       <span>{initialDocument.nodes.background?.name}</span>
       <span>{initialProjection}</span>
       <span>{initialDocument.assets['asset.background']?.uri}</span>
+      <span>{initialDocument.nodes.background?.material?.textureRegion?.width}</span>
       <button type="button" onClick={() => void onSave(initialDocument)}>Save project scene</button>
     </div>
   ),
@@ -39,7 +40,7 @@ const canonicalScene = {
   data: {
     nodes: [
       { id: 'world', kind: 'group' },
-      { id: 'background', parentId: 'world', name: 'Project Background', kind: 'sprite', assetRef: 'asset.background' },
+      { id: 'background', parentId: 'world', name: 'Project Background', kind: 'sprite', assetRef: 'asset.background', frameRef: 'background.full' },
     ],
   },
 };
@@ -76,6 +77,13 @@ describe('SceneEditorOverlay project connection', () => {
         status: 'verified',
         root_path: 'assets/runtime/background.png',
         file_paths: ['assets/runtime/background.png'],
+        content_profile: {
+          components: [{
+            id: 'background.full',
+            kind: 'sprite-frame',
+            specs: { x: 0, y: 0, width: 320, height: 180 },
+          }],
+        },
       }],
     });
     api.loadProjectAssetFile.mockResolvedValue(new Blob(['image'], { type: 'image/png' }));
@@ -102,6 +110,7 @@ describe('SceneEditorOverlay project connection', () => {
     expect(await screen.findByText('Project Background')).toBeInTheDocument();
     expect(screen.getByText('orthographic')).toBeInTheDocument();
     expect(screen.getByText('blob:project-background')).toBeInTheDocument();
+    expect(screen.getByText('320')).toBeInTheDocument();
     expect(api.getProjectGameContent).toHaveBeenCalledWith('project-1');
     expect(api.loadProjectAssetFile).toHaveBeenCalledWith(
       'project-1',

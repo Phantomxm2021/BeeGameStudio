@@ -78,6 +78,31 @@ function manifest(): BeeGameAssetManifest {
         selected_at: '2026-09-15T00:00:00.000Z',
         selection_reason: ['user selected replacement'],
       },
+      {
+        id: 'asset.atlas',
+        fulfills: [],
+        source: {
+          type: 'agent-authored',
+          created_at: '2026-09-15T00:00:00.000Z',
+          reason: 'atlas fixture',
+        },
+        root_path: 'assets/runtime/characters.png',
+        file_paths: ['assets/runtime/characters.png'],
+        provisional: false,
+        status: 'verified',
+        selected_at: '2026-09-15T00:00:00.000Z',
+        selection_reason: ['contains the required character frame'],
+        asset_kind: 'sprite-atlas',
+        content_profile: {
+          packaging: 'self-contained',
+          inspection: { status: 'complete', source: 'server' },
+          components: [{
+            id: 'player.idle.0',
+            kind: 'atlas-region',
+            specs: { x: 32, y: 16, width: 24, height: 28 },
+          }],
+        },
+      },
     ],
   }
 }
@@ -225,6 +250,37 @@ describe('Game Content Package scene and UI contract', () => {
       'asset is not verified: asset.unverified',
     )
     expect(audit.issues.join('\n')).toContain('bypasses assetRefs')
+  })
+
+  test('resolves Scene sprite frames through Manifest atlas components', () => {
+    const root = workspace()
+    validFiles(root)
+    const snapshot = loadBeeGameContentDocument(root, 'scenes/main.scene.json')
+    const document = structuredClone(snapshot.document)
+    if (document.kind !== 'scene-2d') throw new Error('expected scene fixture')
+    const background = document.data.nodes.find(node => node.id === 'background')
+    if (!background) throw new Error('expected background fixture')
+    document.assetRefs = ['asset.atlas']
+    background.assetRef = 'asset.atlas'
+    background.frameRef = 'player.idle.0'
+    if (background.components?.[0])
+      background.components[0].assetRef = 'asset.atlas'
+    writeJson(root, 'content/scenes/main.scene.json', document)
+
+    expect(auditBeeGameContentPackage(root, authority()).issues).toEqual([])
+
+    background.frameRef = 'player.missing'
+    writeJson(root, 'content/scenes/main.scene.json', document)
+    expect(auditBeeGameContentPackage(root, authority()).issues.join('\n')).toContain(
+      'frameRef does not resolve to a usable sprite frame: player.missing',
+    )
+
+    background.frameRef = 'player.idle.0'
+    background.kind = 'group'
+    writeJson(root, 'content/scenes/main.scene.json', document)
+    expect(auditBeeGameContentPackage(root, authority()).issues.join('\n')).toContain(
+      'frameRef is only valid for a sprite',
+    )
   })
 
   test('round-trips direct Scene and UI edits with stable identity', () => {

@@ -282,7 +282,24 @@ function disposeOwned(object: THREE.Object3D | null | undefined) {
 
 function localAssetUri(asset: SceneAsset | undefined) { return asset?.bytes?.startsWith('data:') ? asset.bytes : asset?.uri }
 
-function useLocalTexture(uri: string | undefined, onDiagnostic?: (message: string) => void) {
+export function applyTextureRegion(
+  texture: THREE.Texture,
+  region: NonNullable<SceneNode['material']>['textureRegion'],
+): boolean {
+  const image = texture.image as { width?: number; height?: number }
+  const imageWidth = image.width ?? 0, imageHeight = image.height ?? 0
+  if (
+    !region ||
+    region.x + region.width > imageWidth ||
+    region.y + region.height > imageHeight
+  ) return false
+  texture.repeat.set(region.width / imageWidth, region.height / imageHeight)
+  texture.offset.set(region.x / imageWidth, 1 - (region.y + region.height) / imageHeight)
+  texture.needsUpdate = true
+  return true
+}
+
+function useLocalTexture(uri: string | undefined, region?: NonNullable<SceneNode['material']>['textureRegion'], onDiagnostic?: (message: string) => void) {
   const [texture, setTexture] = useState<THREE.Texture | null>(null)
   useEffect(() => {
     let alive = true
@@ -290,9 +307,17 @@ function useLocalTexture(uri: string | undefined, onDiagnostic?: (message: strin
     setTexture(null)
     if (!uri) return () => { alive = false }
     const loader = new THREE.TextureLoader()
-    loader.load(uri, next => { if (alive) { loaded = next; next.colorSpace = THREE.SRGBColorSpace; setTexture(next) } else next.dispose() }, undefined, () => onDiagnostic?.('Local texture asset could not be decoded'))
+    loader.load(uri, next => {
+      if (!alive) { next.dispose(); return }
+      loaded = next
+      next.colorSpace = THREE.SRGBColorSpace
+      if (region && !applyTextureRegion(next, region)) {
+        onDiagnostic?.('Texture region falls outside the decoded image')
+      }
+      setTexture(next)
+    }, undefined, () => onDiagnostic?.('Local texture asset could not be decoded'))
     return () => { alive = false; loaded?.dispose() }
-  }, [uri, onDiagnostic])
+  }, [uri, region?.x, region?.y, region?.width, region?.height, onDiagnostic])
   return texture
 }
 
@@ -302,7 +327,7 @@ function materialProps(material: SceneNode['material'], texture: THREE.Texture |
 }
 
 function Primitive({ node, assets, diagnose }: { node: SceneNode; assets: Record<string, SceneAsset>; diagnose: (message: string) => void }) {
-  const texture = useLocalTexture(localAssetUri(node.material?.textureAssetId ? assets[node.material.textureAssetId] : undefined), diagnose)
+  const texture = useLocalTexture(localAssetUri(node.material?.textureAssetId ? assets[node.material.textureAssetId] : undefined), node.material?.textureRegion, diagnose)
   const props = materialProps(node.material, texture)
   const material = node.material?.mode === 'unlit' ? <meshBasicMaterial {...props} /> : <meshStandardMaterial {...props} metalness={node.material?.metalness ?? 0} roughness={node.material?.roughness ?? .8} />
   const shape = node.kind === 'box' ? <boxGeometry args={[1, 1, 1]} /> : node.kind === 'sphere' ? <sphereGeometry args={[1, 24, 16]} /> : <planeGeometry args={[1, 1]} />
@@ -315,7 +340,7 @@ function ModelAsset({ asset, override, assets, diagnose, onReady }: { asset: Sce
   const [error, setError] = useState(false)
   const [animations, setAnimations] = useState<THREE.AnimationClip[]>([])
   const mixer = useRef<THREE.AnimationMixer | null>(null)
-  const overrideTexture = useLocalTexture(localAssetUri(override?.textureAssetId ? assets[override.textureAssetId] : undefined), diagnose)
+  const overrideTexture = useLocalTexture(localAssetUri(override?.textureAssetId ? assets[override.textureAssetId] : undefined), override?.textureRegion, diagnose)
   const assetKey = Object.values(assets).map(item => `${item.id}:${item.path}:${item.bytes ?? ''}`).sort().join('|')
   useEffect(() => {
     let alive = true

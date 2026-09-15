@@ -138,6 +138,8 @@ content/
 
 第一阶段把编辑器必须稳定理解的字段提升为公共结构，而不是全部塞进任意 `data`：Scene 节点明确提供 `transform`、`assetRef` 与 `components`；UI 节点明确提供 `layout`、`assetRef`、`bindings`、`actions` 与 `style`。项目特有扩展仍可留在 `data`，编辑器必须无损保留。
 
+Scene Sprite 使用整张图片时只写 `assetRef`；使用 Spritesheet/Atlas 子区域时再写 `frameRef`。`frameRef` 必须解析到该 Manifest resource 的 `content_profile.components` 中一个 `sprite-frame` 或 `atlas-region`，其 `specs` 由 Manifest 唯一保存 `x`、`y`、`width`、`height` 像素事实。Scene 不复制这些坐标，目标实现和编辑器均通过同一引用解析。
+
 ## 6. 内容类型
 
 ### 6.1 共同类型

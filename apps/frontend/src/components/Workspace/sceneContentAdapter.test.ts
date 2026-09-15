@@ -23,6 +23,7 @@ function scene(): BeeGameSceneContentDocument {
           parentId: 'world',
           kind: 'sprite',
           assetRef: 'asset.background',
+          frameRef: 'background.full',
           zIndex: -2,
           transform: { position: [2, 4], rotation: 0.25, scale: [8, 6] },
           components: [{ type: 'sprite-renderer', data: { blend: 'normal' } }],
@@ -41,6 +42,19 @@ describe('Scene content editor boundary', () => {
       documentRevision: REVISION,
       irRevision: REVISION,
       assetManifestRevision: ASSET_REVISION,
+      assets: {
+        'asset.background': {
+          id: 'asset.background',
+          name: 'background.png',
+          mimeType: 'image/png',
+          path: 'assets/runtime/background.png',
+        },
+      },
+      assetRegions: {
+        'asset.background': {
+          'background.full': { x: 12, y: 8, width: 64, height: 32 },
+        },
+      },
     });
 
     expect(editor.rootIds).toEqual(['world']);
@@ -49,6 +63,12 @@ describe('Scene content editor boundary', () => {
       position: [2, -2, 4],
       rotation: [0, -0.25, 0],
       scale: [8, 1, 6],
+    });
+    expect(editor.nodes.background.material?.textureRegion).toEqual({
+      x: 12,
+      y: 8,
+      width: 64,
+      height: 32,
     });
     expect(editorDocumentToSceneContent(editor, canonical)).toEqual(canonical);
   });

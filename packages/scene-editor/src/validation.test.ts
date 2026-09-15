@@ -45,6 +45,9 @@ describe('scene DTO validation', () => {
     const volume = makeFixture()
     volume.nodes.hive.volume!.size = [1, 0, 1]
     expect(() => assertSceneDocument(volume)).toThrow(/size/)
+    const region = makeFixture()
+    region.nodes.hive.material!.textureRegion = { x: 0, y: 0, width: 0, height: 32 }
+    expect(() => assertSceneDocument(region)).toThrow(/textureRegion.width/)
   })
 
   it('checks node and asset references, dependency closure and safe paths', () => {

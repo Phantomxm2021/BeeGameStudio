@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import type { SceneAsset, SceneDocument } from '@beegame/scene-editor';
+import type { SceneAsset, SceneDocument, SceneNode } from '@beegame/scene-editor';
 import '@beegame/scene-editor/styles.css';
 import {
   beeGameAdapter,
@@ -78,12 +78,15 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
                 }
                 objectUrls.push(uri);
                 return {
-                  id: resource.id,
-                  name: path.split('/').at(-1) ?? resource.id,
-                  mimeType: blob.type || imageMimeType(path),
-                  path,
-                  uri,
-                } satisfies SceneAsset;
+                  asset: {
+                    id: resource.id,
+                    name: path.split('/').at(-1) ?? resource.id,
+                    mimeType: blob.type || imageMimeType(path),
+                    path,
+                    uri,
+                  } satisfies SceneAsset,
+                  regions: spriteRegions(resource.content_profile),
+                };
               } catch {
                 return undefined;
               }
@@ -91,8 +94,11 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
         );
         if (!active) return;
         const assets: Record<string, SceneAsset> = {};
-        for (const asset of loadedAssets) {
-          if (asset) assets[asset.id] = asset;
+        const assetRegions: Record<string, Record<string, TextureRegion>> = {};
+        for (const loaded of loadedAssets) {
+          if (!loaded) continue;
+          assets[loaded.asset.id] = loaded.asset;
+          assetRegions[loaded.asset.id] = loaded.regions;
         }
         canonicalRef.current = { path: scene.path, revision: scene.revision, document };
         setInitialDocument(sceneContentToEditorDocument({
@@ -101,6 +107,7 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           irRevision: snapshot.index.irRevision,
           assetManifestRevision: snapshot.index.assetManifestRevision,
           assets,
+          assetRegions,
         }));
       })
       .catch(error => {
@@ -151,6 +158,7 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
 }
 
 const SCENE_IMAGE = /\.(?:png|jpe?g|webp|gif|avif|bmp)$/i;
+type TextureRegion = NonNullable<NonNullable<SceneNode['material']>['textureRegion']>;
 
 function preferredSceneImagePath(rootPath: string, filePaths: string[]): string | undefined {
   if (SCENE_IMAGE.test(rootPath)) return rootPath;
@@ -161,4 +169,30 @@ function imageMimeType(path: string): string {
   const extension = path.split('.').at(-1)?.toLowerCase();
   if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
   return extension ? `image/${extension}` : 'application/octet-stream';
+}
+
+function spriteRegions(contentProfile: Record<string, unknown> | undefined): Record<string, TextureRegion> {
+  const components = contentProfile?.components;
+  if (!Array.isArray(components)) return {};
+  const regions: Record<string, TextureRegion> = {};
+  for (const component of components) {
+    if (!component || typeof component !== 'object' || Array.isArray(component)) continue;
+    const value = component as Record<string, unknown>;
+    if (value.kind !== 'sprite-frame' && value.kind !== 'atlas-region') continue;
+    if (typeof value.id !== 'string' || !value.specs || typeof value.specs !== 'object' || Array.isArray(value.specs)) continue;
+    const specs = value.specs as Record<string, unknown>;
+    const region = { x: specs.x, y: specs.y, width: specs.width, height: specs.height };
+    if (!isTextureRegion(region)) continue;
+    regions[value.id] = region;
+  }
+  return regions;
+}
+
+function isTextureRegion(value: Record<string, unknown>): value is TextureRegion {
+  return (
+    typeof value.x === 'number' && Number.isFinite(value.x) && value.x >= 0 &&
+    typeof value.y === 'number' && Number.isFinite(value.y) && value.y >= 0 &&
+    typeof value.width === 'number' && Number.isFinite(value.width) && value.width > 0 &&
+    typeof value.height === 'number' && Number.isFinite(value.height) && value.height > 0
+  );
 }

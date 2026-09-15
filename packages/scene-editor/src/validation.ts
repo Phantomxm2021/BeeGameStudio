@@ -89,11 +89,16 @@ export function assertTransform(input: unknown, path = 'transform'): asserts inp
 }
 
 function assertMaterial(input: unknown, path: string): asserts input is MaterialOverride {
-  const value = record(input, path); keys(value, ['mode', 'color', 'metalness', 'roughness', 'opacity', 'alphaMode', 'textureAssetId'], path)
+  const value = record(input, path); keys(value, ['mode', 'color', 'metalness', 'roughness', 'opacity', 'alphaMode', 'textureAssetId', 'textureRegion'], path)
   if (typeof value.mode !== 'string' || !MATERIAL_MODES.has(value.mode)) invalid(`${path}.mode`, 'unsupported material mode')
   text(value.color, `${path}.color`); number(value.metalness, `${path}.metalness`, n => n >= 0 && n <= 1); number(value.roughness, `${path}.roughness`, n => n >= 0 && n <= 1); number(value.opacity, `${path}.opacity`, n => n >= 0 && n <= 1)
   if (typeof value.alphaMode !== 'string' || !ALPHA_MODES.has(value.alphaMode)) invalid(`${path}.alphaMode`, 'unsupported alpha mode')
   if (value.textureAssetId !== undefined) text(value.textureAssetId, `${path}.textureAssetId`)
+  if (value.textureRegion !== undefined) {
+    const region = record(value.textureRegion, `${path}.textureRegion`); keys(region, ['x', 'y', 'width', 'height'], `${path}.textureRegion`)
+    number(region.x, `${path}.textureRegion.x`, n => n >= 0); number(region.y, `${path}.textureRegion.y`, n => n >= 0)
+    number(region.width, `${path}.textureRegion.width`, n => n > 0); number(region.height, `${path}.textureRegion.height`, n => n > 0)
+  }
 }
 
 function assertLight(input: unknown, path: string): asserts input is LightData {

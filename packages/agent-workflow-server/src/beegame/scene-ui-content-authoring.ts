@@ -77,6 +77,7 @@ export function buildSceneUiContentAuthoringAuthority(
     'Write content/index.json, scene files under content/scenes/, and UI files under content/ui/. Keep world-space Scene content and screen-space UI content separate.',
     'These Scene and UI files are the canonical editable source used by editors and consumed directly by target implementations; do not create another derived Scene or UI config.',
     'Reference Game IR nodes through irRefs and verified Manifest resources through assetRefs. Do not write asset file paths or URLs into content data.',
+    'When a Scene sprite uses a sprite sheet or atlas, set its frameRef to a sprite-frame or atlas-region id from that Manifest resource content_profile; do not copy frame rectangles into Scene data.',
     'Express the complete Scene and UI required by the authority. Do not create VFX, character, animation, audio, gameplay, target-engine source code, or a second resource registry in this task.',
     'Finish after the Scene and UI package is coherent. The host validates syntax, versions, references and hierarchy.',
   ].join(' ')

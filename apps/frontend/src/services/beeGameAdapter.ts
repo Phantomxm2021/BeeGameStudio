@@ -288,6 +288,7 @@ export type BeeGameContentNode = {
   layer?: string
   zIndex?: number
   assetRef?: string
+  frameRef?: string
   components?: Array<{
     type: string
     assetRef?: string

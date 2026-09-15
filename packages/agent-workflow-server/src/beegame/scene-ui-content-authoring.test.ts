@@ -34,6 +34,7 @@ describe('Scene and UI direct CLI authority', () => {
     expect(authority.prompt).toContain('Keep world-space Scene content and screen-space UI content separate')
     expect(authority.prompt).toContain('canonical editable source')
     expect(authority.prompt).toContain('do not create another derived Scene or UI config')
+    expect(authority.prompt).toContain('frameRef')
     expect(authority.prompt).not.toMatch(/subagent|skill|retry|tool call|step-by-step/i)
   })
 

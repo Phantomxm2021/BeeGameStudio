@@ -8,6 +8,7 @@ export interface Transform { position: Vec3; rotation: Vec3; quaternion?: Quat; 
 export interface MaterialOverride {
   mode: 'standard' | 'unlit'; color: string; metalness: number; roughness: number
   opacity: number; alphaMode: 'opaque' | 'mask' | 'blend'; textureAssetId?: string
+  textureRegion?: { x: number; y: number; width: number; height: number }
 }
 export interface LightData { kind: LightKind; color: string; intensity: number; distance?: number; angle?: number; penumbra?: number }
 export interface VolumeVisual { role: 'collider' | 'trigger'; shape: VolumeShape; size: Vec3; offset: Vec3; rotation: Vec3 }

@@ -47,6 +47,7 @@ export function sceneContentToEditorDocument(input: {
   irRevision: string;
   assetManifestRevision: string;
   assets?: Record<string, SceneAsset>;
+  assetRegions?: Record<string, Record<string, NonNullable<SceneNode['material']>['textureRegion']>>;
 }): SceneDocument {
   const children = childrenByParent(input.document.data.nodes);
   const nodes = Object.fromEntries(
@@ -65,7 +66,12 @@ export function sceneContentToEditorDocument(input: {
           material: {
             ...DEFAULT_MATERIAL,
             ...(node.assetRef && input.assets?.[node.assetRef]
-              ? { textureAssetId: node.assetRef }
+              ? {
+                  textureAssetId: node.assetRef,
+                  ...(node.frameRef && input.assetRegions?.[node.assetRef]?.[node.frameRef]
+                    ? { textureRegion: input.assetRegions[node.assetRef][node.frameRef] }
+                    : {}),
+                }
               : {}),
           },
         } : {}),
