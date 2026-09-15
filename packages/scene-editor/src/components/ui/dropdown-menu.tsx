@@ -11,7 +11,15 @@ export function DropdownMenuTrigger(props: ComponentProps<typeof DropdownMenuPri
   return <DropdownMenuPrimitive.Trigger data-slot="dropdown-menu-trigger" {...props} />
 }
 export function DropdownMenuContent({ className = '', sideOffset = 6, ...props }: ComponentProps<typeof DropdownMenuPrimitive.Content>) {
-  return <DropdownMenuPrimitive.Portal><DropdownMenuPrimitive.Content data-slot="dropdown-menu-content" sideOffset={sideOffset} className={`ui-dropdown-content ${className}`} onContextMenu={event => event.preventDefault()} {...props} /></DropdownMenuPrimitive.Portal>
+  const container = typeof document === 'undefined' ? undefined : document.querySelector<HTMLElement>('.scene-editor-host') ?? undefined
+  return <DropdownMenuPrimitive.Portal container={container}><DropdownMenuPrimitive.Content data-slot="dropdown-menu-content" sideOffset={sideOffset} className={`scene-editor-portal ui-dropdown-content ${className}`} onContextMenu={event => event.preventDefault()} {...props} /></DropdownMenuPrimitive.Portal>
+}
+export const DropdownMenuSub = DropdownMenuPrimitive.Sub
+export function DropdownMenuSubTrigger({ className = '', ...props }: ComponentProps<typeof DropdownMenuPrimitive.SubTrigger>) {
+  return <DropdownMenuPrimitive.SubTrigger className={`scene-editor-portal ui-dropdown-item ${className}`} {...props} />
+}
+export function DropdownMenuSubContent({ className = '', ...props }: ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
+  return <DropdownMenuPrimitive.SubContent className={`scene-editor-portal ui-dropdown-content ${className}`} {...props} />
 }
 export function DropdownMenuItem({ className = '', ...props }: ComponentProps<typeof DropdownMenuPrimitive.Item>) {
   return <DropdownMenuPrimitive.Item className={`ui-dropdown-item ${className}`} {...props} />

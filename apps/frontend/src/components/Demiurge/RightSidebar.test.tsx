@@ -107,7 +107,7 @@ describe('RightSidebar tabs', () => {
         await user.click(screen.getByRole('tab', { name: /^Artifacts/ }));
         await user.click(await screen.findByRole('button', { name: 'Scene' }));
         expect(await screen.findByRole('dialog', { name: 'Scene Editor' })).toBeInTheDocument();
-        await user.click(screen.getByRole('button', { name: 'Close Scene Editor' }));
+        await user.keyboard('{Escape}');
         expect(screen.queryByRole('dialog', { name: 'Scene Editor' })).not.toBeInTheDocument();
     });
 

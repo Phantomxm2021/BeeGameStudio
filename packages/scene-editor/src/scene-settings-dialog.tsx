@@ -1,17 +1,26 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { Settings2 } from 'lucide-react'
 import { DEFAULT_SCENE_SETTINGS, type SceneDocument, type SceneSettings } from './model'
 import { assertSceneSettings } from './validation'
 import { Dialog, DialogTrigger, DialogContent, DialogTitle, DialogDescription, DialogClose } from './components/ui/dialog'
 import { Toggle } from './components/ui/toggle'
 
-export function SceneSettingsDialog({ document, onApply, onSave }: {
+export function SceneSettingsDialog({ document, onApply, onSave, trigger, open: controlledOpen, onOpenChange }: {
   document: SceneDocument
   onApply: (name: string, settings: SceneSettings) => boolean
   onSave: () => void
+  trigger?: ReactNode | null
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null)
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const isControlled = controlledOpen !== undefined
+  const open = controlledOpen ?? internalOpen
+  const setOpen = (value: boolean) => {
+    if (!isControlled) setInternalOpen(value)
+    onOpenChange?.(value)
+  }
   const [name, setName] = useState(document.name)
   const [settings, setSettings] = useState<SceneSettings>({ ...DEFAULT_SCENE_SETTINGS, ...document.settings })
   const [error, setError] = useState('')
@@ -29,7 +38,7 @@ export function SceneSettingsDialog({ document, onApply, onSave }: {
     if (value) { setName(document.name); setSettings({ ...DEFAULT_SCENE_SETTINGS, ...document.settings }); setError('') }
     setOpen(value)
   }}>
-    <DialogTrigger className="icon-button" aria-label="Scene settings" title="Scene settings"><Settings2 size={18} /></DialogTrigger>
+    {trigger === undefined ? <DialogTrigger className="icon-button" aria-label="Scene settings" title="Scene settings"><Settings2 size={18} /></DialogTrigger> : trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
     <DialogContent className="scene-settings-dialog" onOpenAutoFocus={event => { event.preventDefault(); headingRef.current?.focus() }}>
       <div className="settings-heading"><DialogTitle ref={headingRef} tabIndex={-1}>Scene settings</DialogTitle><DialogDescription>Configure this scene’s appearance and environment.</DialogDescription></div>
       <form onSubmit={event => { event.preventDefault(); apply() }} onKeyDown={event => {

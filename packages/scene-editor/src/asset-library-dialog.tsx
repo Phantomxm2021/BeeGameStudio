@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowLeft, Box, Eye, File, LibraryBig, Image as ImageIcon, Plus, Search, X } from 'lucide-react'
 import { Dialog, DialogTrigger, DialogContent, DialogTitle, DialogDescription } from './components/ui/dialog'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from './components/ui/context-menu'
@@ -18,8 +18,21 @@ async function loadEntry(entry: Entry, signal: AbortSignal): Promise<SceneAsset>
   return { id: `asset-${crypto.randomUUID()}`, name: entry.name, path: entry.path, mimeType: entry.mimeType, bytes: dataUri(new Uint8Array(await response.arrayBuffer()), entry.mimeType) }
 }
 
-export function AssetLibraryDialog({ source, assets, onAdd }: { source?: AssetLibrarySource; assets: Record<string, SceneAsset>; onAdd: (asset: SceneAsset) => boolean }) {
-  const [open, setOpen] = useState(false)
+export function AssetLibraryDialog({ source, assets, onAdd, trigger, open: controlledOpen, onOpenChange }: {
+  source?: AssetLibrarySource
+  assets: Record<string, SceneAsset>
+  onAdd: (asset: SceneAsset) => boolean
+  trigger?: ReactNode | null
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+}) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const isControlled = controlledOpen !== undefined
+  const open = controlledOpen ?? internalOpen
+  const setOpen = (value: boolean) => {
+    if (!isControlled) setInternalOpen(value)
+    onOpenChange?.(value)
+  }
   const [entries, setEntries] = useState<Entry[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -64,7 +77,7 @@ export function AssetLibraryDialog({ source, assets, onAdd }: { source?: AssetLi
     finally { if (!controller.signal.aborted) setAdding(false) }
   }
   return <Dialog open={open} onOpenChange={value => { if (!value) { pending.current?.abort(); setAdding(false) }; setOpen(value) }}>
-    <DialogTrigger className="icon-button" aria-label="Asset library" title="Open asset library"><LibraryBig size={18} /></DialogTrigger>
+    {trigger === undefined ? <DialogTrigger className="icon-button" aria-label="Asset library" title="Open asset library"><LibraryBig size={18} /></DialogTrigger> : trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
     <DialogContent className="asset-library-dialog">
       <div className={`settings-heading ${preview ? 'asset-preview-heading' : ''}`}>
         {preview && <button ref={backButton} className="icon-button" title="Back to asset library" aria-label="Back to asset library" onClick={() => { pending.current?.abort(); setPreview(null); setError('') }}><ArrowLeft size={18} /></button>}

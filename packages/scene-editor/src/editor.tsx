@@ -6,7 +6,7 @@ import { DEFAULT_SCENE_SETTINGS, type SceneDocument, type SceneNode, type SceneA
 import { exportPackage, importPackage, makeEmptyScene, sceneContentKey, canonicalJson } from './persistence'
 import { transformSelection } from './selection-transform'
 import { SceneViewport, type SceneViewportProps } from './viewport'
-import { Hand, Move, Rotate3D, Scaling, Save, Undo2, Redo2, Magnet, ChevronDown, Globe2, Box, Scan, Square, Focus, CircleCheck, Circle, ChevronLeft, ChevronRight, Lightbulb, Plus, Search, X, Axis3D } from 'lucide-react'
+import { Hand, Move, Rotate3D, Scaling, Save, Undo2, Redo2, Magnet, ChevronDown, Globe2, Box, Scan, Square, Focus, CircleCheck, Circle, ChevronLeft, ChevronRight, Lightbulb, Search, X, Axis3D, Menu } from 'lucide-react'
 import { Inspector, ModelPartInspector } from './inspector'
 import { TreeNode, matchesTreeNode, navigateModelTree } from './hierarchy'
 import { readModelStructure, type ModelSelection, type ModelStructure } from './model-structure'
@@ -14,7 +14,7 @@ import { currentKeyboardLabels } from './platform'
 import { AssetLibraryDialog, type AssetLibrarySource } from './asset-library-dialog'
 import { SceneSettingsDialog } from './scene-settings-dialog'
 import { Toggle } from './components/ui/toggle'
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuItem } from './components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from './components/ui/dropdown-menu'
 
 type Mode = 'translate' | 'rotate' | 'scale' | 'hand'
 type DropPosition = 'before' | 'inside' | 'after'
@@ -29,21 +29,61 @@ const SCENE_TOOLS: { mode: Mode; label: string; key: string }[] = [
 
 const TOOL_ICONS = { hand: Hand, translate: Move, rotate: Rotate3D, scale: Scaling }
 
+export interface SceneEditorProps { initialDocument?: SceneDocument; storageKey?: string; assetLibrary?: AssetLibrarySource; initialView?: SceneViewportProps['initialView']; initialExpanded?: Record<string, boolean> }
+
 function ViewDropdown({ label, value, options, onChange }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void }) {
   return <DropdownMenu>
-    <DropdownMenuTrigger className="view-dropdown" aria-label={label} title={`${label}: ${options.find(option => option.value === value)?.label}`}>
+    <DropdownMenuTrigger className="view-dropdown" aria-label={label} title={label}>
       {label === 'Coordinate space' ? <Globe2 size={15} /> : value === 'orthographic' ? <Square size={18} /> : <Box size={18} />}
       <span>{options.find(option => option.value === value)?.label}</span><ChevronDown size={13} />
     </DropdownMenuTrigger>
     <DropdownMenuContent align="center" collisionPadding={8} aria-label={label}>
       <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
-        {options.map(option => <DropdownMenuRadioItem key={option.value} value={option.value} title={`Use ${option.label}`}>{option.label}</DropdownMenuRadioItem>)}
+        {options.map(option => <DropdownMenuRadioItem key={option.value} value={option.value} title={option.label}>{option.label}</DropdownMenuRadioItem>)}
       </DropdownMenuRadioGroup>
     </DropdownMenuContent>
   </DropdownMenu>
 }
 
-export interface SceneEditorProps { initialDocument?: SceneDocument; storageKey?: string; assetLibrary?: AssetLibrarySource; initialView?: SceneViewportProps['initialView']; initialExpanded?: Record<string, boolean> }
+function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets, openSettings, toggleGizmos }: {
+  canUndo: boolean
+  canRedo: boolean
+  undo: () => void
+  redo: () => void
+  addLight: (kind: LightKind) => void
+  save: () => void
+  openAssets: () => void
+  openSettings: () => void
+  toggleGizmos: () => void
+}) {
+  return <DropdownMenu>
+    <DropdownMenuTrigger className="icon-button toolbar-menu-trigger" aria-label="Scene actions" title="Scene actions"><Menu size={18} /></DropdownMenuTrigger>
+    <DropdownMenuContent align="start" collisionPadding={8} aria-label="Scene actions">
+      <DropdownMenuItem disabled={!canUndo} onSelect={undo}><Undo2 size={14} />Undo</DropdownMenuItem>
+      <DropdownMenuItem disabled={!canRedo} onSelect={redo}><Redo2 size={14} />Redo</DropdownMenuItem>
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger><Lightbulb size={14} />Lighting<ChevronRight className="submenu-chevron" size={13} /></DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          {(['directional', 'point', 'spot', 'ambient'] as const).map(kind => <DropdownMenuItem key={kind} onSelect={() => addLight(kind)}><Lightbulb size={14} />Add {kind} light</DropdownMenuItem>)}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger><Box size={14} />Library<ChevronRight className="submenu-chevron" size={13} /></DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          <DropdownMenuItem onSelect={openAssets}><Box size={14} />Asset library</DropdownMenuItem>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger><ChevronDown size={14} />Scene<ChevronRight className="submenu-chevron" size={13} /></DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          <DropdownMenuItem onSelect={openSettings}><ChevronDown size={14} />Scene settings</DropdownMenuItem>
+          <DropdownMenuItem onSelect={toggleGizmos}><Axis3D size={14} />Toggle gizmos</DropdownMenuItem>
+          <DropdownMenuItem onSelect={save}><Save size={14} />Save scene</DropdownMenuItem>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    </DropdownMenuContent>
+  </DropdownMenu>
+}
 
 export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-editor.draft.v2', assetLibrary, initialView, initialExpanded }: SceneEditorProps = {}) {
   const [document, setDocument] = useState<SceneDocument>(() => {
@@ -60,6 +100,7 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
   const [query, setQuery] = useState(''), [mode, setMode] = useState<Mode>('translate'), [space, setSpace] = useState<'local' | 'world'>('world')
   const [showGizmos, setShowGizmos] = useState(initialView?.showGizmos ?? true)
   const [snap, setSnap] = useState(false), [ortho, setOrtho] = useState(false), [focus, setFocus] = useState(0), [notice, setNotice] = useState('')
+  const [assetLibraryOpen, setAssetLibraryOpen] = useState(false), [sceneSettingsOpen, setSceneSettingsOpen] = useState(false)
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set()), [unpickableIds, setUnpickableIds] = useState<Set<string>>(() => new Set()), [expanded, setExpanded] = useState<Record<string, boolean>>(initialExpanded ?? {})
   const [renaming, setRenaming] = useState<string | null>(null), [contextMenu, setContextMenu] = useState<ContextMenu>(null), [dropPreview, setDropPreview] = useState<{ id: string; position: DropPosition } | null>(null)
   const [modelSelection, setModelSelection] = useState<ModelSelection | null>(null)
@@ -167,6 +208,18 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
       <aside className={`panel hierarchy hierarchy-panel ${hierarchyCollapsed ? 'is-collapsed' : ''}`} data-testid="scene-hierarchy" id="scene-hierarchy-panel" inert={hierarchyCollapsed}><PanelTitle title="HIERARCHY" meta={`${Object.keys(document.nodes).length} objects`} /><div className="panel-content"><div className="hierarchy-search"><Search size={14} /><input ref={searchInputRef} className="search" title="Search scene objects and model nodes" aria-label="Search hierarchy" placeholder="Search hierarchy" value={query} onChange={event => setQuery(event.target.value)} />{query.length > 0 && <button type="button" className="search-clear" aria-label="Clear hierarchy search" title="Clear search" onClick={() => { setQuery(''); searchInputRef.current?.focus() }}><X size={14} /></button>}</div><div className="tree" role="tree" aria-label="Scene hierarchy" aria-multiselectable="true" onClick={event => { if (event.target === event.currentTarget) setSelection([]) }}>{document.rootIds.map(id => <TreeNode key={id} id={id} document={document} structures={structures} modelSelection={modelSelection} onSelectPart={selectModelPart} onFramePart={(ownerId, nodeIndex) => { selectModelPart(ownerId, nodeIndex); setFocus(value => value + 1) }} query={query} selectedIds={selectedIds} expanded={expanded} hiddenIds={hiddenIds} unpickableIds={unpickableIds} renaming={renaming} dropPreview={dropPreview} onSelect={(id, event) => { const index = visibleIds.indexOf(id); if (event.shiftKey && selected) { const start = visibleIds.indexOf(selected); setSelection(visibleIds.slice(Math.min(start, index), Math.max(start, index) + 1), id) } else if (event.metaKey || event.ctrlKey) setSelection(selectedIds.includes(id) ? selectedIds.filter(value => value !== id) : [...selectedIds, id], id); else setSelection([id], id) }} onToggleExpand={id => setExpanded(value => ({ ...value, [id]: value[id] === false }))} onToggleHidden={toggleHidden} onTogglePickable={togglePickable} onRename={rename} onBeginRename={startRename} onFrame={frame} onDragPreview={setDropPreview} onDrop={moveSelection} setContext={setContextMenu} />)}</div>{document.rootIds.length === 0 && <div className="empty-state hierarchy-empty" data-testid="scene-empty-state"><Scan size={26} strokeWidth={1.2} /><strong>Empty scene</strong><span>No objects in this scene</span></div>}</div></aside>
       <main className="viewport" data-testid="scene-canvas" onClick={event => { if (event.target === event.currentTarget) setSelection([]) }}><div className="scene-toolbar-position">
         <div className="scene-view-bar" data-testid="scene-toolbar">
+          <ToolbarMenu
+            canUndo={history.current.canUndo}
+            canRedo={history.current.canRedo}
+            undo={() => { const next = history.current.undo(); setDocument({ ...next, nodes: { ...next.nodes }, assets: { ...next.assets } }) }}
+            redo={() => { const next = history.current.redo(); setDocument({ ...next, nodes: { ...next.nodes }, assets: { ...next.assets } }) }}
+            addLight={addLight}
+            save={saveLocal}
+            openAssets={() => setAssetLibraryOpen(true)}
+            openSettings={() => setSceneSettingsOpen(true)}
+            toggleGizmos={() => setShowGizmos(value => !value)}
+          />
+          <span className="toolbar-divider" />
           <div className="scene-tools" role="toolbar" aria-label="Scene tools" aria-orientation="horizontal">
             {SCENE_TOOLS.map(tool => { const Icon = TOOL_ICONS[tool.mode]; return <button key={tool.mode} className={`icon-button ${mode === tool.mode ? 'active' : ''}`} aria-label={tool.label} aria-pressed={mode === tool.mode} title={`${tool.label} (${tool.key})`} onClick={() => setMode(tool.mode)}><Icon size={18} /></button> })}
           </div>
@@ -174,19 +227,11 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
           <ViewDropdown label="Coordinate space" value={space} options={[{ value: 'local', label: 'Local' }, { value: 'world', label: 'World' }]} onChange={value => setSpace(value as 'local' | 'world')} />
           <ViewDropdown label="Projection" value={ortho ? 'orthographic' : 'perspective'} options={[{ value: 'perspective', label: 'Perspective' }, { value: 'orthographic', label: 'Orthographic' }]} onChange={value => setOrtho(value === 'orthographic')} />
           <Toggle pressed={snap} onPressedChange={setSnap} aria-label="Snap" title="Grid snapping"><Magnet size={16} /><span>Snap</span></Toggle>
-          <span className="toolbar-divider" />
-          <div className="tool-group history-tools">
-            <button className="icon-button" data-testid="undo" aria-label="Undo" title={`Undo (${keyboard.modifier} Z)`} disabled={!history.current.canUndo} onClick={() => { const next = history.current.undo(); setDocument({ ...next, nodes: { ...next.nodes }, assets: { ...next.assets } }) }}><Undo2 size={18} /></button>
-            <button className="icon-button" data-testid="redo" aria-label="Redo" title={`Redo (${keyboard.modifier} ${keyboard.shift} Z)`} disabled={!history.current.canRedo} onClick={() => { const next = history.current.redo(); setDocument({ ...next, nodes: { ...next.nodes }, assets: { ...next.assets } }) }}><Redo2 size={18} /></button>
-          </div>
-          <DropdownMenu><DropdownMenuTrigger className="icon-button" aria-label="Add light" title="Add a light object"><Lightbulb size={18} /></DropdownMenuTrigger><DropdownMenuContent align="end" collisionPadding={8} aria-label="Add light">{(['directional', 'point', 'spot', 'ambient'] as const).map(kind => <DropdownMenuItem key={kind} title={`Add a ${kind} light`} onSelect={() => addLight(kind)}><Plus size={13} />{kind[0].toUpperCase() + kind.slice(1)} light</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>
-          <button className="icon-button" aria-label="Scene gizmos" aria-pressed={showGizmos} title="Show or hide scene helper icons" onClick={() => setShowGizmos(value => !value)}><Axis3D size={18} /></button>
-          <AssetLibraryDialog source={assetLibrary} assets={document.assets} onAdd={addModelAsset} />
+          <AssetLibraryDialog source={assetLibrary} assets={document.assets} onAdd={addModelAsset} open={assetLibraryOpen} onOpenChange={setAssetLibraryOpen} trigger={null} />
           <SceneSettingsDialog document={document} onSave={saveLocal} onApply={(name, settings) => {
             if (name === document.name && canonicalJson(settings) === canonicalJson(document.settings ?? DEFAULT_SCENE_SETTINGS)) return true
             return commit([{ type: 'scene.configure', name, settings, expectedName: document.name, expectedSettings: document.settings ?? null }], 'Configure scene')
-          }} />
-          <button className="icon-button" data-testid="save" aria-label="Save" title={`Save (${keyboard.modifier} S)`} onClick={saveLocal}><Save size={17} /></button>
+          }} open={sceneSettingsOpen} onOpenChange={setSceneSettingsOpen} trigger={null} />
         </div>
         </div>
 
