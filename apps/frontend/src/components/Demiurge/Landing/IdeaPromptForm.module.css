@@ -1,0 +1,150 @@
+.form {
+    position: relative;
+    width: 100%;
+    max-width: 872px;
+    min-width: 0;
+    margin-inline: auto;
+    color: #101828;
+}
+
+.root {
+    --prompt-paper: #fff;
+    --prompt-toolbar: #f7f7f8;
+    --prompt-ink: #101828;
+    --prompt-muted: #667085;
+    --prompt-border: rgba(0, 0, 0, .06);
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 10px;
+    border: 1px solid var(--prompt-border);
+    border-radius: 45px;
+    background: var(--prompt-paper);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, .06);
+}
+
+.surface {
+    overflow: visible;
+    min-width: 0;
+    border: 1px solid var(--prompt-border);
+    border-radius: 30px;
+    background: var(--prompt-toolbar);
+}
+
+.inputPanel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    padding: 16px 20px 12px;
+    border-radius: inherit;
+    background: var(--prompt-paper);
+    color: var(--prompt-ink);
+}
+
+.input {
+    box-sizing: border-box;
+    display: block;
+    flex: 1 0 auto;
+    width: 100%;
+    height: 72px;
+    min-height: 72px;
+    max-height: 72px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    outline: none;
+    resize: none;
+    background: transparent;
+    color: var(--prompt-ink);
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 24px;
+    overflow-y: auto;
+}
+.input::placeholder { color: var(--prompt-muted); opacity: 1; }
+.inputActions, .toolbar, .toolGroup {
+    display: flex;
+    align-items: center;
+}
+.inputActions { justify-content: space-between; min-height: 40px; }
+.toolbar {
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 48px;
+    padding: 8px 16px;
+    background: var(--prompt-toolbar);
+    border-radius: 0 0 30px 30px;
+}
+.toolGroup { min-width: 0; gap: 8px; }
+
+.addButton, .submitButton, .modeButton, .learnButton {
+    box-sizing: border-box;
+    display: inline-flex;
+    flex: 0 0 auto;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--prompt-border);
+    background: var(--prompt-paper);
+    color: var(--prompt-ink);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 20px;
+    white-space: nowrap;
+    cursor: pointer;
+    box-shadow: 0 2px 5px rgba(16, 24, 40, .05);
+    transition: background-color 150ms, box-shadow 150ms;
+}
+.addButton, .submitButton { width: 40px; height: 40px; }
+.addButton { border: 0; background: transparent; box-shadow: none; color: var(--prompt-muted); }
+.addButton svg { width: 20px; height: 20px; stroke-width: 1.5; }
+.submitButton { border-radius: 50%; background: #000; color: #fff; border-color: #000; }
+.submitButton svg { width: 20px; height: 20px; }
+.modeButton, .learnButton { height: 32px; border-radius: 16px; padding-inline: 12px; }
+.learnButton { padding-inline: 18px; }
+.modeButton svg, .learnButton svg { width: 16px; height: 16px; stroke-width: 1.65; }
+.modeChevron { margin-left: 2px; }
+.popoverMenu { width: 176px; padding: 6px; color: var(--foreground); }
+.popoverItem { display: flex; width: 100%; align-items: center; gap: 10px; border: 0; border-radius: 10px; background: transparent; padding: 9px 10px; color: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.popoverItem:hover, .popoverItem:focus-visible { background: var(--muted); outline: none; }
+.popoverItem svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.selectedIcon { margin-left: auto; }
+.root button:focus-visible { outline: 2px solid #3884ff; outline-offset: 3px; }
+.learnButton:focus-visible { outline: 2px solid #3884ff; outline-offset: 3px; }
+.root button:enabled:hover:not(.addButton) { box-shadow: 0 2px 8px rgba(16, 24, 40, .13); }
+.addButton:enabled:hover { color: var(--prompt-ink); }
+.root button:disabled { cursor: not-allowed; }
+.root:disabled .inputPanel, .root:disabled .toolbar { opacity: .45; }
+.spinner { animation: prompt-spin 1s linear infinite; }
+@keyframes prompt-spin { to { transform: rotate(360deg); } }
+
+.attachments { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.attachment { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--prompt-border); border-radius: 10px; background: var(--prompt-toolbar); font-size: 12px; }
+.attachment img { width: 28px; height: 28px; object-fit: cover; border-radius: 6px; }
+.attachment span { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment svg { width: 16px; height: 16px; }
+.attachment button { display: grid; place-items: center; border: 0; padding: 4px; background: transparent; color: inherit; cursor: pointer; }
+.error { margin: 8px 12px 0; padding: 8px; border-radius: 8px; background: #fff; color: #b42318; font-size: 13px; }
+
+:global(.dark) .root {
+    --prompt-paper: #17181b;
+    --prompt-toolbar: #222328;
+    --prompt-ink: #f4f4f5;
+    --prompt-muted: #a1a1aa;
+    --prompt-border: rgba(255,255,255,.09);
+}
+@media (max-width: 560px) {
+    .inputPanel { padding: 16px; }
+    .toolbar { padding-inline: 8px; gap: 8px; }
+    .modeButton { padding-inline: 10px; }
+    .learnButton { padding-inline: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .root *, .root *::before, .root *::after { animation: none; transition: none; }
+}

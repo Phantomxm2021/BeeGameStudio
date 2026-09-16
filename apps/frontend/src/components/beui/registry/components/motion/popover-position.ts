@@ -69,14 +69,16 @@ export function usePopoverPortalPosition<
 
     const trigger = triggerRef.current;
     const content = contentRef.current;
-    const observer = new ResizeObserver(update);
-    if (trigger) observer.observe(trigger);
-    if (content) observer.observe(content);
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(update);
+    if (trigger) observer?.observe(trigger);
+    if (content) observer?.observe(content);
 
     window.addEventListener("scroll", update, true);
     window.addEventListener("resize", update);
     return () => {
-      observer.disconnect();
+      observer?.disconnect();
       window.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
     };

@@ -36,7 +36,62 @@ describe("MessageScroller PreviewRail", () => {
     if (!viewport) throw new Error("Expected a message viewport");
     const scrollTo = vi.fn();
     viewport.scrollTo = scrollTo;
+    Object.defineProperty(viewport, "scrollTop", { configurable: true, value: 0, writable: true });
     fireEvent.click(anchors[1]);
     expect(scrollTo).toHaveBeenCalled();
+  });
+
+  it("keeps a single user anchor visible when the transcript overflows", async () => {
+    let viewport: HTMLElement | null = null;
+    render(
+      <MessageScroller
+        navigation="rail"
+        viewportRef={(node) => {
+          viewport = node;
+          if (node) {
+            Object.defineProperty(node, "scrollHeight", { configurable: true, value: 480 });
+            Object.defineProperty(node, "clientHeight", { configurable: true, value: 120 });
+          }
+        }}
+      >
+        <Message from="user">Only request</Message>
+        <Message from="assistant">A long running response</Message>
+      </MessageScroller>,
+    );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    });
+
+    if (!viewport) throw new Error("Expected a message viewport");
+    const scrollTo = vi.fn();
+    viewport.scrollTo = scrollTo;
+    Object.defineProperty(viewport, "scrollTop", { configurable: true, value: 0, writable: true });
+    const userMessage = screen.getByLabelText("user message");
+    userMessage.getBoundingClientRect = () => ({
+      x: 0,
+      y: 240,
+      top: 240,
+      right: 100,
+      bottom: 280,
+      left: 0,
+      width: 100,
+      height: 40,
+      toJSON: () => ({}),
+    });
+    viewport.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 100,
+      bottom: 120,
+      left: 0,
+      width: 100,
+      height: 120,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to user message 1 of 1" }));
+    expect(scrollTo).toHaveBeenCalledWith({ top: 200, behavior: "smooth" });
   });
 });

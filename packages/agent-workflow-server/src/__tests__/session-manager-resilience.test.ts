@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   BeeGameSessionManager,
   isResourceWorkerDurableProgress,
+  readWorkflowWorkerChatHistoryFromDisk,
   type BeeGameSessionRunner,
   type BeeGameSessionRunnerStartInput,
   type DashboardSDKMessage,
@@ -105,6 +106,146 @@ describe('BeeGame session runtime resilience', () => {
     manager.stop(session.id)
     expect(received).toEqual([])
     expect(retained).toEqual(['session.stopped'])
+    await manager.dispose()
+  })
+
+  test('mirrors workflow worker activity into the project chat session', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-workflow-chat-'))
+    const workspacePath = join(root, 'workspace')
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async ({ onMessage }) => {
+          onMessage({
+            type: 'assistant',
+            message: {
+              id: 'worker-message',
+              content: [
+                { type: 'text', text: '正在编写基础文档。' },
+                {
+                  type: 'tool_use',
+                  id: 'write-doc',
+                  name: 'Write',
+                  input: { file_path: 'docs/GAME_DESIGN.md', content: '# Game' },
+                },
+              ],
+            },
+          })
+          onMessage({
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'write-doc',
+                  content: 'Wrote docs/GAME_DESIGN.md',
+                },
+              ],
+            },
+          })
+          onMessage({
+            type: 'result',
+            subtype: 'success',
+            is_error: false,
+            result: 'done',
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const chat = manager.start({
+      workspacePath,
+      projectId: 'project-1',
+      userId: 'user-1',
+    })
+    const worker = manager.start({
+      workspacePath,
+      projectId: 'project-1',
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'document-author',
+      workflowAllowedPaths: ['docs/GAME_DESIGN.md'],
+    })
+
+    await manager.send(
+      worker.id,
+      'BeeGame delivery worker: document-author\nWrite the document.',
+    )
+    await waitForIdle(manager, worker.id)
+
+    const visible = manager.events(chat.id)
+    expect(visible.some(event => event.type === 'assistant.message' && event.text === '正在编写基础文档。')).toBe(true)
+    expect(visible.some(event => event.type === 'tool.started' && event.payload?.toolName === 'Write')).toBe(true)
+    expect(visible.some(event => event.type === 'tool.completed' && event.payload?.toolName === 'Write')).toBe(true)
+    expect(visible.some(event => event.type === 'user.message')).toBe(false)
+    const orphanHistory = await readWorkflowWorkerChatHistoryFromDisk(
+      workspacePath,
+      chat.id,
+      [],
+    )
+    expect(orphanHistory.some(event => event.type === 'assistant.message')).toBe(true)
+    expect(orphanHistory.some(event => event.type === 'tool.completed')).toBe(true)
+    expect(orphanHistory.some(event => event.type === 'turn.started')).toBe(false)
+    expect(
+      await readWorkflowWorkerChatHistoryFromDisk(
+        workspacePath,
+        chat.id,
+        visible,
+      ),
+    ).toEqual([])
+    await manager.dispose()
+  })
+
+  test('recovers direct author reviewer and game IR CLI activity into Chat history', async () => {
+    root = await mkdtemp(join(tmpdir(), 'workflow-stage-chat-history-'))
+    const workspacePath = join(root, 'project')
+    const stages = [
+      ['foundation-authoring', 'author', 'Author wrote the documents.'],
+      ['foundation-reviewer', 'reviewer', 'Reviewer corrected the documents.'],
+      ['game-ir', 'game-ir', 'Game IR was generated.'],
+    ] as const
+    for (const [directory, _stage, text] of stages) {
+      const logDirectory = join(workspacePath, '.beegame', 'workflow', directory, 'native', 'attempt')
+      await mkdir(logDirectory, { recursive: true })
+      const messages = [
+        { at: '2026-09-16T00:00:00.000Z', event: 'response.message', data: { type: 'assistant', message: {
+          id: `message-${directory}`, content: [{ type: 'text', text }, { type: 'tool_use', id: `tool-${directory}`, name: 'Write', input: { file_path: 'docs/a.md' } }],
+        } } },
+        { at: '2026-09-16T00:00:01.000Z', event: 'response.message', data: { type: 'user', message: {
+          content: [{ type: 'tool_result', tool_use_id: `tool-${directory}`, content: 'done' }],
+        } } },
+      ]
+      await writeFile(join(logDirectory, 'native-events.jsonl'), messages.map(value => JSON.stringify(value)).join('\n') + '\n')
+    }
+    const history = await readWorkflowWorkerChatHistoryFromDisk(workspacePath, 'main', [])
+    for (const [, stage, text] of stages) {
+      expect(history.some(event => event.type === 'assistant.message' && event.text === text && event.payload?.workflowStage === stage)).toBe(true)
+    }
+    expect(history.filter(event => event.type === 'tool.started')).toHaveLength(3)
+    expect(history.filter(event => event.type === 'tool.completed')).toHaveLength(3)
+    const withoutDuplicates = await readWorkflowWorkerChatHistoryFromDisk(workspacePath, 'main', history)
+    expect(withoutDuplicates).toEqual([])
+  })
+
+  test('tails direct CLI stage logs into the live project Chat without stage callbacks', async () => {
+    root = await mkdtemp(join(tmpdir(), 'workflow-stage-chat-live-'))
+    const workspacePath = join(root, 'project')
+    await mkdir(workspacePath, { recursive: true })
+    const manager = new BeeGameSessionManager({ start: async () => ({ submit: async () => undefined, stop: () => undefined }) }, root)
+    const chat = manager.start({ workspacePath, projectId: 'project-live', userId: 'user-live' })
+    manager.followWorkflowStageChat({ workspacePath, projectId: 'project-live', userId: 'user-live' })
+    const directory = join(workspacePath, '.beegame', 'workflow', 'foundation-authoring', 'native')
+    await mkdir(directory, { recursive: true })
+    await writeFile(join(directory, 'native-events.jsonl'), JSON.stringify({
+      at: new Date().toISOString(), event: 'response.message', data: { type: 'assistant', message: {
+        id: 'live-message', content: [{ type: 'text', text: 'Live author output.' }],
+      } },
+    }) + '\n')
+    for (let attempt = 0; attempt < 30 && !manager.events(chat.id).some(event => event.text === 'Live author output.'); attempt++)
+      await new Promise(resolve => setTimeout(resolve, 50))
+    expect(manager.events(chat.id).some(event => event.type === 'assistant.message' && event.text === 'Live author output.')).toBe(true)
     await manager.dispose()
   })
 

@@ -288,9 +288,6 @@ vi.mock('./SideMenu', () => ({
 vi.mock('./RightSidebar', async () => {
   return { RightSidebar: (props: Record<string, any>) => {
     capturedRightSidebarProps = props;
-    if (props.projectStatus?.workflow?.nextAction) {
-      return <button type="button" onClick={() => props.onWorkflowAction?.(props.projectStatus.workflow.nextAction)}>继续</button>;
-    }
     return <div data-testid="right-sidebar" />;
   }};
 });
@@ -505,53 +502,6 @@ describe('DashboardView runtime loading', () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it('refreshes the workflow snapshot immediately after a retry succeeds', async () => {
-    render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
-    await waitFor(() => expect(capturedRightSidebarProps).not.toBeNull());
-    loadPendingPermissions.mockClear();
-    loadProjectStatus.mockClear();
-
-    await act(async () => {
-      await capturedRightSidebarProps?.onWorkflowAction('retry');
-    });
-
-    expect(apiMocks.retryWorkflow).toHaveBeenCalledWith('proj_1');
-    expect(loadPendingPermissions).toHaveBeenCalledWith('proj_1');
-    expect(loadProjectStatus).toHaveBeenCalledWith('proj_1');
-  });
-
-  it('continues a recoverable workflow through the real API client exactly once', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ status: 'running' }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    }));
-    vi.stubGlobal('fetch', fetchMock);
-    mockedProjectStatus = {
-      project_id: 'proj_1',
-      phase: 'paused',
-      blocked: true,
-      workflow: {
-        runId: 'run_recovery_transport',
-        status: 'needs_action',
-        recoverable: true,
-        lastProvenPhase: 'RESOURCE_PREPARATION',
-        lastProvenUnitId: 'resource:content',
-        lastProvenUnitKind: 'resource-content',
-        nextAction: 'resume',
-      },
-    };
-
-    render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
-
-    fireEvent.click(await screen.findByRole('button', { name: '继续' }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/projects/proj_1/workflow/resume',
-      expect.objectContaining({ method: 'POST' }),
-    );
   });
 
   it('covers the dashboard while the server is starting the project runtime', async () => {

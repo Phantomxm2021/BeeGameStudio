@@ -37,6 +37,7 @@ import {
   deleteSessionArtifactsFromTranscript,
   getLatestRuntimeUsage,
   readSessionTranscriptFromDisk,
+  readWorkflowWorkerChatHistoryFromDisk,
   recoverLatestProjectSessionFromDisk,
   type BeeGameEvent,
   type BeeGameRuntimeSnapshot,
@@ -787,6 +788,11 @@ export function createAgentWorkflowApp(
       author,
       reviewer,
       ir,
+    })
+    beeGameSessions.followWorkflowStageChat({
+      userId: input.user.id,
+      projectId: input.projectId,
+      workspacePath: workspaceKey,
     })
     deliveryControllers.set(key, {
       controller,
@@ -2765,7 +2771,21 @@ export function createAgentWorkflowApp(
         dashboardDataRoot,
         beeGameSessions,
       })
-      const visibleEvents = compactTranscriptForChatHistory(events)
+      const workerHistory = await readWorkflowWorkerChatHistoryFromDisk(
+        sessionRef.workspacePath,
+        sessionRef.sessionId,
+        events,
+      )
+      const timeline = [...events, ...workerHistory]
+        .sort((left, right) => {
+          const time = left.createdAt.getTime() - right.createdAt.getTime()
+          if (time !== 0) return time
+          const session = left.sessionId.localeCompare(right.sessionId)
+          return session !== 0 ? session : left.id - right.id
+        })
+        .map((event, index) => ({ ...event, id: index + 1 }))
+      const visibleEvents = compactTranscriptForChatHistory(timeline)
+      const latestTodoEvent = findLatestTodoWriteEvent(visibleEvents)
       const pagination = {
         limit: parseTranscriptPageLimit(c.req.query('limit')),
         beforeId: parsePositiveInteger(c.req.query('before')),
@@ -2773,6 +2793,7 @@ export function createAgentWorkflowApp(
       return c.json({
         sessionId: sessionRef.sessionId,
         workspacePath: sessionRef.workspacePath,
+        ...(latestTodoEvent ? { latestTodoEvent } : {}),
         ...paginateTranscriptEvents(visibleEvents, pagination),
       })
     } catch (err) {
@@ -8935,6 +8956,34 @@ function paginateTranscriptEvents<T extends { id: number }>(
       nextBeforeId: pageEvents[0]?.id ?? null,
     },
   }
+}
+
+function findLatestTodoWriteEvent<
+  T extends {
+    type: BeeGameEvent['type']
+    payload?: BeeGameEvent['payload']
+  },
+>(events: T[]): T | undefined {
+  return events.findLast(event => {
+    if (
+      event.type !== 'tool.started' &&
+      event.type !== 'tool.progress' &&
+      event.type !== 'tool.completed' &&
+      event.type !== 'tool.failed'
+    ) return false
+    const toolName =
+      typeof event.payload?.toolName === 'string'
+        ? event.payload.toolName.trim().toLowerCase()
+        : ''
+    if (toolName !== 'todowrite' && toolName !== 'todo_write') return false
+    const input = event.payload?.input
+    return Boolean(
+      input &&
+      typeof input === 'object' &&
+      !Array.isArray(input) &&
+      Array.isArray((input as { todos?: unknown }).todos),
+    )
+  })
 }
 
 function parseTranscriptPageLimit(value: string | undefined): number {

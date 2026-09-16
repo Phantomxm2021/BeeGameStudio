@@ -1,11 +1,10 @@
-import { Fragment, memo, useMemo, type ReactNode } from 'react';
-import { Pencil } from 'lucide-react';
-import { getWorkflowControlState, type ChatDisplayMessage, type ChatDisplaySource, type ProjectRuntimeDisplayModel } from '../../../viewModels/displayModels';
+import { Fragment, memo, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ChevronDown, Pencil } from 'lucide-react';
+import { type ChatDisplayMessage, type ChatDisplaySource } from '../../../viewModels/displayModels';
 import { MarkdownRenderer } from './ChatMarkdownContent';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText, type BeeGameText } from '../../../i18n/useBeeGameTranslations';
 import { Message } from '../../beui/registry/components/agents/message';
-import type { WorkflowCardAction, WorkflowCardPayload } from '../../../types/message';
 import {
     MessageMarker,
     MessageBubble,
@@ -17,11 +16,10 @@ import { AgentActivity, type AgentActivityItem } from '../../beui/registry/compo
 import { FileDiff, type FileDiffLine } from '../../beui/registry/components/agents/file-diff';
 import { ReasoningText } from '../../beui/registry/components/agents/loading-states/reasoning-text';
 import { StreamingResponse } from '../../beui/registry/components/agents/streaming-response';
-import { TodoList, type TodoItem } from '../../beui/registry/components/agents/todo-list';
+import { shortenAbsolutePathsForDisplay } from '../../../utils/chatPathDisplay';
 
 type BeeGameCollaborationFeedProps = {
     messages: ChatDisplayMessage[];
-    projectStatus?: ProjectRuntimeDisplayModel | null;
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
     lang?: Language;
     currentUserDisplayName?: string;
@@ -29,7 +27,6 @@ type BeeGameCollaborationFeedProps = {
     currentUserAvatarUrl?: string;
     onEditMessage?: (message: ChatDisplayMessage) => void;
     onRetryResponse?: (message: string) => void;
-    onWorkflowAction?: (action: WorkflowCardAction) => Promise<void> | void;
     isLoading?: boolean;
     streamingMessageId?: string | null;
 };
@@ -81,9 +78,11 @@ type NormalizedTool = {
     input?: unknown;
     before?: string;
     after?: string;
+    stage?: WorkflowStage;
 };
 
 type ToolKind = 'search' | 'read' | 'write' | 'edit' | 'bash' | 'todo' | 'subagent' | 'generic';
+type WorkflowStage = 'author' | 'reviewer' | 'game-ir';
 
 const GENERIC_TOOL_NAME = 'Tool';
 
@@ -139,9 +138,11 @@ const stripStructuredDetailLabel = (value: string): string => {
     return value;
 };
 
+const displayText = (value: string): string => shortenAbsolutePathsForDisplay(value);
+
 const getToolKind = (toolName?: string): ToolKind => {
     const normalized = String(toolName || '').trim().toLowerCase();
-    if (normalized === 'search' || normalized === 'grep' || normalized === 'glob') return 'search';
+    if (normalized === 'search' || normalized === 'grep' || normalized === 'glob' || normalized === 'websearch' || normalized === 'web_search') return 'search';
     if (normalized === 'todowrite' || normalized === 'todo_write') return 'todo';
     if (normalized === 'read') return 'read';
     if (normalized === 'write') return 'write';
@@ -149,6 +150,23 @@ const getToolKind = (toolName?: string): ToolKind => {
     if (normalized === 'bash') return 'bash';
     if (normalized === 'task' || normalized === 'subagent') return 'subagent';
     return 'generic';
+};
+
+const isHiddenPresentationTool = (toolName?: string): boolean => (
+    String(toolName || '').trim().toLowerCase() === 'structuredoutput'
+);
+
+const inferWorkflowStage = (value: string): WorkflowStage | undefined => {
+    const normalized = value.toLowerCase();
+    if (normalized.includes('foundation-authoring')) return 'author';
+    if (normalized.includes('foundation-reviewer') || normalized.includes('foundation-review')) return 'reviewer';
+    if (normalized.includes('game-ir')) return 'game-ir';
+    return undefined;
+};
+
+const isLocalSearchTool = (tool: NormalizedTool): boolean => {
+    const normalized = tool.name.trim().toLowerCase();
+    return normalized === 'search' || normalized === 'grep' || normalized === 'glob';
 };
 
 const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null => {
@@ -178,9 +196,9 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
         id: message.id,
         name,
         status,
-        detail: stripStructuredDetailLabel(rawDetail),
-        output,
-        diff,
+        detail: displayText(stripStructuredDetailLabel(rawDetail)),
+        output: displayText(output),
+        diff: diff ? displayText(diff) : undefined,
         artifactId: String(message.artifactId || message.artifact_id || '').trim() || undefined,
         kind,
         timestamp: Number(message.timestamp || 0),
@@ -193,6 +211,7 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
         input: message.toolInput ?? message.tool_input,
         before: message.toolBefore ?? message.tool_before,
         after: message.toolAfter ?? message.tool_after,
+        stage: inferWorkflowStage(`${rawDetail}\n${content}`),
     };
 };
 
@@ -254,21 +273,21 @@ function toActivityItem(
         return {
             id: `activity-thinking-${part.message.id}`,
             type: 'text',
-            content: part.message.thought || part.message.content || 'Thinking',
+            content: displayText(part.message.thought || part.message.content || 'Thinking'),
         };
     }
     if (part.tool.kind === 'search') {
         return {
             id: `activity-search-${part.tool.id}`,
             type: 'search',
-            query: part.tool.detail || part.tool.name,
+            query: displayText(part.tool.detail || part.tool.name),
         };
     }
     return {
         id: `activity-tool-${part.tool.id}`,
         type: 'tool',
         action: getActivityToolAction(part.tool),
-        target: part.tool.detail || part.tool.name,
+        target: displayText(part.tool.detail || part.tool.name),
         ...getUnifiedDiffStats(part.tool.diff),
     };
 }
@@ -302,9 +321,7 @@ function parseDiffLines(diff: string): FileDiffLine[] {
 
 type ResponsePart =
     | { kind: 'thinking'; message: ChatDisplayMessage; timestamp: number; turnId?: string; activityGroupId?: string }
-    | { kind: 'workflow'; workflow: WorkflowCardPayload; timestamp: number }
     | { kind: 'tool'; tool: NormalizedTool; timestamp: number; turnId?: string; activityGroupId?: string }
-    | { kind: 'todo'; id: string; items: TodoItem[]; timestamp: number; turnId?: string }
     | { kind: 'agent'; message: ChatDisplayMessage; timestamp: number; turnId?: string };
 
 type AgentResponseTurn = {
@@ -312,6 +329,7 @@ type AgentResponseTurn = {
     id: string;
     turnId?: string;
     parts: ResponsePart[];
+    stage?: WorkflowStage;
 };
 
 type FeedEntry =
@@ -416,7 +434,10 @@ const appendAssistantContentBlocks = (
                 toolOutput: result?.text,
                 content: `Tool: ${block.toolName || 'Tool'}\nStatus: ${result ? (result.isError ? 'failed' : 'completed') : 'running'}`,
             });
-            if (synthetic) appendTool(turn, synthetic, activityGroupId);
+            if (synthetic && synthetic.kind !== 'todo' && !isHiddenPresentationTool(synthetic.name)) {
+                turn.stage ||= synthetic.stage;
+                appendTool(turn, synthetic, activityGroupId);
+            }
             return;
         }
         if (block.type === 'tool_result' && !block.toolUseId) {
@@ -429,7 +450,10 @@ const appendAssistantContentBlocks = (
                 toolOutput: block.text,
                 content: `Tool result\nStatus: ${block.isError ? 'failed' : 'completed'}\nOutput: ${block.text || ''}`,
             });
-            if (synthetic) appendTool(turn, synthetic, activityGroupId);
+            if (synthetic && !isHiddenPresentationTool(synthetic.name)) {
+                turn.stage ||= synthetic.stage;
+                appendTool(turn, synthetic, activityGroupId);
+            }
         }
     });
     return true;
@@ -456,6 +480,7 @@ const matchesStreamingMessage = (message: ChatDisplayMessage, streamingMessageId
 };
 
 const SHANGHAI_TIME_ZONE = 'Asia/Shanghai';
+const LONG_MARKDOWN_COLLAPSED_HEIGHT = 480;
 
 const calendarDateKey = (timestamp: number): string | undefined => {
     if (!Number.isFinite(timestamp)) return undefined;
@@ -481,22 +506,18 @@ const feedEntryTimestamp = (entry: FeedEntry): number => {
     return Math.min(...entry.parts.map((part) => part.timestamp));
 };
 
-const workflowTimestamp = (workflow: WorkflowCardPayload): number => {
-    const timestamp = Date.parse(workflow.createdAt || '');
-    return Number.isFinite(timestamp) ? timestamp : Number.POSITIVE_INFINITY;
-};
-
-const buildFeedEntries = (
-    messages: ChatDisplayMessage[],
-    workflow?: WorkflowCardPayload,
-): FeedEntry[] => {
+const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
     const entries: FeedEntry[] = [];
     const toolParts = new Map<string, ToolPartReference>();
     let activeTurn: AgentResponseTurn | null = null;
 
-    const ensureTurn = (id: string, turnId?: string): AgentResponseTurn => {
+    const ensureTurn = (id: string, turnId?: string, reuseAnonymousActivity = false): AgentResponseTurn => {
         if (activeTurn && turnId && activeTurn.turnId === turnId) {
             return activeTurn;
+        }
+        if (reuseAnonymousActivity && activeTurn && !turnId && !activeTurn.turnId) {
+            const lastPart = activeTurn.parts.at(-1);
+            if (lastPart?.kind === 'thinking' || lastPart?.kind === 'tool') return activeTurn;
         }
         activeTurn = { kind: 'response', id, turnId, parts: [] };
         entries.push(activeTurn);
@@ -511,6 +532,13 @@ const buildFeedEntries = (
         }
 
         if (isAgentMessage(message) && message.contentBlocks?.length) {
+            const hasVisibleBlock = message.contentBlocks.some((block) => (
+                block.type === 'text' ||
+                block.type === 'thinking' ||
+                (block.type === 'tool_use' && getToolKind(block.toolName) !== 'todo' && !isHiddenPresentationTool(block.toolName)) ||
+                (block.type === 'tool_result' && !block.toolUseId)
+            ));
+            if (!hasVisibleBlock) continue;
             const turn = ensureTurn(message.id, message.turnId || message.turn_id);
             appendAssistantContentBlocks(turn, message, mergeToolPart.bind(null, toolParts));
             continue;
@@ -524,35 +552,16 @@ const buildFeedEntries = (
 
         if (isContextUpdateMessage(message)) {
             entries.push({ kind: 'context', message });
+            activeTurn = null;
             continue;
         }
 
         if (isToolMessage(message)) {
             const tool = normalizeToolMessage(message);
             if (!tool) continue;
-            const turn = ensureTurn(message.id, tool.turnId);
-            if (tool.kind === 'todo') {
-                const input = tool.input && typeof tool.input === 'object' ? tool.input as { todos?: unknown } : undefined;
-                const items = Array.isArray(input?.todos)
-                    ? input.todos.flatMap((todo, index): TodoItem[] => {
-                        if (!todo || typeof todo !== 'object') return [];
-                        const record = todo as Record<string, unknown>;
-                        const title = typeof record.content === 'string' ? record.content : typeof record.title === 'string' ? record.title : '';
-                        if (!title) return [];
-                        const rawStatus = String(record.status || 'pending');
-                        const status: TodoItem['status'] = rawStatus === 'in_progress' || rawStatus === 'in-progress'
-                            ? 'in-progress'
-                            : rawStatus === 'completed'
-                                ? 'completed'
-                                : rawStatus === 'cancelled' || rawStatus === 'blocked'
-                                    ? 'cancelled'
-                                    : 'pending';
-                        return [{ id: `${tool.id}-${index}`, title, status }];
-                    })
-                    : [];
-                if (items.length > 0) turn.parts.push({ kind: 'todo', id: tool.id, items, timestamp: tool.timestamp || messageTimestamp(message), turnId: tool.turnId });
-                continue;
-            }
+            if (tool.kind === 'todo' || isHiddenPresentationTool(tool.name)) continue;
+            const turn = ensureTurn(message.id, tool.turnId, true);
+            turn.stage ||= tool.stage;
             mergeToolPart(toolParts, turn, tool);
             continue;
         }
@@ -563,70 +572,65 @@ const buildFeedEntries = (
         }
     }
 
-    if (workflow) {
-        const target = [...entries].reverse().find((entry): entry is AgentResponseTurn => entry.kind === 'response');
-        if (target) {
-            const workflowPart: ResponsePart = { kind: 'workflow', workflow, timestamp: workflowTimestamp(workflow) };
-            const workflowTime = workflowPart.timestamp;
-            if (Number.isFinite(workflowTime)) {
-                const insertionIndex = target.parts.findIndex((part) => Number.isFinite(part.timestamp) && part.timestamp > workflowTime);
-                if (insertionIndex >= 0) target.parts.splice(insertionIndex, 0, workflowPart);
-                else target.parts.push(workflowPart);
-            } else {
-                target.parts.push(workflowPart);
-            }
-        } else {
-            entries.push({ kind: 'response', id: `workflow-${workflow.runId || 'current'}`, parts: [{ kind: 'workflow', workflow, timestamp: workflowTimestamp(workflow) }] });
-        }
-    }
-
     // Parts already arrive in the runtime event order. Do not sort by a
     // display timestamp: replayed events can legitimately carry an older
     // timestamp while still appearing later in the response stream.
     return entries;
 };
 
+const hasLaterAgentResponseBeforeUser = (entries: FeedEntry[], entryIndex: number): boolean => {
+    for (const candidate of entries.slice(entryIndex + 1)) {
+        if (candidate.kind === 'user') return false;
+        if (candidate.kind === 'response' && candidate.parts.some((part) => part.kind === 'agent' && part.message.content.trim())) {
+            return true;
+        }
+    }
+    return false;
+};
+
 export const BeeGameCollaborationFeed = memo(({
     messages,
-    projectStatus,
     lang = 'en',
     onEditMessage,
     onRetryResponse,
-    onWorkflowAction,
     isLoading = false,
     streamingMessageId = null,
 }: BeeGameCollaborationFeedProps) => {
     const text = useBeeGameText(lang);
-    const workflow = getWorkflowControlState(projectStatus);
-    const entries = useMemo(
-        () => buildFeedEntries(messages, workflow),
-        [messages, workflow],
-    );
+    const entries = useMemo(() => buildFeedEntries(messages), [messages]);
     const hasStreamingMessage = Boolean(streamingMessageId && entries.some((entry) => entry.kind === 'response' && entry.parts.some((part) => (
         (part.kind === 'tool' && part.tool.status === 'running') ||
         ((part.kind === 'thinking' || part.kind === 'agent') && matchesStreamingMessage(part.message, streamingMessageId))
     ))));
     const entriesWithDates = useMemo(() => {
         const dateKeys = entries.map((entry) => calendarDateKey(feedEntryTimestamp(entry)));
+        let previousStage: WorkflowStage | undefined;
         return entries.map((entry, index) => {
             const dateKey = dateKeys[index];
+            const stage = entry.kind === 'response' ? entry.stage : undefined;
+            const showStageSeparator = Boolean(stage && stage !== previousStage);
+            if (stage) previousStage = stage;
             return {
                 entry,
                 dateKey,
                 dateLabel: dateKey ? calendarDateLabel(feedEntryTimestamp(entry), lang) : undefined,
                 showDateSeparator: Boolean(dateKey && dateKey !== dateKeys[index - 1]),
+                showStageSeparator,
+                stage,
             };
         });
     }, [entries, lang]);
 
     return (
         <MessageGroup spacing="compact">
-            {entriesWithDates.map(({ entry, dateKey, dateLabel, showDateSeparator }, entryIndex) => {
+            {entriesWithDates.map(({ entry, dateKey, dateLabel, showDateSeparator, showStageSeparator, stage }, entryIndex) => {
                 const previousUserMessage = entry.kind === 'response'
                     ? [...entries.slice(0, entryIndex)].reverse().find((candidate): candidate is Extract<FeedEntry, { kind: 'user' }> => candidate.kind === 'user')?.message
                     : undefined;
+                const hasLaterResponseInConversationTurn = entry.kind === 'response' && hasLaterAgentResponseBeforeUser(entries, entryIndex);
                 return <Fragment key={entry.kind === 'user' || entry.kind === 'context' ? entry.message.id : entry.id}>
                     {showDateSeparator && dateKey && dateLabel ? <DateSeparator dateKey={dateKey} label={dateLabel} /> : null}
+                    {showStageSeparator && stage ? <StageSeparator stage={stage} lang={lang} /> : null}
                     {entry.kind === 'user' ? (
                         <Message key={entry.message.id} data-message-id={entry.message.id} data-scroll-anchor="false" from="user" className="mb-3 min-w-0"><UserMessageCard
                             message={entry.message}
@@ -637,12 +641,19 @@ export const BeeGameCollaborationFeed = memo(({
                     ) : entry.kind === 'context' ? (
                         <ContextUpdateSeparator key={entry.message.id} text={text} />
                     ) : (
-                    <Message key={entry.id} data-testid={`beegame-agent-turn-${entry.id}`} data-message-id={entry.turnId || entry.id} data-scroll-anchor="false" from="assistant" className="mb-3 min-w-0">
+                    <Message
+                        key={entry.id}
+                        data-testid={`beegame-agent-turn-${entry.id}`}
+                        data-message-id={entry.turnId || entry.id}
+                        data-scroll-anchor="false"
+                        from="assistant"
+                        className="mb-3 min-w-0"
+                    >
                         <MessageContent>
                             {(() => {
                                 const responseText = entry.parts
                                     .filter((part): part is Extract<ResponsePart, { kind: 'agent' }> => part.kind === 'agent')
-                                    .map((part) => part.message.content.trim())
+                                    .map((part) => displayText(part.message.content.trim()))
                                     .filter(Boolean)
                                     .join('\n\n');
                                 const sources = entry.parts.flatMap((part) => part.kind === 'agent' ? getMessageSources(part.message) : [])
@@ -656,17 +667,15 @@ export const BeeGameCollaborationFeed = memo(({
                                     copyText={responseText || undefined}
                                     onRetry={previousUserMessage && onRetryResponse ? () => onRetryResponse(previousUserMessage.content) : undefined}
                                     announce={false}
-                                    showActions={Boolean(responseText)}
+                                    showActions={Boolean(responseText) && !hasLaterResponseInConversationTurn}
                                     sources={sources}
                                     className="w-full"
                                     contentClassName="text-[var(--text-primary)]"
                                 >
                                     <ResponseParts
                                         parts={entry.parts}
-                                        text={text}
                                         lang={lang}
                                         streamingMessageId={streamingMessageId}
-                                        onWorkflowAction={onWorkflowAction}
                                     />
                                 </StreamingResponse>;
                             })()}
@@ -686,17 +695,23 @@ function BeUiAgentActivity({
     items,
     status,
     duration,
+    activeLabel,
+    summary,
 }: {
     items: AgentActivityItem[];
     status: 'working' | 'complete';
     duration: number;
+    activeLabel?: string;
+    summary?: string;
 }) {
     return <div className="w-full" data-testid="beegame-agent-activity-group">
         <AgentActivity
             items={items}
             status={status}
             duration={duration}
-            defaultOpen={false}
+            activeLabel={activeLabel}
+            summary={summary}
+            defaultOpen={status === 'working'}
             className="w-full text-[var(--text-secondary)]"
         />
     </div>;
@@ -704,16 +719,12 @@ function BeUiAgentActivity({
 
 function ResponseParts({
     parts,
-    text,
     lang,
     streamingMessageId,
-    onWorkflowAction,
 }: {
     parts: ResponsePart[];
-    text: BeeGameText;
     lang: Language;
     streamingMessageId: string | null;
-    onWorkflowAction?: (action: WorkflowCardAction) => Promise<void> | void;
 }) {
     const rendered: ReactNode[] = [];
     for (let index = 0; index < parts.length; index += 1) {
@@ -745,7 +756,18 @@ function ResponseParts({
                     (candidate.kind === 'tool' && candidate.tool.status === 'running') ||
                     (candidate.kind === 'thinking' && matchesStreamingMessage(candidate.message, streamingMessageId))
                 )) ? 'working' : 'complete';
-                rendered.push(<BeUiAgentActivity key={`agent-activity-${key}`} items={activityItems} status={activityStatus} duration={activityDuration} />);
+                const activityTools = activityParts
+                    .filter((candidate): candidate is Extract<ResponsePart, { kind: 'tool' }> => candidate.kind === 'tool')
+                    .map((candidate) => candidate.tool);
+                const localSearchOnly = activityTools.length > 0 && activityTools.every(isLocalSearchTool);
+                rendered.push(<BeUiAgentActivity
+                    key={`agent-activity-${key}`}
+                    items={activityItems}
+                    status={activityStatus}
+                    duration={activityDuration}
+                    activeLabel={localSearchOnly ? (lang === 'zh' ? '正在搜索文件…' : 'Searching files…') : undefined}
+                    summary={localSearchOnly ? (lang === 'zh' ? '已搜索文件' : 'Searched files') : undefined}
+                />);
             };
             // A contiguous run is one beUI mixed activity. File previews follow the
             // activity while the tool invocation stays in its original row/order.
@@ -756,27 +778,95 @@ function ResponseParts({
                 .filter((tool) => Boolean(tool.diff));
             artifactTools.forEach((tool) => {
                 const lines = parseDiffLines(tool.diff!);
-                rendered.push(<FileDiff key={`agent-file-diff-${tool.id}`} file={tool.detail || tool.name} lines={lines} status={tool.status === 'running' ? 'streaming' : 'complete'} defaultOpen={false} copyText={lines.map((line) => line.content).join('\n')} />);
+                rendered.push(<FileDiff key={`agent-file-diff-${tool.id}`} file={displayText(tool.detail || tool.name)} lines={lines} status={tool.status === 'running' ? 'streaming' : 'complete'} defaultOpen={false} copyText={lines.map((line) => line.content).join('\n')} />);
             });
             continue;
         }
-        if (part.kind === 'workflow') {
-            rendered.push(<div key={`workflow-${part.workflow.runId || 'current'}`} className="min-w-0" data-testid={`beegame-workflow-plan-${part.workflow.runId || 'current'}`} data-message-id={`beegame-workflow-${part.workflow.runId || 'current'}`}>
-                <AgentTodoPlan workflow={part.workflow} text={text} onWorkflowAction={onWorkflowAction} />
-            </div>);
-            continue;
-        }
-        if (part.kind === 'todo') {
-            rendered.push(<div key={`todo-${part.id}`} className="min-w-0" data-testid={`beegame-todo-event-${part.id}`}>
-                <TodoList items={part.items} title="To-dos" defaultOpen collapseOnComplete className="w-full bg-transparent p-0" />
-            </div>);
-            continue;
-        }
-        rendered.push(<div key={`agent-${part.message.id}`} className="beegame-ai-prose min-w-0" data-slot="message-content" data-testid={`beegame-agent-message-${part.message.id}`} data-message-id={part.message.id}>
-            <MarkdownRenderer content={part.message.content} messageId={part.message.id} lang={lang} />
-        </div>);
+        rendered.push(<LongMarkdownMessage
+            key={`agent-${part.message.id}`}
+            message={part.message}
+            lang={lang}
+            collapsible={!matchesStreamingMessage(part.message, streamingMessageId)}
+        />);
     }
     return <>{rendered}</>;
+}
+
+function LongMarkdownMessage({
+    message,
+    lang,
+    collapsible,
+}: {
+    message: ChatDisplayMessage;
+    lang: Language;
+    collapsible: boolean;
+}) {
+    const content = displayText(message.content);
+    const contentRef = useRef<HTMLDivElement>(null);
+    const [isLong, setIsLong] = useState(false);
+    const [open, setOpen] = useState(false);
+    const contentId = `beegame-long-markdown-${message.id}`;
+
+    useLayoutEffect(() => {
+        if (!collapsible) {
+            setIsLong(false);
+            return;
+        }
+        const node = contentRef.current;
+        if (!node) return;
+        const measure = () => {
+            const renderedHeight = node.scrollHeight;
+            // jsdom has no layout engine; the fallback only keeps the behavior
+            // testable there. Real browsers always use the rendered height.
+            const testEnvironmentFallback = renderedHeight === 0 && content.length >= 1_200;
+            setIsLong(renderedHeight > LONG_MARKDOWN_COLLAPSED_HEIGHT || testEnvironmentFallback);
+        };
+        measure();
+        if (typeof ResizeObserver === 'undefined') return;
+        const observer = new ResizeObserver(measure);
+        observer.observe(node);
+        return () => observer.disconnect();
+    }, [collapsible, content]);
+
+    const characterCount = useMemo(() => content.replace(/\s/g, '').length, [content]);
+    const moreLabel = lang === 'zh'
+        ? `展开全文 · ${characterCount.toLocaleString('zh-CN')} 字`
+        : `Show full response · ${characterCount.toLocaleString('en-US')} chars`;
+
+    return <div
+        className="beegame-ai-prose min-w-0"
+        data-slot="message-content"
+        data-testid={`beegame-agent-message-${message.id}`}
+        data-message-id={message.id}
+    >
+        <div className="relative min-w-0">
+            <div
+                ref={contentRef}
+                id={contentId}
+                className={isLong && !open ? 'overflow-hidden' : undefined}
+                style={isLong && !open ? { maxHeight: LONG_MARKDOWN_COLLAPSED_HEIGHT } : undefined}
+            >
+                <MarkdownRenderer content={content} messageId={message.id} lang={lang} />
+            </div>
+            {isLong && !open ? <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-b from-transparent to-[var(--background)]"
+            /> : null}
+        </div>
+        {isLong ? <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={contentId}
+            onClick={() => setOpen((current) => !current)}
+            className="mx-auto mt-2 flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-medium text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+        >
+            <span>{open ? (lang === 'zh' ? '收起全文' : 'Show less') : moreLabel}</span>
+            <ChevronDown
+                aria-hidden="true"
+                className={`h-3.5 w-3.5 transition-transform motion-reduce:transition-none ${open ? 'rotate-180' : ''}`}
+            />
+        </button> : null}
+    </div>;
 }
 
 function ContextUpdateSeparator({ text }: { text: BeeGameText }) {
@@ -806,71 +896,21 @@ function DateSeparator({ dateKey, label }: { dateKey: string; label: string }) {
     );
 }
 
-function AgentTodoPlan({
-    workflow,
-    text,
-    onWorkflowAction,
-}: {
-    workflow: WorkflowCardPayload;
-    text: BeeGameText;
-    onWorkflowAction?: (action: WorkflowCardAction) => Promise<void> | void;
-}) {
-    const sourceTasks = workflow.tasks?.length
-        ? workflow.tasks
-        : workflow.stageSnapshots?.flatMap(snapshot => (snapshot.tasks || []).map(task => ({ ...task, id: `${snapshot.stageId}:${task.id}` }))) || [];
-    const progress = workflow.totalTaskCount
-        ? Math.round(((workflow.completedTaskCount || 0) / workflow.totalTaskCount) * 100)
-        : undefined;
-    const items: TodoItem[] = sourceTasks.length
-        ? sourceTasks.map(task => {
-            const status: TodoItem['status'] = task.status === 'completed'
-                ? 'completed'
-                : task.status === 'running'
-                    ? 'in-progress'
-                    : task.status === 'failed' || task.status === 'blocked' || task.status === 'stopped'
-                        ? 'cancelled'
-                        : 'pending';
-            const detail = task.failureReason || (task.durationMs !== undefined ? `${Math.max(0, Math.round(task.durationMs))}ms` : undefined);
-            return {
-                id: task.id,
-                title: task.title,
-                status,
-                progress: status === 'completed' ? 100 : status === 'in-progress' ? progress : undefined,
-                detail,
-            };
-        })
-        : [{
-            id: `${workflow.runId}:phase`,
-            title: workflow.currentPhase || text.aiProcessing || '',
-            status: workflow.status === 'completed' ? 'completed' : workflow.status === 'running' ? 'in-progress' : workflow.status === 'failed' || workflow.status === 'blocked' || workflow.status === 'cancelled' || workflow.status === 'stale' ? 'cancelled' : 'pending',
-            progress,
-            detail: workflow.block?.detail || workflow.block?.message || workflow.thinking,
-        }];
-    const isRunning = workflow.status === 'running' || workflow.status === 'verifying';
-    const actionLabel = workflow.nextAction === 'resume'
-        ? text.resume || 'Resume'
-        : text.retry || 'Retry';
-
+function StageSeparator({ stage, lang }: { stage: WorkflowStage; lang: Language }) {
+    const labels: Record<WorkflowStage, { zh: string; en: string }> = {
+        author: { zh: '文档编写', en: 'Document authoring' },
+        reviewer: { zh: '审计与修订', en: 'Review and revision' },
+        'game-ir': { zh: 'Game IR', en: 'Game IR' },
+    };
     return (
-        <div className="w-full min-w-0 space-y-2" data-testid={`beegame-todo-plan-${workflow.runId}`}>
-            <TodoList
-                items={items}
-                title={workflow.currentPhase || text.aiProcessing || ''}
-                defaultOpen={isRunning}
-                collapseOnComplete
-                className="w-full bg-transparent p-0"
-            />
-            {workflow.nextAction && onWorkflowAction ? (
-                <button
-                    type="button"
-                    data-testid={`beegame-workflow-action-${workflow.nextAction}`}
-                    className="text-sm font-medium text-[var(--primary)] underline-offset-4 hover:underline"
-                    onClick={() => void onWorkflowAction(workflow.nextAction!)}
-                >
-                    {actionLabel}
-                </button>
-            ) : null}
-        </div>
+        <MessageMarker
+            data-testid={`beegame-stage-separator-${stage}`}
+            data-slot="marker"
+            data-variant="separator"
+            className="type-muted bg-transparent py-2 text-[var(--text-muted)]"
+        >
+            {labels[stage][lang === 'zh' ? 'zh' : 'en']}
+        </MessageMarker>
     );
 }
 

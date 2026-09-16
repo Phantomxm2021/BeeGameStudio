@@ -254,7 +254,7 @@ export function MessageScroller({
       return unchanged ? current : nextItems;
     });
     setRailOverflowing(
-      viewport.scrollHeight > viewport.clientHeight + 1 && userMessages.length > 1,
+      viewport.scrollHeight > viewport.clientHeight + 1 && userMessages.length > 0,
     );
   }, [navigation]);
 
@@ -372,14 +372,7 @@ export function MessageScroller({
       const target = railTargetsRef.current.get(item.id);
       if (!viewport || !target) return;
 
-      const lastItem = railItems.at(-1)?.id === item.id;
       setActiveRailId(item.id);
-      if (lastItem) {
-        setFollowing(true);
-        scrollToEnd(reduce || !smooth ? "auto" : "smooth");
-        return;
-      }
-
       setFollowing(false);
       programmaticScrollRef.current = true;
       const viewportRect = viewport.getBoundingClientRect();
@@ -401,7 +394,7 @@ export function MessageScroller({
         programmaticScrollRef.current = false;
       }, behavior === "smooth" ? 320 : 0);
     },
-    [railItems, reduce, scrollToEnd, setFollowing, smooth],
+    [reduce, setFollowing, smooth],
   );
 
   const viewport = (

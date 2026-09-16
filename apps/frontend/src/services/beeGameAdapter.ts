@@ -128,6 +128,7 @@ type BeeGameEventStreamCallbacks = {
 type BeeGameProjectTranscriptPage = BeeGameTranscriptPage & {
   sessionId: string
   workspacePath: string
+  latestTodoEvent?: BeeGameEvent
 }
 
 type BeeGameProjectArtifactIndex = {
@@ -594,9 +595,13 @@ export const beeGameAdapter = {
       ...transcriptPage.page,
       latestEventId: getLatestBeeGameEventId(transcriptPage.events),
     })
+    const historyEvents = transcriptPage.latestTodoEvent &&
+      !transcriptPage.events.some(event => event.id === transcriptPage.latestTodoEvent?.id)
+      ? [...transcriptPage.events, transcriptPage.latestTodoEvent]
+      : transcriptPage.events
     return eventsToHistory(
       projectId,
-      transcriptPage.events,
+      historyEvents,
       transcriptPage.workspacePath,
     )
   },

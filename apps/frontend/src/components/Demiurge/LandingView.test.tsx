@@ -111,7 +111,6 @@ let mockCurrentUser: {
   permissions: ['project.create', 'project.delete'],
 };
 let mockProjects: Array<{ id: string; name: string; created_at: string }> = [];
-const terminalRenderState = vi.hoisted(() => ({ renderCount: 0 }));
 
 vi.mock('../../store/projectStore', () => ({
   useProjectStore: (
@@ -136,12 +135,16 @@ vi.mock('../../store/systemStore', () => {
       currentUser: typeof mockCurrentUser;
       loadCurrentUser: typeof mockLoadCurrentUser;
       hasPermission: (permission: string) => boolean;
+      isDark: boolean;
+      setTheme: (isDark: boolean) => void;
     }) => unknown,
   ) => {
     const state = {
       currentUser: mockCurrentUser,
       loadCurrentUser: mockLoadCurrentUser,
       hasPermission: (permission: string) => Boolean(mockCurrentUser?.permissions.includes(permission)),
+      isDark: false,
+      setTheme: vi.fn(),
     };
     return selector ? selector(state) : state;
   };
@@ -149,8 +152,10 @@ vi.mock('../../store/systemStore', () => {
     currentUser: mockCurrentUser,
     loadCurrentUser: mockLoadCurrentUser,
     hasPermission: (permission: string) => Boolean(mockCurrentUser?.permissions.includes(permission)),
+    isDark: false,
+    setTheme: vi.fn(),
   });
-  return { useSystemStore };
+  return { useSystemStore, applyThemeToDocument: vi.fn() };
 });
 
 vi.mock('../../services/api', () => ({
@@ -226,13 +231,6 @@ vi.mock('../../services/supabaseAuthApi', () => ({
 
 vi.mock('./DemiurgeLogo', () => ({
   DemiurgeLogo: () => <div data-testid="demiurge-logo" />,
-}));
-
-vi.mock('./Landing/FaultyTerminal', () => ({
-  FaultyTerminal: () => {
-    terminalRenderState.renderCount += 1;
-    return <div data-testid="faulty-terminal-canvas" />;
-  },
 }));
 
 const renderLanding = async (props?: Partial<React.ComponentProps<typeof LandingView>>) => {
@@ -565,7 +563,6 @@ beforeEach(() => {
   });
   uploadSupabaseAvatarImage.mockReset();
   uploadSupabaseAvatarImage.mockResolvedValue('https://cdn.example.com/avatars/alice.png');
-  terminalRenderState.renderCount = 0;
 });
 
 describe('LandingView bootstrap submission', () => {
@@ -956,6 +953,7 @@ describe('LandingView bootstrap submission', () => {
     expect(screen.getByText('A')).toBeInTheDocument();
     expect(await screen.findByText('Alice')).toBeInTheDocument();
     expect(screen.getByText('300 credits')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /模式|mode/i })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: '个人主页' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: '系统设置' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();
@@ -1099,7 +1097,7 @@ describe('LandingView bootstrap submission', () => {
     await waitFor(() => expect(screen.queryByRole('menu', { name: '用户菜单' })).not.toBeInTheDocument());
   });
 
-  it('uses the frosted input surface style for the account menu without filling the avatar', async () => {
+  it('uses the shared circular dashboard avatar for the account menu', async () => {
     mockCurrentUser = {
       id: 'alice',
       role: 'owner',
@@ -1108,8 +1106,8 @@ describe('LandingView bootstrap submission', () => {
     await renderLanding();
 
     const userButton = await screen.findByRole('button', { name: '用户菜单' });
-    expect(userButton).toHaveAttribute('data-avatar-surface', 'outline');
-    expect(userButton).not.toHaveClass('bg-black/20');
+    expect(userButton).toHaveClass('rounded-full', 'bg-[var(--surface-2)]');
+    expect(userButton).not.toHaveClass('rounded-lg');
 
     fireEvent.click(userButton);
 
@@ -1668,7 +1666,7 @@ describe('LandingView bootstrap submission', () => {
 
     expect(screen.getByRole('heading', { name: 'Start with an idea.' })).toBeInTheDocument();
     expect(screen.getByText('A few words are enough to begin.')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('What game do you want to make? e.g. a mobile puzzle game')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'What game do you want to make? e.g. a mobile puzzle game' })).toHaveAttribute('placeholder', 'Ask anything...');
     expect(screen.queryByTestId('demiurge-logo')).not.toBeInTheDocument();
   });
 
@@ -1687,11 +1685,15 @@ describe('LandingView bootstrap submission', () => {
     expect(await screen.findByText('game-design.md')).toBeInTheDocument();
   });
 
-  it('keeps the landing page free of decorative video backgrounds', async () => {
+  it('renders a muted looping video background behind the landing content', async () => {
     await renderLanding();
 
-    expect(screen.queryByTestId('faulty-terminal-background')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('landing-background-video')).not.toBeInTheDocument();
+    const video = screen.getByTestId('landing-background-video') as HTMLVideoElement;
+    expect(video).toBeInTheDocument();
+    expect(video.loop).toBe(true);
+    expect(video.muted).toBe(true);
+    expect(video.playsInline).toBe(true);
+    expect(screen.queryByTestId('beui-theme-toggle')).not.toBeInTheDocument();
   });
 
   it('keeps the prompt usable while typing', async () => {
@@ -1711,9 +1713,34 @@ describe('LandingView bootstrap submission', () => {
   it('renders the idea prompt as a semantic surface', async () => {
     await renderLanding();
 
-    expect(screen.getByTestId('idea-prompt-surface')).toHaveClass('bg-surface-2', 'border-border', 'rounded-xl');
-    expect(screen.getByTestId('idea-prompt-surface')).not.toHaveClass('backdrop-blur-2xl');
+    expect(screen.getByTestId('idea-prompt-surface')).toContainElement(screen.getByRole('textbox'));
+    expect(screen.getByRole('textbox')).toHaveAttribute('rows', '3');
     expect(screen.queryByTestId('progressive-blur-layer')).not.toBeInTheDocument();
+  });
+
+  it('offers attachment types and switches between creation modes', async () => {
+    await renderLanding({ lang: 'zh' });
+
+    expect(screen.getByRole('button', { name: '生成' })).toHaveTextContent('');
+    expect(screen.queryByRole('button', { name: 'Voice input unavailable' })).not.toBeInTheDocument();
+    expect(screen.queryByText('GPT 5.2')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '添加附件' }));
+    expect(screen.getByRole('button', { name: '文档' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '图片' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '视频' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '文档' }));
+    expect(document.getElementById('landing-attachment-upload')).toHaveAttribute('accept', expect.stringContaining('.md'));
+
+    fireEvent.click(screen.getByRole('button', { name: /创意模式/ }));
+    fireEvent.click(screen.getByRole('button', { name: '蓝图模式' }));
+    await waitFor(() => {
+      const modeTrigger = screen.getAllByRole('button', { name: /蓝图模式/ })
+        .find(button => button.getAttribute('aria-haspopup') === 'dialog');
+      expect(modeTrigger).toHaveAttribute('aria-expanded', 'false');
+    });
+
+    expect(screen.getByRole('link', { name: 'Learn more' })).toHaveAttribute('href', '#examples-tutorials');
   });
 
   it('renders the updated Simplified Chinese hero subtitle', async () => {

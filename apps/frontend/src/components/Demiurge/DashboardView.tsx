@@ -609,15 +609,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         }}
         isLoading={isLoading}
         onStopTask={stopTask}
-        onWorkflowAction={
-          canSendMessage
-            ? async action => {
-                if (action === 'resume') await api.resumeWorkflow(projectId);
-                else await api.retryWorkflow(projectId);
-                await loadProjectRuntimeState(projectId);
-              }
-            : undefined
-        }
         isStopping={isStopping}
         isRuntimeBusy={currentStatus === 'running'}
         onResolveToolPermission={hasPendingToolPermission && canApproveTool && !isProjectInteractionLocked ? resolveToolPermission : undefined}

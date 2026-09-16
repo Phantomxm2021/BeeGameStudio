@@ -289,6 +289,7 @@ export function SelectContent({ className, children }: SelectContentProps) {
     if (!node) return;
     const measure = () => setHeight(node.offsetHeight);
     measure();
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     return () => observer.disconnect();

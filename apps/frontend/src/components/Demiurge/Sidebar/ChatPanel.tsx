@@ -11,7 +11,6 @@ import type { WaitingPermissionState } from '../../../utils/waitingPermission';
 import { type ChatDisplayMessage, type ProjectRuntimeDisplayModel, type PermissionDisplayModel } from '../../../viewModels/displayModels';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
-import type { WorkflowCardAction } from '../../../types/message';
 import { Button } from '../../beui/project-button';
 import { ApprovalCard, type ApprovalCardAnswers } from '../../beui/registry/components/agents/approval-card';
 import { PromptInput } from '../../beui/registry/components/agents/prompt-input';
@@ -27,7 +26,6 @@ interface ChatPanelProps {
     onSend: () => void;
     onSendMessage?: (message: string) => void;
     onEditMessage?: (message: ChatDisplayMessage) => void;
-    onWorkflowAction?: (action: WorkflowCardAction) => Promise<void> | void;
     editingMessageId?: string | null;
     onCancelEdit?: () => void;
     attachments?: ChatAttachmentPayload[];
@@ -200,7 +198,6 @@ export const ChatPanel = memo(({
     isLoading,
     streamingMessageId = null,
     onStop,
-    onWorkflowAction,
     isStopping = false,
     chatInput,
     onChatInputChange,
@@ -300,7 +297,6 @@ export const ChatPanel = memo(({
                 ) : null}
                 <BeeGameCollaborationFeed
                     messages={messages}
-                    projectStatus={projectStatus}
                     onPreviewArtifact={onPreviewArtifact}
                     lang={lang}
                     currentUserDisplayName={currentUserDisplayName}
@@ -308,7 +304,6 @@ export const ChatPanel = memo(({
                     currentUserAvatarUrl={currentUserAvatarUrl}
                     onEditMessage={onEditMessage}
                     onRetryResponse={(!isLoading && !isComposerLocked && onSendMessage) ? onSendMessage : undefined}
-                    onWorkflowAction={onWorkflowAction}
                     isLoading={isLoading}
                     streamingMessageId={streamingMessageId}
                 />

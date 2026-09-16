@@ -1197,6 +1197,53 @@ describe('beeGameAdapter prompt rules', () => {
     expect(localStorage.getItem('beegame-adapter-bindings:cookie-user')).toBeNull();
   });
 
+  it('restores the latest TodoWrite snapshot even when it is outside the transcript page', async () => {
+    const workspacePath = '/tmp/beegame-projects/users/cookie-user/cookie-game';
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/projects/project_todo/transcript?limit=300') {
+        return jsonResponse({
+          sessionId: 'beegame_todo_restore',
+          workspacePath,
+          events: [{
+            id: 900,
+            sessionId: 'beegame_todo_restore',
+            turnId: 'turn-latest',
+            type: 'assistant.message',
+            text: 'Latest visible response.',
+            payload: { type: 'assistant.message' },
+            createdAt: '2026-06-21T00:00:02.000Z',
+          }],
+          latestTodoEvent: {
+            id: 12,
+            sessionId: 'beegame_todo_restore',
+            turnId: 'turn-old-todo',
+            type: 'tool.completed',
+            text: 'TodoWrite completed',
+            payload: {
+              type: 'tool.completed',
+              toolUseID: 'todo-1',
+              toolName: 'TodoWrite',
+              input: { todos: [{ content: 'Persisted task', status: 'completed' }] },
+            },
+            createdAt: '2026-06-20T23:00:00.000Z',
+          },
+          page: { hasMore: true, nextBeforeId: 600 },
+        });
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const history = await beeGameAdapter.getChatHistory('project_todo') as Array<Record<string, unknown>>;
+
+    expect(history).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        toolName: 'TodoWrite',
+        toolInput: { todos: [{ content: 'Persisted task', status: 'completed' }] },
+      }),
+    ]));
+  });
+
   it('uses the server-owned project transcript workspace instead of browser metadata', async () => {
     localStorage.setItem('beegame_supabase_session', JSON.stringify({
       accessToken: 'cloud-access-token',

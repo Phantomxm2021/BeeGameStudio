@@ -62,7 +62,7 @@ describe('RightSidebar tabs', () => {
         vi.useRealTimers();
     });
 
-    it('shows the canonical chat and artifacts tabs', () => {
+    it('shows chat, todo, and artifacts tabs in canonical order', () => {
         render(
             <RightSidebar
                 projectId="proj_1"
@@ -82,10 +82,35 @@ describe('RightSidebar tabs', () => {
         );
 
         expect(screen.getByRole('tab', { name: 'Chat' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Todo' })).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: /^Artifacts/ })).toBeInTheDocument();
+        expect(screen.getAllByRole('tab').map(tab => tab.textContent?.replace(/\d+$/, ''))).toEqual(['Chat', 'Todo', 'Artifacts']);
         expect(screen.queryByRole('tab', { name: '资源' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '运行时' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '任务看板' })).not.toBeInTheDocument();
+    });
+
+    it('shows the latest native TodoWrite snapshot only in the Todo tab', async () => {
+        const user = userEvent.setup();
+        render(
+            <RightSidebar
+                projectId="proj_1"
+                lang="en"
+                messages={[{
+                    id: 'todo-1', sender: 'system', content: '', timestamp: 1, type: 'tool', toolName: 'TodoWrite',
+                    toolInput: { todos: [{ content: 'Build the scene', status: 'in_progress' }] },
+                }]}
+                progress={0}
+                onSendMessage={vi.fn()}
+                isLoading={false}
+                waitingPermission={{ kind: 'none', isBlockingChat: false, isWaitingStatus: false, message: '', placeholder: 'Type...' }}
+            />
+        );
+
+        expect(screen.queryByText('Build the scene')).not.toBeInTheDocument();
+        await user.click(screen.getByRole('tab', { name: 'Todo' }));
+        expect(screen.getByText('Build the scene')).toBeInTheDocument();
+        expect(screen.getByRole('region', { name: /^Current tasks/ })).toBeInTheDocument();
     });
 
     it('opens the independent Scene Editor from the Scene entry', async () => {

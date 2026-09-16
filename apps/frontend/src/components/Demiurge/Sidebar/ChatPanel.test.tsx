@@ -407,11 +407,10 @@ describe('ChatPanel approval bar', () => {
 
         expect(screen.queryByTestId('beegame-thinking-message-beegame-runtime-activity')).not.toBeInTheDocument();
         expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
-        expect(screen.getAllByTestId('beegame-workflow-plan-proj_1')[0]).toHaveClass('min-w-0');
-        expect(screen.getAllByTestId('beegame-workflow-plan-proj_1')[0]).not.toHaveClass('px-3');
+        expect(screen.queryByTestId('beegame-workflow-plan-proj_1')).not.toBeInTheDocument();
     });
 
-    it('places the workflow card in timestamp order after its triggering user message', () => {
+    it('does not turn workflow state into a synthetic chat card', () => {
         renderChatPanel({
             actionPermission: undefined,
             pendingPermissions: [],
@@ -433,11 +432,8 @@ describe('ChatPanel approval bar', () => {
             },
         });
 
-        const user = document.querySelector('[data-message-id="user_before_run"]')!;
-        const workflow = document.querySelector('[data-message-id="beegame-workflow-run_timeline"]')!;
-        const agent = document.querySelector('[data-message-id="agent_after_run"]')!;
-        expect(user.compareDocumentPosition(workflow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        expect(workflow.closest('[data-testid^="beegame-agent-turn-"]')).toBe(agent);
+        expect(document.querySelector('[data-message-id="beegame-workflow-run_timeline"]')).toBeNull();
+        expect(screen.getByText('开始处理。')).toBeInTheDocument();
     });
 
     it('keeps the completed thought summary after the workflow finishes', () => {
@@ -544,11 +540,7 @@ describe('ChatPanel approval bar', () => {
         expect(document.querySelector('[data-message-id="m_user"]')).not.toHaveClass('px-3');
         expect(screen.getByTestId('beegame-agent-turn-m_agent')).toBeInTheDocument();
         expect(screen.getByTestId('beegame-agent-turn-m_agent')).toHaveAttribute('data-scroll-anchor', 'false');
-        const userFeedItem = document.querySelector('[data-message-id="m_user"]')!;
-        const workflowFeedItem = document.querySelector('[data-message-id="beegame-workflow-proj_1"]')!;
-        const agentFeedItem = screen.getByTestId('beegame-agent-turn-m_agent');
-        expect(userFeedItem.compareDocumentPosition(workflowFeedItem) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        expect(workflowFeedItem.closest('[data-testid^="beegame-agent-turn-"]')).toBe(agentFeedItem);
+        expect(document.querySelector('[data-message-id="beegame-workflow-proj_1"]')).toBeNull();
         expect(screen.queryByText('当前任务')).not.toBeInTheDocument();
         const userMessage = screen.getByTestId('beegame-user-message-m_user');
         expect(userMessage).toBeInTheDocument();
@@ -756,11 +748,9 @@ describe('ChatPanel approval bar', () => {
         });
 
         const activities = screen.getAllByTestId('beegame-agent-activity-group');
-        const workflow = screen.getByTestId('beegame-workflow-plan-turn-order-workflow');
         const agent = screen.getByTestId('beegame-agent-message-order-agent');
         expect(activities).toHaveLength(2);
-        expect(activities[0].compareDocumentPosition(workflow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-        expect(workflow.compareDocumentPosition(agent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(activities[0].compareDocumentPosition(agent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(agent.compareDocumentPosition(activities[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
@@ -1021,7 +1011,7 @@ describe('ChatPanel approval bar', () => {
         expect(separator).not.toHaveAttribute('role', 'separator');
     });
 
-    it('renders BeeGame search tool calls as activity items', async () => {
+    it('labels local BeeGame search tool calls as file searches', async () => {
         renderChatPanel({
             actionPermission: undefined,
             pendingPermissions: [],
@@ -1044,8 +1034,72 @@ describe('ChatPanel approval bar', () => {
         const activity = screen.getByTestId('beegame-agent-activity-group');
         expect(activity.querySelector('[data-content="search"]')).toBeInTheDocument();
         await userEvent.setup().click(activity.querySelector('button')!);
-        expect(activity).toHaveTextContent('Searched the web');
+        expect(activity).toHaveTextContent('已搜索文件');
         expect(activity).toHaveTextContent('found 4 files');
+    });
+
+    it('groups consecutive anonymous tool calls into one collapsed activity', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            messages: [
+                { id: 'read-a', sender: 'system', type: 'tool', content: 'Read completed', timestamp: 1, toolName: 'Read', toolStatus: 'completed', toolDetail: 'docs/GDD.md' },
+                { id: 'read-b', sender: 'system', type: 'tool', content: 'Read completed', timestamp: 2, toolName: 'Read', toolStatus: 'completed', toolDetail: 'docs/Art.md' },
+                { id: 'write-a', sender: 'system', type: 'tool', content: 'Write completed', timestamp: 3, toolName: 'Write', toolStatus: 'completed', toolDetail: 'docs/Tech.md' },
+            ],
+        });
+
+        const activity = screen.getByTestId('beegame-agent-activity-group');
+        expect(screen.getAllByTestId(/^beegame-agent-turn-/)).toHaveLength(1);
+        expect(screen.getAllByTestId('beegame-agent-activity-group')).toHaveLength(1);
+        expect(activity).toHaveTextContent('Ran 3 tools');
+        expect(activity.querySelector('[data-state="closed"]')).toBeInTheDocument();
+    });
+
+    it('hides StructuredOutput plumbing from the visible transcript', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            messages: [{
+                id: 'structured-output',
+                sender: 'system',
+                type: 'tool',
+                content: 'StructuredOutput completed',
+                timestamp: 1,
+                toolName: 'StructuredOutput',
+                toolStatus: 'completed',
+            }],
+        });
+
+        expect(screen.queryByTestId('beegame-agent-activity-group')).not.toBeInTheDocument();
+        expect(screen.queryByText(/StructuredOutput/)).not.toBeInTheDocument();
+    });
+
+    it('shows internal workflow stages as lightweight separators and hides storage paths', async () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            lang: 'zh',
+            messages: [{
+                id: 'author-read',
+                sender: 'system',
+                type: 'tool',
+                content: 'Read completed',
+                timestamp: 1,
+                toolName: 'Read',
+                toolStatus: 'completed',
+                toolDetail: '.beegame/workflow/foundation-authoring/run-1/workspace/docs/GDD.md',
+            }],
+        });
+
+        expect(screen.getByTestId('beegame-stage-separator-author')).toHaveTextContent('文档编写');
+        const activity = screen.getByTestId('beegame-agent-activity-group');
+        await userEvent.setup().click(activity.querySelector('button')!);
+        expect(activity).toHaveTextContent('GDD.md');
+        expect(activity).not.toHaveTextContent('.beegame/workflow');
     });
 
     it('shows BeeGame read tool calls as activity items', async () => {
@@ -1111,7 +1165,8 @@ describe('ChatPanel approval bar', () => {
         expect(screen.queryByText(/^Tool$/)).not.toBeInTheDocument();
     });
 
-    it('renders long BeeGame final summaries as one complete response', () => {
+    it('collapses long completed Markdown in place and can reveal the full response', async () => {
+        const longSection = '这是需要保留的文章正文，用来验证长内容不会持续撑高整个聊天窗口。'.repeat(45);
         renderChatPanel({
             actionPermission: undefined,
             pendingPermissions: [],
@@ -1125,8 +1180,7 @@ describe('ChatPanel approval bar', () => {
                         '',
                         '我已成功实现了一个完整的体素生存游戏。',
                         '以下是交付内容。',
-                        '这行应该还可见。',
-                        '这一行之后的详细清单不应该继续撑满整个右侧面板。',
+                        longSection,
                         'docs/GDD.md',
                         'docs/TECH_SPEC.md',
                         'docs/VERIFICATION.md',
@@ -1138,8 +1192,22 @@ describe('ChatPanel approval bar', () => {
 
         expect(screen.getByRole('heading', { name: '项目完成总结', level: 2 })).toBeInTheDocument();
         expect(document.body.textContent).toContain('docs/VERIFICATION.md');
-        expect(screen.queryByRole('button', { name: 'View summary details' })).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: 'Hide summary details' })).not.toBeInTheDocument();
+        const expand = screen.getByRole('button', { name: /Show full response/ });
+        expect(expand).toHaveAttribute('aria-expanded', 'false');
+        await userEvent.setup().click(expand);
+        expect(screen.getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true');
+    });
+
+    it('does not add article controls to short Markdown responses', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            messages: [{ id: 'short-markdown', sender: 'beegame', content: '## 完成\n\n场景已经准备好。', timestamp: 1 }],
+        });
+
+        expect(screen.queryByRole('button', { name: /Show full response/ })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Show less' })).not.toBeInTheDocument();
     });
 
     it('renders BeeGame messages without an avatar header or collapse control', () => {
@@ -1404,6 +1472,21 @@ describe('ChatPanel approval bar', () => {
         expect(screen.getByRole('button', { name: 'Copy response' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Helpful' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Not helpful' })).toBeInTheDocument();
+    });
+
+    it('shows response actions only on the final assistant reply before the next user message', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            onSendMessage: vi.fn(),
+            messages: [
+                { id: 'user-a', sender: 'user', content: 'Do the work.', timestamp: 1 },
+                { id: 'agent-progress', sender: 'beegame', content: 'I am inspecting the files.', timestamp: 2 },
+                { id: 'agent-final', sender: 'beegame', content: 'The work is complete.', timestamp: 3 },
+            ],
+        });
+
+        expect(screen.getAllByRole('button', { name: 'Copy response' })).toHaveLength(1);
+        expect(screen.getAllByRole('button', { name: 'Retry response' })).toHaveLength(1);
     });
 
     it('retries a completed response with its nearest preceding user message', () => {

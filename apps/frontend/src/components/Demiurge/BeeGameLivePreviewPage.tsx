@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ProfileAvatarButton } from './ProfileAvatarButton';
 import { ArrowLeft, ChevronDown, ExternalLink, FolderOpen, History, Play, RefreshCw, Settings, ShoppingCart, Square, Upload, UserCircle } from 'lucide-react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../i18n/useBeeGameTranslations';
@@ -403,20 +404,11 @@ export function BeeGameLivePreviewPage({
           </Button>
           <DropdownMenu open={isProfileMenuOpen} onOpenChange={setProfileMenuOpen}>
             <DropdownMenuTrigger
-              render={<button type="button" data-testid="beegame-profile-trigger" aria-label={commonText.profile || 'Profile'} title={commonText.profile || 'Profile'} />}
+              render={<ProfileAvatarButton avatarUrl={currentUser?.avatarUrl} userLabel={currentUser?.displayName?.trim() || currentUser?.email?.trim()} data-testid="beegame-profile-trigger" aria-label={commonText.profile || 'Profile'} title={commonText.profile || 'Profile'} />}
               onClick={(event) => {
                 if (event.currentTarget.getAttribute('aria-expanded') !== 'true') setProfileMenuOpen(true);
               }}
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
-            >
-              {currentUser?.avatarUrl ? (
-                <img src={currentUser.avatarUrl} alt="" className="h-full w-full rounded-full object-cover" />
-              ) : (
-                <span className="type-button font-semibold" aria-hidden="true">
-                  {(currentUser?.displayName?.trim() || currentUser?.email?.trim() || 'Profile').slice(0, 1).toUpperCase()}
-                </span>
-              )}
-            </DropdownMenuTrigger>
+            />
             <DropdownMenuContent align="end" className="w-[min(18rem,calc(100vw-1rem))]">
               <div data-testid="beegame-profile-menu-user" className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2.5">
                 {currentUser?.avatarUrl ? (

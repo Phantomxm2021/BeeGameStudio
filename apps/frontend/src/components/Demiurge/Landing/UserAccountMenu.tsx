@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { LogOut, UserRound } from 'lucide-react';
+import { LogOut } from 'lucide-react';
+import { ProfileAvatarButton } from '../ProfileAvatarButton';
 
 export interface UserAccountMenuItem {
     key: string;
@@ -42,18 +43,8 @@ export function UserAccountMenu({
     onSignOut,
 }: UserAccountMenuProps) {
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-    const [avatarFailed, setAvatarFailed] = useState(false);
     const containerRef = useRef<HTMLDivElement | null>(null);
     const userLabel = currentUserDisplayName || currentUserEmail || (currentUserId ? fallbackUserLabel : undefined);
-    const userInitial = getUserInitial(userLabel);
-
-    useEffect(() => {
-        setAvatarFailed(false);
-    }, [currentUserAvatarUrl]);
-
-    useEffect(() => {
-        if (isUserMenuOpen) setAvatarFailed(false);
-    }, [isUserMenuOpen]);
 
     useEffect(() => {
         if (!isUserMenuOpen) return undefined;
@@ -89,34 +80,17 @@ export function UserAccountMenu({
             ref={containerRef}
             className={`${className} transition-opacity duration-200 ${isTransitioning ? 'opacity-0' : 'opacity-100'}`.trim()}
         >
-            <button
+            <ProfileAvatarButton
                 type="button"
                 aria-label={ariaLabel}
                 aria-haspopup="menu"
                 aria-expanded={currentUserId ? isUserMenuOpen : undefined}
-                data-avatar-surface="outline"
+                avatarUrl={currentUserAvatarUrl}
+                userLabel={userLabel}
+                anonymous={!currentUserId}
                 onClick={handleUserButtonClick}
-                className={`relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg border border-border bg-background/80 text-foreground shadow-sm transition-[border-color,background-color,transform] duration-150 hover:bg-accent active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${isActive || isUserMenuOpen ? 'border-primary bg-accent' : ''}`}
-            >
-                {currentUserId ? (
-                    currentUserAvatarUrl && !avatarFailed ? (
-                        <img
-                            src={currentUserAvatarUrl}
-                            alt=""
-                            referrerPolicy="no-referrer"
-                            className="absolute inset-0 h-full w-full rounded-full object-cover"
-                            onLoad={() => setAvatarFailed(false)}
-                            onError={() => setAvatarFailed(true)}
-                        />
-                    ) : (
-                        <span className="type-footnote flex h-8 w-8 items-center justify-center rounded-full text-foreground">
-                            {userInitial}
-                        </span>
-                    )
-                ) : (
-                    <UserRound className="h-6 w-6" />
-                )}
-            </button>
+                className={isActive || isUserMenuOpen ? 'ring-2 ring-ring' : ''}
+            />
 
             {currentUserId && isUserMenuOpen ? (
                 <div
@@ -166,8 +140,3 @@ export function UserAccountMenu({
         </div>
     );
 }
-
-const getUserInitial = (userId?: string): string => {
-    const first = Array.from(userId?.trim() || 'U')[0] || 'U';
-    return /^[a-z]$/i.test(first) ? first.toUpperCase() : first;
-};

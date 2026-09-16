@@ -171,6 +171,10 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
     };
     const structuredPatch = record.structured_patch ?? record.structuredPatch ?? metadata.structured_patch ?? metadata.structuredPatch;
     const toolInput = record.tool_input ?? record.toolInput ?? metadata.tool_input ?? metadata.toolInput;
+    const rawToolStatus = readOptionalString('tool_status', 'toolStatus')?.toLowerCase();
+    const toolStatus = rawToolStatus === 'running' || rawToolStatus === 'completed' || rawToolStatus === 'failed'
+      ? rawToolStatus
+      : undefined;
     const clientIdFromMetadata = String(metadata.client_message_id ?? '').trim() || undefined;
     const finalClientMessageId = clientMessageId || clientIdFromMetadata;
     const dedupeKey = buildMessageDedupeKey({
@@ -205,6 +209,10 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
       taskKind,
       nextAction,
       requiresUserAction: typeof requiresUserActionRaw === 'boolean' ? requiresUserActionRaw : undefined,
+      toolName: readOptionalString('tool_name', 'toolName', 'tool'),
+      toolStatus,
+      toolDetail: readOptionalString('tool_detail', 'toolDetail'),
+      toolOutput: readOptionalString('tool_output', 'toolOutput', 'output'),
       toolDiff: readOptionalString('tool_diff', 'toolDiff', 'diff', 'gitDiff', 'git_diff'),
       toolUseId: readOptionalString('tool_use_id', 'toolUseId'),
       toolPatch: readOptionalString('tool_patch', 'toolPatch', 'patch'),

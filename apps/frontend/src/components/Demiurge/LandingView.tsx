@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Check, LoaderCircle, X } from 'lucide-react';
+import { Check, Gamepad2, LoaderCircle, X } from 'lucide-react';
 import type { Language } from './AgentsConfig';
 import { normalizeI18nLanguage, useCommonText } from '../../i18n/useBeeGameTranslations';
 import { useProjectStore } from '../../store/projectStore';
@@ -9,7 +9,8 @@ import { useSystemStore } from '../../store/systemStore';
 import { HeroIntro } from './Landing/HeroIntro';
 import { IdeaPromptForm } from './Landing/IdeaPromptForm';
 import { AttachmentBuildReview } from './Landing/AttachmentBuildReview';
-import { LandingActions } from './Landing/LandingActions';
+import { AccountActionsMenu } from './Landing/AccountActionsMenu';
+import { LandingVideoBackground } from './Landing/LandingVideoBackground';
 import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { ProfileModal } from './Landing/ProfileModal';
@@ -1280,51 +1281,59 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   return (
     <div
       key="landing"
-      className={`absolute inset-0 z-50 flex flex-col overflow-y-auto bg-background text-foreground opacity-100 transition-opacity duration-300 ${isTransitioning ? 'opacity-0' : ''}`}
+      className={`absolute inset-0 z-50 flex flex-col overflow-y-auto bg-[#c97843] text-white opacity-100 transition-opacity duration-300 dark:bg-black ${isTransitioning ? 'opacity-0' : ''}`}
     >
-      <header className="relative z-20 flex h-16 shrink-0 items-center justify-between border-b border-border bg-background px-4 sm:px-6">
-        <div className="text-sm font-semibold tracking-tight text-foreground">BeeGame</div>
-        <LandingActions
-        lang={lang}
-        isTransitioning={isTransitioning}
-        isSettingsOpen={isSettingsOpen}
-        isHistoryOpen={isHistoryOpen}
-        isProfileOpen={isProfileOpen}
-        isCreditStoreOpen={isCreditStoreOpen}
-        isResourceLibraryOpen={isResourceLibraryOpen}
-        currentUserId={currentUser?.id}
-        currentUserDisplayName={currentUser?.displayName || currentUser?.email}
-        currentUserEmail={currentUser?.email}
-        currentUserAvatarUrl={currentUser?.avatarUrl}
-        className="relative z-20 flex items-center gap-2"
-        creditBalance={creditBalance?.balanceCredits}
-        onOpenLogin={handleOpenLogin}
-        onOpenProfile={handleOpenProfile}
-        onSignOut={currentUser ? () => void handleSignOut() : undefined}
-        onToggleSettings={() => {
-          setIsSettingsOpen(value => !value);
-          setIsHistoryOpen(false);
-          setIsCreditStoreOpen(false);
-        }}
-        canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
-        onOpenResourceLibrary={() => {
-          openResourceLibraryRoute();
-          setIsResourceLibraryOpen(true);
-          setIsSettingsOpen(false);
-          setIsHistoryOpen(false);
-          setIsCreditStoreOpen(false);
-        }}
-        onToggleHistory={() => {
-          setIsHistoryOpen(value => !value);
-          setIsSettingsOpen(false);
-          setIsCreditStoreOpen(false);
-        }}
-        onOpenCreditStore={() => {
-          setIsCreditStoreOpen(true);
-          setIsSettingsOpen(false);
-          setIsHistoryOpen(false);
-        }}
-      />
+      <LandingVideoBackground />
+      <header className="absolute inset-x-0 top-0 z-20 flex h-16 items-center justify-between px-4 sm:h-20 sm:px-8">
+        <div className="flex items-center gap-2.5 text-white [text-shadow:0_2px_16px_rgba(0,0,0,0.32)]">
+          <span className="grid size-8 place-items-center rounded-lg border border-white/45 bg-white/10 backdrop-blur-lg">
+            <Gamepad2 className="size-[18px]" aria-hidden="true" />
+          </span>
+          <span className="text-lg font-semibold tracking-[-0.03em]">BeeGame</span>
+        </div>
+        <div className="relative z-20 flex items-center gap-2">
+          <AccountActionsMenu
+            lang={lang}
+            isTransitioning={isTransitioning}
+            isSettingsOpen={isSettingsOpen}
+            isHistoryOpen={isHistoryOpen}
+            isProfileOpen={isProfileOpen}
+            isCreditStoreOpen={isCreditStoreOpen}
+            isResourceLibraryOpen={isResourceLibraryOpen}
+            currentUserId={currentUser?.id}
+            currentUserDisplayName={currentUser?.displayName || currentUser?.email}
+            currentUserEmail={currentUser?.email}
+            currentUserAvatarUrl={currentUser?.avatarUrl}
+            className="relative flex items-center gap-2"
+            creditBalance={creditBalance?.balanceCredits}
+            onOpenLogin={handleOpenLogin}
+            onOpenProfile={handleOpenProfile}
+            onSignOut={currentUser ? () => void handleSignOut() : undefined}
+            onToggleSettings={() => {
+              setIsSettingsOpen(value => !value);
+              setIsHistoryOpen(false);
+              setIsCreditStoreOpen(false);
+            }}
+            canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
+            onOpenResourceLibrary={() => {
+              openResourceLibraryRoute();
+              setIsResourceLibraryOpen(true);
+              setIsSettingsOpen(false);
+              setIsHistoryOpen(false);
+              setIsCreditStoreOpen(false);
+            }}
+            onToggleHistory={() => {
+              setIsHistoryOpen(value => !value);
+              setIsSettingsOpen(false);
+              setIsCreditStoreOpen(false);
+            }}
+            onOpenCreditStore={() => {
+              setIsCreditStoreOpen(true);
+              setIsSettingsOpen(false);
+              setIsHistoryOpen(false);
+            }}
+          />
+        </div>
       </header>
 
       <SettingsMenu
@@ -1464,19 +1473,21 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         </Dialog>
       ) : null}
 
-      <main className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col justify-center gap-3 px-4 py-8 sm:px-6 sm:py-12">
-        <HeroIntro title={t.landingTitle} subtitle={t.landingSubtitle} isTransitioning={isTransitioning} />
+      <main className="relative z-10 mx-auto flex min-h-dvh w-full flex-1 items-center justify-center px-4 pb-12 pt-28 sm:px-8 sm:pb-16 sm:pt-36">
+        <div className="flex w-full max-w-4xl flex-col items-center gap-8 sm:gap-10 lg:gap-12">
+          <HeroIntro title={t.landingTitle} subtitle={t.landingSubtitle} isTransitioning={isTransitioning} />
 
-        <IdeaPromptForm
-          value={projectName}
-          placeholder={t.ideaPlaceholder}
-          generateLabel={t.generate}
-          isTransitioning={isTransitioning || isPreparing}
-          onChange={handleProjectNameChange}
-          onSubmit={handleStart}
-          attachments={attachmentBuildAttachments}
-          onAttachmentsChange={setAttachmentBuildAttachments}
-        />
+          <IdeaPromptForm
+            value={projectName}
+            placeholder={t.ideaPlaceholder}
+            generateLabel={t.generate}
+            isTransitioning={isTransitioning || isPreparing}
+            onChange={handleProjectNameChange}
+            onSubmit={handleStart}
+            attachments={attachmentBuildAttachments}
+            onAttachmentsChange={setAttachmentBuildAttachments}
+          />
+        </div>
       </main>
       {shouldShowIntakeModal ? (
         <div

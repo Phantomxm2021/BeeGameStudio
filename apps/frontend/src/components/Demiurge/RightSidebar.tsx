@@ -11,7 +11,6 @@ import type { WaitingPermissionState } from '../../utils/waitingPermission';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, PermissionDisplayModel } from '../../viewModels/displayModels';
 import { useChatStore } from '../../store/chatStore';
 import { normalizeChatHistory } from '../../utils/chatHistory';
-import type { WorkflowCardAction } from '../../types/message';
 
 // Modular Panels
 import { ChatPanel } from './Sidebar/ChatPanel';
@@ -22,6 +21,8 @@ import { buildArtifactViewModel, type ArtifactEditorKind } from './Sidebar/artif
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../beui/motion/tabs';
 import { SceneEditorOverlay } from '../Workspace/SceneEditorOverlay';
 import { UiEditorOverlay } from '../Workspace/UiEditorOverlay';
+import { TodoPanel } from './Sidebar/TodoPanel';
+import { deriveCurrentProjectTodos } from '../../utils/projectTodos';
 
 const dedupeAttachments = (attachments: ChatAttachmentPayload[]): ChatAttachmentPayload[] => {
     const seen = new Set<string>();
@@ -47,7 +48,6 @@ interface RightSidebarProps {
     ) => Promise<boolean>;
     isLoading: boolean;
     onStopTask?: () => void | Promise<void>;
-    onWorkflowAction?: (action: WorkflowCardAction) => Promise<void> | void;
     isStopping?: boolean;
     isRuntimeBusy?: boolean;
     onResolveToolPermission?: (
@@ -89,7 +89,6 @@ export function RightSidebar({
     onSendMessage,
     isLoading,
     onStopTask,
-    onWorkflowAction,
     isStopping = false,
     isRuntimeBusy = false,
     onResolveToolPermission,
@@ -106,7 +105,7 @@ export function RightSidebar({
     currentUserAvatarUrl,
 }: RightSidebarProps) {
 
-    const [activeTab, setActiveTab] = useState<'chat' | 'artifacts'>('chat');
+    const [activeTab, setActiveTab] = useState<'chat' | 'todo' | 'artifacts'>('chat');
     const [showAssets, setShowAssets] = useState(false);
     const [chatInput, setChatInput] = useState('');
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -224,6 +223,7 @@ export function RightSidebar({
         () => buildArtifactViewModel(artifacts, documentProgress),
         [artifacts, documentProgress],
     );
+    const currentTodos = useMemo(() => deriveCurrentProjectTodos(messages), [messages]);
     const documentEventRevision = useMemo(
         () => [
             ...messages
@@ -485,11 +485,12 @@ export function RightSidebar({
 
     const dockClassName = 'workspace-collaboration-panel pointer-events-auto h-full min-h-0 min-w-0';
     const panelClassName = 'flex h-full min-h-0 min-w-0 flex-col overflow-hidden';
-    const tabLabel = (tab: 'chat' | 'artifacts') => {
+    const tabLabel = (tab: 'chat' | 'todo' | 'artifacts') => {
         if (tab === 'chat') return 'Chat';
+        if (tab === 'todo') return 'Todo';
         return 'Artifacts';
     };
-    const sidebarTabs = ['chat', 'artifacts'] as const;
+    const sidebarTabs = ['chat', 'todo', 'artifacts'] as const;
 
     return (
         <>
@@ -525,7 +526,6 @@ export function RightSidebar({
                                 isLoading={isLoading}
                                 streamingMessageId={streamingMessageId}
                                 onStop={onStopTask}
-                                onWorkflowAction={onWorkflowAction}
                                 isStopping={isStopping}
                                 isComposerLocked={isComposerLocked}
                                 chatInput={chatInput}
@@ -562,6 +562,8 @@ export function RightSidebar({
                                 isLoadingOlderHistory={isLoadingOlderHistory}
                                 onLoadOlderHistory={handleLoadOlderHistory}
                             />
+                        ) : activeTab === 'todo' ? (
+                            <TodoPanel items={currentTodos} />
                         ) : (
                             <div className="h-full min-h-0">
                                 {showAssets ? (

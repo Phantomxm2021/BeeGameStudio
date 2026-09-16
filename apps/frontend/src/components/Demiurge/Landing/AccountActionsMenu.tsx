@@ -1,6 +1,7 @@
-import { FolderOpen, History, Settings, ShoppingCart, UserCircle } from 'lucide-react';
+import { FolderOpen, History, Moon, Settings, ShoppingCart, Sun, UserCircle } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import { useCommonText } from '../../../i18n/useBeeGameTranslations';
+import { applyThemeToDocument, useSystemStore } from '../../../store/systemStore';
 import { UserAccountMenu, type UserAccountMenuItem } from './UserAccountMenu';
 
 interface AccountActionsMenuProps {
@@ -51,7 +52,18 @@ export function AccountActionsMenu({
     canManageResources = false,
 }: AccountActionsMenuProps) {
     const t = useCommonText(lang);
+    const isDark = useSystemStore(state => state.isDark);
+    const setTheme = useSystemStore(state => state.setTheme);
     const items: UserAccountMenuItem[] = [
+        {
+            key: 'theme',
+            label: lang === 'zh' ? (isDark ? '浅色模式' : '深色模式') : (isDark ? 'Light mode' : 'Dark mode'),
+            icon: isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />,
+            onClick: () => {
+                applyThemeToDocument(!isDark);
+                setTheme(!isDark);
+            },
+        },
         {
             key: 'profile',
             label: t.profile,

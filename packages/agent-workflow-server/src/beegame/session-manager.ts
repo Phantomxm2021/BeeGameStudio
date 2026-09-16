@@ -14,6 +14,7 @@ import {
 } from 'node:fs'
 import {
   mkdir,
+  open,
   readdir,
   readFile,
   realpath,
@@ -30,6 +31,7 @@ import {
   relative,
   resolve,
 } from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
 import {
   mapModelConfigToRuntime,
   type RuntimeModelConfig,
@@ -54,6 +56,7 @@ import {
   CANONICAL_PROJECT_DOCUMENTS,
 } from './delivery-workflow/types'
 import { sanitizeWorkflowDisplayMessage } from './delivery-workflow/workflow-display-message'
+import { createStageChatProjector } from './stage-chat-events'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -171,6 +174,16 @@ export type BeeGameEvent = {
   payload?: DashboardSDKMessage
   createdAt: Date
 }
+
+const WORKFLOW_WORKER_CHAT_EVENTS = new Set<BeeGameEventType>([
+  'assistant.message',
+  'assistant.partial',
+  'assistant.thinking',
+  'tool.started',
+  'tool.completed',
+  'tool.failed',
+  'tool.progress',
+])
 
 export type BeeGameEventSubscriber = (event: BeeGameEvent) => void
 
@@ -586,6 +599,16 @@ export class BeeGameSessionManager {
     Set<BeeGameEventSubscriber>
   >()
   private readonly dashboardDataRoot: string
+  private readonly stageChatFollowers = new Map<string, {
+    timer: ReturnType<typeof setInterval>
+    syncing: boolean
+    files: Map<string, {
+      offset: number
+      remainder: string
+      decoder: StringDecoder
+      projector: ReturnType<typeof createStageChatProjector>
+    }>
+  }>()
 
   constructor(
     private readonly runner: BeeGameSessionRunner = createNativeCliProcessRunner(),
@@ -969,6 +992,108 @@ export class BeeGameSessionManager {
       .map(event => formatBeeGameEventForDisplay(event, record.language))
   }
 
+  appendProjectChatEvent(input: {
+    userId: string
+    projectId: string
+    workspacePath: string
+    type: BeeGameEventType
+    text: string
+    payload?: DashboardSDKMessage
+  }): boolean {
+    const workspacePath = resolve(input.workspacePath)
+    const record = [...this.sessions.values()]
+      .filter(candidate =>
+        !candidate.workflowWorker &&
+        candidate.userId === input.userId &&
+        candidate.projectId === input.projectId &&
+        resolve(candidate.session.cwd) === workspacePath)
+      .sort((left, right) =>
+        right.session.updatedAt.getTime() - left.session.updatedAt.getTime())[0]
+    if (!record) return false
+    const nativeKey = getDashboardPayloadString(input.payload, 'workflowStageNativeKey')
+    if (nativeKey && record.events.some(event =>
+      getDashboardPayloadString(event.payload, 'workflowStageNativeKey') === nativeKey)) return false
+    this.append(record, input.type, input.text, input.payload)
+    return true
+  }
+
+  followWorkflowStageChat(input: {
+    userId: string
+    projectId: string
+    workspacePath: string
+  }): void {
+    const workspacePath = resolve(input.workspacePath)
+    const key = `${input.userId}:${input.projectId}:${workspacePath}`
+    if (this.stageChatFollowers.has(key)) return
+    const follower = {
+      timer: undefined as unknown as ReturnType<typeof setInterval>,
+      syncing: false,
+      files: new Map<string, {
+        offset: number
+        remainder: string
+        decoder: StringDecoder
+        projector: ReturnType<typeof createStageChatProjector>
+      }>(),
+    }
+    const sync = async () => {
+      if (follower.syncing) return
+      follower.syncing = true
+      try {
+        for (const logPath of await listStageNativeEventLogs(join(workspacePath, '.beegame', 'workflow'))) {
+          const stage = stageFromNativeLogPath(logPath)
+          if (!stage) continue
+          let file = follower.files.get(logPath)
+          if (!file) {
+            file = {
+              offset: 0,
+              remainder: '',
+              decoder: new StringDecoder('utf8'),
+              projector: createStageChatProjector({ stage, sink: event => {
+                this.appendProjectChatEvent({ ...input, workspacePath, type: event.type,
+                  text: event.text, ...(event.payload ? { payload: event.payload } : {}) })
+              } }),
+            }
+            follower.files.set(logPath, file)
+          }
+          const size = (await stat(logPath)).size
+          if (size < file.offset) {
+            file.offset = 0
+            file.remainder = ''
+            file.decoder = new StringDecoder('utf8')
+          }
+          if (size === file.offset) continue
+          const handle = await open(logPath, 'r')
+          try {
+            const bytes = Buffer.alloc(size - file.offset)
+            const { bytesRead } = await handle.read(bytes, 0, bytes.length, file.offset)
+            file.offset += bytesRead
+            const lines = (file.remainder + file.decoder.write(bytes.subarray(0, bytesRead))).split('\n')
+            file.remainder = lines.pop() ?? ''
+            for (const line of lines) {
+              if (!line) continue
+              try {
+                const entry = JSON.parse(line) as { event?: unknown; data?: unknown }
+                if (entry.event === 'response.message' && entry.data && typeof entry.data === 'object')
+                  await file.projector(entry.data as Record<string, unknown>)
+              } catch {
+                // Runtime diagnostics remain best-effort observability.
+              }
+            }
+          } finally { await handle.close() }
+        }
+      } catch (error) {
+        console.warn('[BeeGame] Failed to follow workflow Chat output', {
+          workspacePath,
+          cause: error instanceof Error ? error.message : String(error),
+        })
+      } finally { follower.syncing = false }
+    }
+    follower.timer = setInterval(() => { void sync() }, 750)
+    follower.timer.unref?.()
+    this.stageChatFollowers.set(key, follower)
+    void sync()
+  }
+
   subscribeEvents(
     sessionId: string,
     subscriber: BeeGameEventSubscriber,
@@ -1245,6 +1370,8 @@ export class BeeGameSessionManager {
   }
 
   async dispose(): Promise<void> {
+    for (const follower of this.stageChatFollowers.values()) clearInterval(follower.timer)
+    this.stageChatFollowers.clear()
     const workflowDrains: Promise<void>[] = []
     for (const record of this.sessions.values()) {
       // Mark the session stopped before the transport can flush any more
@@ -1976,6 +2103,34 @@ export class BeeGameSessionManager {
         })
       }
     }
+    if (
+      record.workflowWorker &&
+      record.projectId &&
+      WORKFLOW_WORKER_CHAT_EVENTS.has(event.type)
+    ) {
+      const chatRecord = [...this.sessions.values()]
+        .filter(
+          candidate =>
+            !candidate.workflowWorker &&
+            candidate.userId === record.userId &&
+            candidate.projectId === record.projectId &&
+            resolve(candidate.session.cwd) === resolve(record.session.cwd),
+        )
+        .sort(
+          (left, right) =>
+            right.session.updatedAt.getTime() - left.session.updatedAt.getTime(),
+        )[0]
+      if (chatRecord) {
+        this.append(chatRecord, event.type, event.text, {
+          ...(event.payload ?? { type: event.type }),
+          workflowRunId: record.workflowRunId,
+          workflowDispatchId: record.workflowDispatchId,
+          workflowWorkerType: record.workflowWorkerType,
+          workflowSourceSessionId: event.sessionId,
+          workflowSourceEventId: event.id,
+        })
+      }
+    }
     if (record.workflowWorker && record.workflowRunId) {
       // Raw tool/system labels remain telemetry. Resource preparation exposes
       // only a small structural activity vocabulary so the card can explain
@@ -2357,6 +2512,127 @@ export async function recoverLatestProjectSessionFromDisk(
     }
   }
   return undefined
+}
+
+/**
+ * Recover visible chat activity from a workflow worker transcript left behind
+ * by an interrupted process. Normal live worker activity is mirrored into the
+ * project chat; the source identity prevents this fallback from duplicating it.
+ */
+export async function readWorkflowWorkerChatHistoryFromDisk(
+  workspacePath: string,
+  mainSessionId: string,
+  mainEvents: readonly BeeGameEvent[],
+): Promise<BeeGameEvent[]> {
+  const transcriptDir = dirname(
+    getSessionTranscriptPath(mainSessionId, workspacePath),
+  )
+  const mirrored = new Set(
+    mainEvents.flatMap(event => {
+      const sourceSessionId = getDashboardPayloadString(
+        event.payload,
+        'workflowSourceSessionId',
+      )
+      const sourceEventId = event.payload?.workflowSourceEventId
+      return sourceSessionId && typeof sourceEventId === 'number'
+        ? [`${sourceSessionId}:${sourceEventId}`]
+        : []
+    }),
+  )
+  let fileNames: string[]
+  try {
+    fileNames = await readdir(transcriptDir)
+  } catch {
+    fileNames = []
+  }
+
+  const recovered: BeeGameEvent[] = []
+  for (const fileName of fileNames.sort()) {
+    if (!fileName.endsWith('.jsonl')) continue
+    let events: BeeGameEvent[]
+    try {
+      events = parseTranscriptEvents(
+        await readFile(join(transcriptDir, fileName), 'utf8'),
+      )
+    } catch {
+      continue
+    }
+    const sourceSessionId = events.find(event => event.sessionId)?.sessionId
+    if (!sourceSessionId || sourceSessionId === mainSessionId) continue
+    const isWorkflowWorker = events.some(
+      event =>
+        event.type === 'turn.started' &&
+        event.text.includes('BeeGame delivery worker:'),
+    )
+    if (!isWorkflowWorker) continue
+    for (const event of events) {
+      if (!WORKFLOW_WORKER_CHAT_EVENTS.has(event.type)) continue
+      if (mirrored.has(`${event.sessionId}:${event.id}`)) continue
+      recovered.push(event)
+    }
+  }
+
+  const stageNativeKeys = new Set(mainEvents.flatMap(event => {
+    const key = getDashboardPayloadString(event.payload, 'workflowStageNativeKey')
+    return key ? [key] : []
+  }))
+  const workflowRoot = join(workspacePath, '.beegame', 'workflow')
+  const nativeLogs = await listStageNativeEventLogs(workflowRoot)
+  for (const logPath of nativeLogs) {
+    const stage = stageFromNativeLogPath(logPath)
+    if (!stage) continue
+    let rows: string[]
+    try { rows = (await readFile(logPath, 'utf8')).split('\n').filter(Boolean) }
+    catch { continue }
+    let createdAt = new Date(0)
+    const projector = createStageChatProjector({ stage, sink: event => {
+      const key = getDashboardPayloadString(event.payload, 'workflowStageNativeKey')
+      if (key && stageNativeKeys.has(key)) return
+      if (key) stageNativeKeys.add(key)
+      recovered.push({ id: recovered.length + 1, sessionId: `workflow-stage:${stage}`,
+        type: event.type, text: event.text, ...(event.payload ? { payload: event.payload } : {}), createdAt })
+    } })
+    for (const row of rows) {
+      try {
+        const entry = JSON.parse(row) as { at?: unknown; event?: unknown; data?: unknown }
+        if (entry.event !== 'response.message' || !entry.data || typeof entry.data !== 'object') continue
+        createdAt = typeof entry.at === 'string' ? new Date(entry.at) : new Date(0)
+        await projector(entry.data as Record<string, unknown>)
+      } catch {
+        // A damaged diagnostic line must not hide the rest of Chat history.
+      }
+    }
+  }
+  return recovered.sort((left, right) => {
+    const time = left.createdAt.getTime() - right.createdAt.getTime()
+    if (time !== 0) return time
+    const session = left.sessionId.localeCompare(right.sessionId)
+    return session !== 0 ? session : left.id - right.id
+  })
+}
+
+function stageFromNativeLogPath(path: string): 'author' | 'reviewer' | 'game-ir' | undefined {
+  const normalized = path.split('\\').join('/')
+  if (normalized.includes('/foundation-authoring/')) return 'author'
+  if (normalized.includes('/foundation-reviewer/')) return 'reviewer'
+  if (normalized.includes('/game-ir/')) return 'game-ir'
+  return undefined
+}
+
+async function listStageNativeEventLogs(root: string): Promise<string[]> {
+  const found: string[] = []
+  async function visit(directory: string): Promise<void> {
+    let entries
+    try { entries = await readdir(directory, { withFileTypes: true }) }
+    catch { return }
+    for (const entry of entries) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) await visit(path)
+      else if (entry.isFile() && entry.name.endsWith('native-events.jsonl')) found.push(path)
+    }
+  }
+  await visit(root)
+  return found.sort()
 }
 
 async function resolveReadableTranscriptPath(

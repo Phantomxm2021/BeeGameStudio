@@ -97,9 +97,31 @@ describe('normalizeChatHistory semantic metadata', () => {
         ]);
 
         expect(messages[0]).toMatchObject({
+            toolName: 'Write',
             toolDiff: '--- a/src/StartScreen.tsx\n+++ b/src/StartScreen.tsx\n@@\n-old\n+new',
             toolStructuredPatch: { files: ['src/StartScreen.tsx'] },
             toolInput: { file_path: 'src/StartScreen.tsx', content: 'new' },
+        });
+    });
+
+    it('preserves completed tool presentation metadata from persisted history', () => {
+        const messages = normalizeChatHistory([{
+            id: 'read-complete',
+            sender: 'system',
+            content: 'Read completed',
+            type: 'tool',
+            tool_name: 'Read',
+            tool_status: 'completed',
+            tool_detail: 'docs/GDD.md',
+            tool_output: 'done',
+            timestamp: 1,
+        }]);
+
+        expect(messages[0]).toMatchObject({
+            toolName: 'Read',
+            toolStatus: 'completed',
+            toolDetail: 'docs/GDD.md',
+            toolOutput: 'done',
         });
     });
 
