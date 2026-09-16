@@ -1714,7 +1714,7 @@ describe('LandingView bootstrap submission', () => {
     await renderLanding();
 
     expect(screen.getByTestId('idea-prompt-surface')).toContainElement(screen.getByRole('textbox'));
-    expect(screen.getByRole('textbox')).toHaveAttribute('rows', '3');
+    expect(screen.getByRole('textbox')).toHaveAttribute('rows', '2');
     expect(screen.queryByTestId('progressive-blur-layer')).not.toBeInTheDocument();
   });
 

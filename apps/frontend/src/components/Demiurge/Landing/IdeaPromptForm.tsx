@@ -75,7 +75,7 @@ export function IdeaPromptForm({
                         </div>
                     )}
                     <textarea ref={inputRef} className={styles.input} aria-label={placeholder}
-                        placeholder="Ask anything..." rows={3} value={value}
+                        placeholder="Ask anything..." rows={2} value={value}
                         onChange={event => onChange(event.target.value)}
                         onKeyDown={event => {
                             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) {
