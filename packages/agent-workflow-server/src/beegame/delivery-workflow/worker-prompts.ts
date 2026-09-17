@@ -68,6 +68,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
       return [
         'Complete resource delivery in one normal CLI turn. Read the accepted Foundation documents, then autonomously search for, select or make the real runtime assets the game needs.',
         'Create the canonical Asset Manifest at contract.manifestPath and the referenced files under assets/. Record source and license facts for any web asset. Keep Scene/UI/VFX content and implementation for their later stages.',
+        'Inspect the actual key visual assets you selected or created and compare them with the accepted camera, spatial and art direction before finishing. Correct substantive visual-semantic mismatches autonomously.',
         'Run contract.validationCommand once near the end and use its diagnostics to correct the delivery. The host performs the final deterministic validation after the CLI turn.',
         'End normally with a concise summary.',
       ].join(' ')
@@ -79,13 +80,14 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         return [
           'Continue the same direct CLI Scene/UI/VFX content task.',
           'Use contract.output.format as the exact strict file shape. Fix the deterministic package errors in contract.currentContentIssues while preserving valid game decisions.',
-          'Run contract.validationCommand once near the end, correct its diagnostics, and finish normally.',
+          'Run contract.validationCommand once near the end and correct its diagnostics. Then run contract.previewCommand, inspect the rendered Scene images, correct substantive visual or spatial mismatches autonomously, and render once more to confirm the final result.',
         ].join(' ')
       return [
         'Create the engine-neutral Scene, UI and VFX content package in one normal CLI turn from the accepted Foundation documents and Asset Manifest.',
         'Use contract.output.format as the exact strict file shape. Write content/index.json, Scene files under content/scenes/, UI files under content/ui/, and VFX files under content/vfx/. Keep world-space Scene, screen-space UI and effects separate.',
         'Reference verified Manifest resources through assetRefs. Keep asset paths and URLs out of content data; leave target-engine implementation for the following stage.',
         'Run contract.validationCommand once near the end and use its diagnostics to correct the package. The host performs the same deterministic validation after the CLI turn.',
+        'After the package validates, run contract.previewCommand and inspect the rendered Scene images in contract.previewCommand.outputRoot. Judge the actual composition against the accepted Foundation documents and assets, correct substantive visual or spatial mismatches autonomously, then render once more to confirm the final result.',
         'Finish after the coherent Content package is complete.',
       ].join(' ')
     case 'implementation-worker':
@@ -132,7 +134,7 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
     case 'resource-planner':
       return 'The contract includes a read-only validation command using the host checks. Use its diagnostics when checking the delivery. Summarize the produced assets and observed validation result; final stage acceptance and receipt generation belong to the host.'
     case 'content-author':
-      return 'Finish the Scene2D and UI package under content/, then end the turn normally. The host validates the package and creates its receipt.'
+      return 'Finish the Scene2D and UI package under content/, including the final rendered Scene preview, then end the turn normally. The host validates the package and creates its receipt.'
     case 'implementation-worker':
       return 'Finish the implementation and deterministic checks, then end the turn normally with a concise summary. The host verifies expected artifacts and persists workflow evidence.'
     case 'acceptance-validator':

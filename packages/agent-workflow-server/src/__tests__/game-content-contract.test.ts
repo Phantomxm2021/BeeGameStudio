@@ -31,6 +31,10 @@ describe('game content authoring contract', () => {
     expect(task.contract.validationCommand.args[0]).toEndWith(
       'game-content-validation-cli.ts',
     )
+    expect(task.contract.previewCommand.args[0]).toEndWith(
+      'scene-content-preview-cli.ts',
+    )
+    expect(task.contract.previewCommand.outputRoot).toBe('content/previews/')
 
     const index = (format.index ?? {}) as Record<string, unknown>
     expect(() => parseBeeGameContentIndex(index)).not.toThrow()
@@ -48,6 +52,8 @@ describe('game content authoring contract', () => {
     })
     expect(prompt).toContain('contract.output.format')
     expect(prompt).toContain('contract.validationCommand')
+    expect(prompt).toContain('contract.previewCommand')
+    expect(prompt).toContain('inspect the rendered Scene images')
     expect(prompt).toContain('content/vfx/')
   })
 

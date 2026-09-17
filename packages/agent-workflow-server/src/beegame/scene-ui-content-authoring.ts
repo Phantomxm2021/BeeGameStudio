@@ -41,6 +41,11 @@ export type SceneUiContentAuthoringAuthority = Readonly<{
       executable: string
       args: readonly string[]
     }>
+    previewCommand: Readonly<{
+      executable: string
+      args: readonly string[]
+      outputRoot: 'content/previews/'
+    }>
   }>
 }>
 
@@ -165,6 +170,14 @@ export function buildSceneUiContentAuthoringAuthority(
     validationCommand: {
       executable: process.execPath,
       args: [new URL('./game-content-validation-cli.ts', import.meta.url).pathname],
+    },
+    previewCommand: {
+      executable: process.execPath,
+      args: [
+        new URL('./scene-content-preview-cli.ts', import.meta.url).pathname,
+        '.',
+      ],
+      outputRoot: 'content/previews/' as const,
     },
   } as const
   return Object.freeze({
