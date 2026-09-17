@@ -212,31 +212,15 @@ function readyReceipt(
   marker: string,
 ): GameIrReadyResult {
   return {
-    schemaVersion: 'game-ir-ready-receipt.v1' as const,
+    schemaVersion: 'game-ir-ready-receipt.v2' as const,
     taskId: 'game-ir-task',
     publicationId: `ir-publication-${marker}`,
-    gameIrSchemaVersion: 'game-ir.v1' as const,
+    gameIrSchemaVersion: 'game-ir.v2' as const,
     foundationRevision: source.publishedDocumentRevision,
     foundationReceiptDigest: digest(`foundation-receipt-${marker}`),
+    candidateDigest: digest(`candidate-${marker}`),
     manifestDigest: digest(`manifest-${marker}`),
-    moduleDigests: {
-      balance: digest(`balance-module-${marker}`),
-      gameplay: digest(`gameplay-module-${marker}`),
-      'implementation-verification': digest(`module-${marker}`),
-      presentation: digest(`presentation-module-${marker}`),
-      'resource-realization': digest(`resource-module-${marker}`),
-      'world-scene': digest(`world-module-${marker}`),
-    },
-    sourceMapDigests: {
-      balance: digest(`balance-source-map-${marker}`),
-      gameplay: digest(`gameplay-source-map-${marker}`),
-      'implementation-verification': digest(`source-map-${marker}`),
-      presentation: digest(`presentation-source-map-${marker}`),
-      'resource-realization': digest(`resource-source-map-${marker}`),
-      'world-scene': digest(`world-source-map-${marker}`),
-    },
-    dependencyGraphDigest: digest(`dependency-graph-${marker}`),
-    committedPath: `.beegame/ir/game-ir.v1/revisions/${source.publishedDocumentRevision}/COMMITTED.json`,
+    committedPath: `.beegame/ir/game-ir.v2/revisions/${source.publishedDocumentRevision}/COMMITTED.json`,
   }
 }
 
@@ -257,6 +241,7 @@ function irPort(input: {
   const reads: Array<Parameters<GameIrOperations['readResult']>[0]> = []
   let stopCalls = 0
   const ir: GameIrOperations = {
+    async revise() { throw new Error('not used') },
     async start(request) {
       starts.push(structuredClone(request))
       return handle
@@ -281,10 +266,12 @@ function irPort(input: {
       return {
         input: input.source,
         candidate: {
-          schemaVersion: 'game-ir.v1',
+          schemaVersion: 'game-ir.v2',
           taskId: 'game-ir-task',
-          foundationRevision: input.source.publishedDocumentRevision,
-          modules: [],
+          sourceRevision: input.source.publishedDocumentRevision,
+          parameters: {}, assets: [],
+          scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }],
+          ui: [], vfx: [], logic: {},
         },
         ready,
       }

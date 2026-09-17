@@ -18,6 +18,7 @@ import {
   RESOURCE_LIBRARY_USAGE,
   RESOURCE_EMBEDDED_COMPONENT_KINDS,
   RESOURCE_RELATION_KINDS,
+  RESOURCE_SOURCE_KINDS,
   RESOURCE_USAGE_TAGS,
   type ResourceAcquisitionProfile,
   type ResourceEmbeddedComponentKind,
@@ -803,8 +804,7 @@ function validateSourcingPolicy(value: unknown, path: string, issues: string[]):
     path,
     issues,
   )
-  const sourceKinds = ['resource-library', 'web', 'agent-authored', 'user-provided'] as const
-  validateEnumArray(value.allowed_source_kinds, sourceKinds, `${path}.allowed_source_kinds`, issues, true)
+  validateEnumArray(value.allowed_source_kinds, RESOURCE_SOURCE_KINDS, `${path}.allowed_source_kinds`, issues, true)
   for (const field of ['license_constraints', 'handoff_criteria'] as const)
     if (!Array.isArray(value[field]) || value[field].length === 0 || !value[field].every(isTrimmedString))
       issues.push(`${path}.${field} must be a non-empty array of trimmed non-empty strings.`)
@@ -974,9 +974,11 @@ function validateResource(
   if (value.embedded_kinds !== undefined)
     validateEnumArray(value.embedded_kinds, RESOURCE_EMBEDDED_COMPONENT_KINDS, `${path}.embedded_kinds`, issues)
   if (assetKind && AUDIO_ASSET_KINDS.has(assetKind)) {
-    const allowedExtensions = PLAYABLE_AUDIO_ASSET_KINDS.has(assetKind)
-      ? AUDIO_FILE_EXTENSIONS
-      : new Set([...AUDIO_FILE_EXTENSIONS, '.json'])
+    const hasEncodedAudio = filePaths.some(filePath =>
+      AUDIO_FILE_EXTENSIONS.has(extname(filePath).toLowerCase()),
+    )
+    // Metadata beside encoded audio is not a provisional synthesis definition.
+    const allowedExtensions = new Set([...AUDIO_FILE_EXTENSIONS, '.json'])
     for (const filePath of filePaths)
       if (!allowedExtensions.has(extname(filePath).toLowerCase()))
         issues.push(
@@ -986,7 +988,7 @@ function validateResource(
       filePath => extname(filePath).toLowerCase() === '.json',
     )
     if (
-      structuredPaths.length > 0 &&
+      !hasEncodedAudio && structuredPaths.length > 0 &&
       (value.provisional !== true ||
         !['audio-cue', 'audio-bank'].includes(assetKind) ||
         filePaths.length !== 1 ||

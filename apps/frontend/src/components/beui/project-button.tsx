@@ -23,10 +23,10 @@ const variantClass: Record<ProjectVariant, string> = {
 };
 
 const sizeClass: Record<ProjectSize, string> = {
-  default: 'h-8 gap-1.5 px-2.5 text-md',
-  xs: 'h-7 gap-1 rounded-md px-2 text-[11px]',
-  sm: 'h-8 gap-1 rounded-md px-2.5 text-md',
-  lg: 'h-10 gap-1.5 px-3',
+  default: 'h-8 gap-1.5 px-2.5 text-sm',
+  xs: 'h-7 gap-1 rounded-md px-2 text-xs',
+  sm: 'h-8 gap-1 rounded-md px-2.5 text-sm',
+  lg: 'h-10 gap-1.5 px-3 text-sm',
   icon: 'size-8 rounded-md',
   'icon-xs': 'size-7 rounded-md',
   'icon-sm': 'size-8 rounded-md',

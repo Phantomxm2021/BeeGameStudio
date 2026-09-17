@@ -61,7 +61,7 @@ function DefaultPreview({ item }: { item: PreviewRailItem }) {
       {item.description ? (
         <div
           data-slot="preview-rail-description"
-          className="mt-1 text-sm leading-6 text-muted-foreground"
+          className="mt-1 text-sm leading-5 text-muted-foreground"
         >
           {item.description}
         </div>

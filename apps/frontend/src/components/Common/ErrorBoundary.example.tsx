@@ -37,7 +37,7 @@ export function AppWithErrorBoundary() {
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-gray-100 p-8">
-        <h1 className="text-3xl font-bold mb-8">ErrorBoundary 示例</h1>
+        <h1 className="text-3xl font-semibold mb-8">ErrorBoundary 示例</h1>
         <div className="bg-white rounded-lg shadow p-6">
           <BuggyComponent />
         </div>
@@ -51,7 +51,7 @@ export function NestedErrorBoundaryExample() {
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-gray-100 p-8">
-        <h1 className="text-3xl font-bold mb-8">嵌套 ErrorBoundary 示例</h1>
+        <h1 className="text-3xl font-semibold mb-8">嵌套 ErrorBoundary 示例</h1>
         
         <div className="grid grid-cols-2 gap-4">
           {/* 左侧组件有独立的 ErrorBoundary */}

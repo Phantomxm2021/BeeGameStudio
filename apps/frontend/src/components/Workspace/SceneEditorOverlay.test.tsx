@@ -128,4 +128,43 @@ describe('SceneEditorOverlay project connection', () => {
       }),
     ));
   });
+
+  it('offers every project Scene and switches the editor document', async () => {
+    const user = userEvent.setup();
+    const secondScene = {
+      ...canonicalScene,
+      id: 'scene.forest',
+      data: { nodes: [
+        { id: 'world', kind: 'group' },
+        { id: 'background', parentId: 'world', name: 'Forest Background', kind: 'sprite', assetRef: 'asset.background', frameRef: 'background.full' },
+      ] },
+    };
+    api.getProjectGameContent.mockResolvedValueOnce({
+      state: 'ready',
+      index: {
+        schema: 'beegame-content-package.v1', id: 'game-content', dimension: '2d',
+        irRevision: revision, assetManifestRevision: assetRevision,
+        entryScene: 'scene.main', files: ['scenes/main.scene.json', 'scenes/forest.scene.json'],
+      },
+      documents: [
+        { path: 'scenes/main.scene.json', revision, document: canonicalScene },
+        { path: 'scenes/forest.scene.json', revision, document: secondScene },
+      ],
+    });
+
+    render(<SceneEditorOverlay projectId="project-1" onClose={vi.fn()} />);
+    expect(await screen.findByText('Project Background')).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Scene document' }), 'scenes/forest.scene.json');
+    expect(await screen.findByText('Forest Background')).toBeInTheDocument();
+  });
+
+  it('always provides a route back when Scene content is not ready', async () => {
+    const onClose = vi.fn();
+    api.getProjectGameContent.mockResolvedValueOnce({ state: 'awaiting_assets' });
+    render(<SceneEditorOverlay projectId="project-1" onClose={onClose} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Scene content is not available yet');
+    await userEvent.setup().click(screen.getAllByRole('button', { name: 'Back to project' })[0]!);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
 });

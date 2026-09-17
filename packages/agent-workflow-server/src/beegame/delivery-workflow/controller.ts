@@ -1,4 +1,5 @@
 import { auditAssetContract } from '../asset-contract-audit'
+import { foundationPublicDigest } from '../foundation-public-result'
 import { readBeeGameAssetManifestSync } from '../asset-contracts'
 import {
   acceptBeeGameContentPackage,
@@ -17,7 +18,7 @@ import type { createFoundationAuthoring } from '../stage-modules/foundation-auth
 import type { createFoundationReviewer } from '../stage-modules/foundation-reviewer/public'
 import type { GameIrOperations } from '../stage-modules/game-ir/public'
 import { createGameIrLink } from './game-ir-link'
-import { assertDispatchedIr, assertResourceIr, consumesGameIr, downstreamIrForRequest, isDownstreamIrPhase, readDownstreamIr } from './downstream-ir'
+import { assertDispatchedIr, assertResourceIr, consumesGameIr, downstreamIrEntryIds, downstreamIrForRequest, isDownstreamIrPhase, readDownstreamIr } from './downstream-ir'
 import { isFoundationStageActive, isIrStageActive, isPublicStageActive } from './public-stage-routing'
 import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
 import {
@@ -167,7 +168,7 @@ export function createDeliveryWorkflowController(input: {
         const audit = auditBeeGameContentPackage(input.workspacePath, {
           irRevision: gameIr.resultId,
           assetManifestRevision,
-          irNodeIds: gameIr.modules.flatMap(module => module.nodes.map(node => node.id)),
+          irEntryIds: downstreamIrEntryIds(gameIr),
           manifest: readBeeGameAssetManifestSync(input.workspacePath),
         })
         if (!audit.package || audit.package.digest !== run.revision.content)
@@ -664,7 +665,7 @@ export function createDeliveryWorkflowController(input: {
       const audit = auditBeeGameContentPackage(input.workspacePath, {
         irRevision: gameIr.resultId,
         assetManifestRevision: run.revision.resource,
-        irNodeIds: gameIr.modules.flatMap(module => module.nodes.map(node => node.id)),
+        irEntryIds: downstreamIrEntryIds(gameIr),
         manifest: readBeeGameAssetManifestSync(input.workspacePath),
       })
       return !audit.package || audit.package.digest !== run.revision.content
@@ -684,9 +685,7 @@ export function createDeliveryWorkflowController(input: {
     return {
       irRevision: gameIr.resultId,
       assetManifestRevision: run.revision.resource,
-      irNodeIds: gameIr.modules.flatMap(module =>
-        module.nodes.map(node => node.id),
-      ),
+      irEntryIds: downstreamIrEntryIds(gameIr),
       manifest: readBeeGameAssetManifestSync(input.workspacePath),
     }
   }
@@ -841,6 +840,25 @@ export function createDeliveryWorkflowController(input: {
           run,
           'canonical documents changed while resource preparation was paused; document review must be rerun',
         )
+        return
+      }
+      const gameIr = await readDownstreamIr({
+        run,
+        workspacePath: input.workspacePath,
+        ir: input.ir,
+      })
+      const settled = await completeResourceTask({
+        run,
+        workspacePath: input.workspacePath,
+        gameIr,
+      })
+      if (settled.phase !== 'RESOURCE_PREPARATION') {
+        const saved = await persist(settled, 'resource.preparation.ready')
+        await resumeUnlocked(saved)
+        return
+      }
+      if (settled.status !== 'running') {
+        await persist(settled, 'resource.preparation.needs_action')
         return
       }
       await startResourcePreparation({
@@ -1055,6 +1073,42 @@ export function createDeliveryWorkflowController(input: {
     })
   }
 
+  function reviseGameIr(edit: { expectedResultDigest: string; draft: unknown }) {
+    return serialize(async () => {
+      const observed = await store.load()
+      if (!observed) throw new Error('Workflow is unavailable')
+      const lock = await store.mutationLock(observed.runId)
+      try {
+        const current = await store.load(lock)
+        const link = current?.gameIrStage
+        if (!current || current.runId !== observed.runId || !input.ir || !link?.handle || link.outcome?.status !== 'completed')
+          throw new Error('A published IR is required')
+        if (current.phase !== 'RESOURCE_PREPARATION' || current.status === 'running' ||
+            current.resourceProductionState.deliveryReceipt || current.evidence.resourcePreparation ||
+            current.revision.content || current.revision.implementation ||
+            current.activeDispatch?.status === 'running')
+          throw new Error('IR correction requires idle resource preparation before accepted delivery')
+        if (foundationPublicDigest(link.outcome.result) !== edit.expectedResultDigest)
+          throw new Error('IR publication changed before correction')
+        await readDownstreamIr({ run: current, workspacePath: input.workspacePath, ir: input.ir })
+        const outcome = await input.ir.revise({ handle: link.handle, ...edit })
+        if (outcome.status !== 'completed' || outcome.billingStatus !== 'settled')
+          throw new Error('IR correction was not published')
+        const next: DeliveryRun = { ...current, status: 'needs_action', thinking: 'idle',
+          activeDispatch: undefined, activeTaskId: undefined,
+          blockedReason: 'IR revised; existing resources require validation against the new publication.',
+          gameIrStage: { ...link, handle: outcome.handle, outcome },
+          resourceProductionState: { currentTask: 'RESOURCE_DELIVERY' },
+        }
+        await readDownstreamIr({ run: next, workspacePath: input.workspacePath, ir: input.ir })
+        return await store.commit(next, { runId: next.runId, type: 'game_ir.revised',
+          phase: next.phase, status: next.status, revision: next.revision,
+          previousResultDigest: edit.expectedResultDigest,
+          resultDigest: foundationPublicDigest(outcome.result) }, undefined, lock)
+      } finally { await store.unlock(lock) }
+    })
+  }
+
   function loadGameContentForEditing() {
     return serialize(async () => {
       const current = await store.load()
@@ -1137,6 +1191,7 @@ export function createDeliveryWorkflowController(input: {
     resume,
     ensureProgress,
     requestChange,
+    reviseGameIr,
     loadGameContentForEditing,
     saveGameContentEdit,
     publishGameContentEdits,

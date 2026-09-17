@@ -1,5 +1,5 @@
 import { Fragment, memo, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ChevronDown, Pencil } from 'lucide-react';
+import { ArrowLeft, Bot, ChevronDown, ChevronRight, FileText, Pencil } from 'lucide-react';
 import { type ChatDisplayMessage, type ChatDisplaySource } from '../../../viewModels/displayModels';
 import { MarkdownRenderer } from './ChatMarkdownContent';
 import type { Language } from '../AgentsConfig';
@@ -16,7 +16,9 @@ import { AgentActivity, type AgentActivityItem } from '../../beui/registry/compo
 import { FileDiff, type FileDiffLine } from '../../beui/registry/components/agents/file-diff';
 import { ReasoningText } from '../../beui/registry/components/agents/loading-states/reasoning-text';
 import { StreamingResponse } from '../../beui/registry/components/agents/streaming-response';
+import { Drawer } from '../../beui/registry/components/motion/drawer';
 import { shortenAbsolutePathsForDisplay } from '../../../utils/chatPathDisplay';
+import { ArtifactCard } from './ArtifactCard';
 
 type BeeGameCollaborationFeedProps = {
     messages: ChatDisplayMessage[];
@@ -82,7 +84,15 @@ type NormalizedTool = {
 };
 
 type ToolKind = 'search' | 'read' | 'write' | 'edit' | 'bash' | 'todo' | 'subagent' | 'generic';
-type WorkflowStage = 'author' | 'reviewer' | 'game-ir';
+type WorkflowStage =
+    | 'author'
+    | 'content'
+    | 'reviewer'
+    | 'revision'
+    | 'game-ir'
+    | 'resources'
+    | 'implementation'
+    | 'acceptance';
 
 const GENERIC_TOOL_NAME = 'Tool';
 
@@ -148,7 +158,7 @@ const getToolKind = (toolName?: string): ToolKind => {
     if (normalized === 'write') return 'write';
     if (normalized === 'edit' || normalized === 'multiedit') return 'edit';
     if (normalized === 'bash') return 'bash';
-    if (normalized === 'task' || normalized === 'subagent') return 'subagent';
+    if (normalized === 'agent' || normalized === 'task' || normalized === 'subagent') return 'subagent';
     return 'generic';
 };
 
@@ -162,6 +172,33 @@ const inferWorkflowStage = (value: string): WorkflowStage | undefined => {
     if (normalized.includes('foundation-reviewer') || normalized.includes('foundation-review')) return 'reviewer';
     if (normalized.includes('game-ir')) return 'game-ir';
     return undefined;
+};
+
+const workflowStage = (message: ChatDisplayMessage): WorkflowStage | undefined => {
+    const taskKind = String(message.taskKind || '').trim();
+    if (taskKind.startsWith('workflow_stage:')) {
+        const stage = taskKind.slice('workflow_stage:'.length) as WorkflowStage;
+        return ['author', 'content', 'reviewer', 'revision', 'game-ir', 'resources', 'implementation', 'acceptance'].includes(stage)
+            ? stage
+            : undefined;
+    }
+
+    // Read existing persisted worker history as a stage during the migration.
+    // New events are normalized by the adapter above and never reach this path.
+    const workerType = taskKind.startsWith('workflow_worker:')
+        ? taskKind.slice('workflow_worker:'.length)
+        : '';
+    const stages: Record<string, WorkflowStage> = {
+        'document-author': 'author',
+        'content-author': 'content',
+        'foundation-reviewer': 'reviewer',
+        'foundation-document-reviser': 'revision',
+        'game-ir-compiler': 'game-ir',
+        'resource-planner': 'resources',
+        'implementation-worker': 'implementation',
+        'acceptance-validator': 'acceptance',
+    };
+    return stages[workerType];
 };
 
 const isLocalSearchTool = (tool: NormalizedTool): boolean => {
@@ -211,7 +248,7 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
         input: message.toolInput ?? message.tool_input,
         before: message.toolBefore ?? message.tool_before,
         after: message.toolAfter ?? message.tool_after,
-        stage: inferWorkflowStage(`${rawDetail}\n${content}`),
+        stage: workflowStage(message) || inferWorkflowStage(`${rawDetail}\n${content}`),
     };
 };
 
@@ -320,7 +357,7 @@ function parseDiffLines(diff: string): FileDiffLine[] {
 }
 
 type ResponsePart =
-    | { kind: 'thinking'; message: ChatDisplayMessage; timestamp: number; turnId?: string; activityGroupId?: string }
+    | { kind: 'thinking'; message: ChatDisplayMessage; timestamp: number; durationMs?: number; turnId?: string; activityGroupId?: string }
     | { kind: 'tool'; tool: NormalizedTool; timestamp: number; turnId?: string; activityGroupId?: string }
     | { kind: 'agent'; message: ChatDisplayMessage; timestamp: number; turnId?: string };
 
@@ -336,6 +373,8 @@ type FeedEntry =
     | { kind: 'user'; message: ChatDisplayMessage }
     | { kind: 'context'; message: ChatDisplayMessage }
     | AgentResponseTurn;
+
+type AgentRunDetail = { kind: 'subagent'; tool: NormalizedTool };
 
 type ToolPartReference = {
     turn: AgentResponseTurn;
@@ -511,15 +550,16 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
     const toolParts = new Map<string, ToolPartReference>();
     let activeTurn: AgentResponseTurn | null = null;
 
-    const ensureTurn = (id: string, turnId?: string, reuseAnonymousActivity = false): AgentResponseTurn => {
+    const ensureTurn = (id: string, turnId?: string, reuseAnonymousActivity = false, stage?: WorkflowStage): AgentResponseTurn => {
         if (activeTurn && turnId && activeTurn.turnId === turnId) {
+            activeTurn.stage ||= stage;
             return activeTurn;
         }
         if (reuseAnonymousActivity && activeTurn && !turnId && !activeTurn.turnId) {
             const lastPart = activeTurn.parts.at(-1);
             if (lastPart?.kind === 'thinking' || lastPart?.kind === 'tool') return activeTurn;
         }
-        activeTurn = { kind: 'response', id, turnId, parts: [] };
+        activeTurn = { kind: 'response', id, turnId, parts: [], stage };
         entries.push(activeTurn);
         return activeTurn;
     };
@@ -539,14 +579,20 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
                 (block.type === 'tool_result' && !block.toolUseId)
             ));
             if (!hasVisibleBlock) continue;
-            const turn = ensureTurn(message.id, message.turnId || message.turn_id);
+            const turn = ensureTurn(message.id, message.turnId || message.turn_id, false, workflowStage(message));
             appendAssistantContentBlocks(turn, message, mergeToolPart.bind(null, toolParts));
             continue;
         }
 
         if (isThinkingMessage(message)) {
-            const turn = ensureTurn(message.id, message.turnId || message.turn_id);
-            turn.parts.push({ kind: 'thinking', message, timestamp: messageTimestamp(message), turnId: message.turnId || message.turn_id });
+            const turn = ensureTurn(message.id, message.turnId || message.turn_id, false, workflowStage(message));
+            turn.parts.push({
+                kind: 'thinking',
+                message,
+                timestamp: messageTimestamp(message),
+                durationMs: message.thinkingDurationMs,
+                turnId: message.turnId || message.turn_id,
+            });
             continue;
         }
 
@@ -560,14 +606,14 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
             const tool = normalizeToolMessage(message);
             if (!tool) continue;
             if (tool.kind === 'todo' || isHiddenPresentationTool(tool.name)) continue;
-            const turn = ensureTurn(message.id, tool.turnId, true);
+            const turn = ensureTurn(message.id, tool.turnId, true, workflowStage(message));
             turn.stage ||= tool.stage;
             mergeToolPart(toolParts, turn, tool);
             continue;
         }
 
         if (isAgentMessage(message)) {
-            const turn = ensureTurn(message.id, message.turnId || message.turn_id);
+            const turn = ensureTurn(message.id, message.turnId || message.turn_id, false, workflowStage(message));
             turn.parts.push({ kind: 'agent', message, timestamp: messageTimestamp(message), turnId: message.turnId || message.turn_id });
         }
     }
@@ -593,10 +639,12 @@ export const BeeGameCollaborationFeed = memo(({
     lang = 'en',
     onEditMessage,
     onRetryResponse,
+    onPreviewArtifact,
     isLoading = false,
     streamingMessageId = null,
 }: BeeGameCollaborationFeedProps) => {
     const text = useBeeGameText(lang);
+    const [detail, setDetail] = useState<AgentRunDetail | null>(null);
     const entries = useMemo(() => buildFeedEntries(messages), [messages]);
     const hasStreamingMessage = Boolean(streamingMessageId && entries.some((entry) => entry.kind === 'response' && entry.parts.some((part) => (
         (part.kind === 'tool' && part.tool.status === 'running') ||
@@ -621,7 +669,12 @@ export const BeeGameCollaborationFeed = memo(({
         });
     }, [entries, lang]);
 
+    const openDetail = (nextDetail: AgentRunDetail) => {
+        setDetail(nextDetail);
+    };
+
     return (
+        <>
         <MessageGroup spacing="compact">
             {entriesWithDates.map(({ entry, dateKey, dateLabel, showDateSeparator, showStageSeparator, stage }, entryIndex) => {
                 const previousUserMessage = entry.kind === 'response'
@@ -662,7 +715,7 @@ export const BeeGameCollaborationFeed = memo(({
                                     (part.kind === 'tool' && part.tool.status === 'running') ||
                                     ((part.kind === 'thinking' || part.kind === 'agent') && matchesStreamingMessage(part.message, streamingMessageId))
                                 )) ? 'streaming' as const : 'complete' as const;
-                                return <StreamingResponse
+                                const response = <StreamingResponse
                                     status={status}
                                     copyText={responseText || undefined}
                                     onRetry={previousUserMessage && onRetryResponse ? () => onRetryResponse(previousUserMessage.content) : undefined}
@@ -676,8 +729,11 @@ export const BeeGameCollaborationFeed = memo(({
                                         parts={entry.parts}
                                         lang={lang}
                                         streamingMessageId={streamingMessageId}
+                                        onOpenSubagent={(tool) => openDetail({ kind: 'subagent', tool })}
+                                        onPreviewArtifact={onPreviewArtifact}
                                     />
                                 </StreamingResponse>;
+                                return response;
                             })()}
                         </MessageContent>
                     </Message>
@@ -686,6 +742,21 @@ export const BeeGameCollaborationFeed = memo(({
             })}
             {isLoading && !hasStreamingMessage ? <Message data-testid="beegame-loading-message" from="assistant" className="mb-3 min-w-0"><MessageContent><ReasoningText phrases={[text.thinkingActive || text.aiProcessing || '']} variant="scramble" /></MessageContent></Message> : null}
         </MessageGroup>
+        <Drawer
+            open={Boolean(detail)}
+            onOpenChange={(open) => { if (!open) setDetail(null); }}
+            ariaLabel={lang === 'zh' ? 'Agent 执行详情' : 'Agent run details'}
+            className="overflow-hidden"
+        >
+            {detail ? <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                <AgentRunDetailView
+                    detail={detail}
+                    lang={lang}
+                    onBack={() => setDetail(null)}
+                />
+            </div> : null}
+        </Drawer>
+        </>
     );
 });
 
@@ -696,12 +767,14 @@ function BeUiAgentActivity({
     status,
     duration,
     activeLabel,
+    workingPhrases,
     summary,
 }: {
     items: AgentActivityItem[];
     status: 'working' | 'complete';
     duration: number;
     activeLabel?: string;
+    workingPhrases?: string[];
     summary?: string;
 }) {
     return <div className="w-full" data-testid="beegame-agent-activity-group">
@@ -710,6 +783,11 @@ function BeUiAgentActivity({
             status={status}
             duration={duration}
             activeLabel={activeLabel}
+            renderWorkingStatus={({ label }) => <ReasoningText
+                phrases={workingPhrases?.length ? workingPhrases : [typeof label === 'string' ? label : 'Working']}
+                variant="swap"
+                className="type-caption-1 text-[var(--text-muted)]"
+            />}
             summary={summary}
             defaultOpen={status === 'working'}
             className="w-full text-[var(--text-secondary)]"
@@ -717,26 +795,151 @@ function BeUiAgentActivity({
     </div>;
 }
 
+function SubagentToolSummary({ tool, lang, onOpen }: { tool: NormalizedTool; lang: Language; onOpen: () => void }) {
+    const running = tool.status === 'running';
+    const failed = tool.status === 'failed';
+    const title = lang === 'zh' ? '子任务' : 'Subagent';
+    const normalizedName = tool.name.trim().toLowerCase();
+    const name = normalizedName && !['agent', 'subagent', 'task'].includes(normalizedName) ? tool.name : title;
+    const statusLabel = running
+        ? (lang === 'zh' ? '执行中' : 'Working')
+        : failed
+            ? (lang === 'zh' ? '失败' : 'Failed')
+            : (lang === 'zh' ? '已完成' : 'Completed');
+    return <div
+        className="my-1"
+        data-testid={`beegame-subagent-disclosure-${tool.id}`}
+    >
+        <button
+            type="button"
+            onClick={onOpen}
+            className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-2)] px-2.5 text-left text-xs font-medium text-[var(--text-secondary)] shadow-sm outline-none transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+        >
+            <Bot aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="max-w-40 truncate">{name}</span>
+            <span className={`shrink-0 ${failed ? 'text-[var(--destructive)]' : 'text-[var(--text-muted)]'}`}>{statusLabel}</span>
+            <ChevronRight aria-hidden="true" className="size-3 shrink-0" />
+        </button>
+    </div>;
+}
+
+function activityStatusPhrases(tools: NormalizedTool[], lang: Language): string[] {
+    const tool = tools.at(-1);
+    if (!tool) return [lang === 'zh' ? '正在分析' : 'Reasoning'];
+    const zh: Record<ToolKind, string> = {
+        search: '正在搜索资料',
+        read: '正在读取文件',
+        write: '正在写入文件',
+        edit: '正在更新文件',
+        bash: '正在执行命令',
+        todo: '正在更新任务',
+        subagent: '正在委派子任务',
+        generic: '正在调用工具',
+    };
+    const en: Record<ToolKind, string> = {
+        search: 'Searching',
+        read: 'Reading files',
+        write: 'Writing files',
+        edit: 'Updating files',
+        bash: 'Running command',
+        todo: 'Updating tasks',
+        subagent: 'Delegating task',
+        generic: 'Using tool',
+    };
+    return [lang === 'zh' ? zh[tool.kind] : en[tool.kind]];
+}
+
+function AgentRunDetailView({
+    detail,
+    lang,
+    onBack,
+}: {
+    detail: AgentRunDetail;
+    lang: Language;
+    onBack: () => void;
+}) {
+    const running = detail.tool.status === 'running';
+    const failed = detail.tool.status === 'failed';
+    const title = lang === 'zh' ? '子任务' : 'Subagent';
+    const statusLabel = running
+        ? (lang === 'zh' ? '执行中' : 'Working')
+        : failed
+            ? (lang === 'zh' ? '失败' : 'Failed')
+            : (lang === 'zh' ? '已完成' : 'Completed');
+    const prompt = displayText(String(detail.tool.subagentPrompt || detail.tool.detail || '').trim());
+    const output = displayText(String(detail.tool.subagentOutput || detail.tool.output || '').trim());
+    const trace = displayText(String(detail.tool.subagentTrace || '').trim());
+
+    return <section className="min-w-0 space-y-4 px-1 py-2" data-testid="beegame-agent-run-detail">
+        <header className="flex items-center gap-2 border-b border-[var(--border-subtle)] pb-3">
+            <button
+                type="button"
+                onClick={onBack}
+                aria-label={lang === 'zh' ? '返回聊天' : 'Back to chat'}
+                className="flex size-8 shrink-0 items-center justify-center rounded-md text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+            >
+                <ArrowLeft aria-hidden="true" className="size-4" />
+            </button>
+            <Bot aria-hidden="true" className="size-4 shrink-0 text-[var(--text-secondary)]" />
+            <div className="min-w-0 flex-1">
+                <h2 className="type-chat-h3 truncate text-[var(--text-primary)]">{title}</h2>
+                <p className={`type-caption-1 ${failed ? 'text-[var(--destructive)]' : 'text-[var(--text-muted)]'}`}>{statusLabel}</p>
+            </div>
+        </header>
+        <div className="space-y-4" data-testid={`beegame-subagent-detail-${detail.tool.id}`}>
+            {prompt ? <section>
+                <h3 className="mb-1 type-caption-1 font-medium text-[var(--text-muted)]">{lang === 'zh' ? '任务' : 'Task'}</h3>
+                <MarkdownRenderer content={prompt} messageId={`${detail.tool.id}-subagent-task`} lang={lang} />
+            </section> : null}
+            {output ? <section>
+                <h3 className="mb-1 type-caption-1 font-medium text-[var(--text-muted)]">{lang === 'zh' ? '结果' : 'Result'}</h3>
+                <MarkdownRenderer content={output} messageId={`${detail.tool.id}-subagent-output`} lang={lang} />
+            </section> : null}
+            {trace ? <section>
+                <h3 className="mb-1 type-caption-1 font-medium text-[var(--text-muted)]">{lang === 'zh' ? '执行记录' : 'Trace'}</h3>
+                <pre className="type-code max-h-[32rem] overflow-auto whitespace-pre-wrap rounded-md bg-[var(--surface-3)] p-2 text-[var(--text-secondary)]">{trace}</pre>
+            </section> : null}
+        </div>
+    </section>;
+}
+
 function ResponseParts({
     parts,
     lang,
     streamingMessageId,
+    onOpenSubagent,
+    onPreviewArtifact,
 }: {
     parts: ResponsePart[];
     lang: Language;
     streamingMessageId: string | null;
+    onOpenSubagent: (tool: NormalizedTool) => void;
+    onPreviewArtifact?: (id: string, title: string, content?: string) => void;
 }) {
     const rendered: ReactNode[] = [];
     for (let index = 0; index < parts.length; index += 1) {
         const part = parts[index];
+        const isSubagentPart = part.kind === 'tool' && (part.tool.isSubagent || part.tool.kind === 'subagent');
+        if (isSubagentPart) {
+            rendered.push(<SubagentToolSummary key={`subagent-${part.tool.id}`} tool={part.tool} lang={lang} onOpen={() => onOpenSubagent(part.tool)} />);
+            continue;
+        }
         const isActivityPart = part.kind === 'thinking' || part.kind === 'tool';
         if (isActivityPart) {
             const segmentStartIndex = index;
             const activityGroupId = 'activityGroupId' in part ? part.activityGroupId : undefined;
+            const activityTurnId = 'turnId' in part ? part.turnId : undefined;
             const belongsToActivity = (candidate: ResponsePart) => {
+                if (candidate.kind === 'tool' && (candidate.tool.isSubagent || candidate.tool.kind === 'subagent')) return false;
                 const candidateGroupId = 'activityGroupId' in candidate ? candidate.activityGroupId : undefined;
                 if (activityGroupId) return candidateGroupId === activityGroupId;
-                return (candidate.kind === 'thinking' || candidate.kind === 'tool') && !candidateGroupId;
+                if (candidate.kind !== 'thinking' && candidate.kind !== 'tool') return false;
+                if (candidateGroupId) return false;
+                // Raw workflow history may put two independent worker turns
+                // next to each other. They are separate reasoning records, not
+                // one activity merely because no prose message sits between them.
+                const candidateTurnId = candidate.turnId;
+                return candidateTurnId === activityTurnId;
             };
             while (index < parts.length && belongsToActivity(parts[index])) {
                 index += 1;
@@ -749,9 +952,13 @@ function ResponseParts({
                 if (!activityParts.length) return;
                 const activityItems = activityParts.map((candidate) => toActivityItem(candidate));
                 const activityTimestamps = activityParts.map((candidate) => candidate.timestamp).filter((timestamp) => Number.isFinite(timestamp));
-                const activityDuration = activityTimestamps.length > 1
+                const observedDuration = activityTimestamps.length > 1
                     ? Math.max(0, (Math.max(...activityTimestamps) - Math.min(...activityTimestamps)) / 1000)
                     : 0;
+                const persistedThinkingDuration = Math.max(0, ...activityParts.map((candidate) => (
+                    candidate.kind === 'thinking' ? (candidate.durationMs || 0) / 1000 : 0
+                )));
+                const activityDuration = Math.max(observedDuration, persistedThinkingDuration);
                 const activityStatus: 'working' | 'complete' = activityParts.some((candidate) => (
                     (candidate.kind === 'tool' && candidate.tool.status === 'running') ||
                     (candidate.kind === 'thinking' && matchesStreamingMessage(candidate.message, streamingMessageId))
@@ -760,12 +967,14 @@ function ResponseParts({
                     .filter((candidate): candidate is Extract<ResponsePart, { kind: 'tool' }> => candidate.kind === 'tool')
                     .map((candidate) => candidate.tool);
                 const localSearchOnly = activityTools.length > 0 && activityTools.every(isLocalSearchTool);
+                const workingPhrases = activityStatusPhrases(activityTools, lang);
                 rendered.push(<BeUiAgentActivity
                     key={`agent-activity-${key}`}
                     items={activityItems}
                     status={activityStatus}
                     duration={activityDuration}
-                    activeLabel={localSearchOnly ? (lang === 'zh' ? '正在搜索文件…' : 'Searching files…') : undefined}
+                    activeLabel={localSearchOnly ? (lang === 'zh' ? '正在搜索文件' : 'Searching files') : workingPhrases[0]}
+                    workingPhrases={workingPhrases}
                     summary={localSearchOnly ? (lang === 'zh' ? '已搜索文件' : 'Searched files') : undefined}
                 />);
             };
@@ -782,11 +991,25 @@ function ResponseParts({
             });
             continue;
         }
+        const presentation = messagePresentation(part.message);
+        if (presentation === 'artifact' && part.message.artifactId && onPreviewArtifact) {
+            const title = part.message.documentTitle || part.message.artifactPath || (lang === 'zh' ? '项目产物' : 'Project artifact');
+            rendered.push(<ArtifactCard
+                key={`artifact-${part.message.id}`}
+                title={title}
+                sender={part.message.sender}
+                content={displayText(part.message.content)}
+                artifactType={part.message.artifactType}
+                onPreview={() => onPreviewArtifact(part.message.artifactId!, title, part.message.content)}
+            />);
+            continue;
+        }
         rendered.push(<LongMarkdownMessage
             key={`agent-${part.message.id}`}
             message={part.message}
             lang={lang}
             collapsible={!matchesStreamingMessage(part.message, streamingMessageId)}
+            presentation={presentation}
         />);
     }
     return <>{rendered}</>;
@@ -796,10 +1019,12 @@ function LongMarkdownMessage({
     message,
     lang,
     collapsible,
+    presentation,
 }: {
     message: ChatDisplayMessage;
     lang: Language;
     collapsible: boolean;
+    presentation: MessagePresentation;
 }) {
     const content = displayText(message.content);
     const contentRef = useRef<HTMLDivElement>(null);
@@ -834,11 +1059,18 @@ function LongMarkdownMessage({
         : `Show full response · ${characterCount.toLocaleString('en-US')} chars`;
 
     return <div
-        className="beegame-ai-prose min-w-0"
+        className={`beegame-ai-prose min-w-0 ${presentation === 'article' ? 'rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] px-4 py-3' : ''}`}
         data-slot="message-content"
         data-testid={`beegame-agent-message-${message.id}`}
         data-message-id={message.id}
     >
+        {presentation === 'article' ? <div
+            data-testid={`beegame-article-message-${message.id}`}
+            className="mb-3 flex items-center gap-1.5 border-b border-[var(--border-subtle)] pb-2 type-caption-1 font-medium text-[var(--text-muted)]"
+        >
+            <FileText aria-hidden="true" className="h-3.5 w-3.5" />
+            <span>{lang === 'zh' ? '详细内容' : 'Detailed content'}</span>
+        </div> : null}
         <div className="relative min-w-0">
             <div
                 ref={contentRef}
@@ -867,6 +1099,20 @@ function LongMarkdownMessage({
             />
         </button> : null}
     </div>;
+}
+
+type MessagePresentation = 'chat' | 'article' | 'artifact';
+
+/**
+ * Presentation is an explicit producer contract. We deliberately never infer an
+ * article from prose length or Markdown syntax: normal conversational replies
+ * can be long too, and must retain the lightweight chat treatment.
+ */
+function messagePresentation(message: ChatDisplayMessage): MessagePresentation {
+    const hint = String(message.renderHint || '').trim().toLowerCase();
+    if ((hint === 'artifact_card' || message.type === 'artifact_card') && message.artifactId) return 'artifact';
+    if (hint === 'article' || hint === 'document' || message.isDocument) return 'article';
+    return 'chat';
 }
 
 function ContextUpdateSeparator({ text }: { text: BeeGameText }) {
@@ -899,8 +1145,13 @@ function DateSeparator({ dateKey, label }: { dateKey: string; label: string }) {
 function StageSeparator({ stage, lang }: { stage: WorkflowStage; lang: Language }) {
     const labels: Record<WorkflowStage, { zh: string; en: string }> = {
         author: { zh: '文档编写', en: 'Document authoring' },
+        content: { zh: '内容编写', en: 'Content authoring' },
         reviewer: { zh: '审计与修订', en: 'Review and revision' },
+        revision: { zh: '文档修订', en: 'Document revision' },
         'game-ir': { zh: 'Game IR', en: 'Game IR' },
+        resources: { zh: '资源准备', en: 'Resource preparation' },
+        implementation: { zh: '游戏实现', en: 'Game implementation' },
+        acceptance: { zh: '验收', en: 'Acceptance' },
     };
     return (
         <MessageMarker

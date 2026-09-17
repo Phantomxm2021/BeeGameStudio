@@ -6,13 +6,22 @@ import {
   RESOURCE_ASSET_KINDS,
   RESOURCE_CAPABILITIES,
   RESOURCE_DIMENSIONS,
+  RESOURCE_EMBEDDED_COMPONENT_KINDS,
+  RESOURCE_RELATION_KINDS,
+  RESOURCE_SOURCE_KINDS,
   RESOURCE_USAGE_TAGS,
 } from '@bee-game-studio/beegame-resource-core'
 import { CANONICAL_ASSET_MANIFEST } from './types'
+import { fileURLToPath } from 'node:url'
 
 export function buildSystemDeliveryContract() {
   return {
     canonicalAssetManifest: {
+      validation: {
+        executable: process.execPath,
+        args: [fileURLToPath(new URL('../resource-validation-cli.ts', import.meta.url))],
+        usage: 'Run executable with args from the project workspace (or append the workspace path). Read-only host contract, file/hash, IR and readiness checks; exit 0 means valid, exit 1 includes actionable issues. This does not publish or advance the workflow.',
+      },
       path: CANONICAL_ASSET_MANIFEST,
       version: CURRENT_ASSET_MANIFEST_VERSION,
       indexFields: ['version', 'project_target', 'modules'],
@@ -102,6 +111,15 @@ export function buildSystemDeliveryContract() {
             'retrieved_at',
           ],
           statuses: ['available', 'verified', 'failed'],
+          fieldTypes: {
+            selection_reason: 'non-empty string[]',
+            fulfills: 'unique requirement ID string[]',
+            file_paths: 'non-empty workspace-relative string[] including root_path',
+            local_file_hashes: 'object mapping each file path to SHA-256 hex',
+            provisional: 'boolean',
+            content_profile: 'optional JSON object',
+            technical_facts: 'optional object with string, number or boolean values',
+          },
         },
       },
       canonicalValues: {
@@ -109,16 +127,20 @@ export function buildSystemDeliveryContract() {
         assetKinds: [...RESOURCE_ASSET_KINDS],
         usageTags: [...RESOURCE_USAGE_TAGS],
         capabilities: [...RESOURCE_CAPABILITIES],
+        relationKinds: [...RESOURCE_RELATION_KINDS],
+        embeddedKinds: [...RESOURCE_EMBEDDED_COMPONENT_KINDS],
+        allowedSourceKinds: [...RESOURCE_SOURCE_KINDS],
       },
       rules: [
         'asset_format_capabilities are lowercase filename extensions without dots',
         'modules.requirements is one JSON path string',
         'modules.resources is an array of JSON path strings',
         'a resource root_path is one file and must also appear in file_paths',
+        'encoded audio resources may include JSON cue/sprite metadata beside the audio files; a JSON-only synthesis definition must be one provisional audio-cue or audio-bank JSON root file',
         'web and agent-authored resource files belong under runtime_asset_root; generated_asset_root is only for converted Resource Library deliveries',
         'a web source requires a direct source_url, containing page_url, explicit license and retrieved_at; license_url and author are optional provenance',
         'when acquisition_profile.coverage is present, acquisition_profile.capabilities must be empty',
-        'each resource-realization acquisition-profile node maps to one requirement whose id is the described logical resource requirementId; copy required, name, purpose, dimensions, assetKinds, usageTags, capabilities, styles, acceptanceCriteria, sourcingPolicy and coverage exactly, changing only camelCase field names to the documented snake_case Manifest names',
+        'each Game IR assets entry maps directly to one requirement with the same id; copy required, name, purpose, dimensions, kinds, usageTags, capabilities, styles, acceptanceCriteria, sourcing and non-empty coverage exactly, changing only camelCase field names to the documented snake_case Manifest names; omit coverage only when the IR array is empty',
         'dependencies are Resource Library provenance objects, not resource ids; omit dependencies for direct agent-authored resources',
         'omit optional resource fields when they are not needed',
         'each resource fulfills array contains the current IR requirement ids satisfied by that resource',

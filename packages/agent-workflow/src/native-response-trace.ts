@@ -7,19 +7,21 @@ const record = (value: unknown): RecordValue | undefined =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : undefined
 const secretKey = /(?:^|[_-])(?:api[_-]?key|auth|authorization|auth[_-]?token|password|passwd|secret|credentials?|access[_-]?token|refresh[_-]?token|token|cookie|private[_-]?key)(?:$|[_-])/i
 
-/** Project before transport: never send hidden reasoning, signatures, prompts,
- * images or arbitrary provider fields to the diagnostic sink. */
+/** Project before transport: exclude signatures, prompts, images and arbitrary
+ * provider fields. Thinking text is an explicit, redacted observability stream
+ * for the project Chat, never host-generated content. */
 export function projectResponseMessage(value: unknown): RecordValue | undefined {
   const message = record(value)
   if (!message) return
   if (message.type === 'stream_request_start') return { type: message.type }
   if (message.type === 'reasoning_activity' && Number.isSafeInteger(message.bytes) && message.bytes >= 0)
-    return { type: message.type, bytes: message.bytes }
+    return { type: message.type, bytes: message.bytes, text: typeof message.text === 'string' ? message.text : '' }
   if (message.type === 'stream_event') {
     const event = record(message.event)
     if (!event) return
     if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta')
-      return { type: 'reasoning_activity', bytes: typeof event.delta.thinking === 'string' ? Buffer.byteLength(event.delta.thinking) : 0 }
+      return { type: 'reasoning_activity', bytes: typeof event.delta.thinking === 'string' ? Buffer.byteLength(event.delta.thinking) : 0,
+        text: typeof event.delta.thinking === 'string' ? event.delta.thinking : '' }
     let safe: RecordValue | undefined
     if (event.type === 'message_start') safe = { type: event.type,
       message: { id: event.message?.id, model: event.message?.model, usage: event.message?.usage } }
@@ -121,7 +123,7 @@ export function createNativeResponseTraceLog(log: (event: string, data: unknown)
   environment: Record<string, string | undefined>,
   onUsage?: (message: RecordValue) => Promise<void>) {
   const redact = createResponseRedactor(environment)
-  const queries = new Map<string, { identity: RecordValue; messageId?: string; reasoningBytes: number; reasoningSaved: number; blocks: Map<number, {
+  const queries = new Map<string, { identity: RecordValue; messageId?: string; reasoningBytes: number; reasoningSaved: number; reasoningText: string; reasoningSavedChars: number; reasoningTruncated: boolean; blocks: Map<number, {
     type: string; name?: string; toolId?: string; text: string; bytes: number; saved: number; truncated: boolean
   }> }>()
   const maxBlockChars = 8 * 1024 * 1024, maxLogBytes = 128 * 1024 * 1024
@@ -139,9 +141,11 @@ export function createNativeResponseTraceLog(log: (event: string, data: unknown)
   }
   async function flushQuery(query: (typeof queries extends Map<any, infer V> ? V : never), interrupted = false) {
     if (query.reasoningBytes !== query.reasoningSaved) {
-      await write('response.reasoning_progress', { ...query.identity, messageId: query.messageId,
-        receivedBytes: query.reasoningBytes, contentLogged: false })
+      const content = query.reasoningText.slice(query.reasoningSavedChars)
+      await write('response.reasoning_snapshot', { ...query.identity, messageId: query.messageId,
+        content, receivedBytes: query.reasoningBytes, truncated: query.reasoningTruncated, cumulative: false })
       query.reasoningSaved = query.reasoningBytes
+      query.reasoningSavedChars = query.reasoningText.length
     }
     for (const [index, block] of query.blocks) if (block.bytes !== block.saved) {
       await write('response.content_snapshot', { ...query.identity, messageId: query.messageId, index,
@@ -158,7 +162,8 @@ export function createNativeResponseTraceLog(log: (event: string, data: unknown)
       const identity = { queryId: frame.queryId, agentId: frame.agentId,
         parentToolUseId: typeof frame.parentToolUseId === 'string' ? frame.parentToolUseId : undefined }
       let query = queries.get(frame.queryId)
-      if (!query) { query = { identity, blocks: new Map(), reasoningBytes: 0, reasoningSaved: 0 }; queries.set(frame.queryId, query) }
+      if (!query) { query = { identity, blocks: new Map(), reasoningBytes: 0, reasoningSaved: 0,
+        reasoningText: '', reasoningSavedChars: 0, reasoningTruncated: false }; queries.set(frame.queryId, query) }
       if (frame.kind === 'query_start') { await write('response.query_start', identity); return }
       if (frame.kind === 'query_end') {
         await flushQuery(query, frame.status !== 'completed')
@@ -167,7 +172,13 @@ export function createNativeResponseTraceLog(log: (event: string, data: unknown)
       }
       const message = projectResponseMessage(frame.message)
       if (!message) return
-      if (message.type === 'reasoning_activity') { query.reasoningBytes += message.bytes; return }
+      if (message.type === 'reasoning_activity') {
+        query.reasoningBytes += message.bytes
+        const text = typeof message.text === 'string' ? message.text : ''
+        query.reasoningText += text.slice(0, Math.max(0, maxBlockChars - query.reasoningText.length))
+        query.reasoningTruncated ||= query.reasoningText.length >= maxBlockChars
+        return
+      }
       // Usage is kept separate from diagnostic content and never truncated.
       if (message.event?.type === 'message_start' || message.event?.type === 'message_delta' || message.message?.usage)
         await onUsage?.({ ...message, nativeTraceAgentId: frame.agentId, nativeTraceQueryId: frame.queryId })

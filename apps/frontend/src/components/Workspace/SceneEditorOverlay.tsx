@@ -21,8 +21,17 @@ interface SceneEditorOverlayProps {
   onClose: () => void;
 }
 
+type SceneSnapshot = {
+  path: string;
+  revision: string;
+  document: BeeGameSceneContentDocument;
+  editorDocument: SceneDocument;
+};
+
 export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayProps) {
   const [initialDocument, setInitialDocument] = useState<SceneDocument>();
+  const [scenes, setScenes] = useState<SceneSnapshot[]>([]);
+  const [selectedScenePath, setSelectedScenePath] = useState('');
   const [loadError, setLoadError] = useState('');
   const canonicalRef = useRef<{
     path: string;
@@ -42,6 +51,8 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
     let active = true;
     const objectUrls: string[] = [];
     setInitialDocument(undefined);
+    setScenes([]);
+    setSelectedScenePath('');
     setLoadError('');
     canonicalRef.current = undefined;
     void Promise.all([
@@ -54,18 +65,20 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           setLoadError(`Scene content is not available yet (${snapshot.state.replaceAll('_', ' ')}).`);
           return;
         }
-        const scene = snapshot.documents?.find(item => {
+        const sceneEntries = snapshot.documents?.flatMap(item => {
           const document = item.document as Partial<BeeGameSceneContentDocument>;
-          return document.kind === 'scene-2d' && document.id === snapshot.index?.entryScene;
-        });
-        if (!scene) {
-          setLoadError(`Entry scene ${snapshot.index.entryScene} is missing from the content package.`);
+          return document.kind === 'scene-2d'
+            ? [{ ...item, document: item.document as BeeGameSceneContentDocument }]
+            : [];
+        }) ?? [];
+        if (!sceneEntries.length) {
+          setLoadError('The content package has no Scene documents yet.');
           return;
         }
-        const document = scene.document as BeeGameSceneContentDocument;
+        const referencedAssets = new Set(sceneEntries.flatMap(scene => scene.document.assetRefs));
         const loadedAssets = await Promise.all(
           manifest.resources
-            .filter(resource => resource.status === 'verified' && document.assetRefs.includes(resource.id))
+            .filter(resource => resource.status === 'verified' && referencedAssets.has(resource.id))
             .map(async resource => {
               const path = preferredSceneImagePath(resource.root_path, resource.file_paths);
               if (!path) return undefined;
@@ -100,15 +113,26 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           assets[loaded.asset.id] = loaded.asset;
           assetRegions[loaded.asset.id] = loaded.regions;
         }
-        canonicalRef.current = { path: scene.path, revision: scene.revision, document };
-        setInitialDocument(sceneContentToEditorDocument({
-          document,
-          documentRevision: scene.revision,
-          irRevision: snapshot.index.irRevision,
-          assetManifestRevision: snapshot.index.assetManifestRevision,
-          assets,
-          assetRegions,
+        const availableScenes = sceneEntries.map(scene => ({
+          path: scene.path,
+          revision: scene.revision,
+          document: scene.document,
+          editorDocument: sceneContentToEditorDocument({
+            document: scene.document,
+            documentRevision: scene.revision,
+            irRevision: snapshot.index!.irRevision,
+            assetManifestRevision: snapshot.index!.assetManifestRevision,
+            assets,
+            assetRegions,
+          }),
         }));
+        const entry = availableScenes.find(scene => scene.document.id === snapshot.index?.entryScene)
+          ?? availableScenes[0];
+        if (!entry) return;
+        canonicalRef.current = { path: entry.path, revision: entry.revision, document: entry.document };
+        setScenes(availableScenes);
+        setSelectedScenePath(entry.path);
+        setInitialDocument(entry.editorDocument);
       })
       .catch(error => {
         if (active) setLoadError(error instanceof Error ? error.message : String(error));
@@ -118,6 +142,15 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
       objectUrls.forEach(url => URL.revokeObjectURL(url));
     };
   }, [projectId]);
+
+  const chooseScene = (path: string) => {
+    const next = scenes.find(scene => scene.path === path);
+    if (!next) return;
+    canonicalRef.current = { path: next.path, revision: next.revision, document: next.document };
+    setSelectedScenePath(next.path);
+    setInitialDocument(next.editorDocument);
+    setLoadError('');
+  };
 
   const save = async (document: SceneDocument) => {
     const current = canonicalRef.current;
@@ -132,16 +165,38 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
       revision: saved.revision,
       document: saved.document,
     };
+    setScenes(items => items.map(item => item.path === saved.path
+      ? { ...item, revision: saved.revision, document: saved.document }
+      : item));
   };
 
   return (
     <div className="scene-editor-host fixed inset-0 z-[100] flex flex-col bg-[#09090b]" role="dialog" aria-modal="true" aria-label="Scene Editor">
+      <header className="flex h-11 shrink-0 items-center gap-3 border-b border-white/10 bg-[#17181b] px-4 text-sm text-white">
+        <strong>Scene Editor</strong>
+        <select
+          aria-label="Scene document"
+          className="min-w-40 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-xs text-white"
+          value={selectedScenePath}
+          onChange={event => chooseScene(event.target.value)}
+          disabled={!scenes.length}
+        >
+          {scenes.map(scene => <option key={scene.path} value={scene.path}>{scene.document.id}</option>)}
+        </select>
+        <span className="min-w-0 flex-1 truncate text-xs text-white/50">
+          {loadError ? 'Scene is not ready to edit' : scenes.length > 1 ? `${scenes.length} scenes` : ''}
+        </span>
+        <button type="button" className="rounded-md px-2 py-1 text-xs text-white/80 hover:bg-white/10" onClick={onClose}>Back to project</button>
+      </header>
       <div className="min-h-0 flex-1">
         {loadError ? (
-          <div className="grid h-full place-items-center bg-[#3c3f43] px-6 text-center text-sm text-white/70" role="alert">{loadError}</div>
+          <div className="grid h-full place-items-center bg-[#3c3f43] px-6 text-center text-sm text-white/70" role="alert">
+            <div><p>{loadError}</p><button type="button" className="mt-4 rounded-md bg-white/10 px-3 py-2 text-xs text-white hover:bg-white/20" onClick={onClose}>Back to project</button></div>
+          </div>
         ) : initialDocument ? (
           <Suspense fallback={<div className="grid h-full place-items-center bg-[#3c3f43] text-xs text-white/60">Loading Scene Editor…</div>}>
             <SceneEditor
+              key={selectedScenePath}
               initialDocument={initialDocument}
               initialProjection="orthographic"
               initialView={{ position: [0, 20, 0.001], target: [0, 0, 0] }}

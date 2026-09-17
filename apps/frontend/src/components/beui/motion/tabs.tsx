@@ -52,7 +52,7 @@ function TabsTrigger({ className, value, children, ...props }: ComponentProps<ty
     <TabsPrimitive.Tab
       value={value}
       className={cn(
-        'relative inline-flex min-w-0 items-center justify-center rounded-t-md px-3 text-[14px] font-medium text-muted-foreground outline-none transition-colors duration-[var(--motion-hover)] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 data-[active]:text-foreground',
+        'relative inline-flex min-w-0 items-center justify-center rounded-t-md px-3 text-sm font-medium text-muted-foreground outline-none transition-colors duration-[var(--motion-hover)] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 data-[active]:text-foreground',
         className,
       )}
       {...props}

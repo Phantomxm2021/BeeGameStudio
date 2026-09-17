@@ -4,7 +4,7 @@ import { createNativeResponseTraceLog, projectResponseMessage, createResponseRed
 test('response projection excludes prompts, hidden reasoning and signatures', () => {
   expect(projectResponseMessage({ type: 'user', message: { content: [{ type: 'text', text: 'PRIVATE_PROMPT' }] } })).toBeUndefined()
   expect(projectResponseMessage({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'PRIVATE_THINKING' } } }))
-    .toEqual({ type: 'reasoning_activity', bytes: 16 })
+    .toEqual({ type: 'reasoning_activity', bytes: 16, text: 'PRIVATE_THINKING' })
   const projected = projectResponseMessage({ type: 'assistant', message: { id: 'm', content: [
     { type: 'thinking', thinking: 'PRIVATE_THINKING', signature: 'PRIVATE_SIGNATURE' },
     { type: 'text', text: 'Public answer' }, { type: 'tool_use', id: 'write', name: 'Write', input: { file_path: 'docs/ASSET_PLAN.md', content: '# Assets' } },

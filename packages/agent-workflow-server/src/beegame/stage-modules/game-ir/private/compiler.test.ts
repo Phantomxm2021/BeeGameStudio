@@ -28,17 +28,26 @@ function identity(source: FoundationIrInput): GameIrCompilationIdentity {
     foundationRevision: receipt.foundationRevision, foundationReadyReceiptDigest: receipt.receiptDigest }
 }
 
-test('runs one direct CLI generation and preserves its validation error', async () => {
+test('repairs a rejected draft only after an explicit second invocation', async () => {
   const source = fixture(), id = identity(source), workspacePath = await mkdtemp(join('/private/tmp', 'direct-ir-'))
   let calls = 0
   try {
-    const execute = async () => { calls += 1; return 'not-json' }
+    const execute = async (operation: { prompt: string; readOnlyFiles?: Readonly<Record<string, string>> }) => {
+      calls += 1
+      if (calls === 1) return 'not-json'
+      expect(operation.prompt).toContain('Host validation rejected the previous output')
+      expect(operation.readOnlyFiles?.['previous-output.txt']).toBe('not-json')
+      expect(operation.readOnlyFiles?.['validation-error.txt']).toContain('Unexpected identifier')
+      return JSON.stringify({ schemaVersion: 'game-ir-direct-draft.v2', parameters: {}, assets: [],
+        scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }], ui: [], vfx: [],
+        logic: { entryScene: 'scene.main' } })
+    }
     const result = await compileGameIr({ workspacePath, identity: id, foundationInput: source, execute })
     expect(result.status).toBe('needs_action'); expect(calls).toBe(1)
     expect(result.status === 'needs_action' ? result.diagnostic.reason : '').toContain('Unexpected identifier')
+    expect(result.status === 'needs_action' ? result.diagnostic.recoverable : false).toBe(true)
     const repeated = await compileGameIr({ workspacePath, identity: id, foundationInput: source, execute })
-    expect(repeated.status).toBe('needs_action'); expect(calls).toBe(1)
-    expect(repeated.status === 'needs_action' ? repeated.diagnostic.reason : '').toContain('Unexpected identifier')
+    expect(repeated.status).toBe('ready'); expect(calls).toBe(2)
   } finally { await rm(workspacePath, { recursive: true, force: true }) }
 })
 

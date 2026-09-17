@@ -33,6 +33,7 @@ export type AssistantContentBlock = {
 
 export type RenderHint =
   | 'default'
+  | 'article'
   | 'document'
   | 'artifact_card'
   | 'structured_json'
@@ -259,6 +260,9 @@ export interface Message {
   /** reasoning/thought content (optional) */
   thought?: string
 
+  /** Elapsed time covered by a persisted reasoning record. */
+  thinkingDurationMs?: number
+
   /** Ordered assistant content blocks from the raw response message. */
   contentBlocks?: AssistantContentBlock[]
 
@@ -395,6 +399,9 @@ export interface ProjectEventMessage {
 
   /** Snake_case compatibility alias for event payloads. */
   turn_id?: string
+
+  /** Elapsed time covered by this persisted reasoning event. */
+  thinking_duration_ms?: number
 
   /** Stable client message identity for optimistic user messages */
   client_message_id?: string

@@ -208,7 +208,7 @@ import {
 } from './beegame/foundation-authoring-host'
 import { createFoundationReviewerHost, type FoundationReviewerHostOptions, type FoundationReviewerHost } from './beegame/foundation-reviewer-host'
 import { createGameIrHost, type GameIrHostOptions, type GameIrHost } from './beegame/game-ir-host'
-import { isPublicStageActive } from './beegame/delivery-workflow/public-stage-routing'
+import { isIrStageActive, isPublicStageActive } from './beegame/delivery-workflow/public-stage-routing'
 import { resolveNativeRuntimeCommand } from './beegame/native-runtime-process-path'
 import { evaluateWorkflowDeliveryGate } from './beegame/delivery-workflow/delivery-gate'
 import type {
@@ -2673,7 +2673,7 @@ export function createAgentWorkflowApp(
         )
       }
       const after = parsePositiveInteger(c.req.query('after')) ?? 0
-      const events = await getProjectRuntimeEvents({
+      const events = await getProjectChatTimelineEvents({
         sessionId: sessionRef.sessionId,
         workspacePath: sessionRef.workspacePath,
         dashboardDataRoot,
@@ -2723,9 +2723,10 @@ export function createAgentWorkflowApp(
       const after = headerAfter ?? queryAfter
       const stream = createProjectEventsSseStream({
         request: c.req.raw,
+        userId: user.id,
+        projectId: project.id,
         sessionId: sessionRef.sessionId,
         workspacePath: sessionRef.workspacePath,
-        live: Boolean(sessionRef.live),
         after,
         recoveredFromTranscript: !sessionRef.live,
         dashboardDataRoot,
@@ -2765,25 +2766,12 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       })
       if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
-      const events = await getProjectRuntimeEvents({
+      const timeline = await getProjectChatTimelineEvents({
         sessionId: sessionRef.sessionId,
         workspacePath: sessionRef.workspacePath,
         dashboardDataRoot,
         beeGameSessions,
       })
-      const workerHistory = await readWorkflowWorkerChatHistoryFromDisk(
-        sessionRef.workspacePath,
-        sessionRef.sessionId,
-        events,
-      )
-      const timeline = [...events, ...workerHistory]
-        .sort((left, right) => {
-          const time = left.createdAt.getTime() - right.createdAt.getTime()
-          if (time !== 0) return time
-          const session = left.sessionId.localeCompare(right.sessionId)
-          return session !== 0 ? session : left.id - right.id
-        })
-        .map((event, index) => ({ ...event, id: index + 1 }))
       const visibleEvents = compactTranscriptForChatHistory(timeline)
       const latestTodoEvent = findLatestTodoWriteEvent(visibleEvents)
       const pagination = {
@@ -3269,6 +3257,22 @@ export function createAgentWorkflowApp(
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 409)
     }
+  })
+
+  app.post('/api/projects/:id/game-ir/revise', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project?.root_path) return c.json({ error: 'Project not found' }, 404)
+      const body = await c.req.json()
+      if (!body || typeof body.expectedResultDigest !== 'string' || !/^[a-f0-9]{64}$/.test(body.expectedResultDigest) || !body.draft)
+        return c.json({ error: 'Expected IR result digest and corrected draft are required' }, 400)
+      const controller = getDeliveryController({ request: c.req.raw, user,
+        projectId: project.id, workspacePath: project.root_path })
+      return c.json(await controller.reviseGameIr({ expectedResultDigest: body.expectedResultDigest, draft: body.draft }))
+    } catch (err) { return c.json({ error: toErrorMessage(err) }, 409) }
   })
 
   app.post('/api/projects/:id/workflow/stop', async c => {
@@ -6009,7 +6013,7 @@ async function readBeeGameWorkflowSnapshot(
     // Capture this before reconciling a stale top-level dispatch: that
     // reconciliation also repairs nested foundation tasks, so checking only
     // the post-reconcile snapshot would lose the reconnect signal.
-    let resumeOnReconnect = await foundationResumeOnReconnectRequired(
+    let resumeOnReconnect = await publicStageResumeOnReconnectRequired(
       currentRun,
       sessionIsOpen,
     )
@@ -6028,7 +6032,7 @@ async function readBeeGameWorkflowSnapshot(
     // actually live; the projection, rather than the task list, is the
     // reconnect authority consumed by the dashboard.
     if (!resumeOnReconnect) {
-      resumeOnReconnect = await foundationResumeOnReconnectRequired(
+      resumeOnReconnect = await publicStageResumeOnReconnectRequired(
         currentRun,
         sessionIsOpen,
       )
@@ -6060,10 +6064,16 @@ async function readBeeGameWorkflowSnapshot(
   }
 }
 
-async function foundationResumeOnReconnectRequired(
+async function publicStageResumeOnReconnectRequired(
   run: DeliveryRun,
   sessionIsOpen: (dispatch: DispatchRecord) => Promise<boolean> | boolean,
 ): Promise<boolean> {
+  // Game IR owns its execution lease internally rather than exposing a
+  // top-level workflow dispatch. Re-entering its public resume operation is
+  // idempotent: a live lease is left alone, while a lost in-process watcher
+  // is reattached. Without this signal a running IR can remain durably stuck
+  // after the server or dashboard reconnects.
+  if (run.status === 'running' && isIrStageActive(run)) return true
   if (
     run.status !== 'running' ||
     run.phase !== 'DOCUMENT_REVIEW' ||
@@ -6423,8 +6433,9 @@ async function getProjectRuntimeEvents(input: {
   dashboardDataRoot?: string
   beeGameSessions: BeeGameSessionManager
 }): Promise<BeeGameEvent[]> {
+  let events: BeeGameEvent[]
   try {
-    return input.beeGameSessions.events(input.sessionId)
+    events = input.beeGameSessions.events(input.sessionId)
   } catch (err) {
     if (toErrorMessage(err) !== 'Session not found') throw err
     const transcript = await readSessionTranscriptFromDisk(
@@ -6432,7 +6443,7 @@ async function getProjectRuntimeEvents(input: {
       input.workspacePath,
       input.dashboardDataRoot,
     )
-    return closeInterruptedTranscriptTurns(input.sessionId, transcript).map(
+    events = closeInterruptedTranscriptTurns(input.sessionId, transcript).map(
       event =>
         formatBeeGameEventForDisplay({
           ...event,
@@ -6441,16 +6452,54 @@ async function getProjectRuntimeEvents(input: {
         }),
     )
   }
+  return events.sort((left, right) => {
+    const time = left.createdAt.getTime() - right.createdAt.getTime()
+    return time !== 0 ? time : left.id - right.id
+  })
+}
+
+async function getProjectChatTimelineEvents(input: {
+  sessionId: string
+  workspacePath: string
+  dashboardDataRoot?: string
+  beeGameSessions: BeeGameSessionManager
+}): Promise<BeeGameEvent[]> {
+  const mainEvents = await getProjectRuntimeEvents(input)
+  const workerEvents = await readWorkflowWorkerChatHistoryFromDisk(
+    input.workspacePath,
+    input.sessionId,
+    mainEvents,
+  )
+  return [...mainEvents, ...workerEvents]
+    .sort((left, right) => {
+      const time = left.createdAt.getTime() - right.createdAt.getTime()
+      if (time !== 0) return time
+      const session = left.sessionId.localeCompare(right.sessionId)
+      return session !== 0 ? session : left.id - right.id
+    })
+    .map((event, index) => ({
+      ...event,
+      id: index + 1,
+      payload: {
+        ...(event.payload ?? { type: event.type }),
+        projectSourceSessionId: event.sessionId,
+        projectSourceEventId: event.id,
+      },
+    }))
 }
 
 const PROJECT_EVENTS_SSE_HEARTBEAT_INTERVAL_MS = 15_000
 const PROJECT_EVENTS_SSE_MAX_CONNECTION_MS = 25_000
+// Direct CLI stages can outlive an API-process restart. Their durable trace is
+// therefore also a live source, not merely a refresh-time recovery source.
+const PROJECT_EVENTS_SSE_TIMELINE_RECONCILE_INTERVAL_MS = 750
 
 function createProjectEventsSseStream(input: {
   request: Request
+  userId: string
+  projectId: string
   sessionId: string
   workspacePath: string
-  live: boolean
   after: number
   recoveredFromTranscript: boolean
   dashboardDataRoot?: string
@@ -6488,15 +6537,36 @@ function createProjectEventsSseStream(input: {
         let lastHeartbeatAt = Date.now()
         const deadline = Date.now() + PROJECT_EVENTS_SSE_MAX_CONNECTION_MS
         let pendingEvents: BeeGameEvent[] = []
+        let nextTimelineId = 0
+        const seenSourceEvents = new Set<string>()
         let wake: (() => void) | undefined
-        const unsubscribe = input.live
-          ? input.beeGameSessions.subscribeEvents(input.sessionId, event => {
-              if (event.id <= after) return
-              pendingEvents.push(event)
-              wake?.()
-              wake = undefined
-            })
-          : undefined
+        const sourceEventKey = (event: BeeGameEvent): string => {
+          const sourceSessionId =
+            typeof event.payload?.workflowSourceSessionId === 'string'
+              ? event.payload.workflowSourceSessionId
+              : typeof event.payload?.projectSourceSessionId === 'string'
+                ? event.payload.projectSourceSessionId
+              : event.sessionId
+          const sourceEventId =
+            typeof event.payload?.workflowSourceEventId === 'number'
+              ? event.payload.workflowSourceEventId
+              : typeof event.payload?.projectSourceEventId === 'number'
+                ? event.payload.projectSourceEventId
+              : event.id
+          return `${sourceSessionId}:${sourceEventId}`
+        }
+        const unsubscribe = input.beeGameSessions.subscribeProjectEvents(
+          {
+            userId: input.userId,
+            projectId: input.projectId,
+            workspacePath: input.workspacePath,
+          },
+          event => {
+            pendingEvents.push(event)
+            wake?.()
+            wake = undefined
+          },
+        )
         const emitEvents = (events: BeeGameEvent[]) => {
           const unseen = events.filter(event => event.id > after)
           if (unseen.length === 0) return
@@ -6514,20 +6584,32 @@ function createProjectEventsSseStream(input: {
           )
           lastHeartbeatAt = Date.now()
         }
+        const reconcileTimeline = async () => {
+          const timeline = await getProjectChatTimelineEvents({
+            sessionId: input.sessionId,
+            workspacePath: input.workspacePath,
+            dashboardDataRoot: input.dashboardDataRoot,
+            beeGameSessions: input.beeGameSessions,
+          })
+          timeline.forEach(event => seenSourceEvents.add(sourceEventKey(event)))
+          nextTimelineId = Math.max(nextTimelineId, timeline.at(-1)?.id ?? 0)
+          emitEvents(timeline)
+        }
         try {
-          emitEvents(
-            await getProjectRuntimeEvents({
-              sessionId: input.sessionId,
-              workspacePath: input.workspacePath,
-              dashboardDataRoot: input.dashboardDataRoot,
-              beeGameSessions: input.beeGameSessions,
-            }),
-          )
+          await reconcileTimeline()
           while (!closed && !signal.aborted && Date.now() < deadline) {
             if (pendingEvents.length > 0) {
               const events = pendingEvents
               pendingEvents = []
-              emitEvents(events)
+              const unseen = events
+                .filter(event => {
+                  const key = sourceEventKey(event)
+                  if (seenSourceEvents.has(key)) return false
+                  seenSourceEvents.add(key)
+                  return true
+                })
+                .map(event => ({ ...event, id: ++nextTimelineId }))
+              emitEvents(unseen)
               continue
             }
             const timeUntilDeadline = deadline - Date.now()
@@ -6536,7 +6618,11 @@ function createProjectEventsSseStream(input: {
               (Date.now() - lastHeartbeatAt)
             const waitMs = Math.max(
               1,
-              Math.min(timeUntilDeadline, timeUntilHeartbeat),
+              Math.min(
+                timeUntilDeadline,
+                timeUntilHeartbeat,
+                PROJECT_EVENTS_SSE_TIMELINE_RECONCILE_INTERVAL_MS,
+              ),
             )
             await new Promise<void>(resolve => {
               let timer: ReturnType<typeof setTimeout>
@@ -6560,6 +6646,7 @@ function createProjectEventsSseStream(input: {
               controller.enqueue(encoder.encode(': heartbeat\n\n'))
               lastHeartbeatAt = Date.now()
             }
+            if (!closed && !signal.aborted) await reconcileTimeline()
           }
           close()
         } catch (error) {
@@ -9005,9 +9092,44 @@ function compactTranscriptForChatHistory<
     payload?: BeeGameEvent['payload']
   },
 >(events: T[]): T[] {
+  const chatEvents: T[] = []
+  let thinkingEvent: T | undefined
+  let thinkingText = ''
+  const flushThinking = () => {
+    if (thinkingEvent && thinkingText.trim()) {
+      chatEvents.push({
+        ...thinkingEvent,
+        text: thinkingText,
+        payload: {
+          ...(thinkingEvent.payload ?? { type: 'assistant.thinking' }),
+          status: 'streaming',
+        },
+      })
+    }
+    thinkingEvent = undefined
+    thinkingText = ''
+  }
+  for (const event of events) {
+    if (event.type !== 'assistant.thinking') {
+      flushThinking()
+      chatEvents.push(event)
+      continue
+    }
+    const status = event.payload?.status
+    if (status === 'ended') {
+      flushThinking()
+      continue
+    }
+    if (event.text && event.text !== 'Thinking') {
+      thinkingEvent ??= event
+      thinkingText += event.text
+    }
+  }
+  flushThinking()
+
   const terminalToolIds = new Set<string>()
   const latestOpenProgressId = new Map<string, number>()
-  for (const event of events) {
+  for (const event of chatEvents) {
     const toolUseID =
       typeof event.payload?.toolUseID === 'string'
         ? event.payload.toolUseID
@@ -9019,13 +9141,11 @@ function compactTranscriptForChatHistory<
       latestOpenProgressId.set(toolUseID, event.id)
     }
   }
-  return events.flatMap(event => {
-    // Streaming and thinking events are transport detail. The Chat history
-    // renders terminal assistant messages and intentionally hides these types.
-    if (
-      event.type === 'assistant.partial' ||
-      event.type === 'assistant.thinking'
-    ) {
+  return chatEvents.flatMap(event => {
+    // Visible text streaming is superseded by the terminal assistant message.
+    // Thinking has no equivalent terminal event, so it remains part of Chat
+    // history instead of being irreversibly discarded.
+    if (event.type === 'assistant.partial') {
       return []
     }
     if (event.type === 'system.status') {

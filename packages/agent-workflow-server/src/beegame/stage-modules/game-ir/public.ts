@@ -50,6 +50,7 @@ export type GameIrResult = (
 
 export type GameIrResumeInput = Readonly<{ handle: GameIrHandle; requestId: string }>
 export type GameIrStopInput = GameIrResumeInput & Readonly<{ reason: string }>
+export type GameIrReviseInput = Readonly<{ handle: GameIrHandle; expectedResultDigest: string; draft: unknown }>
 
 export const gameIrHandleSchema = z.object({
   protocolVersion: z.literal(1), producer: z.literal('game-ir'), id: z.string().regex(/^[a-f0-9]{64}$/),
@@ -78,9 +79,10 @@ export type GameIrOperations = Readonly<{
   resume(input: GameIrResumeInput): Promise<GameIrResult>
   stop(input: GameIrStopInput): Promise<GameIrResult>
   readResult(input: Readonly<{ handle: GameIrHandle; foundationRevision: string }>): Promise<GameIrPublishedView>
+  revise(input: GameIrReviseInput): Promise<GameIrResult>
 }>
 
-/** Public boundary: only the four lifecycle operations and a verified result reader escape. */
+/** Public lifecycle, verified reads, and explicit immutable corrections. */
 export function createGameIrStage(
   config: GameIrConfiguration,
   infrastructure: GameIrInfrastructure,
@@ -98,5 +100,6 @@ export function createGameIrStage(
     resume: input => invoke(() => operations.resume(input)),
     stop: input => invoke(() => operations.stop(input)),
     readResult: input => invoke(() => operations.readResult(input)),
+    revise: input => invoke(() => operations.revise(input)),
   })
 }

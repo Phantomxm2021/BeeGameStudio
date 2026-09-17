@@ -1,6 +1,7 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { LogOut } from 'lucide-react';
 import { ProfileAvatarButton } from '../ProfileAvatarButton';
+import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from '../../beui/registry/components/motion/popover-morph';
 
 export interface UserAccountMenuItem {
     key: string;
@@ -43,27 +44,7 @@ export function UserAccountMenu({
     onSignOut,
 }: UserAccountMenuProps) {
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-    const containerRef = useRef<HTMLDivElement | null>(null);
     const userLabel = currentUserDisplayName || currentUserEmail || (currentUserId ? fallbackUserLabel : undefined);
-
-    useEffect(() => {
-        if (!isUserMenuOpen) return undefined;
-        const handlePointerDown = (event: PointerEvent) => {
-            if (!containerRef.current?.contains(event.target as Node)) {
-                setIsUserMenuOpen(false);
-            }
-        };
-        document.addEventListener('pointerdown', handlePointerDown);
-        return () => document.removeEventListener('pointerdown', handlePointerDown);
-    }, [isUserMenuOpen]);
-
-    const handleUserButtonClick = () => {
-        if (!currentUserId) {
-            onOpenLogin();
-            return;
-        }
-        setIsUserMenuOpen((value) => !value);
-    };
 
     const handleItemClick = (item: UserAccountMenuItem) => {
         setIsUserMenuOpen(false);
@@ -76,29 +57,21 @@ export function UserAccountMenu({
     };
 
     return (
-        <div
-            ref={containerRef}
-            className={`${className} transition-opacity duration-200 ${isTransitioning ? 'opacity-0' : 'opacity-100'}`.trim()}
-        >
-            <ProfileAvatarButton
-                type="button"
-                aria-label={ariaLabel}
-                aria-haspopup="menu"
-                aria-expanded={currentUserId ? isUserMenuOpen : undefined}
-                avatarUrl={currentUserAvatarUrl}
-                userLabel={userLabel}
-                anonymous={!currentUserId}
-                onClick={handleUserButtonClick}
-                className={isActive || isUserMenuOpen ? 'ring-2 ring-ring' : ''}
-            />
-
-            {currentUserId && isUserMenuOpen ? (
-                <div
-                    role="menu"
-                    aria-label={ariaLabel}
-                    data-testid="beegame-user-settings-menu"
-                    className="absolute right-0 top-14 z-[140] w-64 overflow-hidden rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-lg"
-                >
+        <div className={`${className} transition-opacity duration-200 ${isTransitioning ? 'opacity-0' : 'opacity-100'}`.trim()}>
+            {currentUserId ? (
+                <MorphPopover open={isUserMenuOpen} onOpenChange={setIsUserMenuOpen}>
+                    <MorphPopoverTrigger>
+                        <ProfileAvatarButton
+                            type="button"
+                            aria-label={ariaLabel}
+                            avatarUrl={currentUserAvatarUrl}
+                            userLabel={userLabel}
+                            anonymous={false}
+                            className={isActive || isUserMenuOpen ? 'ring-2 ring-ring' : ''}
+                        />
+                    </MorphPopoverTrigger>
+                    <MorphPopoverContent side="bottom" align="end" sideOffset={10} radius={12} className="z-[140] w-64 overflow-hidden rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-lg">
+                        <div role="menu" aria-label={ariaLabel} data-testid="beegame-user-settings-menu" className="border-border bg-popover">
                     <div className="px-3 py-3">
                         <div className="truncate text-base font-semibold text-foreground">{userLabel}</div>
                         {currentUserEmail ? (
@@ -135,8 +108,20 @@ export function UserAccountMenu({
                             </button>
                         </>
                     ) : null}
-                </div>
-            ) : null}
+                        </div>
+                    </MorphPopoverContent>
+                </MorphPopover>
+            ) : (
+                <ProfileAvatarButton
+                    type="button"
+                    aria-label={ariaLabel}
+                    avatarUrl={currentUserAvatarUrl}
+                    userLabel={userLabel}
+                    anonymous
+                    onClick={onOpenLogin}
+                    className={isActive ? 'ring-2 ring-ring' : ''}
+                />
+            )}
         </div>
     );
 }

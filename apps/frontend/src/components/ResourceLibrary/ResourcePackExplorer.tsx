@@ -170,7 +170,7 @@ function ExplorerNodeRow({ node, selectedElementId, selectedElementIds, selected
   const guideLeft = Math.max(6, node.level * INDENT - 9)
 
   return <div
-      className={`relative flex h-[30px] min-w-0 items-center gap-1 rounded-[5px] pr-2 text-[12px] leading-none transition-colors ${
+      className={`relative flex h-[30px] min-w-0 items-center gap-1 rounded-[5px] pr-2 text-xs leading-4 transition-colors ${
         isSelected
           ? 'bg-accent text-accent-foreground'
           : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'

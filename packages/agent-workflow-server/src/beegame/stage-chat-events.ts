@@ -1,6 +1,7 @@
 export type StageChatEventType =
   | 'assistant.message'
   | 'assistant.partial'
+  | 'assistant.thinking'
   | 'tool.started'
   | 'tool.completed'
   | 'tool.failed'
@@ -8,6 +9,8 @@ export type StageChatEventType =
 export type StageChatEvent = Readonly<{
   type: StageChatEventType
   text: string
+  /** Stable native invocation identity. Keeps streamed blocks separate. */
+  turnId?: string
   payload?: { type: string; [key: string]: unknown }
 }>
 
@@ -49,27 +52,52 @@ function toolResultText(value: unknown): string {
 
 /**
  * Projects the user-visible part of one native CLI invocation into Chat.
- * Hidden reasoning, usage envelopes and stream protocol noise are intentionally
- * excluded. The CLI remains the agent; this adapter only preserves its normal
- * replies and tool activity.
+ * The CLI remains the agent. This adapter preserves its visible replies, tool
+ * activity, and explicitly emitted thinking deltas for the Chat UI.
  */
 export function createStageChatProjector(input: {
-  stage: 'author' | 'reviewer' | 'game-ir'
+  stage: 'author' | 'content' | 'reviewer' | 'revision' | 'game-ir'
   sink?: StageChatSink
 }) {
   const tools = new Map<string, { name: string; input?: unknown }>()
   const toolResults = new Set<string>()
   const assistantMessages = new Set<string>()
+  const activeThinking = new Set<string>()
+
+  const closeThinking = async (turnId: string | undefined, reason: string) => {
+    if (!turnId || !activeThinking.delete(turnId) || !input.sink) return
+    await input.sink({ type: 'assistant.thinking', text: 'Thinking', turnId,
+      payload: { type: 'assistant.thinking', status: 'ended', reason,
+        workflowStage: input.stage, workflowStageStreamId: turnId,
+        thinkingBlockId: turnId } })
+  }
 
   return async (message: NativeMessage): Promise<void> => {
     if (!input.sink) return
-    const source = { workflowStage: input.stage }
+    const queryId = typeof message.queryId === 'string' ? message.queryId : undefined
+    const turnId = queryId ? `workflow-stage:${input.stage}:${queryId}` : undefined
+    const source = { workflowStage: input.stage, ...(turnId ? { workflowStageStreamId: turnId } : {}) }
+
+    if (message.type === 'thinking_end') {
+      await closeThinking(turnId, 'native_query_end')
+      return
+    }
 
     if (message.type === 'stream_event') {
       const event = object(message.event)
       const delta = object(event?.delta)
       if (event?.type === 'content_block_delta' && delta?.type === 'text_delta' && typeof delta.text === 'string' && delta.text) {
-        await input.sink({ type: 'assistant.partial', text: delta.text, payload: { type: 'assistant.partial', ...source } })
+        await closeThinking(turnId, 'visible_output_started')
+        await input.sink({ type: 'assistant.partial', text: delta.text, turnId,
+          payload: { type: 'assistant.partial', ...source } })
+      }
+      if (event?.type === 'content_block_delta' && delta?.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking) {
+        const nativeKey = typeof message.workflowStageNativeKey === 'string' ? message.workflowStageNativeKey : undefined
+        if (turnId) activeThinking.add(turnId)
+        await input.sink({ type: 'assistant.thinking', text: delta.thinking, turnId,
+          payload: { type: 'assistant.thinking', status: 'streaming', ...source,
+            ...(turnId ? { thinkingBlockId: turnId } : {}),
+            ...(nativeKey ? { workflowStageNativeKey: nativeKey } : {}) } })
       }
       return
     }
@@ -82,6 +110,7 @@ export function createStageChatProjector(input: {
         const name = typeof block.name === 'string' && block.name ? block.name : 'Tool'
         if (tools.has(block.id)) continue
         tools.set(block.id, { name, ...(block.input !== undefined ? { input: block.input } : {}) })
+        await closeThinking(turnId, 'tool_started')
         await input.sink({
           type: 'tool.started',
           text: name,
@@ -92,8 +121,9 @@ export function createStageChatProjector(input: {
       }
       const text = visibleText(body?.content).trim()
       if (!text || (messageId && assistantMessages.has(messageId))) return
+      await closeThinking(turnId, 'visible_output_started')
       if (messageId) assistantMessages.add(messageId)
-      await input.sink({ type: 'assistant.message', text,
+      await input.sink({ type: 'assistant.message', text, turnId,
         payload: { type: 'assistant.message', ...(messageId ? { messageId,
           workflowStageNativeKey: `${input.stage}:assistant:${messageId}` } : {}), ...source } })
       return

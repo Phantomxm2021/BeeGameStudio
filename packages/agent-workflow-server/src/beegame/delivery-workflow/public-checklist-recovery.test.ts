@@ -68,7 +68,6 @@ function downstreamDispatchRequest(
           }),
         ),
         irResultId: fixtureDigest('accepted-ir-result'),
-        irModules: [{ moduleId: 'implementation-verification', nodes: [] }],
       },
     },
   }

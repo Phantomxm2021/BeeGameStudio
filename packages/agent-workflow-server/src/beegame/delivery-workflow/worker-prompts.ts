@@ -60,7 +60,7 @@ function formatGameIrInstruction(request: WorkerDispatchRequest): string {
   if (typeof gameIr !== 'object' || Array.isArray(gameIr))
     throw new Error('gameIr contract must be an object')
   return [
-    'The injected contract.gameIr is the sole fixed Game IR version for this dispatch. Use its resultId, foundationRevision and publicationId to identify the stable publication, and use its module values, node IDs, references and edges exactly as authority.',
+    'The injected contract.gameIr is the sole fixed Game IR version for this dispatch. Use its resultId, foundationRevision and publicationId to identify the stable publication, then consume its parameters, assets, scenes, ui, vfx and logic directly.',
     'Source documents and other prose explain design only; they must not silently produce a second specification. If they conflict with contract.gameIr, report the contradiction as an actionable finding for this worker and do not recompile, regenerate or mutate Game IR.',
   ].join(' ')
 }
@@ -107,7 +107,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
       return [
         'Create the engine-neutral Scene2D and UI content package in one normal CLI turn from the injected fixed Game IR and Asset Manifest.',
         'Write content/index.json, scene files under content/scenes/, and UI files under content/ui/. Keep world-space Scene content and screen-space UI content separate.',
-        'Reference IR nodes through irRefs and verified Manifest resources through assetRefs. Do not embed asset paths or URLs, create a second resource registry, write target-engine code, or expand into VFX, characters, animation, audio or gameplay implementation.',
+        'Reference IR entry IDs through irRefs and verified Manifest resources through assetRefs. Do not embed asset paths or URLs, create a second resource registry, write target-engine code, or expand into VFX, characters, animation, audio or gameplay implementation.',
         'Finish after the coherent Scene/UI package is complete. The host performs deterministic schema, revision, reference and hierarchy validation.',
       ].join(' ')
     case 'implementation-worker':
@@ -152,7 +152,7 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
           ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
           : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
     case 'resource-planner':
-      return 'Finish the complete assets/ resource contract, verify the Manifest and local resources, then end the turn normally. The host owns deterministic acceptance and receipt generation.'
+      return 'The contract includes a read-only validation command using the host checks. Use its diagnostics when checking the delivery. Summarize the produced assets and observed validation result; final stage acceptance and receipt generation belong to the host.'
     case 'content-author':
       return 'Finish the Scene2D and UI package under content/, then end the turn normally. The host validates the package and creates its receipt.'
     case 'implementation-worker':

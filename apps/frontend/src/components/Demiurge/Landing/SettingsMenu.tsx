@@ -1187,7 +1187,7 @@ export function SettingsMenu({
                     <select
                       value={lang}
                       onChange={event => onSetLang(event.target.value as Language)}
-                      className="h-10 w-full rounded-lg border border-input bg-background px-3 text-[16px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30 min-[900px]:text-md"
+                      className="h-10 w-full rounded-lg border border-input bg-background px-3 type-input text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30 min-[900px]:text-md"
                     >
                       {LANGUAGE_OPTIONS.map(option => (
                         <option key={option.code} value={option.code}>

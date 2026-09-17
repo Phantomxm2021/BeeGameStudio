@@ -391,6 +391,38 @@ describe('DashboardView runtime loading', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('resumes a durable Game IR public stage once when reconnecting', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ status: 'running' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    mockedProjectStatus = {
+      ...mockedProjectStatus,
+      phase: 'DOCUMENT_REVIEW',
+      blocked: false,
+      workflow: {
+        runId: 'run_ir_reconnect',
+        status: 'running',
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'GAME_IR_COMPILATION',
+        executionStatus: 'working',
+        resumeOnReconnect: true,
+        tasks: [
+          { id: 'game-ir-public-stage', title: 'Game IR', status: 'running' },
+        ],
+      },
+    };
+
+    render(<DashboardView projectId="proj_1" projectName="Project One" lang="zh" onSetLang={vi.fn()} />);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/projects/proj_1/workflow/resume',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
   it('does not reconnect-resume a completed workflow or a workflow with an active worker', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

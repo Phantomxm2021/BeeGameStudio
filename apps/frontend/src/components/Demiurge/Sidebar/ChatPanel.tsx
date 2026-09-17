@@ -12,7 +12,7 @@ import { type ChatDisplayMessage, type ProjectRuntimeDisplayModel, type Permissi
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 import { Button } from '../../beui/project-button';
-import { ApprovalCard, type ApprovalCardAnswers } from '../../beui/registry/components/agents/approval-card';
+import { ToolApproval, ToolApprovalCode } from '../../beui/registry/components/agents/tool-approval';
 import { PromptInput } from '../../beui/registry/components/agents/prompt-input';
 
 interface ChatPanelProps {
@@ -53,6 +53,8 @@ interface ChatPanelProps {
     pendingPermissions: PermissionDisplayModel[];
     waitingPermission: WaitingPermissionState;
     projectStatus?: ProjectRuntimeDisplayModel | null;
+    onWorkflowAction?: (action: 'resume' | 'retry') => void | Promise<void>;
+    isWorkflowActionPending?: boolean;
     isComposerLocked?: boolean;
     canSendMessage?: boolean;
     lang?: Language;
@@ -146,48 +148,34 @@ const BeUiPermissionPanel = ({
     const isNetworkPermission = permission.permission_tool_name === 'SandboxNetworkAccess';
     const supportsSessionPermission = isNetworkPermission || permission.permission_tool_name === 'ResourceLibrary';
     const approvalStatus = isAllowPending || isDenyPending
-        ? 'submitting'
+        ? 'approving'
         : permissionState.gateId === permission.gate_id && permissionState.phase === 'failed'
-            ? 'rejected'
+            ? 'error'
             : 'pending';
-    const submitApproval = (answers: ApprovalCardAnswers) => {
-        const decision = answers.permission?.selected[0];
-        if (decision === 'allow-once') {
-            void onResolveToolPermission?.(toPermissionPayload(permission), 'allow', 'once');
-        } else if (decision === 'allow-session' && supportsSessionPermission) {
-            void onResolveToolPermission?.(toPermissionPayload(permission), 'allow', 'session');
-        } else if (decision === 'deny') {
-            void onResolveToolPermission?.(toPermissionPayload(permission), 'deny');
-        }
-    };
+    const parameterLabel = command ? text.permissionCommandLabel : text.permissionTargetLabel;
+    const toolName = permission.permission_tool_name || (command ? 'terminal.run' : 'workspace.access');
 
     return (
         <div data-testid="beegame-permission-panel" className="mb-3">
-            <ApprovalCard
+            <ToolApproval
+                tool={toolName}
                 title={command ? text.permissionBashTitle : text.permissionToolTitle}
-                description={<><span>{text.permissionPanelDescription}</span> <span>{text.permissionRiskGeneric}</span></>}
-                questions={[{
-                    id: 'permission',
-                    title: command ? text.permissionBashTitle : text.permissionToolTitle,
-                    description: <>
-                        <span>{text.permissionPanelDescription}</span>{' '}
-                        <span>{text.permissionRiskGeneric}</span>
-                        <span className="mt-2 block text-xs text-[var(--text-secondary)]">
-                            <span className="font-medium">{command ? text.permissionCommandLabel : text.permissionTargetLabel}:</span>{' '}{target}
-                        </span>
-                    </>,
-                    options: [
-                        { value: 'allow-once', label: text.allowOnce || 'Allow once' },
-                        { value: 'allow-session', label: text.allowForSession || 'Allow for this session', disabled: !supportsSessionPermission },
-                        { value: 'deny', label: text.deny || 'Deny' },
-                    ],
-                }]}
                 status={approvalStatus}
-                defaultAnswers={{ permission: { selected: [], custom: '' } }}
-                onSubmit={submitApproval}
-                submitLabel={text.continue || 'Continue'}
-                result={permissionState.message || text.permissionPendingPlaceholder}
-                className="bg-transparent p-0 text-[var(--text-primary)]"
+                description={`${text.permissionPanelDescription} ${text.permissionRiskGeneric}`}
+                parameters={[{
+                    id: command ? 'command' : 'target',
+                    label: parameterLabel,
+                    value: command ? <ToolApprovalCode code={target} language="bash" /> : target,
+                }]}
+                onApprove={() => void onResolveToolPermission?.(toPermissionPayload(permission), 'allow', 'once')}
+                onAlwaysAllow={supportsSessionPermission
+                    ? () => void onResolveToolPermission?.(toPermissionPayload(permission), 'allow', 'session')
+                    : undefined}
+                onDeny={() => void onResolveToolPermission?.(toPermissionPayload(permission), 'deny')}
+                approveLabel={text.allowOnce || 'Allow once'}
+                alwaysAllowLabel={text.allowForSession || 'Allow for this session'}
+                denyLabel={text.deny || 'Deny'}
+                className="text-[var(--text-primary)]"
             />
         </div>
     );
@@ -219,6 +207,8 @@ export const ChatPanel = memo(({
     pendingPermissions,
     waitingPermission,
     projectStatus,
+    onWorkflowAction,
+    isWorkflowActionPending = false,
     isComposerLocked = false,
     canSendMessage = true,
     lang = 'en',
@@ -243,6 +233,10 @@ export const ChatPanel = memo(({
                 : [],
         );
     const activeBeeGamePermission = activeBeeGamePermissions[0];
+    const workflowAction = projectStatus?.workflow?.nextAction;
+    const workflowActionLabel = workflowAction === 'retry'
+        ? 'Retry workflow'
+        : 'Continue workflow';
     const isComposerDisabled = !canSendMessage || isComposerLocked || isLoading || waitingPermission.isBlockingChat || Boolean(activeBeeGamePermission);
     const handleImageFiles = async (files: File[]) => {
         if (!files.length || !onAddAttachments) return;
@@ -309,6 +303,24 @@ export const ChatPanel = memo(({
                 />
             </MessageScroller>
             <div className={composerShellClassName}>
+                {workflowAction && onWorkflowAction ? (
+                    <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
+                        <p className="type-caption-1 text-[var(--text-secondary)]">
+                            {workflowAction === 'retry'
+                                ? 'This workflow needs another attempt.'
+                                : 'This workflow is ready to continue.'}
+                        </p>
+                        <Button
+                            type="button"
+                            size="sm"
+                            disabled={isWorkflowActionPending || isLoading}
+                            onClick={() => void onWorkflowAction(workflowAction)}
+                            data-testid="beegame-workflow-action"
+                        >
+                            {isWorkflowActionPending ? 'Working…' : workflowActionLabel}
+                        </Button>
+                    </div>
+                ) : null}
                 {activeBeeGamePermissions.map(permission => (
                     <BeUiPermissionPanel
                         key={permission.gate_id}

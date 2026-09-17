@@ -64,24 +64,19 @@ const logDashboardReadError = (label: string, error: unknown): void => {
   }
 };
 
-const shouldResumeFoundationReviewOnReconnect = (
+const shouldResumePublicStageOnReconnect = (
   workflow: ProjectRuntimeDisplayModel['workflow'],
 ): boolean => {
   if (
     !workflow ||
     workflow.status !== 'running' ||
-    workflow.currentPhase !== 'DOCUMENT_REVIEW' ||
-    workflow.documentStep !== 'FOUNDATION_REVIEW' ||
-    workflow.worker ||
-    workflow.executionStatus === 'working'
+    workflow.worker
   ) {
     return false;
   }
-  // The server owns the reconnect decision. A running foundation task can be
-  // left in the durable snapshot after its transport disappears; the task
-  // list alone cannot distinguish that state from a live worker or a task
-  // that is still being reconciled. Only resume when the service projection
-  // explicitly marks this run for reconnect recovery.
+  // The server owns the reconnect decision for every public stage. The task
+  // list and display status cannot distinguish a live stage from one whose
+  // in-process watcher disappeared, so only act on the explicit projection.
   return workflow.resumeOnReconnect === true;
 };
 
@@ -104,6 +99,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   const [creditSummary, setCreditSummary] = useState<BeeGameUsageSummary | null>(null);
   const [deploymentHistory, setDeploymentHistory] = useState<BeeGameDeploymentPayload[]>([]);
   const [isDeployingProject, setDeployingProject] = useState(false);
+  const [isWorkflowActionPending, setWorkflowActionPending] = useState(false);
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const creditRefreshPromiseRef = useRef<{ projectId: string; promise: Promise<void> } | null>(null);
@@ -433,12 +429,28 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     if (failedResult) throw failedResult.reason;
   }, [loadProjectRuntimeState, projectId, translateBeeGame]);
 
+  const handleWorkflowAction = useCallback(async (action: 'resume' | 'retry') => {
+    setWorkflowActionPending(true);
+    try {
+      if (action === 'retry') {
+        await api.retryWorkflow(projectId);
+      } else {
+        await api.resumeWorkflow(projectId);
+      }
+      await loadProjectRuntimeState(projectId);
+    } catch (error) {
+      showError(getErrorMessage(error, 'Unable to continue the workflow.'));
+    } finally {
+      setWorkflowActionPending(false);
+    }
+  }, [loadProjectRuntimeState, projectId, showError]);
+
   useEffect(() => {
     if (
       authenticationStatus !== 'authenticated' ||
       !hasCurrentRuntimeSnapshot ||
       reconnectResumeProjectRef.current === projectId ||
-      !shouldResumeFoundationReviewOnReconnect(projectRuntimeDisplay?.workflow)
+      !shouldResumePublicStageOnReconnect(projectRuntimeDisplay?.workflow)
     ) {
       return;
     }
@@ -615,6 +627,8 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         permissionState={permissionState}
         pendingPermissions={permissionDisplayModels}
         projectStatus={projectRuntimeDisplay}
+        onWorkflowAction={handleWorkflowAction}
+        isWorkflowActionPending={isWorkflowActionPending}
         waitingPermission={waitingPermission}
         canSendMessage={canSendMessage}
         canApproveTool={canApproveTool}

@@ -190,7 +190,7 @@ function validFiles(workspacePath: string): void {
 const authority = () => ({
   irRevision: IR_REVISION,
   assetManifestRevision: ASSET_REVISION,
-  irNodeIds: ['world.main', 'presentation.hud'],
+  irEntryIds: ['world.main', 'presentation.hud'],
   manifest: manifest(),
 })
 
@@ -245,7 +245,7 @@ describe('Game Content Package scene and UI contract', () => {
     const audit = auditBeeGameContentPackage(root, authority())
 
     expect(audit.valid).toBe(false)
-    expect(audit.issues.join('\n')).toContain('unknown IR node world.unknown')
+    expect(audit.issues.join('\n')).toContain('unknown IR entry world.unknown')
     expect(audit.issues.join('\n')).toContain(
       'asset is not verified: asset.unverified',
     )

@@ -1,7 +1,6 @@
 import { readBeeGameAssetManifest } from '../asset-contracts'
 import { transitionDeliveryRun } from './transition'
 import { isWorkflowEvidenceFile } from './evidence'
-import { resourceIrDeliveryIssues } from './resource-ir-delivery'
 import type { ImplementationTask, DeliveryRun, WorkerDispatchRequest } from './types'
 import type { WorkerTerminalResult } from './worker-contracts'
 
@@ -61,16 +60,6 @@ export function implementationCompletionIssue(input: {
       : []),
     ...(!evidenceRefsMatch
       ? ['evidenceRefs must contain exactly the canonical evidencePath']
-      : []),
-    ...(input.workspacePath && input.gameIr
-      ? resourceIrDeliveryIssues({
-          gameIr: input.gameIr,
-          workspacePath: input.workspacePath,
-          artifactClasses: [
-            'runtime-resource',
-            'generated-output',
-          ],
-        })
       : []),
   ]
   return issues.length

@@ -4,7 +4,7 @@
  * Root component for the BeeGame frontend.
  */
 
-import { lazy, Suspense, useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import ErrorBoundary from './components/Common/ErrorBoundary';
 import { useProjectStore } from './store/projectStore';
@@ -76,6 +76,9 @@ function App() {
   const authenticationRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedProtectedDataUserRef = useRef<string | null>(null);
   const activeProject = projects.find(p => p.id === activeProjectId);
+  const isDashboardVisible = Boolean(
+    authenticationStatus === 'authenticated' && activeProjectId && activeProject && !isResourceRoute,
+  );
 
   useEffect(() => {
     const syncResourceRoute = () => setIsResourceRoute(isResourceLibraryRoute());
@@ -83,10 +86,11 @@ function App() {
     return () => window.removeEventListener('popstate', syncResourceRoute);
   }, []);
 
-  // Keep the app shell and native controls on the same theme.
-  useEffect(() => {
-    applyThemeToDocument(isDark);
-  }, [isDark]);
+  // Landing and resource surfaces are always light. The persisted theme belongs
+  // to the project dashboard and is applied only while that surface is active.
+  useLayoutEffect(() => {
+    applyThemeToDocument(isDashboardVisible ? isDark : false);
+  }, [isDashboardVisible, isDark]);
 
   // Initialize toast callbacks
   useEffect(() => {
@@ -237,11 +241,11 @@ function App() {
   return (
     <ErrorBoundary>
       {/* If we have an active project ID and valid project, render the Dashboard */}
-      {authenticationStatus === 'authenticated' && activeProjectId && activeProject && !isResourceRoute ? (
+      {isDashboardVisible ? (
         <Suspense fallback={<div className="grid min-h-screen place-items-center bg-background"><span className="size-7 animate-spin rounded-full border-2 border-border/20 border-t-ring" /></div>}>
           <DashboardView
-            projectId={activeProjectId}
-            projectName={activeProject.name || 'Untitled Project'}
+            projectId={activeProjectId!}
+            projectName={activeProject?.name || 'Untitled Project'}
             lang={lang}
             onSetLang={setLang}
             onBack={clearActiveProject}

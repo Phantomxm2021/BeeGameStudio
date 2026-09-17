@@ -103,7 +103,7 @@ describe('ChatPanel approval bar', () => {
         expect(screen.queryByTestId('beegame-permission-panel')).not.toBeInTheDocument();
     });
 
-    it('shows BeeGame permission requests in a panel above the composer instead of replacing the input', () => {
+    it('shows BeeGame permission requests in a panel above the composer instead of replacing the input', async () => {
         renderChatPanel({
             actionPermission: beeGamePermissionReview,
             pendingPermissions: [beeGamePermissionReview],
@@ -113,17 +113,18 @@ describe('ChatPanel approval bar', () => {
 
         expect(screen.getByTestId('beegame-permission-panel')).toBeInTheDocument();
         expect(screen.getAllByText('BeeGame 想运行 Bash 命令').length).toBeGreaterThan(0);
-        expect(screen.getByText('npm create vite@latest . -- --template react-ts 2>&1')).toBeInTheDocument();
+        await userEvent.setup().click(screen.getByRole('button', { name: 'View details' }));
+        expect(screen.getAllByText((_, element) => element?.textContent === 'npm create vite@latest . -- --template react-ts 2>&1').length).toBeGreaterThan(0);
         expect(screen.queryByText('/Projects/BeeGameStudio/generated-game')).not.toBeInTheDocument();
         expect(screen.queryByText('作用范围')).not.toBeInTheDocument();
-        expect(screen.getByText('可能创建文件、安装依赖或访问网络')).toBeInTheDocument();
-        expect(screen.getByRole('radio', { name: '拒绝' })).toBeInTheDocument();
-        expect(screen.getByRole('radio', { name: '允许本次' })).toBeInTheDocument();
+        expect(screen.getByText(/可能创建文件、安装依赖或访问网络/)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '拒绝' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: '允许本次' })).toBeInTheDocument();
         expect(screen.getByPlaceholderText('等待权限确认')).toBeInTheDocument();
         expect(screen.queryByPlaceholderText('询问团队（Shift+Enter 换行）...')).not.toBeInTheDocument();
     });
 
-    it('maps Approval Card once and deny choices to the existing permission resolver', async () => {
+    it('maps Tool Approval actions to the existing permission resolver', async () => {
         const user = userEvent.setup();
         const { onResolveToolPermission } = renderChatPanel({
             actionPermission: beeGamePermissionReview,
@@ -132,8 +133,7 @@ describe('ChatPanel approval bar', () => {
             lang: 'zh',
         });
 
-        await user.click(screen.getByRole('radio', { name: '允许本次' }));
-        await user.click(screen.getByRole('button', { name: /Submit response|继续/i }));
+        await user.click(screen.getByRole('button', { name: '允许本次' }));
         expect(onResolveToolPermission).toHaveBeenCalledWith(
             expect.objectContaining({ gate_id: beeGamePermissionReview.gate_id }),
             'allow',
@@ -150,15 +150,14 @@ describe('ChatPanel approval bar', () => {
             variant: 'beegame',
             lang: 'zh',
         });
-        await user.click(screen.getAllByRole('radio', { name: '拒绝' }).at(-1)!);
-        await user.click(screen.getAllByRole('button', { name: /Submit response|继续/i }).at(-1)!);
+        await user.click(screen.getAllByRole('button', { name: '拒绝' }).at(-1)!);
         expect(onSecondResolve).toHaveBeenCalledWith(
             expect.objectContaining({ gate_id: 'gate_beegame_deny' }),
             'deny',
         );
     });
 
-    it('renders pending approvals in arrival order', () => {
+    it('renders pending approvals in arrival order', async () => {
         const secondPermission = {
             ...beeGamePermissionReview,
             gate_id: 'gate_second_permission',
@@ -174,7 +173,10 @@ describe('ChatPanel approval bar', () => {
         });
 
         expect(screen.getAllByTestId('beegame-permission-panel')).toHaveLength(2);
-        expect(screen.getByText('npm create vite@latest . -- --template react-ts 2>&1')).toBeInTheDocument();
+        const detailButtons = screen.getAllByRole('button', { name: 'View details' });
+        await userEvent.setup().click(detailButtons[0]);
+        await userEvent.setup().click(detailButtons[1]);
+        expect(screen.getAllByText((_, element) => element?.textContent === 'npm create vite@latest . -- --template react-ts 2>&1').length).toBeGreaterThan(0);
         expect(screen.getByText('GDD.md')).toBeInTheDocument();
     });
 
@@ -215,8 +217,7 @@ describe('ChatPanel approval bar', () => {
         });
 
         expect(screen.getByText('registry.example:443')).toBeInTheDocument();
-        await user.click(screen.getByRole('radio', { name: '当前会话允许' }));
-        await user.click(screen.getByRole('button', { name: /Submit response|继续/i }));
+        await user.click(screen.getByRole('button', { name: '当前会话允许' }));
         expect(onResolveToolPermission).toHaveBeenCalledWith(
             expect.objectContaining({ gate_id: 'network_permission' }),
             'allow',
@@ -240,8 +241,7 @@ describe('ChatPanel approval bar', () => {
             lang: 'zh',
         });
 
-        await user.click(screen.getByRole('radio', { name: '当前会话允许' }));
-        await user.click(screen.getByRole('button', { name: /Submit response|继续/i }));
+        await user.click(screen.getByRole('button', { name: '当前会话允许' }));
         expect(onResolveToolPermission).toHaveBeenCalledWith(
             expect.objectContaining({ gate_id: 'resource_library_permission' }),
             'allow',
@@ -263,7 +263,7 @@ describe('ChatPanel approval bar', () => {
             'bg-transparent',
             'px-2',
             'pt-1.5',
-            'text-[16px]',
+            'type-input',
             'scrollbar-hide',
         );
         expect(screen.getByPlaceholderText(/ask team/i)).not.toHaveClass('pb-14');
@@ -337,7 +337,7 @@ describe('ChatPanel approval bar', () => {
         const thinkingMessage = screen.getByTestId('beegame-agent-activity-group');
         expect(thinkingMessage).toBeInTheDocument();
         expect(thinkingMessage.querySelector('[data-state="working"]')).not.toBeNull();
-        expect(thinkingMessage.querySelector('[role="status"]')).toHaveTextContent('Thinking…');
+        expect(thinkingMessage.querySelector('[role="status"]')).toHaveTextContent('Reasoning…');
     });
 
     it('matches a streamed content block to its parent assistant message id', () => {
@@ -724,6 +724,20 @@ describe('ChatPanel approval bar', () => {
         expect(screen.getByTestId('beegame-agent-activity-group').querySelector('[data-content="text"]')).toBeInTheDocument();
     });
 
+    it('keeps adjacent thinking from separate turns in separate activities', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            messages: [
+                { id: 'thought-turn-a', sender: 'beegame', content: 'Thinking', thought: 'First task', timestamp: 1, type: 'thought', taskKind: 'assistant_thinking', turnId: 'turn-a' },
+                { id: 'thought-turn-b', sender: 'beegame', content: 'Thinking', thought: 'Second task', timestamp: 2, type: 'thought', taskKind: 'assistant_thinking', turnId: 'turn-b' },
+            ],
+        });
+
+        expect(screen.getAllByTestId('beegame-agent-activity-group')).toHaveLength(2);
+    });
+
     it('keeps activity segments around markdown and todo parts in response order', () => {
         renderChatPanel({
             actionPermission: undefined,
@@ -768,7 +782,7 @@ describe('ChatPanel approval bar', () => {
         expect(screen.queryByText('Stop streaming')).not.toBeInTheDocument();
     });
 
-    it('keeps complete structured subagent fields available inside the activity', async () => {
+    it('opens structured subagent details in a dedicated view', async () => {
         const prompt = 'Prompt '.repeat(80);
         const output = 'Output '.repeat(80);
         renderChatPanel({
@@ -778,8 +792,59 @@ describe('ChatPanel approval bar', () => {
             messages: [{ id: 'm_subagent', sender: 'system', type: 'tool', toolName: 'Task', toolStatus: 'completed', isSubagentTool: true, subagentPrompt: prompt, subagentOutput: output, content: 'Task completed', timestamp: 1 }],
         });
 
-        const activity = screen.getByTestId('beegame-agent-activity-group');
+        const disclosure = screen.getByTestId('beegame-subagent-disclosure-m_subagent');
+        const trigger = within(disclosure).getByRole('button', { name: /Subagent/ });
+        expect(screen.queryByTestId('beegame-agent-activity-group')).not.toBeInTheDocument();
         expect(screen.queryByTestId('beegame-tool-output-m_subagent')).not.toBeInTheDocument();
+
+        await userEvent.setup().click(trigger);
+        const drawer = screen.getByRole('dialog', { name: 'Agent run details' });
+        expect(drawer).toHaveClass('z-[401]');
+        expect(within(drawer).getByTestId('beegame-agent-run-detail')).toBeInTheDocument();
+        expect(within(drawer).getByText(/Prompt Prompt/)).toBeInTheDocument();
+        expect(within(drawer).getByText(/Output Output/)).toBeInTheDocument();
+
+        await userEvent.setup().click(screen.getByRole('button', { name: 'Back to chat' }));
+        expect(screen.getByTestId('beegame-subagent-disclosure-m_subagent')).toBeInTheDocument();
+    });
+
+    it('renders a subagent task as Markdown inside its detail drawer', async () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            messages: [{
+                id: 'm_markdown_subagent', sender: 'system', type: 'tool', toolName: 'Task', toolStatus: 'completed', isSubagentTool: true,
+                subagentPrompt: '## Verify IR\n\n- Read `game-ir.json`\n- Confirm the schema',
+                content: 'Task completed', timestamp: 1,
+            }],
+        });
+
+        await userEvent.setup().click(within(screen.getByTestId('beegame-subagent-disclosure-m_markdown_subagent')).getByRole('button', { name: /Subagent/ }));
+        const drawer = screen.getByRole('dialog', { name: 'Agent run details' });
+        expect(within(drawer).getByRole('heading', { name: 'Verify IR' })).toBeInTheDocument();
+        expect(within(drawer).getByText('game-ir.json')).toBeInTheDocument();
+        expect(within(drawer).getByRole('list')).toHaveTextContent('Confirm the schema');
+    });
+
+    it('renders legacy worker history as its workflow stage without hiding the response', () => {
+        renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            messages: [{
+                id: 'm_resource_worker',
+                sender: 'beegame',
+                content: '正在生成资源。',
+                timestamp: 1,
+                taskKind: 'workflow_worker:resource-planner',
+                turnId: 'turn-resource',
+            }],
+        });
+
+        expect(screen.getByTestId('beegame-stage-separator-resources')).toHaveTextContent('Resource preparation');
+        expect(screen.getByText('正在生成资源。')).toBeInTheDocument();
+        expect(screen.queryByTestId('beegame-workflow-worker-disclosure')).not.toBeInTheDocument();
     });
 
     it('keeps oversized messages inside the dedicated scroll viewport', () => {
@@ -1270,6 +1335,45 @@ describe('ChatPanel approval bar', () => {
         expect(screen.queryByText(/\*\*交付内容\*\*/)).not.toBeInTheDocument();
     });
 
+    it('uses explicit presentation hints for detailed content and project artifacts', async () => {
+        const { onPreviewArtifact } = renderChatPanel({
+            actionPermission: undefined,
+            pendingPermissions: [],
+            variant: 'beegame',
+            messages: [
+                {
+                    id: 'm_chat_reply',
+                    sender: 'beegame',
+                    content: '这是正常的聊天回复，即使它包含 Markdown 也不应被猜成文章。',
+                    timestamp: 1,
+                },
+                {
+                    id: 'm_article_reply',
+                    sender: 'beegame',
+                    content: '### 详细设计\n\n这是明确标记的详细内容。',
+                    timestamp: 2,
+                    renderHint: 'article',
+                },
+                {
+                    id: 'm_artifact_reply',
+                    sender: 'beegame',
+                    content: '# 游戏设计文档\n\n已写入项目文件。',
+                    timestamp: 3,
+                    renderHint: 'artifact_card',
+                    artifactId: 'artifact_gdd',
+                    documentTitle: 'GDD.md',
+                    artifactType: 'GDD',
+                },
+            ],
+        });
+
+        expect(screen.queryByTestId('beegame-article-message-m_chat_reply')).not.toBeInTheDocument();
+        expect(screen.getByTestId('beegame-article-message-m_article_reply')).toBeInTheDocument();
+        const artifact = screen.getByRole('button', { name: /GDD\.md/i });
+        await userEvent.setup().click(artifact);
+        expect(onPreviewArtifact).toHaveBeenCalledWith('artifact_gdd', 'GDD.md', '# 游戏设计文档\n\n已写入项目文件。');
+    });
+
     it('renders write tool calls and preview actions inside the activity', async () => {
         renderChatPanel({
             actionPermission: undefined,
@@ -1436,7 +1540,7 @@ describe('ChatPanel approval bar', () => {
         const activity = screen.getByTestId('beegame-agent-activity-group');
         expect(activity.querySelector('[data-state="working"]')).toBeInTheDocument();
         expect(activity.querySelector('[role="region"]')).toHaveStyle({ height: '0px' });
-        expect(activity).toHaveTextContent('Running tools');
+        expect(activity).toHaveTextContent('Running command');
         expect(within(activity).getByText('Edit')).toBeInTheDocument();
         expect(within(activity).getAllByText('Run').length).toBeGreaterThan(0);
     });

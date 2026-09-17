@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   beeGameAdapter,
   getBeeGameWorkspaceSettings,
+  transcriptEventsToHistory,
 } from './beeGameAdapter';
 import { clearSupabaseSession, hydrateSupabaseSessionUser } from './supabaseAuthApi';
 import i18n from '../i18n';
@@ -160,6 +161,53 @@ describe('beeGameAdapter prompt rules', () => {
     clearSupabaseSession();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+  });
+
+  it('projects module and worker execution through the same workflow-stage identity', () => {
+    const history = transcriptEventsToHistory('project-1', [
+      {
+        id: 1,
+        sessionId: 'author-module',
+        type: 'assistant.message',
+        text: 'Document draft complete.',
+        payload: { type: 'assistant.message', workflowStage: 'author' },
+        createdAt: '2026-09-17T00:00:00.000Z',
+      },
+      {
+        id: 2,
+        sessionId: 'resource-worker',
+        type: 'assistant.message',
+        text: 'Resources ready.',
+        payload: { type: 'assistant.message', workflowWorkerType: 'resource-planner' },
+        createdAt: '2026-09-17T00:00:01.000Z',
+      },
+      ...[
+        ['content-author', 'content'],
+        ['foundation-reviewer', 'reviewer'],
+        ['foundation-document-reviser', 'revision'],
+        ['game-ir-compiler', 'game-ir'],
+        ['implementation-worker', 'implementation'],
+        ['acceptance-validator', 'acceptance'],
+      ].map(([workflowWorkerType], index) => ({
+        id: index + 3,
+        sessionId: `worker-${workflowWorkerType}`,
+        type: 'assistant.message',
+        text: 'Stage output.',
+        payload: { type: 'assistant.message', workflowWorkerType },
+        createdAt: `2026-09-17T00:00:0${index + 2}.000Z`,
+      })),
+    ]) as Array<{ taskKind?: string }>;
+
+    expect(history.map(message => message.taskKind)).toEqual([
+      'workflow_stage:author',
+      'workflow_stage:resources',
+      'workflow_stage:content',
+      'workflow_stage:reviewer',
+      'workflow_stage:revision',
+      'workflow_stage:game-ir',
+      'workflow_stage:implementation',
+      'workflow_stage:acceptance',
+    ]);
   });
 
   it('localizes quota failures through the API adapter while preserving error identity', async () => {
@@ -2709,13 +2757,16 @@ describe('beeGameAdapter prompt rules', () => {
     expect(firstPoll.messages.some(message => message.type === 'token')).toBe(false);
   });
 
-  it('maps BeeGame thinking events to one redacted start/end lifecycle', async () => {
+  it('preserves visible BeeGame thinking text between its start/end lifecycle', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
       if (path === '/api/beegame-sessions/beegame_thinking/events?after=0') {
         return jsonResponse([
           thinkingEvent(30, 'beegame_thinking', 'turn-1', 'started'),
-          thinkingEvent(31, 'beegame_thinking', 'turn-1', 'streaming'),
+          {
+            ...thinkingEvent(31, 'beegame_thinking', 'turn-1', 'streaming'),
+            text: '正在检查资源清单。',
+          },
           thinkingEvent(32, 'beegame_thinking', 'turn-1', 'ended'),
         ]);
       }
@@ -2728,9 +2779,9 @@ describe('beeGameAdapter prompt rules', () => {
 
     expect(polled.messages).toHaveLength(2);
     expect(polled.messages[0]).toEqual(expect.objectContaining({
-      type: 'think_start',
+      type: 'thought',
       sender: 'beegame',
-      content: 'Thinking',
+      content: '正在检查资源清单。',
       task_kind: 'assistant_thinking',
       message_id: 'beegame-thinking-turn-1',
     }));
@@ -2738,8 +2789,91 @@ describe('beeGameAdapter prompt rules', () => {
       type: 'think_end',
       sender: 'beegame',
       message_id: 'beegame-thinking-turn-1',
+      thinking_duration_ms: 2000,
     }));
-    expect(JSON.stringify(polled.messages)).not.toContain('private reasoning');
+    expect(JSON.stringify(polled.messages)).toContain('正在检查资源清单。');
+  });
+
+  it('uses the end lifecycle duration for persisted thinking history', () => {
+    const history = transcriptEventsToHistory('project-thinking-history', [
+      thinkingEvent(30, 'beegame_thinking_history', 'turn-1', 'started'),
+      {
+        ...thinkingEvent(31, 'beegame_thinking_history', 'turn-1', 'streaming'),
+        text: '正在检查资源清单。',
+      },
+      thinkingEvent(32, 'beegame_thinking_history', 'turn-1', 'ended'),
+    ]) as Array<{ type?: string; content?: string; thinkingDurationMs?: number }>
+
+    expect(history).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'thought',
+        content: '正在检查资源清单。',
+        thinkingDurationMs: 2000,
+      }),
+    ]))
+  })
+
+  it('keeps persisted thinking when that turn also has a final answer', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path === '/api/beegame-sessions/beegame_thinking_final/events?after=0') {
+        return jsonResponse([
+          {
+            ...thinkingEvent(30, 'beegame_thinking_final', 'turn-1', 'streaming'),
+            text: '先核对资源清单。',
+          },
+          {
+            ...thinkingEvent(31, 'beegame_thinking_final', 'turn-1', 'streaming'),
+            text: '再检查引用。',
+          },
+          assistantMessageEvent(32, 'beegame_thinking_final', 'turn-1', '检查完成。'),
+        ]);
+      }
+      return jsonResponse({ error: 'not found' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { project } = seedBoundProject('beegame_thinking_final', '/tmp/beegame-projects/thinking-final');
+    const polled = await beeGameAdapter.pollMessages(project.id, 0);
+
+    expect(polled.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'thought',
+        content: '先核对资源清单。再检查引用。',
+        message_id: 'beegame-thinking-turn-1',
+        thinking_duration_ms: 1000,
+      }),
+      expect.objectContaining({ type: 'agent_message', content: '检查完成。' }),
+    ]));
+  });
+
+  it('keeps distinct thinking executions separate within one agent turn', async () => {
+    const thinking = (id: number, block: string, status: 'streaming' | 'ended', text: string) => ({
+      ...thinkingEvent(id, 'beegame_thinking_blocks', 'turn-1', status), text,
+      payload: { type: 'assistant.thinking', status, thinkingBlockId: block },
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) =>
+      String(input) === '/api/beegame-sessions/beegame_thinking_blocks/events?after=0'
+        ? jsonResponse([
+          thinking(30, 'response-a:0', 'streaming', '先检查场景。'),
+          thinking(31, 'response-a:0', 'ended', 'Thinking'),
+          { id: 32, sessionId: 'beegame_thinking_blocks', turnId: 'turn-1', type: 'tool.started', text: 'Read', createdAt: '2026-06-21T00:00:32.000Z', payload: { type: 'tool.started', toolUseID: 'read-1', toolName: 'Read' } },
+          thinking(33, 'response-b:0', 'streaming', '再核对引用。'),
+          thinking(34, 'response-b:0', 'ended', 'Thinking'),
+        ])
+        : jsonResponse({ error: 'not found' }, 404),
+    ))
+
+    const { project } = seedBoundProject('beegame_thinking_blocks', '/tmp/beegame-projects/thinking-blocks')
+    const polled = await beeGameAdapter.pollMessages(project.id, 0)
+    const thoughts = polled.messages.filter(message => message.type === 'thought')
+
+    expect(thoughts).toHaveLength(2)
+    expect(thoughts.map(message => message.message_id)).toEqual([
+      'beegame-thinking-turn-1-response-a:0',
+      'beegame-thinking-turn-1-response-b:0',
+    ])
+    expect(thoughts.map(message => message.content)).toEqual(['先检查场景。', '再核对引用。'])
   });
 
   it('drops runtime output that arrives after its turn has ended', async () => {

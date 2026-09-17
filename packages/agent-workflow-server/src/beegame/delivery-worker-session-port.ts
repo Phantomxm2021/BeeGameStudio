@@ -659,18 +659,8 @@ async function createDeterministicResourcePlannerTerminal(input: {
   ]
   if (input.request.workerType !== 'resource-planner')
     throw new Error('resource planner terminal received another worker type')
-  if (!contract.present)
-    throw new Error(
-      'resource planner completed without assets/asset-manifest.json',
-    )
-  if (contract.requirements.length === 0)
-    throw new Error(
-      `resource planner canonical resource plan was rejected: ${
-        contract.issues.length
-          ? contract.issues.join('; ')
-          : 'requirements must contain at least one canonical requirement'
-      }`,
-    )
+  // A terminal means the CLI turn ended, not that its artifacts passed.
+  // completeResourceTask owns acceptance and recoverable artifact diagnostics.
   return resourcePlannerTerminalSchema.parse({
     revision: input.request.revision,
     workerType: 'resource-planner' as const,

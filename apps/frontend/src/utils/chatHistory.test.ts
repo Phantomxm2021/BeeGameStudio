@@ -167,6 +167,21 @@ describe('normalizeChatHistory semantic metadata', () => {
         expect(messages.every((message) => message.turnId === 'turn-replay')).toBe(true);
     });
 
+    it('preserves the persisted thinking duration for the Chat activity', () => {
+        const messages = normalizeChatHistory([
+            {
+                id: 'thought-duration',
+                sender: 'beegame',
+                content: 'Checking references.',
+                type: 'thought',
+                timestamp: 300,
+                thinking_duration_ms: 379_000,
+            },
+        ]);
+
+        expect(messages[0].thinkingDurationMs).toBe(379_000);
+    });
+
     it('preserves adapter-normalized camelCase tool block fields', () => {
         const messages = normalizeChatHistory([{
             id: 'assistant-tool',

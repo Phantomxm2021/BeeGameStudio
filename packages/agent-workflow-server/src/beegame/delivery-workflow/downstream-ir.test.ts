@@ -20,57 +20,55 @@ type MutablePublishedView = { -readonly [K in keyof GameIrPublishedView]: GameIr
 const cleanups: (() => Promise<void>)[] = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
 
-test('resource worker receives the complete published IR without source bindings', () => {
+test('malformed resource delivery becomes needs_action without a content dispatch or accepted receipt', async () => {
+  const f = await fixture()
+  await f.controller.resume(f.run)
+  const request = f.requests[0]!
+  await mkdir(join(f.workspace, 'assets'), { recursive: true })
+  await writeFile(join(f.workspace, 'assets/asset-manifest.json'), '{invalid')
+  await f.controller.dispatcher.completeDispatch(request.dispatchId!, {
+    workerType: 'resource-planner', status: 'completed', revision: request.revision, writtenPaths: [],
+  })
+  const run = (await f.controller.store.load())!
+  expect(run.status).toBe('needs_action')
+  expect(run.phase).toBe('RESOURCE_PREPARATION')
+  expect(run.blockedReason).toContain('valid JSON')
+  expect(run.resourceProductionState.deliveryReceipt).toBeUndefined()
+  expect(run.evidence.resourcePreparation).toBeUndefined()
+  expect(f.requests).toHaveLength(1)
+})
+
+test('resource worker receives the complete lightweight IR', () => {
   const ir = {
     resultId: 'result', foundationRevision: 'foundation', publicationId: 'publication',
-    modules: [
-      { moduleId: 'presentation', nodes: [{
-        id: 'art', kind: 'presentation.art-direction', producerMode: 'agent-authored',
-        value: {}, references: [], edges: [], bindings: { label: { documentPath: 'docs/ART_DIRECTION.md' } },
-      }] },
-      { moduleId: 'resource-realization', nodes: [{
-        id: 'resource', kind: 'logical-resource', producerMode: 'agent-authored',
-        value: {}, references: [], edges: [], bindings: { label: { documentPath: 'docs/ASSET_PLAN.md' } },
-      }] },
-    ],
+    parameters: { speed: 4 }, assets: [],
+    scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }],
+    ui: [], vfx: [], logic: { start: 'scene.main' },
   } as unknown as Parameters<typeof downstreamIrForWorker>[1]
 
   const projected = downstreamIrForWorker('resource-planner', ir)
-  expect(projected.modules.map(module => module.moduleId)).toEqual([
-    'presentation',
-    'resource-realization',
-  ])
-  expect(projected.modules[0]?.nodes[0]?.bindings).toEqual({})
-  expect(ir.modules[0]?.nodes[0]?.bindings).not.toEqual({})
+  expect(projected).toBe(ir)
+  expect(projected.scenes[0]?.id).toBe('scene.main')
 })
 
-test('implementation and acceptance receive published IR values without source bindings', () => {
+test('implementation and acceptance receive the same published IR', () => {
   const ir = {
     resultId: 'result', foundationRevision: 'foundation', publicationId: 'publication',
-    modules: [{ moduleId: 'gameplay', nodes: [{
-      id: 'state', kind: 'gameplay.state', producerMode: 'agent-authored',
-      value: { large: 'payload' }, references: ['other'], edges: [],
-      bindings: { source: { documentPath: 'docs/GDD.md' } },
-    }] }],
+    parameters: {}, assets: [], scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }],
+    ui: [], vfx: [], logic: { state: { large: 'payload' } },
   } as unknown as Parameters<typeof downstreamIrForWorker>[1]
 
   const projected = downstreamIrForWorker('implementation-worker', ir)
   expect(projected.resultId).toBe('result')
-  expect(projected.modules[0]?.nodes[0]).toMatchObject({
-    id: 'state', kind: 'gameplay.state', value: { large: 'payload' }, bindings: {},
-    references: ['other'],
-  })
+  expect(projected.logic).toEqual({ state: { large: 'payload' } })
   expect(downstreamIrForWorker('acceptance-validator', ir)).toEqual(projected)
-  expect(ir.modules[0]?.nodes[0]?.value).toEqual({ large: 'payload' })
 })
 
 test('resource repair keeps the complete IR publication', () => {
   const ir = {
     resultId: 'result', foundationRevision: 'foundation', publicationId: 'publication',
-    modules: [{ moduleId: 'resource-realization', nodes: [{
-      id: 'large-node', kind: 'resource-realization.logical-resource',
-      producerMode: 'semantic', value: {}, references: [], edges: [], bindings: {},
-    }] }],
+    parameters: {}, assets: [], scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }],
+    ui: [], vfx: [], logic: {},
   } as unknown as Parameters<typeof downstreamIrForRequest>[1]
   const request = {
     runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
@@ -81,10 +79,8 @@ test('resource repair keeps the complete IR publication', () => {
 
   expect(downstreamIrForRequest(request, ir)).toEqual({
     resultId: 'result', foundationRevision: 'foundation', publicationId: 'publication',
-    modules: [{ moduleId: 'resource-realization', nodes: [{
-      id: 'large-node', kind: 'resource-realization.logical-resource',
-      producerMode: 'semantic', value: {}, references: [], edges: [], bindings: {},
-    }] }],
+    parameters: {}, assets: [], scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }],
+    ui: [], vfx: [], logic: {},
   })
 })
 
@@ -102,9 +98,11 @@ async function fixture() {
   const outcome = run.gameIrStage!.outcome!
   if (outcome.status !== 'completed') throw new Error('fixture')
   const view: MutablePublishedView = { input: acceptedIrInput(run), ready: outcome.result,
-    candidate: { schemaVersion: 'game-ir.v1', taskId: 'game-ir-task', foundationRevision: outcome.result.foundationRevision,
-      modules: Object.keys(outcome.result.moduleDigests).map(moduleId => ({ moduleId, nodes: [] })) } as GameIrPublishedView['candidate'] }
+    candidate: { schemaVersion: 'game-ir.v2', taskId: 'game-ir-task', sourceRevision: outcome.result.foundationRevision,
+      parameters: {}, assets: [], scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }],
+      ui: [{ id: 'ui.hud', name: 'HUD', assetIds: [], config: {} }], vfx: [], logic: {} } }
   const ir: GameIrOperations = { async start() { return run.gameIrStage!.handle! }, async getResult() { return outcome },
+    async revise() { throw new Error('not used') },
     async resume() { return outcome }, async stop() { return outcome }, async readResult() { return structuredClone(view) } }
   const requests: WorkerDispatchRequest[] = []
   const workerPort: DeliveryWorkerPort = {
@@ -120,14 +118,38 @@ async function fixture() {
   return { ...f, run, view, ir, controller, requests, save }
 }
 
+test('IR correction rebinds idle resource preparation and requires explicit continuation', async () => {
+  const f = await fixture()
+  const old = f.run.gameIrStage!.outcome!
+  if (old.status !== 'completed') throw new Error('fixture')
+  const expectedResultDigest = foundationPublicDigest(old.result)
+  let revisions = 0
+  Object.assign(f.ir, { revise: async () => {
+    revisions++
+    f.view.ready = { ...old.result, publicationId: 'corrected', candidateDigest: 'a'.repeat(64) }
+    return { ...old, handle: { ...old.handle, id: 'b'.repeat(64) }, result: f.view.ready }
+  } })
+  await expect(f.controller.reviseGameIr({ expectedResultDigest, draft: {} })).rejects.toThrow('idle resource preparation')
+  await f.save({ ...f.run, status: 'failed' })
+  await expect(f.controller.reviseGameIr({ expectedResultDigest: 'c'.repeat(64), draft: {} })).rejects.toThrow('changed before correction')
+  const revised = await f.controller.reviseGameIr({ expectedResultDigest, draft: {} })
+  expect(revisions).toBe(1)
+  expect(revised.status).toBe('needs_action')
+  expect(revised.resourceProductionState.deliveryReceipt).toBeUndefined()
+  expect(revised.resourceProductionState.irResultId).toBeUndefined()
+  expect(revised.activeDispatch).toBeUndefined()
+  expect(f.requests).toHaveLength(0)
+  expect(revised.gameIrStage!.outcome).toMatchObject({ result: { publicationId: 'corrected' } })
+})
+
 test('resource and Scene/UI content receive the same complete IR publication', async () => {
   const f = await fixture()
   await f.controller.resume(f.run)
   const resource = f.requests[0]!
   expect(resource.workerType).toBe('resource-planner')
-  const gameIr = resource.contract.gameIr as { resultId: string; modules: unknown[] }
+  const gameIr = resource.contract.gameIr as { resultId: string; scenes: unknown[] }
   expect(gameIr.resultId).toBe(foundationPublicDigest(f.view.ready))
-  expect(gameIr.modules).toHaveLength(6)
+  expect(gameIr.scenes).toHaveLength(1)
   const content: DeliveryRun = { ...f.run, phase: 'GAME_CONTENT',
     revision: { ...f.run.revision, resource: fixtureDigest('resource') },
     resourceProductionState: { currentTask: 'RESOURCE_DELIVERED', irResultId: gameIr.resultId,
@@ -137,7 +159,7 @@ test('resource and Scene/UI content receive the same complete IR publication', a
   await f.controller.dispatcher.dispatch({ runId: f.run.runId, ownerId: f.run.ownerId, projectId: f.run.projectId,
     workspacePath: f.workspace, workerType: 'content-author', phase: 'GAME_CONTENT', revision: fixtureDigest('resource'),
     allowedPaths: ['content/'], contract: {} })
-  expect((f.requests[1]!.contract.gameIr as { modules: unknown[] }).modules).toHaveLength(6)
+  expect((f.requests[1]!.contract.gameIr as { scenes: unknown[] }).scenes).toHaveLength(1)
   expect((f.requests[1]!.contract.gameIr as { resultId: string }).resultId).toBe(gameIr.resultId)
   expect(f.requests[1]!.protectedPaths).toContain('docs/GDD.md')
   expect(f.requests[1]!.protectedPaths).toContain('.beegame/ir/')
@@ -147,21 +169,10 @@ test('resource and Scene/UI content receive the same complete IR publication', a
 
 test('Scene/UI edits stay draft until explicitly published to implementation', async () => {
   const f = await fixture()
-  const node = {
-    id: 'world.main',
-    kind: 'world.scene',
-    producerMode: 'agent-authored',
-    value: {},
-    references: [],
-    edges: [],
-    bindings: {},
-  }
   f.view.candidate = {
     ...f.view.candidate,
-    modules: f.view.candidate.modules.map((module, index) =>
-      index === 0 ? { ...module, nodes: [node] } : module,
-    ),
-  } as GameIrPublishedView['candidate']
+    scenes: [{ id: 'world.main', name: 'Main', assetIds: [], config: {} }],
+  }
   const irRevision = foundationPublicDigest(f.view.ready)
   const resourceRevision = fixtureDigest('editable resources')
   const manifest: BeeGameAssetManifest = {
@@ -203,7 +214,7 @@ test('Scene/UI edits stay draft until explicitly published to implementation', a
   const authority = {
     irRevision,
     assetManifestRevision: resourceRevision,
-    irNodeIds: ['world.main'],
+    irEntryIds: ['world.main'],
     manifest,
   }
   const receipt = acceptBeeGameContentPackage(f.workspace, authority)
@@ -314,7 +325,7 @@ test('late completion after source drift is quarantined instead of admitting a r
   expect(f.requests).toHaveLength(1)
 })
 
-test('same receipt ID cannot hide a changed dispatched module payload', async () => {
+test('same receipt ID cannot hide a changed dispatched IR payload', async () => {
   const f = await fixture()
   await f.controller.resume(f.run)
   const gameIr = await readDownstreamIr({ run: f.run, workspacePath: f.workspace, ir: f.ir })

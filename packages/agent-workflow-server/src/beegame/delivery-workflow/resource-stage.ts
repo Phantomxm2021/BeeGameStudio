@@ -11,7 +11,7 @@ import {
 import {
   computeResourceRevision,
 } from './revision'
-import { resourceIrDeliveryIssues } from './resource-ir-delivery'
+import type { DownstreamIr } from './downstream-ir'
 import { buildSystemDeliveryContract } from './system-delivery-contract'
 import { transitionDeliveryRun } from './transition'
 import { type DeliveryRun, type WorkerDispatchRequest } from './types'
@@ -186,25 +186,14 @@ function boundResourcesFulfill(
 export function resourceIrManifestIssues(
   run: DeliveryRun,
   workspacePath: string,
+  gameIrOverride?: DownstreamIr,
 ): string[] {
-  const gameIr = object(run.activeDispatch?.request?.contract.gameIr)
-  const modules = Array.isArray(gameIr?.modules) ? gameIr.modules : []
-  const resourceModule = modules
-    .map(object)
-    .find(module => module?.moduleId === 'resource-realization')
-  const nodes = Array.isArray(resourceModule?.nodes)
-    ? resourceModule.nodes.map(object).filter(Boolean) as Record<string, unknown>[]
-    : []
-  if (!gameIr || !resourceModule || !nodes.length)
-    return ['The resource dispatch has no complete resource-realization IR module.']
-
-  const requirementByLogicalNode = new Map<string, string>()
-  for (const node of nodes) {
-    if (node.kind !== 'resource-realization.logical-resource') continue
-    const value = object(node.value)
-    if (typeof node.id === 'string' && typeof value?.requirementId === 'string')
-      requirementByLogicalNode.set(node.id, value.requirementId)
-  }
+  const gameIr = object(gameIrOverride ?? run.activeDispatch?.request?.contract.gameIr)
+  const assets = Array.isArray(gameIr?.assets)
+    ? gameIr.assets.map(object).filter(Boolean) as Record<string, unknown>[]
+    : undefined
+  if (!gameIr || !assets)
+    return ['The resource dispatch has no valid Game IR asset requirements.']
 
   let manifest
   try {
@@ -226,16 +215,10 @@ export function resourceIrManifestIssues(
   )
   const expectedIds = new Set<string>()
   const issues: string[] = []
-  for (const node of nodes) {
-    if (node.kind !== 'resource-realization.acquisition-profile') continue
-    const edges = Array.isArray(node.edges) ? node.edges.map(object) : []
-    const describes = edges.find(edge => edge?.type === 'describes')
-    const requirementId =
-      typeof describes?.targetId === 'string'
-        ? requirementByLogicalNode.get(describes.targetId)
-        : undefined
+  for (const asset of assets) {
+    const requirementId = typeof asset.id === 'string' ? asset.id : undefined
     if (!requirementId) {
-      issues.push(`IR acquisition profile ${String(node.id)} has no logical resource requirement.`)
+      issues.push('Game IR contains an asset requirement without an ID.')
       continue
     }
     expectedIds.add(requirementId)
@@ -244,32 +227,31 @@ export function resourceIrManifestIssues(
       issues.push(`Manifest requirement is missing for IR requirement: ${requirementId}.`)
       continue
     }
-    const value = object(node.value) ?? {}
     const profile = requirement.acquisition_profile
     const comparisons: Array<[string, readonly string[] | undefined, readonly string[]]> = [
-      ['dimensions', stringArray(value.dimensions), profile.dimensions],
-      ['assetKinds', stringArray(value.assetKinds), profile.asset_kinds],
-      ['usageTags', stringArray(value.usageTags), profile.usage_tags],
-      ['capabilities', stringArray(value.capabilities), profile.capabilities],
-      ['styles', stringArray(value.styles), profile.styles],
-      ['acceptanceCriteria', stringArray(value.acceptanceCriteria) ?? [], profile.acceptance_criteria ?? []],
+      ['dimensions', stringArray(asset.dimensions), profile.dimensions],
+      ['kinds', stringArray(asset.kinds), profile.asset_kinds],
+      ['usageTags', stringArray(asset.usageTags), profile.usage_tags],
+      ['capabilities', stringArray(asset.capabilities), profile.capabilities],
+      ['styles', stringArray(asset.styles), profile.styles],
+      ['acceptanceCriteria', stringArray(asset.acceptanceCriteria) ?? [], profile.acceptance_criteria ?? []],
     ]
     for (const [field, expected, actual] of comparisons)
       if (!expected || !sameStrings(expected, actual))
         issues.push(`Manifest requirement ${requirementId} does not preserve IR ${field}.`)
-    if (value.required !== requirement.required)
+    if (asset.required !== requirement.required)
       issues.push(`Manifest requirement ${requirementId} does not preserve IR required.`)
-    if (value.name !== requirement.name)
+    if (asset.name !== requirement.name)
       issues.push(`Manifest requirement ${requirementId} does not preserve IR name.`)
-    if (value.purpose !== requirement.purpose)
+    if (asset.purpose !== requirement.purpose)
       issues.push(`Manifest requirement ${requirementId} does not preserve IR purpose.`)
     if (
-      normalizedCoverage(value.coverage, 'ir') !==
+      normalizedCoverage(asset.coverage, 'ir') !==
       normalizedCoverage(profile.coverage, 'manifest')
     )
       issues.push(`Manifest requirement ${requirementId} does not preserve IR coverage.`)
-    if (!sourcingPolicyMatches(value.sourcingPolicy, profile.sourcing_policy))
-      issues.push(`Manifest requirement ${requirementId} does not preserve IR sourcingPolicy.`)
+    if (!sourcingPolicyMatches(asset.sourcing, profile.sourcing_policy))
+      issues.push(`Manifest requirement ${requirementId} does not preserve IR sourcing.`)
     const boundResources = (bindingsByRequirement.get(requirementId) ?? [])
       .map(resourceId => resourcesById.get(resourceId))
       .filter(Boolean) as BeeGameProjectResource[]
@@ -282,32 +264,6 @@ export function resourceIrManifestIssues(
     if (!expectedIds.has(requirement.id))
       issues.push(`Manifest requirement is not defined by the injected IR: ${requirement.id}.`)
 
-  const targetNode = nodes.find(
-    node => node.kind === 'resource-realization.delivery-target',
-  )
-  const target = object(targetNode?.value)
-  const manifestTarget = manifest.project_target
-  if (!target || !manifestTarget) {
-    issues.push('Manifest project_target does not preserve the IR delivery target.')
-  } else {
-    const formats = stringArray(target.assetFormatCapabilities)
-    if (!formats || !sameStrings(formats, manifestTarget.asset_format_capabilities))
-      issues.push('Manifest project_target does not preserve IR assetFormatCapabilities.')
-    if (target.platform !== manifestTarget.platform)
-      issues.push('Manifest project_target does not preserve IR platform.')
-    if (target.runtime !== manifestTarget.runtime)
-      issues.push('Manifest project_target does not preserve IR runtime.')
-  }
-  issues.push(
-    ...resourceIrDeliveryIssues({
-      gameIr,
-      workspacePath,
-      artifactClasses: ['runtime-resource', 'generated-output'],
-      registeredResourcePaths: new Set(
-        manifest.resources.flatMap(resource => resource.file_paths),
-      ),
-    }),
-  )
   return issues
 }
 
@@ -343,7 +299,6 @@ export async function startResourcePreparation(input: {
       ),
       currentResourceIssues: [
         ...currentResourceContractIssues(input.workspacePath),
-        ...(input.run.blockedReason ? [input.run.blockedReason] : []),
       ],
       systemDeliveryContract: buildSystemDeliveryContract(),
     },
@@ -353,20 +308,27 @@ export async function startResourcePreparation(input: {
 export async function completeResourceTask(input: {
   run: DeliveryRun
   workspacePath: string
-  terminal: Extract<
+  terminal?: Extract<
     WorkerTerminalResult,
     { workerType: 'resource-planner' }
   >
+  /**
+   * A public, already-read IR lets the host accept an existing delivery
+   * without launching a no-op resource worker. The terminal path keeps using
+   * the exact dispatch payload that produced the artifacts.
+   */
+  gameIr?: DownstreamIr
 }): Promise<DeliveryRun> {
   if (input.run.phase !== 'RESOURCE_PREPARATION')
     throw new Error('resource production is not the active phase')
-  if (input.terminal.workerType === 'resource-planner') {
+  if (input.terminal?.workerType === 'resource-planner' || input.gameIr) {
     if (input.run.resourceProductionState.currentTask === 'RESOURCE_DELIVERED')
       throw new Error('resource preparation is already complete')
     const audit = auditAssetContract(input.workspacePath)
     const irManifestIssues = resourceIrManifestIssues(
       input.run,
       input.workspacePath,
+      input.gameIr,
     )
     const requiredIds = audit.requirements
       .filter(requirement => requirement.required)
@@ -397,7 +359,7 @@ export async function completeResourceTask(input: {
             acceptedAt: new Date().toISOString(),
           }
         : undefined
-    const boundIrResultId = currentResourceIrResultId(input.run)
+    const boundIrResultId = input.gameIr?.resultId ?? currentResourceIrResultId(input.run)
     const readiness = auditResourceDeliveryReadiness({
       workspacePath: input.workspacePath,
       confirmedPolicy: confirmedResourceLibraryUsage(
@@ -408,12 +370,14 @@ export async function completeResourceTask(input: {
     if (
       !audit.present ||
       !audit.valid ||
+      audit.requirements.length === 0 ||
       irManifestIssues.length > 0 ||
       missingRequirementIds.length > 0 ||
       !readiness.ready
     ) {
       const issues = [...new Set([
         ...audit.issues,
+        ...(audit.requirements.length === 0 ? ['Resource delivery requires at least one canonical requirement.'] : []),
         ...irManifestIssues,
         ...(missingRequirementIds.length
           ? [`Missing verified resource bindings: ${missingRequirementIds.join(', ')}`]

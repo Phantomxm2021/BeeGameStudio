@@ -57,31 +57,16 @@ function publicIr(
     ? readyReceipt(run, 'replacement')
     : completedOutcome.result
   const candidate = {
-    schemaVersion: 'game-ir.v1' as const,
+    schemaVersion: 'game-ir.v2' as const,
     taskId: 'game-ir-task',
-    foundationRevision: source.publishedDocumentRevision,
-    modules: [
-      {
-        moduleId: 'implementation-verification',
-        nodes: [
-          {
-            id: 'scenario.core-loop',
-            kind: 'implementation-verification.acceptance-scenario',
-            producerMode: 'semantic' as const,
-            value: {
-              description:
-                'Observe the published core loop with runtime evidence.',
-            },
-            references: [],
-            edges: [],
-            bindings: {},
-          },
-        ],
-      },
-    ],
-  } as GameIrPublishedView['candidate']
+    sourceRevision: source.publishedDocumentRevision,
+    parameters: {}, assets: [],
+    scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }],
+    ui: [], vfx: [], logic: {},
+  }
   const view: GameIrPublishedView = { input: source, ready, candidate }
   return {
+    async revise() { throw new Error('not used') },
     async start() {
       return run.gameIrStage!.handle!
     },

@@ -1,6 +1,11 @@
 export const RESOURCE_DIMENSIONS = ['2D', '3D', 'agnostic'] as const
 export type ResourceDimension = (typeof RESOURCE_DIMENSIONS)[number]
 
+export const RESOURCE_SOURCE_KINDS = [
+  'resource-library', 'web', 'agent-authored', 'user-provided',
+] as const
+export type ResourceSourceKind = (typeof RESOURCE_SOURCE_KINDS)[number]
+
 export const RESOURCE_LIBRARY_USAGE = ['optional', 'preferred', 'required'] as const
 export type ResourceLibraryUsage = (typeof RESOURCE_LIBRARY_USAGE)[number]
 

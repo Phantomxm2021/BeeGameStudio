@@ -106,7 +106,8 @@ const structuredJsonToMarkdown = (value: unknown): string | null => {
 import MarkdownErrorBoundary from '../../Common/MarkdownErrorBoundary';
 
 export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble = false }: { content: string, messageId?: string; lang?: Language; bubble?: boolean }) => {
-    const bubbleTextClass = bubble ? 'text-[currentColor]' : 'text-[var(--text-primary)]';
+    const bodyTextClass = bubble ? 'text-[currentColor]' : 'text-[var(--text-secondary)]';
+    const headingTextClass = bubble ? 'text-[currentColor]' : 'text-[var(--text-primary)]';
     const { formattedMainContent, renderAsCsv } = useMemo(() => {
         const normalized = normalizeEscapedNewlines(content);
         const fromProcessor = artifactProcessor.stripMarkers(normalized);
@@ -137,7 +138,7 @@ export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble =
                 <div className={`mt-1`}>
                     {renderAsCsv && csvData ? (
                         <div className="my-6 w-full min-w-0 max-w-full overflow-x-auto rounded-lg border border-[var(--border)]">
-	                            <table className="type-table w-full border-collapse">
+	                            <table className="type-chat-body w-full border-collapse">
                                 <thead className="border-b border-[var(--border)] bg-[var(--surface-2)]">
                                     <tr className="transition-colors hover:bg-[var(--surface-hover)]">
                                         {csvData.header.map((cell, idx) => (
@@ -153,7 +154,7 @@ export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble =
                                             {row.map((cell, cIdx) => {
                                                 const color = detectColor(cell);
                                                 return (
-	                                                    <td key={`cell-${rIdx}-${cIdx}`} className="type-table-cell whitespace-pre-wrap break-words border-[var(--border)] px-4 py-3">
+	                                                    <td key={`cell-${rIdx}-${cIdx}`} className="type-chat-body whitespace-pre-wrap break-words border-[var(--border)] px-3 py-2.5">
                                                         {color && <ColorSwatch color={color} />}
                                                         {cell}
                                                     </td>
@@ -170,48 +171,48 @@ export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble =
                             components={{
                                 p: (props) => (
                                     <p
-                                        className={`type-body mb-3 ${bubbleTextClass} last:mb-0 break-words [overflow-wrap:anywhere]`}
+                                        className={`type-chat-body mb-2.5 ${bodyTextClass} last:mb-0 break-words [overflow-wrap:anywhere]`}
                                         {...props}
                                     />
                                 ),
                                 ul: (props) => (
                                     <ul
-                                        className={`type-body my-3 ml-5 list-disc space-y-1 ${bubbleTextClass}`}
+                                        className={`type-chat-body my-2 ml-4 list-disc space-y-0.5 ${bodyTextClass}`}
                                         {...props}
                                     />
                                 ),
                                 ol: (props) => (
                                     <ol
-                                        className={`type-body my-3 ml-5 list-decimal space-y-1 ${bubbleTextClass}`}
+                                        className={`type-chat-body my-2 ml-4 list-decimal space-y-0.5 ${bodyTextClass}`}
                                         {...props}
                                     />
                                 ),
                                 li: (props) => <li className="break-words [overflow-wrap:anywhere]" {...props} />,
-                                blockquote: (props) => <blockquote className={`my-4 border-l-2 border-[var(--border-strong)] pl-4 ${bubbleTextClass}`} {...props} />,
+                                blockquote: (props) => <blockquote className={`type-chat-body my-3 border-l-2 border-[var(--border-strong)] pl-3 ${bodyTextClass}`} {...props} />,
                                 h1: (props) => (
                                     <h1
-                                        className={`type-title-2 mb-4 border-b border-[var(--border)] pb-2 ${bubbleTextClass}`}
+                                        className={`type-chat-h1 mb-3 border-b border-[var(--border)] pb-2 ${headingTextClass}`}
                                         {...props}
                                     />
                                 ),
                                 h2: (props) => (
                                     <h2
-                                        className={`type-title-3 mt-6 mb-3 ${bubbleTextClass}`}
+                                        className={`type-chat-h2 mt-5 mb-2.5 ${headingTextClass}`}
                                         {...props}
                                     />
                                 ),
                                 h3: (props) => (
                                     <h3
-                                        className={`type-headline mt-5 mb-2 ${bubbleTextClass}`}
+                                        className={`type-chat-h3 mt-4 mb-2 ${headingTextClass}`}
                                         {...props}
                                     />
                                 ),
 	                                a: (props) => <a className="text-[var(--info)] underline decoration-[var(--info)]/40 underline-offset-4 hover:text-[var(--text-primary)]" target="_blank" rel="noreferrer" {...props} />,
-	                                strong: (props) => <strong className="opacity-100" {...props} />,
+	                                strong: (props) => <strong className={bubble ? 'opacity-100' : 'text-[var(--text-primary)]'} {...props} />,
                                 table: (props) => (
 
                                     <div className="my-6 w-full min-w-0 max-w-full overflow-x-auto rounded-lg border border-[var(--border)]">
-	                                        <table className="type-table w-full border-collapse" {...props} />
+	                                        <table className="type-chat-body w-full border-collapse" {...props} />
                                     </div>
                                 ),
                                 thead: (props) => <thead className="border-b border-[var(--border)] bg-[var(--surface-2)]" {...props} />,
@@ -222,14 +223,14 @@ export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble =
                                     const cellContent = Array.isArray(children) ? children.map(c => typeof c === 'string' ? c : '').join('') : String(children);
                                     const color = detectColor(cellContent);
                                     return (
-	                                        <td className="type-table-cell whitespace-pre-wrap break-words border-[var(--border)] px-4 py-3" {...props}>
+	                                        <td className="type-chat-body whitespace-pre-wrap break-words border-[var(--border)] px-3 py-2.5" {...props}>
                                             {color && <ColorSwatch color={color} />}
                                             {children}
                                         </td>
                                     );
                                 },
                                 pre: (props) => (
-                                    <pre className={`type-code my-4 max-w-full overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface-3)] p-4 ${bubbleTextClass}`}>
+                                    <pre className={`type-code my-3 max-w-full overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface-3)] p-3 ${bodyTextClass}`}>
                                         {props.children}
                                     </pre>
                                 ),
@@ -241,7 +242,7 @@ export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble =
                                     if (isInline) {
                                       const color = typeof children === 'string' ? detectColor(children) : null;
                                       return (
-                                        <code className={`type-inline-code break-words bg-[var(--surface-3)] ${bubble ? 'text-[currentColor]' : 'text-[var(--text-secondary)]'}`} {...props}>
+                                        <code className={`type-chat-inline-code break-words bg-[var(--surface-3)] ${bubble ? 'text-[currentColor]' : 'text-[var(--text-secondary)]'}`} {...props}>
                                             {color && <ColorSwatch color={color} />}
                                             {children}
                                         </code>

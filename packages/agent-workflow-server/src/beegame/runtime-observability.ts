@@ -1,5 +1,8 @@
-import { mkdir, appendFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
+import { appendRuntimeDiagnostic } from './project-records'
+
+const MAX_RUNTIME_DIAGNOSTIC_BYTES = 4 * 1024 * 1024
+const RUNTIME_DIAGNOSTIC_ARCHIVES = 3
 
 type RuntimeObservationInput = {
   workspacePath: string
@@ -186,8 +189,12 @@ async function appendObservation(
   path: string,
   record: Record<string, unknown>,
 ): Promise<void> {
-  await mkdir(dirname(path), { recursive: true })
-  await appendFile(path, `${JSON.stringify(record)}\n`, 'utf8')
+  appendRuntimeDiagnostic({
+    path,
+    record,
+    maxBytes: MAX_RUNTIME_DIAGNOSTIC_BYTES,
+    archiveCount: RUNTIME_DIAGNOSTIC_ARCHIVES,
+  })
 }
 
 function safeErrorSink(sink: (message: string) => void, message: string): void {

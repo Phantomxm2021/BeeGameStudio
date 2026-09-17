@@ -25,7 +25,7 @@ BeeGame Studio 后续只保留一条交付主线：
 
 ## 2. 当前问题与修订范围
 
-当前 Game IR 已能表达六个领域，但从 IR 到最终游戏仍缺少独立的、可检查的“装配规格”。Implementation Agent 目前同时承担：
+当前 Game IR 以一个轻量 JSON 保存共享参数、资源需求、Scene/UI/VFX 条目和玩法逻辑，但从 IR 到最终游戏仍需要独立、可检查的“装配规格”。Implementation Agent 不能同时承担：
 
 1. 理解 IR；
 2. 决定资源如何组合；
@@ -128,7 +128,7 @@ content/
   "schema": "beegame-content.v1",
   "id": "scene.main",
   "kind": "scene-2d",
-  "irRefs": ["<world-scene node id>"],
+  "irRefs": ["<scene or UI entry id>"],
   "assetRefs": ["asset.background", "asset.player.atlas"],
   "data": {}
 }
@@ -181,9 +181,11 @@ Atlas/Spritesheet 的二进制文件和 provenance 属于 Manifest；frame 与 c
 ### 7.1 Game IR
 
 输入：已接纳的八文档。  
-任务：忠实生成精简、可追溯的六域 IR。  
-输出：一个已发布 IR revision。  
+任务：忠实生成一个精简 JSON，根字段固定为 `parameters`、`assets`、`scenes`、`ui`、`vfx`、`logic`。`assets` 只声明逻辑资源需求；Scene/UI/VFX 条目只保存需求、规则和稳定引用，不保存完整可编辑节点树。
+输出：一个包含 `game-ir.json`、`manifest.json` 与提交收据的已发布 IR revision。
 边界：不获取资源、不写 Content Package、不写引擎代码。
+
+生成采用一次普通直接 CLI 任务；Workflow 不拆分领域、不规定工具/子 Agent、不追加验证 Agent 或语义证明。宿主只校验 JSON、版本、唯一 ID、至少一个 Scene 以及资源引用存在性。旧六模块节点图、source map、dependency graph 和 implementation-verification 投影不再属于可达方案。
 
 ### 7.2 Resource Delivery
 
@@ -317,7 +319,7 @@ Workflow 不判断审美、不规定节点数量、不替 Agent 选择组件、�
 - 不制作 Unity/Godot/Unreal/Web 的通用 Engine Adapter；
 - 不用 schema 复刻任何引擎的完整对象模型；
 - 不建立新的多 Agent 编排框架；
-- 不为每种资源或每个 IR node 创建一个任务；
+- 不为每种资源或每个 IR entry 创建一个任务；
 - 不同时保留旧 `assets/content` 与新 `content`；
 - 不把 Content Package 变成第二份八文档或第二份 Game IR；
 - 不在首轮测试中构建完整玩法和完整工程；

@@ -3,7 +3,7 @@ import type { ChatDisplayMessage } from '../viewModels/displayModels';
 import { deriveCurrentProjectTodos } from './projectTodos';
 
 describe('deriveCurrentProjectTodos', () => {
-    it('returns the latest TodoWrite snapshot', () => {
+    it('keeps every TodoWrite task while applying its latest status', () => {
         const messages: ChatDisplayMessage[] = [
             {
                 id: 'first', sender: 'system', content: '', timestamp: 1, type: 'tool', toolName: 'TodoWrite',
@@ -19,6 +19,7 @@ describe('deriveCurrentProjectTodos', () => {
         ];
 
         expect(deriveCurrentProjectTodos(messages)).toEqual([
+            { id: 'first-0', title: 'Old task', status: 'pending' },
             { id: 'latest-0', title: 'Finished', status: 'completed' },
             { id: 'latest-1', title: 'Edit App.tsx', status: 'in-progress' },
         ]);
@@ -46,6 +47,7 @@ describe('deriveCurrentProjectTodos', () => {
             },
         ];
         expect(deriveCurrentProjectTodos(messages)).toEqual([
+            { id: 'historical-0', title: 'Old task', status: 'pending' },
             { id: 'structured-0', title: 'Recovered task', status: 'pending' },
         ]);
     });

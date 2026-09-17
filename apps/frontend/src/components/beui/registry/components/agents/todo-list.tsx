@@ -43,6 +43,7 @@ export interface TodoListProps {
   onOpenChange?: (open: boolean) => void;
   collapseOnComplete?: boolean;
   maxHeight?: number;
+  expandToFit?: boolean;
   className?: string;
 }
 
@@ -206,6 +207,7 @@ export function TodoList({
   onOpenChange,
   collapseOnComplete = true,
   maxHeight = 248,
+  expandToFit = false,
   className,
 }: TodoListProps) {
   const reduce = useReducedMotion() ?? false;
@@ -312,7 +314,7 @@ export function TodoList({
         <div
           ref={viewportRef}
           className="scrollbar-hide overflow-y-auto px-2 pb-2"
-          style={{ maxHeight }}
+          style={expandToFit ? undefined : { maxHeight }}
         >
           {items.length ? (
             <ol aria-live="polite" className="space-y-0">

@@ -139,6 +139,15 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
     const taskId = typeof record.task_id === 'string' ? record.task_id : typeof record.taskId === 'string' ? record.taskId : undefined;
     const turnId = String(record.turn_id ?? record.turnId ?? metadata.turn_id ?? metadata.turnId ?? '').trim() || undefined;
     const timestamp = toTimestampMs(record.timestamp);
+    const thinkingDurationCandidate = record.thinking_duration_ms
+      ?? record.thinkingDurationMs
+      ?? metadata.thinking_duration_ms
+      ?? metadata.thinkingDurationMs;
+    const thinkingDurationMs = typeof thinkingDurationCandidate === 'number'
+      ? thinkingDurationCandidate
+      : typeof thinkingDurationCandidate === 'string'
+        ? Number(thinkingDurationCandidate)
+        : undefined;
     const messageId = resolveStableMessageId(record);
     const clientMessageId = String(record.client_message_id ?? record.clientMessageId ?? '').trim() || undefined;
     const supersedesMessageId = String(
@@ -197,6 +206,9 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
       content,
       contentBlocks,
       timestamp,
+      ...(typeof thinkingDurationMs === 'number' && Number.isFinite(thinkingDurationMs) && thinkingDurationMs >= 0
+        ? { thinkingDurationMs }
+        : {}),
       type: semanticType,
       taskId,
       turnId,

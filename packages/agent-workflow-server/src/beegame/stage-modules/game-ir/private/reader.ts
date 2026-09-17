@@ -1,7 +1,7 @@
 import type { FoundationIrInput } from '../input'
 import type { GameIrReadyReceipt } from './core/contracts'
 import { canonicalGameIrJson, type GameIrCandidate } from './core/model'
-import { foundationReadyReceiptFromInput, gameIrSourceSections } from './core/source-input'
+import { foundationReadyReceiptFromInput } from './core/source-input'
 import type { DirectGameIrAuthority } from './direct-authority'
 import { validateDirectGameIrPublication } from './direct-publication'
 
@@ -11,8 +11,7 @@ export type GameIrPublishedView = Readonly<{ input: FoundationIrInput; ready: Ga
 export async function readPublishedGameIr(input: { workspacePath: string; foundationInput: FoundationIrInput;
   ready: GameIrReadyReceipt; authority: DirectGameIrAuthority }): Promise<GameIrPublishedView> {
   const foundation = foundationReadyReceiptFromInput(input.foundationInput)
-  if (canonicalGameIrJson(input.authority.request.foundation) !== canonicalGameIrJson(foundation) ||
-      canonicalGameIrJson(input.authority.sections) !== canonicalGameIrJson(gameIrSourceSections(input.foundationInput)))
+  if (canonicalGameIrJson(input.authority.request.foundation) !== canonicalGameIrJson(foundation))
     throw new Error('Published IR source does not match the accepted Foundation result')
   const published = await validateDirectGameIrPublication({ workspacePath: input.workspacePath,
     publicationId: input.ready.publicationId, ...input.authority })

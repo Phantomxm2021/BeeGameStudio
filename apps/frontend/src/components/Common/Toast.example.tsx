@@ -18,7 +18,7 @@ export const BasicToastExample: React.FC = () => {
 
   return (
     <div className="p-8 space-y-4">
-      <h2 className="text-2xl font-bold mb-4">Toast Examples</h2>
+      <h2 className="text-2xl font-semibold mb-4">Toast Examples</h2>
 
       <div className="flex gap-4">
         <button
@@ -109,7 +109,7 @@ export const WebSocketStatusExample: React.FC = () => {
 
   return (
     <div className="p-8 space-y-4">
-      <h2 className="text-2xl font-bold mb-4">WebSocket Status</h2>
+      <h2 className="text-2xl font-semibold mb-4">WebSocket Status</h2>
 
       <div className="flex gap-4">
         <button
@@ -178,7 +178,7 @@ export const AppIntegrationExample: React.FC = () => {
     <div className="min-h-screen bg-gray-100">
       {/* Your app content */}
       <div className="p-8">
-        <h1 className="text-3xl font-bold mb-4">My Application</h1>
+        <h1 className="text-3xl font-semibold mb-4">My Application</h1>
         <button
           onClick={() => showSuccess('Welcome to the app!')}
           className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"

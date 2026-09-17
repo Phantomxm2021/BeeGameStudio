@@ -133,7 +133,7 @@ export type BeeGameContentDocument = z.infer<typeof contentDocumentSchema>
 export type BeeGameContentAuthority = Readonly<{
   irRevision: string
   assetManifestRevision: string
-  irNodeIds: readonly string[]
+  irEntryIds: readonly string[]
   manifest: BeeGameAssetManifest
 }>
 
@@ -328,12 +328,12 @@ function validateDocument(input: {
   authority: BeeGameContentAuthority
   issues: string[]
 }): void {
-  const irIds = new Set(input.authority.irNodeIds)
+  const irIds = new Set(input.authority.irEntryIds)
   const resourceById = new Map(
     input.authority.manifest.resources.map(resource => [resource.id, resource]),
   )
   for (const id of input.document.irRefs)
-    if (!irIds.has(id)) input.issues.push(`${input.path}: unknown IR node ${id}.`)
+    if (!irIds.has(id)) input.issues.push(`${input.path}: unknown IR entry ${id}.`)
   for (const id of input.document.assetRefs) {
     const resource = resourceById.get(id)
     if (!resource) input.issues.push(`${input.path}: unknown asset ${id}.`)
@@ -613,17 +613,17 @@ export function recoverBeeGameContentRevision(
 ): string {
   const indexPath = resolve(workspacePath, BEEGAME_CONTENT_INDEX)
   const index = contentIndexSchema.parse(parseJson(indexPath))
-  const irNodeIds = new Set<string>()
+  const irEntryIds = new Set<string>()
   for (const path of index.files) {
     const absolute = safeContentFile(workspacePath, path)
     if (!absolute) throw new Error(`unsafe content path ${path}`)
     const document = contentDocumentSchema.parse(parseJson(absolute))
-    document.irRefs.forEach(id => irNodeIds.add(id))
+    document.irRefs.forEach(id => irEntryIds.add(id))
   }
   const audit = auditBeeGameContentPackage(workspacePath, {
     irRevision: index.irRevision,
     assetManifestRevision: index.assetManifestRevision,
-    irNodeIds: [...irNodeIds],
+    irEntryIds: [...irEntryIds],
     manifest,
   })
   if (!audit.package)

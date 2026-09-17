@@ -198,7 +198,7 @@ export function PromptInput({
       <div
         ref={measurementRef}
         aria-hidden="true"
-        className="pointer-events-none invisible absolute inset-x-2 top-0 whitespace-pre-wrap px-2 text-sm leading-6 [overflow-wrap:break-word]"
+        className="type-input pointer-events-none invisible absolute inset-x-2 top-0 whitespace-pre-wrap px-2 [overflow-wrap:break-word]"
       >
         {`${currentValue}\u200b`}
       </div>
@@ -212,7 +212,7 @@ export function PromptInput({
         {...textareaProps}
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={handleKeyDown}
-        className="scrollbar-hide block w-full resize-none overflow-y-auto bg-transparent px-2 pt-1.5 text-[16px] leading-6 text-foreground outline-none placeholder:text-muted-foreground/55 min-[900px]:text-md"
+        className="type-input scrollbar-hide block w-full resize-none overflow-y-auto bg-transparent px-2 pt-1.5 text-foreground outline-none placeholder:text-muted-foreground/55"
       />
 
       <div className="mt-1 flex min-h-8 items-center gap-1">

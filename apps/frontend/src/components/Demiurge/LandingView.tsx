@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { Check, Gamepad2, LoaderCircle, X } from 'lucide-react';
+import { ArrowLeft, Check, LoaderCircle, X } from 'lucide-react';
 import type { Language } from './AgentsConfig';
 import { normalizeI18nLanguage, useCommonText } from '../../i18n/useBeeGameTranslations';
 import { useProjectStore } from '../../store/projectStore';
@@ -10,11 +10,12 @@ import { HeroIntro } from './Landing/HeroIntro';
 import { IdeaPromptForm } from './Landing/IdeaPromptForm';
 import { AttachmentBuildReview } from './Landing/AttachmentBuildReview';
 import { AccountActionsMenu } from './Landing/AccountActionsMenu';
-import { LandingVideoBackground } from './Landing/LandingVideoBackground';
+import { LandingImageBackground } from './Landing/LandingImageBackground';
 import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { ProfileModal } from './Landing/ProfileModal';
 import { SettingsMenu } from './Landing/SettingsMenu';
+import { LandingSiteMenu, type LandingPage } from './Landing/LandingSiteMenu';
 import { AuthDialog } from './Landing/AuthDialog';
 import { ConfirmedBrief, IntakeOptionCards, IntakeSettingsForm } from './Landing/IntakePanels';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '../ui/dialog';
@@ -624,6 +625,10 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const [restoredRealtimeBillingIdea] = useState(() => readPendingRealtimeBillingIdea());
   const [projectName, setProjectName] = useState(() => restoredIntakeFlow?.idea || restoredIdeaDraft?.idea || '');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [landingPage, setLandingPage] = useState<LandingPage>(() => {
+    const page = window.location.pathname.replace(/^\//, '');
+    return page === 'blog' || page === 'learn' || page === 'about' ? page : 'home';
+  });
   const [isResourceLibraryOpen, setIsResourceLibraryOpen] = useState(() => isResourceLibraryRoute());
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isCreditStoreOpen, setIsCreditStoreOpen] = useState(false);
@@ -633,6 +638,14 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     const syncResourceRoute = () => setIsResourceLibraryOpen(isResourceLibraryRoute());
     window.addEventListener('popstate', syncResourceRoute);
     return () => window.removeEventListener('popstate', syncResourceRoute);
+  }, []);
+  useEffect(() => {
+    const onPopState = () => {
+      const page = window.location.pathname.replace(/^\//, '');
+      setLandingPage(page === 'blog' || page === 'learn' || page === 'about' ? page : 'home');
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
   }, []);
   const [intakePhase, setIntakePhase] = useState<IntakePhase>(restoredIntakeFlow?.phase || 'idle');
   const [intakeOptions, setIntakeOptions] = useState<BeeGameIntakeOption[]>(restoredIntakeFlow?.options || []);
@@ -695,6 +708,25 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   }, []);
 
   const t = useCommonText(lang);
+  const heroPhrases: Record<Language, { connector: string; words: string[] }> = {
+    zh: { connector: '，可以是', words: ['一句话', '一张图', '一段视频'] },
+    'zh-TW': { connector: '，可以是', words: ['一句話', '一張圖', '一段影片'] },
+    en: { connector: ' can be ', words: ['a sentence', 'an image', 'a video'] },
+    ja: { connector: '。', words: ['ひとことでも', '一枚の画像でも', 'ひとつの動画でも'] },
+    ko: { connector: ' — ', words: ['한 문장', '한 장의 이미지', '한 편의 영상'] },
+    fr: { connector: ' : ', words: ['une phrase', 'une image', 'une vidéo'] },
+    de: { connector: ' – ', words: ['ein Satz', 'ein Bild', 'ein Video'] },
+    es: { connector: ': ', words: ['una frase', 'una imagen', 'un vídeo'] },
+    it: { connector: ': ', words: ['una frase', 'un’immagine', 'un video'] },
+    pt: { connector: ': ', words: ['uma frase', 'uma imagem', 'um vídeo'] },
+  };
+  const navigateLandingPage = (page: LandingPage) => {
+    const pathname = page === 'home' ? '/' : `/${page}`;
+    window.history.pushState({}, '', pathname);
+    setLandingPage(page);
+  };
+  const isChinaVisitor = lang === 'zh' && Intl.DateTimeFormat().resolvedOptions().timeZone === 'Asia/Shanghai';
+  const icpNumber = import.meta.env.VITE_ICP_RECORD_NUMBER as string | undefined;
   const intakeTranslate: Translate = (key, options) => translate(`intake.${key}`, options);
   const intakeText = createLandingIntakeCopy(intakeTranslate);
   const showAuthError = (message: string) => {
@@ -1283,15 +1315,14 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       key="landing"
       className={`absolute inset-0 z-50 flex flex-col overflow-y-auto bg-[#c97843] text-white opacity-100 transition-opacity duration-300 dark:bg-black ${isTransitioning ? 'opacity-0' : ''}`}
     >
-      <LandingVideoBackground />
+      <LandingImageBackground />
       <header className="absolute inset-x-0 top-0 z-20 flex h-16 items-center justify-between px-4 sm:h-20 sm:px-8">
         <div className="flex items-center gap-2.5 text-white [text-shadow:0_2px_16px_rgba(0,0,0,0.32)]">
-          <span className="grid size-8 place-items-center rounded-lg border border-white/45 bg-white/10 backdrop-blur-lg">
-            <Gamepad2 className="size-[18px]" aria-hidden="true" />
-          </span>
-          <span className="text-lg font-semibold tracking-[-0.03em]">BeeGame</span>
+          <img src="/assets/bgs_logo.svg" alt="" className="size-8 drop-shadow-sm" />
+          <span className="text-lg font-semibold tracking-[-0.03em]">Bee Game Studio</span>
         </div>
         <div className="relative z-20 flex items-center gap-2">
+          <LandingSiteMenu language={lang} onNavigate={navigateLandingPage} onOpenLegal={setActiveLegalDocument} />
           <AccountActionsMenu
             lang={lang}
             isTransitioning={isTransitioning}
@@ -1473,9 +1504,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         </Dialog>
       ) : null}
 
-      <main className="relative z-10 mx-auto flex min-h-dvh w-full flex-1 items-center justify-center px-4 pb-12 pt-28 sm:px-8 sm:pb-16 sm:pt-36">
-        <div className="flex w-full max-w-4xl flex-col items-center gap-8 sm:gap-10 lg:gap-12">
-          <HeroIntro title={t.landingTitle} subtitle={t.landingSubtitle} isTransitioning={isTransitioning} />
+      {landingPage === 'home' ? <main className="relative z-10 mx-auto flex min-h-dvh w-full flex-1 items-center justify-center px-4 pb-10 pt-24 sm:px-8 sm:pb-14 sm:pt-28 lg:pb-16 lg:pt-32">
+        <div className="flex w-full max-w-4xl -translate-y-4 flex-col items-center gap-9 sm:-translate-y-6 sm:gap-11 lg:-translate-y-8 lg:gap-[3.25rem]">
+          <HeroIntro title={t.landingTitle} connector={heroPhrases[lang].connector} subtitle={t.landingSubtitle} rotatingWords={heroPhrases[lang].words} isTransitioning={isTransitioning} />
 
           <IdeaPromptForm
             value={projectName}
@@ -1488,7 +1519,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             onAttachmentsChange={setAttachmentBuildAttachments}
           />
         </div>
-      </main>
+      </main> : <LandingContentPage page={landingPage} language={lang} onBack={() => navigateLandingPage('home')} />}
+      <footer className="relative z-10 flex w-full flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 pb-4 text-center text-xs text-white/72 [text-shadow:0_1px_8px_rgba(0,0,0,.42)]">
+        <span>© {new Date().getFullYear()} Bee Game Studio</span>
+        {isChinaVisitor && icpNumber ? <a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline">{icpNumber}</a> : null}
+      </footer>
       {shouldShowIntakeModal ? (
         <div
           role="dialog"
@@ -1668,4 +1703,22 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       ) : null}
     </div>
   );
+}
+
+function LandingContentPage({ page, language, onBack }: { page: Exclude<LandingPage, 'home'>; language: Language; onBack: () => void }) {
+  const zh = language.startsWith('zh');
+  const content = page === 'blog'
+    ? (zh ? { eyebrow: 'Bee Game Studio', title: '博客', description: '产品动态、游戏创作洞察与团队故事将在这里发布。', note: '首批文章即将上线。' } : { eyebrow: 'Bee Game Studio', title: 'Blog', description: 'Product updates, game-making notes, and stories from the studio will live here.', note: 'The first posts are on their way.' })
+    : page === 'learn'
+      ? (zh ? { eyebrow: 'Bee Game Studio', title: '学习中心', description: '从灵感到可玩的世界，逐步了解每一个创作环节。', note: '教学内容即将上线。' } : { eyebrow: 'Bee Game Studio', title: 'Learn', description: 'Learn each creative step, from an idea to a playable world.', note: 'Learning guides are coming soon.' })
+      : (zh ? { eyebrow: 'Bee Game Studio', title: '关于我们', description: '我们相信游戏创作应该从灵感开始，而不该被工具阻挡。', note: 'Bee Game Studio 正在打造更自然的游戏创作体验。' } : { eyebrow: 'Bee Game Studio', title: 'About', description: 'We believe game making should start with inspiration, not friction.', note: 'Bee Game Studio is building a more natural creative experience.' });
+  return <main className="relative z-10 mx-auto flex min-h-dvh w-full items-center justify-center px-6 pt-20 text-white">
+    <section className="w-full max-w-2xl rounded-[2rem] border border-white/30 bg-black/15 p-8 text-center shadow-2xl backdrop-blur-md sm:p-12">
+      <p className="text-sm font-medium tracking-[.12em] text-white/70">{content.eyebrow}</p>
+      <h1 className="type-hero mt-4 text-white">{content.title}</h1>
+      <p className="type-body-lg mx-auto mt-5 max-w-xl text-white/90">{content.description}</p>
+      <p className="mt-8 text-sm text-white/70">{content.note}</p>
+      <button type="button" onClick={onBack} className="mt-9 inline-flex items-center gap-2 rounded-full border border-white/40 bg-white/12 px-4 py-2.5 text-sm font-medium transition hover:bg-white/20"><ArrowLeft className="size-4" />{zh ? '返回首页' : 'Back to home'}</button>
+    </section>
+  </main>;
 }

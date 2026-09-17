@@ -29,7 +29,7 @@ export function IntakeOptionCards({ options, copy, localizedOptionLabel, onSelec
               </div>
             </div>
             <div className="type-footnote mt-4 text-muted-foreground">{copy.optionCard.gameplay}</div>
-            <div data-testid="intake-option-gameplay" className="scrollbar-premium type-body mt-2 min-h-0 overflow-y-auto py-2 leading-5 text-muted-foreground">
+            <div data-testid="intake-option-gameplay" className="scrollbar-premium type-body mt-2 min-h-0 overflow-y-auto py-2 text-muted-foreground">
               {option.gameplay || localizedOptionLabel(option.title)}
             </div>
           </button>

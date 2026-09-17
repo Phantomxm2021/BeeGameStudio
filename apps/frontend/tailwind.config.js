@@ -10,13 +10,16 @@ export default {
       // Product typography is explicit so the root remains 16px and the
       // spacing scale keeps its 4px rhythm across browser and desktop.
       fontSize: {
-        xs: ['11px', { lineHeight: '16px' }],
-        sm: ['12px', { lineHeight: '18px' }],
-        base: ['13px', { lineHeight: '20px' }],
-        md: ['14px', { lineHeight: '20px' }],
-        lg: ['16px', { lineHeight: '24px' }],
-        xl: ['20px', { lineHeight: '28px' }],
-        '2xl': ['28px', { lineHeight: '34px' }],
+        xs: ['12px', { lineHeight: '16px', letterSpacing: '0.01em', fontWeight: '400' }],
+        sm: ['14px', { lineHeight: '20px', letterSpacing: '0' }],
+        base: ['17px', { lineHeight: '25px', letterSpacing: '0', fontWeight: '400' }],
+        md: ['17px', { lineHeight: '25px', letterSpacing: '0', fontWeight: '400' }],
+        lg: ['20px', { lineHeight: '28px', letterSpacing: '0', fontWeight: '400' }],
+        xl: ['24px', { lineHeight: '30px', letterSpacing: '-0.005em', fontWeight: '600' }],
+        '2xl': ['32px', { lineHeight: '38px', letterSpacing: '-0.01em', fontWeight: '600' }],
+        '3xl': ['40px', { lineHeight: '46px', letterSpacing: '-0.015em', fontWeight: '600' }],
+        '4xl': ['48px', { lineHeight: '52px', letterSpacing: '-0.02em', fontWeight: '600' }],
+        hero: ['64px', { lineHeight: '68px', letterSpacing: '-0.025em', fontWeight: '600' }],
       },
       // Custom color palette for XRMOD Demiurge
       colors: {
@@ -83,21 +86,31 @@ export default {
       // Custom font families
       fontFamily: {
         sans: [
-          'Inter',
+          '"SF Pro Text"',
+          '"PingFang SC"',
           '-apple-system',
           'BlinkMacSystemFont',
-          '"Segoe UI"',
-          'Roboto',
+          '"Helvetica Neue"',
+          'Arial',
+          'sans-serif',
+        ],
+        display: [
+          '"SF Pro Display"',
+          '"SF Pro Text"',
+          '"PingFang SC"',
+          '-apple-system',
+          'BlinkMacSystemFont',
           '"Helvetica Neue"',
           'Arial',
           'sans-serif',
         ],
         mono: [
-          '"Fira Code"',
-          '"JetBrains Mono"',
+          '"SF Mono"',
+          'SFMono-Regular',
           'Menlo',
           'Monaco',
           'Consolas',
+          '"Liberation Mono"',
           'monospace',
         ],
       },

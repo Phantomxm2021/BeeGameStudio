@@ -314,7 +314,7 @@ export function ApprovalCard({
 
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-start gap-3">
-            <h3 className="min-w-0 flex-1 text-base font-medium leading-5 text-foreground">
+            <h3 className="min-w-0 flex-1 text-base font-medium text-foreground">
               <ActionSwapRollText value={titleKey}>
                 {displayTitle}
               </ActionSwapRollText>
@@ -326,7 +326,7 @@ export function ApprovalCard({
             ) : (
               <span
                 className={cn(
-                  "shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium transition-colors",
+                  "shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium transition-colors",
                   getStatusBadgeClass(status),
                 )}
               >

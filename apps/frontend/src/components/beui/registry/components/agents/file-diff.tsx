@@ -155,7 +155,7 @@ export function FileDiff({
         <div className="pl-6 pt-1.5">
           <div className="overflow-hidden rounded-xl bg-muted/80">
             <div ref={viewportRef} data-slot="file-diff-viewport" aria-live="polite" className="scrollbar-hide overflow-auto" style={{ maxHeight }}>
-              <div className="font-mono text-xs leading-5">
+              <div className="font-mono text-xs leading-4">
                 <span className="sr-only">File changes</span>
                 {lines.map((line, index) => {
                   const type = line.type ?? "context";

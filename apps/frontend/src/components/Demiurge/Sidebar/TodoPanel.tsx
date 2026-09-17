@@ -21,7 +21,7 @@ export const TodoPanel = memo(({ items }: TodoPanelProps) => {
                 title="Current tasks"
                 open
                 collapseOnComplete={false}
-                maxHeight={640}
+                expandToFit
                 className="bg-transparent"
             />
         ) : (

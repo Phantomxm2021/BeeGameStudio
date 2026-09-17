@@ -10,26 +10,25 @@ export type DownstreamIr = {
   resultId: string
   foundationRevision: string
   publicationId: string
-  modules: GameIrPublishedView['candidate']['modules']
+  parameters: GameIrPublishedView['candidate']['parameters']
+  assets: GameIrPublishedView['candidate']['assets']
+  scenes: GameIrPublishedView['candidate']['scenes']
+  ui: GameIrPublishedView['candidate']['ui']
+  vfx: GameIrPublishedView['candidate']['vfx']
+  logic: GameIrPublishedView['candidate']['logic']
 }
 
 export function consumesGameIr(worker: string): boolean {
   return ['resource-planner', 'content-author', 'implementation-worker', 'acceptance-validator'].includes(worker)
 }
 
-export function downstreamIrForWorker(worker: string, ir: DownstreamIr): DownstreamIr {
-  if (consumesGameIr(worker))
-    return {
-      ...ir,
-      modules: ir.modules.map(module => ({
-        ...module,
-        nodes: module.nodes.map(node => ({
-          ...node,
-          bindings: {},
-        })),
-      })),
-    }
+export function downstreamIrForWorker(_worker: string, ir: DownstreamIr): DownstreamIr {
   return ir
+}
+
+/** Stable IDs that authored Scene/UI documents may reference. */
+export function downstreamIrEntryIds(ir: DownstreamIr): readonly string[] {
+  return [...ir.assets, ...ir.scenes, ...ir.ui, ...ir.vfx].map(entry => entry.id)
 }
 
 export function downstreamIrForRequest(
@@ -65,8 +64,17 @@ export async function readDownstreamIr(input: {
     if (createHash('sha256').update(current, 'utf8').digest('hex') !== document.digest)
       throw new Error(`Accepted Foundation document changed: ${document.path}`)
   }
-  return { resultId: foundationPublicDigest(view.ready), foundationRevision: link.foundationRevision,
-    publicationId: view.ready.publicationId, modules: view.candidate.modules }
+  return {
+    resultId: foundationPublicDigest(view.ready),
+    foundationRevision: link.foundationRevision,
+    publicationId: view.ready.publicationId,
+    parameters: view.candidate.parameters,
+    assets: view.candidate.assets,
+    scenes: view.candidate.scenes,
+    ui: view.candidate.ui,
+    vfx: view.candidate.vfx,
+    logic: view.candidate.logic,
+  }
 }
 
 export function assertResourceIr(run: DeliveryRun, ir: DownstreamIr, allowUnplanned = false): void {

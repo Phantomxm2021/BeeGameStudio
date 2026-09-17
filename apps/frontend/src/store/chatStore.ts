@@ -280,7 +280,9 @@ export const useChatStore = create<ChatState>()(
       updateThought: (taskId, thought, sender, timestamp, messageId, turnId) =>
         set((state) => {
           const key = `${taskId || 'na'}_${sender}`;
-          const existingId = state.lastStreamingIdByTask[key];
+          // Thinking is an independent streamed block. It must never reuse the
+          // current prose message merely because both came from one agent.
+          const existingId = messageId || state.lastStreamingIdByTask[key];
           const existingIndex = existingId ? state.messageIndexMap[existingId] : -1;
           const now = timestamp || Date.now();
 
@@ -310,6 +312,8 @@ export const useChatStore = create<ChatState>()(
             sender,
             content: '',
             thought,
+            type: 'thought',
+            taskKind: 'assistant_thinking',
             turnId,
             taskId,
             timestamp: now,
@@ -317,10 +321,7 @@ export const useChatStore = create<ChatState>()(
           return {
             messages: nextMessages,
             messageIndexMap: rebuildIndexMap(nextMessages),
-            lastStreamingIdByTask: {
-              ...state.lastStreamingIdByTask,
-              [key]: messageId || fallbackId,
-            },
+            lastStreamingIdByTask: state.lastStreamingIdByTask,
             streamingMessageId: messageId || fallbackId,
             isStreaming: true,
           };

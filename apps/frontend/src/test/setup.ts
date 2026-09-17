@@ -49,6 +49,26 @@ beforeAll(() => {
       }
     };
   }
+
+  // Motion's viewport helpers use this browser API. JSDOM intentionally does
+  // not implement it, so provide the inert platform equivalent for unit tests.
+  if (!globalThis.IntersectionObserver) {
+    class IntersectionObserverMock implements IntersectionObserver {
+      readonly root: Element | Document | null = null;
+      readonly rootMargin = '0px';
+      readonly thresholds = [0];
+      constructor(_callback: IntersectionObserverCallback, _options?: IntersectionObserverInit) {}
+      disconnect() {}
+      observe(_target: Element) {}
+      takeRecords(): IntersectionObserverEntry[] { return []; }
+      unobserve(_target: Element) {}
+    }
+    Object.defineProperty(globalThis, 'IntersectionObserver', {
+      value: IntersectionObserverMock,
+      writable: true,
+      configurable: true,
+    });
+  }
 });
 
 // Cleanup after each test case

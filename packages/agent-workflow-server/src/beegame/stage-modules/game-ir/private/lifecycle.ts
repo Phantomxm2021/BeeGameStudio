@@ -9,10 +9,10 @@ import { journalImmutableFiles as files, journalCanonical, ReviewJournalConflict
 import type { ReviewNativeUsage } from '../../../stage-runtime/native-usage'
 import { gameIrHandleSchema } from '../public'
 import type { GameIrHandle, GameIrProgress, GameIrReadyResult, GameIrResult,
-  GameIrResumeInput, GameIrStartInput, GameIrStopInput } from '../public'
+  GameIrResumeInput, GameIrStartInput, GameIrStopInput, GameIrReviseInput } from '../public'
 import { parseGameIrReadyReceipt } from '../private/core/contracts'
 import { foundationReadyReceiptFromInput } from '../private/core/source-input'
-import { compileGameIr, loadGameIrCompilerAuthority, type GameIrCompileInput, type GameIrCompileResult } from './compiler'
+import { compileGameIr, loadGameIrCompilerAuthority, publishGameIrCorrection, type GameIrCompileInput, type GameIrCompileResult } from './compiler'
 import { readPublishedGameIr, type GameIrPublishedView } from './reader'
 import { runNativeIrOperation, type NativeIrOperation } from './native-operation'
 
@@ -141,6 +141,7 @@ export type GameIrLifecycle = {
   resume(input: GameIrResumeInput): Promise<GameIrResult>
   stop(input: GameIrStopInput): Promise<GameIrResult>
   readResult(input: { handle: GameIrHandle; foundationRevision: string }): Promise<GameIrPublishedView>
+  revise(input: GameIrReviseInput): Promise<GameIrResult>
 }
 
 export function createGameIrLifecycle(workspacePath: string, infrastructure: Infrastructure, compiler: GameIrCompiler = compileGameIr): GameIrLifecycle {
@@ -345,6 +346,32 @@ export function createGameIrLifecycle(workspacePath: string, infrastructure: Inf
     return { ...base, status: 'needs_action', reason: state.failure ? `Game IR requires attention: ${state.failure}.` : 'Game IR awaits explicit continuation.', resumable: canResume(state) }
   }
   return Object.freeze({
+    async revise(value: GameIrReviseInput) {
+      const { start, handle } = await load(value.handle)
+      const current = await view(start, handle)
+      if (current.status !== 'completed' || current.billingStatus !== 'settled' ||
+          digest(current.result) !== value.expectedResultDigest)
+        throw new Error('IR correction requires the expected settled publication')
+      const source = captureFoundationIrInput(start)
+      const foundation = foundationReadyReceiptFromInput(source)
+      const authority = await loadGameIrCompilerAuthority({ workspacePath, identity: {
+        runId: handle.id, taskId: handle.id, publicationId: current.result.publicationId,
+        confirmedBriefDigest: source.confirmedBriefDigest, foundationRevision: source.publishedDocumentRevision,
+        foundationReadyReceiptDigest: foundation.receiptDigest,
+      } })
+      await readPublishedGameIr({ workspacePath, foundationInput: source, ready: current.result, authority })
+      const nextStart = { ...start, requestId: `revision:${digest({ parent: current.result, draft: value.draft })}` }
+      const nextHandle = handleFor(nextStart, digest(source))
+      const journal = await open(nextStart, nextHandle)
+      const ready = await publishGameIrCorrection({ workspacePath, foundationInput: source,
+        identity: { runId: nextHandle.id, taskId: nextHandle.id, publicationId: nextHandle.id,
+          confirmedBriefDigest: source.confirmedBriefDigest, foundationRevision: source.publishedDocumentRevision,
+          foundationReadyReceiptDigest: foundation.receiptDigest },
+        execute: async () => { throw new Error('Explicit IR correction must not start an agent') },
+      }, value.draft)
+      await append(journal, { kind: 'ready', ready }, `revision:${nextHandle.id}`)
+      return view(nextStart, nextHandle)
+    },
     async start(value: GameIrStartInput) {
       const input = startSchema.parse(structuredClone(value)) as GameIrStartInput
       if (input.ownerId !== ownerId) throw new Error('Game IR start owner/protocol mismatch')

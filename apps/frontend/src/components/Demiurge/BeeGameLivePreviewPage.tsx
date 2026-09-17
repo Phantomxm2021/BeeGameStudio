@@ -328,7 +328,7 @@ export function BeeGameLivePreviewPage({
               }}
               className="group flex min-w-0 max-w-[min(52vw,28rem)] flex-[0_1_auto] items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-1 text-left transition hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
             >
-              <span data-testid="beegame-project-trigger" className="min-w-0 flex-1 truncate text-[18px] font-semibold leading-6 text-[var(--text-primary)] sm:text-xl sm:leading-6">{projectName}</span>
+              <span data-testid="beegame-project-trigger" className="type-body-lg min-w-0 flex-1 truncate font-semibold text-[var(--text-primary)]">{projectName}</span>
               <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)] transition-transform group-data-[open]:rotate-180" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-[min(20rem,calc(100vw-1rem))]">

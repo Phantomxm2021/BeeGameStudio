@@ -20,10 +20,11 @@ const ir = {
   resultId: 'c'.repeat(64),
   foundationRevision: 'a'.repeat(64),
   publicationId: 'publication',
-  modules: [
-    { id: 'world', nodes: [{ id: 'world.main' }, { id: 'presentation.hud' }] },
-  ],
-} as unknown as DownstreamIr
+  parameters: {}, assets: [],
+  scenes: [{ id: 'world.main', name: 'Main', assetIds: [], config: {} }],
+  ui: [{ id: 'presentation.hud', name: 'HUD', assetIds: [], config: {} }],
+  vfx: [], logic: {},
+} satisfies DownstreamIr
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'beegame-content-stage-'))

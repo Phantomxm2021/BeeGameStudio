@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   BeeGameSessionManager,
   isResourceWorkerDurableProgress,
   readWorkflowWorkerChatHistoryFromDisk,
+  type BeeGameEvent,
   type BeeGameSessionRunner,
   type BeeGameSessionRunnerStartInput,
   type DashboardSDKMessage,
@@ -106,6 +107,58 @@ describe('BeeGame session runtime resilience', () => {
     manager.stop(session.id)
     expect(received).toEqual([])
     expect(retained).toEqual(['session.stopped'])
+    await manager.dispose()
+  })
+
+  test('streams workflow worker events at project scope without a live chat session', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-project-event-subscriber-'))
+    const workspacePath = join(root, 'workspace')
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async ({ onMessage }) => {
+          onMessage({
+            type: 'assistant',
+            message: {
+              id: 'resource-message',
+              content: [{ type: 'text', text: '资源准备中。' }],
+            },
+          })
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const received: BeeGameEvent[] = []
+    manager.subscribeProjectEvents(
+      { workspacePath, projectId: 'project-1', userId: 'user-1' },
+      event => received.push(event),
+    )
+    const worker = manager.start({
+      workspacePath,
+      projectId: 'project-1',
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'resource-planner',
+    })
+
+    await manager.send(worker.id, 'prepare resources')
+    await waitForIdle(manager, worker.id)
+
+    expect(received).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'assistant.message',
+        text: '资源准备中。',
+        payload: expect.objectContaining({
+          workflowWorkerType: 'resource-planner',
+        }),
+      }),
+    ]))
+    const logIndex = JSON.parse(
+      await readFile(join(workspacePath, 'logs', 'index.json'), 'utf8'),
+    ) as { sessions: Record<string, { transcript: string }> }
+    expect(logIndex.sessions[worker.id]?.transcript).toContain('transcripts/')
     await manager.dispose()
   })
 
@@ -210,6 +263,9 @@ describe('BeeGame session runtime resilience', () => {
       const logDirectory = join(workspacePath, '.beegame', 'workflow', directory, 'native', 'attempt')
       await mkdir(logDirectory, { recursive: true })
       const messages = [
+        ...(directory === 'foundation-authoring' ? [{ at: '2026-09-16T00:00:00.000Z', event: 'response.reasoning_snapshot', data: {
+          content: '先核对文档之间的依赖关系。', queryId: 'author-thinking-1', receivedBytes: 42, cumulative: false,
+        } }] : []),
         { at: '2026-09-16T00:00:00.000Z', event: 'response.message', data: { type: 'assistant', message: {
           id: `message-${directory}`, content: [{ type: 'text', text }, { type: 'tool_use', id: `tool-${directory}`, name: 'Write', input: { file_path: 'docs/a.md' } }],
         } } },
@@ -223,6 +279,7 @@ describe('BeeGame session runtime resilience', () => {
     for (const [, stage, text] of stages) {
       expect(history.some(event => event.type === 'assistant.message' && event.text === text && event.payload?.workflowStage === stage)).toBe(true)
     }
+    expect(history.some(event => event.type === 'assistant.thinking' && event.text === '先核对文档之间的依赖关系。' && event.payload?.workflowStage === 'author')).toBe(true)
     expect(history.filter(event => event.type === 'tool.started')).toHaveLength(3)
     expect(history.filter(event => event.type === 'tool.completed')).toHaveLength(3)
     const withoutDuplicates = await readWorkflowWorkerChatHistoryFromDisk(workspacePath, 'main', history)
@@ -238,14 +295,19 @@ describe('BeeGame session runtime resilience', () => {
     manager.followWorkflowStageChat({ workspacePath, projectId: 'project-live', userId: 'user-live' })
     const directory = join(workspacePath, '.beegame', 'workflow', 'foundation-authoring', 'native')
     await mkdir(directory, { recursive: true })
-    await writeFile(join(directory, 'native-events.jsonl'), JSON.stringify({
-      at: new Date().toISOString(), event: 'response.message', data: { type: 'assistant', message: {
-        id: 'live-message', content: [{ type: 'text', text: 'Live author output.' }],
+    await writeFile(join(directory, 'native-events.jsonl'), [
+      { at: new Date().toISOString(), event: 'response.content_snapshot', data: {
+        queryId: 'live-query', index: 0, type: 'text', content: 'Live author ', receivedBytes: 12, cumulative: true,
       } },
-    }) + '\n')
+      { at: new Date().toISOString(), event: 'response.content_snapshot', data: {
+        queryId: 'live-query', index: 0, type: 'text', content: 'Live author output.', receivedBytes: 19, cumulative: true,
+      } },
+    ].map(value => JSON.stringify(value)).join('\n') + '\n')
     for (let attempt = 0; attempt < 30 && !manager.events(chat.id).some(event => event.text === 'Live author output.'); attempt++)
       await new Promise(resolve => setTimeout(resolve, 50))
-    expect(manager.events(chat.id).some(event => event.type === 'assistant.message' && event.text === 'Live author output.')).toBe(true)
+    const streamed = manager.events(chat.id).filter(event => event.type === 'assistant.partial')
+    expect(streamed.map(event => event.text)).toEqual(['Live author ', 'output.'])
+    expect(streamed.every(event => event.turnId === 'workflow-stage:author:live-query')).toBe(true)
     await manager.dispose()
   })
 
@@ -511,7 +573,7 @@ describe('BeeGame session runtime resilience', () => {
     })
   })
 
-  test('leaves unsupported external tools on the existing permission path', async () => {
+  test('auto-approves every tool requested by a workflow worker', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-non-resource-permission-'))
     const workspacePath = join(root, 'workspace')
     let decisionPromise: Promise<DashboardPermissionDecision> | undefined
@@ -542,26 +604,20 @@ describe('BeeGame session runtime resilience', () => {
 
     await manager.send(session.id, 'implement the project')
     await waitForIdle(manager, session.id)
-    const pending = manager.pendingPermissionsForProject(
+    expect(manager.pendingPermissionsForProject(
       'user-1',
       'project-1',
       workspacePath,
-    )
-
-    expect(pending).toEqual([
-      expect.objectContaining({
-        toolUseID: 'implementation-import-1',
-        toolName: 'UnknownExternalTool',
-      }),
-    ])
-    manager.resolveProjectPermission(
-      'user-1',
-      'project-1',
-      workspacePath,
-      'implementation-import-1',
-      { behavior: 'deny' },
-    )
-    expect(await decisionPromise).toEqual({ behavior: 'deny' })
+    )).toEqual([])
+    expect(await decisionPromise).toEqual({ behavior: 'allow', scope: 'once' })
+    expect(
+      manager
+        .events(session.id)
+        .find(event => event.type === 'permission.resolved')?.payload,
+    ).toMatchObject({
+      autoApproved: true,
+      reason: 'workflow_worker_tool_authority',
+    })
     manager.dispose()
   })
 
@@ -809,20 +865,23 @@ describe('BeeGame session runtime resilience', () => {
     manager.dispose()
   })
 
-  test('leaves unsupported tools on the existing permission path', async () => {
+  test('auto-approves non-file tools for a workflow worker without a permission gate', async () => {
     root = await mkdtemp(join(tmpdir(), 'beegame-project-tool-permission-'))
     const workspacePath = join(root, 'workspace')
     await mkdir(workspacePath, { recursive: true })
-    let decisionPromise: Promise<DashboardPermissionDecision> | undefined
+    let decisionPromises: Promise<DashboardPermissionDecision>[] = []
     const runner: BeeGameSessionRunner = {
       start: async startInput => ({
         submit: async () => {
-          decisionPromise = startInput.requestPermission?.({
-            toolUseID: 'project-bash-request',
-            toolName: 'Bash',
-            message: 'Run a shell command',
-            input: { command: 'pwd' },
-          })
+          decisionPromises = ['Bash', 'WebSearch', 'WebFetch', 'SandboxNetworkAccess'].map(
+            toolName =>
+              startInput.requestPermission!({
+                toolUseID: `workflow-${toolName}`,
+                toolName,
+                message: `${toolName} requires permission`,
+                input: { command: 'pwd', query: 'public domain sprites', host: 'example.com' },
+              }),
+          )
         },
         stop: () => undefined,
       }),
@@ -847,20 +906,18 @@ describe('BeeGame session runtime resilience', () => {
         'project-1',
         workspacePath,
       ),
-    ).toEqual([
-      expect.objectContaining({
-        toolUseID: 'project-bash-request',
-        toolName: 'Bash',
-      }),
-    ])
-    manager.resolveProjectPermission(
-      'user-1',
-      'project-1',
-      workspacePath,
-      'project-bash-request',
-      { behavior: 'deny' },
+    ).toEqual([])
+    expect(await Promise.all(decisionPromises)).toEqual(
+      Array.from({ length: 4 }, () => ({ behavior: 'allow', scope: 'once' })),
     )
-    expect(await decisionPromise).toEqual({ behavior: 'deny' })
+    for (const event of manager
+      .events(session.id)
+      .filter(event => event.type === 'permission.resolved')) {
+      expect(event.payload).toMatchObject({
+        autoApproved: true,
+        reason: 'workflow_worker_tool_authority',
+      })
+    }
     manager.dispose()
   })
 
@@ -1783,6 +1840,66 @@ describe('BeeGame session runtime resilience', () => {
     expect(
       manager.events(session.id).some(event => event.type === 'turn.failed'),
     ).toBe(false)
+    expect(
+      manager.events(session.id).some(
+        event => event.type === 'assistant.thinking' && event.text === 'planning',
+      ),
+    ).toBe(true)
+    manager.dispose()
+  })
+
+  test('carries a thinking block start time into its end event', async () => {
+    root = await mkdtemp(join(tmpdir(), 'beegame-thinking-duration-'))
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({
+        submit: async input => {
+          input.onMessage({
+            type: 'stream_event',
+            event: {
+              type: 'content_block_start', index: 0,
+              content_block: { type: 'thinking' },
+            },
+          } as DashboardSDKMessage)
+          input.onMessage({
+            type: 'stream_event',
+            event: {
+              type: 'content_block_delta', index: 0,
+              delta: { type: 'thinking_delta', thinking: '先规划。' },
+            },
+          } as DashboardSDKMessage)
+          await new Promise(resolve => setTimeout(resolve, 12))
+          input.onMessage({
+            type: 'stream_event',
+            event: { type: 'content_block_stop', index: 0 },
+          } as DashboardSDKMessage)
+        },
+        stop: () => undefined,
+      }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath: join(root, 'workspace'),
+      userId: 'user-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'document-author',
+    })
+
+    await manager.send(session.id, 'start')
+    await waitForIdle(manager, session.id)
+    const thinkingEvents = manager.events(session.id).filter(event => event.type === 'assistant.thinking')
+    const started = thinkingEvents.find(event => event.payload?.status === 'started')
+    const ended = thinkingEvents.find(event => event.payload?.status === 'ended')
+
+    expect(manager.events(session.id).filter(event => event.type === 'turn.failed')).toEqual([])
+    expect(thinkingEvents.map(event => event.payload)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'started' }),
+      expect.objectContaining({ status: 'ended' }),
+    ]))
+    expect(started?.payload?.thinkingStartedAt).toBeTruthy()
+    expect(ended?.payload?.thinkingStartedAt).toBe(started?.payload?.thinkingStartedAt)
+    expect(Date.parse(ended!.createdAt.toISOString()) - Date.parse(String(ended?.payload?.thinkingStartedAt))).toBeGreaterThanOrEqual(10)
     manager.dispose()
   })
 

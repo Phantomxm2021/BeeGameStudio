@@ -953,7 +953,7 @@ describe('LandingView bootstrap submission', () => {
     expect(screen.getByText('A')).toBeInTheDocument();
     expect(await screen.findByText('Alice')).toBeInTheDocument();
     expect(screen.getByText('300 credits')).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /模式|mode/i })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /模式|mode/i })).not.toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: '个人主页' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: '系统设置' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: '历史项目' })).toBeInTheDocument();
@@ -1013,9 +1013,10 @@ describe('LandingView bootstrap submission', () => {
     fireEvent.click(await screen.findByRole('button', { name: '用户菜单' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: '个人主页' }));
 
-    expect(await screen.findByRole('dialog', { name: '个人主页' })).toBeInTheDocument();
-    expect(screen.getByText('Alice')).toBeInTheDocument();
-    expect(screen.getByText('alice@example.com')).toBeInTheDocument();
+    const profileDialog = await screen.findByRole('dialog', { name: '个人主页' });
+    expect(profileDialog).toBeInTheDocument();
+    expect(within(profileDialog).getByText('Alice')).toBeInTheDocument();
+    expect(within(profileDialog).getByText('alice@example.com')).toBeInTheDocument();
     expect(screen.queryByLabelText('昵称')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('个人邮箱')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('头像 URL')).not.toBeInTheDocument();
@@ -1411,8 +1412,8 @@ describe('LandingView bootstrap submission', () => {
 
     const textbox = await submitIdeaAndConfirmIntake('LLM generated idea');
 
-    expect(screen.getByRole('heading', { name: '从一个想法开始' })).toBeInTheDocument();
-    expect(screen.getByText('寥寥几句，就足以启程。')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^从一个想法开始/ })).toBeInTheDocument();
+    expect(screen.getByText('给它一点灵感，剩下的交给我们。')).toBeInTheDocument();
     expect(screen.queryByText('正在根据你的想法生成可选方案...')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(textbox).toBeDisabled();
@@ -1664,8 +1665,8 @@ describe('LandingView bootstrap submission', () => {
   it('renders localized English hero copy and idea placeholder', async () => {
     await renderLanding({ lang: 'en' });
 
-    expect(screen.getByRole('heading', { name: 'Start with an idea.' })).toBeInTheDocument();
-    expect(screen.getByText('A few words are enough to begin.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^Start with an idea/ })).toBeInTheDocument();
+    expect(screen.getByText('Give it a little inspiration. Leave the rest to us.')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'What game do you want to make? e.g. a mobile puzzle game' })).toHaveAttribute('placeholder', 'Ask anything...');
     expect(screen.queryByTestId('demiurge-logo')).not.toBeInTheDocument();
   });
@@ -1685,14 +1686,14 @@ describe('LandingView bootstrap submission', () => {
     expect(await screen.findByText('game-design.md')).toBeInTheDocument();
   });
 
-  it('renders a muted looping video background behind the landing content', async () => {
+  it('renders the static image background behind the landing content', async () => {
     await renderLanding();
 
-    const video = screen.getByTestId('landing-background-video') as HTMLVideoElement;
-    expect(video).toBeInTheDocument();
-    expect(video.loop).toBe(true);
-    expect(video.muted).toBe(true);
-    expect(video.playsInline).toBe(true);
+    const image = screen.getByTestId('landing-background-image') as HTMLImageElement;
+    expect(image).toBeInTheDocument();
+    expect(image.getAttribute('src')).toContain('background.jpg');
+    expect(screen.queryByTestId('landing-background-video')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('landing-gradient-background')).not.toBeInTheDocument();
     expect(screen.queryByTestId('beui-theme-toggle')).not.toBeInTheDocument();
   });
 
@@ -1746,15 +1747,15 @@ describe('LandingView bootstrap submission', () => {
   it('renders the updated Simplified Chinese hero subtitle', async () => {
     await renderLanding({ lang: 'zh' });
 
-    expect(screen.getByRole('heading', { name: '从一个想法开始' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^从一个想法开始/ })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '从一个想法开始。' })).not.toBeInTheDocument();
-    expect(screen.getByText('寥寥几句，就足以启程。')).toBeInTheDocument();
+    expect(screen.getByText('给它一点灵感，剩下的交给我们。')).toBeInTheDocument();
   });
 
   it('renders the Traditional Chinese hero title without punctuation', async () => {
     await renderLanding({ lang: 'zh-TW' });
 
-    expect(screen.getByRole('heading', { name: '從一個想法開始' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /^從一個想法開始/ })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '從一個想法開始。' })).not.toBeInTheDocument();
   });
 

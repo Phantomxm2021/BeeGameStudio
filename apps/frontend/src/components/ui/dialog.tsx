@@ -12,7 +12,7 @@ function DialogPortal({ children }: { children: React.ReactNode }) {
 }
 
 function DialogOverlay({ className, ...props }: ComponentProps<typeof DialogPrimitive.Backdrop>) {
-  return <DialogPrimitive.Backdrop className={cn("fixed inset-0 z-[240] bg-background transition-opacity duration-[var(--motion-dialog)] data-[ending-style]:opacity-0 data-[starting-style]:opacity-0", className)} {...props} />
+  return <DialogPrimitive.Backdrop className={cn("fixed inset-0 z-[240] bg-black/38 backdrop-blur-[2px] transition-opacity duration-[var(--motion-dialog)] data-[ending-style]:opacity-0 data-[starting-style]:opacity-0", className)} {...props} />
 }
 
 function DialogContent({ className, children, ...props }: ComponentProps<typeof DialogPrimitive.Popup>) {
@@ -30,7 +30,7 @@ function DialogContent({ className, children, ...props }: ComponentProps<typeof 
 }
 
 function DialogTitle({ className, ...props }: ComponentProps<typeof DialogPrimitive.Title>) {
-  return <DialogPrimitive.Title className={cn("text-[20px] font-semibold leading-7", className)} {...props} />
+  return <DialogPrimitive.Title className={cn("type-body-lg font-display font-semibold", className)} {...props} />
 }
 
 function DialogDescription({ className, ...props }: ComponentProps<typeof DialogPrimitive.Description>) {

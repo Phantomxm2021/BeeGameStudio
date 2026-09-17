@@ -100,20 +100,20 @@ export function UsageBillingPanel({
         </div>
         <div className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(7rem,.7fr)_minmax(0,1fr)]">
           <input
-            className="type-input text-[16px] min-[900px]:text-md min-w-0 rounded-lg border border-border bg-surface-2 px-3 py-2 text-foreground outline-none focus:border-ring"
+            className="type-input min-w-0 rounded-lg border border-border bg-surface-2 px-3 py-2 text-foreground outline-none focus:border-ring"
             placeholder={copy.priceId}
             value={packForm.priceId}
             onChange={event => onPackFormChange({ ...packForm, priceId: event.target.value })}
           />
           <input
-            className="type-input text-[16px] min-[900px]:text-md min-w-0 rounded-lg border border-border bg-surface-2 px-3 py-2 text-foreground outline-none focus:border-ring"
+            className="type-input min-w-0 rounded-lg border border-border bg-surface-2 px-3 py-2 text-foreground outline-none focus:border-ring"
             placeholder={copy.credits}
             inputMode="numeric"
             value={packForm.credits}
             onChange={event => onPackFormChange({ ...packForm, credits: event.target.value })}
           />
           <input
-            className="type-input text-[16px] min-[900px]:text-md min-w-0 rounded-lg border border-border bg-surface-2 px-3 py-2 text-foreground outline-none focus:border-ring sm:col-span-2 xl:col-span-1"
+            className="type-input min-w-0 rounded-lg border border-border bg-surface-2 px-3 py-2 text-foreground outline-none focus:border-ring sm:col-span-2 xl:col-span-1"
             placeholder={copy.displayName}
             value={packForm.displayName}
             onChange={event => onPackFormChange({ ...packForm, displayName: event.target.value })}
@@ -121,7 +121,7 @@ export function UsageBillingPanel({
         </div>
         <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(7rem,10rem)_auto] sm:items-center">
           <input
-            className="type-input text-[16px] min-[900px]:text-md min-w-0 rounded-lg border border-border bg-surface-2 px-3 py-2 text-foreground outline-none focus:border-ring"
+            className="type-input min-w-0 rounded-lg border border-border bg-surface-2 px-3 py-2 text-foreground outline-none focus:border-ring"
             placeholder={copy.sortOrder}
             inputMode="numeric"
             value={packForm.sortOrder}

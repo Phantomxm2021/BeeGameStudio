@@ -18,6 +18,16 @@ import { type ChecklistAuthority } from '../beegame/checklist-authority-projecti
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/foundation-documents'
 
 describe('delivery worker session credentials', () => {
+  test('malformed resource artifacts reach stage acceptance instead of throwing a transport failure', async () => {
+    const workspacePath = await createResourceWorkspace()
+    try {
+      await mkdir(join(workspacePath, 'assets'), { recursive: true })
+      await writeFile(join(workspacePath, 'assets/asset-manifest.json'), '{invalid')
+      const terminal = await runResourceTerminal({ workspacePath, workerType: 'resource-planner',
+        toolName: 'Write', toolInput: { file_path: join(workspacePath, 'assets/asset-manifest.json') } })
+      expect(terminal).toMatchObject({ workerType: 'resource-planner', status: 'completed' })
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
   test('passes only the accepted checklist snapshot to the document author', async () => {
     const input = checklistAuthorityFixture()
     const request = {
@@ -44,7 +54,8 @@ describe('delivery worker session credentials', () => {
     const block = await buildDocumentAuthorAuthorityBlock(request)
     expect(block).toContain('# 中文玩法愿景')
     expect(block).toContain('# 日本語シーン設計')
-    expect(block).toContain('acceptance-scenario-1')
+    expect(block).toContain('Associated Game IR result: ir-publication-1')
+    expect(block).not.toContain('acceptance-scenario')
   })
 
   test('fails clearly when the checklist authority snapshot is absent', async () => {
@@ -447,22 +458,6 @@ function checklistAuthorityFixture(): ChecklistAuthority {
     documentSetDigest,
     documents,
     irResultId: 'ir-publication-1',
-    irModules: [
-      {
-        moduleId: 'implementation-verification',
-        nodes: [
-          {
-            id: 'acceptance-scenario-1',
-            value: {
-              label: '光点を集める',
-              precondition: '关卡已开始',
-              action: '收集光点',
-              expectedOutcome: '计数增加',
-            },
-          },
-        ],
-      },
-    ],
   }
 }
 

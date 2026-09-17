@@ -1,7 +1,7 @@
 import { readBeeGameAssetManifestSync } from '../asset-contracts'
 import { acceptBeeGameContentPackage } from '../game-content-package'
 import { buildSceneUiContentAuthoringAuthority } from '../scene-ui-content-authoring'
-import type { DownstreamIr } from './downstream-ir'
+import { downstreamIrEntryIds, type DownstreamIr } from './downstream-ir'
 import { transitionDeliveryRun } from './transition'
 import type { DeliveryRun, WorkerDispatchRequest } from './types'
 import type { WorkerTerminalResult } from './worker-contracts'
@@ -71,9 +71,7 @@ export function completeGameContentStage(input: {
     const receipt = acceptBeeGameContentPackage(input.workspacePath, {
       irRevision: input.gameIr.resultId,
       assetManifestRevision,
-      irNodeIds: input.gameIr.modules.flatMap(module =>
-        module.nodes.map(node => node.id),
-      ),
+      irEntryIds: downstreamIrEntryIds(input.gameIr),
       manifest,
     })
     const run = { ...input.run, activeDispatch: undefined, gameContentReceipt: receipt }

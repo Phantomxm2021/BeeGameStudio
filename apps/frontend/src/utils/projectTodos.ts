@@ -56,19 +56,25 @@ const parseSnapshot = (input: unknown, messageId: string): ProjectTodo[] | null 
     });
 };
 
-/** Returns the most recent complete TodoWrite snapshot from the native chat stream. */
+/** Returns every project task represented by native TodoWrite events. */
 export const deriveCurrentProjectTodos = (messages: ChatDisplayMessage[]): ProjectTodo[] => {
-    let latest: ProjectTodo[] = [];
+    const todos = new Map<string, ProjectTodo>();
+    const mergeSnapshot = (snapshot: ProjectTodo[]) => {
+        for (const item of snapshot) {
+            const existingKey = [...todos.entries()].find(([, current]) => current.title === item.title)?.[0];
+            todos.set(existingKey || item.id, { ...item, id: existingKey || item.id });
+        }
+    };
     for (const message of messages) {
         if (isTodoTool(messageToolName(message))) {
             const snapshot = parseSnapshot(message.toolInput, message.id);
-            if (snapshot) latest = snapshot;
+            if (snapshot) mergeSnapshot(snapshot);
         }
         for (const [index, block] of (message.contentBlocks || []).entries()) {
             if (block.type !== 'tool_use' || !isTodoTool(block.toolName)) continue;
             const snapshot = parseSnapshot(block.toolInput, `${message.id}-block-${index}`);
-            if (snapshot) latest = snapshot;
+            if (snapshot) mergeSnapshot(snapshot);
         }
     }
-    return latest;
+    return [...todos.values()];
 };

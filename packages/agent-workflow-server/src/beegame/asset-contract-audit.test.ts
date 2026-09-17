@@ -11,6 +11,23 @@ import {
 
 const workspaces: string[] = []
 
+test('encoded ambience accepts JSON sidecars but JSON-only synthesis remains provisional', () => {
+  const value = manifest()
+  const resource = value.resources[0]!
+  resource.asset_kind = 'ambience'
+  resource.root_path = 'assets/runtime/owls.ogg'
+  resource.file_paths = [resource.root_path, 'assets/runtime/owls.json']
+  expect(() => parseCanonicalBeeGameAssetManifest(value)).not.toThrow()
+  resource.root_path = 'assets/runtime/owls.json'
+  resource.file_paths = [resource.root_path]
+  expect(() => parseCanonicalBeeGameAssetManifest(value)).toThrow('programmatic audio')
+  resource.asset_kind = 'audio-bank'
+  resource.provisional = true
+  expect(() => parseCanonicalBeeGameAssetManifest(value)).not.toThrow()
+  resource.file_paths.push('assets/runtime/script.js')
+  expect(() => parseCanonicalBeeGameAssetManifest(value)).toThrow()
+})
+
 afterEach(async () => {
   for (const workspace of workspaces.splice(0))
     await rm(workspace, { recursive: true, force: true })

@@ -31,8 +31,23 @@ const getPathFolderName = (path?: string): string => {
   return normalized.split('/').filter(Boolean).at(-1) || '';
 };
 
-const getProjectDisplayName = (project: { name?: string; root_path?: string }, fallback: string): string =>
-  getPathFolderName(project.root_path) || project.name || fallback;
+const isGeneratedProjectId = (value: string): boolean =>
+  /(^proj[_-]|^[a-f\d]{8,}$|--[a-f\d]{8,}$)/i.test(value.trim());
+
+const humanizeProjectName = (value: string): string => {
+  const withoutGeneratedSuffix = value
+    .replace(/--[a-f\d]{8,}$/i, '')
+    .trim();
+  if (!withoutGeneratedSuffix) return '';
+  return withoutGeneratedSuffix;
+};
+
+const getProjectDisplayName = (project: { name?: string; root_path?: string }, fallback: string): string => {
+  const folderName = humanizeProjectName(getPathFolderName(project.root_path));
+  if (folderName) return folderName;
+  const explicitName = String(project.name || '').trim();
+  return explicitName && !isGeneratedProjectId(explicitName) ? explicitName : fallback;
+};
 
 const MENU_WIDTH = 150;
 const MENU_MARGIN = 12;

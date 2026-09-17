@@ -225,11 +225,7 @@ async function verifiedChecklistAuthority(input: {
     if (createHash('sha256').update(current, 'utf8').digest('hex') !== document.digest)
       throw new Error(`Accepted Foundation document changed before Checklist publication: ${document.path}`)
   }
-  const module = view.candidate.modules.find(value => value.moduleId === 'implementation-verification')
-  if (!module) throw new Error('Verified IR does not contain implementation verification')
   return { foundationRevision: link.foundationRevision, documentSetDigest: view.input.documentSetDigest,
     documents: view.input.documents.map(({ path, content, digest }) => ({ path, content, digest })),
-    irResultId: foundationPublicDigest(view.ready), irModules: [{ moduleId: module.moduleId,
-      nodes: module.nodes.filter(node => node.kind === 'implementation-verification.acceptance-scenario')
-        .map(node => ({ id: node.id, kind: node.kind, value: node.value, bindings: node.bindings })) }] }
+    irResultId: foundationPublicDigest(view.ready) }
 }

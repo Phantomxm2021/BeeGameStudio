@@ -20,7 +20,7 @@ export type GameIrHostOptions = {
   billingClient: BeeGameUsageBillingClient
 }
 
-export type GameIrHost = Pick<GameIrOperations, 'start' | 'resume' | 'stop' | 'getResult' | 'readResult'>
+export type GameIrHost = GameIrOperations
 
 /** Lazy host assembly mirrors Foundation Reviewer and keeps credentials/billing private. */
 export function createGameIrHost(options: GameIrHostOptions): GameIrHost {
@@ -60,6 +60,7 @@ export function createGameIrHost(options: GameIrHostOptions): GameIrHost {
     stop: input => getStage().then(stage => stage.stop(input)),
     getResult: input => getStage().then(stage => stage.getResult(input)),
     readResult: input => getStage().then(stage => stage.readResult(input)),
+    revise: input => getStage().then(stage => stage.revise(input)),
   })
 }
 

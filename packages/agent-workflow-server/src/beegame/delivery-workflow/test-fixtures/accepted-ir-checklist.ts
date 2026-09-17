@@ -175,31 +175,15 @@ export function readyReceipt(
   const source = acceptedIrInput(run)
   const digest = fixtureDigest
   return {
-    schemaVersion: 'game-ir-ready-receipt.v1',
+    schemaVersion: 'game-ir-ready-receipt.v2',
     taskId: 'game-ir-task',
     publicationId: `ir-publication-${marker}`,
-    gameIrSchemaVersion: 'game-ir.v1',
+    gameIrSchemaVersion: 'game-ir.v2',
     foundationRevision: source.publishedDocumentRevision,
     foundationReceiptDigest: digest(`foundation-receipt-${marker}`),
+    candidateDigest: digest(`candidate-${marker}`),
     manifestDigest: digest(`manifest-${marker}`),
-    moduleDigests: {
-      balance: digest(`balance-module-${marker}`),
-      gameplay: digest(`gameplay-module-${marker}`),
-      'implementation-verification': digest(`module-${marker}`),
-      presentation: digest(`presentation-module-${marker}`),
-      'resource-realization': digest(`resource-module-${marker}`),
-      'world-scene': digest(`world-module-${marker}`),
-    },
-    sourceMapDigests: {
-      balance: digest(`balance-source-map-${marker}`),
-      gameplay: digest(`gameplay-source-map-${marker}`),
-      'implementation-verification': digest(`source-map-${marker}`),
-      presentation: digest(`presentation-source-map-${marker}`),
-      'resource-realization': digest(`resource-source-map-${marker}`),
-      'world-scene': digest(`world-source-map-${marker}`),
-    },
-    dependencyGraphDigest: digest(`dependency-graph-${marker}`),
-    committedPath: `.beegame/ir/game-ir.v1/revisions/${source.publishedDocumentRevision}/COMMITTED.json`,
+    committedPath: `.beegame/ir/game-ir.v2/revisions/${source.publishedDocumentRevision}/COMMITTED.json`,
   }
 }
 

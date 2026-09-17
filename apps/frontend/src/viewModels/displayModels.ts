@@ -38,6 +38,7 @@ export type ChatDisplayMessage = Pick<
   | 'isDocument'
   | 'documentTitle'
   | 'thought'
+  | 'thinkingDurationMs'
   | 'contentBlocks'
   | 'taskId'
   | 'turnId'
@@ -624,6 +625,7 @@ export const toChatDisplayMessage = (message: Message): ChatDisplayMessage => ({
   isDocument: message.isDocument,
   documentTitle: message.documentTitle,
   thought: message.thought,
+  thinkingDurationMs: message.thinkingDurationMs,
   contentBlocks: message.contentBlocks,
   taskId: message.taskId,
   turnId: message.turnId || message.turn_id,

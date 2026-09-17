@@ -18,7 +18,7 @@ Resource Delivery 是 Game IR 后的第一个生产阶段。Scene、UI、VFX、�
 
 Workflow 向一次正常的直接 CLI Agent 任务提供：
 
-- 当前已发布 Game IR，重点包含 `resource-realization` 需求；
+- 当前已发布 Game IR，其 `assets` 数组包含逻辑资源需求；
 - 已确认目标平台、运行时与资源格式能力；
 - Resource Library 的实际可用能力和当前项目已有资源；
 - 唯一可写范围 `assets/**`。

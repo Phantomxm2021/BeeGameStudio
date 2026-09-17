@@ -96,6 +96,10 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
         const stats = statSync(absolute)
         if (!stats.isFile()) issues.push(`Path is not a file: ${filePath}`)
         else if (!stats.size) issues.push(`File is empty: ${filePath}`)
+        else if (filePath.toLowerCase().endsWith('.json')) {
+          try { JSON.parse(readFileSync(absolute, 'utf8')) }
+          catch { issues.push(`File contains invalid JSON: ${filePath}`) }
+        }
         const expected = resource.local_file_hashes?.[filePath]
         if (expected && stats.isFile()) {
           const actual = createHash('sha256')

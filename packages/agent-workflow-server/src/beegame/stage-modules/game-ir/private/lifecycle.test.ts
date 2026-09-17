@@ -8,10 +8,42 @@ import { foundationPublicDigest } from '../../../foundation-public-result'
 import { captureFoundationIrInput } from '../input'
 import { foundationReadyReceiptFromInput } from '../private/core/source-input'
 import { createGameIrLifecycle, type GameIrCompiler } from './lifecycle'
+import { compileGameIr } from './compiler'
 import type { GameIrReadyResult, GameIrStartInput } from '../public'
 import type { ReviewerReviewResult } from '../../foundation-reviewer/public'
 
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
+
+test('explicit correction preserves the old publication, is repeatable, and never runs another agent', async () => {
+  const workspacePath = await realpath(await mkdtemp(join(tmpdir(), 'game-ir-correction-')))
+  try {
+    const review = acceptedReview()
+    const draft = { schemaVersion: 'game-ir-direct-draft.v2', parameters: { volume: 1 }, assets: [],
+      scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }], ui: [], vfx: [], logic: {} }
+    let calls = 0
+    const stage = createGameIrLifecycle(workspacePath, infrastructure(), input => compileGameIr({ ...input,
+      execute: async () => { calls++; return JSON.stringify(draft) } }))
+    const handle = await stage.start({ protocolVersion: 1, ownerId: 'owner', projectId: 'project', requestId: 'initial',
+      acceptedReview: review, publishedDocumentRevision: review.documentSetDigest })
+    const initial = await waitFor(stage, handle)
+    if (initial.status !== 'completed') throw new Error('fixture failed')
+    const oldBytes = await readFile(join(workspacePath, initial.result.committedPath), 'utf8')
+    const correction = { handle, expectedResultDigest: foundationPublicDigest(initial.result),
+      draft: { ...draft, parameters: { volume: 0.5 } } }
+    await expect(stage.revise({ ...correction, expectedResultDigest: sha('stale') })).rejects.toThrow('expected settled')
+    const revised = await stage.revise(correction)
+    if (revised.status !== 'completed') throw new Error('revision failed')
+    expect(revised.handle.id).not.toBe(handle.id)
+    expect(revised.result.committedPath).not.toBe(initial.result.committedPath)
+    expect((await stage.revise(correction)).handle).toEqual(revised.handle)
+    expect(await readFile(join(workspacePath, initial.result.committedPath), 'utf8')).toBe(oldBytes)
+    expect((await stage.readResult({ handle, foundationRevision: review.documentSetDigest })).candidate.parameters).toEqual({ volume: 1 })
+    const restarted = createGameIrLifecycle(workspacePath, infrastructure())
+    expect((await restarted.readResult({ handle: revised.handle, foundationRevision: review.documentSetDigest })).candidate.parameters).toEqual({ volume: 0.5 })
+    expect(calls).toBe(1)
+    await expect(stage.revise({ ...correction, draft: { ...draft, schemaVersion: 'invalid' } })).rejects.toThrow()
+  } finally { await rm(workspacePath, { recursive: true, force: true }) }
+})
 
 function acceptedReview(): ReviewerReviewResult {
   const brief = 'Confirmed brief'
@@ -56,12 +88,10 @@ function infrastructure() {
 
 function readyFor(source: ReturnType<typeof captureFoundationIrInput>): GameIrReadyResult {
   const receipt = foundationReadyReceiptFromInput(source)
-  return { schemaVersion: 'game-ir-ready-receipt.v1' as const, taskId: 'ir-request', publicationId: 'publication',
-    gameIrSchemaVersion: 'game-ir.v1' as const, foundationRevision: source.publishedDocumentRevision,
-    foundationReceiptDigest: receipt.receiptDigest, manifestDigest: sha('manifest'),
-    moduleDigests: Object.fromEntries(['balance', 'gameplay', 'implementation-verification', 'presentation', 'resource-realization', 'world-scene'].map(key => [key, sha(key)])) as GameIrReadyResult['moduleDigests'],
-    sourceMapDigests: Object.fromEntries(['balance', 'gameplay', 'implementation-verification', 'presentation', 'resource-realization', 'world-scene'].map(key => [key, sha(`${key}-source`)])) as GameIrReadyResult['sourceMapDigests'],
-    dependencyGraphDigest: sha('graph'), committedPath: `.beegame/ir/game-ir.v1/revisions/${source.publishedDocumentRevision}/COMMITTED.json`,
+  return { schemaVersion: 'game-ir-ready-receipt.v2' as const, taskId: 'ir-request', publicationId: 'publication',
+    gameIrSchemaVersion: 'game-ir.v2' as const, foundationRevision: source.publishedDocumentRevision,
+    foundationReceiptDigest: receipt.receiptDigest, candidateDigest: sha('candidate'), manifestDigest: sha('manifest'),
+    committedPath: `.beegame/ir/game-ir.v2/revisions/${source.publishedDocumentRevision}/COMMITTED.json`,
   }
 }
 
@@ -97,7 +127,7 @@ test('Game IR start is idempotent and a ready result is durable', async () => {
       acceptedReview: review, publishedDocumentRevision: review.documentSetDigest }
     const source = captureFoundationIrInput(input)
     const ready = readyFor(source)
-    const compiler: GameIrCompiler = async () => ({ status: 'ready', closure: { candidate: { schemaVersion: 'game-ir.v1', taskId: 'ir-request', foundationRevision: source.publishedDocumentRevision, modules: [] } }, readyReceipt: ready } as any)
+    const compiler: GameIrCompiler = async () => ({ status: 'ready', closure: { candidate: { schemaVersion: 'game-ir.v2', taskId: 'ir-request', sourceRevision: source.publishedDocumentRevision, parameters: {}, assets: [], scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }], ui: [], vfx: [], logic: {} } }, readyReceipt: ready } as any)
     const stage = createGameIrLifecycle(workspacePath, infrastructure(), compiler)
     const handle = await stage.start(input)
     expect(await stage.start(input)).toEqual(handle)
@@ -106,24 +136,33 @@ test('Game IR start is idempotent and a ready result is durable', async () => {
   } finally { await rm(workspacePath, { recursive: true, force: true }) }
 })
 
-test('a direct CLI validation failure is terminal and does not trigger a hidden retry', async () => {
+test('a direct CLI validation failure waits for explicit resume before repair', async () => {
   const workspacePath = await realpath(await mkdtemp(join(tmpdir(), 'game-ir-validation-terminal-')))
   try {
     const review = acceptedReview()
     const input: GameIrStartInput = { protocolVersion: 1, ownerId: 'owner', projectId: 'project', requestId: 'validation-terminal',
       acceptedReview: review, publishedDocumentRevision: review.documentSetDigest }
+    const source = captureFoundationIrInput(input), ready = readyFor(source)
     let calls = 0
-    const compiler: GameIrCompiler = async () => { calls += 1; return { status: 'needs_action', diagnostic: {
-      schemaVersion: 'game-ir-compiler-diagnostic.v1', recoverable: false, step: 'direct', domain: 'all', mode: 'compile',
-      reason: 'latest host validation error',
-    } } }
+    const compiler: GameIrCompiler = async () => {
+      calls += 1
+      if (calls === 1) return { status: 'needs_action', diagnostic: {
+        schemaVersion: 'game-ir-compiler-diagnostic.v1', recoverable: true, step: 'direct', domain: 'all', mode: 'compile',
+        reason: 'latest host validation error',
+      } }
+      return { status: 'ready', closure: { candidate: { schemaVersion: 'game-ir.v2', taskId: 'ir-request',
+        sourceRevision: source.publishedDocumentRevision, parameters: {}, assets: [],
+        scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }], ui: [], vfx: [],
+        logic: { entryScene: 'scene.main' } } }, readyReceipt: ready } as any
+    }
     const stage = createGameIrLifecycle(workspacePath, infrastructure(), compiler)
     const handle = await stage.start(input)
     const result = await waitFor(stage, handle)
-    expect(result).toMatchObject({ status: 'needs_action', resumable: false })
-    const repeated = await stage.resume({ handle, requestId: 'must-not-retry' })
-    expect(repeated).toMatchObject({ status: 'needs_action', resumable: false })
+    expect(result).toMatchObject({ status: 'needs_action', resumable: true })
     expect(calls).toBe(1)
+    await stage.resume({ handle, requestId: 'explicit-repair' })
+    expect(await waitFor(stage, handle)).toMatchObject({ status: 'completed' })
+    expect(calls).toBe(2)
   } finally { await rm(workspacePath, { recursive: true, force: true }) }
 })
 
@@ -171,7 +210,7 @@ test('recovers a lost billing acknowledgement with the same event and does not r
     })
     const compiler: GameIrCompiler = async ({ execute }) => {
       await execute({ kind: 'compile', prompt: 'fixture', outputFormat: 'json' })
-      return { status: 'ready', closure: { candidate: { schemaVersion: 'game-ir.v1', taskId: 'ir-request', foundationRevision: source.publishedDocumentRevision, modules: [] } }, readyReceipt: ready } as any
+      return { status: 'ready', closure: { candidate: { schemaVersion: 'game-ir.v2', taskId: 'ir-request', sourceRevision: source.publishedDocumentRevision, parameters: {}, assets: [], scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }], ui: [], vfx: [], logic: {} } }, readyReceipt: ready } as any
     }
     const stage = createGameIrLifecycle(workspacePath, infrastructureForTest, compiler)
     const handle = await stage.start(input)
@@ -206,7 +245,7 @@ test('rejects a billing receipt bound to another event without publishing or rer
     })
     const compiler: GameIrCompiler = async ({ execute }) => {
       await execute({ kind: 'compile', prompt: 'fixture', outputFormat: 'json' })
-      return { status: 'ready', closure: { candidate: { schemaVersion: 'game-ir.v1', taskId: 'ir-request', foundationRevision: source.publishedDocumentRevision, modules: [] } }, readyReceipt: ready } as any
+      return { status: 'ready', closure: { candidate: { schemaVersion: 'game-ir.v2', taskId: 'ir-request', sourceRevision: source.publishedDocumentRevision, parameters: {}, assets: [], scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }], ui: [], vfx: [], logic: {} } }, readyReceipt: ready } as any
     }
     const stage = createGameIrLifecycle(workspacePath, infrastructureForTest, compiler)
     const handle = await stage.start(input)
@@ -233,7 +272,7 @@ test('late compiler completion after a real stop cannot publish READY', async ()
     let release: () => void = () => {}
     const started = new Promise<void>(resolve => { began = resolve })
     const gate = new Promise<void>(resolve => { release = resolve })
-    const compiler: GameIrCompiler = async () => { began(); await gate; return { status: 'ready', closure: { candidate: { schemaVersion: 'game-ir.v1', taskId: 'ir-request', foundationRevision: source.publishedDocumentRevision, modules: [] } }, readyReceipt: ready } as any }
+    const compiler: GameIrCompiler = async () => { began(); await gate; return { status: 'ready', closure: { candidate: { schemaVersion: 'game-ir.v2', taskId: 'ir-request', sourceRevision: source.publishedDocumentRevision, parameters: {}, assets: [], scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }], ui: [], vfx: [], logic: {} } }, readyReceipt: ready } as any }
     const stage = createGameIrLifecycle(workspacePath, infrastructure(), compiler)
     const handle = await stage.start(input)
     await started
@@ -259,7 +298,7 @@ test('resume preserves intent when stop arrives before the old drive exits', asy
     const compiler: GameIrCompiler = async () => {
       invocation++
       if (invocation === 1) { began(); await gate }
-      return { status: 'ready', closure: { candidate: { schemaVersion: 'game-ir.v1', taskId: 'ir-request', foundationRevision: source.publishedDocumentRevision, modules: [] } }, readyReceipt: ready } as any
+      return { status: 'ready', closure: { candidate: { schemaVersion: 'game-ir.v2', taskId: 'ir-request', sourceRevision: source.publishedDocumentRevision, parameters: {}, assets: [], scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }], ui: [], vfx: [], logic: {} } }, readyReceipt: ready } as any
     }
     const stage = createGameIrLifecycle(workspacePath, infrastructure(), compiler)
     const handle = await stage.start(input)
@@ -289,7 +328,7 @@ test('resume does not restart a stopped operation whose usage was never observed
       invocation++
       began()
       await execute({ kind: 'compile', prompt: 'no usage fixture', outputFormat: 'json' })
-      return { status: 'ready', closure: { candidate: { schemaVersion: 'game-ir.v1', taskId: 'ir-request', foundationRevision: source.publishedDocumentRevision, modules: [] } }, readyReceipt: ready } as any
+      return { status: 'ready', closure: { candidate: { schemaVersion: 'game-ir.v2', taskId: 'ir-request', sourceRevision: source.publishedDocumentRevision, parameters: {}, assets: [], scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }], ui: [], vfx: [], logic: {} } }, readyReceipt: ready } as any
     }
     const stage = createGameIrLifecycle(workspacePath, meteredInfrastructure(async value => validReceipt(value), async () => ({
       command: [process.execPath, '-e', 'process.stdin.resume(); setTimeout(() => {}, 5000)'], env: {},
@@ -311,7 +350,7 @@ test('readResult rejects missing or tampered committed publication instead of re
     const input: GameIrStartInput = { protocolVersion: 1, ownerId: 'owner', projectId: 'project', requestId: 'reader-validation', acceptedReview: review, publishedDocumentRevision: review.documentSetDigest }
     const source = captureFoundationIrInput(input)
     const ready = readyFor(source)
-    const compiler: GameIrCompiler = async () => ({ status: 'ready', closure: { candidate: { schemaVersion: 'game-ir.v1', taskId: 'ir-request', foundationRevision: source.publishedDocumentRevision, modules: [] } }, readyReceipt: ready } as any)
+    const compiler: GameIrCompiler = async () => ({ status: 'ready', closure: { candidate: { schemaVersion: 'game-ir.v2', taskId: 'ir-request', sourceRevision: source.publishedDocumentRevision, parameters: {}, assets: [], scenes: [{ id: 'scene.main', name: 'Main', assetIds: [], config: {} }], ui: [], vfx: [], logic: {} } }, readyReceipt: ready } as any)
     const stage = createGameIrLifecycle(workspacePath, infrastructure(), compiler)
     const handle = await stage.start(input)
     expect((await waitFor(stage, handle)).status).toBe('completed')

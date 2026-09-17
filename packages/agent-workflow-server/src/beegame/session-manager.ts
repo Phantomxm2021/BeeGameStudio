@@ -4,7 +4,6 @@ import {
   type ProjectArtifactIdentity,
 } from './project-artifact-store'
 import {
-  appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -41,7 +40,7 @@ import type {
   BeeGameUsageBillingUsage as Usage,
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import { recordConfirmedBriefEvidence } from './confirmed-brief-evidence'
-import { appendBoundedDiagnosticRecord } from './bounded-diagnostic-log'
+import { appendChatTranscript, appendRuntimeDiagnostic } from './project-records'
 import {
   parseNativeBackgroundTaskLaunch,
   readNativeBackgroundTaskUsage,
@@ -186,6 +185,13 @@ const WORKFLOW_WORKER_CHAT_EVENTS = new Set<BeeGameEventType>([
 ])
 
 export type BeeGameEventSubscriber = (event: BeeGameEvent) => void
+
+type ProjectEventSubscription = {
+  userId: string
+  projectId: string
+  workspacePath: string
+  subscriber: BeeGameEventSubscriber
+}
 
 export type BeeGameSession = {
   id: string
@@ -424,7 +430,9 @@ type SessionRecord = {
   activeAssistantMessageId: string | null
   emittedAssistantMessageIds: Set<string>
   thinkingBlockIndexes: Set<number>
-  visibleThinkingBlockIndexes: Set<number>
+  visibleThinkingBlockIds: Map<number, string>
+  /** Start time for each visible thinking block, used when its end event arrives. */
+  thinkingBlockStartedAt: Map<string, string>
   /** Prevents one durable progress write for every streamed prose fragment. */
   documentAuthorWritingReported: boolean
   events: BeeGameEvent[]
@@ -598,6 +606,7 @@ export class BeeGameSessionManager {
     string,
     Set<BeeGameEventSubscriber>
   >()
+  private readonly projectEventSubscribers = new Set<ProjectEventSubscription>()
   private readonly dashboardDataRoot: string
   private readonly stageChatFollowers = new Map<string, {
     timer: ReturnType<typeof setInterval>
@@ -746,7 +755,8 @@ export class BeeGameSessionManager {
       activeAssistantMessageId: null,
       emittedAssistantMessageIds: new Set(),
       thinkingBlockIndexes: new Set(),
-      visibleThinkingBlockIndexes: new Set(),
+      visibleThinkingBlockIds: new Map(),
+      thinkingBlockStartedAt: new Map(),
       documentAuthorWritingReported: false,
       events: recoveredTranscript?.events ?? [],
       nextEventId: recoveredTranscript
@@ -998,6 +1008,7 @@ export class BeeGameSessionManager {
     workspacePath: string
     type: BeeGameEventType
     text: string
+    turnId?: string
     payload?: DashboardSDKMessage
   }): boolean {
     const workspacePath = resolve(input.workspacePath)
@@ -1013,7 +1024,7 @@ export class BeeGameSessionManager {
     const nativeKey = getDashboardPayloadString(input.payload, 'workflowStageNativeKey')
     if (nativeKey && record.events.some(event =>
       getDashboardPayloadString(event.payload, 'workflowStageNativeKey') === nativeKey)) return false
-    this.append(record, input.type, input.text, input.payload)
+    this.append(record, input.type, input.text, input.payload, input.turnId)
     return true
   }
 
@@ -1032,6 +1043,7 @@ export class BeeGameSessionManager {
         offset: number
         remainder: string
         decoder: StringDecoder
+        contentLengths: Map<string, number>
         projector: ReturnType<typeof createStageChatProjector>
       }>(),
     }
@@ -1048,9 +1060,11 @@ export class BeeGameSessionManager {
               offset: 0,
               remainder: '',
               decoder: new StringDecoder('utf8'),
+              contentLengths: new Map(),
               projector: createStageChatProjector({ stage, sink: event => {
                 this.appendProjectChatEvent({ ...input, workspacePath, type: event.type,
-                  text: event.text, ...(event.payload ? { payload: event.payload } : {}) })
+                  text: event.text, ...(event.turnId ? { turnId: event.turnId } : {}),
+                  ...(event.payload ? { payload: event.payload } : {}) })
               } }),
             }
             follower.files.set(logPath, file)
@@ -1060,6 +1074,7 @@ export class BeeGameSessionManager {
             file.offset = 0
             file.remainder = ''
             file.decoder = new StringDecoder('utf8')
+            file.contentLengths.clear()
           }
           if (size === file.offset) continue
           const handle = await open(logPath, 'r')
@@ -1073,8 +1088,8 @@ export class BeeGameSessionManager {
               if (!line) continue
               try {
                 const entry = JSON.parse(line) as { event?: unknown; data?: unknown }
-                if (entry.event === 'response.message' && entry.data && typeof entry.data === 'object')
-                  await file.projector(entry.data as Record<string, unknown>)
+                const message = stageChatMessageFromTrace(entry, file.contentLengths)
+                if (message) await file.projector(message)
               } catch {
                 // Runtime diagnostics remain best-effort observability.
               }
@@ -1113,6 +1128,24 @@ export class BeeGameSessionManager {
       current.delete(wrappedSubscriber)
       if (current.size === 0) this.eventSubscribers.delete(sessionId)
     }
+  }
+
+  subscribeProjectEvents(
+    input: {
+      userId: string
+      projectId: string
+      workspacePath: string
+    },
+    subscriber: BeeGameEventSubscriber,
+  ): () => void {
+    const subscription: ProjectEventSubscription = {
+      userId: input.userId,
+      projectId: input.projectId,
+      workspacePath: resolve(input.workspacePath),
+      subscriber,
+    }
+    this.projectEventSubscribers.add(subscription)
+    return () => this.projectEventSubscribers.delete(subscription)
   }
 
   transcript(sessionId: string): Array<{
@@ -1221,7 +1254,8 @@ export class BeeGameSessionManager {
       record.activeAssistantMessageId = null
       record.emittedAssistantMessageIds.clear()
       record.thinkingBlockIndexes.clear()
-      record.visibleThinkingBlockIndexes.clear()
+      record.visibleThinkingBlockIds.clear()
+      record.thinkingBlockStartedAt.clear()
       record.documentAuthorWritingReported = false
       record.currentTurnStartingUsage = this.deriveRuntimeSnapshot(record).usage
       record.currentTurnId = nextTurnId
@@ -1609,7 +1643,8 @@ export class BeeGameSessionManager {
       record.activeAssistantMessageId = null
       record.emittedAssistantMessageIds.clear()
       record.thinkingBlockIndexes.clear()
-      record.visibleThinkingBlockIndexes.clear()
+      record.visibleThinkingBlockIds.clear()
+      record.thinkingBlockStartedAt.clear()
       record.documentAuthorWritingReported = false
       record.abortController = null
       record.session.updatedAt = new Date()
@@ -1661,7 +1696,7 @@ export class BeeGameSessionManager {
         : {}),
       signal,
       onMessage: message => {
-        appendProjectAgentRawLog(record, message)
+        appendProjectAgentDiagnostic(record, message)
         if (isSDKExecutionError(message)) {
           executionError = new Error(getSDKExecutionErrorDetail(message))
         }
@@ -1693,6 +1728,8 @@ export class BeeGameSessionManager {
         }
         const mapped = mapSDKMessageToEvent(record, message)
         if (mapped) {
+          if (mapped.type !== 'assistant.thinking')
+            this.closeOpenThinkingLifecycle(record, 'visible_output_started')
           if (mapped.type === 'assistant.partial') {
             this.append(record, mapped.type, mapped.text, message)
             this.appendAssistantPartialText(record, message)
@@ -1714,6 +1751,8 @@ export class BeeGameSessionManager {
           }
         }
         for (const toolEvent of mapSDKMessageToToolEvents(record, message)) {
+          if (toolEvent.type === 'tool.started')
+            this.closeOpenThinkingLifecycle(record, 'tool_started')
           this.append(record, toolEvent.type, toolEvent.text, toolEvent.payload)
         }
       },
@@ -2030,6 +2069,19 @@ export class BeeGameSessionManager {
           : {}),
       })
     }
+    if (record.workflowWorker === true) {
+      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
+        type: 'permission.resolved',
+        toolUseID: request.toolUseID,
+        toolName: request.toolName,
+        decision: 'allow',
+        scope: 'once',
+        autoApproved: true,
+        reason: 'workflow_worker_tool_authority',
+        input: request.input,
+      })
+      return Promise.resolve({ behavior: 'allow', scope: 'once' })
+    }
     return new Promise(resolve => {
       record.pendingPermissions.set(request.toolUseID, {
         ...request,
@@ -2052,12 +2104,11 @@ export class BeeGameSessionManager {
   ): void {
     if (record.thinkingBlockIndexes.size === 0) return
     record.thinkingBlockIndexes.clear()
-    if (record.visibleThinkingBlockIndexes.size === 0) return
-    record.visibleThinkingBlockIndexes.clear()
-    this.append(record, 'assistant.thinking', 'Thinking', {
-      type: 'assistant.thinking',
-      status: 'ended',
-      reason,
+    const visibleBlockIds = [...record.visibleThinkingBlockIds.values()]
+    record.visibleThinkingBlockIds.clear()
+    for (const thinkingBlockId of visibleBlockIds) this.append(record, 'assistant.thinking', 'Thinking', {
+      type: 'assistant.thinking', status: 'ended', reason,
+      thinkingBlockId,
     })
   }
 
@@ -2076,23 +2127,46 @@ export class BeeGameSessionManager {
     type: BeeGameEventType,
     text: string,
     payload?: DashboardSDKMessage,
+    turnId?: string,
   ): BeeGameEvent {
     const workflowUsageBefore =
       record.workflowWorker && record.workflowRunId
         ? this.deriveRuntimeSnapshot(record).usage
         : undefined
+    const effectiveTurnId = turnId || record.currentTurnId || undefined
+    const createdAt = new Date()
+    let eventPayload = payload
+    if (type === 'assistant.thinking') {
+      const thinkingBlockId = getDashboardPayloadString(payload, 'thinkingBlockId') || 'default'
+      const thinkingKey = `${effectiveTurnId ?? record.session.id}:${thinkingBlockId}`
+      const status = getDashboardPayloadString(payload, 'status')
+      let thinkingStartedAt = record.thinkingBlockStartedAt.get(thinkingKey)
+      if (!thinkingStartedAt && status !== 'ended') {
+        thinkingStartedAt = createdAt.toISOString()
+        record.thinkingBlockStartedAt.set(thinkingKey, thinkingStartedAt)
+      }
+      if (thinkingStartedAt) {
+        eventPayload = {
+          ...(payload ?? { type: 'assistant.thinking' }),
+          thinkingStartedAt,
+        }
+      }
+      if (status === 'ended') record.thinkingBlockStartedAt.delete(thinkingKey)
+    }
     const event: BeeGameEvent = {
       id: record.nextEventId,
       sessionId: record.session.id,
-      ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
+      ...(effectiveTurnId ? { turnId: effectiveTurnId } : {}),
       type,
       text,
-      ...(payload ? { payload } : {}),
-      createdAt: new Date(),
+      ...(eventPayload ? { payload: eventPayload } : {}),
+      createdAt,
     }
     record.events.push(event)
-    appendTranscriptEvent(record.transcriptPath, event)
-    appendProjectRuntimeLog(record, event)
+    appendChatTranscript(record.transcriptPath, event)
+    // This index locates a Chat transcript; it is not a runtime event log.
+    if (event.type === 'session.started' || event.type === 'session.resumed')
+      updateProjectTranscriptIndex(record)
     for (const subscriber of this.eventSubscribers.get(record.session.id) ?? []) {
       try {
         subscriber(event)
@@ -2101,6 +2175,43 @@ export class BeeGameSessionManager {
           sessionId: record.session.id,
           cause: error instanceof Error ? error.message : String(error),
         })
+      }
+    }
+    if (record.projectId) {
+      for (const subscription of this.projectEventSubscribers) {
+        if (
+          subscription.userId !== record.userId ||
+          subscription.projectId !== record.projectId ||
+          subscription.workspacePath !== resolve(record.session.cwd)
+        )
+          continue
+        try {
+          const displayEvent = formatBeeGameEventForDisplay(
+            event,
+            record.language,
+          )
+          subscription.subscriber(
+            record.workflowWorker
+              ? {
+                  ...displayEvent,
+                  payload: {
+                    ...(displayEvent.payload ?? { type: displayEvent.type }),
+                    workflowRunId: record.workflowRunId,
+                    workflowDispatchId: record.workflowDispatchId,
+                    workflowWorkerType: record.workflowWorkerType,
+                    ...(workflowStageForWorkerType(record.workflowWorkerType)
+                      ? { workflowStage: workflowStageForWorkerType(record.workflowWorkerType) }
+                      : {}),
+                  },
+                }
+              : displayEvent,
+          )
+        } catch (error) {
+          console.warn('[BeeGame] Project event subscriber failed', {
+            projectId: record.projectId,
+            cause: error instanceof Error ? error.message : String(error),
+          })
+        }
       }
     }
     if (
@@ -2126,6 +2237,9 @@ export class BeeGameSessionManager {
           workflowRunId: record.workflowRunId,
           workflowDispatchId: record.workflowDispatchId,
           workflowWorkerType: record.workflowWorkerType,
+          ...(workflowStageForWorkerType(record.workflowWorkerType)
+            ? { workflowStage: workflowStageForWorkerType(record.workflowWorkerType) }
+            : {}),
           workflowSourceSessionId: event.sessionId,
           workflowSourceEventId: event.id,
         })
@@ -2559,16 +2673,31 @@ export async function readWorkflowWorkerChatHistoryFromDisk(
     }
     const sourceSessionId = events.find(event => event.sessionId)?.sessionId
     if (!sourceSessionId || sourceSessionId === mainSessionId) continue
-    const isWorkflowWorker = events.some(
+    const workerStart = events.find(
       event =>
         event.type === 'turn.started' &&
         event.text.includes('BeeGame delivery worker:'),
     )
-    if (!isWorkflowWorker) continue
+    if (!workerStart) continue
+    const workflowWorkerType = workerStart.text
+      .match(/BeeGame delivery worker:\s*([^\s]+)/)?.[1]
     for (const event of events) {
       if (!WORKFLOW_WORKER_CHAT_EVENTS.has(event.type)) continue
       if (mirrored.has(`${event.sessionId}:${event.id}`)) continue
-      recovered.push(event)
+      recovered.push({
+        ...event,
+        ...(workflowWorkerType
+          ? {
+              payload: {
+                ...(event.payload ?? { type: event.type }),
+                workflowWorkerType,
+                ...(workflowStageForWorkerType(workflowWorkerType)
+                  ? { workflowStage: workflowStageForWorkerType(workflowWorkerType) }
+                  : {}),
+              },
+            }
+          : {}),
+      })
     }
   }
 
@@ -2585,19 +2714,22 @@ export async function readWorkflowWorkerChatHistoryFromDisk(
     try { rows = (await readFile(logPath, 'utf8')).split('\n').filter(Boolean) }
     catch { continue }
     let createdAt = new Date(0)
+    const contentLengths = new Map<string, number>()
     const projector = createStageChatProjector({ stage, sink: event => {
       const key = getDashboardPayloadString(event.payload, 'workflowStageNativeKey')
       if (key && stageNativeKeys.has(key)) return
       if (key) stageNativeKeys.add(key)
       recovered.push({ id: recovered.length + 1, sessionId: `workflow-stage:${stage}`,
-        type: event.type, text: event.text, ...(event.payload ? { payload: event.payload } : {}), createdAt })
+        type: event.type, text: event.text, ...(event.turnId ? { turnId: event.turnId } : {}),
+        ...(event.payload ? { payload: event.payload } : {}), createdAt })
     } })
     for (const row of rows) {
       try {
         const entry = JSON.parse(row) as { at?: unknown; event?: unknown; data?: unknown }
-        if (entry.event !== 'response.message' || !entry.data || typeof entry.data !== 'object') continue
+        const message = stageChatMessageFromTrace(entry, contentLengths)
+        if (!message) continue
         createdAt = typeof entry.at === 'string' ? new Date(entry.at) : new Date(0)
-        await projector(entry.data as Record<string, unknown>)
+        await projector(message)
       } catch {
         // A damaged diagnostic line must not hide the rest of Chat history.
       }
@@ -2611,12 +2743,66 @@ export async function readWorkflowWorkerChatHistoryFromDisk(
   })
 }
 
-function stageFromNativeLogPath(path: string): 'author' | 'reviewer' | 'game-ir' | undefined {
+function workflowStageForWorkerType(workerType?: string): string | undefined {
+  const stages: Record<string, string> = {
+    'document-author': 'author',
+    'content-author': 'content',
+    'foundation-reviewer': 'reviewer',
+    'foundation-document-reviser': 'revision',
+    'game-ir-compiler': 'game-ir',
+    'resource-planner': 'resources',
+    'implementation-worker': 'implementation',
+    'acceptance-validator': 'acceptance',
+  }
+  return workerType ? stages[workerType] : undefined
+}
+
+function stageFromNativeLogPath(path: string): 'author' | 'content' | 'reviewer' | 'revision' | 'game-ir' | undefined {
   const normalized = path.split('\\').join('/')
   if (normalized.includes('/foundation-authoring/')) return 'author'
+  if (normalized.includes('/content-authoring/')) return 'content'
   if (normalized.includes('/foundation-reviewer/')) return 'reviewer'
+  if (normalized.includes('/foundation-revision/')) return 'revision'
   if (normalized.includes('/game-ir/')) return 'game-ir'
   return undefined
+}
+
+/** Converts persisted, redacted trace rows into the native shape understood by
+ * the stage Chat projector. */
+function stageChatMessageFromTrace(
+  entry: { event?: unknown; data?: unknown },
+  contentLengths = new Map<string, number>(),
+): Record<string, unknown> | undefined {
+  if (entry.event === 'response.message' && entry.data && typeof entry.data === 'object')
+    return entry.data as Record<string, unknown>
+  if (entry.event === 'response.query_end' && entry.data && typeof entry.data === 'object') {
+    const data = entry.data as Record<string, unknown>
+    return { type: 'thinking_end', queryId: data.queryId }
+  }
+  if (!entry.data || typeof entry.data !== 'object') return undefined
+  const data = entry.data as Record<string, unknown>
+  if (entry.event === 'response.content_snapshot') {
+    // The log intentionally stores only a redacted cumulative checkpoint.
+    // Derive the display delta locally, so logs remain safe and replayable.
+    if (data.type !== 'text' || typeof data.content !== 'string' || !data.content) return undefined
+    const key = `${data.queryId ?? 'unknown'}:${data.index ?? 0}`
+    const priorLength = contentLengths.get(key) ?? 0
+    const delta = data.content.length >= priorLength ? data.content.slice(priorLength) : data.content
+    contentLengths.set(key, data.content.length)
+    if (!delta) return undefined
+    return { type: 'stream_event', queryId: data.queryId,
+      ...(typeof data.queryId === 'string' && typeof data.index === 'number' && typeof data.receivedBytes === 'number'
+        ? { workflowStageNativeKey: `text:${data.queryId}:${data.index}:${data.receivedBytes}` }
+        : {}),
+      event: { type: 'content_block_delta', index: data.index, delta: { type: 'text_delta', text: delta } } }
+  }
+  if (entry.event !== 'response.reasoning_snapshot' || typeof data.content !== 'string' || !data.content) return undefined
+  return { type: 'stream_event',
+    queryId: data.queryId,
+    ...(typeof data.queryId === 'string' && typeof data.receivedBytes === 'number'
+      ? { workflowStageNativeKey: `thinking:${data.queryId}:${data.receivedBytes}` }
+      : {}),
+    event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: data.content } } }
 }
 
 async function listStageNativeEventLogs(root: string): Promise<string[]> {
@@ -4181,7 +4367,7 @@ function archiveInterruptedRecoveredTurn(record: SessionRecord): void {
     text: 'Previous BeeGame turn was interrupted before completion.',
     createdAt: new Date(),
   })
-  appendTranscriptEvent(
+  appendChatTranscript(
     record.transcriptPath,
     record.events.at(-1) as BeeGameEvent,
   )
@@ -4259,27 +4445,6 @@ function getDashboardPayloadRecord(
     : {}
 }
 
-function appendTranscriptEvent(path: string, event: BeeGameEvent): void {
-  try {
-    mkdirSync(dirname(path), { recursive: true })
-    appendFileSync(
-      path,
-      `${JSON.stringify({
-        id: event.id,
-        sessionId: event.sessionId,
-        ...(event.turnId ? { turnId: event.turnId } : {}),
-        type: event.type,
-        text: event.text,
-        ...(event.payload ? { payload: event.payload } : {}),
-        createdAt: event.createdAt.toISOString(),
-      })}\n`,
-      'utf8',
-    )
-  } catch {
-    // Transcript logging must not break the active BeeGame turn.
-  }
-}
-
 type ProjectLogIndex = {
   version: 1
   project: string
@@ -4290,95 +4455,54 @@ type ProjectLogIndex = {
 type ProjectLogIndexSession = {
   sessionId: string
   transcript: string
-  agentRawLog: string
-  runtimeLog: string
-  previewLog: string
-  deployLog: string
   updatedAt: string
 }
 
-function appendProjectRuntimeLog(
-  record: SessionRecord,
-  event: BeeGameEvent,
-): void {
-  if (event.type === 'assistant.partial' || event.type === 'usage') return
-  try {
-    updateProjectLogIndex(record)
-    const path = getProjectRuntimeLogPath(record)
-    mkdirSync(dirname(path), { recursive: true })
-    appendFileSync(
-      path,
-      [
-        event.createdAt.toISOString(),
-        event.type,
-        event.turnId ?? '-',
-        collapseLogLine(event.text),
-      ].join(' ') + '\n',
-      'utf8',
-    )
-  } catch {
-    // Project-local runtime logs are diagnostic only.
-  }
-}
-
-function appendProjectAgentRawLog(
+function appendProjectAgentDiagnostic(
   record: SessionRecord,
   message: DashboardSDKMessage,
 ): void {
-  try {
-    const path = getProjectAgentRawLogPath(record)
-    mkdirSync(dirname(path), { recursive: true })
-    appendBoundedDiagnosticRecord(
-      path,
-      `${JSON.stringify({
-        sessionId: record.session.id,
-        ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
-        createdAt: new Date().toISOString(),
-        message,
-      })}\n`,
-      {
-        maxBytes: MAX_PROJECT_AGENT_RAW_LOG_BYTES,
-        archiveCount: PROJECT_AGENT_RAW_LOG_ARCHIVES,
-      },
-    )
-  } catch {
-    // Raw agent logs must never interrupt the active turn.
-  }
+  appendRuntimeDiagnostic({
+    path: getProjectRuntimeDiagnosticPath(record),
+    // Keep transport facts for incident diagnosis, never raw model text or
+    // tool inputs. Chat itself is already persisted in the transcript.
+    record: {
+      type: 'agent.transport',
+      sessionId: record.session.id,
+      ...(record.currentTurnId ? { turnId: record.currentTurnId } : {}),
+      createdAt: new Date().toISOString(),
+      messageType: typeof message.type === 'string' ? message.type : 'unknown',
+      ...(typeof message.uuid === 'string' ? { messageId: message.uuid } : {}),
+      ...(typeof message.subtype === 'string' ? { subtype: message.subtype } : {}),
+    },
+    maxBytes: MAX_PROJECT_AGENT_RAW_LOG_BYTES,
+    archiveCount: PROJECT_AGENT_RAW_LOG_ARCHIVES,
+  })
 }
 
-function updateProjectLogIndex(record: SessionRecord): void {
+function updateProjectTranscriptIndex(record: SessionRecord): void {
   const workspacePath = record.session.cwd
   const logsDir = getProjectLogsDirForRecord(record)
   mkdirSync(logsDir, { recursive: true })
-  const indexPath =
+  const scopedIndexPath =
     record.workflowWorker && record.workflowRunId
       ? resolve(logsDir, 'index.json')
       : getProjectLogIndexPath(workspacePath)
+  const indexPaths = record.workflowWorker
+    ? [scopedIndexPath, getProjectLogIndexPath(workspacePath)]
+    : [scopedIndexPath]
   const now = new Date().toISOString()
-  const index = readProjectLogIndex(indexPath, workspacePath)
-  index.updatedAt = now
-  index.sessions[record.session.id] = {
-    sessionId: record.session.id,
-    transcript: toProjectRelativePath(workspacePath, record.transcriptPath),
-    agentRawLog: toProjectRelativePath(
-      workspacePath,
-      getProjectAgentRawLogPath(record),
-    ),
-    runtimeLog: toProjectRelativePath(
-      workspacePath,
-      getProjectRuntimeLogPath(record),
-    ),
-    previewLog: toProjectRelativePath(
-      workspacePath,
-      getProjectPreviewLogPath(workspacePath),
-    ),
-    deployLog: toProjectRelativePath(
-      workspacePath,
-      getProjectDeployLogPath(workspacePath),
-    ),
-    updatedAt: now,
+  for (const indexPath of new Set(indexPaths)) {
+    mkdirSync(dirname(indexPath), { recursive: true })
+    const index = readProjectLogIndex(indexPath, workspacePath)
+    index.updatedAt = now
+    index.sessions[record.session.id] = {
+      sessionId: record.session.id,
+      transcript: toProjectRelativePath(workspacePath, record.transcriptPath),
+      updatedAt: now,
+    }
+    writeFileSync(indexPath, JSON.stringify(index, null, 2), 'utf8')
   }
-  writeFileSync(indexPath, JSON.stringify(index, null, 2), 'utf8')
 }
 
 function readProjectLogIndex(
@@ -4439,7 +4563,7 @@ function getProjectLogIndexPath(workspacePath: string): string {
   return resolve(getProjectLogsDir(workspacePath), 'index.json')
 }
 
-function getProjectRuntimeLogPath(record: SessionRecord): string {
+function getProjectRuntimeDiagnosticPath(record: SessionRecord): string {
   if (record.workflowWorker && record.workflowRunId) {
     return resolve(
       record.session.cwd,
@@ -4448,46 +4572,14 @@ function getProjectRuntimeLogPath(record: SessionRecord): string {
       'logs',
       record.workflowRunId,
       record.workflowDispatchId ?? record.session.id,
-      'runtime.log',
+      'runtime-diagnostics.jsonl',
     )
   }
-  return resolve(getProjectLogsDir(record.session.cwd), 'runtime.log')
-}
-
-function getProjectAgentRawLogPath(record: SessionRecord): string {
-  if (record.workflowWorker && record.workflowRunId) {
-    return resolve(
-      record.session.cwd,
-      '.beegame',
-      'workflow',
-      'logs',
-      record.workflowRunId,
-      record.workflowDispatchId ?? record.session.id,
-      'agent.raw.jsonl',
-    )
-  }
-  return resolve(getProjectLogsDir(record.session.cwd), 'agent.raw.jsonl')
-}
-
-function getProjectPreviewLogPath(workspacePath: string): string {
-  return resolve(getProjectLogsDir(workspacePath), 'preview.log')
-}
-
-function getProjectDeployLogPath(workspacePath: string): string {
-  return resolve(getProjectLogsDir(workspacePath), 'deploy.log')
+  return resolve(getProjectLogsDir(record.session.cwd), 'runtime-diagnostics.jsonl')
 }
 
 function toProjectRelativePath(workspacePath: string, path: string): string {
   return relative(workspacePath, path).split('\\').join('/')
-}
-
-function collapseLogLine(text: string): string {
-  const collapsed = text
-    .split('\n')
-    .map(part => part.trim())
-    .filter(Boolean)
-    .join(' ')
-  return collapsed.length > 800 ? `${collapsed.slice(0, 797)}...` : collapsed
 }
 
 function mapSDKMessageToEvent(
@@ -4634,13 +4726,16 @@ function mapStreamEvent(
   if (textDelta.trim()) return mapTextEvent('assistant.partial', textDelta)
 
   const thinking = extractStreamThinkingStatus(record, message)
-  if (!thinking || thinking === 'streaming') return null
+  if (!thinking) return null
+  const thinkingText = extractStreamThinkingDelta(message)
+  if (thinking.status === 'streaming' && !thinkingText) return null
   return {
     type: 'assistant.thinking',
-    text: 'Thinking',
+    text: thinkingText || 'Thinking',
     payload: {
       type: 'assistant.thinking',
-      status: thinking,
+      status: thinking.status,
+      ...(thinking.blockId ? { thinkingBlockId: thinking.blockId } : {}),
     },
   }
 }
@@ -4892,7 +4987,7 @@ function mapStreamingToolInputActivity(message: DashboardSDKMessage): {
 function extractStreamThinkingStatus(
   record: SessionRecord,
   message: DashboardSDKMessage,
-): 'started' | 'streaming' | 'ended' | null {
+): { status: 'started' | 'streaming' | 'ended'; blockId?: string } | null {
   const event = getObjectField(message, 'event') ?? message
   const eventType = getStringField(event, 'type')
   if (eventType === 'content_block_start') {
@@ -4902,16 +4997,17 @@ function extractStreamThinkingStatus(
       return null
     const index = getNumberField(event, 'index')
     if (index !== undefined) record.thinkingBlockIndexes.add(index)
-    return 'streaming'
+    return { status: 'streaming' }
   }
   if (eventType === 'content_block_stop') {
     const index = getNumberField(event, 'index')
     if (index === undefined || !record.thinkingBlockIndexes.has(index))
       return null
     record.thinkingBlockIndexes.delete(index)
-    if (!record.visibleThinkingBlockIndexes.has(index)) return null
-    record.visibleThinkingBlockIndexes.delete(index)
-    return 'ended'
+    const blockId = record.visibleThinkingBlockIds.get(index)
+    if (!blockId) return null
+    record.visibleThinkingBlockIds.delete(index)
+    return { status: 'ended', blockId }
   }
   if (eventType !== 'content_block_delta') return null
 
@@ -4925,10 +5021,29 @@ function extractStreamThinkingStatus(
   }
   const index = getNumberField(event, 'index')
   if (index === undefined || !record.thinkingBlockIndexes.has(index))
-    return 'streaming'
-  if (record.visibleThinkingBlockIndexes.has(index)) return 'streaming'
-  record.visibleThinkingBlockIndexes.add(index)
-  return 'started'
+    return { status: 'streaming' }
+  const existingBlockId = record.visibleThinkingBlockIds.get(index)
+  if (existingBlockId) return { status: 'streaming', blockId: existingBlockId }
+  const blockId = `${record.activeAssistantMessageId ?? 'stream'}:${index}`
+  record.visibleThinkingBlockIds.set(index, blockId)
+  return { status: 'started', blockId }
+}
+
+function extractStreamThinkingDelta(message: DashboardSDKMessage): string {
+  const event = getObjectField(message, 'event') ?? message
+  if (getStringField(event, 'type') !== 'content_block_delta') return ''
+  const delta = getObjectField(event, 'delta')
+  const deltaType = getStringField(delta, 'type')
+  if (
+    deltaType !== 'thinking_delta' &&
+    deltaType !== 'redacted_thinking_delta'
+  )
+    return ''
+  return (
+    getStringField(delta, 'thinking') ||
+    getStringField(delta, 'text') ||
+    getStringField(delta, 'data')
+  )
 }
 
 function extractStreamMessageId(

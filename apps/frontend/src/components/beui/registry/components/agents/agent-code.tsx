@@ -155,7 +155,7 @@ export function AgentCode({
   return (
     <pre
       className={cn(
-        "m-0 overflow-x-auto whitespace-pre font-mono text-xs leading-5 text-foreground/85",
+        "m-0 overflow-x-auto whitespace-pre font-mono text-xs leading-4 text-foreground/85",
         className,
       )}
     >

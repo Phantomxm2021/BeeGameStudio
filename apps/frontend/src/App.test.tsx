@@ -3,6 +3,9 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 
 import App from './App';
 
+const { applyThemeToDocument } = vi.hoisted(() => ({
+  applyThemeToDocument: vi.fn(),
+}));
 const loadProjects = vi.fn().mockResolvedValue(undefined);
 const loadStatus = vi.fn().mockResolvedValue(undefined);
 const loadAgents = vi.fn().mockResolvedValue(undefined);
@@ -14,6 +17,7 @@ const loadCurrentUser = vi.fn().mockResolvedValue({
 });
 const setAuthenticationStatus = vi.fn();
 let mockedAuthenticationStatus: 'initializing' | 'authenticated' | 'anonymous' = 'authenticated';
+let mockedIsDark = true;
 const bootstrapProject = vi.fn().mockResolvedValue('proj_1');
 const setToastCallbacks = vi.fn();
 const loadHistory = vi.fn();
@@ -22,7 +26,7 @@ const { getChatHistory } = vi.hoisted(() => ({
 }));
 const showError = vi.fn();
 const showSuccess = vi.fn();
-let mockedActiveProjectId = 'proj_1';
+let mockedActiveProjectId: string | null = 'proj_1';
 const mockedProjects = [
   { id: 'proj_1', name: 'Project One', created_at: Date.now() },
   { id: 'proj_2', name: 'Project Two', created_at: Date.now() },
@@ -44,7 +48,7 @@ vi.mock('./store/projectStore', () => {
 });
 
 vi.mock('./store/systemStore', () => ({
-  applyThemeToDocument: vi.fn(),
+  applyThemeToDocument,
   useSystemStore: (selector?: (state: Record<string, unknown>) => unknown) => {
     const state = {
     loadStatus,
@@ -56,7 +60,7 @@ vi.mock('./store/systemStore', () => ({
     currentUser: mockedAuthenticationStatus === 'authenticated'
       ? { id: 'owner-user', role: 'owner', permissions: ['project.read'] }
       : null,
-    isDark: false,
+    isDark: mockedIsDark,
     toggleTheme: vi.fn(),
     status: { capabilities: {} },
     };
@@ -125,6 +129,7 @@ describe('App view routing', () => {
       permissions: ['project.read'],
     });
     mockedAuthenticationStatus = 'authenticated';
+    mockedIsDark = true;
     mockedActiveProjectId = 'proj_1';
     getChatHistory.mockReset().mockResolvedValue([]);
     window.history.pushState({}, '', '/');
@@ -199,12 +204,24 @@ describe('App view routing', () => {
     window.history.pushState({}, '', '/');
     render(<App />);
     expect(screen.getByTestId('dashboard-view')).toBeInTheDocument();
+    expect(applyThemeToDocument).toHaveBeenLastCalledWith(true);
   });
 
   it('restores the resource library route instead of redirecting it to the project dashboard', () => {
     window.history.pushState({}, '', '/?resourceLibrary=1');
     render(<App />);
     expect(screen.getByTestId('landing-view')).toBeInTheDocument();
+    expect(applyThemeToDocument).toHaveBeenLastCalledWith(false);
+  });
+
+  it('keeps the landing page light when the persisted dashboard theme is dark', () => {
+    mockedActiveProjectId = null;
+    mockedIsDark = true;
+
+    render(<App />);
+
+    expect(screen.getByTestId('landing-view')).toBeInTheDocument();
+    expect(applyThemeToDocument).toHaveBeenLastCalledWith(false);
   });
 
   it('does not load protected dashboard data when no user is signed in', async () => {

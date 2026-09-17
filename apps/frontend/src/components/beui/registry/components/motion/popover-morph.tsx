@@ -233,10 +233,18 @@ export function MorphPopoverContent({
   const ctx = useMorphContext("MorphPopoverContent");
   const reduce = useReducedMotion() ?? false;
   const [portalReady, setPortalReady] = useState(false);
+  const [contentReady, setContentReady] = useState(false);
+  const setContentNode = useCallback(
+    (node: HTMLDivElement | null) => {
+      ctx.contentRef.current = node;
+      setContentReady(node !== null);
+    },
+    [ctx.contentRef],
+  );
   const layout = usePopoverPortalPosition(
     ctx.triggerRef,
     ctx.contentRef,
-    portalReady && ctx.open,
+    portalReady && ctx.open && contentReady,
   );
 
   useEffect(() => setPortalReady(true), []);
@@ -296,7 +304,7 @@ export function MorphPopoverContent({
           className="fixed z-[9999] [filter:drop-shadow(0_10px_18px_rgba(0,0,0,0.14))]"
         >
           <motion.div
-            ref={ctx.contentRef}
+            ref={setContentNode}
             id={ctx.contentId}
             role="dialog"
             aria-labelledby={ctx.triggerId}

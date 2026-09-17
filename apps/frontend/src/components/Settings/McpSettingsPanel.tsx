@@ -348,7 +348,7 @@ export function McpServerFormPopover({
                   aria-label={copy.form.name}
                   value={form.name}
                   onChange={event => update({ name: event.target.value })}
-                  className="type-input text-[16px] min-[900px]:text-md h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
+                  className="type-input h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
                 />
               </label>
 
@@ -367,7 +367,7 @@ export function McpServerFormPopover({
                   aria-label={copy.form.transport}
                   value={form.transport}
                   onChange={event => update({ transport: event.target.value as McpServerTransport })}
-                  className="type-input text-[16px] min-[900px]:text-md h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
+                  className="type-input h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
                 >
                   <option value="stdio">{copy.form.stdio}</option>
                   <option value="sse">{copy.form.sse}</option>
@@ -383,7 +383,7 @@ export function McpServerFormPopover({
                     value={form.url}
                     onChange={event => update({ url: event.target.value })}
                     placeholder="http://127.0.0.1:3000/mcp"
-                    className="type-input text-[16px] min-[900px]:text-md h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
+                    className="type-input h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
                   />
                 </label>
               ) : null}
@@ -433,7 +433,7 @@ export function McpServerFormPopover({
                         aria-label={copy.form.scope}
                         value={form.scope}
                         onChange={event => update({ scope: event.target.value as McpServerScope })}
-                        className="type-input text-[16px] min-[900px]:text-md h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
+                        className="type-input h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
                       >
                         <option value="beegame">{copy.form.beegame}</option>
                         <option value="project">{copy.form.project}</option>

@@ -104,7 +104,7 @@ export function AuthDialog({
                 type="text"
                 value={registerDisplayName}
                 onChange={event => onRegisterDisplayNameChange(event.target.value)}
-                className="mt-2 h-10 w-full rounded-lg border border-input bg-background px-3 text-[16px] text-foreground outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/30 min-[900px]:text-md"
+                className="mt-2 h-10 w-full rounded-lg border border-input bg-background px-3 type-input text-foreground outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/30 min-[900px]:text-md"
                 autoComplete="nickname"
                 placeholder={translate('intake.auth.fields.displayNamePlaceholder')}
               />
@@ -117,7 +117,7 @@ export function AuthDialog({
               type="email"
               value={loginEmail}
               onChange={event => onLoginEmailChange(event.target.value)}
-              className="mt-2 h-10 w-full rounded-lg border border-input bg-background px-3 text-[16px] text-foreground outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/30 min-[900px]:text-md"
+              className="mt-2 h-10 w-full rounded-lg border border-input bg-background px-3 type-input text-foreground outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/30 min-[900px]:text-md"
               autoComplete="email"
               placeholder="you@example.com"
             />
@@ -130,7 +130,7 @@ export function AuthDialog({
                 type="text"
                 value={invitationCode}
                 onChange={event => onInvitationCodeChange(event.target.value)}
-                className="mt-2 h-10 w-full rounded-lg border border-input bg-background px-3 text-[16px] text-foreground outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/30 min-[900px]:text-md"
+                className="mt-2 h-10 w-full rounded-lg border border-input bg-background px-3 type-input text-foreground outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/30 min-[900px]:text-md"
                 autoComplete="off"
                 placeholder={translate('intake.auth.fields.invitationCodePlaceholder')}
               />
@@ -144,7 +144,7 @@ export function AuthDialog({
                 type="password"
                 value={loginPassword}
                 onChange={event => onLoginPasswordChange(event.target.value)}
-                className="mt-2 h-10 w-full rounded-lg border border-input bg-background px-3 text-[16px] text-foreground outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/30 min-[900px]:text-md"
+                className="mt-2 h-10 w-full rounded-lg border border-input bg-background px-3 type-input text-foreground outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/30 min-[900px]:text-md"
                 autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
                 placeholder={
                   authMode === 'register'
@@ -221,7 +221,7 @@ export function AuthDialog({
                 type="text"
                 value={invitationCode}
                 onChange={event => onInvitationCodeChange(event.target.value)}
-                className="mb-3 h-10 w-full rounded-lg border border-input bg-background px-3 text-[16px] text-foreground outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/30 min-[900px]:text-md"
+                className="mb-3 h-10 w-full rounded-lg border border-input bg-background px-3 type-input text-foreground outline-none transition placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/30 min-[900px]:text-md"
                 autoComplete="off"
                 placeholder={translate('intake.auth.fields.invitationCodePlaceholder')}
               />
