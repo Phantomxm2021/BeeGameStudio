@@ -11,7 +11,6 @@ export type ChecklistAuthority = Readonly<{
   foundationRevision: string
   documentSetDigest?: string
   documents: readonly ChecklistAuthorityDocument[]
-  irResultId: string
 }>
 
 export type ChecklistAuthorityDocument = Readonly<{
@@ -32,7 +31,6 @@ export function buildChecklistAuthorityProjection(input: {
     '# Checklist Authority',
     '',
     `Approved foundation revision: ${authority.foundationRevision}`,
-    `Associated Game IR result: ${authority.irResultId}`,
     '',
     'The eight documents below are the sole content authority. Produce the implementation checklist from them. Do not invent requirements from generic best practices or prior runs.',
     '',
@@ -54,9 +52,6 @@ function validateChecklistAuthority(
   assertText(value.foundationRevision, 'checklist authority foundation revision')
   if (value.foundationRevision !== approvedDocumentRevision)
     throw new Error('checklist authority foundation revision does not match approved document revision')
-  assertText(value.irResultId, 'checklist authority IR result ID')
-  if (/[[\]{}\r\n]/u.test(value.irResultId))
-    throw new Error('checklist authority IR result ID contains unsafe characters')
   if (!Array.isArray(value.documents) || value.documents.length !== CANONICAL_FOUNDATION_DOCUMENTS.length)
     throw new Error('checklist authority must contain exactly eight foundation documents')
 
@@ -87,7 +82,6 @@ function validateChecklistAuthority(
     foundationRevision: value.foundationRevision,
     ...(value.documentSetDigest ? { documentSetDigest: value.documentSetDigest } : {}),
     documents,
-    irResultId: value.irResultId,
   }
 }
 

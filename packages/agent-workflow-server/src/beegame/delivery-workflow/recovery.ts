@@ -360,10 +360,6 @@ export async function recoverAndResumeRun(input: {
       // Shutdown must be acknowledged before rejection. Unsupported projects
       // must never reach receipt reconciliation or reconstruct a review state.
       if (stoppedRecord) assertNoRetiredFoundationReviewRun(stoppedRecord)
-      // The historical projector cannot reconstruct public IR provenance.
-      // Never replace an invalid linked snapshot with an unbound legacy run.
-      if (stoppedRecord?.gameIrStage)
-        recoveryConflict('Public IR workflow snapshot is invalid; exact source and resource bindings must be restored before resuming')
       const runId = stringValue(stoppedRecord?.runId)
       if (!runId)
         throw new WorkflowStoreError(

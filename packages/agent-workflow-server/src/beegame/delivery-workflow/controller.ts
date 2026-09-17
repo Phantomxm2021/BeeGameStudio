@@ -16,10 +16,7 @@ type ResourceDeliveryReadiness,
 } from '../resource-delivery-readiness'
 import type { createFoundationAuthoring } from '../stage-modules/foundation-authoring/public'
 import type { createFoundationReviewer } from '../stage-modules/foundation-reviewer/public'
-import type { GameIrOperations } from '../stage-modules/game-ir/public'
-import { createGameIrLink } from './game-ir-link'
-import { assertDispatchedIr, assertResourceIr, consumesGameIr, downstreamIrEntryIds, downstreamIrForRequest, isDownstreamIrPhase, readDownstreamIr } from './downstream-ir'
-import { isFoundationStageActive, isIrStageActive, isPublicStageActive } from './public-stage-routing'
+import { isFoundationStageActive, isPublicStageActive } from './public-stage-routing'
 import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
 import {
 buildChangeImpactDispatch,
@@ -80,20 +77,44 @@ export function createDeliveryWorkflowController(input: {
   workerPort: DeliveryWorkerPort
   author?: ReturnType<typeof createFoundationAuthoring>
   reviewer?: ReturnType<typeof createFoundationReviewer>
-  ir?: GameIrOperations
   handoffRecoveryGraceMs?: number
 }) {
   const store = createRunStore(input.workspacePath, input.ownerId)
-  const irLink = input.ir ? createGameIrLink({ store, ir: input.ir,
-    onCompleted: run => { void ensureProgress(run).catch(() => undefined) } }) : undefined
   const reviewLink = input.reviewer ? createFoundationReviewLink({ workspacePath: input.workspacePath,
     store, reviewer: input.reviewer,
-    ...(irLink ? { onCompleted: (run: DeliveryRun) => { void ensureProgress(run).catch(() => undefined) } } : {}) }) : undefined
+    onCompleted: (run: DeliveryRun) => { void ensureProgress(run).catch(() => undefined) } }) : undefined
   const authorLink = input.author ? createFoundationAuthoringLink({ store, author: input.author,
     ...(reviewLink ? { onCompleted: (run: DeliveryRun) => ensureProgress(run) } : {}) }) : undefined
   async function progressPublicFoundation(run: DeliveryRun, resume = false) {
-    if (run.foundationReviewStage?.acceptedReview && irLink && run.status !== 'stopped' &&
-        run.foundationReviewStage.control.action !== 'stop') return irLink.ensureProgress(run)
+    if (run.foundationReviewStage?.acceptedReview && run.status !== 'stopped' &&
+        run.foundationReviewStage.control.action !== 'stop') {
+      const documentRevision = await computeDocumentRevision(
+        input.workspacePath,
+        run.confirmedBriefDigest,
+      )
+      const next: DeliveryRun = {
+        ...run,
+        phase: 'RESOURCE_PREPARATION',
+        documentStep: undefined,
+        status: 'running',
+        activeDispatch: undefined,
+        activeTaskId: undefined,
+        tasks: [],
+        revision: {
+          ...run.revision,
+          document: documentRevision,
+          resource: undefined,
+          content: undefined,
+          implementation: undefined,
+        },
+        evidence: {},
+        resourceProductionState: { currentTask: 'RESOURCE_DELIVERY' },
+        blockedReason: undefined,
+      }
+      const saved = await persist(next, 'phase.entered')
+      await resumeUnlocked(saved)
+      return saved
+    }
     if (run.foundationReviewStage || run.authorStage?.status === 'completed') {
       if (reviewLink) return resume ? reviewLink.resume(run) : reviewLink.ensureProgress(run)
       return run
@@ -106,11 +127,6 @@ export function createDeliveryWorkflowController(input: {
     if (!isPublicStageActive(current)) return stopRun({ store, runId: current.runId, reason,
       sessionIsOpen: dispatch => dispatcher.workerIsOpen(dispatch.dispatchId),
       stopDispatch: (dispatchId, stopReason) => dispatcher.stop(dispatchId, stopReason) })
-    if (isIrStageActive(current)) {
-      if (!irLink) throw new Error('IR public module is required')
-      const stopped = await irLink.stop(current, reason)
-      return isIrStageActive(stopped) ? stopped : stopFoundation(stopped, reason)
-    }
     if ((current.foundationReviewStage || current.authorStage?.status === 'completed') && reviewLink) {
       const stopped = await reviewLink.stop(current, reason)
       return isFoundationStageActive(stopped) ? stopped : stopFoundation(stopped, reason)
@@ -148,27 +164,17 @@ export function createDeliveryWorkflowController(input: {
   dispatcher = {
     ...transportDispatcher,
     async dispatch(request) {
-      if (!consumesGameIr(request.workerType)) return transportDispatcher.dispatch(request)
       const run = await store.load()
-      if (!run || run.runId !== request.runId) throw new Error('IR consumer run changed')
-      const gameIr = await readDownstreamIr({ run, workspacePath: input.workspacePath, ir: input.ir })
-      assertResourceIr(run, gameIr, request.workerType === 'resource-planner')
-      const active = run.activeDispatch
-      if (active && active.phase === request.phase && active.workerType === request.workerType &&
-          active.taskId === request.taskId && active.revision === request.revision &&
-          (active.status === 'running' || active.status === 'completed'))
-        assertDispatchedIr(active.request, gameIr)
       let contentContract: Record<string, unknown> = {}
-      if (['implementation-worker', 'acceptance-validator'].includes(request.workerType)) {
+      if (run && run.runId === request.runId && ['implementation-worker', 'acceptance-validator'].includes(request.workerType)) {
         if (!run.gameContentReceipt)
           throw new Error('downstream work requires an accepted Scene/UI content receipt')
         const assetManifestRevision = run.revision.resource
         if (!assetManifestRevision)
           throw new Error('Scene/UI consumer requires an accepted Asset Manifest revision')
         const audit = auditBeeGameContentPackage(input.workspacePath, {
-          irRevision: gameIr.resultId,
+          documentRevision: run.revision.document,
           assetManifestRevision,
-          irEntryIds: downstreamIrEntryIds(gameIr),
           manifest: readBeeGameAssetManifestSync(input.workspacePath),
         })
         if (!audit.package || audit.package.digest !== run.revision.content)
@@ -177,11 +183,9 @@ export function createDeliveryWorkflowController(input: {
       }
       return transportDispatcher.dispatch({ ...request,
         protectedPaths: [...new Set([...(request.protectedPaths ?? []), ...CANONICAL_DOCUMENT_ARTIFACTS,
-          '.beegame/ir/', '.beegame/workflow/game-ir/',
           ...(['content-author', 'implementation-worker'].includes(request.workerType) ? ['assets/'] : []),
           ...(request.workerType === 'implementation-worker' ? ['content/'] : [])])],
-        contract: { ...request.contract, ...contentContract,
-          gameIr: downstreamIrForRequest(request, gameIr) } })
+        contract: { ...request.contract, ...contentContract } })
     },
   }
 
@@ -273,18 +277,6 @@ export function createDeliveryWorkflowController(input: {
     // Late callbacks from the retired worker path cannot update its link.
     if (run && isPublicStageActive(run) || record.phase === 'DOCUMENT_DRAFTING') return
     if (!run || run.activeDispatch?.dispatchId !== record.dispatchId) return
-    if (consumesGameIr(record.workerType)) {
-      try {
-        const gameIr = await readDownstreamIr({ run, workspacePath: input.workspacePath, ir: input.ir })
-        assertResourceIr(run, gameIr, record.workerType === 'resource-planner')
-        assertDispatchedIr(run.activeDispatch.request, gameIr)
-      } catch (error) {
-        await persist({ ...run, status: 'needs_action',
-          blockedReason: error instanceof Error ? error.message : 'IR consumer binding failed' },
-          'ir.consumer.rejected', { dispatchId: record.dispatchId })
-        return
-      }
-    }
     let next: DeliveryRun = { ...run, activeDispatch: undefined }
     if (result.workerType === 'change-impact-analyzer') {
       const message =
@@ -407,7 +399,6 @@ export function createDeliveryWorkflowController(input: {
         workspacePath: input.workspacePath,
         terminal: result,
         documentSet: 'checklist',
-        ir: input.ir,
       })
       if (next.blockedReason && next.status === 'running') {
         next = {
@@ -434,10 +425,8 @@ export function createDeliveryWorkflowController(input: {
         return
       }
       next = await completeResourceTask({
-        // Resource completion validates the durable artifacts against the exact
-        // IR injected into this dispatch. Keep that dispatch available until
-        // completion has derived the binding and receipts; completeResourceTask
-        // clears it in the returned run.
+        // Resource completion validates the durable manifest and bindings before
+        // clearing the dispatch and advancing the workflow.
         run,
         workspacePath: input.workspacePath,
         terminal: result,
@@ -470,15 +459,9 @@ export function createDeliveryWorkflowController(input: {
         )
         return
       }
-      const gameIr = await readDownstreamIr({
-        run,
-        workspacePath: input.workspacePath,
-        ir: input.ir,
-      })
       next = completeGameContentStage({
         run,
         workspacePath: input.workspacePath,
-        gameIr,
         terminal: result,
       })
       next = await persist(
@@ -531,7 +514,6 @@ export function createDeliveryWorkflowController(input: {
         completionFailureReason = implementationCompletionIssue({
           task: activeTask,
           workspacePath: input.workspacePath,
-          gameIr: run.activeDispatch?.request?.contract.gameIr,
           terminal: result,
         })
       }
@@ -657,15 +639,9 @@ export function createDeliveryWorkflowController(input: {
     if (!run.gameContentReceipt || !run.revision.content || !run.revision.resource)
       return true
     try {
-      const gameIr = await readDownstreamIr({
-        run,
-        workspacePath: input.workspacePath,
-        ir: input.ir,
-      })
       const audit = auditBeeGameContentPackage(input.workspacePath, {
-        irRevision: gameIr.resultId,
+        documentRevision: run.revision.document,
         assetManifestRevision: run.revision.resource,
-        irEntryIds: downstreamIrEntryIds(gameIr),
         manifest: readBeeGameAssetManifestSync(input.workspacePath),
       })
       return !audit.package || audit.package.digest !== run.revision.content
@@ -677,15 +653,9 @@ export function createDeliveryWorkflowController(input: {
   async function gameContentAuthority(run: DeliveryRun) {
     if (!run.gameContentReceipt || !run.revision.resource)
       throw new Error('Scene/UI editing requires accepted content and resources')
-    const gameIr = await readDownstreamIr({
-      run,
-      workspacePath: input.workspacePath,
-      ir: input.ir,
-    })
     return {
-      irRevision: gameIr.resultId,
+      documentRevision: run.revision.document,
       assetManifestRevision: run.revision.resource,
-      irEntryIds: downstreamIrEntryIds(gameIr),
       manifest: readBeeGameAssetManifestSync(input.workspacePath),
     }
   }
@@ -702,7 +672,6 @@ export function createDeliveryWorkflowController(input: {
     const evidence = run.evidence.resourcePreparation
     return (
       run.resourceProductionState.currentTask !== 'RESOURCE_DELIVERED' ||
-      !run.resourceProductionState.irResultId ||
       !run.resourceProductionState.deliveryReceipt ||
       !run.revision.resource ||
       evidence?.status !== 'passed' ||
@@ -767,11 +736,6 @@ export function createDeliveryWorkflowController(input: {
   }
 
   async function resumeUnlocked(run: DeliveryRun): Promise<void> {
-    if (isIrStageActive(run)) {
-      if (!irLink) throw new Error('IR public module is required')
-      await irLink.ensureProgress(run)
-      return
-    }
     if (isFoundationStageActive(run)) {
       await progressPublicFoundation(run)
       return
@@ -782,17 +746,6 @@ export function createDeliveryWorkflowController(input: {
     }
     assertNoRetiredFoundationReviewRun(run)
     if (run.status !== 'running') return
-    if (isDownstreamIrPhase(run.phase)) {
-      try {
-        const gameIr = await readDownstreamIr({ run, workspacePath: input.workspacePath, ir: input.ir })
-        assertResourceIr(run, gameIr, run.phase === 'RESOURCE_PREPARATION')
-      } catch (error) {
-        await persist({ ...run, status: 'needs_action',
-          blockedReason: error instanceof Error ? error.message : 'IR consumer binding failed' },
-          'ir.consumer.rejected')
-        return
-      }
-    }
     // Replay a terminal from a phase that owns top-level dispatches. Foundation
     // review and revision terminals are nested under their own durable tasks
     // and never enter this route.
@@ -829,7 +782,6 @@ export function createDeliveryWorkflowController(input: {
           run,
           workspacePath: input.workspacePath,
           dispatcher,
-          ir: input.ir,
         })
       }
       return
@@ -840,25 +792,6 @@ export function createDeliveryWorkflowController(input: {
           run,
           'canonical documents changed while resource preparation was paused; document review must be rerun',
         )
-        return
-      }
-      const gameIr = await readDownstreamIr({
-        run,
-        workspacePath: input.workspacePath,
-        ir: input.ir,
-      })
-      const settled = await completeResourceTask({
-        run,
-        workspacePath: input.workspacePath,
-        gameIr,
-      })
-      if (settled.phase !== 'RESOURCE_PREPARATION') {
-        const saved = await persist(settled, 'resource.preparation.ready')
-        await resumeUnlocked(saved)
-        return
-      }
-      if (settled.status !== 'running') {
-        await persist(settled, 'resource.preparation.needs_action')
         return
       }
       await startResourcePreparation({
@@ -883,15 +816,9 @@ export function createDeliveryWorkflowController(input: {
         )
         return
       }
-      const gameIr = await readDownstreamIr({
-        run,
-        workspacePath: input.workspacePath,
-        ir: input.ir,
-      })
       await startGameContentStage({
         run,
         workspacePath: input.workspacePath,
-        gameIr,
         dispatcher,
       })
       return
@@ -1006,11 +933,6 @@ export function createDeliveryWorkflowController(input: {
     return serialize(async () => {
       const latest = await store.load()
       if (!latest || latest.runId !== run.runId) return
-      if (isIrStageActive(latest)) {
-        if (!irLink) throw new Error('IR public module is required')
-        await irLink.resume(latest)
-        return
-      }
       if (isFoundationStageActive(latest)) {
         await progressPublicFoundation(latest, true)
         return
@@ -1034,11 +956,6 @@ export function createDeliveryWorkflowController(input: {
     return serialize(async () => {
       const latest = await store.load()
       if (!latest || latest.runId !== run.runId) return
-      if (isIrStageActive(latest)) {
-        if (!irLink) throw new Error('IR public module is required')
-        await irLink.ensureProgress(latest)
-        return
-      }
       if (isFoundationStageActive(latest)) {
         await progressPublicFoundation(latest)
         return
@@ -1070,42 +987,6 @@ export function createDeliveryWorkflowController(input: {
       const latest = await store.load()
       if (latest && isPublicStageActive(latest)) throw new Error('Public document stage is still active; change routing is unavailable')
       return requestChangeUnlocked(run, message)
-    })
-  }
-
-  function reviseGameIr(edit: { expectedResultDigest: string; draft: unknown }) {
-    return serialize(async () => {
-      const observed = await store.load()
-      if (!observed) throw new Error('Workflow is unavailable')
-      const lock = await store.mutationLock(observed.runId)
-      try {
-        const current = await store.load(lock)
-        const link = current?.gameIrStage
-        if (!current || current.runId !== observed.runId || !input.ir || !link?.handle || link.outcome?.status !== 'completed')
-          throw new Error('A published IR is required')
-        if (current.phase !== 'RESOURCE_PREPARATION' || current.status === 'running' ||
-            current.resourceProductionState.deliveryReceipt || current.evidence.resourcePreparation ||
-            current.revision.content || current.revision.implementation ||
-            current.activeDispatch?.status === 'running')
-          throw new Error('IR correction requires idle resource preparation before accepted delivery')
-        if (foundationPublicDigest(link.outcome.result) !== edit.expectedResultDigest)
-          throw new Error('IR publication changed before correction')
-        await readDownstreamIr({ run: current, workspacePath: input.workspacePath, ir: input.ir })
-        const outcome = await input.ir.revise({ handle: link.handle, ...edit })
-        if (outcome.status !== 'completed' || outcome.billingStatus !== 'settled')
-          throw new Error('IR correction was not published')
-        const next: DeliveryRun = { ...current, status: 'needs_action', thinking: 'idle',
-          activeDispatch: undefined, activeTaskId: undefined,
-          blockedReason: 'IR revised; existing resources require validation against the new publication.',
-          gameIrStage: { ...link, handle: outcome.handle, outcome },
-          resourceProductionState: { currentTask: 'RESOURCE_DELIVERY' },
-        }
-        await readDownstreamIr({ run: next, workspacePath: input.workspacePath, ir: input.ir })
-        return await store.commit(next, { runId: next.runId, type: 'game_ir.revised',
-          phase: next.phase, status: next.status, revision: next.revision,
-          previousResultDigest: edit.expectedResultDigest,
-          resultDigest: foundationPublicDigest(outcome.result) }, undefined, lock)
-      } finally { await store.unlock(lock) }
     })
   }
 
@@ -1186,12 +1067,11 @@ export function createDeliveryWorkflowController(input: {
           if (current && isPublicStageActive(current) && current.status !== 'stopped')
             await stopFoundation(current, 'Application host is shutting down.')
         })
-      } finally { authorLink?.dispose(); reviewLink?.dispose(); irLink?.dispose() }
+      } finally { authorLink?.dispose(); reviewLink?.dispose() }
     },
     resume,
     ensureProgress,
     requestChange,
-    reviseGameIr,
     loadGameContentForEditing,
     saveGameContentEdit,
     publishGameContentEdits,

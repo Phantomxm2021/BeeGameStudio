@@ -161,7 +161,7 @@ function assertUnitPayloadIdentity(unit: AcceptedWorkflowUnit): void {
     if (unit.unitId !== GAME_CONTENT_UNIT_ID ||
         unit.receiptRef !== 'content/index.json' ||
         payload.receiptRef !== unit.receiptRef ||
-        payload.irRevision !== unit.dependencyDigests.gameIr ||
+        payload.documentRevision !== unit.dependencyDigests.document ||
         payload.assetManifestRevision !== unit.dependencyDigests.resource)
       recoveryError(
         'recovery_checkpoint_conflict',
@@ -449,7 +449,7 @@ function historicalResourceFacts(input: {
         'snapshot Scene/UI content receipt has no accepted journal event',
       )
     if (content.contentRevision !== contentProof.inputRevision ||
-        content.irRevision !== contentPayload?.irRevision ||
+        content.documentRevision !== contentPayload?.documentRevision ||
         content.assetManifestRevision !== contentPayload?.assetManifestRevision ||
         stableValue(content.contentIds) !== stableValue(contentPayload?.contentIds))
       recoveryError(
@@ -1231,9 +1231,6 @@ function buildProjectionRun(input: {
     foundationDraftState: { completedPaths: documents },
     resourceProductionState: {
       currentTask: resourceTask,
-      ...(stringValue(gate?.dependencyDigests.gameIr)
-        ? { irResultId: stringValue(gate?.dependencyDigests.gameIr) }
-        : {}),
       ...(gatePayload?.bindings && gate?.dependencyDigests.resource
         ? {
             deliveryReceipt: {
@@ -1248,9 +1245,9 @@ function buildProjectionRun(input: {
     ...(content && contentPayload
       ? {
           gameContentReceipt: {
-            schemaVersion: 'game-content-ready.v1' as const,
+            schemaVersion: 'game-content-ready.v2' as const,
             contentRevision: content.inputRevision,
-            irRevision: stringValue(contentPayload.irRevision)!,
+            documentRevision: stringValue(contentPayload.documentRevision)!,
             assetManifestRevision: stringValue(contentPayload.assetManifestRevision)!,
             indexPath: 'content/index.json' as const,
             contentIds: stringArray(contentPayload.contentIds)!,
@@ -1334,7 +1331,10 @@ export async function projectExactResumeRun(input: {
     )
   const snapshot = rawSnapshotRecord(input.inspection)
   if (snapshot) assertNoRetiredFoundationReviewRun(snapshot)
-  if (snapshot?.authorStage) recoveryError('recovery_checkpoint_conflict', 'Public Author recovery belongs to its module')
+  // A completed public author handoff is durable provenance for downstream
+  // phases. Only an author/review stage in its own active phase is routed to
+  // the public module (before this projector is entered); rejecting the
+  // completed handoff here made every later RESOURCE_PREPARATION resume fail.
   if (snapshot) assertNoRetiredAuthorRun(snapshot)
   const snapshotRunId = assertSnapshotIdentity({
     snapshot,

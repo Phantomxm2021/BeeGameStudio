@@ -207,8 +207,7 @@ import {
   type FoundationAuthoringHostOptions,
 } from './beegame/foundation-authoring-host'
 import { createFoundationReviewerHost, type FoundationReviewerHostOptions, type FoundationReviewerHost } from './beegame/foundation-reviewer-host'
-import { createGameIrHost, type GameIrHostOptions, type GameIrHost } from './beegame/game-ir-host'
-import { isIrStageActive, isPublicStageActive } from './beegame/delivery-workflow/public-stage-routing'
+import { isPublicStageActive } from './beegame/delivery-workflow/public-stage-routing'
 import { resolveNativeRuntimeCommand } from './beegame/native-runtime-process-path'
 import { evaluateWorkflowDeliveryGate } from './beegame/delivery-workflow/delivery-gate'
 import type {
@@ -425,7 +424,6 @@ export type AgentWorkflowAppOptions = {
     options: FoundationAuthoringHostOptions,
   ) => FoundationAuthoringHost
   foundationReviewerHostFactory?: (options: FoundationReviewerHostOptions) => FoundationReviewerHost
-  gameIrHostFactory?: (options: GameIrHostOptions) => GameIrHost
 }
 
 export const ROUTE_PERMISSION = {
@@ -780,14 +778,12 @@ export function createAgentWorkflowApp(
     )(authoringHostOptions)
     const { language: _authorLanguage, ...reviewHostOptions } = authoringHostOptions
     const reviewer = (options.foundationReviewerHostFactory ?? createFoundationReviewerHost)(reviewHostOptions)
-    const ir = (options.gameIrHostFactory ?? createGameIrHost)(reviewHostOptions)
     const controller = createDeliveryWorkflowController({
       workspacePath: workspaceKey,
       ownerId: input.user.id,
       workerPort,
       author,
       reviewer,
-      ir,
     })
     beeGameSessions.followWorkflowStageChat({
       userId: input.user.id,
@@ -3259,22 +3255,6 @@ export function createAgentWorkflowApp(
     }
   })
 
-  app.post('/api/projects/:id/game-ir/revise', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'agent.send_message')
-    if (forbidden) return c.json(forbidden, 403)
-    try {
-      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
-      if (!project?.root_path) return c.json({ error: 'Project not found' }, 404)
-      const body = await c.req.json()
-      if (!body || typeof body.expectedResultDigest !== 'string' || !/^[a-f0-9]{64}$/.test(body.expectedResultDigest) || !body.draft)
-        return c.json({ error: 'Expected IR result digest and corrected draft are required' }, 400)
-      const controller = getDeliveryController({ request: c.req.raw, user,
-        projectId: project.id, workspacePath: project.root_path })
-      return c.json(await controller.reviseGameIr({ expectedResultDigest: body.expectedResultDigest, draft: body.draft }))
-    } catch (err) { return c.json({ error: toErrorMessage(err) }, 409) }
-  })
-
   app.post('/api/projects/:id/workflow/stop', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'agent.cancel')
@@ -3345,10 +3325,8 @@ export function createAgentWorkflowApp(
         options.defaultWorkspacePath,
       )
       const run = await createRunStore(workspacePath, user.id).load()
-      const irReady =
-        run?.gameIrStage?.outcome?.status === 'completed' &&
-        run.gameIrStage.outcome.billingStatus === 'settled'
-      if (!irReady) return c.json({ state: 'awaiting_ir' })
+      if (!run?.foundationReviewStage?.acceptedReview)
+        return c.json({ state: 'awaiting_documents' })
       if (!run.revision.resource)
         return c.json({ state: 'awaiting_assets' })
       if (!run.gameContentReceipt)
@@ -6068,12 +6046,6 @@ async function publicStageResumeOnReconnectRequired(
   run: DeliveryRun,
   sessionIsOpen: (dispatch: DispatchRecord) => Promise<boolean> | boolean,
 ): Promise<boolean> {
-  // Game IR owns its execution lease internally rather than exposing a
-  // top-level workflow dispatch. Re-entering its public resume operation is
-  // idempotent: a live lease is left alone, while a lost in-process watcher
-  // is reattached. Without this signal a running IR can remain durably stuck
-  // after the server or dashboard reconnects.
-  if (run.status === 'running' && isIrStageActive(run)) return true
   if (
     run.status !== 'running' ||
     run.phase !== 'DOCUMENT_REVIEW' ||
@@ -6800,7 +6772,6 @@ function workflowThinkingStatus(
   workflow: JsonObject,
 ): 'working' | 'waiting' | 'idle' {
   if (workflowStatus(workflow) !== 'running') return 'idle'
-  if (workflow.documentStep === 'GAME_IR_COMPILATION') return 'working'
   if (isObject(workflow.authorStage) && ['starting', 'running'].includes(String(workflow.authorStage.status))) return 'working'
   if (isObject(workflow.foundationReviewStage)) {
     const invocation = isObject(workflow.foundationReviewStage.invocation)
@@ -6849,10 +6820,6 @@ function workflowMessageKey(workflow: JsonObject): string {
 function workflowNextAction(
   workflow: JsonObject,
 ): 'resume' | 'retry' | undefined {
-  if (workflow.documentStep === 'GAME_IR_COMPILATION' && isObject(workflow.gameIrStage)) {
-    const outcome = workflow.gameIrStage.outcome
-    if (isObject(outcome) && outcome.status === 'needs_action' && outcome.resumable === false) return undefined
-  }
   const publicAuthor = projectPublicAuthorDisplay(workflow.authorStage)
   if (publicAuthor?.completed && !workflow.foundationReviewStage)
     return workflowStatus(workflow) === 'stopped' ? 'resume' : undefined
@@ -6940,9 +6907,7 @@ function workflowViewForDisplay(
     workflow.phase === 'DOCUMENT_DRAFTING' ||
     workflow.phase === 'DOCUMENT_REVIEW'
   const assetPhase = workflow.phase === 'RESOURCE_PREPARATION'
-  const displayTaskSource = workflow.documentStep === 'GAME_IR_COMPILATION'
-    ? [{ id: 'game-ir-public-stage', title: 'IR 编译', status: workflow.status, attempt: 0, operation: 'produce' }]
-    : workflow.phase === 'GAME_CONTENT'
+  const displayTaskSource = workflow.phase === 'GAME_CONTENT'
     ? [{ id: 'scene-ui-content', title: 'Scene / UI Content', status: workflow.status, attempt: 0, operation: 'produce' }]
     : foundationDisplay
     ? [{ id: 'foundation-public-stage', title: 'Foundation Reviewer',

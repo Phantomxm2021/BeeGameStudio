@@ -1,7 +1,6 @@
 import { readBeeGameAssetManifestSync } from '../asset-contracts'
 import { acceptBeeGameContentPackage } from '../game-content-package'
 import { buildSceneUiContentAuthoringAuthority } from '../scene-ui-content-authoring'
-import { downstreamIrEntryIds, type DownstreamIr } from './downstream-ir'
 import { transitionDeliveryRun } from './transition'
 import type { DeliveryRun, WorkerDispatchRequest } from './types'
 import type { WorkerTerminalResult } from './worker-contracts'
@@ -10,11 +9,11 @@ type Dispatcher = { dispatch(request: WorkerDispatchRequest): Promise<unknown> }
 
 function authority(input: {
   workspacePath: string
-  gameIr: DownstreamIr
+  documentRevision: string
   assetManifestRevision: string
 }) {
   return buildSceneUiContentAuthoringAuthority({
-    gameIr: input.gameIr,
+    documentRevision: input.documentRevision,
     assetManifestRevision: input.assetManifestRevision,
     manifest: readBeeGameAssetManifestSync(input.workspacePath),
   })
@@ -23,7 +22,6 @@ function authority(input: {
 export async function startGameContentStage(input: {
   run: DeliveryRun
   workspacePath: string
-  gameIr: DownstreamIr
   dispatcher: Dispatcher
 }): Promise<unknown> {
   if (input.run.phase !== 'GAME_CONTENT' || input.run.status !== 'running')
@@ -34,7 +32,7 @@ export async function startGameContentStage(input: {
     throw new Error('game content requires an accepted Asset Manifest revision')
   const task = authority({
     workspacePath: input.workspacePath,
-    gameIr: input.gameIr,
+    documentRevision: input.run.revision.document,
     assetManifestRevision,
   })
   return input.dispatcher.dispatch({
@@ -58,7 +56,6 @@ export async function startGameContentStage(input: {
 export function completeGameContentStage(input: {
   run: DeliveryRun
   workspacePath: string
-  gameIr: DownstreamIr
   terminal: Extract<WorkerTerminalResult, { workerType: 'content-author' }>
 }): DeliveryRun {
   if (input.run.phase !== 'GAME_CONTENT')
@@ -69,9 +66,8 @@ export function completeGameContentStage(input: {
   try {
     const manifest = readBeeGameAssetManifestSync(input.workspacePath)
     const receipt = acceptBeeGameContentPackage(input.workspacePath, {
-      irRevision: input.gameIr.resultId,
+      documentRevision: input.run.revision.document,
       assetManifestRevision,
-      irEntryIds: downstreamIrEntryIds(input.gameIr),
       manifest,
     })
     const run = { ...input.run, activeDispatch: undefined, gameContentReceipt: receipt }

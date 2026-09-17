@@ -15,7 +15,6 @@ describe('canonical resource-content workflow', () => {
       phase: 'RESOURCE_PREPARATION' as const,
       resourceProductionState: {
         currentTask: 'RESOURCE_DELIVERED' as const,
-        irResultId: 'c'.repeat(64),
         deliveryReceipt: {
           bindings: [],
           catalogObserved: false,

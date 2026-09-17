@@ -78,7 +78,7 @@ export async function evaluateWorkflowDeliveryGate(input: {
   ) {
     return {
       allowed: false,
-      issues: ['Accepted Scene/UI content is not bound to the current IR and Asset Manifest revisions.'],
+      issues: ['Accepted Scene/UI content is not bound to the current document and Asset Manifest revisions.'],
     }
   }
   if (

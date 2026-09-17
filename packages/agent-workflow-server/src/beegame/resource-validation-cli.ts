@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
 import { auditResourceDeliveryReadiness, confirmedResourceLibraryUsage } from './resource-delivery-readiness'
-import { resourceIrManifestIssues } from './delivery-workflow/resource-stage'
 import type { DeliveryRun } from './delivery-workflow/types'
 
 /** Read-only entry point to the host's existing acceptance checks. */
@@ -20,7 +19,6 @@ export function validateResourceDelivery(workspacePath: string) {
   })
   const issues = [...new Set([
     ...audit.issues, ...readiness.issues, ...readiness.readinessIssues,
-    ...resourceIrManifestIssues(run, workspacePath),
     ...(audit.requirements.length ? [] : ['Resource delivery requires at least one canonical requirement.']),
   ])]
   return { valid: issues.length === 0, issues, requirementCount: audit.requirements.length,

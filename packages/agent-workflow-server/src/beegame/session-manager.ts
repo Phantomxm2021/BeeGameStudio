@@ -2749,7 +2749,6 @@ function workflowStageForWorkerType(workerType?: string): string | undefined {
     'content-author': 'content',
     'foundation-reviewer': 'reviewer',
     'foundation-document-reviser': 'revision',
-    'game-ir-compiler': 'game-ir',
     'resource-planner': 'resources',
     'implementation-worker': 'implementation',
     'acceptance-validator': 'acceptance',
@@ -2757,13 +2756,12 @@ function workflowStageForWorkerType(workerType?: string): string | undefined {
   return workerType ? stages[workerType] : undefined
 }
 
-function stageFromNativeLogPath(path: string): 'author' | 'content' | 'reviewer' | 'revision' | 'game-ir' | undefined {
+function stageFromNativeLogPath(path: string): 'author' | 'content' | 'reviewer' | 'revision' | undefined {
   const normalized = path.split('\\').join('/')
   if (normalized.includes('/foundation-authoring/')) return 'author'
   if (normalized.includes('/content-authoring/')) return 'content'
   if (normalized.includes('/foundation-reviewer/')) return 'reviewer'
   if (normalized.includes('/foundation-revision/')) return 'revision'
-  if (normalized.includes('/game-ir/')) return 'game-ir'
   return undefined
 }
 

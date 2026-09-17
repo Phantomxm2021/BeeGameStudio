@@ -302,7 +302,6 @@ export type BeeGameSceneContentDocument = {
   schema: 'beegame-content.v1'
   id: string
   kind: 'scene-2d'
-  irRefs: string[]
   assetRefs: string[]
   data: { nodes: BeeGameContentNode[]; cameraNodeId?: string }
 }
@@ -331,7 +330,6 @@ export type BeeGameUiContentDocument = {
   schema: 'beegame-content.v1'
   id: string
   kind: 'ui-screen' | 'ui-hud' | 'ui-flow'
-  irRefs: string[]
   assetRefs: string[]
   data: { rootId: string; nodes: BeeGameUiContentNode[] }
 }
@@ -341,14 +339,14 @@ export type BeeGameEditableContentDocument =
   | BeeGameUiContentDocument
 
 export type BeeGameGameContentSnapshot = {
-  state: 'awaiting_ir' | 'awaiting_assets' | 'awaiting_content' | 'ready' | 'draft'
+  state: 'awaiting_documents' | 'awaiting_assets' | 'awaiting_content' | 'ready' | 'draft'
   acceptedContentRevision?: string
   contentRevision?: string
   index?: {
     schema: 'beegame-content-package.v1'
     id: string
     dimension: '2d'
-    irRevision: string
+    documentRevision: string
     assetManifestRevision: string
     entryScene: string
     files: string[]
@@ -540,6 +538,13 @@ export const beeGameAdapter = {
     return postJson<Record<string, unknown>>(
       `/api/projects/${encodeURIComponent(projectId)}/workflow/retry`,
       { language: getCurrentUiLanguage() },
+    )
+  },
+
+  async stopWorkflow(projectId: string): Promise<Record<string, unknown>> {
+    return postJson<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/workflow/stop`,
+      { reason: 'user stopped workflow' },
     )
   },
 
@@ -1407,7 +1412,6 @@ function getWorkflowStage(event: BeeGameEvent): string | undefined {
     'content-author': 'content',
     'foundation-reviewer': 'reviewer',
     'foundation-document-reviser': 'revision',
-    'game-ir-compiler': 'game-ir',
     'resource-planner': 'resources',
     'implementation-worker': 'implementation',
     'acceptance-validator': 'acceptance',

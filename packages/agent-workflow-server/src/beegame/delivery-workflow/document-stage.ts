@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
 import { createHash } from 'node:crypto'
-import type { GameIrOperations } from '../stage-modules/game-ir/public'
 import { foundationPublicDigest } from '../foundation-public-result'
 import type { ChecklistAuthority } from '../checklist-authority-projection'
 import { readFile } from '../stage-runtime/files'
@@ -27,7 +26,6 @@ export async function startChecklistDraftStage(input: {
   run: DeliveryRun
   workspacePath: string
   dispatcher: Dispatcher
-  ir?: GameIrOperations
 }): Promise<unknown> {
   if (
     input.run.phase !== 'DOCUMENT_REVIEW' ||
@@ -67,7 +65,6 @@ export async function completeDocumentDraft(input: {
   terminal: Extract<WorkerTerminalResult, { workerType: 'document-author' }>
   audit?: ReadinessAudit
   documentSet?: 'foundation' | 'checklist'
-  ir?: GameIrOperations
 }): Promise<DeliveryRun> {
   // The only production caller is the controller's checklist terminal branch.
   // Foundation completion is owned by the isolated Author public module.
@@ -76,7 +73,7 @@ export async function completeDocumentDraft(input: {
   const authority = await verifiedChecklistAuthority(input)
   const dispatchedAuthority = input.run.activeDispatch?.request?.contract.checklistAuthority
   if (foundationPublicDigest(dispatchedAuthority) !== foundationPublicDigest(authority))
-    throw new Error('Checklist completion does not bind the dispatched Foundation and IR result')
+    throw new Error('Checklist completion does not bind the dispatched Foundation documents')
 
   const candidatePath =
     input.run.activeDispatch?.request?.contract.checklistCandidatePath
@@ -208,24 +205,18 @@ export async function completeDocumentDraft(input: {
 }
 
 async function verifiedChecklistAuthority(input: {
-  run: DeliveryRun; workspacePath: string; ir?: GameIrOperations
+  run: DeliveryRun; workspacePath: string
 }): Promise<ChecklistAuthority> {
-  const link = input.run.gameIrStage, outcome = link?.outcome
-  if (!input.ir || !link?.handle || outcome?.status !== 'completed' || outcome.billingStatus !== 'settled' ||
-      link.control.action !== 'run' || input.run.revision.document !== link.foundationRevision)
-    throw new Error('Checklist requires the current completed and settled IR result')
-  const view = await input.ir.readResult({ handle: link.handle, foundationRevision: link.foundationRevision })
-  if (foundationPublicDigest(view.ready) !== foundationPublicDigest(outcome.result) ||
-      view.input.foundationResultId !== input.run.foundationReviewStage?.acceptedReview?.resultId ||
-      foundationPublicDigest(view.input) !== link.inputDigest)
-    throw new Error('Checklist IR public result binding changed')
+  const review = input.run.foundationReviewStage?.acceptedReview
+  if (!review || input.run.revision.document !== review.documentSetDigest)
+    throw new Error('Checklist requires the current accepted Foundation documents')
   // Observe working files only to detect drift, never to substitute input.
-  for (const document of view.input.documents) {
+  for (const document of review.documents) {
     const current = await readFile(join(input.workspacePath, document.path), 'utf8')
     if (createHash('sha256').update(current, 'utf8').digest('hex') !== document.digest)
       throw new Error(`Accepted Foundation document changed before Checklist publication: ${document.path}`)
   }
-  return { foundationRevision: link.foundationRevision, documentSetDigest: view.input.documentSetDigest,
-    documents: view.input.documents.map(({ path, content, digest }) => ({ path, content, digest })),
-    irResultId: foundationPublicDigest(view.ready) }
+  return { foundationRevision: review.documentSetDigest,
+    documentSetDigest: review.documentSetDigest,
+    documents: review.documents.map(({ path, content, digest }) => ({ path, content, digest })) }
 }

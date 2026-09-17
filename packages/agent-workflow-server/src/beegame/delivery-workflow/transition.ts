@@ -165,10 +165,8 @@ function enterResourcePreparation(
     },
     tasks: [],
     evidence: {},
-    // Keep the published IR binding while restarting resource production.
     resourceProductionState: {
       currentTask: 'RESOURCE_DELIVERY',
-      irResultId: run.resourceProductionState.irResultId,
     },
     gameContentReceipt: undefined,
     updatedAt: timestamp(),
@@ -229,10 +227,10 @@ export function transitionDeliveryRun(
         fail('content cannot be published while workflow work is active')
       requireEvidence(event.evidence, event.receipt.contentRevision, ['passed'])
       if (
-        event.receipt.irRevision !== run.resourceProductionState.irResultId ||
+        event.receipt.documentRevision !== run.revision.document ||
         event.receipt.assetManifestRevision !== run.revision.resource
       )
-        fail('published content does not bind the current IR and resources')
+        fail('published content does not bind the current Foundation documents and resources')
       const implementationReady = Boolean(
         run.revision.implementation &&
           run.tasks.length > 0 &&

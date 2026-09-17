@@ -89,7 +89,6 @@ type WorkflowStage =
     | 'content'
     | 'reviewer'
     | 'revision'
-    | 'game-ir'
     | 'resources'
     | 'implementation'
     | 'acceptance';
@@ -170,7 +169,6 @@ const inferWorkflowStage = (value: string): WorkflowStage | undefined => {
     const normalized = value.toLowerCase();
     if (normalized.includes('foundation-authoring')) return 'author';
     if (normalized.includes('foundation-reviewer') || normalized.includes('foundation-review')) return 'reviewer';
-    if (normalized.includes('game-ir')) return 'game-ir';
     return undefined;
 };
 
@@ -178,7 +176,7 @@ const workflowStage = (message: ChatDisplayMessage): WorkflowStage | undefined =
     const taskKind = String(message.taskKind || '').trim();
     if (taskKind.startsWith('workflow_stage:')) {
         const stage = taskKind.slice('workflow_stage:'.length) as WorkflowStage;
-        return ['author', 'content', 'reviewer', 'revision', 'game-ir', 'resources', 'implementation', 'acceptance'].includes(stage)
+        return ['author', 'content', 'reviewer', 'revision', 'resources', 'implementation', 'acceptance'].includes(stage)
             ? stage
             : undefined;
     }
@@ -193,7 +191,6 @@ const workflowStage = (message: ChatDisplayMessage): WorkflowStage | undefined =
         'content-author': 'content',
         'foundation-reviewer': 'reviewer',
         'foundation-document-reviser': 'revision',
-        'game-ir-compiler': 'game-ir',
         'resource-planner': 'resources',
         'implementation-worker': 'implementation',
         'acceptance-validator': 'acceptance',
@@ -1148,7 +1145,6 @@ function StageSeparator({ stage, lang }: { stage: WorkflowStage; lang: Language 
         content: { zh: '内容编写', en: 'Content authoring' },
         reviewer: { zh: '审计与修订', en: 'Review and revision' },
         revision: { zh: '文档修订', en: 'Document revision' },
-        'game-ir': { zh: 'Game IR', en: 'Game IR' },
         resources: { zh: '资源准备', en: 'Resource preparation' },
         implementation: { zh: '游戏实现', en: 'Game implementation' },
         acceptance: { zh: '验收', en: 'Acceptance' },

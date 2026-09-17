@@ -457,7 +457,6 @@ function checklistAuthorityFixture(): ChecklistAuthority {
     foundationRevision: documentSetDigest,
     documentSetDigest,
     documents,
-    irResultId: 'ir-publication-1',
   }
 }
 

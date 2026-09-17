@@ -64,6 +64,7 @@ interface RightSidebarProps {
     pendingPermissions?: PermissionDisplayModel[];
     projectStatus?: ProjectRuntimeDisplayModel | null;
     onWorkflowAction?: (action: 'resume' | 'retry') => void | Promise<void>;
+    onWorkflowStop?: () => void | Promise<void>;
     isWorkflowActionPending?: boolean;
     waitingPermission: WaitingPermissionState;
     canSendMessage?: boolean;
@@ -98,6 +99,7 @@ export function RightSidebar({
     pendingPermissions = [],
     projectStatus,
     onWorkflowAction,
+    onWorkflowStop,
     isWorkflowActionPending = false,
     waitingPermission,
     canSendMessage = true,
@@ -558,6 +560,7 @@ export function RightSidebar({
                                 waitingPermission={waitingPermission}
                                 projectStatus={projectStatus}
                                 onWorkflowAction={onWorkflowAction}
+                                onWorkflowStop={onWorkflowStop}
                                 isWorkflowActionPending={isWorkflowActionPending}
                                 canSendMessage={canSendMessage}
                                 lang={lang}

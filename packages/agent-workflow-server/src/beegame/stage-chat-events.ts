@@ -56,7 +56,7 @@ function toolResultText(value: unknown): string {
  * activity, and explicitly emitted thinking deltas for the Chat UI.
  */
 export function createStageChatProjector(input: {
-  stage: 'author' | 'content' | 'reviewer' | 'revision' | 'game-ir'
+  stage: 'author' | 'content' | 'reviewer' | 'revision'
   sink?: StageChatSink
 }) {
   const tools = new Map<string, { name: string; input?: unknown }>()

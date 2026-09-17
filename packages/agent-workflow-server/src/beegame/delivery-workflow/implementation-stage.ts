@@ -30,7 +30,6 @@ export function implementationComplete(run: DeliveryRun): boolean {
 export function implementationCompletionIssue(input: {
   task: ImplementationTask
   workspacePath?: string
-  gameIr?: unknown
   terminal: Extract<
     WorkerTerminalResult,
     { workerType: 'implementation-worker' }

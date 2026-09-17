@@ -31,7 +31,7 @@ export type FoundationReviewLinkState = {
 }
 
 const PASSED_STOP = 'Foundation document review and correction completed. Explicit continuation is required.'
-const AUTO_HANDOFF = 'Foundation document review and correction completed. Starting Game IR compilation.'
+const AUTO_HANDOFF = 'Foundation document review and correction completed. Starting resource delivery.'
 
 function isComplete(link: FoundationReviewLinkState) {
   return Boolean(link.acceptedReview)

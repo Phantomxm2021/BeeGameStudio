@@ -12,7 +12,7 @@ export async function readFile(path: string, _encoding: 'utf8'): Promise<string>
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
   try {
     const stat = await handle.stat()
-    if (!stat.isFile()) throw new Error('IR evidence must be a regular file')
+    if (!stat.isFile()) throw new Error('Workflow evidence must be a regular file')
     return await handle.readFile('utf8')
   } finally { await handle.close() }
 }

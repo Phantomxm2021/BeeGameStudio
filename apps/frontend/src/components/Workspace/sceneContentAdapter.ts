@@ -44,7 +44,7 @@ function childrenByParent(nodes: BeeGameContentNode[]): Map<string, string[]> {
 export function sceneContentToEditorDocument(input: {
   document: BeeGameSceneContentDocument;
   documentRevision: string;
-  irRevision: string;
+  foundationDocumentRevision: string;
   assetManifestRevision: string;
   assets?: Record<string, SceneAsset>;
   assetRegions?: Record<string, Record<string, NonNullable<SceneNode['material']>['textureRegion']>>;
@@ -87,9 +87,9 @@ export function sceneContentToEditorDocument(input: {
     revision: 0,
     source: {
       source: {
-        kind: 'published-ir',
+        kind: 'content-package',
         publicationId: input.document.id,
-        candidateDigest: input.irRevision,
+        candidateDigest: input.foundationDocumentRevision,
         sourceInputDigest: input.assetManifestRevision,
       },
       contentDigest: input.documentRevision,

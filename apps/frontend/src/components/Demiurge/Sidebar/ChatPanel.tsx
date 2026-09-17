@@ -54,6 +54,7 @@ interface ChatPanelProps {
     waitingPermission: WaitingPermissionState;
     projectStatus?: ProjectRuntimeDisplayModel | null;
     onWorkflowAction?: (action: 'resume' | 'retry') => void | Promise<void>;
+    onWorkflowStop?: () => void | Promise<void>;
     isWorkflowActionPending?: boolean;
     isComposerLocked?: boolean;
     canSendMessage?: boolean;
@@ -208,6 +209,7 @@ export const ChatPanel = memo(({
     waitingPermission,
     projectStatus,
     onWorkflowAction,
+    onWorkflowStop,
     isWorkflowActionPending = false,
     isComposerLocked = false,
     canSendMessage = true,
@@ -318,6 +320,20 @@ export const ChatPanel = memo(({
                             data-testid="beegame-workflow-action"
                         >
                             {isWorkflowActionPending ? 'Working…' : workflowActionLabel}
+                        </Button>
+                    </div>
+                ) : null}
+                {projectStatus?.workflow?.status === 'running' && onWorkflowStop ? (
+                    <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
+                        <p className="type-caption-1 text-[var(--text-secondary)]">This workflow is running.</p>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={isWorkflowActionPending}
+                            onClick={() => void onWorkflowStop()}
+                        >
+                            {isWorkflowActionPending ? 'Stopping…' : 'Stop workflow'}
                         </Button>
                     </div>
                 ) : null}

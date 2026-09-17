@@ -1,6 +1,5 @@
 import type { HistoricalAuthorDraftState } from './historical-author-checkpoint'
 import type { FoundationReviewLinkState } from './foundation-review-link'
-import type { GameIrStageLink } from './game-ir-link'
 import type {
   AuthorDocumentsResult,
   AuthorHandle,
@@ -79,7 +78,6 @@ export type DeliveryPhase =
 export type DocumentWorkflowStep =
   | 'FOUNDATION_DRAFTING'
   | 'FOUNDATION_REVIEW'
-  | 'GAME_IR_COMPILATION'
   | 'CHECKLIST_DRAFTING'
 
 /**
@@ -150,8 +148,6 @@ export type ResourceDeliveryReceipt = {
 
 export type ResourceProductionState = {
   currentTask: ResourceProductionTask
-  /** Published IR accepted by the resource planner; retained by its descendants. */
-  irResultId?: string
   deliveryReceipt?: ResourceDeliveryReceipt
 }
 
@@ -287,7 +283,6 @@ export type DeliveryRun = {
   foundationDraftState: HistoricalAuthorDraftState
   /** Public author lifecycle handoff; never contains private checkpoints or worker state. */
   authorStage?: AuthorStageLink
-  gameIrStage?: GameIrStageLink
   foundationReviewStage?: FoundationReviewLinkState
   /** Reserved solely to reject obsolete snapshots; no old project state is accepted. */
   foundationAuditState?: never

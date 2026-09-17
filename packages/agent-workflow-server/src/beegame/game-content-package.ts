@@ -15,7 +15,7 @@ import type { BeeGameAssetManifest } from './asset-contracts'
 export const BEEGAME_CONTENT_ROOT = 'content' as const
 export const BEEGAME_CONTENT_INDEX = 'content/index.json' as const
 export const BEEGAME_CONTENT_PACKAGE_SCHEMA =
-  'beegame-content-package.v1' as const
+  'beegame-content-package.v2' as const
 export const BEEGAME_CONTENT_DOCUMENT_SCHEMA = 'beegame-content.v1' as const
 
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/)
@@ -33,7 +33,7 @@ const contentIndexSchema = z
     schema: z.literal(BEEGAME_CONTENT_PACKAGE_SCHEMA),
     id: identifier,
     dimension: z.literal('2d'),
-    irRevision: digestSchema,
+    documentRevision: digestSchema,
     assetManifestRevision: digestSchema,
     entryScene: identifier,
     files: uniqueIdentifiers.min(1),
@@ -96,7 +96,6 @@ const uiNodeSchema = z
 const contentHeader = {
   schema: z.literal(BEEGAME_CONTENT_DOCUMENT_SCHEMA),
   id: identifier,
-  irRefs: uniqueIdentifiers.min(1),
   assetRefs: uniqueIdentifiers,
 } as const
 
@@ -131,9 +130,8 @@ export type BeeGameContentIndex = z.infer<typeof contentIndexSchema>
 export type BeeGameContentDocument = z.infer<typeof contentDocumentSchema>
 
 export type BeeGameContentAuthority = Readonly<{
-  irRevision: string
+  documentRevision: string
   assetManifestRevision: string
-  irEntryIds: readonly string[]
   manifest: BeeGameAssetManifest
 }>
 
@@ -165,9 +163,9 @@ export type BeeGameContentPackageAudit = Readonly<{
 }>
 
 export type BeeGameContentReadyReceipt = Readonly<{
-  schemaVersion: 'game-content-ready.v1'
+  schemaVersion: 'game-content-ready.v2'
   contentRevision: string
-  irRevision: string
+  documentRevision: string
   assetManifestRevision: string
   indexPath: typeof BEEGAME_CONTENT_INDEX
   contentIds: readonly string[]
@@ -328,12 +326,9 @@ function validateDocument(input: {
   authority: BeeGameContentAuthority
   issues: string[]
 }): void {
-  const irIds = new Set(input.authority.irEntryIds)
   const resourceById = new Map(
     input.authority.manifest.resources.map(resource => [resource.id, resource]),
   )
-  for (const id of input.document.irRefs)
-    if (!irIds.has(id)) input.issues.push(`${input.path}: unknown IR entry ${id}.`)
   for (const id of input.document.assetRefs) {
     const resource = resourceById.get(id)
     if (!resource) input.issues.push(`${input.path}: unknown asset ${id}.`)
@@ -413,8 +408,8 @@ export function auditBeeGameContentPackage(
       ],
     }
   }
-  if (index.irRevision !== authority.irRevision)
-    issues.push(`${BEEGAME_CONTENT_INDEX}: irRevision does not match authority.`)
+  if (index.documentRevision !== authority.documentRevision)
+    issues.push(`${BEEGAME_CONTENT_INDEX}: documentRevision does not match authority.`)
   if (index.assetManifestRevision !== authority.assetManifestRevision)
     issues.push(
       `${BEEGAME_CONTENT_INDEX}: assetManifestRevision does not match authority.`,
@@ -539,8 +534,8 @@ export function saveBeeGameContentDocument(input: {
 }): BeeGameContentDocumentSaveResult {
   const indexPath = resolve(input.workspacePath, BEEGAME_CONTENT_INDEX)
   const index = contentIndexSchema.parse(parseJson(indexPath))
-  if (index.irRevision !== input.authority.irRevision)
-    throw new Error('Content package IR revision does not match the edit authority')
+  if (index.documentRevision !== input.authority.documentRevision)
+    throw new Error('Content package document revision does not match the edit authority')
   if (index.assetManifestRevision !== input.authority.assetManifestRevision)
     throw new Error('Content package Asset Manifest revision does not match the edit authority')
   if (!index.files.includes(input.path))
@@ -597,33 +592,25 @@ export function acceptBeeGameContentPackage(
       `Game Content Package is invalid: ${audit.issues.join('; ')}`,
     )
   return Object.freeze({
-    schemaVersion: 'game-content-ready.v1',
+    schemaVersion: 'game-content-ready.v2',
     contentRevision: audit.package.digest,
-    irRevision: audit.package.index.irRevision,
+    documentRevision: audit.package.index.documentRevision,
     assetManifestRevision: audit.package.index.assetManifestRevision,
     indexPath: BEEGAME_CONTENT_INDEX,
     contentIds: audit.package.documents.map(document => document.id),
   })
 }
 
-/** Recompute durable package bytes during recovery without inventing IR facts. */
+/** Recompute durable package bytes during recovery without inventing source facts. */
 export function recoverBeeGameContentRevision(
   workspacePath: string,
   manifest: BeeGameAssetManifest,
 ): string {
   const indexPath = resolve(workspacePath, BEEGAME_CONTENT_INDEX)
   const index = contentIndexSchema.parse(parseJson(indexPath))
-  const irEntryIds = new Set<string>()
-  for (const path of index.files) {
-    const absolute = safeContentFile(workspacePath, path)
-    if (!absolute) throw new Error(`unsafe content path ${path}`)
-    const document = contentDocumentSchema.parse(parseJson(absolute))
-    document.irRefs.forEach(id => irEntryIds.add(id))
-  }
   const audit = auditBeeGameContentPackage(workspacePath, {
-    irRevision: index.irRevision,
+    documentRevision: index.documentRevision,
     assetManifestRevision: index.assetManifestRevision,
-    irEntryIds: [...irEntryIds],
     manifest,
   })
   if (!audit.package)

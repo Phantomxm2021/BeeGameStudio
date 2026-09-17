@@ -23,7 +23,8 @@ function acceptedResourceUnits(
   next: DeliveryRun,
 ): AcceptedWorkflowUnit[] {
   const after = next.resourceProductionState
-  const irDependency: Record<string, string> = after.irResultId ? { gameIr: after.irResultId } : {}
+  const documentDependency: Record<string, string> = next.revision.document
+    ? { document: next.revision.document } : {}
   const gate = next.evidence.resourcePreparation
   if (
     gate?.status === 'passed' &&
@@ -37,8 +38,8 @@ function acceptedResourceUnits(
         predecessorUnitIds: [],
         inputRevision: gate.revision,
         dependencyDigests: after.deliveryReceipt
-          ? { ...irDependency, resource: after.deliveryReceipt.resourceDigest }
-          : irDependency,
+          ? { ...documentDependency, resource: after.deliveryReceipt.resourceDigest }
+          : documentDependency,
         receiptRef: gate.path,
         acceptedAt: gate.observedAt,
         payload: {
@@ -67,14 +68,14 @@ function acceptedGameContentUnits(
     predecessorUnitIds: ['resource:delivery'],
     inputRevision: receipt.contentRevision,
     dependencyDigests: {
-      gameIr: receipt.irRevision,
+      document: receipt.documentRevision,
       resource: receipt.assetManifestRevision,
     },
     receiptRef: receipt.indexPath,
     acceptedAt: evidence.observedAt,
     payload: {
       receiptRef: receipt.indexPath,
-      irRevision: receipt.irRevision,
+      documentRevision: receipt.documentRevision,
       assetManifestRevision: receipt.assetManifestRevision,
       contentIds: [...receipt.contentIds],
     },
@@ -91,8 +92,8 @@ export function deriveAcceptedWorkflowUnits(
     throw new Error(RETIRED_FOUNDATION_AUTHOR)
   units.push(...acceptedResourceUnits(previous, next))
   units.push(...acceptedGameContentUnits(previous, next))
-  const irDependency: Record<string, string> = next.resourceProductionState.irResultId
-    ? { gameIr: next.resourceProductionState.irResultId } : {}
+  const documentDependency: Record<string, string> = next.revision.document
+    ? { document: next.revision.document } : {}
 
   for (const task of next.tasks) {
     const prior = previous.tasks.find(candidate => candidate.id === task.id)
@@ -105,7 +106,7 @@ export function deriveAcceptedWorkflowUnits(
         phase: next.phase,
         predecessorUnitIds,
         inputRevision: task.completedRevision ?? next.revision.workspace,
-        dependencyDigests: irDependency,
+        dependencyDigests: documentDependency,
         receiptRef: task.evidenceRefs[0],
         acceptedAt: next.updatedAt,
         payload: { taskId: task.id, evidenceRefs: task.evidenceRefs },
@@ -125,7 +126,7 @@ export function deriveAcceptedWorkflowUnits(
         phase: next.phase,
         predecessorUnitIds: next.tasks.map(task => `implementation:${task.id}`),
         inputRevision: acceptance.revision,
-        dependencyDigests: irDependency,
+        dependencyDigests: documentDependency,
         receiptRef: acceptance.path,
         acceptedAt: acceptance.observedAt,
         payload: { receiptRef: acceptance.path },

@@ -7,7 +7,7 @@ export function directImplementationTask(input: {
 }): ImplementationTask {
   return {
     id: 'DIRECT_IMPLEMENTATION',
-    title: 'Implement the published Game IR',
+    title: 'Implement the accepted documents, content and resources',
     checklistIds: [...input.checklistIds],
     resourceIds: [...input.resourceIds],
     contentIds: [...input.contentIds],

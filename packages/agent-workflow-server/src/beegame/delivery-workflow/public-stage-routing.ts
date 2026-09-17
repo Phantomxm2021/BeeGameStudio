@@ -4,13 +4,9 @@ import type { DeliveryRun } from './types'
 export function isFoundationStageActive(run: Pick<DeliveryRun, 'phase' | 'documentStep' | 'authorStage' | 'foundationReviewStage'>): boolean {
   return Boolean((run.authorStage || run.foundationReviewStage) &&
     (run.phase === 'DOCUMENT_DRAFTING' || run.phase === 'DOCUMENT_REVIEW' &&
-      run.documentStep !== 'CHECKLIST_DRAFTING' && run.documentStep !== 'GAME_IR_COMPILATION'))
-}
-
-export function isIrStageActive(run: Pick<DeliveryRun, 'phase' | 'documentStep'>): boolean {
-  return run.phase === 'DOCUMENT_REVIEW' && run.documentStep === 'GAME_IR_COMPILATION'
+      run.documentStep !== 'CHECKLIST_DRAFTING'))
 }
 
 export function isPublicStageActive(run: DeliveryRun): boolean {
-  return isFoundationStageActive(run) || isIrStageActive(run)
+  return isFoundationStageActive(run)
 }

@@ -549,7 +549,6 @@ async function createWorkerRecoveryRun(input: {
     evidence: resourcePreparation ? { resourcePreparation } : {},
     resourceProductionState: {
       currentTask: 'RESOURCE_DELIVERED',
-      ...(resourceRevision ? { irResultId: 'a'.repeat(64) } : {}),
       ...(resourceRevision
         ? {
             deliveryReceipt: {

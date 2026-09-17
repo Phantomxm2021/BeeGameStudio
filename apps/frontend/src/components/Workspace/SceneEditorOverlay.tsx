@@ -120,7 +120,7 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           editorDocument: sceneContentToEditorDocument({
             document: scene.document,
             documentRevision: scene.revision,
-            irRevision: snapshot.index!.irRevision,
+            foundationDocumentRevision: snapshot.index!.documentRevision,
             assetManifestRevision: snapshot.index!.assetManifestRevision,
             assets,
             assetRegions,

@@ -6,30 +6,18 @@ import {
   BEEGAME_CONTENT_PACKAGE_SCHEMA,
   BEEGAME_CONTENT_ROOT,
 } from './game-content-package'
-import type { DownstreamIr } from './delivery-workflow/downstream-ir'
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 
 const inputSchema = z
   .strictObject({
-    gameIr: z
-      .strictObject({
-        resultId: digest,
-        foundationRevision: digest,
-        publicationId: z.string().min(1),
-        parameters: z.record(z.string(), z.unknown()),
-        assets: z.array(z.unknown()),
-        scenes: z.array(z.unknown()).min(1),
-        ui: z.array(z.unknown()),
-        vfx: z.array(z.unknown()),
-        logic: z.record(z.string(), z.unknown()),
-      }),
+    documentRevision: digest,
     assetManifestRevision: digest,
     manifest: z.unknown(),
   })
 
 export type SceneUiContentAuthoringInput = Readonly<{
-  gameIr: DownstreamIr
+  documentRevision: string
   assetManifestRevision: string
   manifest: BeeGameAssetManifest
 }>
@@ -39,7 +27,7 @@ export type SceneUiContentAuthoringAuthority = Readonly<{
   allowedPaths: readonly ['content/']
   prompt: string
   contract: Readonly<{
-    gameIr: SceneUiContentAuthoringInput['gameIr']
+    documentRevision: string
     assetManifestRevision: string
     assetManifest: BeeGameAssetManifest
     output: Readonly<{
@@ -61,7 +49,7 @@ export function buildSceneUiContentAuthoringAuthority(
 ): SceneUiContentAuthoringAuthority {
   const parsed = inputSchema.parse(structuredClone(input))
   const contract = {
-    gameIr: parsed.gameIr as SceneUiContentAuthoringInput['gameIr'],
+    documentRevision: parsed.documentRevision,
     assetManifestRevision: parsed.assetManifestRevision,
     assetManifest: parsed.manifest as BeeGameAssetManifest,
     output: {
@@ -74,10 +62,10 @@ export function buildSceneUiContentAuthoringAuthority(
   } as const
   const prompt = [
     'Create the engine-neutral Scene2D and UI content package for this game in content/.',
-    'Use the injected published Game IR as the requirements and rule authority and the injected Asset Manifest as the sole resource authority; this package owns Scene and UI assembly.',
+    'Read the accepted Foundation documents in the workspace as the game requirements and rule authority, and use the injected Asset Manifest as the sole resource authority; this package owns Scene and UI assembly.',
     'Write content/index.json, scene files under content/scenes/, and UI files under content/ui/. Keep world-space Scene content and screen-space UI content separate.',
     'These Scene and UI files are the canonical editable source used by editors and consumed directly by target implementations; do not create another derived Scene or UI config.',
-    'Reference Game IR entries through irRefs and verified Manifest resources through assetRefs. Do not write asset file paths or URLs into content data.',
+    'Reference verified Manifest resources through assetRefs. Keep file paths and URLs out of content data.',
     'When a Scene sprite uses a sprite sheet or atlas, set its frameRef to a sprite-frame or atlas-region id from that Manifest resource content_profile; do not copy frame rectangles into Scene data.',
     'Express the complete Scene and UI required by the authority. Do not create VFX, character, animation, audio, gameplay, target-engine source code, or a second resource registry in this task.',
     'Finish after the Scene and UI package is coherent. The host validates syntax, versions, references and hierarchy.',
