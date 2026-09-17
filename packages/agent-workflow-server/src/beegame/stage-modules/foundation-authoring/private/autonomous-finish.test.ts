@@ -118,7 +118,6 @@ test('native finish mode exceeds the retired output cap while preserving scope a
     onUsage: async () => {}, onProgress: async () => {},
   }, async input => {
     expect(input.prompt).toContain('Preserve useful completed work')
-    expect(input.env.BEEGAME_EXTERNAL_REVIEW).toBe('1')
     expect(input.prompt).not.toMatch(/audit|review|consistency|finish immediately/i)
     expect(input.prompt).not.toContain('"maxOutputTokens"')
     await input.onMessage?.({ type: 'result', modelUsage: { fixture: { inputTokens: 1, outputTokens: 90_000 } } })

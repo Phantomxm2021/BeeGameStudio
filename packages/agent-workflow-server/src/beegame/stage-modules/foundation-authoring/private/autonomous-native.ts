@@ -159,9 +159,7 @@ export async function runAutonomousAuthor(input: AutonomousNativeInput,
   try {
     result = await execute({
     command: input.configuration.command,
-    // This workflow has a dedicated external review stage. Suppress the
-    // generic CLI verification contract so it is not duplicated inside Author.
-    env: { ...nativeFileAgentEnvironment(input.configuration.env), BEEGAME_EXTERNAL_REVIEW: '1' },
+    env: nativeFileAgentEnvironment(input.configuration.env),
     workspacePath: input.workspacePath, logPath: input.logPath,
     responseTrace: true,
     writablePaths: [...CANONICAL_FOUNDATION_DOCUMENTS], allowWorkingFiles: true,
