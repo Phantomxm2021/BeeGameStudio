@@ -77,14 +77,16 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         request.contract.currentContentIssues.length > 0
       )
         return [
-          'Continue the same direct CLI Scene/UI content task.',
-          'Fix only the deterministic package errors in contract.currentContentIssues, preserve valid work, and finish normally.',
+          'Continue the same direct CLI Scene/UI/VFX content task.',
+          'Use contract.output.format as the exact strict file shape. Fix the deterministic package errors in contract.currentContentIssues while preserving valid game decisions.',
+          'Run contract.validationCommand once near the end, correct its diagnostics, and finish normally.',
         ].join(' ')
       return [
-        'Create the engine-neutral Scene2D and UI content package in one normal CLI turn from the accepted Foundation documents and Asset Manifest.',
-        'Write content/index.json, scene files under content/scenes/, and UI files under content/ui/. Keep world-space Scene content and screen-space UI content separate.',
+        'Create the engine-neutral Scene, UI and VFX content package in one normal CLI turn from the accepted Foundation documents and Asset Manifest.',
+        'Use contract.output.format as the exact strict file shape. Write content/index.json, Scene files under content/scenes/, UI files under content/ui/, and VFX files under content/vfx/. Keep world-space Scene, screen-space UI and effects separate.',
         'Reference verified Manifest resources through assetRefs. Keep asset paths and URLs out of content data; leave target-engine implementation for the following stage.',
-        'Finish after the coherent Scene/UI package is complete. The host performs deterministic schema, revision, reference and hierarchy validation.',
+        'Run contract.validationCommand once near the end and use its diagnostics to correct the package. The host performs the same deterministic validation after the CLI turn.',
+        'Finish after the coherent Content package is complete.',
       ].join(' ')
     case 'implementation-worker':
       if (

@@ -93,6 +93,16 @@ const uiNodeSchema = z
     data: z.record(z.string(), z.unknown()).optional(),
   })
 
+const vfxNodeSchema = z
+  .strictObject({
+    id: identifier,
+    parentId: identifier.optional(),
+    name: z.string().trim().min(1).max(512).optional(),
+    type: identifier,
+    assetRef: identifier.optional(),
+    data: z.record(z.string(), z.unknown()).optional(),
+  })
+
 const contentHeader = {
   schema: z.literal(BEEGAME_CONTENT_DOCUMENT_SCHEMA),
   id: identifier,
@@ -121,9 +131,20 @@ const uiDocumentSchema = z
       }),
   })
 
+const vfxDocumentSchema = z
+  .strictObject({
+    ...contentHeader,
+    kind: z.literal('vfx'),
+    data: z
+      .strictObject({
+        nodes: z.array(vfxNodeSchema).min(1),
+      }),
+  })
+
 const contentDocumentSchema = z.discriminatedUnion('kind', [
   sceneDocumentSchema,
   uiDocumentSchema,
+  vfxDocumentSchema,
 ])
 
 export type BeeGameContentIndex = z.infer<typeof contentIndexSchema>
@@ -368,9 +389,11 @@ function validateDocument(input: {
   validateTree({
     path: input.path,
     nodes: input.document.data.nodes,
-    ...(input.document.kind === 'scene-2d'
-      ? {}
-      : { rootId: input.document.data.rootId }),
+    ...(input.document.kind === 'ui-screen' ||
+      input.document.kind === 'ui-hud' ||
+      input.document.kind === 'ui-flow'
+      ? { rootId: input.document.data.rootId }
+      : {}),
     issues: input.issues,
   })
   if (input.document.kind === 'scene-2d') {
@@ -445,7 +468,10 @@ export function auditBeeGameContentPackage(
     }
     const wrongDirectory =
       (document.kind === 'scene-2d' && !path.startsWith('scenes/')) ||
-      (document.kind !== 'scene-2d' && !path.startsWith('ui/'))
+      (document.kind === 'vfx' && !path.startsWith('vfx/')) ||
+      (document.kind !== 'scene-2d' &&
+        document.kind !== 'vfx' &&
+        !path.startsWith('ui/'))
     if (wrongDirectory)
       issues.push(`${BEEGAME_CONTENT_ROOT}/${path}: kind is stored in the wrong directory.`)
     validateDocument({
@@ -549,7 +575,10 @@ export function saveBeeGameContentDocument(input: {
     throw new Error(`Content document identity cannot change during an edit: ${input.path}`)
   const wrongDirectory =
     (document.kind === 'scene-2d' && !input.path.startsWith('scenes/')) ||
-    (document.kind !== 'scene-2d' && !input.path.startsWith('ui/'))
+    (document.kind === 'vfx' && !input.path.startsWith('vfx/')) ||
+    (document.kind !== 'scene-2d' &&
+      document.kind !== 'vfx' &&
+      !input.path.startsWith('ui/'))
   if (wrongDirectory)
     throw new Error(`Content document kind is stored in the wrong directory: ${input.path}`)
 

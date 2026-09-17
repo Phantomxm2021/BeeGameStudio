@@ -54,7 +54,7 @@ describe('delivery worker session credentials', () => {
     const block = await buildDocumentAuthorAuthorityBlock(request)
     expect(block).toContain('# 中文玩法愿景')
     expect(block).toContain('# 日本語シーン設計')
-    expect(block).toContain('Associated Game IR result: ir-publication-1')
+    expect(block).not.toContain('Game IR')
     expect(block).not.toContain('acceptance-scenario')
   })
 

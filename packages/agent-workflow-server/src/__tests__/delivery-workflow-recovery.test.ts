@@ -106,7 +106,10 @@ const CANONICAL_RECEIPT_WORKERS: readonly DispatchWorkerType[] = [
   'document-author',
 ]
 
-const PUBLIC_IR_CONSUMER_WORKERS: readonly DispatchWorkerType[] = [
+// These stages have their own prerequisite-aware recovery tests below. The
+// generic matrix fixture intentionally does not synthesize their accepted
+// documents, assets, content, implementation or acceptance evidence.
+const PREREQUISITE_AWARE_WORKERS: readonly DispatchWorkerType[] = [
   'resource-planner',
   'content-author',
   'implementation-worker',
@@ -910,8 +913,8 @@ describe('delivery workflow recovery', () => {
   })
 
   test('retains the exact-resume checkpoint vocabulary for persisted worker types', () => {
-    // Author, Reviewer and IR own their recovery behind public ports;
-    // only the current downstream worker kinds use this checkpoint matrix.
+    // Author and Reviewer own their recovery behind public ports; only the
+    // current downstream worker kinds use this checkpoint matrix.
     expect(WORKER_TYPES).toHaveLength(7)
     expect(EXACT_RESUME_WORKER_CHECKPOINTS).toEqual([
       'before-dispatch',
@@ -928,15 +931,13 @@ describe('delivery workflow recovery', () => {
     ])
   })
 
-  for (const workerType of WORKER_TYPES) {
-    const checkpoints = PUBLIC_IR_CONSUMER_WORKERS.includes(workerType)
-      ? (['before-dispatch'] as const)
-      : exactResumeCheckpointsForWorker(workerType)
+  for (const workerType of WORKER_TYPES.filter(
+    workerType => !PREREQUISITE_AWARE_WORKERS.includes(workerType),
+  )) {
+    const checkpoints = exactResumeCheckpointsForWorker(workerType)
     for (const checkpoint of checkpoints) {
       test(
-        PUBLIC_IR_CONSUMER_WORKERS.includes(workerType)
-          ? `${workerType} rejects historical recovery without public IR`
-          : `${workerType} keeps semantic dispatch count stable at ${checkpoint}`,
+        `${workerType} keeps semantic dispatch count stable at ${checkpoint}`,
         async () => {
         workspace = await mkdtemp(join(tmpdir(), 'beegame-worker-matrix-'))
         const run = await createWorkerRecoveryRun({
@@ -993,21 +994,6 @@ describe('delivery workflow recovery', () => {
           )
           expect(started).toHaveLength(0)
           expect(await readFile(store.paths.snapshot, 'utf8')).toBe(before)
-          return
-        }
-
-        // These historical matrix runs deliberately have no public IR link.
-        // Recovery must fail closed instead of reconstructing an IR binding from
-        // the documents or dispatching a worker with an unbound contract.
-        if (PUBLIC_IR_CONSUMER_WORKERS.includes(workerType)) {
-          await resumeFromDisk(false)
-          const rejected = await store.load()
-          expect(started).toHaveLength(0)
-          expect(rejected?.status).toBe('needs_action')
-          expect(rejected?.activeDispatch).toBeUndefined()
-          expect(rejected?.blockedReason).toBe(
-            'Downstream work requires a completed and settled IR result',
-          )
           return
         }
 

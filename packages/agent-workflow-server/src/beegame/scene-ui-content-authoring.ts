@@ -23,9 +23,8 @@ export type SceneUiContentAuthoringInput = Readonly<{
 }>
 
 export type SceneUiContentAuthoringAuthority = Readonly<{
-  task: 'SCENE_UI_CONTENT'
+  task: 'GAME_CONTENT'
   allowedPaths: readonly ['content/']
-  prompt: string
   contract: Readonly<{
     documentRevision: string
     assetManifestRevision: string
@@ -35,7 +34,12 @@ export type SceneUiContentAuthoringAuthority = Readonly<{
       index: typeof BEEGAME_CONTENT_INDEX
       packageSchema: typeof BEEGAME_CONTENT_PACKAGE_SCHEMA
       documentSchema: typeof BEEGAME_CONTENT_DOCUMENT_SCHEMA
-      kinds: readonly ['scene-2d', 'ui-screen', 'ui-hud', 'ui-flow']
+      kinds: readonly ['scene-2d', 'ui-screen', 'ui-hud', 'ui-flow', 'vfx']
+      format: Readonly<Record<string, unknown>>
+    }>
+    validationCommand: Readonly<{
+      executable: string
+      args: readonly string[]
     }>
   }>
 }>
@@ -57,23 +61,112 @@ export function buildSceneUiContentAuthoringAuthority(
       index: BEEGAME_CONTENT_INDEX,
       packageSchema: BEEGAME_CONTENT_PACKAGE_SCHEMA,
       documentSchema: BEEGAME_CONTENT_DOCUMENT_SCHEMA,
-      kinds: ['scene-2d', 'ui-screen', 'ui-hud', 'ui-flow'],
+      kinds: ['scene-2d', 'ui-screen', 'ui-hud', 'ui-flow', 'vfx'],
+      format: {
+        strict: true,
+        index: {
+          schema: BEEGAME_CONTENT_PACKAGE_SCHEMA,
+          id: '<stable-package-id>',
+          dimension: '2d',
+          documentRevision: parsed.documentRevision,
+          assetManifestRevision: parsed.assetManifestRevision,
+          entryScene: '<scene-document-id>',
+          files: ['scenes/<name>.json', 'ui/<name>.json', 'vfx/<name>.json'],
+        },
+        sceneDocument: {
+          schema: BEEGAME_CONTENT_DOCUMENT_SCHEMA,
+          id: '<stable-scene-id>',
+          kind: 'scene-2d',
+          assetRefs: ['<verified-manifest-resource-id>'],
+          data: {
+            nodes: [
+              {
+                id: '<node-id>',
+                parentId: '<optional-parent-id>',
+                name: '<optional-name>',
+                kind: '<node-kind>',
+                enabled: true,
+                transform: { position: [0, 0], rotation: 0, scale: [1, 1] },
+                layer: '<optional-layer>',
+                zIndex: 0,
+                assetRef: '<optional-declared-asset-id>',
+                frameRef: '<optional-manifest-frame-id-for-sprites>',
+                components: [
+                  {
+                    type: '<component-type>',
+                    assetRef: '<optional-declared-asset-id>',
+                    data: {},
+                  },
+                ],
+                data: {},
+              },
+            ],
+            cameraNodeId: '<optional-node-id>',
+          },
+        },
+        uiDocument: {
+          schema: BEEGAME_CONTENT_DOCUMENT_SCHEMA,
+          id: '<stable-ui-id>',
+          kind: '<ui-screen|ui-hud|ui-flow>',
+          assetRefs: ['<verified-manifest-resource-id>'],
+          data: {
+            rootId: '<root-node-id>',
+            nodes: [
+              {
+                id: '<node-id>',
+                parentId: '<optional-parent-id>',
+                role: '<ui-role>',
+                name: '<optional-name>',
+                text: '<optional-text>',
+                assetRef: '<optional-declared-asset-id>',
+                layout: {
+                  anchor: '<optional-anchor>',
+                  position: [0, 0],
+                  size: [0, 0],
+                  rotation: 0,
+                  scale: [1, 1],
+                },
+                bindings: {},
+                actions: {},
+                style: {},
+                data: {},
+              },
+            ],
+          },
+        },
+        vfxDocument: {
+          schema: BEEGAME_CONTENT_DOCUMENT_SCHEMA,
+          id: '<stable-vfx-id>',
+          kind: 'vfx',
+          assetRefs: ['<verified-manifest-resource-id>'],
+          data: {
+            nodes: [
+              {
+                id: '<effect-id>',
+                parentId: '<optional-parent-id>',
+                name: '<optional-name>',
+                type: '<effect-type>',
+                assetRef: '<optional-declared-asset-id>',
+                data: {},
+              },
+            ],
+          },
+        },
+        rules: [
+          'The shown index, document, data and node keys are the complete allowed keys; omit optional placeholder fields instead of adding alternatives.',
+          'Every file path in index.files is relative to content/.',
+          'Every used assetRef is listed once in the document assetRefs and resolves to a verified Manifest resource.',
+        ],
+      },
+    },
+    validationCommand: {
+      executable: process.execPath,
+      args: [new URL('./game-content-validation-cli.ts', import.meta.url).pathname],
     },
   } as const
-  const prompt = [
-    'Create the engine-neutral Scene2D and UI content package for this game in content/.',
-    'Read the accepted Foundation documents in the workspace as the game requirements and rule authority, and use the injected Asset Manifest as the sole resource authority; this package owns Scene and UI assembly.',
-    'Write content/index.json, scene files under content/scenes/, and UI files under content/ui/. Keep world-space Scene content and screen-space UI content separate.',
-    'These Scene and UI files are the canonical editable source used by editors and consumed directly by target implementations; do not create another derived Scene or UI config.',
-    'Reference verified Manifest resources through assetRefs. Keep file paths and URLs out of content data.',
-    'When a Scene sprite uses a sprite sheet or atlas, set its frameRef to a sprite-frame or atlas-region id from that Manifest resource content_profile; do not copy frame rectangles into Scene data.',
-    'Express the complete Scene and UI required by the authority. Do not create VFX, character, animation, audio, gameplay, target-engine source code, or a second resource registry in this task.',
-    'Finish after the Scene and UI package is coherent. The host validates syntax, versions, references and hierarchy.',
-  ].join(' ')
   return Object.freeze({
-    task: 'SCENE_UI_CONTENT',
+    task: 'GAME_CONTENT',
     allowedPaths: ['content/'] as const,
-    prompt,
     contract,
   })
 }
