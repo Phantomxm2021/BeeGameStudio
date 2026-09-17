@@ -2,6 +2,7 @@ import type { Message, MessageType, RenderHint, ProjectEventMessage } from '../t
 
 export type CanonicalChatMessageType =
   | 'text'
+  | 'thought'
   | 'artifact_card'
   | 'system_status'
   | 'error'
@@ -10,6 +11,7 @@ export type CanonicalChatMessageType =
 
 const CANONICAL_TYPES = new Set<CanonicalChatMessageType>([
   'text',
+  'thought',
   'artifact_card',
   'system_status',
   'error',
@@ -20,7 +22,6 @@ const CANONICAL_TYPES = new Set<CanonicalChatMessageType>([
 const TRANSPORT_TYPE_MAP: Record<string, CanonicalChatMessageType> = {
   normal: 'text',
   document: 'artifact_card',
-  thought: 'text',
 };
 
 interface SemanticResolverInput {

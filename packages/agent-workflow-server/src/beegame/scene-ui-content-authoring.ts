@@ -98,7 +98,9 @@ export function buildSceneUiContentAuthoringAuthority(
                     data: {},
                   },
                 ],
-                data: {},
+                data: {
+                  member: '<required-when-choosing-a-specific-file-from-a-multi-file-resource>',
+                },
               },
             ],
             cameraNodeId: '<optional-node-id>',
@@ -156,6 +158,7 @@ export function buildSceneUiContentAuthoringAuthority(
           'The shown index, document, data and node keys are the complete allowed keys; omit optional placeholder fields instead of adding alternatives.',
           'Every file path in index.files is relative to content/.',
           'Every used assetRef is listed once in the document assetRefs and resolves to a verified Manifest resource.',
+          'For a multi-file visual resource, set data.member (or the equivalent nested texture/sprite action member) whenever the node needs a file other than the resource root; do not rely on filename guessing.',
         ],
       },
     },

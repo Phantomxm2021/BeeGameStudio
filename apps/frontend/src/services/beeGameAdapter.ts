@@ -137,6 +137,10 @@ type BeeGameProjectArtifactIndex = {
   artifacts: BeeGameDiscoveredArtifact[]
 }
 
+// A refresh should restore the active end of the conversation, not replay a
+// whole long-running project. Older history remains explicitly paged in when
+// the user scrolls to the top.
+const CHAT_INITIAL_HISTORY_PAGE_SIZE = 50
 const CHAT_HISTORY_PAGE_SIZE = 300
 type ChatHistoryCursorState = BeeGameTranscriptPage['page'] & {
   latestEventId: number
@@ -538,13 +542,6 @@ export const beeGameAdapter = {
     return postJson<Record<string, unknown>>(
       `/api/projects/${encodeURIComponent(projectId)}/workflow/retry`,
       { language: getCurrentUiLanguage() },
-    )
-  },
-
-  async stopWorkflow(projectId: string): Promise<Record<string, unknown>> {
-    return postJson<Record<string, unknown>>(
-      `/api/projects/${encodeURIComponent(projectId)}/workflow/stop`,
-      { reason: 'user stopped workflow' },
     )
   },
 
@@ -1270,9 +1267,10 @@ async function readProjectEventStream(
 async function fetchProjectTranscriptPage(
   projectId: string,
   beforeId?: number,
+  limit = CHAT_HISTORY_PAGE_SIZE,
 ): Promise<BeeGameProjectTranscriptPage> {
   const params = new URLSearchParams({
-    limit: String(CHAT_HISTORY_PAGE_SIZE),
+    limit: String(limit),
   })
   if (beforeId !== undefined) params.set('before', String(beforeId))
   return getJson(
@@ -1284,7 +1282,11 @@ async function fetchProjectTranscriptPageIfAvailable(
   projectId: string,
 ): Promise<BeeGameProjectTranscriptPage | undefined> {
   try {
-    return await fetchProjectTranscriptPage(projectId)
+    return await fetchProjectTranscriptPage(
+      projectId,
+      undefined,
+      CHAT_INITIAL_HISTORY_PAGE_SIZE,
+    )
   } catch {
     return undefined
   }
@@ -1300,8 +1302,14 @@ function eventsToHistory(
     eventToProjectEventMessages(projectId, event, workspacePath),
   )
   const thoughtMessages = new Map<string, ProjectEventMessage>()
+  const thinkingStartedAtByMessage = new Map<string, number>()
   const messages = projectedMessages.flatMap(message => {
-    if (message.type === 'think_start') return []
+    if (message.type === 'think_start') {
+      if (message.message_id) {
+        thinkingStartedAtByMessage.set(message.message_id, message.timestamp || 0)
+      }
+      return []
+    }
     if (message.type === 'think_end') {
       const thought = message.message_id
         ? thoughtMessages.get(message.message_id)
@@ -1311,18 +1319,21 @@ function eventsToHistory(
       // lifecycle marker from the history UI.
       if (thought && typeof message.thinking_duration_ms === 'number') {
         thought.thinking_duration_ms = message.thinking_duration_ms
-        thought.timestamp = message.timestamp
       }
+      if (message.message_id) thinkingStartedAtByMessage.delete(message.message_id)
       return []
     }
     if (message.type !== 'thought' || !message.message_id) return [message]
     const existing = thoughtMessages.get(message.message_id)
     if (existing) {
       existing.content = `${existing.content || ''}${message.content || ''}`
-      existing.timestamp = message.timestamp
-      existing.thinking_duration_ms = message.thinking_duration_ms
+      if (typeof message.thinking_duration_ms === 'number') {
+        existing.thinking_duration_ms = message.thinking_duration_ms
+      }
       return []
     }
+    const thinkingStartedAt = thinkingStartedAtByMessage.get(message.message_id)
+    if (thinkingStartedAt !== undefined) message.timestamp = thinkingStartedAt
     thoughtMessages.set(message.message_id, message)
     return [message]
   })
@@ -1471,16 +1482,26 @@ function eventToProjectEventMessagesBase(
     case 'assistant.thinking': {
       const status = getPayloadString(event, 'status')
       const thinkingBlockId = getPayloadString(event, 'thinkingBlockId') || 'default'
+      const thinkingStartedAtValue = getPayloadString(event, 'thinkingStartedAt')
+      // A block id is not guaranteed to be unique for the lifetime of a
+      // session (notably in older workflow-stage traces). The lifecycle start
+      // is part of the canonical identity and prevents a later block from
+      // mutating an earlier completed Thought card.
+      const thinkingOccurrence = thinkingStartedAtValue
+        ? `-${thinkingStartedAtValue}`
+        : ''
       const thinkingMessageId = thinkingBlockId === 'default'
-        ? `beegame-thinking-${event.turnId || event.sessionId}`
-        : `beegame-thinking-${event.turnId || event.sessionId}-${thinkingBlockId}`
-      const thinkingStartedAt = Date.parse(getPayloadString(event, 'thinkingStartedAt'))
+        ? `beegame-thinking-${event.turnId || event.sessionId}${thinkingOccurrence}`
+        : `beegame-thinking-${event.turnId || event.sessionId}-${thinkingBlockId}${thinkingOccurrence}`
+      const thinkingStartedAt = Date.parse(thinkingStartedAtValue)
+      const thinkingTimestamp = Number.isFinite(thinkingStartedAt)
+        ? thinkingStartedAt
+        : Date.parse(event.createdAt) || Date.now()
       const thinkingDurationMs = Number.isFinite(thinkingStartedAt)
         ? Math.max(0, Date.parse(event.createdAt) - thinkingStartedAt)
         : undefined
       if (status === 'ended') {
-        return [
-          {
+        const endMessage = {
             type: 'think_end',
             task_id: taskId,
             project_id: projectId,
@@ -1490,8 +1511,30 @@ function eventToProjectEventMessagesBase(
             turn_id: event.turnId,
             timestamp: Date.parse(event.createdAt) || Date.now(),
             ...(thinkingDurationMs !== undefined ? { thinking_duration_ms: thinkingDurationMs } : {}),
-          } as ProjectEventMessage,
-        ]
+          } as ProjectEventMessage
+        // The chat transcript endpoint compacts a complete reasoning block
+        // into one terminal event. Live transport still sends text deltas plus
+        // a textless end marker. Project both forms into the same canonical
+        // Thought + end lifecycle so refresh and realtime are equivalent.
+        if (event.text && event.text !== 'Thinking') {
+          return [
+            {
+              type: 'thought',
+              task_id: taskId,
+              project_id: projectId,
+              sender: 'beegame',
+              content: event.text,
+              task_kind: 'assistant_thinking',
+              message_id: thinkingMessageId,
+              turnId: event.turnId,
+              turn_id: event.turnId,
+              timestamp: thinkingTimestamp,
+              ...(thinkingDurationMs !== undefined ? { thinking_duration_ms: thinkingDurationMs } : {}),
+            } as ProjectEventMessage,
+            endMessage,
+          ]
+        }
+        return [endMessage]
       }
       if (event.text && event.text !== 'Thinking') {
         return [
@@ -1505,7 +1548,7 @@ function eventToProjectEventMessagesBase(
             message_id: thinkingMessageId,
             turnId: event.turnId,
             turn_id: event.turnId,
-            timestamp: Date.parse(event.createdAt) || Date.now(),
+            timestamp: thinkingTimestamp,
             ...(thinkingDurationMs !== undefined ? { thinking_duration_ms: thinkingDurationMs } : {}),
           } as ProjectEventMessage,
         ]

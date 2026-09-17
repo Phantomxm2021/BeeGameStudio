@@ -8,6 +8,7 @@ import {
 import {
   editorDocumentToSceneContent,
   sceneContentToEditorDocument,
+  type SpriteFrameTable,
 } from './sceneContentAdapter';
 import './SceneEditorOverlay.css';
 
@@ -49,7 +50,6 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
 
   useEffect(() => {
     let active = true;
-    const objectUrls: string[] = [];
     setInitialDocument(undefined);
     setScenes([]);
     setSelectedScenePath('');
@@ -76,42 +76,62 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           return;
         }
         const referencedAssets = new Set(sceneEntries.flatMap(scene => scene.document.assetRefs));
-        const loadedAssets = await Promise.all(
-          manifest.resources
-            .filter(resource => resource.status === 'verified' && referencedAssets.has(resource.id))
-            .map(async resource => {
-              const path = preferredSceneImagePath(resource.root_path, resource.file_paths);
-              if (!path) return undefined;
-              try {
-                const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path);
-                const uri = URL.createObjectURL(blob);
-                if (!active) {
-                  URL.revokeObjectURL(uri);
-                  return undefined;
-                }
-                objectUrls.push(uri);
-                return {
-                  asset: {
-                    id: resource.id,
-                    name: path.split('/').at(-1) ?? resource.id,
-                    mimeType: blob.type || imageMimeType(path),
-                    path,
-                    uri,
-                  } satisfies SceneAsset,
-                  regions: spriteRegions(resource.content_profile),
-                };
-              } catch {
-                return undefined;
-              }
-            }),
-        );
         if (!active) return;
         const assets: Record<string, SceneAsset> = {};
         const assetRegions: Record<string, Record<string, TextureRegion>> = {};
-        for (const loaded of loadedAssets) {
-          if (!loaded) continue;
-          assets[loaded.asset.id] = loaded.asset;
-          assetRegions[loaded.asset.id] = loaded.regions;
+        const assetMembers: Record<string, Record<string, string>> = {};
+        const frameTables: Record<string, Record<string, SpriteFrameTable>> = {};
+        const assetFailures: string[] = [];
+        await Promise.all(manifest.resources.map(async resource => {
+          if (resource.status !== 'verified' || !referencedAssets.has(resource.id)) return;
+          const imagePaths = resource.file_paths.filter(path => SCENE_IMAGE.test(path));
+          if (!imagePaths.length) return;
+          const members: Record<string, string> = {};
+          const tables: Record<string, SpriteFrameTable> = {};
+          const loaded = await Promise.all(imagePaths.map(async path => {
+            try {
+              const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path);
+              return { path, bytes: await blobToDataUrl(blob) };
+            } catch (error) {
+              assetFailures.push(`${resource.id}/${path.split('/').at(-1) ?? path}: ${error instanceof Error ? error.message : String(error)}`);
+              return undefined;
+            }
+          }));
+          for (const item of loaded) {
+            if (!item) continue;
+            const member = fileStem(item.path);
+            const assetId = item.path === resource.root_path ? resource.id : `${resource.id}:${member}`;
+            assets[assetId] = {
+              id: assetId,
+              name: item.path.split('/').at(-1) ?? assetId,
+              mimeType: imageMimeType(item.path),
+              path: item.path,
+              bytes: item.bytes,
+            };
+            members[member] = assetId;
+          }
+          const tablePaths = resource.file_paths.filter(path => /\.json$/i.test(path));
+          await Promise.all(tablePaths.map(async path => {
+            try {
+              const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path);
+              const value = JSON.parse(await blob.text()) as unknown;
+              if (isSpriteFrameTable(value)) tables[fileStem(path)] = value;
+            } catch (error) {
+              assetFailures.push(`${resource.id}/${path.split('/').at(-1) ?? path}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }));
+          if (!assets[resource.id]) {
+            const rootPath = preferredSceneImagePath(resource.root_path, imagePaths);
+            const rootMemberId = rootPath ? members[fileStem(rootPath)] : undefined;
+            if (rootMemberId) assets[resource.id] = { ...assets[rootMemberId], id: resource.id };
+          }
+          assetMembers[resource.id] = members;
+          frameTables[resource.id] = tables;
+          assetRegions[resource.id] = spriteRegions(resource.content_profile);
+        }));
+        if (assetFailures.length) {
+          setLoadError(`Scene assets could not be loaded: ${assetFailures.slice(0, 3).join(' · ')}${assetFailures.length > 3 ? ` · +${assetFailures.length - 3} more` : ''}`);
+          return;
         }
         const availableScenes = sceneEntries.map(scene => ({
           path: scene.path,
@@ -124,6 +144,8 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
             assetManifestRevision: snapshot.index!.assetManifestRevision,
             assets,
             assetRegions,
+            assetMembers,
+            frameTables,
           }),
         }));
         const entry = availableScenes.find(scene => scene.document.id === snapshot.index?.entryScene)
@@ -139,7 +161,6 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
       });
     return () => {
       active = false;
-      objectUrls.forEach(url => URL.revokeObjectURL(url));
     };
   }, [projectId]);
 
@@ -199,7 +220,7 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
               key={selectedScenePath}
               initialDocument={initialDocument}
               initialProjection="orthographic"
-              initialView={{ position: [0, 20, 0.001], target: [0, 0, 0] }}
+              initialView={{ position: [6.4, 20, 3.601], target: [6.4, 0, 3.6], showGizmos: false }}
               onSave={save}
               onClose={onClose}
             />
@@ -218,6 +239,21 @@ type TextureRegion = NonNullable<NonNullable<SceneNode['material']>['textureRegi
 function preferredSceneImagePath(rootPath: string, filePaths: string[]): string | undefined {
   if (SCENE_IMAGE.test(rootPath)) return rootPath;
   return filePaths.find(path => SCENE_IMAGE.test(path));
+}
+
+function fileStem(path: string): string {
+  return (path.split('/').at(-1) ?? path).replace(/\.[^.]+$/, '');
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string'
+      ? resolve(reader.result)
+      : reject(new Error('Asset file did not decode as a data URL.'));
+    reader.onerror = () => reject(reader.error ?? new Error('Asset file could not be read.'));
+    reader.readAsDataURL(blob);
+  });
 }
 
 function imageMimeType(path: string): string {
@@ -249,5 +285,15 @@ function isTextureRegion(value: Record<string, unknown>): value is TextureRegion
     typeof value.y === 'number' && Number.isFinite(value.y) && value.y >= 0 &&
     typeof value.width === 'number' && Number.isFinite(value.width) && value.width > 0 &&
     typeof value.height === 'number' && Number.isFinite(value.height) && value.height > 0
+  );
+}
+
+function isSpriteFrameTable(value: unknown): value is SpriteFrameTable {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const table = value as Record<string, unknown>;
+  return (
+    typeof table.frameWidth === 'number' && table.frameWidth > 0 &&
+    typeof table.frameHeight === 'number' && table.frameHeight > 0 &&
+    typeof table.framesPerFacing === 'number' && table.framesPerFacing > 0
   );
 }

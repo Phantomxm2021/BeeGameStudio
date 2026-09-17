@@ -75,6 +75,40 @@ describe('chatStore Performance & Cap', () => {
     expect(state.messages[0].id).toBe(streamingId);
   });
 
+  it('preserves the final thinking duration when a streamed thought is finalized', () => {
+    const { addMessage, finalizeMessage } = useChatStore.getState();
+    addMessage({
+      id: 'thinking-1',
+      messageId: 'thinking-1',
+      sender: 'beegame',
+      content: 'Thinking',
+      thought: 'Checking the request.',
+      taskId: 'task-1',
+      timestamp: 100,
+      type: 'thought',
+      taskKind: 'assistant_thinking',
+    });
+
+    finalizeMessage(
+      'task-1',
+      'Thinking',
+      'beegame',
+      'thought',
+      undefined,
+      undefined,
+      undefined,
+      { taskKind: 'assistant_thinking', thinkingDurationMs: 2_130 },
+      2_230,
+      'thinking-1',
+    );
+
+    expect(useChatStore.getState().messages[0]).toMatchObject({
+      id: 'thinking-1',
+      thought: 'Checking the request.',
+      thinkingDurationMs: 2_130,
+    });
+  });
+
   it('should reconcile optimistic user message with persisted history instead of duplicating it', () => {
     const { addMessage, loadHistory } = useChatStore.getState();
 

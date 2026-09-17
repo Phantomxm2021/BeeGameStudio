@@ -26,6 +26,7 @@ interface ChatMessageSemantic {
   subagentTrace?: string;
   sources?: Message['sources'];
   citations?: Message['citations'];
+  thinkingDurationMs?: number;
 }
 
 interface ChatState {
@@ -137,6 +138,7 @@ function mergeMessages(existing: Message, incoming: Message): Message {
     content: incoming.content || existing.content,
     attachments: incoming.attachments || existing.attachments,
     thought: incoming.thought ?? existing.thought,
+    thinkingDurationMs: incoming.thinkingDurationMs ?? existing.thinkingDurationMs,
     timestamp: incoming.timestamp || existing.timestamp,
     type: incoming.type || existing.type,
     isDocument: incoming.isDocument !== undefined ? incoming.isDocument : existing.isDocument,
@@ -263,6 +265,7 @@ export const useChatStore = create<ChatState>()(
             subagentTrace: semantic?.subagentTrace,
             sources: semantic?.sources,
             citations: semantic?.citations,
+            thinkingDurationMs: semantic?.thinkingDurationMs,
           });
           const finalId = messageId || fallbackId;
           return {
@@ -367,6 +370,7 @@ export const useChatStore = create<ChatState>()(
             subagentTrace: semantic?.subagentTrace,
             sources: semantic?.sources,
             citations: semantic?.citations,
+            thinkingDurationMs: semantic?.thinkingDurationMs,
           });
           const newStreamingMap = { ...state.lastStreamingIdByTask };
           delete newStreamingMap[key];

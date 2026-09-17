@@ -445,18 +445,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
     }
   }, [loadProjectRuntimeState, projectId, showError]);
 
-  const handleWorkflowStop = useCallback(async () => {
-    setWorkflowActionPending(true);
-    try {
-      await api.stopWorkflow(projectId);
-      await loadProjectRuntimeState(projectId);
-    } catch (error) {
-      showError(getErrorMessage(error, 'Unable to stop the workflow.'));
-    } finally {
-      setWorkflowActionPending(false);
-    }
-  }, [loadProjectRuntimeState, projectId, showError]);
-
   useEffect(() => {
     if (
       authenticationStatus !== 'authenticated' ||
@@ -640,7 +628,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
         pendingPermissions={permissionDisplayModels}
         projectStatus={projectRuntimeDisplay}
         onWorkflowAction={handleWorkflowAction}
-        onWorkflowStop={handleWorkflowStop}
         isWorkflowActionPending={isWorkflowActionPending}
         waitingPermission={waitingPermission}
         canSendMessage={canSendMessage}

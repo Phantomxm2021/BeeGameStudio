@@ -49,25 +49,69 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
     const checklistTurn = screen.getAllByTestId(/^beegame-agent-turn-/)
       .find((turn) => turn.textContent?.includes('11 个经验证的验收场景'));
     expect(checklistTurn).toBeDefined();
-    const activities = within(checklistTurn!).getAllByTestId('beegame-agent-activity-group');
-    const activity = activities[0];
-    const toolActivity = activities[1];
+    const activities = checklistTurn!.querySelectorAll('[data-content]');
+    const activity = activities[0] as HTMLElement;
+    const toolActivity = activities[1] as HTMLElement;
     expect(activity).toBeInTheDocument();
     expect(activities).toHaveLength(2);
-    expect(activities[0].querySelector('[data-content="text"]')).toBeInTheDocument();
-    expect(activities[1].querySelector('[data-content="tool"]')).toBeInTheDocument();
-    expect(activities.every((candidate) => !candidate.textContent?.includes('Running tools'))).toBe(true);
-    expect(activities.every((candidate) => !candidate.textContent?.includes('Run Tool'))).toBe(true);
+    expect(activities[0]).toHaveAttribute('data-content', 'text');
+    expect(activities[1]).toHaveAttribute('data-content', 'tool');
+    expect([...activities].every((candidate) => !candidate.textContent?.includes('Running tools'))).toBe(true);
+    expect([...activities].every((candidate) => !candidate.textContent?.includes('Run Tool'))).toBe(true);
     expect(toolActivity).toHaveTextContent('Edit');
     fireEvent.click(within(activity).getByRole('button'));
     expect(screen.getByTestId(`beegame-agent-message-beegame-assistant-beegame_191b560f8a9046b18e1efed2fafa8f07-${CHECKLIST_MIXED_MESSAGE_ID}-block-1`)).toBeInTheDocument();
     expect(screen.getByTestId(`beegame-agent-message-beegame-assistant-beegame_191b560f8a9046b18e1efed2fafa8f07-${CHECKLIST_FINAL_MESSAGE_ID}-block-0`)).toBeInTheDocument();
     expect(screen.getByTestId(`beegame-agent-message-beegame-assistant-beegame_0889307bbd6142f186543e33306e9b01-${IMPLEMENTATION_MIXED_MESSAGE_ID}-block-1`)).toBeInTheDocument();
     expect(within(checklistTurn!).getByText(/11 个经验证的验收场景/)).toBeInTheDocument();
-    expect(activities.every((candidate) => !candidate.textContent?.includes('11 个经验证的验收场景') && !candidate.textContent?.includes('Checklist 候选文件已写入'))).toBe(true);
+    expect([...activities].every((candidate) => !candidate.textContent?.includes('11 个经验证的验收场景') && !candidate.textContent?.includes('Checklist 候选文件已写入'))).toBe(true);
     expect(within(checklistTurn!).getByText(/Checklist 候选文件已写入/)).toBeInTheDocument();
     expect(within(checklistTurn!).queryByTestId('beegame-file-diff')).not.toBeInTheDocument();
     expect(screen.queryByText('LLM generated')).not.toBeInTheDocument();
+  });
+
+  it('keeps Think and every tool call out of a mixed activity', () => {
+    const messages = [
+      {
+        id: 'think-before-tool',
+        sender: 'beegame',
+        content: 'Thinking',
+        thought: 'Checking the content package.',
+        type: 'thought',
+        turnId: 'turn-separate-activity',
+        timestamp: 1_000,
+        thinkingDurationMs: 2_000,
+      },
+      {
+        id: 'tool-between-thinks',
+        sender: 'system',
+        content: 'Bash completed',
+        type: 'tool',
+        turnId: 'turn-separate-activity',
+        timestamp: 2_000,
+        toolName: 'Bash',
+        toolUseId: 'tool-between-thinks',
+        toolStatus: 'completed',
+        toolDetail: 'ls -R content',
+      },
+      {
+        id: 'think-after-tool',
+        sender: 'beegame',
+        content: 'Thinking',
+        thought: 'Content directory is absent.',
+        type: 'thought',
+        turnId: 'turn-separate-activity',
+        timestamp: 3_000,
+        thinkingDurationMs: 1_000,
+      },
+    ] satisfies ChatDisplayMessage[];
+
+    const { container } = render(<BeeGameCollaborationFeed messages={messages} />);
+
+    expect(container.querySelector('[data-content="mixed"]')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('[data-content="text"]')).toHaveLength(2);
+    expect(container.querySelectorAll('[data-content="tool"]')).toHaveLength(1);
+    expect(screen.getByText('Ran 1 tool')).toBeInTheDocument();
   });
 
   it('uses full calendar dates for date separators', () => {

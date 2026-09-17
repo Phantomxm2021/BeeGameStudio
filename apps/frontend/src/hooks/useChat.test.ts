@@ -260,13 +260,14 @@ describe('useChat clarification gate handling', () => {
         sender: 'beegame',
         message_id: 'thinking-turn-2',
         turnId: 'turn-2',
+        thinking_duration_ms: 2_130,
       });
     });
 
     expect(chatStoreState.removeMessage).not.toHaveBeenCalled();
     expect(chatStoreState.finalizeMessage).toHaveBeenLastCalledWith(
       'task_1', 'Thinking', 'beegame', 'thought', undefined, undefined, undefined,
-      { taskKind: 'assistant_thinking', turnId: 'turn-2' }, 101, 'thinking-turn-2',
+      { taskKind: 'assistant_thinking', turnId: 'turn-2', thinkingDurationMs: 2_130 }, 101, 'thinking-turn-2',
     );
   });
 

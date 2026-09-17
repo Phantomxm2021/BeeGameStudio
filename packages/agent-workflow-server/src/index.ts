@@ -16,6 +16,7 @@ if (import.meta.main) {
   activeServer = Bun.serve({
     hostname: host,
     port,
+    idleTimeout: 30,
     fetch: createAgentWorkflowApp({
       registerCleanup: cleanup => cleanupHandlers.push(cleanup),
       modelConfigStore: {},

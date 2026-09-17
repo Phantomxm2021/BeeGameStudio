@@ -1520,17 +1520,19 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
           />
         </div>
       </main> : <LandingContentPage page={landingPage} language={lang} onBack={() => navigateLandingPage('home')} />}
-      <footer className="relative z-10 flex w-full flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 pb-4 text-center text-xs text-white/72 [text-shadow:0_1px_8px_rgba(0,0,0,.42)]">
-        <span>© {new Date().getFullYear()} Bee Game Studio</span>
-        {isChinaVisitor && icpNumber ? <a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline">{icpNumber}</a> : null}
-      </footer>
+      {landingPage === 'home' ? (
+        <footer className="fixed inset-x-0 bottom-0 z-20 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 pb-4 text-center text-xs text-white/72 [text-shadow:0_1px_8px_rgba(0,0,0,.42)]">
+          <span>© {new Date().getFullYear()} Bee Game Studio</span>
+          {isChinaVisitor && icpNumber ? <a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer" className="underline-offset-2 hover:underline">{icpNumber}</a> : null}
+        </footer>
+      ) : null}
       {shouldShowIntakeModal ? (
         <div
           role="dialog"
           aria-modal="true"
           aria-label={modalTitle}
           data-intake-modal="true"
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-background px-4 py-6"
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/38 px-4 py-6 backdrop-blur-[2px]"
         >
           <div
             className={`relative flex max-h-[calc(100dvh-3rem)] w-full ${intakeModalWidthClass} flex-col overflow-hidden rounded-xl border border-border bg-background text-foreground`}

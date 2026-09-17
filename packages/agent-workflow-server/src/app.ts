@@ -3255,58 +3255,6 @@ export function createAgentWorkflowApp(
     }
   })
 
-  app.post('/api/projects/:id/workflow/stop', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'agent.cancel')
-    if (forbidden) return c.json(forbidden, 403)
-    try {
-      const project = await getOwnedProjectMetadata(
-        c.req.raw,
-        user,
-        c.req.param('id'),
-        dashboardRepository,
-      )
-      if (!project?.root_path)
-        return c.json({ error: 'Project not found' }, 404)
-      const run = await createRunStore(project.root_path, user.id).load()
-      if (!run) return c.json({ error: 'document_review_not_started' }, 409)
-      const body = await readOptionalJson(c.req.raw)
-      const reason =
-        typeof body.reason === 'string' && body.reason.trim()
-          ? body.reason
-          : 'user stopped workflow'
-      const controller = getDeliveryController({
-        request: c.req.raw,
-        user,
-        projectId: run.projectId,
-        workspacePath: project.root_path,
-      })
-      if (isPublicStageActive(run)) {
-        return c.json(await controller.stopFoundation(run, reason))
-      }
-      const stopBridge = createWorkflowDispatchStopBridge({
-        isManagedDispatchOpen: dispatchId =>
-          beeGameSessions.isWorkflowWorkerOpen(dispatchId),
-        disposeManagedDispatch: dispatchId =>
-          beeGameSessions.disposeWorkflowDispatch(dispatchId),
-        fallbackIsOpen: dispatchId =>
-          controller.dispatcher.workerIsOpen(dispatchId),
-        fallbackStop: (dispatchId, stopReason) =>
-          controller.dispatcher.stop(dispatchId, stopReason),
-      })
-      return c.json(
-        await stopRun({
-          store: createRunStore(project.root_path, user.id),
-          runId: run.runId,
-          reason,
-          ...stopBridge,
-        }),
-      )
-    } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 409)
-    }
-  })
-
   app.get('/api/projects/:id/game-content', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.read')
@@ -6460,7 +6408,10 @@ async function getProjectChatTimelineEvents(input: {
     }))
 }
 
-const PROJECT_EVENTS_SSE_HEARTBEAT_INTERVAL_MS = 15_000
+// Keep this below Bun's/default reverse-proxy idle window. Otherwise a quiet
+// agent period closes Chat's event stream before its first heartbeat and the
+// UI only catches up after a transcript refresh.
+const PROJECT_EVENTS_SSE_HEARTBEAT_INTERVAL_MS = 5_000
 const PROJECT_EVENTS_SSE_MAX_CONNECTION_MS = 25_000
 // Direct CLI stages can outlive an API-process restart. Their durable trace is
 // therefore also a live source, not merely a refresh-time recovery source.
@@ -9049,29 +9000,42 @@ function parsePositiveInteger(value: string | undefined): number | undefined {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
 }
 
-function compactTranscriptForChatHistory<
+export function compactTranscriptForChatHistory<
   T extends {
     id: number
     type: BeeGameEvent['type']
     text: string
+    createdAt: BeeGameEvent['createdAt']
     payload?: BeeGameEvent['payload']
   },
 >(events: T[]): T[] {
   const chatEvents: T[] = []
-  let thinkingEvent: T | undefined
+  let thinkingStartEvent: T | undefined
+  let thinkingLatestEvent: T | undefined
   let thinkingText = ''
-  const flushThinking = () => {
-    if (thinkingEvent && thinkingText.trim()) {
+  const thinkingBlockId = (event: T): string =>
+    typeof event.payload?.thinkingBlockId === 'string'
+      ? event.payload.thinkingBlockId
+      : 'default'
+  const flushThinking = (endEvent?: T) => {
+    if (thinkingStartEvent && thinkingText.trim()) {
+      const terminalEvent = endEvent ?? thinkingLatestEvent ?? thinkingStartEvent
       chatEvents.push({
-        ...thinkingEvent,
+        ...terminalEvent,
         text: thinkingText,
         payload: {
-          ...(thinkingEvent.payload ?? { type: 'assistant.thinking' }),
-          status: 'streaming',
+          ...(thinkingStartEvent.payload ?? { type: 'assistant.thinking' }),
+          ...(terminalEvent.payload ?? {}),
+          status: endEvent ? 'ended' : 'streaming',
+          thinkingStartedAt:
+            typeof thinkingStartEvent.payload?.thinkingStartedAt === 'string'
+              ? thinkingStartEvent.payload.thinkingStartedAt
+              : new Date(thinkingStartEvent.createdAt).toISOString(),
         },
       })
     }
-    thinkingEvent = undefined
+    thinkingStartEvent = undefined
+    thinkingLatestEvent = undefined
     thinkingText = ''
   }
   for (const event of events) {
@@ -9082,11 +9046,18 @@ function compactTranscriptForChatHistory<
     }
     const status = event.payload?.status
     if (status === 'ended') {
-      flushThinking()
+      flushThinking(event)
       continue
     }
     if (event.text && event.text !== 'Thinking') {
-      thinkingEvent ??= event
+      if (
+        thinkingStartEvent &&
+        thinkingBlockId(thinkingStartEvent) !== thinkingBlockId(event)
+      ) {
+        flushThinking()
+      }
+      thinkingStartEvent ??= event
+      thinkingLatestEvent = event
       thinkingText += event.text
     }
   }

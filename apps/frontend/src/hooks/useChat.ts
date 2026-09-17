@@ -484,6 +484,9 @@ export const useChat = ({
               {
                 taskKind: thoughtMessage?.taskKind || 'assistant_thinking',
                 turnId: thoughtMessage?.turnId || message.turnId || message.turn_id,
+                ...(typeof message.thinking_duration_ms === 'number' && Number.isFinite(message.thinking_duration_ms)
+                  ? { thinkingDurationMs: Math.max(0, message.thinking_duration_ms) }
+                  : {}),
               },
               thoughtMessage?.timestamp || message.timestamp,
               thoughtMessage?.messageId || thoughtMessage?.id || message.message_id,

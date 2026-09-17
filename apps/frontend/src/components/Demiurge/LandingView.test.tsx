@@ -1376,6 +1376,8 @@ describe('LandingView bootstrap submission', () => {
     );
     expect(within(cards[0]).queryByTestId('intake-option-tags')).not.toBeInTheDocument();
     expect(dialog).toHaveAttribute('data-intake-modal', 'true');
+    expect(dialog).toHaveClass('bg-black/38', 'backdrop-blur-[2px]');
+    expect(dialog).not.toHaveClass('bg-background');
     expect(screen.queryByText('BeeGame Idea Intake')).not.toBeInTheDocument();
     expect(screen.queryByText('Choose a direction')).not.toBeInTheDocument();
   });

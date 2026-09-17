@@ -30,4 +30,8 @@ describe('message semantics', () => {
       content: '# GDD\n\n## Core Loop\n\nLong content that looks like a document.'.repeat(40),
     })).toBe('text');
   });
+
+  it('preserves Thinking as a canonical lifecycle type', () => {
+    expect(normalizeCanonicalMessageType({ type: 'thought' })).toBe('thought');
+  });
 });

@@ -310,13 +310,9 @@ function toActivityItem(
             content: displayText(part.message.thought || part.message.content || 'Thinking'),
         };
     }
-    if (part.tool.kind === 'search') {
-        return {
-            id: `activity-search-${part.tool.id}`,
-            type: 'search',
-            query: displayText(part.tool.detail || part.tool.name),
-        };
-    }
+    // This feed has one compact activity presentation for every tool kind.
+    // Keeping search as a `tool` as well prevents a search + command batch
+    // from silently becoming beUI's generic "mixed" activity.
     return {
         id: `activity-tool-${part.tool.id}`,
         type: 'tool',
@@ -759,39 +755,6 @@ export const BeeGameCollaborationFeed = memo(({
 
 BeeGameCollaborationFeed.displayName = 'BeeGameCollaborationFeed';
 
-function BeUiAgentActivity({
-    items,
-    status,
-    duration,
-    activeLabel,
-    workingPhrases,
-    summary,
-}: {
-    items: AgentActivityItem[];
-    status: 'working' | 'complete';
-    duration: number;
-    activeLabel?: string;
-    workingPhrases?: string[];
-    summary?: string;
-}) {
-    return <div className="w-full" data-testid="beegame-agent-activity-group">
-        <AgentActivity
-            items={items}
-            status={status}
-            duration={duration}
-            activeLabel={activeLabel}
-            renderWorkingStatus={({ label }) => <ReasoningText
-                phrases={workingPhrases?.length ? workingPhrases : [typeof label === 'string' ? label : 'Working']}
-                variant="swap"
-                className="type-caption-1 text-[var(--text-muted)]"
-            />}
-            summary={summary}
-            defaultOpen={status === 'working'}
-            className="w-full text-[var(--text-secondary)]"
-        />
-    </div>;
-}
-
 function SubagentToolSummary({ tool, lang, onOpen }: { tool: NormalizedTool; lang: Language; onOpen: () => void }) {
     const running = tool.status === 'running';
     const failed = tool.status === 'failed';
@@ -818,32 +781,6 @@ function SubagentToolSummary({ tool, lang, onOpen }: { tool: NormalizedTool; lan
             <ChevronRight aria-hidden="true" className="size-3 shrink-0" />
         </button>
     </div>;
-}
-
-function activityStatusPhrases(tools: NormalizedTool[], lang: Language): string[] {
-    const tool = tools.at(-1);
-    if (!tool) return [lang === 'zh' ? '正在分析' : 'Reasoning'];
-    const zh: Record<ToolKind, string> = {
-        search: '正在搜索资料',
-        read: '正在读取文件',
-        write: '正在写入文件',
-        edit: '正在更新文件',
-        bash: '正在执行命令',
-        todo: '正在更新任务',
-        subagent: '正在委派子任务',
-        generic: '正在调用工具',
-    };
-    const en: Record<ToolKind, string> = {
-        search: 'Searching',
-        read: 'Reading files',
-        write: 'Writing files',
-        edit: 'Updating files',
-        bash: 'Running command',
-        todo: 'Updating tasks',
-        subagent: 'Delegating task',
-        generic: 'Using tool',
-    };
-    return [lang === 'zh' ? zh[tool.kind] : en[tool.kind]];
 }
 
 function AgentRunDetailView({
@@ -921,65 +858,58 @@ function ResponseParts({
             rendered.push(<SubagentToolSummary key={`subagent-${part.tool.id}`} tool={part.tool} lang={lang} onOpen={() => onOpenSubagent(part.tool)} />);
             continue;
         }
-        const isActivityPart = part.kind === 'thinking' || part.kind === 'tool';
-        if (isActivityPart) {
+        if (part.kind === 'thinking') {
+            const status: 'working' | 'complete' = matchesStreamingMessage(part.message, streamingMessageId)
+                ? 'working'
+                : 'complete';
+            rendered.push(<AgentActivity
+                key={`thinking-activity-${part.message.id}`}
+                items={[toActivityItem(part)]}
+                contentType="text"
+                status={status}
+                duration={Math.max(0, (part.durationMs || 0) / 1000)}
+                activeLabel={lang === 'zh' ? '正在思考' : 'Thinking'}
+                defaultOpen={status === 'working'}
+                className="w-full text-[var(--text-secondary)]"
+            />);
+            continue;
+        }
+        if (part.kind === 'tool') {
             const segmentStartIndex = index;
-            const activityGroupId = 'activityGroupId' in part ? part.activityGroupId : undefined;
-            const activityTurnId = 'turnId' in part ? part.turnId : undefined;
-            const belongsToActivity = (candidate: ResponsePart) => {
-                if (candidate.kind === 'tool' && (candidate.tool.isSubagent || candidate.tool.kind === 'subagent')) return false;
-                const candidateGroupId = 'activityGroupId' in candidate ? candidate.activityGroupId : undefined;
-                if (activityGroupId) return candidateGroupId === activityGroupId;
-                if (candidate.kind !== 'thinking' && candidate.kind !== 'tool') return false;
-                if (candidateGroupId) return false;
-                // Raw workflow history may put two independent worker turns
-                // next to each other. They are separate reasoning records, not
-                // one activity merely because no prose message sits between them.
-                const candidateTurnId = candidate.turnId;
-                return candidateTurnId === activityTurnId;
+            const activityGroupId = part.activityGroupId;
+            const activityTurnId = part.turnId;
+            const belongsToToolGroup = (candidate: ResponsePart) => {
+                if (candidate.kind !== 'tool' || candidate.tool.isSubagent || candidate.tool.kind === 'subagent') return false;
+                if (activityGroupId) return candidate.activityGroupId === activityGroupId;
+                return !candidate.activityGroupId && candidate.turnId === activityTurnId;
             };
-            while (index < parts.length && belongsToActivity(parts[index])) {
-                index += 1;
-            }
+            while (index < parts.length && belongsToToolGroup(parts[index])) index += 1;
             index -= 1;
-            const segmentParts = parts.slice(segmentStartIndex, index + 1).filter(
-                (candidate): candidate is Extract<ResponsePart, { kind: 'thinking' | 'tool' }> => belongsToActivity(candidate),
+            const toolParts = parts.slice(segmentStartIndex, index + 1).filter(
+                (candidate): candidate is Extract<ResponsePart, { kind: 'tool' }> => belongsToToolGroup(candidate),
             );
-            const renderActivity = (activityParts: typeof segmentParts, key: string) => {
-                if (!activityParts.length) return;
-                const activityItems = activityParts.map((candidate) => toActivityItem(candidate));
-                const activityTimestamps = activityParts.map((candidate) => candidate.timestamp).filter((timestamp) => Number.isFinite(timestamp));
-                const observedDuration = activityTimestamps.length > 1
-                    ? Math.max(0, (Math.max(...activityTimestamps) - Math.min(...activityTimestamps)) / 1000)
-                    : 0;
-                const persistedThinkingDuration = Math.max(0, ...activityParts.map((candidate) => (
-                    candidate.kind === 'thinking' ? (candidate.durationMs || 0) / 1000 : 0
-                )));
-                const activityDuration = Math.max(observedDuration, persistedThinkingDuration);
-                const activityStatus: 'working' | 'complete' = activityParts.some((candidate) => (
-                    (candidate.kind === 'tool' && candidate.tool.status === 'running') ||
-                    (candidate.kind === 'thinking' && matchesStreamingMessage(candidate.message, streamingMessageId))
-                )) ? 'working' : 'complete';
-                const activityTools = activityParts
-                    .filter((candidate): candidate is Extract<ResponsePart, { kind: 'tool' }> => candidate.kind === 'tool')
-                    .map((candidate) => candidate.tool);
-                const localSearchOnly = activityTools.length > 0 && activityTools.every(isLocalSearchTool);
-                const workingPhrases = activityStatusPhrases(activityTools, lang);
-                rendered.push(<BeUiAgentActivity
-                    key={`agent-activity-${key}`}
-                    items={activityItems}
-                    status={activityStatus}
-                    duration={activityDuration}
-                    activeLabel={localSearchOnly ? (lang === 'zh' ? '正在搜索文件' : 'Searching files') : workingPhrases[0]}
-                    workingPhrases={workingPhrases}
-                    summary={localSearchOnly ? (lang === 'zh' ? '已搜索文件' : 'Searched files') : undefined}
-                />);
-            };
-            // A contiguous run is one beUI mixed activity. File previews follow the
-            // activity while the tool invocation stays in its original row/order.
-            renderActivity(segmentParts, `segment-${segmentStartIndex}`);
-            const artifactTools = segmentParts
-                .filter((candidate): candidate is Extract<ResponsePart, { kind: 'tool' }> => candidate.kind === 'tool')
+            const timestamps = toolParts.map((candidate) => candidate.timestamp).filter(Number.isFinite);
+            const duration = timestamps.length > 1
+                ? Math.max(0, (Math.max(...timestamps) - Math.min(...timestamps)) / 1000)
+                : 0;
+            const status: 'working' | 'complete' = toolParts.some((candidate) => candidate.tool.status === 'running')
+                ? 'working'
+                : 'complete';
+            const localSearchOnly = toolParts.length > 0 && toolParts.every((candidate) => isLocalSearchTool(candidate.tool));
+            // Tool calls deliberately go straight to the beUI AgentActivity
+            // component. Thinking is a separate lifecycle, not an extra item
+            // in a synthetic mixed activity.
+            rendered.push(<AgentActivity
+                key={`tool-activity-${segmentStartIndex}`}
+                items={toolParts.map((candidate) => toActivityItem(candidate))}
+                status={status}
+                duration={duration}
+                activeLabel={localSearchOnly ? (lang === 'zh' ? '正在搜索文件' : 'Searching files') : undefined}
+                summary={localSearchOnly ? (lang === 'zh' ? '已搜索文件' : 'Searched files') : undefined}
+                defaultOpen={status === 'working'}
+                className="w-full text-[var(--text-secondary)]"
+            />);
+            const artifactTools = toolParts
                 .map((candidate) => candidate.tool)
                 .filter((tool) => Boolean(tool.diff));
             artifactTools.forEach((tool) => {

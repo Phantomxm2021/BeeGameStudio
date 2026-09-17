@@ -51,6 +51,9 @@ const cleanupHandlers: Array<() => void | Promise<void>> = []
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port,
+  // Project Chat uses SSE. Its connection is intentionally longer-lived than
+  // Bun's 10-second default request idle timeout.
+  idleTimeout: 30,
   fetch: createAgentWorkflowApp({
     registerCleanup: cleanup => cleanupHandlers.push(cleanup),
     modelConfigStore: {},

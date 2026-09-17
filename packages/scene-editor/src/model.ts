@@ -22,7 +22,7 @@ export interface SceneNode {
 }
 export interface SceneAsset { id: string; name: string; mimeType: string; path: string; bytes?: string; uri?: string; dependencies?: string[]; diagnostics?: string[] }
 export interface SourceBinding {
-  source: { kind: 'fixture'; fixtureId: string; fixtureDigest: string } | { kind: 'published-ir'; publicationId: string; candidateDigest: string; sourceInputDigest: string }
+  source: { kind: 'fixture'; fixtureId: string; fixtureDigest: string } | { kind: 'published-ir' | 'content-package'; publicationId: string; candidateDigest: string; sourceInputDigest: string }
   contentDigest: string; contentRevision: string; contentSchemaVersion: string; adapterId: string; adapterVersion: string
 }
 export interface SceneSettings {

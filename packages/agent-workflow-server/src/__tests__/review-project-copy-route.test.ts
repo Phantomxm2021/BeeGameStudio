@@ -211,7 +211,7 @@ describe('POST /api/projects/:projectId/review-copy', () => {
     const response = await f.app.request(`/api/projects/${f.projectId}/review-copy`, { method: 'POST' })
     expect(response.status).toBe(201)
     const payload = await response.json() as { project: { id: string } }
-    const stopped = await f.app.request(`/api/projects/${payload.project.id}/workflow/stop`, { method: 'POST' })
+    const stopped = await f.app.request(`/api/projects/${payload.project.id}/stop`, { method: 'POST' })
     expect(stopped.status).toBe(200)
     expect(f.reviewerStops).toHaveLength(1)
     expect(f.authorStarts()).toBe(0)
