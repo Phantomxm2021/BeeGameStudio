@@ -1,8 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ProfileAvatarButton } from './ProfileAvatarButton';
-import { ArrowLeft, ChevronDown, ExternalLink, FolderOpen, History, Play, RefreshCw, Settings, ShoppingCart, Square, Upload, UserCircle } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ExternalLink, Play, RefreshCw, Square, Upload } from 'lucide-react';
 import type { Language } from './AgentsConfig';
-import { useBeeGameText, useCommonText } from '../../i18n/useBeeGameTranslations';
+import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { Button } from '../beui/project-button';
 import { SettingsMenu } from './Landing/SettingsMenu';
 import {
@@ -23,11 +22,11 @@ import { WorkspaceShell } from '../Workspace/WorkspaceShell';
 import { WorkspacePreviewPanel } from '../Workspace/WorkspacePreviewPanel';
 import { WorkspaceDeploymentDialog } from '../Workspace/WorkspaceDeploymentDialog';
 import { ThemeToggle } from '../beui/motion/theme-toggle';
+import { AccountActionsMenu } from './Landing/AccountActionsMenu';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 
@@ -161,7 +160,6 @@ export function BeeGameLivePreviewPage({
   const [isHistoryOpen, setHistoryOpen] = useState(false);
   const [isProfileOpen, setProfileOpen] = useState(false);
   const [isProjectMenuOpen, setProjectMenuOpen] = useState(false);
-  const [isProfileMenuOpen, setProfileMenuOpen] = useState(false);
   const [isPreviewMenuOpen, setPreviewMenuOpen] = useState(false);
   useEffect(() => {
     const syncResourceRoute = () => setIsResourceLibraryOpen(isResourceLibraryRoute());
@@ -175,7 +173,6 @@ export function BeeGameLivePreviewPage({
   const [previewConsoleEntries, setPreviewConsoleEntries] = useState<PreviewConsoleEntry[]>([]);
   const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
   const uiText = useBeeGameText(lang);
-  const commonText = useCommonText(lang);
   const labels = uiText.livePreview as Record<string, string>;
   const backHomeLabel = lang.startsWith('zh') ? '返回主页' : 'Back to home';
   const currentUser = useSystemStore(state => state.currentUser);
@@ -402,42 +399,27 @@ export function BeeGameLivePreviewPage({
             <Upload className="h-3.5 w-3.5 min-[900px]:hidden" />
             <span className="max-[899px]:hidden">{isDeploying ? labels.deploying : 'Build'}</span>
           </Button>
-          <DropdownMenu open={isProfileMenuOpen} onOpenChange={setProfileMenuOpen}>
-            <DropdownMenuTrigger
-              render={<ProfileAvatarButton avatarUrl={currentUser?.avatarUrl} userLabel={currentUser?.displayName?.trim() || currentUser?.email?.trim()} data-testid="beegame-profile-trigger" aria-label={commonText.profile || 'Profile'} title={commonText.profile || 'Profile'} />}
-              onClick={(event) => {
-                if (event.currentTarget.getAttribute('aria-expanded') !== 'true') setProfileMenuOpen(true);
-              }}
-            />
-            <DropdownMenuContent align="end" className="w-[min(18rem,calc(100vw-1rem))]">
-              <div data-testid="beegame-profile-menu-user" className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2.5">
-                {currentUser?.avatarUrl ? (
-                  <img src={currentUser.avatarUrl} alt="" className="h-8 w-8 shrink-0 rounded-full object-cover" />
-                ) : (
-                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--surface-3)] type-button font-semibold text-[var(--text-primary)]" aria-hidden="true">
-                    {(currentUser?.displayName?.trim() || currentUser?.email?.trim() || 'Profile').slice(0, 1).toUpperCase()}
-                  </span>
-                )}
-                <div className="min-w-0">
-                  <div className="type-button truncate text-[var(--text-primary)]">{currentUser?.displayName?.trim() || commonText.profile || 'Profile'}</div>
-                  {currentUser?.email ? <div className="type-caption-1 truncate text-[var(--text-secondary)]">{currentUser.email}</div> : null}
-                </div>
-              </div>
-              <DropdownMenuItem onClick={() => { closeAccountSurfaces(); setProfileOpen(true); }}><UserCircle className="h-4 w-4" />{commonText.profile || 'Profile'}</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => { closeAccountSurfaces(); setCreditStoreOpen(true); }}><ShoppingCart className="h-4 w-4" />{commonText.creditStore || 'Credit Store'}</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => { closeAccountSurfaces(); setSettingsOpen(true); }}><Settings className="h-4 w-4" />{commonText.settings || 'Settings'}</DropdownMenuItem>
-              {currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage') ? (
-                <DropdownMenuItem onClick={() => { openResourceLibraryRoute(); closeAccountSurfaces(); setIsResourceLibraryOpen(true); setSettingsOpen(false); }}><FolderOpen className="h-4 w-4" />{commonText.resources || 'Resources'}</DropdownMenuItem>
-              ) : null}
-              <DropdownMenuItem onClick={() => { closeAccountSurfaces(); setHistoryOpen(true); }}><History className="h-4 w-4" />{commonText.historyProjects || 'History Projects'}</DropdownMenuItem>
-              {currentUser ? (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => void handleSignOut()}>{commonText.signOut || 'Sign out'}</DropdownMenuItem>
-                </>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <AccountActionsMenu
+            lang={lang}
+            isSettingsOpen={isSettingsOpen}
+            isHistoryOpen={isHistoryOpen}
+            isProfileOpen={isProfileOpen}
+            isCreditStoreOpen={isCreditStoreOpen}
+            isResourceLibraryOpen={isResourceLibraryOpen}
+            currentUserId={currentUser?.id}
+            currentUserDisplayName={currentUser?.displayName}
+            currentUserEmail={currentUser?.email}
+            currentUserAvatarUrl={currentUser?.avatarUrl}
+            creditBalance={accountCreditBalance?.balanceCredits}
+            canManageResources={currentUser?.role === 'owner' || currentUser?.permissions.includes('resources.manage')}
+            onOpenProfile={() => { closeAccountSurfaces(); setProfileOpen(true); }}
+            onOpenCreditStore={() => { closeAccountSurfaces(); setCreditStoreOpen(true); }}
+            onToggleSettings={() => { closeAccountSurfaces(); setSettingsOpen(true); }}
+            onOpenResourceLibrary={() => { openResourceLibraryRoute(); closeAccountSurfaces(); setIsResourceLibraryOpen(true); }}
+            onToggleHistory={() => { closeAccountSurfaces(); setHistoryOpen(true); }}
+            onOpenLogin={() => setProfileOpen(true)}
+            onSignOut={currentUser ? () => void handleSignOut() : undefined}
+          />
         </div>
       </header>
 
