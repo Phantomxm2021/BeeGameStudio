@@ -272,17 +272,34 @@
 .scene-editor-host .settings-heading h2 { margin: 0 0 7px; font-size: 15px; font-weight: 600; }
 .scene-editor-host .settings-heading p { margin: 0; color: #999ea9; font-size: 11px; line-height: 1.5; }
 .scene-editor-host .scene-settings-dialog form { display: flex; flex-direction: column; min-height: 0; }
-.scene-editor-host .settings-scroll { overflow: auto; padding: 18px 22px; min-height: 0; }
+.scene-editor-host .settings-scroll { overflow: auto; padding: 14px 22px 18px; min-height: 0; }
 .scene-editor-host .settings-field { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #c9ccd3; }
 .scene-editor-host .settings-field input { width: 100%; }
-.scene-editor-host .settings-scroll fieldset { border: 0; border-top: 1px solid #ffffff10; padding: 12px 0 0; margin: 19px 0 0; }
-.scene-editor-host .settings-scroll legend { color: #9da4af; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; padding: 0 8px 0 0; }
 .scene-editor-host .settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 11px; min-height: 28px; color: #c9ccd3; font-size: 11px; }
-.scene-editor-host .settings-row input[type=number] { width: 86px; }
+.scene-editor-host .settings-row input[type=number] { width: 92px; }
 .scene-editor-host .settings-row input[type=color] { width: 42px; height: 28px; }
 .scene-editor-host .settings-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 16px; }
+.scene-editor-host .settings-number { height: 30px; padding: 0 12px; border-radius: 999px; background: #ffffff06; text-align: center; }
+.scene-editor-host .settings-section { display: grid; gap: 12px; padding-top: 18px; }
+.scene-editor-host .settings-section-divided { margin-top: 18px; border-top: 1px solid #ffffff10; }
+.scene-editor-host .settings-disabled { opacity: .42; }
 .scene-editor-host .settings-error { color: #f2a5a5; line-height: 1.5; }
 .scene-editor-host .settings-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 14px 22px; border-top: 1px solid #ffffff10; flex-shrink: 0; }
+.scene-editor-host .beui-tabs-list { position: relative; display: inline-flex; width: 100%; align-items: center; gap: 3px; padding: 3px; border-radius: 999px; background: #ffffff08; }
+.scene-editor-host .beui-tabs-trigger { position: relative; isolation: isolate; display: inline-flex; flex: 1; align-items: center; justify-content: center; height: 30px; padding: 0 14px; border: 0; border-radius: 999px; color: #979ca7; font-weight: 500; }
+.scene-editor-host .beui-tabs-trigger:hover:not(:disabled) { background: transparent; color: #f4f4f5; }
+.scene-editor-host .beui-tabs-trigger[aria-selected=true] { color: #111216; }
+.scene-editor-host .beui-tabs-trigger > span:last-child { position: relative; z-index: 1; }
+.scene-editor-host .beui-tabs-trigger[aria-selected=true] > span:last-child { color: #111216; }
+.scene-editor-host .beui-tabs-indicator { position: absolute; inset: 0; z-index: 0; border-radius: 999px; background: #f4f4f5; box-shadow: 0 1px 4px #0005; }
+.scene-editor-host .beui-tabs-content { min-height: 178px; }
+.scene-editor-host .beui-switch { display: flex; align-items: center; width: 38px; height: 22px; padding: 3px; border: 1px solid #ffffff18; border-radius: 999px; background: #ffffff0b; }
+.scene-editor-host .beui-switch:hover:not(:disabled) { background: #ffffff12; }
+.scene-editor-host .beui-switch[data-state=checked] { border-color: #f4f4f5; background: #f4f4f5; }
+.scene-editor-host .beui-switch-thumb { display: block; width: 14px; height: 14px; border-radius: 50%; background: #8f949e; box-shadow: 0 1px 3px #0007; }
+.scene-editor-host .beui-switch[data-state=checked] .beui-switch-thumb { background: #111216; }
+.scene-editor-host .beui-button.settings-apply { min-width: 84px; height: 34px; padding: 0 18px; border: 1px solid #f4f4f5; border-radius: 999px; background: #f4f4f5; color: #111216; font-weight: 600; }
+.scene-editor-host .beui-button.settings-apply:hover:not(:disabled) { background: #d4d4d8; color: #111216; }
 @media (max-width: 900px) {
   .scene-editor-host .bottom-bar { flex-direction: column; align-items: flex-start; gap: 7px; }
   .scene-editor-host .scene-name { max-width: 65vw; }
