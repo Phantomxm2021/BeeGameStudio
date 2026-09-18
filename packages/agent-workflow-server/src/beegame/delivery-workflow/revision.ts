@@ -10,6 +10,7 @@ export const REVISION_EXCLUDED_PREFIXES = [
   '.cache/',
   '.vite/',
   '.beegame/workflow/',
+  '.beegame/logs/',
   '.beegame-attachments/',
   'logs/',
   'node_modules/',
