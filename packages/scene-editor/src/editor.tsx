@@ -6,7 +6,7 @@ import { componentOf, DEFAULT_SCENE_SETTINGS, type SceneDocument, type SceneNode
 import { exportPackage, importPackage, makeEmptyScene, sceneContentKey, canonicalJson } from './persistence'
 import { transformSelection } from './selection-transform'
 import { SceneViewport, type SceneViewMode, type SceneViewportProps } from './viewport'
-import { Hand, Move, Rotate3D, Scaling, Save, Undo2, Redo2, Magnet, Globe2, Box, Scan, Square, Focus, CircleCheck, Circle, ChevronLeft, ChevronRight, Lightbulb, Search, X, Axis3D, Menu, Settings2 } from 'lucide-react'
+import { Hand, Move, Rotate3D, Scaling, Save, Undo2, Redo2, Magnet, Globe2, Box, Scan, Square, Focus, CircleCheck, Circle, ChevronLeft, ChevronRight, Lightbulb, Search, X, Axis3D, Menu, Settings2, Sun, Flashlight, Sparkles } from 'lucide-react'
 import { Inspector, ModelPartInspector } from './inspector'
 import { TreeNode, matchesTreeNode, navigateModelTree } from './hierarchy'
 import { readModelStructure, type ModelSelection, type ModelStructure } from './model-structure'
@@ -15,7 +15,7 @@ import { AssetLibraryDialog, type AssetLibrarySource } from './asset-library-dia
 import { SceneSettingsDialog } from './scene-settings-dialog'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut } from './components/motion/context-menu'
 import { Button } from './components/motion/button'
-import { Menu as MotionMenu, MenuItem, MenuSeparator } from './components/motion/menu'
+import { Menu as MotionMenu, MenuItem, MenuSeparator, MenuSub } from './components/motion/menu'
 import { Select } from './components/motion/select'
 
 type Mode = 'translate' | 'rotate' | 'scale' | 'hand'
@@ -58,7 +58,12 @@ function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets,
     <MenuItem disabled={!canRedo} onSelect={redo}><Redo2 size={14} />Redo</MenuItem>
     <MenuSeparator />
     <MenuItem onSelect={openAssets}><Box size={14} />Asset library</MenuItem>
-    {(['directional', 'point', 'spot', 'ambient'] as const).map(kind => <MenuItem key={kind} onSelect={() => addLight(kind)}><Lightbulb size={14} />Add {kind} light</MenuItem>)}
+    <MenuSub label="Add light" icon={<Lightbulb size={14} />}>
+      <MenuItem onSelect={() => addLight('directional')}><Sun size={14} />Directional light</MenuItem>
+      <MenuItem onSelect={() => addLight('point')}><Lightbulb size={14} />Point light</MenuItem>
+      <MenuItem onSelect={() => addLight('spot')}><Flashlight size={14} />Spot light</MenuItem>
+      <MenuItem onSelect={() => addLight('ambient')}><Sparkles size={14} />Ambient light</MenuItem>
+    </MenuSub>
     <MenuSeparator />
     <MenuItem onSelect={openSettings}><Settings2 size={14} />Scene settings</MenuItem>
     <MenuItem onSelect={toggleGizmos}><Axis3D size={14} />{showGizmos ? 'Hide gizmos' : 'Show gizmos'}</MenuItem>
