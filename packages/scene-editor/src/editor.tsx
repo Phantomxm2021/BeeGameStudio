@@ -6,16 +6,17 @@ import { componentOf, DEFAULT_SCENE_SETTINGS, type SceneDocument, type SceneNode
 import { exportPackage, importPackage, makeEmptyScene, sceneContentKey, canonicalJson } from './persistence'
 import { transformSelection } from './selection-transform'
 import { SceneViewport, type SceneViewMode, type SceneViewportProps } from './viewport'
-import { Hand, Move, Rotate3D, Scaling, Save, Undo2, Redo2, Magnet, ChevronDown, Globe2, Box, Scan, Square, Focus, CircleCheck, Circle, ChevronLeft, ChevronRight, Lightbulb, Search, X, Axis3D, Menu, Settings2 } from 'lucide-react'
+import { Hand, Move, Rotate3D, Scaling, Save, Undo2, Redo2, Magnet, Globe2, Box, Scan, Square, Focus, CircleCheck, Circle, ChevronLeft, ChevronRight, Lightbulb, Search, X, Axis3D, Menu, Settings2 } from 'lucide-react'
 import { Inspector, ModelPartInspector } from './inspector'
 import { TreeNode, matchesTreeNode, navigateModelTree } from './hierarchy'
 import { readModelStructure, type ModelSelection, type ModelStructure } from './model-structure'
 import { currentKeyboardLabels } from './platform'
 import { AssetLibraryDialog, type AssetLibrarySource } from './asset-library-dialog'
 import { SceneSettingsDialog } from './scene-settings-dialog'
-import { Toggle } from './components/ui/toggle'
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from './components/ui/dropdown-menu'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuShortcut } from './components/motion/context-menu'
+import { Button } from './components/motion/button'
+import { Menu as MotionMenu, MenuItem, MenuSeparator } from './components/motion/menu'
+import { Select } from './components/motion/select'
 
 type Mode = 'translate' | 'rotate' | 'scale' | 'hand'
 type DropPosition = 'before' | 'inside' | 'after'
@@ -33,17 +34,8 @@ const TOOL_ICONS = { hand: Hand, translate: Move, rotate: Rotate3D, scale: Scali
 export interface SceneEditorProps { initialDocument?: SceneDocument; storageKey?: string; assetLibrary?: AssetLibrarySource; initialView?: SceneViewportProps['initialView']; initialProjection?: 'perspective' | 'orthographic'; initialExpanded?: Record<string, boolean>; onSave?: (document: SceneDocument) => void | Promise<void>; onClose?: () => void; onDirtyChange?: (dirty: boolean, saving: boolean) => void }
 
 function ViewDropdown({ label, value, options, onChange, disabled = false }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; disabled?: boolean }) {
-  return <DropdownMenu>
-    <DropdownMenuTrigger className="view-dropdown" aria-label={label} title={disabled ? `${label} is fixed in 2D mode` : label} disabled={disabled}>
-      {label === 'Coordinate space' ? <Globe2 size={15} /> : label === 'View mode' ? value === '2d' ? <Square size={18} /> : <Box size={18} /> : value === 'orthographic' ? <Square size={18} /> : <Box size={18} />}
-      <span>{options.find(option => option.value === value)?.label}</span><ChevronDown size={13} />
-    </DropdownMenuTrigger>
-    <DropdownMenuContent align="center" collisionPadding={8} aria-label={label}>
-      <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
-        {options.map(option => <DropdownMenuRadioItem key={option.value} value={option.value} title={option.label}>{option.label}</DropdownMenuRadioItem>)}
-      </DropdownMenuRadioGroup>
-    </DropdownMenuContent>
-  </DropdownMenu>
+  const icon = label === 'Coordinate space' ? <Globe2 size={15} /> : label === 'View mode' ? value === '2d' ? <Square size={17} /> : <Box size={17} /> : value === 'orthographic' ? <Square size={17} /> : <Box size={17} />
+  return <Select ariaLabel={label} value={value} options={options} onValueChange={onChange} disabled={disabled} leading={icon} className="toolbar-select" />
 }
 
 function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets, openSettings, showGizmos, toggleGizmos, closeEditor }: {
@@ -59,28 +51,20 @@ function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets,
   toggleGizmos: () => void
   closeEditor?: () => void
 }) {
-  return <DropdownMenu>
-    <DropdownMenuTrigger className="icon-button toolbar-menu-trigger" aria-label="Scene actions" title="Scene actions"><Menu size={18} /></DropdownMenuTrigger>
-    <DropdownMenuContent align="start" collisionPadding={8} aria-label="Scene actions">
-      <DropdownMenuItem onSelect={save}><Save size={14} />Save scene</DropdownMenuItem>
-      <DropdownMenuSeparator />
-      <DropdownMenuItem disabled={!canUndo} onSelect={undo}><Undo2 size={14} />Undo</DropdownMenuItem>
-      <DropdownMenuItem disabled={!canRedo} onSelect={redo}><Redo2 size={14} />Redo</DropdownMenuItem>
-      <DropdownMenuSeparator />
-      <DropdownMenuItem onSelect={openAssets}><Box size={14} />Asset library</DropdownMenuItem>
-      <DropdownMenuSub>
-        <DropdownMenuSubTrigger><Lightbulb size={14} />Lighting<ChevronRight className="submenu-chevron" size={13} /></DropdownMenuSubTrigger>
-        <DropdownMenuSubContent>
-          {(['directional', 'point', 'spot', 'ambient'] as const).map(kind => <DropdownMenuItem key={kind} onSelect={() => addLight(kind)}><Lightbulb size={14} />Add {kind} light</DropdownMenuItem>)}
-        </DropdownMenuSubContent>
-      </DropdownMenuSub>
-      <DropdownMenuSeparator />
-      <DropdownMenuItem onSelect={openSettings}><Settings2 size={14} />Scene settings</DropdownMenuItem>
-      <DropdownMenuItem onSelect={toggleGizmos}><Axis3D size={14} />{showGizmos ? 'Hide gizmos' : 'Show gizmos'}</DropdownMenuItem>
-      {closeEditor && <DropdownMenuSeparator />}
-      {closeEditor && <DropdownMenuItem onSelect={closeEditor}><X size={14} />Close editor</DropdownMenuItem>}
-    </DropdownMenuContent>
-  </DropdownMenu>
+  return <MotionMenu ariaLabel="Scene actions" trigger={<Menu size={18} />} className="toolbar-menu">
+    <MenuItem onSelect={save}><Save size={14} />Save scene</MenuItem>
+    <MenuSeparator />
+    <MenuItem disabled={!canUndo} onSelect={undo}><Undo2 size={14} />Undo</MenuItem>
+    <MenuItem disabled={!canRedo} onSelect={redo}><Redo2 size={14} />Redo</MenuItem>
+    <MenuSeparator />
+    <MenuItem onSelect={openAssets}><Box size={14} />Asset library</MenuItem>
+    {(['directional', 'point', 'spot', 'ambient'] as const).map(kind => <MenuItem key={kind} onSelect={() => addLight(kind)}><Lightbulb size={14} />Add {kind} light</MenuItem>)}
+    <MenuSeparator />
+    <MenuItem onSelect={openSettings}><Settings2 size={14} />Scene settings</MenuItem>
+    <MenuItem onSelect={toggleGizmos}><Axis3D size={14} />{showGizmos ? 'Hide gizmos' : 'Show gizmos'}</MenuItem>
+    {closeEditor ? <MenuSeparator /> : null}
+    {closeEditor ? <MenuItem onSelect={closeEditor}><X size={14} />Close editor</MenuItem> : null}
+  </MotionMenu>
 }
 
 export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-editor.draft.v2', assetLibrary, initialView, initialProjection = 'perspective', initialExpanded, onSave, onClose, onDirtyChange }: SceneEditorProps = {}) {
@@ -277,13 +261,13 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
           />
           <span className="toolbar-divider" />
           <div className="scene-tools" role="toolbar" aria-label="Scene tools" aria-orientation="horizontal">
-            {SCENE_TOOLS.map(tool => { const Icon = TOOL_ICONS[tool.mode]; return <button key={tool.mode} className={`icon-button ${mode === tool.mode ? 'active' : ''}`} aria-label={tool.label} aria-pressed={mode === tool.mode} title={`${tool.label} (${tool.key})`} onClick={() => setMode(tool.mode)}><Icon size={18} /></button> })}
+            {SCENE_TOOLS.map(tool => { const Icon = TOOL_ICONS[tool.mode]; return <Button key={tool.mode} className={`icon-button ${mode === tool.mode ? 'active' : ''}`} aria-label={tool.label} aria-pressed={mode === tool.mode} title={`${tool.label} (${tool.key})`} onClick={() => setMode(tool.mode)}><Icon size={18} /></Button> })}
           </div>
           <span className="toolbar-divider" />
           <ViewDropdown label="Coordinate space" value={space} options={[{ value: 'local', label: 'Local' }, { value: 'world', label: 'World' }]} onChange={value => setSpace(value as 'local' | 'world')} />
           <ViewDropdown label="View mode" value={viewMode} options={[{ value: '2d', label: '2D' }, { value: '3d', label: '3D' }]} onChange={value => setViewMode(value as SceneViewMode)} />
           <ViewDropdown label="Projection" value={viewMode === '2d' || ortho ? 'orthographic' : 'perspective'} options={[{ value: 'perspective', label: 'Perspective' }, { value: 'orthographic', label: 'Orthographic' }]} onChange={value => setOrtho(value === 'orthographic')} disabled={viewMode === '2d'} />
-          <Toggle pressed={snap} onPressedChange={setSnap} aria-label="Snap" title="Grid snapping"><Magnet size={16} /><span>Snap</span></Toggle>
+          <Button className="toolbar-toggle" aria-label="Snap" aria-pressed={snap} title="Grid snapping" onClick={() => setSnap(value => !value)}><Magnet size={16} /><span>Snap</span></Button>
           <AssetLibraryDialog source={assetLibrary} assets={document.assets} onAdd={addModelAsset} open={assetLibraryOpen} onOpenChange={setAssetLibraryOpen} trigger={null} />
           <SceneSettingsDialog document={document} onSave={() => void saveDocument()} onApply={(name, settings) => {
             if (name === document.name && canonicalJson(settings) === canonicalJson(document.settings ?? DEFAULT_SCENE_SETTINGS)) return true
