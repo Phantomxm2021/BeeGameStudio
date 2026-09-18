@@ -24,6 +24,9 @@ export function DropdownMenuSubContent({ className = '', ...props }: ComponentPr
 export function DropdownMenuItem({ className = '', ...props }: ComponentProps<typeof DropdownMenuPrimitive.Item>) {
   return <DropdownMenuPrimitive.Item className={`ui-dropdown-item ${className}`} {...props} />
 }
+export function DropdownMenuSeparator({ className = '', ...props }: ComponentProps<typeof DropdownMenuPrimitive.Separator>) {
+  return <DropdownMenuPrimitive.Separator className={`ui-dropdown-separator ${className}`} {...props} />
+}
 export function DropdownMenuRadioGroup(props: ComponentProps<typeof DropdownMenuPrimitive.RadioGroup>) {
   return <DropdownMenuPrimitive.RadioGroup {...props} />
 }

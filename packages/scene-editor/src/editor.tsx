@@ -6,7 +6,7 @@ import { componentOf, DEFAULT_SCENE_SETTINGS, type SceneDocument, type SceneNode
 import { exportPackage, importPackage, makeEmptyScene, sceneContentKey, canonicalJson } from './persistence'
 import { transformSelection } from './selection-transform'
 import { SceneViewport, type SceneViewMode, type SceneViewportProps } from './viewport'
-import { Hand, Move, Rotate3D, Scaling, Save, Undo2, Redo2, Magnet, ChevronDown, Globe2, Box, Scan, Square, Focus, CircleCheck, Circle, ChevronLeft, ChevronRight, Lightbulb, Search, X, Axis3D, Menu } from 'lucide-react'
+import { Hand, Move, Rotate3D, Scaling, Save, Undo2, Redo2, Magnet, ChevronDown, Globe2, Box, Scan, Square, Focus, CircleCheck, Circle, ChevronLeft, ChevronRight, Lightbulb, Search, X, Axis3D, Menu, Settings2 } from 'lucide-react'
 import { Inspector, ModelPartInspector } from './inspector'
 import { TreeNode, matchesTreeNode, navigateModelTree } from './hierarchy'
 import { readModelStructure, type ModelSelection, type ModelStructure } from './model-structure'
@@ -14,7 +14,7 @@ import { currentKeyboardLabels } from './platform'
 import { AssetLibraryDialog, type AssetLibrarySource } from './asset-library-dialog'
 import { SceneSettingsDialog } from './scene-settings-dialog'
 import { Toggle } from './components/ui/toggle'
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from './components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent } from './components/ui/dropdown-menu'
 
 type Mode = 'translate' | 'rotate' | 'scale' | 'hand'
 type DropPosition = 'before' | 'inside' | 'after'
@@ -61,18 +61,22 @@ function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets,
   return <DropdownMenu>
     <DropdownMenuTrigger className="icon-button toolbar-menu-trigger" aria-label="Scene actions" title="Scene actions"><Menu size={18} /></DropdownMenuTrigger>
     <DropdownMenuContent align="start" collisionPadding={8} aria-label="Scene actions">
+      <DropdownMenuItem onSelect={save}><Save size={14} />Save scene</DropdownMenuItem>
+      <DropdownMenuSeparator />
       <DropdownMenuItem disabled={!canUndo} onSelect={undo}><Undo2 size={14} />Undo</DropdownMenuItem>
       <DropdownMenuItem disabled={!canRedo} onSelect={redo}><Redo2 size={14} />Redo</DropdownMenuItem>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem onSelect={openAssets}><Box size={14} />Asset library</DropdownMenuItem>
       <DropdownMenuSub>
         <DropdownMenuSubTrigger><Lightbulb size={14} />Lighting<ChevronRight className="submenu-chevron" size={13} /></DropdownMenuSubTrigger>
         <DropdownMenuSubContent>
           {(['directional', 'point', 'spot', 'ambient'] as const).map(kind => <DropdownMenuItem key={kind} onSelect={() => addLight(kind)}><Lightbulb size={14} />Add {kind} light</DropdownMenuItem>)}
         </DropdownMenuSubContent>
       </DropdownMenuSub>
-      <DropdownMenuItem onSelect={openAssets}><Box size={14} />Asset library</DropdownMenuItem>
-      <DropdownMenuItem onSelect={openSettings}><ChevronDown size={14} />Scene settings</DropdownMenuItem>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem onSelect={openSettings}><Settings2 size={14} />Scene settings</DropdownMenuItem>
       <DropdownMenuItem onSelect={toggleGizmos}><Axis3D size={14} />{showGizmos ? 'Hide gizmos' : 'Show gizmos'}</DropdownMenuItem>
-      <DropdownMenuItem onSelect={save}><Save size={14} />Save scene</DropdownMenuItem>
+      {closeEditor && <DropdownMenuSeparator />}
       {closeEditor && <DropdownMenuItem onSelect={closeEditor}><X size={14} />Close editor</DropdownMenuItem>}
     </DropdownMenuContent>
   </DropdownMenu>
