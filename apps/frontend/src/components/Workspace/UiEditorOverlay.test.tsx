@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { beeGameAdapter } from '../../services/beeGameAdapter';
 import { UiEditorOverlay } from './UiEditorOverlay';
 
+function selectEditorOption(label: string, option: string) {
+  fireEvent.click(screen.getByLabelText(label));
+  fireEvent.click(screen.getByRole('option', { name: option }));
+}
+
 const uiDocument = {
   schema: 'beegame-content.v1' as const,
   id: 'ui_title',
@@ -82,13 +87,13 @@ describe('UiEditorOverlay', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Choose source image' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Use image other' }));
     expect(screen.getByRole('button', { name: 'Choose source image' })).toHaveTextContent('other');
-    fireEvent.change(screen.getByRole('combobox', { name: 'Image type' }), { target: { value: 'filled' } });
-    expect(screen.getByRole('combobox', { name: 'Fill method' })).toBeInTheDocument();
+    selectEditorOption('Image type', 'Filled');
+    expect(screen.getByLabelText('Fill method')).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: 'Fill amount' })).toBeInTheDocument();
 
     const panel = await screen.findByRole('treeitem', { name: 'Panel' });
     fireEvent.click(panel.querySelector('.ui-editor-tree-row')!);
-    expect(screen.getByRole('combobox', { name: 'Image type' })).toHaveValue('sliced');
+    expect(screen.getByLabelText('Image type')).toHaveTextContent('Sliced');
     expect(screen.getByRole('spinbutton', { name: 'Slice left' })).toHaveValue(12);
     expect(container.querySelector('.ui-editor-node[data-role="nineSlicePanel"] .ui-editor-image.sliced')).toHaveStyle({ borderWidth: '12px 12px 12px 12px' });
 
@@ -173,7 +178,7 @@ describe('UiEditorOverlay', () => {
     expect(screen.getByRole('radiogroup', { name: 'Anchor preset' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('radio', { name: 'center' }));
     expect(screen.getByRole('radio', { name: 'center' })).toHaveAttribute('aria-checked', 'true');
-    fireEvent.change(screen.getByRole('combobox', { name: 'UI render space' }), { target: { value: 'world' } });
+    selectEditorOption('UI render space', 'World Space (XR)');
     expect(screen.getByRole('spinbutton', { name: 'Position Z' })).toBeInTheDocument();
     expect(screen.getByRole('spinbutton', { name: 'Rotation Y' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Snap' }));
@@ -232,9 +237,9 @@ describe('UiEditorOverlay', () => {
 
     fireEvent.click(within(hierarchy).getByText('Reduced motion').closest('.ui-editor-tree-row')!);
     expect(screen.getByText('Toggle Object')).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Toggle initial value' })).toHaveValue('follow-prefers-reduced-motion');
+    expect(screen.getByLabelText('Toggle initial value')).toHaveTextContent('Follow System');
     expect(container.querySelector('.ui-editor-toggle-preview')).toHaveClass('mixed');
-    fireEvent.change(screen.getByRole('combobox', { name: 'Toggle initial value' }), { target: { value: 'true' } });
+    selectEditorOption('Toggle initial value', 'On');
     expect(container.querySelector('.ui-editor-toggle-preview')).toHaveClass('checked');
 
     fireEvent.click(within(hierarchy).getByText('Settings layout').closest('.ui-editor-tree-row')!);
@@ -284,7 +289,7 @@ describe('UiEditorOverlay', () => {
     const sourceImage = screen.getByRole('button', { name: 'Choose source image' });
     fireEvent.click(sourceImage);
     expect(screen.getByRole('dialog', { name: 'Project image assets' })).toBeInTheDocument();
-    const imageType = screen.getByRole('combobox', { name: 'Image type' });
+    const imageType = screen.getByLabelText('Image type');
     fireEvent.blur(sourceImage, { relatedTarget: imageType });
     expect(screen.queryByRole('dialog', { name: 'Project image assets' })).not.toBeInTheDocument();
 

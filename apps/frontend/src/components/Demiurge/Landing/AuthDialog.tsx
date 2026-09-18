@@ -2,6 +2,7 @@ import { X } from 'lucide-react';
 import type { SupabaseOAuthProvider } from '../../../services/supabaseAuthApi';
 import type { AuthMode, IntakeCopy, Translate } from './types';
 import { Dialog, DialogContent, DialogTitle } from '../../ui/dialog';
+import { Checkbox } from '../../beui/registry/components/motion/checkbox';
 
 type AuthDialogProps = {
   isOpen: boolean;
@@ -167,14 +168,8 @@ export function AuthDialog({
               {intakeText.auth.forgotPassword}
             </button>
           ) : (
-            <label className="flex items-start gap-3 rounded-lg border border-border bg-muted p-3 text-sm text-muted-foreground">
-              <input
-                aria-label={intakeText.auth.acceptTermsAria}
-                type="checkbox"
-                checked={hasAcceptedTerms}
-                onChange={event => onTermsChange(event.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-input"
-              />
+            <div className="flex items-start gap-3 rounded-lg border border-border bg-muted p-3 text-sm text-muted-foreground">
+              <Checkbox aria-label={intakeText.auth.acceptTermsAria} checked={hasAcceptedTerms} onCheckedChange={onTermsChange} className="mt-0.5" />
               <span>
                 {intakeText.auth.acceptTermsPrefix}{' '}
                 <button
@@ -194,7 +189,7 @@ export function AuthDialog({
                 </button>
                 {intakeText.auth.acceptTermsSuffix}
               </span>
-            </label>
+            </div>
           )}
         </div>
 

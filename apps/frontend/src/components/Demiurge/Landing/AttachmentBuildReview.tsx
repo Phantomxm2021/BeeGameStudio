@@ -2,6 +2,8 @@ import type { AttachmentBuildAnalysis } from '../../../services/attachmentBuild'
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 import type { BeeGameIntakeSettings } from '../../../services/beeGameAdapter';
+import { Button } from '../../beui/project-button';
+import { ProjectSelect } from '../../beui/project-select';
 
 type ConflictChoice = 'gdd' | 'image' | 'custom';
 
@@ -75,23 +77,13 @@ export function AttachmentBuildReview({
                     ))}
                 </section>
             ) : null}
-            <label className="type-callout block text-foreground">
+            <div className="type-callout block text-foreground">
                 {copy.resourceLibrary || 'Resource Library'}
-                <select
-                    aria-label={copy.resourceLibrary || 'Resource Library'}
-                    value={resourceLibraryUsage}
-                    onChange={event => onResourceLibraryUsageChange(event.target.value as BeeGameIntakeSettings['resourceLibraryUsage'])}
-                    disabled={isSubmitting}
-                    className="border border-input bg-background type-input mt-2 h-10 w-full rounded-lg px-3"
-                >
-                    <option value="preferred">{copy.resourcePreferred || 'Prefer Resource Library'}</option>
-                    <option value="optional">{copy.resourceOptional || 'Use when helpful'}</option>
-                    <option value="required">{copy.resourceRequired || 'Require Resource Library'}</option>
-                </select>
-            </label>
+                <ProjectSelect ariaLabel={copy.resourceLibrary || 'Resource Library'} value={resourceLibraryUsage} onValueChange={value => onResourceLibraryUsageChange(value as BeeGameIntakeSettings['resourceLibraryUsage'])} disabled={isSubmitting} options={[{ value: 'preferred', label: copy.resourcePreferred || 'Prefer Resource Library' }, { value: 'optional', label: copy.resourceOptional || 'Use when helpful' }, { value: 'required', label: copy.resourceRequired || 'Require Resource Library' }]} className="mt-2 w-full" triggerClassName="h-10 rounded-lg" />
+            </div>
             <div className="flex justify-end gap-3">
-                <button type="button" disabled={isSubmitting} onClick={onRetry} className="rounded-md border border-border bg-secondary text-secondary-foreground type-button px-4 py-2">{copy.retry || 'Retry analysis'}</button>
-                <button type="button" disabled={isSubmitting} onClick={onConfirm} className="rounded-md border border-transparent bg-primary text-primary-foreground type-button px-4 py-2">{isSubmitting ? (copy.preparing || 'Preparing build…') : (copy.confirm || 'Confirm and build')}</button>
+                <Button type="button" variant="secondary" disabled={isSubmitting} onClick={onRetry}>{copy.retry || 'Retry analysis'}</Button>
+                <Button type="button" disabled={isSubmitting} onClick={onConfirm}>{isSubmitting ? (copy.preparing || 'Preparing build…') : (copy.confirm || 'Confirm and build')}</Button>
             </div>
         </div>
     );

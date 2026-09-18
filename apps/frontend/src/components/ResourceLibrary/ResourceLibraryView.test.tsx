@@ -103,8 +103,9 @@ describe('ResourceLibraryView workspace', () => {
     expect(screen.queryByRole('button', { name: '保存配置' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('tab', { name: '元素配置' }))
     expect(screen.getByRole('button', { name: '保存配置' })).toBeInTheDocument()
+    await user.click(screen.getByLabelText('资产类型'))
     expect(screen.queryByRole('option', { name: '模型' })).not.toBeInTheDocument()
-    expect(screen.getByRole('option', { name: '3D 模型' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '模型 / 3D 资产' })).toBeInTheDocument()
   })
 
   test('edits typed asset capabilities and semantic relations without filename inference', async () => {
@@ -118,7 +119,8 @@ describe('ResourceLibraryView workspace', () => {
     await user.click(screen.getByRole('treeitem', { name: 'knight.png' }))
     await user.click(await screen.findByRole('button', { name: '显示元素信息' }))
     await user.click(screen.getByRole('tab', { name: '元素配置' }))
-    await user.selectOptions(screen.getByRole('combobox', { name: '资产类型' }), 'animation-library')
+    await user.click(screen.getByLabelText('资产类型'))
+    await user.click(screen.getByRole('option', { name: '独立动画库' }))
     await user.click(screen.getByRole('button', { name: '包含动画' }))
     await user.type(screen.getByPlaceholderText('例如 locomotion, combat'), 'locomotion')
     await user.click(screen.getByText('外部资产关系'))

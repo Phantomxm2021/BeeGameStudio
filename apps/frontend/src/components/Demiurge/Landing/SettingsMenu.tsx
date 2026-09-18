@@ -83,6 +83,9 @@ import { UserSkillsSettingsPanel } from '../../Settings/UserSkillsSettingsPanel'
 import { ModelConfigPanel } from '../../Settings/ModelConfigPanel';
 import { WebToolsPanel } from '../../Settings/WebToolsPanel';
 import { Dialog, DialogContent } from '../../ui/dialog';
+import { Button } from '../../beui/project-button';
+import { Tabs, TabsList, TabsTrigger } from '../../beui/motion/tabs';
+import { ProjectSelect } from '../../beui/project-select';
 import { UsageBillingPanel, type BillingPackFormState, type BillingSettingsCopy } from '../../Settings/BillingSettingsPanel';
 import { ProjectLifecyclePanel, type ProjectLifecycleSettingsCopy } from '../../Settings/ProjectLifecycleSettingsPanel';
 import { RuntimeSettingsPanel, type RuntimeCapabilityCopy } from '../../Settings/RuntimeSettingsPanel';
@@ -997,59 +1000,47 @@ export function SettingsMenu({
             className="flex h-auto w-full shrink-0 flex-col border-b border-border bg-muted/30 p-2 sm:h-full sm:w-44 sm:border-b-0 sm:border-r sm:p-3"
           >
             <div className="mb-2 flex items-center justify-between sm:mb-4">
-              <button
-                type="button"
-                aria-label={text.closeSettings}
-                onClick={onClose}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
+              <Button type="button" variant="outline" size="icon" aria-label={text.closeSettings} onClick={onClose}>
                 <X className="h-4 w-4" />
-              </button>
+              </Button>
             </div>
-            <div className="flex gap-1.5 overflow-x-auto pb-1 sm:block sm:space-y-1.5 sm:overflow-visible sm:pb-0" role="tablist" aria-label={t.systemSettings}>
+            <Tabs value={activeSection} onValueChange={value => { setActiveSection(value as typeof activeSection); setActiveTab('general'); }}>
+            <TabsList className="flex h-auto gap-1.5 overflow-x-auto border-0 pb-1 sm:block sm:space-y-1.5 sm:overflow-visible sm:pb-0" aria-label={t.systemSettings}>
               {sectionTabs.map(tab => {
                 const Icon = tab.icon;
-                const selected = activeSection === tab.id;
                 return (
-                  <button
+                  <TabsTrigger
                     key={tab.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={selected}
-                    onClick={() => {
-                      setActiveSection(tab.id);
-                      setActiveTab('general');
-                    }}
-                    className={`flex h-9 min-w-max items-center gap-2 rounded-lg px-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:w-full ${selected ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground'}`}
+                    value={tab.id}
+                    className="flex h-9 min-w-max items-center justify-start gap-2 rounded-lg px-3 text-left text-sm data-[active]:bg-accent sm:w-full"
                   >
                     <Icon className="h-4 w-4" />
                     {tab.label}
-                  </button>
+                  </TabsTrigger>
                 );
               })}
-            </div>
+            </TabsList>
+            </Tabs>
             {activeSection === 'platform' ? (
                 <div className="mt-2 border-t border-border pt-2 sm:mt-4 sm:pt-3">
                 <div className="type-caption-1 mb-2 px-3 text-muted-foreground">{adminCopy.platform}</div>
-                <div className="flex gap-1.5 overflow-x-auto pb-1 sm:block sm:space-y-1.5 sm:overflow-visible sm:pb-0" role="tablist" aria-label={adminCopy.platform}>
+                <Tabs value={activeTab} onValueChange={value => setActiveTab(value as typeof activeTab)}>
+                <TabsList className="flex h-auto gap-1.5 overflow-x-auto border-0 pb-1 sm:block sm:space-y-1.5 sm:overflow-visible sm:pb-0" aria-label={adminCopy.platform}>
                   {platformTabs.map(tab => {
                     const Icon = tab.icon;
-                    const selected = activeTab === tab.id;
                     return (
-                      <button
+                      <TabsTrigger
                         key={tab.id}
-                        type="button"
-                        role="tab"
-                        aria-selected={selected}
-                        onClick={() => setActiveTab(tab.id)}
-                    className={`flex h-9 min-w-max items-center gap-2 rounded-lg px-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:w-full ${selected ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground'}`}
+                        value={tab.id}
+                        className="flex h-9 min-w-max items-center justify-start gap-2 rounded-lg px-3 text-left text-sm data-[active]:bg-accent sm:w-full"
                       >
                         <Icon className="h-4 w-4" />
                         {tab.label}
-                      </button>
+                      </TabsTrigger>
                     );
                   })}
-                </div>
+                </TabsList>
+                </Tabs>
               </div>
             ) : null}
           </aside>
@@ -1179,23 +1170,13 @@ export function SettingsMenu({
             >
               {activeSection === 'personal' && activeTab === 'general' ? (
                 <div className="divide-y divide-border">
-                  <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
+                  <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
                     <span className="flex items-center gap-2 text-sm font-medium text-foreground">
                       <Globe className="h-4 w-4 text-muted-foreground" />
                       {t.language}
                     </span>
-                    <select
-                      value={lang}
-                      onChange={event => onSetLang(event.target.value as Language)}
-                      className="h-10 w-full rounded-lg border border-input bg-background px-3 type-input text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30 min-[900px]:text-md"
-                    >
-                      {LANGUAGE_OPTIONS.map(option => (
-                        <option key={option.code} value={option.code}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    <ProjectSelect ariaLabel={t.language} value={lang} onValueChange={value => onSetLang(value as Language)} options={LANGUAGE_OPTIONS.map(option => ({ value: option.code, label: option.label }))} className="w-full" triggerClassName="h-10 rounded-lg type-input min-[900px]:text-md" />
+                  </div>
                   <div className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
                     <span className="text-sm font-medium text-foreground">{t.theme}</span>
                     <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">

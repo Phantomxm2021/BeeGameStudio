@@ -79,6 +79,9 @@
 .ui-editor-object-subtitle { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0 0 43px; color: #9299a7; font-size: 9px; letter-spacing: .04em; }
 .ui-editor-object-subtitle span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 0; }
 .ui-editor-inspector label { display: grid; grid-template-columns: 67px minmax(0, 1fr); align-items: center; gap: 5px; min-height: 27px; color: #adb2bc; font-size: 10px; }
+.ui-editor-select-field { display: grid; grid-template-columns: 67px minmax(0, 1fr); align-items: center; gap: 5px; min-height: 27px; color: #adb2bc; font-size: 10px; }
+.ui-editor-select-field .ui-editor-select-trigger { z-index: 1; height: 24px; min-width: 0; border-color: #ffffff0b; border-radius: 3px; background: #111318; padding: 4px 6px; color: #d4d7df; font-size: 10px; }
+.ui-editor-select-field .ui-editor-select-content { border-color: #ffffff12; background: #15171c; color: #d4d7df; }
 .ui-editor-inspector input,.ui-editor-inspector select,.ui-editor-inspector textarea { width: 100%; min-width: 0; padding: 4px 6px; border: 1px solid #ffffff0b; border-radius: 3px; background: #111318; color: #d4d7df; font-size: 10px; }
 .ui-editor-inspector input,.ui-editor-inspector select { height: 24px; }
 .ui-editor-inspector input:focus-visible,.ui-editor-inspector select:focus-visible,.ui-editor-inspector textarea:focus-visible { outline: 1px solid #a1a1aa; outline-offset: -1px; }

@@ -59,7 +59,8 @@ describe('AttachmentBuildReview', () => {
 
         fireEvent.change(screen.getByLabelText('Confirmed GDD'), { target: { value: '# Edited GDD' } });
         fireEvent.click(screen.getByRole('button', { name: 'Use GDD value' }));
-        fireEvent.change(screen.getByRole('combobox', { name: 'Resource Library usage' }), { target: { value: 'required' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Resource Library usage' }));
+        fireEvent.click(screen.getByRole('option', { name: 'Require Resource Library' }));
         fireEvent.click(screen.getByRole('button', { name: 'Retry analysis' }));
         fireEvent.click(screen.getByRole('button', { name: 'Confirm and build' }));
 

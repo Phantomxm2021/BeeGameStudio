@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FolderOpen, MoreHorizontal, Network, Trash2 } from 'lucide-react';
 import { Switch } from '../ui/switch';
+import { ProjectSelect } from '../beui/project-select';
+import { Button } from '../beui/project-button';
 import {
   type ActiveDiscoveredMcpServer,
   type DiscoveredMcpServer,
@@ -361,19 +363,10 @@ export function McpServerFormPopover({
                 />
               </div>
 
-              <label className="grid gap-2 py-3">
+              <div className="grid gap-2 py-3">
                 <span className="type-caption-1 text-muted-foreground">{copy.form.transport}</span>
-                <select
-                  aria-label={copy.form.transport}
-                  value={form.transport}
-                  onChange={event => update({ transport: event.target.value as McpServerTransport })}
-                  className="type-input h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
-                >
-                  <option value="stdio">{copy.form.stdio}</option>
-                  <option value="sse">{copy.form.sse}</option>
-                  <option value="http">{copy.form.http}</option>
-                </select>
-              </label>
+                <ProjectSelect ariaLabel={copy.form.transport} value={form.transport} onValueChange={value => update({ transport: value as McpServerTransport })} options={[{ value: 'stdio', label: copy.form.stdio }, { value: 'sse', label: copy.form.sse }, { value: 'http', label: copy.form.http }]} className="w-full" triggerClassName="type-input h-10 rounded-lg bg-muted/40" />
+              </div>
 
               {form.transport !== 'stdio' ? (
                 <label className="grid gap-2 py-3">
@@ -427,19 +420,10 @@ export function McpServerFormPopover({
                         </label>
                       </>
                     ) : null}
-                    <label className="grid gap-2 py-3">
+                    <div className="grid gap-2 py-3">
                       <span className="type-caption-1 text-muted-foreground">{copy.form.scope}</span>
-                      <select
-                        aria-label={copy.form.scope}
-                        value={form.scope}
-                        onChange={event => update({ scope: event.target.value as McpServerScope })}
-                        className="type-input h-10 w-full rounded-lg border border-border bg-muted/40 px-3 text-foreground outline-none transition-colors focus:border-ring focus:bg-accent"
-                      >
-                        <option value="beegame">{copy.form.beegame}</option>
-                        <option value="project">{copy.form.project}</option>
-                        <option value="global">{copy.form.global}</option>
-                      </select>
-                    </label>
+                      <ProjectSelect ariaLabel={copy.form.scope} value={form.scope} onValueChange={value => update({ scope: value as McpServerScope })} options={[{ value: 'beegame', label: copy.form.beegame }, { value: 'project', label: copy.form.project }, { value: 'global', label: copy.form.global }]} className="w-full" triggerClassName="type-input h-10 rounded-lg bg-muted/40" />
+                    </div>
 
                     <label className="grid gap-2 py-3">
                       <span className="type-caption-1 text-muted-foreground">{copy.form.cwd}</span>
@@ -473,17 +457,16 @@ export function McpServerFormPopover({
 
           {mode === 'create' ? (
             <footer className="relative z-10 flex shrink-0 items-center justify-end gap-2 border-t border-border bg-muted/30 px-4 py-3">
-              <button type="button" onClick={onClose} className="rounded-md border border-border bg-secondary text-secondary-foreground type-button h-9 px-4 text-foreground">
+              <Button type="button" variant="secondary" onClick={onClose}>
                 {copy.form.cancel}
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={onSave}
                 disabled={saveDisabled}
-                className="rounded-md border border-transparent bg-primary text-primary-foreground h-9 px-4 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isSaving ? copy.form.saving : copy.form.save}
-              </button>
+              </Button>
             </footer>
           ) : null}
         </div>

@@ -1,4 +1,6 @@
 import type { BeeGameBillingCreditPack, BeeGameBillingEvent, BeeGameUsageSummary } from '../../services/creditsApi';
+import { Checkbox } from '../beui/registry/components/motion/checkbox';
+import { Button } from '../beui/project-button';
 
 export type BillingPackFormState = {
   priceId: string;
@@ -89,14 +91,15 @@ export function UsageBillingPanel({
             <h4 className="type-footnote text-foreground">{copy.packsTitle}</h4>
             <p className="type-caption-1 mt-1 text-muted-foreground">{copy.packsDescription}</p>
           </div>
-          <button
-            type="button"
-            className="type-button shrink-0 rounded-full border border-border px-3 py-1.5 text-foreground hover:border-warning-300/40 hover:text-foreground disabled:opacity-50"
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 rounded-full"
             disabled={isSavingPack}
             onClick={onSavePack}
           >
             {isSavingPack ? copy.saving : copy.savePack}
-          </button>
+          </Button>
         </div>
         <div className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.4fr)_minmax(7rem,.7fr)_minmax(0,1fr)]">
           <input
@@ -127,14 +130,9 @@ export function UsageBillingPanel({
             value={packForm.sortOrder}
             onChange={event => onPackFormChange({ ...packForm, sortOrder: event.target.value })}
           />
-          <label className="type-callout flex min-w-0 items-center gap-2 rounded-xl border border-border px-3 py-2 text-foreground">
-            <input
-              type="checkbox"
-              checked={packForm.enabled}
-              onChange={event => onPackFormChange({ ...packForm, enabled: event.target.checked })}
-            />
-            {copy.enabled}
-          </label>
+          <div className="type-callout flex min-w-0 items-center rounded-xl border border-border px-3 py-2 text-foreground">
+            <Checkbox checked={packForm.enabled} onCheckedChange={enabled => onPackFormChange({ ...packForm, enabled })} label={copy.enabled} />
+          </div>
         </div>
         <div className="overflow-hidden rounded-lg border border-border">
           {billingCreditPacks.length ? (
@@ -201,13 +199,14 @@ function BillingCreditPackRow({
         <div className="type-caption-1 break-all text-muted-foreground">{pack.priceId}</div>
       </div>
       <div className="type-caption-1 text-muted-foreground">{pack.enabled ? copy.enabled : copy.disabled}</div>
-      <button
-        type="button"
-        className="type-button rounded-full border border-border px-3 py-1.5 text-foreground hover:border-warning-300/40 hover:text-foreground"
+      <Button
+        variant="outline"
+        size="sm"
+        className="rounded-full"
         onClick={onEdit}
       >
         {copy.edit}
-      </button>
+      </Button>
     </div>
   );
 }

@@ -368,7 +368,7 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('switch', { name: '自动记忆' })).not.toBeInTheDocument();
         expect(screen.queryByText('Let the runtime decide when delegation is useful. BeeGame will not force it.')).not.toBeInTheDocument();
         expect(screen.queryByText('BeeGame 会把 Brave key 注入新启动的 runtime session。已有会话不会自动重启。')).not.toBeInTheDocument();
-        expect(screen.getByRole('combobox', { name: '语言选择' })).toBeInTheDocument();
+        expect(screen.getByLabelText('语言选择')).toBeInTheDocument();
         expect(screen.queryByText('/tmp/beegame-projects')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('搜索后端')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('配置名称')).not.toBeInTheDocument();
@@ -732,7 +732,7 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('tab', { name: '技能' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '模型' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '成员' })).not.toBeInTheDocument();
-        expect(screen.getByRole('combobox', { name: '语言选择' })).toBeInTheDocument();
+        expect(screen.getByLabelText('语言选择')).toBeInTheDocument();
         expect(screen.queryByLabelText('工作路径')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('搜索后端')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
@@ -765,7 +765,7 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('tab', { name: '能力' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: 'MCP' })).not.toBeInTheDocument();
         expect(screen.queryByRole('tab', { name: '模型' })).not.toBeInTheDocument();
-        expect(screen.getByRole('combobox', { name: '语言选择' })).toBeInTheDocument();
+        expect(screen.getByLabelText('语言选择')).toBeInTheDocument();
         expect(screen.queryByLabelText('工作路径')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('搜索后端')).not.toBeInTheDocument();
         expect(listModelConfigs).not.toHaveBeenCalled();
@@ -1055,7 +1055,8 @@ describe('SettingsMenu model settings', () => {
         expect(await screen.findByText('/tmp/beegame-projects')).toBeInTheDocument();
         expect(screen.getByText('服务器模式下工作根目录是全局安全边界。普通用户不能单独修改，项目路径由平台按账号自动生成。')).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '恢复默认' })).not.toBeInTheDocument();
-        await userEvent.selectOptions(screen.getByLabelText('搜索后端'), 'brave');
+        await userEvent.click(screen.getByLabelText('搜索后端'));
+        await userEvent.click(screen.getByRole('option', { name: 'Brave' }));
         await userEvent.type(screen.getByLabelText('BRAVE_SEARCH_API_KEY'), 'bsa-dashboard-secret');
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
@@ -1200,7 +1201,8 @@ describe('SettingsMenu model settings', () => {
 
         expect(screen.queryByLabelText('BRAVE_SEARCH_API_KEY')).not.toBeInTheDocument();
         await openPlatformSettings();
-        await userEvent.selectOptions(screen.getByLabelText('搜索后端'), 'brave');
+        await userEvent.click(screen.getByLabelText('搜索后端'));
+        await userEvent.click(screen.getByRole('option', { name: 'Brave' }));
         await userEvent.type(screen.getByLabelText('BRAVE_SEARCH_API_KEY'), 'bsa-dashboard-secret');
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
@@ -1210,7 +1212,8 @@ describe('SettingsMenu model settings', () => {
         }));
         expect(screen.queryByText('网页搜索配置已保存；新会话生效。')).not.toBeInTheDocument();
 
-        await userEvent.selectOptions(screen.getByLabelText('搜索后端'), 'exa');
+        await userEvent.click(screen.getByLabelText('搜索后端'));
+        await userEvent.click(screen.getByRole('option', { name: 'Exa' }));
         expect(screen.getByLabelText('EXA_API_KEY')).toBeInTheDocument();
     });
 });

@@ -1,4 +1,5 @@
 import type { ModelProviderKind } from '../../services/modelConfigApi';
+import { ProjectSelect } from '../beui/project-select';
 
 export type ModelConfigPanelLabels = {
   provider: string;
@@ -54,12 +55,7 @@ export function ModelConfigPanel({
     <form className="divide-y divide-border" autoComplete="off" onSubmit={onSubmit}>
       <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center">
         <span className="text-sm font-medium text-foreground">{labels.provider}</span>
-        <select aria-label={labels.provider} value={provider} onChange={event => onProviderChange(event.target.value as ModelProviderKind)} className={inputClass}>
-          <option value="openai-compatible">OpenAI Compatible</option>
-          <option value="anthropic-compatible">Anthropic API Compatible</option>
-          <option value="gemini">Gemini</option>
-          <option value="grok">Grok</option>
-        </select>
+        <ProjectSelect ariaLabel={labels.provider} value={provider} onValueChange={value => onProviderChange(value as ModelProviderKind)} options={[{ value: 'openai-compatible', label: 'OpenAI Compatible' }, { value: 'anthropic-compatible', label: 'Anthropic API Compatible' }, { value: 'gemini', label: 'Gemini' }, { value: 'grok', label: 'Grok' }]} className="w-full" triggerClassName={inputClass} />
       </label>
       <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center"><span className="text-sm font-medium text-foreground">{labels.baseUrl}</span><input aria-label={labels.baseUrl} value={baseUrl} onChange={event => onBaseUrlChange(event.target.value)} placeholder="https://api.example.com/v1" className={inputClass} /></label>
       <label className="grid min-h-16 gap-3 py-3 sm:grid-cols-[10.5rem_1fr] sm:items-center"><span className="text-sm font-medium text-foreground">{labels.apiKey}</span><input aria-label={labels.apiKey} type="password" autoComplete="new-password" value={apiKey} onChange={event => onApiKeyChange(event.target.value)} placeholder={apiKeyPreview ? `${savedPrefix}${apiKeyPreview}` : 'sk-...'} className={inputClass} /></label>

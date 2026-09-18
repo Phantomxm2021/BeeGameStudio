@@ -40,6 +40,8 @@ import {
   type BeeGameUiContentNode,
 } from '../../services/beeGameAdapter';
 import { EditorLoadingView, type EditorLoadState } from './EditorLoadingView';
+import { Checkbox } from '../beui/registry/components/motion/checkbox';
+import { ProjectSelect } from '../beui/project-select';
 import './SceneEditorOverlay.css';
 import './UiEditorOverlay.css';
 
@@ -930,7 +932,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
               <div className="ui-editor-object-header">
                 <div className="ui-editor-object-heading">
                   <span className="ui-editor-object-avatar">{roleIcon(selected.role)}</span>
-                  <input type="checkbox" aria-label="Set active" checked={selected.enabled !== false} onChange={event => updateSelected(node => { node.enabled = event.target.checked; })} />
+                  <Checkbox aria-label="Set active" checked={selected.enabled !== false} onCheckedChange={checked => updateSelected(node => { node.enabled = checked; })} />
                   <input className="ui-editor-name-input" aria-label="Object name" value={selected.name ?? selected.id} onChange={event => updateSelected(node => { node.name = event.target.value; })} />
                 </div>
                 <div className="ui-editor-object-subtitle"><span>{uiNodeTypeLabel(selectedKind)}</span><span title={`${selected.role} · ${selected.id}`}>{selected.role} · {selected.id}</span></div>
@@ -961,12 +963,12 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
                       {!imageAssets.length ? <p>No verified image assets are available in this project.</p> : null}
                     </div> : null}
                   </div>
-                  <label>Image Type<select aria-label="Image type" value={selectedImageType} onChange={event => updateImage('type', event.target.value as UnityImageType)}><option value="simple">Simple</option><option value="sliced">Sliced</option><option value="tiled">Tiled</option><option value="filled">Filled</option></select></label>
-                  {selectedImageType === 'simple' || selectedImageType === 'filled' ? <label className="ui-editor-check-field"><span>Preserve Aspect</span><input type="checkbox" aria-label="Preserve aspect" checked={selectedImage.preserveAspect === true || (!('preserveAspect' in selectedImage) && selected.data?.fit === 'contain')} onChange={event => updateImage('preserveAspect', event.target.checked)} /></label> : null}
+                  <EditorSelect label="Image Type" ariaLabel="Image type" value={selectedImageType} onValueChange={value => updateImage('type', value as UnityImageType)} options={[['simple', 'Simple'], ['sliced', 'Sliced'], ['tiled', 'Tiled'], ['filled', 'Filled']]} />
+                  {selectedImageType === 'simple' || selectedImageType === 'filled' ? <div className="ui-editor-check-field"><span>Preserve Aspect</span><Checkbox aria-label="Preserve aspect" checked={selectedImage.preserveAspect === true || (!('preserveAspect' in selectedImage) && selected.data?.fit === 'contain')} onCheckedChange={checked => updateImage('preserveAspect', checked)} /></div> : null}
                   {selectedImageType === 'sliced' ? <div className="ui-editor-slice-border"><span>Slice Border</span>{(['left', 'right', 'top', 'bottom'] as const).map(side => <label key={side}>{side[0].toUpperCase()}<input aria-label={`Slice ${side}`} type="number" min="0" value={typeof selectedBorder[side] === 'number' ? selectedBorder[side] : 0} onChange={event => updateBorder(side, Number(event.target.value))} /></label>)}</div> : null}
                   {selectedImageType === 'filled' ? <>
-                    <label>Fill Method<select aria-label="Fill method" value={typeof selectedImage.fillMethod === 'string' ? selectedImage.fillMethod : 'horizontal'} onChange={event => updateImage('fillMethod', event.target.value)}><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option><option value="radial90">Radial 90</option><option value="radial180">Radial 180</option><option value="radial360">Radial 360</option></select></label>
-                    <label>Fill Origin<select aria-label="Fill origin" value={typeof selectedImage.fillOrigin === 'string' ? selectedImage.fillOrigin : 'start'} onChange={event => updateImage('fillOrigin', event.target.value)}><option value="start">Start</option><option value="end">End</option></select></label>
+                    <EditorSelect label="Fill Method" ariaLabel="Fill method" value={typeof selectedImage.fillMethod === 'string' ? selectedImage.fillMethod : 'horizontal'} onValueChange={value => updateImage('fillMethod', value)} options={[['horizontal', 'Horizontal'], ['vertical', 'Vertical'], ['radial90', 'Radial 90'], ['radial180', 'Radial 180'], ['radial360', 'Radial 360']]} />
+                    <EditorSelect label="Fill Origin" ariaLabel="Fill origin" value={typeof selectedImage.fillOrigin === 'string' ? selectedImage.fillOrigin : 'start'} onValueChange={value => updateImage('fillOrigin', value)} options={[['start', 'Start'], ['end', 'End']]} />
                     <label>Fill Amount<input aria-label="Fill amount" type="range" min="0" max="1" step="0.01" value={typeof selectedImage.fillAmount === 'number' ? selectedImage.fillAmount : 1} onChange={event => updateImage('fillAmount', Number(event.target.value))} /></label>
                   </> : null}
                 </> : null}
@@ -980,10 +982,10 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
               </div></details> : null}
               {selectedKind === 'toggle' ? <details className="ui-editor-inspector-component ui-editor-component-content" open><summary><ChevronRight size={12} className="ui-editor-component-chevron" /><ToggleLeft size={14} /><span>Toggle</span></summary><div className="ui-editor-section">
                 <label>Label<input aria-label="Toggle label" value={uiNodeText(selected)} onChange={event => updateText(event.target.value)} /></label>
-                <label>Initial Value<select aria-label="Toggle initial value" value={String(selected.data?.value ?? selected.data?.default ?? false)} onChange={event => {
-                  const value = event.target.value === 'true' ? true : event.target.value === 'false' ? false : event.target.value;
+                <EditorSelect label="Initial Value" ariaLabel="Toggle initial value" value={String(selected.data?.value ?? selected.data?.default ?? false)} onValueChange={next => {
+                  const value = next === 'true' ? true : next === 'false' ? false : next;
                   updateData('default' in (selected.data ?? {}) ? 'default' : 'value', value);
-                }}><option value="false">Off</option><option value="true">On</option><option value="follow-prefers-reduced-motion">Follow System</option></select></label>
+                }} options={[["false", 'Off'], ["true", 'On'], ['follow-prefers-reduced-motion', 'Follow System']]} />
                 <label>Storage Key<input aria-label="Toggle storage key" value={typeof selected.data?.storageKey === 'string' ? selected.data.storageKey : ''} onChange={event => updateData('storageKey', event.target.value)} /></label>
               </div></details> : null}
               {selectedKind === 'particle-system' ? <details className="ui-editor-inspector-component ui-editor-component-content" open><summary><ChevronRight size={12} className="ui-editor-component-chevron" /><Circle size={14} /><span>Particle System</span></summary><div className="ui-editor-section">
@@ -992,7 +994,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
                   const range = typeof node.data?.particleSize === 'object' && node.data.particleSize !== null ? node.data.particleSize as Record<string, unknown> : {};
                   node.data = { ...node.data, particleSize: { ...range, [key]: Math.max(0, Number(event.target.value)) } };
                 })} />)}</div> : <label>Particle Size<input aria-label="Particle size" type="number" min="0" value={typeof selected.data?.particleSize === 'number' ? selected.data.particleSize : 8} onChange={event => updateData('particleSize', Math.max(0, Number(event.target.value)))} /></label>}
-                <label>Blend<select aria-label="Particle blend mode" value={typeof selected.data?.blend === 'string' ? selected.data.blend : 'alpha'} onChange={event => updateData('blend', event.target.value)}><option value="alpha">Alpha</option><option value="additive">Additive</option><option value="multiply">Multiply</option></select></label>
+                <EditorSelect label="Blend" ariaLabel="Particle blend mode" value={typeof selected.data?.blend === 'string' ? selected.data.blend : 'alpha'} onValueChange={value => updateData('blend', value)} options={[['alpha', 'Alpha'], ['additive', 'Additive'], ['multiply', 'Multiply']]} />
               </div></details> : null}
               {selectedKind === 'toast' ? <details className="ui-editor-inspector-component ui-editor-component-behavior" open><summary><ChevronRight size={12} className="ui-editor-component-chevron" /><BoxSelect size={14} /><span>Toast Behavior</span></summary><div className="ui-editor-section">
                 <label>Trigger<input aria-label="Toast trigger" value={typeof selected.data?.trigger === 'string' ? selected.data.trigger : ''} onChange={event => updateData('trigger', event.target.value)} /></label>
@@ -1007,7 +1009,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
                 <label>Inactive Alpha<input aria-label="Segment inactive alpha" type="number" min="0" max="1" step="0.05" value={typeof selected.data?.inactiveAlpha === 'number' ? selected.data.inactiveAlpha : .3} onChange={event => updateData('inactiveAlpha', Math.max(0, Math.min(1, Number(event.target.value))))} /></label>
               </div></details> : null}
               {selectedKind !== 'flow' && selectedKind !== 'flow-screen' ? <details className="ui-editor-inspector-component ui-editor-component-transform" open><summary><ChevronRight size={12} className="ui-editor-component-chevron" /><Move size={14} /><span>Rect Transform</span></summary><div className="ui-editor-section">
-                <label>Space<select aria-label="UI render space" value={typeof selected.data?.space === 'string' ? selected.data.space : 'screen'} onChange={event => updateData('space', event.target.value)}><option value="screen">Screen Space</option><option value="world">World Space (XR)</option></select></label>
+                <EditorSelect label="Space" ariaLabel="UI render space" value={typeof selected.data?.space === 'string' ? selected.data.space : 'screen'} onValueChange={value => updateData('space', value)} options={[['screen', 'Screen Space'], ['world', 'World Space (XR)']]} />
                 <div className="ui-editor-anchor-field"><span>Anchors</span><div className="ui-editor-anchor-presets" role="radiogroup" aria-label="Anchor preset">{ANCHOR_PRESETS.map(anchor => <button key={anchor} type="button" role="radio" aria-label={anchor} aria-checked={(selected.layout?.anchor ?? 'top-left') === anchor} className={(selected.layout?.anchor ?? 'top-left') === anchor ? 'active' : ''} onClick={() => updateSelected(node => { node.layout = { ...node.layout, anchor }; })}><i /></button>)}</div></div>
                 <div className="ui-editor-pair"><span>Position</span>{[0, 1].map(index => <input key={index} aria-label={`Position ${index === 0 ? 'X' : 'Y'}`} type="number" value={selected.layout?.position?.[index] ?? 0} onChange={event => updateLayout('position', index, Number(event.target.value))} />)}</div>
                 {selected.data?.space === 'world' ? <label>Position Z<input aria-label="Position Z" type="number" value={typeof selected.data?.positionZ === 'number' ? selected.data.positionZ : 0} onChange={event => updateData('positionZ', Number(event.target.value))} /></label> : null}
@@ -1025,9 +1027,9 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
                 <label>Radius<input type="number" min="0" value={typeof selected.style?.cornerRadius === 'number' ? selected.style.cornerRadius : 0} onChange={event => updateStyle('cornerRadius', Math.max(0, Number(event.target.value)))} /></label>
                 <label>Opacity<input type="number" min="0" max="1" step="0.05" value={typeof selected.data?.alpha === 'number' ? selected.data.alpha : 1} onChange={event => updateData('alpha', Math.max(0, Math.min(1, Number(event.target.value))))} /></label>
                 {textCapable ? <>
-                  <label>Font<select aria-label="Font asset" value={typeof selectedFont?.assetRef === 'string' ? selectedFont.assetRef : ''} onChange={event => selectFontAsset(event.target.value)}><option value="">Default</option>{fontAssets.map(asset => <option key={asset.id} value={asset.id}>{asset.label}</option>)}</select></label>
+                  <EditorSelect label="Font" ariaLabel="Font asset" value={typeof selectedFont?.assetRef === 'string' ? selectedFont.assetRef : ''} onValueChange={selectFontAsset} options={[["", 'Default'], ...fontAssets.map(asset => [asset.id, asset.label] as const)]} />
                   <label>Font size<input type="number" min="1" value={typeof selected.data?.fontSize === 'number' ? selected.data.fontSize : 18} onChange={event => updateData('fontSize', Math.max(1, Number(event.target.value)))} /></label>
-                  <label>Align<select value={typeof selected.data?.align === 'string' ? selected.data.align : 'center'} onChange={event => updateData('align', event.target.value)}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+                  <EditorSelect label="Align" ariaLabel="Text alignment" value={typeof selected.data?.align === 'string' ? selected.data.align : 'center'} onValueChange={value => updateData('align', value)} options={[['left', 'Left'], ['center', 'Center'], ['right', 'Right']]} />
                 </> : null}
               </div></details> : null}
               <details className="ui-editor-inspector-component ui-editor-component-advanced"><summary><ChevronRight size={12} className="ui-editor-component-chevron" /><BoxSelect size={14} /><span>Advanced</span></summary><div className="ui-editor-section ui-editor-json-section">
@@ -1470,6 +1472,10 @@ function resolveNodeImage(node: BeeGameUiContentNode, assetUrls: Record<string, 
   if (!node.assetRef) return undefined;
   const member = typeof node.data?.member === 'string' ? node.data.member : undefined;
   return assetUrls[member ? `${node.assetRef}:${member}` : node.assetRef] ?? assetUrls[node.assetRef];
+}
+
+function EditorSelect({ label, ariaLabel, value, onValueChange, options }: { label: string; ariaLabel: string; value: string; onValueChange: (value: string) => void; options: ReadonlyArray<readonly [string, string]> }) {
+  return <div className="ui-editor-select-field"><span>{label}</span><ProjectSelect ariaLabel={ariaLabel} value={value} onValueChange={onValueChange} options={options.map(([optionValue, optionLabel]) => ({ value: optionValue, label: optionLabel }))} className="min-w-0" triggerClassName="ui-editor-select-trigger" contentClassName="ui-editor-select-content" /></div>;
 }
 
 function UiImagePreview({ node, src }: { node: BeeGameUiContentNode; src: string }) {

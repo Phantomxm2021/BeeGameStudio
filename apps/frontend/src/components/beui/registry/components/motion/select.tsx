@@ -198,9 +198,11 @@ export function Select({
 export interface SelectTriggerProps {
   className?: string;
   children: ReactNode;
+  ariaLabel?: string;
+  title?: string;
 }
 
-export function SelectTrigger({ className, children }: SelectTriggerProps) {
+export function SelectTrigger({ className, children, ariaLabel, title }: SelectTriggerProps) {
   const ctx = useSelectContext("SelectTrigger");
   const isTop = ctx.placement === "top";
   // edge facing the panel flattens then rounds; the far edge stays rounded.
@@ -219,6 +221,8 @@ export function SelectTrigger({ className, children }: SelectTriggerProps) {
       aria-haspopup="listbox"
       aria-expanded={ctx.open}
       aria-controls={ctx.listId}
+      aria-label={ariaLabel}
+      title={title}
       onClick={() => ctx.setOpen(!ctx.open)}
       // Gooey: the edge facing the panel snaps flat (panel attached) then rounds
       // back once the panel pulls away — the two pinch apart.

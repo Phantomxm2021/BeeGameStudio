@@ -1,5 +1,6 @@
 import { Bot, Brain, ShieldCheck } from 'lucide-react';
 import type { RuntimeSettingsConfig } from '../../services/runtimeSettingsApi';
+import { Switch } from '../ui/switch';
 
 export type RuntimeCapabilityCopy = {
   title: string;
@@ -46,7 +47,7 @@ export function RuntimeSettingsPanel({
     <div className="divide-y divide-border">
       {getRuntimeCapabilityItems(copy).map(item => {
         const Icon = item.scope === 'restart' ? ShieldCheck : item.key === 'autoDreamEnabled' ? Brain : Bot;
-        const checked = settings[item.key];
+        const checked = Boolean(settings[item.key]);
         return (
           <div key={item.key} className="grid min-h-16 gap-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center">
             <div className="min-w-0">
@@ -59,18 +60,11 @@ export function RuntimeSettingsPanel({
                 <div>{item.note}</div>
               </div>
             </div>
-            <button
-              type="button"
-              role="switch"
+            <Switch
               aria-label={item.label}
-              aria-checked={checked}
-              onClick={() => onToggle(item.key)}
-              className={`relative h-7 w-12 rounded-full border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${checked ? 'border-success/60 bg-success' : 'border-border bg-muted/40'}`}
-            >
-              <span
-                className={`absolute left-1 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-background shadow-sm transition-transform ${checked ? 'translate-x-5' : 'translate-x-0'}`}
-              />
-            </button>
+              checked={checked}
+              onCheckedChange={() => onToggle(item.key)}
+            />
           </div>
         );
       })}

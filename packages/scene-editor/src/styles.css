@@ -298,6 +298,16 @@
 .scene-editor-host .beui-switch[data-state=checked] { border-color: #f4f4f5; background: #f4f4f5; }
 .scene-editor-host .beui-switch-thumb { display: block; width: 14px; height: 14px; border-radius: 50%; background: #8f949e; box-shadow: 0 1px 3px #0007; }
 .scene-editor-host .beui-switch[data-state=checked] .beui-switch-thumb { background: #111216; }
+.scene-editor-host .beui-select { position: relative; min-width: 0; width: 100%; }
+.scene-editor-host .beui-select-trigger { width: 100%; height: 28px; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 8px; border: 1px solid #ffffff10; border-radius: 7px; background: #121419; color: #d8dbe2; font: inherit; text-align: left; cursor: pointer; }
+.scene-editor-host .beui-select-trigger:hover { border-color: #ffffff28; background: #181b21; }
+.scene-editor-host .beui-select-trigger:focus-visible { outline: 1px solid #8bbcf0; outline-offset: 1px; }
+.scene-editor-host .beui-select-trigger:disabled { cursor: not-allowed; opacity: .5; }
+.scene-editor-host .beui-select-trigger > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scene-editor-host .beui-select-content { position: absolute; left: 0; right: 0; top: calc(100% + 5px); z-index: 80; display: grid; gap: 2px; max-height: 220px; overflow: auto; padding: 4px; border: 1px solid #ffffff17; border-radius: 9px; background: #17191f; box-shadow: 0 14px 32px #0008; transform-origin: top; }
+.scene-editor-host .beui-select-item { min-height: 26px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 7px; border: 0; border-radius: 6px; background: transparent; color: #aeb3bd; font: inherit; text-align: left; cursor: pointer; }
+.scene-editor-host .beui-select-item:hover,.scene-editor-host .beui-select-item[aria-selected="true"] { background: #ffffff0c; color: #f5f6f8; }
+.scene-editor-host .beui-select-item:disabled { cursor: not-allowed; opacity: .4; }
 .scene-editor-host .beui-button.settings-apply { min-width: 84px; height: 34px; padding: 0 18px; border: 1px solid #f4f4f5; border-radius: 999px; background: #f4f4f5; color: #111216; font-weight: 600; }
 .scene-editor-host .beui-button.settings-apply:hover:not(:disabled) { background: #d4d4d8; color: #111216; }
 @media (max-width: 900px) {

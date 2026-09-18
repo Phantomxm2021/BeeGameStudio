@@ -5,6 +5,7 @@ import type {
   BeeGameProjectRetentionResult,
 } from '../../services/projectLifecycleApi';
 import { CreditMetric } from './BillingSettingsPanel';
+import { Button } from '../beui/project-button';
 
 export type ProjectLifecycleSettingsCopy = {
   tab: string;
@@ -94,22 +95,24 @@ export function ProjectLifecyclePanel({
             <div className="type-footnote text-foreground">{copy.retentionDescription}</div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
+            <Button
+              variant="outline"
+              size="sm"
               disabled={isRetentionRunning}
               onClick={onPlanRetention}
-              className="border border-input bg-background type-button h-9 rounded-full px-3 text-foreground disabled:opacity-60"
+              className="rounded-full"
             >
               {copy.dryRun}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               disabled={isRetentionRunning}
               onClick={onRunRetention}
-              className="border border-input bg-background type-button h-9 rounded-full px-3 text-foreground disabled:opacity-60"
+              className="rounded-full"
             >
               {copy.runRetention}
-            </button>
+            </Button>
           </div>
         </div>
         {retentionResult ? (

@@ -11,6 +11,7 @@ import {
   type SpriteFrameTable,
 } from './sceneContentAdapter';
 import { EditorLoadingView, type EditorLoadState } from './EditorLoadingView';
+import { ProjectSelect } from '../beui/project-select';
 import './SceneEditorOverlay.css';
 
 const loadSceneEditor = async () => {
@@ -297,12 +298,10 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
               onDirtyChange={(dirty, saving) => { setEditorDirty(dirty); setEditorSaving(saving); }}
             />
             {scenes.length > 1 ? (
-              <label className="scene-document-switcher">
+              <div className="scene-document-switcher">
                 <span>Scene</span>
-                <select aria-label="Scene document" title={editorDirty ? 'Save or undo changes before switching scenes' : editorSaving ? 'Wait for the current save to finish' : 'Scene document'} disabled={editorDirty || editorSaving} value={selectedScenePath} onChange={event => chooseScene(event.target.value)}>
-                  {scenes.map(scene => <option key={scene.path} value={scene.path}>{scene.document.id}</option>)}
-                </select>
-              </label>
+                <ProjectSelect ariaLabel="Scene document" title={editorDirty ? 'Save or undo changes before switching scenes' : editorSaving ? 'Wait for the current save to finish' : 'Scene document'} disabled={editorDirty || editorSaving} value={selectedScenePath} onValueChange={chooseScene} options={scenes.map(scene => ({ value: scene.path, label: scene.document.id }))} className="scene-document-select" triggerClassName="scene-document-select-trigger" />
+              </div>
             ) : null}
           </div>
         </Suspense>

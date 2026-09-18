@@ -2,6 +2,7 @@ import type { RefObject } from 'react';
 import type { BeeGameIntakeOption, BeeGameIntakeSettings } from '../../../services/beeGameAdapter';
 import type { ProductionSettingOptions } from '../../../config/productionSettingOptions';
 import type { IntakeCopy } from './types';
+import { ProjectSelect } from '../../beui/project-select';
 
 type IntakeOptionCardsProps = {
   options: BeeGameIntakeOption[];
@@ -76,13 +77,10 @@ export function IntakeSettingsForm({
         <SettingSelect label={copy.fields.dimension} value={settings.dimension} options={options.dimensions} onChange={value => onChange({ dimension: value })} copy={copy} localizedOptionLabel={localizedOptionLabel} className={selectClass} labelClass={inputLabelClass} />
         <SettingSelect label={copy.fields.genre} value={settings.genre} options={options.genres} onChange={value => onChange({ genre: value })} copy={copy} localizedOptionLabel={localizedOptionLabel} className={selectClass} labelClass={inputLabelClass} />
         <SettingSelect label={copy.fields.style} value={settings.visualStyle} options={options.styles} onChange={value => onChange({ visualStyle: value })} copy={copy} localizedOptionLabel={localizedOptionLabel} className={selectClass} labelClass={inputLabelClass} />
-        <label className={inputLabelClass}>
+        <div className={inputLabelClass}>
           {copy.fields.resourceLibrary}
-          <select aria-label={copy.fields.resourceLibrary} value={settings.resourceLibraryUsage || ''} onChange={event => onChange({ resourceLibraryUsage: event.target.value as BeeGameIntakeSettings['resourceLibraryUsage'] })} className={selectClass}>
-            <option value="" disabled hidden>{copy.fields.selectPlaceholder}</option>
-            {(['preferred', 'optional', 'required'] as const).map(value => <option key={value} value={value}>{copy.resourceLibraryUsage[value]}</option>)}
-          </select>
-        </label>
+          <ProjectSelect ariaLabel={copy.fields.resourceLibrary} value={settings.resourceLibraryUsage || ''} onValueChange={value => onChange({ resourceLibraryUsage: value as BeeGameIntakeSettings['resourceLibraryUsage'] })} placeholder={copy.fields.selectPlaceholder} options={(['preferred', 'optional', 'required'] as const).map(value => ({ value, label: copy.resourceLibraryUsage[value] }))} className="w-full" triggerClassName={selectClass} />
+        </div>
         <div ref={inputMenuRef} className={inputLabelClass}>
           <span>{copy.fields.inputs}</span>
           <button
@@ -113,7 +111,7 @@ export function IntakeSettingsForm({
 }
 
 function SettingSelect({ label, value, options, onChange, copy, localizedOptionLabel, className, labelClass }: { label: string; value: string; options: string[]; onChange: (value: string) => void; copy: IntakeCopy; localizedOptionLabel: (value: string) => string; className: string; labelClass: string }) {
-  return <label className={labelClass}>{label}<select aria-label={label} value={value} onChange={event => onChange(event.target.value)} className={className}><option value="" disabled hidden>{copy.fields.selectPlaceholder}</option>{options.map(option => <option key={option} value={option}>{localizedOptionLabel(option)}</option>)}</select></label>;
+  return <div className={labelClass}>{label}<ProjectSelect ariaLabel={label} value={value} onValueChange={onChange} placeholder={copy.fields.selectPlaceholder} options={options.map(option => ({ value: option, label: localizedOptionLabel(option) }))} className="w-full" triggerClassName={className} /></div>;
 }
 
 type ConfirmedBriefProps = { settings: BeeGameIntakeSettings; copy: IntakeCopy; localizedOptionLabel: (value: string) => string; isPreparing: boolean; onEdit: () => void; onStart: () => void };
