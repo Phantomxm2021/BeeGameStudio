@@ -585,13 +585,31 @@ export async function retryRun(input: {
       !acquired.run.activeDispatch?.terminalResult
     )
       return acquired.run
+    const acceptanceRevisionMismatch =
+      acquired.run.phase === 'ACCEPTANCE' &&
+      acquired.run.activeDispatch?.failureReason ===
+        'acceptance evidence does not match the workspace' &&
+      Boolean(input.workspacePath)
+    const acceptanceRetryRevision = acceptanceRevisionMismatch
+      ? await computeWorkspaceRevision(input.workspacePath!)
+      : undefined
+    const retryBase = acceptanceRetryRevision
+      ? {
+          ...acquired.run,
+          revision: {
+            ...acquired.run.revision,
+            implementation: acceptanceRetryRevision,
+            workspace: acceptanceRetryRevision,
+          },
+        }
+      : acquired.run
     const replayable =
-      !input.taskId && acquired.run.activeDispatch?.terminalResult
+      !input.taskId && retryBase.activeDispatch?.terminalResult
     const resumed =
       transitionDeliveryRun(
         {
-          ...acquired.run,
-          activeDispatch: replayable ? acquired.run.activeDispatch : undefined,
+          ...retryBase,
+          activeDispatch: replayable ? retryBase.activeDispatch : undefined,
         },
         { type: 'retry', ...(input.taskId ? { taskId: input.taskId } : {}) },
       )
