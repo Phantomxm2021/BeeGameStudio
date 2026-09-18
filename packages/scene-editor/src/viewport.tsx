@@ -511,6 +511,34 @@ function Primitive({ node, assets, diagnose }: { node: SceneNode; assets: Record
   return <mesh castShadow receiveShadow scale={[...rendererSize(node), 1]}><planeGeometry args={[1, 1]} />{material}</mesh>
 }
 
+function TextPreview({ node }: { node: SceneNode }) {
+  const component = componentOf(node, 'text')
+  const texture = useMemo(() => {
+    if (!componentVisibleInEditor(component) || !component) return null
+    const fontSize = Math.max(8, Number(component.properties.fontSize) || 32)
+    const lines = component.text.split('\n')
+    const canvas = window.document.createElement('canvas')
+    const context = canvas.getContext('2d')!
+    context.font = `${fontSize}px "SF Pro Text", "PingFang SC", sans-serif`
+    const width = Math.max(1, ...lines.map(line => context.measureText(line || ' ').width))
+    canvas.width = Math.ceil(width + fontSize)
+    canvas.height = Math.ceil(lines.length * fontSize * 1.25 + fontSize * .5)
+    context.font = `${fontSize}px "SF Pro Text", "PingFang SC", sans-serif`
+    context.fillStyle = typeof component.properties.color === 'string' ? component.properties.color : '#ffffff'
+    context.textAlign = 'center'
+    context.textBaseline = 'middle'
+    lines.forEach((line, index) => context.fillText(line, canvas.width / 2, fontSize * .25 + fontSize * 1.25 * (index + .5)))
+    const map = new THREE.CanvasTexture(canvas)
+    map.colorSpace = THREE.SRGBColorSpace
+    return map
+  }, [component?.text, component?.enabled, component?.properties.fontSize, component?.properties.color])
+  useEffect(() => () => texture?.dispose(), [texture])
+  if (!texture || !component) return null
+  const rect = componentOf(node, 'rect-transform')
+  const size: [number, number] = rect ? [Math.max(.01, rect.sizeDelta[0]), Math.max(.01, rect.sizeDelta[1])] : [Math.max(1, texture.image.width / texture.image.height), 1]
+  return <mesh scale={[size[0], size[1], 1]}><planeGeometry args={[1, 1]} /><meshBasicMaterial map={texture} transparent depthWrite={false} toneMapped={false} /></mesh>
+}
+
 function seeded(index: number, salt: number): number {
   const value = Math.sin(index * 127.1 + salt * 311.7) * 43758.5453
   return value - Math.floor(value)
@@ -722,7 +750,7 @@ function SelectionOutline({ selectedIds, modelSelection, color, width }: { selec
   return null
 }
 
-function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableIds, onSelect, mode, space, snap, onTransform, orbit, diagnose, showGizmos }: { id: string; document: SceneDocument; selected: string; selectedIds: readonly string[]; hiddenIds: readonly string[]; unpickableIds: readonly string[]; onSelect: (id: string, modifiers?: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => void; mode: SceneViewportMode; space: 'local' | 'world'; snap: boolean; onTransform: (transform: Transform) => void; orbit: MutableRefObject<any>; diagnose: (message: string) => void; showGizmos: boolean }) {
+function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableIds, onSelect, mode, space, snap, onTransform, orbit, diagnose, showGizmos, viewMode }: { id: string; document: SceneDocument; selected: string; selectedIds: readonly string[]; hiddenIds: readonly string[]; unpickableIds: readonly string[]; onSelect: (id: string, modifiers?: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => void; mode: SceneViewportMode; space: 'local' | 'world'; snap: boolean; onTransform: (transform: Transform) => void; orbit: MutableRefObject<any>; diagnose: (message: string) => void; showGizmos: boolean; viewMode: SceneViewMode }) {
   const node = document.nodes[id]
   const group = useRef<THREE.Group>(null)
   const controls = useRef<any>(null)
@@ -774,15 +802,16 @@ function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableId
   }
   return <><group ref={group} name={node.id} position={node.transform.position} rotation={node.transform.rotation as any} scale={node.transform.scale} onClick={event => { event.stopPropagation(); if (!unpickableIds.includes(node.id) && mode !== 'hand' && !event.altKey) onSelect(node.id, { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey }) }}>
     {componentOf(node, 'sprite-renderer') || componentOf(node, 'image') || componentOf(node, 'tilemap') ? <Primitive node={node} assets={document.assets} diagnose={diagnose} /> : null}
+    {componentOf(node, 'text') ? <TextPreview node={node} /> : null}
     {componentOf(node, 'mesh-filter') && componentOf(node, 'mesh-renderer') ? <ModelAsset asset={document.assets[componentOf(node, 'mesh-filter')!.assetId]} override={componentOf(node, 'mesh-renderer')!.material} assets={document.assets} diagnose={diagnose} /> : null}
     {componentOf(node, 'skinned-mesh-renderer') ? <ModelAsset asset={document.assets[componentOf(node, 'skinned-mesh-renderer')!.assetId]} override={componentOf(node, 'skinned-mesh-renderer')!.material} assets={document.assets} diagnose={diagnose} /> : null}
     {componentOf(node, 'particle-system') ? <ParticleEmitterPreview node={node} assets={document.assets} diagnose={diagnose} /> : null}
-    {componentVisibleInEditor(componentOf(node, 'light-2d') ?? componentOf(node, 'light')) ? <Light dimension={document.dimension} showIcon={document.dimension === '3d' && (showGizmos || isSelected)} node={node} selected={isSelected} gizmoColor={document.settings?.selectionColor ?? '#ffad46'} /> : null}
-    {showGizmos && (document.dimension === '3d' || isSelected) ? node.components.filter((component): component is Collider2DComponent => ['box-collider-2d', 'circle-collider-2d', 'capsule-collider-2d', 'polygon-collider-2d'].includes(component.type) && component.enabled).map(component => <Volume2D key={component.id} volume={component} />) : null}
-    {showGizmos && document.dimension === '3d' ? node.components.filter((component): component is Collider3DComponent => ['box-collider', 'sphere-collider', 'capsule-collider', 'mesh-collider'].includes(component.type) && component.enabled).map(component => <Volume3D key={component.id} volume={component} />) : null}
-    {document.dimension === '3d' && !node.components.some(component => ['sprite-renderer', 'image', 'tilemap-renderer', 'mesh-renderer', 'skinned-mesh-renderer', 'particle-system', 'light-2d', 'light'].includes(component.type)) && showGizmos ? <axesHelper args={[.35]} /> : null}
-    {node.children.map(child => <NodeView key={child} id={child} document={document} selected={selected} selectedIds={selectedIds} hiddenIds={hiddenIds} unpickableIds={unpickableIds} onSelect={onSelect} mode={mode} space={space} snap={snap} onTransform={onTransform} orbit={orbit} diagnose={diagnose} showGizmos={showGizmos} />)}
-  </group>{showGizmos && isSelected && selected === node.id && !node.locked && node.editable !== false && mode !== 'select' && mode !== 'hand' ? createPortal(<TransformControls ref={controls} object={group as MutableRefObject<THREE.Group>} mode={mode} space={space} size={document.dimension === '2d' ? 1.35 : 1} showX={document.dimension === '3d' || mode !== 'rotate'} showY={document.dimension === '3d' || mode !== 'rotate'} showZ={document.dimension === '3d' || mode === 'rotate'} translationSnap={snap ? .25 : undefined} rotationSnap={snap ? Math.PI / 12 : undefined} scaleSnap={snap ? .25 : undefined} onMouseDown={() => { start.current = structuredClone(node.transform); setDragging(true); if (orbit.current) orbit.current.enabled = false }} onMouseUp={finish} />, scene) : null}</>
+    {componentVisibleInEditor(componentOf(node, 'light-2d') ?? componentOf(node, 'light')) ? <Light dimension={viewMode} showIcon={viewMode === '3d' && (showGizmos || isSelected)} node={node} selected={isSelected} gizmoColor={document.settings?.selectionColor ?? '#ffad46'} /> : null}
+    {showGizmos && (viewMode === '3d' || isSelected) ? node.components.filter((component): component is Collider2DComponent => ['box-collider-2d', 'circle-collider-2d', 'capsule-collider-2d', 'polygon-collider-2d'].includes(component.type) && component.enabled).map(component => <Volume2D key={component.id} volume={component} />) : null}
+    {showGizmos && (viewMode === '3d' || isSelected) ? node.components.filter((component): component is Collider3DComponent => ['box-collider', 'sphere-collider', 'capsule-collider', 'mesh-collider'].includes(component.type) && component.enabled).map(component => <Volume3D key={component.id} volume={component} />) : null}
+    {viewMode === '3d' && !node.components.some(component => ['sprite-renderer', 'image', 'tilemap-renderer', 'mesh-renderer', 'skinned-mesh-renderer', 'particle-system', 'light-2d', 'light'].includes(component.type)) && showGizmos ? <axesHelper args={[.35]} /> : null}
+    {node.children.map(child => <NodeView key={child} id={child} document={document} selected={selected} selectedIds={selectedIds} hiddenIds={hiddenIds} unpickableIds={unpickableIds} onSelect={onSelect} mode={mode} space={space} snap={snap} onTransform={onTransform} orbit={orbit} diagnose={diagnose} showGizmos={showGizmos} viewMode={viewMode} />)}
+  </group>{showGizmos && isSelected && selected === node.id && !node.locked && node.editable !== false && mode !== 'select' && mode !== 'hand' ? createPortal(<TransformControls ref={controls} object={group as MutableRefObject<THREE.Group>} mode={mode} space={space} size={viewMode === '2d' ? 1.35 : 1} showX={viewMode === '3d' || mode !== 'rotate'} showY={viewMode === '3d' || mode !== 'rotate'} showZ={viewMode === '3d' || mode === 'rotate'} translationSnap={snap ? .25 : undefined} rotationSnap={snap ? Math.PI / 12 : undefined} scaleSnap={snap ? .25 : undefined} onMouseDown={() => { start.current = structuredClone(node.transform); setDragging(true); if (orbit.current) orbit.current.enabled = false }} onMouseUp={finish} />, scene) : null}</>
 }
 
 function LightIcon({ kind, color }: { kind: LightKind; color: string }) {
@@ -863,15 +892,17 @@ function SceneContents({ document, selected, selectedIds = [selected], modelSele
   const diagnosticCallback = useRef(onDiagnostic)
   diagnosticCallback.current = onDiagnostic
   const diagnose = useMemo(() => reportOnce(message => diagnosticCallback.current?.(message)), [])
-  return <><color attach="background" args={[settings.background]} /><ambientLight color={settings.ambientColor} intensity={settings.ambientIntensity} />{settings.fogEnabled && <fog attach="fog" args={[settings.fogColor, settings.fogNear, settings.fogFar]} />}{settings.showGrid && <Grid position={viewMode === '2d' ? [0, 0, 2] : undefined} rotation={viewMode === '2d' ? [Math.PI / 2, 0, 0] : undefined} userData={{ editorHelper: true }} args={[40, 40]} cellSize={1} sectionSize={5} sectionColor="#747980" cellColor="#555a61" fadeDistance={35} infiniteGrid />}<NavigationController orbit={orbit} handMode={mode === 'hand'} viewMode={viewMode} onTemporarySnap={setTemporarySnap} /><OrbitControls ref={orbit} target={initialView?.target} makeDefault enableRotate={false} enableDamping={false} enablePan={false} enableZoom={false} mouseButtons={{ LEFT: -1 as any, MIDDLE: -1 as any, RIGHT: -1 as any }} /><CameraRig document={document} selected={selected} modelSelection={modelSelection} focus={focus} orbit={orbit} /><SelectionOutline selectedIds={selectedIds} modelSelection={modelSelection} color={settings.selectionColor ?? '#ffad46'} width={settings.selectionWidth ?? 3} />{showGizmos && <GizmoHelper renderPriority={2} alignment="bottom-center" margin={[0, 136]}><GizmoViewport axisColors={['#d87178', '#66a58b', '#6e8ec7']} labelColor="white" /></GizmoHelper>}{document.rootIds.map(id => <NodeView key={id} id={id} document={document} selected={selected} selectedIds={selectedIds} hiddenIds={hiddenIds} unpickableIds={unpickableIds} onSelect={onSelect} mode={modelSelection ? 'select' : mode} space={space} snap={snap || temporarySnap} onTransform={onTransform} orbit={orbit} diagnose={diagnose} showGizmos={showGizmos} />)}</>
+  return <><color attach="background" args={[settings.background]} /><ambientLight color={settings.ambientColor} intensity={settings.ambientIntensity} />{settings.fogEnabled && <fog attach="fog" args={[settings.fogColor, settings.fogNear, settings.fogFar]} />}{settings.showGrid && <Grid position={viewMode === '2d' ? [0, 0, 2] : undefined} rotation={viewMode === '2d' ? [Math.PI / 2, 0, 0] : undefined} userData={{ editorHelper: true }} args={[40, 40]} cellSize={1} sectionSize={5} sectionColor="#747980" cellColor="#555a61" fadeDistance={35} infiniteGrid />}<NavigationController orbit={orbit} handMode={mode === 'hand'} viewMode={viewMode} onTemporarySnap={setTemporarySnap} /><OrbitControls ref={orbit} target={initialView?.target} makeDefault enableRotate={false} enableDamping={false} enablePan={false} enableZoom={false} mouseButtons={{ LEFT: -1 as any, MIDDLE: -1 as any, RIGHT: -1 as any }} /><CameraRig document={document} selected={selected} modelSelection={modelSelection} focus={focus} orbit={orbit} /><SelectionOutline selectedIds={selectedIds} modelSelection={modelSelection} color={settings.selectionColor ?? '#ffad46'} width={settings.selectionWidth ?? 3} />{showGizmos && <GizmoHelper renderPriority={2} alignment="bottom-center" margin={[0, 136]}><GizmoViewport axisColors={['#d87178', '#66a58b', '#6e8ec7']} labelColor="white" /></GizmoHelper>}{document.rootIds.map(id => <NodeView key={id} id={id} document={document} selected={selected} selectedIds={selectedIds} hiddenIds={hiddenIds} unpickableIds={unpickableIds} onSelect={onSelect} mode={modelSelection ? 'select' : mode} space={space} snap={snap || temporarySnap} onTransform={onTransform} orbit={orbit} diagnose={diagnose} showGizmos={showGizmos} viewMode={viewMode} />)}</>
 }
 
 /** Self-contained R3F viewport used by the independent scene editor. */
 export function SceneViewport(props: SceneViewportProps) {
   const effectiveOrtho = props.viewMode === '2d' || props.ortho
+  const authoredViewMatchesMode = props.document.dimension === props.viewMode
+  const position = authoredViewMatchesMode ? props.initialView?.position : undefined
   const camera = effectiveOrtho
-    ? { position: props.initialView?.position ?? (props.viewMode === '2d' ? [0, 0, 10] as const : [7, 6, 7] as const), zoom: 65 }
-    : { position: props.initialView?.position ?? [7, 5, 7] as [number, number, number], fov: 45 }
+    ? { position: position ?? (props.viewMode === '2d' ? [0, 0, 10] as const : [7, 6, 7] as const), zoom: 65 }
+    : { position: position ?? [7, 5, 7] as [number, number, number], fov: 45 }
   return <Canvas shadows events={viewportEvents} key={`${props.viewMode}-${effectiveOrtho ? 'orthographic' : 'perspective'}-${props.document.dimension}`} orthographic={effectiveOrtho} camera={camera} onPointerMissed={event => props.onSelect('', { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey })} onCreated={({ gl }) => { gl.setClearColor('#3c3f43'); gl.domElement.tabIndex = 0; gl.domElement.setAttribute('aria-label', 'Scene viewport') }}><SceneContents {...props} /></Canvas>
 }
 

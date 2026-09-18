@@ -22,14 +22,19 @@ export function matchesTreeNode(document: SceneDocument, id: string, query: stri
   const node = document.nodes[id]
   if (!node) return false
   const value = query.toLowerCase()
-  return !query || node.name.toLowerCase().includes(value) || node.tags.some(tag => tag.toLowerCase().includes(value)) || node.components.some(component => component.type.includes(value)) || node.children.some(child => matchesTreeNode(document, child, query, structures))
+  const modelAssetId = node.components.find(component => component.type === 'mesh-filter' || component.type === 'skinned-mesh-renderer')?.assetId
+  const structure = modelAssetId ? structures[modelAssetId] : null
+  const importedPartMatches = structure ? Object.values(structure.nodes).some(part => part.name.toLowerCase().includes(value)) : false
+  return !query || node.name.toLowerCase().includes(value) || node.tags.some(tag => tag.toLowerCase().includes(value)) || node.components.some(component => component.type.includes(value)) || importedPartMatches || node.children.some(child => matchesTreeNode(document, child, query, structures))
 }
 
 export function TreeNode(props: TreeProps) {
   const { id, document, structures, modelSelection, query, selectedIds, expanded, hiddenIds, unpickableIds, renaming, dropPreview, onSelect, onToggleExpand, onToggleHidden, onTogglePickable, onRename, onFrame, onDragPreview, onDrop, setContext, depth = 0 } = props
   const node = document.nodes[id]
   if (!node || !matchesTreeNode(document, id, query, structures)) return null
-  const hasChildren = Boolean(node.children.length)
+  const modelAssetId = node.components.find(component => component.type === 'mesh-filter' || component.type === 'skinned-mesh-renderer')?.assetId
+  const structure = modelAssetId ? structures[modelAssetId] : null
+  const hasChildren = Boolean(node.children.length || structure?.roots.length)
   const isOpen = Boolean(query) || expanded[id] !== false
   const preview = dropPreview?.id === id ? dropPreview.position : null
   const pickable = !unpickableIds.has(id)
@@ -49,6 +54,7 @@ export function TreeNode(props: TreeProps) {
     </div>
     {isOpen && hasChildren && <div className="tree-children" role="group">
       {node.children.map(child => <TreeNode {...props} key={child} id={child} depth={depth + 1} />)}
+      {structure?.roots.map(index => <ModelTreeNode key={`${id}:${index}`} ownerId={id} index={index} structure={structure} props={props} depth={depth + 1} />)}
     </div>}
   </div>
 }

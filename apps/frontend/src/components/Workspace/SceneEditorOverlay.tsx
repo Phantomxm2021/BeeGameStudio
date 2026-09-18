@@ -46,20 +46,14 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
   const [selectedScenePath, setSelectedScenePath] = useState('');
   const [loadState, setLoadState] = useState<SceneLoadState>(INITIAL_LOAD_STATE);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const [editorDirty, setEditorDirty] = useState(false);
+  const [editorSaving, setEditorSaving] = useState(false);
   const loadControllerRef = useRef<AbortController | undefined>(undefined);
   const canonicalRef = useRef<{
     path: string;
     revision: string;
     document: BeeGameSceneContentDocument;
   } | undefined>(undefined);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -250,6 +244,7 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
   };
 
   const chooseScene = (path: string) => {
+    if (editorDirty || editorSaving) return;
     const next = scenes.find(scene => scene.path === path);
     if (!next) return;
     canonicalRef.current = { path: next.path, revision: next.revision, document: next.document };
@@ -265,13 +260,17 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
       expectedRevision: current.revision,
       document: editorDocumentToSceneContent(document, current.document),
     });
-    canonicalRef.current = {
+    if (canonicalRef.current?.path === current.path) canonicalRef.current = {
       path: saved.path,
       revision: saved.revision,
       document: saved.document,
     };
+    const savedEditorDocument: SceneDocument = {
+      ...document,
+      source: { ...document.source, contentDigest: saved.revision, contentRevision: saved.revision },
+    };
     setScenes(items => items.map(item => item.path === saved.path
-      ? { ...item, revision: saved.revision, document: saved.document }
+      ? { ...item, revision: saved.revision, document: saved.document, editorDocument: savedEditorDocument }
       : item));
   };
 
@@ -295,11 +294,12 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
                 : { position: [7, 5, 7], target: [0, 0, 0], showGizmos: true }}
               onSave={save}
               onClose={closeEditor}
+              onDirtyChange={(dirty, saving) => { setEditorDirty(dirty); setEditorSaving(saving); }}
             />
             {scenes.length > 1 ? (
               <label className="scene-document-switcher">
                 <span>Scene</span>
-                <select aria-label="Scene document" value={selectedScenePath} onChange={event => chooseScene(event.target.value)}>
+                <select aria-label="Scene document" title={editorDirty ? 'Save or undo changes before switching scenes' : editorSaving ? 'Wait for the current save to finish' : 'Scene document'} disabled={editorDirty || editorSaving} value={selectedScenePath} onChange={event => chooseScene(event.target.value)}>
                   {scenes.map(scene => <option key={scene.path} value={scene.path}>{scene.document.id}</option>)}
                 </select>
               </label>

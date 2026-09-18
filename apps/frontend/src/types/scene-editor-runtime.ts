@@ -17,6 +17,7 @@ export interface SceneEditorProps {
   storageKey?: string;
   onSave?: (document: SceneDocument) => void | Promise<void>;
   onClose?: () => void;
+  onDirtyChange?: (dirty: boolean, saving: boolean) => void;
 }
 
 

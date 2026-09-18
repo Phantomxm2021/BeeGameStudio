@@ -7,7 +7,7 @@ import { exportPackage, importPackage, makeEmptyScene, sceneContentKey, canonica
 import { transformSelection } from './selection-transform'
 import { SceneViewport, type SceneViewMode, type SceneViewportProps } from './viewport'
 import { Hand, Move, Rotate3D, Scaling, Save, Undo2, Redo2, Magnet, ChevronDown, Globe2, Box, Scan, Square, Focus, CircleCheck, Circle, ChevronLeft, ChevronRight, Lightbulb, Search, X, Axis3D, Menu } from 'lucide-react'
-import { Inspector } from './inspector'
+import { Inspector, ModelPartInspector } from './inspector'
 import { TreeNode, matchesTreeNode, navigateModelTree } from './hierarchy'
 import { readModelStructure, type ModelSelection, type ModelStructure } from './model-structure'
 import { currentKeyboardLabels } from './platform'
@@ -29,7 +29,7 @@ const SCENE_TOOLS: { mode: Mode; label: string; key: string }[] = [
 
 const TOOL_ICONS = { hand: Hand, translate: Move, rotate: Rotate3D, scale: Scaling }
 
-export interface SceneEditorProps { initialDocument?: SceneDocument; storageKey?: string; assetLibrary?: AssetLibrarySource; initialView?: SceneViewportProps['initialView']; initialProjection?: 'perspective' | 'orthographic'; initialExpanded?: Record<string, boolean>; onSave?: (document: SceneDocument) => void | Promise<void>; onClose?: () => void }
+export interface SceneEditorProps { initialDocument?: SceneDocument; storageKey?: string; assetLibrary?: AssetLibrarySource; initialView?: SceneViewportProps['initialView']; initialProjection?: 'perspective' | 'orthographic'; initialExpanded?: Record<string, boolean>; onSave?: (document: SceneDocument) => void | Promise<void>; onClose?: () => void; onDirtyChange?: (dirty: boolean, saving: boolean) => void }
 
 function ViewDropdown({ label, value, options, onChange, disabled = false }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; disabled?: boolean }) {
   return <DropdownMenu>
@@ -78,7 +78,7 @@ function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets,
   </DropdownMenu>
 }
 
-export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-editor.draft.v2', assetLibrary, initialView, initialProjection = 'perspective', initialExpanded, onSave, onClose }: SceneEditorProps = {}) {
+export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-editor.draft.v2', assetLibrary, initialView, initialProjection = 'perspective', initialExpanded, onSave, onClose, onDirtyChange }: SceneEditorProps = {}) {
   const [document, setDocument] = useState<SceneDocument>(() => {
     if (initialDocument) return initialDocument
     try { const saved = localStorage.getItem(storageKey); return saved ? importPackage(JSON.parse(saved)) : makeEmptyScene() } catch { return makeEmptyScene() }
@@ -124,7 +124,9 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
   const searchInputRef = useRef<HTMLInputElement>(null)
   const editorRootRef = useRef<HTMLDivElement>(null)
   const current = document.nodes[selected]
-  const structure = undefined as ModelStructure | undefined
+  const modelAssetId = current ? componentOf(current, 'mesh-filter')?.assetId ?? componentOf(current, 'skinned-mesh-renderer')?.assetId : undefined
+  const structure = modelAssetId ? structures[modelAssetId] ?? undefined : undefined
+  const selectedModelPart = modelSelection && structure ? structure.nodes[modelSelection.nodeIndex] : undefined
   const visibleIds = useMemo(() => flattenVisible(document, expanded, query, structures), [document, expanded, query])
 
   const setSelection = (ids: string[], primary = ids[0] ?? '') => { setModelSelection(null); const available = history.current.document.nodes; setSelectedIds([...new Set(ids.filter(id => Boolean(available[id])))].sort((a, b) => a === primary ? -1 : b === primary ? 1 : 0)) }
@@ -183,6 +185,18 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
       setSaving(false)
     }
   }
+  const requestClose = () => {
+    if (saving) { setNotice('Save in progress. Wait for it to finish before closing.'); return }
+    if (!isSaved) { setNotice('Unsaved changes. Save or undo them before closing the editor.'); return }
+    onClose?.()
+  }
+  useEffect(() => { onDirtyChange?.(!isSaved, saving) }, [isSaved, saving, onDirtyChange])
+  useEffect(() => {
+    if (isSaved) return undefined
+    const protectDraft = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', protectDraft)
+    return () => window.removeEventListener('beforeunload', protectDraft)
+  }, [isSaved])
   const toggleHidden = (id: string) => setHiddenIds(value => { const next = new Set(value); if (next.has(id)) next.delete(id); else next.add(id); return next })
   const togglePickable = (id: string) => setUnpickableIds(value => { const next = new Set(value); if (next.has(id)) next.delete(id); else next.add(id); return next })
   const frame = (id = selected) => { if (id) { if (modelSelection?.ownerId !== id) setSelection([id], id); setFocus(value => value + 1) } }
@@ -256,7 +270,7 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
             openSettings={() => setSceneSettingsOpen(true)}
             showGizmos={showGizmos}
             toggleGizmos={() => setShowGizmos(value => !value)}
-            closeEditor={onClose}
+            closeEditor={onClose ? requestClose : undefined}
           />
           <span className="toolbar-divider" />
           <div className="scene-tools" role="toolbar" aria-label="Scene tools" aria-orientation="horizontal">
@@ -276,7 +290,7 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
         </div>
 
         <div className="scene-render-surface" data-mode={mode} data-view-mode={viewMode}><SceneViewport showGizmos={showGizmos} initialView={initialView} ortho={ortho} viewMode={viewMode} document={document} selected={selected} selectedIds={selectedIds} modelSelection={modelSelection} hiddenIds={[...hiddenIds]} unpickableIds={[...unpickableIds]} onSelect={(id, modifiers = { ctrlKey: false, metaKey: false, shiftKey: false }) => { if (!id) { setSelection([]); return } if (modifiers.shiftKey && selected) { const index = visibleIds.indexOf(id); const start = visibleIds.indexOf(selected); setSelection(visibleIds.slice(Math.min(start, index), Math.max(start, index) + 1), id) } else if (modifiers.ctrlKey || modifiers.metaKey) setSelection(selectedIds.includes(id) ? selectedIds.filter(value => value !== id) : [...selectedIds, id], id); else setSelection([id], id) }} mode={mode} space={space} snap={snap} focus={focus} onTransform={changeTransform} onDiagnostic={setNotice} /></div></main>
-      <aside className={`panel inspector inspector-panel ${inspectorCollapsed ? 'is-collapsed' : ''}`} data-testid="scene-inspector" id="scene-inspector-panel" inert={inspectorCollapsed}><PanelTitle title="INSPECTOR" /><div className="panel-content">{selectedIds.length > 1 ? <div className="empty-state"><strong>Multiple Selection</strong><span>{selectedIds.length} objects selected. Transform controls apply the active selection to all selected objects.</span></div> : current ? <Inspector key={current.id} node={current} document={document} structure={null} commit={commit} onFocus={() => frame(current.id)} onSave={() => void saveDocument()} onReparent={parentId => { try { const transform = localTransformForWorld(document, current.id, parentId); commit([operations.reparent(current.id, parentId, undefined, current.parentId), operations.transform(current.id, transform, current.transform)], 'Reparent GameObject') } catch (error) { setNotice(`Rejected: ${String(error)}`) } }} /> : <div className="empty-state inspector-empty"><Box size={28} strokeWidth={1.2} /><strong>No selection</strong><span>Select a GameObject in the hierarchy or scene.</span></div>}</div></aside>
+      <aside className={`panel inspector inspector-panel ${inspectorCollapsed ? 'is-collapsed' : ''}`} data-testid="scene-inspector" id="scene-inspector-panel" inert={inspectorCollapsed}><PanelTitle title="INSPECTOR" /><div className="panel-content">{selectedIds.length > 1 ? <div className="empty-state"><strong>Multiple Selection</strong><span>{selectedIds.length} objects selected. Transform controls apply the active selection to all selected objects.</span></div> : current && selectedModelPart && structure ? <ModelPartInspector part={selectedModelPart} structure={structure} assetName={document.assets[modelAssetId ?? '']?.name ?? modelAssetId ?? 'Imported model'} onFocus={() => frame(current.id)} /> : current ? <Inspector key={current.id} node={current} document={document} structure={structure} commit={commit} onFocus={() => frame(current.id)} onSave={() => void saveDocument()} onReparent={parentId => { try { const transform = localTransformForWorld(document, current.id, parentId); commit([operations.reparent(current.id, parentId, undefined, current.parentId), operations.transform(current.id, transform, current.transform)], 'Reparent GameObject') } catch (error) { setNotice(`Rejected: ${String(error)}`) } }} /> : <div className="empty-state inspector-empty"><Box size={28} strokeWidth={1.2} /><strong>No selection</strong><span>Select a GameObject in the hierarchy or scene.</span></div>}</div></aside>
       <PanelEdgeToggle side="hierarchy" collapsed={hierarchyCollapsed} onToggle={() => togglePanel('hierarchy')} />
       <PanelEdgeToggle side="inspector" collapsed={inspectorCollapsed} onToggle={() => togglePanel('inspector')} />
     </div>
@@ -290,7 +304,7 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
         <span title="Press F to frame the selected object"><Focus size={14} /><kbd>F</kbd><span>Focus</span></span>
       </div>
     </footer>
-    <div className="notice" role="alert">{/rejected|failed|missing|unable|invalid/i.test(notice) ? notice : ''}</div>
+    <div className="notice" role="alert">{/rejected|failed|missing|unable|invalid|unsaved|save in progress/i.test(notice) ? notice : ''}</div>
     {contextMenu && <ContextMenuView menu={contextMenu} node={document.nodes[contextMenu.id]} canAct={Boolean(document.nodes[contextMenu.id])} onClose={() => setContextMenu(null)} onRename={() => startRename(contextMenu.id)} onDuplicate={duplicate} onDelete={remove} onFrame={() => frame(contextMenu.id)} onToggleExpand={() => setExpanded(value => ({ ...value, [contextMenu.id]: value[contextMenu.id] === false }))} />}
   </div>
   return content
