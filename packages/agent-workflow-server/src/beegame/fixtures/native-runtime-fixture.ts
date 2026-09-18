@@ -100,6 +100,17 @@ for await (const chunk of Bun.stdin.stream()) {
       )
       continue
     }
+    if (content === 'post-result-task-notification') {
+      process.stdout.write(
+        `${JSON.stringify({ type: 'result', subtype: 'success', is_error: false, session_id: '550e8400-e29b-41d4-a716-446655440000' })}\n`,
+      )
+      setTimeout(() => {
+        process.stdout.write(
+          `${JSON.stringify({ type: 'system', subtype: 'task_notification', value: '<task-id>task-after-result</task-id><status>completed</status>' })}\n`,
+        )
+      }, 10)
+      continue
+    }
     if (
       userMessageCount > 1 &&
       typeof content === 'string' &&

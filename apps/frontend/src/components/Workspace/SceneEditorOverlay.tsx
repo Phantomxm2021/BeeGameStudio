@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import type { SceneAsset, SceneDocument, SceneNode } from '@beegame/scene-editor';
+import type { SceneAsset, SceneDocument } from '@beegame/scene-editor';
 import '@beegame/scene-editor/styles.css';
 import {
   beeGameAdapter,
@@ -10,12 +10,14 @@ import {
   sceneContentToEditorDocument,
   type SpriteFrameTable,
 } from './sceneContentAdapter';
+import { EditorLoadingView, type EditorLoadState } from './EditorLoadingView';
 import './SceneEditorOverlay.css';
 
-const SceneEditor = lazy(async () => {
+const loadSceneEditor = async () => {
   const module = await import('@beegame/scene-editor');
   return { default: module.SceneEditor };
-});
+};
+const SceneEditor = lazy(loadSceneEditor);
 
 interface SceneEditorOverlayProps {
   projectId: string;
@@ -29,11 +31,22 @@ type SceneSnapshot = {
   editorDocument: SceneDocument;
 };
 
+type SceneLoadState = EditorLoadState;
+
+const INITIAL_LOAD_STATE: SceneLoadState = {
+  status: 'loading',
+  progress: 8,
+  label: 'Opening scene',
+  detail: 'Connecting to the project…',
+};
+
 export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayProps) {
   const [initialDocument, setInitialDocument] = useState<SceneDocument>();
   const [scenes, setScenes] = useState<SceneSnapshot[]>([]);
   const [selectedScenePath, setSelectedScenePath] = useState('');
-  const [loadError, setLoadError] = useState('');
+  const [loadState, setLoadState] = useState<SceneLoadState>(INITIAL_LOAD_STATE);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const loadControllerRef = useRef<AbortController | undefined>(undefined);
   const canonicalRef = useRef<{
     path: string;
     revision: string;
@@ -49,52 +62,97 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
   }, [onClose]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+    loadControllerRef.current = controller;
     let active = true;
-    setInitialDocument(undefined);
-    setScenes([]);
-    setSelectedScenePath('');
-    setLoadError('');
+    let prerequisiteProgress = 8;
+    const updateLoadState = (next: Omit<SceneLoadState, 'status'>) => {
+      if (active && !signal.aborted) setLoadState({ status: 'loading', ...next });
+    };
+    const prerequisiteReady = (weight: number, detail: string) => {
+      prerequisiteProgress += weight;
+      updateLoadState({ progress: prerequisiteProgress, label: 'Opening scene', detail });
+    };
     canonicalRef.current = undefined;
     void Promise.all([
-      beeGameAdapter.getProjectGameContent(projectId),
-      beeGameAdapter.getProjectAssets(projectId),
+      beeGameAdapter.getProjectGameContent(projectId, signal).then(value => {
+        prerequisiteReady(14, 'Scene documents loaded');
+        return value;
+      }),
+      beeGameAdapter.getProjectAssets(projectId, signal).then(value => {
+        prerequisiteReady(12, 'Asset manifest loaded');
+        return value;
+      }),
+      loadSceneEditor().then(() => prerequisiteReady(8, 'Editor tools loaded')),
     ])
       .then(async ([snapshot, manifest]) => {
-        if (!active) return;
+        if (!active || signal.aborted) return;
         if ((snapshot.state !== 'ready' && snapshot.state !== 'draft') || !snapshot.index) {
-          setLoadError(`Scene content is not available yet (${snapshot.state.replaceAll('_', ' ')}).`);
+          setLoadState({ status: 'error', progress: prerequisiteProgress, label: 'Scene unavailable', detail: `Scene content is not available yet (${snapshot.state.replaceAll('_', ' ')}).` });
           return;
         }
         const sceneEntries = snapshot.documents?.flatMap(item => {
           const document = item.document as Partial<BeeGameSceneContentDocument>;
-          return document.kind === 'scene-2d'
+          return document.kind === 'scene-2d' || document.kind === 'scene-3d'
             ? [{ ...item, document: item.document as BeeGameSceneContentDocument }]
             : [];
         }) ?? [];
         if (!sceneEntries.length) {
-          setLoadError('The content package has no Scene documents yet.');
+          setLoadState({ status: 'error', progress: prerequisiteProgress, label: 'No scene found', detail: 'The content package has no Scene documents yet.' });
           return;
         }
+        const targetScene = sceneEntries.find(scene => scene.document.id === snapshot.index?.entryScene)
+          ?? sceneEntries[0];
+        const sceneLoadLabel = targetScene.document.id;
         const referencedAssets = new Set(sceneEntries.flatMap(scene => scene.document.assetRefs));
-        if (!active) return;
+        if (!active || signal.aborted) return;
         const assets: Record<string, SceneAsset> = {};
-        const assetRegions: Record<string, Record<string, TextureRegion>> = {};
         const assetMembers: Record<string, Record<string, string>> = {};
         const frameTables: Record<string, Record<string, SpriteFrameTable>> = {};
         const assetFailures: string[] = [];
+        const referencedResources = manifest.resources.filter(resource => resource.status === 'verified' && referencedAssets.has(resource.id));
+        for (const resource of referencedResources) {
+          assets[resource.id] = {
+            id: resource.id,
+            name: resource.root_path.split('/').at(-1) ?? resource.id,
+            mimeType: assetMimeType(resource.root_path),
+            path: resource.root_path,
+          };
+        }
+        const loadTargets = referencedResources.flatMap(resource => resource.file_paths
+          .filter(path => SCENE_PREVIEW.test(path) || /\.json$/i.test(path))
+          .map(path => ({ name: `${resource.id} · ${path.split('/').at(-1) ?? path}` })));
+        const totalFiles = loadTargets.length;
+        let loadedFiles = 0;
+        const markFileLoaded = (name: string) => {
+          loadedFiles += 1;
+          updateLoadState({
+            progress: totalFiles ? 42 + Math.round((loadedFiles / totalFiles) * 48) : 90,
+            label: sceneLoadLabel,
+            detail: totalFiles ? `${name} · ${loadedFiles} of ${totalFiles}` : 'No external scene assets required',
+          });
+        };
+        updateLoadState({
+          progress: 42,
+          label: sceneLoadLabel,
+          detail: totalFiles ? `${loadTargets[0].name} · 0 of ${totalFiles}` : 'No external scene assets required',
+        });
         await Promise.all(manifest.resources.map(async resource => {
           if (resource.status !== 'verified' || !referencedAssets.has(resource.id)) return;
-          const imagePaths = resource.file_paths.filter(path => SCENE_IMAGE.test(path));
-          if (!imagePaths.length) return;
+          const previewPaths = resource.file_paths.filter(path => SCENE_PREVIEW.test(path));
           const members: Record<string, string> = {};
           const tables: Record<string, SpriteFrameTable> = {};
-          const loaded = await Promise.all(imagePaths.map(async path => {
+          const loaded = await Promise.all(previewPaths.map(async path => {
             try {
-              const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path);
-              return { path, bytes: await blobToDataUrl(blob) };
+              const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal);
+              return { path, bytes: await blobToDataUrl(blob, signal) };
             } catch (error) {
+              if (isAbortError(error)) throw error;
               assetFailures.push(`${resource.id}/${path.split('/').at(-1) ?? path}: ${error instanceof Error ? error.message : String(error)}`);
               return undefined;
+            } finally {
+              if (!signal.aborted) markFileLoaded(`${resource.id} · ${path.split('/').at(-1) ?? path}`);
             }
           }));
           for (const item of loaded) {
@@ -104,7 +162,7 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
             assets[assetId] = {
               id: assetId,
               name: item.path.split('/').at(-1) ?? assetId,
-              mimeType: imageMimeType(item.path),
+              mimeType: assetMimeType(item.path),
               path: item.path,
               bytes: item.bytes,
             };
@@ -113,26 +171,29 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           const tablePaths = resource.file_paths.filter(path => /\.json$/i.test(path));
           await Promise.all(tablePaths.map(async path => {
             try {
-              const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path);
+              const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal);
               const value = JSON.parse(await blob.text()) as unknown;
+              throwIfAborted(signal);
               if (isSpriteFrameTable(value)) tables[fileStem(path)] = value;
             } catch (error) {
+              if (isAbortError(error)) throw error;
               assetFailures.push(`${resource.id}/${path.split('/').at(-1) ?? path}: ${error instanceof Error ? error.message : String(error)}`);
+            } finally {
+              if (!signal.aborted) markFileLoaded(`${resource.id} · ${path.split('/').at(-1) ?? path}`);
             }
           }));
-          if (!assets[resource.id]) {
-            const rootPath = preferredSceneImagePath(resource.root_path, imagePaths);
-            const rootMemberId = rootPath ? members[fileStem(rootPath)] : undefined;
-            if (rootMemberId) assets[resource.id] = { ...assets[rootMemberId], id: resource.id };
-          }
+          const rootPath = preferredScenePreviewPath(resource.root_path, previewPaths);
+          const rootMemberId = rootPath ? members[fileStem(rootPath)] : undefined;
+          if (rootMemberId) assets[resource.id] = { ...assets[rootMemberId], id: resource.id };
           assetMembers[resource.id] = members;
           frameTables[resource.id] = tables;
-          assetRegions[resource.id] = spriteRegions(resource.content_profile);
         }));
+        if (!active || signal.aborted) return;
         if (assetFailures.length) {
-          setLoadError(`Scene assets could not be loaded: ${assetFailures.slice(0, 3).join(' · ')}${assetFailures.length > 3 ? ` · +${assetFailures.length - 3} more` : ''}`);
+          setLoadState({ status: 'error', progress: 90, label: 'Assets could not be loaded', detail: `${assetFailures.slice(0, 3).join(' · ')}${assetFailures.length > 3 ? ` · +${assetFailures.length - 3} more` : ''}` });
           return;
         }
+        updateLoadState({ progress: 94, label: sceneLoadLabel, detail: 'Resolving hierarchy, transforms, and sprite regions…' });
         const availableScenes = sceneEntries.map(scene => ({
           path: scene.path,
           revision: scene.revision,
@@ -143,7 +204,6 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
             foundationDocumentRevision: snapshot.index!.documentRevision,
             assetManifestRevision: snapshot.index!.assetManifestRevision,
             assets,
-            assetRegions,
             assetMembers,
             frameTables,
           }),
@@ -155,14 +215,39 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
         setScenes(availableScenes);
         setSelectedScenePath(entry.path);
         setInitialDocument(entry.editorDocument);
+        updateLoadState({ progress: 100, label: 'Scene ready', detail: entry.document.id });
+        await waitForTransition(signal);
+        if (active && !signal.aborted) setLoadState({ status: 'ready', progress: 100, label: 'Scene ready', detail: entry.document.id });
       })
       .catch(error => {
-        if (active) setLoadError(error instanceof Error ? error.message : String(error));
+        if (active && !isAbortError(error)) {
+          setLoadState({ status: 'error', progress: 0, label: 'Could not open scene', detail: error instanceof Error ? error.message : String(error) });
+        }
       });
     return () => {
       active = false;
+      controller.abort();
+      if (loadControllerRef.current === controller) loadControllerRef.current = undefined;
     };
-  }, [projectId]);
+  }, [projectId, loadAttempt]);
+
+  const closeEditor = () => {
+    loadControllerRef.current?.abort();
+    onClose();
+  };
+
+  const stopLoading = () => {
+    loadControllerRef.current?.abort();
+    onClose();
+  };
+
+  const retryLoading = () => {
+    setInitialDocument(undefined);
+    setScenes([]);
+    setSelectedScenePath('');
+    setLoadState(INITIAL_LOAD_STATE);
+    setLoadAttempt(value => value + 1);
+  };
 
   const chooseScene = (path: string) => {
     const next = scenes.find(scene => scene.path === path);
@@ -170,7 +255,6 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
     canonicalRef.current = { path: next.path, revision: next.revision, document: next.document };
     setSelectedScenePath(next.path);
     setInitialDocument(next.editorDocument);
-    setLoadError('');
   };
 
   const save = async (document: SceneDocument) => {
@@ -192,100 +276,112 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
   };
 
   return (
-    <div className="scene-editor-host fixed inset-0 z-[100] flex flex-col bg-[#09090b]" role="dialog" aria-modal="true" aria-label="Scene Editor">
-      <header className="flex h-11 shrink-0 items-center gap-3 border-b border-white/10 bg-[#17181b] px-4 text-sm text-white">
-        <strong>Scene Editor</strong>
-        <select
-          aria-label="Scene document"
-          className="min-w-40 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-xs text-white"
-          value={selectedScenePath}
-          onChange={event => chooseScene(event.target.value)}
-          disabled={!scenes.length}
-        >
-          {scenes.map(scene => <option key={scene.path} value={scene.path}>{scene.document.id}</option>)}
-        </select>
-        <span className="min-w-0 flex-1 truncate text-xs text-white/50">
-          {loadError ? 'Scene is not ready to edit' : scenes.length > 1 ? `${scenes.length} scenes` : ''}
-        </span>
-        <button type="button" className="rounded-md px-2 py-1 text-xs text-white/80 hover:bg-white/10" onClick={onClose}>Back to project</button>
-      </header>
-      <div className="min-h-0 flex-1">
-        {loadError ? (
-          <div className="grid h-full place-items-center bg-[#3c3f43] px-6 text-center text-sm text-white/70" role="alert">
-            <div><p>{loadError}</p><button type="button" className="mt-4 rounded-md bg-white/10 px-3 py-2 text-xs text-white hover:bg-white/20" onClick={onClose}>Back to project</button></div>
-          </div>
-        ) : initialDocument ? (
-          <Suspense fallback={<div className="grid h-full place-items-center bg-[#3c3f43] text-xs text-white/60">Loading Scene Editor…</div>}>
+    <div className="scene-editor-host fixed inset-0 z-[100] bg-[#303238]" role="dialog" aria-modal="true" aria-label="Scene Editor">
+      {loadState.status === 'ready' && initialDocument ? (
+        <Suspense fallback={(
+          <EditorLoadingView
+            state={{ status: 'loading', progress: 96, label: 'Starting editor', detail: 'Preparing the scene viewport…' }}
+            progressLabel="Scene loading progress"
+            onStop={closeEditor}
+          />
+        )}>
+          <div className="h-full min-h-0">
             <SceneEditor
               key={selectedScenePath}
               initialDocument={initialDocument}
-              initialProjection="orthographic"
-              initialView={{ position: [6.4, 20, 3.601], target: [6.4, 0, 3.6], showGizmos: false }}
+              initialProjection={initialDocument.dimension === '2d' ? 'orthographic' : 'perspective'}
+              initialView={initialDocument.dimension === '2d'
+                ? { position: [0, 0, 10], target: [0, 0, 0], showGizmos: true }
+                : { position: [7, 5, 7], target: [0, 0, 0], showGizmos: true }}
               onSave={save}
-              onClose={onClose}
+              onClose={closeEditor}
             />
-          </Suspense>
-        ) : (
-          <div className="grid h-full place-items-center bg-[#3c3f43] text-xs text-white/60">Loading project scene…</div>
-        )}
-      </div>
+            {scenes.length > 1 ? (
+              <label className="scene-document-switcher">
+                <span>Scene</span>
+                <select aria-label="Scene document" value={selectedScenePath} onChange={event => chooseScene(event.target.value)}>
+                  {scenes.map(scene => <option key={scene.path} value={scene.path}>{scene.document.id}</option>)}
+                </select>
+              </label>
+            ) : null}
+          </div>
+        </Suspense>
+      ) : (
+        <EditorLoadingView
+          state={loadState}
+          progressLabel="Scene loading progress"
+          onStop={stopLoading}
+          onRetry={retryLoading}
+          onExit={closeEditor}
+        />
+      )}
     </div>
   );
 }
 
 const SCENE_IMAGE = /\.(?:png|jpe?g|webp|gif|avif|bmp)$/i;
-type TextureRegion = NonNullable<NonNullable<SceneNode['material']>['textureRegion']>;
-
-function preferredSceneImagePath(rootPath: string, filePaths: string[]): string | undefined {
-  if (SCENE_IMAGE.test(rootPath)) return rootPath;
-  return filePaths.find(path => SCENE_IMAGE.test(path));
+const SCENE_PREVIEW = /\.(?:png|jpe?g|webp|gif|avif|bmp|glb|gltf|bin)$/i;
+function preferredScenePreviewPath(rootPath: string, filePaths: string[]): string | undefined {
+  if (SCENE_PREVIEW.test(rootPath)) return rootPath;
+  return filePaths.find(path => SCENE_PREVIEW.test(path));
 }
 
 function fileStem(path: string): string {
   return (path.split('/').at(-1) ?? path).replace(/\.[^.]+$/, '');
 }
 
-function blobToDataUrl(blob: Blob): Promise<string> {
+function blobToDataUrl(blob: Blob, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    const abort = () => {
+      reader.abort();
+      reject(new DOMException('Scene loading was stopped.', 'AbortError'));
+    };
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
+    signal?.addEventListener('abort', abort, { once: true });
     reader.onload = () => typeof reader.result === 'string'
       ? resolve(reader.result)
       : reject(new Error('Asset file did not decode as a data URL.'));
     reader.onerror = () => reject(reader.error ?? new Error('Asset file could not be read.'));
+    reader.onloadend = () => signal?.removeEventListener('abort', abort);
     reader.readAsDataURL(blob);
   });
 }
 
-function imageMimeType(path: string): string {
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw new DOMException('Scene loading was stopped.', 'AbortError');
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function waitForTransition(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(resolve, 180);
+    signal.addEventListener('abort', () => {
+      window.clearTimeout(timer);
+      reject(new DOMException('Scene loading was stopped.', 'AbortError'));
+    }, { once: true });
+  });
+}
+
+function assetMimeType(path: string): string {
   const extension = path.split('.').at(-1)?.toLowerCase();
   if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
-  return extension ? `image/${extension}` : 'application/octet-stream';
-}
-
-function spriteRegions(contentProfile: Record<string, unknown> | undefined): Record<string, TextureRegion> {
-  const components = contentProfile?.components;
-  if (!Array.isArray(components)) return {};
-  const regions: Record<string, TextureRegion> = {};
-  for (const component of components) {
-    if (!component || typeof component !== 'object' || Array.isArray(component)) continue;
-    const value = component as Record<string, unknown>;
-    if (value.kind !== 'sprite-frame' && value.kind !== 'atlas-region') continue;
-    if (typeof value.id !== 'string' || !value.specs || typeof value.specs !== 'object' || Array.isArray(value.specs)) continue;
-    const specs = value.specs as Record<string, unknown>;
-    const region = { x: specs.x, y: specs.y, width: specs.width, height: specs.height };
-    if (!isTextureRegion(region)) continue;
-    regions[value.id] = region;
-  }
-  return regions;
-}
-
-function isTextureRegion(value: Record<string, unknown>): value is TextureRegion {
-  return (
-    typeof value.x === 'number' && Number.isFinite(value.x) && value.x >= 0 &&
-    typeof value.y === 'number' && Number.isFinite(value.y) && value.y >= 0 &&
-    typeof value.width === 'number' && Number.isFinite(value.width) && value.width > 0 &&
-    typeof value.height === 'number' && Number.isFinite(value.height) && value.height > 0
-  );
+  if (extension && SCENE_IMAGE.test(path)) return `image/${extension}`;
+  if (extension === 'glb') return 'model/gltf-binary';
+  if (extension === 'gltf') return 'model/gltf+json';
+  if (extension === 'obj') return 'model/obj';
+  if (extension === 'fbx') return 'application/octet-stream';
+  if (extension === 'json') return 'application/json';
+  if (extension === 'ogg') return 'audio/ogg';
+  if (extension === 'mp3') return 'audio/mpeg';
+  if (extension === 'wav') return 'audio/wav';
+  return 'application/octet-stream';
 }
 
 function isSpriteFrameTable(value: unknown): value is SpriteFrameTable {

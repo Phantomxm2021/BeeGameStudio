@@ -1,387 +1,242 @@
-import type { SceneAsset, SceneDocument, SceneNode, Transform } from '@beegame/scene-editor';
-import type {
-  BeeGameContentNode,
-  BeeGameSceneContentDocument,
-} from '../../services/beeGameAdapter';
-
-const DEFAULT_MATERIAL = {
-  mode: 'unlit' as const,
-  color: '#ffffff',
-  metalness: 0,
-  roughness: 1,
-  opacity: 1,
-  alphaMode: 'blend' as const,
-};
+import type { MaterialOverride, SceneAsset, SceneComponent, SceneDocument, SceneNode, Transform } from '@beegame/scene-editor';
+import type { BeeGameContentNode, BeeGameSceneContentDocument } from '../../services/beeGameAdapter';
 
 const PIXELS_PER_EDITOR_UNIT = 100;
+type CanvasMetrics = { width: number; height: number; pixelsPerUnit: number };
+type CanonicalComponent = NonNullable<BeeGameContentNode['components']>[number];
+export type SpriteFrameTable = { frameWidth: number; frameHeight: number; framesPerFacing: number; facings?: string[]; states?: string[]; frameDurationMs?: number[] };
 
-type NodeSize = { width: number; height: number };
-type NodePoint = { x: number; y: number };
+const record = (value: unknown): Record<string, unknown> | undefined => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+const finite = (value: unknown, fallback: number): number => typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+const sourceAssetId = (assetId?: string): string | undefined => assetId?.split(':', 1)[0];
+const componentData = (component: CanonicalComponent): Record<string, unknown> => structuredClone(component.data ?? {});
+const componentOf = (node: BeeGameContentNode, type: CanonicalComponent['type']) => node.components?.find(component => component.type === type);
+const vec2 = (value: unknown, fallback: [number, number]): [number, number] => Array.isArray(value) ? [finite(value[0], fallback[0]), finite(value[1], fallback[1])] : [finite(record(value)?.x, fallback[0]), finite(record(value)?.y, fallback[1])];
+const vec3 = (value: unknown, fallback: [number, number, number]): [number, number, number] => Array.isArray(value) ? [finite(value[0], fallback[0]), finite(value[1], fallback[1]), finite(value[2], fallback[2])] : [finite(record(value)?.x, fallback[0]), finite(record(value)?.y, fallback[1]), finite(record(value)?.z, fallback[2])];
 
-export type SpriteFrameTable = {
-  frameWidth: number;
-  frameHeight: number;
-  framesPerFacing: number;
-  facings?: string[];
-  states?: string[];
-  frameDurationMs?: number[];
-};
-
-function record(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
+function canvasMetrics(settings?: Record<string, unknown>): CanvasMetrics {
+  const coordinateSystem = record(settings?.coordinateSystem);
+  const camera = record(settings?.camera);
+  const viewport = record(camera?.viewport);
+  const width = Math.max(1, finite(coordinateSystem?.width, finite(viewport?.width, 1280)));
+  const height = Math.max(1, finite(coordinateSystem?.height, finite(viewport?.height, 720)));
+  const pixelsPerUnit = Math.max(.0001, finite(coordinateSystem?.pixelsPerUnit, PIXELS_PER_EDITOR_UNIT));
+  return { width, height, pixelsPerUnit };
 }
 
-function finiteNumber(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-}
-
-function nodeSize(node: BeeGameContentNode): NodeSize {
-  const data = record(node.data);
+function dimensions(node: BeeGameContentNode): { width: number; height: number } {
+  const component = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image') ?? componentOf(node, 'tilemap');
+  const data = record(component?.data);
   const size = record(data?.size) ?? record(record(data?.sprite)?.logicalSize);
+  return { width: Math.max(1, finite(size?.width, PIXELS_PER_EDITOR_UNIT)), height: Math.max(1, finite(size?.height, PIXELS_PER_EDITOR_UNIT)) };
+}
+
+function anchor(node: BeeGameContentNode): { x: number; y: number } {
+  const data = record((componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image') ?? componentOf(node, 'tilemap'))?.data);
+  const value = record(data?.anchor);
+  return { x: finite(value?.x, .5), y: finite(value?.y, .5) };
+}
+
+function layerOrders(settings?: Record<string, unknown>): Map<string, number> {
+  if (!Array.isArray(settings?.layers)) return new Map();
+  return new Map(settings.layers.flatMap((item, index) => { const layer = record(item); return typeof layer?.id === 'string' ? [[layer.id, finite(layer.order, index + 1)] as const] : []; }));
+}
+
+function editorTransform(node: BeeGameContentNode, dimension: '2d' | '3d', layers: Map<string, number>, metrics: CanvasMetrics): Transform {
+  const position = node.transform?.position ?? [0, 0, 0];
+  const rotation = node.transform?.rotation ?? [0, 0, 0];
+  const scale = node.transform?.scale ?? [1, 1, 1];
+  if (dimension === '3d') return { position: [...position], rotation: [...rotation], scale: [...scale] };
+  const size = dimensions(node); const pivot = anchor(node); const layerOrder = node.layer ? layers.get(node.layer) ?? 0 : 0; const order = node.zIndex ?? (position[2] !== 0 ? position[2] : layerOrder);
+  const rootOffsetX = node.parentId ? 0 : metrics.width / 2;
+  const rootOffsetY = node.parentId ? 0 : metrics.height / 2;
   return {
-    width: Math.max(1, finiteNumber(size?.width, PIXELS_PER_EDITOR_UNIT)),
-    height: Math.max(1, finiteNumber(size?.height, PIXELS_PER_EDITOR_UNIT)),
+    // Canonical 2D scenes use top-left logical pixels; the editor uses a
+    // centered, y-up world. Parent transforms remain local pixel offsets.
+    position: [(position[0] - rootOffsetX + (.5 - pivot.x) * size.width) / metrics.pixelsPerUnit, (rootOffsetY - position[1] - (.5 - pivot.y) * size.height) / metrics.pixelsPerUnit, order * .01],
+    rotation: [...rotation],
+    // Renderer dimensions are geometry, not Transform scale. Keeping them
+    // separate prevents child GameObjects inheriting a parent's sprite size.
+    scale: [...scale],
   };
 }
 
-function nodeAnchor(node: BeeGameContentNode): NodePoint {
-  const anchor = record(record(node.data)?.anchor);
-  return {
-    x: finiteNumber(anchor?.x, 0.5),
-    y: finiteNumber(anchor?.y, 0.5),
-  };
+function explicitMember(data: Record<string, unknown>): string | undefined {
+  return typeof data.member === 'string' ? data.member : undefined;
 }
 
-function nodePosition(node: BeeGameContentNode): [number, number] {
-  if (node.transform?.position) return node.transform.position;
-  const offset = record(record(node.data)?.offset);
-  return [finiteNumber(offset?.x, 0), finiteNumber(offset?.y, 0)];
+function resolveAssetId(resourceId: string | undefined, data: Record<string, unknown>, members?: Record<string, Record<string, string>>): string | undefined {
+  if (!resourceId) return undefined;
+  const options = members?.[resourceId] ?? {}; const explicit = explicitMember(data);
+  if (explicit && options[explicit]) return options[explicit];
+  return resourceId;
 }
 
-function layerOrders(nodes: BeeGameContentNode[]): Map<string, number> {
-  const config = nodes.find(node => node.kind === 'world-config');
-  const layers = record(config?.data)?.layers;
-  if (!Array.isArray(layers)) return new Map();
-  return new Map(layers.flatMap((item, index) => {
-    const layer = record(item);
-    return typeof layer?.id === 'string'
-      ? [[layer.id, finiteNumber(layer.order, index + 1)] as const]
-      : [];
-  }));
+function material(data: Record<string, unknown>, assetId?: string): MaterialOverride {
+  const source = record(data.material); const color = typeof source?.color === 'string' ? source.color : typeof data.color === 'string' ? data.color : '#ffffff';
+  return { mode: source?.mode === 'standard' ? 'standard' : 'unlit', color, metalness: finite(source?.metalness, 0), roughness: finite(source?.roughness, 1), opacity: Math.min(1, Math.max(0, finite(source?.opacity, finite(data.opacity, finite(data.alpha, 1))))), alphaMode: ['opaque', 'mask', 'blend'].includes(String(source?.alphaMode)) ? source?.alphaMode as MaterialOverride['alphaMode'] : 'blend', ...(assetId ? { textureAssetId: assetId } : {}) };
 }
 
-function editorKind(node: BeeGameContentNode): SceneNode['kind'] {
-  const sprite = record(record(node.data)?.sprite);
-  if (node.assetRef || typeof sprite?.assetRef === 'string' || node.kind === 'sprite' || node.kind === 'tilemap') return 'plane';
-  const kind = node.kind;
-  if (kind === 'light') return 'light';
-  if (kind === 'box' || kind === 'sphere' || kind === 'plane') return kind;
-  return 'empty';
+function spriteTable(resourceId: string | undefined, member: string | undefined, tables?: Record<string, Record<string, SpriteFrameTable>>) {
+  return resourceId && member ? tables?.[resourceId]?.[member] : undefined;
 }
 
-function explicitAssetMember(node: BeeGameContentNode): string | undefined {
-  const data = record(node.data);
-  if (typeof data?.member === 'string') return data.member;
-  const texture = record(data?.texture);
-  if (typeof texture?.member === 'string') return texture.member;
-  const actions = record(record(data?.sprite)?.actions);
-  const idle = record(actions?.idle);
-  if (typeof idle?.member === 'string') return idle.member;
-  const firstAction = actions ? Object.values(actions).map(record).find(Boolean) : undefined;
-  return typeof firstAction?.member === 'string' ? firstAction.member : undefined;
+function spriteAnimation(table: SpriteFrameTable | undefined, data: Record<string, unknown>) {
+  // State sheets (for example the mailbox flag) are static variants, not
+  // facing animations. Treating every frame table as an animation made the
+  // editor advance through unrelated states and rendered the wrong sprite.
+  if (!table?.facings?.length) return undefined;
+  const initialFacing = typeof data.initialFacing === 'string' && table.facings.includes(data.initialFacing)
+    ? data.initialFacing
+    : table.facings[0];
+  return { ...table, ...(initialFacing ? { initialFacing } : {}), loop: true };
 }
 
-function normalizedTokens(value: string): string[] {
-  return value.toLowerCase().split(/[^a-z0-9]+/).filter(token => token && !/^\d+$/.test(token));
+function frameFor(animation: ReturnType<typeof spriteAnimation>): MaterialOverride['textureRegion'] | undefined {
+  if (!animation) return undefined; const facing = Math.max(0, animation.facings?.indexOf(animation.initialFacing ?? '') ?? 0);
+  return { x: facing * animation.framesPerFacing * animation.frameWidth, y: 0, width: animation.frameWidth, height: animation.frameHeight };
 }
 
-function matchingMember(node: BeeGameContentNode, members: Record<string, string>): string | undefined {
-  const explicit = explicitAssetMember(node);
-  if (explicit && members[explicit]) return members[explicit];
-  if (members[node.id]) return members[node.id];
-  const nodeTokens = normalizedTokens(node.id).filter(token => !['bg', 'deco', 'post'].includes(token));
-  let best: { assetId: string; score: number } | undefined;
-  for (const [member, assetId] of Object.entries(members)) {
-    const memberTokens = normalizedTokens(member).filter(token => !['sp', 'prop', 'ui', 'fx'].includes(token));
-    const score = nodeTokens.filter(token => memberTokens.includes(token)).length;
-    if (score > 0 && (!best || score > best.score)) best = { assetId, score };
+function staticFrameFor(table: SpriteFrameTable | undefined, requestedState: string | undefined): MaterialOverride['textureRegion'] | undefined {
+  if (!table?.states?.length) return undefined;
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const index = requestedState ? table.states.findIndex(state => normalize(state) === normalize(requestedState)) : 0;
+  const stateIndex = index >= 0 ? index : 0;
+  return { x: stateIndex * table.framesPerFacing * table.frameWidth, y: 0, width: table.frameWidth, height: table.frameHeight };
+}
+
+export function lightData(data: Record<string, unknown>, pixelsPerUnit = 1) {
+  const sourceKind = typeof data.kind === 'string' ? data.kind : data.lightType;
+  const kind = ['ambient', 'directional', 'point', 'spot'].includes(String(sourceKind)) ? sourceKind as 'ambient' | 'directional' | 'point' | 'spot' : 'point';
+  const colors = record(data.colors);
+  const color = typeof data.color === 'string' ? data.color : typeof colors?.calm === 'string' ? colors.calm : '#ffffff';
+  const intensity = finite(data.intensity, finite(data.strength, 1));
+  const alpha = typeof data.alpha === 'number' ? data.alpha : typeof colors?.calmAlpha === 'number' ? colors.calmAlpha : undefined;
+  const sourceDistance = typeof data.distance === 'number' ? data.distance : typeof data.range === 'number' ? data.range : undefined;
+  // Canonical 2D measurements are logical pixels; editor lights use world units.
+  const distance = sourceDistance === undefined ? undefined : sourceDistance / pixelsPerUnit;
+  const angle = typeof data.angle === 'number' ? data.angle : typeof data.halfAngleDeg === 'number' ? data.halfAngleDeg * Math.PI / 180 : undefined;
+  return { kind, color, intensity, ...(alpha === undefined ? {} : { alpha }), ...(distance === undefined ? {} : { distance }), ...(angle === undefined ? {} : { angle }), ...(typeof data.penumbra === 'number' ? { penumbra: data.penumbra } : {}) };
+}
+
+function editorParticleProperties(data: Record<string, unknown>, _metrics: CanvasMetrics): Record<string, unknown> {
+  const zone = record(data.zone);
+  if (!zone) return data;
+  const width = finite(zone.width, 0); const height = finite(zone.height, 0);
+  // Particle zones are local to their GameObject. The GameObject transform
+  // already converts the canonical top-left origin into editor world space;
+  // applying the canvas offset here as well moved the emitter twice.
+  return { ...data, zone: { ...zone, x: finite(zone.x, 0), y: -finite(zone.y, 0) - height, width, height } };
+}
+
+function canonicalParticleProperties(data: Record<string, unknown>, _metrics: CanvasMetrics): Record<string, unknown> {
+  const zone = record(data.zone);
+  if (!zone) return data;
+  const width = finite(zone.width, 0); const height = finite(zone.height, 0);
+  return { ...data, zone: { ...zone, x: finite(zone.x, 0), y: -finite(zone.y, 0) - height, width, height } };
+}
+
+function toEditorComponent(input: { node: BeeGameContentNode; component: CanonicalComponent; metrics: CanvasMetrics; members?: Record<string, Record<string, string>>; tables?: Record<string, Record<string, SpriteFrameTable>> }): SceneComponent {
+  const { node, component, metrics } = input; const id = component.id; if (!id) throw new Error(`Component ${node.id} is missing persistent id`); const data = componentData(component); const enabled = data.enabled !== false;
+  const resourceId = component.assetRef; const assetId = resolveAssetId(resourceId, data, input.members); const member = assetId?.includes(':') ? assetId.slice(assetId.indexOf(':') + 1) : explicitMember(data);
+  if (component.type === 'sprite-renderer' || component.type === 'image') {
+    if (component.type === 'sprite-renderer' && !assetId) throw new Error(`${component.type} ${node.id} requires assetRef`);
+    const table = component.type === 'sprite-renderer' ? spriteTable(resourceId, member, input.tables) : undefined;
+    const animation = component.type === 'sprite-renderer' ? spriteAnimation(table, data) : undefined;
+    const region = frameFor(animation) ?? (component.type === 'sprite-renderer' ? staticFrameFor(table, typeof data.frame === 'string' ? data.frame : undefined) : undefined);
+    const common = { id, enabled, ...(assetId ? { assetId } : {}), ...(member ? { member } : {}), material: { ...material(data, assetId), ...(region ? { textureRegion: region } : {}) }, properties: data };
+    return component.type === 'sprite-renderer' ? { ...common, assetId: assetId!, type: 'sprite-renderer', ...(region ? { frame: region } : {}), ...(animation ? { animation } : {}) } : { ...common, type: 'image' };
   }
-  return best?.assetId;
-}
-
-function initialVisibility(node: BeeGameContentNode): boolean {
-  if (node.enabled === false) return false;
-  const condition = record(node.data)?.visibleWhen;
-  if (typeof condition !== 'string') return true;
-  // The editor opens in the calm, uncollected authoring state. Stateful
-  // variants remain in the hierarchy and can still be made visible manually.
-  return condition === 'state != caught' || condition.endsWith('.notCollected');
-}
-
-function spritePreview(
-  node: BeeGameContentNode,
-  resourceId: string | undefined,
-  member: string | undefined,
-  frameTables: Record<string, Record<string, SpriteFrameTable>> | undefined,
-): Record<string, unknown> | undefined {
-  if (!resourceId || !member) return undefined;
-  const table = frameTables?.[resourceId]?.[member];
-  if (!table) return undefined;
-  const data = record(node.data);
-  const actions = record(record(data?.sprite)?.actions);
-  const idle = record(actions?.idle);
-  const initialFacing = typeof data?.initialFacing === 'string' ? data.initialFacing : table.facings?.[0];
-  return {
-    ...table,
-    ...(initialFacing ? { initialFacing } : {}),
-    loop: Boolean(actions) && idle?.loop !== false,
-  };
-}
-
-function firstSpriteRegion(preview: Record<string, unknown> | undefined): NonNullable<SceneNode['material']>['textureRegion'] | undefined {
-  if (!preview) return undefined;
-  const width = finiteNumber(preview.frameWidth, 0);
-  const height = finiteNumber(preview.frameHeight, 0);
-  const framesPerFacing = Math.max(1, Math.floor(finiteNumber(preview.framesPerFacing, 1)));
-  const facings = Array.isArray(preview.facings) ? preview.facings.filter((value): value is string => typeof value === 'string') : [];
-  const facing = typeof preview.initialFacing === 'string' ? preview.initialFacing : facings[0];
-  const facingIndex = Math.max(0, facings.indexOf(facing));
-  return width > 0 && height > 0
-    ? { x: facingIndex * framesPerFacing * width, y: 0, width, height }
-    : undefined;
-}
-
-function editorTransform(node: BeeGameContentNode, layers: Map<string, number>): Transform {
-  const position = nodePosition(node);
-  const scale = node.transform?.scale ?? [1, 1];
-  const size = nodeSize(node);
-  const anchor = nodeAnchor(node);
-  const centerX = position[0] + (0.5 - anchor.x) * size.width;
-  const centerY = position[1] + (0.5 - anchor.y) * size.height;
-  const layer = node.layer ? layers.get(node.layer) ?? 0 : 0;
-  return {
-    position: [centerX / PIXELS_PER_EDITOR_UNIT, (node.zIndex ?? layer) * 0.01, centerY / PIXELS_PER_EDITOR_UNIT],
-    rotation: [0, -(node.transform?.rotation ?? 0), 0],
-    scale: [size.width / PIXELS_PER_EDITOR_UNIT * scale[0], 1, size.height / PIXELS_PER_EDITOR_UNIT * scale[1]],
-  };
-}
-
-function childrenByParent(nodes: BeeGameContentNode[]): Map<string, string[]> {
-  const children = new Map<string, string[]>();
-  for (const node of nodes) {
-    if (!node.parentId) continue;
-    const current = children.get(node.parentId) ?? [];
-    current.push(node.id);
-    children.set(node.parentId, current);
+  if (component.type === 'mesh-filter' || component.type === 'tilemap') { if (!assetId) throw new Error(`${component.type} ${node.id} requires assetRef`); return { id, type: component.type, enabled, assetId, ...(member ? { member } : {}), properties: data }; }
+  if (component.type === 'mesh-renderer') return { id, type: 'mesh-renderer', enabled, ...(assetId ? { assetId } : {}), material: material(data, assetId), properties: data };
+  if (component.type === 'skinned-mesh-renderer') { if (!assetId) throw new Error(`skinned-mesh-renderer ${node.id} requires assetRef`); return { id, type: 'skinned-mesh-renderer', enabled, assetId, ...(member ? { member } : {}), material: material(data, assetId), properties: data }; }
+  if (component.type === 'particle-system') return { id, type: component.type, enabled, properties: editorParticleProperties(data, metrics) };
+  if (component.type === 'grid' || component.type === 'audio-listener' || component.type === 'canvas-renderer') return { id, type: component.type, enabled, properties: data };
+  if (component.type === 'tilemap-renderer') return { id, type: 'tilemap-renderer', enabled, material: material(data, assetId), properties: data };
+  if (component.type === 'animator') return { id, type: 'animator', enabled, ...(assetId ? { assetId } : {}), controller: data };
+  const size2 = vec2(data.size, [1, 1]); const offset2 = vec2(data.offset, [0, 0]); const center3 = vec3(data.center, [0, 0, 0]);
+  if (component.type === 'box-collider-2d') return { id, type: 'box-collider-2d', enabled, size: size2, offset: offset2, isTrigger: data.isTrigger === true };
+  if (component.type === 'circle-collider-2d') return { id, type: 'circle-collider-2d', enabled, radius: finite(data.radius, .5), offset: offset2, isTrigger: data.isTrigger === true };
+  if (component.type === 'capsule-collider-2d') return { id, type: 'capsule-collider-2d', enabled, size: size2, offset: offset2, direction: data.direction === 'horizontal' ? 'horizontal' : 'vertical', isTrigger: data.isTrigger === true };
+  if (component.type === 'polygon-collider-2d') return { id, type: 'polygon-collider-2d', enabled, points: Array.isArray(data.points) ? data.points.map(point => vec2(point, [0, 0])) : [[-.5, -.5], [.5, -.5], [0, .5]], offset: offset2, isTrigger: data.isTrigger === true };
+  if (component.type === 'rigidbody-2d') return { id, type: 'rigidbody-2d', enabled, bodyType: ['dynamic', 'kinematic', 'static'].includes(String(data.bodyType)) ? data.bodyType as 'dynamic' | 'kinematic' | 'static' : 'dynamic', properties: data };
+  if (component.type === 'box-collider') return { id, type: 'box-collider', enabled, size: vec3(data.size, [1, 1, 1]), center: center3, isTrigger: data.isTrigger === true };
+  if (component.type === 'sphere-collider') return { id, type: 'sphere-collider', enabled, radius: finite(data.radius, .5), center: center3, isTrigger: data.isTrigger === true };
+  if (component.type === 'capsule-collider') return { id, type: 'capsule-collider', enabled, radius: finite(data.radius, .5), height: finite(data.height, 2), direction: ['x', 'y', 'z'].includes(String(data.direction)) ? data.direction as 'x' | 'y' | 'z' : 'y', center: center3, isTrigger: data.isTrigger === true };
+  if (component.type === 'mesh-collider') return { id, type: 'mesh-collider', enabled, ...(assetId ? { assetId } : {}), convex: data.convex === true, isTrigger: data.isTrigger === true, properties: data };
+  if (component.type === 'rigidbody') return { id, type: 'rigidbody', enabled, isKinematic: data.isKinematic === true, useGravity: data.useGravity !== false, mass: Math.max(.0001, finite(data.mass, 1)), properties: data };
+  if (component.type === 'audio-source') return { id, type: 'audio-source', enabled, ...(assetId ? { assetId } : {}), properties: data };
+  if (component.type === 'particle-system-renderer') return { id, type: 'particle-system-renderer', enabled, ...(assetId ? { assetId, textureAssetId: assetId } : {}), material: material(data, assetId), properties: data };
+  if (component.type === 'light-2d' || component.type === 'light') return { id, type: component.type, enabled, light: lightData(data, component.type === 'light-2d' ? metrics.pixelsPerUnit : 1), properties: data };
+  if (component.type === 'camera') {
+    const orthographic = data.orthographic === true || data.projection === 'orthographic';
+    const viewport = record(record(data.viewport)?.width !== undefined ? data.viewport : undefined);
+    const orthographicSize = finite(data.orthographicSize, viewport ? finite(viewport.height, 720) / 2 / PIXELS_PER_EDITOR_UNIT : 3.6);
+    return { id, type: 'camera', enabled, orthographic, orthographicSize, ...(typeof data.nearClip === 'number' ? { nearClip: data.nearClip } : {}), ...(typeof data.farClip === 'number' ? { farClip: data.farClip } : {}), properties: data };
   }
-  return children;
+  if (component.type === 'canvas') return { id, type: 'canvas', enabled, renderMode: ['screen-space-overlay', 'screen-space-camera', 'world-space'].includes(String(data.renderMode)) ? data.renderMode as 'screen-space-overlay' | 'screen-space-camera' | 'world-space' : 'world-space', properties: data };
+  if (component.type === 'rect-transform') { const anchoredPosition = vec2(data.anchoredPosition, [0, 0]); const sizeDelta = vec2(data.sizeDelta, [0, 0]); return { id, type: 'rect-transform', enabled, anchorMin: vec2(data.anchorMin, [0, 0]), anchorMax: vec2(data.anchorMax, [1, 1]), pivot: vec2(data.pivot, [.5, .5]), anchoredPosition: [anchoredPosition[0] / metrics.pixelsPerUnit, anchoredPosition[1] / metrics.pixelsPerUnit], sizeDelta: [sizeDelta[0] / metrics.pixelsPerUnit, sizeDelta[1] / metrics.pixelsPerUnit], properties: data }; }
+  if (component.type === 'text') return { id, type: 'text', enabled, text: typeof data.text === 'string' ? data.text : '', properties: data };
+  throw new Error(`Unsupported scene component ${component.type}`);
 }
 
-export function sceneContentToEditorDocument(input: {
-  document: BeeGameSceneContentDocument;
-  documentRevision: string;
-  foundationDocumentRevision: string;
-  assetManifestRevision: string;
-  assets?: Record<string, SceneAsset>;
-  assetRegions?: Record<string, Record<string, NonNullable<SceneNode['material']>['textureRegion']>>;
-  assetMembers?: Record<string, Record<string, string>>;
-  frameTables?: Record<string, Record<string, SpriteFrameTable>>;
-}): SceneDocument {
-  const layers = layerOrders(input.document.data.nodes);
-  const children = childrenByParent(input.document.data.nodes);
-  const canonicalNodes = new Map(input.document.data.nodes.map(node => [node.id, node]));
-  const nodes = Object.fromEntries(
-    input.document.data.nodes.map(node => {
-      const kind = editorKind(node);
-      const sprite = record(record(node.data)?.sprite);
-      const texture = record(record(node.data)?.texture);
-      const resourceId = node.assetRef
-        ?? (typeof sprite?.assetRef === 'string' ? sprite.assetRef : undefined)
-        ?? (typeof texture?.assetRef === 'string' ? texture.assetRef : undefined);
-      const textureAssetId = resourceId
-        ? matchingMember(node, input.assetMembers?.[resourceId] ?? {}) ?? resourceId
-        : undefined;
-      const textureMember = textureAssetId?.includes(':')
-        ? textureAssetId.slice(textureAssetId.indexOf(':') + 1)
-        : explicitAssetMember(node) ?? input.assets?.[textureAssetId ?? '']?.name.replace(/\.[^.]+$/, '');
-      const previewSprite = spritePreview(node, resourceId, textureMember, input.frameTables);
-      const spriteRegion = firstSpriteRegion(previewSprite);
-      const alpha = finiteNumber(record(node.data)?.alpha, 1);
-      const editorNode: SceneNode = {
-        id: node.id,
-        name: node.name ?? node.id,
-        kind,
-        parentId: node.parentId ?? null,
-        children: children.get(node.id) ?? [],
-        visible: initialVisibility(node),
-        locked: false,
-        transform: editorTransform(node, layers),
-        ...(kind === 'plane' ? {
-          material: {
-            ...DEFAULT_MATERIAL,
-            opacity: Math.min(1, Math.max(0, alpha)),
-            ...(textureAssetId && input.assets?.[textureAssetId]
-              ? {
-                  textureAssetId,
-                  ...(spriteRegion
-                    ? { textureRegion: spriteRegion }
-                    : node.frameRef && resourceId && input.assetRegions?.[resourceId]?.[node.frameRef]
-                      ? { textureRegion: input.assetRegions[resourceId][node.frameRef] }
-                    : {}),
-                }
-              : {}),
-          },
-        } : {}),
-        unknown: {
-          canonicalNode: structuredClone(node),
-          preview2d: {
-            ...(previewSprite ? { sprite: previewSprite } : {}),
-            ...(node.kind === 'emitter' && textureAssetId
-              ? { emitter: { ...structuredClone(record(node.data) ?? {}), textureAssetId } }
-              : {}),
-            ...(node.kind === 'visionCone'
-              ? {
-                  procedural: {
-                    kind: 'visionCone',
-                    ...structuredClone(record(node.data) ?? {}),
-                    facing: typeof record(canonicalNodes.get(node.parentId ?? '')?.data)?.initialFacing === 'string'
-                      ? record(canonicalNodes.get(node.parentId ?? '')?.data)?.initialFacing
-                      : 'right',
-                  },
-                }
-              : {}),
-            ...(typeof record(node.data)?.blend === 'string' ? { blend: record(node.data)?.blend } : {}),
-            ...(record(node.data)?.motion ? { motion: structuredClone(record(node.data)?.motion) } : {}),
-            ...(record(node.data)?.patrol ? { patrol: structuredClone(record(node.data)?.patrol) } : {}),
-            ...(record(node.data)?.animation ? { animation: structuredClone(record(node.data)?.animation) } : {}),
-            ...(record(node.data)?.enterAnimation ? { animation: structuredClone(record(node.data)?.enterAnimation) } : {}),
-          },
-        },
-      };
-      return [node.id, editorNode];
-    }),
-  );
-  return {
-    schemaVersion: 'scene-authoring.v1',
-    id: input.document.id,
-    name: input.document.id,
-    revision: 0,
-    settings: {
-      background: '#181a20',
-      showGrid: false,
-      ambientColor: '#ffffff',
-      ambientIntensity: 1,
-      exposure: 1,
-      fogEnabled: false,
-      fogColor: '#181a20',
-      fogNear: 10,
-      fogFar: 60,
-    },
-    source: {
-      source: {
-        kind: 'content-package',
-        publicationId: input.document.id,
-        candidateDigest: input.foundationDocumentRevision,
-        sourceInputDigest: input.assetManifestRevision,
-      },
-      contentDigest: input.documentRevision,
-      contentRevision: input.documentRevision,
-      contentSchemaVersion: input.document.schema,
-      adapterId: 'beegame-scene-2d-editor',
-      adapterVersion: '1.0.0',
-    },
-    rootIds: input.document.data.nodes
-      .filter(node => !node.parentId)
-      .map(node => node.id),
-    nodes,
-    assets: input.assets ?? {},
-    diagnostics: [],
-  };
-}
+const childrenByParent = (nodes: BeeGameContentNode[]) => { const result = new Map<string, string[]>(); for (const node of nodes) if (node.parentId) result.set(node.parentId, [...(result.get(node.parentId) ?? []), node.id]); return result; };
 
-function canonicalBase(node: SceneNode): BeeGameContentNode | undefined {
-  const value = node.unknown?.canonicalNode;
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  return structuredClone(value) as BeeGameContentNode;
-}
-
-function sameTransform(left: Transform, right: Transform): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function canonicalKind(kind: SceneNode['kind']): string {
-  if (kind === 'empty') return 'group';
-  return kind;
-}
-
-function updateCanonicalNode(node: SceneNode, layers: Map<string, number>): BeeGameContentNode {
-  const base = canonicalBase(node);
-  const output: BeeGameContentNode = base ?? {
-    id: node.id,
-    kind: canonicalKind(node.kind),
-  };
-  output.id = node.id;
-  if (node.parentId) output.parentId = node.parentId;
-  else delete output.parentId;
-  if (!base || node.name !== (base.name ?? base.id)) output.name = node.name;
-  const condition = base ? record(base.data)?.visibleWhen : undefined;
-  if (typeof condition !== 'string' && (!base || node.visible !== (base.enabled !== false))) output.enabled = node.visible;
-
-  const baseline = base ? editorTransform(base, layers) : undefined;
-  if (!baseline || !sameTransform(node.transform, baseline)) {
-    const size = base ? nodeSize(base) : { width: PIXELS_PER_EDITOR_UNIT, height: PIXELS_PER_EDITOR_UNIT };
-    const anchor = base ? nodeAnchor(base) : { x: 0.5, y: 0.5 };
-    const position: [number, number] = [
-      node.transform.position[0] * PIXELS_PER_EDITOR_UNIT - (0.5 - anchor.x) * size.width,
-      node.transform.position[2] * PIXELS_PER_EDITOR_UNIT - (0.5 - anchor.y) * size.height,
-    ];
-    const nextTransform = {
-      position,
-      rotation: -node.transform.rotation[1],
-      scale: [
-        node.transform.scale[0] * PIXELS_PER_EDITOR_UNIT / size.width,
-        node.transform.scale[2] * PIXELS_PER_EDITOR_UNIT / size.height,
-      ] as [number, number],
-    };
-    if (base && !base.transform && record(base.data)?.offset) {
-      output.data = { ...structuredClone(base.data), offset: { x: position[0], y: position[1] } };
-    } else {
-      output.transform = nextTransform;
-    }
+export function sceneContentToEditorDocument(input: { document: BeeGameSceneContentDocument; documentRevision: string; foundationDocumentRevision: string; assetManifestRevision: string; assets?: Record<string, SceneAsset>; assetMembers?: Record<string, Record<string, string>>; frameTables?: Record<string, Record<string, SpriteFrameTable>> }): SceneDocument {
+  const dimension = input.document.kind === 'scene-3d' ? '3d' : '2d'; const layers = layerOrders(input.document.data.settings); const metrics = canvasMetrics(input.document.data.settings); const children = childrenByParent(input.document.data.nodes);
+  const nodes = Object.fromEntries(input.document.data.nodes.map(node => [node.id, { id: node.id, name: node.name ?? node.id, parentId: node.parentId ?? null, children: children.get(node.id) ?? [], active: node.enabled !== false, locked: false, transform: editorTransform(node, dimension, layers, metrics), ...(node.layer ? { layer: node.layer } : {}), ...(node.zIndex === undefined ? {} : { order: node.zIndex }), tags: [...(node.semantic ?? [])], metadata: structuredClone(node.data ?? {}), components: (node.components ?? []).map(component => toEditorComponent({ node, component, metrics, members: input.assetMembers, tables: input.frameTables })) } satisfies SceneNode]));
+  // Vision is a child Light2D. If no local rotation was authored, align the
+  // cone with the guard's declared initial facing instead of always pointing up.
+  if (dimension === '2d') for (const source of input.document.data.nodes) {
+    const target = nodes[source.id];
+    const parent = source.parentId ? input.document.data.nodes.find(node => node.id === source.parentId) : undefined;
+    const isVisionCone = source.semantic?.includes('vision-cone') && source.components?.some(component => component.type === 'light-2d');
+    const hasExplicitRotation = source.transform?.rotation?.some(value => value !== 0);
+    const parentSprite = parent?.components?.find(component => component.type === 'sprite-renderer');
+    const facing = record(parentSprite?.data)?.initialFacing;
+    const angle = facing === 'right' ? -Math.PI / 2 : facing === 'left' ? Math.PI / 2 : facing === 'down' ? Math.PI : facing === 'up' ? 0 : undefined;
+    if (target && isVisionCone && !hasExplicitRotation && angle !== undefined) target.transform.rotation[2] = angle;
   }
-  return output;
+  return { schemaVersion: 'scene-game-object.v2', dimension, id: input.document.id, name: input.document.id, revision: 0, settings: { background: '#181a20', showGrid: true, ambientColor: '#ffffff', ambientIntensity: 1, exposure: 1, fogEnabled: false, fogColor: '#181a20', fogNear: 10, fogFar: 60 }, source: { source: { kind: 'content-package', publicationId: input.document.id, candidateDigest: input.foundationDocumentRevision, sourceInputDigest: input.assetManifestRevision }, contentDigest: input.documentRevision, contentRevision: input.documentRevision, contentSchemaVersion: input.document.schema, adapterId: 'unity-game-object-components', adapterVersion: '2.0.0' }, rootIds: input.document.data.nodes.filter(node => !node.parentId).map(node => node.id), nodes, assets: input.assets ?? {}, diagnostics: [] };
 }
 
-export function editorDocumentToSceneContent(
-  editorDocument: SceneDocument,
-  original: BeeGameSceneContentDocument,
-): BeeGameSceneContentDocument {
-  const layers = layerOrders(original.data.nodes);
-  const previousOrder = new Map(
-    original.data.nodes.map((node, index) => [node.id, index]),
-  );
-  const nodes = Object.values(editorDocument.nodes)
-    .sort((left, right) => {
-      const leftOrder = previousOrder.get(left.id) ?? Number.MAX_SAFE_INTEGER;
-      const rightOrder = previousOrder.get(right.id) ?? Number.MAX_SAFE_INTEGER;
-      return leftOrder - rightOrder;
-    })
-    .map(node => updateCanonicalNode(node, layers));
-  const data = {
-    ...structuredClone(original.data),
-    nodes,
-  };
-  if (data.cameraNodeId && !editorDocument.nodes[data.cameraNodeId]) {
-    delete data.cameraNodeId;
-  }
-  return {
-    ...structuredClone(original),
-    assetRefs: [...new Set([
-      ...original.assetRefs,
-      ...nodes.flatMap(node => node.assetRef ? [node.assetRef] : []),
-    ])],
-    data,
-  };
+function toCanonicalComponent(component: SceneComponent, metrics: CanvasMetrics): CanonicalComponent {
+  const enabled = component.enabled ? {} : { enabled: false }; const props = 'properties' in component ? structuredClone(component.properties) : {};
+  if (component.type === 'sprite-renderer') return { id: component.id, type: component.type, assetRef: sourceAssetId(component.assetId), data: { ...props, ...(component.member ? { member: component.member } : {}), ...enabled } };
+  if (component.type === 'image') return { id: component.id, type: component.type, ...(component.assetId ? { assetRef: sourceAssetId(component.assetId) } : {}), data: { ...props, ...(component.member ? { member: component.member } : {}), ...enabled } };
+  if (component.type === 'mesh-filter' || component.type === 'tilemap' || component.type === 'skinned-mesh-renderer') return { id: component.id, type: component.type, assetRef: sourceAssetId(component.assetId), data: { ...props, ...(component.member ? { member: component.member } : {}), ...enabled } };
+  if (component.type === 'mesh-renderer') return { id: component.id, type: component.type, ...(component.assetId ? { assetRef: sourceAssetId(component.assetId) } : {}), data: { ...props, ...enabled } };
+  if (component.type === 'tilemap-renderer') return { id: component.id, type: component.type, data: { ...props, ...enabled } };
+  if (component.type === 'particle-system') return { id: component.id, type: component.type, data: { ...canonicalParticleProperties(props, metrics), ...enabled } };
+  if (component.type === 'grid' || component.type === 'audio-listener' || component.type === 'canvas-renderer') return { id: component.id, type: component.type, data: { ...props, ...enabled } };
+  if (component.type === 'animator') return { id: component.id, type: 'animator', ...(component.assetId ? { assetRef: sourceAssetId(component.assetId) } : {}), data: { ...structuredClone(component.controller), ...enabled } };
+  if (component.type === 'box-collider-2d' || component.type === 'capsule-collider-2d') return { id: component.id, type: component.type, data: { size: component.size, offset: component.offset, ...(component.type === 'capsule-collider-2d' ? { direction: component.direction } : {}), isTrigger: component.isTrigger, ...enabled } };
+  if (component.type === 'circle-collider-2d') return { id: component.id, type: component.type, data: { radius: component.radius, offset: component.offset, isTrigger: component.isTrigger, ...enabled } };
+  if (component.type === 'polygon-collider-2d') return { id: component.id, type: component.type, data: { points: component.points, offset: component.offset, isTrigger: component.isTrigger, ...enabled } };
+  if (component.type === 'rigidbody-2d') return { id: component.id, type: component.type, data: { ...props, bodyType: component.bodyType, ...enabled } };
+  if (component.type === 'box-collider') return { id: component.id, type: component.type, data: { size: component.size, center: component.center, isTrigger: component.isTrigger, ...enabled } };
+  if (component.type === 'sphere-collider') return { id: component.id, type: component.type, data: { radius: component.radius, center: component.center, isTrigger: component.isTrigger, ...enabled } };
+  if (component.type === 'capsule-collider') return { id: component.id, type: component.type, data: { radius: component.radius, height: component.height, direction: component.direction, center: component.center, isTrigger: component.isTrigger, ...enabled } };
+  if (component.type === 'mesh-collider') return { id: component.id, type: component.type, ...(component.assetId ? { assetRef: sourceAssetId(component.assetId) } : {}), data: { ...props, convex: component.convex, isTrigger: component.isTrigger, ...enabled } };
+  if (component.type === 'rigidbody') return { id: component.id, type: component.type, data: { ...props, isKinematic: component.isKinematic, useGravity: component.useGravity, mass: component.mass, ...enabled } };
+  if (component.type === 'audio-source') return { id: component.id, type: component.type, ...(component.assetId ? { assetRef: sourceAssetId(component.assetId) } : {}), data: { ...props, ...enabled } };
+  if (component.type === 'particle-system-renderer') return { id: component.id, type: component.type, ...(component.assetId ? { assetRef: sourceAssetId(component.assetId) } : {}), data: { ...props, ...enabled } };
+  if (component.type === 'light-2d' || component.type === 'light') return { id: component.id, type: component.type, data: { ...props, ...component.light, ...enabled } };
+  if (component.type === 'camera') return { id: component.id, type: component.type, data: { ...props, orthographic: component.orthographic, ...(component.orthographicSize === undefined ? {} : { orthographicSize: component.orthographicSize }), ...(component.nearClip === undefined ? {} : { nearClip: component.nearClip }), ...(component.farClip === undefined ? {} : { farClip: component.farClip }), ...enabled } };
+  if (component.type === 'canvas') return { id: component.id, type: component.type, data: { ...props, renderMode: component.renderMode, ...enabled } };
+  if (component.type === 'rect-transform') return { id: component.id, type: component.type, data: { ...props, anchorMin: component.anchorMin, anchorMax: component.anchorMax, pivot: component.pivot, anchoredPosition: component.anchoredPosition.map(value => value * metrics.pixelsPerUnit), sizeDelta: component.sizeDelta.map(value => value * metrics.pixelsPerUnit), ...enabled } };
+  if (component.type === 'text') return { id: component.id, type: component.type, data: { ...props, text: component.text, ...enabled } };
+  throw new Error(`Unsupported scene component ${component satisfies never}`);
+}
+
+export function editorDocumentToSceneContent(editorDocument: SceneDocument, original: BeeGameSceneContentDocument): BeeGameSceneContentDocument {
+  const previousOrder = new Map(original.data.nodes.map((node, index) => [node.id, index])); const metrics = canvasMetrics(original.data.settings);
+  const nodes = Object.values(editorDocument.nodes).sort((a, b) => (previousOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (previousOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER)).map(node => {
+    const components = node.components.map(component => toCanonicalComponent(component, metrics)); const base: BeeGameContentNode = { id: node.id, ...(node.parentId ? { parentId: node.parentId } : {}), ...(node.name === node.id ? {} : { name: node.name }), ...(node.tags.length ? { semantic: [...node.tags] } : {}), ...(node.active ? {} : { enabled: false }), ...(node.layer ? { layer: node.layer } : {}), ...(node.order === undefined ? {} : { zIndex: node.order }), components, ...(node.metadata && Object.keys(node.metadata).length ? { data: structuredClone(node.metadata) } : {}) };
+    if (editorDocument.dimension === '3d') base.transform = structuredClone(node.transform);
+    else { const size = dimensions(base); const pivot = anchor(base); const rootOffsetX = node.parentId ? 0 : metrics.width / 2; const rootOffsetY = node.parentId ? 0 : metrics.height / 2; base.transform = { position: [node.transform.position[0] * metrics.pixelsPerUnit + rootOffsetX - (.5 - pivot.x) * size.width, rootOffsetY - node.transform.position[1] * metrics.pixelsPerUnit - (.5 - pivot.y) * size.height, 0], rotation: [...node.transform.rotation], scale: [...node.transform.scale] }; }
+    return base;
+  });
+  const data = { ...structuredClone(original.data), nodes }; if (data.cameraNodeId && !editorDocument.nodes[data.cameraNodeId]) delete data.cameraNodeId;
+  return { ...structuredClone(original), kind: editorDocument.dimension === '3d' ? 'scene-3d' : 'scene-2d', assetRefs: [...new Set(nodes.flatMap(node => node.components?.flatMap(component => component.assetRef ? [component.assetRef] : []) ?? []))], data };
 }

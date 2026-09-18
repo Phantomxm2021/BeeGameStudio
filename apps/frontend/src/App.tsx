@@ -29,6 +29,7 @@ import {
 import { LandingView } from './components/Demiurge/LandingView';
 import type { Language } from './components/Demiurge/AgentsConfig';
 import { isResourceLibraryRoute } from './components/ResourceLibrary/resourceLibraryRoute';
+import { getProjectRouteId, WORKSPACE_ROUTE_CHANGE_EVENT } from './navigation/workspaceRoute';
 
 const DashboardView = lazy(async () => {
   const module = await import('./components/Demiurge/DashboardView');
@@ -40,16 +41,20 @@ function App() {
     loadProjects,
     projects,
     activeProjectId,
+    hasLoadedProjects,
     bootstrapProjectFromBrief,
     setToastCallbacks,
     clearActiveProject,
+    syncActiveProjectFromRoute,
   } = useProjectStore(useShallow((state) => ({
     loadProjects: state.loadProjects,
     projects: state.projects,
     activeProjectId: state.activeProjectId,
+    hasLoadedProjects: state.hasLoadedProjects,
     bootstrapProjectFromBrief: state.bootstrapProjectFromBrief,
     setToastCallbacks: state.setToastCallbacks,
     clearActiveProject: state.clearActiveProject,
+    syncActiveProjectFromRoute: state.syncActiveProjectFromRoute,
   })));
   const {
     loadCurrentUser,
@@ -76,15 +81,27 @@ function App() {
   const authenticationRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedProtectedDataUserRef = useRef<string | null>(null);
   const activeProject = projects.find(p => p.id === activeProjectId);
+  const requestedProjectId = getProjectRouteId();
+  const isProjectRouteRestoring = Boolean(
+    authenticationStatus === 'authenticated' && requestedProjectId && !hasLoadedProjects,
+  );
   const isDashboardVisible = Boolean(
     authenticationStatus === 'authenticated' && activeProjectId && activeProject && !isResourceRoute,
   );
 
   useEffect(() => {
     const syncResourceRoute = () => setIsResourceRoute(isResourceLibraryRoute());
-    window.addEventListener('popstate', syncResourceRoute);
-    return () => window.removeEventListener('popstate', syncResourceRoute);
-  }, []);
+    const syncPopState = () => {
+      syncResourceRoute();
+      syncActiveProjectFromRoute();
+    };
+    window.addEventListener('popstate', syncPopState);
+    window.addEventListener(WORKSPACE_ROUTE_CHANGE_EVENT, syncResourceRoute);
+    return () => {
+      window.removeEventListener('popstate', syncPopState);
+      window.removeEventListener(WORKSPACE_ROUTE_CHANGE_EVENT, syncResourceRoute);
+    };
+  }, [syncActiveProjectFromRoute]);
 
   // Landing and resource surfaces are always light. The persisted theme belongs
   // to the project dashboard and is applied only while that surface is active.
@@ -233,6 +250,21 @@ function App() {
           <p className="text-sm font-medium tracking-[-0.01em] text-foreground">
             {authenticationInitializationError || '正在恢复登录状态…'}
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isProjectRouteRestoring) {
+    return (
+      <div
+        className="flex min-h-screen items-center justify-center bg-background px-6 text-center text-foreground"
+        role="status"
+        aria-label="Restoring project workspace"
+      >
+        <div className="flex max-w-sm flex-col items-center gap-4">
+          <span className="size-7 animate-spin rounded-full border-2 border-border/20 border-t-ring" aria-hidden="true" />
+          <p className="text-sm font-medium tracking-[-0.01em] text-foreground">正在恢复项目工作区…</p>
         </div>
       </div>
     );

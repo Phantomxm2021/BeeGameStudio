@@ -1,7 +1,7 @@
 import type { Dispatch, MouseEvent, SetStateAction } from 'react'
 import { ChevronRight, Eye, EyeOff, MousePointer2, MousePointerBan } from 'lucide-react'
 import { ObjectIcon } from './inspector'
-import type { SceneDocument } from './model'
+import { primaryComponentType, type SceneDocument } from './model'
 import type { ModelSelection, ModelStructure } from './model-structure'
 
 type DropPosition = 'before' | 'inside' | 'after'
@@ -22,16 +22,14 @@ export function matchesTreeNode(document: SceneDocument, id: string, query: stri
   const node = document.nodes[id]
   if (!node) return false
   const value = query.toLowerCase()
-  const structure = node.assetId ? structures[node.assetId] : null
-  return !query || node.name.toLowerCase().includes(value) || node.kind.includes(value) || Boolean(structure && Object.values(structure.nodes).some(part => part.name.toLowerCase().includes(value))) || node.children.some(child => matchesTreeNode(document, child, query, structures))
+  return !query || node.name.toLowerCase().includes(value) || node.tags.some(tag => tag.toLowerCase().includes(value)) || node.components.some(component => component.type.includes(value)) || node.children.some(child => matchesTreeNode(document, child, query, structures))
 }
 
 export function TreeNode(props: TreeProps) {
   const { id, document, structures, modelSelection, query, selectedIds, expanded, hiddenIds, unpickableIds, renaming, dropPreview, onSelect, onToggleExpand, onToggleHidden, onTogglePickable, onRename, onFrame, onDragPreview, onDrop, setContext, depth = 0 } = props
   const node = document.nodes[id]
   if (!node || !matchesTreeNode(document, id, query, structures)) return null
-  const structure = node.assetId ? structures[node.assetId] : null
-  const hasChildren = Boolean(node.children.length || structure?.roots.length)
+  const hasChildren = Boolean(node.children.length)
   const isOpen = Boolean(query) || expanded[id] !== false
   const preview = dropPreview?.id === id ? dropPreview.position : null
   const pickable = !unpickableIds.has(id)
@@ -44,13 +42,12 @@ export function TreeNode(props: TreeProps) {
       onDragOver={event => { event.preventDefault(); event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); const ratio = (event.clientY - rect.top) / rect.height; onDragPreview({ id, position: ratio < .25 ? 'before' : ratio > .75 ? 'after' : 'inside' }) }}
       onDragLeave={() => onDragPreview(null)} onDrop={event => { event.preventDefault(); event.stopPropagation(); onDrop(id, dropPreview?.id === id ? dropPreview.position : 'inside'); onDragPreview(null) }}>
       <button className={`chevron ${hasChildren && isOpen ? 'expanded' : ''}`} title={`${isOpen ? 'Collapse' : 'Expand'} ${node.name}`} aria-label={isOpen ? 'Collapse' : 'Expand'} disabled={!hasChildren} onClick={event => { event.stopPropagation(); onToggleExpand(id) }}>{hasChildren && <ChevronRight size={12} />}</button>
-      <span className={`node-icon ${node.kind}`}><ObjectIcon kind={node.kind} lightKind={node.light?.kind} /></span>
+      <span className={`node-icon ${primaryComponentType(node)}`}><ObjectIcon kind={primaryComponentType(node)} /></span>
       {renaming === id ? <input autoFocus title="Rename object" className="tree-rename-input" defaultValue={node.name} onBlur={event => onRename(id, event.currentTarget.value)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') onRename(id, node.name) }} /> : <span className="node-name" title={node.name}>{node.name}</span>}
       <button className="row-action" title={hiddenIds.has(id) ? 'Show in scene' : 'Hide in scene'} aria-label={hiddenIds.has(id) ? 'Show in scene' : 'Hide in scene'} onClick={event => { event.stopPropagation(); onToggleHidden(id) }}>{hiddenIds.has(id) ? <EyeOff size={12} /> : <Eye size={12} />}</button>
       <button className="row-action" title={pickable ? 'Make unpickable' : 'Make pickable'} aria-label={pickable ? 'Make unpickable' : 'Make pickable'} onClick={event => { event.stopPropagation(); onTogglePickable(id) }}>{pickable ? <MousePointer2 size={12} /> : <MousePointerBan size={12} />}</button>
     </div>
     {isOpen && hasChildren && <div className="tree-children" role="group">
-      {structure?.roots.map(index => <ModelTreeNode key={`model-${index}`} ownerId={id} index={index} structure={structure} props={props} depth={depth + 1} />)}
       {node.children.map(child => <TreeNode {...props} key={child} id={child} depth={depth + 1} />)}
     </div>}
   </div>

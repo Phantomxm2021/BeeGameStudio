@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./platform": {
+      "types": "./dist/platform.d.ts",
+      "import": "./dist/platform.js"
+    },
     "./styles.css": "./dist/styles.css"
   },
   "scripts": {
@@ -24,6 +28,7 @@
     "@react-three/drei": "^10.7.6",
     "@react-three/fiber": "^9.3.0",
     "lucide-react": "^1.45.0",
+    "motion": "^13.3.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "three": "^0.180.0"

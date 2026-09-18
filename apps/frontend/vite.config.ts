@@ -18,6 +18,7 @@ const frontendRadixDropdownPath = fileURLToPath(new URL('./node_modules/@radix-u
 const frontendRadixTogglePath = fileURLToPath(new URL('./node_modules/@radix-ui/react-toggle', import.meta.url))
 const frontendRadixContextMenuPath = fileURLToPath(new URL('./node_modules/@radix-ui/react-context-menu', import.meta.url))
 const sceneEditorSrcPath = fileURLToPath(new URL('../../packages/scene-editor/src/index.ts', import.meta.url))
+const sceneEditorPlatformPath = fileURLToPath(new URL('../../packages/scene-editor/src/platform.ts', import.meta.url))
 const sceneEditorStylesPath = fileURLToPath(new URL('../../packages/scene-editor/src/styles.css', import.meta.url))
 const browserNodeBuiltinShimPath = fileURLToPath(new URL('./src/shims/nodeBuiltin.ts', import.meta.url))
 
@@ -37,6 +38,7 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: [
         { find: '@beegame/scene-editor/styles.css', replacement: sceneEditorStylesPath },
+        { find: '@beegame/scene-editor/platform', replacement: sceneEditorPlatformPath },
         { find: '@beegame/scene-editor', replacement: sceneEditorSrcPath },
         { find: '@react-three/fiber', replacement: frontendFiberPath },
         { find: '@react-three/drei', replacement: frontendDreiPath },

@@ -8,7 +8,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { z } from 'zod/v4'
 import type { BeeGameAssetManifest } from './asset-contracts'
 
@@ -17,6 +17,88 @@ export const BEEGAME_CONTENT_INDEX = 'content/index.json' as const
 export const BEEGAME_CONTENT_PACKAGE_SCHEMA =
   'beegame-content-package.v2' as const
 export const BEEGAME_CONTENT_DOCUMENT_SCHEMA = 'beegame-content.v1' as const
+
+/**
+ * Canonical UI object roles accepted by the engine-neutral content contract.
+ *
+ * A role describes the node's authored purpose; it is not an asset kind. Keep
+ * this vocabulary closed so an author cannot silently invent a runtime type.
+ */
+export const BEEGAME_UI_NODE_ROLES = [
+  'screen-root',
+  'hud-root',
+  'flow-root',
+  'flow-screen',
+  'container',
+  'text',
+  'image',
+  'sprite',
+  'nineSlicePanel',
+  'button',
+  'slider',
+  'toggle',
+  'dropdown',
+  'tab',
+  'shape',
+  'keycap',
+  'toast',
+  'worldPrompt',
+  'capsuleSegment',
+  'emitter',
+] as const
+
+export type BeeGameUiNodeRole = (typeof BEEGAME_UI_NODE_ROLES)[number]
+
+export const BEEGAME_UI_ASSET_BACKED_ROLES = [
+  'image',
+  'sprite',
+  'nineSlicePanel',
+] as const satisfies readonly BeeGameUiNodeRole[]
+
+export const BEEGAME_SCENE_MODEL = 'game-object-v2' as const
+export const BEEGAME_SCENE_COMPONENT_TYPES = [
+  'sprite-renderer',
+  'mesh-filter',
+  'mesh-renderer',
+  'skinned-mesh-renderer',
+  'grid',
+  'tilemap',
+  'tilemap-renderer',
+  'animator',
+  'box-collider-2d',
+  'circle-collider-2d',
+  'capsule-collider-2d',
+  'polygon-collider-2d',
+  'rigidbody-2d',
+  'box-collider',
+  'sphere-collider',
+  'capsule-collider',
+  'mesh-collider',
+  'rigidbody',
+  'audio-source',
+  'audio-listener',
+  'particle-system',
+  'particle-system-renderer',
+  'light-2d',
+  'light',
+  'camera',
+  'canvas',
+  'canvas-renderer',
+  'rect-transform',
+  'image',
+  'text',
+] as const
+export const BEEGAME_SCENE_ASSET_COMPONENT_TYPES = [
+  'sprite-renderer',
+  'mesh-filter',
+  'mesh-renderer',
+  'skinned-mesh-renderer',
+  'tilemap',
+  'animator',
+  'audio-source',
+  'particle-system-renderer',
+  'image',
+] as const satisfies readonly (typeof BEEGAME_SCENE_COMPONENT_TYPES)[number][]
 
 const digestSchema = z.string().regex(/^[a-f0-9]{64}$/)
 const finiteNumber = z.number().finite()
@@ -32,41 +114,84 @@ const contentIndexSchema = z
   .strictObject({
     schema: z.literal(BEEGAME_CONTENT_PACKAGE_SCHEMA),
     id: identifier,
-    dimension: z.literal('2d'),
+    dimension: z.enum(['2d', '3d']),
     documentRevision: digestSchema,
     assetManifestRevision: digestSchema,
     entryScene: identifier,
     files: uniqueIdentifiers.min(1),
+    sceneModel: z.literal(BEEGAME_SCENE_MODEL),
   })
 
-const transform2dSchema = z
+const transformSchema = z
   .strictObject({
-    position: z.tuple([finiteNumber, finiteNumber]),
-    rotation: finiteNumber.optional(),
-    scale: z.tuple([finiteNumber, finiteNumber]).optional(),
+    position: z.tuple([finiteNumber, finiteNumber, finiteNumber]),
+    rotation: z.tuple([finiteNumber, finiteNumber, finiteNumber]).optional(),
+    scale: z.tuple([finiteNumber, finiteNumber, finiteNumber]).optional(),
   })
 
-const contentComponentSchema = z
+const sceneComponentSchema = z
   .strictObject({
-    type: identifier,
+    /** Stable identity: editor/runtime references must not depend on array order. */
+    id: identifier,
+    type: z.enum(BEEGAME_SCENE_COMPONENT_TYPES),
     assetRef: identifier.optional(),
     data: z.record(z.string(), z.unknown()).optional(),
   })
 
-const sceneNodeSchema = z
+const behaviorMetadataSchema = z
+  .strictObject({
+    id: identifier,
+    /** Closed at the shape level, intentionally open at the behavior vocabulary level. */
+    kind: identifier,
+    config: z.record(z.string(), z.unknown()),
+  })
+
+const sceneNodeDataSchema = z
+  .record(z.string(), z.unknown())
+  .superRefine((value, context) => {
+    if (value.behaviors === undefined) return
+    if (!Array.isArray(value.behaviors)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['behaviors'],
+        message: 'behaviors must be an array of authored behavior metadata.',
+      })
+      return
+    }
+    const ids = new Set<string>()
+    value.behaviors.forEach((behavior, index) => {
+      const parsed = behaviorMetadataSchema.safeParse(behavior)
+      if (!parsed.success) {
+        context.addIssue({
+          code: 'custom',
+          path: ['behaviors', index],
+          message: 'behavior entries require id, kind and config.',
+        })
+        return
+      }
+      if (ids.has(parsed.data.id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['behaviors', index, 'id'],
+          message: `duplicate behavior id ${parsed.data.id}.`,
+        })
+      }
+      ids.add(parsed.data.id)
+    })
+  })
+
+const componentSceneNodeSchema = z
   .strictObject({
     id: identifier,
     parentId: identifier.optional(),
     name: z.string().trim().min(1).max(512).optional(),
-    kind: identifier,
+    semantic: uniqueIdentifiers.optional(),
     enabled: z.boolean().optional(),
-    transform: transform2dSchema.optional(),
+    transform: transformSchema.optional(),
     layer: identifier.optional(),
     zIndex: finiteNumber.optional(),
-    assetRef: identifier.optional(),
-    frameRef: identifier.optional(),
-    components: z.array(contentComponentSchema).optional(),
-    data: z.record(z.string(), z.unknown()).optional(),
+    components: z.array(sceneComponentSchema).optional(),
+    data: sceneNodeDataSchema.optional(),
   })
 
 const uiLayoutSchema = z
@@ -82,7 +207,8 @@ const uiNodeSchema = z
   .strictObject({
     id: identifier,
     parentId: identifier.optional(),
-    role: identifier,
+    role: z.enum(BEEGAME_UI_NODE_ROLES),
+    enabled: z.boolean().optional(),
     name: z.string().trim().min(1).max(512).optional(),
     text: z.string().optional(),
     assetRef: identifier.optional(),
@@ -109,16 +235,19 @@ const contentHeader = {
   assetRefs: uniqueIdentifiers,
 } as const
 
-const sceneDocumentSchema = z
+const sceneDocumentBaseSchema = z
   .strictObject({
     ...contentHeader,
-    kind: z.literal('scene-2d'),
+    kind: z.string(),
     data: z
       .strictObject({
-        nodes: z.array(sceneNodeSchema).min(1),
+        nodes: z.array(componentSceneNodeSchema).min(1),
         cameraNodeId: identifier.optional(),
+        settings: z.record(z.string(), z.unknown()).optional(),
       }),
   })
+const scene2dDocumentSchema = sceneDocumentBaseSchema.extend({ kind: z.literal('scene-2d') })
+const scene3dDocumentSchema = sceneDocumentBaseSchema.extend({ kind: z.literal('scene-3d') })
 
 const uiDocumentSchema = z
   .strictObject({
@@ -142,13 +271,18 @@ const vfxDocumentSchema = z
   })
 
 const contentDocumentSchema = z.discriminatedUnion('kind', [
-  sceneDocumentSchema,
+  scene2dDocumentSchema,
+  scene3dDocumentSchema,
   uiDocumentSchema,
   vfxDocumentSchema,
 ])
 
 export type BeeGameContentIndex = z.infer<typeof contentIndexSchema>
 export type BeeGameContentDocument = z.infer<typeof contentDocumentSchema>
+export type BeeGameSceneContentDocument = Extract<
+  BeeGameContentDocument,
+  { kind: 'scene-2d' | 'scene-3d' }
+>
 
 export type BeeGameContentAuthority = Readonly<{
   documentRevision: string
@@ -320,6 +454,109 @@ function validateNoResourcePathBypass(
   }
 }
 
+function validateNoLegacyScriptFields(
+  path: string,
+  value: unknown,
+  issues: string[],
+  trail: string[] = [],
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      validateNoLegacyScriptFields(path, item, issues, [...trail, String(index)]),
+    )
+    return
+  }
+  if (!isRecord(value)) return
+  for (const [key, item] of Object.entries(value)) {
+    const nextTrail = [...trail, key]
+    if (key === 'scriptId' || key === 'monoBehaviour' || key === 'mono-behaviour' || key === 'behavior')
+      issues.push(`${path}: ${nextTrail.join('.')} is a retired script component field; use node.data.behaviors metadata.`)
+    validateNoLegacyScriptFields(path, item, issues, nextTrail)
+  }
+}
+
+function validateDeclaredAssetReferences(
+  path: string,
+  value: unknown,
+  declaredAssets: ReadonlySet<string>,
+  issues: string[],
+  trail: string[] = [],
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      validateDeclaredAssetReferences(path, item, declaredAssets, issues, [
+        ...trail,
+        String(index),
+      ]),
+    )
+    return
+  }
+  if (!isRecord(value)) return
+  for (const [key, item] of Object.entries(value)) {
+    const nextTrail = [...trail, key]
+    if (
+      key === 'assetRef' &&
+      typeof item === 'string' &&
+      !declaredAssets.has(item)
+    )
+      issues.push(
+        `${path}: ${nextTrail.join('.')} uses undeclared assetRef ${item}.`,
+      )
+    validateDeclaredAssetReferences(
+      path,
+      item,
+      declaredAssets,
+      issues,
+      nextTrail,
+    )
+  }
+}
+
+function validateAssetMembers(
+  path: string,
+  value: unknown,
+  manifest: BeeGameAssetManifest,
+  issues: string[],
+  trail: string[] = [],
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      validateAssetMembers(path, item, manifest, issues, [...trail, String(index)]),
+    )
+    return
+  }
+  if (!isRecord(value)) return
+  const assetRef = typeof value.assetRef === 'string' ? value.assetRef : undefined
+  const data = isRecord(value.data) ? value.data : undefined
+  const member = typeof value.member === 'string'
+    ? value.member
+    : typeof data?.member === 'string'
+      ? data.member
+      : undefined
+  if (assetRef && member) {
+    const resource = manifest.resources.find(item => item.id === assetRef)
+    const profile = resource && isRecord(resource.content_profile)
+      ? resource.content_profile
+      : undefined
+    const components = profile && Array.isArray(profile.components)
+      ? profile.components
+      : []
+    const explicitMember = components.some(component =>
+      isRecord(component) && component.id === member,
+    )
+    const fileStemMember = resource?.file_paths.some(filePath => {
+      const name = basename(filePath)
+      return name.length > 0 && basename(name, extname(name)) === member
+    }) ?? false
+    if (!explicitMember && !fileStemMember)
+      issues.push(
+        `${path}: ${[...trail, 'member'].join('.')} does not resolve member ${member} in asset ${assetRef}.`,
+      )
+  }
+  for (const [key, item] of Object.entries(value))
+    validateAssetMembers(path, item, manifest, issues, [...trail, key])
+}
+
 function hasUsableSpriteFrame(
   resource: BeeGameAssetManifest['resources'][number],
   frameRef: string,
@@ -341,6 +578,226 @@ function hasUsableSpriteFrame(
   })
 }
 
+function validateUiVocabulary(input: {
+  path: string
+  document: Extract<BeeGameContentDocument, { kind: 'ui-screen' | 'ui-hud' | 'ui-flow' }>
+  issues: string[]
+}): void {
+  const root = input.document.data.nodes.find(
+    node => node.id === input.document.data.rootId,
+  )
+  const expectedRootRole = input.document.kind === 'ui-screen'
+    ? 'screen-root'
+    : input.document.kind === 'ui-hud'
+      ? 'hud-root'
+      : 'flow-root'
+  if (root && root.role !== expectedRootRole)
+    input.issues.push(
+      `${input.path}: ${input.document.kind} root must use role ${expectedRootRole}, received ${root.role}.`,
+    )
+
+  const assetBackedRoles = new Set<string>(BEEGAME_UI_ASSET_BACKED_ROLES)
+  for (const node of input.document.data.nodes) {
+    const rootRole = node.role === 'screen-root' || node.role === 'hud-root' || node.role === 'flow-root'
+    if (rootRole && node.id !== input.document.data.rootId)
+      input.issues.push(
+        `${input.path}: root role ${node.role} is only valid on data.rootId (${node.id}).`,
+      )
+    if (input.document.kind === 'ui-flow') {
+      if (node.id !== input.document.data.rootId && node.role !== 'flow-screen')
+        input.issues.push(
+          `${input.path}: ui-flow child ${node.id} must use role flow-screen, received ${node.role}.`,
+        )
+    } else if (node.role === 'flow-root' || node.role === 'flow-screen') {
+      input.issues.push(
+        `${input.path}: role ${node.role} is only valid in a ui-flow document (${node.id}).`,
+      )
+    }
+    if (assetBackedRoles.has(node.role) && !node.assetRef)
+      input.issues.push(
+        `${input.path}: asset-backed UI role ${node.role} requires assetRef (${node.id}).`,
+      )
+    if (!assetBackedRoles.has(node.role) && node.assetRef)
+      input.issues.push(
+        `${input.path}: UI role ${node.role} is not an asset type and cannot own assetRef (${node.id}); reference assets from its image/texture data instead.`,
+      )
+  }
+}
+
+function validateComponentScene(input: {
+  path: string
+  document: Extract<BeeGameContentDocument, { kind: 'scene-2d' | 'scene-3d' }>
+  issues: string[]
+}): void {
+  const componentTypes = new Set<string>(BEEGAME_SCENE_COMPONENT_TYPES)
+  const assetComponentTypes = new Set<string>(BEEGAME_SCENE_ASSET_COMPONENT_TYPES)
+  const tuple = (value: unknown, length: number): boolean => Array.isArray(value) && value.length === length && value.every(item => typeof item === 'number' && Number.isFinite(item))
+  const issue = (nodeId: string, type: string, message: string): void => { input.issues.push(`${input.path}: ${type} on ${nodeId} ${message}.`) }
+  const nodeById = new Map(input.document.data.nodes.map(node => [node.id, node]))
+  const hasAncestorComponent = (nodeId: string, type: string): boolean => {
+    const visited = new Set<string>()
+    let cursor = nodeById.get(nodeId)?.parentId
+    while (cursor) {
+      if (visited.has(cursor)) return false
+      visited.add(cursor)
+      const node = nodeById.get(cursor)
+      if (!node) return false
+      if (node.components?.some(component => component.type === type)) return true
+      cursor = node.parentId
+    }
+    return false
+  }
+  const componentIds = new Set<string>()
+  const findEmbeddedReference = (
+    value: unknown,
+    trail: readonly string[] = [],
+  ): string | undefined => {
+    if (Array.isArray(value)) {
+      for (let index = 0; index < value.length; index += 1) {
+        const match = findEmbeddedReference(value[index], [...trail, String(index)])
+        if (match) return match
+      }
+      return undefined
+    }
+    if (!isRecord(value)) return undefined
+    for (const [key, item] of Object.entries(value)) {
+      const nextTrail = [...trail, key]
+      if (key === 'assetRef' || key === 'frameRef') return nextTrail.join('.')
+      const match = findEmbeddedReference(item, nextTrail)
+      if (match) return match
+    }
+    return undefined
+  }
+  for (const node of input.document.data.nodes) {
+    const nodeTypes = new Set((node.components ?? []).map(component => component.type))
+    const nodeReference = findEmbeddedReference(node.data)
+    if (nodeReference)
+      input.issues.push(
+        `${input.path}: Scene GameObject ${node.id} stores legacy ${nodeReference} in node data; resources belong on a consuming component.`,
+      )
+    for (const component of node.components ?? []) {
+      if (componentIds.has(component.id))
+        input.issues.push(`${input.path}: duplicate scene component id ${component.id}.`)
+      componentIds.add(component.id)
+      if (!componentTypes.has(component.type)) {
+        input.issues.push(
+          `${input.path}: Scene GameObject ${node.id} uses unknown component type ${component.type}.`,
+        )
+        continue
+      }
+      if (!assetComponentTypes.has(component.type) && component.assetRef)
+        input.issues.push(
+          `${input.path}: Scene component ${component.type} is not an asset consumer and cannot own assetRef (${node.id}).`,
+        )
+      if (['sprite-renderer', 'mesh-filter', 'skinned-mesh-renderer', 'tilemap'].includes(component.type) && !component.assetRef)
+        input.issues.push(
+          `${input.path}: Scene component ${component.type} requires assetRef (${node.id}).`,
+        )
+      const data = component.data ?? {}
+      const embeddedReference = findEmbeddedReference(data)
+      if (embeddedReference)
+        input.issues.push(
+          `${input.path}: Scene component ${component.type} on ${node.id} stores legacy ${embeddedReference} in data; use the component assetRef and data.member fields.`,
+        )
+      if (component.type === 'camera' && typeof data.orthographic !== 'boolean') issue(node.id, component.type, 'requires boolean data.orthographic')
+      if (component.type === 'camera') {
+        if (data.orthographic === true && !(typeof data.orthographicSize === 'number' && Number.isFinite(data.orthographicSize) && data.orthographicSize > 0))
+          issue(node.id, component.type, 'requires positive data.orthographicSize for orthographic projection')
+        if (data.orthographic === false && !(typeof data.fieldOfView === 'number' && Number.isFinite(data.fieldOfView) && data.fieldOfView > 0 && data.fieldOfView < 180))
+          issue(node.id, component.type, 'requires data.fieldOfView in (0,180) for perspective projection')
+        if (!['logical-pixels', 'world-units'].includes(String(data.coordinateSpace)))
+          issue(node.id, component.type, 'requires data.coordinateSpace logical-pixels or world-units')
+        if (String(data.coordinateSpace) === 'logical-pixels') {
+          const viewport = isRecord(data.viewport) ? data.viewport : undefined
+          if (!(typeof viewport?.width === 'number' && Number.isFinite(viewport.width) && viewport.width > 0 && typeof viewport.height === 'number' && Number.isFinite(viewport.height) && viewport.height > 0))
+            issue(node.id, component.type, 'requires positive data.viewport.width and data.viewport.height for logical-pixels')
+        }
+        if (input.document.kind === 'scene-2d' && data.orthographic !== true)
+          issue(node.id, component.type, 'must be orthographic in a 2D scene')
+      }
+      if (component.type === 'rect-transform') {
+        const fields: Array<[string, number]> = [
+          ['anchorMin', 2], ['anchorMax', 2], ['anchoredPosition', 2], ['sizeDelta', 2], ['pivot', 2],
+        ]
+        for (const [field, length] of fields)
+          if (!tuple(data[field], length)) issue(node.id, component.type, `requires data.${field}[${length}]`)
+      }
+      if (component.type === 'box-collider-2d' && (!tuple(data.size, 2) || !tuple(data.offset, 2) || typeof data.isTrigger !== 'boolean')) issue(node.id, component.type, 'requires data.size[2], data.offset[2], and boolean data.isTrigger')
+      if (component.type === 'circle-collider-2d' && (!(typeof data.radius === 'number' && Number.isFinite(data.radius) && data.radius > 0) || !tuple(data.offset, 2) || typeof data.isTrigger !== 'boolean')) issue(node.id, component.type, 'requires positive data.radius, data.offset[2], and boolean data.isTrigger')
+      if (component.type === 'capsule-collider-2d' && (!tuple(data.size, 2) || !tuple(data.offset, 2) || !['horizontal', 'vertical'].includes(String(data.direction)) || typeof data.isTrigger !== 'boolean')) issue(node.id, component.type, 'requires data.size[2], data.offset[2], direction, and boolean data.isTrigger')
+      if (component.type === 'polygon-collider-2d' && (!Array.isArray(data.points) || data.points.length < 3 || !data.points.every(point => tuple(point, 2)) || !tuple(data.offset, 2) || typeof data.isTrigger !== 'boolean')) issue(node.id, component.type, 'requires at least three data.points[2], data.offset[2], and boolean data.isTrigger')
+      if (component.type === 'rigidbody-2d' && !['dynamic', 'kinematic', 'static'].includes(String(data.bodyType))) issue(node.id, component.type, 'requires a valid data.bodyType')
+      if (component.type === 'box-collider' && (!tuple(data.size, 3) || !tuple(data.center, 3) || typeof data.isTrigger !== 'boolean')) issue(node.id, component.type, 'requires data.size[3], data.center[3], and boolean data.isTrigger')
+      if (component.type === 'sphere-collider' && (!(typeof data.radius === 'number' && Number.isFinite(data.radius) && data.radius > 0) || !tuple(data.center, 3) || typeof data.isTrigger !== 'boolean')) issue(node.id, component.type, 'requires positive data.radius, data.center[3], and boolean data.isTrigger')
+      if (component.type === 'capsule-collider' && (!(typeof data.radius === 'number' && Number.isFinite(data.radius) && data.radius > 0) || !(typeof data.height === 'number' && Number.isFinite(data.height) && data.height > 0) || !tuple(data.center, 3) || !['x', 'y', 'z'].includes(String(data.direction)) || typeof data.isTrigger !== 'boolean')) issue(node.id, component.type, 'requires radius, height, center[3], direction, and boolean data.isTrigger')
+      if (component.type === 'mesh-collider' && (typeof data.convex !== 'boolean' || typeof data.isTrigger !== 'boolean')) issue(node.id, component.type, 'requires boolean data.convex and data.isTrigger')
+      if (component.type === 'rigidbody' && (typeof data.isKinematic !== 'boolean' || typeof data.useGravity !== 'boolean' || !(typeof data.mass === 'number' && Number.isFinite(data.mass) && data.mass > 0))) issue(node.id, component.type, 'requires boolean data.isKinematic, boolean data.useGravity, and positive data.mass')
+      if (component.type === 'canvas' && !['screen-space-overlay', 'screen-space-camera', 'world-space'].includes(String(data.renderMode))) issue(node.id, component.type, 'requires a valid data.renderMode')
+      if (component.type === 'text' && typeof data.text !== 'string') issue(node.id, component.type, 'requires string data.text')
+      if (component.type === 'canvas' && !nodeTypes.has('rect-transform')) issue(node.id, component.type, 'requires RectTransform on the same GameObject')
+      if ((component.type === 'image' || component.type === 'text') && !nodeTypes.has('rect-transform')) issue(node.id, component.type, 'requires RectTransform on the same GameObject')
+      if ((component.type === 'image' || component.type === 'text') && !nodeTypes.has('canvas-renderer')) issue(node.id, component.type, 'requires CanvasRenderer on the same GameObject')
+      if ((component.type === 'image' || component.type === 'text') && !hasAncestorComponent(node.id, 'canvas')) issue(node.id, component.type, 'requires a Canvas ancestor')
+    }
+    const types = [...nodeTypes]
+    const physics2d = types.some(type => type.endsWith('-collider-2d') || type === 'rigidbody-2d')
+    const physics3d = types.some(type => ['box-collider', 'sphere-collider', 'capsule-collider', 'mesh-collider', 'rigidbody'].includes(type))
+    if (input.document.kind === 'scene-2d' && physics3d) input.issues.push(`${input.path}: 2D scene GameObject ${node.id} cannot use 3D physics components.`)
+    if (input.document.kind === 'scene-3d' && physics2d) input.issues.push(`${input.path}: 3D scene GameObject ${node.id} cannot use 2D physics components.`)
+    if (input.document.kind === 'scene-2d' && nodeTypes.has('light')) input.issues.push(`${input.path}: 2D scene GameObject ${node.id} must use Light2D.`)
+    if (input.document.kind === 'scene-3d' && nodeTypes.has('light-2d')) input.issues.push(`${input.path}: 3D scene GameObject ${node.id} must use Light.`)
+    if (nodeTypes.has('rigidbody') && nodeTypes.has('rigidbody-2d'))
+      input.issues.push(`${input.path}: GameObject ${node.id} cannot mix Rigidbody and Rigidbody2D.`)
+    if (nodeTypes.has('mesh-renderer') && !nodeTypes.has('mesh-filter'))
+      input.issues.push(`${input.path}: MeshRenderer requires MeshFilter on the same GameObject (${node.id}).`)
+    if (nodeTypes.has('tilemap-renderer') && !nodeTypes.has('tilemap'))
+      input.issues.push(`${input.path}: TilemapRenderer requires Tilemap on the same GameObject (${node.id}).`)
+    if (nodeTypes.has('particle-system-renderer') && !nodeTypes.has('particle-system'))
+      input.issues.push(`${input.path}: ParticleSystemRenderer requires ParticleSystem on the same GameObject (${node.id}).`)
+    if (node.data)
+      validateNoLegacyScriptFields(input.path, node.data, input.issues, ['nodes', node.id, 'data'])
+  }
+  if (input.document.kind === 'scene-2d') {
+    const settings = input.document.data.settings
+    const coordinateSystem = isRecord(settings?.coordinateSystem)
+      ? settings.coordinateSystem
+      : undefined
+    if (!coordinateSystem)
+      input.issues.push(`${input.path}: 2D scene requires data.settings.coordinateSystem.`)
+    else {
+      if (coordinateSystem.origin !== 'top-left')
+        input.issues.push(`${input.path}: 2D coordinateSystem.origin must be top-left.`)
+      if (coordinateSystem.units !== 'logical-pixels')
+        input.issues.push(`${input.path}: 2D coordinateSystem.units must be logical-pixels.`)
+      for (const field of ['width', 'height', 'pixelsPerUnit'])
+        if (!(typeof coordinateSystem[field] === 'number' && Number.isFinite(coordinateSystem[field]) && coordinateSystem[field] > 0))
+          input.issues.push(`${input.path}: 2D coordinateSystem.${field} must be a positive number.`)
+      const expectedHeight = typeof coordinateSystem.height === 'number' && typeof coordinateSystem.pixelsPerUnit === 'number'
+        ? coordinateSystem.height / (2 * coordinateSystem.pixelsPerUnit)
+        : undefined
+      if (expectedHeight !== undefined) {
+        for (const node of input.document.data.nodes) {
+          for (const camera of node.components ?? []) {
+            if (camera.type !== 'camera' || camera.data?.orthographic !== true) continue
+            const actual = camera.data.orthographicSize
+            if (typeof actual === 'number' && Math.abs(actual - expectedHeight) > 0.0001)
+              input.issues.push(`${input.path}: orthographic camera ${node.id} data.orthographicSize must equal viewport height / (2 * pixelsPerUnit) (${expectedHeight}).`)
+          }
+        }
+      }
+    }
+  }
+  if (input.document.data.cameraNodeId) {
+    const camera = input.document.data.nodes.find(
+      node => node.id === input.document.data.cameraNodeId,
+    )
+    if (camera && !camera.components?.some(component => component.type === 'camera'))
+      input.issues.push(
+        `${input.path}: cameraNodeId must reference a GameObject with Camera (${camera.id}).`,
+      )
+  }
+}
+
 function validateDocument(input: {
   path: string
   document: BeeGameContentDocument
@@ -357,35 +814,20 @@ function validateDocument(input: {
       input.issues.push(`${input.path}: asset is not verified: ${id}.`)
   }
   const declaredAssets = new Set(input.document.assetRefs)
-  for (const node of input.document.data.nodes) {
-    if (node.assetRef && !declaredAssets.has(node.assetRef))
-      input.issues.push(
-        `${input.path}: node ${node.id} uses undeclared assetRef ${node.assetRef}.`,
-      )
-    if ('components' in node)
-      for (const component of node.components ?? [])
-        if (component.assetRef && !declaredAssets.has(component.assetRef))
-          input.issues.push(
-            `${input.path}: node ${node.id} component ${component.type} uses undeclared assetRef ${component.assetRef}.`,
-          )
-    if ('frameRef' in node && node.frameRef) {
-      if ('kind' in node && node.kind !== 'sprite')
-        input.issues.push(
-          `${input.path}: node ${node.id} frameRef is only valid for a sprite.`,
-        )
-      if (!node.assetRef)
-        input.issues.push(
-          `${input.path}: node ${node.id} frameRef requires assetRef.`,
-        )
-      else {
-        const resource = resourceById.get(node.assetRef)
-        if (resource && !hasUsableSpriteFrame(resource, node.frameRef))
-          input.issues.push(
-            `${input.path}: node ${node.id} frameRef does not resolve to a usable sprite frame: ${node.frameRef}.`,
-          )
-      }
-    }
-  }
+  validateDeclaredAssetReferences(
+    input.path,
+    input.document.data,
+    declaredAssets,
+    input.issues,
+  )
+  validateAssetMembers(
+    input.path,
+    input.document.data,
+    input.authority.manifest,
+    input.issues,
+  )
+  if (input.document.kind === 'scene-2d' || input.document.kind === 'scene-3d')
+    validateNoLegacyScriptFields(input.path, input.document.data, input.issues, ['data'])
   validateTree({
     path: input.path,
     nodes: input.document.data.nodes,
@@ -396,7 +838,17 @@ function validateDocument(input: {
       : {}),
     issues: input.issues,
   })
-  if (input.document.kind === 'scene-2d') {
+  if (
+    input.document.kind === 'ui-screen' ||
+    input.document.kind === 'ui-hud' ||
+    input.document.kind === 'ui-flow'
+  )
+    validateUiVocabulary({
+      path: input.path,
+      document: input.document,
+      issues: input.issues,
+    })
+  if (input.document.kind === 'scene-2d' || input.document.kind === 'scene-3d') {
     const cameraNodeId = input.document.data.cameraNodeId
     if (
       cameraNodeId &&
@@ -405,6 +857,11 @@ function validateDocument(input: {
       input.issues.push(
         `${input.path}: cameraNodeId does not resolve: ${cameraNodeId}.`,
       )
+    validateComponentScene({
+      path: input.path,
+      document: input.document,
+      issues: input.issues,
+    })
   }
   validateNoResourcePathBypass(input.path, input.document.data, input.issues)
 }
@@ -437,7 +894,6 @@ export function auditBeeGameContentPackage(
     issues.push(
       `${BEEGAME_CONTENT_INDEX}: assetManifestRevision does not match authority.`,
     )
-
   const documents: BeeGameContentDocument[] = []
   const documentPaths = new Set(index.files)
   const actualPaths = existsSync(root)
@@ -467,9 +923,9 @@ export function auditBeeGameContentPackage(
       continue
     }
     const wrongDirectory =
-      (document.kind === 'scene-2d' && !path.startsWith('scenes/')) ||
+      ((document.kind === 'scene-2d' || document.kind === 'scene-3d') && !path.startsWith('scenes/')) ||
       (document.kind === 'vfx' && !path.startsWith('vfx/')) ||
-      (document.kind !== 'scene-2d' &&
+      (document.kind !== 'scene-2d' && document.kind !== 'scene-3d' &&
         document.kind !== 'vfx' &&
         !path.startsWith('ui/'))
     if (wrongDirectory)
@@ -490,8 +946,8 @@ export function auditBeeGameContentPackage(
   }
   const entry = documents.find(document => document.id === index.entryScene)
   if (!entry) issues.push(`Entry scene does not resolve: ${index.entryScene}.`)
-  else if (entry.kind !== 'scene-2d')
-    issues.push(`Entry content must be scene-2d: ${index.entryScene}.`)
+  else if (entry.kind !== `scene-${index.dimension}`)
+    issues.push(`Entry content must be scene-${index.dimension}: ${index.entryScene}.`)
 
   if (issues.length) return { valid: false, issues }
   const value = { index, documents }
@@ -574,9 +1030,9 @@ export function saveBeeGameContentDocument(input: {
   if (document.id !== current.document.id || document.kind !== current.document.kind)
     throw new Error(`Content document identity cannot change during an edit: ${input.path}`)
   const wrongDirectory =
-    (document.kind === 'scene-2d' && !input.path.startsWith('scenes/')) ||
+    ((document.kind === 'scene-2d' || document.kind === 'scene-3d') && !input.path.startsWith('scenes/')) ||
     (document.kind === 'vfx' && !input.path.startsWith('vfx/')) ||
-    (document.kind !== 'scene-2d' &&
+    (document.kind !== 'scene-2d' && document.kind !== 'scene-3d' &&
       document.kind !== 'vfx' &&
       !input.path.startsWith('ui/'))
   if (wrongDirectory)

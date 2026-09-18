@@ -651,8 +651,8 @@ export function createDeliveryWorkflowController(input: {
   }
 
   async function gameContentAuthority(run: DeliveryRun) {
-    if (!run.gameContentReceipt || !run.revision.resource)
-      throw new Error('Scene/UI editing requires accepted content and resources')
+    if (!run.revision.resource)
+      throw new Error('Scene/UI editing requires accepted resources')
     return {
       documentRevision: run.revision.document,
       assetManifestRevision: run.revision.resource,
@@ -815,6 +815,27 @@ export function createDeliveryWorkflowController(input: {
           'resource delivery changed before Scene/UI content authoring',
         )
         return
+      }
+      // A stopped server can lose the in-memory terminal reconciliation after
+      // the content author has already produced a complete package. The
+      // package validator is the acceptance authority, so resume from that
+      // durable output instead of paying for the same author turn again.
+      if (!run.activeDispatch) {
+        const recovered = completeGameContentStage({
+          run,
+          workspacePath: input.workspacePath,
+          terminal: {
+            workerType: 'content-author',
+            revision: run.revision.resource!,
+            status: 'completed',
+            writtenPaths: [],
+          },
+        })
+        if (recovered.phase === 'IMPLEMENTATION') {
+          const accepted = await persist(recovered, 'game.content.ready')
+          await resumeUnlocked(accepted)
+          return
+        }
       }
       await startGameContentStage({
         run,
@@ -990,15 +1011,17 @@ export function createDeliveryWorkflowController(input: {
     })
   }
 
-  function loadGameContentForEditing() {
-    return serialize(async () => {
-      const current = await store.load()
-      if (!current) throw new Error('Workflow is unavailable')
-      return loadBeeGameContentPackageForEditing(
-        input.workspacePath,
-        await gameContentAuthority(current),
-      )
-    })
+  async function loadGameContentForEditing() {
+    // This is a read-only snapshot. Queuing it behind the workflow controller
+    // makes both editors appear to hang for the full duration of an active
+    // worker turn (and forever when a stop is stuck). Mutations remain
+    // serialized below; reads use the durable run snapshot directly.
+    const current = await store.load()
+    if (!current) throw new Error('Workflow is unavailable')
+    return loadBeeGameContentPackageForEditing(
+      input.workspacePath,
+      await gameContentAuthority(current),
+    )
   }
 
   function saveGameContentEdit(edit: {
@@ -1104,7 +1127,13 @@ async function implementationContractFacts(
   })
   return {
     checklistIds: readAcceptanceChecklistIds(workspacePath),
-    resourceIds: assetContract.resources.map(resource => resource.id),
+    // Provisional resources are valid delivery records, but they are not
+    // implementation inputs. Keep the implementation and acceptance
+    // contracts aligned with the dispatch gate, which only exposes verified
+    // resources to downstream agents.
+    resourceIds: assetContract.resources
+      .filter(resource => resource.status === 'verified')
+      .map(resource => resource.id),
     contentIds: [],
     resourceReadiness,
   }

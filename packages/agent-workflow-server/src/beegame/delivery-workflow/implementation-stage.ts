@@ -89,22 +89,32 @@ export async function startNextImplementationTask(input: {
       content.contentRevision !== input.run.revision.content ||
       !sameIds(task.contentIds, [...content.contentIds]))
     throw new Error('implementation requires the exact accepted Scene/UI content package')
-  const started = transitionDeliveryRun(input.run, {
-    type: 'task_started',
-    taskId: task.id,
-    revision: input.revision,
-  })
   const manifest = await readBeeGameAssetManifest(input.workspacePath)
   const resourcesById = new Map(
     manifest.resources.map(resource => [resource.id, resource]),
   )
-  const resources = task.resourceIds.map(id => {
+  const resources = task.resourceIds.flatMap(id => {
     const resource = resourcesById.get(id)
-    if (!resource || resource.status !== 'verified')
+    if (!resource)
       throw new Error(
         `implementation task references unavailable resource ${id}`,
       )
-    return { id, rootPath: resource.root_path, filePaths: resource.file_paths }
+    if (resource.status === 'failed')
+      throw new Error(`implementation task references failed resource ${id}`)
+    if (resource.status !== 'verified') return []
+    return [{ id, rootPath: resource.root_path, filePaths: resource.file_paths }]
+  })
+  const effectiveTask = { ...task, resourceIds: resources.map(resource => resource.id) }
+  const effectiveRun = {
+    ...input.run,
+    tasks: input.run.tasks.map(candidate =>
+      candidate.id === task.id ? effectiveTask : candidate,
+    ),
+  }
+  const started = transitionDeliveryRun(effectiveRun, {
+    type: 'task_started',
+    taskId: task.id,
+    revision: input.revision,
   })
   const request: WorkerDispatchRequest = {
     runId: started.runId,
@@ -117,7 +127,7 @@ export async function startNextImplementationTask(input: {
     revision: input.revision,
     allowedPaths: task.allowedPaths,
     contract: {
-      task,
+      task: effectiveTask,
       currentRevision: input.revision,
       resources,
       ...(input.run.blockedReason

@@ -89,6 +89,7 @@ describe('projectStore pending review normalization', () => {
       projects: [],
       activeProjectId: null,
       isLoading: false,
+      hasLoadedProjects: false,
       isOpeningProject: false,
       pendingPermissions: [],
       projectStatus: null,
@@ -117,22 +118,29 @@ describe('projectStore pending review normalization', () => {
     expect(useProjectStore.getState().projects).toEqual([copy, source])
   })
 
-  it('persists the last active project id while a cloud session is active for validated restoration', () => {
-    localStorage.setItem(
-      'beegame_supabase_session',
-      JSON.stringify({
-        accessToken: 'cloud-token',
-        expiresAt: Date.now() + 60_000,
-        user: { id: 'cloud-user' },
-      }),
-    )
-
+  it('does not use the last active project as browser navigation state', () => {
     useProjectStore.setState({ activeProjectId: 'project_from_other_account' })
 
     expect(JSON.parse(storageData.get('project-storage') || '{}')).toEqual({
-      state: { activeProjectId: 'project_from_other_account' },
+      state: {},
       version: 0,
     })
+  })
+
+  it('restores a project only when the URL explicitly selects it', async () => {
+    getProjects.mockResolvedValue([
+      { id: 'proj_1', name: 'One', created_at: 1 },
+      { id: 'proj_2', name: 'Two', created_at: 2 },
+    ])
+    useProjectStore.setState({ activeProjectId: 'proj_1' })
+
+    window.history.replaceState({}, '', '/')
+    await useProjectStore.getState().loadProjects()
+    expect(useProjectStore.getState().activeProjectId).toBeNull()
+
+    window.history.replaceState({}, '', '/?project=proj_2&editor=scene')
+    await useProjectStore.getState().loadProjects()
+    expect(useProjectStore.getState().activeProjectId).toBe('proj_2')
   })
 
   it('tracks project opening while switching projects', async () => {

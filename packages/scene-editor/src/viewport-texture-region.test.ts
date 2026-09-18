@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { applyTextureRegion } from './viewport'
+import { applyTextureRegion, rendererSize } from './viewport'
+import { identityTransform, type SceneNode } from './model'
 
 describe('sprite atlas texture regions', () => {
   it('maps a top-left pixel rectangle to Three texture coordinates', () => {
@@ -19,5 +20,23 @@ describe('sprite atlas texture regions', () => {
     expect(applyTextureRegion(texture, { x: 48, y: 0, width: 32, height: 32 })).toBe(false)
     expect(texture.repeat.toArray()).toEqual([1, 1])
     expect(texture.offset.toArray()).toEqual([0, 0])
+  })
+
+  it('keeps renderer geometry size separate from child-inherited Transform scale', () => {
+    const node: SceneNode = { id: 'child', name: 'Child', parentId: 'parent', children: [], active: true, locked: false, transform: identityTransform(), tags: [], components: [{ id: 'sprite', type: 'sprite-renderer', enabled: true, assetId: 'sprite', material: { mode: 'unlit', color: '#ffffff', metalness: 0, roughness: 1, opacity: 1, alphaMode: 'opaque' }, properties: { size: { width: 64, height: 32 } } }] }
+    expect(rendererSize(node)).toEqual([.64, .32])
+    expect(node.transform.scale).toEqual([1, 1, 1])
+  })
+
+  it('uses a UI RectTransform size when an Image has no texture dimensions', () => {
+    const node: SceneNode = {
+      id: 'panel', name: 'Panel', parentId: null, children: [], active: true, locked: false,
+      transform: identityTransform(), tags: [],
+      components: [
+        { id: 'rect', type: 'rect-transform', enabled: true, anchorMin: [0, 0], anchorMax: [1, 1], pivot: [.5, .5], anchoredPosition: [0, 0], sizeDelta: [4.8, 2.4], properties: {} },
+        { id: 'image', type: 'image', enabled: true, material: { mode: 'unlit', color: '#ffffff', metalness: 0, roughness: 1, opacity: 1, alphaMode: 'opaque' }, properties: {} },
+      ],
+    }
+    expect(rendererSize(node)).toEqual([4.8, 2.4])
   })
 })

@@ -8,6 +8,7 @@ import { useProjectStore } from '../../store/projectStore';
 import { useSystemStore } from '../../store/systemStore';
 import { HeroIntro } from './Landing/HeroIntro';
 import { IdeaPromptForm } from './Landing/IdeaPromptForm';
+import { BeeGameLogo } from '../BeeGameLogo';
 import { AttachmentBuildReview } from './Landing/AttachmentBuildReview';
 import { AccountActionsMenu } from './Landing/AccountActionsMenu';
 import { LandingImageBackground } from './Landing/LandingImageBackground';
@@ -1318,7 +1319,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       <LandingImageBackground />
       <header className="absolute inset-x-0 top-0 z-20 flex h-16 items-center justify-between px-4 sm:h-20 sm:px-8">
         <div className="flex items-center gap-2.5 text-white [text-shadow:0_2px_16px_rgba(0,0,0,0.32)]">
-          <img src="/assets/bgs_logo.svg" alt="" className="size-8 drop-shadow-sm" />
+          <BeeGameLogo className="size-8 drop-shadow-sm" />
           <span className="text-lg font-semibold tracking-[-0.03em]">Bee Game Studio</span>
         </div>
         <div className="relative z-20 flex items-center gap-2">

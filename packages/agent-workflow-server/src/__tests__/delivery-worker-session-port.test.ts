@@ -102,6 +102,7 @@ describe('delivery worker session credentials', () => {
 
   test('derives implementation terminal after normal agent completion', async () => {
     let submittedPrompt = ''
+    let idleWaits = 0
     const sessions = {
       start() {
         return { id: 'session-implementation' }
@@ -120,6 +121,9 @@ describe('delivery worker session credentials', () => {
             payload: { result: 'Implementation complete.' },
           },
         ]
+      },
+      async waitForWorkflowWorkerIdle() {
+        idleWaits += 1
       },
     } as unknown as BeeGameSessionManager
     const port = createBeeGameDeliveryWorkerPort({
@@ -163,6 +167,7 @@ describe('delivery worker session credentials', () => {
       evidencePath:
         '.beegame/workflow/evidence/implementation-dispatch-implementation.json',
     })
+    expect(idleWaits).toBe(1)
   })
 
   test('accepts the complete terminal verdict when the assistant display text is truncated', async () => {

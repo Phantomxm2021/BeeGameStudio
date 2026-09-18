@@ -223,10 +223,6 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       await this.resolvePermissionRequest(message)
       return
     }
-    const turn = this.activeTurn
-    if (!turn) return
-    this.observability.observeMessage(message)
-    turn.input.onMessage(message as DashboardSDKMessage)
     if (
       message.type === 'system' &&
       (message.subtype === 'task_notification' ||
@@ -236,6 +232,10 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       this.sessionInput.onNativeTaskNotification?.(
         nativeTaskNotification(message),
       )
+    const turn = this.activeTurn
+    if (!turn) return
+    this.observability.observeMessage(message)
+    turn.input.onMessage(message as DashboardSDKMessage)
     if (message.type !== 'result') return
     this.activeTurn = null
     if (isErrorResult(message)) {

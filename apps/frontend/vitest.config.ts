@@ -16,6 +16,7 @@ const frontendRadixDropdownPath = path.resolve(__dirname, './node_modules/@radix
 const frontendRadixTogglePath = path.resolve(__dirname, './node_modules/@radix-ui/react-toggle');
 const frontendRadixContextMenuPath = path.resolve(__dirname, './node_modules/@radix-ui/react-context-menu');
 const sceneEditorSrcPath = path.resolve(__dirname, '../../packages/scene-editor/src/index.ts');
+const sceneEditorPlatformPath = path.resolve(__dirname, '../../packages/scene-editor/src/platform.ts');
 const sceneEditorStylesPath = path.resolve(__dirname, '../../packages/scene-editor/src/styles.css');
 
 export default defineConfig({
@@ -45,6 +46,7 @@ export default defineConfig({
     alias: [
       { find: '@', replacement: path.resolve(__dirname, './src') },
       { find: '@beegame/scene-editor/styles.css', replacement: sceneEditorStylesPath },
+      { find: '@beegame/scene-editor/platform', replacement: sceneEditorPlatformPath },
       { find: '@beegame/scene-editor', replacement: sceneEditorSrcPath },
       { find: '@react-three/fiber', replacement: frontendFiberPath },
       { find: '@react-three/drei', replacement: frontendDreiPath },

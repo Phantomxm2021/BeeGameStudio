@@ -283,19 +283,18 @@ export type BeeGameContentNode = {
   id: string
   parentId?: string
   name?: string
-  kind: string
+  semantic?: string[]
   enabled?: boolean
   transform?: {
-    position: [number, number]
-    rotation?: number
-    scale?: [number, number]
+    position: [number, number, number]
+    rotation?: [number, number, number]
+    scale?: [number, number, number]
   }
   layer?: string
   zIndex?: number
-  assetRef?: string
-  frameRef?: string
   components?: Array<{
-    type: string
+    id: string
+    type: 'sprite-renderer' | 'mesh-filter' | 'mesh-renderer' | 'skinned-mesh-renderer' | 'grid' | 'tilemap' | 'tilemap-renderer' | 'animator' | 'box-collider-2d' | 'circle-collider-2d' | 'capsule-collider-2d' | 'polygon-collider-2d' | 'rigidbody-2d' | 'box-collider' | 'sphere-collider' | 'capsule-collider' | 'mesh-collider' | 'rigidbody' | 'audio-source' | 'audio-listener' | 'particle-system' | 'particle-system-renderer' | 'light-2d' | 'light' | 'camera' | 'canvas' | 'canvas-renderer' | 'rect-transform' | 'image' | 'text'
     assetRef?: string
     data?: Record<string, unknown>
   }>
@@ -305,15 +304,20 @@ export type BeeGameContentNode = {
 export type BeeGameSceneContentDocument = {
   schema: 'beegame-content.v1'
   id: string
-  kind: 'scene-2d'
+  kind: 'scene-2d' | 'scene-3d'
   assetRefs: string[]
-  data: { nodes: BeeGameContentNode[]; cameraNodeId?: string }
+  data: {
+    nodes: BeeGameContentNode[]
+    cameraNodeId?: string
+    settings?: Record<string, unknown>
+  }
 }
 
 export type BeeGameUiContentNode = {
   id: string
   parentId?: string
   role: string
+  enabled?: boolean
   name?: string
   text?: string
   assetRef?: string
@@ -347,12 +351,13 @@ export type BeeGameGameContentSnapshot = {
   acceptedContentRevision?: string
   contentRevision?: string
   index?: {
-    schema: 'beegame-content-package.v1'
+    schema: 'beegame-content-package.v2'
     id: string
-    dimension: '2d'
+    dimension: '2d' | '3d'
     documentRevision: string
     assetManifestRevision: string
     entryScene: string
+    sceneModel: 'game-object-v2'
     files: string[]
   }
   documents?: Array<{
@@ -925,17 +930,21 @@ export const beeGameAdapter = {
 
   async getProjectAssets(
     projectId: string,
+    signal?: AbortSignal,
   ): Promise<BeeGameAssetManifestPayload> {
     return getJson<BeeGameAssetManifestPayload>(
       `/api/projects/${encodeURIComponent(projectId)}/assets`,
+      { signal },
     )
   },
 
   async getProjectGameContent(
     projectId: string,
+    signal?: AbortSignal,
   ): Promise<BeeGameGameContentSnapshot> {
     return getJson<BeeGameGameContentSnapshot>(
       `/api/projects/${encodeURIComponent(projectId)}/game-content`,
+      { signal },
     )
   },
 
@@ -943,10 +952,12 @@ export const beeGameAdapter = {
     projectId: string,
     resourceId: string,
     path: string,
+    signal?: AbortSignal,
   ): Promise<Blob> {
     const query = new URLSearchParams({ path })
     const response = await authenticatedFetch(
       `/api/projects/${encodeURIComponent(projectId)}/assets/resources/${encodeURIComponent(resourceId)}/file?${query.toString()}`,
+      { signal },
     )
     if (!response.ok) await readResponse<never>(response)
     return response.blob()
@@ -3035,8 +3046,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-async function getJson<T>(path: string): Promise<T> {
-  const response = await authenticatedFetch(path)
+async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await authenticatedFetch(path, init)
   return readResponse<T>(response)
 }
 

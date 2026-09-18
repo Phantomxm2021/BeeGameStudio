@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Clock, CopyPlus, LoaderCircle, MoreHorizontal, Trash2, X } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
@@ -52,6 +52,8 @@ const getProjectDisplayName = (project: { name?: string; root_path?: string }, f
 const MENU_WIDTH = 150;
 const MENU_MARGIN = 12;
 const MENU_OFFSET = 8;
+const CREDIT_SUMMARY_BATCH_SIZE = 4;
+const CREDIT_SUMMARY_CACHE_MS = 30_000;
 
 export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: ProjectHistoryModalProps) {
   const { projects, isLoading, deleteProject, createReviewCopy, loadProjects } = useProjectStore(
@@ -69,6 +71,8 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [creatingReviewCopyId, setCreatingReviewCopyId] = useState<string | null>(null);
   const [creditSummaries, setCreditSummaries] = useState<Record<string, BeeGameUsageSummary>>({});
+  const creditSummariesRef = useRef<Record<string, BeeGameUsageSummary>>({});
+  const creditSummaryLoadedAtRef = useRef<Record<string, number>>({});
   const t = useCommonText(lang);
   const text = useBeeGameText(lang);
 
@@ -154,28 +158,44 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
   }, [activeMenuId, isOpen]);
 
   useEffect(() => {
-    if (!isOpen || projects.length === 0) {
-      // No visible project rows means no summaries should remain displayed.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setCreditSummaries({});
-      return;
-    }
+    if (!isOpen || projects.length === 0) return;
     let cancelled = false;
-    void Promise.all(
-      projects.map(async project => {
-        try {
-          const summary = await getCreditSummary(project.id);
-          return [project.id, summary] as const;
-        } catch {
-          return null;
+    let startTimer: number | undefined;
+    const now = Date.now();
+    const missingProjects = projects.filter(project => (
+      !creditSummariesRef.current[project.id] ||
+      now - (creditSummaryLoadedAtRef.current[project.id] || 0) >= CREDIT_SUMMARY_CACHE_MS
+    ));
+
+    const loadMissingSummaries = async () => {
+      for (let index = 0; index < missingProjects.length && !cancelled; index += CREDIT_SUMMARY_BATCH_SIZE) {
+        const batch = missingProjects.slice(index, index + CREDIT_SUMMARY_BATCH_SIZE);
+        const entries = await Promise.all(batch.map(async project => {
+          try {
+            const summary = await getCreditSummary(project.id);
+            return [project.id, summary] as const;
+          } catch {
+            return null;
+          }
+        }));
+        if (cancelled) return;
+        const loaded = entries.filter(Boolean) as Array<readonly [string, BeeGameUsageSummary]>;
+        if (loaded.length > 0) {
+          const next = { ...creditSummariesRef.current, ...Object.fromEntries(loaded) };
+          const loadedAt = Date.now();
+          for (const [projectId] of loaded) creditSummaryLoadedAtRef.current[projectId] = loadedAt;
+          creditSummariesRef.current = next;
+          setCreditSummaries(next);
         }
-      }),
-    ).then(entries => {
-      if (cancelled) return;
-      setCreditSummaries(Object.fromEntries(entries.filter(Boolean) as Array<readonly [string, BeeGameUsageSummary]>));
-    });
+      }
+    };
+
+    // Let the dialog commit and paint before starting secondary per-project
+    // usage requests. Loading in small batches avoids an N-request burst.
+    startTimer = window.setTimeout(() => void loadMissingSummaries(), 0);
     return () => {
       cancelled = true;
+      if (startTimer !== undefined) window.clearTimeout(startTimer);
     };
   }, [isOpen, projects]);
 

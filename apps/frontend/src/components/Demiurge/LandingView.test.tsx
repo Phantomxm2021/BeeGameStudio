@@ -229,10 +229,6 @@ vi.mock('../../services/supabaseAuthApi', () => ({
   uploadSupabaseAvatarImage,
 }));
 
-vi.mock('./DemiurgeLogo', () => ({
-  DemiurgeLogo: () => <div data-testid="demiurge-logo" />,
-}));
-
 const renderLanding = async (props?: Partial<React.ComponentProps<typeof LandingView>>) => {
   let result!: ReturnType<typeof render>;
   await act(async () => {
@@ -1665,12 +1661,12 @@ describe('LandingView bootstrap submission', () => {
   });
 
   it('renders localized English hero copy and idea placeholder', async () => {
-    await renderLanding({ lang: 'en' });
+    const { container } = await renderLanding({ lang: 'en' });
 
     expect(screen.getByRole('heading', { name: /^Start with an idea/ })).toBeInTheDocument();
     expect(screen.getByText('Give it a little inspiration. Leave the rest to us.')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'What game do you want to make? e.g. a mobile puzzle game' })).toHaveAttribute('placeholder', 'Ask anything...');
-    expect(screen.queryByTestId('demiurge-logo')).not.toBeInTheDocument();
+    expect(container.querySelector('img[src="/assets/bgs_logo.svg"]')).toBeInTheDocument();
   });
 
   it('accepts a GDD attachment from the landing prompt', async () => {

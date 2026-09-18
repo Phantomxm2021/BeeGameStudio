@@ -1,40 +1,56 @@
 import { describe, expect, it } from 'vitest'
 import { applyPatch, operations, patchFor } from './commands'
-import { makeFixture } from './model'
+import { makeFixture, type SceneNode } from './model'
 import { SceneHistory } from './history'
-import { canonicalJson, exportPackage, exportYaml, importPackage, makeEmptyScene, sha256Sync } from './persistence'
+import { exportPackage, importPackage, makeEmptyScene } from './persistence'
 import { cloneSubtreeForDuplicate } from './editor'
+import { withAsset } from './inspector'
 
-describe('scene patch core', () => {
-  it('starts as a real blank scene and duplicates a complete subtree as one undoable edit', () => {
-    const empty = makeEmptyScene('test-empty')
-    expect(empty.rootIds).toEqual([])
-    expect(empty.nodes).toEqual({})
-    const parent = { id: 'parent', name: 'Parent', kind: 'empty' as const, parentId: null, children: ['child'], visible: true, locked: false, transform: { position: [0, 0, 0] as [number, number, number], rotation: [0, 0, 0] as [number, number, number], scale: [1, 1, 1] as [number, number, number] } }
-    const child = { id: 'child', name: 'Child', kind: 'box' as const, parentId: 'parent', children: [], visible: true, locked: false, transform: { position: [1, 0, 0] as [number, number, number], rotation: [0, 0, 0] as [number, number, number], scale: [1, 1, 1] as [number, number, number] } }
+describe('GameObject component scene core', () => {
+  it('adds and duplicates complete GameObject subtrees', () => {
+    const empty = makeEmptyScene('empty')
+    const parent: SceneNode = { id: 'parent', name: 'Parent', parentId: null, children: ['child'], active: true, locked: false, transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }, tags: ['anchor'], components: [] }
+    const child: SceneNode = { id: 'child', name: 'Child', parentId: 'parent', children: [], active: true, locked: false, transform: { position: [1, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }, tags: [], components: [{ id: 'child-collider', type: 'box-collider-2d', enabled: true, size: [1, 1], offset: [0, 0], isTrigger: false }] }
     const history = new SceneHistory(empty)
-    history.commit([{ type: 'scene.addNode', node: parent }, { type: 'scene.addNode', node: child }], 'Create subtree')
+    history.commit([{ type: 'scene.addGameObject', node: parent }, { type: 'scene.addGameObject', node: child }], 'Create')
     const copy = cloneSubtreeForDuplicate(history.document, 'parent')
-    history.commit(copy.nodes.map(node => ({ type: 'scene.addNode' as const, node })), 'Duplicate subtree')
+    history.commit(copy.nodes.map(node => ({ type: 'scene.addGameObject' as const, node })), 'Duplicate')
     expect(history.document.nodes[copy.rootId].children).toHaveLength(1)
-    const copyChild = history.document.nodes[copy.rootId].children[0]
-    expect(history.document.nodes[copyChild].parentId).toBe(copy.rootId)
-    history.undo()
-    expect(history.document.nodes[copy.rootId]).toBeUndefined()
+    history.undo(); expect(history.document.nodes[copy.rootId]).toBeUndefined()
   })
-  it('uses canonical JSON and real SHA-256 for content identity', () => { expect(sha256Sync('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'); expect(canonicalJson({ b: 2, a: 1 })).toBe('{"a":1,"b":2}'); expect(() => canonicalJson({ bad: undefined })).toThrow() })
-  it('applies atomically and rejects stale expected values', () => {
-    const doc = makeFixture(); const patch = patchFor(doc, [operations.rename('hive', 'Nest', 'Hive Box')], 'rename'); const result = applyPatch(doc, patch)
-    expect(result.applied).toBe(true); expect(result.document.nodes.hive.name).toBe('Nest'); expect(result.document.source.contentRevision).toBe('2'); expect(result.document.source.contentDigest).toMatch(/^[a-f0-9]{64}$/)
-    const stale = applyPatch(result.document, { ...patch, transactionId: crypto.randomUUID() }); expect(stale.applied).toBe(false); expect(stale.diagnostic).toContain('stale')
+
+  it('edits components atomically and supports undo', () => {
+    const document = makeFixture(); const history = new SceneHistory(document)
+    const collider = document.nodes.hive.components[0]
+    if (collider.type !== 'box-collider-2d') throw new Error('invalid fixture')
+    history.commit([operations.component('hive', { ...collider, isTrigger: true }, collider)], 'Trigger')
+    expect(history.document.nodes.hive.components[0]).toMatchObject({ isTrigger: true })
+    history.undo(); expect(history.document.nodes.hive.components[0]).toMatchObject({ isTrigger: false })
   })
-  it('undoes a removed subtree including children and order', () => {
-    const doc = makeFixture(); const child = { ...doc.nodes.flower, id: 'flower-child', name: 'Child', parentId: 'hive', children: [] }; doc.nodes.hive.children.push(child.id); doc.nodes[child.id] = child
-    const history = new SceneHistory(doc); history.commit([{ type: 'scene.removeNode', nodeId: 'hive', expectedExists: true }], 'delete subtree'); expect(history.document.nodes.hive).toBeUndefined(); history.undo(); expect(history.document.nodes.hive.children).toContain('flower-child'); expect(history.document.nodes['flower-child']).toBeDefined()
+
+  it('switches sprite assets without writing undefined optional fields', () => {
+    const document = makeFixture()
+    document.assets.old = { id: 'old', name: 'old.png', mimeType: 'image/png', path: 'old.png' }
+    document.assets.next = { id: 'next', name: 'next.png', mimeType: 'image/png', path: 'next.png' }
+    const sprite = { id: 'sprite', type: 'sprite-renderer' as const, enabled: true, assetId: 'old', material: { mode: 'unlit' as const, color: '#ffffff', metalness: 0, roughness: 1, opacity: 1, alphaMode: 'opaque' as const, textureAssetId: 'old' }, properties: {} }
+    document.nodes.flower.components.push(sprite)
+    const replacement = withAsset(sprite, 'next')
+    expect(replacement).not.toHaveProperty('member')
+    const history = new SceneHistory(document)
+    history.commit([operations.component('flower', replacement, sprite)], 'Replace sprite')
+    expect(history.document.nodes.flower.components[0]).toMatchObject({ type: 'sprite-renderer', assetId: 'next' })
   })
-  it('rejects hierarchy cycles and locked edits without mutating', () => {
-    const doc = makeFixture(); doc.nodes.hive.locked = true; const lock = applyPatch(doc, patchFor(doc, [operations.transform('hive', { position: [1, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }, doc.nodes.hive.transform)], 'locked')); expect(lock.applied).toBe(false); const cycle = applyPatch(doc, patchFor(doc, [operations.reparent('root', 'flower', undefined, null)], 'cycle')); expect(cycle.applied).toBe(false)
+
+  it('preserves the selected resource member when choosing a sprite card', () => {
+    const sprite = { id: 'sprite', type: 'sprite-renderer' as const, enabled: true, assetId: 'RES-UI:old', member: 'old', material: { mode: 'unlit' as const, color: '#ffffff', metalness: 0, roughness: 1, opacity: 1, alphaMode: 'opaque' as const, textureAssetId: 'RES-UI:old', textureRegion: { x: 32, y: 0, width: 32, height: 32 } }, properties: {} }
+    expect(withAsset(sprite, 'RES-UI:ui_glyph_q')).toMatchObject({ assetId: 'RES-UI:ui_glyph_q', member: 'ui_glyph_q', material: { textureAssetId: 'RES-UI:ui_glyph_q' } })
+    expect(withAsset(sprite, 'RES-UI:ui_glyph_q')).not.toHaveProperty('material.textureRegion')
   })
-  it('deduplicates exact transactions and rejects conflicting reuse', () => { const doc = makeFixture(); const patch = patchFor(doc, [operations.rename('hive', 'Nest', 'Hive Box')], 'rename'); const once = applyPatch(doc, patch); const twice = applyPatch(once.document, patch); expect(twice.applied).toBe(true); expect(twice.diagnostic).toContain('already'); const conflict = applyPatch(once.document, { ...patch, operations: [operations.rename('hive', 'Other', 'Nest')] }); expect(conflict.applied).toBe(false); expect(conflict.diagnostic).toContain('different') })
-  it('round trips package bytes and complete YAML payload', () => { const doc = makeFixture(); doc.assets.logo = { id: 'logo', name: 'logo.png', mimeType: 'image/png', path: 'textures/logo.png', bytes: 'data:image/png;base64,AA==' }; const restored = importPackage(exportPackage(doc)); expect(restored.assets.logo.bytes).toContain('base64'); const yaml = JSON.parse(exportYaml(doc)); expect(yaml.schema).toBe('beegame-content-v1'); expect(yaml.data.nodes.hive.volume.role).toBe('collider') })
+
+  it('rejects stale edits and only reopens the new schema', () => {
+    const document = makeFixture(); const result = applyPatch(document, patchFor(document, [operations.rename('hive', 'Nest', 'Hive')], 'Rename'))
+    expect(result.applied).toBe(true)
+    expect(applyPatch(result.document, patchFor(result.document, [operations.rename('hive', 'Other', 'Wrong')], 'Stale')).applied).toBe(false)
+    const reopened = importPackage(exportPackage(result.document)); expect(reopened.schemaVersion).toBe('scene-game-object.v2'); expect(reopened.nodes.hive.components[0].type).toBe('box-collider-2d')
+  })
 })

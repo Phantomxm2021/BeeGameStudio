@@ -6,7 +6,10 @@ export function Header() {
 
   return (
     <nav className="nav" aria-label={messages.nav.primary}>
-      <a className="brand" href="#top" aria-label="Bee Game Studio">BEE GAME STUDIO</a>
+      <a className="brand" href="#top" aria-label="Bee Game Studio">
+        <img src="/assets/bgs_logo.svg" alt="" />
+        <span>BEE GAME STUDIO</span>
+      </a>
       <div className="nav-right">
         <a href="#story">{messages.nav.story}</a>
         <a href="#belief">{messages.nav.belief}</a>

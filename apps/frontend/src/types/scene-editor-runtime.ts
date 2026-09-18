@@ -5,6 +5,8 @@ export type {
   SceneDocument,
   SceneAsset,
   SceneNode,
+  SceneComponent,
+  MaterialOverride,
   Transform,
 } from '../../../../packages/scene-editor/src/model';
 
@@ -16,5 +18,6 @@ export interface SceneEditorProps {
   onSave?: (document: SceneDocument) => void | Promise<void>;
   onClose?: () => void;
 }
+
 
 export declare const SceneEditor: ComponentType<SceneEditorProps>;

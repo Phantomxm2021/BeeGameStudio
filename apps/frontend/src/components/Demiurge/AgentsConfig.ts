@@ -11,21 +11,11 @@ import {
     Database,
     Rocket,
 } from 'lucide-react';
-import { createElement } from 'react';
-import type { SVGProps } from 'react';
+import type { ComponentProps } from 'react';
+import { BeeGameLogo } from '../BeeGameLogo';
 
-export const BeeIcon = ({ className, ...props }: SVGProps<SVGSVGElement>) => (
-    createElement(
-        'svg',
-        { viewBox: '0 0 24 24', className, 'aria-hidden': true, ...props },
-        createElement('path', { d: 'M8.5 7.8c-.9-.9-2.2-1.7-3.9-2.4-.2 1.8.1 3.2 1 4.2.7.8 1.7 1.2 3 1.3', fill: 'currentColor', opacity: '0.35' }),
-        createElement('path', { d: 'M15.5 7.8c.9-.9 2.2-1.7 3.9-2.4.2 1.8-.1 3.2-1 4.2-.7.8-1.7 1.2-3 1.3', fill: 'currentColor', opacity: '0.35' }),
-        createElement('path', { d: 'M7 13.2c0-3 2.1-5.2 5-5.2s5 2.2 5 5.2c0 3.2-2.2 5.8-5 5.8s-5-2.6-5-5.8Z', fill: 'currentColor' }),
-        createElement('path', { d: 'M8.2 12h7.6M8.4 15h7.2', stroke: 'black', strokeWidth: '1.4', strokeLinecap: 'round', opacity: '0.45' }),
-        createElement('path', { d: 'M10 7.7 8.7 5.5M14 7.7l1.3-2.2', stroke: 'currentColor', strokeWidth: '1.5', strokeLinecap: 'round' }),
-        createElement('circle', { cx: '10', cy: '11', r: '.75', fill: 'black', opacity: '0.6' }),
-        createElement('circle', { cx: '14', cy: '11', r: '.75', fill: 'black', opacity: '0.6' }),
-    )
+export const BeeIcon = (props: ComponentProps<typeof BeeGameLogo>) => (
+    BeeGameLogo(props)
 );
 
 // --- I18N Metadata ---

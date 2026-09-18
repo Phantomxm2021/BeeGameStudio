@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Box3, BufferGeometry, Float32BufferAttribute } from 'three'
-import { lightGizmoSegments } from '../src/light-gizmo'
+import { lightConePoints, lightGizmoSegments } from '../src/light-gizmo'
 
 const bounds = (points: number[]) => {
   const geometry = new BufferGeometry().setAttribute('position', new Float32BufferAttribute(points, 3))
@@ -12,6 +12,14 @@ const bounds = (points: number[]) => {
 const light = { color: '#ffffff', intensity: 1 }
 
 describe('light gizmo dimensions', () => {
+  it('builds a visible y-up 2D spotlight face from the Unity range and half-angle', () => {
+    const points = lightConePoints({ ...light, kind: 'spot', distance: 260, angle: Math.PI / 6 })
+    expect(points[0]).toEqual([0, 0])
+    expect(Math.max(...points.map(point => point[1]))).toBeCloseTo(260)
+    expect(Math.min(...points.map(point => point[0]))).toBeCloseTo(-130)
+    expect(Math.max(...points.map(point => point[0]))).toBeCloseTo(130)
+  })
+
   it('shows the point light range in every axis and updates when the range changes', () => {
     for (const distance of [2, 7]) {
       const box = bounds(lightGizmoSegments({ ...light, kind: 'point', distance }))

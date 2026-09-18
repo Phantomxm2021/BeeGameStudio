@@ -23,6 +23,12 @@ import { SceneEditorOverlay } from '../Workspace/SceneEditorOverlay';
 import { UiEditorOverlay } from '../Workspace/UiEditorOverlay';
 import { TodoPanel } from './Sidebar/TodoPanel';
 import { deriveCurrentProjectTodos } from '../../utils/projectTodos';
+import {
+    closeProjectEditorRoute,
+    getProjectEditorRoute,
+    openProjectEditorRoute,
+    WORKSPACE_ROUTE_CHANGE_EVENT,
+} from '../../navigation/workspaceRoute';
 
 const dedupeAttachments = (attachments: ChatAttachmentPayload[]): ChatAttachmentPayload[] => {
     const seen = new Set<string>();
@@ -125,8 +131,8 @@ export function RightSidebar({
     const [previewContent, setPreviewContent] = useState('');
     const [previewTitle, setPreviewTitle] = useState('');
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
-    const [isSceneEditorOpen, setIsSceneEditorOpen] = useState(false);
-    const [isUiEditorOpen, setIsUiEditorOpen] = useState(false);
+    const [isSceneEditorOpen, setIsSceneEditorOpen] = useState(() => getProjectEditorRoute(projectId) === 'scene');
+    const [isUiEditorOpen, setIsUiEditorOpen] = useState(() => getProjectEditorRoute(projectId) === 'ui');
     const [hasOlderHistory, setHasOlderHistory] = useState(false);
     const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
     const submittedDraftRef = useRef<{ projectId: string; content: string; attachments: ChatAttachmentPayload[]; supersedesMessageId?: string } | null>(null);
@@ -150,6 +156,21 @@ export function RightSidebar({
     const assetUploadRequestRef = useRef(0);
 
     const uiText = useBeeGameText(lang);
+
+    useEffect(() => {
+        const syncEditorRoute = () => {
+            const editor = getProjectEditorRoute(projectId);
+            setIsSceneEditorOpen(editor === 'scene');
+            setIsUiEditorOpen(editor === 'ui');
+        };
+        syncEditorRoute();
+        window.addEventListener('popstate', syncEditorRoute);
+        window.addEventListener(WORKSPACE_ROUTE_CHANGE_EVENT, syncEditorRoute);
+        return () => {
+            window.removeEventListener('popstate', syncEditorRoute);
+            window.removeEventListener(WORKSPACE_ROUTE_CHANGE_EVENT, syncEditorRoute);
+        };
+    }, [projectId]);
 
     useEffect(() => {
         activeProjectRef.current = projectId;
@@ -371,10 +392,10 @@ export function RightSidebar({
 
     const handleOpenEditor = (kind: ArtifactEditorKind) => {
         if (kind === 'scene') {
-            setIsSceneEditorOpen(true);
+            openProjectEditorRoute(projectId, 'scene');
             return;
         }
-        setIsUiEditorOpen(true);
+        openProjectEditorRoute(projectId, 'ui');
     };
 
     const handleUploadAsset = async (file: File) => {
@@ -613,13 +634,13 @@ export function RightSidebar({
             {isSceneEditorOpen ? (
                 <SceneEditorOverlay
                     projectId={projectId}
-                    onClose={() => setIsSceneEditorOpen(false)}
+                    onClose={() => closeProjectEditorRoute(projectId)}
                 />
             ) : null}
             {isUiEditorOpen ? (
                 <UiEditorOverlay
                     projectId={projectId}
-                    onClose={() => setIsUiEditorOpen(false)}
+                    onClose={() => closeProjectEditorRoute(projectId)}
                 />
             ) : null}
         </>

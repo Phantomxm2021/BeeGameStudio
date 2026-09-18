@@ -3277,8 +3277,6 @@ export function createAgentWorkflowApp(
         return c.json({ state: 'awaiting_documents' })
       if (!run.revision.resource)
         return c.json({ state: 'awaiting_assets' })
-      if (!run.gameContentReceipt)
-        return c.json({ state: 'awaiting_content' })
       const controller = getDeliveryController({
         request: c.req.raw,
         user,
@@ -3288,7 +3286,7 @@ export function createAgentWorkflowApp(
       const snapshot = await controller.loadGameContentForEditing()
       return c.json({
         state:
-          snapshot.contentRevision === run.revision.content
+          run.gameContentReceipt && snapshot.contentRevision === run.revision.content
             ? 'ready'
             : 'draft',
         acceptedContentRevision: run.revision.content,

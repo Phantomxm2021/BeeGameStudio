@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Euler, Matrix4, Quaternion, Vector3 } from 'three'
 import { operations } from './commands'
 import { SceneHistory } from './history'
-import { DEFAULT_SCENE_SETTINGS, type SceneDocument, type SceneNode, type SceneAsset, type LightKind, type Transform } from './model'
+import { componentOf, DEFAULT_SCENE_SETTINGS, type SceneDocument, type SceneNode, type SceneAsset, type LightKind, type Transform } from './model'
 import { exportPackage, importPackage, makeEmptyScene, sceneContentKey, canonicalJson } from './persistence'
 import { transformSelection } from './selection-transform'
-import { SceneViewport, type SceneViewportProps } from './viewport'
+import { SceneViewport, type SceneViewMode, type SceneViewportProps } from './viewport'
 import { Hand, Move, Rotate3D, Scaling, Save, Undo2, Redo2, Magnet, ChevronDown, Globe2, Box, Scan, Square, Focus, CircleCheck, Circle, ChevronLeft, ChevronRight, Lightbulb, Search, X, Axis3D, Menu } from 'lucide-react'
-import { Inspector, ModelPartInspector } from './inspector'
+import { Inspector } from './inspector'
 import { TreeNode, matchesTreeNode, navigateModelTree } from './hierarchy'
 import { readModelStructure, type ModelSelection, type ModelStructure } from './model-structure'
 import { currentKeyboardLabels } from './platform'
@@ -31,10 +31,10 @@ const TOOL_ICONS = { hand: Hand, translate: Move, rotate: Rotate3D, scale: Scali
 
 export interface SceneEditorProps { initialDocument?: SceneDocument; storageKey?: string; assetLibrary?: AssetLibrarySource; initialView?: SceneViewportProps['initialView']; initialProjection?: 'perspective' | 'orthographic'; initialExpanded?: Record<string, boolean>; onSave?: (document: SceneDocument) => void | Promise<void>; onClose?: () => void }
 
-function ViewDropdown({ label, value, options, onChange }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void }) {
+function ViewDropdown({ label, value, options, onChange, disabled = false }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; disabled?: boolean }) {
   return <DropdownMenu>
-    <DropdownMenuTrigger className="view-dropdown" aria-label={label} title={label}>
-      {label === 'Coordinate space' ? <Globe2 size={15} /> : value === 'orthographic' ? <Square size={18} /> : <Box size={18} />}
+    <DropdownMenuTrigger className="view-dropdown" aria-label={label} title={disabled ? `${label} is fixed in 2D mode` : label} disabled={disabled}>
+      {label === 'Coordinate space' ? <Globe2 size={15} /> : label === 'View mode' ? value === '2d' ? <Square size={18} /> : <Box size={18} /> : value === 'orthographic' ? <Square size={18} /> : <Box size={18} />}
       <span>{options.find(option => option.value === value)?.label}</span><ChevronDown size={13} />
     </DropdownMenuTrigger>
     <DropdownMenuContent align="center" collisionPadding={8} aria-label={label}>
@@ -45,7 +45,7 @@ function ViewDropdown({ label, value, options, onChange }: { label: string; valu
   </DropdownMenu>
 }
 
-function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets, openSettings, toggleGizmos, closeEditor }: {
+function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets, openSettings, showGizmos, toggleGizmos, closeEditor }: {
   canUndo: boolean
   canRedo: boolean
   undo: () => void
@@ -54,6 +54,7 @@ function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets,
   save: () => void
   openAssets: () => void
   openSettings: () => void
+  showGizmos: boolean
   toggleGizmos: () => void
   closeEditor?: () => void
 }) {
@@ -70,7 +71,7 @@ function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets,
       </DropdownMenuSub>
       <DropdownMenuItem onSelect={openAssets}><Box size={14} />Asset library</DropdownMenuItem>
       <DropdownMenuItem onSelect={openSettings}><ChevronDown size={14} />Scene settings</DropdownMenuItem>
-      <DropdownMenuItem onSelect={toggleGizmos}><Axis3D size={14} />Toggle gizmos</DropdownMenuItem>
+      <DropdownMenuItem onSelect={toggleGizmos}><Axis3D size={14} />{showGizmos ? 'Hide gizmos' : 'Show gizmos'}</DropdownMenuItem>
       <DropdownMenuItem onSelect={save}><Save size={14} />Save scene</DropdownMenuItem>
       {closeEditor && <DropdownMenuItem onSelect={closeEditor}><X size={14} />Close editor</DropdownMenuItem>}
     </DropdownMenuContent>
@@ -94,7 +95,10 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
   const selected = selectedIds[0] ?? ''
   const [query, setQuery] = useState(''), [mode, setMode] = useState<Mode>('translate'), [space, setSpace] = useState<'local' | 'world'>('world')
   const [showGizmos, setShowGizmos] = useState(initialView?.showGizmos ?? true)
-  const [snap, setSnap] = useState(false), [ortho, setOrtho] = useState(initialProjection === 'orthographic'), [focus, setFocus] = useState(0), [notice, setNotice] = useState('')
+  const [snap, setSnap] = useState(false)
+  const [viewMode, setViewMode] = useState<SceneViewMode>(initialDocument?.dimension === '2d' ? '2d' : '3d')
+  const [ortho, setOrtho] = useState(initialDocument?.dimension === '3d' && initialProjection === 'orthographic')
+  const [focus, setFocus] = useState(0), [notice, setNotice] = useState('')
   const [assetLibraryOpen, setAssetLibraryOpen] = useState(false), [sceneSettingsOpen, setSceneSettingsOpen] = useState(false)
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set()), [unpickableIds, setUnpickableIds] = useState<Set<string>>(() => new Set()), [expanded, setExpanded] = useState<Record<string, boolean>>(initialExpanded ?? {})
   const [renaming, setRenaming] = useState<string | null>(null), [contextMenu, setContextMenu] = useState<ContextMenu>(null), [dropPreview, setDropPreview] = useState<{ id: string; position: DropPosition } | null>(null)
@@ -120,8 +124,7 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
   const searchInputRef = useRef<HTMLInputElement>(null)
   const editorRootRef = useRef<HTMLDivElement>(null)
   const current = document.nodes[selected]
-  const structure = current?.assetId ? structures[current.assetId] : null
-  const selectedPart = modelSelection && structure ? structure.nodes[modelSelection.nodeIndex] : null
+  const structure = undefined as ModelStructure | undefined
   const visibleIds = useMemo(() => flattenVisible(document, expanded, query, structures), [document, expanded, query])
 
   const setSelection = (ids: string[], primary = ids[0] ?? '') => { setModelSelection(null); const available = history.current.document.nodes; setSelectedIds([...new Set(ids.filter(id => Boolean(available[id])))].sort((a, b) => a === primary ? -1 : b === primary ? 1 : 0)) }
@@ -129,21 +132,24 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
   const commit = (ops: Parameters<SceneHistory['commit']>[0], label: string) => { try { const next = history.current.commit(ops, label); setDocument({ ...next, nodes: { ...next.nodes }, assets: { ...next.assets } }); setNotice(`${label} · revision ${next.revision}`); setContextMenu(null); return true } catch (error) { setNotice(`Rejected: ${error instanceof Error ? error.message : String(error)}`); return false } }
   const addLight = (kind: LightKind) => {
     const id = `light-${crypto.randomUUID()}`
-    const count = Object.values(document.nodes).filter(node => node.light?.kind === kind).length
+    const lightType = document.dimension === '2d' ? 'light-2d' : 'light'
+    const count = Object.values(document.nodes).filter(node => (componentOf(node, 'light-2d') ?? componentOf(node, 'light'))?.light.kind === kind).length
     const label = `${kind[0].toUpperCase() + kind.slice(1)} Light`
-    const node: SceneNode = { id, name: count ? `${label} ${count + 1}` : label, kind: 'light', parentId: null, children: [], visible: true, locked: false,
+    const node: SceneNode = { id, name: count ? `${label} ${count + 1}` : label, parentId: null, children: [], active: true, locked: false, tags: [],
       transform: { position: kind === 'ambient' ? [0, 0, 0] : [2, 4, 2], rotation: [-Math.PI / 4, Math.PI / 4, 0], scale: [1, 1, 1] },
-      light: { kind, color: '#ffffff', intensity: kind === 'ambient' ? .5 : kind === 'directional' ? 2 : 15, ...(kind === 'point' || kind === 'spot' ? { distance: 15 } : {}), ...(kind === 'spot' ? { angle: Math.PI / 6, penumbra: .2 } : {}) },
+      components: [{ id: `${id}:${lightType}:0`, type: lightType, enabled: true, light: { kind, color: '#ffffff', intensity: kind === 'ambient' ? .5 : kind === 'directional' ? 2 : 15, ...(kind === 'point' || kind === 'spot' ? { distance: 15 } : {}), ...(kind === 'spot' ? { angle: Math.PI / 6, penumbra: .2 } : {}) }, properties: {} }],
     }
-    if (commit([{ type: 'scene.addNode', node }], `Add ${label}`)) setSelection([id])
+    if (commit([{ type: 'scene.addGameObject', node }], `Add ${label}`)) setSelection([id])
   }
   const addModelAsset = (asset: SceneAsset) => {
-    const registered = Object.values(document.assets).find(item => item.bytes === asset.bytes) ?? asset
+    if (document.dimension !== '3d') { setNotice(`Rejected: ${asset.name} is a 3D model and cannot be added to a 2D scene`); return false }
     const id = `model-${crypto.randomUUID()}`
-    const node: SceneNode = { id, name: asset.name.replace(/\.glb$/i, ''), kind: 'model', parentId: null, children: [], visible: true, locked: false, assetId: registered.id, transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } }
-    const added = commit([...(document.assets[registered.id] ? [] : [{ type: 'scene.addAsset' as const, asset: registered }]), { type: 'scene.addNode', node }], 'Add library model')
-    if (added) setSelection([id])
-    return added
+    const node: SceneNode = { id, name: asset.name.replace(/\.[^.]+$/, ''), parentId: null, children: [], active: true, locked: false, tags: [], transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }, components: [
+      { id: `${id}:mesh-filter:0`, type: 'mesh-filter', enabled: true, assetId: asset.id, properties: {} },
+      { id: `${id}:mesh-renderer:1`, type: 'mesh-renderer', enabled: true, material: { mode: 'standard', color: '#ffffff', metalness: 0, roughness: 1, opacity: 1, alphaMode: 'opaque' }, properties: {} },
+    ] }
+    if (commit([{ type: 'scene.addGameObject', node }], `Add ${node.name}`)) { setSelection([id]); return true }
+    return false
   }
   const duplicate = () => {
     const roots = selectedIds.filter(id => !selectedIds.some(other => other !== id && isDescendant(document, id, other)))
@@ -151,14 +157,14 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
     const copyIds: string[] = []
     for (const rootId of roots) {
       const copy = cloneSubtreeForDuplicate(document, rootId)
-      operationsToApply.push(...copy.nodes.map(node => ({ type: 'scene.addNode' as const, node })))
+      operationsToApply.push(...copy.nodes.map(node => ({ type: 'scene.addGameObject' as const, node })))
       copyIds.push(copy.rootId)
     }
     if (!operationsToApply.length) return
     commit(operationsToApply, `Duplicate ${copyIds.length} object${copyIds.length === 1 ? '' : 's'}`)
     setSelection(copyIds, copyIds[0])
   }
-  const remove = () => { const roots = selectedIds.filter(id => id !== 'root' && document.nodes[id] && !selectedIds.some(other => other !== id && isDescendant(document, id, other))); if (!roots.length) return; commit(roots.map(nodeId => ({ type: 'scene.removeNode', nodeId, expectedExists: true })), `Delete ${roots.length} object${roots.length === 1 ? '' : 's'}`); setSelection([]) }
+  const remove = () => { const roots = selectedIds.filter(id => id !== 'root' && document.nodes[id] && !selectedIds.some(other => other !== id && isDescendant(document, id, other))); if (!roots.length) return; commit(roots.map(nodeId => ({ type: 'scene.removeGameObject', nodeId, expectedExists: true })), `Delete ${roots.length} object${roots.length === 1 ? '' : 's'}`); setSelection([]) }
   const changeTransform = (transform: Transform) => { if (!current) return; try { commit(transformSelection(document, selectedIds, current.id, transform), selectedIds.length > 1 ? 'Transform selection' : 'Change transform') } catch (error) { setNotice(`Rejected: ${error instanceof Error ? error.message : String(error)}`) } }
   const saveDocument = async () => {
     if (savingRef.current) return
@@ -211,6 +217,26 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
     commit(ops, `Move ${roots.length} object${roots.length === 1 ? '' : 's'}`)
     setDropPreview(null)
   }
+  useEffect(() => {
+    const root = editorRootRef.current
+    if (!root) return undefined
+    const onInspectorHistory = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const key = event.key.toLowerCase()
+      if (!(event.metaKey || event.ctrlKey) || !['z', 'y'].includes(key) || !target?.matches('input,textarea,select,[contenteditable="true"]')) return
+      event.preventDefault()
+      event.stopPropagation()
+      target.blur()
+      queueMicrotask(() => {
+        try {
+          const next = key === 'y' || event.shiftKey ? history.current.redo() : history.current.undo()
+          setDocument({ ...next, nodes: { ...next.nodes }, assets: { ...next.assets } })
+        } catch (error) { setNotice(String(error)) }
+      })
+    }
+    root.addEventListener('keydown', onInspectorHistory, true)
+    return () => root.removeEventListener('keydown', onInspectorHistory, true)
+  }, [])
   useEffect(() => { const onKey = (event: KeyboardEvent) => { if (event.defaultPrevented || event.isComposing) return; const root = editorRootRef.current; if (!root || (!root.contains(event.target as Node) && !root.contains(window.document.activeElement))) return; const target = event.target as HTMLElement | null; if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); if (window.document.activeElement instanceof HTMLElement) window.document.activeElement.blur(); queueMicrotask(() => void saveDocument()); return } if (target?.matches('input,textarea,select,[contenteditable="true"]') || target?.isContentEditable) return; const key = event.key.toLowerCase(); if (!modelSelection && structure?.roots.length && event.key === 'ArrowRight') { event.preventDefault(); if (expanded[selected] === false) setExpanded(value => ({ ...value, [selected]: true })); else selectModelPart(selected, structure.roots[0]); return } if (modelSelection && (['Delete', 'Backspace', 'F2'].includes(event.key) || ((event.metaKey || event.ctrlKey) && key === 'd'))) { event.preventDefault(); return } if (modelSelection && structure && event.key.startsWith('Arrow')) { event.preventDefault(); navigateModelTree(event.key, modelSelection, structure, expanded, setExpanded, selectModelPart, setSelection); return } if (key === 'q' && !event.repeat && !event.metaKey && !event.ctrlKey) { event.preventDefault(); setMode('hand'); return } const mod = event.metaKey || event.ctrlKey; if (!mod && !event.repeat && key === 'w') { event.preventDefault(); setMode('translate'); return } if (!mod && !event.repeat && key === 'e') { event.preventDefault(); setMode('rotate'); return } if (!mod && !event.repeat && key === 'r') { event.preventDefault(); setMode('scale'); return } if (mod && key === 's') { event.preventDefault(); void saveDocument(); return } if (mod && key === 'd') { event.preventDefault(); duplicate(); return } if (mod && key === 'z') { event.preventDefault(); try { const next = event.shiftKey ? history.current.redo() : history.current.undo(); setDocument({ ...next, nodes: { ...next.nodes }, assets: { ...next.assets } }) } catch (error) { setNotice(String(error)) } return } if (mod && key === 'y') { event.preventDefault(); const next = history.current.redo(); setDocument({ ...next, nodes: { ...next.nodes }, assets: { ...next.assets } }); return } if (event.key === 'F2') { event.preventDefault(); startRename(); return } if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); remove(); return } const index = selected ? visibleIds.indexOf(selected) : -1; if (event.key === 'ArrowDown') { event.preventDefault(); const next = visibleIds[Math.min(visibleIds.length - 1, Math.max(0, index + 1))]; if (next) setSelection([next], next) } else if (event.key === 'ArrowUp') { event.preventDefault(); const next = visibleIds[Math.max(0, index < 0 ? 0 : index - 1)]; if (next) setSelection([next], next) } else if (event.key === 'ArrowLeft') { event.preventDefault(); const node = selected ? document.nodes[selected] : undefined; if (node?.children.length && expanded[selected] !== false) setExpanded(value => ({ ...value, [selected]: false })); else if (node?.parentId) setSelection([node.parentId], node.parentId) } else if (event.key === 'ArrowRight') { event.preventDefault(); const node = selected ? document.nodes[selected] : undefined; if (node?.children.length && expanded[selected] === false) setExpanded(value => ({ ...value, [selected]: true })); else { const next = visibleIds[Math.min(visibleIds.length - 1, Math.max(0, index + 1))]; if (next) setSelection([next], next) } } else if (key === 'f') { event.preventDefault(); frame() } }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey) }, [document, expanded, selected, visibleIds, selectedIds, modelSelection, structure])
   useEffect(() => { const close = () => setContextMenu(null); window.addEventListener('click', close); return () => window.removeEventListener('click', close) }, [])
 
@@ -228,6 +254,7 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
             save={() => void saveDocument()}
             openAssets={() => setAssetLibraryOpen(true)}
             openSettings={() => setSceneSettingsOpen(true)}
+            showGizmos={showGizmos}
             toggleGizmos={() => setShowGizmos(value => !value)}
             closeEditor={onClose}
           />
@@ -237,7 +264,8 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
           </div>
           <span className="toolbar-divider" />
           <ViewDropdown label="Coordinate space" value={space} options={[{ value: 'local', label: 'Local' }, { value: 'world', label: 'World' }]} onChange={value => setSpace(value as 'local' | 'world')} />
-          <ViewDropdown label="Projection" value={ortho ? 'orthographic' : 'perspective'} options={[{ value: 'perspective', label: 'Perspective' }, { value: 'orthographic', label: 'Orthographic' }]} onChange={value => setOrtho(value === 'orthographic')} />
+          <ViewDropdown label="View mode" value={viewMode} options={[{ value: '2d', label: '2D' }, { value: '3d', label: '3D' }]} onChange={value => setViewMode(value as SceneViewMode)} />
+          <ViewDropdown label="Projection" value={viewMode === '2d' || ortho ? 'orthographic' : 'perspective'} options={[{ value: 'perspective', label: 'Perspective' }, { value: 'orthographic', label: 'Orthographic' }]} onChange={value => setOrtho(value === 'orthographic')} disabled={viewMode === '2d'} />
           <Toggle pressed={snap} onPressedChange={setSnap} aria-label="Snap" title="Grid snapping"><Magnet size={16} /><span>Snap</span></Toggle>
           <AssetLibraryDialog source={assetLibrary} assets={document.assets} onAdd={addModelAsset} open={assetLibraryOpen} onOpenChange={setAssetLibraryOpen} trigger={null} />
           <SceneSettingsDialog document={document} onSave={() => void saveDocument()} onApply={(name, settings) => {
@@ -247,18 +275,18 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
         </div>
         </div>
 
-        <div className="scene-render-surface" data-mode={mode}><SceneViewport showGizmos={showGizmos} initialView={initialView} ortho={ortho} document={document} selected={selected} selectedIds={selectedIds} modelSelection={modelSelection} hiddenIds={[...hiddenIds]} unpickableIds={[...unpickableIds]} onSelect={(id, modifiers = { ctrlKey: false, metaKey: false, shiftKey: false }) => { if (!id) { setSelection([]); return } if (modifiers.shiftKey && selected) { const index = visibleIds.indexOf(id); const start = visibleIds.indexOf(selected); setSelection(visibleIds.slice(Math.min(start, index), Math.max(start, index) + 1), id) } else if (modifiers.ctrlKey || modifiers.metaKey) setSelection(selectedIds.includes(id) ? selectedIds.filter(value => value !== id) : [...selectedIds, id], id); else setSelection([id], id) }} mode={mode} space={space} snap={snap} focus={focus} onTransform={changeTransform} onDiagnostic={setNotice} /></div></main>
-      <aside className={`panel inspector inspector-panel ${inspectorCollapsed ? 'is-collapsed' : ''}`} data-testid="scene-inspector" id="scene-inspector-panel" inert={inspectorCollapsed}><PanelTitle title="INSPECTOR" /><div className="panel-content">{selectedIds.length > 1 ? <div className="empty-state"><strong>Multiple Selection</strong><span>{selectedIds.length} objects selected. Transform controls apply the active selection to all selected objects.</span></div> : current ? selectedPart && structure ? <ModelPartInspector part={selectedPart} structure={structure} assetName={document.assets[current.assetId!]?.name ?? current.name} onFocus={() => frame(current.id)} /> : <Inspector key={current.id} node={current} document={document} structure={structure} commit={commit} onFocus={() => frame(current.id)} onSave={() => void saveDocument()} onReparent={parentId => { try { const transform = localTransformForWorld(document, current.id, parentId); commit([operations.reparent(current.id, parentId, undefined, current.parentId), operations.transform(current.id, transform, current.transform)], 'Reparent node') } catch (error) { setNotice(`Rejected: ${String(error)}`) } }} /> : <div className="empty-state inspector-empty"><Box size={28} strokeWidth={1.2} /><strong>No selection</strong><span>Select an object in the hierarchy or scene to edit its properties.</span></div>}</div></aside>
+        <div className="scene-render-surface" data-mode={mode} data-view-mode={viewMode}><SceneViewport showGizmos={showGizmos} initialView={initialView} ortho={ortho} viewMode={viewMode} document={document} selected={selected} selectedIds={selectedIds} modelSelection={modelSelection} hiddenIds={[...hiddenIds]} unpickableIds={[...unpickableIds]} onSelect={(id, modifiers = { ctrlKey: false, metaKey: false, shiftKey: false }) => { if (!id) { setSelection([]); return } if (modifiers.shiftKey && selected) { const index = visibleIds.indexOf(id); const start = visibleIds.indexOf(selected); setSelection(visibleIds.slice(Math.min(start, index), Math.max(start, index) + 1), id) } else if (modifiers.ctrlKey || modifiers.metaKey) setSelection(selectedIds.includes(id) ? selectedIds.filter(value => value !== id) : [...selectedIds, id], id); else setSelection([id], id) }} mode={mode} space={space} snap={snap} focus={focus} onTransform={changeTransform} onDiagnostic={setNotice} /></div></main>
+      <aside className={`panel inspector inspector-panel ${inspectorCollapsed ? 'is-collapsed' : ''}`} data-testid="scene-inspector" id="scene-inspector-panel" inert={inspectorCollapsed}><PanelTitle title="INSPECTOR" /><div className="panel-content">{selectedIds.length > 1 ? <div className="empty-state"><strong>Multiple Selection</strong><span>{selectedIds.length} objects selected. Transform controls apply the active selection to all selected objects.</span></div> : current ? <Inspector key={current.id} node={current} document={document} structure={null} commit={commit} onFocus={() => frame(current.id)} onSave={() => void saveDocument()} onReparent={parentId => { try { const transform = localTransformForWorld(document, current.id, parentId); commit([operations.reparent(current.id, parentId, undefined, current.parentId), operations.transform(current.id, transform, current.transform)], 'Reparent GameObject') } catch (error) { setNotice(`Rejected: ${String(error)}`) } }} /> : <div className="empty-state inspector-empty"><Box size={28} strokeWidth={1.2} /><strong>No selection</strong><span>Select a GameObject in the hierarchy or scene.</span></div>}</div></aside>
       <PanelEdgeToggle side="hierarchy" collapsed={hierarchyCollapsed} onToggle={() => togglePanel('hierarchy')} />
       <PanelEdgeToggle side="inspector" collapsed={inspectorCollapsed} onToggle={() => togglePanel('inspector')} />
     </div>
     <footer className="bottom-bar">
       <div className="scene-status" role="status"><span className="scene-name" title={document.name}>{document.name}</span><span className={`save-status ${isSaved ? 'saved' : 'unsaved'}`} data-testid="scene-save-status">{isSaved && !saving ? <CircleCheck size={12} /> : <Circle size={9} />}{saving ? 'saving' : isSaved ? 'saved' : 'unsaved'}</span></div>
       <div className="viewport-hints" aria-label="Scene navigation hints">
-        <span title={`Hold ${keyboard.altName} and left-drag to orbit`}><MouseButtonIcon button="left" /><kbd aria-label={keyboard.altName}>{keyboard.alt}</kbd><span>Orbit</span></span>
-        <span title="Right-drag to look around; WASD to fly"><MouseButtonIcon button="right" /><span>Right · Look</span></span>
-        <span title="Drag with the middle mouse button to pan"><MouseButtonIcon button="middle" /><span>Middle · Pan</span></span>
-        <span title="Scroll to zoom"><MouseButtonIcon button="wheel" /><span>Scroll · Zoom</span></span>
+        {viewMode === '3d' && <span title={`Hold ${keyboard.altName} and left-drag to orbit`}><MouseButtonIcon button="left" /><kbd aria-label={keyboard.altName}>{keyboard.alt}</kbd><span>Orbit</span></span>}
+        <span title={viewMode === '2d' ? 'Right-drag to pan in 2D mode' : 'Right-drag to look around; use WASD and Q/E to fly'}><MouseButtonIcon button="right" /><span>Right · {viewMode === '2d' ? 'Pan' : 'Look'}</span></span>
+        <span title={keyboard.apple ? `Middle-drag to pan, or hold ${keyboard.altName}+Command and left-drag` : `Middle-drag to pan, or hold ${keyboard.altName}+Control and left-drag`}><MouseButtonIcon button="middle" /><span>Middle · Pan</span></span>
+        <span title={keyboard.apple ? `Scroll or use a two-finger vertical gesture to zoom; ${keyboard.altName}+Control and left-drag also zooms` : `Scroll to zoom; ${keyboard.altName}+right-drag also zooms`}><MouseButtonIcon button="wheel" /><span>Scroll · Zoom</span></span>
         <span title="Press F to frame the selected object"><Focus size={14} /><kbd>F</kbd><span>Focus</span></span>
       </div>
     </footer>
@@ -307,7 +335,7 @@ export function cloneSubtreeForDuplicate(document: SceneDocument, rootId: string
   const collect = (id: string) => {
     const node = document.nodes[id]
     if (!node || idMap.has(id)) return
-    idMap.set(id, `${node.kind}-${crypto.randomUUID().slice(0, 8)}`)
+    idMap.set(id, `game-object-${crypto.randomUUID().slice(0, 8)}`)
     node.children.forEach(collect)
   }
   collect(rootId)
@@ -320,6 +348,7 @@ export function cloneSubtreeForDuplicate(document: SceneDocument, rootId: string
     copy.name = id === rootId ? `${copy.name} Copy` : copy.name
     copy.parentId = id === rootId ? source.parentId : idMap.get(source.parentId ?? '') ?? null
     copy.children = source.children.map(child => idMap.get(child)!).filter(Boolean)
+    copy.components = copy.components.map(component => ({ ...component, id: `${copy.id}:${component.type}:${crypto.randomUUID().slice(0, 8)}` }))
     nodes.push(copy)
     source.children.forEach(build)
   }

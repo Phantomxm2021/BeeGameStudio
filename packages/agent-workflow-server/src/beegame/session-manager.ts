@@ -47,14 +47,11 @@ import {
 } from './native-background-task-output'
 import { createNativeCliProcessRunner } from './native-cli-process-runner'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
-import type { BeeGameNativeTaskNotification } from './native-task-notification'
-import { createRunStore } from './delivery-workflow/run-store'
 import {
-  CANONICAL_ASSET_MANIFEST,
-  CANONICAL_FOUNDATION_DOCUMENTS,
-  CANONICAL_PROJECT_DOCUMENTS,
-} from './delivery-workflow/types'
-import { sanitizeWorkflowDisplayMessage } from './delivery-workflow/workflow-display-message'
+  parseNativeTerminalTaskNotification,
+  type BeeGameNativeTaskNotification,
+} from './native-task-notification'
+import { createRunStore } from './delivery-workflow/run-store'
 import { createStageChatProjector } from './stage-chat-events'
 
 export type BeeGameImageAttachment = {
@@ -425,6 +422,15 @@ type SessionRecord = {
   abortController: AbortController | null
   pendingPermissions: Map<string, PendingPermission>
   toolUses: Map<string, { toolName: string; input?: unknown }>
+  /** Native subagents remain part of the workflow turn after its foreground result. */
+  nativeBackgroundTasks: Map<
+    string,
+    {
+      toolUseID: string
+      outputFile: string
+      status: 'running' | 'completed' | 'failed' | 'stopped' | 'killed'
+    }
+  >
   /** Tool-use blocks observed before their streamed JSON input is complete. */
   assistantPartialTextByMessage: Map<string, string>
   activeAssistantMessageId: string | null
@@ -433,8 +439,6 @@ type SessionRecord = {
   visibleThinkingBlockIds: Map<number, string>
   /** Start time for each visible thinking block, used when its end event arrives. */
   thinkingBlockStartedAt: Map<string, string>
-  /** Prevents one durable progress write for every streamed prose fragment. */
-  documentAuthorWritingReported: boolean
   events: BeeGameEvent[]
   nextEventId: number
   nextTurnIndex: number
@@ -453,94 +457,6 @@ type SessionRecord = {
   usageLastCommittedKey?: string
   usageFailureReported: boolean
   resumeEventPending: boolean
-}
-
-function workflowDocumentFromToolEvent(
-  record: SessionRecord,
-  event: BeeGameEvent,
-): string | undefined {
-  if (event.type !== 'tool.started' && event.type !== 'tool.completed')
-    return undefined
-  const payload = event.payload
-  const input = payload?.input
-  if (!input || typeof input !== 'object' || Array.isArray(input))
-    return undefined
-  const filePath = (input as Record<string, unknown>).file_path
-  if (typeof filePath !== 'string' || !filePath.trim()) return undefined
-  const absolutePath = isAbsolute(filePath)
-    ? filePath
-    : join(record.session.cwd, filePath)
-  const relativePath = relative(record.session.cwd, resolve(absolutePath))
-    .split('\\')
-    .join('/')
-  return [...CANONICAL_PROJECT_DOCUMENTS, CANONICAL_ASSET_MANIFEST].includes(
-    relativePath as
-      | (typeof CANONICAL_PROJECT_DOCUMENTS)[number]
-      | typeof CANONICAL_ASSET_MANIFEST,
-  )
-    ? relativePath
-    : undefined
-}
-
-function documentAuthorActivityMessage(
-  record: SessionRecord,
-  event: BeeGameEvent,
-): string | undefined {
-  if (record.workflowWorkerType !== 'document-author') return undefined
-  const traditional = record.language === 'zh-TW'
-  const chinese = record.language === 'zh' || traditional
-  if (
-    event.type === 'assistant.thinking' &&
-    event.payload?.status === 'started'
-  )
-    return chinese
-      ? traditional
-        ? '正在推理目前文件…'
-        : '正在推理当前文档…'
-      : 'Reasoning about the current document…'
-  if (
-    event.type === 'assistant.thinking' &&
-    event.payload?.status === 'ended'
-  )
-    return chinese
-      ? traditional
-        ? '正在撰寫目前文件…'
-        : '正在撰写当前文档…'
-      : 'Writing the current document…'
-  if (
-    event.type === 'assistant.partial' &&
-    event.text.trim() &&
-    !record.documentAuthorWritingReported
-  ) {
-    record.documentAuthorWritingReported = true
-    return chinese
-      ? traditional
-        ? '正在撰寫目前文件…'
-        : '正在撰写当前文档…'
-      : 'Writing the current document…'
-  }
-  if (
-    event.type !== 'tool.progress' ||
-    event.payload?.phase !== 'input_streaming'
-  )
-    return undefined
-  const toolName = getDashboardPayloadString(event.payload, 'toolName')
-  if (toolName !== 'Write' && toolName !== 'Edit') return undefined
-  if (toolName === 'Write')
-    return chinese
-      ? traditional
-        ? '正在準備文件寫入…'
-        : '正在准备文档写入…'
-      : 'Preparing the document write…'
-  return chinese
-    ? traditional
-      ? '正在準備文件修改…'
-      : '正在准备文档修改…'
-    : 'Preparing the document edit…'
-}
-
-function isResourceProductionWorker(workerType?: string): boolean {
-  return workerType === 'resource-planner'
 }
 
 export type StartBeeGameSessionInput = {
@@ -751,13 +667,13 @@ export class BeeGameSessionManager {
       abortController: null,
       pendingPermissions: new Map(),
       toolUses: new Map(),
+      nativeBackgroundTasks: new Map(),
       assistantPartialTextByMessage: new Map(),
       activeAssistantMessageId: null,
       emittedAssistantMessageIds: new Set(),
       thinkingBlockIndexes: new Set(),
       visibleThinkingBlockIds: new Map(),
       thinkingBlockStartedAt: new Map(),
-      documentAuthorWritingReported: false,
       events: recoveredTranscript?.events ?? [],
       nextEventId: recoveredTranscript
         ? getNextTranscriptEventId(recoveredTranscript.events)
@@ -1256,7 +1172,6 @@ export class BeeGameSessionManager {
       record.thinkingBlockIndexes.clear()
       record.visibleThinkingBlockIds.clear()
       record.thinkingBlockStartedAt.clear()
-      record.documentAuthorWritingReported = false
       record.currentTurnStartingUsage = this.deriveRuntimeSnapshot(record).usage
       record.currentTurnId = nextTurnId
       record.nextTurnIndex += 1
@@ -1378,6 +1293,34 @@ export class BeeGameSessionManager {
     if (record.workflowUsageWriteError) {
       throw record.workflowUsageWriteError
     }
+    const usage = this.deriveRuntimeSnapshot(record).usage
+    const delta = subtractRuntimeUsage(usage, record.workflowUsageCommitted)
+    if (
+      delta.total_tokens <= 0 &&
+      delta.prompt_tokens <= 0 &&
+      delta.completion_tokens <= 0 &&
+      delta.cache_read_tokens <= 0 &&
+      delta.cache_creation_tokens <= 0
+    )
+      return
+    const dispatchId = record.workflowDispatchId
+    if (!record.workflowRunId || !dispatchId)
+      throw new Error('workflow usage event is missing its dispatch identity')
+    const persisted = await createRunStore(
+      record.session.cwd,
+      record.userId,
+    ).addWorkflowUsage(
+      record.workflowRunId,
+      {
+        input_tokens: delta.prompt_tokens,
+        cache_read_tokens: delta.cache_read_tokens,
+        cache_creation_tokens: delta.cache_creation_tokens,
+        completion_tokens: delta.completion_tokens,
+        total_tokens: delta.total_tokens,
+      },
+      dispatchId,
+    )
+    if (persisted) addRuntimeUsage(record.workflowUsageCommitted, delta)
   }
 
   async rebindWorkflowWorker(
@@ -1398,9 +1341,19 @@ export class BeeGameSessionManager {
     const record = this.sessions.get(sessionId)
     if (!record?.workflowWorker) return
     await record.activeTurn
-    await record.workflowUsageWriteTail
-    await record.usageWriteTail
-    if (record.workflowUsageWriteError) throw record.workflowUsageWriteError
+    while (record.session.status === 'running') {
+      let running = false
+      for (const task of record.nativeBackgroundTasks.values()) {
+        if (
+          task.status === 'running' &&
+          readNativeBackgroundTaskUsage(task.outputFile)
+        )
+          task.status = 'completed'
+        if (task.status === 'running') running = true
+      }
+      if (!running) break
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
   }
 
   async dispose(): Promise<void> {
@@ -1426,7 +1379,6 @@ export class BeeGameSessionManager {
           (async () => {
             await record.activeTurn?.catch(() => undefined)
             await record.workflowUsageWriteTail.catch(() => undefined)
-            await record.usageWriteTail.catch(() => undefined)
             if (record.workflowUsageWriteError) {
               console.error('[BeeGame] Failed to flush workflow token usage', {
                 runId: record.workflowRunId,
@@ -1549,6 +1501,17 @@ export class BeeGameSessionManager {
             record.nativeSessionId = nativeSessionId
             this.persistRuntimeSnapshot(record)
           },
+          onNativeTaskNotification: notification => {
+            const terminal = parseNativeTerminalTaskNotification(notification)
+            if (!terminal) return
+            for (const [taskId, task] of record.nativeBackgroundTasks) {
+              if (
+                taskId === terminal.taskId ||
+                task.toolUseID === terminal.toolUseId
+              )
+                task.status = terminal.status
+            }
+          },
           cwd: record.session.cwd,
           env,
           runtimeLaunchContract: buildRuntimeLaunchContract(
@@ -1628,8 +1591,26 @@ export class BeeGameSessionManager {
       }
     } finally {
       const terminalTurnId = record.currentTurnId
+      if (record.workflowWorker) {
+        // Workflow usage is accounting telemetry. Persist it once per turn,
+        // but never put that storage lane between the native result and the
+        // dispatch terminal commit.
+        const usageFlush = this.flushWorkflowUsage(record.session.id)
+        record.workflowUsageWriteTail = usageFlush.catch(error => {
+          record.workflowUsageWriteError =
+            error instanceof Error ? error : new Error(String(error))
+          console.error('[BeeGame] Failed to persist workflow token usage', {
+            runId: record.workflowRunId,
+            dispatchId: record.workflowDispatchId,
+            cause: record.workflowUsageWriteError.message,
+          })
+        })
+      }
       if (terminalTurnId) {
-        await this.recordTerminalUsage(record, terminalTurnId)
+        // Remote billing is accounting, not worker lifecycle authority. A
+        // slow or unavailable billing service must not keep a completed native
+        // turn (and therefore the whole workflow) in the running state.
+        void this.recordTerminalUsage(record, terminalTurnId)
       }
       if (record.session.status === 'running') {
         record.session.turnStatus = 'idle'
@@ -1645,7 +1626,6 @@ export class BeeGameSessionManager {
       record.thinkingBlockIndexes.clear()
       record.visibleThinkingBlockIds.clear()
       record.thinkingBlockStartedAt.clear()
-      record.documentAuthorWritingReported = false
       record.abortController = null
       record.session.updatedAt = new Date()
     }
@@ -2129,10 +2109,6 @@ export class BeeGameSessionManager {
     payload?: DashboardSDKMessage,
     turnId?: string,
   ): BeeGameEvent {
-    const workflowUsageBefore =
-      record.workflowWorker && record.workflowRunId
-        ? this.deriveRuntimeSnapshot(record).usage
-        : undefined
     const effectiveTurnId = turnId || record.currentTurnId || undefined
     const createdAt = new Date()
     let eventPayload = payload
@@ -2245,144 +2221,9 @@ export class BeeGameSessionManager {
         })
       }
     }
-    if (record.workflowWorker && record.workflowRunId) {
-      // Raw tool/system labels remain telemetry. Resource preparation exposes
-      // only a small structural activity vocabulary so the card can explain
-      // real work without leaking tool inputs or JSON.
-      const documentActivityMessage = documentAuthorActivityMessage(
-        record,
-        event,
-      )
-      const progressMessage = isResourceProductionWorker(
-        record.workflowWorkerType,
-      )
-        ? ''
-        : record.workflowWorkerType === 'document-author'
-          ? (documentActivityMessage ?? '')
-          : event.type === 'assistant.message'
-            ? sanitizeWorkflowDisplayMessage(event.text)
-            : ''
-      // Initial authoring already has one durable taskId. Keep that authority
-      // stable while the worker reads upstream documents instead of projecting
-      // transient Read events as a different active task.
-      const currentItemId =
-        record.workflowWorkerType === 'document-author'
-          ? undefined
-          : workflowDocumentFromToolEvent(record, event)
-      const clearCurrentItem =
-        Boolean(currentItemId) &&
-        (event.type === 'tool.completed' || event.type === 'tool.failed')
-      const durableProgress = isResourceProductionWorker(
-        record.workflowWorkerType,
-      )
-        ? isResourceWorkerDurableProgress(event)
-        : record.workflowWorkerType === 'document-author'
-          ? isDocumentAuthorDurableProgress(event)
-          : true
-      const thinking =
-        event.type === 'assistant.thinking' ||
-            event.type === 'tool.started' ||
-            (event.type === 'tool.progress' &&
-              event.payload?.phase === 'input_streaming') ||
-            (record.workflowWorkerType === 'document-author' &&
-              Boolean(documentActivityMessage))
-          ? 'working'
-          : event.type === 'turn.completed' ||
-              event.type === 'turn.empty' ||
-              event.type === 'turn.failed' ||
-              event.type === 'result'
-            ? 'idle'
-            : undefined
-      if (
-        progressMessage ||
-        thinking ||
-        clearCurrentItem ||
-        (isResourceProductionWorker(record.workflowWorkerType) &&
-          durableProgress)
-      ) {
-        void createRunStore(record.session.cwd, record.userId)
-          .updateProgress(record.workflowRunId, {
-            ...(progressMessage ? { message: progressMessage } : {}),
-            ...(thinking ? { thinking } : {}),
-            ...(record.workflowWorkerType
-              ? { workerType: record.workflowWorkerType }
-              : {}),
-            ...(record.workflowDispatchId
-              ? { dispatchId: record.workflowDispatchId }
-              : {}),
-            ...(currentItemId ? { currentItemId } : {}),
-            ...(clearCurrentItem ? { currentItemId: null } : {}),
-            durable: durableProgress,
-          })
-          .catch(() => undefined)
-      }
-    }
     record.nextEventId += 1
     record.session.updatedAt = new Date()
     this.persistRuntimeSnapshot(record)
-    if (record.workflowWorker && record.workflowRunId && workflowUsageBefore) {
-      const workflowUsageAfter = this.deriveRuntimeSnapshot(record).usage
-      const delta = subtractRuntimeUsage(
-        workflowUsageAfter,
-        workflowUsageBefore,
-      )
-      if (
-        delta.total_tokens <= 0 &&
-        delta.prompt_tokens <= 0 &&
-        delta.completion_tokens <= 0 &&
-        delta.cache_read_tokens <= 0 &&
-        delta.cache_creation_tokens <= 0
-      ) {
-        return event
-      }
-      const usageDelta = {
-        input_tokens: delta.prompt_tokens,
-        cache_read_tokens: delta.cache_read_tokens,
-        cache_creation_tokens: delta.cache_creation_tokens,
-        completion_tokens: delta.completion_tokens,
-        total_tokens: delta.total_tokens,
-      }
-      const workflowDispatchId = record.workflowDispatchId
-      if (!workflowDispatchId)
-        throw new Error('workflow usage event is missing its dispatch identity')
-      const previousWrite = record.workflowUsageWriteTail
-      const nextWrite = previousWrite
-        .catch(() => undefined)
-        .then(async () => {
-          const persisted = await createRunStore(
-            record.session.cwd,
-            record.userId,
-          ).addWorkflowUsage(
-            record.workflowRunId as string,
-            usageDelta,
-            workflowDispatchId,
-          )
-          if (!persisted) {
-            // `addWorkflowUsage` also returns null for a stale dispatch after
-            // a terminal commit. Only report the strict data-loss case when
-            // the authoritative run itself is gone.
-            const current = await createRunStore(
-              record.session.cwd,
-              record.userId,
-            ).load()
-            if (!current)
-              throw new Error(
-                'workflow run disappeared before usage was persisted',
-              )
-            return
-          }
-          addRuntimeUsage(record.workflowUsageCommitted, delta)
-        })
-      record.workflowUsageWriteTail = nextWrite.catch(error => {
-        record.workflowUsageWriteError =
-          error instanceof Error ? error : new Error(String(error))
-        console.error('[BeeGame] Failed to persist workflow token usage', {
-          runId: record.workflowRunId,
-          dispatchId: workflowDispatchId,
-          cause: record.workflowUsageWriteError.message,
-        })
-      })
-    }
     return event
   }
 
@@ -2422,19 +2263,6 @@ export class BeeGameSessionManager {
       return undefined
     }
   }
-}
-
-export function isResourceWorkerDurableProgress(event: BeeGameEvent): boolean {
-  if (event.type !== 'tool.completed') return false
-  const toolName = getDashboardPayloadString(event.payload, 'toolName')
-  return isFileMutationTool(toolName)
-}
-
-export function isDocumentAuthorDurableProgress(event: BeeGameEvent): boolean {
-  return (
-    event.type === 'tool.completed' &&
-    isFileMutationTool(getDashboardPayloadString(event.payload, 'toolName'))
-  )
 }
 
 function resolveExistingPath(path: string): string {
@@ -4797,6 +4625,17 @@ function mapSDKMessageToToolEvents(
         toolName === 'Agent'
           ? extractNativeAgentResult(block.content)
           : undefined
+      if (toolName === 'Agent') {
+        const launch = parseNativeBackgroundTaskLaunch(output)
+        if (launch) {
+          const existing = record.nativeBackgroundTasks.get(launch.taskId)
+          record.nativeBackgroundTasks.set(launch.taskId, {
+            toolUseID,
+            outputFile: launch.outputFile,
+            status: existing?.status ?? 'running',
+          })
+        }
+      }
       const nativeTaskResult =
         toolName === 'TaskOutput'
           ? extractNativeCompletedTaskResult(message)

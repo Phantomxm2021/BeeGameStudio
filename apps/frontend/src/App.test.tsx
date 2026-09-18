@@ -27,6 +27,7 @@ const { getChatHistory } = vi.hoisted(() => ({
 const showError = vi.fn();
 const showSuccess = vi.fn();
 let mockedActiveProjectId: string | null = 'proj_1';
+let mockedHasLoadedProjects = true;
 const mockedProjects = [
   { id: 'proj_1', name: 'Project One', created_at: Date.now() },
   { id: 'proj_2', name: 'Project Two', created_at: Date.now() },
@@ -37,9 +38,11 @@ vi.mock('./store/projectStore', () => {
     loadProjects,
     projects: mockedProjects,
     activeProjectId: mockedActiveProjectId,
+    hasLoadedProjects: mockedHasLoadedProjects,
     bootstrapProject,
     setToastCallbacks,
     clearActiveProject: vi.fn(),
+    syncActiveProjectFromRoute: vi.fn(),
   });
   const useProjectStore = Object.assign((selector?: (state: ReturnType<typeof projectState>) => unknown) => selector ? selector(projectState()) : projectState(), {
     getState: () => ({ activeProjectId: mockedActiveProjectId }),
@@ -131,6 +134,7 @@ describe('App view routing', () => {
     mockedAuthenticationStatus = 'authenticated';
     mockedIsDark = true;
     mockedActiveProjectId = 'proj_1';
+    mockedHasLoadedProjects = true;
     getChatHistory.mockReset().mockResolvedValue([]);
     window.history.pushState({}, '', '/');
   });
@@ -205,6 +209,18 @@ describe('App view routing', () => {
     render(<App />);
     expect(screen.getByTestId('dashboard-view')).toBeInTheDocument();
     expect(applyThemeToDocument).toHaveBeenLastCalledWith(true);
+  });
+
+  it('does not flash Idea Home while restoring a project route', () => {
+    mockedActiveProjectId = null;
+    mockedHasLoadedProjects = false;
+    window.history.pushState({}, '', '/?project=proj_1&editor=scene');
+
+    render(<App />);
+
+    expect(screen.getByLabelText('Restoring project workspace')).toBeInTheDocument();
+    expect(screen.queryByTestId('landing-view')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dashboard-view')).not.toBeInTheDocument();
   });
 
   it('restores the resource library route instead of redirecting it to the project dashboard', () => {

@@ -24,6 +24,7 @@ import type { BeeGameBuildBrief } from '../services/beeGameAdapter';
 import { isAuthenticationServiceUnavailable } from '../services/apiClient';
 import { useChatStore } from './chatStore';
 import { useSystemStore } from './systemStore';
+import { getProjectRouteId, openIdeaHomeRoute, openProjectRoute } from '../navigation/workspaceRoute';
 
 const normalizeProjectTimestamp = (project: Project): Project => {
   const ts = Number(project.created_at);
@@ -93,6 +94,9 @@ interface ProjectState {
   /** Loading state for async operations */
   isLoading: boolean;
 
+  /** Whether the URL's project route has been resolved against the server list. */
+  hasLoadedProjects: boolean;
+
   /** Whether a project open/switch operation is in progress */
   isOpeningProject: boolean;
 
@@ -161,6 +165,9 @@ interface ProjectState {
    */
   clearActiveProject: () => void;
 
+  /** Apply browser back/forward navigation without creating another history entry. */
+  syncActiveProjectFromRoute: () => void;
+
   bootstrapProjectFromBrief: (data: BeeGameBuildBrief) => Promise<StartProjectResult>;
 
   /**
@@ -200,6 +207,7 @@ export const useProjectStore = create<ProjectState>()(
       projects: [],
       activeProjectId: null,
       isLoading: false,
+      hasLoadedProjects: false,
       isOpeningProject: false,
       pendingPermissions: [],
       projectStatus: null,
@@ -212,19 +220,20 @@ export const useProjectStore = create<ProjectState>()(
 
       loadProjects: async () => {
         try {
-          set({ isLoading: true });
+          set({ isLoading: true, hasLoadedProjects: false });
           const rawProjects = (await api.getProjects()) as unknown as Project[];
           const projects = rawProjects.map(normalizeProjectTimestamp);
-          const currentActiveId = get().activeProjectId;
-          const hasActive = !!currentActiveId && projects.some((p) => p.id === currentActiveId);
+          const requestedProjectId = getProjectRouteId();
+          const hasRequestedProject = !!requestedProjectId && projects.some((p) => p.id === requestedProjectId);
           set({
             projects,
-            activeProjectId: hasActive ? currentActiveId : null,
+            activeProjectId: hasRequestedProject ? requestedProjectId : null,
             isLoading: false,
+            hasLoadedProjects: true,
           });
         } catch (error) {
           console.error('Failed to load projects:', error);
-          set({ isLoading: false });
+          set({ isLoading: false, hasLoadedProjects: true });
           throw error;
         }
       },
@@ -318,6 +327,7 @@ export const useProjectStore = create<ProjectState>()(
         }
 
         if (get().activeProjectId === normalizedProjectId) {
+          openProjectRoute(normalizedProjectId);
           return;
         }
 
@@ -332,6 +342,7 @@ export const useProjectStore = create<ProjectState>()(
             pendingPermissions: [],
             projectStatus: null,
           });
+          openProjectRoute(normalizedProjectId);
           // Clear current messages to prepare for loading new project's history
           useChatStore.getState().clearMessages();
         } catch (error) {
@@ -348,6 +359,21 @@ export const useProjectStore = create<ProjectState>()(
       clearActiveProject: () => {
         set({
           activeProjectId: null,
+          pendingPermissions: [],
+          projectStatus: null,
+        });
+        openIdeaHomeRoute();
+        useChatStore.getState().clearMessages();
+      },
+
+      syncActiveProjectFromRoute: () => {
+        const requestedProjectId = getProjectRouteId();
+        const nextProjectId = requestedProjectId && get().projects.some(project => project.id === requestedProjectId)
+          ? requestedProjectId
+          : null;
+        if (nextProjectId === get().activeProjectId) return;
+        set({
+          activeProjectId: nextProjectId,
           pendingPermissions: [],
           projectStatus: null,
         });
@@ -374,6 +400,7 @@ export const useProjectStore = create<ProjectState>()(
             activeProjectId: newProjectId,
             isLoading: false,
           }));
+          openProjectRoute(newProjectId);
 
           const chatStore = useChatStore.getState();
           const bootstrapTimestamp = Date.now();
@@ -463,6 +490,13 @@ export const useProjectStore = create<ProjectState>()(
             };
           });
 
+          const nextActiveProjectId = get().activeProjectId;
+          if (nextActiveProjectId) {
+            openProjectRoute(nextActiveProjectId, { replace: true });
+          } else {
+            openIdeaHomeRoute({ replace: true });
+          }
+
           // Show success toast
           // Requirements: 12.4
           const { showToastSuccess } = get();
@@ -498,12 +532,7 @@ export const useProjectStore = create<ProjectState>()(
     {
       name: 'project-storage',
       storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({
-        // The id is only a navigation preference. loadProjects() validates it
-        // against the authenticated user's server-side project list on every
-        // app start before it can become active again.
-        activeProjectId: state.activeProjectId,
-      }),
+      partialize: () => ({}),
     }
   )
 );

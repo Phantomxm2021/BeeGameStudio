@@ -54,7 +54,8 @@ p { text-wrap: pretty; }
   z-index: 20;
 }
 
-.brand { font-size: 13px; font-weight: 700; letter-spacing: .13em; }
+.brand { align-items: center; display: inline-flex; font-size: 13px; font-weight: 700; gap: 10px; letter-spacing: .13em; }
+.brand img { height: 30px; object-fit: contain; width: 30px; }
 .nav-right { align-items: center; color: rgb(255 255 255 / 65%); display: flex; font-size: 12px; gap: 30px; }
 .nav-right a:hover { color: var(--ember); }
 .nav-join { background: var(--paper); border-radius: 999px; color: #111; padding: 10px 16px; }
@@ -268,7 +269,8 @@ p { text-wrap: pretty; }
   .language-selector, .language-selector select { min-width: 5.2rem; }
   .language-current { font-size: 11px; padding: 10px 24px 10px 10px; }
   .language-selector select { padding: 0 24px 0 10px; }
-  .brand { font-size: 10px; }
+  .brand { font-size: 10px; gap: 7px; }
+  .brand img { height: 26px; width: 26px; }
   .hero { padding: 0 20px; }
   .hero-copy { margin-left: 0; width: 92vw; }
   .hero-copy h1 { font-size: 66px; }

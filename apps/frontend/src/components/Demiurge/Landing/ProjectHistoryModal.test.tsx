@@ -170,6 +170,61 @@ describe('ProjectHistoryModal permissions', () => {
     expect(getCreditSummary).toHaveBeenCalledWith('project-1');
   });
 
+  it('reuses loaded credit summaries when the history modal is reopened', async () => {
+    const view = render(
+      <ProjectHistoryModal
+        isOpen
+        lang="en"
+        onClose={vi.fn()}
+        onSelectProject={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('7 credits')).toBeInTheDocument();
+    expect(getCreditSummary).toHaveBeenCalledTimes(1);
+
+    view.rerender(
+      <ProjectHistoryModal
+        isOpen={false}
+        lang="en"
+        onClose={vi.fn()}
+        onSelectProject={vi.fn()}
+      />,
+    );
+    view.rerender(
+      <ProjectHistoryModal
+        isOpen
+        lang="en"
+        onClose={vi.fn()}
+        onSelectProject={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('7 credits')).toBeInTheDocument();
+    await waitFor(() => expect(getCreditSummary).toHaveBeenCalledTimes(1));
+  });
+
+  it('limits initial credit summary requests to a small batch', async () => {
+    projectList = Array.from({ length: 6 }, (_, index) => ({
+      id: `project-${index + 1}`,
+      name: `Project ${index + 1}`,
+      created_at: 1710000000000 + index,
+    }));
+    getCreditSummary.mockReturnValue(new Promise(() => {}));
+
+    render(
+      <ProjectHistoryModal
+        isOpen
+        lang="en"
+        onClose={vi.fn()}
+        onSelectProject={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('dialog', { name: 'History Projects' })).toBeInTheDocument();
+    await waitFor(() => expect(getCreditSummary).toHaveBeenCalledTimes(4));
+  });
+
   it('closes an open project menu when clicking elsewhere', () => {
     getCreditSummary.mockReturnValue(new Promise(() => {}));
 

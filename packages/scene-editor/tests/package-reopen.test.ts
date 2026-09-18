@@ -23,7 +23,7 @@ describe('materialized package reopen', () => {
   })
   it('rejects invalid graphs and conflicting resource bytes before replacing a document', () => {
     const content = exportPackage(makeFixture()); content.content.nodes.hive.children.push('missing')
-    expect(() => importPackage(content)).toThrow(/missing child/)
+    expect(() => importPackage(content)).toThrow(/invalid child/)
     const doc = makeFixture(); doc.assets.a = { id: 'a', name: 'a.bin', path: 'a.bin', mimeType: 'application/octet-stream', bytes: 'data:application/octet-stream;base64,AA==' }
     const invalid = exportPackage(doc); invalid.assets.a.data = 'data:application/octet-stream;base64,AQ=='
     expect(() => importPackage(invalid)).toThrow(/conflicting bytes/)

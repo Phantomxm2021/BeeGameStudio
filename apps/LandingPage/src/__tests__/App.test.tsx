@@ -17,6 +17,8 @@ test("renders the localized narrative with Chinese headings and a waitlist CTA",
   );
 
   expect(screen.getByRole("link", { name: "Bee Game Studio" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Bee Game Studio" }).querySelector("img"))
+    .toHaveAttribute("src", "/assets/bgs_logo.svg");
   expect(screen.getByRole("heading", { name: "把想法，做成游戏。" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: /你不是没有能力/ })).toBeInTheDocument();
   expect(screen.getByRole("tab", { name: "听懂想法" })).toBeInTheDocument();
@@ -64,9 +66,7 @@ test("reveals the playable game image at the final creation stage", async () => 
     </LocaleProvider>,
   );
 
-  const images = screen.getAllByRole("img");
-  expect(images).toHaveLength(1);
-  expect(images[0]).toHaveAttribute("src", "/images/game/hero-game-native-v1.png");
+  expect(document.querySelector('img[src="/images/game/hero-game-native-v1.png"]')).toBeInTheDocument();
 
   await user.click(screen.getByRole("tab", { name: "亲自试玩" }));
   expect(screen.getByRole("img", { name: "雨夜里亮着暖光的微缩便利店游戏场景" }))

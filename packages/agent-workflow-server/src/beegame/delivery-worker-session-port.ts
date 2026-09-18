@@ -297,6 +297,11 @@ export function createBeeGameDeliveryWorkerPort(input: {
               event.type === 'turn.empty',
           )
         if (result) {
+          // A foreground result does not end a native turn that launched
+          // background subagents. Their files and usage must settle before the
+          // host validates and accepts the worker output.
+          if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
+            await input.sessions.waitForWorkflowWorkerIdle(sessionId)
           const terminalEvents = events
           const drainedFailure = [...terminalEvents]
             .reverse()
@@ -348,8 +353,6 @@ export function createBeeGameDeliveryWorkerPort(input: {
               throw new Error(
                 `document author output is missing: ${targetPath}`,
               )
-            if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
-              await input.sessions.waitForWorkflowWorkerIdle(sessionId)
             return createDeterministicDocumentAuthorTerminal(
               request,
               [targetPath],

@@ -1,179 +1,21 @@
-<?xml version='1.0' encoding='UTF-8'?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" fill="none" role="img" aria-labelledby="bgs02a3-title bgs02a3-description">
-  <title id="bgs02a3-title">Bee Game Studio — 02A-3</title>
-  <desc id="bgs02a3-description">Editable vector redraw of the selected golden bee and ghost mascot. Transparent canvas, white face and stripe, two blue eyes, and two golden wings. All artwork uses Bézier paths and SVG gradients; no embedded bitmap or visible text.</desc>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" fill="none" role="img" aria-labelledby="bgs-logo-title bgs-logo-description">
+  <title id="bgs-logo-title">Bee Game Studio</title>
+  <desc id="bgs-logo-description">White bee mascot with transparent eye cutouts.</desc>
   <defs>
-    <!-- Palette and lighting. All gradient coordinates use the shared viewBox. -->
-    <linearGradient id="bgs02a3-wing-top" gradientUnits="userSpaceOnUse" x1="798" y1="467" x2="983" y2="179">
-      <stop stop-color="#F2770C"/>
-      <stop offset=".24" stop-color="#FA981B"/>
-      <stop offset=".49" stop-color="#FDBC30"/>
-      <stop offset=".76" stop-color="#FDD446"/>
-      <stop offset="1" stop-color="#FDE85B"/>
-    </linearGradient>
-    <radialGradient id="bgs02a3-wing-top-shadow" gradientUnits="userSpaceOnUse" cx="782" cy="422" r="133" gradientTransform="translate(782 422) rotate(-52) scale(1 .45) translate(-782 -422)">
-      <stop stop-color="#E2790B" stop-opacity=".24"/>
-      <stop offset="1" stop-color="#E2790B" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="bgs02a3-wing-bottom" gradientUnits="userSpaceOnUse" x1="872" y1="632" x2="1069" y2="493">
-      <stop stop-color="#F26909"/>
-      <stop offset=".26" stop-color="#FEA01D"/>
-      <stop offset=".55" stop-color="#FDC033"/>
-      <stop offset=".82" stop-color="#FDD546"/>
-      <stop offset="1" stop-color="#FDE355"/>
-    </linearGradient>
-    <radialGradient id="bgs02a3-wing-bottom-shadow" gradientUnits="userSpaceOnUse" cx="812" cy="574" r="188" gradientTransform="translate(812 574) rotate(23) scale(1 .48) translate(-812 -574)">
-      <stop stop-color="#E4A023" stop-opacity=".23"/>
-      <stop offset="1" stop-color="#E4A023" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="bgs02a3-ribbon" gradientUnits="userSpaceOnUse" x1="339" y1="907" x2="752" y2="477">
-      <stop stop-color="#FDA018"/>
-      <stop offset=".16" stop-color="#FD950F"/>
-      <stop offset=".44" stop-color="#FDB727"/>
-      <stop offset=".76" stop-color="#FDDE4E"/>
-      <stop offset="1" stop-color="#FDDA4E"/>
-    </linearGradient>
-    <radialGradient id="bgs02a3-ribbon-shade" gradientUnits="userSpaceOnUse" cx="459" cy="823" r="236" gradientTransform="translate(459 823) rotate(-38) scale(1 .48) translate(-459 -823)">
-      <stop stop-color="#FACD26" stop-opacity=".16"/>
-      <stop offset="1" stop-color="#FACD26" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="bgs02a3-crown" gradientUnits="userSpaceOnUse" x1="191" y1="480" x2="559" y2="328">
-      <stop stop-color="#FDA313"/>
-      <stop offset=".32" stop-color="#FDBB2B"/>
-      <stop offset=".68" stop-color="#FDD444"/>
-      <stop offset="1" stop-color="#FDE556"/>
-    </linearGradient>
-    <radialGradient id="bgs02a3-crown-shadow" gradientUnits="userSpaceOnUse" cx="703" cy="478" r="172">
-      <stop stop-color="#FDA41D" stop-opacity=".53"/>
-      <stop offset="1" stop-color="#FDA41D" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="bgs02a3-tail" gradientUnits="userSpaceOnUse" x1="562" y1="999" x2="851" y2="714">
-      <stop stop-color="#FDB421"/>
-      <stop offset=".23" stop-color="#FDAB19"/>
-      <stop offset=".55" stop-color="#FDBC2B"/>
-      <stop offset="1" stop-color="#FDEC60"/>
-    </linearGradient>
-    <radialGradient id="bgs02a3-tail-shadow" gradientUnits="userSpaceOnUse" cx="581" cy="953" r="185" gradientTransform="translate(581 953) rotate(-37) scale(1 .46) translate(-581 -953)">
-      <stop stop-color="#FD6200" stop-opacity=".32"/>
-      <stop offset="1" stop-color="#FD6200" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="bgs02a3-face" gradientUnits="userSpaceOnUse" cx="410" cy="570" r="303">
-      <stop stop-color="#FDFDFD"/>
-      <stop offset=".7" stop-color="#FCFCFC"/>
-      <stop offset=".83" stop-color="#FBFBFD"/>
-      <stop offset=".94" stop-color="#ECEEFB"/>
-      <stop offset="1" stop-color="#E3E7F9"/>
-    </radialGradient>
-    <radialGradient id="bgs02a3-face-cast" gradientUnits="userSpaceOnUse" cx="674" cy="567" r="129" gradientTransform="translate(674 567) rotate(33) scale(.42 1) translate(-674 -567)">
-      <stop stop-color="#B9C0E6" stop-opacity=".38"/>
-      <stop offset="1" stop-color="#B9C0E6" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="bgs02a3-white-band" gradientUnits="userSpaceOnUse" x1="373" y1="934" x2="817" y2="610">
-      <stop stop-color="#D7DCF5"/>
-      <stop offset=".13" stop-color="#F0F1FA"/>
-      <stop offset=".32" stop-color="#FEFDFD"/>
-      <stop offset=".81" stop-color="#FEFDFD"/>
-      <stop offset="1" stop-color="#EDEFF8"/>
-    </linearGradient>
-    <linearGradient id="bgs02a3-eye-left" gradientUnits="userSpaceOnUse" x1="237" y1="564" x2="279" y2="661">
-      <stop stop-color="#0843DB"/>
-      <stop offset=".5" stop-color="#012BAB"/>
-      <stop offset="1" stop-color="#0029A6"/>
-    </linearGradient>
-    <linearGradient id="bgs02a3-eye-right" gradientUnits="userSpaceOnUse" x1="425" y1="517" x2="471" y2="627">
-      <stop stop-color="#063FD6"/>
-      <stop offset=".5" stop-color="#012BAB"/>
-      <stop offset="1" stop-color="#0029A5"/>
-    </linearGradient>
-    <radialGradient id="bgs02a3-eye-left-glow" gradientUnits="userSpaceOnUse" cx="240" cy="590" r="28" gradientTransform="translate(240 590) rotate(21) scale(.65 1) translate(-240 -590)">
-      <stop stop-color="#5191F9" stop-opacity=".23"/>
-      <stop offset="1" stop-color="#5191F9" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="bgs02a3-eye-right-glow" gradientUnits="userSpaceOnUse" cx="428" cy="549" r="31" gradientTransform="translate(428 549) rotate(22) scale(.66 1) translate(-428 -549)">
-      <stop stop-color="#478AF6" stop-opacity=".23"/>
-      <stop offset="1" stop-color="#478AF6" stop-opacity="0"/>
-    </radialGradient>
-    <!-- Reusable, smoothly fitted Bézier silhouettes. -->
-    <path id="bgs02a3-upper-wing-path" d="M 780 501 C 857.74 488.45 927.63 450.58 985.87 397.18 C 1016.51 369.09 1043.6 336.25 1055.94 296.12 C 1066.68 261.19 1066.24 220.73 1045.3 194.89 C 1033.66 180.53 1015.68 170.68 996.18 166.61 C 978.96 163.02 960.56 163.92 943.03 167.32 C 904.87 174.73 870.85 193.99 841.05 218.31 C 779.39 268.65 733.8 339.14 724 418 C 742 441 763 474 780 501 Z"/>
-    <path id="bgs02a3-lower-wing-path" d="M 828 618 C 882.16 664.86 949.45 689.86 1019.31 683.01 C 1054.67 679.55 1090.69 667.58 1117.06 643.96 C 1131.55 630.99 1143.12 614.5 1148.8 596.65 C 1153.39 582.24 1154.14 566.95 1150.82 552.62 C 1142.82 518 1111.09 488.97 1075.67 473.55 C 1044.82 460.12 1011.17 457.02 978.73 459.7 C 912.04 465.22 850.32 493.22 789 522 C 798 552 809 589 828 618 Z"/>
-    <path id="bgs02a3-body-path" d="M 724 418 C 667.36 346.2 579.21 309.47 492.03 308.72 C 408.51 308 325.09 341.72 260.03 396.5 C 223.02 427.67 191.95 465.65 172.53 509.4 C 156.32 545.93 148.24 586.47 148.44 626.21 C 148.64 665.94 157.13 704.86 172.7 741.9 C 190.7 784.69 218.14 824.98 252.22 856.38 C 315.98 915.12 402.95 942.74 484.31 967.73 C 503.89 973.75 523.15 979.61 541.69 989.31 C 563.07 1000.51 583.51 1016.8 598.53 1034.86 C 605.91 1043.72 611.99 1053.01 616.58 1064.84 C 620.49 1074.92 623.33 1086.85 628.82 1093.52 C 631.63 1096.93 635.14 1098.97 639.26 1098.93 C 643.48 1098.9 648.35 1096.71 652.97 1094.17 C 663.2 1088.54 672.21 1081.22 681.14 1073.71 C 754.2 1012.23 822.17 937.63 852.38 847.22 C 864.85 809.88 870.89 769.85 865.11 731.31 C 859.22 691.93 842.18 654.03 828 618 C 804 560 767 459 724 418 Z"/>
-    <path id="bgs02a3-tail-path" d="M 451 957 C 614.42 923.04 774.49 809.03 840 650 L 1254 650 L 1254 1254 L 0 1254 Z"/>
-    <path id="bgs02a3-crown-path" d="M 0 0 H 724 V 418 C 721 463 707 507 690 537 L 144 656 H 0 Z"/>
-    <path id="bgs02a3-face-path" d="M 690 537 C 668.11 447.03 592.38 392.88 508.87 375.8 C 433.55 360.41 353.11 376.39 287.02 418.01 C 212.08 465.21 155.59 545.4 150.8 630.64 C 146.23 711.84 187.68 798.63 249 853 C 427.89 816.27 600.74 700.78 690 537 Z"/>
-    <path id="bgs02a3-stripe-path" d="M 813 594 C 767.46 685.45 697.62 768.4 612.16 828.61 C 538.33 880.63 453.47 914.46 366 926 C 393.84 938.16 422.29 948.25 451 957 C 614.42 923.04 774.49 809.03 840 650 C 831.68 631.36 822.56 611.51 813 594 Z"/>
-    <path id="bgs02a3-left-eye-path" d="M 257.24 559.49 C 245.35 560.78 234.41 571.7 228.05 583.75 C 222.73 593.85 220.63 604.73 220.75 616.03 C 220.89 628.15 223.59 640.74 230.64 650.22 C 237.85 659.92 249.63 666.37 260.71 665.32 C 272.68 664.18 283.85 654.29 290.11 642.53 C 295.74 631.95 297.39 619.85 296.8 607.75 C 296.2 595.38 293.24 583.01 285.85 573.62 C 278.78 564.63 267.65 558.37 257.24 559.49 Z"/>
-    <path id="bgs02a3-right-eye-path" d="M 447.13 514.58 C 433.8 515.57 421.22 526.48 413.8 539.5 C 407.47 550.61 404.9 563.26 405.31 576.07 C 405.73 589.24 409.29 602.58 417.2 612.51 C 425.44 622.86 438.4 629.5 450.81 628.6 C 464.49 627.62 477.49 617.48 484.86 604.51 C 491.07 593.6 493.28 580.68 492.67 567.95 C 492.04 554.79 488.39 541.83 480.51 531.72 C 472.26 521.14 459.39 513.67 447.13 514.58 Z"/>
-    <clipPath id="bgs02a3-body-clip">
-      <use href="#bgs02a3-body-path"/>
-    </clipPath>
-    <radialGradient id="bgs02a3-ribbon-edge-light" gradientUnits="userSpaceOnUse" cx="770" cy="572" r="225" gradientTransform="translate(770 572) rotate(37) scale(0.54 1) translate(-770 -572)">
-      <stop offset="0" stop-color="#FEA923" stop-opacity="0.45"/>
-      <stop offset="1" stop-color="#FEA923" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="bgs02a3-tail-soft-light" gradientUnits="userSpaceOnUse" cx="785" cy="1008" r="235" gradientTransform="translate(785 1008) rotate(0) scale(1 0.8) translate(-785 -1008)">
-      <stop offset="0" stop-color="#FDDE4B" stop-opacity="0.45"/>
-      <stop offset="1" stop-color="#FDDE4B" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="bgs02a3-face-edge-left" gradientUnits="userSpaceOnUse" cx="177" cy="759" r="148" gradientTransform="translate(177 759) rotate(-29) scale(0.5 1) translate(-177 -759)">
-      <stop offset="0" stop-color="#E4E9FB" stop-opacity="0.35"/>
-      <stop offset="1" stop-color="#E4E9FB" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="bgs02a3-left-eye-contact" gradientUnits="userSpaceOnUse" cx="259" cy="613" r="57" gradientTransform="translate(259 613) scale(0.7192982456140351 1) translate(-259 -613)">
-      <stop offset="0" stop-color="#6478AC" stop-opacity="0"/>
-      <stop offset=".77" stop-color="#6478AC" stop-opacity=".06"/>
-      <stop offset=".9" stop-color="#6478AC" stop-opacity=".075"/>
-      <stop offset="1" stop-color="#6478AC" stop-opacity="0"/>
-    </radialGradient>
-    <radialGradient id="bgs02a3-right-eye-contact" gradientUnits="userSpaceOnUse" cx="449" cy="572" r="61" gradientTransform="translate(449 572) scale(0.7540983606557377 1) translate(-449 -572)">
-      <stop offset="0" stop-color="#6478AC" stop-opacity="0"/>
-      <stop offset=".77" stop-color="#6478AC" stop-opacity=".06"/>
-      <stop offset=".9" stop-color="#6478AC" stop-opacity=".075"/>
-      <stop offset="1" stop-color="#6478AC" stop-opacity="0"/>
-    </radialGradient>
+    <path id="bgs-upper-wing" d="M780 501C857.74 488.45 927.63 450.58 985.87 397.18C1016.51 369.09 1043.6 336.25 1055.94 296.12C1066.68 261.19 1066.24 220.73 1045.3 194.89C1033.66 180.53 1015.68 170.68 996.18 166.61C978.96 163.02 960.56 163.92 943.03 167.32C904.87 174.73 870.85 193.99 841.05 218.31C779.39 268.65 733.8 339.14 724 418C742 441 763 474 780 501Z"/>
+    <path id="bgs-lower-wing" d="M828 618C882.16 664.86 949.45 689.86 1019.31 683.01C1054.67 679.55 1090.69 667.58 1117.06 643.96C1131.55 630.99 1143.12 614.5 1148.8 596.65C1153.39 582.24 1154.14 566.95 1150.82 552.62C1142.82 518 1111.09 488.97 1075.67 473.55C1044.82 460.12 1011.17 457.02 978.73 459.7C912.04 465.22 850.32 493.22 789 522C798 552 809 589 828 618Z"/>
+    <path id="bgs-body" d="M724 418C667.36 346.2 579.21 309.47 492.03 308.72C408.51 308 325.09 341.72 260.03 396.5C223.02 427.67 191.95 465.65 172.53 509.4C156.32 545.93 148.24 586.47 148.44 626.21C148.64 665.94 157.13 704.86 172.7 741.9C190.7 784.69 218.14 824.98 252.22 856.38C315.98 915.12 402.95 942.74 484.31 967.73C503.89 973.75 523.15 979.61 541.69 989.31C563.07 1000.51 583.51 1016.8 598.53 1034.86C605.91 1043.72 611.99 1053.01 616.58 1064.84C620.49 1074.92 623.33 1086.85 628.82 1093.52C631.63 1096.93 635.14 1098.97 639.26 1098.93C643.48 1098.9 648.35 1096.71 652.97 1094.17C663.2 1088.54 672.21 1081.22 681.14 1073.71C754.2 1012.23 822.17 937.63 852.38 847.22C864.85 809.88 870.89 769.85 865.11 731.31C859.22 691.93 842.18 654.03 828 618C804 560 767 459 724 418Z"/>
+    <path id="bgs-left-eye" d="M257.24 559.49C245.35 560.78 234.41 571.7 228.05 583.75C222.73 593.85 220.63 604.73 220.75 616.03C220.89 628.15 223.59 640.74 230.64 650.22C237.85 659.92 249.63 666.37 260.71 665.32C272.68 664.18 283.85 654.29 290.11 642.53C295.74 631.95 297.39 619.85 296.8 607.75C296.2 595.38 293.24 583.01 285.85 573.62C278.78 564.63 267.65 558.37 257.24 559.49Z"/>
+    <path id="bgs-right-eye" d="M447.13 514.58C433.8 515.57 421.22 526.48 413.8 539.5C407.47 550.61 404.9 563.26 405.31 576.07C405.73 589.24 409.29 602.58 417.2 612.51C425.44 622.86 438.4 629.5 450.81 628.6C464.49 627.62 477.49 617.48 484.86 604.51C491.07 593.6 493.28 580.68 492.67 567.95C492.04 554.79 488.39 541.83 480.51 531.72C472.26 521.14 459.39 513.67 447.13 514.58Z"/>
+    <mask id="bgs-white-mark" x="0" y="0" width="1254" height="1254" maskUnits="userSpaceOnUse" style="mask-type:luminance">
+      <rect width="1254" height="1254" fill="black"/>
+      <use href="#bgs-upper-wing" fill="white"/>
+      <use href="#bgs-lower-wing" fill="white"/>
+      <use href="#bgs-body" fill="white"/>
+      <use href="#bgs-left-eye" fill="black"/>
+      <use href="#bgs-right-eye" fill="black"/>
+    </mask>
   </defs>
-  <!-- Artwork only: the canvas itself is transparent. -->
-  <g id="bgs02a3-wings">
-    <g id="bgs02a3-upper-wing">
-      <use href="#bgs02a3-upper-wing-path" fill="url(#bgs02a3-wing-top)"/>
-      <use href="#bgs02a3-upper-wing-path" fill="url(#bgs02a3-wing-top-shadow)"/>
-    </g>
-    <g id="bgs02a3-lower-wing">
-      <use href="#bgs02a3-lower-wing-path" fill="url(#bgs02a3-wing-bottom)"/>
-      <use href="#bgs02a3-lower-wing-path" fill="url(#bgs02a3-wing-bottom-shadow)"/>
-    </g>
-  </g>
-  <g id="bgs02a3-body">
-    <use href="#bgs02a3-body-path" fill="url(#bgs02a3-ribbon)"/>
-    <use href="#bgs02a3-body-path" fill="url(#bgs02a3-ribbon-shade)"/>
-    <use href="#bgs02a3-body-path" fill="url(#bgs02a3-ribbon-edge-light)"/>
-    <g clip-path="url(#bgs02a3-body-clip)">
-      <g id="bgs02a3-forehead">
-        <use href="#bgs02a3-crown-path" fill="url(#bgs02a3-crown)"/>
-        <use href="#bgs02a3-crown-path" fill="url(#bgs02a3-crown-shadow)"/>
-      </g>
-      <g id="bgs02a3-tail-artwork">
-        <use href="#bgs02a3-tail-path" fill="url(#bgs02a3-tail)"/>
-        <use href="#bgs02a3-tail-path" fill="url(#bgs02a3-tail-shadow)"/>
-        <use href="#bgs02a3-tail-path" fill="url(#bgs02a3-tail-soft-light)"/>
-      </g>
-    </g>
-    <g id="bgs02a3-face-area">
-      <use href="#bgs02a3-face-path" fill="url(#bgs02a3-face)"/>
-      <use href="#bgs02a3-face-path" fill="url(#bgs02a3-face-cast)"/>
-      <use href="#bgs02a3-face-path" fill="url(#bgs02a3-face-edge-left)"/>
-    </g>
-    <use id="bgs02a3-white-stripe" href="#bgs02a3-stripe-path" fill="url(#bgs02a3-white-band)"/>
-  </g>
-  <g id="bgs02a3-eyes">
-    <g id="bgs02a3-left-eye-artwork">
-      <ellipse cx="259" cy="613" rx="41" ry="57" fill="url(#bgs02a3-left-eye-contact)"/>
-      <use href="#bgs02a3-left-eye-path" fill="url(#bgs02a3-eye-left)"/>
-      <use href="#bgs02a3-left-eye-path" fill="url(#bgs02a3-eye-left-glow)"/>
-    </g>
-    <g id="bgs02a3-right-eye-artwork">
-      <ellipse cx="449" cy="572" rx="46" ry="61" fill="url(#bgs02a3-right-eye-contact)"/>
-      <use href="#bgs02a3-right-eye-path" fill="url(#bgs02a3-eye-right)"/>
-      <use href="#bgs02a3-right-eye-path" fill="url(#bgs02a3-eye-right-glow)"/>
-    </g>
-  </g>
+  <rect width="1254" height="1254" fill="white" mask="url(#bgs-white-mark)"/>
 </svg>

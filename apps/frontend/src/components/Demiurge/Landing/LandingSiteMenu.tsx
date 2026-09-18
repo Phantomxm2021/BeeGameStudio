@@ -39,7 +39,7 @@ export function LandingSiteMenu({ language, onNavigate, onOpenLegal }: LandingSi
     <>
       <MorphPopover open={open} onOpenChange={setOpen}>
         <MorphPopoverTrigger>
-          <button type="button" aria-label={labels.menu} className="grid size-8 place-items-center bg-transparent text-white transition hover:text-white/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80">
+          <button type="button" aria-label={labels.menu} className="grid size-8 cursor-pointer place-items-center bg-transparent text-white transition hover:text-white/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80">
             <Grip className="size-5" strokeWidth={3} />
           </button>
         </MorphPopoverTrigger>
@@ -47,7 +47,7 @@ export function LandingSiteMenu({ language, onNavigate, onOpenLegal }: LandingSi
           <div role="menu" aria-label={labels.menu}>
             <MenuItem icon={<Rss />} label={labels.blog} onClick={() => choose(() => onNavigate('blog'))} />
             <MenuItem icon={<BookOpen />} label={labels.learn} onClick={() => choose(() => onNavigate('learn'))} />
-            <button type="button" role="menuitem" onClick={() => setShowSocial(value => !value)} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition hover:bg-slate-900/6">
+            <button type="button" role="menuitem" onClick={() => setShowSocial(value => !value)} className="flex w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition hover:bg-slate-900/6">
               <Globe2 className="size-4" /><span className="flex-1">{labels.social}</span><ChevronDown className={`size-4 transition-transform ${showSocial ? 'rotate-180' : ''}`} />
             </button>
             {showSocial ? <div className="mx-2 mb-1 grid grid-cols-2 gap-1 border-l border-slate-200 pl-3 pt-1">{socialPlatforms.map(platform => <span key={platform} title={labels.comingSoon} className="rounded-lg px-2 py-1.5 text-xs text-slate-500">{platform}</span>)}</div> : null}
@@ -67,5 +67,5 @@ export function LandingSiteMenu({ language, onNavigate, onOpenLegal }: LandingSi
 }
 
 function MenuItem({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
-  return <button type="button" role="menuitem" onClick={onClick} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition hover:bg-slate-900/6">{icon}<span>{label}</span></button>;
+  return <button type="button" role="menuitem" onClick={onClick} className="flex w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition hover:bg-slate-900/6">{icon}<span>{label}</span></button>;
 }

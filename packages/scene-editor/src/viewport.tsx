@@ -7,11 +7,14 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
 import type { ModelSelection } from './model-structure'
-import { DEFAULT_SCENE_SETTINGS } from './model'
-import { LightGizmo } from './light-gizmo'
-import type { LightKind, SceneAsset, SceneDocument, SceneNode, Transform, VolumeVisual } from './model'
+import { componentOf, DEFAULT_SCENE_SETTINGS } from './model'
+import { LightGizmo, lightConePoints } from './light-gizmo'
+import { isApplePlatform, resolveUnityNavigationAction, wheelPixels } from './navigation'
+import type { NavigationAction } from './navigation'
+import type { Collider2DComponent, Collider3DComponent, LightKind, MaterialOverride, SceneAsset, SceneComponent, SceneDocument, SceneNode, Transform } from './model'
 
 export type SceneViewportMode = 'select' | 'translate' | 'rotate' | 'scale' | 'hand'
+export type SceneViewMode = '2d' | '3d'
 export type SceneViewportProps = {
   document: SceneDocument
   initialView?: { position: [number, number, number]; target: [number, number, number]; showGizmos?: boolean }
@@ -26,6 +29,7 @@ export type SceneViewportProps = {
   space: 'local' | 'world'
   snap: boolean
   ortho: boolean
+  viewMode: SceneViewMode
   focus: number
   onTransform: (transform: Transform) => void
   onTransformBatch?: (changes: Array<{ id: string; transform: Transform }>) => void
@@ -44,14 +48,23 @@ const reportOnce = (report: ((message: string) => void) | undefined) => {
   return (message: string) => { if (!seen.has(message)) { seen.add(message); report?.(message) } }
 }
 
+/** Scene view is an authoring surface: runtime visibility expressions must not
+ * make editable renderers disappear. Only an explicit editor override hides a
+ * component here; the game runtime remains responsible for `visibleWhen`. */
+export function componentVisibleInEditor(component: SceneComponent | undefined): boolean {
+  if (!component?.enabled) return false
+  const properties = 'properties' in component ? component.properties : undefined
+  return properties?.visibleInEditor !== false
+}
+
 const LOOK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><g fill="none" stroke="#11151b" stroke-width="4" stroke-linejoin="round"><path d="M2 14s4-7 12-7 12 7 12 7-4 7-12 7S2 14 2 14Z"/><circle cx="14" cy="14" r="3"/></g><g fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linejoin="round"><path d="M2 14s4-7 12-7 12 7 12 7-4 7-12 7S2 14 2 14Z"/><circle cx="14" cy="14" r="3"/></g></svg>')}") 14 14, crosshair`
 
-type NavigationAction = 'orbit' | 'pan' | 'dolly' | 'look'
 type NavigationRef = { action: NavigationAction | null; pointerId: number | null; hand: boolean }
 
-function NavigationController({ orbit, handMode, onTemporarySnap }: { orbit: MutableRefObject<any>; handMode: boolean; onTemporarySnap: (active: boolean) => void }) {
+function NavigationController({ orbit, handMode, viewMode, onTemporarySnap }: { orbit: MutableRefObject<any>; handMode: boolean; viewMode: SceneViewMode; onTemporarySnap: (active: boolean) => void }) {
   const { camera, gl } = useThree()
   const keys = useRef(new Set<string>())
+  const flySpeed = useRef(1.8)
   const navigation = useRef<NavigationRef>({ action: null, pointerId: null, hand: handMode })
   const viewportActive = useRef(false)
   navigation.current.hand = handMode
@@ -85,13 +98,17 @@ function NavigationController({ orbit, handMode, onTemporarySnap }: { orbit: Mut
       spherical.theta -= dx * .005; spherical.phi = THREE.MathUtils.clamp(spherical.phi - dy * .005, .01, Math.PI - .01)
       camera.position.copy(pivot).add(new THREE.Vector3().setFromSpherical(spherical)); camera.lookAt(pivot); orbit.current?.update()
     }
-    const dolly = (dy: number) => {
+    const dolly = (dy: number, sensitivity = .01) => {
       const ortho = camera as THREE.OrthographicCamera
       if (ortho.isOrthographicCamera) {
-        ortho.zoom = THREE.MathUtils.clamp(ortho.zoom * Math.exp(-dy * .01), .01, 1e4)
+        ortho.zoom = THREE.MathUtils.clamp(ortho.zoom * Math.exp(-dy * sensitivity), .01, 1e4)
         ortho.updateProjectionMatrix()
       } else {
-        const direction = new THREE.Vector3(); camera.getWorldDirection(direction); camera.position.addScaledVector(direction, dy * .02)
+        const pivot = target()
+        const offset = camera.position.clone().sub(pivot)
+        const distance = THREE.MathUtils.clamp(offset.length() * Math.exp(dy * sensitivity), .01, 1e6)
+        if (!offset.lengthSq()) offset.set(0, 0, 1)
+        camera.position.copy(pivot).add(offset.setLength(distance))
       }
       orbit.current?.update()
     }
@@ -101,24 +118,25 @@ function NavigationController({ orbit, handMode, onTemporarySnap }: { orbit: Mut
     }
     const pointerDown = (event: PointerEvent) => {
       viewportActive.current = true
-      let action: NavigationAction | null = null
-      if (event.button === 0 && event.altKey) action = 'orbit'
-      else if (event.button === 0 && navigation.current.hand) action = 'pan'
-      else if (event.button === 1) action = 'pan'
-      else if (event.button === 2 && event.altKey) action = 'dolly'
-      else if (event.button === 2) action = 'look'
+      const action = resolveUnityNavigationAction(event, {
+        viewMode,
+        handMode: navigation.current.hand,
+        apple: isApplePlatform(window.navigator),
+      })
       // TransformControls disables OrbitControls while a gizmo drag is active;
       // keep every camera gesture locked for that duration as well.
       if (!action || (orbit.current && orbit.current.enabled === false && navigation.current.action === null)) return
+      element.focus({ preventScroll: true })
       event.preventDefault(); event.stopImmediatePropagation(); navigation.current = { action, pointerId: event.pointerId, hand: navigation.current.hand }; element.setPointerCapture(event.pointerId); if (action === 'look') syncTargetToView(); if (orbit.current) orbit.current.enabled = false
       updateCursor()
     }
     const pointerMove = (event: PointerEvent) => {
       const state = navigation.current; if (!state.action || state.pointerId !== event.pointerId) return
       event.preventDefault(); event.stopImmediatePropagation()
+      const movementRate = event.shiftKey ? 3 : 1
       if (state.action === 'orbit') orbitCamera(event.movementX, event.movementY)
-      else if (state.action === 'pan') pan(event.movementX, event.movementY)
-      else if (state.action === 'dolly') dolly(event.movementY)
+      else if (state.action === 'pan') pan(event.movementX * movementRate, event.movementY * movementRate)
+      else if (state.action === 'dolly') dolly(event.movementY * movementRate)
       else look(event.movementX, event.movementY)
     }
     const resetNavigation = (pointerId?: number) => {
@@ -138,6 +156,7 @@ function NavigationController({ orbit, handMode, onTemporarySnap }: { orbit: Mut
       const key = event.key.toLowerCase()
       if (key === 'escape' && navigation.current.action) { event.preventDefault(); resetNavigation(); return }
       if (navigation.current.action === 'look' && ['w', 'a', 's', 'd', 'q', 'e', 'shift', 'r'].includes(key)) { event.preventDefault(); event.stopImmediatePropagation() }
+      if (viewMode === '3d' && ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) { event.preventDefault(); event.stopImmediatePropagation() }
       keys.current.add(key)
       updateCursor()
       if (event.key === 'Control' || event.key === 'Meta') onTemporarySnap(true)
@@ -152,11 +171,22 @@ function NavigationController({ orbit, handMode, onTemporarySnap }: { orbit: Mut
     const pointerEnter = () => { viewportActive.current = true }
     const pointerLeave = () => { if (navigation.current.action === null) viewportActive.current = false }
     const contextMenu = (event: MouseEvent) => event.preventDefault()
+    const wheel = (event: WheelEvent) => {
+      viewportActive.current = true
+      const delta = wheelPixels(event, element.clientHeight) * (event.shiftKey ? 3 : 1)
+      // Unity uses the wheel/two-finger vertical gesture for zoom. During
+      // Flythrough the same gesture changes camera speed instead.
+      if (navigation.current.action === 'look') flySpeed.current = THREE.MathUtils.clamp(flySpeed.current * Math.exp(-delta * .0015), .1, 50)
+      else dolly(delta, .0015)
+      event.preventDefault()
+      event.stopImmediatePropagation()
+    }
     const lostCapture = (event: PointerEvent) => resetNavigation(event.pointerId)
     element.addEventListener('lostpointercapture', lostCapture)
     element.addEventListener('contextmenu', contextMenu, true)
     element.addEventListener('pointerdown', pointerDown, true); element.addEventListener('pointermove', pointerMove, true); element.addEventListener('pointerup', pointerUp, true); element.addEventListener('pointercancel', pointerUp, true)
     element.addEventListener('pointerenter', pointerEnter, true); element.addEventListener('pointerleave', pointerLeave, true)
+    element.addEventListener('wheel', wheel, { capture: true, passive: false })
     window.addEventListener('pointerdown', outsidePointerDown, true)
     window.addEventListener('keydown', keyDown, true); window.addEventListener('keyup', keyUp, true); window.addEventListener('blur', blur)
     let frame = 0
@@ -164,17 +194,24 @@ function NavigationController({ orbit, handMode, onTemporarySnap }: { orbit: Mut
     const fly = () => {
       const now = performance.now(); const dt = THREE.MathUtils.clamp((now - lastTime) / 1000, 0, .1); lastTime = now
       const state = navigation.current
-      if (state.action === 'look') {
+      if (state.action === 'look' || (viewMode === '3d' && ['arrowup', 'arrowdown', 'arrowleft', 'arrowright'].some(key => keys.current.has(key)))) {
         const direction = new THREE.Vector3(); camera.getWorldDirection(direction)
         const right = new THREE.Vector3().crossVectors(direction, camera.up).normalize(); const up = camera.up.clone().normalize(); const delta = new THREE.Vector3()
-        if (keys.current.has('w')) delta.add(direction); if (keys.current.has('s')) delta.sub(direction); if (keys.current.has('a')) delta.sub(right); if (keys.current.has('d')) delta.add(right); if (keys.current.has('q')) delta.sub(up); if (keys.current.has('e')) delta.add(up)
-        if (delta.lengthSq()) { delta.normalize().multiplyScalar((keys.current.has('shift') ? 7.2 : 1.8) * dt); camera.position.add(delta); target().add(delta); orbit.current?.update() }
+        if (state.action === 'look') {
+          if ((camera as THREE.OrthographicCamera).isOrthographicCamera) {
+            if (keys.current.has('w')) delta.add(up); if (keys.current.has('s')) delta.sub(up); if (keys.current.has('a')) delta.sub(right); if (keys.current.has('d')) delta.add(right)
+          } else {
+            if (keys.current.has('w')) delta.add(direction); if (keys.current.has('s')) delta.sub(direction); if (keys.current.has('a')) delta.sub(right); if (keys.current.has('d')) delta.add(right); if (keys.current.has('q')) delta.sub(up); if (keys.current.has('e')) delta.add(up)
+          }
+        }
+        if (keys.current.has('arrowup')) delta.add(direction); if (keys.current.has('arrowdown')) delta.sub(direction); if (keys.current.has('arrowleft')) delta.sub(right); if (keys.current.has('arrowright')) delta.add(right)
+        if (delta.lengthSq()) { delta.normalize().multiplyScalar(flySpeed.current * (keys.current.has('shift') ? 4 : 1) * dt); camera.position.add(delta); target().add(delta); orbit.current?.update() }
       }
       frame = requestAnimationFrame(fly)
     }
     frame = requestAnimationFrame(fly)
-    return () => { cancelAnimationFrame(frame); resetNavigation(); element.removeEventListener('lostpointercapture', lostCapture); element.removeEventListener('contextmenu', contextMenu, true); element.removeEventListener('pointerdown', pointerDown, true); element.removeEventListener('pointermove', pointerMove, true); element.removeEventListener('pointerup', pointerUp, true); element.removeEventListener('pointercancel', pointerUp, true); element.removeEventListener('pointerenter', pointerEnter, true); element.removeEventListener('pointerleave', pointerLeave, true); window.removeEventListener('pointerdown', outsidePointerDown, true); window.removeEventListener('keydown', keyDown, true); window.removeEventListener('keyup', keyUp, true); window.removeEventListener('blur', blur); if (orbit.current) orbit.current.enabled = true }
-  }, [camera, gl, orbit, onTemporarySnap])
+    return () => { cancelAnimationFrame(frame); resetNavigation(); element.removeEventListener('lostpointercapture', lostCapture); element.removeEventListener('contextmenu', contextMenu, true); element.removeEventListener('pointerdown', pointerDown, true); element.removeEventListener('pointermove', pointerMove, true); element.removeEventListener('pointerup', pointerUp, true); element.removeEventListener('pointercancel', pointerUp, true); element.removeEventListener('pointerenter', pointerEnter, true); element.removeEventListener('pointerleave', pointerLeave, true); element.removeEventListener('wheel', wheel, true); window.removeEventListener('pointerdown', outsidePointerDown, true); window.removeEventListener('keydown', keyDown, true); window.removeEventListener('keyup', keyUp, true); window.removeEventListener('blur', blur); if (orbit.current) orbit.current.enabled = true }
+  }, [camera, gl, orbit, onTemporarySnap, viewMode])
   return null
 }
 
@@ -200,6 +237,15 @@ function CameraRig({ document, selected, modelSelection, focus, orbit }: { docum
   partRef.current = modelSelection
   documentRef.current = document
   selectedRef.current = selected
+  const cameraNode = Object.values(document.nodes).find(node => componentOf(node, 'camera'))
+  const cameraComponent = cameraNode ? componentOf(cameraNode, 'camera') : undefined
+  const orthographicSize = cameraComponent?.orthographicSize ?? 3.6
+  useEffect(() => {
+    if (!document.dimension || !(camera as THREE.OrthographicCamera).isOrthographicCamera) return
+    const orthographic = camera as THREE.OrthographicCamera
+    orthographic.zoom = size.height / Math.max(.01, orthographicSize * 2)
+    orthographic.updateProjectionMatrix()
+  }, [camera, document.dimension, orthographicSize, size.height])
   useEffect(() => {
     const id = selectedRef.current
     if (!focus || !documentRef.current.nodes[id]) return
@@ -284,7 +330,7 @@ function localAssetUri(asset: SceneAsset | undefined) { return asset?.bytes?.sta
 
 export function applyTextureRegion(
   texture: THREE.Texture,
-  region: NonNullable<SceneNode['material']>['textureRegion'],
+  region: MaterialOverride['textureRegion'],
 ): boolean {
   const image = texture.image as { width?: number; height?: number }
   const imageWidth = image.width ?? 0, imageHeight = image.height ?? 0
@@ -299,7 +345,7 @@ export function applyTextureRegion(
   return true
 }
 
-function useLocalTexture(uri: string | undefined, region?: NonNullable<SceneNode['material']>['textureRegion'], onDiagnostic?: (message: string) => void) {
+function useLocalTexture(uri: string | undefined, region?: MaterialOverride['textureRegion'], onDiagnostic?: (message: string) => void) {
   const [texture, setTexture] = useState<THREE.Texture | null>(null)
   useEffect(() => {
     let alive = true
@@ -321,7 +367,7 @@ function useLocalTexture(uri: string | undefined, region?: NonNullable<SceneNode
   return texture
 }
 
-function materialProps(material: SceneNode['material'], texture: THREE.Texture | null) {
+function materialProps(material: MaterialOverride | undefined, texture: THREE.Texture | null) {
   if (!material) return { color: '#8192b5', opacity: 1, transparent: false }
   return { color: material.color, opacity: material.opacity, transparent: material.alphaMode === 'blend', depthWrite: material.alphaMode !== 'blend', alphaTest: material.alphaMode === 'mask' ? .5 : 0, map: texture ?? undefined }
 }
@@ -344,32 +390,54 @@ type Preview2D = {
   }
   blend?: string
   emitter?: {
-    textureAssetId?: string; count?: number; blend?: string; tint?: string
+    textureAssetId?: string; count?: number; maxParticles?: number; blend?: string; tint?: string
     particleSize?: { min?: number; max?: number }
     zone?: { x?: number; y?: number; width?: number; height?: number }
     alpha?: { min?: number; max?: number }
     motion?: { amplitudePx?: number; periodSecs?: { min?: number; max?: number } }
   }
-  procedural?: {
-    kind?: string; range?: number; halfAngleDeg?: number; facing?: string
-    colors?: { calm?: string; calmAlpha?: number }
-  }
 }
 
 function preview2d(node: SceneNode): Preview2D | undefined {
-  const value = node.unknown?.preview2d
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Preview2D : undefined
+  const sprite = componentOf(node, 'sprite-renderer')
+  const particle = componentOf(node, 'particle-system')
+  const particleRenderer = componentOf(node, 'particle-system-renderer')
+  return {
+    ...(sprite?.animation ? { sprite: sprite.animation } : {}),
+    ...(node.metadata?.motion && typeof node.metadata.motion === 'object' ? { motion: node.metadata.motion as Preview2D['motion'] } : {}),
+    ...(node.metadata?.patrol && typeof node.metadata.patrol === 'object' ? { patrol: node.metadata.patrol as Preview2D['patrol'] } : {}),
+    ...(node.metadata?.animation && typeof node.metadata.animation === 'object' ? { animation: node.metadata.animation as Preview2D['animation'] } : {}),
+    ...(typeof node.metadata?.blend === 'string' ? { blend: node.metadata.blend } : {}),
+    ...(particle ? { emitter: { ...particle.properties, ...particleRenderer?.properties, textureAssetId: particleRenderer?.textureAssetId ?? particleRenderer?.assetId } as Preview2D['emitter'] } : {}),
+  }
 }
 
-function patrolPosition(patrol: NonNullable<Preview2D['patrol']>, elapsedSecs: number): { x: number; z: number } | undefined {
+export function rendererSize(node: SceneNode): [number, number] {
+  const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image') ?? componentOf(node, 'tilemap')
+  const properties = renderer && 'properties' in renderer ? renderer.properties : undefined
+  const value = properties?.size
+  const sprite = properties?.sprite
+  const logical = sprite && typeof sprite === 'object' && !Array.isArray(sprite) ? (sprite as Record<string, unknown>).logicalSize : undefined
+  const rect = componentOf(node, 'rect-transform')
+  const rectSize = rect?.sizeDelta
+  const size = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown>
+    : logical && typeof logical === 'object' && !Array.isArray(logical) ? logical as Record<string, unknown>
+    : rectSize ? { width: rectSize[0] * 100, height: rectSize[1] * 100 }
+    : undefined
+  const width = typeof size?.width === 'number' && Number.isFinite(size.width) ? size.width : 100
+  const height = typeof size?.height === 'number' && Number.isFinite(size.height) ? size.height : 100
+  return [Math.max(1, width) / 100, Math.max(1, height) / 100]
+}
+
+function patrolPosition(patrol: NonNullable<Preview2D['patrol']>, elapsedSecs: number): { x: number; y: number } | undefined {
   const forward = patrol.waypoints?.filter(point => Number.isFinite(point.x) && Number.isFinite(point.y)) ?? []
   if (!forward.length) return undefined
   const points = patrol.mode === 'pingpong'
     ? [...forward, ...forward.slice(1, -1).reverse()]
     : [...forward, ...(patrol.returnPath?.filter(point => Number.isFinite(point.x) && Number.isFinite(point.y)) ?? [])]
-  if (points.length === 1) return { x: points[0].x! / 100, z: points[0].y! / 100 }
+  if (points.length === 1) return { x: points[0].x! / 100, y: points[0].y! / 100 }
   const startDelay = Math.max(0, patrol.startDelaySecs ?? 0)
-  if (elapsedSecs <= startDelay) return { x: points[0].x! / 100, z: points[0].y! / 100 }
+  if (elapsedSecs <= startDelay) return { x: points[0].x! / 100, y: points[0].y! / 100 }
   const speed = 80
   const segments = points.map((point, index) => {
     const next = points[(index + 1) % points.length]
@@ -379,18 +447,18 @@ function patrolPosition(patrol: NonNullable<Preview2D['patrol']>, elapsedSecs: n
   const cycleSecs = segments.reduce((sum, segment) => sum + segment.travelSecs + segment.pauseSecs, 0)
   let cursor = (elapsedSecs - startDelay) % Math.max(.1, cycleSecs)
   for (const segment of segments) {
-    if (cursor < segment.pauseSecs) return { x: segment.point.x! / 100, z: segment.point.y! / 100 }
+    if (cursor < segment.pauseSecs) return { x: segment.point.x! / 100, y: segment.point.y! / 100 }
     cursor -= segment.pauseSecs
     if (cursor <= segment.travelSecs) {
       const progress = segment.travelSecs > 0 ? cursor / segment.travelSecs : 1
       return {
         x: THREE.MathUtils.lerp(segment.point.x!, segment.next.x!, progress) / 100,
-        z: THREE.MathUtils.lerp(segment.point.y!, segment.next.y!, progress) / 100,
+        y: THREE.MathUtils.lerp(segment.point.y!, segment.next.y!, progress) / 100,
       }
     }
     cursor -= segment.travelSecs
   }
-  return { x: points[0].x! / 100, z: points[0].y! / 100 }
+  return { x: points[0].x! / 100, y: points[0].y! / 100 }
 }
 
 function spriteFrameAt(sprite: NonNullable<Preview2D['sprite']>, elapsedMs: number): number {
@@ -409,7 +477,12 @@ function spriteFrameAt(sprite: NonNullable<Preview2D['sprite']>, elapsedMs: numb
 }
 
 function Primitive({ node, assets, diagnose }: { node: SceneNode; assets: Record<string, SceneAsset>; diagnose: (message: string) => void }) {
-  const texture = useLocalTexture(localAssetUri(node.material?.textureAssetId ? assets[node.material.textureAssetId] : undefined), node.material?.textureRegion, diagnose)
+  const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image')
+  const tilemap = componentOf(node, 'tilemap')
+  const tilemapRenderer = componentOf(node, 'tilemap-renderer')
+  const materialData = renderer?.material
+    ?? (tilemapRenderer && tilemap ? { ...tilemapRenderer.material, textureAssetId: tilemap.assetId } : undefined)
+  const texture = useLocalTexture(localAssetUri(materialData?.textureAssetId ? assets[materialData.textureAssetId] : undefined), materialData?.textureRegion, diagnose)
   const sprite = preview2d(node)?.sprite
   const frame = useRef(-1)
   useFrame(({ clock }) => {
@@ -427,16 +500,15 @@ function Primitive({ node, assets, diagnose }: { node: SceneNode; assets: Record
     texture.offset.set(x / imageWidth, 1 - sprite.frameHeight / imageHeight)
     texture.needsUpdate = true
   })
-  const props = materialProps(node.material, texture)
+  const props = materialProps(materialData, texture)
   const blending = preview2d(node)?.blend === 'additive' ? THREE.AdditiveBlending : THREE.NormalBlending
   // A material compiled without a map will not necessarily acquire the map's
   // shader defines when an asynchronous texture arrives. Recreate it once the
   // texture identity changes so image-backed 2D planes stop rendering white.
   const materialKey = texture?.uuid ?? 'no-texture'
-  const material = node.material?.mode === 'unlit' ? <meshBasicMaterial key={materialKey} {...props} blending={blending} /> : <meshStandardMaterial key={materialKey} {...props} blending={blending} metalness={node.material?.metalness ?? 0} roughness={node.material?.roughness ?? .8} />
-  const shape = node.kind === 'box' ? <boxGeometry args={[1, 1, 1]} /> : node.kind === 'sphere' ? <sphereGeometry args={[1, 24, 16]} /> : <planeGeometry args={[1, 1]} />
-  if (node.kind === 'light' || node.kind === 'empty' || node.kind === 'model') return null
-  return <mesh rotation={node.kind === 'plane' ? [-Math.PI / 2, 0, 0] : [0, 0, 0]} castShadow receiveShadow>{shape}{material}</mesh>
+  const material = materialData?.mode === 'standard' ? <meshStandardMaterial key={materialKey} {...props} blending={blending} metalness={materialData.metalness} roughness={materialData.roughness} /> : <meshBasicMaterial key={materialKey} {...props} blending={blending} />
+  if (!(componentVisibleInEditor(renderer) || (componentVisibleInEditor(tilemap) && componentVisibleInEditor(tilemapRenderer)))) return null
+  return <mesh castShadow receiveShadow scale={[...rendererSize(node), 1]}><planeGeometry args={[1, 1]} />{material}</mesh>
 }
 
 function seeded(index: number, salt: number): number {
@@ -445,16 +517,19 @@ function seeded(index: number, salt: number): number {
 }
 
 function ParticleEmitterPreview({ node, assets, diagnose }: { node: SceneNode; assets: Record<string, SceneAsset>; diagnose: (message: string) => void }) {
+  const particle = componentOf(node, 'particle-system')
+  const renderer = componentOf(node, 'particle-system-renderer')
+  if (!componentVisibleInEditor(particle) || !componentVisibleInEditor(renderer)) return null
   const emitter = preview2d(node)?.emitter
   const texture = useLocalTexture(localAssetUri(emitter?.textureAssetId ? assets[emitter.textureAssetId] : undefined), undefined, diagnose)
   const root = useRef<THREE.Group>(null)
-  const count = Math.max(0, Math.min(100, Math.floor(emitter?.count ?? 0)))
+  const count = Math.max(0, Math.min(256, Math.floor(emitter?.count ?? emitter?.maxParticles ?? 0)))
   const particles = useMemo(() => Array.from({ length: count }, (_, index) => {
     const zone = emitter?.zone
     const sizeMin = emitter?.particleSize?.min ?? 3, sizeMax = emitter?.particleSize?.max ?? sizeMin
     return {
       x: ((zone?.x ?? 0) + seeded(index, 1) * (zone?.width ?? 0)) / 100,
-      z: ((zone?.y ?? 0) + seeded(index, 2) * (zone?.height ?? 0)) / 100,
+      y: ((zone?.y ?? 0) + seeded(index, 2) * (zone?.height ?? 0)) / 100,
       size: (sizeMin + seeded(index, 3) * (sizeMax - sizeMin)) / 100,
       phase: seeded(index, 4) * Math.PI * 2,
       speed: (emitter?.motion?.periodSecs?.min ?? 3) + seeded(index, 5) * ((emitter?.motion?.periodSecs?.max ?? 6) - (emitter?.motion?.periodSecs?.min ?? 3)),
@@ -468,31 +543,19 @@ function ParticleEmitterPreview({ node, assets, diagnose }: { node: SceneNode; a
       if (!particle) return
       const wave = clock.elapsedTime * Math.PI * 2 / Math.max(.1, particle.speed) + particle.phase
       child.position.x = particle.x + Math.sin(wave) * (emitter?.motion?.amplitudePx ?? 0) / 100
-      child.position.z = particle.z + Math.cos(wave * .7) * (emitter?.motion?.amplitudePx ?? 0) / 200
+      child.position.y = particle.y + Math.cos(wave * .7) * (emitter?.motion?.amplitudePx ?? 0) / 200
       const material = (child as THREE.Mesh).material as THREE.MeshBasicMaterial
       material.opacity = particle.opacity * (.7 + .3 * Math.sin(wave))
     })
   })
   if (!emitter || !texture) return null
-  return <group ref={root}>{particles.map((particle, index) => <mesh key={index} position={[particle.x, index * .0001, particle.z]} rotation={[-Math.PI / 2, 0, 0]}>
+  return <group ref={root}>{particles.map((particle, index) => <mesh key={index} position={[particle.x, particle.y, index * .0001]}>
     <planeGeometry args={[particle.size, particle.size]} />
-    <meshBasicMaterial map={texture} color={emitter.tint ?? '#ffffff'} transparent opacity={particle.opacity} depthWrite={false} blending={emitter.blend === 'additive' ? THREE.AdditiveBlending : THREE.NormalBlending} />
+    <meshBasicMaterial map={texture} color={emitter.tint ?? '#ffffff'} transparent opacity={particle.opacity} depthWrite={false} blending={emitter.blend === 'additive' ? THREE.AdditiveBlending : THREE.NormalBlending} toneMapped={false} />
   </mesh>)}</group>
 }
 
-function Procedural2DPreview({ node }: { node: SceneNode }) {
-  const procedural = preview2d(node)?.procedural
-  if (procedural?.kind !== 'visionCone') return null
-  const radius = Math.max(0, procedural.range ?? 0) / 100
-  const halfAngle = Math.max(0, procedural.halfAngleDeg ?? 30) * Math.PI / 180
-  const facingAngle = { right: 0, down: -Math.PI / 2, left: Math.PI, up: Math.PI / 2 }[procedural.facing ?? 'right'] ?? 0
-  return <mesh rotation={[-Math.PI / 2, 0, facingAngle]}>
-    <circleGeometry args={[radius, 40, -halfAngle, halfAngle * 2]} />
-    <meshBasicMaterial color={procedural.colors?.calm ?? '#cfe0ff'} transparent opacity={procedural.colors?.calmAlpha ?? .4} depthWrite={false} side={THREE.DoubleSide} />
-  </mesh>
-}
-
-function ModelAsset({ asset, override, assets, diagnose, onReady }: { asset: SceneAsset | undefined; override: SceneNode['material']; assets: Record<string, SceneAsset>; diagnose: (message: string) => void; onReady?: () => void }) {
+function ModelAsset({ asset, override, assets, diagnose, onReady }: { asset: SceneAsset | undefined; override: MaterialOverride | undefined; assets: Record<string, SceneAsset>; diagnose: (message: string) => void; onReady?: () => void }) {
   const [prototype, setPrototype] = useState<THREE.Object3D | null>(null)
   const [error, setError] = useState(false)
   const [animations, setAnimations] = useState<THREE.AnimationClip[]>([])
@@ -570,11 +633,22 @@ export function AssetModelPreview({ asset, assets, onDiagnostic }: { asset: Scen
   </Canvas>
 }
 
-function Volume({ volume }: { volume: VolumeVisual }) {
-  const material = <meshBasicMaterial color={volume.role === 'trigger' ? '#e27ac2' : '#4ea3db'} wireframe transparent opacity={.35} />
-  const geometry = volume.shape === 'sphere' ? <sphereGeometry args={[.5, 20, 12]} /> : volume.shape === 'capsule' ? <capsuleGeometry args={[.25, .5, 8, 16]} /> : <boxGeometry args={volume.size} />
-  const scale = volume.shape === 'sphere' ? volume.size : volume.shape === 'capsule' ? [volume.size[0] * 2, volume.size[1], volume.size[2] * 2] as const : [1, 1, 1] as const
-  return <mesh userData={{ editorHelper: true }} position={volume.offset} rotation={volume.rotation as any} scale={scale}>{geometry}{material}</mesh>
+function Volume2D({ volume }: { volume: Collider2DComponent }) {
+  const material = <meshBasicMaterial color={volume.isTrigger ? '#e27ac2' : '#4ea3db'} wireframe transparent opacity={.55} depthWrite={false} />
+  if (volume.type === 'circle-collider-2d') return <mesh userData={{ editorHelper: true }} position={[volume.offset[0], volume.offset[1], .002]} scale={[volume.radius * 2, volume.radius * 2, 1]}><circleGeometry args={[.5, 32]} />{material}</mesh>
+  if (volume.type === 'polygon-collider-2d') {
+    const shape = new THREE.Shape(); volume.points.forEach(([x, y], index) => index ? shape.lineTo(x, y) : shape.moveTo(x, y)); shape.closePath()
+    return <mesh userData={{ editorHelper: true }} position={[volume.offset[0], volume.offset[1], .002]}><shapeGeometry args={[shape]} />{material}</mesh>
+  }
+  return <mesh userData={{ editorHelper: true }} position={[volume.offset[0], volume.offset[1], .002]} scale={[volume.size[0], volume.size[1], 1]}><planeGeometry args={[1, 1]} />{material}</mesh>
+}
+
+function Volume3D({ volume }: { volume: Collider3DComponent }) {
+  const material = <meshBasicMaterial color={volume.isTrigger ? '#e27ac2' : '#4ea3db'} wireframe transparent opacity={.55} depthWrite={false} />
+  if (volume.type === 'sphere-collider') return <mesh userData={{ editorHelper: true }} position={volume.center} scale={[volume.radius, volume.radius, volume.radius]}><sphereGeometry args={[1, 16, 12]} />{material}</mesh>
+  if (volume.type === 'capsule-collider') return <mesh userData={{ editorHelper: true }} position={volume.center}><capsuleGeometry args={[volume.radius, Math.max(0, volume.height - volume.radius * 2), 8, 16]} />{material}</mesh>
+  if (volume.type === 'box-collider') return <mesh userData={{ editorHelper: true }} position={volume.center} scale={volume.size}><boxGeometry args={[1, 1, 1]} />{material}</mesh>
+  return null
 }
 
 function selectedObject(scene: THREE.Scene, id: string, part?: ModelSelection | null) {
@@ -663,16 +737,17 @@ function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableId
     object.position.set(...node.transform.position)
     object.scale.set(...node.transform.scale)
     const patrol = preview?.patrol ? patrolPosition(preview.patrol, time) : undefined
-    if (patrol) { object.position.x = patrol.x; object.position.z = patrol.z }
+    if (patrol) { object.position.x = patrol.x; object.position.y = patrol.y }
     const motion = preview?.motion
-    if (motion?.kind === 'vertical-bob') object.position.z += Math.sin(time * Math.PI * 2 / Math.max(.1, typeof motion.periodSecs === 'number' ? motion.periodSecs : 2.4)) * (motion.amplitudePx ?? 0) / 100
+    if (motion?.kind === 'vertical-bob') object.position.y += Math.sin(time * Math.PI * 2 / Math.max(.1, typeof motion.periodSecs === 'number' ? motion.periodSecs : 2.4)) * (motion.amplitudePx ?? 0) / 100
     else if (motion?.kind === 'horizontal-drift') object.position.x += Math.sin(time * Math.PI / 8) * Math.max(.02, (motion.speedPxPerSec ?? 0) / 100)
     const animation = preview?.animation
     if (animation?.kind === 'breathe' || animation?.kind === 'pulse') {
       const wave = (Math.sin(time * Math.PI * 2 / Math.max(.1, animation.periodSecs ?? 2.4)) + 1) / 2
       const scale = (animation.scaleMin ?? 1) + ((animation.scaleMax ?? 1) - (animation.scaleMin ?? 1)) * wave
-      object.scale.set(node.transform.scale[0] * scale, node.transform.scale[1], node.transform.scale[2] * scale)
-      const opacity = (animation.alphaMin ?? node.material?.opacity ?? 1) + ((animation.alphaMax ?? node.material?.opacity ?? 1) - (animation.alphaMin ?? node.material?.opacity ?? 1)) * wave
+      object.scale.set(node.transform.scale[0] * scale, node.transform.scale[1] * scale, node.transform.scale[2])
+      const baseOpacity = componentOf(node, 'sprite-renderer')?.material.opacity ?? 1
+      const opacity = (animation.alphaMin ?? baseOpacity) + ((animation.alphaMax ?? baseOpacity) - (animation.alphaMin ?? baseOpacity)) * wave
       object.traverse(child => {
         const mesh = child as THREE.Mesh
         const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []
@@ -687,7 +762,7 @@ function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableId
     window.addEventListener('keydown', key); window.addEventListener('pointercancel', cancel)
     return () => { window.removeEventListener('keydown', key); window.removeEventListener('pointercancel', cancel); if (start.current) cancel() }
   }, [dragging, orbit])
-  if (!node || !node.visible || hiddenIds.includes(node.id)) return null
+  if (!node || !node.active || hiddenIds.includes(node.id)) return null
   const isSelected = selectedIds.includes(node.id)
   const finish = () => {
     const object = group.current
@@ -698,10 +773,16 @@ function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableId
     start.current = null; setDragging(false); if (orbit.current) orbit.current.enabled = true
   }
   return <><group ref={group} name={node.id} position={node.transform.position} rotation={node.transform.rotation as any} scale={node.transform.scale} onClick={event => { event.stopPropagation(); if (!unpickableIds.includes(node.id) && mode !== 'hand' && !event.altKey) onSelect(node.id, { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey }) }}>
-    {node.kind === 'model' ? <ModelAsset asset={node.assetId ? document.assets[node.assetId] : undefined} override={node.material} assets={document.assets} diagnose={diagnose} /> : node.kind === 'light' ? <Light showIcon={showGizmos || isSelected} node={node} selected={isSelected} gizmoColor={document.settings?.selectionColor ?? '#ffad46'} /> : node.kind === 'empty' ? (preview?.emitter ? <ParticleEmitterPreview node={node} assets={document.assets} diagnose={diagnose} /> : preview?.procedural ? <Procedural2DPreview node={node} /> : showGizmos ? <axesHelper args={[.35]} /> : null) : <Primitive node={node} assets={document.assets} diagnose={diagnose} />}
-    {node.volume && showGizmos ? <Volume volume={node.volume} /> : null}
+    {componentOf(node, 'sprite-renderer') || componentOf(node, 'image') || componentOf(node, 'tilemap') ? <Primitive node={node} assets={document.assets} diagnose={diagnose} /> : null}
+    {componentOf(node, 'mesh-filter') && componentOf(node, 'mesh-renderer') ? <ModelAsset asset={document.assets[componentOf(node, 'mesh-filter')!.assetId]} override={componentOf(node, 'mesh-renderer')!.material} assets={document.assets} diagnose={diagnose} /> : null}
+    {componentOf(node, 'skinned-mesh-renderer') ? <ModelAsset asset={document.assets[componentOf(node, 'skinned-mesh-renderer')!.assetId]} override={componentOf(node, 'skinned-mesh-renderer')!.material} assets={document.assets} diagnose={diagnose} /> : null}
+    {componentOf(node, 'particle-system') ? <ParticleEmitterPreview node={node} assets={document.assets} diagnose={diagnose} /> : null}
+    {componentVisibleInEditor(componentOf(node, 'light-2d') ?? componentOf(node, 'light')) ? <Light dimension={document.dimension} showIcon={document.dimension === '3d' && (showGizmos || isSelected)} node={node} selected={isSelected} gizmoColor={document.settings?.selectionColor ?? '#ffad46'} /> : null}
+    {showGizmos && (document.dimension === '3d' || isSelected) ? node.components.filter((component): component is Collider2DComponent => ['box-collider-2d', 'circle-collider-2d', 'capsule-collider-2d', 'polygon-collider-2d'].includes(component.type) && component.enabled).map(component => <Volume2D key={component.id} volume={component} />) : null}
+    {showGizmos && document.dimension === '3d' ? node.components.filter((component): component is Collider3DComponent => ['box-collider', 'sphere-collider', 'capsule-collider', 'mesh-collider'].includes(component.type) && component.enabled).map(component => <Volume3D key={component.id} volume={component} />) : null}
+    {document.dimension === '3d' && !node.components.some(component => ['sprite-renderer', 'image', 'tilemap-renderer', 'mesh-renderer', 'skinned-mesh-renderer', 'particle-system', 'light-2d', 'light'].includes(component.type)) && showGizmos ? <axesHelper args={[.35]} /> : null}
     {node.children.map(child => <NodeView key={child} id={child} document={document} selected={selected} selectedIds={selectedIds} hiddenIds={hiddenIds} unpickableIds={unpickableIds} onSelect={onSelect} mode={mode} space={space} snap={snap} onTransform={onTransform} orbit={orbit} diagnose={diagnose} showGizmos={showGizmos} />)}
-  </group>{isSelected && selected === node.id && !node.locked && node.editable !== false && mode !== 'select' && mode !== 'hand' ? createPortal(<TransformControls ref={controls} object={group as MutableRefObject<THREE.Group>} mode={mode} space={space} translationSnap={snap ? .25 : undefined} rotationSnap={snap ? Math.PI / 12 : undefined} scaleSnap={snap ? .25 : undefined} onMouseDown={() => { start.current = structuredClone(node.transform); setDragging(true); if (orbit.current) orbit.current.enabled = false }} onMouseUp={finish} />, scene) : null}</>
+  </group>{showGizmos && isSelected && selected === node.id && !node.locked && node.editable !== false && mode !== 'select' && mode !== 'hand' ? createPortal(<TransformControls ref={controls} object={group as MutableRefObject<THREE.Group>} mode={mode} space={space} size={document.dimension === '2d' ? 1.35 : 1} showX={document.dimension === '3d' || mode !== 'rotate'} showY={document.dimension === '3d' || mode !== 'rotate'} showZ={document.dimension === '3d' || mode === 'rotate'} translationSnap={snap ? .25 : undefined} rotationSnap={snap ? Math.PI / 12 : undefined} scaleSnap={snap ? .25 : undefined} onMouseDown={() => { start.current = structuredClone(node.transform); setDragging(true); if (orbit.current) orbit.current.enabled = false }} onMouseUp={finish} />, scene) : null}</>
 }
 
 function LightIcon({ kind, color }: { kind: LightKind; color: string }) {
@@ -744,22 +825,36 @@ function LightIcon({ kind, color }: { kind: LightKind; color: string }) {
   return <sprite ref={sprite} name={`${kind}-light-icon`} renderOrder={1000}><spriteMaterial map={texture} transparent depthTest={false} depthWrite={false} sizeAttenuation={false} toneMapped={false} /></sprite>
 }
 
-function Light({ node, selected, gizmoColor, showIcon }: { node: SceneNode; selected: boolean; gizmoColor: string; showIcon: boolean }) {
-  const light = node.light
+function Light({ node, selected, gizmoColor, showIcon, dimension }: { node: SceneNode; selected: boolean; gizmoColor: string; showIcon: boolean; dimension: '2d' | '3d' }) {
+  const light2d = componentOf(node, 'light-2d')?.light
+  const light = light2d ?? componentOf(node, 'light')?.light
   const target = useMemo(() => { const object = new THREE.Object3D(); object.position.set(0, 0, -1); return object }, [])
+  const cone = useMemo(() => {
+    if (!light2d || light2d.kind !== 'spot') return null
+    const shape = new THREE.Shape()
+    const points = lightConePoints(light2d)
+    shape.moveTo(points[0][0], points[0][1])
+    for (const [x, y] of points.slice(1)) shape.lineTo(x, y)
+    shape.closePath()
+    return shape
+  }, [light2d?.kind, light2d?.distance, light2d?.angle])
   if (!light) return null
   return <group>
     <primitive object={target} />
+    {cone && <mesh userData={{ editorHelper: true }} position={[0, 0, .001]} renderOrder={998} raycast={() => {}}>
+      <shapeGeometry args={[cone]} />
+      <meshBasicMaterial color={light.color} transparent opacity={light.alpha ?? .35} depthTest={false} depthWrite={false} blending={THREE.AdditiveBlending} toneMapped={false} />
+    </mesh>}
     {light.kind === 'ambient' ? <ambientLight color={light.color} intensity={light.intensity} />
       : light.kind === 'directional' ? <directionalLight color={light.color} intensity={light.intensity} target={target} castShadow shadow-mapSize={[2048, 2048]} shadow-camera-left={-18} shadow-camera-right={18} shadow-camera-top={18} shadow-camera-bottom={-18} shadow-camera-near={.1} shadow-camera-far={60} shadow-bias={-.0002} shadow-normalBias={.035} />
       : light.kind === 'point' ? <pointLight color={light.color} intensity={light.intensity} distance={light.distance ?? 0} />
       : <spotLight color={light.color} intensity={light.intensity} distance={light.distance ?? 0} angle={light.angle ?? Math.PI / 3} penumbra={light.penumbra ?? 0} target={target} />}
     {showIcon && <LightIcon kind={light.kind} color={light.color} />}
-    {selected && <LightGizmo light={light} color={gizmoColor} />}
+    {selected && dimension === '3d' && <LightGizmo light={light} color={gizmoColor} />}
   </group>
 }
 
-function SceneContents({ document, selected, selectedIds = [selected], modelSelection, hiddenIds = [], unpickableIds = [], onSelect, mode, space, snap, focus, onTransform, onDiagnostic, initialView, showGizmos = true }: SceneViewportProps) {
+function SceneContents({ document, selected, selectedIds = [selected], modelSelection, hiddenIds = [], unpickableIds = [], onSelect, mode, space, snap, focus, onTransform, onDiagnostic, initialView, showGizmos = true, viewMode }: SceneViewportProps) {
   const settings = document.settings ?? DEFAULT_SCENE_SETTINGS
   const { gl } = useThree()
   useEffect(() => { gl.toneMappingExposure = settings.exposure }, [gl, settings.exposure])
@@ -768,12 +863,16 @@ function SceneContents({ document, selected, selectedIds = [selected], modelSele
   const diagnosticCallback = useRef(onDiagnostic)
   diagnosticCallback.current = onDiagnostic
   const diagnose = useMemo(() => reportOnce(message => diagnosticCallback.current?.(message)), [])
-  return <><color attach="background" args={[settings.background]} /><ambientLight color={settings.ambientColor} intensity={settings.ambientIntensity} />{settings.fogEnabled && <fog attach="fog" args={[settings.fogColor, settings.fogNear, settings.fogFar]} />}{settings.showGrid && <Grid userData={{ editorHelper: true }} args={[40, 40]} cellSize={1} sectionSize={5} sectionColor="#747980" cellColor="#555a61" fadeDistance={35} infiniteGrid />}<NavigationController orbit={orbit} handMode={mode === 'hand'} onTemporarySnap={setTemporarySnap} /><OrbitControls ref={orbit} target={initialView?.target} makeDefault enableRotate={false} enableDamping dampingFactor={.08} enablePan enableZoom mouseButtons={{ LEFT: -1 as any, MIDDLE: THREE.MOUSE.PAN, RIGHT: -1 as any }} /><CameraRig document={document} selected={selected} modelSelection={modelSelection} focus={focus} orbit={orbit} /><SelectionOutline selectedIds={selectedIds} modelSelection={modelSelection} color={settings.selectionColor ?? '#ffad46'} width={settings.selectionWidth ?? 3} />{showGizmos && <GizmoHelper renderPriority={2} alignment="bottom-center" margin={[0, 136]}><GizmoViewport axisColors={['#d87178', '#66a58b', '#6e8ec7']} labelColor="white" /></GizmoHelper>}{document.rootIds.map(id => <NodeView key={id} id={id} document={document} selected={selected} selectedIds={selectedIds} hiddenIds={hiddenIds} unpickableIds={unpickableIds} onSelect={onSelect} mode={modelSelection ? 'select' : mode} space={space} snap={snap || temporarySnap} onTransform={onTransform} orbit={orbit} diagnose={diagnose} showGizmos={showGizmos} />)}</>
+  return <><color attach="background" args={[settings.background]} /><ambientLight color={settings.ambientColor} intensity={settings.ambientIntensity} />{settings.fogEnabled && <fog attach="fog" args={[settings.fogColor, settings.fogNear, settings.fogFar]} />}{settings.showGrid && <Grid position={viewMode === '2d' ? [0, 0, 2] : undefined} rotation={viewMode === '2d' ? [Math.PI / 2, 0, 0] : undefined} userData={{ editorHelper: true }} args={[40, 40]} cellSize={1} sectionSize={5} sectionColor="#747980" cellColor="#555a61" fadeDistance={35} infiniteGrid />}<NavigationController orbit={orbit} handMode={mode === 'hand'} viewMode={viewMode} onTemporarySnap={setTemporarySnap} /><OrbitControls ref={orbit} target={initialView?.target} makeDefault enableRotate={false} enableDamping={false} enablePan={false} enableZoom={false} mouseButtons={{ LEFT: -1 as any, MIDDLE: -1 as any, RIGHT: -1 as any }} /><CameraRig document={document} selected={selected} modelSelection={modelSelection} focus={focus} orbit={orbit} /><SelectionOutline selectedIds={selectedIds} modelSelection={modelSelection} color={settings.selectionColor ?? '#ffad46'} width={settings.selectionWidth ?? 3} />{showGizmos && <GizmoHelper renderPriority={2} alignment="bottom-center" margin={[0, 136]}><GizmoViewport axisColors={['#d87178', '#66a58b', '#6e8ec7']} labelColor="white" /></GizmoHelper>}{document.rootIds.map(id => <NodeView key={id} id={id} document={document} selected={selected} selectedIds={selectedIds} hiddenIds={hiddenIds} unpickableIds={unpickableIds} onSelect={onSelect} mode={modelSelection ? 'select' : mode} space={space} snap={snap || temporarySnap} onTransform={onTransform} orbit={orbit} diagnose={diagnose} showGizmos={showGizmos} />)}</>
 }
 
 /** Self-contained R3F viewport used by the independent scene editor. */
 export function SceneViewport(props: SceneViewportProps) {
-  return <Canvas shadows events={viewportEvents} key={props.ortho ? 'orthographic' : 'perspective'} orthographic={props.ortho} camera={props.ortho ? { position: props.initialView?.position ?? [7, 6, 7], zoom: 65 } : { position: props.initialView?.position ?? [7, 5, 7], fov: 45 }} onPointerMissed={event => props.onSelect('', { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey })} onCreated={({ gl }) => gl.setClearColor('#3c3f43')}><SceneContents {...props} /></Canvas>
+  const effectiveOrtho = props.viewMode === '2d' || props.ortho
+  const camera = effectiveOrtho
+    ? { position: props.initialView?.position ?? (props.viewMode === '2d' ? [0, 0, 10] as const : [7, 6, 7] as const), zoom: 65 }
+    : { position: props.initialView?.position ?? [7, 5, 7] as [number, number, number], fov: 45 }
+  return <Canvas shadows events={viewportEvents} key={`${props.viewMode}-${effectiveOrtho ? 'orthographic' : 'perspective'}-${props.document.dimension}`} orthographic={effectiveOrtho} camera={camera} onPointerMissed={event => props.onSelect('', { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey })} onCreated={({ gl }) => { gl.setClearColor('#3c3f43'); gl.domElement.tabIndex = 0; gl.domElement.setAttribute('aria-label', 'Scene viewport') }}><SceneContents {...props} /></Canvas>
 }
 
 export default SceneViewport

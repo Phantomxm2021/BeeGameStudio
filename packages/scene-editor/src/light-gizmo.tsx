@@ -2,10 +2,22 @@ import { useMemo, useRef } from 'react'
 import { Line } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { Group, Matrix4, Quaternion, Vector3 } from 'three'
-import type { SceneNode } from './model'
+import type { LightData } from './model'
 
-type Light = NonNullable<SceneNode['light']>
+type Light = LightData
 type Point = [number, number, number]
+
+/** A filled 2D spot face in the editor's centered, y-up coordinate system. */
+export function lightConePoints(light: Light, segments = 32): Array<[number, number]> {
+  const length = Math.max(0, light.distance ?? 0)
+  const angle = Math.max(0, Math.min(Math.PI / 2, light.angle ?? Math.PI / 3))
+  const points: Array<[number, number]> = [[0, 0]]
+  for (let index = 0; index <= segments; index += 1) {
+    const theta = -angle + (2 * angle * index) / segments
+    points.push([Math.sin(theta) * length, Math.cos(theta) * length])
+  }
+  return points
+}
 
 /** Local-space guides: light direction is -Z, just like the actual light target. */
 export function lightGizmoSegments(light: Light): number[] {

@@ -152,6 +152,40 @@ describe('native CLI process runner', () => {
     runtime.dispose?.()
   })
 
+  test('keeps native background task notifications observable after the foreground result', async () => {
+    const notifications: string[] = []
+    const runtime = await createNativeCliProcessRunner({
+      command: [process.execPath, fixturePath],
+      observabilityFactory: () => ({
+        beginTurn: () => undefined,
+        observeStdoutChunk: () => undefined,
+        observeLine: () => undefined,
+        observeMessage: () => undefined,
+        finishTurn: () => undefined,
+        flush: async () => undefined,
+      }),
+    }).start({
+      sessionId: 'session-background-notification',
+      cwd: process.cwd(),
+      env: {},
+      onNativeTaskNotification: notification =>
+        notifications.push(notification.value),
+    })
+
+    await runtime.submit({
+      prompt: 'post-result-task-notification',
+      signal: new AbortController().signal,
+      onMessage: () => undefined,
+      requestPermission: async () => ({ behavior: 'deny' }),
+    })
+    await new Promise(resolve => setTimeout(resolve, 30))
+
+    expect(notifications).toEqual([
+      '<task-id>task-after-result</task-id><status>completed</status>',
+    ])
+    runtime.dispose?.()
+  })
+
   test('keeps confirmed brief evidence metadata out of native prompt content', async () => {
     const runtime = await startRuntime()
     let result: Record<string, unknown> | undefined

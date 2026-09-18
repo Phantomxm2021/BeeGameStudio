@@ -30,9 +30,9 @@ export function importPackage(input: ScenePackageV1): SceneDocument {
 
 /** Creates a deliberately blank authoring document. Demo fixtures stay test-only. */
 export function makeEmptyScene(id = 'scene-empty', name = 'Untitled Scene'): SceneDocument {
-  const fixtureDigest = sha256Sync(canonicalJson({ schemaVersion: 'scene-authoring.v1', id, name, kind: 'empty-scene' }))
+  const fixtureDigest = sha256Sync(canonicalJson({ schemaVersion: 'scene-game-object.v2', dimension: '3d', id, name }))
   const source: SourceBinding = { source: { kind: 'fixture', fixtureId: 'empty-scene-v1', fixtureDigest }, contentDigest: '', contentRevision: '0', contentSchemaVersion: 'beegame-content-v1', adapterId: 'three-scene-v1', adapterVersion: '1.0.0' }
-  const document: SceneDocument = { schemaVersion: 'scene-authoring.v1', id, name, revision: 0, source, rootIds: [], nodes: {}, assets: {}, diagnostics: [] }
+  const document: SceneDocument = { schemaVersion: 'scene-game-object.v2', dimension: '3d', id, name, revision: 0, source, rootIds: [], nodes: {}, assets: {}, diagnostics: [] }
   const digestable = clone(document); digestable.source.contentDigest = ''; document.source.contentDigest = sha256Sync(canonicalJson(digestable))
   assertSceneDocument(document)
   return document
