@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -44,6 +44,32 @@ function readStoredZipEntries(data: Uint8Array): Map<string, string> {
 }
 
 describe('active BeeGame session artifact reads', () => {
+  test('retains workflow transcript and native snapshot after transport disposal', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'beegame-workflow-retention-'))
+    roots.push(root)
+    const workspacePath = join(root, 'workspace')
+    const runner: BeeGameSessionRunner = {
+      start: async () => ({ submit: async () => undefined, stop: () => undefined }),
+    }
+    const manager = new BeeGameSessionManager(runner, root)
+    const session = manager.start({
+      workspacePath,
+      projectId: 'project-workflow-retention',
+      userId: 'owner-1',
+      workflowWorker: true,
+      workflowRunId: 'run-1',
+      workflowDispatchId: 'dispatch-1',
+      workflowWorkerType: 'implementation-worker',
+      resumeNativeSessionId: '15d7e597-c26a-4319-a2b0-63e8e00d5ac6',
+    })
+
+    await manager.disposeWorkflowWorker(session.id)
+
+    expect((await readdir(join(workspacePath, 'transcripts'))).length).toBe(1)
+    expect(await readdir(join(root, 'snapshots'))).toContain(`${session.id}.json`)
+    manager.dispose()
+  })
+
   test('readArtifact and package always serve canonical bytes, regardless of application snapshots', async () => {
     const root = await mkdtemp(join(tmpdir(), 'beegame-session-artifact-snapshot-'))
     roots.push(root)

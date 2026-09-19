@@ -24,6 +24,7 @@ type ProjectSelectProps = {
   className?: string;
   triggerClassName?: string;
   contentClassName?: string;
+  portal?: boolean;
 };
 
 /** Product adapter around the canonical beUI Select primitives. */
@@ -38,13 +39,14 @@ export function ProjectSelect({
   className,
   triggerClassName,
   contentClassName,
+  portal,
 }: ProjectSelectProps) {
   return (
     <Select value={value} onValueChange={onValueChange} disabled={disabled} className={className}>
       <SelectTrigger ariaLabel={ariaLabel} title={title} className={triggerClassName}>
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
-      <SelectContent className={cn('max-h-64 overflow-y-auto', contentClassName)}>
+      <SelectContent portal={portal} className={cn('max-h-64 overflow-y-auto', contentClassName)}>
         {options.map(option => (
           <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
             {option.label}

@@ -4,6 +4,7 @@ import type { SceneDocument } from '../../../../packages/scene-editor/src/model'
 export type {
   SceneDocument,
   SceneAsset,
+  SpriteSheet,
   SceneNode,
   SceneComponent,
   MaterialOverride,
@@ -22,3 +23,5 @@ export interface SceneEditorProps {
 
 
 export declare const SceneEditor: ComponentType<SceneEditorProps>;
+
+export { spriteSheetSelection, parseSpriteSheet } from '../../../../packages/scene-editor/src/sprite-sheet';

@@ -64,9 +64,8 @@ import {
 CANONICAL_DOCUMENT_ARTIFACTS
 } from './types'
 import {
+confirmAcceptanceFromImplementation,
 enterAcceptance,
-reconcileAcceptance,
-startAcceptance,
 } from './validation-stage'
 import {
 type WorkerTerminalResult
@@ -166,7 +165,7 @@ export function createDeliveryWorkflowController(input: {
     async dispatch(request) {
       const run = await store.load()
       let contentContract: Record<string, unknown> = {}
-      if (run && run.runId === request.runId && ['implementation-worker', 'acceptance-validator'].includes(request.workerType)) {
+      if (run && run.runId === request.runId && request.workerType === 'implementation-worker') {
         if (!run.gameContentReceipt)
           throw new Error('downstream work requires an accepted Scene/UI content receipt')
         const assetManifestRevision = run.revision.resource
@@ -542,14 +541,12 @@ export function createDeliveryWorkflowController(input: {
           return
         }
         next = await persist(enterAcceptance(next), 'phase.entered')
-        await startAcceptance({
+        next = await confirmAcceptanceFromImplementation({
           run: next,
           workspacePath: input.workspacePath,
-          dispatcher,
-          expectedChecklistIds: auditFacts.checklistIds,
-          expectedContentIds: auditFacts.contentIds,
-          expectedResourceIds: auditFacts.resourceIds,
         })
+        next = transitionDeliveryRun(next, { type: 'delivery_completed' })
+        await persist(next, 'run.completed')
       } else {
         await startNextImplementationTask({
           run: next,
@@ -561,53 +558,6 @@ export function createDeliveryWorkflowController(input: {
         })
       }
       return
-    }
-    if (result.workerType === 'acceptance-validator') {
-      if (await documentRevisionChanged(next)) {
-        await restartDocumentStage(
-          next,
-          'canonical documents changed before acceptance; document review and downstream work must be rerun',
-        )
-        return
-      }
-      if (
-        resourcePreparationMissing(next) ||
-        (await resourceRevisionChanged(next))
-      ) {
-        await restartResourcePreparation(
-          next,
-          'resource delivery is missing or approved resources changed before acceptance; resource delivery must be rerun',
-        )
-        return
-      }
-      if (await gameContentChanged(next)) {
-        await restartGameContent(
-          next,
-          'accepted Scene/UI content changed before acceptance; content authoring must be rerun',
-        )
-        return
-      }
-      const acceptanceFacts = await contractFactsFor(next)
-      next = await reconcileAcceptance({
-        run: { ...next, phase: 'ACCEPTANCE' },
-        workspacePath: input.workspacePath,
-        terminal: result,
-        expectedChecklistIds: acceptanceFacts.checklistIds,
-        currentImplementationRevision: await computeWorkspaceRevision(
-          input.workspacePath,
-        ),
-      })
-      if (next.phase === 'DELIVERY')
-        next = transitionDeliveryRun(next, { type: 'delivery_completed' })
-      await persist(
-        next,
-        next.status === 'completed'
-          ? 'run.completed'
-          : result.status === 'failed'
-            ? 'acceptance.needs_action'
-            : 'acceptance.reconciled',
-        result.status === 'failed' ? { findings: result.findings } : undefined,
-      )
     }
   }
 
@@ -903,15 +853,14 @@ export function createDeliveryWorkflowController(input: {
         await restartGameContent(run, 'accepted Scene/UI content changed before acceptance')
         return
       }
-      const acceptanceFacts = await contractFactsFor(run)
-      await startAcceptance({
+      const accepted = await confirmAcceptanceFromImplementation({
         run,
         workspacePath: input.workspacePath,
-        dispatcher,
-        expectedChecklistIds: acceptanceFacts.checklistIds,
-        expectedContentIds: acceptanceFacts.contentIds,
-        expectedResourceIds: acceptanceFacts.resourceIds,
       })
+      await persist(
+        transitionDeliveryRun(accepted, { type: 'delivery_completed' }),
+        'run.completed',
+      )
     }
   }
 

@@ -4,7 +4,7 @@ import { isAbsolute, relative, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createNativeTaskAccess } from './native-task-access'
 import { createNativeToolDiagnostics } from './native-tool-diagnostics'
-import { createNativeResponseTraceLog, NATIVE_RESPONSE_TRACE_PREFIX } from './native-response-trace'
+import { createNativeResponseTraceLog, createResponseRedactor, projectResponseMessage, NATIVE_RESPONSE_TRACE_PREFIX } from './native-response-trace'
 import { NATIVE_DIAGNOSTIC_PREFIX, parseNativeDiagnostic } from './native-diagnostics'
 
 const SAFE_INHERITED = ['HOME', 'LANG', 'LC_ALL', 'LOGNAME', 'NODE_ENV', 'PATH', 'SHELL', 'TMPDIR', 'USER', 'CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING']
@@ -101,6 +101,7 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
   let upstreamWaitBucket = 0
   let lastProgressAt = 0
   let logQueue = Promise.resolve()
+  const redactTaskObservation = createResponseRedactor(input.env)
   const log = (event: string, data: unknown) => {
     const line = JSON.stringify({ at: new Date().toISOString(), event, data }) + '\n'
     return logQueue = logQueue.then(() => appendFile(input.logPath, line, { mode: 0o600 }))
@@ -156,6 +157,9 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
     if (!closed && !child.stdin.destroyed) child.stdin.write(JSON.stringify(value) + '\n')
   }
   async function handle(message: Record<string, any>) {
+    if (message.type === 'system' && ['task_started', 'task_progress', 'task_notification'].includes(message.subtype)) {
+      await log('native.task_lifecycle', redactTaskObservation(projectResponseMessage(message)))
+    }
     // Observers cannot alter admission or stop draining later usage frames.
     try { await input.onMessage?.(structuredClone(message)) }
     catch { fail('observation_failed') }

@@ -639,6 +639,16 @@ export const BeeGameCollaborationFeed = memo(({
     const text = useBeeGameText(lang);
     const [detail, setDetail] = useState<AgentRunDetail | null>(null);
     const entries = useMemo(() => buildFeedEntries(messages), [messages]);
+    const currentDetail = useMemo(() => {
+        if (!detail) return null;
+        for (const entry of entries) {
+            if (entry.kind !== 'response') continue;
+            for (const part of entry.parts) {
+                if (part.kind === 'tool' && part.tool.id === detail.tool.id) return { ...detail, tool: part.tool };
+            }
+        }
+        return detail;
+    }, [detail, entries]);
     const hasStreamingMessage = Boolean(streamingMessageId && entries.some((entry) => entry.kind === 'response' && entry.parts.some((part) => (
         (part.kind === 'tool' && part.tool.status === 'running') ||
         ((part.kind === 'thinking' || part.kind === 'agent') && matchesStreamingMessage(part.message, streamingMessageId))
@@ -743,7 +753,7 @@ export const BeeGameCollaborationFeed = memo(({
         >
             {detail ? <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
                 <AgentRunDetailView
-                    detail={detail}
+                    detail={currentDetail ?? detail}
                     lang={lang}
                     onBack={() => setDetail(null)}
                 />

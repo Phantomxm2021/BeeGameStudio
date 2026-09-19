@@ -160,6 +160,7 @@ describe('delivery worker session credentials', () => {
       status: 'completed',
       changedPaths: [],
       verifiedArtifacts: [],
+      summary: 'Implementation complete.',
       verificationResults: [],
       evidenceRefs: [
         '.beegame/workflow/evidence/implementation-dispatch-implementation.json',
@@ -170,35 +171,47 @@ describe('delivery worker session credentials', () => {
     expect(idleWaits).toBe(1)
   })
 
-  test('accepts the complete terminal verdict when the assistant display text is truncated', async () => {
+  test('forwards an explicit native resume ID without treating it as a transcript ID', async () => {
+    let startInput: Record<string, unknown> | undefined
+    const sessions = {
+      start(input: Record<string, unknown>) {
+        startInput = input
+        return { id: 'session-resumed-implementation' }
+      },
+      updateAuthToken() {},
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+    await port.start({
+      dispatchId: 'dispatch-resume', runId: 'run-1', ownerId: 'user-1',
+      projectId: 'project-1', workspacePath: '/tmp/project-1',
+      workerType: 'implementation-worker', phase: 'IMPLEMENTATION',
+      taskId: 'DIRECT_IMPLEMENTATION', revision: 'revision-1',
+      allowedPaths: ['./'],
+      contract: {
+        task: { id: 'DIRECT_IMPLEMENTATION' },
+        resumeWorkerSessionId: '15d7e597-c26a-4319-a2b0-63e8e00d5ac6',
+      },
+    })
+    expect(startInput?.resumeNativeSessionId).toBe(
+      '15d7e597-c26a-4319-a2b0-63e8e00d5ac6',
+    )
+    expect(startInput?.transcriptSessionId).toBeUndefined()
+  })
+
+  test('rejects the retired acceptance-validator worker instead of parsing a synthetic verdict', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-acceptance-'))
-    let submittedPrompt = ''
     const sessions = {
       start() {
         return { id: 'session-acceptance' }
       },
       updateAuthToken() {},
-      async sendWithDisplay(_sessionId: string, prompt: string) {
-        submittedPrompt = prompt
-      },
+      async sendWithDisplay() {},
       events() {
         return [
           {
-            id: 'acceptance-message',
-            type: 'assistant.message',
-            text: 'Runtime and browser checks passed so far...',
-            createdAt: new Date(),
-          },
-          {
             id: 'acceptance-result',
             type: 'result',
-            text: [
-              'TASK DIRECT_IMPLEMENTATION: PASS — expected scene is visible in the browser',
-              'CHECKLIST AC-1: PASS — interaction produced the specified response',
-              'CONTENT scene.main: PASS — scene hierarchy is represented at runtime',
-              'ASSET asset.background: PASS — registered background loaded successfully',
-              'ACCEPTANCE: PASS',
-            ].join('\n'),
+            text: 'A historical acceptance worker finished.',
             createdAt: new Date(),
           },
         ]
@@ -224,45 +237,8 @@ describe('delivery worker session credentials', () => {
         },
       })
       await port.submit('dispatch-acceptance', 'Run acceptance')
-
-      expect(submittedPrompt).not.toContain('SubmitValidationResult')
-      expect(await port.waitForTerminal?.('dispatch-acceptance')).toMatchObject({
-        workerType: 'acceptance-validator',
-        status: 'passed',
-        validatedTaskIds: ['DIRECT_IMPLEMENTATION'],
-        findings: [],
-      })
-    } finally {
-      await rm(workspacePath, { recursive: true, force: true })
-    }
-  })
-
-  test('rejects a verdict that fabricates contract coverage', async () => {
-    const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-acceptance-'))
-    const sessions = {
-      start() { return { id: 'session-acceptance' } },
-      updateAuthToken() {},
-      async sendWithDisplay() {},
-      events() {
-        return [{
-          id: 'acceptance-result',
-          type: 'result',
-          text: 'Everything passed.\nACCEPTANCE: PASS',
-          createdAt: new Date(),
-        }]
-      },
-    } as unknown as BeeGameSessionManager
-    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
-    try {
-      await port.start({
-        dispatchId: 'dispatch-acceptance', runId: 'run-1', ownerId: 'user-1',
-        projectId: 'project-1', workspacePath, workerType: 'acceptance-validator',
-        phase: 'ACCEPTANCE', revision: 'revision-1', allowedPaths: [],
-        contract: { taskIds: ['DIRECT_IMPLEMENTATION'], checklistIds: ['AC-1'] },
-      })
-      await port.submit('dispatch-acceptance', 'Run acceptance')
       await expect(port.waitForTerminal?.('dispatch-acceptance')).rejects.toThrow(
-        'acceptance report does not cover every task exactly once',
+        'retired delivery worker: acceptance-validator',
       )
     } finally {
       await rm(workspacePath, { recursive: true, force: true })

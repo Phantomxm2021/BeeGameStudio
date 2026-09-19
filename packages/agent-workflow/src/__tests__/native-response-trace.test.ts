@@ -1,6 +1,14 @@
 import { expect, test } from 'bun:test'
 import { createNativeResponseTraceLog, projectResponseMessage, createResponseRedactor } from '../native-response-trace'
 
+test('native task observation preserves progress without projecting private provider fields', () => {
+  expect(projectResponseMessage({ type: 'system', subtype: 'task_progress', task_id: 'task-1', tool_use_id: 'agent-1',
+    description: 'Read manifest', usage: { tool_uses: 45, total_tokens: 123, duration_ms: 60000, private: 'secret' },
+    prompt: 'private', arbitrary: 'secret' })).toEqual({ type: 'system', subtype: 'task_progress',
+      task_id: 'task-1', tool_use_id: 'agent-1', description: 'Read manifest',
+      usage: { tool_uses: 45, total_tokens: 123, duration_ms: 60000 } })
+})
+
 test('response projection excludes prompts, hidden reasoning and signatures', () => {
   expect(projectResponseMessage({ type: 'user', message: { content: [{ type: 'text', text: 'PRIVATE_PROMPT' }] } })).toBeUndefined()
   expect(projectResponseMessage({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: 'PRIVATE_THINKING' } } }))

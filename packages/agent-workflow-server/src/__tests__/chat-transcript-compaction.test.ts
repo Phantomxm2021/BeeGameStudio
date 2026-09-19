@@ -23,6 +23,14 @@ const thinkingEvent = (
 })
 
 describe('chat transcript compaction', () => {
+  test('retains native task lifecycle and progress but not unrelated system chatter', () => {
+    const events: BeeGameEvent[] = ['task_started', 'task_progress', 'task_notification', 'init'].map((subtype, id) => ({
+      id, type: 'system.status', text: 'system', sessionId: 'worker-1', createdAt: new Date(),
+      payload: { type: 'system', subtype, task_id: 'task-1', tool_use_id: 'agent-1' },
+    }))
+    expect(compactTranscriptForChatHistory(events).map(event => event.payload?.subtype))
+      .toEqual(['task_started', 'task_progress', 'task_notification'])
+  })
   test('preserves one completed Thinking lifecycle with its full duration', () => {
     const compacted = compactTranscriptForChatHistory([
       thinkingEvent(1, 'Checking', 'started', '2026-09-17T00:00:00.000Z'),

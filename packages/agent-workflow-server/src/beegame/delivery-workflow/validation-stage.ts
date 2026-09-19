@@ -1,9 +1,8 @@
 import { transitionDeliveryRun } from './transition'
-import { isWorkflowEvidenceFile } from './evidence'
-import type { DeliveryRun, EvidenceRef, WorkerDispatchRequest } from './types'
-import type { WorkerTerminalResult } from './worker-contracts'
-
-type Dispatcher = { dispatch(request: WorkerDispatchRequest): Promise<unknown> }
+import { isWorkflowEvidenceFile, resolveWorkflowEvidencePath } from './evidence'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
+import type { DeliveryRun, EvidenceRef } from './types'
 
 function currentImplementationRevision(run: DeliveryRun): string {
   return run.revision.implementation ?? run.revision.workspace
@@ -38,113 +37,48 @@ export function enterAcceptance(run: DeliveryRun): DeliveryRun {
   }
 }
 
-export async function startAcceptance(input: {
+/**
+ * Acceptance is a host confirmation of the implementation turn's current
+ * evidence, not a second default model audit. The implementation Agent owns
+ * the normal run/inspect/fix loop; this receipt only proves which artifacts
+ * and revision were handed to delivery.
+ */
+export async function confirmAcceptanceFromImplementation(input: {
   run: DeliveryRun
   workspacePath: string
-  dispatcher: Dispatcher
-  expectedChecklistIds: string[]
-  expectedContentIds: string[]
-  expectedResourceIds: string[]
-  currentImplementationRevision?: string
-}): Promise<unknown> {
-  if (input.run.phase !== 'ACCEPTANCE')
-    throw new Error('acceptance requires ACCEPTANCE phase')
-  if (!input.run.gameContentReceipt || !input.run.revision.content ||
-      input.run.gameContentReceipt.contentRevision !== input.run.revision.content)
-    throw new Error('acceptance requires the accepted Scene/UI content package')
-  return input.dispatcher.dispatch({
-    runId: input.run.runId,
-    ownerId: input.run.ownerId,
-    projectId: input.run.projectId,
-    workspacePath: input.workspacePath,
-    workerType: 'acceptance-validator',
-    phase: 'ACCEPTANCE',
-    revision: currentImplementationRevision(input.run),
-    allowedPaths: [],
-    contract: {
-      taskIds: input.run.tasks.map(task => task.id),
-      tasks: input.run.tasks.map(task => ({
-        id: task.id,
-        allowedPaths: task.allowedPaths,
-        checklistIds: task.checklistIds,
-      })),
-      checklistIds: input.expectedChecklistIds,
-      contentIds: input.expectedContentIds,
-      resourceIds: input.expectedResourceIds,
-    },
-  })
-}
-
-export async function reconcileAcceptance(input: {
-  run: DeliveryRun
-  workspacePath?: string
-  terminal: Extract<
-    WorkerTerminalResult,
-    { workerType: 'acceptance-validator' }
-  >
-  expectedChecklistIds?: string[]
-  currentImplementationRevision?: string
 }): Promise<DeliveryRun> {
   if (input.run.phase !== 'ACCEPTANCE')
-    throw new Error('acceptance is not the active phase')
-  if (input.terminal.revision !== currentImplementationRevision(input.run))
-    throw new Error('acceptance evidence revision is stale')
-  if (
-    input.currentImplementationRevision &&
-    input.terminal.revision !== input.currentImplementationRevision
-  )
-    throw new Error('acceptance evidence does not match the workspace')
-  if (
-    input.workspacePath &&
-    !isWorkflowEvidenceFile(input.workspacePath, input.terminal.evidencePath)
-  )
-    throw new Error(
-      'acceptance evidence file is missing or outside the project workspace',
-    )
-  const exact = (
-    expected: string[] | undefined,
-    actual: string[],
-    label: string,
-  ) => {
-    if (expected === undefined) return
-    if (
-      expected.length !== actual.length ||
-      expected.some(id => !actual.includes(id))
-    )
-      throw new Error(`acceptance does not cover every ${label}`)
-  }
-  exact(input.expectedChecklistIds, input.terminal.checklistIds, 'checklist')
-  exact(
-    input.run.tasks.map(task => task.id),
-    input.terminal.validatedTaskIds,
-    'task',
-  )
-  const knownTaskIds = new Set(input.run.tasks.map(task => task.id))
-  if (
-    input.terminal.findings.some(finding =>
-      finding.taskIds.some(taskId => !knownTaskIds.has(taskId)),
-    )
-  )
-    throw new Error('acceptance finding references an unknown task')
-  const status =
-    input.terminal.status === 'passed'
-      ? 'passed'
-      : input.terminal.status === 'failed'
-        ? 'failed'
-        : 'blocked'
+    throw new Error('acceptance requires ACCEPTANCE phase')
+  const revision = currentImplementationRevision(input.run)
+  if (!allTasksComplete(input.run))
+    throw new Error('acceptance requires completed implementation evidence')
+  const taskEvidence = input.run.tasks.flatMap(task => {
+    if (task.completedRevision !== revision)
+      throw new Error('implementation evidence revision is stale')
+    return task.evidenceRefs
+  })
+  if (!taskEvidence.length || taskEvidence.some(
+    path => !isWorkflowEvidenceFile(input.workspacePath, path),
+  ))
+    throw new Error('acceptance requires implementation evidence in the workspace')
+
+  const evidencePath = `.beegame/workflow/evidence/acceptance-host-${revision}.json`
+  const target = resolveWorkflowEvidencePath(input.workspacePath, evidencePath)
+  if (!target) throw new Error('acceptance evidence path is invalid')
+  await mkdir(dirname(target), { recursive: true })
+  await writeFile(target, `${JSON.stringify({
+    version: 1,
+    kind: 'host-delivery-confirmation',
+    revision,
+    implementationEvidence: taskEvidence,
+    note: 'The implementation Agent performed the runtime inspection. This receipt confirms artifact identity and does not replace its observations.',
+  }, null, 2)}\n`, 'utf8')
   const evidence: EvidenceRef = {
-    path: input.terminal.evidencePath,
+    path: evidencePath,
     kind: 'acceptance',
-    revision: currentImplementationRevision(input.run),
-    status,
+    revision,
+    status: 'passed',
     observedAt: new Date().toISOString(),
   }
-  return transitionDeliveryRun(
-    input.run,
-    input.terminal.status === 'passed'
-      ? { type: 'acceptance_passed', evidence }
-      : input.terminal.status === 'failed'
-        ? { type: 'acceptance_failed', evidence }
-        : { type: 'acceptance_blocked', evidence },
-  )
+  return transitionDeliveryRun(input.run, { type: 'acceptance_passed', evidence })
 }

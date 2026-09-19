@@ -21,6 +21,7 @@ import {
 } from "react";
 import { EASE_OUT } from "@/components/beui/registry/lib/ease";
 import { cn } from "@/components/beui/registry/lib/utils";
+import { createPortal } from 'react-dom';
 
 const INSTANT_TRANSITION: Transition = { duration: 0 };
 
@@ -144,7 +145,7 @@ export function Select({
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     const onPointer = (e: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node))
+      if (rootRef.current && !rootRef.current.contains(e.target as Node) && !document.getElementById(`${baseId}-list`)?.contains(e.target as Node))
         setOpen(false);
     };
     window.addEventListener("keydown", onKey);
@@ -188,7 +189,21 @@ export function Select({
 
   return (
     <SelectContext.Provider value={ctx}>
-      <div ref={rootRef} className={cn("relative", className)}>
+      <div ref={rootRef} className={cn("relative", className)} onKeyDown={event => {
+        if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); setOpen(false); document.getElementById(`${baseId}-trigger`)?.focus(); }
+        if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+          event.preventDefault(); event.stopPropagation(); setOpen(true);
+          requestAnimationFrame(() => {
+            const items = Array.from(document.getElementById(`${baseId}-list`)?.querySelectorAll<HTMLElement>('[role="option"]:not(:disabled)') ?? []);
+            const index = items.indexOf(document.activeElement as HTMLElement);
+            const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length;
+            items[next]?.focus();
+          });
+        }
+      }} onBlur={event => {
+        const target = event.relatedTarget as Node | null;
+        if (open && !rootRef.current?.contains(target) && !document.getElementById(`${baseId}-list`)?.contains(target)) setOpen(false);
+      }}>
         {children}
       </div>
     </SelectContext.Provider>
@@ -279,14 +294,25 @@ export function SelectValue({ placeholder, className }: SelectValueProps) {
 export interface SelectContentProps {
   className?: string;
   children: ReactNode;
+  portal?: boolean;
 }
 
-export function SelectContent({ className, children }: SelectContentProps) {
+export function SelectContent({ className, children, portal = false }: SelectContentProps) {
   const ctx = useSelectContext("SelectContent");
   const innerRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(0);
   const open = ctx.open;
   const { setPlacement } = ctx;
+  const [rect, setRect] = useState({ left: 0, top: 0, bottom: 0, width: 0 });
+  useLayoutEffect(() => {
+    if (!portal || !open) return;
+    const measure = () => {
+      const trigger = document.getElementById(ctx.triggerId);
+      if (trigger) { const box = trigger.getBoundingClientRect(); setRect({ left: box.left, top: box.top, bottom: box.bottom, width: box.width }); }
+    };
+    measure(); window.addEventListener('scroll', measure, true); window.addEventListener('resize', measure);
+    return () => { window.removeEventListener('scroll', measure, true); window.removeEventListener('resize', measure); };
+  }, [portal, open, ctx.triggerId]);
 
   useLayoutEffect(() => {
     const node = innerRef.current;
@@ -330,7 +356,7 @@ export function SelectContent({ className, children }: SelectContentProps) {
   // Items stay mounted (open just animates the panel) so each item's label
   // registration persists — otherwise the trigger would fall back to the
   // placeholder the moment the panel closes.
-  return (
+  const content = (
     <motion.div
       id={ctx.listId}
       role="listbox"
@@ -373,8 +399,11 @@ export function SelectContent({ className, children }: SelectContentProps) {
             }
       }
       style={{
+        ...(portal ? { position: 'fixed' as const, left: rect.left, width: rect.width, right: 'auto', top: isTop ? 'auto' : rect.bottom, bottom: isTop ? window.innerHeight - rect.top : 'auto', zIndex: 260 } : {}),
         transformOrigin: isTop ? "bottom" : "top",
-        overflow: "hidden",
+        overflowX: "hidden",
+        overflowY: open ? "auto" : "hidden",
+        maxHeight: portal ? Math.max(80, (isTop ? rect.top : window.innerHeight - rect.bottom) - 20) : undefined,
         pointerEvents: open ? "auto" : "none",
       }}
       // flush against the trigger, then separates into its own rounded pill;
@@ -396,6 +425,7 @@ export function SelectContent({ className, children }: SelectContentProps) {
       </motion.div>
     </motion.div>
   );
+  return portal && typeof document !== 'undefined' ? createPortal(content, document.body) : content;
 }
 
 export interface SelectItemProps {

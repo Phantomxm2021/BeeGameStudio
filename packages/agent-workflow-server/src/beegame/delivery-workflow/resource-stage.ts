@@ -1,8 +1,11 @@
 import { auditAssetContract } from '../asset-contract-audit'
 import {
-  auditResourceDeliveryReadiness,
-  confirmedResourceLibraryUsage,
-} from '../resource-delivery-readiness'
+  ASSET_MANIFEST_AUTHORING_CONTRACT_PATH,
+  ASSET_MANIFEST_VALIDATION_COMMAND,
+  materializeAssetManifestAuthoringContract,
+} from '../asset-manifest-authoring-contract'
+import { confirmedResourceLibraryUsage } from '../resource-delivery-readiness'
+import { validateResourceDelivery } from '../resource-validation-cli'
 import {
   computeResourceRevision,
 } from './revision'
@@ -19,11 +22,6 @@ export function resourcePreparationAllowedPaths(
   // able to create the complete asset contract without crossing phase/task
   // boundaries that would force it into a planner/curator/author protocol.
   return [directoryScope('assets')]
-}
-
-export function currentResourceContractIssues(workspacePath: string): string[] {
-  const audit = auditAssetContract(workspacePath)
-  return [...new Set(audit.issues)]
 }
 
 function directoryScope(path: string): string {
@@ -44,6 +42,9 @@ export async function startResourcePreparation(input: {
   if (input.run.activeDispatch?.status === 'running')
     return input.run.activeDispatch
 
+  await materializeAssetManifestAuthoringContract(input.workspacePath)
+  const validation = validateResourceDelivery(input.workspacePath, input.run.confirmedBriefContext)
+
   const common = {
     runId: input.run.runId,
     ownerId: input.run.ownerId,
@@ -63,13 +64,9 @@ export async function startResourcePreparation(input: {
         input.run.confirmedBriefContext,
       ),
       manifestPath: 'assets/asset-manifest.json',
-      validationCommand: {
-        executable: process.execPath,
-        args: [new URL('../resource-validation-cli.ts', import.meta.url).pathname],
-      },
-      currentResourceIssues: [
-        ...currentResourceContractIssues(input.workspacePath),
-      ],
+      contractPath: ASSET_MANIFEST_AUTHORING_CONTRACT_PATH,
+      validationCommand: ASSET_MANIFEST_VALIDATION_COMMAND,
+      ...(validation.issues.length ? { validationIssues: validation.issues } : {}),
     },
   })
 }
@@ -87,6 +84,13 @@ export async function completeResourceTask(input: {
   if (input.terminal?.workerType === 'resource-planner') {
     if (input.run.resourceProductionState.currentTask === 'RESOURCE_DELIVERED')
       throw new Error('resource preparation is already complete')
+    const validation = validateResourceDelivery(input.workspacePath, input.run.confirmedBriefContext)
+    if (!validation.valid) return {
+      ...input.run,
+      activeDispatch: undefined,
+      status: 'needs_action',
+      blockedReason: validation.issues.join('; '),
+    }
     const audit = auditAssetContract(input.workspacePath)
     const requiredIds = audit.requirements
       .filter(requirement => requirement.required)
@@ -117,36 +121,6 @@ export async function completeResourceTask(input: {
             acceptedAt: new Date().toISOString(),
           }
         : undefined
-    const readiness = auditResourceDeliveryReadiness({
-      workspacePath: input.workspacePath,
-      confirmedPolicy: confirmedResourceLibraryUsage(
-        input.run.confirmedBriefContext,
-      ),
-      catalogObserved: deliveryReceipt?.catalogObserved ?? false,
-    })
-    if (
-      !audit.present ||
-      !audit.valid ||
-      audit.requirements.length === 0 ||
-      missingRequirementIds.length > 0 ||
-      !readiness.ready
-    ) {
-      const issues = [...new Set([
-        ...audit.issues,
-        ...(audit.requirements.length === 0 ? ['Resource delivery requires at least one canonical requirement.'] : []),
-        ...(missingRequirementIds.length
-          ? [`Missing verified resource bindings: ${missingRequirementIds.join(', ')}`]
-          : []),
-        ...readiness.readinessIssues,
-      ])]
-      return {
-        ...input.run,
-        activeDispatch: undefined,
-        status: 'needs_action',
-        blockedReason: issues.join('; ') || 'resource preparation is incomplete',
-        resourceProductionState: input.run.resourceProductionState,
-      }
-    }
     const accepted: DeliveryRun = {
       ...input.run,
       activeDispatch: undefined,

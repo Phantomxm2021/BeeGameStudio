@@ -38,13 +38,13 @@ test('code, plain-text filenames and unused definitions do not become invented l
   expect(buildReviewFileChecks(source).links).toEqual([])
 })
 
-test('Reviewer prompt keeps autonomous review focused on material game outcomes', () => {
+test('Reviewer prompt uses a compact direct-review instruction', () => {
   const prompt = fileReviewPrompt()
-  expect(prompt).toContain('Choose your own investigation and editing strategy')
-  expect(prompt).toContain('directly correct every real problem')
-  expect(prompt).toContain('implemented game to violate a confirmed requirement, behave inconsistently, or fail acceptance')
-  expect(prompt).toContain('Do not assign severity, priority, or blocker labels')
-  expect(prompt).not.toContain('checklist')
+  expect(prompt).toContain('directly correct only implementation-affecting contradictions or omissions')
+  expect(prompt).toContain('make the needed edits promptly')
+  expect(prompt).toContain('Do not narrate or enumerate an audit checklist')
+  expect(prompt).not.toContain('severity')
+  expect(prompt).not.toContain('blocker')
   for (const label of ['BLOCKER', 'HIGH', 'MEDIUM', 'LOW']) expect(prompt).not.toContain(label)
 })
 

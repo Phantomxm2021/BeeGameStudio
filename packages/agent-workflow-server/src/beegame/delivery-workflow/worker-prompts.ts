@@ -57,20 +57,11 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         '',
       ].join(' ')
     case 'resource-planner':
-      if (
-        Array.isArray(request.contract.currentResourceIssues) &&
-        request.contract.currentResourceIssues.length > 0
-      )
-        return [
-          'Continue the same direct CLI resource task using the accepted Foundation documents.',
-          'Fix the deterministic contract errors in contract.currentResourceIssues, preserve valid work, and finish the resource delivery normally.',
-        ].join(' ')
       return [
-        'Complete resource delivery in one normal CLI turn. Read the accepted Foundation documents, then autonomously search for, select or make the real runtime assets the game needs.',
-        'Create the canonical Asset Manifest at contract.manifestPath and the referenced files under assets/. Record source and license facts for any web asset. Keep Scene/UI/VFX content and implementation for their later stages.',
-        'Inspect the actual key visual assets you selected or created and compare them with the accepted camera, spatial and art direction before finishing. Correct substantive visual-semantic mismatches autonomously.',
-        'Run contract.validationCommand once near the end and use its diagnostics to correct the delivery. The host performs the final deterministic validation after the CLI turn.',
-        'End normally with a concise summary.',
+        'Read the accepted Foundation documents and the Asset Manifest authoring contract at contract.contractPath, then autonomously obtain or make the runtime assets the game needs.',
+        'Write the Asset Manifest at contract.manifestPath and its referenced files under assets/. Record source and license facts for web assets.',
+        'Finish normally with a concise summary. The host validates the persisted manifest after the turn.',
+        'contract.validationCommand runs the same read-only interface check as the host. Use it as needed; contract.validationIssues reports current interface issues to address while preserving usable assets. No separate verification agent is required.',
       ].join(' ')
     case 'content-author':
       if (
@@ -80,14 +71,13 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         return [
           'Continue the same direct CLI Scene/UI/VFX content task.',
           'Use contract.output.format as the exact strict file shape. Fix the deterministic package errors in contract.currentContentIssues while preserving valid game decisions.',
-          'Run contract.validationCommand once near the end and correct its diagnostics. Then run contract.previewCommand, inspect the rendered Scene images, correct substantive visual or spatial mismatches autonomously, and render once more to confirm the final result.',
+          'Use contract.validationCommand and contract.previewCommand as needed to inspect the result and correct substantive package, visual, or spatial mismatches autonomously.',
         ].join(' ')
       return [
-        'Create the engine-neutral Scene, UI and VFX content package in one normal CLI turn from the accepted Foundation documents and Asset Manifest.',
+        'Create the engine-neutral Scene, UI and VFX content package from the accepted Foundation documents and Asset Manifest.',
         'Use contract.output.format as the exact strict file shape. Write content/index.json, Scene files under content/scenes/, UI files under content/ui/, and VFX files under content/vfx/. Keep world-space Scene, screen-space UI and effects separate.',
         'Reference verified Manifest resources through assetRefs. Keep asset paths and URLs out of content data; leave target-engine implementation for the following stage.',
-        'Run contract.validationCommand once near the end and use its diagnostics to correct the package. The host performs the same deterministic validation after the CLI turn.',
-        'After the package validates, run contract.previewCommand and inspect the rendered Scene images in contract.previewCommand.outputRoot. Judge the actual composition against the accepted Foundation documents and assets, correct substantive visual or spatial mismatches autonomously, then render once more to confirm the final result.',
+        'Use contract.validationCommand and contract.previewCommand as useful evidence while you inspect the rendered Scene images in contract.previewCommand.outputRoot. Judge the actual composition against the accepted Foundation documents and assets, and correct substantive visual or spatial mismatches autonomously.',
         'Finish after the coherent Content package is complete.',
       ].join(' ')
     case 'implementation-worker':
@@ -100,16 +90,10 @@ function workerInstruction(request: WorkerDispatchRequest): string {
           'Fix the deterministic host errors in contract.currentImplementationIssues, preserve valid work, run only the relevant checks, and finish normally.',
         ].join(' ')
       return [
-        'Complete contract.task within allowedPaths in one normal CLI turn. Implement the accepted Foundation documents and contract.gameContent package for the selected target, and use the Manifest only to locate their referenced runtime assets.',
+        'Complete contract.task within allowedPaths. Implement the accepted Foundation documents and contract.gameContent package for the selected target, and use the Manifest only to locate their referenced runtime assets.',
         'The running game must load content/index.json and its registered Scene/UI documents as runtime data. Do not copy their editable values into source code or a second generated configuration.',
         'Read the specific accepted document sections needed for implementation and keep the content package as the editable source of Scene/UI data.',
-        'Work normally with native tools. Audit the completed implementation once against the accepted Foundation documents, content package and checklist and correct substantive functional conflicts. Run existing non-runtime checks once when they exist; do not create a new verification framework or large one-off harness. If no check exists, perform only brief targeted static sanity checks. Runtime acceptance is a separate phase.',
-      ].join(' ')
-    case 'acceptance-validator':
-      return [
-        'Run the implemented game and verify the accepted Foundation documents, Scene/UI package and checklist as a read-only acceptance pass. Use the project\'s existing runtime and test tooling; do not modify project files.',
-        'In the final response, report one evidence line for every ID in contract.taskIds, contract.checklistIds, contract.contentIds and contract.resourceIds, using exactly `TASK <id>: PASS|FAIL — <observation>`, `CHECKLIST <id>: PASS|FAIL — <observation>`, `CONTENT <id>: PASS|FAIL — <observation>`, or `ASSET <id>: PASS|FAIL — <observation>`. Do not claim an ID without observing it.',
-        'After those evidence lines, end with exactly ACCEPTANCE: PASS only when every reported item passed; otherwise end with exactly ACCEPTANCE: FAIL.',
+        'Work normally with native tools. Run the game and inspect the relevant visual and interaction results before finishing. Correct substantive functional, production-build, visual, or content conflicts you find. Choose the checks and workflow that are useful for this task; do not add a framework solely to satisfy this request. End with a concise account of what you observed and anything that remains unresolved.',
       ].join(' ')
     case 'change-impact-analyzer':
       return 'Review the requested change against the project as a read-only worker. Decide its actual impact autonomously; do not modify project files.'
@@ -132,13 +116,11 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
           ? `Ensure the assigned Markdown game document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
           : `Ensure the assigned Markdown document at ${documentAuthorTargetPath(request)} is complete and end the turn normally. The native runtime owns the file-operation sequence.`
     case 'resource-planner':
-      return 'The contract includes a read-only validation command using the host checks. Use its diagnostics when checking the delivery. Summarize the produced assets and observed validation result; final stage acceptance and receipt generation belong to the host.'
+      return 'Summarize the produced assets, the checks you used, and any unresolved issue. The host validates the persisted contract and records the receipt.'
     case 'content-author':
-      return 'Finish the Scene2D and UI package under content/, including the final rendered Scene preview, then end the turn normally. The host validates the package and creates its receipt.'
+      return 'Finish the Scene/UI/VFX package under content/ and end normally with a concise summary. The host validates the package and creates its receipt.'
     case 'implementation-worker':
-      return 'Finish the implementation and deterministic checks, then end the turn normally with a concise summary. The host verifies expected artifacts and persists workflow evidence.'
-    case 'acceptance-validator':
-      return 'Run runtime acceptance normally, report the required per-ID evidence lines, and finish with the required plain-text ACCEPTANCE verdict line.'
+      return 'Finish the implementation and end normally with a concise summary. The host confirms artifact identity and persists workflow evidence.'
     case 'change-impact-analyzer':
       return 'End with exactly four plain-text lines: `CLASSIFICATION: question|implementation_only|documents_required`, `AFFECTED_REQUIREMENTS: <comma-separated IDs or NONE>`, `AFFECTED_CHECKLIST: <comma-separated IDs or NONE>`, and `RATIONALE: <concise single-line rationale>`.'
     case 'question-answerer':

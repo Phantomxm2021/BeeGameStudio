@@ -19,8 +19,8 @@ const TERMINAL_TAIL_BYTES = 128 * 1024
 /**
  * Bee Game Studio reports an asynchronously launched native Agent through the
  * Agent tool result before it later emits task_started/task_notification SDK
- * events. Preserve the opaque task id and output file only for passive token
- * accounting. Delivery evidence never reads this file and is captured from
+ * events. Preserve the opaque task id and output file for passive accounting
+ * and Chat observation. Delivery evidence never reads this file and is captured from
  * Bee Game Studio's native terminal notification instead.
  */
 export function parseNativeBackgroundTaskLaunch(

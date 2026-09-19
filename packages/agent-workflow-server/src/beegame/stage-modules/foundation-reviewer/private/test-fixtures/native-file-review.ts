@@ -4,7 +4,7 @@ import {join} from 'node:path'
 import assert from 'node:assert/strict'
 const mode=process.argv[2]??'normal'
 createInterface({input:process.stdin}).on('line',async(line)=>{
- assert.ok(line.includes('requirements.md')&&line.includes('directly correct every real problem'))
+ assert.ok(line.includes('requirements.md')&&line.includes('directly correct only implementation-affecting contradictions or omissions'))
  assert.equal(process.env.BEEGAME_STRUCTURED_OUTPUT_IS_TERMINAL,'1')
  await readFile(join(process.cwd(),'requirements.md'),'utf8')
  const fileChecks=JSON.parse(await readFile(join(process.cwd(),'review-context/file-checks.json'),'utf8'))

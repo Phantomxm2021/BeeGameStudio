@@ -9082,7 +9082,8 @@ export function compactTranscriptForChatHistory<
     if (event.type === 'assistant.partial') {
       return []
     }
-    if (event.type === 'system.status') {
+    if (event.type === 'system.status' &&
+      !['task_started', 'task_progress', 'task_notification'].includes(String(event.payload?.subtype))) {
       return []
     }
     if (event.type === 'tool.started') {

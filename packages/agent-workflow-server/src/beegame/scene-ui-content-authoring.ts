@@ -196,6 +196,15 @@ export function buildSceneUiContentAuthoringAuthority(
             ],
           },
         },
+        uiLayoutContract: {
+          referenceResolution: 'Root data.referenceResolution is [width, height] in logical pixels. Root layout.size, if present, must match it.',
+          anchor: 'top/middle/bottom-left/center/right. Position is an offset from that anchor on the parent rectangle; the same point on the child is its pivot. data.anchor {x,y} may override only the child pivot.',
+          textStyle: 'Use style.fontSize, style.color, style.align, style.verticalAlign and style.lineHeight. For an actual font file use data.font.assetRef; do not invent font asset aliases.',
+          image: 'Use assetRef + optional data.member for the image file, data.frame for an exact case-sensitive atlas frame name (without extension). Inspect the delivered atlas; never guess names.',
+          nineSlice: 'Use data.image.type=sliced and data.nineSlice.border=[left,right,top,bottom]. data.frame may name an explicit meta.nine_slice composite made from tl,tr,bl,br,h,v,c frames, or a single packed frame. Never invent a panel frame absent from both tables.',
+          appearance: 'Use style.opacity, style.background (CSS color or {color,opacity,radius}), style.gradient (color array), style.border ({width,color,radius}), style.cornerRadius. Shape uses style.shape and style.color.',
+          example: '960x540 root; top-center title at [0,92] is centered at x=480. A centered 240px progress track with a left-pivot fill uses middle-center + data.anchor={x:0,y:0.5}, position=[-118,70], not middle-left.',
+        },
         uiVocabulary: {
           roles: BEEGAME_UI_NODE_ROLES,
           rootByDocumentKind: {

@@ -32,6 +32,16 @@ describe('chatStore Performance & Cap', () => {
     expect(state.messageIndexMap['msg-2']).toBe(1);
   });
 
+  it('keeps the subagent prompt and trace when a terminal notification updates the live card', () => {
+    const { addMessage } = useChatStore.getState();
+    const base = { id: 'agent-1', messageId: 'agent-1', sender: 'beegame', content: 'Subagent', timestamp: 1000 };
+    addMessage({ ...base, toolStatus: 'running', subagentPrompt: 'Audit assets', subagentTrace: 'Read manifest.json' });
+    addMessage({ ...base, toolStatus: 'completed', subagentPrompt: undefined, subagentTrace: undefined, subagentOutput: 'Audit passed' });
+    expect(useChatStore.getState().messages).toHaveLength(1);
+    expect(useChatStore.getState().messages[0]).toMatchObject({ toolStatus: 'completed', subagentPrompt: 'Audit assets',
+      subagentTrace: 'Read manifest.json', subagentOutput: 'Audit passed' });
+  });
+
   it('should cap messages at the paginated history limit (2000)', () => {
     const { addMessage } = useChatStore.getState();
     

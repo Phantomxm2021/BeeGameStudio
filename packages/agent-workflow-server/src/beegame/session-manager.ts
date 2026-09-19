@@ -46,6 +46,7 @@ import {
   readNativeBackgroundTaskUsage,
 } from './native-background-task-output'
 import { createNativeCliProcessRunner } from './native-cli-process-runner'
+import { createNativeSubagentChatEnricher, isNativeTaskLifecycle } from './native-subagent-chat'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
 import {
   parseNativeTerminalTaskNotification,
@@ -179,9 +180,15 @@ const WORKFLOW_WORKER_CHAT_EVENTS = new Set<BeeGameEventType>([
   'tool.completed',
   'tool.failed',
   'tool.progress',
+  'system.status',
 ])
 
 export type BeeGameEventSubscriber = (event: BeeGameEvent) => void
+
+function isWorkerChatEvent(event: Pick<BeeGameEvent, 'type' | 'payload'>): boolean {
+  return WORKFLOW_WORKER_CHAT_EVENTS.has(event.type) &&
+    (event.type !== 'system.status' || isNativeTaskLifecycle(event.payload))
+}
 
 type ProjectEventSubscription = {
   userId: string
@@ -428,6 +435,7 @@ type SessionRecord = {
     {
       toolUseID: string
       outputFile: string
+      turnId?: string
       status: 'running' | 'completed' | 'failed' | 'stopped' | 'killed'
     }
   >
@@ -464,6 +472,8 @@ export type StartBeeGameSessionInput = {
   projectId?: string
   modelConfigId?: string
   transcriptSessionId?: string
+  /** Resume a native CLI conversation without treating its UUID as a BGS transcript ID. */
+  resumeNativeSessionId?: string
   userId: string
   authToken?: string
   getValidAuthToken?: (options?: {
@@ -518,6 +528,7 @@ export type BeeGameSessionUsageBillingBackend = {
 
 export class BeeGameSessionManager {
   private readonly sessions = new Map<string, SessionRecord>()
+  private readonly subagentChat = new WeakMap<SessionRecord, ReturnType<typeof createNativeSubagentChatEnricher>>()
   private readonly eventSubscribers = new Map<
     string,
     Set<BeeGameEventSubscriber>
@@ -620,7 +631,11 @@ export class BeeGameSessionManager {
     )
     const record: SessionRecord = {
       session,
+      ...(input.resumeNativeSessionId
+        ? { nativeSessionId: input.resumeNativeSessionId }
+        : {}),
       ...(persistedRuntime?.nativeSessionId &&
+      !input.resumeNativeSessionId &&
       resolveExistingPath(persistedRuntime.workspacePath) ===
         resolveExistingPath(cwd)
         ? { nativeSessionId: persistedRuntime.nativeSessionId }
@@ -1268,20 +1283,15 @@ export class BeeGameSessionManager {
   }
 
   /**
-   * Workflow workers are disposable transport sessions. Their durable
-   * progress lives in .beegame/workflow, so remove the private transcript and
-   * runtime snapshot when the worker reaches a terminal state.
+   * Workflow workers are disposable transports, but their transcript and
+   * native-session snapshot are delivery evidence. Retention is handled by
+   * the project log policy, not by terminal cleanup.
    */
   async disposeWorkflowWorker(sessionId: string): Promise<void> {
     const record = this.sessions.get(sessionId)
     if (!record?.workflowWorker) return
     if (record.session.status === 'running') this.stop(sessionId)
     await this.waitForWorkflowWorkerIdle(sessionId)
-    await rm(record.transcriptPath, { force: true })
-    await rm(
-      getRuntimeSnapshotPath(this.dashboardDataRoot, record.session.id),
-      { force: true },
-    )
     this.sessions.delete(sessionId)
     this.eventSubscribers.delete(sessionId)
   }
@@ -1502,6 +1512,14 @@ export class BeeGameSessionManager {
             this.persistRuntimeSnapshot(record)
           },
           onNativeTaskNotification: notification => {
+            // Foreground messages already go through onMessage. Background
+            // notifications must remain visible after that turn has returned.
+            if (notification.backgroundMessage) {
+              const taskId = getStringField(notification.backgroundMessage, 'task_id')
+              this.append(record, 'system.status', String(notification.backgroundMessage.subtype),
+                notification.backgroundMessage as DashboardSDKMessage,
+                record.nativeBackgroundTasks.get(taskId)?.turnId)
+            }
             const terminal = parseNativeTerminalTaskNotification(notification)
             if (!terminal) return
             for (const [taskId, task] of record.nativeBackgroundTasks) {
@@ -2111,7 +2129,12 @@ export class BeeGameSessionManager {
   ): BeeGameEvent {
     const effectiveTurnId = turnId || record.currentTurnId || undefined
     const createdAt = new Date()
-    let eventPayload = payload
+    let enrich = this.subagentChat.get(record)
+    if (!enrich) {
+      enrich = createNativeSubagentChatEnricher()
+      this.subagentChat.set(record, enrich)
+    }
+    let eventPayload = enrich({ type, payload }).payload as DashboardSDKMessage | undefined
     if (type === 'assistant.thinking') {
       const thinkingBlockId = getDashboardPayloadString(payload, 'thinkingBlockId') || 'default'
       const thinkingKey = `${effectiveTurnId ?? record.session.id}:${thinkingBlockId}`
@@ -2193,7 +2216,7 @@ export class BeeGameSessionManager {
     if (
       record.workflowWorker &&
       record.projectId &&
-      WORKFLOW_WORKER_CHAT_EVENTS.has(event.type)
+      isWorkerChatEvent(event)
     ) {
       const chatRecord = [...this.sessions.values()]
         .filter(
@@ -2509,8 +2532,14 @@ export async function readWorkflowWorkerChatHistoryFromDisk(
     if (!workerStart) continue
     const workflowWorkerType = workerStart.text
       .match(/BeeGame delivery worker:\s*([^\s]+)/)?.[1]
+    const enrich = createNativeSubagentChatEnricher()
+    const latestNativeTask = new Map<string, number>()
     for (const event of events) {
-      if (!WORKFLOW_WORKER_CHAT_EVENTS.has(event.type)) continue
+      if (isNativeTaskLifecycle(event.payload)) latestNativeTask.set(String(event.payload?.task_id), event.id)
+    }
+    for (const rawEvent of events) {
+      const event = enrich(rawEvent, latestNativeTask.get(String(rawEvent.payload?.task_id)) === rawEvent.id)
+      if (!isWorkerChatEvent(event)) continue
       if (mirrored.has(`${event.sessionId}:${event.id}`)) continue
       recovered.push({
         ...event,
@@ -2579,7 +2608,6 @@ function workflowStageForWorkerType(workerType?: string): string | undefined {
     'foundation-document-reviser': 'revision',
     'resource-planner': 'resources',
     'implementation-worker': 'implementation',
-    'acceptance-validator': 'acceptance',
   }
   return workerType ? stages[workerType] : undefined
 }
@@ -2599,11 +2627,11 @@ function stageChatMessageFromTrace(
   entry: { event?: unknown; data?: unknown },
   contentLengths = new Map<string, number>(),
 ): Record<string, unknown> | undefined {
-  if (entry.event === 'response.message' && entry.data && typeof entry.data === 'object')
+  if ((entry.event === 'response.message' || entry.event === 'native.task_lifecycle') && entry.data && typeof entry.data === 'object')
     return entry.data as Record<string, unknown>
   if (entry.event === 'response.query_end' && entry.data && typeof entry.data === 'object') {
     const data = entry.data as Record<string, unknown>
-    return { type: 'thinking_end', queryId: data.queryId }
+    return { type: 'thinking_end', queryId: data.queryId, parentToolUseId: data.parentToolUseId, agentId: data.agentId }
   }
   if (!entry.data || typeof entry.data !== 'object') return undefined
   const data = entry.data as Record<string, unknown>
@@ -2616,7 +2644,7 @@ function stageChatMessageFromTrace(
     const delta = data.content.length >= priorLength ? data.content.slice(priorLength) : data.content
     contentLengths.set(key, data.content.length)
     if (!delta) return undefined
-    return { type: 'stream_event', queryId: data.queryId,
+    return { type: 'stream_event', queryId: data.queryId, parentToolUseId: data.parentToolUseId, agentId: data.agentId,
       ...(typeof data.queryId === 'string' && typeof data.index === 'number' && typeof data.receivedBytes === 'number'
         ? { workflowStageNativeKey: `text:${data.queryId}:${data.index}:${data.receivedBytes}` }
         : {}),
@@ -2625,6 +2653,7 @@ function stageChatMessageFromTrace(
   if (entry.event !== 'response.reasoning_snapshot' || typeof data.content !== 'string' || !data.content) return undefined
   return { type: 'stream_event',
     queryId: data.queryId,
+    parentToolUseId: data.parentToolUseId, agentId: data.agentId,
     ...(typeof data.queryId === 'string' && typeof data.receivedBytes === 'number'
       ? { workflowStageNativeKey: `thinking:${data.queryId}:${data.receivedBytes}` }
       : {}),
@@ -4466,7 +4495,7 @@ function mapNativeTaskLifecycleEvent(message: DashboardSDKMessage): {
   payload: DashboardSDKMessage
 } | null {
   const subtype = getStringField(message, 'subtype')
-  if (subtype !== 'task_started' && subtype !== 'task_notification') return null
+  if (!isNativeTaskLifecycle(message)) return null
   return { type: 'system.status', text: subtype, payload: message }
 }
 
@@ -4632,6 +4661,7 @@ function mapSDKMessageToToolEvents(
           record.nativeBackgroundTasks.set(launch.taskId, {
             toolUseID,
             outputFile: launch.outputFile,
+            turnId: record.currentTurnId ?? undefined,
             status: existing?.status ?? 'running',
           })
         }

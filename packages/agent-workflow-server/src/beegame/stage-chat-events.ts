@@ -1,4 +1,7 @@
+import { createNativeSubagentChatEnricher, isNativeTaskLifecycle } from './native-subagent-chat'
+
 export type StageChatEventType =
+  | 'system.status'
   | 'assistant.message'
   | 'assistant.partial'
   | 'assistant.thinking'
@@ -63,6 +66,10 @@ export function createStageChatProjector(input: {
   const toolResults = new Set<string>()
   const assistantMessages = new Set<string>()
   const activeThinking = new Set<string>()
+  const enrich = createNativeSubagentChatEnricher()
+  const originalSink = input.sink
+  const sink: StageChatSink | undefined = originalSink ? event => originalSink(enrich(event)) : undefined
+  input = { ...input, sink }
 
   const closeThinking = async (turnId: string | undefined, reason: string) => {
     if (!turnId || !activeThinking.delete(turnId) || !input.sink) return
@@ -75,8 +82,21 @@ export function createStageChatProjector(input: {
   return async (message: NativeMessage): Promise<void> => {
     if (!input.sink) return
     const queryId = typeof message.queryId === 'string' ? message.queryId : undefined
-    const turnId = queryId ? `workflow-stage:${input.stage}:${queryId}` : undefined
-    const source = { workflowStage: input.stage, ...(turnId ? { workflowStageStreamId: turnId } : {}) }
+    const parentToolUseID = typeof message.parent_tool_use_id === 'string' ? message.parent_tool_use_id :
+      typeof message.parentToolUseId === 'string' ? message.parentToolUseId : undefined
+    const nativeAgentId = typeof message.agentId === 'string' && message.agentId !== 'root' ? message.agentId : undefined
+    const childScope = parentToolUseID || nativeAgentId
+    const turnId = queryId ? `workflow-stage:${input.stage}:${queryId}${childScope ? `:subagent:${childScope}` : ''}` : undefined
+    const source = { workflowStage: input.stage, ...(turnId ? { workflowStageStreamId: turnId } : {}),
+      ...(parentToolUseID ? { parentToolUseID } : {}), ...(nativeAgentId ? { nativeAgentId } : {}) }
+
+    if (isNativeTaskLifecycle(message)) {
+      await input.sink({ type: 'system.status', text: message.subtype, turnId,
+        payload: { ...message, type: 'system', ...source,
+          workflowStageNativeKey: message.workflowStageNativeKey ||
+            `${input.stage}:${queryId}:${message.uuid || `${message.task_id}:${message.subtype}:${JSON.stringify(message.usage ?? {})}`}` } })
+      return
+    }
 
     if (message.type === 'thinking_end') {
       await closeThinking(turnId, 'native_query_end')

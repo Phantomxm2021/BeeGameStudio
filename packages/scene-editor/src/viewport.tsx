@@ -1,5 +1,5 @@
 import { Canvas, createPortal, events as createPointerEvents, useFrame, useThree } from '@react-three/fiber'
-import { Bounds, useBounds, Grid, GizmoHelper, GizmoViewport, OrbitControls, TransformControls } from '@react-three/drei'
+import { Bounds, useBounds, Grid, Line, GizmoHelper, GizmoViewport, OrbitControls, TransformControls } from '@react-three/drei'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MutableRefObject } from 'react'
 import * as THREE from 'three'
@@ -8,6 +8,7 @@ import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.j
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
 import type { ModelSelection } from './model-structure'
 import { componentOf, DEFAULT_SCENE_SETTINGS } from './model'
+import { colliderOutline } from './collider-outline'
 import { LightGizmo, lightConePoints } from './light-gizmo'
 import { isApplePlatform, resolveUnityNavigationAction, wheelPixels } from './navigation'
 import type { NavigationAction } from './navigation'
@@ -36,7 +37,6 @@ export type SceneViewportProps = {
   onDiagnostic?: (message: string) => void
 }
 
-const identity = (): Transform => ({ position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] })
 const sameTransform = (a: Transform, b: Transform) => JSON.stringify(a) === JSON.stringify(b)
 function viewportEvents(state: Parameters<typeof createPointerEvents>[0]) {
   const manager = createPointerEvents(state)
@@ -412,7 +412,7 @@ function preview2d(node: SceneNode): Preview2D | undefined {
   }
 }
 
-export function rendererSize(node: SceneNode): [number, number] {
+export function rendererSize(node: SceneNode, pixelsPerUnit = 100): [number, number] {
   const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image') ?? componentOf(node, 'tilemap')
   const properties = renderer && 'properties' in renderer ? renderer.properties : undefined
   const value = properties?.size
@@ -420,24 +420,25 @@ export function rendererSize(node: SceneNode): [number, number] {
   const logical = sprite && typeof sprite === 'object' && !Array.isArray(sprite) ? (sprite as Record<string, unknown>).logicalSize : undefined
   const rect = componentOf(node, 'rect-transform')
   const rectSize = rect?.sizeDelta
-  const size = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown>
+  const size = Array.isArray(value) ? { width: value[0], height: value[1] }
+    : value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown>
     : logical && typeof logical === 'object' && !Array.isArray(logical) ? logical as Record<string, unknown>
-    : rectSize ? { width: rectSize[0] * 100, height: rectSize[1] * 100 }
+    : rectSize ? { width: rectSize[0] * pixelsPerUnit, height: rectSize[1] * pixelsPerUnit }
     : undefined
   const width = typeof size?.width === 'number' && Number.isFinite(size.width) ? size.width : 100
   const height = typeof size?.height === 'number' && Number.isFinite(size.height) ? size.height : 100
-  return [Math.max(1, width) / 100, Math.max(1, height) / 100]
+  return [Math.max(1, width) / pixelsPerUnit, Math.max(1, height) / pixelsPerUnit]
 }
 
-function patrolPosition(patrol: NonNullable<Preview2D['patrol']>, elapsedSecs: number): { x: number; y: number } | undefined {
+function patrolPosition(patrol: NonNullable<Preview2D['patrol']>, elapsedSecs: number, pixelsPerUnit: number): { x: number; y: number } | undefined {
   const forward = patrol.waypoints?.filter(point => Number.isFinite(point.x) && Number.isFinite(point.y)) ?? []
   if (!forward.length) return undefined
   const points = patrol.mode === 'pingpong'
     ? [...forward, ...forward.slice(1, -1).reverse()]
     : [...forward, ...(patrol.returnPath?.filter(point => Number.isFinite(point.x) && Number.isFinite(point.y)) ?? [])]
-  if (points.length === 1) return { x: points[0].x! / 100, y: points[0].y! / 100 }
+  if (points.length === 1) return { x: points[0].x! / pixelsPerUnit, y: points[0].y! / pixelsPerUnit }
   const startDelay = Math.max(0, patrol.startDelaySecs ?? 0)
-  if (elapsedSecs <= startDelay) return { x: points[0].x! / 100, y: points[0].y! / 100 }
+  if (elapsedSecs <= startDelay) return { x: points[0].x! / pixelsPerUnit, y: points[0].y! / pixelsPerUnit }
   const speed = 80
   const segments = points.map((point, index) => {
     const next = points[(index + 1) % points.length]
@@ -447,18 +448,18 @@ function patrolPosition(patrol: NonNullable<Preview2D['patrol']>, elapsedSecs: n
   const cycleSecs = segments.reduce((sum, segment) => sum + segment.travelSecs + segment.pauseSecs, 0)
   let cursor = (elapsedSecs - startDelay) % Math.max(.1, cycleSecs)
   for (const segment of segments) {
-    if (cursor < segment.pauseSecs) return { x: segment.point.x! / 100, y: segment.point.y! / 100 }
+    if (cursor < segment.pauseSecs) return { x: segment.point.x! / pixelsPerUnit, y: segment.point.y! / pixelsPerUnit }
     cursor -= segment.pauseSecs
     if (cursor <= segment.travelSecs) {
       const progress = segment.travelSecs > 0 ? cursor / segment.travelSecs : 1
       return {
-        x: THREE.MathUtils.lerp(segment.point.x!, segment.next.x!, progress) / 100,
-        y: THREE.MathUtils.lerp(segment.point.y!, segment.next.y!, progress) / 100,
+        x: THREE.MathUtils.lerp(segment.point.x!, segment.next.x!, progress) / pixelsPerUnit,
+        y: THREE.MathUtils.lerp(segment.point.y!, segment.next.y!, progress) / pixelsPerUnit,
       }
     }
     cursor -= segment.travelSecs
   }
-  return { x: points[0].x! / 100, y: points[0].y! / 100 }
+  return { x: points[0].x! / pixelsPerUnit, y: points[0].y! / pixelsPerUnit }
 }
 
 function spriteFrameAt(sprite: NonNullable<Preview2D['sprite']>, elapsedMs: number): number {
@@ -476,7 +477,7 @@ function spriteFrameAt(sprite: NonNullable<Preview2D['sprite']>, elapsedMs: numb
   return 0
 }
 
-function Primitive({ node, assets, diagnose }: { node: SceneNode; assets: Record<string, SceneAsset>; diagnose: (message: string) => void }) {
+function Primitive({ node, assets, diagnose, pixelsPerUnit }: { pixelsPerUnit: number; node: SceneNode; assets: Record<string, SceneAsset>; diagnose: (message: string) => void }) {
   const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image')
   const tilemap = componentOf(node, 'tilemap')
   const tilemapRenderer = componentOf(node, 'tilemap-renderer')
@@ -508,7 +509,7 @@ function Primitive({ node, assets, diagnose }: { node: SceneNode; assets: Record
   const materialKey = texture?.uuid ?? 'no-texture'
   const material = materialData?.mode === 'standard' ? <meshStandardMaterial key={materialKey} {...props} blending={blending} metalness={materialData.metalness} roughness={materialData.roughness} /> : <meshBasicMaterial key={materialKey} {...props} blending={blending} />
   if (!(componentVisibleInEditor(renderer) || (componentVisibleInEditor(tilemap) && componentVisibleInEditor(tilemapRenderer)))) return null
-  return <mesh castShadow receiveShadow scale={[...rendererSize(node), 1]}><planeGeometry args={[1, 1]} />{material}</mesh>
+  return <mesh castShadow receiveShadow scale={[...rendererSize(node, pixelsPerUnit), 1]}><planeGeometry args={[1, 1]} />{material}</mesh>
 }
 
 function TextPreview({ node }: { node: SceneNode }) {
@@ -544,7 +545,7 @@ function seeded(index: number, salt: number): number {
   return value - Math.floor(value)
 }
 
-function ParticleEmitterPreview({ node, assets, diagnose }: { node: SceneNode; assets: Record<string, SceneAsset>; diagnose: (message: string) => void }) {
+function ParticleEmitterPreview({ node, assets, diagnose, pixelsPerUnit }: { pixelsPerUnit: number; node: SceneNode; assets: Record<string, SceneAsset>; diagnose: (message: string) => void }) {
   const particle = componentOf(node, 'particle-system')
   const renderer = componentOf(node, 'particle-system-renderer')
   if (!componentVisibleInEditor(particle) || !componentVisibleInEditor(renderer)) return null
@@ -556,22 +557,22 @@ function ParticleEmitterPreview({ node, assets, diagnose }: { node: SceneNode; a
     const zone = emitter?.zone
     const sizeMin = emitter?.particleSize?.min ?? 3, sizeMax = emitter?.particleSize?.max ?? sizeMin
     return {
-      x: ((zone?.x ?? 0) + seeded(index, 1) * (zone?.width ?? 0)) / 100,
-      y: ((zone?.y ?? 0) + seeded(index, 2) * (zone?.height ?? 0)) / 100,
-      size: (sizeMin + seeded(index, 3) * (sizeMax - sizeMin)) / 100,
+      x: ((zone?.x ?? 0) + seeded(index, 1) * (zone?.width ?? 0)) / pixelsPerUnit,
+      y: ((zone?.y ?? 0) + seeded(index, 2) * (zone?.height ?? 0)) / pixelsPerUnit,
+      size: (sizeMin + seeded(index, 3) * (sizeMax - sizeMin)) / pixelsPerUnit,
       phase: seeded(index, 4) * Math.PI * 2,
       speed: (emitter?.motion?.periodSecs?.min ?? 3) + seeded(index, 5) * ((emitter?.motion?.periodSecs?.max ?? 6) - (emitter?.motion?.periodSecs?.min ?? 3)),
       opacity: (emitter?.alpha?.min ?? .35) + seeded(index, 6) * ((emitter?.alpha?.max ?? .9) - (emitter?.alpha?.min ?? .35)),
     }
-  }), [count, emitter])
+  }), [count, emitter, pixelsPerUnit])
   useFrame(({ clock }) => {
     if (!root.current) return
     root.current.children.forEach((child, index) => {
       const particle = particles[index]
       if (!particle) return
       const wave = clock.elapsedTime * Math.PI * 2 / Math.max(.1, particle.speed) + particle.phase
-      child.position.x = particle.x + Math.sin(wave) * (emitter?.motion?.amplitudePx ?? 0) / 100
-      child.position.y = particle.y + Math.cos(wave * .7) * (emitter?.motion?.amplitudePx ?? 0) / 200
+      child.position.x = particle.x + Math.sin(wave) * (emitter?.motion?.amplitudePx ?? 0) / pixelsPerUnit
+      child.position.y = particle.y + Math.cos(wave * .7) * (emitter?.motion?.amplitudePx ?? 0) / (pixelsPerUnit * 2)
       const material = (child as THREE.Mesh).material as THREE.MeshBasicMaterial
       material.opacity = particle.opacity * (.7 + .3 * Math.sin(wave))
     })
@@ -662,13 +663,8 @@ export function AssetModelPreview({ asset, assets, onDiagnostic }: { asset: Scen
 }
 
 function Volume2D({ volume }: { volume: Collider2DComponent }) {
-  const material = <meshBasicMaterial color={volume.isTrigger ? '#e27ac2' : '#4ea3db'} wireframe transparent opacity={.55} depthWrite={false} />
-  if (volume.type === 'circle-collider-2d') return <mesh userData={{ editorHelper: true }} position={[volume.offset[0], volume.offset[1], .002]} scale={[volume.radius * 2, volume.radius * 2, 1]}><circleGeometry args={[.5, 32]} />{material}</mesh>
-  if (volume.type === 'polygon-collider-2d') {
-    const shape = new THREE.Shape(); volume.points.forEach(([x, y], index) => index ? shape.lineTo(x, y) : shape.moveTo(x, y)); shape.closePath()
-    return <mesh userData={{ editorHelper: true }} position={[volume.offset[0], volume.offset[1], .002]}><shapeGeometry args={[shape]} />{material}</mesh>
-  }
-  return <mesh userData={{ editorHelper: true }} position={[volume.offset[0], volume.offset[1], .002]} scale={[volume.size[0], volume.size[1], 1]}><planeGeometry args={[1, 1]} />{material}</mesh>
+  const points = colliderOutline(volume)
+  return points.length > 1 ? <Line userData={{ editorHelper: true }} points={points} renderOrder={1001} color={volume.isTrigger ? '#e27ac2' : '#4ea3db'} lineWidth={1} transparent opacity={.8} depthWrite={false} depthTest={false} raycast={() => null} /> : null
 }
 
 function Volume3D({ volume }: { volume: Collider3DComponent }) {
@@ -751,6 +747,7 @@ function SelectionOutline({ selectedIds, modelSelection, color, width }: { selec
 }
 
 function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableIds, onSelect, mode, space, snap, onTransform, orbit, diagnose, showGizmos, viewMode }: { id: string; document: SceneDocument; selected: string; selectedIds: readonly string[]; hiddenIds: readonly string[]; unpickableIds: readonly string[]; onSelect: (id: string, modifiers?: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => void; mode: SceneViewportMode; space: 'local' | 'world'; snap: boolean; onTransform: (transform: Transform) => void; orbit: MutableRefObject<any>; diagnose: (message: string) => void; showGizmos: boolean; viewMode: SceneViewMode }) {
+  const pixelsPerUnit = document.pixelsPerUnit ?? 100
   const node = document.nodes[id]
   const group = useRef<THREE.Group>(null)
   const controls = useRef<any>(null)
@@ -764,11 +761,11 @@ function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableId
     const time = clock.elapsedTime
     object.position.set(...node.transform.position)
     object.scale.set(...node.transform.scale)
-    const patrol = preview?.patrol ? patrolPosition(preview.patrol, time) : undefined
+    const patrol = preview?.patrol ? patrolPosition(preview.patrol, time, pixelsPerUnit) : undefined
     if (patrol) { object.position.x = patrol.x; object.position.y = patrol.y }
     const motion = preview?.motion
-    if (motion?.kind === 'vertical-bob') object.position.y += Math.sin(time * Math.PI * 2 / Math.max(.1, typeof motion.periodSecs === 'number' ? motion.periodSecs : 2.4)) * (motion.amplitudePx ?? 0) / 100
-    else if (motion?.kind === 'horizontal-drift') object.position.x += Math.sin(time * Math.PI / 8) * Math.max(.02, (motion.speedPxPerSec ?? 0) / 100)
+    if (motion?.kind === 'vertical-bob') object.position.y += Math.sin(time * Math.PI * 2 / Math.max(.1, typeof motion.periodSecs === 'number' ? motion.periodSecs : 2.4)) * (motion.amplitudePx ?? 0) / pixelsPerUnit
+    else if (motion?.kind === 'horizontal-drift') object.position.x += Math.sin(time * Math.PI / 8) * Math.max(.02, (motion.speedPxPerSec ?? 0) / pixelsPerUnit)
     const animation = preview?.animation
     if (animation?.kind === 'breathe' || animation?.kind === 'pulse') {
       const wave = (Math.sin(time * Math.PI * 2 / Math.max(.1, animation.periodSecs ?? 2.4)) + 1) / 2
@@ -801,12 +798,12 @@ function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableId
     start.current = null; setDragging(false); if (orbit.current) orbit.current.enabled = true
   }
   return <><group ref={group} name={node.id} position={node.transform.position} rotation={node.transform.rotation as any} scale={node.transform.scale} onClick={event => { event.stopPropagation(); if (!unpickableIds.includes(node.id) && mode !== 'hand' && !event.altKey) onSelect(node.id, { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey }) }}>
-    {componentOf(node, 'sprite-renderer') || componentOf(node, 'image') || componentOf(node, 'tilemap') ? <Primitive node={node} assets={document.assets} diagnose={diagnose} /> : null}
+    {componentOf(node, 'sprite-renderer') || componentOf(node, 'image') || componentOf(node, 'tilemap') ? <Primitive node={node} pixelsPerUnit={pixelsPerUnit} assets={document.assets} diagnose={diagnose} /> : null}
     {componentOf(node, 'text') ? <TextPreview node={node} /> : null}
     {componentOf(node, 'mesh-filter') && componentOf(node, 'mesh-renderer') ? <ModelAsset asset={document.assets[componentOf(node, 'mesh-filter')!.assetId]} override={componentOf(node, 'mesh-renderer')!.material} assets={document.assets} diagnose={diagnose} /> : null}
     {componentOf(node, 'skinned-mesh-renderer') ? <ModelAsset asset={document.assets[componentOf(node, 'skinned-mesh-renderer')!.assetId]} override={componentOf(node, 'skinned-mesh-renderer')!.material} assets={document.assets} diagnose={diagnose} /> : null}
-    {componentOf(node, 'particle-system') ? <ParticleEmitterPreview node={node} assets={document.assets} diagnose={diagnose} /> : null}
-    {componentVisibleInEditor(componentOf(node, 'light-2d') ?? componentOf(node, 'light')) ? <Light dimension={viewMode} showIcon={viewMode === '3d' && (showGizmos || isSelected)} node={node} selected={isSelected} gizmoColor={document.settings?.selectionColor ?? '#ffad46'} /> : null}
+    {componentOf(node, 'particle-system') ? <ParticleEmitterPreview node={node} pixelsPerUnit={pixelsPerUnit} assets={document.assets} diagnose={diagnose} /> : null}
+    {componentVisibleInEditor(componentOf(node, 'light-2d') ?? componentOf(node, 'light')) ? <Light dimension={viewMode} showIcon={showGizmos} node={node} selected={isSelected} gizmoColor={document.settings?.selectionColor ?? '#ffad46'} /> : null}
     {showGizmos && (viewMode === '3d' || isSelected) ? node.components.filter((component): component is Collider2DComponent => ['box-collider-2d', 'circle-collider-2d', 'capsule-collider-2d', 'polygon-collider-2d'].includes(component.type) && component.enabled).map(component => <Volume2D key={component.id} volume={component} />) : null}
     {showGizmos && (viewMode === '3d' || isSelected) ? node.components.filter((component): component is Collider3DComponent => ['box-collider', 'sphere-collider', 'capsule-collider', 'mesh-collider'].includes(component.type) && component.enabled).map(component => <Volume3D key={component.id} volume={component} />) : null}
     {viewMode === '3d' && !node.components.some(component => ['sprite-renderer', 'image', 'tilemap-renderer', 'mesh-renderer', 'skinned-mesh-renderer', 'particle-system', 'light-2d', 'light'].includes(component.type)) && showGizmos ? <axesHelper args={[.35]} /> : null}

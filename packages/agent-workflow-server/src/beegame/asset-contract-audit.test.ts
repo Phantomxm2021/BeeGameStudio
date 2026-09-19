@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
@@ -86,6 +86,44 @@ async function writeFixture(value: BeeGameAssetManifest): Promise<string> {
 }
 
 describe('Manifest-owned resource bindings', () => {
+  test('accepts descriptive vocabulary and preserves resource/source annotations', async () => {
+    const value = manifest()
+    value.requirements[0]!.acquisition_profile.usage_tags = ['world', 'gameplay', 'custom-harbor']
+    value.requirements[0]!.acquisition_profile.capabilities = ['texturepacker-array-json']
+    const resource = { ...value.resources[0]!, usage_tags: ['user-defined'], capabilities: ['my-format'],
+      notes: 'Independent art notes', source: { ...value.resources[0]!.source, toolchain: 'Pillow' } }
+    value.resources = [resource]
+    expect(parseCanonicalBeeGameAssetManifest(value).resources[0]).toMatchObject({ notes: 'Independent art notes', source: { toolchain: 'Pillow' } })
+    expect(auditAssetContract(await writeFixture(value)).valid).toBe(true)
+  })
+
+  test('does not treat an unconsumed hash spelling as verified integrity', () => {
+    const value = manifest()
+    value.resources = [{ ...value.resources[0]!, hashes: { sha256: {} } } as never]
+    expect(() => parseCanonicalBeeGameAssetManifest(value)).toThrow('use local_file_hashes')
+  })
+
+  test('retains real entry-file and integrity checks', async () => {
+    const value = manifest()
+    value.resources[0]!.root_path = 'assets/runtime'
+    expect(() => parseCanonicalBeeGameAssetManifest(value)).toThrow('root_path must be listed')
+    value.resources[0]!.root_path = 'assets/runtime/model.json'
+    value.resources[0]!.local_file_hashes = { 'assets/runtime/model.json': '0'.repeat(64) }
+    const workspace = await writeFixture(value)
+    expect(auditAssetContract(workspace).issues.join('\n')).toContain('hash does not match')
+    await rm(join(workspace, 'assets/runtime/model.json'))
+    expect(auditAssetContract(workspace).issues.join('\n')).toContain('File does not exist')
+  })
+
+  test('rejects symlinked resource files escaping the project', async () => {
+    const workspace = await writeFixture(manifest())
+    const outside = await mkdtemp(join(tmpdir(), 'beegame-outside-'))
+    workspaces.push(outside)
+    await writeFile(join(outside, 'data.json'), '{}')
+    await rm(join(workspace, 'assets/runtime/model.json'))
+    await symlink(join(outside, 'data.json'), join(workspace, 'assets/runtime/model.json'))
+    expect(auditAssetContract(workspace).issues.join('\n')).toContain('escapes the project')
+  })
   test('accepts a verified resource that fulfills a current requirement', async () => {
     const workspace = await writeFixture(manifest())
 

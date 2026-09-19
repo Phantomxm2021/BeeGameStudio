@@ -154,6 +154,7 @@ describe('native CLI process runner', () => {
 
   test('keeps native background task notifications observable after the foreground result', async () => {
     const notifications: string[] = []
+    const backgroundMessages: unknown[] = []
     const runtime = await createNativeCliProcessRunner({
       command: [process.execPath, fixturePath],
       observabilityFactory: () => ({
@@ -168,8 +169,10 @@ describe('native CLI process runner', () => {
       sessionId: 'session-background-notification',
       cwd: process.cwd(),
       env: {},
-      onNativeTaskNotification: notification =>
-        notifications.push(notification.value),
+      onNativeTaskNotification: notification => {
+        notifications.push(notification.value)
+        backgroundMessages.push(notification.backgroundMessage)
+      },
     })
 
     await runtime.submit({
@@ -183,6 +186,7 @@ describe('native CLI process runner', () => {
     expect(notifications).toEqual([
       '<task-id>task-after-result</task-id><status>completed</status>',
     ])
+    expect(backgroundMessages).toEqual([expect.objectContaining({ type: 'system', subtype: 'task_notification' })])
     runtime.dispose?.()
   })
 

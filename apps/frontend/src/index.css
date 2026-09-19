@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./styles/tokens.css";
+@source "../../../packages/scene-editor/src";
 @config "../tailwind.config.js";
 
 @variant dark (&:where(.dark, .dark *));

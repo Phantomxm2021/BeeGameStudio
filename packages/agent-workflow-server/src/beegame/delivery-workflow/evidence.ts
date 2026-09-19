@@ -48,6 +48,7 @@ export async function persistImplementationEvidence(input: {
   taskId: string
   revision: string
   verifiedArtifacts: string[]
+  summary: string
   verificationResults: ImplementationVerificationResult[]
 }): Promise<void> {
   const target = resolveWorkflowEvidencePath(
@@ -67,6 +68,7 @@ export async function persistImplementationEvidence(input: {
       taskId: input.taskId,
       revision: input.revision,
       verifiedArtifacts: input.verifiedArtifacts,
+      summary: input.summary,
       verificationResults: input.verificationResults,
     })}\n`,
     'utf8',

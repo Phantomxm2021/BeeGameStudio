@@ -18,6 +18,69 @@ const transcriptResponse = (overrides: Record<string, unknown> = {}) => new Resp
 }))
 
 describe('transcriptEventsToHistory', () => {
+  const nativeEvent = (id: number, type: string, payload: Record<string, unknown>, sessionId = 'worker-1') => ({
+    id, type, payload, sessionId, turnId: 'turn-1', text: 'system', createdAt: `2026-09-19T00:00:0${id}.000Z`,
+  })
+  const launchEvents = () => [
+    nativeEvent(1, 'tool.started', { toolName: 'Agent', toolUseID: 'agent-1', input: { description: 'Audit assets', prompt: 'Check manifest' } }),
+    nativeEvent(2, 'tool.completed', { toolName: 'Agent', toolUseID: 'agent-1', input: { prompt: 'Check manifest' },
+      output: 'Async agent launched successfully.\nagentId: task-1 (internal ID)\noutput_file: /tmp/task-1.output' }),
+  ]
+
+  it('keeps asynchronous launch running, not completed, without showing the launch receipt as a result', () => {
+    const history = transcriptEventsToHistory('project-1', launchEvents()) as Record<string, unknown>[]
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ toolStatus: 'running', isSubagentTool: true, subagentPrompt: 'Check manifest' })
+    expect(history[0]?.subagentOutput).toBeUndefined()
+  })
+
+  it('reconciles mirrored lifecycle, native progress, trace and terminal result into the same subagent card', () => {
+    const events = [...launchEvents(),
+      nativeEvent(3, 'system.status', { type: 'system', subtype: 'task_progress', task_id: 'task-1', tool_use_id: 'agent-1',
+        workflowSourceSessionId: 'worker-1', description: 'Reading manifest', last_tool_name: 'Read',
+        usage: { tool_uses: 45, duration_ms: 1083052, total_tokens: 156415 }, subagentTrace: '[read-1] Read manifest.json' }, 'main-chat'),
+    ]
+    const progress = transcriptEventsToHistory('project-1', events) as Record<string, unknown>[]
+    expect(progress).toHaveLength(1)
+    expect(progress[0]).toMatchObject({ toolStatus: 'running', subagentPrompt: 'Check manifest' })
+    expect(progress[0]?.subagentTrace).toContain('45 tools')
+    expect(progress[0]?.subagentTrace).toContain('[read-1] Read')
+    events.push(nativeEvent(4, 'turn.completed', {}), nativeEvent(5, 'system.status', {
+      type: 'system', subtype: 'task_notification', tool_use_id: 'agent-1', status: 'completed', summary: 'All assets checked',
+    }))
+    const history = transcriptEventsToHistory('project-1', events) as Record<string, unknown>[]
+    const card = history.find(message => message.isSubagentTool)
+    expect(history.filter(message => message.isSubagentTool)).toHaveLength(1)
+    expect(card).toMatchObject({ toolStatus: 'completed', subagentOutput: 'All assets checked', subagentPrompt: 'Check manifest' })
+    expect(card?.subagentTrace).toContain('[read-1] Read')
+  })
+
+  it.each(['failed', 'stopped', 'killed'])('retains %s background task outcomes after foreground completion', status => {
+    const history = transcriptEventsToHistory('project-1', [...launchEvents(), nativeEvent(3, 'turn.completed', {}),
+      nativeEvent(4, 'system.status', { type: 'system', subtype: 'task_notification', tool_use_id: 'agent-1', status, summary: 'Task ended' }),
+    ]) as Record<string, unknown>[]
+    expect(history.find(message => message.isSubagentTool)).toMatchObject({ toolStatus: 'failed', subagentOutput: 'Task ended' })
+  })
+
+  it('keeps synchronous Agent and Task results completed', () => {
+    for (const toolName of ['Agent', 'Task']) {
+      const history = transcriptEventsToHistory('project-1', [nativeEvent(1, 'tool.completed', {
+        toolName, toolUseID: 'sync-1', output: 'Audit finished', input: { prompt: 'Audit' },
+      })]) as Record<string, unknown>[]
+      expect(history[0]).toMatchObject({ toolStatus: 'completed', subagentOutput: 'Audit finished' })
+    }
+  })
+
+  it('correlates stage lifecycle recovered from disk with the tool invocation already mirrored into chat', () => {
+    const history = transcriptEventsToHistory('project-1', [
+      nativeEvent(1, 'tool.started', { toolName: 'Agent', toolUseID: 'agent-1', input: { prompt: 'Review' },
+        workflowStage: 'reviewer', workflowStageNativeKey: 'reviewer:tool-start:agent-1' }, 'main-chat'),
+      nativeEvent(2, 'system.status', { type: 'system', subtype: 'task_notification', tool_use_id: 'agent-1',
+        status: 'completed', summary: 'Checked', workflowStage: 'reviewer', workflowStageNativeKey: 'reviewer:notification-1' }, 'workflow-stage:reviewer'),
+    ]) as Record<string, unknown>[]
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ toolStatus: 'completed', subagentPrompt: 'Review', subagentOutput: 'Checked' })
+  })
   beforeEach(() => {
     authenticatedFetchMock.mockReset()
   })

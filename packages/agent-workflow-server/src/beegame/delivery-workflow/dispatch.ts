@@ -469,6 +469,7 @@ export function createDeliveryDispatcher(options: {
                     taskId: result.taskId,
                     revision: result.revision,
                     verifiedArtifacts: result.verifiedArtifacts,
+                    summary: result.summary,
                     verificationResults: result.verificationResults,
                 });
             const evidencePath = terminalEvidencePath(result);
@@ -517,7 +518,7 @@ export function createDeliveryDispatcher(options: {
             result.workerType === 'change-impact-analyzer' ||
             result.workerType === 'question-answerer'
             ? 'completed'
-            : result.status === 'passed' || result.status === 'completed'
+            : result.status === 'completed'
                 ? 'completed'
                 : result.status === 'blocked'
                     ? 'blocked'

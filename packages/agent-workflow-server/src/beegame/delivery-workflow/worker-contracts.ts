@@ -59,6 +59,8 @@ export const implementationWorkerTerminalSchema = base
     status: z.enum(['completed', 'failed', 'blocked']),
     changedPaths: z.array(z.string().min(1)),
     verifiedArtifacts: z.array(z.string().min(1)),
+    /** Natural-language account retained as evidence; it is not parsed as a verdict. */
+    summary: z.string().min(1),
     verificationResults: z.array(
       z
         .object({
@@ -75,48 +77,6 @@ export const implementationWorkerTerminalSchema = base
     evidencePath: z.string().min(1),
   })
   .strict()
-
-const implementationFindingSchema = z
-  .object({
-    taskIds: z.array(z.string().min(1)),
-    checklistIds: z.array(z.string().min(1)),
-    artifactPaths: z.array(z.string().min(1)).min(1),
-    description: z.string().min(1),
-    requiredAction: z.string().min(1),
-  })
-  .strict()
-
-function requireActionableFindings(
-  value: { status: 'passed' | 'failed' | 'blocked'; findings: unknown[] },
-  context: z.RefinementCtx,
-): void {
-  if (value.status !== 'passed' && value.findings.length === 0) {
-    context.addIssue({
-      code: 'custom',
-      path: ['findings'],
-      message: 'failed or blocked validation requires actionable findings',
-    })
-  }
-  if (value.status === 'passed' && value.findings.length > 0) {
-    context.addIssue({
-      code: 'custom',
-      path: ['findings'],
-      message: 'passed validation cannot contain findings',
-    })
-  }
-}
-
-export const acceptanceValidatorTerminalSchema = base
-  .extend({
-    workerType: z.literal('acceptance-validator'),
-    status: z.enum(['passed', 'failed', 'blocked']),
-    validatedTaskIds: z.array(z.string().min(1)),
-    checklistIds: z.array(z.string().min(1)),
-    findings: z.array(implementationFindingSchema),
-    evidencePath: z.string().min(1),
-  })
-  .strict()
-  .superRefine(requireActionableFindings)
 
 export const changeImpactTerminalSchema = z
   .object({
@@ -146,7 +106,6 @@ export const workerTerminalSchema = z.discriminatedUnion('workerType', [
   resourcePlannerTerminalSchema,
   contentAuthorTerminalSchema,
   implementationWorkerTerminalSchema,
-  acceptanceValidatorTerminalSchema,
   changeImpactTerminalSchema,
   questionAnswerTerminalSchema,
 ])

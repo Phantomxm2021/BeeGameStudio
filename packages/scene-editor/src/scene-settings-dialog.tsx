@@ -3,6 +3,7 @@ import { Settings2 } from 'lucide-react'
 import { DEFAULT_SCENE_SETTINGS, type SceneDocument, type SceneSettings } from './model'
 import { assertSceneSettings } from './validation'
 import { Dialog, DialogTrigger, DialogContent, DialogTitle, DialogDescription } from './components/ui/dialog'
+import { Input } from './components/motion/input'
 import { Button } from './components/motion/button'
 import { Switch } from './components/motion/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/motion/tabs'
@@ -58,7 +59,7 @@ export function SceneSettingsDialog({ document, onApply, onSave, trigger, open: 
             </TabsList>
             <TabsContent value="environment">
               <div className="settings-section">
-                <label className="settings-field">Scene name<input title="Scene name" value={name} required onChange={event => setName(event.target.value)} /></label>
+                <label className="settings-field">Scene name<Input title="Scene name" value={name} required onChange={setName} /></label>
                 <label className="settings-row">Background<input title="Scene background color" type="color" value={settings.background} onChange={event => patch({ background: event.target.value })} /></label>
                 <label className="settings-row">Exposure<input className="settings-number" title="Scene exposure" type="number" min="0.1" max="5" step="0.1" value={settings.exposure} onChange={event => patch({ exposure: Number(event.target.value) })} /></label>
               </div>
@@ -89,7 +90,7 @@ export function SceneSettingsDialog({ document, onApply, onSave, trigger, open: 
           </Tabs>
           {error && <p className="settings-error" role="alert">{error}</p>}
         </div>
-        <div className="settings-actions"><Button title="Apply scene settings" className="settings-apply" type="submit">Apply</Button></div>
+        <div className="settings-actions"><Button title="Apply scene settings" variant="primary" className="settings-apply" type="submit">Apply</Button></div>
       </form>
     </DialogContent>
   </Dialog>

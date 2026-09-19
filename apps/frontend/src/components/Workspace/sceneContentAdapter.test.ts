@@ -25,6 +25,55 @@ function scene(): BeeGameSceneContentDocument {
 }
 
 describe('Unity-style scene adapter', () => {
+  it('converts collider pixels and y-down offsets, and restores them on save without shrinking lights', () => {
+    const input = scene();
+    input.data.settings = { coordinateSystem: { pixelsPerUnit: 50, width: 1280, height: 720 } };
+    input.data.nodes[0].components = [
+      { id: 'box', type: 'box-collider-2d', data: { size: [140, 80], offset: [10, 20], isTrigger: false } },
+      { id: 'circle', type: 'circle-collider-2d', data: { radius: 26, offset: [5, -10], isTrigger: false } },
+      { id: 'capsule', type: 'capsule-collider-2d', data: { size: [140, 80], offset: [0, 0], direction: 'horizontal', isTrigger: true } },
+      { id: 'polygon', type: 'polygon-collider-2d', data: { points: [[0, 0], [50, 0], [0, 100]], offset: [10, 20], isTrigger: false } },
+    ];
+    const imported = sceneContentToEditorDocument({ document: input, documentRevision: HASH, foundationDocumentRevision: HASH, assetManifestRevision: HASH });
+    expect(imported.nodes.root.components).toMatchObject([
+      { size: [2.8, 1.6], offset: [.2, -.4] },
+      { radius: .52, offset: [.1, .2] },
+      { size: [2.8, 1.6], direction: 'horizontal' },
+      { points: [[0, -0], [1, -0], [0, -2]], offset: [.2, -.4] },
+    ]);
+    const saved = editorDocumentToSceneContent(imported, input);
+    expect(saved.data.nodes[0].components).toEqual(input.data.nodes[0].components);
+    const reopened = sceneContentToEditorDocument({ document: saved, documentRevision: HASH, foundationDocumentRevision: HASH, assetManifestRevision: HASH });
+    expect(reopened.nodes['guard-vision'].components[0]).toMatchObject({ light: { distance: 5.2 } });
+    input.kind = 'scene-3d';
+    const threeD = sceneContentToEditorDocument({ document: input, documentRevision: HASH, foundationDocumentRevision: HASH, assetManifestRevision: HASH });
+    expect(threeD.nodes.root.components[0]).toMatchObject({ size: [140, 80], offset: [10, 20] });
+  });
+  it('uses state sheets on Image and root resource references without a member', () => {
+    const input = scene();
+    input.data.nodes[0].components = [{ id: 'image', type: 'image', assetRef: 'RES-FOX', data: { frame: 'hover' } }];
+    const imported = sceneContentToEditorDocument({ document: input, documentRevision: HASH, foundationDocumentRevision: HASH, assetManifestRevision: HASH,
+      assets: { ...assets, 'RES-FOX': { ...assets['RES-FOX'], spriteSheet: { frameWidth: 44, frameHeight: 44, states: ['normal', 'hover'] } } } });
+    expect(imported.nodes.root.components[0]).toMatchObject({ material: { textureRegion: { x: 44, y: 0, width: 44, height: 44 } } });
+  });
+
+  it('reads harbor packed frames, array size/anchor and PPU32 without altering scene JSON', () => {
+    const input = scene();
+    input.data.settings = { coordinateSystem: { pixelsPerUnit: 32, width: 2400, height: 1600 } };
+    input.data.nodes[0] = { id: 'root', transform: { position: [320, 320, 0] }, components: [
+      { id: 'sprite', type: 'sprite-renderer', assetRef: 'RES-FOX', data: { size: [32, 48], anchor: [.5, 1], frame: 'boat_hull_f0' } },
+      { id: 'collider', type: 'box-collider-2d', data: { size: [32, 48], offset: [0, 0] } },
+    ] };
+    const sheetAssets = { ...assets, 'RES-FOX': { ...assets['RES-FOX'], spriteSheet: { frames: { boat_hull_f0: { x: 1, y: 1, width: 40, height: 48 } } } } };
+    const editor = sceneContentToEditorDocument({ document: input, documentRevision: HASH, foundationDocumentRevision: HASH, assetManifestRevision: HASH, assets: sheetAssets });
+    expect(editor.pixelsPerUnit).toBe(32);
+    expect(editor.nodes.root.components[0]).toMatchObject({ frame: { x: 1, y: 1, width: 40, height: 48 } });
+    expect(editor.nodes.root.components[1]).toMatchObject({ size: [1, 1.5] });
+    expect(editor.nodes.root.transform.position).toEqual([-27.5, 15.75, 0]);
+    expect(editorDocumentToSceneContent(editor, input).data.nodes[0].transform?.position).toEqual([320, 320, 0]);
+    expect(editorDocumentToSceneContent(editor, input).data.nodes[0].components?.[0].data).toEqual(input.data.nodes[0].components?.[0].data);
+  });
+
   it('maps canonical 2D GameObjects without synthetic component types', () => {
     const output = sceneContentToEditorDocument({ document: scene(), documentRevision: HASH, foundationDocumentRevision: HASH, assetManifestRevision: HASH, assets, assetMembers });
     expect(output).toMatchObject({ schemaVersion: 'scene-game-object.v2', dimension: '2d' });
@@ -53,14 +102,14 @@ describe('Unity-style scene adapter', () => {
     expect(output.data.nodes.find(node => node.id === 'fireflies')?.components?.map(component => component.type)).toEqual(['particle-system', 'particle-system-renderer']);
     expect(output.data.nodes.find(node => node.id === 'fireflies')?.components?.find(component => component.type === 'particle-system')?.data).toMatchObject({ zone: { x: 40, y: 60, width: 1200, height: 600 } });
     expect(output.data.nodes.find(node => node.id === 'fireflies')?.components?.find(component => component.type === 'particle-system-renderer')).toMatchObject({ assetRef: 'RES-FX', data: { member: 'glow', blend: 'additive' } });
-    expect(output.data.nodes.find(node => node.id === 'guard-vision')?.components).toEqual([expect.objectContaining({ type: 'light-2d', data: expect.objectContaining({ lightType: 'spot', range: 260, halfAngleDeg: 30, colors: expect.objectContaining({ calm: '#CFE0FF', calmAlpha: .4 }), kind: 'spot', distance: 2.6, angle: Math.PI / 6, alpha: .4, intensity: 1 }) })]);
+    expect(output.data.nodes.find(node => node.id === 'guard-vision')?.components).toEqual([expect.objectContaining({ type: 'light-2d', data: expect.objectContaining({ lightType: 'spot', range: 260, halfAngleDeg: 30, colors: expect.objectContaining({ calm: '#CFE0FF', calmAlpha: .4 }), kind: 'spot', distance: 260, angle: Math.PI / 6, alpha: .4, intensity: 1 }) })]);
     expect(output.data.nodes.find(node => node.id === 'awareness')?.components?.find(component => component.type === 'rect-transform')).toMatchObject({ id: 'awareness-rect' });
     expect(output.data.nodes.find(node => node.id === 'player')?.transform?.scale).toEqual([1, 1, 1]);
   });
 
   it('does not materialize undefined animation fields when a frame table has no facings', () => {
-    const frameTables = { 'RES-FOX': { idle: { frameWidth: 64, frameHeight: 64, framesPerFacing: 4 } } };
-    const output = sceneContentToEditorDocument({ document: scene(), documentRevision: HASH, foundationDocumentRevision: HASH, assetManifestRevision: HASH, assets, assetMembers, frameTables });
+    const sheetAssets = { ...assets, 'RES-FOX:idle': { ...assets['RES-FOX:idle'], spriteSheet: { frameWidth: 64, frameHeight: 64, framesPerFacing: 4 } } };
+    const output = sceneContentToEditorDocument({ document: scene(), documentRevision: HASH, foundationDocumentRevision: HASH, assetManifestRevision: HASH, assets: sheetAssets, assetMembers });
     const sprite = output.nodes.player.components[0];
     expect(sprite.type).toBe('sprite-renderer');
     if (sprite.type !== 'sprite-renderer') throw new Error('Expected sprite renderer');
@@ -74,9 +123,9 @@ describe('Unity-style scene adapter', () => {
     light.components![0]!.data = { lightType: 'spot', range: 260, halfAngleDeg: 30, colors: { calm: '#CFE0FF', calmAlpha: .4 } };
     const mailbox = input.data.nodes.find(node => node.id === 'player')!;
     mailbox.components![0]!.data = { member: 'idle', frame: 'flag_up', size: { width: 64, height: 64 } };
-    const output = sceneContentToEditorDocument({ document: input, documentRevision: HASH, foundationDocumentRevision: HASH, assetManifestRevision: HASH, assets, assetMembers, frameTables: { 'RES-FOX': { idle: { frameWidth: 64, frameHeight: 64, framesPerFacing: 2, states: ['flag_down', 'flag_up'] } } } });
+    const output = sceneContentToEditorDocument({ document: input, documentRevision: HASH, foundationDocumentRevision: HASH, assetManifestRevision: HASH, assets: { ...assets, 'RES-FOX:idle': { ...assets['RES-FOX:idle'], spriteSheet: { frameWidth: 64, frameHeight: 64, framesPerFacing: 2, states: ['flag_down', 'flag_up'] } } }, assetMembers });
     expect(output.nodes['guard-vision'].components[0]).toMatchObject({ light: { kind: 'spot', color: '#CFE0FF', alpha: .4, intensity: 1, distance: 2.6, angle: Math.PI / 6 } });
-    expect(output.nodes.player.components[0]).toMatchObject({ frame: { x: 128, y: 0, width: 64, height: 64 }, material: { textureRegion: { x: 128, y: 0 } } });
+    expect(output.nodes.player.components[0]).toMatchObject({ frame: { x: 64, y: 0, width: 64, height: 64 }, material: { textureRegion: { x: 64, y: 0 } } });
   });
 
   it('does not guess a resource member from the GameObject id', () => {

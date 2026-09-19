@@ -2,6 +2,8 @@ export type BeeGameNativeTaskNotification = {
   value: string
   uuid?: string
   isMeta?: boolean
+  /** Observation only, supplied when no foreground turn is consuming messages. */
+  backgroundMessage?: Record<string, unknown>
 }
 
 export type NativeTerminalTaskNotification = {

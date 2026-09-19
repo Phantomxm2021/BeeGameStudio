@@ -22,9 +22,13 @@ test('delivery controller has one direct implementation path', async () => {
   expect(controller).not.toContain('resource.preparation.reconciled')
   expect(controller).toContain("'resource.preparation.ready'")
   expect(controller).toContain('enterAcceptance(next)')
-  expect(prompts).not.toContain(
-    "case 'acceptance-validator':\n      return 'Call SubmitValidationResult",
-  )
+  expect(controller).not.toContain('startAcceptance(')
+  expect(controller).toContain('confirmAcceptanceFromImplementation(')
+  expect(prompts).not.toContain("case 'acceptance-validator':")
+  expect(prompts).not.toContain('Runtime acceptance is a separate phase')
+  expect(prompts).not.toContain('validationCommand once')
+  expect(prompts).not.toContain('resource-validation-cli')
+  expect(prompts).not.toContain('Use contract.validationCommand when it helps validate the delivery')
 })
 
 test('current snapshots reject both retired delivery phases', () => {

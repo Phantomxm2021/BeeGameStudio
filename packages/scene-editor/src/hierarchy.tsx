@@ -42,7 +42,7 @@ export function TreeNode(props: TreeProps) {
   return <div className="tree-node" role="treeitem" aria-label={node.name} aria-level={depth + 1} aria-selected={selected} aria-expanded={hasChildren ? isOpen : undefined}>
     <div data-testid={`scene-tree-item-${id}`} className={`tree-row ${selected ? 'selected' : ''} ${hiddenIds.has(id) ? 'is-hidden' : ''} ${preview ? `drop-${preview}` : ''}`} draggable={node.editable !== false && !node.locked}
       onClick={event => { event.stopPropagation(); onSelect(id, event) }} onDoubleClick={() => onFrame(id)}
-      onContextMenu={event => { event.preventDefault(); event.stopPropagation(); if (!selected) onSelect(id, event); setContext({ id, x: event.clientX, y: event.clientY }) }}
+      onContextMenu={event => { if (!selected) onSelect(id, event); setContext({ id, x: event.clientX, y: event.clientY }) }}
       onDragStart={event => { event.stopPropagation(); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/scene-node', id); if (!selected) onSelect(id, event as unknown as MouseEvent) }}
       onDragOver={event => { event.preventDefault(); event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); const ratio = (event.clientY - rect.top) / rect.height; onDragPreview({ id, position: ratio < .25 ? 'before' : ratio > .75 ? 'after' : 'inside' }) }}
       onDragLeave={() => onDragPreview(null)} onDrop={event => { event.preventDefault(); event.stopPropagation(); onDrop(id, dropPreview?.id === id ? dropPreview.position : 'inside'); onDragPreview(null) }}>

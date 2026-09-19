@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import type { SceneAsset, SceneDocument } from '@beegame/scene-editor';
+import { parseSpriteSheet, type SpriteSheet } from '@beegame/scene-editor';
 import '@beegame/scene-editor/styles.css';
 import {
   beeGameAdapter,
@@ -8,7 +9,6 @@ import {
 import {
   editorDocumentToSceneContent,
   sceneContentToEditorDocument,
-  type SpriteFrameTable,
 } from './sceneContentAdapter';
 import { EditorLoadingView, type EditorLoadState } from './EditorLoadingView';
 import { ProjectSelect } from '../beui/project-select';
@@ -100,14 +100,13 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
         const targetScene = sceneEntries.find(scene => scene.document.id === snapshot.index?.entryScene)
           ?? sceneEntries[0];
         const sceneLoadLabel = targetScene.document.id;
-        const referencedAssets = new Set(sceneEntries.flatMap(scene => scene.document.assetRefs));
+        // The picker must include verified project resources, not just existing scene references.
         if (!active || signal.aborted) return;
         const assets: Record<string, SceneAsset> = {};
         const assetMembers: Record<string, Record<string, string>> = {};
-        const frameTables: Record<string, Record<string, SpriteFrameTable>> = {};
         const assetFailures: string[] = [];
-        const referencedResources = manifest.resources.filter(resource => resource.status === 'verified' && referencedAssets.has(resource.id));
-        for (const resource of referencedResources) {
+        const availableResources = manifest.resources.filter(resource => resource.status === 'verified');
+        for (const resource of availableResources) {
           assets[resource.id] = {
             id: resource.id,
             name: resource.root_path.split('/').at(-1) ?? resource.id,
@@ -115,7 +114,7 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
             path: resource.root_path,
           };
         }
-        const loadTargets = referencedResources.flatMap(resource => resource.file_paths
+        const loadTargets = availableResources.flatMap(resource => resource.file_paths
           .filter(path => SCENE_PREVIEW.test(path) || /\.json$/i.test(path))
           .map(path => ({ name: `${resource.id} · ${path.split('/').at(-1) ?? path}` })));
         const totalFiles = loadTargets.length;
@@ -133,11 +132,10 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           label: sceneLoadLabel,
           detail: totalFiles ? `${loadTargets[0].name} · 0 of ${totalFiles}` : 'No external scene assets required',
         });
-        await Promise.all(manifest.resources.map(async resource => {
-          if (resource.status !== 'verified' || !referencedAssets.has(resource.id)) return;
+        await Promise.all(availableResources.map(async resource => {
           const previewPaths = resource.file_paths.filter(path => SCENE_PREVIEW.test(path));
           const members: Record<string, string> = {};
-          const tables: Record<string, SpriteFrameTable> = {};
+          const tables: Record<string, SpriteSheet> = {};
           const loaded = await Promise.all(previewPaths.map(async path => {
             try {
               const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal);
@@ -169,7 +167,8 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
               const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal);
               const value = JSON.parse(await blob.text()) as unknown;
               throwIfAborted(signal);
-              if (isSpriteFrameTable(value)) tables[fileStem(path)] = value;
+              const sheet = parseSpriteSheet(value);
+              if (sheet) tables[fileStem(path)] = sheet;
             } catch (error) {
               if (isAbortError(error)) throw error;
               assetFailures.push(`${resource.id}/${path.split('/').at(-1) ?? path}: ${error instanceof Error ? error.message : String(error)}`);
@@ -177,11 +176,13 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
               if (!signal.aborted) markFileLoaded(`${resource.id} · ${path.split('/').at(-1) ?? path}`);
             }
           }));
+          for (const [member, assetId] of Object.entries(members)) {
+            if (tables[member]) assets[assetId].spriteSheet = tables[member];
+          }
           const rootPath = preferredScenePreviewPath(resource.root_path, previewPaths);
           const rootMemberId = rootPath ? members[fileStem(rootPath)] : undefined;
           if (rootMemberId) assets[resource.id] = { ...assets[rootMemberId], id: resource.id };
           assetMembers[resource.id] = members;
-          frameTables[resource.id] = tables;
         }));
         if (!active || signal.aborted) return;
         if (assetFailures.length) {
@@ -200,7 +201,6 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
             assetManifestRevision: snapshot.index!.assetManifestRevision,
             assets,
             assetMembers,
-            frameTables,
           }),
         }));
         const entry = availableScenes.find(scene => scene.document.id === snapshot.index?.entryScene)
@@ -381,14 +381,4 @@ function assetMimeType(path: string): string {
   if (extension === 'mp3') return 'audio/mpeg';
   if (extension === 'wav') return 'audio/wav';
   return 'application/octet-stream';
-}
-
-function isSpriteFrameTable(value: unknown): value is SpriteFrameTable {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const table = value as Record<string, unknown>;
-  return (
-    typeof table.frameWidth === 'number' && table.frameWidth > 0 &&
-    typeof table.frameHeight === 'number' && table.frameHeight > 0 &&
-    typeof table.framesPerFacing === 'number' && table.framesPerFacing > 0
-  );
 }

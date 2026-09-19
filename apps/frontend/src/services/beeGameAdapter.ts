@@ -1313,8 +1313,18 @@ function eventsToHistory(
     eventToProjectEventMessages(projectId, event, workspacePath),
   )
   const thoughtMessages = new Map<string, ProjectEventMessage>()
+  const toolMessages = new Map<string, ProjectEventMessage>()
   const thinkingStartedAtByMessage = new Map<string, number>()
   const messages = projectedMessages.flatMap(message => {
+    if ((message.type === 'tool_start' || message.type === 'tool_end') && message.message_id) {
+      const existing = toolMessages.get(message.message_id)
+      if (existing) {
+        Object.assign(existing, Object.fromEntries(Object.entries(message).filter(([, value]) => value !== undefined)))
+        return []
+      }
+      toolMessages.set(message.message_id, message)
+      return [message]
+    }
     if (message.type === 'think_start') {
       if (message.message_id) {
         thinkingStartedAtByMessage.set(message.message_id, message.timestamp || 0)
@@ -1468,8 +1478,32 @@ function eventToProjectEventMessagesBase(
           status: 'running',
         } as ProjectEventMessage,
       ]
-    case 'system.status':
-      return []
+    case 'system.status': {
+      const subtype = getPayloadString(event, 'subtype')
+      if (!['task_started', 'task_progress', 'task_notification'].includes(subtype)) return []
+      const id = getPayloadString(event, 'toolUseID') || getPayloadString(event, 'tool_use_id') || getPayloadString(event, 'task_id')
+      if (!id) return []
+      const terminal = subtype === 'task_notification'
+      const status = getPayloadString(event, 'status')
+      const type = terminal && status === 'completed' ? 'tool.completed' :
+        terminal && ['failed', 'stopped', 'killed'].includes(status) ? 'tool.failed' : 'tool.progress'
+      const usage = getPayloadRecord(event, 'usage')
+      const activity = [getPayloadString(event, 'description'), getPayloadString(event, 'last_tool_name'),
+        typeof usage.tool_uses === 'number' ? `${usage.tool_uses} tools` : '',
+        typeof usage.duration_ms === 'number' ? `${Math.round(usage.duration_ms / 1000)}s` : '',
+        typeof usage.total_tokens === 'number' ? `${usage.total_tokens} tokens` : '',
+      ].filter(Boolean).join(' · ')
+      const input = getPayloadRecord(event, 'input')
+      return eventToProjectEventMessagesBase(projectId, { ...event, type,
+        payload: { ...event.payload, type, toolUseID: id, toolName: 'Agent',
+          input: { ...input,
+            ...(getPayloadString(event, 'prompt') ? { prompt: getPayloadString(event, 'prompt') } : {}),
+            trace: [getPayloadString(event, 'subagentTrace'), activity].filter(Boolean).join('\n\n'),
+          },
+          output: terminal ? getPayloadString(event, 'summary') || getPayloadString(event, 'result') : '',
+        },
+      }, workspacePath)
+    }
     case 'assistant.partial': {
       // Only the unified workflow trace has a durable stream identity. Legacy
       // partials have no way to reconcile with their final answer, so retain
@@ -1707,6 +1741,12 @@ function eventToProjectEventMessagesBase(
         typeof event.payload?.output === 'string'
           ? event.payload.output
           : event.text
+      // The tool has returned a launch receipt, not a subagent result.
+      if (event.type === 'tool.completed' && ['agent', 'task'].includes(finishedTool.toLowerCase()) &&
+        (event.payload?.nativeBackgroundTask || (/^agentId:\s*\S+/m.test(output) && /^output_file:\s*\S+/m.test(output)))) {
+        return eventToProjectEventMessagesBase(projectId, { ...event, type: 'tool.progress',
+          payload: { ...event.payload, type: 'tool.progress', output: '' } }, workspacePath)
+      }
       const finishedInfo = getToolDisplayInfo(
         finishedTool,
         event.type === 'tool.failed' ? 'failed' : 'completed',
@@ -1895,7 +1935,8 @@ function normalizeBeeGameEvents(
     }
     if (
       event.type === 'system.status' &&
-      event.text.trim().toLowerCase() === 'system'
+      event.text.trim().toLowerCase() === 'system' &&
+      !['task_started', 'task_progress', 'task_notification'].includes(getPayloadString(event, 'subtype'))
     ) {
       continue
     }
@@ -2310,7 +2351,10 @@ function getPermissionRequestMessageId(event: BeeGameEvent): string {
 
 function getToolMessageId(event: BeeGameEvent): string {
   const toolUseId = getPayloadString(event, 'toolUseID')
-  if (toolUseId) return `beegame-tool-${event.sessionId}-${toolUseId}`
+  const stage = getPayloadString(event, 'workflowStage')
+  const sourceSessionId = stage && getPayloadString(event, 'workflowStageNativeKey') ? `workflow-stage:${stage}` :
+    getPayloadString(event, 'workflowSourceSessionId') || event.sessionId
+  if (toolUseId) return `beegame-tool-${sourceSessionId}-${toolUseId}`
   return `beegame-event-${event.id}`
 }
 

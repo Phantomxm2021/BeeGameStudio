@@ -1,10 +1,64 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { beeGameAdapter } from '../../services/beeGameAdapter';
+import type { SceneDocument } from '@beegame/scene-editor';
+import { beeGameAdapter, type BeeGameSceneContentDocument } from '../../services/beeGameAdapter';
 import { SceneEditorOverlay } from './SceneEditorOverlay';
+
+vi.mock('@beegame/scene-editor', async importOriginal => ({
+  ...await importOriginal<typeof import('@beegame/scene-editor')>(),
+  SceneEditor: ({ initialDocument }: { initialDocument: SceneDocument }) => (
+    <div data-testid="loaded-scene">
+      {initialDocument.name}
+      {Object.values(initialDocument.assets).map(asset => <span key={asset.id}>{asset.name}{asset.spriteSheet ? ` frame ${('frames' in asset.spriteSheet ? Object.keys(asset.spriteSheet.frames).length : asset.spriteSheet.frameWidth)}` : ''}</span>)}
+    </div>
+  ),
+}));
 
 describe('SceneEditorOverlay loading experience', () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it.each(['scene-2d', 'scene-3d'] as const)('opens a valid %s with verified project resources', async kind => {
+    const revision = 'a'.repeat(64);
+    const document: BeeGameSceneContentDocument = {
+      schema: 'beegame-content.v1', id: 'existing-scene', kind, assetRefs: ['RES-AUDIO'],
+      data: { nodes: [
+        { id: 'root', name: 'Scene Root', components: [] },
+        { id: 'audio', parentId: 'root', components: [
+          { id: 'audio-source', type: 'audio-source', assetRef: 'RES-AUDIO', data: { volume: 0 } },
+        ] },
+      ] },
+    };
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({
+      state: 'ready',
+      index: {
+        schema: 'beegame-content-package.v2', id: 'content', dimension: kind === 'scene-2d' ? '2d' : '3d',
+        documentRevision: revision, assetManifestRevision: revision, entryScene: document.id,
+        sceneModel: 'game-object-v2', files: ['content/scene.json'],
+      },
+      documents: [{ path: 'content/scene.json', revision, document }],
+    });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({
+      contract_state: 'ready', version: 9, requirements: [],
+      resources: [
+        { id: 'RES-AUDIO', root_path: 'forest.ogg', file_paths: ['forest.ogg'], status: 'verified' as const },
+        { id: 'RES-EXTRA', root_path: 'extra.png', file_paths: ['extra.png', 'extra.json'], status: 'verified' as const },
+        { id: 'RES-PENDING', root_path: 'pending.png', file_paths: ['pending.png'], status: 'available' as const },
+      ].map(resource => ({
+        ...resource, source: { type: 'agent-authored' as const, created_at: '2026-09-19', reason: 'test' },
+        provisional: false, selected_at: '2026-09-19', selection_reason: [],
+      })),
+    });
+    const loadAsset = vi.spyOn(beeGameAdapter, 'loadProjectAssetFile').mockImplementation(async (_project, _resource, path) => path.endsWith('.json')
+      ? new Blob([JSON.stringify({ frameWidth: 44, frameHeight: 44, states: ['normal', 'hover'] })], { type: 'application/json' })
+      : new Blob(['image'], { type: 'image/png' }));
+    render(<SceneEditorOverlay projectId="project-1" onClose={vi.fn()} />);
+    expect(await screen.findByTestId('loaded-scene')).toHaveTextContent('existing-scene');
+    expect(screen.getByTestId('loaded-scene')).toHaveTextContent('forest.ogg');
+    expect(screen.getByTestId('loaded-scene')).toHaveTextContent('extra.png frame 44');
+    expect(loadAsset).toHaveBeenCalledWith('project-1', 'RES-EXTRA', 'extra.png', expect.any(AbortSignal));
+    expect(loadAsset).not.toHaveBeenCalledWith('project-1', 'RES-PENDING', expect.anything(), expect.anything());
+    expect(screen.queryByText('Could not open scene')).not.toBeInTheDocument();
+  });
 
   it('shows no navigation chrome and closes after interrupting an in-flight load', () => {
     const signals: AbortSignal[] = [];

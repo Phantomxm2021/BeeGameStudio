@@ -13,6 +13,13 @@ const secretKey = /(?:^|[_-])(?:api[_-]?key|auth|authorization|auth[_-]?token|pa
 export function projectResponseMessage(value: unknown): RecordValue | undefined {
   const message = record(value)
   if (!message) return
+  if (message.type === 'system' && ['task_started', 'task_progress', 'task_notification'].includes(message.subtype)) {
+    return { type: 'system', ...Object.fromEntries(
+      ['subtype', 'uuid', 'session_id', 'task_id', 'tool_use_id', 'description', 'status', 'summary', 'output_file', 'last_tool_name']
+        .filter(key => typeof message[key] === 'string').map(key => [key, message[key]])),
+      ...(record(message.usage) ? { usage: Object.fromEntries(['total_tokens', 'tool_uses', 'duration_ms']
+        .filter(key => typeof message.usage[key] === 'number').map(key => [key, message.usage[key]])) } : {}) }
+  }
   if (message.type === 'stream_request_start') return { type: message.type }
   if (message.type === 'reasoning_activity' && Number.isSafeInteger(message.bytes) && message.bytes >= 0)
     return { type: message.type, bytes: message.bytes, text: typeof message.text === 'string' ? message.text : '' }

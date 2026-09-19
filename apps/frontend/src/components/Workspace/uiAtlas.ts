@@ -1,0 +1,56 @@
+import { parseSpriteSheet, spriteSheetSelection } from '@beegame/scene-editor';
+
+const frameName = (name: string) => name.replace(/\.(png|webp|jpe?g)$/i, '');
+
+/** Materialize cropped sprites once, so image, tiled and nine-slice previews
+ * all consume the same pixels rather than stretching the complete atlas. */
+export async function uiAtlasImages(src: string, metadata: unknown, signal: AbortSignal): Promise<Record<string, string>> {
+  const sheet = parseSpriteSheet(metadata);
+  if (!sheet) return {};
+  const image = new Image();
+  await new Promise<void>((resolve, reject) => {
+    const abort = () => { image.src = ''; cleanup(); reject(new DOMException('Cancelled', 'AbortError')); };
+    const cleanup = () => { signal.removeEventListener('abort', abort); image.onload = null; image.onerror = null; };
+    image.onload = () => { cleanup(); resolve(); };
+    image.onerror = () => { cleanup(); reject(new Error('Cannot decode sprite atlas')); };
+    if (signal.aborted) return abort();
+    signal.addEventListener('abort', abort, { once: true });
+    image.src = src;
+  });
+  const frames = 'frames' in sheet ? sheet.frames : Object.fromEntries(
+    (sheet.states ?? ['default']).map(frame => [frame, spriteSheetSelection(sheet, { frame }).frame!]),
+  );
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Canvas unavailable for sprite atlas');
+  const output: Record<string, string> = {};
+  for (const [name, rect] of Object.entries(frames)) {
+    if (rect.x + rect.width > image.naturalWidth || rect.y + rect.height > image.naturalHeight) throw new Error(`Atlas frame outside image: ${name}`);
+    canvas.width = rect.width; canvas.height = rect.height;
+    context.drawImage(image, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height);
+    output[name] = canvas.toDataURL('image/png');
+  }
+  const composites = (metadata as { meta?: { nine_slice?: Record<string, Record<string, string>> } }).meta?.nine_slice ?? {};
+  for (const [name, parts] of Object.entries(composites)) {
+    const part = (key: string) => {
+      const rect = frames[frameName(parts[key] ?? '')];
+      if (!rect) throw new Error(`Nine-slice ${name}: missing part ${key}`);
+      return rect;
+    };
+    const tl = part('tl'), tr = part('tr'), bl = part('bl'), c = part('c');
+    const widths = [tl.width, c.width, tr.width], heights = [tl.height, c.height, bl.height];
+    canvas.width = widths.reduce((a, b) => a + b); canvas.height = heights.reduce((a, b) => a + b);
+    for (const [index, key] of ['tl', 'h', 'tr', 'v', 'c', 'v', 'bl', 'h', 'br'].entries()) {
+      const col = index % 3, row = Math.floor(index / 3), rect = part(key);
+      context.drawImage(image, rect.x, rect.y, rect.width, rect.height,
+        widths.slice(0, col).reduce((a, b) => a + b, 0), heights.slice(0, row).reduce((a, b) => a + b, 0), widths[col], heights[row]);
+    }
+    output[name] = canvas.toDataURL('image/png');
+  }
+  return output;
+}
+
+export function uiImageKey(assetRef: string, data: Record<string, unknown> = {}): string {
+  const base = typeof data.member === 'string' ? `${assetRef}:${data.member}` : assetRef;
+  return typeof data.frame === 'string' ? `${base}#${frameName(data.frame)}` : base;
+}

@@ -1,3 +1,4 @@
+import { spriteSheetSelection, atlasFrameName } from './sprite-sheet'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { AudioLines, Box, Camera, ChevronRight, CircleDot, Image, Layers, Lightbulb, LockKeyhole, Move, Sparkles, UnlockKeyhole, type LucideIcon } from 'lucide-react'
 import { operations } from './commands'
@@ -5,6 +6,7 @@ import { primaryComponentType, type MaterialOverride, type SceneAsset, type Scen
 import type { ModelPart, ModelStructure } from './model-structure'
 import { Select } from './components/motion/select'
 import { Switch } from './components/motion/switch'
+import { Input } from './components/motion/input'
 import { RangeSlider } from './components/motion/range-slider'
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from './components/ui/dialog'
 
@@ -65,7 +67,7 @@ function setMember<T extends { member?: string }>(component: T, assetId: string 
   if (member) next.member = member
   return next
 }
-export function withAsset(component: SceneComponent, assetId: string | undefined): SceneComponent {
+export function withAsset(component: SceneComponent, assetId: string | undefined, asset?: SceneAsset): SceneComponent {
   if (component.type === 'sprite-renderer') {
     // Frame/animation and the derived texture region belong to the previous
     // sprite. Keeping them after an asset replacement can point beyond the new
@@ -75,9 +77,23 @@ export function withAsset(component: SceneComponent, assetId: string | undefined
     delete next.animation
     const material = { ...next.material }
     delete material.textureRegion
-    return { ...next, assetId: assetId!, material: setTextureAsset(material, assetId) }
+    const properties = { ...next.properties }
+    delete properties.frame
+    delete properties.frameTable
+    delete properties.member
+    delete properties.initialFacing
+    const selection = spriteSheetSelection(asset?.spriteSheet)
+    return { ...next, assetId: assetId!, properties, ...selection, material: { ...setTextureAsset(material, assetId), ...(selection.frame ? { textureRegion: selection.frame } : {}) } }
   }
-  if (component.type === 'image') return { ...clearAsset(setMember(component, assetId)), ...(assetId === undefined ? {} : { assetId }), material: setTextureAsset(component.material, assetId) }
+  if (component.type === 'image') {
+    const next = clearAsset(setMember(component, assetId))
+    const material = { ...component.material }
+    delete material.textureRegion
+    const properties = { ...next.properties }
+    delete properties.frame
+    const { frame } = spriteSheetSelection(asset?.spriteSheet)
+    return { ...next, properties, ...(assetId === undefined ? {} : { assetId }), material: { ...setTextureAsset(material, assetId), ...(frame ? { textureRegion: frame } : {}) } }
+  }
   if (component.type === 'mesh-renderer') return { ...clearAsset(component), ...(assetId === undefined ? {} : { assetId }) }
   if (component.type === 'particle-system-renderer') {
     const next = { ...component }
@@ -109,24 +125,26 @@ function imageAssets(document: SceneDocument): SceneAsset[] {
 }
 function ImageAssetProperty({ component, document, replace }: { component: Extract<SceneComponent, { type: 'sprite-renderer' | 'image' | 'particle-system-renderer' }>; document: SceneDocument; replace: (next: SceneComponent, label: string) => void }) {
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
   const assets = useMemo(() => imageAssets(document), [document.assets])
   const current = componentAssetId(component)
   const selected = current ? document.assets[current] : undefined
   const required = component.type === 'sprite-renderer'
   const label = component.type === 'particle-system-renderer' ? 'Texture' : component.type === 'image' ? 'Source Image' : 'Sprite'
-  return <Dialog open={open} onOpenChange={setOpen}>
+  return <Dialog open={open} onOpenChange={value => { setOpen(value); if (value) setQuery("") }}>
     <div className="scene-image-picker-control"><div className="scene-source-image-field"><span>{label}</span><DialogTrigger asChild><button type="button" className="scene-source-image" aria-label={`Choose ${component.type === 'sprite-renderer' ? 'sprite' : 'source image'}`}>
       {assetPreviewUrl(selected) ? <img src={assetPreviewUrl(selected)} alt="" /> : <Image size={15} />}
       <span>{('member' in component ? component.member : undefined) ?? (typeof component.properties.member === 'string' ? component.properties.member : undefined) ?? selected?.name?.replace(/\.[^.]+$/, '') ?? current ?? 'None'}</span><ChevronRight size={12} />
     </button></DialogTrigger></div></div>
     <DialogContent className="scene-image-asset-dialog" aria-label="Project image assets">
       <div className="settings-heading"><DialogTitle>Select {label}</DialogTitle><DialogDescription>{assets.length} project image{assets.length === 1 ? '' : 's'} available</DialogDescription></div>
+      <div className="scene-picker-search"><Input aria-label="Search image assets" placeholder="Search images…" value={query} onChange={setQuery} /></div>
       <div className="scene-asset-picker">
       {!required ? <button type="button" className="scene-asset-card none" aria-label="No source image" onClick={() => { replace(withAsset(component, undefined), 'Remove image'); setOpen(false) }}><span>×</span><small>None</small></button> : null}
-      {assets.map(asset => <button type="button" className={`scene-asset-card${current === asset.id ? ' selected' : ''}`} aria-label={`Use image ${asset.name}`} key={asset.id} onClick={() => { replace(withAsset(component, asset.id), `Replace ${component.type === 'sprite-renderer' ? 'sprite' : 'image'}`); setOpen(false) }}>
-        {assetPreviewUrl(asset) ? <img src={assetPreviewUrl(asset)} alt="" /> : <Image size={18} />}<small title={asset.name}>{asset.name.replace(/\.[^.]+$/, '')}</small>
+      {assets.filter(asset => asset.name.toLowerCase().includes(query.toLowerCase())).map(asset => <button type="button" className={`scene-asset-card${current === asset.id ? ' selected' : ''}`} aria-label={`Use image ${asset.name}`} key={asset.id} onClick={() => { replace(withAsset(component, asset.id, asset), `Replace ${component.type === 'sprite-renderer' ? 'sprite' : 'image'}`); setOpen(false) }}>
+        {assetPreviewUrl(asset) ? <img loading="lazy" src={assetPreviewUrl(asset)} alt="" /> : <Image size={18} />}<small title={asset.name}>{asset.name.replace(/\.[^.]+$/, '')}</small>
       </button>)}
-      {!assets.length ? <p>No image assets are available in this project.</p> : null}
+      {!assets.some(asset => asset.name.toLowerCase().includes(query.toLowerCase())) ? <p>{query ? "No matching images." : "No image assets are available in this project."}</p> : null}
       </div>
     </DialogContent>
   </Dialog>
@@ -138,6 +156,24 @@ function AssetProperty({ component, document, replace }: { component: SceneCompo
   const assets = Object.values(document.assets).filter(asset => assetAccepted(component, asset))
   const label = component.type === 'audio-source' ? 'Audio clip' : component.type === 'animator' ? 'Controller' : component.type === 'tilemap' ? 'Tilemap' : MATERIAL_COMPONENTS.has(component.type) ? 'Material' : 'Mesh'
   return <Property label={label}><Select className="asset-picker" ariaLabel={`${labelFor(component)} ${label.toLowerCase()}`} value={current ?? ''} onValueChange={value => replace(withAsset(component, value || undefined), `Replace ${label.toLowerCase()}`)} options={[{ value: '', label: 'None', disabled: required }, ...assets.map(asset => ({ value: asset.id, label: asset.name }))]} /></Property>
+}
+function SpriteFrameProperty({ component, document, replace }: { component: Extract<SceneComponent, { type: 'sprite-renderer' | 'image' }>; document: SceneDocument; replace: (next: SceneComponent, label: string) => void }) {
+  const sheet = component.assetId ? document.assets[component.assetId]?.spriteSheet : undefined
+  const atlas = sheet && 'frames' in sheet ? sheet : undefined
+  const strip = sheet && !('frames' in sheet) ? sheet : undefined
+  const directional = Boolean(strip?.facings?.length)
+  const names = atlas ? Object.keys(atlas.frames) : directional ? strip?.facings : strip?.states
+  if (!names?.length) return null
+  const property = directional ? 'initialFacing' : 'frame'
+  const selection = spriteSheetSelection(sheet, component.properties)
+  const value = directional ? selection.animation?.initialFacing ?? names[0] : atlas ? (typeof component.properties.frame === 'string' ? atlasFrameName(component.properties.frame) : names[0]) : names[Math.round((selection.frame?.x ?? 0) / strip!.frameWidth)] ?? names[0]
+  return <Property label={directional ? 'Facing' : 'Frame'}><Select ariaLabel={directional ? 'Sprite facing' : 'Sprite frame'} value={value} options={names.map(name => ({ value: name, label: name }))}
+    onValueChange={value => {
+      const properties = { ...component.properties, [property]: value }
+      const selection = spriteSheetSelection(sheet, properties)
+      replace({ ...component, ...(component.type === 'sprite-renderer' ? selection : {}), properties,
+        material: { ...component.material, ...(selection.frame ? { textureRegion: selection.frame } : {}) } }, 'Change sprite frame')
+    }} /></Property>
 }
 function TextInspector({ component, replace }: { component: Extract<SceneComponent, { type: 'text' }>; replace: (next: SceneComponent, label: string) => void }) {
   const [text, setText] = useState(component.text)
@@ -156,16 +192,16 @@ function Vec2Property({ label, value, onCommit }: { label: string; value: [numbe
 }
 function ComponentInspector({ node, component, document, commit }: { node: SceneNode; component: SceneComponent; document: SceneDocument; commit: Commit }) {
   const Icon = ICONS[component.type] ?? Box
-  const replace = (next: SceneComponent, label: string) => commit([operations.component(node.id, next)], label)
+  const replace = (next: SceneComponent, label: string) => { if (JSON.stringify(component) !== JSON.stringify(next)) commit([operations.component(node.id, next)], label) }
   if (component.type === 'text') return <TextInspector component={component} replace={replace} />
-  if (component.type === 'sprite-renderer' || component.type === 'image' || component.type === 'mesh-renderer' || component.type === 'skinned-mesh-renderer' || component.type === 'tilemap-renderer' || component.type === 'particle-system-renderer') return <ComponentSection title={labelFor(component)} icon={Icon}>{component.type !== 'tilemap-renderer' && <AssetProperty component={component} document={document} replace={replace} />}<Property label="Color"><input type="color" value={component.material.color} onChange={event => replace({ ...component, material: { ...component.material, color: event.target.value } }, 'Change renderer color')} /></Property><Property label="Opacity"><RangeSlider aria-label="Renderer opacity" min={0} max={1} step={.01} showTicks={false} value={component.material.opacity} onValueChange={opacity => replace({ ...component, material: { ...component.material, opacity, alphaMode: opacity < 1 ? 'blend' : 'opaque' } }, 'Change renderer opacity')} /></Property></ComponentSection>
-  if (component.type === 'mesh-filter' || component.type === 'tilemap' || component.type === 'mesh-collider' || component.type === 'animator') return <ComponentSection title={labelFor(component)} icon={Icon}><AssetProperty component={component} document={document} replace={replace} /></ComponentSection>
-  if (component.type === 'particle-system') { const countKey = component.properties.count === undefined ? 'maxParticles' : 'count'; const count = Number(component.properties[countKey]) || 0; return <ComponentSection title="Particle System" icon={Icon}><NumberProperty label="Count" value={count} min={0} step="1" onCommit={value => replace({ ...component, properties: { ...component.properties, [countKey]: Math.max(0, Math.round(value)) } }, 'Change particle count')} /></ComponentSection> }
+  if (component.type === 'sprite-renderer' || component.type === 'image' || component.type === 'mesh-renderer' || component.type === 'skinned-mesh-renderer' || component.type === 'tilemap-renderer' || component.type === 'particle-system-renderer') return <ComponentSection title={labelFor(component)} icon={Icon}>{component.type !== 'tilemap-renderer' && <AssetProperty component={component} document={document} replace={replace} />}{(component.type === 'sprite-renderer' || component.type === 'image') && <SpriteFrameProperty component={component} document={document} replace={replace} />}<Property label="Color"><input type="color" value={component.material.color} onChange={event => replace({ ...component, material: { ...component.material, color: event.target.value } }, 'Change renderer color')} /></Property><Property label="Opacity"><span data-edit-gesture className="scene-opacity-control"><RangeSlider aria-label="Renderer opacity" min={0} max={1} step={.01} showTicks={false} value={component.material.opacity} onValueChange={opacity => replace({ ...component, material: { ...component.material, opacity, alphaMode: opacity < 1 ? 'blend' : 'opaque' } }, 'Change renderer opacity')} className="scene-opacity-slider" /></span></Property></ComponentSection>
+  if (component.type === 'mesh-filter' || component.type === 'tilemap' || component.type === 'animator') return <ComponentSection title={labelFor(component)} icon={Icon}><AssetProperty component={component} document={document} replace={replace} /></ComponentSection>
+  if (component.type === 'particle-system') return <ParticleInspector component={component} replace={replace} />
   if (component.type === 'light-2d' || component.type === 'light') return <ComponentSection title={labelFor(component)} icon={Icon}><Property label="Type"><Select ariaLabel="Light type" value={component.light.kind} onValueChange={value => replace({ ...component, light: { ...component.light, kind: value as typeof component.light.kind } }, 'Change light type')} options={['ambient', 'directional', 'point', 'spot'].map(kind => ({ value: kind, label: kind }))} /></Property><Property label="Color"><input aria-label="Light color" type="color" value={component.light.color} onChange={event => replace({ ...component, light: { ...component.light, color: event.target.value } }, 'Change light color')} /></Property><NumberProperty label="Intensity" value={component.light.intensity} min={0} onCommit={value => replace({ ...component, light: { ...component.light, intensity: Math.max(0, value) } }, 'Change light intensity')} />{component.light.kind === 'point' || component.light.kind === 'spot' ? <NumberProperty label="Range" value={component.light.distance ?? 10} min={0} onCommit={value => replace({ ...component, light: { ...component.light, distance: Math.max(0, value) } }, 'Change light range')} /> : null}{component.light.kind === 'spot' ? <NumberProperty label="Angle °" value={(component.light.angle ?? Math.PI / 3) * 180 / Math.PI} min={1} step="1" onCommit={value => replace({ ...component, light: { ...component.light, angle: Math.max(1, value) * Math.PI / 180 } }, 'Change spot angle')} /> : null}</ComponentSection>
   if (component.type === 'camera') return <ComponentSection title="Camera" icon={Icon}><Property label="Orthographic"><Switch aria-label="Camera orthographic" checked={component.orthographic} onCheckedChange={checked => replace({ ...component, orthographic: checked }, 'Change camera projection')} /></Property>{component.orthographic ? <NumberProperty label="Orthographic size" value={component.orthographicSize ?? 3.6} min={.01} step="0.01" onCommit={value => replace({ ...component, orthographicSize: Math.max(.01, value) }, 'Change orthographic size')} /> : null}<NumberProperty label="Near clip" value={component.nearClip ?? .1} min={.001} step="0.01" onCommit={value => replace({ ...component, nearClip: Math.max(.001, value) }, 'Change near clip')} /><NumberProperty label="Far clip" value={component.farClip ?? 1000} min={.01} onCommit={value => replace({ ...component, farClip: Math.max(.01, value) }, 'Change far clip')} /></ComponentSection>
   if (component.type === 'rect-transform') return <ComponentSection title="Rect Transform" icon={Icon}><Vec2Property label="Anchor min" value={component.anchorMin} onCommit={value => replace({ ...component, anchorMin: value }, 'Change anchor min')} /><Vec2Property label="Anchor max" value={component.anchorMax} onCommit={value => replace({ ...component, anchorMax: value }, 'Change anchor max')} /><Vec2Property label="Pivot" value={component.pivot} onCommit={value => replace({ ...component, pivot: value }, 'Change pivot')} /><Vec2Property label="Position" value={component.anchoredPosition} onCommit={value => replace({ ...component, anchoredPosition: value }, 'Change anchored position')} /><Vec2Property label="Size" value={component.sizeDelta} onCommit={value => replace({ ...component, sizeDelta: value }, 'Change rect size')} /></ComponentSection>
-  if (isCollider(component)) return <ComponentSection title={labelFor(component)} icon={Icon}><Property label="Trigger"><Switch aria-label={`${labelFor(component)} trigger`} checked={component.isTrigger} onCheckedChange={checked => replace({ ...component, isTrigger: checked }, 'Change trigger')} /></Property>{'radius' in component ? <NumberProperty label="Radius" value={component.radius} min={0} onCommit={value => replace({ ...component, radius: Math.max(0, value) }, 'Change collider radius')} /> : null}{'size' in component && Array.isArray(component.size) && component.size.length === 2 ? <Vec2Property label="Size" value={component.size as [number, number]} onCommit={value => replace({ ...component, size: value } as SceneComponent, 'Change collider size')} /> : null}</ComponentSection>
-  if (component.type === 'audio-source') return <ComponentSection title="Audio Source" icon={Icon}><AssetProperty component={component} document={document} replace={replace} /><Property label="Loop"><Switch aria-label="Audio loop" checked={component.properties.loop === true} onCheckedChange={checked => replace({ ...component, properties: { ...component.properties, loop: checked } }, 'Change audio loop')} /></Property><NumberProperty label="Volume" value={Number(component.properties.volume) || 1} min={0} step="0.05" onCommit={value => replace({ ...component, properties: { ...component.properties, volume: Math.max(0, value) } }, 'Change audio volume')} /></ComponentSection>
+  if (isCollider(component)) return <ComponentSection title={labelFor(component)} icon={Icon}>{component.type === "mesh-collider" && <AssetProperty component={component} document={document} replace={replace} />}<Property label="Trigger"><Switch aria-label={`${labelFor(component)} trigger`} checked={component.isTrigger} onCheckedChange={checked => replace({ ...component, isTrigger: checked }, 'Change trigger')} /></Property>{'radius' in component ? <NumberProperty label="Radius" value={component.radius} min={0} onCommit={value => replace({ ...component, radius: Math.max(0, value) }, 'Change collider radius')} /> : null}{'size' in component && Array.isArray(component.size) && component.size.length === 2 ? <Vec2Property label="Size" value={component.size as [number, number]} onCommit={value => replace({ ...component, size: value } as SceneComponent, 'Change collider size')} /> : null}</ComponentSection>
+  if (component.type === 'audio-source') return <ComponentSection title="Audio Source" icon={Icon}><AssetProperty component={component} document={document} replace={replace} /><Property label="Loop"><Switch aria-label="Audio loop" checked={component.properties.loop === true} onCheckedChange={checked => replace({ ...component, properties: { ...component.properties, loop: checked } }, 'Change audio loop')} /></Property><NumberProperty label="Volume" value={Number(component.properties.volume ?? 1)} min={0} step="0.05" onCommit={value => replace({ ...component, properties: { ...component.properties, volume: Math.max(0, value) } }, 'Change audio volume')} /></ComponentSection>
   return <ComponentSection title={labelFor(component)} icon={Icon}><Property label="Enabled"><Switch aria-label={`${labelFor(component)} enabled`} checked={component.enabled} onCheckedChange={checked => replace({ ...component, enabled: checked }, 'Change component state')} /></Property></ComponentSection>
 }
 
@@ -176,9 +212,29 @@ export function Inspector({ node, document, commit, onFocus, onSave, onReparent 
   const number = (value: number, onChange: (value: number) => void, label = 'Value') => <DraftScalar aria-label={label} type="number" step="0.1" value={value} parse={Number} onCommit={next => onChange(Number(next))} onSave={onSave} />
   const descendants = new Set<string>(); const collect = (id: string) => { descendants.add(id); document.nodes[id]?.children.forEach(collect) }; collect(node.id)
   const primary = primaryComponentType(node)
-  return <div className="inspector-scroll"><section className="object-header"><div className="object-heading"><span className="object-avatar"><ObjectIcon kind={primary} size={23} /></span><Switch aria-label="Active" disabled={readOnly} checked={node.active} onCheckedChange={checked => commit([operations.active(node.id, checked, node.active)], 'Change active state')} /><input className="name-input" disabled={readOnly} value={name} onChange={event => setName(event.target.value)} onBlur={() => { const next = name.trim(); if (next && next !== node.name) commit([operations.rename(node.id, next, node.name)], 'Rename GameObject'); else setName(node.name) }} /><button className="object-lock" disabled={node.editable === false} onClick={() => commit([operations.locked(node.id, !node.locked, node.locked)], 'Change lock')}>{node.locked ? <LockKeyhole size={13} /> : <UnlockKeyhole size={13} />}</button></div><div className="object-subtitle"><span>GAMEOBJECT · {primary.toUpperCase()}</span><button onClick={onFocus}>Focus F</button></div><Property label="Parent"><Select ariaLabel="Parent" disabled={readOnly} value={node.parentId ?? ''} onValueChange={value => onReparent(value || null)} options={[{ value: '', label: 'Scene Root' }, ...Object.values(document.nodes).filter(item => !descendants.has(item.id)).map(item => ({ value: item.id, label: item.name }))]} /></Property></section><fieldset className="inspector-fields" disabled={readOnly}><ComponentSection title="Transform" icon={Move}><Vector label="Position" values={node.transform.position} set={(i, value) => update({ position: node.transform.position.map((v, index) => index === i ? value : v) as [number, number, number] })} number={number} /><Vector label="Rotation °" values={node.transform.rotation.map(value => value * 180 / Math.PI) as [number, number, number]} set={(i, value) => update({ rotation: node.transform.rotation.map((v, index) => index === i ? value * Math.PI / 180 : v) as [number, number, number] })} number={number} /><Vector label="Scale" values={node.transform.scale} set={(i, value) => update({ scale: node.transform.scale.map((v, index) => index === i ? value : v) as [number, number, number] })} number={number} /></ComponentSection>{node.components.map(component => <ComponentInspector key={component.id} node={node} component={component} document={document} commit={commit} />)}</fieldset></div>
+  return <div className="inspector-scroll"><section className="object-header"><div className="object-heading"><span className="object-avatar"><ObjectIcon kind={primary} size={23} /></span><Switch aria-label="Active" disabled={readOnly} checked={node.active} onCheckedChange={checked => commit([operations.active(node.id, checked, node.active)], 'Change active state')} /><input className="name-input" disabled={readOnly} value={name} onChange={event => setName(event.target.value)} onBlur={() => { const next = name.trim(); if (next && next !== node.name) commit([operations.rename(node.id, next, node.name)], 'Rename GameObject'); else setName(node.name) }} /><button className="object-lock" disabled={node.editable === false} onClick={() => commit([operations.locked(node.id, !node.locked, node.locked)], 'Change lock')}>{node.locked ? <LockKeyhole size={13} /> : <UnlockKeyhole size={13} />}</button></div><div className="object-subtitle"><span>GAMEOBJECT · {primary.toUpperCase()}</span><button onClick={onFocus}>Focus F</button></div><Property label="Parent"><Select ariaLabel="Parent" disabled={readOnly} value={node.parentId ?? ''} onValueChange={value => onReparent(value || null)} options={[{ value: '', label: 'Scene Root' }, ...Object.values(document.nodes).filter(item => !descendants.has(item.id)).map(item => ({ value: item.id, label: item.name }))]} /></Property></section><fieldset className="inspector-fields" disabled={readOnly} inert={readOnly}><ComponentSection title="Transform" icon={Move}><Vector label="Position" values={node.transform.position} set={(i, value) => update({ position: node.transform.position.map((v, index) => index === i ? value : v) as [number, number, number] })} number={number} /><Vector label="Rotation °" values={node.transform.rotation.map(value => value * 180 / Math.PI) as [number, number, number]} set={(i, value) => update({ rotation: node.transform.rotation.map((v, index) => index === i ? value * Math.PI / 180 : v) as [number, number, number] })} number={number} /><Vector label="Scale" values={node.transform.scale} set={(i, value) => update({ scale: node.transform.scale.map((v, index) => index === i ? value : v) as [number, number, number] })} number={number} /></ComponentSection>{node.components.map(component => <ComponentInspector key={component.id} node={node} component={component} document={document} commit={commit} />)}</fieldset></div>
 }
 
 type DraftScalarProps = { type: 'color' | 'number'; value: string | number; parse: (value: string) => string | number; onCommit: (value: string | number) => void; onSave?: () => void; min?: string; max?: string; step?: string; ['aria-label']?: string }
 function Vector({ label, values, set, number }: { label: string; values: [number, number, number]; set: (index: number, value: number) => void; number: (value: number, onChange: (value: number) => void, label?: string) => ReactNode }) { return <div className="vector"><span>{label}</span><div>{values.map((value, index) => <label key={index}><b>{'XYZ'[index]}</b>{number(fmt(value), next => set(index, next), `${label.split(' ')[0]} ${'XYZ'[index]}`)}</label>)}</div></div> }
 function DraftScalar({ value, parse, onCommit, onSave, ...inputProps }: DraftScalarProps) { const [draft, setDraft] = useState(String(value)), [editing, setEditing] = useState(false); useEffect(() => { if (!editing) setDraft(String(value)) }, [value, editing]); const commitDraft = () => { if (!editing) return; setEditing(false); const next = parse(draft); if (next !== value) onCommit(next) }; return <input title={inputProps['aria-label']} {...inputProps} value={draft} onFocus={() => setEditing(true)} onChange={event => setDraft(event.target.value)} onBlur={commitDraft} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); commitDraft(); setTimeout(() => onSave?.(), 0) } }} /> }
+
+function ParticleInspector({ component, replace }: { component: Extract<SceneComponent, { type: 'particle-system' }>; replace: (next: SceneComponent, label: string) => void }) {
+  const props = component.properties
+  const group = (name: string) => (props[name] && typeof props[name] === 'object' ? props[name] : {}) as Record<string, number>
+  const field = (name: string, key: string, label: string, fallback: number, min?: number) => <NumberProperty key={key} label={label} value={Number(group(name)[key] ?? fallback)} min={min} onCommit={value => replace({ ...component, properties: { ...props, [name]: { ...group(name), [key]: value } } }, `Change particle ${label.toLowerCase()}`)} />
+  const motion = (props.motion && typeof props.motion === 'object' ? props.motion : {}) as Record<string, unknown>
+  const period = (motion.periodSecs && typeof motion.periodSecs === 'object' ? motion.periodSecs : {}) as Record<string, number>
+  const countKey = props.count === undefined ? 'maxParticles' : 'count'
+  return <ComponentSection title="Particle System" icon={Sparkles}>
+    <NumberProperty label="Count" value={Number(props[countKey] ?? 0)} min={0} step="1" onCommit={value => replace({ ...component, properties: { ...props, [countKey]: Math.max(0, Math.round(value)) } }, 'Change particle count')} />
+    {field('particleSize', 'min', 'Min size (px)', 3, 0)}
+    {field('particleSize', 'max', 'Max size (px)', Number(group('particleSize').min ?? 3), 0)}
+    {field('zone', 'x', 'Zone X', 0)}{field('zone', 'y', 'Zone Y', 0)}
+    {field('zone', 'width', 'Zone width', 0, 0)}{field('zone', 'height', 'Zone height', 0, 0)}
+    {field('alpha', 'min', 'Min alpha', .35, 0)}{field('alpha', 'max', 'Max alpha', .9, 0)}
+    <NumberProperty label="Motion (px)" value={Number(motion.amplitudePx ?? 0)} min={0} onCommit={value => replace({ ...component, properties: { ...props, motion: { ...motion, amplitudePx: value } } }, 'Change particle motion')} />
+    {(['min', 'max'] as const).map(key => <NumberProperty key={key} label={`${key === 'min' ? 'Min' : 'Max'} period (s)`} value={Number(period[key] ?? (key === 'min' ? 3 : 6))} min={.1} onCommit={value => replace({ ...component, properties: { ...props, motion: { ...motion, periodSecs: { ...period, [key]: value } } } }, 'Change particle period')} />)}
+    <p className="component-note">Editor preview shows up to 256 particles.</p>
+  </ComponentSection>
+}

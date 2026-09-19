@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowLeft, Box, Eye, File, LibraryBig, Image as ImageIcon, Plus, Search, X } from 'lucide-react'
 import { Dialog, DialogTrigger, DialogContent, DialogTitle, DialogDescription } from './components/ui/dialog'
-import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from './components/ui/context-menu'
+import { Input } from './components/motion/input'
+import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from './components/motion/context-menu'
 import { AssetModelPreview } from './viewport'
 import { dataUri, fromDataUri } from './assets'
 import type { SceneAsset } from './model'
 
 export type AssetLibrarySource = { url: string; label: string }
 type Entry = { name: string; path: string; mimeType: string; size: number; url?: string; asset?: SceneAsset }
-const isModel = (entry: Entry) => entry.path.toLowerCase().endsWith('.glb')
+const isModel = (entry: Entry) => /\.(glb|gltf)$/i.test(entry.path)
 const isImage = (entry: Entry) => /\.(png|jpe?g|webp|gif|avif)$/i.test(entry.path)
 async function loadEntry(entry: Entry, signal: AbortSignal): Promise<SceneAsset> {
   if (entry.asset) return entry.asset
@@ -48,7 +49,7 @@ export function AssetLibraryDialog({ source, assets, onAdd, trigger, open: contr
     if (!open) return
     const controller = new AbortController()
     setError(''); setSelected(null); setQuery(''); setPreview(null)
-    if (!source) { setEntries(Object.values(assets).map(asset => ({ name: asset.name, path: asset.path, mimeType: asset.mimeType, size: asset.bytes ? fromDataUri(asset.bytes).length : 0, asset }))); return }
+    if (!source) { setEntries([...new Map(Object.values(assets).map(asset => [asset.path, asset])).values()].map(asset => ({ name: asset.name, path: asset.path, mimeType: asset.mimeType, size: asset.bytes ? fromDataUri(asset.bytes).length : 0, asset }))); return }
     setLoading(true); setEntries([])
     fetch(source.url, { signal: controller.signal }).then(async response => {
       if (!response.ok) throw Error('Unable to read the asset directory.')
@@ -86,19 +87,19 @@ export function AssetLibraryDialog({ source, assets, onAdd, trigger, open: contr
       {preview ? <div className="asset-preview" aria-label={`Preview ${preview.entry.name}`}>
         {preview.asset ? isModel(preview.entry) ? <AssetModelPreview asset={preview.asset} assets={assets} onDiagnostic={setError} /> : <img src={preview.asset.bytes} alt={preview.entry.name} onError={() => setError('Unable to preview this image.')} /> : !error && <p role="status">Loading preview…</p>}
       </div> : <div className="asset-library-body">
-        <div className="asset-search"><Search size={14} /><input ref={searchInputRef} title="Search library assets" aria-label="Search assets" placeholder="Search assets" value={query} onChange={event => setQuery(event.target.value)} />{query.length > 0 && <button type="button" className="search-clear" aria-label="Clear assets search" title="Clear search" onClick={() => { setQuery(''); searchInputRef.current?.focus() }}><X size={14} /></button>}</div>
+        <div className="asset-search"><Search size={14} /><Input ref={searchInputRef} title="Search library assets" aria-label="Search assets" placeholder="Search assets" value={query} onChange={setQuery} />{query.length > 0 && <button type="button" className="search-clear" aria-label="Clear assets search" title="Clear search" onClick={() => { setQuery(''); searchInputRef.current?.focus() }}><X size={14} /></button>}</div>
         <div ref={gallery} className="asset-grid" aria-label="Library assets">
           {entries.filter(item => `${item.name} ${item.path}`.toLowerCase().includes(query.toLowerCase())).map(item => {
             const Icon = item.mimeType.startsWith('image/') ? ImageIcon : /\.gl(tf|b)$/i.test(item.path) ? Box : File
             return <ContextMenu key={item.path} onOpenChange={value => { if (value) setSelected(item.path) }}>
-              <ContextMenuTrigger asChild><button className="asset-card" aria-pressed={selected === item.path} title={`${item.name} · Right-click for actions`} onClick={() => setSelected(item.path)} onDoubleClick={() => { if (isModel(item) || isImage(item)) void run(item, 'preview') }}><Icon size={32} strokeWidth={1.3} /><strong>{item.name}</strong><span>{item.path}</span></button></ContextMenuTrigger>
-              <ContextMenuContent collisionPadding={8} aria-label={`${item.name} actions`}>
-                <ContextMenuItem title="Preview asset" disabled={adding || (!isModel(item) && !isImage(item))} onSelect={() => void run(item, 'preview')}><Eye size={14} />Preview</ContextMenuItem>
-                <ContextMenuItem title="Add model to scene" disabled={adding || !isModel(item)} onSelect={() => void run(item, 'add')}><Plus size={14} />Add to scene</ContextMenuItem>
+              <ContextMenuTrigger><button className="asset-card" aria-pressed={selected === item.path} title={`${item.name} · Right-click for actions`} onClick={() => setSelected(item.path)} onDoubleClick={() => { if (isModel(item) || isImage(item)) void run(item, 'preview') }}>{isImage(item) && item.asset?.bytes ? <img loading="lazy" src={item.asset.bytes} alt="" /> : <Icon size={32} strokeWidth={1.3} />}<strong>{item.name}</strong><span>{item.mimeType}</span></button></ContextMenuTrigger>
+              <ContextMenuContent className="scene-context-content" ariaLabel={`${item.name} actions`}>
+                <ContextMenuItem disabled={adding || (!isModel(item) && !isImage(item))} onSelect={() => void run(item, 'preview')}><Eye size={14} />Preview</ContextMenuItem>
+                <ContextMenuItem disabled={adding || !isModel(item)} onSelect={() => void run(item, 'add')}><Plus size={14} />Add to scene</ContextMenuItem>
               </ContextMenuContent>
             </ContextMenu>
           })}
-          {loading ? <p role="status">Reading asset directory…</p> : !entries.length && <p>No assets in this directory.</p>}
+          {loading ? <p role="status">Reading asset directory…</p> : !entries.some(item => `${item.name} ${item.path}`.toLowerCase().includes(query.toLowerCase())) && <p>{query ? "No matching assets." : "No assets in this directory."}</p>}
         </div>
         {adding && <p role="status">Adding model…</p>}
       </div>}

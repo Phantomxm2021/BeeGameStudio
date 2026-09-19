@@ -13,13 +13,11 @@ export const fileReviewReportSchema = singleReviewReportSchema
 
 export function fileReviewPrompt(): string {
   return [
-    'Review the eight documents in docs/ against the confirmed user requirements in requirements.md, and directly correct every real problem you find. Choose your own investigation and editing strategy.',
-    'Change only problems that could cause the implemented game to violate a confirmed requirement, behave inconsistently, or fail acceptance. Ignore wording preferences and harmless semantic differences.',
-    'Inspect, edit and recheck the documents as needed until you judge the task complete. Do not assign severity, priority, or blocker labels, and do not invent work to satisfy a quota.',
-    'Keep related statements consistent when a correction crosses document boundaries, but do not redesign unrelated content. Use your own judgment instead of treating prior suggestions as mandatory instructions.',
-    'The deliverables are the eight documents in docs/. requirements.md and review-context/ are read-only task evidence; working notes are not deliverables.',
+    'Review the eight documents in docs/ against requirements.md, then directly correct only implementation-affecting contradictions or omissions.',
+    'Work as a normal coding task: inspect the relevant files, make the needed edits promptly, and finish. Do not narrate or enumerate an audit checklist.',
+    'The deliverables are the eight documents in docs/. requirements.md and review-context/ are read-only evidence.',
     'Do not edit version or updated_at; the service updates those fields when it seals a document whose authored content changed.',
-    'When the work is complete, use StructuredOutput with only a concise summary of the completed review and corrections.',
+    'When complete, use StructuredOutput with a concise summary of the review and corrections.',
   ].join('\n')
 }
 

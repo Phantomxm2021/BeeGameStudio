@@ -228,10 +228,13 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       (message.subtype === 'task_notification' ||
         message.subtype === 'task_started' ||
         message.subtype === 'task_progress')
-    )
+    ) {
+      if (!this.activeTurn) this.observability.observeMessage(message)
       this.sessionInput.onNativeTaskNotification?.(
-        nativeTaskNotification(message),
+        { ...nativeTaskNotification(message),
+          ...(!this.activeTurn ? { backgroundMessage: message } : {}) },
       )
+    }
     const turn = this.activeTurn
     if (!turn) return
     this.observability.observeMessage(message)

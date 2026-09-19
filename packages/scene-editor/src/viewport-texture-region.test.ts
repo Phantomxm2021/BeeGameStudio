@@ -26,6 +26,8 @@ describe('sprite atlas texture regions', () => {
     const node: SceneNode = { id: 'child', name: 'Child', parentId: 'parent', children: [], active: true, locked: false, transform: identityTransform(), tags: [], components: [{ id: 'sprite', type: 'sprite-renderer', enabled: true, assetId: 'sprite', material: { mode: 'unlit', color: '#ffffff', metalness: 0, roughness: 1, opacity: 1, alphaMode: 'opaque' }, properties: { size: { width: 64, height: 32 } } }] }
     expect(rendererSize(node)).toEqual([.64, .32])
     expect(node.transform.scale).toEqual([1, 1, 1])
+    if (node.components[0].type === 'sprite-renderer') node.components[0].properties.size = [32, 48]
+    expect(rendererSize(node, 32)).toEqual([1, 1.5])
   })
 
   it('uses a UI RectTransform size when an Image has no texture dimensions', () => {

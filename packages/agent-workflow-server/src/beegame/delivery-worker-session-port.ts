@@ -16,7 +16,6 @@ import {
 } from './delivery-workflow/types'
 import { implementationWorkerTerminalSchema } from './delivery-workflow/worker-contracts'
 import {
-  acceptanceValidatorTerminalSchema,
   changeImpactTerminalSchema,
   contentAuthorTerminalSchema,
   documentAuthorTerminalSchema,
@@ -110,8 +109,11 @@ export function createBeeGameDeliveryWorkerPort(input: {
       assertSharedDocumentWorker(request)
       const dispatchId = request.dispatchId ?? randomUUID()
       const requestedResumeSession = request.contract.resumeWorkerSessionId
-      if (requestedResumeSession !== undefined)
-        throw new Error('document author session resume is not supported')
+      if (
+        requestedResumeSession !== undefined &&
+        (typeof requestedResumeSession !== 'string' || !requestedResumeSession)
+      )
+        throw new Error('worker resume session id must be a non-empty string')
       const documentAuthorityBlock =
         request.workerType === 'document-author' &&
         request.contract.documentSet === 'checklist'
@@ -129,6 +131,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
         ...(input.userDataRoot ? { userDataRoot: input.userDataRoot } : {}),
         ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
         ...(input.language ? { language: input.language } : {}),
+        ...(typeof requestedResumeSession === 'string'
+          ? { resumeNativeSessionId: requestedResumeSession }
+          : {}),
         // Resource selection is a dedicated post-review capability. All
         // other workers consume the resulting manifest as read-only input.
         workflowWorker: true,
@@ -419,8 +424,6 @@ async function createDeterministicStructuredTerminal(input: {
       )
     case 'implementation-worker':
       return createDeterministicImplementationWorkerTerminal(input)
-    case 'acceptance-validator':
-      return createNaturalAcceptanceTerminal(input)
     case 'change-impact-analyzer':
       return createNaturalChangeImpactTerminal(input)
     case 'question-answerer':
@@ -517,107 +520,6 @@ async function createNaturalQuestionAnswerTerminal(input: {
   return terminal
 }
 
-async function createNaturalAcceptanceTerminal(input: {
-  request: WorkerDispatchRequest
-  events: ReturnType<BeeGameSessionManager['events']>
-}) {
-  const report = [...input.events]
-    .reverse()
-    .find(
-      event =>
-        (event.type === 'result' || event.type === 'assistant.message') &&
-        /(?:^|\n)ACCEPTANCE:\s*(?:PASS|FAIL)\s*$/iu.test(event.text.trim()),
-    )
-    ?.text.trim()
-  if (!report)
-    throw new Error('acceptance worker completed without a final report')
-  const verdict = report.match(/(?:^|\n)ACCEPTANCE:\s*(PASS|FAIL)\s*$/iu)?.[1]
-  if (!verdict)
-    throw new Error(
-      'acceptance report must end with ACCEPTANCE: PASS or ACCEPTANCE: FAIL',
-    )
-  const contract = input.request.contract
-  const expected = {
-    task: submittedStringArray(contract.taskIds),
-    checklist: submittedStringArray(contract.checklistIds),
-    content: submittedStringArray(contract.contentIds),
-    asset: submittedStringArray(contract.resourceIds),
-  }
-  const observations = acceptanceObservations(report)
-  const actual = {
-    task: observations.filter(item => item.kind === 'task').map(item => item.id),
-    checklist: observations.filter(item => item.kind === 'checklist').map(item => item.id),
-    content: observations.filter(item => item.kind === 'content').map(item => item.id),
-    asset: observations.filter(item => item.kind === 'asset').map(item => item.id),
-  }
-  for (const kind of ['task', 'checklist', 'content', 'asset'] as const)
-    assertExactAcceptanceCoverage(expected[kind], actual[kind], kind)
-  const failed = observations.filter(item => item.status === 'FAIL')
-  if ((verdict === 'PASS') !== (failed.length === 0))
-    throw new Error('acceptance verdict conflicts with per-ID evidence')
-  const evidencePath = `.beegame/workflow/evidence/${input.request.workerType}-${input.request.dispatchId}.json`
-  const terminal = acceptanceValidatorTerminalSchema.parse({
-    workerType: 'acceptance-validator',
-    revision: input.request.revision,
-    status: verdict === 'PASS' ? 'passed' : 'failed',
-    validatedTaskIds: actual.task,
-    checklistIds: actual.checklist,
-    findings:
-      verdict === 'PASS'
-        ? []
-        : failed.map(item => ({
-            taskIds: item.kind === 'task' ? [item.id] : [],
-            checklistIds: item.kind === 'checklist' ? [item.id] : [],
-            artifactPaths: ['.'],
-            description: `${item.kind.toUpperCase()} ${item.id}: ${item.observation}`,
-            requiredAction: 'Review and correct this observed acceptance failure.',
-          })),
-    evidencePath,
-  })
-  await writeCanonicalTerminalEvidence({
-    workspacePath: input.request.workspacePath,
-    evidencePath,
-    value: { ...terminal, report },
-  })
-  return terminal
-}
-
-type AcceptanceObservation = {
-  kind: 'task' | 'checklist' | 'content' | 'asset'
-  id: string
-  status: 'PASS' | 'FAIL'
-  observation: string
-}
-
-function acceptanceObservations(report: string): AcceptanceObservation[] {
-  return report.split(/\r?\n/u).flatMap(line => {
-    const match = line.match(
-      /^(TASK|CHECKLIST|CONTENT|ASSET)\s+(\S+):\s*(PASS|FAIL)\s+[—-]\s+(.+)$/u,
-    )
-    if (!match) return []
-    return [{
-      kind: match[1].toLowerCase() as AcceptanceObservation['kind'],
-      id: match[2],
-      status: match[3] as AcceptanceObservation['status'],
-      observation: match[4].trim(),
-    }]
-  })
-}
-
-function assertExactAcceptanceCoverage(
-  expected: string[],
-  actual: string[],
-  kind: string,
-): void {
-  const unique = new Set(actual)
-  if (
-    unique.size !== actual.length ||
-    expected.length !== actual.length ||
-    expected.some(id => !unique.has(id))
-  )
-    throw new Error(`acceptance report does not cover every ${kind} exactly once`)
-}
-
 const WORKSPACE_MUTATION_TOOLS = new Set([
   'Write',
   'Edit',
@@ -700,12 +602,6 @@ function sameStringSet(
   return a.length === b.length && a.every((value, index) => value === b[index])
 }
 
-function submittedStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === 'string')
-    : []
-}
-
 function createDeterministicImplementationWorkerTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
@@ -721,6 +617,7 @@ function createDeterministicImplementationWorkerTerminal(input: {
     status: 'completed',
     changedPaths,
     verifiedArtifacts: changedPaths,
+    summary: finalResultText(input.events),
     verificationResults: [],
     evidenceRefs: [evidencePath],
     evidencePath,

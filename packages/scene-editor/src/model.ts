@@ -52,11 +52,12 @@ export type SceneComponent = SpriteRendererComponent | MeshFilterComponent | Mes
 
 export interface SceneGameObject { id: string; name: string; parentId: string | null; children: string[]; active: boolean; locked: boolean; editable?: boolean; transform: Transform; layer?: string; order?: number; tags: string[]; components: SceneComponent[]; metadata?: Record<string, unknown>; source?: { irId?: string; occurrenceId?: string } }
 export type SceneNode = SceneGameObject
-export interface SceneAsset { id: string; name: string; mimeType: string; path: string; bytes?: string; uri?: string; dependencies?: string[]; diagnostics?: string[] }
+export type SpriteSheet = { frames: Record<string, { x: number; y: number; width: number; height: number }> } | { frameWidth: number; frameHeight: number; framesPerFacing?: number; facings?: string[]; states?: string[]; frameDurationMs?: number[] }
+export interface SceneAsset { spriteSheet?: SpriteSheet; id: string; name: string; mimeType: string; path: string; bytes?: string; uri?: string; dependencies?: string[]; diagnostics?: string[] }
 export interface SourceBinding { source: { kind: 'fixture'; fixtureId: string; fixtureDigest: string } | { kind: 'published-ir' | 'content-package'; publicationId: string; candidateDigest: string; sourceInputDigest: string }; contentDigest: string; contentRevision: string; contentSchemaVersion: string; adapterId: string; adapterVersion: string }
 export interface SceneSettings { background: string; showGrid: boolean; ambientColor: string; ambientIntensity: number; exposure: number; fogEnabled: boolean; fogColor: string; fogNear: number; fogFar: number; selectionColor?: string; selectionWidth?: number }
 export const DEFAULT_SCENE_SETTINGS: Readonly<SceneSettings> = { background: '#3c3f43', showGrid: true, ambientColor: '#ffffff', ambientIntensity: .2, exposure: 1, fogEnabled: false, fogColor: '#3c3f43', fogNear: 10, fogFar: 60, selectionColor: '#ffad46', selectionWidth: 3 }
-export interface SceneDocument { schemaVersion: 'scene-game-object.v2'; dimension: '2d' | '3d'; id: string; name: string; settings?: SceneSettings; revision: number; source: SourceBinding; rootIds: string[]; nodes: Record<string, SceneGameObject>; assets: Record<string, SceneAsset>; diagnostics: string[]; appliedTransactions?: Record<string, string> }
+export interface SceneDocument { pixelsPerUnit?: number; schemaVersion: 'scene-game-object.v2'; dimension: '2d' | '3d'; id: string; name: string; settings?: SceneSettings; revision: number; source: SourceBinding; rootIds: string[]; nodes: Record<string, SceneGameObject>; assets: Record<string, SceneAsset>; diagnostics: string[]; appliedTransactions?: Record<string, string> }
 
 export type SceneOperation =
   | { type: 'scene.configure'; name: string; settings?: SceneSettings; expectedName?: string; expectedSettings?: SceneSettings | null }

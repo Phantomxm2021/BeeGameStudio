@@ -12,6 +12,19 @@ const CHECKLIST_FINAL_MESSAGE_ID = '021789435028095846a816464a9af9c0791e0f68a2ce
 const IMPLEMENTATION_MIXED_MESSAGE_ID = '0217894385633113d0449b03f13da7ad7c0359f0f1d760c19f272';
 
 describe('BeeGameCollaborationFeed canonical transcript', () => {
+  it('updates the open subagent drawer as progress and terminal result arrive', () => {
+    const message: ChatDisplayMessage = { id: 'subagent-live', sender: 'beegame', content: 'Subagent: Audit assets',
+      type: 'tool', timestamp: Date.now(), toolName: 'Agent', toolStatus: 'running', isSubagentTool: true,
+      subagentPrompt: 'Audit assets', subagentTrace: 'Read manifest.json' };
+    const { rerender } = render(<BeeGameCollaborationFeed messages={[message]} />);
+    fireEvent.click(within(screen.getByTestId('beegame-subagent-disclosure-subagent-live')).getByRole('button'));
+    expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Read manifest.json');
+    rerender(<BeeGameCollaborationFeed messages={[{ ...message, toolStatus: 'completed',
+      subagentTrace: 'Checked hashes and palette', subagentOutput: 'Audit passed' }]} />);
+    expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Completed');
+    expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Checked hashes and palette');
+    expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Audit passed');
+  });
   it('starts with the real idea and keeps three independent turns in source order', () => {
     expect(sampleMessages[0]).toMatchObject({
       sender: 'user',

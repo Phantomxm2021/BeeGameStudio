@@ -78,8 +78,8 @@ export type BeeGameAssetRequirement = {
   acquisition_profile: {
     dimensions: ResourceAcquisitionProfile['dimensions']
     asset_kinds: ResourceAcquisitionProfile['assetKinds']
-    usage_tags: ResourceAcquisitionProfile['usageTags']
-    capabilities: ResourceAcquisitionProfile['capabilities']
+    usage_tags?: readonly string[]
+    capabilities?: readonly string[]
     styles: ResourceAcquisitionProfile['styles']
     acceptance_criteria?: readonly string[]
     sourcing_policy?: {
@@ -702,12 +702,6 @@ function validateRequirement(
     issues.push(`${path} must be an object.`)
     return
   }
-  rejectUnknownKeys(
-    value,
-    ['id', 'name', 'purpose', 'required', 'acquisition_profile'],
-    path,
-    issues,
-  )
   const id = trimmedString(value.id)
   if (!id) issues.push(`${path}.id must be a trimmed non-empty string.`)
   else if (ids.has(id)) issues.push(`${path}.id is duplicated: ${id}.`)
@@ -732,21 +726,6 @@ function validateAcquisitionProfile(
     issues.push(`${path} must be an object.`)
     return
   }
-  rejectUnknownKeys(
-    value,
-    [
-      'dimensions',
-      'asset_kinds',
-      'usage_tags',
-      'capabilities',
-      'styles',
-      'acceptance_criteria',
-      'sourcing_policy',
-      'coverage',
-    ],
-    path,
-    issues,
-  )
   validateEnumArray(
     value.dimensions,
     RESOURCE_DIMENSIONS,
@@ -761,18 +740,8 @@ function validateAcquisitionProfile(
     issues,
     true,
   )
-  validateEnumArray(
-    value.usage_tags,
-    RESOURCE_USAGE_TAGS,
-    `${path}.usage_tags`,
-    issues,
-  )
-  validateEnumArray(
-    value.capabilities,
-    RESOURCE_CAPABILITIES,
-    `${path}.capabilities`,
-    issues,
-  )
+  validateDescriptiveTags(value.usage_tags, `${path}.usage_tags`, issues)
+  validateDescriptiveTags(value.capabilities, `${path}.capabilities`, issues)
   if (!Array.isArray(value.styles) || !value.styles.every(isTrimmedString))
     issues.push(`${path}.styles must be an array of trimmed non-empty strings.`)
   if (
@@ -863,6 +832,12 @@ function validateEnumArray(
 function isTrimmedString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value === value.trim()
 }
+
+// These describe an already selected asset; they are not catalogue query enums.
+function validateDescriptiveTags(value: unknown, path: string, issues: string[]): void {
+  if (value !== undefined && (!Array.isArray(value) || !value.every(isTrimmedString)))
+    issues.push(`${path} must be an array of non-empty strings when present.`)
+}
 function validateResource(
   value: unknown,
   index: number,
@@ -876,34 +851,10 @@ function validateResource(
     issues.push(`${path} must be an object.`)
     return
   }
-  rejectUnknownKeys(
-    value,
-    [
-      'id',
-      'fulfills',
-      'source',
-      'root_path',
-      'file_paths',
-      'local_file_hashes',
-      'provisional',
-      'status',
-      'selected_at',
-      'selection_reason',
-      'dimension',
-      'asset_kind',
-      'capabilities',
-      'usage_tags',
-      'styles',
-      'relation_kinds',
-      'embedded_kinds',
-      'content_profile',
-      'technical_facts',
-      'dependencies',
-      'error',
-    ],
-    path,
-    issues,
-  )
+  // Preserve descriptive extensions (notes, toolchain metadata, etc.). They
+  // neither establish readiness nor replace fields consumed by the runtime.
+  if (value.hashes !== undefined)
+    issues.push(`${path}.hashes is not an integrity field; use local_file_hashes: { "workspace-relative-file": "sha256-hex" }.`)
   const id = trimmedString(value.id)
   if (!id) issues.push(`${path}.id must be a trimmed non-empty string.`)
   else if (ids.has(id)) issues.push(`${path}.id is duplicated: ${id}.`)
@@ -964,9 +915,9 @@ function validateResource(
   if (value.asset_kind !== undefined && !assetKind)
     issues.push(`${path}.asset_kind must be a trimmed non-empty string.`)
   if (value.usage_tags !== undefined)
-    validateEnumArray(value.usage_tags, RESOURCE_USAGE_TAGS, `${path}.usage_tags`, issues)
+    validateDescriptiveTags(value.usage_tags, `${path}.usage_tags`, issues)
   if (value.capabilities !== undefined)
-    validateEnumArray(value.capabilities, RESOURCE_CAPABILITIES, `${path}.capabilities`, issues)
+    validateDescriptiveTags(value.capabilities, `${path}.capabilities`, issues)
   if (value.styles !== undefined && !nonEmptyStringArray(value.styles))
     issues.push(`${path}.styles must be a non-empty array of non-empty strings.`)
   if (value.relation_kinds !== undefined)
@@ -1022,12 +973,6 @@ function validateResourceSource(
     return
   }
   if (value.type === 'resource-library') {
-    rejectUnknownKeys(
-      value,
-      ['type', 'pack_id', 'pack_version', 'element_id', 'element_path'],
-      path,
-      issues,
-    )
     for (const field of [
       'pack_id',
       'pack_version',
@@ -1039,27 +984,12 @@ function validateResourceSource(
     return
   }
   if (value.type === 'agent-authored') {
-    rejectUnknownKeys(value, ['type', 'created_at', 'reason'], path, issues)
     if (!trimmedString(value.created_at))
       issues.push(`${path}.created_at is required.`)
     if (!trimmedString(value.reason)) issues.push(`${path}.reason is required.`)
     return
   }
   if (value.type === 'web') {
-    rejectUnknownKeys(
-      value,
-      [
-        'type',
-        'source_url',
-        'page_url',
-        'license',
-        'license_url',
-        'author',
-        'retrieved_at',
-      ],
-      path,
-      issues,
-    )
     for (const field of [
       'source_url',
       'page_url',
@@ -1074,7 +1004,6 @@ function validateResourceSource(
     return
   }
   if (value.type === 'user-provided') {
-    rejectUnknownKeys(value, ['type', 'created_at', 'filename'], path, issues)
     if (!trimmedString(value.created_at))
       issues.push(`${path}.created_at is required.`)
     if (!trimmedString(value.filename))

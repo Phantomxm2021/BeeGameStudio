@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync, realpathSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import {
   BeeGameAssetManifestError,
@@ -196,5 +196,9 @@ function projectFile(workspace: string, filePath: string): string | undefined {
     isAbsolute(fromWorkspace)
   )
     return undefined
+  if (existsSync(absolute)) {
+    const physical = relative(realpathSync(workspace), realpathSync(absolute))
+    if (physical === '..' || physical.startsWith(`..${sep}`) || isAbsolute(physical)) return undefined
+  }
   return absolute
 }

@@ -5,3 +5,5 @@ export * from './assets'
 export * from './persistence'
 export * from './viewport'
 export * from './editor'
+
+export * from './sprite-sheet'
