@@ -5,6 +5,10 @@ import type { SpriteRendererComponent, SceneAsset } from './model'
 import { canonicalJson } from './persistence'
 
 describe('project sprite sheets', () => {
+  it('uses a component frameSize without requiring a sidecar atlas', () => {
+    expect(spriteSheetSelection(undefined, {frameSize:[48,48]}).frame).toEqual({x:0,y:0,width:48,height:48})
+    expect(spriteSheetSelection(undefined, {frameSize:[0,48]})).toEqual({})
+  })
   it('reads the packed array atlas used by harbor and resolves extensionless frame IDs', () => {
     const table = parseSpriteSheet({ frames: [
       { filename: 'boat_hull_f0.png', frame: { x: 1, y: 1, w: 40, h: 48 }, rotated: false, trimmed: false },

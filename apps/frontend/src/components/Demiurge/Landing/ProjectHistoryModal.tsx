@@ -204,7 +204,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
   return (
     <>
       <Dialog open={isOpen} onOpenChange={(open) => { if (!open) { closeMenu(); onClose(); } }}>
-        <DialogContent className="flex max-h-[min(620px,calc(100dvh-2rem))] max-w-xl flex-col overflow-hidden p-5">
+        <DialogContent className="flex h-[min(620px,calc(100dvh-2rem))] max-h-[min(620px,calc(100dvh-2rem))] max-w-xl flex-col overflow-hidden p-5">
         <div className="relative z-10 mb-5 flex items-center justify-between">
           <div>
             <DialogTitle className="type-title-3 text-foreground">{t.historyProjects}</DialogTitle>
@@ -232,12 +232,14 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
           </Button>
         </div>
 
-        <div className="relative z-10 min-h-48 flex-1 space-y-3 overflow-y-auto px-1 pt-3 scrollbar-premium">
+        <div className="relative z-10 min-h-0 flex-1 space-y-3 overflow-y-auto px-1 pt-3 scrollbar-premium">
           {isProjectListLoading ? (
             <ProjectHistoryListSkeleton />
           ) : projects.length === 0 ? (
-            <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-muted/40 px-8 text-center text-muted-foreground">
-              <Clock className="h-8 w-8 stroke-1" />
+            <div className="flex h-full min-h-48 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border bg-muted/40 px-8 text-center text-muted-foreground">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent/70 text-muted-foreground">
+                <Clock className="h-6 w-6 stroke-[1.5]" />
+              </span>
               <span className="type-callout text-foreground">{text.noProjectsForAccount}</span>
               <span className="type-footnote max-w-sm text-muted-foreground">{text.localProjectsNeedMigration}</span>
             </div>
@@ -321,7 +323,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
               style={{ left: menuPosition.left, top: menuPosition.top }}
 
               onPointerDown={event => event.stopPropagation()}
-              className="bg-background fixed z-[90] min-w-[150px] overflow-hidden rounded-lg p-1.5 text-foreground shadow-lg"
+              className="bg-background fixed z-[260] min-w-[150px] overflow-hidden rounded-lg p-1.5 text-foreground shadow-lg"
             >
               <button
                 type="button"

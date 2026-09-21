@@ -1,9 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import { fileURLToPath } from 'node:url'
+import { mkdtemp, realpath, rm, stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   createNativeCliProcessRunner,
   nativeRuntimeEnvironment,
   nativeRuntimeCommand,
+  prepareNativeSessionTemporaryDirectory,
 } from './native-cli-process-runner'
 
 const fixturePath = fileURLToPath(
@@ -29,6 +33,93 @@ function startRuntime() {
 }
 
 describe('native CLI process runner', () => {
+  test('gives each session a stable, project-local scratch directory', async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), 'session-scratch-')))
+    try {
+      const a = await prepareNativeSessionTemporaryDirectory(root, 'session-a')
+      expect(a.startsWith(root + '/')).toBe(true)
+      expect((await stat(a)).isDirectory()).toBe(true)
+      expect(await prepareNativeSessionTemporaryDirectory(root, 'session-a')).toBe(a)
+      expect(await prepareNativeSessionTemporaryDirectory(root, 'session-b')).not.toBe(a)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  test('passes preferred response language without changing the native tool inventory', () => {
+    const command = nativeRuntimeCommand({ sessionId: 'language', cwd: process.cwd(), env: {}, language: 'zh' })
+    expect(command[command.indexOf('--append-system-prompt') + 1]).toContain('User response language: zh')
+    expect(command).not.toContain('--tools')
+  })
+
+  test('awaits attachment persistence before delivering later terminal messages', async () => {
+    const runtime = await startRuntime()
+    const received: string[] = []
+    try {
+      await runtime.submit({ prompt: 'write', signal: new AbortController().signal,
+        onMessage: async message => {
+          if (message.type === 'assistant') await new Promise(resolve => setTimeout(resolve, 20))
+          received.push(String(message.type))
+        },
+        requestPermission: async () => ({ behavior: 'deny' }) })
+      expect(received).toEqual(['assistant', 'result'])
+    } finally { runtime.dispose?.() }
+  })
+  for (const source of ['policy', 'user'] as const) {
+    test(`keeps ${source} denials distinct in the native permission response`, async () => {
+      const runtime = await startRuntime()
+      const messages: Record<string, unknown>[] = []
+      try {
+        await runtime.submit({ prompt: 'permission', signal: new AbortController().signal,
+          onMessage: message => { messages.push(message) },
+          requestPermission: async () => ({ behavior: 'deny', source, message: 'Denied at boundary' }) })
+        const reply = messages.at(-1)?.permissionResponse as { response: { response: Record<string, unknown> } }
+        expect(reply.response.response.behavior).toBe('deny')
+        expect(reply.response.response.decisionClassification).toBe(source === 'user' ? 'user_reject' : undefined)
+      } finally { runtime.dispose?.() }
+    })
+  }
+  test('drains a resumed agent and forwards the final parent result without injecting a prompt', async () => {
+    const runtime = await startRuntime()
+    const messages: Record<string, unknown>[] = []
+    try {
+      await runtime.submit({ prompt: 'agent-lifecycle:complete', signal: new AbortController().signal,
+        onMessage: message => { messages.push(message) }, requestPermission: async () => ({ behavior: 'deny' }) })
+      expect(messages.at(-1)).toMatchObject({ type: 'result', result: 'Implementation finished', received_user_count: 1 })
+      expect(messages.filter(message => message.type === 'result')).toHaveLength(2)
+      expect(messages.some(message => message.type === 'assistant')).toBe(true)
+    } finally { runtime.dispose?.() }
+  })
+
+  test('does not wait for a long-lived background shell server', async () => {
+    const runtime = await startRuntime()
+    try {
+      await runtime.submit({ prompt: 'background-server', signal: new AbortController().signal,
+        onMessage: () => undefined, requestPermission: async () => ({ behavior: 'deny' }) })
+    } finally { runtime.dispose?.() }
+  })
+
+  for (const [mode, error] of [
+    ['idle-without-parent', 'before the parent completed'],
+    ['eof', 'without a terminal result'],
+  ]) {
+    test(`rejects ${mode} instead of delivering the interim result`, async () => {
+      const runtime = await startRuntime()
+      try {
+        await expect(runtime.submit({ prompt: `agent-lifecycle:${mode}`, signal: new AbortController().signal,
+          onMessage: () => undefined, requestPermission: async () => ({ behavior: 'deny' }) })).rejects.toThrow(error)
+      } finally { runtime.dispose?.() }
+    })
+  }
+
+  test('can stop while waiting for the resumed agent after an interim result', async () => {
+    const runtime = await startRuntime()
+    const controller = new AbortController()
+    try {
+      await expect(runtime.submit({ prompt: 'agent-lifecycle:pending', signal: controller.signal,
+        onMessage: message => { if (message.type === 'result') controller.abort() },
+        requestPermission: async () => ({ behavior: 'deny' }) })).rejects.toThrow('cancelled by user')
+    } finally { runtime.dispose?.() }
+  })
+
   test('does not override native provider stream recovery policy', () => {
     const env = nativeRuntimeEnvironment({
       ANTHROPIC_AUTH_TOKEN: 'selected-token',
@@ -37,6 +128,7 @@ describe('native CLI process runner', () => {
     expect(env.CLAUDE_ENABLE_STREAM_WATCHDOG).toBeUndefined()
     expect(env.CLAUDE_STREAM_IDLE_TIMEOUT_MS).toBeUndefined()
     expect(env.ANTHROPIC_AUTH_TOKEN).toBe('selected-token')
+    expect(env.BEEGAME_NATIVE_BACKGROUND_PERMISSIONS).toBe('1')
   })
 
   test('reports the selected model and sanitized launch contract to passive observability', async () => {
@@ -140,7 +232,7 @@ describe('native CLI process runner', () => {
     await runtime.submit({
       prompt: 'write',
       signal: new AbortController().signal,
-      onMessage: message => messages.push(message),
+      onMessage: message => { messages.push(message) },
       requestPermission: async () => ({ behavior: 'deny' }),
     })
 
@@ -285,7 +377,7 @@ describe('native CLI process runner', () => {
     await runtime.submit({
       prompt: 'permission',
       signal: new AbortController().signal,
-      onMessage: message => messages.push(message),
+      onMessage: message => { messages.push(message) },
       requestPermission: async request => {
         requests.push(request)
         return {

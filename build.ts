@@ -20,6 +20,9 @@ const result = await Bun.build({
   entrypoints: ['src/entrypoints/cli.tsx'],
   outdir,
   target: 'bun',
+  // Sharp locates platform .node/libvips files relative to its installed
+  // package. Inlining its JS into dist breaks that lookup at runtime.
+  external: ['sharp'],
   splitting: true,
   sourcemap: 'linked',
   define: {

@@ -7,6 +7,8 @@ export type ProjectTodo = {
     id: string;
     title: string;
     status: ProjectTodoStatus;
+    scope?: string;
+    stage?: string;
 };
 
 const isTodoTool = (name: unknown): boolean => {
@@ -35,11 +37,12 @@ const normalizeStatus = (status: unknown): ProjectTodoStatus => {
     return 'pending';
 };
 
-const parseSnapshot = (input: unknown, messageId: string): ProjectTodo[] | null => {
+type TodoRecord = ProjectTodo & { key: string };
+const parseSnapshot = (input: unknown, messageId: string): TodoRecord[] | null => {
     if (!input || typeof input !== 'object') return null;
     const todos = (input as { todos?: unknown }).todos;
     if (!Array.isArray(todos)) return null;
-    return todos.flatMap((todo, index): ProjectTodo[] => {
+    return todos.flatMap((todo, index): TodoRecord[] => {
         if (!todo || typeof todo !== 'object') return [];
         const record = todo as Record<string, unknown>;
         const title = typeof record.content === 'string'
@@ -49,32 +52,35 @@ const parseSnapshot = (input: unknown, messageId: string): ProjectTodo[] | null 
                 : '';
         if (!title.trim()) return [];
         return [{
-            id: typeof record.id === 'string' && record.id ? record.id : `${messageId}-${index}`,
+            id: `${messageId}-${index}`,
+            key: typeof record.id === 'string' && record.id ? record.id : title.trim(),
             title: shortenAbsolutePathsForDisplay(title.trim()),
             status: normalizeStatus(record.status),
         }];
     });
 };
 
-/** Returns every project task represented by native TodoWrite events. */
+/** TodoWrite replaces its execution's list; retain other executions, not stale snapshots. */
 export const deriveCurrentProjectTodos = (messages: ChatDisplayMessage[]): ProjectTodo[] => {
-    const todos = new Map<string, ProjectTodo>();
-    const mergeSnapshot = (snapshot: ProjectTodo[]) => {
-        for (const item of snapshot) {
-            const existingKey = [...todos.entries()].find(([, current]) => current.title === item.title)?.[0];
-            todos.set(existingKey || item.id, { ...item, id: existingKey || item.id });
-        }
+    const scopes = new Map<string, ProjectTodo[]>();
+    const mergeSnapshot = (snapshot: TodoRecord[], scope: string, message: ChatDisplayMessage) => {
+        scopes.set(scope, snapshot.map(item => ({ id: item.id, title: item.title, status: item.status,
+                ...(message.todoScope ? { scope: message.todoScope } : {}),
+                ...(message.taskKind?.startsWith('workflow_stage:') ? { stage: message.taskKind.slice('workflow_stage:'.length) } : {}),
+            })));
     };
-    for (const message of messages) {
+    for (const message of [...messages].sort((a, b) =>
+        a.sequence !== undefined && b.sequence !== undefined ? a.sequence - b.sequence : a.timestamp - b.timestamp)) {
+        const scope = message.todoScope || JSON.stringify([message.taskId || '', message.taskKind || '', message.turnId || '']);
         if (isTodoTool(messageToolName(message))) {
             const snapshot = parseSnapshot(message.toolInput, message.id);
-            if (snapshot) mergeSnapshot(snapshot);
+            if (snapshot) mergeSnapshot(snapshot, scope, message);
         }
         for (const [index, block] of (message.contentBlocks || []).entries()) {
             if (block.type !== 'tool_use' || !isTodoTool(block.toolName)) continue;
             const snapshot = parseSnapshot(block.toolInput, `${message.id}-block-${index}`);
-            if (snapshot) mergeSnapshot(snapshot);
+            if (snapshot) mergeSnapshot(snapshot, scope, message);
         }
     }
-    return [...todos.values()];
+    return [...scopes.values()].flat();
 };

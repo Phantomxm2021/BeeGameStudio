@@ -77,6 +77,7 @@ function App() {
   const [authenticationRetryVersion, setAuthenticationRetryVersion] = useState(0);
   const [authenticationInitializationError, setAuthenticationInitializationError] = useState('');
   const loadedHistoryProjectRef = useRef<string | null>(null);
+  const [historyReadyProjectId, setHistoryReadyProjectId] = useState<string | null>(null);
   const authenticationInitializationStartedRef = useRef(false);
   const authenticationRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedProtectedDataUserRef = useRef<string | null>(null);
@@ -191,6 +192,7 @@ function App() {
     const loadChatHistory = async () => {
       if (!activeProjectId || !activeProject) {
         loadedHistoryProjectRef.current = null;
+        setHistoryReadyProjectId(null);
         return;
       }
       if (loadedHistoryProjectRef.current === activeProjectId) return;
@@ -212,6 +214,7 @@ function App() {
           loadHistory(normalized);
         }
         loadedHistoryProjectRef.current = requestProjectId;
+        setHistoryReadyProjectId(requestProjectId);
       } catch (error) {
         if (!cancelled) console.error('[App] Failed to load chat history:', error);
       }
@@ -276,6 +279,7 @@ function App() {
       {isDashboardVisible ? (
         <Suspense fallback={<div className="grid min-h-screen place-items-center bg-background"><span className="size-7 animate-spin rounded-full border-2 border-border/20 border-t-ring" /></div>}>
           <DashboardView
+            chatHistoryReady={historyReadyProjectId === activeProjectId}
             projectId={activeProjectId!}
             projectName={activeProject?.name || 'Untitled Project'}
             lang={lang}

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, statSync, realpathSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { parseSpriteSheet, validateSpriteSheetBounds } from '../../../scene-editor/src/sprite-sheet'
 import {
   BeeGameAssetManifestError,
   readBeeGameAssetManifestModulePathsSync,
@@ -97,8 +98,20 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
         if (!stats.isFile()) issues.push(`Path is not a file: ${filePath}`)
         else if (!stats.size) issues.push(`File is empty: ${filePath}`)
         else if (filePath.toLowerCase().endsWith('.json')) {
-          try { JSON.parse(readFileSync(absolute, 'utf8')) }
-          catch { issues.push(`File contains invalid JSON: ${filePath}`) }
+          try {
+            const value = JSON.parse(readFileSync(absolute, 'utf8'))
+            const image = resource.file_paths.find(path => path === filePath.replace(/\.json$/i, '.png'))
+            const imagePath = image && projectFile(workspace, image)
+            if (imagePath && existsSync(imagePath)) {
+              const sheet = parseSpriteSheet(value)
+              if (sheet) {
+                const bytes = readFileSync(imagePath)
+                if (bytes.length < 24 || !bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])))
+                  throw new Error('Invalid PNG atlas')
+                validateSpriteSheetBounds(sheet, bytes.readUInt32BE(16), bytes.readUInt32BE(20))
+              }
+            }
+          } catch (error) { issues.push(`${filePath}: ${error instanceof Error ? error.message : String(error)}`) }
         }
         const expected = resource.local_file_hashes?.[filePath]
         if (expected && stats.isFile()) {

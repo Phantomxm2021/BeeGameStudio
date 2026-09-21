@@ -6,14 +6,16 @@ import {
   isHttpOnlySessionsEnabled,
 } from '../services/supabaseAuthApi';
 import { buildMessageDedupeKey } from '../utils/chatHistory';
-
-const MAX_MESSAGES = 2000;
+import { settleChatActivity } from '../utils/chatActivity';
 
 function hasCloudSession(): boolean {
   return isHttpOnlySessionsEnabled() || Boolean(getSupabaseSessionUser()?.id?.trim());
 }
 
 interface ChatMessageSemantic {
+  attachments?: Message['attachments'];
+  contentMode?: 'delta' | 'snapshot';
+  sequence?: number;
   turnId?: Message['turnId'];
   contentBlocks?: AssistantContentBlock[];
   renderHint?: Message['renderHint'];
@@ -51,7 +53,7 @@ interface ChatState {
     timestamp?: number,
     messageId?: string
   ) => void;
-  updateThought: (taskId: string, thought: string, sender: string, timestamp?: number, messageId?: string, turnId?: string) => void;
+  updateThought: (taskId: string, thought: string, sender: string, timestamp?: number, messageId?: string, turnId?: string, contentMode?: 'delta' | 'snapshot', sequence?: number) => void;
   removeMessage: (messageId: string) => void;
   finalizeMessage: (
     taskId: string,
@@ -67,6 +69,7 @@ interface ChatState {
   ) => void;
   setCurrentSender: (sender: string | null) => void;
   setIsStreaming: (isStreaming: boolean) => void;
+  settleActivity: (taskId: string, turnId: string | undefined, reason: 'stopped' | 'failed' | 'incomplete', at: number) => void;
   clearMessages: () => void;
   loadHistory: (messages: Message[]) => void;
   setDocumentExpanded: (messageId: string, expanded: boolean) => void;
@@ -79,11 +82,6 @@ function rebuildIndexMap(messages: Message[]): Record<string, number> {
     map[msg.id] = idx;
   });
   return map;
-}
-
-function limitMessages(messages: Message[]): Message[] {
-  if (messages.length <= MAX_MESSAGES) return messages;
-  return messages.slice(messages.length - MAX_MESSAGES);
 }
 
 function withDerivedIdentity(message: Message): Message {
@@ -109,23 +107,17 @@ function findMessageIndex(messages: Message[], candidate: Message): number {
   if (candidate.messageId) {
     const index = messages.findIndex((msg) => msg.messageId === candidate.messageId || msg.id === candidate.messageId);
     if (index !== -1) return index;
-    if (!candidate.clientMessageId && candidate.sender !== 'user') return -1;
   }
   if (candidate.clientMessageId) {
     const index = messages.findIndex((msg) => msg.clientMessageId === candidate.clientMessageId || msg.id === candidate.clientMessageId);
     if (index !== -1) return index;
-    if (candidate.sender !== 'user') return -1;
   }
+  // Distinct persisted/client identities are distinct requests, even when the
+  // user repeats text or sends several image-only messages with empty text.
+  if (candidate.messageId || candidate.clientMessageId) return -1;
   if (candidate.dedupeKey) {
     const index = messages.findIndex((msg) => msg.dedupeKey === candidate.dedupeKey);
     if (index !== -1) return index;
-  }
-  if (candidate.sender === 'user') {
-    const normalizedContent = candidate.content.trim().replace(/\s+/g, ' ');
-    return messages.findIndex((msg) => (
-      msg.sender === 'user' &&
-      msg.content.trim().replace(/\s+/g, ' ') === normalizedContent
-    ));
   }
   return -1;
 }
@@ -138,11 +130,15 @@ function mergeMessages(existing: Message, incoming: Message): Message {
     content: incoming.content || existing.content,
     attachments: incoming.attachments || existing.attachments,
     thought: incoming.thought ?? existing.thought,
+    completionReason: Object.prototype.hasOwnProperty.call(incoming, 'completionReason') ||
+      (incoming.toolStatus && incoming.toolStatus !== 'running')
+      ? incoming.completionReason : incoming.completionReason ?? existing.completionReason,
     thinkingDurationMs: incoming.thinkingDurationMs ?? existing.thinkingDurationMs,
     subagentPrompt: incoming.subagentPrompt ?? existing.subagentPrompt,
     subagentOutput: incoming.subagentOutput ?? existing.subagentOutput,
     subagentTrace: incoming.subagentTrace ?? existing.subagentTrace,
-    timestamp: incoming.timestamp || existing.timestamp,
+    timestamp: existing.timestamp || incoming.timestamp,
+    sequence: existing.sequence ?? incoming.sequence,
     type: incoming.type || existing.type,
     isDocument: incoming.isDocument !== undefined ? incoming.isDocument : existing.isDocument,
     artifactId: incoming.artifactId || existing.artifactId,
@@ -162,19 +158,38 @@ function upsertMessage(messages: Message[], candidate: Message): Message[] {
   const normalized = withDerivedIdentity(candidate);
   const index = findMessageIndex(messages, normalized);
   if (index === -1) {
-    return limitMessages([...messages, normalized]);
+    return [...messages, normalized];
   }
   const updated = [...messages];
   updated[index] = mergeMessages(updated[index], normalized);
-  return limitMessages(updated);
+  return updated;
 }
 
 function reconcileHistory(current: Message[], incoming: Message[]): Message[] {
-  let merged = [...current];
+  const merged = [...current];
+  const positions = new Map<string, number>();
+  const remember = (message: Message, index: number) => {
+    for (const key of [message.id, message.messageId, message.clientMessageId]) {
+      if (key) positions.set(key, index);
+    }
+  };
+  current.forEach(remember);
   for (const message of incoming) {
-    merged = upsertMessage(merged, message);
+    const normalized = withDerivedIdentity(message);
+    let index = normalized.messageId ? positions.get(normalized.messageId) : undefined;
+    if (index === undefined && normalized.clientMessageId) index = positions.get(normalized.clientMessageId);
+    if (index === undefined && !normalized.messageId && !normalized.clientMessageId) {
+      const found = findMessageIndex(merged, normalized);
+      if (found >= 0) index = found;
+    }
+    if (index === undefined) {
+      index = merged.length;
+      merged.push(normalized);
+    } else merged[index] = mergeMessages(merged[index], normalized);
+    remember(merged[index], index);
   }
   return merged.sort((a, b) => {
+    if (a.sequence !== undefined && b.sequence !== undefined) return a.sequence - b.sequence;
     if (a.turnId && a.turnId === b.turnId) {
       return (a.sourceIndex ?? 0) - (b.sourceIndex ?? 0);
     }
@@ -206,19 +221,21 @@ export const useChatStore = create<ChatState>()(
       updateMessage: (taskId, content, sender, type, isDocument, artifactId, documentTitle, semantic, timestamp, messageId) =>
         set((state) => {
           const key = `${taskId || 'na'}_${sender}`;
-          const existingId = state.lastStreamingIdByTask[key];
+          const existingId = messageId || state.lastStreamingIdByTask[key];
           const existingIndex = existingId ? state.messageIndexMap[existingId] : -1;
           const now = timestamp || Date.now();
 
           if (existingIndex !== -1 && existingIndex < state.messages.length) {
             const existing = state.messages[existingIndex];
+            if (existing.streamStatus === 'complete') return state;
             const updatedMessages = [...state.messages];
             updatedMessages[existingIndex] = mergeMessages(existing, {
               ...existing,
               messageId: messageId || existing.messageId,
               id: messageId || existing.id,
-              content: `${existing.content}${content}`,
-              timestamp: now,
+              content: semantic?.contentMode === 'snapshot' ? content : `${existing.content}${content}`,
+              timestamp: existing.timestamp,
+              streamStatus: 'streaming',
               type: type || existing.type || 'text',
               isDocument: isDocument !== undefined ? isDocument : existing.isDocument,
               artifactId: artifactId || existing.artifactId,
@@ -252,6 +269,8 @@ export const useChatStore = create<ChatState>()(
             content,
             taskId,
             timestamp: now,
+            streamStatus: 'streaming',
+            sequence: semantic?.sequence,
             type: type || 'text',
             isDocument,
             artifactId,
@@ -283,7 +302,7 @@ export const useChatStore = create<ChatState>()(
           };
         }),
 
-      updateThought: (taskId, thought, sender, timestamp, messageId, turnId) =>
+      updateThought: (taskId, thought, sender, timestamp, messageId, turnId, contentMode, sequence) =>
         set((state) => {
           const key = `${taskId || 'na'}_${sender}`;
           // Thinking is an independent streamed block. It must never reuse the
@@ -294,14 +313,17 @@ export const useChatStore = create<ChatState>()(
 
           if (existingIndex !== -1 && existingIndex < state.messages.length) {
             const existing = state.messages[existingIndex];
+            if (existing.streamStatus === 'complete') return state;
             const updatedMessages = [...state.messages];
               updatedMessages[existingIndex] = mergeMessages(existing, {
               ...existing,
               messageId: messageId || existing.messageId,
               id: messageId || existing.id,
-              thought: `${existing.thought || ''}${thought}`,
+              thought: contentMode === 'snapshot' ? thought : `${existing.thought || ''}${thought}`,
+              sequence: existing.sequence ?? sequence,
+              streamStatus: 'streaming',
               turnId: turnId || existing.turnId,
-              timestamp: now,
+              timestamp: existing.timestamp,
             });
             return {
               messages: updatedMessages,
@@ -318,6 +340,8 @@ export const useChatStore = create<ChatState>()(
             sender,
             content: '',
             thought,
+            streamStatus: 'streaming',
+            sequence,
             type: 'thought',
             taskKind: 'assistant_thinking',
             turnId,
@@ -362,6 +386,7 @@ export const useChatStore = create<ChatState>()(
             isDocument,
             artifactId,
             documentTitle,
+            attachments: semantic?.attachments,
             renderHint: semantic?.renderHint,
             artifactType: semantic?.artifactType,
             taskKind: semantic?.taskKind,
@@ -374,19 +399,30 @@ export const useChatStore = create<ChatState>()(
             sources: semantic?.sources,
             citations: semantic?.citations,
             thinkingDurationMs: semantic?.thinkingDurationMs,
+            streamStatus: 'complete',
+            completionReason: undefined,
+            sequence: semantic?.sequence,
           });
           const newStreamingMap = { ...state.lastStreamingIdByTask };
-          delete newStreamingMap[key];
+          if (!messageId || newStreamingMap[key] === messageId) delete newStreamingMap[key];
+          const stillStreaming = nextMessages.filter(message => message.streamStatus === 'streaming');
           return {
             messages: nextMessages,
             messageIndexMap: rebuildIndexMap(nextMessages),
             lastStreamingIdByTask: newStreamingMap,
-            streamingMessageId: null,
-            isStreaming: false,
+            streamingMessageId: stillStreaming.at(-1)?.id ?? null,
+            isStreaming: stillStreaming.length > 0,
           };
         }),
 
       setCurrentSender: (sender) => set({ currentSender: sender }),
+      settleActivity: (taskId, turnId, reason, at) => set(state => {
+        const messages = settleChatActivity(state.messages, { taskId, turnId, reason, at });
+        const streaming = messages.filter(message => message.streamStatus === 'streaming');
+        const ids = new Set(streaming.map(message => message.id));
+        return { messages, streamingMessageId: streaming.at(-1)?.id ?? null, isStreaming: streaming.length > 0,
+          lastStreamingIdByTask: Object.fromEntries(Object.entries(state.lastStreamingIdByTask).filter(([, id]) => ids.has(id))) };
+      }),
       setIsStreaming: (isStreaming) => set({ isStreaming }),
       clearMessages: () => set({
         messages: [],

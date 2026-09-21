@@ -111,7 +111,11 @@ describe('DashboardRepository Supabase boundaries', () => {
         url: 'https://project.supabase.co',
         anonKey: 'anon-key',
         authToken: 'user-token',
-        fetchImpl: (async () => Response.json([])) as unknown as typeof fetch,
+        fetchImpl: (async (input: Parameters<typeof fetch>[0]) => Response.json(
+          String(input).includes('beegame_web_tools')
+            ? [{ config: { webSearchAdapter: 'exa', webFetchAdapter: 'http', exaEndpointUrl: 'https://search.test/mcp', webFetchHttpTimeoutMs: 12000 } }]
+            : [],
+        )) as unknown as typeof fetch,
       }),
       supabaseRuntimeEnvClient: new SupabaseRuntimeEnvClient({
         url: 'https://project.supabase.co',
@@ -150,6 +154,11 @@ describe('DashboardRepository Supabase boundaries', () => {
         p_data_dir: userRoot,
       })
       expect(env.OPENAI_BASE_URL).toBe('https://provider.test/v1')
+      expect(env.WEB_SEARCH_ADAPTER).toBe('exa')
+      expect(JSON.parse(await readFile(join(env.BEEGAME_CONFIG_DIR!, 'settings.json'), 'utf8'))).toMatchObject({
+        webSearchAdapter: 'exa', webFetchAdapter: 'http',
+        exaEndpointUrl: 'https://search.test/mcp', webFetchHttpTimeoutMs: 12000,
+      })
       expect(env.FEATURE_MCP_SKILLS).toBe('0')
       expect(env.BEEGAME_CONFIG_DIR).toBe(join(userRoot, '.runtime', 'app'))
       expect(env).not.toHaveProperty('CLAUDE_CONFIG_DIR')

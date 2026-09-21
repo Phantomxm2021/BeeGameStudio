@@ -11,8 +11,8 @@ import {
   sceneContentToEditorDocument,
 } from './sceneContentAdapter';
 import { EditorLoadingView, type EditorLoadState } from './EditorLoadingView';
-import { ProjectSelect } from '../beui/project-select';
 import './SceneEditorOverlay.css';
+import { mapEditorAssets } from './editorAssetLoading';
 
 const loadSceneEditor = async () => {
   const module = await import('@beegame/scene-editor');
@@ -105,6 +105,12 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
         const assets: Record<string, SceneAsset> = {};
         const assetMembers: Record<string, Record<string, string>> = {};
         const assetFailures: string[] = [];
+        const requiredAssets = new Set(sceneEntries.flatMap(scene => scene.document.assetRefs));
+        const failedAsset = (id: string, path: string, error: unknown) => {
+          const detail = `${id}/${path.split('/').at(-1) ?? path}: ${error instanceof Error ? error.message : String(error)}`;
+          if (requiredAssets.has(id)) assetFailures.push(detail);
+          else console.warn('Optional scene asset unavailable:', detail);
+        };
         const availableResources = manifest.resources.filter(resource => resource.status === 'verified');
         for (const resource of availableResources) {
           assets[resource.id] = {
@@ -132,22 +138,22 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           label: sceneLoadLabel,
           detail: totalFiles ? `${loadTargets[0].name} · 0 of ${totalFiles}` : 'No external scene assets required',
         });
-        await Promise.all(availableResources.map(async resource => {
+        await mapEditorAssets(availableResources, async resource => {
           const previewPaths = resource.file_paths.filter(path => SCENE_PREVIEW.test(path));
           const members: Record<string, string> = {};
           const tables: Record<string, SpriteSheet> = {};
-          const loaded = await Promise.all(previewPaths.map(async path => {
+          const loaded = await mapEditorAssets(previewPaths, async path => {
             try {
               const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal);
               return { path, bytes: await blobToDataUrl(blob, signal) };
             } catch (error) {
               if (isAbortError(error)) throw error;
-              assetFailures.push(`${resource.id}/${path.split('/').at(-1) ?? path}: ${error instanceof Error ? error.message : String(error)}`);
+              failedAsset(resource.id, path, error);
               return undefined;
             } finally {
               if (!signal.aborted) markFileLoaded(`${resource.id} · ${path.split('/').at(-1) ?? path}`);
             }
-          }));
+          });
           for (const item of loaded) {
             if (!item) continue;
             const member = fileStem(item.path);
@@ -162,7 +168,7 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
             members[member] = assetId;
           }
           const tablePaths = resource.file_paths.filter(path => /\.json$/i.test(path));
-          await Promise.all(tablePaths.map(async path => {
+          await mapEditorAssets(tablePaths, async path => {
             try {
               const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal);
               const value = JSON.parse(await blob.text()) as unknown;
@@ -171,11 +177,11 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
               if (sheet) tables[fileStem(path)] = sheet;
             } catch (error) {
               if (isAbortError(error)) throw error;
-              assetFailures.push(`${resource.id}/${path.split('/').at(-1) ?? path}: ${error instanceof Error ? error.message : String(error)}`);
+              failedAsset(resource.id, path, error);
             } finally {
               if (!signal.aborted) markFileLoaded(`${resource.id} · ${path.split('/').at(-1) ?? path}`);
             }
-          }));
+          });
           for (const [member, assetId] of Object.entries(members)) {
             if (tables[member]) assets[assetId].spriteSheet = tables[member];
           }
@@ -183,7 +189,7 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           const rootMemberId = rootPath ? members[fileStem(rootPath)] : undefined;
           if (rootMemberId) assets[resource.id] = { ...assets[rootMemberId], id: resource.id };
           assetMembers[resource.id] = members;
-        }));
+        });
         if (!active || signal.aborted) return;
         if (assetFailures.length) {
           setLoadState({ status: 'error', progress: 90, label: 'Assets could not be loaded', detail: `${assetFailures.slice(0, 3).join(' · ')}${assetFailures.length > 3 ? ` · +${assetFailures.length - 3} more` : ''}` });
@@ -230,6 +236,20 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
     loadControllerRef.current?.abort();
     onClose();
   };
+
+  // The loaded editor owns Escape (selection, menus and unsaved changes).
+  // Before it mounts, the loading/error surface must remain dismissible too.
+  useEffect(() => {
+    if (loadState.status === 'ready') return;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      event.preventDefault();
+      loadControllerRef.current?.abort();
+      onClose();
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [loadState.status, onClose]);
 
   const stopLoading = () => {
     loadControllerRef.current?.abort();
@@ -296,13 +316,11 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
               onSave={save}
               onClose={closeEditor}
               onDirtyChange={(dirty, saving) => { setEditorDirty(dirty); setEditorSaving(saving); }}
+              sceneChoices={scenes.map(scene => ({ id: scene.path, label: scene.document.id }))}
+              selectedSceneId={selectedScenePath}
+              onSelectScene={chooseScene}
+              sceneSwitchDisabled={editorDirty || editorSaving}
             />
-            {scenes.length > 1 ? (
-              <div className="scene-document-switcher">
-                <span>Scene</span>
-                <ProjectSelect ariaLabel="Scene document" title={editorDirty ? 'Save or undo changes before switching scenes' : editorSaving ? 'Wait for the current save to finish' : 'Scene document'} disabled={editorDirty || editorSaving} value={selectedScenePath} onValueChange={chooseScene} options={scenes.map(scene => ({ value: scene.path, label: scene.document.id }))} className="scene-document-select" triggerClassName="scene-document-select-trigger" />
-              </div>
-            ) : null}
           </div>
         </Suspense>
       ) : (

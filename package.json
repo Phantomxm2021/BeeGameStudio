@@ -93,6 +93,7 @@
     "@agentclientprotocol/sdk": "^0.19.0",
     "@claude-code-best/mcp-chrome-bridge": "^3.0.1",
     "highlight.js": "^11.11.1",
+    "sharp": "^0.34.5",
     "ws": "^8.20.0"
   },
   "devDependencies": {
@@ -210,7 +211,6 @@
     "react-reconciler": "^0.33.0",
     "rollup": "^4.60.2",
     "semver": "^7.7.4",
-    "sharp": "^0.34.5",
     "shell-quote": "^1.8.3",
     "signal-exit": "^4.1.0",
     "stack-utils": "^2.0.6",
@@ -250,5 +250,8 @@
     "*.{json,jsonc}": [
       "biome format --write --no-errors-on-unmatched"
     ]
+  },
+  "patchedDependencies": {
+    "@anthropic-ai/sandbox-runtime@0.0.44": "patches/@anthropic-ai%2Fsandbox-runtime@0.0.44.patch"
   }
 }

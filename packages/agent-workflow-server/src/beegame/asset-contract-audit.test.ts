@@ -3,6 +3,27 @@ import { mkdir, mkdtemp, rm, writeFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
+import sharp from 'sharp'
+
+test('rejects editor-incompatible atlas rectangles and actual PNG overflow at resource acceptance', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'atlas-contract-'))
+  workspaces.push(workspace)
+  await mkdir(join(workspace, 'assets/runtime'), { recursive: true })
+  const value = manifest()
+  const resource = value.resources[0]!
+  resource.file_paths.push('assets/runtime/model.png')
+  await writeBeeGameAssetManifest(workspace, value)
+  await writeFile(join(workspace, 'assets/runtime/model.png'), await sharp({ create: {
+    width: 256, height: 256, channels: 4, background: '#fff',
+  } }).png().toBuffer())
+  const sidecar = join(workspace, 'assets/runtime/model.json')
+  await writeFile(sidecar, JSON.stringify({ frames: { panel_tl: { x: 2, y: 2, w: 16, h: 16 } } }))
+  expect(auditAssetContract(workspace).issues.join(' ')).toContain('Invalid sprite atlas rectangle: panel_tl')
+  await writeFile(sidecar, JSON.stringify({ frames: { big_morph_05: { frame: { x: 1, y: 217, w: 24, h: 52 } } } }))
+  expect(auditAssetContract(workspace).issues.join(' ')).toContain('Atlas frame outside image: big_morph_05')
+  await writeFile(sidecar, JSON.stringify({ frames: { idle: { frame: { x: 1, y: 1, w: 24, h: 52 } } } }))
+  expect(auditAssetContract(workspace).valid).toBe(true)
+})
 import {
   parseCanonicalBeeGameAssetManifest,
   writeBeeGameAssetManifest,

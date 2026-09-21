@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { ImageGenerationSettingsPanel, type ImageSettingsHandle, type ImageSettingsState } from '../../Settings/ImageGenerationSettingsPanel';
 import { LANGUAGE_OPTIONS, type Language } from '../AgentsConfig';
 import { Switch } from '../../ui/switch';
 import { normalizeI18nLanguage, useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
@@ -118,7 +119,7 @@ interface SettingsMenuProps {
 }
 
 type SettingsSection = 'personal' | 'skills' | 'platform';
-type SettingsTab = 'general' | 'runtime' | 'mcp' | 'skills' | 'model' | 'invitations' | 'projects' | 'credit';
+type SettingsTab = 'general' | 'runtime' | 'mcp' | 'skills' | 'model' | 'image' | 'invitations' | 'projects' | 'credit';
 type McpFormAnchor =
   | { kind: 'new'; rect: PopoverAnchorRect }
   | { kind: 'edit'; serverId: string; rect: PopoverAnchorRect }
@@ -194,6 +195,8 @@ export function SettingsMenu({
   const [isDefault, setIsDefault] = useState(true);
   const [status, setStatus] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const imageSettingsRef = useRef<ImageSettingsHandle>(null);
+  const [imageSettingsState, setImageSettingsState] = useState<ImageSettingsState>({ busy: false, canSave: false });
   const [workspacePath, setWorkspacePath] = useState('');
   const [workspaceStatus, setWorkspaceStatus] = useState('');
   const [webSearchAdapter, setWebSearchAdapter] = useState<WebSearchAdapter>('tavily');
@@ -829,6 +832,7 @@ export function SettingsMenu({
         : []),
       ...(effectiveCanManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
       ...(effectiveCanManageModelConfig ? [{ id: 'model' as const, label: text.settingsModel, icon: KeyRound }] : []),
+      ...(effectiveCanManageModelConfig ? [{ id: 'image' as const, label: lang.startsWith('zh') ? 'AI 生图' : 'AI Images', icon: Cpu }] : []),
       ...(effectiveCanManageLifecycle
         ? [{ id: 'projects' as const, label: projectLifecycleCopy.tab, icon: FolderOpen }]
         : []),
@@ -839,6 +843,7 @@ export function SettingsMenu({
     effectiveCanManageSecrets,
     effectiveCanManageMcp,
     effectiveCanManageModelConfig,
+    lang,
     effectiveCanManageInvitations,
     effectiveCanManageCredits,
     effectiveCanManageLifecycle,
@@ -856,6 +861,8 @@ export function SettingsMenu({
       ? text.settingsGeneral
       : activeSection === 'skills'
         ? userSkillsCopy.title
+        : activeTab === 'image'
+          ? (lang.startsWith('zh') ? 'AI 生图' : 'AI Images')
         : activeTab === 'general'
           ? adminCopy.deployment
           : activeTab === 'runtime'
@@ -872,6 +879,7 @@ export function SettingsMenu({
                       ? billingCopy.title
                       : text.settingsModel;
   const isSavingCurrentTab =
+    activeTab === 'image' ? imageSettingsState.busy :
     activeSection === 'platform' && activeTab === 'general'
       ? effectiveCanManageSecrets && isSavingWebTools
       : activeTab === 'runtime'
@@ -889,6 +897,7 @@ export function SettingsMenu({
                   : isSaving;
   const hasGeneralSaveAction = activeSection === 'platform' && effectiveCanManageSecrets;
   const isSaveDisabled =
+    activeTab === 'image' ? imageSettingsState.busy || !imageSettingsState.canSave :
     activeSection === 'platform' && activeTab === 'general'
       ? !hasGeneralSaveAction ||
         isSavingCurrentTab ||
@@ -925,6 +934,10 @@ export function SettingsMenu({
       return;
     }
     if (activeTab === 'mcp') return;
+    if (activeTab === 'image') {
+      if (await imageSettingsRef.current?.save()) onClose();
+      return;
+    }
     if (activeTab === 'skills') return;
     if (activeTab === 'projects') return;
     if (activeTab === 'credit') return;
@@ -1316,6 +1329,10 @@ export function SettingsMenu({
                     if (!isSaveDisabled) void handleSaveSettings();
                   }}
                 />
+              ) : null}
+
+              {activeSection === 'platform' && activeTab === 'image' && effectiveCanManageModelConfig ? (
+                <ImageGenerationSettingsPanel ref={imageSettingsRef} language={lang} onStateChange={setImageSettingsState} onSaved={onClose} />
               ) : null}
               {activeSection === 'platform' && activeTab === 'model' && status ? (
                 <p role="status" className="mt-3 text-sm text-destructive">{status}</p>

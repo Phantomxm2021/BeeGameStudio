@@ -14,6 +14,7 @@ import type {
   BeeGameUsageBillingRecordResult,
 } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import { createTLSAwareFetch } from '@bee-game-studio/security-core'
+import type { ImageBillingInput, ImageBillingReceipt } from '@bee-game-studio/beegame-billing-core/image-billing'
 
 type JsonObject = Record<string, unknown>
 
@@ -32,6 +33,7 @@ type SupabaseUsageWalletRow = {
   user_id: string
   included_credits_micro: number
   consumed_credits_micro: number
+  reserved_credits_micro?: number
   updated_at: string
 }
 
@@ -41,6 +43,7 @@ export type BeeGameUsageWallet = {
   userId: string
   includedCreditsMicro: number
   consumedCreditsMicro: number
+  reservedCreditsMicro?: number
   balanceCreditsMicro: number
 }
 
@@ -116,6 +119,7 @@ type SupabaseUsageBillingResult = {
 
 export function createBeeGameSupabaseBillingRepositoryFromEnv(
   env: NodeJS.ProcessEnv = process.env,
+  fetchImpl: BillingFetch = createTLSAwareFetch(),
 ): BeeGameBillingServerRepository {
   const url = trimString(
     env.BEEGAME_SUPABASE_URL ?? env.SUPABASE_URL ?? env.VITE_SUPABASE_URL,
@@ -124,7 +128,7 @@ export function createBeeGameSupabaseBillingRepositoryFromEnv(
     env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY ?? env.SUPABASE_SERVICE_ROLE_KEY,
   )
   if (!url || !serviceRoleKey) return new MissingSupabaseBillingRepository()
-  return new SupabaseBillingRepository({ url, serviceRoleKey, fetchImpl: createTLSAwareFetch() })
+  return new SupabaseBillingRepository({ url, serviceRoleKey, fetchImpl })
 }
 
 class SupabaseBillingRepository implements BeeGameBillingServerRepository {
@@ -136,6 +140,33 @@ class SupabaseBillingRepository implements BeeGameBillingServerRepository {
     this.baseUrl = removeTrailingSlashes(config.url)
     this.serviceRoleKey = config.serviceRoleKey
     this.fetchImpl = config.fetchImpl ?? fetch
+  }
+
+  async applyImageBilling(userId: string, input: ImageBillingInput): Promise<ImageBillingReceipt> {
+    return this.rpc<ImageBillingReceipt>('beegame_image_billing', {
+      p_user_id: userId, p_project_id: input.projectId, p_request_id: input.requestId,
+      p_digest: input.digest, p_action: input.action, p_amount: input.amountCreditsMicro,
+      p_budget: input.projectBudgetCreditsMicro, p_metadata: input.metadata ?? {},
+    })
+  }
+
+  async readImageGenerationSettings(): Promise<import('@bee-game-studio/beegame-billing-core/image-billing').ImageConfigRead> {
+    const source = 'supabase-platform' as const
+    const databaseHost = new URL(this.baseUrl).host
+    let response: Response
+    try {
+      response = await this.fetchImpl(this.baseUrl + '/rest/v1/beegame_image_generation_settings?id=eq.platform&select=config&limit=1', {
+        headers: { apikey: this.serviceRoleKey, authorization: 'Bearer ' + this.serviceRoleKey },
+        redirect: 'error',
+      })
+    } catch { return { source, databaseHost, code: 'database-network' } }
+    const facts = { source, databaseHost, httpStatus: response.status }
+    if (!response.ok) return { ...facts, code: 'database-http' }
+    let rows: unknown
+    try { rows = await response.json() } catch { return { ...facts, code: 'database-response' } }
+    if (!Array.isArray(rows)) return { ...facts, code: 'database-response' }
+    if (!rows.length || !rows[0]?.config) return { ...facts, rowExists: rows.length > 0, code: 'platform-row-missing' }
+    return { ...facts, rowExists: true, config: rows[0].config }
   }
 
   async recordUsageForUser(
@@ -195,7 +226,7 @@ class SupabaseBillingRepository implements BeeGameBillingServerRepository {
 
   async getUsageWalletForUser(userId: string): Promise<BeeGameUsageWallet> {
     const rows = await this.rest<SupabaseUsageWalletRow[]>(
-      `/rest/v1/beegame_usage_wallets?user_id=eq.${encodeURIComponent(userId)}&select=user_id,included_credits_micro,consumed_credits_micro,updated_at&limit=1`,
+      `/rest/v1/beegame_usage_wallets?user_id=eq.${encodeURIComponent(userId)}&select=*&limit=1`,
     )
     const row = rows[0] ?? {
       user_id: userId,
@@ -214,8 +245,9 @@ class SupabaseBillingRepository implements BeeGameBillingServerRepository {
       balanceCreditsMicro: Math.max(
         0,
         normalizeNonNegativeInteger(row.included_credits_micro) -
-          normalizeNonNegativeInteger(row.consumed_credits_micro),
+          normalizeNonNegativeInteger(row.consumed_credits_micro) - normalizeNonNegativeInteger(row.reserved_credits_micro ?? 0),
       ),
+      reservedCreditsMicro: normalizeNonNegativeInteger(row.reserved_credits_micro ?? 0),
     }
   }
 
@@ -302,26 +334,12 @@ class SupabaseBillingRepository implements BeeGameBillingServerRepository {
     targetUserId: string,
     input: BeeGameManualCreditGrantInput,
   ): Promise<BeeGameCreditGrant> {
-    const rows = await this.rest<SupabaseUsageWalletRow[]>(
-      `/rest/v1/beegame_usage_wallets?user_id=eq.${encodeURIComponent(targetUserId)}&select=*&limit=1`,
-    )
-    const current = rows[0] ?? {
-      user_id: targetUserId,
-      included_credits_micro: 300_000_000,
-      consumed_credits_micro: 0,
-      updated_at: new Date().toISOString(),
-    }
     const grantedCredits = normalizePositiveInteger(input.credits)
-    const updated = await this.upsert<SupabaseUsageWalletRow>(
-      'beegame_usage_wallets',
-      {
-        user_id: targetUserId,
-        included_credits_micro: current.included_credits_micro + grantedCredits * 1_000_000,
-        consumed_credits_micro: current.consumed_credits_micro,
-        updated_at: new Date().toISOString(),
-      },
-      'user_id',
-    )
+    const amountMicro = grantedCredits * 1_000_000
+    if (!Number.isSafeInteger(amountMicro)) throw new Error('Credit grant amount is out of range')
+    const updated = await this.rpc<SupabaseUsageWalletRow>('beegame_increment_credit_wallet', {
+      p_user_id: targetUserId, p_amount: amountMicro,
+    })
     return {
       grantedCredits,
       balance: toCreditBalance(updated),
@@ -445,7 +463,7 @@ function toCreditBalance(row: SupabaseUsageWalletRow): BeeGameCreditBalance {
     plan: 'free',
     balanceCredits: Math.max(
       0,
-      includedCredits - consumedCredits,
+      includedCredits - consumedCredits - normalizeNonNegativeInteger(row.reserved_credits_micro ?? 0) / 1_000_000,
     ),
     includedCredits,
     consumedCredits,

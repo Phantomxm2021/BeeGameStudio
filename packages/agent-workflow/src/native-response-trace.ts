@@ -26,20 +26,20 @@ export function projectResponseMessage(value: unknown): RecordValue | undefined 
   if (message.type === 'stream_event') {
     const event = record(message.event)
     if (!event) return
-    if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta')
-      return { type: 'reasoning_activity', bytes: typeof event.delta.thinking === 'string' ? Buffer.byteLength(event.delta.thinking) : 0,
-        text: typeof event.delta.thinking === 'string' ? event.delta.thinking : '' }
     let safe: RecordValue | undefined
     if (event.type === 'message_start') safe = { type: event.type,
       message: { id: event.message?.id, model: event.message?.model, usage: event.message?.usage } }
     if (event.type === 'content_block_start') {
       const block = event.content_block
       if (block?.type === 'text') safe = { type: event.type, index: event.index, content_block: { type: 'text', text: block.text } }
+      if (block?.type === 'thinking') safe = { type: event.type, index: event.index, content_block: { type: 'thinking', thinking: block.thinking ?? '' } }
       if (block?.type === 'tool_use') safe = { type: event.type, index: event.index,
         content_block: { type: 'tool_use', id: block.id, name: block.name, input: block.input } }
     }
     if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta')
       safe = { type: event.type, index: event.index, delta: { type: 'text_delta', text: event.delta.text } }
+    if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta')
+      safe = { type: event.type, index: event.index, delta: { type: 'thinking_delta', thinking: event.delta.thinking } }
     if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta')
       safe = { type: event.type, index: event.index, delta: { type: 'input_json_delta', partial_json: event.delta.partial_json } }
     if (event.type === 'message_delta') safe = { type: event.type, usage: event.usage, delta: { stop_reason: event.delta?.stop_reason } }
@@ -65,6 +65,7 @@ export function projectResponseMessage(value: unknown): RecordValue | undefined 
 
 export type ResponseTraceFrame = {
   queryId: string; agentId: string; parentToolUseId?: string
+  occurredAt?: string
   kind: 'query_start' | 'query_end' | 'message'
   message?: RecordValue; status?: string
 }
@@ -77,7 +78,7 @@ export async function* traceNativeQuery<T, R>(source: AsyncGenerator<T, R>,
   const identity = { queryId: randomUUID(), agentId: scope.agentId ?? 'root', parentToolUseId: scope.parentToolUseId }
   const emit = async (frame: Omit<ResponseTraceFrame, keyof typeof identity>) => {
     // No user content except the strict response projection travels here.
-    if (!process.stderr.write(NATIVE_RESPONSE_TRACE_PREFIX + JSON.stringify({ ...identity, ...frame }) + '\n'))
+    if (!process.stderr.write(NATIVE_RESPONSE_TRACE_PREFIX + JSON.stringify({ ...identity, ...frame, occurredAt: new Date().toISOString() }) + '\n'))
       await once(process.stderr, 'drain')
   }
   let finished = false, failed = false
@@ -125,39 +126,24 @@ export function createResponseRedactor(environment: Record<string, string | unde
 
 /** Cumulative, redacted checkpoints deliberately replace raw JSON fragments.
  * They preserve partial Write bodies on interruption without leaking a secret
- * split across deltas. A bounded diagnostic buffer never kills model work. */
+ * split across deltas. This is durable Chat content, not a capped diagnostic
+ * buffer: silently discarding it would make refresh and live output diverge. */
 export function createNativeResponseTraceLog(log: (event: string, data: unknown) => Promise<void>,
   environment: Record<string, string | undefined>,
   onUsage?: (message: RecordValue) => Promise<void>) {
   const redact = createResponseRedactor(environment)
-  const queries = new Map<string, { identity: RecordValue; messageId?: string; reasoningBytes: number; reasoningSaved: number; reasoningText: string; reasoningSavedChars: number; reasoningTruncated: boolean; blocks: Map<number, {
-    type: string; name?: string; toolId?: string; text: string; bytes: number; saved: number; truncated: boolean
+  const queries = new Map<string, { identity: RecordValue; messageId?: string; blocks: Map<number, {
+    type: string; name?: string; toolId?: string; text: string; bytes: number; saved: number; startedAt: string; updatedAt: string
   }> }>()
-  const maxBlockChars = 8 * 1024 * 1024, maxLogBytes = 128 * 1024 * 1024
-  let loggedBytes = 0, truncated = false
   const write = async (event: string, data: unknown) => {
-    if (truncated) return
-    const safe = redact(data), bytes = Buffer.byteLength(JSON.stringify(safe))
-    if (loggedBytes + bytes > maxLogBytes) {
-      truncated = true
-      await log('response.log_truncated', { maxLogBytes, reason: 'diagnostic_storage_cap', modelContinues: true })
-      return
-    }
-    loggedBytes += bytes
-    await log(event, safe)
+    await log(event, redact(data))
   }
   async function flushQuery(query: (typeof queries extends Map<any, infer V> ? V : never), interrupted = false) {
-    if (query.reasoningBytes !== query.reasoningSaved) {
-      const content = query.reasoningText.slice(query.reasoningSavedChars)
-      await write('response.reasoning_snapshot', { ...query.identity, messageId: query.messageId,
-        content, receivedBytes: query.reasoningBytes, truncated: query.reasoningTruncated, cumulative: false })
-      query.reasoningSaved = query.reasoningBytes
-      query.reasoningSavedChars = query.reasoningText.length
-    }
     for (const [index, block] of query.blocks) if (block.bytes !== block.saved) {
       await write('response.content_snapshot', { ...query.identity, messageId: query.messageId, index,
         type: block.type, tool: block.name, toolId: block.toolId, content: block.text,
-        receivedBytes: block.bytes, truncated: block.truncated, interrupted, cumulative: true })
+        receivedBytes: block.bytes, interrupted, cumulative: true,
+        startedAt: block.startedAt, occurredAt: block.updatedAt })
       block.saved = block.bytes
     }
   }
@@ -168,22 +154,29 @@ export function createNativeResponseTraceLog(log: (event: string, data: unknown)
           !['query_start', 'query_end', 'message'].includes(frame.kind)) return
       const identity = { queryId: frame.queryId, agentId: frame.agentId,
         parentToolUseId: typeof frame.parentToolUseId === 'string' ? frame.parentToolUseId : undefined }
+      const occurredAt = typeof frame.occurredAt === 'string' && Number.isFinite(Date.parse(frame.occurredAt))
+        ? frame.occurredAt : new Date().toISOString()
       let query = queries.get(frame.queryId)
-      if (!query) { query = { identity, blocks: new Map(), reasoningBytes: 0, reasoningSaved: 0,
-        reasoningText: '', reasoningSavedChars: 0, reasoningTruncated: false }; queries.set(frame.queryId, query) }
+      if (!query) { query = { identity, blocks: new Map() }; queries.set(frame.queryId, query) }
       if (frame.kind === 'query_start') { await write('response.query_start', identity); return }
       if (frame.kind === 'query_end') {
         await flushQuery(query, frame.status !== 'completed')
-        await write('response.query_end', { ...identity, status: frame.status })
+        await write('response.query_end', { ...identity, status: frame.status, occurredAt })
         queries.delete(frame.queryId); return
       }
       const message = projectResponseMessage(frame.message)
       if (!message) return
       if (message.type === 'reasoning_activity') {
-        query.reasoningBytes += message.bytes
+        // Providers without content blocks still get a message-scoped block.
+        let block = query.blocks.get(-1)
+        if (!block) {
+          block = { type: 'thinking', text: '', bytes: 0, saved: -1, startedAt: occurredAt, updatedAt: occurredAt }
+          query.blocks.set(-1, block)
+        }
+        block.bytes += message.bytes
         const text = typeof message.text === 'string' ? message.text : ''
-        query.reasoningText += text.slice(0, Math.max(0, maxBlockChars - query.reasoningText.length))
-        query.reasoningTruncated ||= query.reasoningText.length >= maxBlockChars
+        block.text += text
+        block.updatedAt = occurredAt
         return
       }
       // Usage is kept separate from diagnostic content and never truncated.
@@ -191,37 +184,42 @@ export function createNativeResponseTraceLog(log: (event: string, data: unknown)
         await onUsage?.({ ...message, nativeTraceAgentId: frame.agentId, nativeTraceQueryId: frame.queryId })
       if (message.type === 'stream_request_start') { await write('response.request_start', identity); return }
       const event = message.event
-      if (!event) { await write('response.message', { ...identity, ...message }); return }
+      if (!event) {
+        // Persist pending text BEFORE its final snapshot, never after it.
+        await flushQuery(query)
+        await write('response.message', { ...identity, ...message, occurredAt }); return
+      }
       if (event.type === 'message_start') {
         await flushQuery(query, true); query.blocks.clear(); query.messageId = event.message.id
         await write('response.message_start', { ...identity, ...event.message }); return
       }
       if (event.type === 'content_block_start') {
         const block = event.content_block
-        const initial = block.type === 'text' ? block.text ?? '' : Object.keys(block.input ?? {}).length ? JSON.stringify(block.input) : ''
+        const initial = block.type === 'thinking' ? block.thinking ?? '' : block.type === 'text' ? block.text ?? '' : Object.keys(block.input ?? {}).length ? JSON.stringify(block.input) : ''
         query.blocks.set(event.index, { type: block.type, name: block.name, toolId: block.id,
-          text: initial, bytes: Buffer.byteLength(initial), saved: -1, truncated: false })
-        await write('response.content_start', { ...identity, messageId: query.messageId, index: event.index, type: block.type, tool: block.name, toolId: block.id })
+          text: initial, bytes: Buffer.byteLength(initial), saved: -1, startedAt: occurredAt, updatedAt: occurredAt })
+        await write('response.content_start', { ...identity, messageId: query.messageId, index: event.index, type: block.type, tool: block.name, toolId: block.id, occurredAt })
       } else if (event.type === 'content_block_delta') {
         const block = query.blocks.get(event.index)
         if (!block) return
-        const text = event.delta.text ?? event.delta.partial_json ?? ''
+        const text = event.delta.text ?? event.delta.thinking ?? event.delta.partial_json ?? ''
+        block.updatedAt = occurredAt
         block.bytes += Buffer.byteLength(text)
-        block.text += text.slice(0, Math.max(0, maxBlockChars - block.text.length))
-        block.truncated ||= block.text.length >= maxBlockChars
+        block.text += text
       } else if (event.type === 'content_block_stop') {
         await flushQuery(query)
         query.blocks.delete(event.index)
-        await write('response.content_end', { ...identity, messageId: query.messageId, index: event.index })
+        await write('response.content_end', { ...identity, messageId: query.messageId, index: event.index, occurredAt })
       } else if (event.type === 'message_delta' || event.type === 'message_stop') {
-        await write('response.' + event.type, { ...identity, messageId: query.messageId, ...event })
+        if (event.type === 'message_stop') await flushQuery(query)
+        await write('response.' + event.type, { ...identity, messageId: query.messageId, ...event, occurredAt })
       }
     },
     async flush(interrupted = false) { for (const query of queries.values()) await flushQuery(query, interrupted) },
     async close() {
       for (const query of queries.values()) {
         await flushQuery(query, true)
-        await write('response.query_end', { ...query.identity, status: 'process_closed_without_query_end' })
+        await write('response.query_end', { ...query.identity, status: 'process_closed_without_query_end', occurredAt: new Date().toISOString() })
       }
       queries.clear()
     },

@@ -17,6 +17,20 @@ vi.mock('@beegame/scene-editor', async importOriginal => ({
 describe('SceneEditorOverlay loading experience', () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it('Escape cancels pending loads before the editor mounts', () => {
+    let requestSignal: AbortSignal | undefined;
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockImplementation((_id, signal) => {
+      requestSignal = signal;
+      return new Promise(() => {});
+    });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockImplementation(() => new Promise(() => {}));
+    const close = vi.fn();
+    render(<SceneEditorOverlay projectId="cancel-loading" onClose={close} />);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(requestSignal?.aborted).toBe(true);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['scene-2d', 'scene-3d'] as const)('opens a valid %s with verified project resources', async kind => {
     const revision = 'a'.repeat(64);
     const document: BeeGameSceneContentDocument = {

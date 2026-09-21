@@ -1,6 +1,7 @@
 import { computeResourceRevision, computeWorkspaceRevision } from './revision'
 import { createRunStore } from './run-store'
-import { isWorkflowEvidenceFile } from './evidence'
+import { isWorkflowEvidenceFile, resolveWorkflowEvidencePath } from './evidence'
+import { runtimeEvidenceIsCurrent } from './runtime-acceptance'
 import { CANONICAL_ASSET_MANIFEST } from './types'
 
 export type WorkflowDeliveryGate = {
@@ -66,6 +67,15 @@ export async function evaluateWorkflowDeliveryGate(input: {
     }
   }
   const currentRevision = await computeWorkspaceRevision(input.workspacePath)
+  try {
+    const receipt = JSON.parse(await readFile(resolveWorkflowEvidencePath(input.workspacePath, run.evidence.acceptance.path)!, 'utf8'))
+    if (receipt.revision !== run.evidence.acceptance.revision || receipt.status !== 'passed' ||
+        receipt.runtimeVerification !== 'agent-reported' ||
+        !await runtimeEvidenceIsCurrent(input.workspacePath, receipt.runtimeReports))
+      return { allowed: false, issues: ['Runtime acceptance has no current, explicit verification evidence.'] }
+  } catch {
+    return { allowed: false, issues: ['Runtime acceptance receipt is unreadable or invalid.'] }
+  }
   const currentResourceRevision = await computeResourceRevision(
     input.workspacePath,
     run.revision.document,

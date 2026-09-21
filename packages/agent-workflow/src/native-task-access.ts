@@ -13,6 +13,10 @@ export type NativeTaskAccessInput = {
   allowWorkingFiles?: boolean
 }
 
+type TaskPermission =
+  | { behavior: 'allow'; updatedInput: Record<string, any> }
+  | { behavior: 'deny'; message: string }
+
 /** Execution permissions, not an agent/tool-selection policy. The native CLI
  * exposes its normal tools. File effects stay in the task workspace, shell
  * effects are enforced by the native OS sandbox, and delegates inherit both. */
@@ -71,35 +75,42 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
     }
   }
 
-  async function permission(request: Record<string, any>): Promise<Record<string, any> | undefined> {
+  async function permission(request: Record<string, any>): Promise<TaskPermission> {
     const name = request.tool_name
     const args = request.input
-    if (!args || typeof args !== 'object' || Array.isArray(args)) return undefined
+    const deny = (reason: string): TaskPermission => ({ behavior: 'deny',
+      message: `${reason} Task working directory: ${JSON.stringify(root)}. File paths may be absolute or relative to this directory. No authorization request has been opened.` })
+    const allow = (updatedInput: Record<string, any>): TaskPermission => ({ behavior: 'allow', updatedInput })
+    if (!args || typeof args !== 'object' || Array.isArray(args)) return deny('Invalid tool input: expected an object.')
     if (name === 'Bash') {
-      if (typeof args.command !== 'string' || !args.command.trim()) return undefined
+      if (typeof args.command !== 'string' || !args.command.trim()) return deny('Invalid Bash input: command is empty.')
       // Never grant the SDK's escape hatch. CLI startup fails if the configured
       // sandbox cannot start, and native execution enforces the same restriction.
-      return { ...args, dangerouslyDisableSandbox: false }
+      return allow({ ...args, dangerouslyDisableSandbox: false })
     }
     if (name === 'Agent') {
       // Delegation is available, but cannot elevate the child's permission mode.
-      return { ...args, mode: 'default' }
+      return allow({ ...args, mode: 'default' })
     }
     const fileKey = name === 'NotebookEdit' ? 'notebook_path' : name === 'LSP' ? 'filePath'
       : ['Read', 'Edit', 'Write'].includes(name) ? 'file_path'
         : ['Glob', 'Grep'].includes(name) ? 'path' : undefined
-    if (!fileKey) return undefined // A new privileged effect needs execution-layer authorization.
-    if (fileKey !== 'path' && typeof args[fileKey] !== 'string') return undefined
-    if (args[fileKey] !== undefined && typeof args[fileKey] !== 'string') return undefined
+    if (!fileKey) return deny(`Tool ${JSON.stringify(name)} has no task permission handler.`)
+    if ((fileKey !== 'path' && typeof args[fileKey] !== 'string') ||
+        (args[fileKey] !== undefined && typeof args[fileKey] !== 'string'))
+      return deny(`Invalid ${fileKey}: expected a file path string.`)
     const path = resolve(root, args[fileKey] ?? '.')
-    if (!within(root, path)) return undefined
+    if (!within(root, path)) return deny(`Path ${JSON.stringify(path)} is outside this task workspace. Check the path against the working directory; no file was changed.`)
     if (name === 'Glob' && (typeof args.pattern !== 'string' || isAbsolute(args.pattern) ||
-        args.pattern.split(/[\\/]/).includes('..'))) return undefined
+        args.pattern.split(/[\\/]/).includes('..'))) return deny('Glob pattern must be relative and cannot traverse parent directories.')
     const writing = ['Write', 'Edit', 'NotebookEdit'].includes(name)
-    if (writing && (protectedPaths.some(protectedPath => within(protectedPath, path)) ||
-        (!input.allowWorkingFiles && !writable.includes(path)))) return undefined
-    if (!await canonicalPath(path, name === 'Write')) return undefined
-    return { ...args, [fileKey]: path }
+    if (writing && protectedPaths.some(protectedPath => within(protectedPath, path)))
+      return deny(`Path ${JSON.stringify(path)} is read-only for this task.`)
+    if (writing && !input.allowWorkingFiles && !writable.includes(path))
+      return deny(`Path ${JSON.stringify(path)} is not a writable output for this task.`)
+    if (!await canonicalPath(path, name === 'Write'))
+      return deny(`Cannot access ${JSON.stringify(path)}: the path is unavailable or resolves through a symbolic/hard link rather than a regular task file.`)
+    return allow({ ...args, [fileKey]: path })
   }
 
   return {
@@ -107,7 +118,7 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
     flags: ['--permission-mode', 'default', '--setting-sources', '', '--strict-mcp-config',
       '--settings', JSON.stringify(settings)],
     // Shell/MCP/LSP children do not need the parent model's credentials.
-    environment: { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', CLAUDE_CODE_TMPDIR: temporaryPath,
+    environment: { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', TMPDIR: temporaryPath, CLAUDE_CODE_TMPDIR: temporaryPath,
       BEEGAME_NATIVE_BACKGROUND_PERMISSIONS: '1',
       BEEGAME_NATIVE_TOOL_RESULTS_DIR: toolResultsPath,
     },

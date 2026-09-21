@@ -1,4 +1,7 @@
 import { z } from 'zod/v4'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { CONTENT_COORDINATE_CONTRACT, UI_ANCHORS } from '../../../scene-editor/src/content-coordinates'
 import type { BeeGameAssetManifest } from './asset-contracts'
 import {
   BEEGAME_CONTENT_DOCUMENT_SCHEMA,
@@ -14,6 +17,17 @@ import {
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 
+export const CONTENT_AUTHORING_CONTRACT_PATH = '.beegame/workflow/content-authoring-contract.json'
+export const GAME_CONTENT_VALIDATION_COMMAND = {
+  executable: process.execPath,
+  args: [new URL('./game-content-validation-cli.ts', import.meta.url).pathname],
+} as const
+export const GAME_CONTENT_INSPECTION_COMMAND = {
+  executable: process.execPath,
+  args: [...GAME_CONTENT_VALIDATION_COMMAND.args, '.', '--inspect'],
+  usage: 'Run in the project workspace. Lists registered files; append a content-relative file path for its node index, then --node <id> for the exact authored node.',
+} as const
+
 const inputSchema = z
   .strictObject({
     documentRevision: digest,
@@ -26,6 +40,19 @@ export type SceneUiContentAuthoringInput = Readonly<{
   assetManifestRevision: string
   manifest: BeeGameAssetManifest
 }>
+
+/** Keep large reference material in a readable file, not in every model request. */
+export async function materializeSceneUiAuthoringContract(workspacePath: string, task: SceneUiContentAuthoringAuthority) {
+  const authoringContractPath = CONTENT_AUTHORING_CONTRACT_PATH
+  const target = join(workspacePath, authoringContractPath)
+  await mkdir(dirname(target), { recursive: true })
+  await writeFile(target, JSON.stringify(task.contract.output.format, null, 2) + '\n')
+  const { assetManifest: _manifest, output, ...shared } = task.contract
+  const { format: _format, ...outputIndex } = output
+  return { ...shared, output: outputIndex, authoringContractPath,
+    inspectionCommand: GAME_CONTENT_INSPECTION_COMMAND,
+    assetManifestPath: 'assets/asset-manifest.json' }
+}
 
 export type SceneUiContentAuthoringAuthority = Readonly<{
   task: 'GAME_CONTENT'
@@ -74,6 +101,7 @@ export function buildSceneUiContentAuthoringAuthority(
       kinds: ['scene-2d', 'scene-3d', 'ui-screen', 'ui-hud', 'ui-flow', 'vfx'],
       format: {
         strict: true,
+        coordinates: CONTENT_COORDINATE_CONTRACT,
         index: {
           schema: BEEGAME_CONTENT_PACKAGE_SCHEMA,
           id: '<stable-package-id>',
@@ -197,9 +225,11 @@ export function buildSceneUiContentAuthoringAuthority(
           },
         },
         uiLayoutContract: {
+          anchors: UI_ANCHORS,
           referenceResolution: 'Root data.referenceResolution is [width, height] in logical pixels. Root layout.size, if present, must match it.',
           anchor: 'top/middle/bottom-left/center/right. Position is an offset from that anchor on the parent rectangle; the same point on the child is its pivot. data.anchor {x,y} may override only the child pivot.',
           textStyle: 'Use style.fontSize, style.color, style.align, style.verticalAlign and style.lineHeight. For an actual font file use data.font.assetRef; do not invent font asset aliases.',
+          textFit: 'After loading the actual font file, measure HUD values and labels at their authored font size (including the largest expected score/time/count and each supported language). Size text bounds and spacing to fit those measurements, not character-count estimates. Keep numeric counters intact; do not rely on arbitrary character wrapping, runtime shrinking, or editor-specific layout overrides to hide undersized bounds. Check both the generated UI and target runtime before reporting visual acceptance.',
           image: 'Use assetRef + optional data.member for the image file, data.frame for an exact case-sensitive atlas frame name (without extension). Inspect the delivered atlas; never guess names.',
           nineSlice: 'Use data.image.type=sliced and data.nineSlice.border=[left,right,top,bottom]. data.frame may name an explicit meta.nine_slice composite made from tl,tr,bl,br,h,v,c frames, or a single packed frame. Never invent a panel frame absent from both tables.',
           appearance: 'Use style.opacity, style.background (CSS color or {color,opacity,radius}), style.gradient (color array), style.border ({width,color,radius}), style.cornerRadius. Shape uses style.shape and style.color.',
@@ -242,7 +272,7 @@ export function buildSceneUiContentAuthoringAuthority(
           'Every file path in index.files is relative to content/.',
           'Every used assetRef is listed once in the document assetRefs and resolves to a verified Manifest resource.',
           `The index must declare sceneModel "${BEEGAME_SCENE_MODEL}". Every scene node is a GameObject; node.kind is forbidden.`,
-          'Use one Unity-style GameObject/Component model for both dimensions. Transform is always 3D. A 2D scene uses the XY plane, Z ordering and an orthographic Camera; a 3D scene uses full XYZ space.',
+          'Use the GameObject/Component structure for both dimensions, with coordinate semantics defined by format.coordinates, not inferred from an engine name. Transform has three components; 2D uses the XY plane and an orthographic Camera. In a 3D scene replace the 2D coordinateSystem example with {origin:"world",units:"meters"}.',
           'Put gameplay identity such as player, enemy, tree, anchor or checkpoint in node.semantic. Put renderer, physics, audio, animation, lighting and camera capabilities in components using exactly format.sceneVocabulary.componentTypes. Every component requires a stable unique id that is independent of array order. An empty GameObject has no renderer. Gameplay behavior metadata belongs in node.data.behaviors as entries with stable id, kind and config; do not add script or MonoBehaviour components.',
           'Every visible object must retain a real renderer: use sprite-renderer for authored 2D graphics, world-space canvas + canvas-renderer + image/text for solid-color meters and labels, Light2D spot data for a 2D vision cone, and particle-system + particle-system-renderer for particles.',
           'Scene nodes never own assetRef or frameRef directly. Only component types listed in format.sceneVocabulary.assetComponentTypes may own component.assetRef. SpriteRenderer, MeshFilter, SkinnedMeshRenderer and Tilemap require a verified component.assetRef; a textured Image requires one, while an intentionally solid-color Image does not. Select a specific multi-file member in component.data.member.',
@@ -255,14 +285,11 @@ export function buildSceneUiContentAuthoringAuthority(
           'For a multi-file visual resource, set data.member (or the equivalent nested texture/sprite action member) whenever the node needs a file other than the resource root; do not rely on filename guessing.',
           'Visible authored world graphics must use a real renderer plus a verified asset. A scene Image may omit assetRef only when it is an intentionally solid-color Unity UI graphic on a Canvas; encode its color/opacity in data. Collider and trigger components are non-visual. A nine-slice panel that uses an image remains an asset-backed UI node and must reference its verified image resource and member.',
           'A ParticleSystem alone is never considered rendered. Put particle-system-renderer on the same GameObject; give that renderer a verified texture asset when the design calls for textured particles.',
-          'Canvas, Image and Text follow Unity UI dependencies: Canvas owns a RectTransform; Image/Text require RectTransform and CanvasRenderer and must be descendants of a Canvas. RectTransform data uses anchorMin, anchorMax, anchoredPosition, sizeDelta and pivot.',
+          'Canvas owns a RectTransform; Image/Text require RectTransform and CanvasRenderer and must be descendants of a Canvas. RectTransform data uses anchorMin, anchorMax, anchoredPosition, sizeDelta and pivot with the top-left conventions in format.coordinates.rectTransform, not target-engine defaults.',
         ],
       },
     },
-    validationCommand: {
-      executable: process.execPath,
-      args: [new URL('./game-content-validation-cli.ts', import.meta.url).pathname],
-    },
+    validationCommand: GAME_CONTENT_VALIDATION_COMMAND,
     previewCommand: {
       executable: process.execPath,
       args: [

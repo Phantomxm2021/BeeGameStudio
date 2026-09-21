@@ -2,16 +2,79 @@ import { describe, expect, it } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { ChatDisplayMessage } from '../viewModels/displayModels';
 import { BeeGameCollaborationFeed } from './BeeGameCollaborationFeed';
+import { toChatDisplayMessages } from '../../../viewModels/displayModels';
+import { normalizeChatHistory } from '../../../utils/chatHistory';
 import { sampleMessages } from '../../../test/fixtures/canonicalTranscript';
 
 const CHECKLIST_TURN_ID = 'beegame-turn-beegame_191b560f8a9046b18e1efed2fafa8f07-1';
+
+it('keeps distinct references after history conversion and renders them with the existing BeUI sources disclosure', () => {
+  const messages = toChatDisplayMessages(normalizeChatHistory([{
+    id: 'sourced', sender: 'beegame', content: 'Answer with references.', timestamp: Date.now(),
+    sources: [{ title: 'Guide A', url: 'https://example.com/a' }],
+    citations: [{ title: 'Guide B', url: 'https://example.com/b' }],
+  }]));
+  render(<BeeGameCollaborationFeed messages={messages} />);
+  fireEvent.click(screen.getByRole('button', { name: /2 sources/i }));
+  expect(screen.getByRole('link', { name: /Guide A/ })).toHaveAttribute('href', 'https://example.com/a');
+  expect(screen.getByRole('link', { name: /Guide B/ })).toHaveAttribute('href', 'https://example.com/b');
+});
+
+it('shows attachment-only user messages without treating documents as images', () => {
+  render(<BeeGameCollaborationFeed messages={[{ id: 'upload', sender: 'user', content: '', timestamp: Date.now(),
+    attachments: [
+      { type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'scene.png' },
+      { type: 'file', mediaType: 'application/pdf', data: 'aGVsbG8=', filename: 'brief.pdf' },
+    ],
+  }]} />);
+  expect(screen.getByRole('img', { name: 'scene.png' })).toBeInTheDocument();
+  expect(screen.getByText('brief.pdf')).toBeInTheDocument();
+  expect(screen.getAllByRole('img')).toHaveLength(1);
+});
 const IMPLEMENTATION_TURN_ID = 'beegame-turn-beegame_0889307bbd6142f186543e33306e9b01-1';
+it('shows tool screenshots outside the collapsed tool activity', () => {
+  render(<BeeGameCollaborationFeed messages={[{ id: 'screenshot', sender: 'beegame', content: 'Read', timestamp: Date.now(),
+    type: 'tool', toolName: 'Read', toolUseId: 'read-image', toolStatus: 'completed',
+    attachments: [{ type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'screenshot.png' }],
+  }]} />);
+  expect(screen.getByRole('img', { name: 'screenshot.png' })).toBeVisible();
+});
 const FAILURE_TURN_ID = 'beegame-turn-beegame_bcc8df40769c4754895fac37064035d5-1';
 const CHECKLIST_MIXED_MESSAGE_ID = '021789434990692846a816464a9af9c0791e0f68a2ce03cbd3227';
 const CHECKLIST_FINAL_MESSAGE_ID = '021789435028095846a816464a9af9c0791e0f68a2ce03cdcd201';
 const IMPLEMENTATION_MIXED_MESSAGE_ID = '0217894385633113d0449b03f13da7ad7c0359f0f1d760c19f272';
 
 describe('BeeGameCollaborationFeed canonical transcript', () => {
+  it('labels cancelled tools as stopped rather than failed', () => {
+    render(<BeeGameCollaborationFeed messages={[
+      { id: 'cancelled', sender: 'beegame', type: 'tool', content: 'Bash', timestamp: 100,
+        toolName: 'Bash', toolStatus: 'failed', completionReason: 'stopped' },
+    ]} lang="en" />);
+    expect(screen.getByText('1 tool calls · 1 stopped')).toBeInTheDocument();
+    expect(screen.queryByText(/1 failed/)).not.toBeInTheDocument();
+  });
+
+  it('does not turn unknown or subsecond thinking duration into 0 seconds', () => {
+    render(<BeeGameCollaborationFeed messages={[
+      { id: 'unknown', sender: 'beegame', type: 'thought', content: 'unknown timing', timestamp: 100, streamStatus: 'complete' },
+      { id: 'short', sender: 'beegame', type: 'thought', content: 'short thinking', timestamp: 200, streamStatus: 'complete', thinkingDurationMs: 365 },
+    ]} lang="en" />);
+    expect(screen.getByText('Thought')).toBeInTheDocument();
+    expect(screen.getByText('Thought · less than 1s')).toBeInTheDocument();
+    expect(screen.queryByText(/Thought.*0s/)).not.toBeInTheDocument();
+  });
+
+  it('opens full failed tool input/output in the shared drawer', () => {
+    const { container } = render(<BeeGameCollaborationFeed messages={[
+      { id: 'tool-detail', sender: 'beegame', type: 'tool', content: 'Read failed', timestamp: 100,
+        toolName: 'Read', toolDetail: 'manifest.json', toolStatus: 'failed', toolInput: { path: 'manifest.json' }, toolOutput: 'Detailed failure, not a completed step' },
+    ]} lang="en" />);
+    fireEvent.click(container.querySelector('[data-content] > button')!);
+    fireEvent.click(screen.getByRole('button', { name: 'manifest.json' }));
+    expect(screen.getByText('Input')).toBeInTheDocument();
+    expect(screen.getByText('Output')).toBeInTheDocument();
+    expect(screen.getByText('Detailed failure, not a completed step')).toBeInTheDocument();
+  });
   it('updates the open subagent drawer as progress and terminal result arrive', () => {
     const message: ChatDisplayMessage = { id: 'subagent-live', sender: 'beegame', content: 'Subagent: Audit assets',
       type: 'tool', timestamp: Date.now(), toolName: 'Agent', toolStatus: 'running', isSubagentTool: true,

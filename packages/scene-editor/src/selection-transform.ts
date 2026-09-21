@@ -1,5 +1,6 @@
 import { Euler, Matrix4, Quaternion, Vector3 } from 'three'
 import { operations } from './commands'
+import { rectTransform } from './rect-transform'
 import type { SceneDocument, SceneOperation, Transform } from './model'
 
 function localMatrix(transform: Transform): Matrix4 {
@@ -13,7 +14,7 @@ function localMatrix(transform: Transform): Matrix4 {
 export function nodeWorldMatrix(document: SceneDocument, nodeId: string, path = new Set<string>()): Matrix4 {
   const node = document.nodes[nodeId]
   if (!node || path.has(nodeId)) throw new Error('Cannot transform an invalid hierarchy')
-  const local = localMatrix(node.transform)
+  const local = localMatrix(rectTransform(node, document.nodes))
   return node.parentId ? nodeWorldMatrix(document, node.parentId, new Set(path).add(nodeId)).multiply(local) : local
 }
 
@@ -37,7 +38,7 @@ export function transformSelection(document: SceneDocument, selectedIds: readonl
   selected.add(primaryId)
   const oldPrimaryWorld = nodeWorldMatrix(document, primaryId)
   const parentWorld = primary.parentId ? nodeWorldMatrix(document, primary.parentId) : new Matrix4()
-  const newPrimaryWorld = parentWorld.clone().multiply(localMatrix(nextPrimaryTransform))
+  const newPrimaryWorld = parentWorld.clone().multiply(localMatrix(rectTransform(primary, document.nodes, nextPrimaryTransform)))
   if (Math.abs(oldPrimaryWorld.determinant()) < 1e-10) throw new Error('Cannot transform a singular selection')
   const delta = newPrimaryWorld.multiply(oldPrimaryWorld.clone().invert())
   const roots = [...selected].filter(id => {
@@ -53,6 +54,6 @@ export function transformSelection(document: SceneDocument, selectedIds: readonl
     if (!node || node.locked || node.editable === false) throw new Error('Selection contains a locked or read-only object')
     const currentParent = node.parentId ? nodeWorldMatrix(document, node.parentId) : new Matrix4()
     const nextLocal = currentParent.invert().multiply(delta.clone().multiply(nodeWorldMatrix(document, id)))
-    return operations.transform(id, fromMatrix(nextLocal), node.transform)
+    return operations.transform(id, rectTransform(node, document.nodes, fromMatrix(nextLocal), true), node.transform)
   })
 }

@@ -1,4 +1,5 @@
 import type { RefObject } from 'react';
+import { PREVIEW_IFRAME_SANDBOX } from '@bee-game-studio/agent-workflow/preview-environment';
 import { AlertTriangle, MonitorPlay } from 'lucide-react';
 
 export type WorkspacePreviewState = 'starting' | 'live' | 'failed' | 'stopped' | 'idle';
@@ -31,7 +32,7 @@ export function WorkspacePreviewPanel({
   return (
     <div data-testid="beegame-preview-surface" className="workspace-preview-region relative flex h-full min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl bg-[var(--preview-well)] text-[var(--text-secondary)]">
       {canShowPreview ? (
-        <iframe ref={previewFrameRef} title={title} data-testid="beegame-live-preview-frame" src={embeddedPreviewUrl} sandbox="allow-forms allow-pointer-lock allow-popups allow-scripts" className="absolute inset-0 h-full w-full border-0 bg-transparent" />
+        <iframe ref={previewFrameRef} title={title} data-testid="beegame-live-preview-frame" src={embeddedPreviewUrl} sandbox={PREVIEW_IFRAME_SANDBOX} className="absolute inset-0 h-full w-full border-0 bg-transparent" />
       ) : (
         <div className="flex h-full w-full items-center justify-center px-8 text-center">
           <div className="max-w-md">

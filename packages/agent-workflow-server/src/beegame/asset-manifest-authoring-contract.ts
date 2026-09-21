@@ -138,6 +138,13 @@ creation method.
 
 ## Canonical example
 
+## Sprite atlas contract
+
+Named atlas entries must use \`frames: { "idle": { "frame": { "x": 0, "y": 0, "w": 32, "h": 32 } } }\`.
+Use an image and same-basename JSON sidecar in file_paths. Flat rectangles, rotated and trimmed entries are not supported.
+Every rectangle must fit inside the actual image dimensions. Render the full atlas before registering it; do not clamp rectangles to conceal cropped artwork.
+Run the resource checker after generating assets. The runtime and editors consume this same contract; do not add a private runtime-only format adapter.
+
 ### \`assets/asset-manifest.json\`
 
 \`\`\`json

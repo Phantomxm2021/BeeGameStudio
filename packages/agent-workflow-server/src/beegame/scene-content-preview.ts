@@ -1,6 +1,8 @@
 import { mkdir, readFile } from 'node:fs/promises'
 import { basename, extname, join, resolve } from 'node:path'
 import sharp from 'sharp'
+import { parseSpriteSheet, spriteSheetSelection } from '../../../scene-editor/src/sprite-sheet'
+import { affine2d, compose2d, point2d, rectLayout, type Affine2D } from '../../../scene-editor/src/content-coordinates'
 import { readBeeGameAssetManifestSync, type BeeGameProjectResource } from './asset-contracts'
 import { auditBeeGameContentPackage, type BeeGameContentDocument } from './game-content-package'
 
@@ -42,7 +44,7 @@ function visualData(node: SceneNode): RecordValue | undefined {
 }
 
 function rectTransformData(node: SceneNode): RecordValue | undefined {
-  return record(component(node, 'rect-transform')?.data) ?? record(record(node.data)?.rectTransform)
+  return record(component(node, 'rect-transform')?.data)
 }
 
 function assetRef(node: SceneNode): string | undefined {
@@ -86,40 +88,42 @@ function resourcePath(resource: BeeGameProjectResource, member?: string): string
   )
 }
 
-function nodeSize(node: SceneNode): { width: number; height: number } {
+function nodeSize(node: SceneNode, nodes: Map<string, SceneNode>): { width: number; height: number } {
+  const rect = sceneRect(node, nodes)
+  if (rect) return { width: rect.size[0], height: rect.size[1] }
   const data = visualData(node)
-  const rectTransform = rectTransformData(node)
-  const rectSize = record(rectTransform?.size) ?? record(rectTransform?.sizeDelta)
-  const size = record(data?.size)
+  const size = (Array.isArray(data?.size) ? { width: data.size[0], height: data.size[1] } : record(data?.size))
     ?? record(record(data?.sprite)?.logicalSize)
-    ?? rectSize
-  const width = number(size?.width, number(data?.width, number(rectTransform?.width, 100)))
-  const height = number(size?.height, number(data?.height, number(rectTransform?.height, 100)))
+  const width = number(size?.width, number(data?.width, 100))
+  const height = number(size?.height, number(data?.height, 100))
   return {
-    width: Math.max(1, Math.round(width)),
-    height: Math.max(1, Math.round(height)),
+    width: Math.max(0, width),
+    height: Math.max(0, height),
   }
 }
 
 function nodeAnchor(node: SceneNode): { x: number; y: number } {
-  const anchor = record(visualData(node)?.anchor)
+  const rawAnchor = visualData(node)?.anchor
+  const anchor = Array.isArray(rawAnchor) ? { x: rawAnchor[0], y: rawAnchor[1] } : record(rawAnchor)
   const pivot = rectTransformData(node)?.pivot
   return {
-    x: number(anchor?.x, Array.isArray(pivot) ? number(pivot[0], .5) : .5),
-    y: number(anchor?.y, Array.isArray(pivot) ? number(pivot[1], .5) : .5),
+    x: Array.isArray(pivot) ? number(pivot[0], .5) : number(anchor?.x, .5),
+    y: Array.isArray(pivot) ? number(pivot[1], .5) : number(anchor?.y, .5),
   }
 }
 
-function localPosition(node: SceneNode): { x: number; y: number } {
-  const offset = record(record(node.data)?.offset)
-  const rectTransform = rectTransformData(node)
-  const anchoredPosition = Array.isArray(rectTransform?.anchoredPosition)
-    ? rectTransform.anchoredPosition
-    : undefined
-  return {
-    x: number(node.transform?.position?.[0], number(anchoredPosition?.[0], number(offset?.x, 0))),
-    y: number(node.transform?.position?.[1], number(anchoredPosition?.[1], number(offset?.y, 0))),
-  }
+function pair(value: unknown, fallback: [number, number]): [number, number] {
+  return Array.isArray(value) ? [number(value[0], fallback[0]), number(value[1], fallback[1])] : fallback
+}
+
+export function sceneRect(node: SceneNode, nodes: Map<string, SceneNode>, path = new Set<string>()): ReturnType<typeof rectLayout> | undefined {
+  const rect = rectTransformData(node)
+  if (!rect) return undefined
+  if (path.has(node.id)) throw new Error('Invalid rect hierarchy')
+  const parent = node.parentId ? nodes.get(node.parentId) : undefined
+  const parentRect = parent && rectTransformData(parent)
+  const parentSize = parent && parentRect ? sceneRect(parent, nodes, new Set(path).add(node.id))?.size ?? [0, 0] : [0, 0]
+  return rectLayout(parentSize, pair(parentRect?.pivot, [0, 0]), pair(rect.anchorMin, [0, 0]), pair(rect.anchorMax, [1, 1]), pair(rect.pivot, [.5, .5]), pair(rect.anchoredPosition, [0, 0]), pair(rect.sizeDelta, [0, 0]))
 }
 
 function localScale(node: SceneNode): { x: number; y: number } {
@@ -130,31 +134,38 @@ function localScale(node: SceneNode): { x: number; y: number } {
   }
 }
 
-type PreviewPose = { x: number; y: number; scaleX: number; scaleY: number }
+type PreviewPose = Affine2D
 
-function worldPose(node: SceneNode, nodes: Map<string, SceneNode>, cache = new Map<string, PreviewPose>()): PreviewPose {
+export function worldPose(node: SceneNode, nodes: Map<string, SceneNode>, cache = new Map<string, PreviewPose>()): PreviewPose {
   const cached = cache.get(node.id)
   if (cached) return cached
-  const local = localPosition(node)
+  const offset = sceneRect(node, nodes)?.position ?? [0, 0]
+  const position = node.transform?.position ?? [0, 0, 0]
   const scale = localScale(node)
+  const local = affine2d(position[0]+offset[0], position[1]+offset[1], node.transform?.rotation?.[2] ?? 0, scale.x, scale.y)
   const parent = node.parentId ? nodes.get(node.parentId) : undefined
   if (!parent) {
-    const pose = { x: local.x, y: local.y, scaleX: scale.x, scaleY: scale.y }
-    cache.set(node.id, pose)
-    return pose
+    cache.set(node.id, local)
+    return local
   }
   const parentPose = worldPose(parent, nodes, cache)
-  // The content contract's 2D coordinates are authored in logical pixels.
-  // Preserve Unity's localScale inheritance without making preview rendering
-  // depend on Three.js scene state.
-  const pose = {
-    x: parentPose.x + local.x * parentPose.scaleX,
-    y: parentPose.y + local.y * parentPose.scaleY,
-    scaleX: parentPose.scaleX * scale.x,
-    scaleY: parentPose.scaleY * scale.y,
-  }
+  const pose = compose2d(parentPose, local)
   cache.set(node.id, pose)
   return pose
+}
+
+/** Rasterize the actual affine geometry, including rotation, mirroring and shear. */
+export async function transformedOverlay(bytes: Buffer, pose: Affine2D, size: { width: number; height: number }, pivot: { x: number; y: number }, canvas: { width: number; height: number }, blend: sharp.Blend = 'over'): Promise<sharp.OverlayOptions | undefined> {
+  if (size.width <= 0 || size.height <= 0) return undefined
+  const matrix = compose2d(pose, affine2d(-pivot.x*size.width, -pivot.y*size.height))
+  const corners = [[0,0], [size.width,0], [0,size.height], [size.width,size.height]].map(([x,y]) => point2d(matrix,x,y))
+  const left = Math.max(0, Math.floor(Math.min(...corners.map(p => p[0])))), top = Math.max(0, Math.floor(Math.min(...corners.map(p => p[1]))))
+  const width = Math.min(canvas.width, Math.ceil(Math.max(...corners.map(p => p[0]))))-left
+  const height = Math.min(canvas.height, Math.ceil(Math.max(...corners.map(p => p[1]))))-top
+  if (width <= 0 || height <= 0 || Math.abs(matrix[0]*matrix[3]-matrix[1]*matrix[2]) < 1e-12) return undefined
+  const m = [...matrix]; m[4] -= left; m[5] -= top
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${width}" height="${height}"><image width="${size.width}" height="${size.height}" preserveAspectRatio="none" transform="matrix(${m.join(' ')})" xlink:href="data:image/png;base64,${bytes.toString('base64')}"/></svg>`
+  return { input: await sharp(Buffer.from(svg)).png().toBuffer(), left, top, blend }
 }
 
 function visibleInDefaultState(node: SceneNode): boolean {
@@ -187,7 +198,7 @@ function layerOrder(scene: SceneDocument): Map<string, number> {
   }))
 }
 
-async function firstSpriteFrame(input: {
+export async function firstSpriteFrame(input: {
   workspacePath: string
   resource: BeeGameProjectResource
   member: string
@@ -195,41 +206,28 @@ async function firstSpriteFrame(input: {
   node: SceneNode
 }): Promise<Buffer> {
   const tablePath = input.resource.file_paths.find(path => stem(path) === input.member && extname(path).toLowerCase() === '.json')
-  if (!tablePath) return input.bytes
   try {
-    const table = JSON.parse(await readFile(resolve(input.workspacePath, tablePath), 'utf8')) as RecordValue
-    const frameWidth = number(table.frameWidth, 0)
-    const frameHeight = number(table.frameHeight, 0)
-    const framesPerFacing = Math.max(1, Math.floor(number(table.framesPerFacing, 1)))
-    if (!frameWidth || !frameHeight) return input.bytes
-    const facings = Array.isArray(table.facings) ? table.facings.filter(value => typeof value === 'string') : []
-    const facing = text(visualData(input.node)?.initialFacing) ?? facings[0]
-    const facingIndex = Math.max(0, facings.indexOf(facing))
+    const data = visualData(input.node) ?? {}
+    const table = tablePath ? parseSpriteSheet(JSON.parse(await readFile(resolve(input.workspacePath, tablePath), 'utf8'))) : undefined
+    const animator = record(component(input.node, 'animator')?.data)
+    const frame = spriteSheetSelection(table, { ...data, frameSize: data.frameSize ?? animator?.frameSize }).frame
+    if (!frame || !frame.width || !frame.height) return input.bytes
     return sharp(input.bytes)
-      .extract({ left: facingIndex * framesPerFacing * frameWidth, top: 0, width: frameWidth, height: frameHeight })
+      .extract({ left: frame.x, top: frame.y, width: frame.width, height: frame.height })
       .png()
       .toBuffer()
-  } catch {
-    return input.bytes
+  } catch (error) {
+    throw new Error(`Sprite frame ${input.node.id}/${input.member}: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
-async function applyOpacity(bytes: Buffer, opacity: number): Promise<Buffer> {
-  const image = sharp(bytes).ensureAlpha()
-  const metadata = await image.metadata()
-  const width = metadata.width
-  const height = metadata.height
-  if (!width || !height || opacity >= 1) return image.png().toBuffer()
-  const alpha = await image
-    .clone()
-    .extractChannel(3)
-    .linear(opacity, 0)
-    .toBuffer()
-  return image
-    .removeAlpha()
-    .joinChannel(alpha, { raw: { width, height, channels: 1 } })
-    .png()
-    .toBuffer()
+export async function applyOpacity(bytes: Buffer, opacity: number): Promise<Buffer> {
+  const image = sharp(bytes).toColourspace('srgb').ensureAlpha()
+  if (opacity >= 1) return image.png().toBuffer()
+  const { data, info } = await image.raw({ depth: 'uchar' }).toBuffer({ resolveWithObject: true })
+  for (let offset = info.channels - 1; offset < data.length; offset += info.channels)
+    data[offset] = Math.round(data[offset]! * Math.max(0, opacity))
+  return sharp(data, { raw: { width: info.width, height: info.height, channels: info.channels } }).png().toBuffer()
 }
 
 function cssColor(value: unknown, fallback = '#ffffff'): string {
@@ -301,8 +299,13 @@ export async function renderSceneContentPreviews(workspacePath: string): Promise
   const outputRoot = resolve(workspacePath, 'content/previews')
   await mkdir(outputRoot, { recursive: true })
   const outputs: string[] = []
+  const issues: string[] = []
   for (const document of audit.package.documents) {
     if (document.kind !== 'scene-2d') continue
+    const initialIssues = issues.length
+    const failed = (nodeId: string, error: unknown) => {
+      issues.push(`${document.id}/${nodeId}: ${error instanceof Error ? error.message : String(error)}`)
+    }
     const size = canvasSize(document)
     const layers = layerOrder(document)
     const nodes = new Map(document.data.nodes.map(node => [node.id, node]))
@@ -327,7 +330,10 @@ export async function renderSceneContentPreviews(workspacePath: string): Promise
         const resource = resources.get(particleResourceId)
         const member = particleMember(node)
         const path = resource ? resourcePath(resource, member) : undefined
-        if (!resource || resource.status !== 'verified' || !path) continue
+        if (!resource || resource.status !== 'verified' || !path) {
+          failed(node.id, 'Particle resource/member is unavailable')
+          continue
+        }
         try {
           const sourceBytes = await readFile(resolve(workspacePath, path))
           const bytes = member
@@ -352,18 +358,12 @@ export async function renderSceneContentPreviews(workspacePath: string): Promise
             const drift = number(motion?.amplitudePx, 0)
             const driftX = drift * Math.sin(seeded(index, 5) * Math.PI * 2)
             const driftY = drift * Math.cos(seeded(index, 6) * Math.PI * 2)
-            const scaledSize = particleSize * Math.max(Math.abs(pose.scaleX), Math.abs(pose.scaleY))
-            const rendered = await particleImage(bytes, scaledSize, tint, alpha)
-            composites.push({
-              input: rendered,
-              left: Math.round(pose.x + (x + driftX) * pose.scaleX - scaledSize / 2),
-              top: Math.round(pose.y + (y + driftY) * pose.scaleY - scaledSize / 2),
-              blend,
-            })
+            const rendered = await particleImage(bytes, particleSize, tint, alpha)
+            const overlay = await transformedOverlay(rendered, compose2d(pose, affine2d(x+driftX, y+driftY)), { width: particleSize, height: particleSize }, { x: .5, y: .5 }, size, blend)
+            if (overlay) composites.push(overlay)
           }
-        } catch {
-          // A preview is advisory; deterministic package validation remains the
-          // authority for malformed or missing assets.
+        } catch (error) {
+          failed(node.id, error)
         }
         continue
       }
@@ -372,16 +372,14 @@ export async function renderSceneContentPreviews(workspacePath: string): Promise
       // assetRef. Render the authored color instead of silently dropping it.
       if (visual?.type === 'image' && !resourceId) {
         const data = record(visual.data)
-        const dimensions = nodeSize(node)
-        const renderedWidth = Math.max(1, Math.round(dimensions.width * Math.abs(pose.scaleX)))
-        const renderedHeight = Math.max(1, Math.round(dimensions.height * Math.abs(pose.scaleY)))
+        const dimensions = nodeSize(node, nodes)
         const alpha = Math.max(0, Math.min(1, number(data?.alpha, number(data?.opacity, 1))))
         try {
-          const rendered = await applyOpacity(await solidColorImage(renderedWidth, renderedHeight, cssColor(data?.color)), alpha)
-          const anchor = nodeAnchor(node)
-          composites.push({ input: rendered, left: Math.round(pose.x - anchor.x * renderedWidth), top: Math.round(pose.y - anchor.y * renderedHeight), blend: 'over' })
-        } catch {
-          // Ignore malformed advisory preview data.
+          const rendered = await applyOpacity(await solidColorImage(Math.max(1, Math.round(dimensions.width)), Math.max(1, Math.round(dimensions.height)), cssColor(data?.color)), alpha)
+          const overlay = await transformedOverlay(rendered, pose, dimensions, nodeAnchor(node), size)
+          if (overlay) composites.push(overlay)
+        } catch (error) {
+          failed(node.id, error)
         }
         continue
       }
@@ -397,16 +395,12 @@ export async function renderSceneContentPreviews(workspacePath: string): Promise
         const bytes = member
           ? await firstSpriteFrame({ workspacePath, resource, member, bytes: sourceBytes, node })
           : sourceBytes
-        const baseDimensions = nodeSize(node)
-        const dimensions = {
-          width: Math.max(1, Math.round(baseDimensions.width * Math.abs(pose.scaleX))),
-          height: Math.max(1, Math.round(baseDimensions.height * Math.abs(pose.scaleY))),
-        }
+        const dimensions = nodeSize(node, nodes)
         const anchor = nodeAnchor(node)
         const visualValues = visualData(node)
         const alpha = Math.max(0, Math.min(1, number(visualValues?.alpha, number(visualValues?.opacity, 1))))
         const resized = await sharp(bytes)
-          .resize(dimensions.width, dimensions.height, { fit: 'fill' })
+          .resize(Math.max(1, Math.round(dimensions.width)), Math.max(1, Math.round(dimensions.height)), { fit: 'fill' })
           .ensureAlpha()
           .png()
           .toBuffer()
@@ -414,17 +408,13 @@ export async function renderSceneContentPreviews(workspacePath: string): Promise
         // RGBA image. Extract and reattach alpha so scene-authored opacity is
         // reflected in the deterministic preview as it is in the editor.
         const rendered = await applyOpacity(resized, alpha)
-        composites.push({
-          input: rendered,
-          left: Math.round(pose.x - anchor.x * dimensions.width),
-          top: Math.round(pose.y - anchor.y * dimensions.height),
-          blend: text(visualData(node)?.blend) === 'additive' ? 'screen' : 'over',
-        })
-      } catch {
-        // A preview is advisory; deterministic package validation remains the
-        // authority for malformed or missing assets.
+        const overlay = await transformedOverlay(rendered, pose, dimensions, anchor, size, text(visualData(node)?.blend) === 'additive' ? 'screen' : 'over')
+        if (overlay) composites.push(overlay)
+      } catch (error) {
+        failed(node.id, error)
       }
     }
+    if (issues.length > initialIssues) continue
     const outputPath = join(outputRoot, `${document.id}.png`)
     await sharp({ create: { width: size.width, height: size.height, channels: 4, background: '#181a20' } })
       .composite(composites)
@@ -432,5 +422,7 @@ export async function renderSceneContentPreviews(workspacePath: string): Promise
       .toFile(outputPath)
     outputs.push(outputPath)
   }
+  if (issues.length)
+    throw new Error('Scene preview failed; do not change valid content to work around renderer errors. ' + issues.join('; '))
   return outputs
 }

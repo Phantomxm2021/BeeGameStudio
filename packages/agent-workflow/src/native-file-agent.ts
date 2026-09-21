@@ -68,6 +68,12 @@ const within = (root: string, path: string) => {
   return !isAbsolute(part) && part !== '..' && !part.startsWith('../')
 }
 
+export function nativeChatEventsPath(logPath: string): string {
+  return logPath.endsWith('native-events.jsonl')
+    ? logPath.slice(0, -'native-events.jsonl'.length) + 'chat-events.jsonl'
+    : logPath + '.chat-events.jsonl'
+}
+
 /** Native file tools with a workspace permission boundary. */
 export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAgentResult> {
   const access = await createNativeTaskAccess(input)
@@ -102,11 +108,15 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
   let lastProgressAt = 0
   let logQueue = Promise.resolve()
   const redactTaskObservation = createResponseRedactor(input.env)
-  const log = (event: string, data: unknown) => {
+  const writeRecord = (path: string, event: string, data: unknown) => {
     const line = JSON.stringify({ at: new Date().toISOString(), event, data }) + '\n'
-    return logQueue = logQueue.then(() => appendFile(input.logPath, line, { mode: 0o600 }))
+    return logQueue = logQueue.then(() => appendFile(path, line, { mode: 0o600 }))
   }
-  const trace = input.responseTrace ? createNativeResponseTraceLog(log, input.env, async message => {
+  const log = (event: string, data: unknown) => writeRecord(input.logPath, event, data)
+  // Workers can outlive the API process. Their durable, redacted Chat source
+  // must remain readable independently of diagnostic retention/rotation.
+  const chat = (event: string, data: unknown) => writeRecord(nativeChatEventsPath(input.logPath), event, data)
+  const trace = input.responseTrace ? createNativeResponseTraceLog(chat, input.env, async message => {
     // Root messages also arrive on stdout. Forward only detached child
     // observations here so usage is persisted exactly once per source.
     if (message.nativeTraceAgentId !== 'root') await input.onMessage?.(structuredClone(message))
@@ -158,7 +168,7 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
   }
   async function handle(message: Record<string, any>) {
     if (message.type === 'system' && ['task_started', 'task_progress', 'task_notification'].includes(message.subtype)) {
-      await log('native.task_lifecycle', redactTaskObservation(projectResponseMessage(message)))
+      await chat('native.task_lifecycle', redactTaskObservation(projectResponseMessage(message)))
     }
     // Observers cannot alter admission or stop draining later usage frames.
     try { await input.onMessage?.(structuredClone(message)) }
@@ -203,13 +213,15 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
       await input.onProgress?.({ modelResponses: modelIds.size, message: '等待上游模型响应' })
     }
     if (message.type === 'control_request' && message.request?.subtype === 'can_use_tool') {
-      const updatedInput = !failure && !result ? await access.permission(message.request) : undefined
-      await log('permission', { tool: message.request.tool_name, allowed: Boolean(updatedInput),
-        path: updatedInput?.file_path ?? updatedInput?.path })
+      const decision = !failure && !result ? await access.permission(message.request)
+        : { behavior: 'deny' as const, message: 'This task has already stopped or completed.' }
+      const args = decision.behavior === 'allow' ? decision.updatedInput : message.request.input
+      const requestedPath = args?.file_path ?? args?.path ?? args?.notebook_path ?? args?.filePath
+      await log('permission', { tool: message.request.tool_name, allowed: decision.behavior === 'allow',
+        path: typeof requestedPath === 'string' ? requestedPath : undefined,
+        reason: decision.behavior === 'deny' ? decision.message : undefined })
       send({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id,
-        response: updatedInput
-          ? { behavior: 'allow', updatedInput }
-          : { behavior: 'deny', message: 'This action is outside the task execution permissions; additional authorization is required.' } } })
+        response: decision } })
     }
     if (message.type === 'assistant' && Array.isArray(message.message?.content)) {
       for (const block of message.message.content) {
@@ -283,7 +295,7 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
   }
   input.signal?.addEventListener('abort', abort, { once: true })
   try {
-    await log('started', { pid: child.pid, tools: 'native-default', writablePaths: input.writablePaths,
+    await log('started', { pid: child.pid, cwd: root, tools: 'native-default', writablePaths: input.writablePaths,
       sandbox: 'required', readOnlyPaths: input.readOnlyPaths, responseTrace: Boolean(trace) })
     if (trace) traceTimer = setInterval(() => { void enqueueTrace(() => trace.flush()) }, 1000)
     if (input.signal?.aborted) abort()
@@ -313,7 +325,11 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
               if (message) await input.onProgress?.({ modelResponses: modelIds.size, message })
             }
           }
-        } catch { await log('response.invalid_frame', { reason: 'invalid_diagnostic_frame' }) }
+        } catch {
+          const response = text.startsWith(NATIVE_RESPONSE_TRACE_PREFIX)
+          if (response) fail('observation_failed')
+          await log('response.invalid_frame', { reason: response ? 'invalid_chat_frame' : 'invalid_diagnostic_frame' })
+        }
       }
       try {
         for await (const chunk of child.stderr) {
@@ -327,7 +343,8 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
             if (!discarding) await line(text)
             discarding = false
           }
-          if (pending.length > 32 * 1024 * 1024) {
+          // Bound unstructured stderr noise, not a known Chat response body.
+          if (pending.length > 32 * 1024 * 1024 && !pending.startsWith(NATIVE_RESPONSE_TRACE_PREFIX)) {
             pending = ''; discarding = true
             await log('response.invalid_frame', { reason: 'diagnostic_frame_too_large', modelContinues: true })
           }

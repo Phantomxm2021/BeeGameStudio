@@ -32,6 +32,7 @@ import { countPendingToolPermissions, usePermissionTabAttention } from '../../ho
 import { isCompletedFoundationAuthoringPause } from '../../utils/documentProgress';
 
 interface DashboardViewProps {
+  chatHistoryReady?: boolean;
   projectId: string;
   projectName: string;
   lang: Language;
@@ -94,7 +95,7 @@ const withProjectSyncTimeout = async <T,>(operation: Promise<T>, message: string
   }
 };
 
-export function DashboardView({ projectId, projectName, lang, onSetLang, onBack }: DashboardViewProps) {
+export function DashboardView({ projectId, projectName, lang, onSetLang, onBack, chatHistoryReady = true }: DashboardViewProps) {
   const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
   const [creditSummary, setCreditSummary] = useState<BeeGameUsageSummary | null>(null);
   const [deploymentHistory, setDeploymentHistory] = useState<BeeGameDeploymentPayload[]>([]);
@@ -174,6 +175,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
   // Custom Hook for WebSocket & REST
   const { sendMessage, stopTask, resolveToolPermission, permissionState, isLoading, isStopping, canContinue, wsState } = useChat({
     projectId,
+    eventsEnabled: chatHistoryReady,
     onError: err => console.error(err),
     showToastError: showError,
     showToastSuccess: showSuccess,
@@ -294,6 +296,22 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack 
       if (trailingRefresh) clearTimeout(trailingRefresh);
     };
   }, [refreshCredits, workflowUsageRevision]);
+
+  useEffect(() => {
+    // Image charges and delayed ledger writes don't change workflow token
+    // counters. Reconcile the authoritative wallet while this view is visible.
+    const refresh = () => { if (document.visibilityState !== 'hidden') void refreshCredits(); };
+    const interval = setInterval(refresh, 5_000);
+    window.addEventListener('beegame:credits-updated', refresh);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('beegame:credits-updated', refresh);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [refreshCredits]);
 
   const isPipelineActive = useMemo(() => {
     const workflowStatus = projectRuntimeDisplay?.workflow?.status;

@@ -74,6 +74,53 @@ describe('ProjectHistoryModal permissions', () => {
     expect(screen.getByRole('button', { name: 'Create Review Copy' })).toBeInTheDocument();
   });
 
+  it('renders the project action menu above the dialog backdrop', () => {
+    getCreditSummary.mockReturnValue(new Promise(() => {}));
+
+    render(
+      <ProjectHistoryModal
+        isOpen
+        lang="en"
+        onClose={vi.fn()}
+        onSelectProject={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByLabelText('More actions Snake Game'));
+
+    const deleteButton = screen.getByRole('button', { name: 'Delete Project' });
+    expect(deleteButton.parentElement).toHaveClass('z-[260]');
+  });
+
+  it('keeps a fixed height for both populated and empty history states', () => {
+    render(
+      <ProjectHistoryModal
+        isOpen
+        lang="en"
+        onClose={vi.fn()}
+        onSelectProject={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('dialog')).toHaveClass('h-[min(620px,calc(100dvh-2rem))]');
+  });
+
+  it('centers the empty state in the available history area', () => {
+    projectList = [];
+
+    render(
+      <ProjectHistoryModal
+        isOpen
+        lang="en"
+        onClose={vi.fn()}
+        onSelectProject={vi.fn()}
+      />,
+    );
+
+    const emptyState = screen.getByText('No projects for this account yet').parentElement;
+    expect(emptyState).toHaveClass('h-full', 'items-center', 'justify-center');
+  });
+
   it('creates and selects one review copy while preventing duplicate requests', async () => {
     let resolveCopy: ((project: any) => void) | undefined;
     createReviewCopy = vi.fn(() => new Promise(resolve => {

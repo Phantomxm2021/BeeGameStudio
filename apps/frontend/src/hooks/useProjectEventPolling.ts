@@ -19,6 +19,7 @@ export type ProjectEventPollingState =
   | 'failed';
 
 export interface UseProjectEventPollingOptions {
+  enabled?: boolean;
   projectId: string;
   onMessage: (message: ProjectEventMessage) => void;
   onClose?: () => void;
@@ -35,6 +36,7 @@ export interface UseProjectEventPollingReturn {
 
 export const useProjectEventPolling = ({
   projectId,
+  enabled = true,
   onMessage,
   onClose,
   onOpen,
@@ -46,6 +48,7 @@ export const useProjectEventPolling = ({
   const reconnectAttemptsRef = useRef(0);
   const callbacksRef = useRef({ onMessage, onClose, onOpen, showToastError });
   const disconnectedRef = useRef(false);
+  const cursorRef = useRef({ projectId, value: 0 });
 
   useEffect(() => {
     callbacksRef.current = { onMessage, onClose, onOpen, showToastError };
@@ -67,10 +70,11 @@ export const useProjectEventPolling = ({
   }, []);
 
   useEffect(() => {
-    if (!projectId || disconnectedRef.current) return;
+    if (!enabled || !projectId || disconnectedRef.current) return;
 
     let cancelled = false;
-    let lastEventId = 0;
+    if (cursorRef.current.projectId !== projectId) cursorRef.current = { projectId, value: 0 };
+    let lastEventId = cursorRef.current.value;
     let idlePolls = 0;
     let connected = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -86,6 +90,7 @@ export const useProjectEventPolling = ({
     };
 
     const markConnected = () => {
+      if (cancelled || disconnectedRef.current) return;
       const recovered = reconnectAttemptsRef.current > 0;
       reconnectAttemptsRef.current = 0;
       setReconnectAttempts(0);
@@ -109,8 +114,9 @@ export const useProjectEventPolling = ({
         // explicit reconnect. Return before touching polling state or reading
         // callbacksRef so a stale response cannot notify the next project.
         if (cancelled || disconnectedRef.current) return;
-        lastEventId = result.lastEventId;
         result.messages.forEach(message => callbacksRef.current.onMessage(message));
+        lastEventId = result.lastEventId;
+        cursorRef.current.value = lastEventId;
         idlePolls = result.messages.length > 0 ? 0 : idlePolls + 1;
         markConnected();
         schedule(
@@ -148,8 +154,12 @@ export const useProjectEventPolling = ({
           lastEventId,
           {
             onOpen: markConnected,
-            onCursor: eventId => { lastEventId = Math.max(lastEventId, eventId); },
-            onMessage: message => callbacksRef.current.onMessage(message),
+            onCursor: eventId => {
+              if (cancelled || disconnectedRef.current) return;
+              lastEventId = Math.max(lastEventId, eventId);
+              cursorRef.current.value = lastEventId;
+            },
+            onMessage: message => { if (!cancelled && !disconnectedRef.current) callbacksRef.current.onMessage(message); },
           },
           streamAbortController.signal,
         );
@@ -185,13 +195,18 @@ export const useProjectEventPolling = ({
 
     if (usePollingFallback) void poll();
     else void stream();
+    const onVisible = () => {
+      if (!document.hidden && !cancelled && !disconnectedRef.current) setGeneration(value => value + 1);
+    };
+    document.addEventListener('visibilitychange', onVisible);
 
     return () => {
       cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
       if (timer) clearTimeout(timer);
       streamAbortController?.abort();
     };
-  }, [generation, projectId]);
+  }, [enabled, generation, projectId]);
 
   return {
     state,

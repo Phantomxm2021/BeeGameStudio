@@ -221,6 +221,7 @@ export const ChatPanel = memo(({
 }: ChatPanelProps) => {
     const text = useBeeGameText(lang);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
+    const historyScrollIntentRef = useRef(false);
     const composerPlaceholder = text.chatPlaceholder || waitingPermission.placeholder;
     const attachFileLabel = text.attachFile || text.attachImage || 'Attach file';
     const workflowIsTerminal = ['completed', 'failed', 'cancelled', 'stale']
@@ -259,18 +260,29 @@ export const ChatPanel = memo(({
                 className="min-w-0 flex-1 overflow-hidden"
                 viewportRef={scrollContainerRef}
                 navigation="rail"
+                smooth={false}
                 navigationLabel="Message navigation"
                 busy={isLoading}
                 viewportClassName="min-h-0 w-full min-w-0 overflow-x-hidden"
                 contentClassName="w-full min-w-0 max-w-full py-3"
                 viewportProps={{
                     'data-testid': 'beegame-message-scroller-viewport',
+                    // Layout changes and the initial jump to the latest message
+                    // must never fetch another history page.
+                    onWheel: event => { historyScrollIntentRef.current = event.deltaY < 0; },
+                    onTouchStart: () => { historyScrollIntentRef.current = true; },
+                    onPointerDown: () => { historyScrollIntentRef.current = true; },
+                    onKeyDown: event => {
+                        historyScrollIntentRef.current = ['ArrowUp', 'PageUp', 'Home'].includes(event.key);
+                    },
                     onScroll: (event) => {
                         if (
+                            historyScrollIntentRef.current &&
                             event.currentTarget.scrollTop <= 48 &&
                             hasOlderHistory &&
                             !isLoadingOlderHistory
                         ) {
+                            historyScrollIntentRef.current = false;
                             void onLoadOlderHistory?.();
                         }
                     },

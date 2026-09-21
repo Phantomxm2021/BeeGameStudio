@@ -3,7 +3,17 @@ import { render, screen } from '@testing-library/react';
 import { MarkdownRenderer } from './ChatMarkdownContent';
 
 describe('MarkdownRenderer structured output', () => {
-  it('renders only the explicit user-facing text from a generic JSON payload', () => {
+  it('keeps literal escapes and identifiers inside code unchanged', () => {
+    render(<MarkdownRenderer content={'```js\nconst wp_1 = "a\\nb";\n```'} />);
+    expect(document.querySelector('pre code')?.textContent).toBe('const wp_1 = "a\\nb";\n');
+  });
+
+  it('renders markdown images lazily within the chat width', () => {
+    render(<MarkdownRenderer content="![Scene preview](https://example.com/scene.png)" />);
+    expect(screen.getByRole('img', { name: 'Scene preview' })).toHaveAttribute('loading', 'lazy');
+    expect(screen.getByRole('img')).toHaveClass('max-w-full', 'object-contain');
+  });
+  it('retains the entire JSON response instead of picking fields by name', () => {
     const content = JSON.stringify({
       verdict: 'APPROVED',
       final_output: 'done',
@@ -12,13 +22,10 @@ describe('MarkdownRenderer structured output', () => {
 
     render(<MarkdownRenderer content={content} />);
 
-    expect(screen.getByText('done')).not.toBeNull();
-    expect(screen.queryByText('metadata')).toBeNull();
-    expect(screen.queryByText('foo')).toBeNull();
-    expect(screen.queryByText('bar')).toBeNull();
+    expect(document.querySelector('pre code')?.textContent).toBe(content);
   });
 
-  it('hides internal JSON payloads without user-facing text', () => {
+  it('does not guess whether visible JSON is internal based on its field names', () => {
     const content = JSON.stringify({
       workerType: 'resource-curator',
       status: 'completed',
@@ -28,12 +35,10 @@ describe('MarkdownRenderer structured output', () => {
 
     const { container } = render(<MarkdownRenderer content={content} />);
 
-    expect(container).toBeEmptyDOMElement();
-    expect(screen.queryByText('resource-curator')).toBeNull();
-    expect(screen.queryByText('assets/asset-manifest.json')).toBeNull();
+    expect(container.querySelector('pre code')?.textContent).toBe(content);
   });
 
-  it('does not expose nested JSON inside a deliverable payload', () => {
+  it('preserves nested data in a deliverable response', () => {
     const content = JSON.stringify({
       deliverable: {
         summary: '资源准备完成。',
@@ -43,9 +48,7 @@ describe('MarkdownRenderer structured output', () => {
 
     render(<MarkdownRenderer content={content} />);
 
-    expect(screen.getByText('资源准备完成。')).not.toBeNull();
-    expect(screen.queryByText('internal')).toBeNull();
-    expect(screen.queryByText('private-revision')).toBeNull();
+    expect(document.querySelector('pre code')?.textContent).toBe(content);
   });
 
   it('renders languageless fenced code blocks as pre blocks', () => {

@@ -682,8 +682,8 @@ export class StructuredIO {
         parentSignal.removeEventListener('abort', onParentAbort)
       }
     }
-    // Only the isolated native file runner opts in. General SDK sessions keep
-    // the existing background auto-deny behavior; explicit denials above still win.
+    // Hosts with a live permission authority opt in. Other SDK sessions keep
+    // background auto-deny behavior; explicit denials above still win.
     canUseTool.supportsBackgroundPermissionRequests = process.env.BEEGAME_NATIVE_BACKGROUND_PERMISSIONS === '1'
     return canUseTool
   }

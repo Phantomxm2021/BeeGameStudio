@@ -8,6 +8,7 @@ const {
   getProjects,
   openProject,
   createReviewCopy,
+  bootstrapProjectFromBrief,
   chatActions,
   updateTokenUsage,
 } = vi.hoisted(() => ({
@@ -17,6 +18,7 @@ const {
   getProjects: vi.fn(),
   openProject: vi.fn(),
   createReviewCopy: vi.fn(),
+  bootstrapProjectFromBrief: vi.fn(),
   chatActions: {
     clearMessages: vi.fn(),
     addMessage: vi.fn(),
@@ -36,6 +38,7 @@ vi.mock('../services/api', async () => {
       getProjects,
       openProject,
       createReviewCopy,
+      bootstrapProjectFromBrief,
     },
   }
 })
@@ -70,6 +73,7 @@ describe('projectStore pending review normalization', () => {
     openProject.mockReset()
     openProject.mockResolvedValue({})
     createReviewCopy.mockReset()
+    bootstrapProjectFromBrief.mockReset()
     chatActions.clearMessages.mockReset()
     chatActions.addMessage.mockReset()
     updateTokenUsage.mockReset()
@@ -97,6 +101,18 @@ describe('projectStore pending review normalization', () => {
       showToastSuccess: null,
     })
     useProjectStore.persist.clearStorage()
+  })
+
+  it('does not inject a duplicate user message after the server has persisted the bootstrap idea', async () => {
+    const project = { id: 'new-project', name: 'Game', created_at: 1 }
+    bootstrapProjectFromBrief.mockResolvedValue({ project, task_id: 'task-1', status: 'started' })
+    getProjects.mockResolvedValue([project])
+    getPendingToolPermissions.mockResolvedValue({ items: [] })
+    await useProjectStore.getState().bootstrapProjectFromBrief({
+      idea: '做一个超级马里奥游戏', option: { title: 'Platformer' }, settings: { platform: 'web' },
+    } as Parameters<ReturnType<typeof useProjectStore.getState>['bootstrapProjectFromBrief']>[0])
+    expect(chatActions.clearMessages).toHaveBeenCalledOnce()
+    expect(chatActions.addMessage.mock.calls.filter(([message]) => message.sender === 'user')).toHaveLength(0)
   })
 
   it('inserts a created review copy once and returns it', async () => {

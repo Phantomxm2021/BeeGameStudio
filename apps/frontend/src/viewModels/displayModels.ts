@@ -5,6 +5,7 @@ import type {
   ProjectBaselineStatusPayload,
 } from '../services/api'
 import { isBaselineDocumentPath, normalizeDocumentPath } from '../utils/documentProgress'
+import { normalizeChatSources } from '../utils/chatSources'
 import type {
   Message,
   WorkflowCardPayload,
@@ -34,13 +35,17 @@ export type ChatDisplayMessage = Pick<
   | 'content'
   | 'attachments'
   | 'timestamp'
+  | 'sequence'
   | 'type'
   | 'isDocument'
   | 'documentTitle'
   | 'thought'
   | 'thinkingDurationMs'
+  | 'streamStatus'
+  | 'completionReason'
   | 'contentBlocks'
   | 'taskId'
+  | 'todoScope'
   | 'turnId'
   | 'turn_id'
   | 'artifactId'
@@ -620,14 +625,19 @@ export const toChatDisplayMessage = (message: Message): ChatDisplayMessage => ({
   dedupeKey: message.dedupeKey,
   sender: message.sender,
   content: message.content,
+  attachments: message.attachments,
   timestamp: message.timestamp,
+  sequence: message.sequence,
   type: message.type,
   isDocument: message.isDocument,
   documentTitle: message.documentTitle,
   thought: message.thought,
   thinkingDurationMs: message.thinkingDurationMs,
+  streamStatus: message.streamStatus,
+  completionReason: message.completionReason,
   contentBlocks: message.contentBlocks,
   taskId: message.taskId,
+  todoScope: message.todoScope,
   turnId: message.turnId || message.turn_id,
   turn_id: message.turn_id || message.turnId,
   artifactId: message.artifactId,
@@ -660,13 +670,14 @@ export const toChatDisplayMessage = (message: Message): ChatDisplayMessage => ({
 const normalizeDisplaySources = (
   value: Message['sources'] | Message['citations'],
 ): ChatDisplaySource[] | undefined => {
-  if (!Array.isArray(value)) return undefined
-  const sources = value.flatMap((source, index) => {
+  const normalized = normalizeChatSources(value)
+  if (!normalized) return undefined
+  const sources = normalized.flatMap((source) => {
     if (!source || typeof source !== 'object') return []
     const title = String(source.title || '').trim()
     if (!title) return []
     return [{
-      id: String(source.id || `source-${index + 1}`),
+      id: String(source.id || source.url || JSON.stringify([title, source.domain || ''])),
       title,
       ...(source.domain ? { domain: String(source.domain) } : {}),
       ...(source.url ? { url: String(source.url) } : {}),

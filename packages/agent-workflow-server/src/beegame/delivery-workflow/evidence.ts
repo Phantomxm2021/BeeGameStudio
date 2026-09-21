@@ -2,6 +2,7 @@ import { existsSync, statSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import { WORKFLOW_EVIDENCE_DIRECTORY } from './types'
+import { readRuntimeAcceptance } from './runtime-acceptance'
 
 export function resolveWorkflowEvidencePath(
   workspacePath: string,
@@ -43,6 +44,7 @@ export type ImplementationVerificationResult = {
 }
 
 export async function persistImplementationEvidence(input: {
+  dispatchId?: string
   workspacePath: string
   evidencePath: string
   taskId: string
@@ -60,6 +62,9 @@ export async function persistImplementationEvidence(input: {
       'implementation evidence path is outside the workflow evidence directory',
     )
   await mkdir(dirname(target), { recursive: true })
+  const runtimeAcceptance = input.dispatchId
+    ? await readRuntimeAcceptance(input.workspacePath, input.dispatchId)
+    : undefined
   await writeFile(
     target,
     `${JSON.stringify({
@@ -70,6 +75,7 @@ export async function persistImplementationEvidence(input: {
       verifiedArtifacts: input.verifiedArtifacts,
       summary: input.summary,
       verificationResults: input.verificationResults,
+      ...(runtimeAcceptance ? { runtimeAcceptance } : {}),
     })}\n`,
     'utf8',
   )

@@ -1,5 +1,7 @@
 import type { AssistantContentBlock, Message, MessageType } from '../types/message';
 import { normalizeHistorySemanticType } from './messageSemantics';
+import { normalizeChatSources } from './chatSources';
+import { normalizeChatAttachments } from '../services/chatAttachments';
 
 const toTimestampMs = (value: unknown): number => {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -126,7 +128,8 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
     const content = String(record.content ?? '').trim();
     const metadata = (record.metadata && typeof record.metadata === 'object') ? record.metadata as Record<string, unknown> : {};
     const contentBlocks = normalizeContentBlocks(record.content_blocks ?? record.contentBlocks ?? metadata.content_blocks ?? metadata.contentBlocks);
-    if (!content && !contentBlocks?.length) continue;
+    const attachments = normalizeChatAttachments(record.attachments);
+    if (!content && !contentBlocks?.length && !attachments?.length) continue;
 
     if (
       sender === 'system' &&
@@ -205,7 +208,11 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
       sender,
       content,
       contentBlocks,
+      attachments,
       timestamp,
+      sequence: typeof record.sequence === 'number' ? record.sequence : undefined,
+      streamStatus: record.streamStatus === 'streaming' ? 'streaming' : record.streamStatus === 'complete' ? 'complete' : undefined,
+      completionReason: record.completionReason === 'stopped' || record.completionReason === 'failed' || record.completionReason === 'incomplete' ? record.completionReason : undefined,
       ...(typeof thinkingDurationMs === 'number' && Number.isFinite(thinkingDurationMs) && thinkingDurationMs >= 0
         ? { thinkingDurationMs }
         : {}),
@@ -235,6 +242,13 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
       toolAfter: readOptionalString('tool_after', 'toolAfter', 'after'),
       toolStructuredPatch: structuredPatch,
       toolInput,
+      todoScope: readOptionalString('todoScope'),
+      sources: normalizeChatSources(record.sources),
+      citations: normalizeChatSources(record.citations),
+      isSubagentTool: record.isSubagentTool === true || record.is_subagent_tool === true,
+      subagentPrompt: readOptionalString('subagentPrompt', 'subagent_prompt'),
+      subagentOutput: readOptionalString('subagentOutput', 'subagent_output'),
+      subagentTrace: readOptionalString('subagentTrace', 'subagent_trace'),
     };
 
     const existingIndex = seen.get(uniqueKey);
@@ -253,6 +267,7 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
   }
 
   return normalized.sort((a, b) => {
+    if (a.sequence !== undefined && b.sequence !== undefined) return a.sequence - b.sequence;
     if (a.turnId && a.turnId === b.turnId) return (a.sourceIndex ?? 0) - (b.sourceIndex ?? 0);
     if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
     return a.id.localeCompare(b.id);

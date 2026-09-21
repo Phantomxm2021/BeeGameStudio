@@ -2,6 +2,8 @@ export type BeeGameNativeTaskNotification = {
   value: string
   uuid?: string
   isMeta?: boolean
+  /** Unmodified structured SDK event, including foreground notifications. */
+  message?: Record<string, unknown>
   /** Observation only, supplied when no foreground turn is consuming messages. */
   backgroundMessage?: Record<string, unknown>
 }
@@ -19,9 +21,22 @@ export type NativeTerminalTaskNotification = {
  * interpreting the task result or controlling the task lifecycle.
  */
 export function parseNativeTerminalTaskNotification(
-  command: { value: unknown; uuid?: string; mode?: string },
+  command: { value: unknown; uuid?: string; mode?: string; message?: Record<string, unknown> },
 ): NativeTerminalTaskNotification | undefined {
   if (typeof command.value !== 'string') return undefined
+  let message = command.message
+  if (!message && command.value.trimStart().startsWith('{')) {
+    try { message = JSON.parse(command.value) } catch { /* Legacy XML below. */ }
+  }
+  if (message?.type === 'system' && message.subtype === 'task_notification') {
+    const { status, task_id: taskId, tool_use_id: toolUseId, summary } = message
+    if ((status === 'completed' || status === 'failed' || status === 'stopped' || status === 'killed') &&
+        typeof taskId === 'string' && taskId) {
+      return { key: typeof toolUseId === 'string' && toolUseId ? toolUseId : taskId,
+        taskId, ...(typeof toolUseId === 'string' ? { toolUseId } : {}), status,
+        ...(typeof summary === 'string' ? { result: summary } : {}) }
+    }
+  }
   const status = readXmlTransportField(command.value, 'status')
   if (
     status !== 'completed' &&

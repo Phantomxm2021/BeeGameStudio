@@ -15,12 +15,14 @@ import type {
 import type { Project } from '../types/project'
 import type { AssistantContentBlock, ProjectEventMessage } from '../types/message'
 import { authenticatedFetch } from './apiClient'
+import { normalizeChatAttachments } from './chatAttachments'
 import { projectQuotaErrorMessage } from './projectQuotaError'
 import {
   normalizeAttachmentBuildAnalysis,
   type AttachmentBuildAnalysis,
 } from './attachmentBuild'
 import { getSupabaseSessionUser } from './supabaseAuthApi'
+import { settleChatActivity } from '../utils/chatActivity'
 
 type BeeGameSession = {
   id: string
@@ -128,7 +130,7 @@ type BeeGameEventStreamCallbacks = {
 type BeeGameProjectTranscriptPage = BeeGameTranscriptPage & {
   sessionId: string
   workspacePath: string
-  latestTodoEvent?: BeeGameEvent
+  todoEvents?: BeeGameEvent[]
 }
 
 type BeeGameProjectArtifactIndex = {
@@ -602,10 +604,9 @@ export const beeGameAdapter = {
       ...transcriptPage.page,
       latestEventId: getLatestBeeGameEventId(transcriptPage.events),
     })
-    const historyEvents = transcriptPage.latestTodoEvent &&
-      !transcriptPage.events.some(event => event.id === transcriptPage.latestTodoEvent?.id)
-      ? [...transcriptPage.events, transcriptPage.latestTodoEvent]
-      : transcriptPage.events
+    const pageIds = new Set(transcriptPage.events.map(event => event.id))
+    const historyEvents = [...transcriptPage.events,
+      ...(transcriptPage.todoEvents ?? []).filter(event => !pageIds.has(event.id))]
     return eventsToHistory(
       projectId,
       historyEvents,
@@ -724,19 +725,19 @@ export const beeGameAdapter = {
       if (!frame.data) return
       const payload = JSON.parse(frame.data) as Partial<BeeGameProjectEvents> & { lastEventId?: number }
       const events = Array.isArray(payload.events)
-        ? payload.events as BeeGameEvent[]
+        ? (payload.events as BeeGameEvent[]).filter(event => event.id > lastEventId)
         : []
       if (events.length === 0) return
       const eventId = typeof payload.lastEventId === 'number'
         ? payload.lastEventId
         : frame.id ?? events[events.length - 1]?.id ?? lastEventId
-      lastEventId = Math.max(lastEventId, eventId)
-      callbacks.onCursor?.(lastEventId)
       normalizeLiveEvents(projectId, events)
         .flatMap(event => eventToProjectEventMessages(projectId, event, payload.workspacePath || ''))
         .filter(message => !(isInitialHistorySync && message.type === 'error'))
         .forEach(message => callbacks.onMessage(message))
-    })
+      lastEventId = Math.max(lastEventId, eventId)
+      callbacks.onCursor?.(lastEventId)
+    }, signal)
     return lastEventId
   },
 
@@ -1239,10 +1240,13 @@ type ProjectEventStreamFrame = {
 async function readProjectEventStream(
   body: ReadableStream<Uint8Array>,
   onFrame: (frame: ProjectEventStreamFrame) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  const cancel = () => { void reader.cancel().catch(() => {}) }
+  signal?.addEventListener('abort', cancel, { once: true })
 
   const flush = (rawFrame: string) => {
     let id: number | undefined
@@ -1261,7 +1265,14 @@ async function readProjectEventStream(
 
   try {
     while (true) {
-      const result = await reader.read()
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const result = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => { reject(new Error('Chat stream heartbeat timed out')); cancel() }, 20_000)
+        }),
+      ]).finally(() => clearTimeout(timer))
+      if (signal?.aborted) break
       if (result.done) break
       buffer += decoder.decode(result.value, { stream: true })
       const frames = buffer.split(/\r?\n\r?\n/)
@@ -1271,6 +1282,8 @@ async function readProjectEventStream(
     buffer += decoder.decode()
     if (buffer.trim()) flush(buffer)
   } finally {
+    signal?.removeEventListener('abort', cancel)
+    cancel()
     reader.releaseLock()
   }
 }
@@ -1315,11 +1328,16 @@ function eventsToHistory(
   const thoughtMessages = new Map<string, ProjectEventMessage>()
   const toolMessages = new Map<string, ProjectEventMessage>()
   const thinkingStartedAtByMessage = new Map<string, number>()
+  const endedThoughts = new Set<string>()
   const messages = projectedMessages.flatMap(message => {
     if ((message.type === 'tool_start' || message.type === 'tool_end') && message.message_id) {
       const existing = toolMessages.get(message.message_id)
       if (existing) {
+        const firstSequence = existing.sequence
+        const firstTimestamp = existing.timestamp
         Object.assign(existing, Object.fromEntries(Object.entries(message).filter(([, value]) => value !== undefined)))
+        existing.sequence = firstSequence
+        existing.timestamp = firstTimestamp
         return []
       }
       toolMessages.set(message.message_id, message)
@@ -1332,6 +1350,7 @@ function eventsToHistory(
       return []
     }
     if (message.type === 'think_end') {
+      if (message.message_id) endedThoughts.add(message.message_id)
       const thought = message.message_id
         ? thoughtMessages.get(message.message_id)
         : undefined
@@ -1347,7 +1366,7 @@ function eventsToHistory(
     if (message.type !== 'thought' || !message.message_id) return [message]
     const existing = thoughtMessages.get(message.message_id)
     if (existing) {
-      existing.content = `${existing.content || ''}${message.content || ''}`
+      existing.content = message.content_mode === 'snapshot' ? message.content : `${existing.content || ''}${message.content || ''}`
       if (typeof message.thinking_duration_ms === 'number') {
         existing.thinking_duration_ms = message.thinking_duration_ms
       }
@@ -1358,10 +1377,12 @@ function eventsToHistory(
     thoughtMessages.set(message.message_id, message)
     return [message]
   })
-  return messages.map(message => ({
+  let history = messages.map(message => ({
     id:
       message.message_id || `${message.type}-${message.task_id}-${Date.now()}`,
     message_id: message.message_id,
+    client_message_id: message.client_message_id,
+    supersedes_message_id: message.supersedes_message_id,
     sender: message.sender || 'system',
     content: message.content || '',
     contentBlocks: message.content_blocks,
@@ -1369,9 +1390,11 @@ function eventsToHistory(
     turnId: message.turnId || message.turn_id,
     turn_id: message.turn_id || message.turnId,
     timestamp: message.timestamp || Date.now(),
+    sequence: message.sequence,
+    streamStatus: message.type === 'token' || (message.type === 'thought' && !endedThoughts.has(message.message_id || '')) ? 'streaming' : 'complete',
     thinkingDurationMs: message.thinking_duration_ms,
     type:
-      message.type === 'agent_message'
+      message.type === 'agent_message' || message.type === 'token'
         ? 'text'
         : message.type === 'thought'
           ? 'thought'
@@ -1389,6 +1412,7 @@ function eventsToHistory(
     toolDetail: message.tool_detail,
     toolOutput: message.tool_output,
     toolInput: message.tool_input,
+    todoScope: message.todoScope,
     toolDiff: message.tool_diff,
     toolPatch: message.tool_patch,
     toolBefore: message.tool_before,
@@ -1398,10 +1422,18 @@ function eventsToHistory(
     subagentOutput: message.subagent_output,
     subagentTrace: message.subagent_trace,
     sources: message.sources,
+    attachments: message.attachments,
     citations: message.citations,
     artifactId: message.artifact_id,
     isSubagentTool: message.is_subagent_tool,
   }))
+  for (const message of projectedMessages) {
+    const status = message.status
+    if (message.type !== 'error' && !(message.type === 'status' && ['idle', 'finished', 'stopped', 'failed'].includes(status || ''))) continue
+    history = settleChatActivity(history, { taskId: message.task_id, turnId: message.turnId || message.turn_id,
+      at: message.timestamp || Date.now(), reason: message.type === 'error' || status === 'failed' ? 'failed' : status === 'stopped' ? 'stopped' : 'incomplete' })
+  }
+  return history
 }
 
 /** Adapter entry point used by dev/test transcript fixtures. */
@@ -1424,13 +1456,21 @@ function eventToProjectEventMessages(
     workspacePath,
   )
   const workflowStage = getWorkflowStage(event)
-  if (!workflowStage) return messages
   return messages.map(message => ({
     ...message,
+    // A retry changes transport session/dispatch, not the stage's TodoWrite
+    // list. Keep subagents separate, but replace the resumed stage snapshot.
+    todoScope: workflowStage ? JSON.stringify([projectId,
+      workflowStage, getPayloadString(event, 'parentToolUseID') || getPayloadString(event, 'parent_tool_use_id')])
+      : JSON.stringify([getPayloadString(event, 'workflowSourceSessionId') ||
+      getPayloadString(event, 'projectSourceSessionId') || event.sessionId,
+      workflowStage || '', getPayloadString(event, 'workflowStageStreamId') || (workflowStage ? '' : event.turnId) || '',
+      getPayloadString(event, 'parentToolUseID') || getPayloadString(event, 'parent_tool_use_id')]),
+    sequence: typeof event.payload?.sourceSequence === 'number' ? event.payload.sourceSequence : event.id,
     // A stage is a workflow concern, independent of whether its implementation
     // happens to be a native module or a delivery worker. It must therefore
     // take precedence over generic transport kinds such as `agent_message`.
-    task_kind: `workflow_stage:${workflowStage}`,
+    ...(workflowStage ? { task_kind: `workflow_stage:${workflowStage}` } : {}),
   }))
 }
 
@@ -1505,10 +1545,6 @@ function eventToProjectEventMessagesBase(
       }, workspacePath)
     }
     case 'assistant.partial': {
-      // Only the unified workflow trace has a durable stream identity. Legacy
-      // partials have no way to reconcile with their final answer, so retain
-      // the established final-only behavior for them.
-      if (!getPayloadString(event, 'workflowStageStreamId')) return []
       return [
         {
           type: 'token',
@@ -1516,6 +1552,7 @@ function eventToProjectEventMessagesBase(
           project_id: projectId,
           sender: 'beegame',
           content: event.text,
+          content_mode: getPayloadString(event, 'contentMode') === 'snapshot' ? 'snapshot' : 'delta',
           task_kind: 'assistant_stream',
           message_id: getBeeGameAssistantMessageId(event),
           turnId: event.turnId,
@@ -1526,7 +1563,6 @@ function eventToProjectEventMessagesBase(
     }
     case 'assistant.thinking': {
       const status = getPayloadString(event, 'status')
-      const thinkingBlockId = getPayloadString(event, 'thinkingBlockId') || 'default'
       const thinkingStartedAtValue = getPayloadString(event, 'thinkingStartedAt')
       // A block id is not guaranteed to be unique for the lifetime of a
       // session (notably in older workflow-stage traces). The lifecycle start
@@ -1535,9 +1571,7 @@ function eventToProjectEventMessagesBase(
       const thinkingOccurrence = thinkingStartedAtValue
         ? `-${thinkingStartedAtValue}`
         : ''
-      const thinkingMessageId = thinkingBlockId === 'default'
-        ? `beegame-thinking-${event.turnId || event.sessionId}${thinkingOccurrence}`
-        : `beegame-thinking-${event.turnId || event.sessionId}-${thinkingBlockId}${thinkingOccurrence}`
+      const thinkingMessageId = `beegame-thinking-${getThinkingDisplayId(event)}${thinkingOccurrence}`
       const thinkingStartedAt = Date.parse(thinkingStartedAtValue)
       const thinkingTimestamp = Number.isFinite(thinkingStartedAt)
         ? thinkingStartedAt
@@ -1569,6 +1603,7 @@ function eventToProjectEventMessagesBase(
               project_id: projectId,
               sender: 'beegame',
               content: event.text,
+              content_mode: getPayloadString(event, 'contentMode') === 'snapshot' ? 'snapshot' : 'delta',
               task_kind: 'assistant_thinking',
               message_id: thinkingMessageId,
               turnId: event.turnId,
@@ -1589,6 +1624,7 @@ function eventToProjectEventMessagesBase(
             project_id: projectId,
             sender: 'beegame',
             content: event.text,
+            content_mode: getPayloadString(event, 'contentMode') === 'snapshot' ? 'snapshot' : 'delta',
             task_kind: 'assistant_thinking',
             message_id: thinkingMessageId,
             turnId: event.turnId,
@@ -1770,6 +1806,8 @@ function eventToProjectEventMessagesBase(
           tool_status: finishedInfo.status,
           tool_detail: finishedInfo.detail,
           tool_output: finishedInfo.output,
+          attachments: normalizeChatAttachments(Array.isArray(event.payload?.attachments)
+            ? event.payload.attachments.map(item => item && typeof item === 'object' ? { ...item, projectId } : item) : undefined),
           tool_input: finishedInput,
           ...getToolDiffFields(event, finishedInput),
           artifact_id: finishedArtifactPath
@@ -1826,6 +1864,7 @@ function eventToProjectEventMessagesBase(
           turnId: event.turnId,
           turn_id: event.turnId,
           status: 'idle',
+          timestamp: Date.parse(event.createdAt),
         } as ProjectEventMessage,
       ]
     }
@@ -1839,6 +1878,7 @@ function eventToProjectEventMessagesBase(
           turnId: event.turnId,
           turn_id: event.turnId,
           status: 'idle',
+          timestamp: Date.parse(event.createdAt),
         } as ProjectEventMessage,
       ]
     case 'session.stopped':
@@ -1847,9 +1887,10 @@ function eventToProjectEventMessagesBase(
           type: 'status',
           task_id: taskId,
           project_id: projectId,
-          turnId: event.turnId,
-          turn_id: event.turnId,
+          // A session stop cancels its unfinished work, including legacy
+          // mirrored tool events that did not retain a transport turn ID.
           status: 'stopped',
+          timestamp: Date.parse(event.createdAt),
         } as ProjectEventMessage,
       ]
     case 'turn.failed':
@@ -1863,6 +1904,7 @@ function eventToProjectEventMessagesBase(
           turn_id: event.turnId,
           content: event.text,
           error: event.text,
+          timestamp: Date.parse(event.createdAt),
         } as ProjectEventMessage,
       ]
     default:
@@ -1893,11 +1935,11 @@ function normalizeBeeGameEvents(
     if (existing === undefined || event.id < existing)
       terminalEventByTurn.set(event.turnId, event.id)
   }
-  const seenUserTexts = new Set<string>()
+  const seenUserMessages = new Set<string>()
   const turnsWithFinal = new Set(
     events
       .filter(event => event.type === 'assistant.message')
-      .map(getTurnDisplayId),
+      .map(getBeeGameAssistantMessageId),
   )
   let bufferedPartial: BeeGameEvent | null = null
   let bufferedThinking: BeeGameEvent | null = null
@@ -1927,9 +1969,10 @@ function normalizeBeeGameEvents(
     }
     if (event.type === 'user.message') {
       if (!options.includeUserMessages) continue
-      const displayText = resolveUserMessageDisplayText(event)
-      if (seenUserTexts.has(displayText)) continue
-      seenUserTexts.add(displayText)
+      const identity = getPayloadString(event, 'clientMessageId') || getPayloadString(event, 'client_message_id') ||
+        `${event.sessionId}:${event.turnId || ''}:${event.id}`
+      if (seenUserMessages.has(identity)) continue
+      seenUserMessages.add(identity)
       visible.push(event)
       continue
     }
@@ -1943,26 +1986,22 @@ function normalizeBeeGameEvents(
     if (event.type === 'result' && !getUsageFromEventPayload(event.payload)) {
       continue
     }
-    if (
-      event.type === 'tool.started' &&
-      Object.keys(getPayloadRecord(event, 'input')).length === 0
-    ) {
-      continue
-    }
     if (event.type === 'assistant.partial') {
       if (
         !options.includePartialsWhenFinalExists &&
-        turnsWithFinal.has(getTurnDisplayId(event))
+        turnsWithFinal.has(getBeeGameAssistantMessageId(event))
       ) {
         continue
       }
       if (
         bufferedPartial &&
-        getTurnDisplayId(bufferedPartial) === getTurnDisplayId(event)
+        getBeeGameAssistantMessageId(bufferedPartial) === getBeeGameAssistantMessageId(event)
       ) {
         bufferedPartial = Object.assign({}, bufferedPartial, {
           id: event.id,
-          text: `${bufferedPartial.text}${event.text}`,
+          payload: { ...event.payload, sourceSequence: bufferedPartial.payload?.sourceSequence ?? bufferedPartial.id,
+            contentMode: getPayloadString(bufferedPartial, 'contentMode') === 'snapshot' || getPayloadString(event, 'contentMode') === 'snapshot' ? 'snapshot' : 'delta' },
+          text: getPayloadString(event, 'contentMode') === 'snapshot' ? event.text : `${bufferedPartial.text}${event.text}`,
           createdAt: event.createdAt,
         })
       } else {
@@ -2009,9 +2048,10 @@ function normalizeBeeGameEvents(
         const next: string = event.text === 'Thinking' ? '' : event.text
         bufferedThinking = {
           ...event,
-          text: previous + next || 'Thinking',
+          text: (getPayloadString(event, 'contentMode') === 'snapshot' ? next : previous + next) || 'Thinking',
           payload: {
             ...(event.payload ?? { type: 'assistant.thinking' }),
+            sourceSequence: bufferedThinking.payload?.sourceSequence ?? bufferedThinking.id,
             thinkingStartedAt:
               getPayloadString(bufferedThinking, 'thinkingStartedAt') ||
               thinkingStartedAt,
@@ -2037,7 +2077,12 @@ function normalizeBeeGameEvents(
 }
 
 function getThinkingDisplayId(event: BeeGameEvent): string {
-  return `${getTurnDisplayId(event)}:${getPayloadString(event, 'thinkingBlockId') || 'default'}`
+  // Native invocation identity survives both live mirroring and disk replay.
+  // The project/session that transports a block is not its owner.
+  const source = getPayloadString(event, 'workflowStageStreamId') ||
+    getPayloadString(event, 'workflowSourceSessionId') ||
+    getPayloadString(event, 'projectSourceSessionId') || event.sessionId
+  return `${source}:${getPayloadString(event, 'parentToolUseID') || getPayloadString(event, 'parent_tool_use_id')}:${getPayloadString(event, 'thinkingBlockId') || getTurnDisplayId(event)}`
 }
 
 function coalesceLogicalAssistantMessages(
@@ -2058,7 +2103,7 @@ function coalesceLogicalAssistantMessages(
     if (event.type !== 'assistant.message') continue
     const messageId = getAssistantPayloadMessageId(event)
     if (!messageId) continue
-    const identity = `${event.sessionId}:${event.turnId ?? ''}:${messageId}`
+    const identity = `${event.sessionId}:${event.turnId ?? ''}:${getPayloadString(event, 'assistantBlockId') || messageId}`
     const payloadText = getAssistantPayloadVisibleText(event)
     const existing = representativeByMessage.get(identity)
     if (!existing) {
@@ -2112,6 +2157,7 @@ function coalesceLogicalAssistantMessages(
 
 function getAssistantPayloadMessageId(event: BeeGameEvent): string {
   if (!event.payload) return ''
+  if (typeof event.payload.messageId === 'string') return event.payload.messageId
   const message = event.payload.message
   if (!message || typeof message !== 'object' || Array.isArray(message))
     return ''
@@ -2139,6 +2185,9 @@ function getAssistantPayloadVisibleText(event: BeeGameEvent): string {
 
 function getAssistantContentBlocks(event: BeeGameEvent): AssistantContentBlock[] | undefined {
   if (!event.payload) return undefined
+  // A canonical block already has its own lifecycle in the timeline. Do not
+  // expand its terminal provider envelope into a second set of Thought/tools.
+  if (typeof event.payload.assistantBlockId === 'string') return undefined
   const payloadBlocks = event.payload.contentBlocks
   if (Array.isArray(payloadBlocks)) {
     return payloadBlocks.filter(isAssistantContentBlock)
@@ -2283,6 +2332,10 @@ function baseMessage(
     project_id: projectId,
     sender,
     content: event.text,
+    ...(sender === 'user' ? { attachments: normalizeChatAttachments(
+      Array.isArray(event.payload?.attachments) ? event.payload.attachments.map(item =>
+        item && typeof item === 'object' ? { ...item, projectId } : item) : undefined,
+    ) } : {}),
     content_blocks: getAssistantContentBlocks(event),
     message_id: messageId,
     ...(clientMessageId ? { client_message_id: clientMessageId } : {}),
@@ -2334,6 +2387,10 @@ function describePermissionResolution(event: BeeGameEvent): string {
 function getBeeGameAssistantMessageId(event: BeeGameEvent): string {
   const displayMessageId = getPayloadString(event, DISPLAY_MESSAGE_ID_KEY)
   if (displayMessageId) return displayMessageId
+  const blockId = getPayloadString(event, 'assistantBlockId')
+  if (blockId) return `beegame-block-${blockId}`
+  const nativeId = getAssistantPayloadMessageId(event)
+  if (nativeId) return `beegame-assistant-${getPayloadString(event, 'workflowSourceSessionId') || event.sessionId}-${nativeId}`
   const stageStreamId = getPayloadString(event, 'workflowStageStreamId')
   if (stageStreamId) return `beegame-stream-${stageStreamId}`
   if (event.type === 'assistant.message')

@@ -12,6 +12,7 @@
     "./native-evidence": "./src/native-evidence.ts",
     "./native-file-agent": "./src/native-file-agent.ts",
     "./native-task-access": "./src/native-task-access.ts",
+    "./preview-environment": "./src/preview-environment.ts",
     "./package.json": "./package.json"
   },
   "scripts": {

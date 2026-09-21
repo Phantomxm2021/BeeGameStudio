@@ -1,9 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { uiAtlasImages, uiImageKey } from './uiAtlas';
+import { uiAtlasImages, uiImageKey, resolveUiImage } from './uiAtlas';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('UI atlas pixels', () => {
+  it('does not substitute an entire image for an unresolved named frame', () => {
+    expect(resolveUiImage('PLAYER', { frame: 'big_idle' }, { PLAYER: 'blob:sheet' })).toBeUndefined();
+    expect(resolveUiImage('PLAYER', {}, { PLAYER: 'blob:image' })).toBe('blob:image');
+    expect(resolveUiImage('UI', { frame: 'button.png' }, { 'UI#button': 'blob:frame' })).toBe('blob:frame');
+  });
+
+  it('crops each directional strip at its authored facing offset', async () => {
+    const draw = canvasMock();
+    const result = await uiAtlasImages('blob:sheet', { frameWidth: 16, frameHeight: 24, facings: ['left', 'right'], framesPerFacing: 4 }, new AbortController().signal);
+    expect(Object.keys(result)).toEqual(['left', 'right']);
+    expect(draw.mock.calls[1].slice(1, 5)).toEqual([64, 0, 16, 24]);
+    expect(uiImageKey('PLAYER', { initialFacing: 'right' })).toBe('PLAYER#right');
+  });
   function canvasMock() {
     vi.stubGlobal('Image', class {
       onload?: () => void;

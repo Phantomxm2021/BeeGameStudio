@@ -6,18 +6,132 @@ import { join } from 'node:path'
 import {
   buildDocumentAuthorAuthorityBlock,
   createBeeGameDeliveryWorkerPort,
+  completedProjectMutationPaths,
 } from '../beegame/delivery-worker-session-port'
 import {
   registerBeeGameAuthoredResources,
   writeBeeGameAssetManifest,
 } from '../beegame/asset-contracts'
-import type { BeeGameSessionManager } from '../beegame/session-manager'
+import type { BeeGameSessionManager, BeeGameEvent } from '../beegame/session-manager'
+
+test('project delivery changes exclude native memory and scratch, not project files', () => {
+  const paths = ['src/main.ts', 'docs/GDD.md', '../.runtime/app/projects/project/memory/feedback.md',
+    '.beegame/tmp/session/inspection.png', 'assets/runtime/player.png']
+  const events = paths.flatMap((path, index): BeeGameEvent[] => [
+    { id: index * 2, sessionId: 'test', text: 'Write', createdAt: new Date(), type: 'tool.started', payload: { type: 'tool.started', toolName: 'Write', toolUseID: String(index), input: { file_path: path } } },
+    { id: index * 2 + 1, sessionId: 'test', text: 'Write', createdAt: new Date(), type: 'tool.completed', payload: { type: 'tool.completed', toolName: 'Write', toolUseID: String(index) } },
+  ])
+  expect(completedProjectMutationPaths('/project', events)).toEqual(['src/main.ts', 'docs/GDD.md', 'assets/runtime/player.png'])
+})
 import type { WorkerDispatchRequest } from '../beegame/delivery-workflow/types'
 import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
 import { type ChecklistAuthority } from '../beegame/checklist-authority-projection'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/foundation-documents'
 
 describe('delivery worker session credentials', () => {
+  for (const workerType of ['resource-planner', 'implementation-worker'] as const)
+  test(`${workerType} receives resource repair capabilities and stop revokes them`, async () => {
+    let prompt = ''
+    let imageAccessClosed = 0
+    const sessions = {
+      start() { return { id: 'resource-access-worker' } }, updateAuthToken() {},
+      async sendWithDisplay(_id: string, text: string) { prompt = text }, stop() {},
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({
+      sessions, userId: 'user-1', resourceLibraryBaseUrl: 'https://library.test',
+      getAuthToken: () => 'private-user-token',
+      openImageAccess(projectId) {
+        expect(projectId).toBe('project-1')
+        return { instruction: 'Native image command available', close() { imageAccessClosed++ } }
+      },
+    })
+    const request = { dispatchId: 'resource-access', runId: 'run', ownerId: 'user-1', projectId: 'project-1',
+      workspacePath: '/tmp/resource-access', workerType, phase: workerType === 'resource-planner' ? 'RESOURCE_PREPARATION' : 'IMPLEMENTATION',
+      revision: 'revision-1', allowedPaths: ['assets/'], contract: {} } as WorkerDispatchRequest
+    await port.start(request)
+    try {
+      await port.submit('resource-access', buildWorkerPrompt(request))
+      if (workerType === 'resource-planner') {
+      expect(prompt).toContain('licensed internet assets')
+      expect(prompt).toContain('Reusing previously generated assets does not waive')
+      expect(prompt).toContain('A built-in-library search is not an internet search')
+      expect(prompt).toContain('internet queries, candidate/page URLs, retrieval dates')
+      expect(prompt).toContain('AI image generation -> programmatic drawing')
+      expect(prompt).not.toContain('Before submission record')
+      expect(prompt).toContain('no fixed search count or tool sequence')
+      } else {
+        expect(prompt).toContain('.beegame/implementation-issues.md')
+        expect(prompt).toContain('finish the game logic first')
+        expect(prompt).toContain('targeted resource repair task')
+        expect(prompt).not.toContain('Content and Manifest may be corrected')
+      }
+      expect(prompt).toContain('GET /api/resource-packs/{packId}/elements/{elementId}/resource-url')
+      expect(prompt).not.toContain('private-user-token')
+      expect(prompt).toContain('Native image command available')
+      const base = prompt.match(/Base URL: (\S+)/)![1]!
+      expect((await fetch(base + '/api/admin')).status).toBe(405)
+      await port.stop('resource-access', 'user stopped')
+      expect(imageAccessClosed).toBe(1)
+      await expect(fetch(base + '/api/admin')).rejects.toThrow()
+    } finally { await port.stop('resource-access', 'test cleanup') }
+  })
+  test('implementation sees the actual project Preview and its sandbox capabilities', async () => {
+    let actualPrompt = ''
+    const sessions = {
+      start() { return { id: 'preview-worker' } }, updateAuthToken() {},
+      async sendWithDisplay(_id: string, prompt: string) { actualPrompt = prompt },
+      events() { return [] },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1',
+      confirmedBriefContext: JSON.stringify({ kind: 'confirmed_build_brief',
+        idea: 'Only one scene and UI; no complete game.',
+        selected_option: { title: 'Small scene' }, settings: { engine: 'react' },
+        confirmed_gdd: 'Already available in accepted documents' }),
+      getPreviewContext: () => ({ status: 'running', sessionId: 'project-preview', url: 'http://localhost/previews/project-preview/' }) })
+    await port.start({ dispatchId: 'preview-dispatch', runId: 'run', ownerId: 'user-1', projectId: 'project-1',
+      workspacePath: '/tmp/preview-contract', workerType: 'implementation-worker', phase: 'IMPLEMENTATION',
+      revision: 'revision-1', allowedPaths: ['./'], contract: {} })
+    await port.submit('preview-dispatch', 'Fix the reported error')
+    expect(actualPrompt).toContain('http://localhost/previews/project-preview/')
+    expect(actualPrompt).toContain('sandboxed-iframe')
+    expect(actualPrompt).toContain('localStorage/sessionStorage access can throw')
+    expect(actualPrompt).toContain('"projectId":"project-1"')
+    expect(actualPrompt).not.toContain('allow-same-origin')
+    expect(actualPrompt).toContain('Only one scene and UI; no complete game.')
+    expect(actualPrompt).toContain('Confirmed user scope')
+    expect(actualPrompt).toContain('Small scene')
+    expect(actualPrompt).toContain('"engine":"react"')
+    expect(actualPrompt).not.toContain('Already available in accepted documents')
+  })
+  for (const outcome of ['result', 'turn.failed'] as const) {
+    test(`uses post-drain ${outcome}, not the earlier waiting message`, async () => {
+      const events: BeeGameEvent[] = []
+      const push = (type: BeeGameEvent['type'], text: string, payload?: BeeGameEvent['payload']) =>
+        events.push({ id: events.length, sessionId: 'drain-session', type, text, createdAt: new Date(), payload })
+      const sessions = {
+        start() { return { id: 'drain-session' } }, updateAuthToken() {},
+        async sendWithDisplay() { push('result', '等待复核结果中。') },
+        events() { return [...events] },
+        async waitForWorkflowWorkerIdle() {
+          push('tool.started', 'Write', { type: 'tool.started', toolUseID: 'write-1', toolName: 'Write', input: { file_path: '/tmp/drain-project/src/final.ts' } })
+          push('tool.completed', 'Write completed', { type: 'tool.completed', toolUseID: 'write-1', toolName: 'Write' })
+          push(outcome, outcome === 'result' ? 'Final parent report' : 'Native process exited during review')
+        },
+      } as unknown as BeeGameSessionManager
+      const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'user-1' })
+      await port.start({ dispatchId: 'drain-dispatch', runId: 'run-1', ownerId: 'user-1', projectId: 'project-1',
+        workspacePath: '/tmp/drain-project', workerType: 'implementation-worker', phase: 'IMPLEMENTATION',
+        taskId: 'DIRECT_IMPLEMENTATION', revision: 'revision-1', allowedPaths: ['./'], contract: {} })
+      await port.submit('drain-dispatch', 'Implement')
+      if (outcome === 'turn.failed')
+        await expect(port.waitForTerminal?.('drain-dispatch')).rejects.toThrow('Native process exited during review')
+      else
+        expect(await port.waitForTerminal?.('drain-dispatch')).toMatchObject({
+          summary: 'Final parent report', changedPaths: ['src/final.ts'], verifiedArtifacts: [], verificationResults: [],
+        })
+    })
+  }
+
   test('malformed resource artifacts reach stage acceptance instead of throwing a transport failure', async () => {
     const workspacePath = await createResourceWorkspace()
     try {

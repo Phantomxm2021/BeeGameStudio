@@ -1,9 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { applyTextureRegion, rendererSize } from './viewport'
+import { applyTextureRegion, rendererSize, rendererOffset, rendererOrder } from './viewport'
 import { identityTransform, type SceneNode } from './model'
 
 describe('sprite atlas texture regions', () => {
+  it('respects explicit 2D renderer order including zero and negative layers', () => {
+    const node: SceneNode = { id: 'sprite', name: 'Sprite', parentId: null, children: [], active: true, locked: false,
+      transform: identityTransform(), tags: [], order: 12, components: [] }
+    expect(rendererOrder(node)).toBe(12)
+    node.components.push({ id: 'renderer', type: 'sprite-renderer', enabled: true, assetId: 'texture',
+      material: { mode: 'unlit', color: '#ffffff', metalness: 0, roughness: 1, opacity: 1, alphaMode: 'blend' },
+      properties: { sortingOrder: 0 } })
+    expect(rendererOrder(node)).toBe(0)
+    if (node.components[0].type === 'sprite-renderer') node.components[0].properties.sortingOrder = -5
+    expect(rendererOrder(node)).toBe(-5)
+  })
   it('maps a top-left pixel rectangle to Three texture coordinates', () => {
     const texture = new THREE.Texture()
     texture.image = { width: 256, height: 128 } as HTMLImageElement
@@ -28,6 +39,11 @@ describe('sprite atlas texture regions', () => {
     expect(node.transform.scale).toEqual([1, 1, 1])
     if (node.components[0].type === 'sprite-renderer') node.components[0].properties.size = [32, 48]
     expect(rendererSize(node, 32)).toEqual([1, 1.5])
+    if (node.components[0].type === 'sprite-renderer') node.components[0].properties.anchor = [.5, 1]
+    expect(rendererOffset(node, rendererSize(node,32))).toEqual([0,.75,0])
+    expect(node.transform).toEqual(identityTransform())
+    if (node.components[0].type === 'sprite-renderer') node.components[0].properties.size = [.2, .1]
+    expect(rendererSize(node, 1)).toEqual([.2, .1])
   })
 
   it('uses a UI RectTransform size when an Image has no texture dimensions', () => {

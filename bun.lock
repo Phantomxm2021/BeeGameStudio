@@ -8,6 +8,7 @@
         "@agentclientprotocol/sdk": "^0.19.0",
         "@claude-code-best/mcp-chrome-bridge": "^3.0.1",
         "highlight.js": "^11.11.1",
+        "sharp": "^0.34.5",
         "ws": "^8.20.0",
       },
       "devDependencies": {
@@ -125,7 +126,6 @@
         "react-reconciler": "^0.33.0",
         "rollup": "^4.60.2",
         "semver": "^7.7.4",
-        "sharp": "^0.34.5",
         "shell-quote": "^1.8.3",
         "signal-exit": "^4.1.0",
         "stack-utils": "^2.0.6",
@@ -194,6 +194,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@base-ui/react": "^1.6.0",
+        "@bee-game-studio/agent-workflow": "workspace:*",
         "@fontsource-variable/geist": "^5.2.9",
         "@radix-ui/react-context-menu": "^2.2.16",
         "@radix-ui/react-dialog": "^1.1.23",
@@ -569,6 +570,9 @@
         "bun-types": "latest",
       },
     },
+  },
+  "patchedDependencies": {
+    "@anthropic-ai/sandbox-runtime@0.0.44": "patches/@anthropic-ai%2Fsandbox-runtime@0.0.44.patch",
   },
   "overrides": {
     "@inquirer/prompts": "8.4.2",

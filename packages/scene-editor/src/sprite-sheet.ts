@@ -35,8 +35,22 @@ export function parseSpriteSheet(value: unknown): SpriteSheet | undefined {
 }
 export const atlasFrameName = (name: string) => name.replace(/\.(png|webp|jpe?g)$/i, '')
 
+export function validateSpriteSheetBounds(sheet: SpriteSheet, width: number, height: number): void {
+  const frames: Array<[string, { x: number; y: number; width: number; height: number }]> = 'frames' in sheet
+    ? Object.entries(sheet.frames) : [['strip', { x: 0, y: 0, width: sheet.frameWidth *
+      (sheet.framesPerFacing ? sheet.framesPerFacing * (sheet.facings?.length || 1) : sheet.states?.length || 1), height: sheet.frameHeight }]]
+  for (const [name, rect] of frames)
+    if (rect.x + rect.width > width || rect.y + rect.height > height)
+      throw new Error(`Atlas frame outside image: ${name} (${rect.x + rect.width}×${rect.y + rect.height} exceeds ${width}×${height})`)
+}
+
 export function spriteSheetSelection(table: SpriteSheet | undefined, properties: Record<string, unknown> = {}): Pick<SpriteRendererComponent, 'frame' | 'animation'> {
-  if (!table) return {}
+  if (!table) {
+    const size = properties.frameSize
+    if (Array.isArray(size) && size.length >= 2 && size.slice(0,2).every(n => typeof n === 'number' && Number.isInteger(n) && n > 0))
+      return { frame: { x:0, y:0, width:size[0], height:size[1] } }
+    return {}
+  }
   if ('frames' in table) {
     const name = typeof properties.frame === 'string' ? atlasFrameName(properties.frame) : Object.keys(table.frames)[0]
     if (!table.frames[name]) throw new Error(`Sprite atlas has no frame "${name}"`)

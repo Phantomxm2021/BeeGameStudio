@@ -45,9 +45,18 @@ function billingWithCallCount(ownerId: string, calls: { count: number }) {
 
 async function waitForAccepted(controller: ReturnType<typeof createDeliveryWorkflowController>, store: ReturnType<typeof createRunStore>, run: DeliveryRun) {
   for (let attempt = 0; attempt < 3_000; attempt++) {
-    await controller.ensureProgress(run)
+    try { await controller.ensureProgress(run) } catch (error) {
+      // Handoff may be performed by this call or by the background observer.
+      // Both must leave the same deliberately failed resource boundary.
+      const failed = await store.load()
+      if (error instanceof Error && error.message === 'resource execution intentionally unavailable in foundation-only fixture' &&
+          failed?.phase === 'RESOURCE_PREPARATION' && failed.status === 'failed' &&
+          failed.foundationReviewStage?.acceptedReview) return failed
+      throw error
+    }
     const current = await store.load()
-    if (current?.foundationReviewStage?.acceptedReview) return current
+    if (current?.foundationReviewStage?.acceptedReview && current.phase === 'RESOURCE_PREPARATION' && current.status === 'failed') return current
+    if (current?.foundationReviewStage?.acceptedReview) { await pause(20); continue }
     if (current?.foundationReviewStage && ['needs_action', 'failed', 'stopped'].includes(current.status))
       throw new Error(JSON.stringify({ reason: current.blockedReason, outcome: current.foundationReviewStage.invocation.outcome }))
     await pause(20)
@@ -97,7 +106,7 @@ test(`agentic document passes correct ${rounds} changed document(s) without a se
   const store = createRunStore(workspacePath, ownerId)
   await store.commit(run, { runId: run.runId, type: 'run.created', phase: run.phase, status: run.status, revision: run.revision })
   const workerPort = {
-    async start() { throw new Error('legacy worker must not execute foundation chain') },
+    async start() { throw new Error('resource execution intentionally unavailable in foundation-only fixture') },
     async submit() { throw new Error('legacy worker must not execute foundation chain') },
     async stop() { throw new Error('legacy worker must not execute foundation chain') },
     async status() { throw new Error('legacy worker must not execute foundation chain') },
@@ -142,9 +151,13 @@ test(`agentic document passes correct ${rounds} changed document(s) without a se
     for (const artifact of authorResult.documents) {
       expect(digest(await readFile(join(workspacePath, artifact.artifactPath), 'utf8'))).toBe(artifact.digest)
     }
-    expect(current.status).toBe('needs_action')
-    expect(current.documentStep).toBe('FOUNDATION_REVIEW')
-    expect(current.activeDispatch).toBeUndefined()
+    // Accepted documents now hand off directly to resources; a publication
+    // snapshot can be observed before that asynchronous handoff has settled.
+    expect(current.status).toBe('failed')
+    expect(current.phase).toBe('RESOURCE_PREPARATION')
+    expect(current.blockedReason).toBe('resource execution intentionally unavailable in foundation-only fixture')
+    expect(current.documentStep).toBeUndefined()
+    expect(current.activeDispatch).toMatchObject({ workerType: 'resource-planner', status: 'failed' })
 
     const snapshot = structuredClone(current)
     const currentPointerPath = join(workspacePath, '.beegame/artifacts/current.json')

@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto'
+import { openResourceLibraryAccess } from './resource-library-access'
+import { PREVIEW_ENVIRONMENT } from '@bee-game-studio/agent-workflow/preview-environment'
 import {
   mkdir,
   readFile,
   writeFile,
 } from 'node:fs/promises'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
 import { resolveWorkflowEvidencePath } from './delivery-workflow/evidence'
 import {
@@ -33,6 +35,22 @@ import {
   type ChecklistAuthority,
 } from './checklist-authority-projection'
 import { documentAuthoringMetrics } from './document-authoring-metrics'
+
+// Forward user-confirmed choices, not the host's global delivery instructions.
+function confirmedUserScope(context: string): string {
+  try {
+    const brief = JSON.parse(context)
+    if (!brief || brief.kind !== 'confirmed_build_brief') return ''
+    return 'Confirmed user scope (generated documents do not authorize expanding this request):\n' +
+      JSON.stringify({
+        idea: brief.idea,
+        selected_option: brief.selected_option,
+        settings: brief.settings,
+      })
+  } catch {
+    return ''
+  }
+}
 
 function taskTypeForWorker(
   workerType: WorkerDispatchRequest['workerType'],
@@ -88,9 +106,20 @@ export function createBeeGameDeliveryWorkerPort(input: {
   language?: BeeGameSessionLanguage
   confirmedBriefContext?: string
   getConfirmedBriefContext?: () => Promise<string | undefined>
+  getPreviewContext?: () => { status: string; url?: string; sessionId?: string }
+  resourceLibraryBaseUrl?: string
+  openImageAccess?: (projectId: string) => { instruction: string; close: () => void }
 }): DeliveryWorkerPort {
   const sessions = new Map<string, string>()
   const records = new Map<string, DispatchRecord>()
+  const libraryAccess = new Map<string, ReturnType<typeof openResourceLibraryAccess>>()
+  const imageAccess = new Map<string, { instruction: string; close: () => void }>()
+  const closeLibraryAccess = (dispatchId: string) => {
+    libraryAccess.get(dispatchId)?.close()
+    libraryAccess.delete(dispatchId)
+    imageAccess.get(dispatchId)?.close()
+    imageAccess.delete(dispatchId)
+  }
   const requests = new Map<string, WorkerDispatchRequest>()
   const documentAuthorityBlocks = new Map<string, string>()
   const eventOffsets = new Map<string, number>()
@@ -134,8 +163,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
         ...(typeof requestedResumeSession === 'string'
           ? { resumeNativeSessionId: requestedResumeSession }
           : {}),
-        // Resource selection is a dedicated post-review capability. All
-        // other workers consume the resulting manifest as read-only input.
+        // Native implementation may coordinate targeted resource repair after
+        // finishing game logic; no extra host workflow or tool sequence.
         workflowWorker: true,
         workflowRunId: request.runId,
         workflowDispatchId: dispatchId,
@@ -173,6 +202,24 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const authToken = await input.getAuthToken?.()
       input.sessions.updateAuthToken(sessionId, authToken)
       const request = requests.get(dispatchId)
+      try {
+      let resourceAccessInstruction = ''
+      if (request?.workerType === 'resource-planner' || request?.workerType === 'implementation-worker') {
+        if (input.openImageAccess && !imageAccess.has(dispatchId))
+          imageAccess.set(dispatchId, input.openImageAccess(request.projectId))
+        if (input.resourceLibraryBaseUrl && input.getAuthToken) {
+          if (!libraryAccess.has(dispatchId))
+            libraryAccess.set(dispatchId, openResourceLibraryAccess({
+              baseUrl: input.resourceLibraryBaseUrl,
+              getAuthToken: input.getAuthToken,
+            }))
+          resourceAccessInstruction = libraryAccess.get(dispatchId)!.instruction
+        } else {
+          resourceAccessInstruction = 'Built-in resource library access is not configured for this run. This is a capability gap, not proof that no matching assets exist. Use native internet search/browser or Bash HTTP tools for external sources and report the library limitation accurately.'
+        }
+        resourceAccessInstruction += '\n\n' + (imageAccess.get(dispatchId)?.instruction
+          ?? 'Platform AI image generation access is unavailable. Do not claim it was used.')
+      }
       const confirmedBriefContext =
         input.confirmedBriefContext ??
         (await input.getConfirmedBriefContext?.())
@@ -195,8 +242,19 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const workerPrompt = [
         languageInstruction,
         workerBriefContext,
+        ...(request?.workerType !== 'document-author' && confirmedBriefContext
+          ? [confirmedUserScope(confirmedBriefContext)]
+          : []),
         documentAuthorAuthorityBlock,
         prompt,
+        resourceAccessInstruction,
+        ...(request?.workerType === 'implementation-worker'
+          ? [`Actual host Preview environment: ${JSON.stringify({
+              ...PREVIEW_ENVIRONMENT,
+              projectId: request.projectId,
+              ...(input.getPreviewContext?.() ?? { status: 'not-running' }),
+            })}`]
+          : []),
         nativeToolAutonomyInstruction,
       ]
         .filter(Boolean)
@@ -212,8 +270,13 @@ export function createBeeGameDeliveryWorkerPort(input: {
         ...(authToken ? { authToken } : {}),
         ...(input.language ? { language: input.language } : {}),
       })
+      } catch (error) {
+        closeLibraryAccess(dispatchId)
+        throw error
+      }
     },
     async stop(dispatchId, reason) {
+      closeLibraryAccess(dispatchId)
       const sessionId = sessions.get(dispatchId)
       if (!sessionId) {
         await input.sessions.disposeWorkflowDispatch?.(dispatchId)
@@ -234,6 +297,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
       })
     },
     async close(dispatchId, options) {
+      closeLibraryAccess(dispatchId)
       const sessionId = sessions.get(dispatchId)
       if (!sessionId) {
         await input.sessions.disposeWorkflowDispatch?.(dispatchId)
@@ -291,9 +355,9 @@ export function createBeeGameDeliveryWorkerPort(input: {
       // deadline would fail a worker that is still making durable progress.
       while (true) {
         const eventOffset = eventOffsets.get(dispatchId) ?? 0
-        const events = sessionEvents(sessionId).slice(eventOffset)
+        let events = sessionEvents(sessionId).slice(eventOffset)
         const request = requests.get(dispatchId)
-        const result = [...events]
+        let result = [...events]
           .reverse()
           .find(
             event =>
@@ -307,6 +371,11 @@ export function createBeeGameDeliveryWorkerPort(input: {
           // host validates and accepts the worker output.
           if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
             await input.sessions.waitForWorkflowWorkerIdle(sessionId)
+          closeLibraryAccess(dispatchId)
+          events = sessionEvents(sessionId).slice(eventOffset)
+          result = [...events].reverse().find(event =>
+            event.type === 'result' || event.type === 'turn.failed' || event.type === 'turn.empty')
+          if (!result) throw new Error('worker completed without a terminal result')
           const terminalEvents = events
           const drainedFailure = [...terminalEvents]
             .reverse()
@@ -551,7 +620,7 @@ async function createDeterministicResourcePlannerTerminal(input: {
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
   const contract = auditAssetContract(input.request.workspacePath)
-  const observedMutationPaths = completedMutationPaths(
+  const observedMutationPaths = completedProjectMutationPaths(
     input.request.workspacePath,
     input.events,
   )
@@ -581,7 +650,7 @@ function createDeterministicContentAuthorTerminal(input: {
   if (input.request.workerType !== 'content-author')
     throw new Error('content author terminal received another worker type')
   const writtenPaths = [...new Set(
-    completedMutationPaths(input.request.workspacePath, input.events).filter(
+    completedProjectMutationPaths(input.request.workspacePath, input.events).filter(
       path => path === 'content' || path.startsWith('content/'),
     ),
   )]
@@ -607,7 +676,7 @@ function createDeterministicImplementationWorkerTerminal(input: {
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
   const changedPaths = [...new Set(
-    completedMutationPaths(input.request.workspacePath, input.events),
+    completedProjectMutationPaths(input.request.workspacePath, input.events),
   )]
   const evidencePath = `.beegame/workflow/evidence/implementation-${input.request.dispatchId}.json`
   return implementationWorkerTerminalSchema.parse({
@@ -616,7 +685,8 @@ function createDeterministicImplementationWorkerTerminal(input: {
     revision: input.request.revision,
     status: 'completed',
     changedPaths,
-    verifiedArtifacts: changedPaths,
+    // Mutations are not verification evidence (the file may even be deleted).
+    verifiedArtifacts: [],
     summary: finalResultText(input.events),
     verificationResults: [],
     evidenceRefs: [evidencePath],
@@ -624,7 +694,7 @@ function createDeterministicImplementationWorkerTerminal(input: {
   })
 }
 
-function completedMutationPaths(
+export function completedProjectMutationPaths(
   workspacePath: string,
   events: ReturnType<BeeGameSessionManager['events']>,
 ): string[] {
@@ -661,5 +731,10 @@ function completedMutationPaths(
           resolve(workspacePath, value),
         ).replaceAll('\\', '/'),
       )
+      // changedPaths is a project-deliverable list, not the native activity log.
+      // Native memory/tool scratch files remain in the transcript, but are not
+      // game artifacts. Execution authority remains responsible for permissions.
+      .filter(path => path !== '' && path !== '..' && !path.startsWith('../')
+        && !isAbsolute(path) && path !== '.beegame/tmp' && !path.startsWith('.beegame/tmp/'))
   })
 }

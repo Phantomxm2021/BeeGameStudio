@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { decodeImageSettings, encodeImageSettings, type ImageSettings } from './image-generation/config-store'
 import { createTLSAwareFetch } from '@bee-game-studio/security-core'
 import {
   decryptSecret,
@@ -531,6 +532,17 @@ export class SupabaseDashboardStore {
       `/rest/v1/beegame_platform_settings?key=eq.${q(PLATFORM_RUNTIME_SETTINGS_KEY)}&select=config&limit=1`,
     )
     return normalizeRuntimeSettings(rows[0]?.config ?? {})
+  }
+
+  async loadPlatformImageSettings(): Promise<ImageSettings> {
+    const rows = await this.rest<{ config: unknown }[]>('/rest/v1/beegame_image_generation_settings?id=eq.platform&select=config&limit=1')
+    return decodeImageSettings(rows[0]?.config ?? {})
+  }
+
+  async savePlatformImageSettings(config: ImageSettings): Promise<void> {
+    await this.upsert('beegame_image_generation_settings', {
+      id: 'platform', config: encodeImageSettings(config), updated_at: new Date().toISOString(),
+    }, 'id')
   }
 
   async savePlatformRuntimeSettings(

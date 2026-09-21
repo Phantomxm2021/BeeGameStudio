@@ -8,8 +8,10 @@ import type {
   DashboardPermissionDecision,
 } from './session-manager'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
-import { resolveNativeRuntimeCommand } from './native-runtime-process-path'
+import { parseNativeTerminalTaskNotification } from './native-task-notification'
+import { resolveNativeRuntimeCommand, nativeSessionTemporaryPath } from './native-runtime-process-path'
 import { getSafeRuntimeProcessEnvironment } from './runtime-process-environment'
+import { mkdir, realpath } from 'node:fs/promises'
 import {
   createRuntimeObservability,
   type RuntimeObservability,
@@ -61,6 +63,8 @@ export function nativeRuntimeCommand(
     '--include-partial-messages',
     '--replay-user-messages',
     '--permission-prompt-tool=stdio',
+    ...(input.language ? ['--append-system-prompt',
+      `User response language: ${input.language}. Use this language for user-visible messages, progress updates, and reasoning summaries you expose. Preserve code, identifiers, paths, and quoted source text in their original form.`] : []),
     ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : []),
   ]
 }
@@ -72,6 +76,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     resolve(): void
     reject(error: Error): void
     abort(): void
+    tasks: Map<string, { toolUseId?: string; running: boolean }>
+    awaitingParentResult: boolean
   } | null = null
   private disposed = false
   private stderrTail = ''
@@ -98,9 +104,10 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   ): Promise<NativeCliProcessRuntime> {
     if (command.length === 0)
       throw new Error('Bee Game Studio native runtime command is required')
+    const temporary = await prepareNativeSessionTemporaryDirectory(input.cwd, input.sessionId)
     const child = Bun.spawn(command, {
       cwd: input.cwd,
-      env: nativeRuntimeEnvironment(input.env),
+      env: { ...nativeRuntimeEnvironment(input.env), TMPDIR: temporary, CLAUDE_CODE_TMPDIR: temporary },
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -150,6 +157,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
           reject(error)
         },
         abort,
+        tasks: new Map(),
+        awaitingParentResult: false,
       }
       this.observability.beginTurn({ requestId })
       this.write({
@@ -231,15 +240,43 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     ) {
       if (!this.activeTurn) this.observability.observeMessage(message)
       this.sessionInput.onNativeTaskNotification?.(
-        { ...nativeTaskNotification(message),
+        { ...nativeTaskNotification(message), message,
           ...(!this.activeTurn ? { backgroundMessage: message } : {}) },
       )
     }
     const turn = this.activeTurn
     if (!turn) return
+    if (message.type === 'system') {
+      const taskId = stringField(message, 'task_id')
+      if (message.subtype === 'task_started' && taskId &&
+          (['local_agent', 'remote_agent', 'local_workflow'].includes(String(message.task_type)) || turn.tasks.has(taskId))) {
+        // SendMessage can reactivate the SAME task ID. A previous terminal
+        // notification or an old transcript tail does not complete this run.
+        turn.tasks.set(taskId, { toolUseId: stringField(message, 'tool_use_id'), running: true })
+      }
+      const terminal = parseNativeTerminalTaskNotification({ ...nativeTaskNotification(message), message })
+      if (terminal) {
+        for (const [id, task] of turn.tasks) {
+          if ((id === terminal.taskId && (!terminal.toolUseId || !task.toolUseId || task.toolUseId === terminal.toolUseId)) ||
+              (terminal.toolUseId && task.toolUseId === terminal.toolUseId))
+            task.running = false
+        }
+      }
+    }
     this.observability.observeMessage(message)
-    turn.input.onMessage(message as DashboardSDKMessage)
+    await turn.input.onMessage(message as DashboardSDKMessage)
+    if (message.type === 'system' && message.subtype === 'session_state_changed' &&
+        message.state === 'idle' && turn.awaitingParentResult) {
+      this.failActiveTurn(new Error('Native session became idle before the parent completed its pending agent work'))
+      return
+    }
     if (message.type !== 'result') return
+    // Keep the original callback and permission context attached while native
+    // subagents work and the parent resumes. Do not send a synthetic prompt.
+    if (!isErrorResult(message) && [...turn.tasks.values()].some(task => task.running)) {
+      turn.awaitingParentResult = true
+      return
+    }
     this.activeTurn = null
     if (isErrorResult(message)) {
       const error = new Error(nativeErrorDetail(message))
@@ -323,6 +360,16 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   }
 }
 
+/** Bash, file tools and image processors share a project-local scratch root.
+ * Do not grant access to the machine-wide /tmp/claude shared by other tasks. */
+export async function prepareNativeSessionTemporaryDirectory(cwd: string, sessionId: string): Promise<string> {
+  const root = await realpath(cwd)
+  const temporary = nativeSessionTemporaryPath(root, sessionId)
+  await mkdir(temporary, { recursive: true, mode: 0o700 })
+  if (await realpath(temporary) !== temporary) throw new Error('Invalid native session temporary directory')
+  return temporary
+}
+
 function isNativeSessionId(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value,
@@ -394,7 +441,7 @@ function permissionResponse(
               behavior: 'deny',
               message: decision.message ?? 'Permission denied by user settings.',
               toolUseID,
-              decisionClassification: 'user_reject',
+              ...(decision.source === 'policy' ? {} : { decisionClassification: 'user_reject' }),
             },
     },
   }
@@ -411,6 +458,9 @@ export function nativeRuntimeEnvironment(
   return {
     ...getSafeRuntimeProcessEnvironment(),
     ...selectedModelEnvironment,
+    // This host can present permission requests from background agents.
+    // Route them to the same authority instead of silently auto-denying them.
+    BEEGAME_NATIVE_BACKGROUND_PERMISSIONS: '1',
   }
 }
 

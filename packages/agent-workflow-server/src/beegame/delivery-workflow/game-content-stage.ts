@@ -1,6 +1,6 @@
 import { readBeeGameAssetManifestSync } from '../asset-contracts'
 import { acceptBeeGameContentPackage } from '../game-content-package'
-import { buildSceneUiContentAuthoringAuthority } from '../scene-ui-content-authoring'
+import { buildSceneUiContentAuthoringAuthority, materializeSceneUiAuthoringContract } from '../scene-ui-content-authoring'
 import { transitionDeliveryRun } from './transition'
 import type { DeliveryRun, WorkerDispatchRequest } from './types'
 import type { WorkerTerminalResult } from './worker-contracts'
@@ -45,7 +45,7 @@ export async function startGameContentStage(input: {
     revision: assetManifestRevision,
     allowedPaths: [...task.allowedPaths],
     contract: {
-      ...task.contract,
+      ...await materializeSceneUiAuthoringContract(input.workspacePath, task),
       ...(input.run.blockedReason
         ? { currentContentIssues: [input.run.blockedReason] }
         : {}),

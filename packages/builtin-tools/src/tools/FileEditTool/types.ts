@@ -5,7 +5,7 @@ import { semanticBoolean } from 'src/utils/semanticBoolean.js'
 // The input schema with optional replace_all
 const inputSchema = lazySchema(() =>
   z.strictObject({
-    file_path: z.string().describe('The absolute path to the file to modify'),
+    file_path: z.string().describe('Path to the file to modify, absolute or relative to the current working directory'),
     old_string: z.string().describe('The text to replace'),
     new_string: z
       .string()

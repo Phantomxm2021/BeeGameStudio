@@ -10,7 +10,6 @@ const record = (value: unknown): Record<string, unknown> | undefined => value &&
 const finite = (value: unknown, fallback: number): number => typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 const sourceAssetId = (assetId?: string): string | undefined => assetId?.split(':', 1)[0];
 const componentData = (component: CanonicalComponent): Record<string, unknown> => structuredClone(component.data ?? {});
-const componentOf = (node: BeeGameContentNode, type: CanonicalComponent['type']) => node.components?.find(component => component.type === type);
 const vec2 = (value: unknown, fallback: [number, number]): [number, number] => Array.isArray(value) ? [finite(value[0], fallback[0]), finite(value[1], fallback[1])] : [finite(record(value)?.x, fallback[0]), finite(record(value)?.y, fallback[1])];
 const vec3 = (value: unknown, fallback: [number, number, number]): [number, number, number] => Array.isArray(value) ? [finite(value[0], fallback[0]), finite(value[1], fallback[1]), finite(value[2], fallback[2])] : [finite(record(value)?.x, fallback[0]), finite(record(value)?.y, fallback[1]), finite(record(value)?.z, fallback[2])];
 
@@ -24,19 +23,6 @@ function canvasMetrics(settings?: Record<string, unknown>): CanvasMetrics {
   return { width, height, pixelsPerUnit };
 }
 
-function dimensions(node: BeeGameContentNode): { width: number; height: number } {
-  const component = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image') ?? componentOf(node, 'tilemap');
-  const data = record(component?.data);
-  const size = Array.isArray(data?.size) ? { width: data.size[0], height: data.size[1] } : record(data?.size) ?? record(record(data?.sprite)?.logicalSize);
-  return { width: Math.max(1, finite(size?.width, PIXELS_PER_EDITOR_UNIT)), height: Math.max(1, finite(size?.height, PIXELS_PER_EDITOR_UNIT)) };
-}
-
-function anchor(node: BeeGameContentNode): { x: number; y: number } {
-  const data = record((componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image') ?? componentOf(node, 'tilemap'))?.data);
-  const value = Array.isArray(data?.anchor) ? { x: data.anchor[0], y: data.anchor[1] } : record(data?.anchor);
-  return { x: finite(value?.x, .5), y: finite(value?.y, .5) };
-}
-
 function layerOrders(settings?: Record<string, unknown>): Map<string, number> {
   if (!Array.isArray(settings?.layers)) return new Map();
   return new Map(settings.layers.flatMap((item, index) => { const layer = record(item); return typeof layer?.id === 'string' ? [[layer.id, finite(layer.order, index + 1)] as const] : []; }));
@@ -47,14 +33,14 @@ function editorTransform(node: BeeGameContentNode, dimension: '2d' | '3d', layer
   const rotation = node.transform?.rotation ?? [0, 0, 0];
   const scale = node.transform?.scale ?? [1, 1, 1];
   if (dimension === '3d') return { position: [...position], rotation: [...rotation], scale: [...scale] };
-  const size = dimensions(node); const pivot = anchor(node); const layerOrder = node.layer ? layers.get(node.layer) ?? 0 : 0; const order = node.zIndex ?? (position[2] !== 0 ? position[2] : layerOrder);
   const rootOffsetX = node.parentId ? 0 : metrics.width / 2;
   const rootOffsetY = node.parentId ? 0 : metrics.height / 2;
+  const layerDepth = (node.zIndex ?? (node.layer ? layers.get(node.layer) ?? 0 : 0)) * .01;
   return {
     // Canonical 2D scenes use top-left logical pixels; the editor uses a
     // centered, y-up world. Parent transforms remain local pixel offsets.
-    position: [(position[0] - rootOffsetX + (.5 - pivot.x) * size.width) / metrics.pixelsPerUnit, (rootOffsetY - position[1] - (.5 - pivot.y) * size.height) / metrics.pixelsPerUnit, order * .01],
-    rotation: [...rotation],
+    position: [(position[0] - rootOffsetX) / metrics.pixelsPerUnit, (rootOffsetY - position[1]) / metrics.pixelsPerUnit, position[2] / metrics.pixelsPerUnit + layerDepth],
+    rotation: [-rotation[0], rotation[1], -rotation[2]],
     // Renderer dimensions are geometry, not Transform scale. Keeping them
     // separate prevents child GameObjects inheriting a parent's sprite size.
     scale: [...scale],
@@ -113,14 +99,16 @@ function toEditorComponent(input: { node: BeeGameContentNode; component: Canonic
   const resourceId = component.assetRef; const assetId = resolveAssetId(resourceId, data, input.members); const member = assetId?.includes(':') ? assetId.slice(assetId.indexOf(':') + 1) : explicitMember(data);
   if (component.type === 'sprite-renderer' || component.type === 'image') {
     if (component.type === 'sprite-renderer' && !assetId) throw new Error(`${component.type} ${node.id} requires assetRef`);
-    const { frame: region, animation } = spriteSheetSelection(assetId ? input.assets?.[assetId]?.spriteSheet : undefined, data);
+    const animator = node.components?.find(c => c.type === 'animator');
+    const selectionData = { ...data, frameSize: data.frameSize ?? (animator ? componentData(animator).frameSize : undefined) };
+    const { frame: region, animation } = spriteSheetSelection(assetId ? input.assets?.[assetId]?.spriteSheet : undefined, selectionData);
     const common = { id, enabled, ...(assetId ? { assetId } : {}), ...(member ? { member } : {}), material: { ...material(data, assetId), ...(region ? { textureRegion: region } : {}) }, properties: data };
     return component.type === 'sprite-renderer' ? { ...common, assetId: assetId!, type: 'sprite-renderer', ...(region ? { frame: region } : {}), ...(animation ? { animation } : {}) } : { ...common, type: 'image' };
   }
   if (component.type === 'mesh-filter' || component.type === 'tilemap') { if (!assetId) throw new Error(`${component.type} ${node.id} requires assetRef`); return { id, type: component.type, enabled, assetId, ...(member ? { member } : {}), properties: data }; }
   if (component.type === 'mesh-renderer') return { id, type: 'mesh-renderer', enabled, ...(assetId ? { assetId } : {}), material: material(data, assetId), properties: data };
   if (component.type === 'skinned-mesh-renderer') { if (!assetId) throw new Error(`skinned-mesh-renderer ${node.id} requires assetRef`); return { id, type: 'skinned-mesh-renderer', enabled, assetId, ...(member ? { member } : {}), material: material(data, assetId), properties: data }; }
-  if (component.type === 'particle-system') return { id, type: component.type, enabled, properties: editorParticleProperties(data, metrics) };
+  if (component.type === 'particle-system') return { id, type: component.type, enabled, properties: input.dimension === '2d' ? editorParticleProperties(data, metrics) : data };
   if (component.type === 'grid' || component.type === 'audio-listener' || component.type === 'canvas-renderer') return { id, type: component.type, enabled, properties: data };
   if (component.type === 'tilemap-renderer') return { id, type: 'tilemap-renderer', enabled, material: material(data, assetId), properties: data };
   if (component.type === 'animator') return { id, type: 'animator', enabled, ...(assetId ? { assetId } : {}), controller: data };
@@ -147,7 +135,12 @@ function toEditorComponent(input: { node: BeeGameContentNode; component: Canonic
     return { id, type: 'camera', enabled, orthographic, orthographicSize, ...(typeof data.nearClip === 'number' ? { nearClip: data.nearClip } : {}), ...(typeof data.farClip === 'number' ? { farClip: data.farClip } : {}), properties: data };
   }
   if (component.type === 'canvas') return { id, type: 'canvas', enabled, renderMode: ['screen-space-overlay', 'screen-space-camera', 'world-space'].includes(String(data.renderMode)) ? data.renderMode as 'screen-space-overlay' | 'screen-space-camera' | 'world-space' : 'world-space', properties: data };
-  if (component.type === 'rect-transform') { const anchoredPosition = vec2(data.anchoredPosition, [0, 0]); const sizeDelta = vec2(data.sizeDelta, [0, 0]); return { id, type: 'rect-transform', enabled, anchorMin: vec2(data.anchorMin, [0, 0]), anchorMax: vec2(data.anchorMax, [1, 1]), pivot: vec2(data.pivot, [.5, .5]), anchoredPosition: [anchoredPosition[0] / metrics.pixelsPerUnit, anchoredPosition[1] / metrics.pixelsPerUnit], sizeDelta: [sizeDelta[0] / metrics.pixelsPerUnit, sizeDelta[1] / metrics.pixelsPerUnit], properties: data }; }
+  if (component.type === 'rect-transform') {
+    const min = vec2(data.anchorMin, [0, 0]), max = vec2(data.anchorMax, [1, 1]), pivot = vec2(data.pivot, [.5, .5]);
+    const offset = vec2(data.anchoredPosition, [0, 0]), size = vec2(data.sizeDelta, [0, 0]);
+    // Rects always use top-left coordinates, including Canvas UI in a 3D scene.
+    return { id, type: 'rect-transform', enabled, anchorMin: [min[0], 1-max[1]], anchorMax: [max[0], 1-min[1]], pivot: [pivot[0], 1-pivot[1]], anchoredPosition: [offset[0]/unit, -offset[1]/unit], sizeDelta: [size[0]/unit, size[1]/unit], properties: data };
+  }
   if (component.type === 'text') return { id, type: 'text', enabled, text: typeof data.text === 'string' ? data.text : '', properties: data };
   throw new Error(`Unsupported scene component ${component.type}`);
 }
@@ -157,19 +150,8 @@ const childrenByParent = (nodes: BeeGameContentNode[]) => { const result = new M
 export function sceneContentToEditorDocument(input: { document: BeeGameSceneContentDocument; documentRevision: string; foundationDocumentRevision: string; assetManifestRevision: string; assets?: Record<string, SceneAsset>; assetMembers?: Record<string, Record<string, string>> }): SceneDocument {
   const dimension = input.document.kind === 'scene-3d' ? '3d' : '2d'; const layers = layerOrders(input.document.data.settings); const metrics = canvasMetrics(input.document.data.settings); const children = childrenByParent(input.document.data.nodes);
   const nodes = Object.fromEntries(input.document.data.nodes.map(node => [node.id, { id: node.id, name: node.name ?? node.id, parentId: node.parentId ?? null, children: children.get(node.id) ?? [], active: node.enabled !== false, locked: false, transform: editorTransform(node, dimension, layers, metrics), ...(node.layer ? { layer: node.layer } : {}), ...(node.zIndex === undefined ? {} : { order: node.zIndex }), tags: [...(node.semantic ?? [])], metadata: structuredClone(node.data ?? {}), components: (node.components ?? []).map(component => toEditorComponent({ node, component, dimension, metrics, members: input.assetMembers, assets: input.assets })) } satisfies SceneNode]));
-  // Vision is a child Light2D. If no local rotation was authored, align the
-  // cone with the guard's declared initial facing instead of always pointing up.
-  if (dimension === '2d') for (const source of input.document.data.nodes) {
-    const target = nodes[source.id];
-    const parent = source.parentId ? input.document.data.nodes.find(node => node.id === source.parentId) : undefined;
-    const isVisionCone = source.semantic?.includes('vision-cone') && source.components?.some(component => component.type === 'light-2d');
-    const hasExplicitRotation = source.transform?.rotation?.some(value => value !== 0);
-    const parentSprite = parent?.components?.find(component => component.type === 'sprite-renderer');
-    const facing = record(parentSprite?.data)?.initialFacing;
-    const angle = facing === 'right' ? -Math.PI / 2 : facing === 'left' ? Math.PI / 2 : facing === 'down' ? Math.PI : facing === 'up' ? 0 : undefined;
-    if (target && isVisionCone && !hasExplicitRotation && angle !== undefined) target.transform.rotation[2] = angle;
-  }
-  return { schemaVersion: 'scene-game-object.v2', pixelsPerUnit: metrics.pixelsPerUnit, dimension, id: input.document.id, name: input.document.id, revision: 0, settings: { background: '#181a20', showGrid: true, ambientColor: '#ffffff', ambientIntensity: 1, exposure: 1, fogEnabled: false, fogColor: '#181a20', fogNear: 10, fogFar: 60 }, source: { source: { kind: 'content-package', publicationId: input.document.id, candidateDigest: input.foundationDocumentRevision, sourceInputDigest: input.assetManifestRevision }, contentDigest: input.documentRevision, contentRevision: input.documentRevision, contentSchemaVersion: input.document.schema, adapterId: 'unity-game-object-components', adapterVersion: '2.0.0' }, rootIds: input.document.data.nodes.filter(node => !node.parentId).map(node => node.id), nodes, assets: input.assets ?? {}, diagnostics: [] };
+  // Opening an editor must not infer and persist rotations from gameplay labels.
+  return { schemaVersion: 'scene-game-object.v2', pixelsPerUnit: dimension === '2d' ? metrics.pixelsPerUnit : 1, dimension, id: input.document.id, name: input.document.id, revision: 0, settings: { background: '#181a20', showGrid: true, ambientColor: '#ffffff', ambientIntensity: 1, exposure: 1, fogEnabled: false, fogColor: '#181a20', fogNear: 10, fogFar: 60 }, source: { source: { kind: 'content-package', publicationId: input.document.id, candidateDigest: input.foundationDocumentRevision, sourceInputDigest: input.assetManifestRevision }, contentDigest: input.documentRevision, contentRevision: input.documentRevision, contentSchemaVersion: input.document.schema, adapterId: 'unity-game-object-components', adapterVersion: '2.0.0' }, rootIds: input.document.data.nodes.filter(node => !node.parentId).map(node => node.id), nodes, assets: input.assets ?? {}, diagnostics: [] };
 }
 
 function toCanonicalComponent(component: SceneComponent, metrics: CanvasMetrics, dimension: '2d' | '3d'): CanonicalComponent {
@@ -181,7 +163,7 @@ function toCanonicalComponent(component: SceneComponent, metrics: CanvasMetrics,
   if (component.type === 'mesh-filter' || component.type === 'tilemap' || component.type === 'skinned-mesh-renderer') return { id: component.id, type: component.type, assetRef: sourceAssetId(component.assetId), data: { ...props, ...(component.member ? { member: component.member } : {}), ...enabled } };
   if (component.type === 'mesh-renderer') return { id: component.id, type: component.type, ...(component.assetId ? { assetRef: sourceAssetId(component.assetId) } : {}), data: { ...props, ...enabled } };
   if (component.type === 'tilemap-renderer') return { id: component.id, type: component.type, data: { ...props, ...enabled } };
-  if (component.type === 'particle-system') return { id: component.id, type: component.type, data: { ...canonicalParticleProperties(props, metrics), ...enabled } };
+  if (component.type === 'particle-system') return { id: component.id, type: component.type, data: { ...(dimension === '2d' ? canonicalParticleProperties(props, metrics) : props), ...enabled } };
   if (component.type === 'grid' || component.type === 'audio-listener' || component.type === 'canvas-renderer') return { id: component.id, type: component.type, data: { ...props, ...enabled } };
   if (component.type === 'animator') return { id: component.id, type: 'animator', ...(component.assetId ? { assetRef: sourceAssetId(component.assetId) } : {}), data: { ...structuredClone(component.controller), ...enabled } };
   if (component.type === 'box-collider-2d' || component.type === 'capsule-collider-2d') return { id: component.id, type: component.type, data: { size: component.size.map(value => value * unit), offset: point(component.offset), ...(component.type === 'capsule-collider-2d' ? { direction: component.direction } : {}), isTrigger: component.isTrigger, ...enabled } };
@@ -198,7 +180,7 @@ function toCanonicalComponent(component: SceneComponent, metrics: CanvasMetrics,
   if (component.type === 'light-2d' || component.type === 'light') return { id: component.id, type: component.type, data: { ...props, ...component.light, ...(component.light.distance === undefined ? {} : { distance: component.light.distance * (component.type === 'light-2d' ? metrics.pixelsPerUnit : 1) }), ...enabled } };
   if (component.type === 'camera') return { id: component.id, type: component.type, data: { ...props, orthographic: component.orthographic, ...(component.orthographicSize === undefined ? {} : { orthographicSize: component.orthographicSize }), ...(component.nearClip === undefined ? {} : { nearClip: component.nearClip }), ...(component.farClip === undefined ? {} : { farClip: component.farClip }), ...enabled } };
   if (component.type === 'canvas') return { id: component.id, type: component.type, data: { ...props, renderMode: component.renderMode, ...enabled } };
-  if (component.type === 'rect-transform') return { id: component.id, type: component.type, data: { ...props, anchorMin: component.anchorMin, anchorMax: component.anchorMax, pivot: component.pivot, anchoredPosition: component.anchoredPosition.map(value => value * metrics.pixelsPerUnit), sizeDelta: component.sizeDelta.map(value => value * metrics.pixelsPerUnit), ...enabled } };
+  if (component.type === 'rect-transform') return { id: component.id, type: component.type, data: { ...props, anchorMin: [component.anchorMin[0], 1-component.anchorMax[1]], anchorMax: [component.anchorMax[0], 1-component.anchorMin[1]], pivot: [component.pivot[0], 1-component.pivot[1]], anchoredPosition: [component.anchoredPosition[0]*unit, -component.anchoredPosition[1]*unit], sizeDelta: component.sizeDelta.map(value => value * unit), ...enabled } };
   if (component.type === 'text') return { id: component.id, type: component.type, data: { ...props, text: component.text, ...enabled } };
   throw new Error(`Unsupported scene component ${component satisfies never}`);
 }
@@ -208,7 +190,11 @@ export function editorDocumentToSceneContent(editorDocument: SceneDocument, orig
   const nodes = Object.values(editorDocument.nodes).sort((a, b) => (previousOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (previousOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER)).map(node => {
     const components = node.components.map(component => toCanonicalComponent(component, metrics, editorDocument.dimension)); const base: BeeGameContentNode = { id: node.id, ...(node.parentId ? { parentId: node.parentId } : {}), ...(node.name === node.id ? {} : { name: node.name }), ...(node.tags.length ? { semantic: [...node.tags] } : {}), ...(node.active ? {} : { enabled: false }), ...(node.layer ? { layer: node.layer } : {}), ...(node.order === undefined ? {} : { zIndex: node.order }), components, ...(node.metadata && Object.keys(node.metadata).length ? { data: structuredClone(node.metadata) } : {}) };
     if (editorDocument.dimension === '3d') base.transform = structuredClone(node.transform);
-    else { const size = dimensions(base); const pivot = anchor(base); const rootOffsetX = node.parentId ? 0 : metrics.width / 2; const rootOffsetY = node.parentId ? 0 : metrics.height / 2; base.transform = { position: [node.transform.position[0] * metrics.pixelsPerUnit + rootOffsetX - (.5 - pivot.x) * size.width, rootOffsetY - node.transform.position[1] * metrics.pixelsPerUnit - (.5 - pivot.y) * size.height, 0], rotation: [...node.transform.rotation], scale: [...node.transform.scale] }; }
+    else {
+      const rootOffsetX = node.parentId ? 0 : metrics.width / 2, rootOffsetY = node.parentId ? 0 : metrics.height / 2;
+      const layerDepth = (node.order ?? (node.layer ? layerOrders(original.data.settings).get(node.layer) ?? 0 : 0)) * .01;
+      base.transform = { position: [node.transform.position[0] * metrics.pixelsPerUnit + rootOffsetX, rootOffsetY - node.transform.position[1] * metrics.pixelsPerUnit, (node.transform.position[2] - layerDepth) * metrics.pixelsPerUnit], rotation: [-node.transform.rotation[0], node.transform.rotation[1], -node.transform.rotation[2]], scale: [...node.transform.scale] };
+    }
     return base;
   });
   const data = { ...structuredClone(original.data), nodes }; if (data.cameraNodeId && !editorDocument.nodes[data.cameraNodeId]) delete data.cameraNodeId;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { BeeGameAssetManifest } from '../beegame/asset-contracts'
@@ -9,11 +9,29 @@ import {
   parseBeeGameContentDocument,
   parseBeeGameContentIndex,
 } from '../beegame/game-content-package'
-import { buildSceneUiContentAuthoringAuthority } from '../beegame/scene-ui-content-authoring'
+import { buildSceneUiContentAuthoringAuthority, materializeSceneUiAuthoringContract } from '../beegame/scene-ui-content-authoring'
 import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
+import { CONTENT_COORDINATE_CONTRACT } from '../../../scene-editor/src/content-coordinates'
 
 const documentRevision = 'a'.repeat(64)
 const assetManifestRevision = 'b'.repeat(64)
+
+test('authoring and every implementation attempt share explicit coordinate semantics', () => {
+  expect(authority().contract.output.format.coordinates).toEqual(CONTENT_COORDINATE_CONTRACT)
+  for (const contract of [{}, { currentImplementationIssues:['repair content'] }]) {
+    const prompt = buildWorkerPrompt({runId:'r',ownerId:'o',projectId:'p',workspacePath:'/workspace',workerType:'implementation-worker',phase:'IMPLEMENTATION',revision:documentRevision,allowedPaths:['./'],contract})
+    expect(prompt).toContain(JSON.stringify(CONTENT_COORDINATE_CONTRACT))
+  }
+})
+
+test('UI anchor names cannot silently fall back to another coordinate', () => {
+  const doc = {schema:'beegame-content.v1',id:'ui',kind:'ui-screen',assetRefs:[],data:{rootId:'root',nodes:[{id:'root',role:'screen-root'},{id:'button',parentId:'root',role:'button',layout:{anchor:'top-right'}}]}}
+  expect(() => parseBeeGameContentDocument(doc)).not.toThrow()
+  doc.data.nodes[1].layout!.anchor = 'right-top'
+  expect(() => parseBeeGameContentDocument(doc)).toThrow()
+  doc.data.nodes[1].layout!.anchor = 'center'
+  expect(() => parseBeeGameContentDocument(doc)).not.toThrow()
+})
 
 function authority() {
   return buildSceneUiContentAuthoringAuthority({
@@ -24,6 +42,20 @@ function authority() {
 }
 
 describe('game content authoring contract', () => {
+  test('materializes exact references without copying full Manifest or format into the dispatch', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'content-references-'))
+    try {
+      const task = authority()
+      const compact = await materializeSceneUiAuthoringContract(root, task)
+      expect(compact).not.toHaveProperty('assetManifest')
+      expect(compact.output).not.toHaveProperty('format')
+      expect(compact.assetManifestPath).toBe('assets/asset-manifest.json')
+      expect(compact.inspectionCommand.args).toContain('--inspect')
+      expect(JSON.parse(await readFile(join(root, compact.authoringContractPath), 'utf8')))
+        .toEqual(task.contract.output.format)
+      expect(JSON.stringify(compact).length).toBeLessThan(JSON.stringify(task.contract).length / 3)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
   test('sends the exact strict format and the host validation command to the Agent', () => {
     const task = authority()
     const format = task.contract.output.format as Record<string, unknown>
@@ -66,7 +98,7 @@ describe('game content authoring contract', () => {
       allowedPaths: ['content/'],
       contract: task.contract,
     })
-    expect(prompt).toContain('contract.output.format')
+    expect(prompt).toContain('contract.authoringContractPath')
     expect(prompt).toContain('contract.validationCommand')
     expect(prompt).toContain('contract.previewCommand')
     expect(prompt).toContain('inspect the rendered Scene images')

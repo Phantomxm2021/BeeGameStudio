@@ -4,7 +4,8 @@ import { operations } from './commands'
 import { SceneHistory } from './history'
 import { componentOf, DEFAULT_SCENE_SETTINGS, type SceneDocument, type SceneNode, type SceneAsset, type LightKind, type Transform } from './model'
 import { exportPackage, importPackage, makeEmptyScene, sceneContentKey, canonicalJson } from './persistence'
-import { transformSelection } from './selection-transform'
+import { transformSelection, nodeWorldMatrix } from './selection-transform'
+import { rectTransform } from './rect-transform'
 import { SceneViewport, type SceneViewMode, type SceneViewportProps } from './viewport'
 import { Hand, Move, Rotate3D, Scaling, Save, Undo2, Redo2, Magnet, Globe2, Box, Scan, Square, Focus, CircleCheck, Circle, ChevronLeft, ChevronRight, Lightbulb, Search, X, Axis3D, Menu, Settings2, Sun, Flashlight, Sparkles } from 'lucide-react'
 import { Inspector, ModelPartInspector } from './inspector'
@@ -34,14 +35,14 @@ const SCENE_TOOLS: { mode: Mode; label: string; key: string }[] = [
 
 const TOOL_ICONS = { hand: Hand, translate: Move, rotate: Rotate3D, scale: Scaling }
 
-export interface SceneEditorProps { initialDocument?: SceneDocument; storageKey?: string; assetLibrary?: AssetLibrarySource; initialView?: SceneViewportProps['initialView']; initialProjection?: 'perspective' | 'orthographic'; initialExpanded?: Record<string, boolean>; onSave?: (document: SceneDocument) => void | Promise<void>; onClose?: () => void; onDirtyChange?: (dirty: boolean, saving: boolean) => void }
+export interface SceneEditorProps { initialDocument?: SceneDocument; storageKey?: string; assetLibrary?: AssetLibrarySource; initialView?: SceneViewportProps['initialView']; initialProjection?: 'perspective' | 'orthographic'; initialExpanded?: Record<string, boolean>; onSave?: (document: SceneDocument) => void | Promise<void>; onClose?: () => void; onDirtyChange?: (dirty: boolean, saving: boolean) => void; sceneChoices?: { id: string; label: string }[]; selectedSceneId?: string; onSelectScene?: (id: string) => void; sceneSwitchDisabled?: boolean }
 
 function ViewDropdown({ label, value, options, onChange, disabled = false }: { label: string; value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; disabled?: boolean }) {
   const icon = label === 'Coordinate space' ? <Globe2 size={15} /> : label === 'View mode' ? value === '2d' ? <Square size={17} /> : <Box size={17} /> : value === 'orthographic' ? <Square size={17} /> : <Box size={17} />
   return <Select ariaLabel={label} value={value} options={options} onValueChange={onChange} disabled={disabled} leading={icon} className="toolbar-select" />
 }
 
-function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets, openSettings, showGizmos, toggleGizmos, closeEditor }: {
+function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets, openSettings, showGizmos, toggleGizmos, closeEditor, sceneChoices, selectedSceneId, onSelectScene, sceneSwitchDisabled }: {
   canUndo: boolean
   canRedo: boolean
   undo: () => void
@@ -53,9 +54,16 @@ function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets,
   showGizmos: boolean
   toggleGizmos: () => void
   closeEditor?: () => void
+  sceneChoices?: SceneEditorProps['sceneChoices']
+  selectedSceneId?: string
+  onSelectScene?: (id: string) => void
+  sceneSwitchDisabled?: boolean
 }) {
   return <MotionMenu ariaLabel="Scene actions" trigger={<Menu size={18} />} className="toolbar-menu">
     <MenuItem onSelect={save}><Save size={14} />Save scene</MenuItem>
+    {sceneChoices && sceneChoices.length > 1 && onSelectScene ? <MenuSub label="Scenes" icon={<Box size={14} />}>
+      {sceneChoices.map(scene => <MenuItem key={scene.id} disabled={sceneSwitchDisabled} onSelect={() => onSelectScene(scene.id)}>{scene.id === selectedSceneId ? '✓ ' : ''}{scene.label}</MenuItem>)}
+    </MenuSub> : null}
     <MenuSeparator />
     <MenuItem disabled={!canUndo} onSelect={undo}><Undo2 size={14} />Undo</MenuItem>
     <MenuItem disabled={!canRedo} onSelect={redo}><Redo2 size={14} />Redo</MenuItem>
@@ -75,7 +83,7 @@ function ToolbarMenu({ canUndo, canRedo, undo, redo, addLight, save, openAssets,
   </MotionMenu>
 }
 
-export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-editor.draft.v2', assetLibrary, initialView, initialProjection = 'perspective', initialExpanded, onSave, onClose, onDirtyChange }: SceneEditorProps = {}) {
+export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-editor.draft.v2', assetLibrary, initialView, initialProjection = 'perspective', initialExpanded, onSave, onClose, onDirtyChange, sceneChoices, selectedSceneId, onSelectScene, sceneSwitchDisabled }: SceneEditorProps = {}) {
   const [document, setDocument] = useState<SceneDocument>(() => {
     if (initialDocument) return initialDocument
     try { const saved = localStorage.getItem(storageKey); return saved ? importPackage(JSON.parse(saved)) : makeEmptyScene() } catch { return makeEmptyScene() }
@@ -271,6 +279,7 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
             showGizmos={showGizmos}
             toggleGizmos={() => setShowGizmos(value => !value)}
             closeEditor={onClose ? requestClose : undefined}
+            sceneChoices={sceneChoices} selectedSceneId={selectedSceneId} onSelectScene={onSelectScene} sceneSwitchDisabled={sceneSwitchDisabled}
           />
           <span className="toolbar-divider" />
           <div className="scene-tools" role="toolbar" aria-label="Scene tools" aria-orientation="horizontal">
@@ -355,7 +364,7 @@ function flattenVisible(document: SceneDocument, expanded: Record<string, boolea
   document.rootIds.forEach(visit); return result
 }
 function isDescendant(document: SceneDocument, candidate: string, ancestor: string) { let parent = document.nodes[candidate]?.parentId; while (parent) { if (parent === ancestor) return true; parent = document.nodes[parent]?.parentId } return false }
-function worldMatrix(document: SceneDocument, id: string): Matrix4 { const node = document.nodes[id]; if (!node) return new Matrix4(); const matrix = new Matrix4().compose(new Vector3(...node.transform.position), new Quaternion().setFromEuler(new Euler(...node.transform.rotation, 'XYZ')), new Vector3(...node.transform.scale)); return node.parentId ? worldMatrix(document, node.parentId).multiply(matrix) : matrix }
+function worldMatrix(document: SceneDocument, id: string): Matrix4 { return nodeWorldMatrix(document, id) }
 function localTransformForWorld(document: SceneDocument, id: string, parentId: string | null): Transform {
   const parentWorld = parentId ? worldMatrix(document, parentId) : new Matrix4()
   if (Math.abs(parentWorld.determinant()) < 1e-10) throw new Error('Cannot reparent under a singular transform')
@@ -366,7 +375,7 @@ function localTransformForWorld(document: SceneDocument, id: string, parentId: s
   const recomposed = new Matrix4().compose(position, quaternion, scale)
   if (local.elements.some((value, index) => Math.abs(value - recomposed.elements[index]) > 1e-5)) throw new Error('Cannot reparent across unsupported shear')
   const euler = new Euler().setFromQuaternion(quaternion, 'XYZ')
-  return { position: position.toArray() as [number, number, number], rotation: [euler.x, euler.y, euler.z], scale: scale.toArray() as [number, number, number] }
+  return rectTransform({ ...document.nodes[id], parentId }, document.nodes, { position: position.toArray() as [number, number, number], rotation: [euler.x, euler.y, euler.z], scale: scale.toArray() as [number, number, number] }, true)
 }
 
 /** Clone a complete authored subtree with fresh IDs and internal child links. */

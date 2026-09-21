@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { nativeFileAgentEnvironment, runNativeFileAgent } from '../native-file-agent'
+import { nativeChatEventsPath, nativeFileAgentEnvironment, runNativeFileAgent } from '../native-file-agent'
 
 const cli = process.env.BEEGAME_REVIEW_TEST_CLI ?? join(import.meta.dir, '../../../../dist/cli-bun.js')
 const frame = (value: any) => 'event: ' + value.type + '\ndata: ' + JSON.stringify(value) + '\n\n'
@@ -80,7 +80,7 @@ async function scenario(mode: 'background' | 'interrupted' | 'auto-background') 
   const timeout = setTimeout(() => stop.abort(), mode === 'auto-background' ? 145_000 : 20_000)
   const monitor = mode === 'interrupted' ? (async () => {
     for (let n = 0; n < 200 && !stop.signal.aborted; n++) {
-      const text = await readFile(logPath, 'utf8').catch(() => '')
+      const text = await readFile(nativeChatEventsPath(logPath), 'utf8').catch(() => '')
       if (text.includes('PARTIAL_ASSET_BODY')) { capturedBeforeStop = true; stop.abort(); return }
       await pause(50)
     }
@@ -103,7 +103,12 @@ async function scenario(mode: 'background' | 'interrupted' | 'auto-background') 
     expect(events.some(e => e.event === 'native_diagnostic' && e.data.event === 'first_stream_event')).toBe(true)
     expect(childReads).toBe(1)
     expect(childWrites).toBe(1)
-    const childFrames = events.filter(e => e.event.startsWith('response.') && e.data.agentId !== 'root')
+    expect(raw).not.toContain('PARTIAL_ASSET_BODY')
+    expect(events.some(e => e.event.startsWith('response.'))).toBe(false)
+    const chatRaw = await readFile(nativeChatEventsPath(logPath), 'utf8')
+    expect(chatRaw).not.toContain('TRACE_PRIVATE_API_KEY')
+    const childFrames = chatRaw.trim().split('\n').map(line => JSON.parse(line))
+      .filter(e => e.event.startsWith('response.') && e.data.agentId !== 'root')
     expect(childFrames.some(e => e.event === 'response.request_start')).toBe(true)
     expect(childFrames.some(e => e.event === 'response.content_snapshot' && e.data.content.includes('PARTIAL_ASSET_BODY'))).toBe(true)
     expect(observed.some(message => message.nativeTraceAgentId && message.event?.type === 'message_start')).toBe(true)

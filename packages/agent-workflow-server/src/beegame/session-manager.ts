@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { nativeSessionTemporaryPath } from './native-runtime-process-path'
 import {
   readCanonicalProjectArtifactConsistently,
   type ProjectArtifactIdentity,
@@ -13,7 +14,6 @@ import {
 } from 'node:fs'
 import {
   mkdir,
-  open,
   readdir,
   readFile,
   realpath,
@@ -30,7 +30,6 @@ import {
   relative,
   resolve,
 } from 'node:path'
-import { StringDecoder } from 'node:string_decoder'
 import {
   mapModelConfigToRuntime,
   type RuntimeModelConfig,
@@ -48,12 +47,10 @@ import {
 import { createNativeCliProcessRunner } from './native-cli-process-runner'
 import { createNativeSubagentChatEnricher, isNativeTaskLifecycle } from './native-subagent-chat'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
-import {
-  parseNativeTerminalTaskNotification,
-  type BeeGameNativeTaskNotification,
-} from './native-task-notification'
+import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { createRunStore } from './delivery-workflow/run-store'
 import { createStageChatProjector } from './stage-chat-events'
+import { ChatJsonlReader } from './chat-jsonl-reader'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -99,6 +96,8 @@ const IMAGE_ATTACHMENT_TYPES: Record<string, string[]> = {
 }
 
 export type MaterializedBeeGameFileAttachment = {
+  type: 'image' | 'file'
+  storageId: string
   relativePath: string
   filename: string
   mediaType: string
@@ -346,7 +345,7 @@ export type BeeGameSessionSubmitInput = {
   /** User-confirmed context exposed read-only to platform contract tools. */
   confirmedBriefContext?: string
   signal: AbortSignal
-  onMessage(message: DashboardSDKMessage): void
+  onMessage(message: DashboardSDKMessage): void | Promise<void>
   onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
   requestPermission(
     request: DashboardPermissionRequest,
@@ -380,6 +379,8 @@ export type DashboardPermissionRequest = {
 export type DashboardPermissionDecision = {
   behavior: 'allow' | 'deny'
   message?: string
+  /** Host policy decisions must not be attributed to a user rejection. */
+  source?: 'policy' | 'user'
   /** Ephemeral approval scope. Never persisted across isolated sessions. */
   scope?: 'once' | 'session'
   updatedPermissions?: Record<string, unknown>[]
@@ -429,21 +430,14 @@ type SessionRecord = {
   abortController: AbortController | null
   pendingPermissions: Map<string, PendingPermission>
   toolUses: Map<string, { toolName: string; input?: unknown }>
-  /** Native subagents remain part of the workflow turn after its foreground result. */
-  nativeBackgroundTasks: Map<
-    string,
-    {
-      toolUseID: string
-      outputFile: string
-      turnId?: string
-      status: 'running' | 'completed' | 'failed' | 'stopped' | 'killed'
-    }
-  >
+  /** Attribution only; the native runner owns task lifecycle and turn draining. */
+  nativeTaskTurnIds: Map<string, string | undefined>
   /** Tool-use blocks observed before their streamed JSON input is complete. */
   assistantPartialTextByMessage: Map<string, string>
   activeAssistantMessageId: string | null
   emittedAssistantMessageIds: Set<string>
   thinkingBlockIndexes: Set<number>
+  activeAssistantTextBlockIndex?: number
   visibleThinkingBlockIds: Map<number, string>
   /** Start time for each visible thinking block, used when its end event arrives. */
   thinkingBlockStartedAt: Map<string, string>
@@ -538,12 +532,7 @@ export class BeeGameSessionManager {
   private readonly stageChatFollowers = new Map<string, {
     timer: ReturnType<typeof setInterval>
     syncing: boolean
-    files: Map<string, {
-      offset: number
-      remainder: string
-      decoder: StringDecoder
-      projector: ReturnType<typeof createStageChatProjector>
-    }>
+    seen: Set<string>
   }>()
 
   constructor(
@@ -682,7 +671,7 @@ export class BeeGameSessionManager {
       abortController: null,
       pendingPermissions: new Map(),
       toolUses: new Map(),
-      nativeBackgroundTasks: new Map(),
+      nativeTaskTurnIds: new Map(),
       assistantPartialTextByMessage: new Map(),
       activeAssistantMessageId: null,
       emittedAssistantMessageIds: new Set(),
@@ -954,7 +943,7 @@ export class BeeGameSessionManager {
     if (!record) return false
     const nativeKey = getDashboardPayloadString(input.payload, 'workflowStageNativeKey')
     if (nativeKey && record.events.some(event =>
-      getDashboardPayloadString(event.payload, 'workflowStageNativeKey') === nativeKey)) return false
+      getDashboardPayloadString(event.payload, 'workflowStageNativeKey') === nativeKey)) return true
     this.append(record, input.type, input.text, input.payload, input.turnId)
     return true
   }
@@ -970,62 +959,18 @@ export class BeeGameSessionManager {
     const follower = {
       timer: undefined as unknown as ReturnType<typeof setInterval>,
       syncing: false,
-      files: new Map<string, {
-        offset: number
-        remainder: string
-        decoder: StringDecoder
-        contentLengths: Map<string, number>
-        projector: ReturnType<typeof createStageChatProjector>
-      }>(),
+      seen: new Set<string>(),
     }
     const sync = async () => {
       if (follower.syncing) return
       follower.syncing = true
       try {
-        for (const logPath of await listStageNativeEventLogs(join(workspacePath, '.beegame', 'workflow'))) {
-          const stage = stageFromNativeLogPath(logPath)
-          if (!stage) continue
-          let file = follower.files.get(logPath)
-          if (!file) {
-            file = {
-              offset: 0,
-              remainder: '',
-              decoder: new StringDecoder('utf8'),
-              contentLengths: new Map(),
-              projector: createStageChatProjector({ stage, sink: event => {
-                this.appendProjectChatEvent({ ...input, workspacePath, type: event.type,
-                  text: event.text, ...(event.turnId ? { turnId: event.turnId } : {}),
-                  ...(event.payload ? { payload: event.payload } : {}) })
-              } }),
-            }
-            follower.files.set(logPath, file)
-          }
-          const size = (await stat(logPath)).size
-          if (size < file.offset) {
-            file.offset = 0
-            file.remainder = ''
-            file.decoder = new StringDecoder('utf8')
-            file.contentLengths.clear()
-          }
-          if (size === file.offset) continue
-          const handle = await open(logPath, 'r')
-          try {
-            const bytes = Buffer.alloc(size - file.offset)
-            const { bytesRead } = await handle.read(bytes, 0, bytes.length, file.offset)
-            file.offset += bytesRead
-            const lines = (file.remainder + file.decoder.write(bytes.subarray(0, bytesRead))).split('\n')
-            file.remainder = lines.pop() ?? ''
-            for (const line of lines) {
-              if (!line) continue
-              try {
-                const entry = JSON.parse(line) as { event?: unknown; data?: unknown }
-                const message = stageChatMessageFromTrace(entry, file.contentLengths)
-                if (message) await file.projector(message)
-              } catch {
-                // Runtime diagnostics remain best-effort observability.
-              }
-            }
-          } finally { await handle.close() }
+        for (const event of await readStageChatHistory(workspacePath)) {
+          const key = String(event.payload?.workflowStageNativeKey ?? `${event.sessionId}:${event.id}`)
+          if (follower.seen.has(key)) continue
+          if (this.appendProjectChatEvent({ ...input, workspacePath, type: event.type,
+            text: event.text, ...(event.turnId ? { turnId: event.turnId } : {}),
+            ...(event.payload ? { payload: event.payload } : {}) })) follower.seen.add(key)
         }
       } catch (error) {
         console.warn('[BeeGame] Failed to follow workflow Chat output', {
@@ -1196,6 +1141,7 @@ export class BeeGameSessionManager {
       this.append(record, 'turn.started', text)
       this.append(record, 'user.message', text, {
         type: 'user.message',
+        ...(preparedPrompt.attachments.length ? { attachments: preparedPrompt.attachments } : {}),
         ...(display?.displayText ? { displayText: display.displayText } : {}),
         ...(display?.displayKind ? { displayKind: display.displayKind } : {}),
         ...(display?.confirmedBriefContext
@@ -1213,7 +1159,6 @@ export class BeeGameSessionManager {
       activeTurn = this.runDirectTurn(
         record,
         preparedPrompt.prompt,
-        preparedPrompt.attachmentDirectory,
       ).finally(() => {
         if (record.activeTurn === activeTurn) record.activeTurn = undefined
       })
@@ -1351,19 +1296,6 @@ export class BeeGameSessionManager {
     const record = this.sessions.get(sessionId)
     if (!record?.workflowWorker) return
     await record.activeTurn
-    while (record.session.status === 'running') {
-      let running = false
-      for (const task of record.nativeBackgroundTasks.values()) {
-        if (
-          task.status === 'running' &&
-          readNativeBackgroundTaskUsage(task.outputFile)
-        )
-          task.status = 'completed'
-        if (task.status === 'running') running = true
-      }
-      if (!running) break
-      await new Promise(resolve => setTimeout(resolve, 100))
-    }
   }
 
   async dispose(): Promise<void> {
@@ -1487,7 +1419,6 @@ export class BeeGameSessionManager {
   private async runDirectTurn(
     record: SessionRecord,
     prompt: BeeGamePromptInput,
-    attachmentDirectory?: string,
   ): Promise<void> {
     try {
       const signal = record.abortController?.signal
@@ -1512,22 +1443,17 @@ export class BeeGameSessionManager {
             this.persistRuntimeSnapshot(record)
           },
           onNativeTaskNotification: notification => {
+            const message = notification.message ?? notification.backgroundMessage
+            const startedId = message && getStringField(message, 'task_id')
+            if (message?.subtype === 'task_started' && startedId)
+              record.nativeTaskTurnIds.set(startedId, record.currentTurnId ?? undefined)
             // Foreground messages already go through onMessage. Background
             // notifications must remain visible after that turn has returned.
             if (notification.backgroundMessage) {
               const taskId = getStringField(notification.backgroundMessage, 'task_id')
               this.append(record, 'system.status', String(notification.backgroundMessage.subtype),
                 notification.backgroundMessage as DashboardSDKMessage,
-                record.nativeBackgroundTasks.get(taskId)?.turnId)
-            }
-            const terminal = parseNativeTerminalTaskNotification(notification)
-            if (!terminal) return
-            for (const [taskId, task] of record.nativeBackgroundTasks) {
-              if (
-                taskId === terminal.taskId ||
-                task.toolUseID === terminal.toolUseId
-              )
-                task.status = terminal.status
+                record.nativeTaskTurnIds.get(taskId))
             }
           },
           cwd: record.session.cwd,
@@ -1633,9 +1559,8 @@ export class BeeGameSessionManager {
       if (record.session.status === 'running') {
         record.session.turnStatus = 'idle'
       }
-      if (attachmentDirectory) {
-        await rm(attachmentDirectory, { recursive: true, force: true })
-      }
+      // These files back durable Chat references; a finished turn must not
+      // delete earlier user uploads or tool screenshots from the same store.
       record.currentTurnId = null
       record.currentTurnStartingUsage = undefined
       record.assistantPartialTextByMessage.clear()
@@ -1693,7 +1618,7 @@ export class BeeGameSessionManager {
         ? { confirmedBriefContext: record.confirmedBriefContext }
         : {}),
       signal,
-      onMessage: message => {
+      onMessage: async message => {
         appendProjectAgentDiagnostic(record, message)
         if (isSDKExecutionError(message)) {
           executionError = new Error(getSDKExecutionErrorDetail(message))
@@ -1729,7 +1654,10 @@ export class BeeGameSessionManager {
           if (mapped.type !== 'assistant.thinking')
             this.closeOpenThinkingLifecycle(record, 'visible_output_started')
           if (mapped.type === 'assistant.partial') {
-            this.append(record, mapped.type, mapped.text, message)
+            this.append(record, mapped.type, mapped.text, {
+              ...message, messageId: record.activeAssistantMessageId,
+              assistantBlockId: nativeAssistantBlockId(record, record.activeAssistantMessageId),
+            })
             this.appendAssistantPartialText(record, message)
           } else if (mapped.type === 'assistant.message') {
             const reconciled = this.reconcileAssistantText(
@@ -1738,7 +1666,8 @@ export class BeeGameSessionManager {
               mapped.text,
             )
             if (reconciled)
-              this.append(record, mapped.type, reconciled, message)
+              this.append(record, mapped.type, reconciled, { ...message,
+                assistantBlockId: nativeAssistantBlockId(record, getSDKAssistantMessageId(message) ?? record.activeAssistantMessageId) })
           } else {
             this.append(
               record,
@@ -1751,6 +1680,15 @@ export class BeeGameSessionManager {
         for (const toolEvent of mapSDKMessageToToolEvents(record, message)) {
           if (toolEvent.type === 'tool.started')
             this.closeOpenThinkingLifecycle(record, 'tool_started')
+          const images = extractNativeToolImages(message, String(toolEvent.payload?.toolUseID ?? ''))
+          if (images.length) {
+            try {
+              const attachments = await materializeBeeGameAttachments(record.session.cwd, images)
+              toolEvent.payload = { ...toolEvent.payload, attachments: attachments.map(({ relativePath: _path, ...reference }) => reference) }
+            } catch {
+              toolEvent.payload = { ...toolEvent.payload, attachmentError: 'Tool image could not be stored for Chat.' }
+            }
+          }
           this.append(record, toolEvent.type, toolEvent.text, toolEvent.payload)
         }
       },
@@ -1911,7 +1849,7 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     message: DashboardSDKMessage,
   ): void {
-    const messageKey = record.activeAssistantMessageId ?? record.currentTurnId
+    const messageKey = nativeAssistantBlockId(record, record.activeAssistantMessageId) ?? record.currentTurnId
     if (!messageKey) return
     const text = extractAssistantPartialText(message)
     if (!text) return
@@ -1928,21 +1866,17 @@ export class BeeGameSessionManager {
   ): string | null {
     const messageId =
       getSDKAssistantMessageId(message) ?? record.activeAssistantMessageId
-    if (messageId && record.emittedAssistantMessageIds.has(messageId))
+    const blockId = nativeAssistantBlockId(record, messageId)
+    if (blockId && record.emittedAssistantMessageIds.has(blockId))
       return null
 
-    const messageKey = messageId ?? record.currentTurnId
+    const messageKey = blockId ?? record.currentTurnId
     const partialText = messageKey
       ? record.assistantPartialTextByMessage.get(messageKey)
       : undefined
     if (messageKey) record.assistantPartialTextByMessage.delete(messageKey)
-    if (messageId) record.emittedAssistantMessageIds.add(messageId)
-    const normalizedPartial = partialText?.trim()
-    if (!normalizedPartial) return finalText
-    if (messageId) return normalizedPartial
-    return normalizedPartial.length > finalText.trim().length + 24
-      ? normalizedPartial
-      : finalText
+    if (blockId) record.emittedAssistantMessageIds.add(blockId)
+    return finalText || partialText || null
   }
 
   resolvePermission(
@@ -1999,7 +1933,7 @@ export class BeeGameSessionManager {
         autoDenied: true,
         reason: 'workflow_tool_not_allowed',
       })
-      return Promise.resolve({ behavior: 'deny', scope: 'once', message: toolRestriction })
+      return Promise.resolve({ behavior: 'deny', scope: 'once', source: 'policy', message: toolRestriction })
     }
     const workflowMutation = workflowFileMutationAuthority(record, request)
     if (workflowMutation) {
@@ -2020,6 +1954,7 @@ export class BeeGameSessionManager {
       )
       return Promise.resolve({
         behavior: workflowMutation.behavior,
+        source: 'policy',
         scope: 'once',
         ...(workflowMutation.message
           ? { message: workflowMutation.message }
@@ -2061,6 +1996,7 @@ export class BeeGameSessionManager {
       )
       return Promise.resolve({
         behavior: projectFileAccess.behavior,
+        source: 'policy',
         scope: 'once',
         ...(projectFileAccess.message
           ? { message: projectFileAccess.message }
@@ -2128,7 +2064,8 @@ export class BeeGameSessionManager {
     turnId?: string,
   ): BeeGameEvent {
     const effectiveTurnId = turnId || record.currentTurnId || undefined
-    const createdAt = new Date()
+    const sourceTime = getDashboardPayloadString(payload, 'occurredAt')
+    const createdAt = sourceTime && Number.isFinite(Date.parse(sourceTime)) ? new Date(sourceTime) : new Date()
     let enrich = this.subagentChat.get(record)
     if (!enrich) {
       enrich = createNativeSubagentChatEnricher()
@@ -2139,7 +2076,7 @@ export class BeeGameSessionManager {
       const thinkingBlockId = getDashboardPayloadString(payload, 'thinkingBlockId') || 'default'
       const thinkingKey = `${effectiveTurnId ?? record.session.id}:${thinkingBlockId}`
       const status = getDashboardPayloadString(payload, 'status')
-      let thinkingStartedAt = record.thinkingBlockStartedAt.get(thinkingKey)
+      let thinkingStartedAt = getDashboardPayloadString(payload, 'thinkingStartedAt') || record.thinkingBlockStartedAt.get(thinkingKey)
       if (!thinkingStartedAt && status !== 'ended') {
         thinkingStartedAt = createdAt.toISOString()
         record.thinkingBlockStartedAt.set(thinkingKey, thinkingStartedAt)
@@ -2241,6 +2178,7 @@ export class BeeGameSessionManager {
             : {}),
           workflowSourceSessionId: event.sessionId,
           workflowSourceEventId: event.id,
+          ...(event.turnId ? { workflowSourceTurnId: event.turnId } : {}),
         })
       }
     }
@@ -2341,6 +2279,28 @@ export async function deleteSessionArtifactsFromTranscript(
   return deleted
 }
 
+type DiskTranscriptEvent = Omit<BeeGameEvent, 'createdAt'> & { createdAt: string }
+const transcriptReaders = new Map<string, {
+  reader: ChatJsonlReader<DiskTranscriptEvent>
+  events: DiskTranscriptEvent[]
+  pending?: Promise<DiskTranscriptEvent[]>
+}>()
+
+function readTranscriptIncrementally(path: string): Promise<DiskTranscriptEvent[]> {
+  let state = transcriptReaders.get(path)
+  if (!state) {
+    state = { reader: new ChatJsonlReader(), events: [] }
+    transcriptReaders.set(path, state)
+  }
+  if (state.pending) return state.pending
+  const current = state
+  current.pending = current.reader.read(path).then(({ rows, reset }) => {
+    if (reset || rows.length) current.events = [...(reset ? [] : current.events), ...rows]
+    return current.events
+  }).finally(() => { current.pending = undefined })
+  return current.pending
+}
+
 export async function readSessionTranscriptFromDisk(
   sessionId: string,
   cwd: string,
@@ -2356,25 +2316,7 @@ export async function readSessionTranscriptFromDisk(
     createdAt: string
   }>
 > {
-  const transcriptPath = await resolveReadableTranscriptPath(sessionId, cwd)
-  const raw = await readFile(transcriptPath, 'utf8')
-  const events = raw
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-    .map(
-      line =>
-        JSON.parse(line) as {
-          sessionId?: string
-          id: number
-          type: BeeGameEventType
-          text: string
-          turnId?: string
-          payload?: DashboardSDKMessage
-          createdAt: string
-        },
-    )
-  return events
+  return readTranscriptIncrementally(getSessionTranscriptPath(sessionId, cwd))
 }
 
 export type RecoveredProjectSessionMetadata = {
@@ -2516,11 +2458,11 @@ export async function readWorkflowWorkerChatHistoryFromDisk(
     if (!fileName.endsWith('.jsonl')) continue
     let events: BeeGameEvent[]
     try {
-      events = parseTranscriptEvents(
-        await readFile(join(transcriptDir, fileName), 'utf8'),
-      )
-    } catch {
-      continue
+      events = (await readTranscriptIncrementally(join(transcriptDir, fileName)))
+        .map(event => ({ ...event, createdAt: new Date(event.createdAt) }))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+      throw error
     }
     const sourceSessionId = events.find(event => event.sessionId)?.sessionId
     if (!sourceSessionId || sourceSessionId === mainSessionId) continue
@@ -2559,38 +2501,17 @@ export async function readWorkflowWorkerChatHistoryFromDisk(
   }
 
   const stageNativeKeys = new Set(mainEvents.flatMap(event => {
+    // Old projections discarded block boundaries. Rebuild those scopes from
+    // native evidence; the timeline excludes their old display-only copies.
+    if (event.payload?.chatSchemaVersion !== 2) return []
     const key = getDashboardPayloadString(event.payload, 'workflowStageNativeKey')
     return key ? [key] : []
   }))
-  const workflowRoot = join(workspacePath, '.beegame', 'workflow')
-  const nativeLogs = await listStageNativeEventLogs(workflowRoot)
-  for (const logPath of nativeLogs) {
-    const stage = stageFromNativeLogPath(logPath)
-    if (!stage) continue
-    let rows: string[]
-    try { rows = (await readFile(logPath, 'utf8')).split('\n').filter(Boolean) }
-    catch { continue }
-    let createdAt = new Date(0)
-    const contentLengths = new Map<string, number>()
-    const projector = createStageChatProjector({ stage, sink: event => {
-      const key = getDashboardPayloadString(event.payload, 'workflowStageNativeKey')
-      if (key && stageNativeKeys.has(key)) return
-      if (key) stageNativeKeys.add(key)
-      recovered.push({ id: recovered.length + 1, sessionId: `workflow-stage:${stage}`,
-        type: event.type, text: event.text, ...(event.turnId ? { turnId: event.turnId } : {}),
-        ...(event.payload ? { payload: event.payload } : {}), createdAt })
-    } })
-    for (const row of rows) {
-      try {
-        const entry = JSON.parse(row) as { at?: unknown; event?: unknown; data?: unknown }
-        const message = stageChatMessageFromTrace(entry, contentLengths)
-        if (!message) continue
-        createdAt = typeof entry.at === 'string' ? new Date(entry.at) : new Date(0)
-        await projector(message)
-      } catch {
-        // A damaged diagnostic line must not hide the rest of Chat history.
-      }
-    }
+  for (const event of await readStageChatHistory(workspacePath)) {
+    const key = getDashboardPayloadString(event.payload, 'workflowStageNativeKey')
+    if (key && stageNativeKeys.has(key)) continue
+    if (key) stageNativeKeys.add(key)
+    recovered.push(event)
   }
   return recovered.sort((left, right) => {
     const time = left.createdAt.getTime() - right.createdAt.getTime()
@@ -2612,6 +2533,70 @@ function workflowStageForWorkerType(workerType?: string): string | undefined {
   return workerType ? stages[workerType] : undefined
 }
 
+type StageChatRow = { at?: unknown; event?: unknown; data?: unknown }
+type StageChatFile = {
+  reader: ChatJsonlReader<StageChatRow>
+  events: BeeGameEvent[]
+  projector: ReturnType<typeof createStageChatProjector>
+  createdAt: Date
+}
+const stageChatReaders = new Map<string, {
+  files: Map<string, StageChatFile>
+  pending?: Promise<BeeGameEvent[]>
+}>()
+
+/** Shared by the live follower and reconnect/history. Only newly appended
+ * records are projected, including when several browser tabs are connected. */
+export function readStageChatHistory(workspacePath: string): Promise<BeeGameEvent[]> {
+  const root = resolve(workspacePath)
+  let state = stageChatReaders.get(root)
+  if (!state) { state = { files: new Map() }; stageChatReaders.set(root, state) }
+  if (state.pending) return state.pending
+  const current = state
+  const makeFile = (stage: NonNullable<ReturnType<typeof stageFromNativeLogPath>>): StageChatFile => {
+    const file: StageChatFile = { reader: new ChatJsonlReader(), events: [], createdAt: new Date(0),
+      projector: createStageChatProjector({ stage, sink: event => {
+        file.events.push({ ...event, id: file.events.length + 1, sessionId: `workflow-stage:${stage}`,
+          createdAt: typeof event.payload?.occurredAt === 'string' ? new Date(event.payload.occurredAt) : file.createdAt })
+      } }) }
+    return file
+  }
+  current.pending = (async () => {
+    const paths = await listStageNativeEventLogs(join(root, '.beegame', 'workflow'))
+    const events: BeeGameEvent[] = []
+    for (const path of paths) {
+      const stage = stageFromNativeLogPath(path)
+      if (!stage) continue
+      let file = current.files.get(path)
+      if (!file) { file = makeFile(stage); current.files.set(path, file) }
+      try {
+        const batch = await file.reader.read(path)
+        if (batch.reset) {
+          const reader = file.reader
+          file = makeFile(stage)
+          file.reader = reader
+          current.files.set(path, file)
+        }
+        for (const row of batch.rows) {
+          const message = stageChatMessageFromTrace(row)
+          if (!message) continue
+          file.createdAt = typeof row.at === 'string' ? new Date(row.at) : new Date(0)
+          await file.projector(message)
+        }
+        events.push(...file.events)
+      } catch (error) {
+        // Retrying after projection/read failure must replay the file, not
+        // advance past records the UI never received.
+        current.files.delete(path)
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+    }
+    for (const path of current.files.keys()) if (!paths.includes(path)) current.files.delete(path)
+    return events
+  })().finally(() => { current.pending = undefined })
+  return current.pending
+}
+
 function stageFromNativeLogPath(path: string): 'author' | 'content' | 'reviewer' | 'revision' | undefined {
   const normalized = path.split('\\').join('/')
   if (normalized.includes('/foundation-authoring/')) return 'author'
@@ -2623,41 +2608,39 @@ function stageFromNativeLogPath(path: string): 'author' | 'content' | 'reviewer'
 
 /** Converts persisted, redacted trace rows into the native shape understood by
  * the stage Chat projector. */
-function stageChatMessageFromTrace(
-  entry: { event?: unknown; data?: unknown },
-  contentLengths = new Map<string, number>(),
+export function stageChatMessageFromTrace(
+  entry: { at?: unknown; event?: unknown; data?: unknown },
 ): Record<string, unknown> | undefined {
-  if ((entry.event === 'response.message' || entry.event === 'native.task_lifecycle') && entry.data && typeof entry.data === 'object')
-    return entry.data as Record<string, unknown>
-  if (entry.event === 'response.query_end' && entry.data && typeof entry.data === 'object') {
-    const data = entry.data as Record<string, unknown>
-    return { type: 'thinking_end', queryId: data.queryId, parentToolUseId: data.parentToolUseId, agentId: data.agentId }
-  }
   if (!entry.data || typeof entry.data !== 'object') return undefined
   const data = entry.data as Record<string, unknown>
+  const source = { queryId: data.queryId, messageId: data.messageId, parentToolUseId: data.parentToolUseId,
+    agentId: data.agentId, occurredAt: data.occurredAt ?? entry.at, startedAt: data.startedAt }
+  if (entry.event === 'response.message' || entry.event === 'native.task_lifecycle')
+    return { ...source, ...data }
+  if (entry.event === 'response.query_end') return { ...source, type: 'thinking_end', status: data.status }
+  if (entry.event === 'response.content_start') return { ...source, type: 'stream_event', event: {
+    type: 'content_block_start', index: data.index,
+    content_block: { type: data.type, name: data.tool, id: data.toolId, input: {} },
+  } }
+  if (entry.event === 'response.content_end' || entry.event === 'response.message_stop')
+    return { ...source, type: 'stream_event', event: {
+      type: entry.event === 'response.content_end' ? 'content_block_stop' : 'message_stop', index: data.index,
+    } }
   if (entry.event === 'response.content_snapshot') {
-    // The log intentionally stores only a redacted cumulative checkpoint.
-    // Derive the display delta locally, so logs remain safe and replayable.
-    if (data.type !== 'text' || typeof data.content !== 'string' || !data.content) return undefined
-    const key = `${data.queryId ?? 'unknown'}:${data.index ?? 0}`
-    const priorLength = contentLengths.get(key) ?? 0
-    const delta = data.content.length >= priorLength ? data.content.slice(priorLength) : data.content
-    contentLengths.set(key, data.content.length)
-    if (!delta) return undefined
-    return { type: 'stream_event', queryId: data.queryId, parentToolUseId: data.parentToolUseId, agentId: data.agentId,
-      ...(typeof data.queryId === 'string' && typeof data.index === 'number' && typeof data.receivedBytes === 'number'
-        ? { workflowStageNativeKey: `text:${data.queryId}:${data.index}:${data.receivedBytes}` }
-        : {}),
-      event: { type: 'content_block_delta', index: data.index, delta: { type: 'text_delta', text: delta } } }
+    if (!['text', 'thinking'].includes(String(data.type)) || typeof data.content !== 'string' || !data.content) return undefined
+    // Redaction can change earlier characters. A checkpoint is a replacement,
+    // not a delta inferred from string length (nor scoped merely by query).
+    return { ...source, type: 'stream_event', contentMode: 'snapshot',
+      workflowStageNativeKey: `${data.type}:${data.queryId}:${data.messageId}:${data.index}:${data.receivedBytes}`,
+      event: { type: 'content_block_delta', index: data.index, delta: data.type === 'thinking'
+        ? { type: 'thinking_delta', thinking: data.content } : { type: 'text_delta', text: data.content } } }
   }
   if (entry.event !== 'response.reasoning_snapshot' || typeof data.content !== 'string' || !data.content) return undefined
-  return { type: 'stream_event',
-    queryId: data.queryId,
-    parentToolUseId: data.parentToolUseId, agentId: data.agentId,
+  return { ...source, type: 'stream_event',
     ...(typeof data.queryId === 'string' && typeof data.receivedBytes === 'number'
       ? { workflowStageNativeKey: `thinking:${data.queryId}:${data.receivedBytes}` }
       : {}),
-    event: { type: 'content_block_delta', delta: { type: 'thinking_delta', thinking: data.content } } }
+    event: { type: 'content_block_delta', index: -1, delta: { type: 'thinking_delta', thinking: data.content } } }
 }
 
 async function listStageNativeEventLogs(root: string): Promise<string[]> {
@@ -2669,20 +2652,15 @@ async function listStageNativeEventLogs(root: string): Promise<string[]> {
     for (const entry of entries) {
       const path = join(directory, entry.name)
       if (entry.isDirectory()) await visit(path)
-      else if (entry.isFile() && entry.name.endsWith('native-events.jsonl')) found.push(path)
+      else if (entry.isFile() && (entry.name.endsWith('native-events.jsonl') || entry.name.endsWith('chat-events.jsonl'))) found.push(path)
     }
   }
   await visit(root)
-  return found.sort()
-}
-
-async function resolveReadableTranscriptPath(
-  sessionId: string,
-  cwd: string,
-): Promise<string> {
-  const primary = getSessionTranscriptPath(sessionId, cwd)
-  await readFile(primary, 'utf8')
-  return primary
+  const paths = new Set(found)
+  // A new run has exactly one content source. Diagnostics are a read-only
+  // fallback for historical runs that predate the dedicated Chat file.
+  return found.filter(path => !path.endsWith('native-events.jsonl') ||
+    !paths.has(path.slice(0, -'native-events.jsonl'.length) + 'chat-events.jsonl')).sort()
 }
 
 function readExistingTranscriptForResume(
@@ -2805,18 +2783,18 @@ function recoverConfirmedBriefContext(
   return undefined
 }
 
-async function prepareBeeGamePromptInput(input: {
+export async function prepareBeeGamePromptInput(input: {
   text: string
   workspace: string
   attachments?: BeeGameAttachment[]
   displayKind?: string
-}): Promise<{ prompt: BeeGamePromptInput; attachmentDirectory?: string }> {
+}): Promise<{ prompt: BeeGamePromptInput;
+  attachments: Omit<MaterializedBeeGameFileAttachment, 'relativePath'>[] }> {
   const images = (input.attachments ?? []).filter(isBeeGameImageAttachment)
-  const files = (input.attachments ?? []).filter(isBeeGameFileAttachment)
-  const materializedFiles =
-    files.length > 0
-      ? await materializeBeeGameFileAttachments(input.workspace, files)
-      : []
+  const materialized = await materializeBeeGameAttachments(input.workspace,
+    (input.attachments ?? []).filter(item => isBeeGameImageAttachment(item) || isBeeGameFileAttachment(item)))
+  const materializedFiles = materialized.filter(item => item.type === 'file')
+  const attachments = materialized.map(({ relativePath: _path, ...reference }) => reference)
   const documentContext =
     materializedFiles.length > 0
       ? `\n\nAttached documents:\n${materializedFiles.map(file => `- ${file.filename} (${file.mediaType}): ${file.relativePath}`).join('\n')}`
@@ -2830,13 +2808,12 @@ async function prepareBeeGamePromptInput(input: {
   const promptText = userInput
   if (images.length === 0) {
     return {
+      attachments,
       prompt: promptText,
-      ...(materializedFiles.length > 0
-        ? { attachmentDirectory: join(input.workspace, '.beegame-attachments') }
-        : {}),
     }
   }
   return {
+    attachments,
     prompt: [
       { type: 'text', text: promptText || 'Analyze the attached image.' },
       ...images.map(image => ({
@@ -2848,57 +2825,76 @@ async function prepareBeeGamePromptInput(input: {
         },
       })),
     ],
-    ...(materializedFiles.length > 0
-      ? { attachmentDirectory: join(input.workspace, '.beegame-attachments') }
-      : {}),
   }
 }
 
-export async function materializeBeeGameFileAttachments(
+export function extractNativeToolImages(message: DashboardSDKMessage, toolUseId: string): BeeGameImageAttachment[] {
+  const content = getObjectField(message, 'message')?.content ?? message.content
+  if (!Array.isArray(content)) return []
+  return content.flatMap(block => {
+    if (!block || !['tool_result', 'mcp_tool_result'].includes(block.type) || block.tool_use_id !== toolUseId || !Array.isArray(block.content)) return []
+    return block.content.flatMap((part: any): BeeGameImageAttachment[] => {
+      const source = part?.source
+      if (part?.type !== 'image' || source?.type !== 'base64' ||
+        !['image/png', 'image/jpeg', 'image/webp'].includes(source.media_type) || typeof source.data !== 'string') return []
+      return [{ type: 'image', mediaType: source.media_type, data: source.data }]
+    })
+  })
+}
+
+export async function materializeBeeGameAttachments(
   workspace: string,
-  attachments: BeeGameFileAttachment[],
+  attachments: BeeGameAttachment[],
 ): Promise<MaterializedBeeGameFileAttachment[]> {
   if (attachments.length === 0) return []
   const attachmentDirectory = join(workspace, '.beegame-attachments')
   await mkdir(attachmentDirectory, { recursive: true })
+  const writtenPaths: string[] = []
+  const results: MaterializedBeeGameFileAttachment[] = []
 
   try {
-    return await Promise.all(
-      attachments.map(async attachment => {
-        const filename = basename(attachment.filename)
-        const extension = filename
-          .slice(filename.lastIndexOf('.'))
-          .toLowerCase()
-        const allowedTypes = DOCUMENT_ATTACHMENT_TYPES[extension]
-        if (
-          !filename ||
-          !allowedTypes ||
-          !allowedTypes.includes(attachment.mediaType)
-        ) {
-          throw new Error(
+    for (const attachment of attachments) {
+      const imageExtension = attachment.type === 'image'
+        ? { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp' }[attachment.mediaType] : undefined
+      const filename = basename(attachment.filename || `image${imageExtension || ''}`)
+      const extension = filename
+        .slice(filename.lastIndexOf('.'))
+        .toLowerCase()
+      const allowedTypes = attachment.type === 'image'
+        ? IMAGE_ATTACHMENT_TYPES[imageExtension || ''] : DOCUMENT_ATTACHMENT_TYPES[extension]
+      if (
+        !filename ||
+        !allowedTypes ||
+        !allowedTypes.includes(attachment.mediaType)
+      ) {
+        throw new Error(
             `Unsupported document attachment: ${attachment.filename}`,
-          )
-        }
-        const data = Buffer.from(attachment.data, 'base64')
-        if (data.length === 0 || data.length > MAX_BEEGAME_ATTACHMENT_BYTES) {
-          throw new Error(
-            `Invalid document attachment size: ${attachment.filename}`,
-          )
-        }
-        const safeFilename =
-          filename.replace(/[^a-zA-Z0-9._-]+/g, '_') || 'attachment'
-        const storedFilename = `${randomUUID()}-${safeFilename}`
-        const storedPath = join(attachmentDirectory, storedFilename)
-        await writeFile(storedPath, data, { flag: 'wx' })
-        return {
-          relativePath: relative(workspace, storedPath),
-          filename,
-          mediaType: attachment.mediaType,
-        }
-      }),
-    )
+        )
+      }
+      const data = Buffer.from(attachment.data, 'base64')
+      if (data.length === 0 || data.length > MAX_BEEGAME_ATTACHMENT_BYTES) {
+        throw new Error(
+          `Invalid document attachment size: ${attachment.filename}`,
+        )
+      }
+      const safeFilename =
+        filename.replace(/[^a-zA-Z0-9._-]+/g, '_') || 'attachment'
+      const storedFilename = `${randomUUID()}-${attachment.type === 'image' ? `image${imageExtension}` : safeFilename}`
+      const storedPath = join(attachmentDirectory, storedFilename)
+      await writeFile(storedPath, data, { flag: 'wx' })
+      writtenPaths.push(storedPath)
+      results.push({
+        type: attachment.type,
+        storageId: storedFilename,
+        relativePath: relative(workspace, storedPath),
+        filename,
+        mediaType: attachment.mediaType,
+      })
+    }
+    return results
   } catch (error) {
-    await rm(attachmentDirectory, { recursive: true, force: true })
+    // Only roll back this upload, never previously persisted attachments.
+    await Promise.all(writtenPaths.map(path => rm(path, { force: true })))
     throw error
   }
 }
@@ -4146,7 +4142,8 @@ function workflowFileMutationAuthority(
       reason: 'workflow_protected_path',
       message: `Workflow workers may not mutate protected project authority: ${protectedPath}.`,
     }
-  const allowed = (record.workflowAllowedPaths ?? []).some(entry => {
+  const scratchPath = nativeSessionTemporaryPath(workspaceRoot, record.session.id)
+  const allowed = pathMatchesConfiguredScope(workspaceRoot, targetPath, scratchPath) || (record.workflowAllowedPaths ?? []).some(entry => {
     return pathMatchesConfiguredScope(record.session.cwd, targetPath, entry)
   })
   return allowed
@@ -4575,10 +4572,18 @@ function mapStreamEvent(
   payload?: DashboardSDKMessage
 } | null {
   const streamMessageId = extractStreamMessageId(message)
-  if (streamMessageId) record.activeAssistantMessageId = streamMessageId
+  if (streamMessageId) {
+    record.activeAssistantMessageId = streamMessageId
+    record.activeAssistantTextBlockIndex = undefined
+  }
+  const event = getObjectField(message, 'event') ?? message
+  if (event.type === 'content_block_start' && getObjectField(event, 'content_block')?.type === 'text')
+    record.activeAssistantTextBlockIndex = getNumberField(event, 'index')
+  if (event.type === 'content_block_delta' && getObjectField(event, 'delta')?.type === 'text_delta')
+    record.activeAssistantTextBlockIndex = getNumberField(event, 'index') ?? record.activeAssistantTextBlockIndex
 
   const textDelta = extractStreamTextDelta(message)
-  if (textDelta.trim()) return mapTextEvent('assistant.partial', textDelta)
+  if (textDelta) return { type: 'assistant.partial', text: textDelta }
 
   const thinking = extractStreamThinkingStatus(record, message)
   if (!thinking) return null
@@ -4654,18 +4659,6 @@ function mapSDKMessageToToolEvents(
         toolName === 'Agent'
           ? extractNativeAgentResult(block.content)
           : undefined
-      if (toolName === 'Agent') {
-        const launch = parseNativeBackgroundTaskLaunch(output)
-        if (launch) {
-          const existing = record.nativeBackgroundTasks.get(launch.taskId)
-          record.nativeBackgroundTasks.set(launch.taskId, {
-            toolUseID,
-            outputFile: launch.outputFile,
-            turnId: record.currentTurnId ?? undefined,
-            status: existing?.status ?? 'running',
-          })
-        }
-      }
       const nativeTaskResult =
         toolName === 'TaskOutput'
           ? extractNativeCompletedTaskResult(message)
@@ -4926,6 +4919,11 @@ function getSDKAssistantMessageId(
 ): string | undefined {
   if (message.type !== 'assistant') return undefined
   return getStringField(getObjectField(message, 'message'), 'id') || undefined
+}
+
+function nativeAssistantBlockId(record: SessionRecord, messageId?: string | null): string | undefined {
+  return messageId && record.activeAssistantTextBlockIndex !== undefined
+    ? `${record.session.id}:${messageId}:text:${record.activeAssistantTextBlockIndex}` : undefined
 }
 
 function extractAssistantPartialText(message: DashboardSDKMessage): string {

@@ -769,6 +769,11 @@ async function initialize(
       const settings = getSettings_DEPRECATED()
       const runtimeConfig = convertToSandboxRuntimeConfig(settings)
 
+      // sandbox-runtime calls this CLAUDE_TMPDIR, while native tools use
+      // CLAUDE_CODE_TMPDIR/getClaudeTempDir. Without this mapping it overwrites
+      // Bash's TMPDIR with /tmp/claude, outside the configured read/write scope.
+      process.env.CLAUDE_TMPDIR = getClaudeTempDir()
+
       // Log monitor is automatically enabled for macOS
       await BaseSandboxManager.initialize(runtimeConfig, wrappedCallback)
 

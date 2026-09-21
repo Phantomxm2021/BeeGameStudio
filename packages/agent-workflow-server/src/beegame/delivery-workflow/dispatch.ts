@@ -464,6 +464,7 @@ export function createDeliveryDispatcher(options: {
                 throw new Error('worker terminal result does not match dispatch contract');
             if (request && result.workerType === 'implementation-worker')
                 await persistImplementationEvidence({
+                    dispatchId,
                     workspacePath: request.workspacePath,
                     evidencePath: result.evidencePath,
                     taskId: result.taskId,

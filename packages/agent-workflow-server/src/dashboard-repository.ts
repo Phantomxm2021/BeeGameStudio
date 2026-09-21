@@ -6,6 +6,8 @@ import {
   type ModelProviderKind,
 } from '@bee-game-studio/agent-workflow'
 import { realpath } from 'node:fs/promises'
+import { loadLocalImageSettings, saveLocalImageSettings, selectImageConfig, updateImageSettings } from './image-generation/config-store'
+import type { ImageProviderKind } from './image-generation/config'
 import { resolve } from 'node:path'
 import { safeErrorFacts } from './security/safe-error-facts'
 import {
@@ -66,6 +68,7 @@ import type { SupabaseRuntimeEnvClient } from './supabase-runtime-env-client'
 import {
   loadWebToolsConfig,
   mapWebToolsConfigToRuntimeEnv,
+  syncWebToolsToRuntimeConfig,
   saveWebToolsConfig,
   toPublicWebToolsConfig,
   type WebToolsConfig,
@@ -504,6 +507,21 @@ export class DashboardRepository {
       : this.loadLocalPlatformRuntimeSettings(request)
   }
 
+  async loadImageGenerationConfig(request: Request, provider?: ImageProviderKind) {
+    const supabase = this.supabaseForRequest(request)
+    const settings = supabase ? await supabase.loadPlatformImageSettings() : loadLocalImageSettings(this.options.dashboardDataRoot)
+    return selectImageConfig(settings, provider)
+  }
+
+  async saveImageGenerationConfig(request: Request, input: unknown) {
+    const supabase = this.supabaseForRequest(request)
+    const previous = supabase ? await supabase.loadPlatformImageSettings() : loadLocalImageSettings(this.options.dashboardDataRoot)
+    const settings = updateImageSettings(previous, input)
+    if (supabase) await supabase.savePlatformImageSettings(settings)
+    else saveLocalImageSettings(this.options.dashboardDataRoot, settings)
+    return selectImageConfig(settings)
+  }
+
   async saveRuntimeSettings(
     request: Request,
     user: BeeGameUserContext,
@@ -786,6 +804,13 @@ export class DashboardRepository {
           })
         : {}
       this.syncRuntimeSettingsFromRuntimeEnv(env, dataDir)
+      const webTools = await this.supabaseForAuthToken(authToken).loadWebTools(userId).catch(error => {
+        console.error('[BeeGame runtime dependency]', JSON.stringify({
+          timestamp: new Date().toISOString(), step: 'web_tools_config', ...safeErrorFacts(error),
+        }))
+        throw error
+      })
+      syncWebToolsToRuntimeConfig(webTools, { dataDir })
       await this.materializeRemoteUserSkillsSafely(userId, dataDir)
       // Supabase owns logical runtime configuration (provider credentials and
       // platform feature flags). The runtime host owns physical isolation. Do
@@ -794,6 +819,7 @@ export class DashboardRepository {
       return {
         ...env,
         ...modelEnv,
+        ...mapWebToolsConfigToRuntimeEnv(webTools),
         BEEGAME_CONFIG_DIR: hostIsolationEnv.BEEGAME_CONFIG_DIR,
         NPM_CONFIG_CACHE: hostIsolationEnv.NPM_CONFIG_CACHE,
         npm_config_cache: hostIsolationEnv.npm_config_cache,
@@ -802,9 +828,12 @@ export class DashboardRepository {
       }
     }
     if (userId) await this.materializeRemoteUserSkillsSafely(userId, dataDir)
+    const webTools = loadWebToolsConfig({ dataDir })
+    const platformEnv = this.mapLocalPlatformRuntimeSettingsToEnv(dataDir)
+    syncWebToolsToRuntimeConfig(webTools, { dataDir })
     return {
-      ...mapWebToolsConfigToRuntimeEnv(loadWebToolsConfig({ dataDir })),
-      ...this.mapLocalPlatformRuntimeSettingsToEnv(dataDir),
+      ...mapWebToolsConfigToRuntimeEnv(webTools),
+      ...platformEnv,
     }
   }
 

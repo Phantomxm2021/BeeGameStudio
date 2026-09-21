@@ -343,7 +343,7 @@ BeeGame 只依据结构化终态、canonical artifacts、revision 和真实工�
 ## 10. 当前权威专项设计
 
 - [Document Reviewer 单轨收敛设计](./beegame-document-reviewer-convergence-plan.md)
-- [Resource Production 单轨设计](./beegame-resource-production-plan.md)
+- [资源获取现行方案](./resource-sourcing-practice-2026-09-20.md)
 - [Resource 与内容描述合同](./beegame-resource-content-contract.md)
 - [Project lifecycle](./beegame-project-lifecycle.md)
 

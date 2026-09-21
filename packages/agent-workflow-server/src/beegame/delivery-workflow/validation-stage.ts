@@ -1,8 +1,9 @@
 import { transitionDeliveryRun } from './transition'
 import { isWorkflowEvidenceFile, resolveWorkflowEvidencePath } from './evidence'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { DeliveryRun, EvidenceRef } from './types'
+import { runtimeEvidenceIsCurrent, type RuntimeAcceptance } from './runtime-acceptance'
 
 function currentImplementationRevision(run: DeliveryRun): string {
   return run.revision.implementation ?? run.revision.workspace
@@ -61,6 +62,18 @@ export async function confirmAcceptanceFromImplementation(input: {
     path => !isWorkflowEvidenceFile(input.workspacePath, path),
   ))
     throw new Error('acceptance requires implementation evidence in the workspace')
+  const runtimeReports: RuntimeAcceptance[] = []
+  for (const path of taskEvidence) {
+    const recorded = JSON.parse(await readFile(resolveWorkflowEvidencePath(input.workspacePath, path)!, 'utf8'))
+    if (recorded.revision !== revision) throw new Error('implementation evidence contents reference a different revision')
+    if (recorded.runtimeAcceptance) runtimeReports.push(recorded.runtimeAcceptance)
+  }
+
+  let status: EvidenceRef['status'] = 'ready'
+  if (runtimeReports.some(report => report.status === 'failed')) status = 'failed'
+  else if (runtimeReports.some(report => report.status === 'blocked')) status = 'blocked'
+  else if (runtimeReports.length === taskEvidence.length)
+    status = await runtimeEvidenceIsCurrent(input.workspacePath, runtimeReports) ? 'passed' : 'blocked'
 
   const evidencePath = `.beegame/workflow/evidence/acceptance-host-${revision}.json`
   const target = resolveWorkflowEvidencePath(input.workspacePath, evidencePath)
@@ -69,16 +82,27 @@ export async function confirmAcceptanceFromImplementation(input: {
   await writeFile(target, `${JSON.stringify({
     version: 1,
     kind: 'host-delivery-confirmation',
+    scope: status === 'ready' ? 'artifact-handoff' : 'agent-runtime-verification',
+    runtimeVerification: status === 'ready' ? 'not-assessed-by-host' : 'agent-reported',
+    status,
+    runtimeReports,
     revision,
     implementationEvidence: taskEvidence,
-    note: 'The implementation Agent performed the runtime inspection. This receipt confirms artifact identity and does not replace its observations.',
+    note: status === 'ready'
+      ? 'This receipt confirms artifact handoff only; runtime acceptance has not been established.'
+      : 'The Agent owns this runtime conclusion. The host binds its saved observations to the implementation revision and verifies evidence files, not their semantic quality.',
   }, null, 2)}\n`, 'utf8')
   const evidence: EvidenceRef = {
     path: evidencePath,
     kind: 'acceptance',
     revision,
-    status: 'passed',
+    status,
     observedAt: new Date().toISOString(),
   }
-  return transitionDeliveryRun(input.run, { type: 'acceptance_passed', evidence })
+  const next = transitionDeliveryRun(input.run, {
+    type: status === 'ready' ? 'artifact_handoff_ready' : status === 'passed' ? 'acceptance_passed' : status === 'failed' ? 'acceptance_failed' : 'acceptance_blocked', evidence,
+  })
+  return status === 'failed' || status === 'blocked'
+    ? { ...next, blockedReason: runtimeReports.filter(report => report.status !== 'passed').map(report => report.summary).join('; ') || 'Runtime evidence is missing or changed after verification.' }
+    : next
 }

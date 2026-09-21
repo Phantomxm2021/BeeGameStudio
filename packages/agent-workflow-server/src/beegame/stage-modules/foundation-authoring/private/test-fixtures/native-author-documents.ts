@@ -18,7 +18,7 @@ for await (const chunk of Bun.stdin.stream()) {
     const message = JSON.parse(line)
     if (message.type !== 'user') continue
     const prompt = message.message.content.map((block: { text: string }) => block.text).join('')
-    if (prompt.includes('mutually consistent set of eight game design documents')) {
+    if (prompt.includes('requirements.md') && Object.keys(documents).every(path => prompt.includes(path))) {
       for (const [path, content] of Object.entries(documents)) await writeFile(join(process.cwd(), path), content)
       output({ type: 'result', session_id: sessionId, subtype: 'success', is_error: false,
         structured_output: { status: 'completed', summary: 'Offline autonomous bundle completed.' },

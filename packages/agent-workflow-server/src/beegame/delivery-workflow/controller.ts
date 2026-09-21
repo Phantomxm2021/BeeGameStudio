@@ -1,4 +1,9 @@
 import { auditAssetContract } from '../asset-contract-audit'
+import {
+  CONTENT_AUTHORING_CONTRACT_PATH,
+  GAME_CONTENT_INSPECTION_COMMAND,
+  GAME_CONTENT_VALIDATION_COMMAND,
+} from '../scene-ui-content-authoring'
 import { foundationPublicDigest } from '../foundation-public-result'
 import { readBeeGameAssetManifestSync } from '../asset-contracts'
 import {
@@ -34,7 +39,9 @@ import { createFoundationAuthoringLink } from './foundation-authoring-link'
 import { createFoundationReviewLink } from './foundation-review-link'
 import {
 completeImplementationTask,
+bindImplementationEvidence,
 implementationCompletionIssue,
+refreshImplementationArtifacts,
 startNextImplementationTask,
 } from './implementation-stage'
 import {
@@ -163,6 +170,7 @@ export function createDeliveryWorkflowController(input: {
   dispatcher = {
     ...transportDispatcher,
     async dispatch(request) {
+      assertNoRetiredFoundationWorker(request)
       const run = await store.load()
       let contentContract: Record<string, unknown> = {}
       if (run && run.runId === request.runId && request.workerType === 'implementation-worker') {
@@ -171,19 +179,32 @@ export function createDeliveryWorkflowController(input: {
         const assetManifestRevision = run.revision.resource
         if (!assetManifestRevision)
           throw new Error('Scene/UI consumer requires an accepted Asset Manifest revision')
-        const audit = auditBeeGameContentPackage(input.workspacePath, {
-          documentRevision: run.revision.document,
-          assetManifestRevision,
-          manifest: readBeeGameAssetManifestSync(input.workspacePath),
-        })
-        if (!audit.package || audit.package.digest !== run.revision.content)
-          throw new Error(`downstream work requires the accepted Scene/UI package: ${audit.issues.join('; ')}`)
-        contentContract = { gameContent: audit.package }
+        let audit: ReturnType<typeof auditBeeGameContentPackage>
+        try {
+          audit = auditBeeGameContentPackage(input.workspacePath, {
+            documentRevision: run.revision.document,
+            assetManifestRevision,
+            manifest: readBeeGameAssetManifestSync(input.workspacePath),
+          })
+        } catch (error) {
+          audit = { valid: false, issues: [error instanceof Error ? error.message : String(error)] }
+        }
+        contentContract = {
+          gameContent: { indexPath: 'content/index.json', contentIds: run.gameContentReceipt.contentIds,
+            revision: audit.package?.digest ?? run.revision.content,
+            authoringContractPath: CONTENT_AUTHORING_CONTRACT_PATH,
+            validationCommand: GAME_CONTENT_VALIDATION_COMMAND,
+            inspectionCommand: GAME_CONTENT_INSPECTION_COMMAND },
+          ...(!audit.valid ? { currentImplementationIssues: [
+            ...(Array.isArray(request.contract.currentImplementationIssues)
+              ? request.contract.currentImplementationIssues : []),
+            ...audit.issues,
+          ] } : {}),
+        }
       }
       return transportDispatcher.dispatch({ ...request,
         protectedPaths: [...new Set([...(request.protectedPaths ?? []), ...CANONICAL_DOCUMENT_ARTIFACTS,
-          ...(['content-author', 'implementation-worker'].includes(request.workerType) ? ['assets/'] : []),
-          ...(request.workerType === 'implementation-worker' ? ['content/'] : [])])],
+          ...(request.workerType === 'content-author' ? ['assets/'] : [])])],
         contract: { ...request.contract, ...contentContract } })
     },
   }
@@ -314,6 +335,7 @@ export function createDeliveryWorkflowController(input: {
         changeAffectedRequirementIds: result.affectedRequirementIds,
         changeAffectedChecklistIds: result.affectedChecklistIds,
         changeRationale: result.rationale,
+        completedAt: undefined,
         phase:
           result.classification === 'documents_required'
             ? 'DOCUMENT_DRAFTING'
@@ -481,23 +503,6 @@ export function createDeliveryWorkflowController(input: {
         return
       }
       if (
-        resourcePreparationMissing(next) ||
-        (await resourceRevisionChanged(next))
-      ) {
-        await restartResourcePreparation(
-          next,
-          'resource delivery is missing or approved resources changed during implementation; resource delivery must be rerun',
-        )
-        return
-      }
-      if (await gameContentChanged(next)) {
-        await restartGameContent(
-          next,
-          'accepted Scene/UI content changed during implementation; content authoring must be rerun',
-        )
-        return
-      }
-      if (
         result.status === 'completed' &&
         result.changedPaths.some(path => isCanonicalDocumentPath(path))
       ) {
@@ -515,10 +520,19 @@ export function createDeliveryWorkflowController(input: {
           workspacePath: input.workspacePath,
           terminal: result,
         })
+        if (!completionFailureReason) {
+          try {
+            next = await refreshImplementationArtifacts({ run: next, workspacePath: input.workspacePath })
+          } catch (error) {
+            completionFailureReason = error instanceof Error ? error.message : String(error)
+          }
+        }
       }
       const currentRevision = await computeWorkspaceRevision(
         input.workspacePath,
       )
+      if (result.status === 'completed' && !completionFailureReason)
+        await bindImplementationEvidence(input.workspacePath, result.evidencePath, currentRevision)
       next = completeImplementationTask({
         run: { ...next, phase: 'IMPLEMENTATION', activeTaskId: record.taskId },
         workspacePath: input.workspacePath,
@@ -545,8 +559,8 @@ export function createDeliveryWorkflowController(input: {
           run: next,
           workspacePath: input.workspacePath,
         })
-        next = transitionDeliveryRun(next, { type: 'delivery_completed' })
-        await persist(next, 'run.completed')
+        if (next.phase === 'DELIVERY') next = transitionDeliveryRun(next, { type: 'delivery_completed' })
+        await persist(next, next.status === 'completed' ? 'run.completed' : 'acceptance.needs_action')
       } else {
         await startNextImplementationTask({
           run: next,
@@ -803,7 +817,7 @@ export function createDeliveryWorkflowController(input: {
         )
         return
       }
-      if (resourcePreparationMissing(run) || await resourceRevisionChanged(run)) {
+      if (resourcePreparationMissing(run)) {
         await restartResourcePreparation(
           run,
           'resource preparation evidence is missing; implementation cannot start before the resource stage is complete',
@@ -817,10 +831,6 @@ export function createDeliveryWorkflowController(input: {
           'game.content.required',
         )
         await resumeUnlocked(contentRun)
-        return
-      }
-      if (await gameContentChanged(run)) {
-        await restartGameContent(run, 'accepted Scene/UI content changed before implementation')
         return
       }
       run = await ensureDirectImplementationTask(run)
@@ -858,8 +868,8 @@ export function createDeliveryWorkflowController(input: {
         workspacePath: input.workspacePath,
       })
       await persist(
-        transitionDeliveryRun(accepted, { type: 'delivery_completed' }),
-        'run.completed',
+        accepted.phase === 'DELIVERY' ? transitionDeliveryRun(accepted, { type: 'delivery_completed' }) : accepted,
+        accepted.phase === 'DELIVERY' ? 'run.completed' : 'acceptance.needs_action',
       )
     }
   }
@@ -981,11 +991,7 @@ export function createDeliveryWorkflowController(input: {
     return serialize(async () => {
       const current = await store.load()
       if (!current) throw new Error('Workflow is unavailable')
-      if (
-        current.status === 'running' ||
-        current.activeDispatch ||
-        current.activeTaskId
-      )
+      if (hasActiveContentWork(current))
         throw new Error('Scene/UI cannot be edited while workflow work is active')
       return saveBeeGameContentDocument({
         workspacePath: input.workspacePath,
@@ -999,7 +1005,7 @@ export function createDeliveryWorkflowController(input: {
     return serialize(async () => {
       const current = await store.load()
       if (!current) throw new Error('Workflow is unavailable')
-      if (current.activeDispatch || current.activeTaskId)
+      if (hasActiveContentWork(current))
         throw new Error('Scene/UI cannot be published while workflow work is active')
       const receipt = acceptBeeGameContentPackage(
         input.workspacePath,
@@ -1054,6 +1060,11 @@ function isCanonicalDocumentPath(path: string): boolean {
   let normalized = path.replaceAll('\\', '/')
   while (normalized.startsWith('./')) normalized = normalized.slice(2)
   return CANONICAL_DOCUMENT_ARTIFACTS.includes(normalized as never)
+}
+
+function hasActiveContentWork(run: DeliveryRun): boolean {
+  return run.status === 'running' || run.activeDispatch?.status === 'running' ||
+    run.tasks.some(task => task.status === 'running')
 }
 
 async function implementationContractFacts(

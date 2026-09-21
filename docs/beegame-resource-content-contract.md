@@ -1,5 +1,7 @@
 # BeeGame 资源与 Game Content Package 合同
 
+坐标、锚点和父子变换的当前统一语义见 [Content 坐标约定](./content-coordinate-contract-2026-09-20.md)。文中的引擎类比不覆盖该约定。
+
 状态：Resource Delivery、Manifest 绑定及 Scene2D/UI Content Authoring 已接入生产 Workflow。VFX、角色、动画、音频和玩法配置仍明确留在后续阶段。
 
 ## 1. 唯一流程
@@ -179,10 +181,14 @@ UI 与 Scene 只能通过稳定状态、事件或锚点 ID 关联，不能互相
 
 ## 7. Workflow 职责
 
+当前实现的上下文交付、预览错误处理与验收边界见 [交付耗时与正确性调整](delivery-cost-correctness-adjustment-2026-09-20.md)。早期章节中的独立 IR 前置假设不适用于当前直接文档 → 资源 → Content 流程。
+
+实现期间的问题记录与定向修复以 [implementation-issue-repair-plan-2026-09-20.md](implementation-issue-repair-plan-2026-09-20.md) 为准：非阻塞缺陷先记后修，素材交资源修复任务，代码缺陷由实现任务处理。一次原生 CLI 任务可协调这些修复，不增加阶段或自动审计循环；资源事实与哈希仍归 Manifest，最终证据必须对应修复后的产物。
+
 Workflow 只做：
 
-- 向一次直接 CLI Content 任务交付冻结的 IR 与 Manifest；
-- 只允许 Content Agent 写 `content/**`；
+- 向一次直接 CLI Content 任务提供已接受文档、Manifest 路径及版本；格式契约落盘后按需读取，不重复内嵌完整 Manifest；
+- Content 职责为编写 `content/**`，不增加原生工具拦截；
 - 保存 Content Package revision 和 digest；
 - 执行 JSON、ID、版本、引用、层级和路径旁路校验；
 - 将同一 Content Package 交给目标实现 Agent。

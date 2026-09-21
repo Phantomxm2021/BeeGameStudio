@@ -54,7 +54,7 @@ export type DeliveryTransition =
     }
   | { type: 'task_failed'; taskId: string; reason: string }
   | ({
-      type: 'acceptance_passed' | 'acceptance_failed' | 'acceptance_blocked'
+      type: 'artifact_handoff_ready' | 'acceptance_passed' | 'acceptance_failed' | 'acceptance_blocked'
     } & EvidenceEvent)
   | { type: 'delivery_completed' }
   | { type: 'stop'; reason: string }
@@ -360,12 +360,13 @@ export function transitionDeliveryRun(
         updatedAt: timestamp(),
       }
       break
+    case 'artifact_handoff_ready':
     case 'acceptance_passed':
       requirePhase(run, 'ACCEPTANCE')
       requireEvidence(
         event.evidence,
         run.revision.implementation ?? run.revision.workspace,
-        ['passed'],
+        event.type === 'artifact_handoff_ready' ? ['ready'] : ['passed'],
       )
       next = {
         ...withEvidence(run, 'acceptance', event.evidence),
@@ -400,8 +401,8 @@ export function transitionDeliveryRun(
       break
     case 'delivery_completed':
       requirePhase(run, 'DELIVERY')
-      if (run.evidence.acceptance?.status !== 'passed')
-        fail('delivery requires passed acceptance evidence')
+      if (!['ready', 'passed'].includes(run.evidence.acceptance?.status ?? ''))
+        fail('delivery requires artifact handoff or passed acceptance evidence')
       if (run.evidence.gameContent?.status !== 'passed' ||
           !run.gameContentReceipt ||
           run.gameContentReceipt.contentRevision !== run.revision.content)

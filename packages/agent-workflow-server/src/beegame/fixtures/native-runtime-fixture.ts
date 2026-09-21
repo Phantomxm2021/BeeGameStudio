@@ -91,6 +91,34 @@ for await (const chunk of Bun.stdin.stream()) {
       continue
     }
     if (content === 'eof') process.exit(0)
+    if (typeof content === 'string' && content.startsWith('agent-lifecycle:')) {
+      const emit = (event: Record<string, unknown>) => process.stdout.write(`${JSON.stringify(event)}\n`)
+      const task = { type: 'system', task_id: 'reused-agent', tool_use_id: 'first-launch' }
+      emit({ ...task, subtype: 'task_started', task_type: 'local_agent' })
+      emit({ ...task, subtype: 'task_notification', status: 'completed' })
+      const resumed = { ...task, tool_use_id: 'send-message-resume' }
+      emit({ ...resumed, subtype: 'task_started', task_type: 'local_agent' })
+      // A late terminal from the previous activation must not close the new one.
+      emit({ ...task, subtype: 'task_notification', status: 'completed' })
+      emit({ type: 'result', subtype: 'success', result: 'Waiting for review' })
+      if (content === 'agent-lifecycle:pending') continue
+      if (content === 'agent-lifecycle:eof') { setTimeout(() => process.exit(0), 20); continue }
+      setTimeout(() => {
+        emit({ ...resumed, subtype: 'task_notification', status: 'completed' })
+        if (content === 'agent-lifecycle:idle-without-parent') {
+          emit({ type: 'system', subtype: 'session_state_changed', state: 'idle' })
+          return
+        }
+        emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Review consumed; implementation finished.' }] } })
+        emit({ type: 'result', subtype: 'success', result: 'Implementation finished', received_user_count: userMessageCount })
+      }, 20)
+      continue
+    }
+    if (content === 'background-server') {
+      process.stdout.write(`${JSON.stringify({ type: 'system', subtype: 'task_started', task_type: 'local_bash', task_id: 'dev-server' })}\n`)
+      process.stdout.write(`${JSON.stringify({ type: 'result', subtype: 'success', result: 'Finished with server running' })}\n`)
+      continue
+    }
     if (content === 'incomplete-success') {
       process.stdout.write(
         `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'planning' }], stop_reason: null } })}\n`,

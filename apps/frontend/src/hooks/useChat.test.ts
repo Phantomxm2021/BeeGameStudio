@@ -24,6 +24,7 @@ const { chatStoreState, useChatStoreMock, projectStoreState, useProjectStoreMock
     finalizeMessage: vi.fn(),
     setCurrentSender: vi.fn(),
     setIsStreaming: vi.fn(),
+    settleActivity: vi.fn(),
     loadHistory: vi.fn(),
     clearMessages: vi.fn(),
     messages: [] as any[],
@@ -201,9 +202,8 @@ describe('useChat clarification gate handling', () => {
         timestamp: 100,
       });
     });
-    expect(chatStoreState.finalizeMessage).toHaveBeenCalledWith(
-      'task_1', 'Thinking', 'beegame', 'thought', false, undefined, undefined,
-      { taskKind: 'assistant_thinking' }, 100, 'thinking-turn-1',
+    expect(chatStoreState.updateThought).toHaveBeenCalledWith(
+      'task_1', '', 'beegame', 100, 'thinking-turn-1', undefined, 'snapshot', undefined,
     );
 
     act(() => {

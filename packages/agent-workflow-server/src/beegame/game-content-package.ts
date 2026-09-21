@@ -10,7 +10,9 @@ import {
 } from 'node:fs'
 import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { z } from 'zod/v4'
+import { UI_ANCHORS } from '../../../scene-editor/src/content-coordinates'
 import type { BeeGameAssetManifest } from './asset-contracts'
+import { auditAssetContract } from './asset-contract-audit'
 
 export const BEEGAME_CONTENT_ROOT = 'content' as const
 export const BEEGAME_CONTENT_INDEX = 'content/index.json' as const
@@ -196,7 +198,7 @@ const componentSceneNodeSchema = z
 
 const uiLayoutSchema = z
   .strictObject({
-    anchor: identifier.optional(),
+    anchor: z.enum(Object.keys(UI_ANCHORS) as [keyof typeof UI_ANCHORS, ...(keyof typeof UI_ANCHORS)[]]).optional(),
     position: z.tuple([finiteNumber, finiteNumber]).optional(),
     size: z.tuple([finiteNumber.nonnegative(), finiteNumber.nonnegative()]).optional(),
     rotation: finiteNumber.optional(),
@@ -873,6 +875,8 @@ export function auditBeeGameContentPackage(
   const issues: string[] = []
   const workspace = resolve(workspacePath)
   const root = resolve(workspace, BEEGAME_CONTENT_ROOT)
+  const assetAudit = auditAssetContract(workspace)
+  if (assetAudit.present) issues.push(...assetAudit.issues)
   const indexPath = resolve(workspace, BEEGAME_CONTENT_INDEX)
   if (!existsSync(indexPath) || !statSync(indexPath).isFile())
     return { valid: false, issues: [`Missing ${BEEGAME_CONTENT_INDEX}.`] }

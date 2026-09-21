@@ -590,7 +590,7 @@ export function RightSidebar({
                                 onLoadOlderHistory={handleLoadOlderHistory}
                             />
                         ) : activeTab === 'todo' ? (
-                            <TodoPanel items={currentTodos} />
+                            <TodoPanel items={currentTodos} lang={lang} />
                         ) : (
                             <div className="h-full min-h-0">
                                 {showAssets ? (

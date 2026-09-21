@@ -1,4 +1,7 @@
 import { Hono, type Context } from 'hono'
+import { readChatAttachment } from './beegame/chat-attachments'
+import { appendProjectChatTimeline, projectChatEventsAfter } from './beegame/project-chat-timeline'
+import { runtimeActivity } from './beegame/runtime-activity'
 import { projectFoundationReviewDisplay } from './beegame/delivery-workflow/foundation-review-display'
 import { foundationResultBinding, foundationPublicDigest } from './beegame/delivery-workflow/foundation-public-handoff'
 import { z } from 'zod/v4'
@@ -96,6 +99,13 @@ import { type BeeGameProjectMetadata } from './project-metadata-store'
 import { createR2ProjectAssetStorageFromEnv } from './r2-project-asset-storage'
 import { createReviewProjectCopy } from './beegame/review-project-copy'
 import { syncRuntimeSettingsToDedicatedRuntimeConfig } from './runtime-settings-store'
+import { imageConfigPatchSchema, imageProviderSchema, publicImageConfig } from './image-generation/config'
+import { ImageAttemptStore } from './image-generation/attempt'
+import { ImageGenerationService } from './image-generation/service'
+import { createImageGenerationProvider } from './image-generation'
+import { openImageGenerationAccess } from './image-generation/access'
+import { loadRuntimeImageConfig } from './image-generation/runtime-config'
+import { createImageBillingClient } from '@bee-game-studio/beegame-billing-core/image-billing'
 import {
   discoverMcpServers,
   type McpServerScope,
@@ -615,6 +625,12 @@ export function createAgentWorkflowApp(
     loadModelConfigsFromStore(modelConfigStore)
   }
   const billingConfig = resolveBeeGameBillingConfig()
+  const imageGeneration = new ImageGenerationService(
+    new ImageAttemptStore(resolve(dashboardDataRoot, 'image-attempts'), {
+      generate: (config, request) => createImageGenerationProvider(config.provider, (url, init) => serviceFetch(url, init)).generate(config, request),
+    }),
+    createImageBillingClient(billingConfig, (url, init) => serviceFetch(url, init)),
+  )
   const proxyBillingRequest = (request: Request, path: string) =>
     proxyAuthenticatedBillingRequest(request, billingConfig, path, sessionAuth)
   const skillsConfig =
@@ -736,6 +752,12 @@ export function createAgentWorkflowApp(
     }
     const workerPort = createBeeGameDeliveryWorkerPort({
       sessions: beeGameSessions,
+      resourceLibraryBaseUrl: options.resourceSelectionRuntimeConfig?.baseUrl,
+      openImageAccess: projectId => openImageGenerationAccess({
+        userId: input.user.id, projectId, workspacePath: input.workspacePath, service: imageGeneration,
+        loadConfig: () => loadRuntimeImageConfig(dashboardDataRoot,
+          { remote: Boolean(supabaseStore), billing: billingConfig }, (url, init) => serviceFetch(url, init)),
+      }),
       userId: input.user.id,
       getAuthToken: async options => {
         if (!supabaseRuntimeEnvClient) return undefined
@@ -755,6 +777,15 @@ export function createAgentWorkflowApp(
       getConfirmedBriefContext: async () =>
         (await createRunStore(workspaceKey, input.user.id).load())
           ?.confirmedBriefContext,
+      getPreviewContext: () => {
+        const preview = beeGamePreviews.runningForWorkspace(workspaceKey)
+        return preview
+          ? { status: preview.status, sessionId: preview.sessionId,
+              url: previewCapabilities.issueUrl(
+                new URL(preview.url, input.request.url).href, preview.sessionId, input.user.id,
+              ) }
+          : { status: 'not-running' }
+      },
     })
     const authoringHostOptions: FoundationAuthoringHostOptions = {
       ownerId: input.user.id,
@@ -1949,6 +1980,39 @@ export function createAgentWorkflowApp(
     )
   })
 
+  app.get('/api/image-generation/settings', async c => {
+    const user = getCurrentUser(c.req.raw)
+    if (user.role !== 'owner' || requirePermission(user, ROUTE_PERMISSION.modelConfig))
+      return c.json({ error: 'Platform administrator required' }, 403)
+    const provider = imageProviderSchema.optional().safeParse(c.req.query('provider'))
+    if (!provider.success) return c.json({ error: 'Invalid image provider' }, 400)
+    try {
+      return c.json(publicImageConfig(await dashboardRepository.loadImageGenerationConfig(c.req.raw, provider.data)))
+    } catch {
+      return c.json({ error: 'Image settings could not be loaded; check storage and migration configuration' }, 503)
+    }
+  })
+
+  app.put('/api/image-generation/settings', async c => {
+    const user = getCurrentUser(c.req.raw)
+    if (user.role !== 'owner' || requirePermission(user, ROUTE_PERMISSION.modelConfig))
+      return c.json({ error: 'Platform administrator required' }, 403)
+    const body = await readJson(c.req.raw)
+    const parsed = imageConfigPatchSchema.safeParse(body)
+    if (!parsed.success) return c.json({ error: 'Invalid image provider settings' }, 400)
+    try {
+      const saved = await dashboardRepository.saveImageGenerationConfig(c.req.raw, parsed.data)
+      await dashboardRepository.appendAuditEvent(c.req.raw, user, {
+        actorId: user.id, action: 'image_generation.settings.updated',
+        targetType: 'image_generation', targetId: 'platform',
+        metadata: { provider: saved.provider, model: saved.model, keyChanged: 'apiKey' in parsed.data, upstreamKeyChanged: 'upstreamApiKey' in parsed.data },
+      })
+      return c.json(publicImageConfig(saved))
+    } catch {
+      return c.json({ error: 'Image settings could not be saved; check secret encryption and storage configuration' }, 503)
+    }
+  })
+
   app.put('/api/runtime-settings', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, ROUTE_PERMISSION.runtimeSettings)
@@ -2670,6 +2734,7 @@ export function createAgentWorkflowApp(
       }
       const after = parsePositiveInteger(c.req.query('after')) ?? 0
       const events = await getProjectChatTimelineEvents({
+        after,
         sessionId: sessionRef.sessionId,
         workspacePath: sessionRef.workspacePath,
         dashboardDataRoot,
@@ -2769,7 +2834,7 @@ export function createAgentWorkflowApp(
         beeGameSessions,
       })
       const visibleEvents = compactTranscriptForChatHistory(timeline)
-      const latestTodoEvent = findLatestTodoWriteEvent(visibleEvents)
+      const todoEvents = findTodoWriteEvents(visibleEvents)
       const pagination = {
         limit: parseTranscriptPageLimit(c.req.query('limit')),
         beforeId: parsePositiveInteger(c.req.query('before')),
@@ -2777,7 +2842,7 @@ export function createAgentWorkflowApp(
       return c.json({
         sessionId: sessionRef.sessionId,
         workspacePath: sessionRef.workspacePath,
-        ...(latestTodoEvent ? { latestTodoEvent } : {}),
+        todoEvents,
         ...paginateTranscriptEvents(visibleEvents, pagination),
       })
     } catch (err) {
@@ -3869,6 +3934,24 @@ export function createAgentWorkflowApp(
     }
   })
 
+  app.get('/api/projects/:id/chat-attachments/:storageId', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const workspace = await resolveBeeGameProjectArtifactReference({
+        request: c.req.raw, user, project, defaultWorkspacePath: options.defaultWorkspacePath,
+        beeGameSessions, dashboardRepository,
+      })
+      if (!workspace) return c.json({ error: 'Attachment not found' }, 404)
+      return await readChatAttachment(workspace.workspacePath, c.req.param('storageId'))
+    } catch {
+      return c.json({ error: 'Attachment not found' }, 404)
+    }
+  })
+
   app.get('/api/projects/:id/assets/resources/:resourceId/file', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.read')
@@ -4679,6 +4762,7 @@ function isPrivilegedConfigurationPath(path: string): boolean {
     '/api/model-configs',
     '/api/web-tools',
     '/api/runtime-settings',
+    '/api/image-generation/settings',
     '/api/mcp-servers',
     '/api/admin/projects',
   ].some(prefix => path === prefix || path.startsWith(`${prefix}/`))
@@ -5871,6 +5955,7 @@ async function getBeeGameProjectRuntimeState(input: {
         : { blocked_reason: pending[0]?.text ?? null }),
     active_agents: runtime.activeAgents,
     updated_at: runtime.updatedAt,
+    activity: runtimeActivity(events, workflowSnapshot?.updatedAt),
     next_action: runtime.nextAction,
     context,
     project_target: assetManifest.project_target ?? null,
@@ -6161,18 +6246,23 @@ function applyWorkflowRuntimeStatus(
       ? dispatch.workerType
       : 'delivery-workflow'
   if (status === 'running') {
+    if (nativeRuntime.phase === 'waiting_approval') return nativeRuntime
     return {
       phase: 'running',
       nextAction: `${worker} is processing`,
-      updatedAt: String(workflow.updatedAt ?? nativeRuntime.updatedAt),
-      activeAgents: [worker],
-      agentStatus: 'working',
+      updatedAt: Date.parse(nativeRuntime.updatedAt) >= Date.parse(String(workflow.updatedAt ?? ''))
+        ? nativeRuntime.updatedAt : String(workflow.updatedAt ?? nativeRuntime.updatedAt),
+      activeAgents: [...new Set([worker, ...nativeRuntime.activeAgents])],
+      agentStatus: nativeRuntime.agentStatus === 'idle' ? 'waiting' : nativeRuntime.agentStatus,
     }
   }
   if (status === 'completed') {
+    const acceptance = toProjectAcceptanceStateFromWorkflow(workflow)
     return {
       phase: 'finished',
-      nextAction: 'Delivery workflow completed',
+      nextAction: acceptance.status === 'passed'
+        ? 'Delivery workflow completed'
+        : 'Project artifacts are ready; runtime acceptance has not been established.',
       updatedAt: String(workflow.updatedAt ?? nativeRuntime.updatedAt),
       activeAgents: [],
       agentStatus: 'idle',
@@ -6376,7 +6466,28 @@ async function getProjectRuntimeEvents(input: {
   })
 }
 
-async function getProjectChatTimelineEvents(input: {
+const projectChatReads = new WeakMap<BeeGameSessionManager, Map<string, Promise<BeeGameEvent[]>>>()
+
+function getProjectChatTimelineEvents(input: {
+  after?: number
+  sessionId: string
+  workspacePath: string
+  dashboardDataRoot?: string
+  beeGameSessions: BeeGameSessionManager
+}): Promise<BeeGameEvent[]> {
+  let reads = projectChatReads.get(input.beeGameSessions)
+  if (!reads) { reads = new Map(); projectChatReads.set(input.beeGameSessions, reads) }
+  const key = `${resolve(input.workspacePath)}:${input.sessionId}:${input.after ?? 0}`
+  const active = reads.get(key)
+  if (active) return active
+  // Concurrent history/SSE clients share one reconciliation, not N full merges.
+  const pending = collectProjectChatTimelineEvents(input).finally(() => { reads.delete(key) })
+  reads.set(key, pending)
+  return pending
+}
+
+async function collectProjectChatTimelineEvents(input: {
+  after?: number
   sessionId: string
   workspacePath: string
   dashboardDataRoot?: string
@@ -6388,22 +6499,18 @@ async function getProjectChatTimelineEvents(input: {
     input.sessionId,
     mainEvents,
   )
-  return [...mainEvents, ...workerEvents]
+  const recoveredScopes = new Set(workerEvents.flatMap(event => event.payload?.chatSchemaVersion === 2 &&
+    typeof event.payload.workflowStageStreamId === 'string' ? [event.payload.workflowStageStreamId] : []))
+  const retainedMainEvents = mainEvents.filter(event => event.payload?.chatSchemaVersion === 2 ||
+    !recoveredScopes.has(String(event.payload?.workflowStageStreamId ?? '')))
+  return appendProjectChatTimeline(input.workspacePath, [...retainedMainEvents, ...workerEvents]
     .sort((left, right) => {
       const time = left.createdAt.getTime() - right.createdAt.getTime()
       if (time !== 0) return time
       const session = left.sessionId.localeCompare(right.sessionId)
       return session !== 0 ? session : left.id - right.id
-    })
-    .map((event, index) => ({
-      ...event,
-      id: index + 1,
-      payload: {
-        ...(event.payload ?? { type: event.type }),
-        projectSourceSessionId: event.sessionId,
-        projectSourceEventId: event.id,
-      },
-    }))
+    }), input.after
+  )
 }
 
 // Keep this below Bun's/default reverse-proxy idle window. Otherwise a quiet
@@ -6415,7 +6522,7 @@ const PROJECT_EVENTS_SSE_MAX_CONNECTION_MS = 25_000
 // therefore also a live source, not merely a refresh-time recovery source.
 const PROJECT_EVENTS_SSE_TIMELINE_RECONCILE_INTERVAL_MS = 750
 
-function createProjectEventsSseStream(input: {
+export function createProjectEventsSseStream(input: {
   request: Request
   userId: string
   projectId: string
@@ -6428,10 +6535,13 @@ function createProjectEventsSseStream(input: {
 }): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
   const signal = input.request.signal
+  let cancelConnection = () => {}
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false
+      let wake: (() => void) | undefined
+      cancelConnection = () => { closed = true; wake?.() }
       const close = () => {
         if (closed) return
         closed = true
@@ -6458,24 +6568,6 @@ function createProjectEventsSseStream(input: {
         let lastHeartbeatAt = Date.now()
         const deadline = Date.now() + PROJECT_EVENTS_SSE_MAX_CONNECTION_MS
         let pendingEvents: BeeGameEvent[] = []
-        let nextTimelineId = 0
-        const seenSourceEvents = new Set<string>()
-        let wake: (() => void) | undefined
-        const sourceEventKey = (event: BeeGameEvent): string => {
-          const sourceSessionId =
-            typeof event.payload?.workflowSourceSessionId === 'string'
-              ? event.payload.workflowSourceSessionId
-              : typeof event.payload?.projectSourceSessionId === 'string'
-                ? event.payload.projectSourceSessionId
-              : event.sessionId
-          const sourceEventId =
-            typeof event.payload?.workflowSourceEventId === 'number'
-              ? event.payload.workflowSourceEventId
-              : typeof event.payload?.projectSourceEventId === 'number'
-                ? event.payload.projectSourceEventId
-              : event.id
-          return `${sourceSessionId}:${sourceEventId}`
-        }
         const unsubscribe = input.beeGameSessions.subscribeProjectEvents(
           {
             userId: input.userId,
@@ -6489,7 +6581,8 @@ function createProjectEventsSseStream(input: {
           },
         )
         const emitEvents = (events: BeeGameEvent[]) => {
-          const unseen = events.filter(event => event.id > after)
+          if (closed || signal.aborted) return
+          const unseen = projectChatEventsAfter(events, after)
           if (unseen.length === 0) return
           after = unseen[unseen.length - 1]!.id
           const payload = JSON.stringify({
@@ -6507,13 +6600,12 @@ function createProjectEventsSseStream(input: {
         }
         const reconcileTimeline = async () => {
           const timeline = await getProjectChatTimelineEvents({
+            after,
             sessionId: input.sessionId,
             workspacePath: input.workspacePath,
             dashboardDataRoot: input.dashboardDataRoot,
             beeGameSessions: input.beeGameSessions,
           })
-          timeline.forEach(event => seenSourceEvents.add(sourceEventKey(event)))
-          nextTimelineId = Math.max(nextTimelineId, timeline.at(-1)?.id ?? 0)
           emitEvents(timeline)
         }
         try {
@@ -6522,15 +6614,7 @@ function createProjectEventsSseStream(input: {
             if (pendingEvents.length > 0) {
               const events = pendingEvents
               pendingEvents = []
-              const unseen = events
-                .filter(event => {
-                  const key = sourceEventKey(event)
-                  if (seenSourceEvents.has(key)) return false
-                  seenSourceEvents.add(key)
-                  return true
-                })
-                .map(event => ({ ...event, id: ++nextTimelineId }))
-              emitEvents(unseen)
+              emitEvents(await appendProjectChatTimeline(input.workspacePath, events, after))
               continue
             }
             const timeUntilDeadline = deadline - Date.now()
@@ -6579,6 +6663,7 @@ function createProjectEventsSseStream(input: {
         }
       })()
     },
+    cancel() { cancelConnection() },
   })
 }
 
@@ -7255,7 +7340,7 @@ function toProjectAcceptanceStateFromWorkflow(
     ...(typeof acceptance?.path === 'string'
       ? { summary: acceptance.path }
       : {}),
-    ...(typeof acceptance?.observedAt === 'string'
+    ...(status !== 'not_run' && typeof acceptance?.observedAt === 'string'
       ? { validated_at: acceptance.observedAt }
       : {}),
   }
@@ -7669,7 +7754,7 @@ function withPreviewCapability(
   }
 }
 
-async function proxyBeeGamePreviewRequest(
+export async function proxyBeeGamePreviewRequest(
   request: Request,
   sessionId: string,
   internalBaseUrl: string,
@@ -7686,7 +7771,12 @@ async function proxyBeeGamePreviewRequest(
   target.search = requestUrl.search
   const headers = new Headers(request.headers)
   headers.delete('host')
+  // The game dev server is untrusted project code, not an authenticated BGS API.
+  headers.delete('cookie')
+  headers.delete('authorization')
   const method = request.method.toUpperCase()
+  if (method === 'OPTIONS')
+    return new Response(null, { status: 204, headers: withPreviewCorsHeaders(new Headers()) })
   let upstream: Response
   try {
     upstream = await fetch(target, {
@@ -8321,20 +8411,13 @@ function registerBeeGameSessionRoutes(
         )
         const metadata = beeGameSessions.metadata(c.req.param('id'))
         const currentUser = options.getCurrentUser(c.req.raw)
-        const workflowRun = await createRunStore(
-          workspacePath,
-          currentUser.id,
-        ).load()
-        if (
-          !workflowRun ||
-          workflowRun.phase !== 'DELIVERY' ||
-          workflowRun.status !== 'completed' ||
-          workflowRun.evidence.acceptance?.status !== 'passed'
-        ) {
+        const deliveryGate = await evaluateWorkflowDeliveryGate({ workspacePath, ownerId: currentUser.id })
+        if (!deliveryGate.allowed) {
           return c.json(
             {
               error: 'Delivery workflow has not completed current acceptance',
               code: 'workflow_delivery_not_ready',
+              issues: deliveryGate.issues,
             },
             409,
           )
@@ -8943,10 +9026,11 @@ function paginateTranscriptEvents<T extends { id: number }>(
   events: T[]
   page: { hasMore: boolean; nextBeforeId: number | null }
 } {
+  const ordered = [...events].sort((a, b) => a.id - b.id)
   const eligible =
     options.beforeId === undefined
-      ? events
-      : events.filter(event => event.id < options.beforeId!)
+      ? ordered
+      : ordered.filter(event => event.id < options.beforeId!)
   const pageEvents = eligible.slice(
     Math.max(0, eligible.length - options.limit),
   )
@@ -8959,13 +9043,13 @@ function paginateTranscriptEvents<T extends { id: number }>(
   }
 }
 
-function findLatestTodoWriteEvent<
+export function findTodoWriteEvents<
   T extends {
     type: BeeGameEvent['type']
     payload?: BeeGameEvent['payload']
   },
->(events: T[]): T | undefined {
-  return events.findLast(event => {
+>(events: T[]): T[] {
+  return events.filter(event => {
     if (
       event.type !== 'tool.started' &&
       event.type !== 'tool.progress' &&
@@ -9001,159 +9085,65 @@ function parsePositiveInteger(value: string | undefined): number | undefined {
 export function compactTranscriptForChatHistory<
   T extends {
     id: number
+    sessionId?: string
+    turnId?: string
     type: BeeGameEvent['type']
     text: string
     createdAt: BeeGameEvent['createdAt']
     payload?: BeeGameEvent['payload']
   },
 >(events: T[]): T[] {
-  const chatEvents: T[] = []
-  let thinkingStartEvent: T | undefined
-  let thinkingLatestEvent: T | undefined
-  let thinkingText = ''
-  const thinkingBlockId = (event: T): string =>
-    typeof event.payload?.thinkingBlockId === 'string'
-      ? event.payload.thinkingBlockId
-      : 'default'
-  const flushThinking = (endEvent?: T) => {
-    if (thinkingStartEvent && thinkingText.trim()) {
-      const terminalEvent = endEvent ?? thinkingLatestEvent ?? thinkingStartEvent
-      chatEvents.push({
-        ...terminalEvent,
-        text: thinkingText,
-        payload: {
-          ...(thinkingStartEvent.payload ?? { type: 'assistant.thinking' }),
-          ...(terminalEvent.payload ?? {}),
-          status: endEvent ? 'ended' : 'streaming',
-          thinkingStartedAt:
-            typeof thinkingStartEvent.payload?.thinkingStartedAt === 'string'
-              ? thinkingStartEvent.payload.thinkingStartedAt
-              : new Date(thinkingStartEvent.createdAt).toISOString(),
-        },
-      })
-    }
-    thinkingStartEvent = undefined
-    thinkingLatestEvent = undefined
-    thinkingText = ''
-  }
+  const result: T[] = []
+  const positions = new Map<string, number>()
   for (const event of events) {
-    if (event.type !== 'assistant.thinking') {
-      flushThinking()
-      chatEvents.push(event)
-      continue
-    }
-    const status = event.payload?.status
-    if (status === 'ended') {
-      flushThinking(event)
-      continue
-    }
-    if (event.text && event.text !== 'Thinking') {
-      if (
-        thinkingStartEvent &&
-        thinkingBlockId(thinkingStartEvent) !== thinkingBlockId(event)
-      ) {
-        flushThinking()
-      }
-      thinkingStartEvent ??= event
-      thinkingLatestEvent = event
-      thinkingText += event.text
-    }
-  }
-  flushThinking()
-
-  const terminalToolIds = new Set<string>()
-  const latestOpenProgressId = new Map<string, number>()
-  for (const event of chatEvents) {
-    const toolUseID =
-      typeof event.payload?.toolUseID === 'string'
-        ? event.payload.toolUseID
-        : ''
-    if (!toolUseID) continue
-    if (event.type === 'tool.completed' || event.type === 'tool.failed') {
-      terminalToolIds.add(toolUseID)
-    } else if (event.type === 'tool.progress') {
-      latestOpenProgressId.set(toolUseID, event.id)
-    }
-  }
-  return chatEvents.flatMap(event => {
-    // Visible text streaming is superseded by the terminal assistant message.
-    // Thinking has no equivalent terminal event, so it remains part of Chat
-    // history instead of being irreversibly discarded.
-    if (event.type === 'assistant.partial') {
-      return []
-    }
+    const payload: NonNullable<BeeGameEvent['payload']> = event.payload ?? { type: event.type }
     if (event.type === 'system.status' &&
-      !['task_started', 'task_progress', 'task_notification'].includes(String(event.payload?.subtype))) {
-      return []
-    }
-    if (event.type === 'tool.started') {
-      const toolUseID =
-        typeof event.payload?.toolUseID === 'string'
-          ? event.payload.toolUseID
-          : ''
-      if (toolUseID && terminalToolIds.has(toolUseID)) return []
-    }
-    if (event.type === 'tool.progress') {
-      const toolUseID =
-        typeof event.payload?.toolUseID === 'string'
-          ? event.payload.toolUseID
-          : ''
-      if (!toolUseID || terminalToolIds.has(toolUseID)) return []
-      if (latestOpenProgressId.get(toolUseID) !== event.id) return []
-    }
-    if (
-      event.type === 'tool.started' ||
-      event.type === 'tool.progress' ||
-      event.type === 'tool.completed' ||
-      event.type === 'tool.failed'
-    ) {
-      return [
-        {
-          ...event,
-          text: truncateChatHistoryText(event.text, 4_096),
-          ...(event.payload
-            ? { payload: compactChatHistoryPayload(event.payload) }
-            : {}),
-        } as T,
-      ]
-    }
-    return [event]
-  })
-}
-
-function compactChatHistoryPayload(
-  payload: NonNullable<BeeGameEvent['payload']>,
-): NonNullable<BeeGameEvent['payload']> {
-  const compacted: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(payload)) {
-    if (key === 'output' && typeof value === 'string') {
-      compacted[key] = truncateChatHistoryText(value, 4_096)
-      continue
-    }
-    compacted[key] = compactChatHistoryValue(value, 0)
+      !['task_started', 'task_progress', 'task_notification'].includes(String(payload.subtype))) continue
+    const scope = `${payload.workflowStageStreamId ?? payload.workflowSourceSessionId ?? payload.projectSourceSessionId ?? event.sessionId}:${payload.parentToolUseID ?? payload.parent_tool_use_id ?? ''}`
+    const body = payload.message as { id?: string } | undefined
+    const messageId = payload.assistantBlockId ?? payload.messageId ?? body?.id
+    const thinking = event.type === 'assistant.thinking'
+    const text = event.type === 'assistant.partial' || event.type === 'assistant.message'
+    const tool = ['tool.started', 'tool.progress', 'tool.completed', 'tool.failed'].includes(event.type)
+    const key = thinking
+      ? `thinking:${scope}:${payload.thinkingBlockId ?? event.turnId ?? 'default'}:${payload.thinkingStartedAt ?? ''}`
+      : text && messageId ? `text:${scope}:${messageId}`
+      : tool && payload.toolUseID ? `tool:${scope}:${payload.toolUseID}` : undefined
+    const position = key ? positions.get(key) : undefined
+    const previous = position === undefined ? undefined : result[position]
+    // A terminal snapshot owns its block. Delayed checkpoints cannot reopen it.
+    if (previous && text && previous.type === 'assistant.message' && event.type === 'assistant.partial') continue
+    if (previous && thinking && previous.payload?.status === 'ended' && payload.status !== 'ended') continue
+    const content = thinking && event.text === 'Thinking' ? '' : event.text
+    const snapshot = payload.contentMode === 'snapshot' || event.type === 'assistant.message'
+    const mergedText = thinking || text
+      ? thinking && !content ? previous?.text ?? '' : snapshot ? content : (previous?.text ?? '') + content
+      : event.text
+    const merged = {
+      ...event,
+      text: mergedText,
+      payload: {
+        ...(previous?.payload ?? {}),
+        ...payload,
+        type: event.type,
+        sourceSequence: previous?.payload?.sourceSequence ?? event.id,
+        ...(thinking || text ? { contentMode: 'snapshot' } : {}),
+        ...(thinking ? {
+          ...(previous?.payload?.status === 'ended' ? { status: 'ended' } : {}),
+          thinkingStartedAt: previous?.payload?.thinkingStartedAt ?? payload.thinkingStartedAt ??
+            new Date(event.createdAt).toISOString(),
+        } : {}),
+        ...(tool ? { toolStartedAt: previous?.payload?.toolStartedAt ??
+          (event.type === 'tool.started' ? new Date(event.createdAt).toISOString() : undefined) } : {}),
+      },
+    } as T
+    if (position === undefined) {
+      if (key) positions.set(key, result.length)
+      result.push(merged)
+    } else result[position] = merged
   }
-  return compacted as NonNullable<BeeGameEvent['payload']>
-}
-
-function compactChatHistoryValue(value: unknown, depth: number): unknown {
-  if (typeof value === 'string') return truncateChatHistoryText(value, 1_024)
-  if (value === null || typeof value !== 'object') return value
-  if (depth >= 4) return '[nested value omitted]'
-  if (Array.isArray(value)) {
-    return value
-      .slice(0, 50)
-      .map(item => compactChatHistoryValue(item, depth + 1))
-  }
-  return Object.fromEntries(
-    Object.entries(value)
-      .slice(0, 50)
-      .map(([key, item]) => [key, compactChatHistoryValue(item, depth + 1)]),
-  )
-}
-
-function truncateChatHistoryText(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value
-  return `${value.slice(0, maxLength)}\n…[historical output truncated]`
+  // IDs remain cursor positions; sourceSequence retains first appearance order.
+  return result
 }
 
 type RecoveredTranscriptEvent = Awaited<

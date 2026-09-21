@@ -824,14 +824,26 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
   useEffect(() => {
     if (!currentUser) return;
+    let active = true;
+    let pending = false;
     const refreshCredits = () => {
+      if (pending || document.visibilityState === 'hidden') return;
+      pending = true;
       void getCreditBalance()
-        .then(balance => setCreditBalance(balance))
-        .catch(() => setCreditBalance(null));
+        .then(balance => { if (active) setCreditBalance(balance); })
+        .catch(() => {})
+        .finally(() => { pending = false; });
     };
+    const interval = window.setInterval(refreshCredits, 5000);
     window.addEventListener('beegame:credits-updated', refreshCredits);
+    window.addEventListener('focus', refreshCredits);
+    document.addEventListener('visibilitychange', refreshCredits);
     return () => {
+      active = false;
+      window.clearInterval(interval);
       window.removeEventListener('beegame:credits-updated', refreshCredits);
+      window.removeEventListener('focus', refreshCredits);
+      document.removeEventListener('visibilitychange', refreshCredits);
     };
   }, [currentUser?.id]);
 

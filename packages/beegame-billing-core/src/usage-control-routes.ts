@@ -7,6 +7,7 @@ import {
 import { isObject, readJson } from './http-helpers'
 import type { BillingRouteDeps } from './billing-route-types'
 import type { BeeGameUsageBillingRecordInput } from './usage-control-client'
+import { validImageBillingInput } from './image-billing'
 
 export function registerBeeGameUsageControlRoutes(
   app: Hono,
@@ -14,6 +15,34 @@ export function registerBeeGameUsageControlRoutes(
 ): void {
   registerUsageRoute(app, deps, '/api/internal/usage/events', false)
   registerUsageRoute(app, deps, '/api/internal/usage/debits', true)
+  app.get('/api/internal/images/config', async c => {
+    if (c.req.header('origin')) return c.json({ error: 'Browser access denied' }, 403)
+    const forbidden = requireUsageServiceToken(c.req.raw, deps.billingConfig)
+    if (forbidden) return forbidden
+    c.header('Cache-Control', 'no-store')
+    if (!deps.dashboardRepository.readImageGenerationSettings)
+      return c.json({ source: 'supabase-platform', code: 'database-config-missing' }, 503)
+    try {
+      const result = await deps.dashboardRepository.readImageGenerationSettings()
+      const { config: _, ...facts } = result
+      console.info('[image-generation]', { event: 'configuration-read', ...facts })
+      return c.json(result, result.code ? 503 : 200)
+    } catch {
+      return c.json({ source: 'supabase-platform', code: 'database-response' }, 503)
+    }
+  })
+  app.post('/api/internal/images/billing', async c => {
+    const forbidden = requireUsageServiceToken(c.req.raw, deps.billingConfig)
+    if (forbidden) return forbidden
+    const body = await readJson(c.req.raw)
+    const userId = stringValue(body.userId)
+    if (!userId || !validImageBillingInput(body))
+      return c.json({ error: 'Invalid image billing request' }, 400)
+    if (!deps.dashboardRepository.applyImageBilling)
+      return c.json({ error: 'Image billing is unavailable' }, 503)
+    try { return c.json(await deps.dashboardRepository.applyImageBilling(userId, body)) }
+    catch { return c.json({ error: 'Image billing could not be completed; preserve the request identity' }, 503) }
+  })
 }
 
 function registerUsageRoute(

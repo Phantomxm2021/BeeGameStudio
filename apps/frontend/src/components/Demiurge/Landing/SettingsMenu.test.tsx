@@ -4,6 +4,8 @@ import type { ComponentProps } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SettingsMenu } from './SettingsMenu';
+import { getImageGenerationSettings, saveImageGenerationSettings } from '../../../services/imageGenerationApi';
+vi.mock('../../../services/imageGenerationApi', () => ({ getImageGenerationSettings: vi.fn(), saveImageGenerationSettings: vi.fn() }));
 
 const {
     createModelConfig,
@@ -400,10 +402,32 @@ describe('SettingsMenu model settings', () => {
         expect(screen.getByRole('tab', { name: '能力' })).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: 'MCP' })).toBeInTheDocument();
         expect(screen.getByRole('tab', { name: '模型' })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'AI 生图' })).toBeInTheDocument();
         await expect(screen.findByText('/tmp/beegame-projects')).resolves.toBeInTheDocument();
         expect(screen.getByText('服务器模式下工作根目录是全局安全边界。普通用户不能单独修改，项目路径由平台按账号自动生成。')).toBeInTheDocument();
         expect(screen.getByLabelText('搜索后端')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: '保存设置' })).toBeInTheDocument();
+    });
+
+    it('saves image settings from the shared window footer and closes only after success', async () => {
+        const config = { provider: 'openrouter' as const, baseUrl: 'https://openrouter.ai/api/v1/images', model: 'openai/gpt-image-2.5-flare', quality: 'medium' as const, size: '1024x1024', hasApiKey: true };
+        vi.mocked(getImageGenerationSettings).mockResolvedValue(config);
+        let finish!: (value: typeof config) => void;
+        vi.mocked(saveImageGenerationSettings).mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+        const onClose = vi.fn();
+        renderSettings({ onClose });
+        await userEvent.click(screen.getByRole('tab', { name: '平台' }));
+        await userEvent.click(screen.getByRole('tab', { name: 'AI 生图' }));
+        await screen.findByDisplayValue(config.model);
+        const save = screen.getByRole('button', { name: '保存设置' });
+        expect(save.closest('form')).toBeNull();
+        expect(screen.queryByRole('button', { name: '保存生图配置' })).not.toBeInTheDocument();
+        await userEvent.click(save);
+        expect(save).toBeDisabled();
+        expect(onClose).not.toHaveBeenCalled();
+        finish(config);
+        await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+        expect(vi.mocked(saveImageGenerationSettings).mock.calls.at(-1)![0]).not.toHaveProperty('apiKey');
     });
 
     it('lets users delete private skills from the settings panel without exposing editing', async () => {

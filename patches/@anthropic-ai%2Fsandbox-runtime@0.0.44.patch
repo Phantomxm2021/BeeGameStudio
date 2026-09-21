@@ -1,0 +1,53 @@
+diff --git a/dist/sandbox/macos-sandbox-utils.js b/dist/sandbox/macos-sandbox-utils.js
+index 3f3471e5de771df67af26675cedac107fc5cc520..d71cf27226a4c4461e7363b20a328b6cb81a8fc6 100644
+--- a/dist/sandbox/macos-sandbox-utils.js
++++ b/dist/sandbox/macos-sandbox-utils.js
+@@ -67,15 +67,28 @@ function getAncestorDirectories(pathStr) {
+  * @param logTag - Log tag for sandbox violations
+  * @returns Array of sandbox profile rule lines
+  */
+-function generateMoveBlockingRules(pathPatterns, logTag) {
++function generateMoveBlockingRules(pathPatterns, logTag, readableExceptions = []) {
+     const rules = [];
++    // A read-denied region may contain explicitly readable subtrees. Do not
++    // accidentally prohibit unlink/rename inside those subtrees; write rules
++    // still independently constrain them. Keep ancestor-move protection below.
++    const exceptions = readableExceptions.map(pattern => {
++        const normalized = normalizePathForSandbox(pattern);
++        const filter = containsGlobChars(normalized)
++            ? `(regex ${escapePath(globToRegex(normalized))})`
++            : `(subpath ${escapePath(normalized)})`;
++        return `(require-not ${filter})`;
++    });
++    const moveFilter = filter => exceptions.length
++        ? `(require-all ${filter} ${exceptions.join(' ')})`
++        : filter;
+     for (const pathPattern of pathPatterns) {
+         const normalizedPath = normalizePathForSandbox(pathPattern);
+         if (containsGlobChars(normalizedPath)) {
+             // Use regex matching for glob patterns
+             const regexPattern = globToRegex(normalizedPath);
+             // Block moving/renaming files matching this pattern
+-            rules.push(`(deny file-write-unlink`, `  (regex ${escapePath(regexPattern)})`, `  (with message "${logTag}"))`);
++            rules.push(`(deny file-write-unlink`, `  ${moveFilter(`(regex ${escapePath(regexPattern)})`)}`, `  (with message "${logTag}"))`);
+             // For glob patterns, extract the static prefix and block ancestor moves
+             // Remove glob characters to get the directory prefix
+             const staticPrefix = normalizedPath.split(/[*?[\]]/)[0];
+@@ -95,7 +108,7 @@ function generateMoveBlockingRules(pathPatterns, logTag) {
+         else {
+             // Use subpath matching for literal paths
+             // Block moving/renaming the denied path itself
+-            rules.push(`(deny file-write-unlink`, `  (subpath ${escapePath(normalizedPath)})`, `  (with message "${logTag}"))`);
++            rules.push(`(deny file-write-unlink`, `  ${moveFilter(`(subpath ${escapePath(normalizedPath)})`)}`, `  (with message "${logTag}"))`);
+             // Block moves of ancestor directories
+             for (const ancestorDir of getAncestorDirectories(normalizedPath)) {
+                 rules.push(`(deny file-write-unlink`, `  (literal ${escapePath(ancestorDir)})`, `  (with message "${logTag}"))`);
+@@ -167,7 +180,7 @@ function generateReadRules(config, logTag) {
+         rules.push(`(allow file-read-metadata`, `  (vnode-type DIRECTORY))`);
+     }
+     // Block file movement to prevent bypass via mv/rename
+-    rules.push(...generateMoveBlockingRules(config.denyOnly || [], logTag));
++    rules.push(...generateMoveBlockingRules(config.denyOnly || [], logTag, config.allowWithinDeny || []));
+     return rules;
+ }
+ /**

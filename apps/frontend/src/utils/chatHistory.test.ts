@@ -2,6 +2,22 @@ import { describe, expect, it } from 'vitest';
 import { normalizeChatHistory } from './chatHistory';
 
 describe('normalizeChatHistory semantic metadata', () => {
+    it('preserves attachment-only user messages', () => {
+        const attachments = [{ type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'scene.png' }];
+        expect(normalizeChatHistory([{ id: 'image', sender: 'user', content: '', timestamp: 1, attachments }])[0])
+            .toMatchObject({ content: '', attachments });
+    });
+    it('retains subagent detail and source metadata through refresh without unsafe links', () => {
+        const [message] = normalizeChatHistory([{ id: 'agent', sender: 'beegame', content: 'Review', timestamp: 1,
+            isSubagentTool: true, subagentPrompt: 'Inspect', subagentOutput: 'Passed', subagentTrace: 'Read file',
+            todoScope: 'reviewer', sources: [{ title: 'Guide', url: 'https://example.com/guide' }],
+            citations: [{ title: 'Unsafe', url: 'javascript:alert(1)' }],
+        }]);
+        expect(message).toMatchObject({ isSubagentTool: true, subagentPrompt: 'Inspect', subagentOutput: 'Passed',
+            subagentTrace: 'Read file', todoScope: 'reviewer', sources: [{ title: 'Guide', url: 'https://example.com/guide' }],
+            citations: [{ title: 'Unsafe' }],
+        });
+    });
     it('maps render and artifact metadata into frontend messages', () => {
         const messages = normalizeChatHistory([
             {

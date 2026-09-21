@@ -84,6 +84,22 @@ export async function completeResourceTask(input: {
   if (input.terminal?.workerType === 'resource-planner') {
     if (input.run.resourceProductionState.currentTask === 'RESOURCE_DELIVERED')
       throw new Error('resource preparation is already complete')
+    const accepted = await refreshResourceDelivery(input)
+    if (accepted.status === 'needs_action') return accepted
+    return transitionDeliveryRun(accepted, {
+      type: 'resource_preparation_ready',
+      resourceRevision: accepted.revision.resource!,
+      evidence: accepted.evidence.resourcePreparation!,
+    })
+  }
+  throw new Error('retired resource worker terminal')
+}
+
+/** Validate and record the current files without rerunning an upstream Agent. */
+export async function refreshResourceDelivery(input: {
+  run: DeliveryRun
+  workspacePath: string
+}): Promise<DeliveryRun> {
     const validation = validateResourceDelivery(input.workspacePath, input.run.confirmedBriefContext)
     if (!validation.valid) return {
       ...input.run,
@@ -141,10 +157,9 @@ export async function completeResourceTask(input: {
       status: 'passed' as const,
       observedAt: new Date().toISOString(),
     }
-    return transitionDeliveryRun(
-      accepted,
-      { type: 'resource_preparation_ready', resourceRevision, evidence },
-    )
-  }
-  throw new Error('retired resource worker terminal')
+    return {
+      ...accepted,
+      revision: { ...accepted.revision, resource: resourceRevision },
+      evidence: { ...accepted.evidence, resourcePreparation: evidence },
+    }
 }

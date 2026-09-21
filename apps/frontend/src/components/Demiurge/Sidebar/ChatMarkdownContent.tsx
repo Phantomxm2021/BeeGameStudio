@@ -3,8 +3,6 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import type { Language } from '../AgentsConfig';
-import { formatMessageContent } from '../../../utils/formatters';
-import { artifactProcessor } from '../../../utils/artifactProcessor';
 
 const normalizeEscapedNewlines = (input: string): string => {
     if (!input) return '';
@@ -12,7 +10,7 @@ const normalizeEscapedNewlines = (input: string): string => {
 };
 
 const isLikelyCsvContent = (input: string): boolean => {
-    const text = normalizeEscapedNewlines(input).trim();
+    const text = input.trim();
     if (!text) return false;
     const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
     if (lines.length < 2) return false;
@@ -75,7 +73,7 @@ const detectColor = (text: string): string | null => {
 };
 
 const tryParseStructuredJson = (input: string): unknown | null => {
-    const text = normalizeEscapedNewlines(input).trim();
+    const text = input.trim();
     if (!text || (!text.startsWith('{') && !text.startsWith('['))) return null;
     try {
         return JSON.parse(text);
@@ -84,43 +82,16 @@ const tryParseStructuredJson = (input: string): unknown | null => {
     }
 };
 
-const structuredJsonToMarkdown = (value: unknown): string | null => {
-    if (Array.isArray(value)) return null;
-    if (!value || typeof value !== 'object') return null;
-    const payload = value as Record<string, unknown>;
-    const userFacingTextCandidates = [payload.final, payload.final_output, payload.summary, payload.message];
-    for (const candidate of userFacingTextCandidates) {
-        if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
-    }
-    const deliverable = payload.deliverable;
-    if (typeof deliverable === 'string' && deliverable.trim()) return deliverable.trim();
-    if (deliverable && typeof deliverable === 'object' && !Array.isArray(deliverable)) {
-        const sections = Object.entries(deliverable as Record<string, unknown>)
-            .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && Boolean(entry[1].trim()))
-            .map(([key, sectionValue]) => `## ${key}\n\n${sectionValue.trim()}`);
-        return sections.join('\n\n').trim() || null;
-    }
-    return null;
-};
-
 import MarkdownErrorBoundary from '../../Common/MarkdownErrorBoundary';
 
 export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble = false }: { content: string, messageId?: string; lang?: Language; bubble?: boolean }) => {
     const bodyTextClass = bubble ? 'text-[currentColor]' : 'text-[var(--text-secondary)]';
     const headingTextClass = bubble ? 'text-[currentColor]' : 'text-[var(--text-primary)]';
-    const { formattedMainContent, renderAsCsv } = useMemo(() => {
-        const normalized = normalizeEscapedNewlines(content);
-        const fromProcessor = artifactProcessor.stripMarkers(normalized);
-        const structuredPayload = tryParseStructuredJson(fromProcessor);
-        const structured = structuredPayload !== null
-            ? structuredJsonToMarkdown(structuredPayload)
-            : null;
-        const main = fromProcessor.replace(/<thought>[\s\S]*?<\/thought>/, '').trim();
-        const visibleContent = structuredPayload !== null
-            ? structured || ''
-            : main;
-        const formatted = formatMessageContent(visibleContent);
-        return { formattedMainContent: formatted, renderAsCsv: isLikelyCsvContent(formatted) };
+    const { formattedMainContent, renderAsCsv, renderAsJson } = useMemo(() => {
+        // Event classification belongs to the adapter, not to a field-name
+        // heuristic that discards parts of a model's visible response.
+        const json = tryParseStructuredJson(content) !== null;
+        return { formattedMainContent: content, renderAsCsv: !json && isLikelyCsvContent(content), renderAsJson: json };
     }, [content]);
 
     const csvData = useMemo(() => {
@@ -136,7 +107,9 @@ export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble =
         <MarkdownErrorBoundary messageId={messageId} rawContent={content}>
             <div className={`min-w-0 max-w-full select-text break-words ${bubble ? 'text-background' : 'text-[var(--text-primary)]'} [overflow-wrap:anywhere]`}>
                 <div className={`mt-1`}>
-                    {renderAsCsv && csvData ? (
+                    {renderAsJson ? (
+                        <pre className="type-code max-w-full overflow-x-auto rounded-lg bg-[var(--surface-3)] p-3"><code>{content}</code></pre>
+                    ) : renderAsCsv && csvData ? (
                         <div className="my-6 w-full min-w-0 max-w-full overflow-x-auto rounded-lg border border-[var(--border)]">
 	                            <table className="type-chat-body w-full border-collapse">
                                 <thead className="border-b border-[var(--border)] bg-[var(--surface-2)]">
@@ -169,6 +142,9 @@ export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble =
                         <ReactMarkdown
                             remarkPlugins={[remarkGfm, remarkBreaks]}
                             components={{
+                                img: ({ node: _node, ...props }) => <img {...props}
+                                    loading="lazy" decoding="async" referrerPolicy="no-referrer"
+                                    className="my-2 h-auto max-h-80 max-w-full rounded-xl object-contain" />,
                                 p: (props) => (
                                     <p
                                         className={`type-chat-body mb-2.5 ${bodyTextClass} last:mb-0 break-words [overflow-wrap:anywhere]`}

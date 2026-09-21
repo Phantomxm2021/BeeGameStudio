@@ -1,4 +1,4 @@
-import { Fragment, memo, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, Bot, ChevronDown, ChevronRight, FileText, Pencil } from 'lucide-react';
 import { type ChatDisplayMessage, type ChatDisplaySource } from '../../../viewModels/displayModels';
 import { MarkdownRenderer } from './ChatMarkdownContent';
@@ -16,9 +16,12 @@ import { AgentActivity, type AgentActivityItem } from '../../beui/registry/compo
 import { FileDiff, type FileDiffLine } from '../../beui/registry/components/agents/file-diff';
 import { ReasoningText } from '../../beui/registry/components/agents/loading-states/reasoning-text';
 import { StreamingResponse } from '../../beui/registry/components/agents/streaming-response';
+import { ToolResult, ToolResultOutput } from '../../beui/registry/components/agents/tool-result';
 import { Drawer } from '../../beui/registry/components/motion/drawer';
 import { shortenAbsolutePathsForDisplay } from '../../../utils/chatPathDisplay';
 import { ArtifactCard } from './ArtifactCard';
+import { chatStageLabels } from '../../../utils/chatStageLabels';
+import { ChatAttachmentView } from './ChatAttachmentView';
 
 type BeeGameCollaborationFeedProps = {
     messages: ChatDisplayMessage[];
@@ -62,6 +65,8 @@ type ToolFeedMessage = ChatDisplayMessage & {
 };
 
 type NormalizedTool = {
+    attachments?: ChatDisplayMessage['attachments'];
+    completionReason?: ChatDisplayMessage['completionReason'];
     id: string;
     name: string;
     status: 'running' | 'completed' | 'failed';
@@ -230,8 +235,10 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
         id: message.id,
         name,
         status,
+        completionReason: message.completionReason,
+        attachments: message.attachments,
         detail: displayText(stripStructuredDetailLabel(rawDetail)),
-        output: displayText(output),
+        output,
         diff: diff ? displayText(diff) : undefined,
         artifactId: String(message.artifactId || message.artifact_id || '').trim() || undefined,
         kind,
@@ -367,7 +374,7 @@ type FeedEntry =
     | { kind: 'context'; message: ChatDisplayMessage }
     | AgentResponseTurn;
 
-type AgentRunDetail = { kind: 'subagent'; tool: NormalizedTool };
+type AgentRunDetail = { kind: 'subagent' | 'tool'; tool: NormalizedTool };
 
 type ToolPartReference = {
     turn: AgentResponseTurn;
@@ -392,6 +399,7 @@ const mergeToolPart = (
                 name: tool.name === GENERIC_TOOL_NAME ? current.name : tool.name,
                 detail: tool.detail || current.detail,
                 output: tool.output || current.output,
+                attachments: tool.attachments ?? current.attachments,
                 diff: tool.diff || current.diff,
                 before: tool.before ?? current.before,
                 after: tool.after ?? current.after,
@@ -502,6 +510,7 @@ const getMessageSources = (message: ChatDisplayMessage): ChatDisplaySource[] => 
 const messageTimestamp = (message: ChatDisplayMessage): number => Number(message.timestamp || Number.POSITIVE_INFINITY);
 
 const matchesStreamingMessage = (message: ChatDisplayMessage, streamingMessageId: string | null): boolean => {
+    if (message.streamStatus) return message.streamStatus === 'streaming';
     if (!streamingMessageId) return false;
     const id = String(message.id || '');
     const legacyMessageId = (message as ChatDisplayMessage & { message_id?: string }).message_id;
@@ -649,7 +658,7 @@ export const BeeGameCollaborationFeed = memo(({
         }
         return detail;
     }, [detail, entries]);
-    const hasStreamingMessage = Boolean(streamingMessageId && entries.some((entry) => entry.kind === 'response' && entry.parts.some((part) => (
+    const hasStreamingMessage = Boolean(entries.some((entry) => entry.kind === 'response' && entry.parts.some((part) => (
         (part.kind === 'tool' && part.tool.status === 'running') ||
         ((part.kind === 'thinking' || part.kind === 'agent') && matchesStreamingMessage(part.message, streamingMessageId))
     ))));
@@ -733,6 +742,7 @@ export const BeeGameCollaborationFeed = memo(({
                                         lang={lang}
                                         streamingMessageId={streamingMessageId}
                                         onOpenSubagent={(tool) => openDetail({ kind: 'subagent', tool })}
+                                        onOpenTool={(tool) => openDetail({ kind: 'tool', tool })}
                                         onPreviewArtifact={onPreviewArtifact}
                                     />
                                 </StreamingResponse>;
@@ -752,11 +762,11 @@ export const BeeGameCollaborationFeed = memo(({
             className="overflow-hidden"
         >
             {detail ? <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-                <AgentRunDetailView
+                {detail.kind === 'tool' ? <ToolResultDetail tool={(currentDetail ?? detail).tool} lang={lang} /> : <AgentRunDetailView
                     detail={currentDetail ?? detail}
                     lang={lang}
                     onBack={() => setDetail(null)}
-                />
+                />}
             </div> : null}
         </Drawer>
         </>
@@ -765,13 +775,49 @@ export const BeeGameCollaborationFeed = memo(({
 
 BeeGameCollaborationFeed.displayName = 'BeeGameCollaborationFeed';
 
+function ToolResultDetail({ tool, lang }: { tool: NormalizedTool; lang: Language }) {
+    return <ToolResult title={tool.name} status={tool.status === 'completed' ? 'success' : tool.status === 'failed' ? 'error' : 'running'}
+        defaultOpen collapseOnComplete={false} kind={tool.kind === 'bash' ? 'terminal' : 'custom'} copyText={tool.output}>
+        <div className="space-y-4">
+            {tool.input !== undefined && <section>
+                <h3 className="mb-2 type-caption-1 text-[var(--text-muted)]">{lang === 'zh' ? '输入' : 'Input'}</h3>
+                <ToolResultOutput language="json">{JSON.stringify(tool.input, null, 2)}</ToolResultOutput>
+            </section>}
+            <section>
+                <h3 className="mb-2 type-caption-1 text-[var(--text-muted)]">{lang === 'zh' ? '输出' : 'Output'}</h3>
+                <ToolResultOutput>{tool.output || (lang === 'zh' ? '暂无输出' : 'No output yet')}</ToolResultOutput>
+            </section>
+        </div>
+    </ToolResult>;
+}
+
+function ThinkingActivity({ part, lang, working }: { part: Extract<ResponsePart, { kind: 'thinking' }>; lang: Language; working: boolean }) {
+    const [now, setNow] = useState(Date.now);
+    useEffect(() => {
+        if (!working) return;
+        const timer = setInterval(() => setNow(Date.now()), 1000);
+        return () => clearInterval(timer);
+    }, [working]);
+    const elapsed = working ? Math.max(0, now - part.timestamp) : part.durationMs;
+    const duration = elapsed === undefined ? '' : elapsed < 1000
+        ? (lang === 'zh' ? '少于 1 秒' : 'less than 1s')
+        : (lang === 'zh' ? `${Math.floor(elapsed / 1000)} 秒` : `${Math.floor(elapsed / 1000)}s`);
+    return <AgentActivity items={[{ id: part.message.id, type: 'text', content: <MarkdownRenderer
+        content={part.message.thought || part.message.content || ''} messageId={part.message.id} lang={lang} /> }]}
+        contentType="text" status={working ? 'working' : 'complete'}
+        activeLabel={`${lang === 'zh' ? '正在思考' : 'Thinking'}${duration ? ` · ${duration}` : ''}`}
+        summary={`${part.message.completionReason ? (lang === 'zh' ? '思考已中断' : 'Thinking interrupted') : (lang === 'zh' ? '已思考' : 'Thought')}${duration ? ` · ${duration}` : ''}`}
+        defaultOpen={false} className="w-full text-[var(--text-secondary)]" />;
+}
+
 function SubagentToolSummary({ tool, lang, onOpen }: { tool: NormalizedTool; lang: Language; onOpen: () => void }) {
     const running = tool.status === 'running';
     const failed = tool.status === 'failed';
     const title = lang === 'zh' ? '子任务' : 'Subagent';
     const normalizedName = tool.name.trim().toLowerCase();
     const name = normalizedName && !['agent', 'subagent', 'task'].includes(normalizedName) ? tool.name : title;
-    const statusLabel = running
+    const statusLabel = tool.completionReason === 'stopped' ? (lang === 'zh' ? '已停止' : 'Stopped')
+        : tool.completionReason === 'incomplete' ? (lang === 'zh' ? '未完成' : 'Incomplete') : running
         ? (lang === 'zh' ? '执行中' : 'Working')
         : failed
             ? (lang === 'zh' ? '失败' : 'Failed')
@@ -805,7 +851,8 @@ function AgentRunDetailView({
     const running = detail.tool.status === 'running';
     const failed = detail.tool.status === 'failed';
     const title = lang === 'zh' ? '子任务' : 'Subagent';
-    const statusLabel = running
+    const statusLabel = detail.tool.completionReason === 'stopped' ? (lang === 'zh' ? '已停止' : 'Stopped')
+        : detail.tool.completionReason === 'incomplete' ? (lang === 'zh' ? '未完成' : 'Incomplete') : running
         ? (lang === 'zh' ? '执行中' : 'Working')
         : failed
             ? (lang === 'zh' ? '失败' : 'Failed')
@@ -852,12 +899,14 @@ function ResponseParts({
     lang,
     streamingMessageId,
     onOpenSubagent,
+    onOpenTool,
     onPreviewArtifact,
 }: {
     parts: ResponsePart[];
     lang: Language;
     streamingMessageId: string | null;
     onOpenSubagent: (tool: NormalizedTool) => void;
+    onOpenTool: (tool: NormalizedTool) => void;
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
 }) {
     const rendered: ReactNode[] = [];
@@ -869,18 +918,9 @@ function ResponseParts({
             continue;
         }
         if (part.kind === 'thinking') {
-            const status: 'working' | 'complete' = matchesStreamingMessage(part.message, streamingMessageId)
-                ? 'working'
-                : 'complete';
-            rendered.push(<AgentActivity
+            rendered.push(<ThinkingActivity
                 key={`thinking-activity-${part.message.id}`}
-                items={[toActivityItem(part)]}
-                contentType="text"
-                status={status}
-                duration={Math.max(0, (part.durationMs || 0) / 1000)}
-                activeLabel={lang === 'zh' ? '正在思考' : 'Thinking'}
-                defaultOpen={status === 'working'}
-                className="w-full text-[var(--text-secondary)]"
+                part={part} lang={lang} working={matchesStreamingMessage(part.message, streamingMessageId)}
             />);
             continue;
         }
@@ -898,10 +938,15 @@ function ResponseParts({
             const toolParts = parts.slice(segmentStartIndex, index + 1).filter(
                 (candidate): candidate is Extract<ResponsePart, { kind: 'tool' }> => belongsToToolGroup(candidate),
             );
-            const timestamps = toolParts.map((candidate) => candidate.timestamp).filter(Number.isFinite);
-            const duration = timestamps.length > 1
-                ? Math.max(0, (Math.max(...timestamps) - Math.min(...timestamps)) / 1000)
-                : 0;
+            const stoppedCount = toolParts.filter(candidate => candidate.tool.completionReason === 'stopped').length;
+            const incompleteCount = toolParts.filter(candidate => candidate.tool.completionReason === 'incomplete').length;
+            const failedCount = toolParts.filter(candidate => candidate.tool.status === 'failed' &&
+                candidate.tool.completionReason !== 'stopped' && candidate.tool.completionReason !== 'incomplete').length;
+            const outcomeSummary = [
+                failedCount ? (lang === 'zh' ? `${failedCount} 次失败` : `${failedCount} failed`) : '',
+                stoppedCount ? (lang === 'zh' ? `${stoppedCount} 次已停止` : `${stoppedCount} stopped`) : '',
+                incompleteCount ? (lang === 'zh' ? `${incompleteCount} 次未完成` : `${incompleteCount} incomplete`) : '',
+            ].filter(Boolean).join(' · ');
             const status: 'working' | 'complete' = toolParts.some((candidate) => candidate.tool.status === 'running')
                 ? 'working'
                 : 'complete';
@@ -911,14 +956,18 @@ function ResponseParts({
             // in a synthetic mixed activity.
             rendered.push(<AgentActivity
                 key={`tool-activity-${segmentStartIndex}`}
-                items={toolParts.map((candidate) => toActivityItem(candidate))}
+                items={toolParts.map((candidate) => ({ ...toActivityItem(candidate), target: <button type="button"
+                    className={`text-left hover:underline ${candidate.tool.status === 'failed' ? 'text-[var(--destructive)]' : ''}`}
+                    onClick={() => onOpenTool(candidate.tool)}>{displayText(candidate.tool.detail || candidate.tool.name)}</button> }))}
                 status={status}
-                duration={duration}
                 activeLabel={localSearchOnly ? (lang === 'zh' ? '正在搜索文件' : 'Searching files') : undefined}
-                summary={localSearchOnly ? (lang === 'zh' ? '已搜索文件' : 'Searched files') : undefined}
+                summary={outcomeSummary ? `${lang === 'zh' ? `${toolParts.length} 次工具调用` : `${toolParts.length} tool calls`} · ${outcomeSummary}` : localSearchOnly ? (lang === 'zh' ? '已搜索文件' : 'Searched files') : undefined}
                 defaultOpen={status === 'working'}
                 className="w-full text-[var(--text-secondary)]"
             />);
+            toolParts.forEach(({ tool }) => tool.attachments?.forEach((attachment, attachmentIndex) => {
+                rendered.push(<ChatAttachmentView key={`tool-image-${tool.id}-${attachmentIndex}`} attachment={attachment} />);
+            }));
             const artifactTools = toolParts
                 .map((candidate) => candidate.tool)
                 .filter((tool) => Boolean(tool.diff));
@@ -1080,15 +1129,6 @@ function DateSeparator({ dateKey, label }: { dateKey: string; label: string }) {
 }
 
 function StageSeparator({ stage, lang }: { stage: WorkflowStage; lang: Language }) {
-    const labels: Record<WorkflowStage, { zh: string; en: string }> = {
-        author: { zh: '文档编写', en: 'Document authoring' },
-        content: { zh: '内容编写', en: 'Content authoring' },
-        reviewer: { zh: '审计与修订', en: 'Review and revision' },
-        revision: { zh: '文档修订', en: 'Document revision' },
-        resources: { zh: '资源准备', en: 'Resource preparation' },
-        implementation: { zh: '游戏实现', en: 'Game implementation' },
-        acceptance: { zh: '验收', en: 'Acceptance' },
-    };
     return (
         <MessageMarker
             data-testid={`beegame-stage-separator-${stage}`}
@@ -1096,7 +1136,7 @@ function StageSeparator({ stage, lang }: { stage: WorkflowStage; lang: Language 
             data-variant="separator"
             className="type-muted bg-transparent py-2 text-[var(--text-muted)]"
         >
-            {labels[stage][lang === 'zh' ? 'zh' : 'en']}
+            {chatStageLabels[stage][lang === 'zh' ? 'zh' : 'en']}
         </MessageMarker>
     );
 }
@@ -1118,6 +1158,9 @@ function UserMessageCard({
                 <MessageBubble variant="solid" className="max-w-full">
                     <MessageBubbleContent className="max-w-full">
                         <MarkdownRenderer content={message.content} messageId={message.id} lang={lang} bubble />
+                        {message.attachments?.length ? <div className="mt-2 flex flex-wrap gap-2">
+                            {message.attachments.map((attachment, index) => <ChatAttachmentView key={index} attachment={attachment} />)}
+                        </div> : null}
                     {onEdit ? <button
                         type="button"
                         aria-label="Edit message"

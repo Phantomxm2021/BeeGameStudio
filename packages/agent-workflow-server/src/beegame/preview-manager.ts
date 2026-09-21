@@ -247,6 +247,15 @@ export class BeeGamePreviewManager {
     return record.internalUrl
   }
 
+  /** Resolve only an already-running preview owned by this workspace. */
+  runningForWorkspace(workspacePath: string): BeeGamePreviewSnapshot | undefined {
+    const record = [...this.records.values()].filter(record =>
+      record.snapshot.status === 'running' &&
+      sameWorkspace(record.snapshot.workspacePath, workspacePath),
+    ).sort((a, b) => b.snapshot.updatedAt.localeCompare(a.snapshot.updatedAt))[0]
+    return record ? { ...record.snapshot } : undefined
+  }
+
   expectsPublicPath(sessionId: string): boolean {
     const record = this.records.get(sessionId)
     return Boolean(record?.expectsPublicPath)

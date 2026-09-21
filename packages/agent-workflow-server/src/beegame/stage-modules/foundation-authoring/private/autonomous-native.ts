@@ -5,6 +5,7 @@ import type { AuthorUsage } from './contract'
 import { CANONICAL_FOUNDATION_DOCUMENTS } from './domain/types'
 import { autonomousAuthorReadOnlyPaths } from './autonomous-files'
 import { boundedFinishExecutionLimits, startAuthorBudget, type AuthorExecutionLimits } from './execution-budget'
+import { CONTENT_COORDINATE_CONTRACT } from '../../../../../../scene-editor/src/content-coordinates'
 
 export const autonomousAuthorReportSchema = z.strictObject({
   status: z.enum(['completed', 'blocked']),
@@ -19,6 +20,7 @@ export function autonomousAuthorPrompt(language?: string): string {
     'requirements.md contains the confirmed game requirements. Read it, then create and directly write the complete set of eight game design documents in docs/.',
     `The deliverables are: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}.`,
     'Use your own judgment to complete the documents from the confirmed requirements. Continue useful existing drafts instead of restarting them.',
+    `For spatial specifications use the Content coordinate convention: ${CONTENT_COORDINATE_CONTRACT.scene2d} ${CONTENT_COORDINATE_CONTRACT.scene3d} ${CONTENT_COORDINATE_CONTRACT.rotation} Screen UI always uses top-left logical pixels and parent-local offsets.`,
     'Write the document bodies to those files rather than returning them in the response. Do not implement the game.',
     'When the task is complete, use StructuredOutput with status completed or blocked and a concise summary of the result or the specific unresolved blocker.',
     ...(language ? [`Use ${language} for the documents and summary.`] : []),

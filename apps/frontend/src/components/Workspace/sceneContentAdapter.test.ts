@@ -25,6 +25,47 @@ function scene(): BeeGameSceneContentDocument {
 }
 
 describe('Unity-style scene adapter', () => {
+  it('round-trips 2D rotation, Z, scale and rect anchors at the editor boundary', () => {
+    const input = scene();
+    input.data.settings = { coordinateSystem:{width:960,height:540,pixelsPerUnit:32}, layers:[{id:'actors',order:5}] };
+    const actor = input.data.nodes.find(n => n.id === 'player')!;
+    actor.transform = { position:[96,224,7], rotation:[0,0,Math.PI/3], scale:[-2,3,1] };
+    const rect = input.data.nodes.find(n => n.id === 'awareness')!.components!.find(c => c.type === 'rect-transform')!;
+    rect.data = {anchorMin:[.25,.1],anchorMax:[.75,.8],pivot:[0,1],anchoredPosition:[12,16],sizeDelta:[80,8]};
+    const editor = sceneContentToEditorDocument({document:input,documentRevision:HASH,foundationDocumentRevision:HASH,assetManifestRevision:HASH});
+    expect(editor.nodes.player.transform.rotation[2]).toBeCloseTo(-Math.PI/3);
+    expect(editor.nodes.player.transform.scale).toEqual([-2,3,1]);
+    const imported = editor.nodes.awareness.components.find(c=>c.type==='rect-transform')!;
+    expect(imported).toMatchObject({anchoredPosition:[.375,-.5],pivot:[0,0],sizeDelta:[2.5,.25]});
+    const saved = editorDocumentToSceneContent(editor,input);
+    const savedActor = saved.data.nodes.find(n=>n.id==='player')!;
+    savedActor.transform!.position.forEach((v,i)=>expect(v).toBeCloseTo(actor.transform!.position[i]));
+    savedActor.transform!.rotation!.forEach((v,i)=>expect(v).toBeCloseTo(actor.transform!.rotation![i]));
+    const savedRect = saved.data.nodes.find(n=>n.id==='awareness')!.components!.find(c=>c.type==='rect-transform')!;
+    (savedRect.data!.anchorMin as number[]).forEach((v,i)=>expect(v).toBeCloseTo((rect.data!.anchorMin as number[])[i]));
+    expect(savedRect.data!.anchoredPosition).toEqual([12,16]);
+    editor.nodes.player.transform.position[0] += 1;
+    editor.nodes.player.transform.rotation[2] -= .25;
+    const moved = editorDocumentToSceneContent(editor,input);
+    expect(moved.data.nodes.find(n=>n.id==='player')!.transform!.position[0]).toBe(128);
+    const reopened = sceneContentToEditorDocument({document:moved,documentRevision:HASH,foundationDocumentRevision:HASH,assetManifestRevision:HASH});
+    expect(reopened.nodes.player.transform.position).toEqual(editor.nodes.player.transform.position);
+    expect(reopened.nodes.player.transform.rotation[2]).toBeCloseTo(editor.nodes.player.transform.rotation[2]);
+  });
+
+  it('does not apply 2D flips, canvas offsets or pixel scaling to a 3D scene and its effects', () => {
+    const input = scene(); input.kind = 'scene-3d';
+    input.data.settings = {coordinateSystem:{origin:'world',units:'meters',pixelsPerUnit:32}};
+    input.data.nodes[0].transform = {position:[1,2,3],rotation:[.1,.2,.3],scale:[1,2,3]};
+    const editor = sceneContentToEditorDocument({document:input,documentRevision:HASH,foundationDocumentRevision:HASH,assetManifestRevision:HASH});
+    expect(editor.nodes.root.transform).toEqual(input.data.nodes[0].transform);
+    expect(editor.pixelsPerUnit).toBe(1);
+    expect(editor.nodes.fireflies.components[0]).toMatchObject({properties:{zone:{x:40,y:60,width:1200,height:600}}});
+    const saved = editorDocumentToSceneContent(editor,input);
+    expect(saved.data.nodes[0].transform).toEqual(input.data.nodes[0].transform);
+    expect(saved.data.nodes.find(n=>n.id==='fireflies')!.components![0].data).toEqual(input.data.nodes.find(n=>n.id==='fireflies')!.components![0].data);
+  });
+
   it('converts collider pixels and y-down offsets, and restores them on save without shrinking lights', () => {
     const input = scene();
     input.data.settings = { coordinateSystem: { pixelsPerUnit: 50, width: 1280, height: 720 } };
@@ -69,7 +110,8 @@ describe('Unity-style scene adapter', () => {
     expect(editor.pixelsPerUnit).toBe(32);
     expect(editor.nodes.root.components[0]).toMatchObject({ frame: { x: 1, y: 1, width: 40, height: 48 } });
     expect(editor.nodes.root.components[1]).toMatchObject({ size: [1, 1.5] });
-    expect(editor.nodes.root.transform.position).toEqual([-27.5, 15.75, 0]);
+    // A bottom pivot moves geometry, not the GameObject/collider.
+    expect(editor.nodes.root.transform.position).toEqual([-27.5, 15, 0]);
     expect(editorDocumentToSceneContent(editor, input).data.nodes[0].transform?.position).toEqual([320, 320, 0]);
     expect(editorDocumentToSceneContent(editor, input).data.nodes[0].components?.[0].data).toEqual(input.data.nodes[0].components?.[0].data);
   });

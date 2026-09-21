@@ -3,7 +3,24 @@ import type { ChatDisplayMessage } from '../viewModels/displayModels';
 import { deriveCurrentProjectTodos } from './projectTodos';
 
 describe('deriveCurrentProjectTodos', () => {
-    it('keeps every TodoWrite task while applying its latest status', () => {
+    it('keeps same-named tasks in separate execution scopes and compares paths before display shortening', () => {
+        const make = (id: string, scope: string, timestamp: number, content: string, status: string): ChatDisplayMessage => ({
+            id, todoScope: scope, sender: 'system', content: 'TodoWrite', timestamp, toolName: 'TodoWrite',
+            toolInput: { todos: [{ content, status }] },
+        });
+        const items = deriveCurrentProjectTodos([
+            make('last', 'author', 4, 'Review', 'completed'),
+            make('a', 'author', 1, 'Review', 'pending'),
+            make('b', 'reviewer', 2, 'Review', 'in_progress'),
+            make('c', 'author', 3, 'Edit /Users/a/index.ts', 'pending'),
+            make('d', 'author', 5, 'Edit /Users/b/index.ts', 'pending'),
+        ]);
+        expect(items.map(t => [t.title, t.status])).toEqual([
+            ['Edit index.ts', 'pending'], ['Review', 'in-progress'],
+        ]);
+        expect(new Set(items.map(t => t.id)).size).toBe(2);
+    });
+    it('replaces a scope snapshot instead of retaining renamed or removed tasks', () => {
         const messages: ChatDisplayMessage[] = [
             {
                 id: 'first', sender: 'system', content: '', timestamp: 1, type: 'tool', toolName: 'TodoWrite',
@@ -19,7 +36,6 @@ describe('deriveCurrentProjectTodos', () => {
         ];
 
         expect(deriveCurrentProjectTodos(messages)).toEqual([
-            { id: 'first-0', title: 'Old task', status: 'pending' },
             { id: 'latest-0', title: 'Finished', status: 'completed' },
             { id: 'latest-1', title: 'Edit App.tsx', status: 'in-progress' },
         ]);
@@ -47,7 +63,6 @@ describe('deriveCurrentProjectTodos', () => {
             },
         ];
         expect(deriveCurrentProjectTodos(messages)).toEqual([
-            { id: 'historical-0', title: 'Old task', status: 'pending' },
             { id: 'structured-0', title: 'Recovered task', status: 'pending' },
         ]);
     });

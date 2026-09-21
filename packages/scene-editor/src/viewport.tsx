@@ -9,6 +9,7 @@ import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
 import type { ModelSelection } from './model-structure'
 import { componentOf, DEFAULT_SCENE_SETTINGS } from './model'
 import { colliderOutline } from './collider-outline'
+import { editorRect, rectTransform } from './rect-transform'
 import { LightGizmo, lightConePoints } from './light-gizmo'
 import { isApplePlatform, resolveUnityNavigationAction, wheelPixels } from './navigation'
 import type { NavigationAction } from './navigation'
@@ -223,7 +224,7 @@ function worldPosition(document: SceneDocument, id: string) {
   const matrix = new THREE.Matrix4()
   for (const node of chain) {
     const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(...node.transform.rotation))
-    matrix.multiply(new THREE.Matrix4().compose(new THREE.Vector3(...node.transform.position), rotation, new THREE.Vector3(...node.transform.scale)))
+    matrix.multiply(new THREE.Matrix4().compose(new THREE.Vector3(...rectTransform(node, document.nodes).position), rotation, new THREE.Vector3(...node.transform.scale)))
   }
   result.setFromMatrixPosition(matrix)
   return result
@@ -427,7 +428,18 @@ export function rendererSize(node: SceneNode, pixelsPerUnit = 100): [number, num
     : undefined
   const width = typeof size?.width === 'number' && Number.isFinite(size.width) ? size.width : 100
   const height = typeof size?.height === 'number' && Number.isFinite(size.height) ? size.height : 100
-  return [Math.max(1, width) / pixelsPerUnit, Math.max(1, height) / pixelsPerUnit]
+  return [Math.max(0, width) / pixelsPerUnit, Math.max(0, height) / pixelsPerUnit]
+}
+
+/** A visual pivot offsets geometry, not its GameObject, children or colliders. */
+export function rendererOffset(node: SceneNode, size: readonly number[]): [number, number, number] {
+  const rect = componentOf(node, 'rect-transform')
+  if (rect) return [(.5-rect.pivot[0])*size[0], (.5-rect.pivot[1])*size[1], 0]
+  const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image') ?? componentOf(node, 'tilemap')
+  const anchor = renderer?.properties.anchor
+  const value = Array.isArray(anchor) ? anchor : anchor && typeof anchor === 'object' ? [(anchor as {x?: number}).x, (anchor as {y?: number}).y] : [.5, .5]
+  const x = typeof value[0] === 'number' ? value[0] : .5, y = typeof value[1] === 'number' ? value[1] : .5
+  return [(.5-x)*size[0], (y-.5)*size[1], 0]
 }
 
 function patrolPosition(patrol: NonNullable<Preview2D['patrol']>, elapsedSecs: number, pixelsPerUnit: number): { x: number; y: number } | undefined {
@@ -477,7 +489,14 @@ function spriteFrameAt(sprite: NonNullable<Preview2D['sprite']>, elapsedMs: numb
   return 0
 }
 
-function Primitive({ node, assets, diagnose, pixelsPerUnit }: { pixelsPerUnit: number; node: SceneNode; assets: Record<string, SceneAsset>; diagnose: (message: string) => void }) {
+export function rendererOrder(node: SceneNode): number {
+  const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image')
+    ?? componentOf(node, 'tilemap-renderer') ?? componentOf(node, 'particle-system-renderer')
+  const order = renderer?.properties.sortingOrder ?? node.order ?? 0
+  return typeof order === 'number' && Number.isFinite(order) ? order : 0
+}
+
+function Primitive({ node, assets, diagnose, pixelsPerUnit, rectSize, flat2d }: { pixelsPerUnit: number; node: SceneNode; assets: Record<string, SceneAsset>; diagnose: (message: string) => void; rectSize?: [number, number]; flat2d?: boolean }) {
   const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image')
   const tilemap = componentOf(node, 'tilemap')
   const tilemapRenderer = componentOf(node, 'tilemap-renderer')
@@ -502,6 +521,7 @@ function Primitive({ node, assets, diagnose, pixelsPerUnit }: { pixelsPerUnit: n
     texture.needsUpdate = true
   })
   const props = materialProps(materialData, texture)
+  if (flat2d) { props.transparent = true; props.depthWrite = false }
   const blending = preview2d(node)?.blend === 'additive' ? THREE.AdditiveBlending : THREE.NormalBlending
   // A material compiled without a map will not necessarily acquire the map's
   // shader defines when an asynchronous texture arrives. Recreate it once the
@@ -509,10 +529,11 @@ function Primitive({ node, assets, diagnose, pixelsPerUnit }: { pixelsPerUnit: n
   const materialKey = texture?.uuid ?? 'no-texture'
   const material = materialData?.mode === 'standard' ? <meshStandardMaterial key={materialKey} {...props} blending={blending} metalness={materialData.metalness} roughness={materialData.roughness} /> : <meshBasicMaterial key={materialKey} {...props} blending={blending} />
   if (!(componentVisibleInEditor(renderer) || (componentVisibleInEditor(tilemap) && componentVisibleInEditor(tilemapRenderer)))) return null
-  return <mesh castShadow receiveShadow scale={[...rendererSize(node, pixelsPerUnit), 1]}><planeGeometry args={[1, 1]} />{material}</mesh>
+  const size = rectSize ?? rendererSize(node, pixelsPerUnit)
+  return <mesh castShadow receiveShadow renderOrder={flat2d ? rendererOrder(node) : 0} position={rendererOffset(node, size)} scale={[...size, 1]}><planeGeometry args={[1, 1]} />{material}</mesh>
 }
 
-function TextPreview({ node }: { node: SceneNode }) {
+function TextPreview({ node, rectSize }: { node: SceneNode; rectSize?: [number, number] }) {
   const component = componentOf(node, 'text')
   const texture = useMemo(() => {
     if (!componentVisibleInEditor(component) || !component) return null
@@ -536,8 +557,8 @@ function TextPreview({ node }: { node: SceneNode }) {
   useEffect(() => () => texture?.dispose(), [texture])
   if (!texture || !component) return null
   const rect = componentOf(node, 'rect-transform')
-  const size: [number, number] = rect ? [Math.max(.01, rect.sizeDelta[0]), Math.max(.01, rect.sizeDelta[1])] : [Math.max(1, texture.image.width / texture.image.height), 1]
-  return <mesh scale={[size[0], size[1], 1]}><planeGeometry args={[1, 1]} /><meshBasicMaterial map={texture} transparent depthWrite={false} toneMapped={false} /></mesh>
+  const size: [number, number] = rectSize ?? (rect ? [Math.max(.01, rect.sizeDelta[0]), Math.max(.01, rect.sizeDelta[1])] : [Math.max(1, texture.image.width / texture.image.height), 1])
+  return <mesh position={rendererOffset(node, size)} scale={[size[0], size[1], 1]}><planeGeometry args={[1, 1]} /><meshBasicMaterial map={texture} transparent depthWrite={false} toneMapped={false} /></mesh>
 }
 
 function seeded(index: number, salt: number): number {
@@ -578,7 +599,7 @@ function ParticleEmitterPreview({ node, assets, diagnose, pixelsPerUnit }: { pix
     })
   })
   if (!emitter || !texture) return null
-  return <group ref={root}>{particles.map((particle, index) => <mesh key={index} position={[particle.x, particle.y, index * .0001]}>
+  return <group ref={root}>{particles.map((particle, index) => <mesh key={index} renderOrder={rendererOrder(node)} position={[particle.x, particle.y, index * .0001]}>
     <planeGeometry args={[particle.size, particle.size]} />
     <meshBasicMaterial map={texture} color={emitter.tint ?? '#ffffff'} transparent opacity={particle.opacity} depthWrite={false} blending={emitter.blend === 'additive' ? THREE.AdditiveBlending : THREE.NormalBlending} toneMapped={false} />
   </mesh>)}</group>
@@ -759,7 +780,7 @@ function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableId
     const object = group.current
     if (!object || !node || dragging || selectedIds.includes(node.id)) return
     const time = clock.elapsedTime
-    object.position.set(...node.transform.position)
+    object.position.set(...rectTransform(node, document.nodes).position)
     object.scale.set(...node.transform.scale)
     const patrol = preview?.patrol ? patrolPosition(preview.patrol, time, pixelsPerUnit) : undefined
     if (patrol) { object.position.x = patrol.x; object.position.y = patrol.y }
@@ -782,7 +803,7 @@ function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableId
   })
   useEffect(() => {
     if (!dragging) return
-    const cancel = () => { if (group.current && start.current) { group.current.position.set(...start.current.position); group.current.rotation.set(...start.current.rotation); group.current.scale.set(...start.current.scale) }; start.current = null; if (controls.current) { controls.current.dragging = false; controls.current.axis = null }; setDragging(false); orbit.current && (orbit.current.enabled = true) }
+    const cancel = () => { if (group.current && start.current && node) { group.current.position.set(...rectTransform(node, document.nodes, start.current).position); group.current.rotation.set(...start.current.rotation); group.current.scale.set(...start.current.scale) }; start.current = null; if (controls.current) { controls.current.dragging = false; controls.current.axis = null }; setDragging(false); orbit.current && (orbit.current.enabled = true) }
     const key = (event: KeyboardEvent) => { if (event.key === 'Escape') cancel() }
     window.addEventListener('keydown', key); window.addEventListener('pointercancel', cancel)
     return () => { window.removeEventListener('keydown', key); window.removeEventListener('pointercancel', cancel); if (start.current) cancel() }
@@ -793,13 +814,15 @@ function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableId
     const object = group.current
     if (object && start.current) {
       const next: Transform = { position: [object.position.x, object.position.y, object.position.z], rotation: [object.rotation.x, object.rotation.y, object.rotation.z], scale: [object.scale.x, object.scale.y, object.scale.z] }
-      if (!sameTransform(next, start.current)) onTransform(next)
+      const authored = rectTransform(node, document.nodes, next, true)
+      if (!sameTransform(authored, start.current)) onTransform(authored)
     }
     start.current = null; setDragging(false); if (orbit.current) orbit.current.enabled = true
   }
-  return <><group ref={group} name={node.id} position={node.transform.position} rotation={node.transform.rotation as any} scale={node.transform.scale} onClick={event => { event.stopPropagation(); if (!unpickableIds.includes(node.id) && mode !== 'hand' && !event.altKey) onSelect(node.id, { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey }) }}>
-    {componentOf(node, 'sprite-renderer') || componentOf(node, 'image') || componentOf(node, 'tilemap') ? <Primitive node={node} pixelsPerUnit={pixelsPerUnit} assets={document.assets} diagnose={diagnose} /> : null}
-    {componentOf(node, 'text') ? <TextPreview node={node} /> : null}
+  const rectSize = editorRect(node, document.nodes)?.size
+  return <><group ref={group} name={node.id} position={rectTransform(node, document.nodes).position} rotation={node.transform.rotation as any} scale={node.transform.scale} onClick={event => { event.stopPropagation(); if (!unpickableIds.includes(node.id) && mode !== 'hand' && !event.altKey) onSelect(node.id, { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey }) }}>
+    {componentOf(node, 'sprite-renderer') || componentOf(node, 'image') || componentOf(node, 'tilemap') ? <Primitive node={node} flat2d={document.dimension === '2d'} rectSize={rectSize} pixelsPerUnit={pixelsPerUnit} assets={document.assets} diagnose={diagnose} /> : null}
+    {componentOf(node, 'text') ? <TextPreview node={node} rectSize={rectSize} /> : null}
     {componentOf(node, 'mesh-filter') && componentOf(node, 'mesh-renderer') ? <ModelAsset asset={document.assets[componentOf(node, 'mesh-filter')!.assetId]} override={componentOf(node, 'mesh-renderer')!.material} assets={document.assets} diagnose={diagnose} /> : null}
     {componentOf(node, 'skinned-mesh-renderer') ? <ModelAsset asset={document.assets[componentOf(node, 'skinned-mesh-renderer')!.assetId]} override={componentOf(node, 'skinned-mesh-renderer')!.material} assets={document.assets} diagnose={diagnose} /> : null}
     {componentOf(node, 'particle-system') ? <ParticleEmitterPreview node={node} pixelsPerUnit={pixelsPerUnit} assets={document.assets} diagnose={diagnose} /> : null}

@@ -18,7 +18,8 @@ export async function uiAtlasImages(src: string, metadata: unknown, signal: Abor
     image.src = src;
   });
   const frames = 'frames' in sheet ? sheet.frames : Object.fromEntries(
-    (sheet.states ?? ['default']).map(frame => [frame, spriteSheetSelection(sheet, { frame }).frame!]),
+    (sheet.facings?.length ? sheet.facings : sheet.states?.length ? sheet.states : ['default'])
+      .map(frame => [frame, spriteSheetSelection(sheet, { frame, initialFacing: frame }).frame!]),
   );
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
@@ -52,5 +53,11 @@ export async function uiAtlasImages(src: string, metadata: unknown, signal: Abor
 
 export function uiImageKey(assetRef: string, data: Record<string, unknown> = {}): string {
   const base = typeof data.member === 'string' ? `${assetRef}:${data.member}` : assetRef;
-  return typeof data.frame === 'string' ? `${base}#${frameName(data.frame)}` : base;
+  const frame = typeof data.frame === 'string' ? data.frame : data.initialFacing;
+  return typeof frame === 'string' ? `${base}#${frameName(frame)}` : base;
+}
+
+export function resolveUiImage(assetRef: string, data: Record<string, unknown> | undefined, images: Record<string, string>): string | undefined {
+  // A named frame requires a real rectangle; never stretch an unresolved sheet.
+  return images[uiImageKey(assetRef, data)];
 }

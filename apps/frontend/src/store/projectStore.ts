@@ -405,15 +405,8 @@ export const useProjectStore = create<ProjectState>()(
           const chatStore = useChatStore.getState();
           const bootstrapTimestamp = Date.now();
           chatStore.clearMessages();
-          chatStore.addMessage({
-            id: `bootstrap-user-${newProjectId}-${bootstrapTimestamp}`,
-            clientMessageId: `bootstrap-user-${newProjectId}`,
-            sender: 'user',
-            content: data.idea,
-            taskId: result.task_id,
-            timestamp: bootstrapTimestamp,
-            type: 'text',
-          });
+          // Bootstrap already persisted the user's idea before returning.
+          // Load that receipt from history instead of inventing a second user message.
           chatStore.addMessage({
             id: `bootstrap-brief-${newProjectId}-${bootstrapTimestamp}`,
             clientMessageId: `bootstrap-brief-${newProjectId}`,

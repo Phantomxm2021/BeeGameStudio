@@ -21,6 +21,21 @@ describe('chatStore Performance & Cap', () => {
     useChatStore.getState().clearMessages();
   });
 
+  it('isolates interleaved message IDs and replaces redacted snapshots without moving their start', () => {
+    const { updateMessage, finalizeMessage } = useChatStore.getState();
+    updateMessage('run', 'first', 'beegame', 'text', false, undefined, undefined, {}, 100, 'm1');
+    updateMessage('run', 'second', 'beegame', 'text', false, undefined, undefined, {}, 200, 'm2');
+    updateMessage('run', ' complete', 'beegame', 'text', false, undefined, undefined, {}, 300, 'm1');
+    updateMessage('run', '[REDACTED]', 'beegame', 'text', false, undefined, undefined, { contentMode: 'snapshot' }, 400, 'm2');
+    finalizeMessage('run', 'first complete', 'beegame', 'text', false, undefined, undefined, {}, 500, 'm1');
+    updateMessage('run', 'late delta', 'beegame', 'text', false, undefined, undefined, {}, 600, 'm1');
+    expect(useChatStore.getState().messages.map(m => [m.id, m.content, m.timestamp])).toEqual([
+      ['m1', 'first complete', 100], ['m2', '[REDACTED]', 200],
+    ]);
+    expect(useChatStore.getState().isStreaming).toBe(true);
+    expect(useChatStore.getState().streamingMessageId).toBe('m2');
+  });
+
   it('should maintain O(1) messageIndexMap when adding messages', () => {
     const { addMessage } = useChatStore.getState();
     addMessage({ id: 'msg-1', sender: 'user', content: 'hello', timestamp: 1000 });
@@ -30,6 +45,15 @@ describe('chatStore Performance & Cap', () => {
     expect(state.messages.length).toBe(2);
     expect(state.messageIndexMap['msg-1']).toBe(0);
     expect(state.messageIndexMap['msg-2']).toBe(1);
+  });
+
+  it('stops unfinished messages but accepts a later authoritative final receipt', () => {
+    const { updateMessage, settleActivity, finalizeMessage } = useChatStore.getState();
+    updateMessage('run', 'Partial', 'beegame', 'text', false, undefined, undefined, {}, 100, 'm');
+    settleActivity('run', undefined, 'stopped', 200);
+    expect(useChatStore.getState().messages[0]).toMatchObject({ streamStatus: 'complete', completionReason: 'stopped', content: 'Partial' });
+    finalizeMessage('run', 'Full receipt', 'beegame', 'text', false, undefined, undefined, {}, 300, 'm');
+    expect(useChatStore.getState().messages[0]).toMatchObject({ streamStatus: 'complete', completionReason: undefined, content: 'Full receipt' });
   });
 
   it('keeps the subagent prompt and trace when a terminal notification updates the live card', () => {
@@ -42,7 +66,7 @@ describe('chatStore Performance & Cap', () => {
       subagentTrace: 'Read manifest.json', subagentOutput: 'Audit passed' });
   });
 
-  it('should cap messages at the paginated history limit (2000)', () => {
+  it('retains all explicitly loaded messages beyond 2000', () => {
     const { addMessage } = useChatStore.getState();
     
     // Add 2010 messages
@@ -56,15 +80,25 @@ describe('chatStore Performance & Cap', () => {
     }
 
     const state = useChatStore.getState();
-    expect(state.messages.length).toBe(2000);
-    // Oldest messages should be removed (msg-0 to msg-9)
-    expect(state.messages[0].id).toBe('msg-10');
-    expect(state.messages[1999].id).toBe('msg-2009');
+    expect(state.messages.length).toBe(2010);
+    expect(state.messages[0].id).toBe('msg-0');
+    expect(state.messages[2009].id).toBe('msg-2009');
     
     // Index map should be rebuilt correctly
-    expect(state.messageIndexMap['msg-10']).toBe(0);
-    expect(state.messageIndexMap['msg-2009']).toBe(1999);
-    expect(state.messageIndexMap['msg-0']).toBeUndefined();
+    expect(state.messageIndexMap['msg-10']).toBe(10);
+    expect(state.messageIndexMap['msg-2009']).toBe(2009);
+    expect(state.messageIndexMap['msg-0']).toBe(0);
+  });
+
+  it('prepends an older page beyond 2000 without evicting the live edge or the requested page', () => {
+    const create = (sequence: number) => ({ id: 'history-' + sequence, sequence,
+      sender: 'beegame', content: 'Message ' + sequence, timestamp: sequence + 1 });
+    const { loadHistory } = useChatStore.getState();
+    loadHistory(Array.from({ length: 2200 }, (_, i) => create(i + 300)));
+    loadHistory(Array.from({ length: 300 }, (_, i) => create(i)));
+    expect(useChatStore.getState().messages).toHaveLength(2500);
+    expect(useChatStore.getState().messages[0].id).toBe('history-0');
+    expect(useChatStore.getState().messages.at(-1)?.id).toBe('history-2499');
   });
 
   it('should use O(1) lookup for updateMessage', () => {
@@ -147,7 +181,7 @@ describe('chatStore Performance & Cap', () => {
     expect(state.messages[0].clientMessageId).toBe('client-msg-1');
   });
 
-  it('should reconcile optimistic user message with a backend event id when content matches', () => {
+  it('does not infer an optimistic receipt solely from matching text', () => {
     const { addMessage } = useChatStore.getState();
 
     addMessage({
@@ -167,12 +201,12 @@ describe('chatStore Performance & Cap', () => {
     });
 
     const state = useChatStore.getState();
-    expect(state.messages).toHaveLength(1);
-    expect(state.messages[0].id).toBe('beegame-event-42');
-    expect(state.messages[0].content).toBe('make a snake game');
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[1].id).toBe('beegame-event-42');
+    expect(state.messages[1].content).toBe('make a snake game');
   });
 
-  it('should reconcile duplicate user messages even when client message ids differ', () => {
+  it('preserves repeated requests when client message identities differ', () => {
     const { addMessage } = useChatStore.getState();
 
     addMessage({
@@ -192,8 +226,20 @@ describe('chatStore Performance & Cap', () => {
     });
 
     const state = useChatStore.getState();
-    expect(state.messages).toHaveLength(1);
-    expect(state.messages[0].clientMessageId).toBe('client-msg-b');
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[1].clientMessageId).toBe('client-msg-b');
+  });
+
+  it('keeps separate image-only turns while replacing optimistic bytes with the matching durable reference', () => {
+    const { addMessage, finalizeMessage, loadHistory } = useChatStore.getState();
+    addMessage({ id: 'upload-a', clientMessageId: 'upload-a', sender: 'user', content: '', timestamp: 1,
+      attachments: [{ type: 'image', mediaType: 'image/png', data: 'eA==' }] });
+    const attachments = [{ type: 'image' as const, mediaType: 'image/png', filename: 'scene.png', projectId: 'p',
+      storageId: '00000000-0000-0000-0000-000000000000-image.png' }];
+    finalizeMessage('s', '', 'user', 'text', false, undefined, undefined, { attachments }, 2, 'upload-a');
+    loadHistory([{ id: 'upload-b', sender: 'user', content: '', timestamp: 3, attachments }]);
+    expect(useChatStore.getState().messages).toHaveLength(2);
+    expect(useChatStore.getState().messages[0].attachments).toEqual(attachments);
   });
 
   it('should not discard existing history when a reconnect returns only a short session slice', () => {

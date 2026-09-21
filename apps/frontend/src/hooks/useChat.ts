@@ -55,6 +55,8 @@ function isProjectWorkflowActive(
  * Options for useChat hook
  */
 export interface UseChatOptions {
+  /** Initial history must establish the resume cursor before opening SSE. */
+  eventsEnabled?: boolean
   /** Project ID for the chat session */
   projectId: string
 
@@ -161,6 +163,7 @@ export interface UseChatReturn {
  */
 export const useChat = ({
   projectId,
+  eventsEnabled = true,
   onError,
   onTaskComplete,
   onTaskEvent,
@@ -369,6 +372,8 @@ export const useChat = ({
               message.artifact_id,
               message.document_title,
               {
+                contentMode: message.content_mode,
+                sequence: message.sequence,
                 turnId: message.turnId || message.turn_id,
                 contentBlocks: message.content_blocks,
                 renderHint: message.render_hint,
@@ -390,17 +395,19 @@ export const useChat = ({
           break
 
         case 'agent_message':
-          if (message.content && message.sender) {
+          if ((message.content || message.attachments?.length) && message.sender) {
             const semanticType = normalizeProjectEventSemanticType(message)
             finalizeMessage(
               message.task_id,
-              message.content,
+              message.content || '',
               message.sender,
               semanticType,
               message.is_document,
               message.artifact_id,
               message.document_title,
               {
+                sequence: message.sequence,
+                attachments: message.attachments,
                 turnId: message.turnId || message.turn_id,
                 contentBlocks: message.content_blocks,
                 renderHint: message.render_hint,
@@ -431,6 +438,8 @@ export const useChat = ({
               message.timestamp,
               message.message_id,
               message.turnId || message.turn_id,
+              message.content_mode,
+              message.sequence,
             )
             setCurrentSender(message.sender)
           }
@@ -438,22 +447,8 @@ export const useChat = ({
 
         case 'think_start':
           if (message.sender && message.message_id) {
-            finalizeMessage(
-              message.task_id,
-              message.content || 'Thinking',
-              message.sender,
-              'thought',
-              false,
-              undefined,
-              undefined,
-              {
-                taskKind: 'assistant_thinking',
-                turnId: message.turnId || message.turn_id,
-                contentBlocks: message.content_blocks,
-              },
-              message.timestamp,
-              message.message_id,
-            )
+            updateThought(message.task_id, '', message.sender, message.timestamp, message.message_id,
+              message.turnId || message.turn_id, 'snapshot', message.sequence)
             setCurrentSender(message.sender)
           }
           break
@@ -469,7 +464,6 @@ export const useChat = ({
 
             if (!hasActualThought) {
               removeMessage(message.message_id)
-              setIsStreaming(false)
               break
             }
 
@@ -495,6 +489,11 @@ export const useChat = ({
           break
 
         case 'status':
+          if (['finished', 'stopped', 'idle', 'failed'].includes(message.status || '')) {
+            useChatStore.getState().settleActivity(message.task_id, message.turnId || message.turn_id,
+              message.status === 'stopped' ? 'stopped' : message.status === 'failed' ? 'failed' : 'incomplete',
+              message.timestamp || Date.now())
+          }
           // Task status update
           // Requirements: 6.2
           if (
@@ -643,6 +642,8 @@ export const useChat = ({
         }
 
         case 'error': {
+          useChatStore.getState().settleActivity(message.task_id, message.turnId || message.turn_id,
+            'failed', message.timestamp || Date.now())
           const errContent =
             message.content ||
             message.message ||
@@ -703,6 +704,7 @@ export const useChat = ({
               type: 'tool',
               taskKind: message.task_kind || 'tool_execution',
               toolName: message.tool,
+              sequence: message.sequence,
               toolUseId: message.tool_use_id,
               toolStatus: message.tool_status || 'running',
               toolDetail: message.tool_detail,
@@ -713,6 +715,7 @@ export const useChat = ({
               toolAfter: message.tool_after,
               toolStructuredPatch: message.structured_patch,
               toolInput: message.tool_input,
+              todoScope: message.todoScope,
               artifactId: message.artifact_id,
               artifactPath: message.artifact_path,
               turnId: message.turnId || message.turn_id,
@@ -760,7 +763,9 @@ export const useChat = ({
               toolUseId: message.tool_use_id,
               toolStatus: message.tool_status || status,
               toolDetail: message.tool_detail,
-              toolOutput: message.subagent_output || message.tool_output || outputSummary,
+              toolOutput: message.subagent_output || message.tool_output || toolResult,
+              attachments: message.attachments,
+              sequence: message.sequence,
               toolDiff: message.tool_diff,
               toolPatch: message.tool_patch,
               toolBefore: message.tool_before,
@@ -768,6 +773,7 @@ export const useChat = ({
               toolStructuredPatch: message.structured_patch,
               toolInput: message.tool_input,
               artifactId: message.artifact_id,
+              todoScope: message.todoScope,
               artifactPath: message.artifact_path,
               turnId: message.turnId || message.turn_id,
               isSubagentTool: message.is_subagent_tool,
@@ -916,6 +922,7 @@ export const useChat = ({
   // Initialize the reconnect-safe runtime event transport
   const { state: wsState, reconnect } = useProjectEventPolling({
     projectId,
+    enabled: eventsEnabled,
     onMessage: handleProjectEventMessage,
     onClose: handleTransportClose,
     onOpen: syncAfterReconnect, // Trigger sync on connect/reconnect

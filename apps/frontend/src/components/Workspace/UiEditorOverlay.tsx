@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Matrix4 } from 'three';
-import { uiAtlasImages, uiImageKey } from './uiAtlas';
+import { uiAnchor, uiLocalMatrix } from '@beegame/scene-editor';
+import { uiAtlasImages, uiImageKey, resolveUiImage } from './uiAtlas';
+import { mapEditorAssets } from './editorAssetLoading';
 import { currentKeyboardLabels } from '@beegame/scene-editor/platform';
 import {
   BoxSelect,
@@ -99,7 +101,7 @@ const UI_COMPONENTS: Array<{ kind: UiComponentKind; label: string }> = [
 ];
 const ANCHOR_PRESETS = [
   'top-left', 'top-center', 'top-right',
-  'center-left', 'center', 'center-right',
+  'middle-left', 'middle-center', 'middle-right',
   'bottom-left', 'bottom-center', 'bottom-right',
 ] as const;
 type TransformDrag = {
@@ -142,6 +144,8 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
   const [assetSearch, setAssetSearch] = useState('');
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const loadMoreAssetsRef = useRef<(() => Promise<void>) | undefined>(undefined);
   const [closeRequested, setCloseRequested] = useState(false);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const [unpickableIds, setUnpickableIds] = useState<Set<string>>(new Set());
@@ -183,6 +187,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
     setHiddenIds(new Set());
     setUnpickableIds(new Set());
     setImagePickerOpen(false);
+    setPickerLoading(false);
     setMessage('Loading project UI…');
     setLoadState(INITIAL_UI_LOAD_STATE);
     void beeGameAdapter.getProjectGameContent(projectId, signal).then(async snapshot => {
@@ -226,14 +231,22 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
           members: resource.file_paths.filter(path => UI_IMAGE.test(path)).map(fileStem),
           font: resource.file_paths.some(path => UI_FONT.test(path)) || /font/i.test(resource.asset_kind ?? resource.id),
         })));
+        const requiredAssets = new Set(uiDocuments.flatMap(item => item.document.assetRefs));
+        const loadResources = async (resources: typeof manifest.resources, initial: boolean) => {
         const loadTargets = resources.flatMap(resource => resource.file_paths
           .filter(path => UI_IMAGE.test(path) || UI_FONT.test(path))
           .map(path => ({ resourceId: resource.id, path })));
         const totalFiles = loadTargets.length;
         let loadedFiles = 0;
         const failedFiles: string[] = [];
+        const optionalFailures: string[] = [];
+        const failedAsset = (id: string, path: string, error: unknown) => {
+          const detail = `${id}/${path.split('/').at(-1) ?? path}: ${error instanceof Error ? error.message : String(error)}`;
+          (requiredAssets.has(id) ? failedFiles : optionalFailures).push(detail);
+        };
         const markFileLoaded = (resourceId: string, path: string) => {
           loadedFiles += 1;
+          if (!initial) return;
           updateLoadState({
             progress: totalFiles ? 40 + Math.round((loadedFiles / totalFiles) * 54) : 94,
             label: uiLabel,
@@ -242,18 +255,19 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
               : 'No external UI assets required',
           });
         };
-        updateLoadState({
+        if (initial) updateLoadState({
           progress: 40,
           label: uiLabel,
           detail: totalFiles
             ? `${loadTargets[0].resourceId} · ${loadTargets[0].path.split('/').at(-1) ?? loadTargets[0].path} · 0 of ${totalFiles}`
             : 'No external UI assets required',
         });
-        const loaded = await Promise.all(manifest.resources
+        const imageTargets = resources
           .filter(resource => resource.status === 'verified')
           .flatMap(resource => resource.file_paths
             .filter(path => UI_IMAGE.test(path))
-            .map(async path => {
+            .map(path => ({ resource, path })));
+        const loaded = await mapEditorAssets(imageTargets, async ({ resource, path }) => {
               try {
                 const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal);
                 const url = URL.createObjectURL(blob);
@@ -277,12 +291,12 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
                 return entries;
               } catch (error) {
                 if (isUiAbortError(error)) throw error;
-                failedFiles.push(path.split('/').at(-1) ?? path);
+                failedAsset(resource.id, path, error);
                 return [] as Array<readonly [string, string]>;
               } finally {
                 if (!signal.aborted) markFileLoaded(resource.id, path);
               }
-            })));
+            });
         if (!active) return;
         const entries = loaded.flat();
         for (const resource of manifest.resources) {
@@ -290,16 +304,16 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
           const first = entries.find(([key]) => key.startsWith(`${resource.id}:`));
           if (first) entries.push([resource.id, first[1]]);
         }
-        setAssetUrls(Object.fromEntries(entries));
+        setAssetUrls(previous => ({ ...previous, ...Object.fromEntries(entries) }));
         setAssetOptions(options => options.map(option => ({ ...option, members: option.members.flatMap(member => {
           const prefix = `${option.id}:${member}#`;
           const frames = entries.filter(([key]) => key.startsWith(prefix)).map(([key]) => `${member}#${key.slice(prefix.length)}`);
           return frames.length ? frames : [member];
         }) })));
-        const fonts = await Promise.all(resources.flatMap(resource => {
+        const fonts = await mapEditorAssets(resources.filter(resource => resource.file_paths.some(item => UI_FONT.test(item))), async resource => {
           const path = resource.file_paths.find(item => UI_FONT.test(item));
-          if (!path) return [];
-          return [beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal).then(async blob => {
+          if (!path) return undefined;
+          return beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal).then(async blob => {
             if (!active) return undefined;
             const url = URL.createObjectURL(blob);
             objectUrls.push(url);
@@ -315,15 +329,30 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
             return [resource.id, family] as const;
           }).catch(error => {
             if (isUiAbortError(error)) throw error;
-            failedFiles.push(path.split('/').at(-1) ?? path);
+            failedAsset(resource.id, path, error);
             return undefined;
           }).finally(() => {
             if (!signal.aborted) markFileLoaded(resource.id, path);
-          })];
-        }));
-        if (active) setFontFamilies(Object.fromEntries(fonts.filter((item): item is readonly [string, string] => Boolean(item))));
+          });
+        });
+        if (active) setFontFamilies(previous => ({ ...previous, ...Object.fromEntries(fonts.filter((item): item is readonly [string, string] => Boolean(item))) }));
         if (failedFiles.length) throw new Error(`Failed to load ${failedFiles.length} assets: ${failedFiles.join(', ')}`);
-        setMessage('');
+        if (active) setMessage(optionalFailures.length ? `Optional assets unavailable: ${optionalFailures.join(' · ')}` : '');
+        };
+        await loadResources(resources.filter(resource => requiredAssets.has(resource.id)), true);
+        if (!active || signal.aborted) return;
+        let pickerRequest: Promise<void> | undefined;
+        loadMoreAssetsRef.current = () => {
+          if (!pickerRequest) {
+            setPickerLoading(true);
+            pickerRequest = loadResources(resources.filter(resource => !requiredAssets.has(resource.id)), false)
+              .catch(error => {
+                pickerRequest = undefined;
+                if (active && !isUiAbortError(error)) setMessage(`Could not load picker assets: ${error instanceof Error ? error.message : String(error)}`);
+              }).finally(() => { if (active) setPickerLoading(false); });
+          }
+          return pickerRequest;
+        };
         updateLoadState({ progress: 100, label: uiLabel, detail: 'UI ready' });
         await waitForUiTransition(signal);
         if (active && !signal.aborted) setLoadState({ status: 'ready', progress: 100, label: uiLabel, detail: 'UI ready' });
@@ -336,6 +365,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
       if (active && !isUiAbortError(error)) setLoadState({ status: 'error', progress: 0, label: 'Could not open UI', detail: error instanceof Error ? error.message : String(error) });
     });
     return () => {
+      loadMoreAssetsRef.current = undefined;
       active = false;
       controller.abort();
       if (loadControllerRef.current === controller) loadControllerRef.current = undefined;
@@ -363,13 +393,11 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
     : selectedSlice ? { left: selectedSlice[0], right: selectedSlice[1], top: selectedSlice[2], bottom: selectedSlice[3] } : {};
   const frameIssues = current?.document.data.nodes.flatMap(node => {
     if (!node.assetRef) return [];
-    const base = uiImageKey(node.assetRef, { member: node.data?.member });
-    if (!Object.keys(assetUrls).some(key => key.startsWith(`${base}#`))) return [];
     const states = node.data?.stateFrames;
-    const frames = [node.data?.frame, ...(states && typeof states === 'object' ? Object.values(states) : [])];
+    const frames = [node.data?.frame ?? node.data?.initialFacing, ...(states && typeof states === 'object' ? Object.values(states) : [])];
     return [...new Set(frames.filter((frame): frame is string => typeof frame === 'string'))]
       .filter(frame => !assetUrls[uiImageKey(node.assetRef!, { ...node.data, frame })])
-      .map(frame => `${node.id}: missing atlas frame "${frame}"`);
+      .map(frame => `${node.id}: unresolved frame "${frame}" in ${node.assetRef}; check the registered atlas metadata`);
   }) ?? [];
   const selectedKind = selected ? uiNodeKind(selected.role) : 'other';
   const textCapable = selected ? supportsTextNode(selectedKind) : false;
@@ -637,6 +665,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
 
   const selectFontAsset = (resourceId: string) => {
     if (!current || !selected) return;
+    if (resourceId && !fontFamilies[resourceId]) void loadMoreAssetsRef.current?.();
     commitCurrent(next => {
       const node = next.document.data.nodes.find(item => item.id === selected.id);
       if (!node) return;
@@ -657,6 +686,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
     if (kind === 'image') {
       const asset = imageAssets[0];
       if (!asset) return;
+      if (!assetUrls[`${asset.id}:${asset.members[0]}`]) void loadMoreAssetsRef.current?.();
       node.assetRef = asset.id;
       node.data = { ...node.data, member: asset.members[0] };
     }
@@ -706,9 +736,15 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
     if (!selected || !snapshot || selected.id === snapshot.document.data.rootId) return;
     event.preventDefault();
     event.stopPropagation();
-    const rect = event.currentTarget.closest('.ui-editor-selection-gizmo')?.getBoundingClientRect();
-    const centerX = rect ? rect.left + rect.width / 2 : event.clientX;
-    const centerY = rect ? rect.top + rect.height / 2 : event.clientY;
+    const stageRect = stageRef.current?.getBoundingClientRect();
+    if (!stageRect) return;
+    const parentMatrix = parentTransform(selected, snapshot.document.data.nodes);
+    const localPivot = nodePosition(selected, snapshot.document.data.nodes);
+    const m = parentMatrix.elements;
+    const centerX = stageRect.left + (m[0]*localPivot[0]+m[4]*localPivot[1]+m[12])*zoom;
+    const centerY = stageRect.top + (m[1]*localPivot[0]+m[5]*localPivot[1]+m[13])*zoom;
+    const inverse = parentMatrix.clone().invert().elements;
+    const px = (event.clientX-centerX)/zoom, py = (event.clientY-centerY)/zoom;
     transformRef.current = {
       kind,
       startX: event.clientX,
@@ -718,10 +754,10 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
       rotation: selected.layout?.rotation ?? 0,
       centerX,
       centerY,
-      pointerAngle: Math.atan2(event.clientY - centerY, event.clientX - centerX),
+      pointerAngle: Math.atan2(inverse[1]*px+inverse[5]*py, inverse[0]*px+inverse[4]*py),
       before: structuredClone(snapshot),
       changed: false,
-      parentMatrix: parentTransform(selected, snapshot.document.data.nodes),
+      parentMatrix,
     };
   };
 
@@ -748,7 +784,8 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
             node.layout = { ...node.layout, scale: [Math.max(.05, snapValue(drag.scale[0] + dx / 160, snap ? .05 : 0)), Math.max(.05, snapValue(drag.scale[1] + dy / 160, snap ? .05 : 0))] };
           }
         } else {
-          const angle = drag.rotation + Math.atan2(event.clientY - drag.centerY, event.clientX - drag.centerX) - drag.pointerAngle;
+          const px = (event.clientX-drag.centerX)/zoom, py = (event.clientY-drag.centerY)/zoom;
+          const angle = drag.rotation + Math.atan2(inverse[1]*px+inverse[5]*py, inverse[0]*px+inverse[4]*py) - drag.pointerAngle;
           node.layout = { ...node.layout, rotation: snap ? Math.round(angle / (Math.PI / 12)) * (Math.PI / 12) : angle };
         }
       });
@@ -922,10 +959,11 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
           onPointerCancel={() => { panRef.current = undefined; setPanning(false); }}
           onWheel={event => {
             event.preventDefault();
-            if (event.ctrlKey) {
+            if (event.ctrlKey || !keyboard.apple || event.deltaMode !== 0 || (event.deltaX === 0 && Math.abs(event.deltaY) >= 40 && Number.isInteger(event.deltaY))) {
               // macOS trackpad pinch gestures are exposed by Chromium as
               // ctrl+wheel. Keep their small deltas for smooth native zoom.
-              setZoom(value => clampZoom(value * Math.exp(-event.deltaY * .01)));
+              const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 100 : 1);
+              setZoom(value => clampZoom(value * Math.exp(-delta * (event.ctrlKey ? .01 : .002))));
               return;
             }
             // Two-finger scrolling pans the canvas on both axes. Shift+wheel
@@ -962,7 +1000,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
               {documents.length > 1 ? <MenuPrimitive.SubmenuRoot open={screenMenuOpen} onOpenChange={setScreenMenuOpen}>
                 <MenuPrimitive.SubmenuTrigger aria-label="Screens"><PanelsTopLeft size={14} />Screens<ChevronRight size={13} /></MenuPrimitive.SubmenuTrigger>
                 <EditorMenuPopup submenu label="UI screens">
-                  {documents.map(item => <MenuPrimitive.Item key={item.path} onClick={() => chooseDocument(item.path)}>{item.path === current?.path ? <CircleCheck size={14} /> : <Circle size={14} />}{item.document.data.nodes.find(node => node.id === item.document.data.rootId)?.name ?? item.document.id}{savedContentRef.current[item.path] !== JSON.stringify((current?.path === item.path ? current : item).document) ? ' •' : ''}</MenuPrimitive.Item>)}
+                  {documents.map(item => <MenuPrimitive.Item key={item.path} onClick={() => chooseDocument(item.path)}>{item.path === current?.path ? <CircleCheck size={14} /> : <Circle size={14} />}{item.document.id}{savedContentRef.current[item.path] !== JSON.stringify((current?.path === item.path ? current : item).document) ? ' •' : ''}</MenuPrimitive.Item>)}
                 </EditorMenuPopup>
               </MenuPrimitive.SubmenuRoot> : null}
               {current?.document.kind !== 'ui-flow' ? <MenuPrimitive.SubmenuRoot open={addMenuOpen} onOpenChange={setAddMenuOpen}>
@@ -1030,7 +1068,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
               {textCapable || imageCapable ? <details className="ui-editor-inspector-component ui-editor-component-content" open><summary><ChevronRight size={12} className="ui-editor-component-chevron" />{imageCapable ? <ImageIcon size={14} /> : <Type size={14} />}<span>{imageCapable ? 'Image' : 'Text'}</span></summary><div className="ui-editor-section">
                 {textCapable ? <label>Text<EditorInput value={uiNodeText(selected)} onChange={event => updateText(event.target.value)} /></label> : null}
                 {imageCapable ? <>
-                  <div className="ui-editor-source-image-field"><span>Source Image</span><Button variant="outline" aria-label="Choose source image" className="ui-editor-source-image" aria-haspopup="dialog" aria-expanded={imagePickerOpen} onClick={() => { setAssetSearch(''); setImagePickerOpen(true); }}>
+                  <div className="ui-editor-source-image-field"><span>Source Image</span><Button variant="outline" aria-label="Choose source image" className="ui-editor-source-image" aria-haspopup="dialog" aria-expanded={imagePickerOpen} onClick={() => { setAssetSearch(''); setImagePickerOpen(true); void loadMoreAssetsRef.current?.(); }}>
                     {resolveNodeImage(selected, assetUrls) ? <img src={resolveNodeImage(selected, assetUrls)} alt="" /> : <ImageIcon size={15} />}
                     <span>{typeof selected.data?.frame === 'string' ? selected.data.frame : typeof selected.data?.member === 'string' ? selected.data.member : selected.assetRef ?? 'Choose image'}</span><ChevronRight size={12} />
                   </Button></div>
@@ -1124,7 +1162,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
               <span title="Pinch on the trackpad to zoom"><ZoomIn size={13} /><span>Pinch · Zoom</span></span>
             </> : <>
               <span title="Drag with the middle mouse button to pan"><MousePointer2 size={13} /><span>Middle · Pan</span></span>
-              <span title="Hold Control and scroll to zoom"><ZoomIn size={13} /><kbd>{keyboard.modifier}</kbd><span>Scroll · Zoom</span></span>
+              <span title="Scroll the mouse wheel to zoom"><ZoomIn size={13} /><span>Scroll · Zoom</span></span>
             </>}
             <span title="Hold Shift while dragging a scale handle to preserve proportions"><Scaling size={13} /><kbd>{keyboard.shift}</kbd><span>Drag · Proportional</span></span>
           </div>
@@ -1133,16 +1171,16 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
       </main>
       <Dialog open={imagePickerOpen} onOpenChange={setImagePickerOpen}>
         <DialogContent className="ui-editor-asset-dialog" onKeyDown={event => event.stopPropagation()}>
-          <DialogTitle>Project images</DialogTitle><DialogDescription>Choose a source image for this object.</DialogDescription>
+          <DialogTitle>Select Source Image</DialogTitle><DialogDescription>{imageAssets.reduce((count, asset) => count + asset.members.length, 0)} project images available</DialogDescription>
           <Input aria-label="Search images" placeholder="Search images…" value={assetSearch} onChange={setAssetSearch} />
+          {pickerLoading ? <p role="status">Loading project images…</p> : null}
           <div className="ui-editor-asset-grid">
             {imageAssets.flatMap(asset => asset.members.filter(member => `${asset.label} ${member}`.toLowerCase().includes(assetSearch.toLowerCase())).map(member => {
               const url = assetUrls[`${asset.id}:${member}`];
-              return <Button variant="ghost" className="ui-editor-asset-card" aria-pressed={selected?.assetRef === asset.id && selected?.data?.member === member} aria-label={`Use image ${member}`} key={`${asset.id}:${member}`} onClick={() => selectImageAsset(asset.id, member)}>{url ? <img src={url} alt="" /> : <ImageIcon size={20} />}<span title={member}>{member}</span></Button>;
+              return <Button variant="ghost" disabled={!url} className="ui-editor-asset-card" aria-pressed={selected?.assetRef === asset.id && selected?.data?.member === member} aria-label={`Use image ${member}`} key={`${asset.id}:${member}`} onClick={() => selectImageAsset(asset.id, member)}>{url ? <img loading="lazy" src={url} alt="" /> : <ImageIcon size={20} />}<span title={member}>{member}</span></Button>;
             }))}
           </div>
           {!imageAssets.some(asset => asset.members.some(member => `${asset.label} ${member}`.toLowerCase().includes(assetSearch.toLowerCase()))) ? <p>No matching images.</p> : null}
-          <Button variant="outline" onClick={() => setImagePickerOpen(false)}>Close</Button>
         </DialogContent>
       </Dialog>
       <Dialog open={closeRequested} onOpenChange={setCloseRequested}>
@@ -1338,7 +1376,7 @@ function createUiComponent(kind: UiComponentKind, id: string, parentId: string):
     parentId,
     name: UI_COMPONENTS.find(item => item.kind === kind)?.label ?? kind,
     role: kind,
-    layout: { position: [0, 0] as [number, number], size: [160, 40] as [number, number], anchor: 'center' },
+    layout: { position: [0, 0] as [number, number], size: [160, 40] as [number, number], anchor: 'middle-center' },
     data: {} as Record<string, unknown>,
     style: {} as Record<string, unknown>,
   };
@@ -1386,14 +1424,11 @@ function uiFontSize(node: BeeGameUiContentNode): number {
 }
 
 function nodeAnchor(node: BeeGameUiContentNode) {
-  const anchor = node.layout?.anchor ?? 'top-left';
-  const [vertical, horizontal] = anchor === 'center' ? ['middle', 'center'] : anchor.split('-');
-  return [horizontal === 'center' ? .5 : horizontal === 'right' ? 1 : 0, vertical === 'middle' || vertical === 'center' ? .5 : vertical === 'bottom' ? 1 : 0];
+  return uiAnchor(node.layout?.anchor);
 }
 
 function nodePosition(node: BeeGameUiContentNode, nodes: BeeGameUiContentNode[]): [number, number] {
-  const zone = node.data?.zone as { x?: number; y?: number } | undefined;
-  const [x, y] = node.layout?.position ?? [zone?.x ?? 0, zone?.y ?? 0];
+  const [x, y] = node.layout?.position ?? [0, 0];
   const parent = nodes.find(item => item.id === node.parentId);
   const [width, height] = parent ? nodeSize(parent) : [0, 0];
   const [ax, ay] = nodeAnchor(node);
@@ -1408,10 +1443,8 @@ function localTransform(node: BeeGameUiContentNode, nodes: BeeGameUiContentNode[
   const [presetX, presetY] = nodeAnchor(node);
   const ax = custom?.x ?? presetX;
   const ay = custom?.y ?? presetY;
-  return new Matrix4().makeTranslation(x + (.5 - ax) * width, y + (.5 - ay) * height, 0)
-    .multiply(new Matrix4().makeRotationZ(node.layout?.rotation ?? 0))
-    .multiply(new Matrix4().makeScale(sx, sy, 1))
-    .multiply(new Matrix4().makeTranslation(-width / 2, -height / 2, 0));
+  const [a, b, c, d, e, f] = uiLocalMatrix([0, 0], [width, height], [0, 0], [x, y], [ax, ay], node.layout?.rotation ?? 0, [sx, sy]);
+  return new Matrix4().set(a, c, 0, e, b, d, 0, f, 0, 0, 1, 0, 0, 0, 0, 1);
 }
 
 function parentTransform(node: BeeGameUiContentNode, nodes: BeeGameUiContentNode[]): Matrix4 {
@@ -1492,7 +1525,7 @@ function renderUiNode(
     {kind === 'slider' ? <UiSliderPreview node={node} assetUrls={assetUrls} /> : null}
     {kind === 'toggle' ? <UiTogglePreview node={node} /> : null}
     {kind === 'particle-system' ? <UiParticlePreview node={node} assetUrls={assetUrls} /> : null}
-    {kind === 'dropdown' ? <span>{Array.isArray(node.data?.options) ? String(node.data.options[Number(node.data?.selected ?? 0)] ?? '') : text}<ChevronRight size={14} className="ui-editor-dropdown-arrow" /></span> : text && kind !== 'toggle' ? <span className="ui-editor-text" style={{ justifyItems: 'stretch', alignItems: node.style?.verticalAlign === 'top' ? 'start' : node.style?.verticalAlign === 'bottom' ? 'end' : 'center' }}>{text}</span> : null}
+    {kind === 'dropdown' ? <span>{Array.isArray(node.data?.options) ? String(node.data.options[Number(node.data?.selected ?? 0)] ?? '') : text}<ChevronRight size={14} className="ui-editor-dropdown-arrow" /></span> : text && kind !== 'toggle' ? <span className="ui-editor-text" style={{ justifyContent: style.textAlign === 'left' ? 'flex-start' : style.textAlign === 'right' ? 'flex-end' : 'center', alignItems: node.style?.verticalAlign === 'top' ? 'flex-start' : node.style?.verticalAlign === 'bottom' ? 'flex-end' : 'center' }}>{text}</span> : null}
     {(children.get(node.id) ?? []).map(child => renderUiNode(child, nodes, children, assetUrls, fontFamilies, selectedId, select, hiddenIds, unpickableIds))}
   </div>;
 }
@@ -1539,9 +1572,11 @@ function UiParticlePreview({ node, assetUrls }: { node: BeeGameUiContentNode; as
   const range = size && typeof size === 'object' ? size as { min?: number; max?: number } : undefined;
   const minSize = typeof size === 'number' ? size : range?.min ?? 8;
   const maxSize = range?.max ?? minSize;
+  const zone = node.data?.zone as { x?: number; y?: number; width?: number; height?: number } | undefined;
+  const [width, height] = nodeSize(node);
   return <span className="ui-editor-particle-preview" aria-hidden="true">{Array.from({ length: count }, (_, index) => <i key={index} style={{
-    left: `${12 + ((index * 37) % 79)}%`,
-    top: `${8 + ((index * 53) % 83)}%`,
+    left: (zone?.x ?? 0) + (12 + ((index * 37) % 79)) / 100 * (zone?.width ?? width),
+    top: (zone?.y ?? 0) + (8 + ((index * 53) % 83)) / 100 * (zone?.height ?? height),
     width: Math.max(0, minSize + (maxSize - minSize) * ((index * 37 % 100) / 100)),
     mixBlendMode: node.data?.blend === 'additive' || node.data?.blend === 'add' ? 'screen' : node.data?.blend === 'multiply' ? 'multiply' : 'normal',
     color: tint,
@@ -1605,10 +1640,14 @@ function uiNodeStyle(node: BeeGameUiContentNode, root: boolean, fontFamilies: Re
     borderRadius: typeof style.cornerRadius === 'number' ? style.cornerRadius : typeof style.radius === 'number' ? style.radius : border?.radius ?? background?.radius ?? (node.role === 'keycap' ? 6 : undefined),
     fontSize: resolvedFontSize,
     fontFamily,
+    fontWeight: typeof style.fontWeight === 'number' ? style.fontWeight : 400,
+    letterSpacing: typeof style.letterSpacing === 'number' ? style.letterSpacing : 0,
+    textTransform: 'none',
     opacity: dataAlpha,
     lineHeight: typeof style.lineHeight === 'number' ? style.lineHeight : 1.35,
     textAlign: align === 'left' || align === 'right' || align === 'center' ? align : 'center',
     transformStyle: worldSpace ? 'preserve-3d' : undefined,
+    transformOrigin: `${anchorX * 100}% ${anchorY * 100}%`,
     transform: worldSpace
       ? `translateZ(${positionZ}px) rotateX(${Number(rotation3D[0]) || 0}deg) rotateY(${Number(rotation3D[1]) || 0}deg) rotateZ(${Number(rotation3D[2]) || 0}deg) scale3d(${scaleX}, ${scaleY}, ${scaleZ})`
       : `rotate(${node.layout?.rotation ?? 0}rad) scale(${scaleX}, ${scaleY})`,
@@ -1626,13 +1665,7 @@ function uiNodeStyle(node: BeeGameUiContentNode, root: boolean, fontFamilies: Re
 
 function resolveNodeImage(node: BeeGameUiContentNode, assetUrls: Record<string, string>): string | undefined {
   if (!node.assetRef) return undefined;
-  const member = typeof node.data?.member === 'string' ? node.data.member : undefined;
-  const base = member ? `${node.assetRef}:${member}` : node.assetRef;
-  const key = uiImageKey(node.assetRef, node.data);
-  if (assetUrls[key]) return assetUrls[key];
-  // Standalone images can carry a descriptive frame name; atlases must resolve it.
-  if (Object.keys(assetUrls).some(candidate => candidate.startsWith(`${base}#`))) return undefined;
-  return assetUrls[base];
+  return resolveUiImage(node.assetRef, node.data, assetUrls);
 }
 
 function EditorSelect({ label, ariaLabel, value, onValueChange, options }: { label: string; ariaLabel: string; value: string; onValueChange: (value: string) => void; options: ReadonlyArray<readonly [string, string]> }) {

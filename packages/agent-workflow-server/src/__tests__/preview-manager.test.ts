@@ -40,6 +40,10 @@ describe('BeeGamePreviewManager generic Vite contract', () => {
         async () => true,
       )
       await manager.start({ sessionId: 'generic-session', workspacePath: workspace })
+      expect(manager.runningForWorkspace(workspace)?.sessionId).toBe('generic-session')
+      expect(manager.runningForWorkspace(join(workspace, 'different-project'))).toBeUndefined()
+      manager.stop('generic-session', workspace)
+      expect(manager.runningForWorkspace(workspace)).toBeUndefined()
     } finally {
       process.chdir(originalCwd)
       if (originalNodeEnv === undefined) delete process.env.NODE_ENV

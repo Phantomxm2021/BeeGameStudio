@@ -1,8 +1,9 @@
 import {test,expect} from 'bun:test'
 import {mkdtemp,mkdir,writeFile,readFile,symlink,rm,realpath} from 'node:fs/promises'
 import {join} from 'node:path'
+import sharp from 'sharp'
 import {tmpdir} from 'node:os'
-import {runNativeFileAgent,nativeFileAgentEnvironment} from '../native-file-agent'
+import {runNativeFileAgent,nativeFileAgentEnvironment,nativeChatEventsPath} from '../native-file-agent'
 const cli=process.env.BEEGAME_REVIEW_TEST_CLI??join(import.meta.dir,'../../../../dist/cli-bun.js')
 test('stream activity is observable without leaking payloads', async () => {
  const dir=await realpath(await mkdtemp(join(tmpdir(),'native-stream-')))
@@ -16,9 +17,12 @@ test('stream activity is observable without leaking payloads', async () => {
   const raw=await readFile(join(dir,'log.jsonl'),'utf8')
   expect(raw).not.toContain('PRIVATE_MODEL_TEXT');expect(raw).not.toContain('PRIVATE_STDERR_SECRET')
   const events=raw.trim().split('\n').map(line=>JSON.parse(line))
-  expect(events.filter(e=>e.event==='native.task_lifecycle').map(e=>e.data.subtype))
+  const chatRaw=await readFile(nativeChatEventsPath(join(dir,'log.jsonl')),'utf8')
+  const chatEvents=chatRaw.trim().split('\n').map(line=>JSON.parse(line))
+  expect(chatEvents.filter(e=>e.event==='native.task_lifecycle').map(e=>e.data.subtype))
    .toEqual(['task_started','task_progress','task_notification'])
   expect(raw).not.toContain('PRIVATE_TASK_')
+  expect(chatRaw).not.toContain('PRIVATE_TASK_')
   expect(events.filter(e=>e.event==='stream_event'&&e.data.deltaType==='text_delta')).toHaveLength(5)
   expect(events.some(e=>e.event==='stdout_activity')).toBe(true)
   expect(events.some(e=>e.event==='stderr_activity')).toBe(true)
@@ -45,22 +49,27 @@ test('max-token truncation is correlated with an incomplete tool input', async (
    tool:'Write',responseStopReason:'max_tokens',modelContinues:true}})
  } finally {await rm(dir,{recursive:true,force:true})}
 })
-for(const mode of ['files','working-files','retry-limit'] as const)test('real native CLI: '+mode,async()=>{
+for(const mode of ['files','working-files','retry-limit','image'] as const)test('real native CLI: '+mode,async()=>{
  const dir=await realpath(await mkdtemp(join(tmpdir(),'native-file-boundary-')))
  const workspace=join(dir,'workspace');await mkdir(workspace)
  await writeFile(join(workspace,'target.md'),'ORIGINAL\n');await writeFile(join(dir,'outside.md'),'SECRET\n')
  await symlink(join(dir,'outside.md'),join(workspace,'link.md'))
  await mkdir(join(workspace,'docs'));await writeFile(join(workspace,'docs/GDD.md'),'Test geometry: legs 3 and 4.\n')
+ if(mode==='image')await sharp({create:{width:2400,height:2100,channels:4,background:{r:100,g:150,b:200,alpha:1}}}).png().toFile(join(workspace,'large.png'))
  const requests:any[]=[];let n=0;const abort=new AbortController()
- const calls=[
-  {name:'Read',input:{file_path:join(workspace,'target.md')}},
+ const calls=mode==='image'?[{name:'Read',input:{file_path:'large.png'}},{name:'StructuredOutput',input:{ok:true}}]:[
+  {name:'Read',input:{file_path:'target.md'}},
   {name:'Read',input:{file_path:join(dir,'outside.md')}},
   {name:'Read',input:{file_path:join(workspace,'link.md')}},
-  {name:'Edit',input:{file_path:join(workspace,'target.md'),old_string:'ORIGINAL',new_string:'EDITED'}},
+  {name:'Edit',input:{file_path:'target.md',old_string:'ORIGINAL',new_string:'EDITED'}},
   {name:'Write',input:{file_path:join(dir,'outside.md'),content:'BAD'}},
   {name:'Write',input:{file_path:join(workspace,'other.md'),content:'BAD'}},
-  {name:'Write',input:{file_path:join(workspace,'target.md'),content:'FINAL\n'}},
-  ...(mode==='working-files'?[{name:'Write',input:{file_path:join(workspace,'docs/GDD.md'),content:'BAD'}}]:[]),
+  {name:'Write',input:{file_path:'target.md',content:'FINAL\n'}},
+  ...(mode==='working-files'?[
+   {name:'Write',input:{file_path:join(workspace,'docs/GDD.md'),content:'BAD'}},
+   {name:'Bash',input:{command:'pwd; printf test > scratch.tmp && mv scratch.tmp scratch.md && cat scratch.md && rm scratch.md && printf probe > "$TMPDIR/probe.txt" && printf "\\nTMPDIR=%s\\n" "$TMPDIR"'}},
+   {name:'Read',input:{file_path:join(workspace,'.native-tmp',process.platform==='win32'?'claude':`claude-${process.getuid?.()??0}`,'probe.txt')}},
+  ]:[]),
   {name:'StructuredOutput',input:{ok:true}},
  ]
  const event=(x:any)=>'event: '+x.type+'\ndata: '+JSON.stringify(x)+'\n\n'
@@ -92,16 +101,37 @@ for(const mode of ['files','working-files','retry-limit'] as const)test('real na
    logPath:join(dir,'events.jsonl'),signal:abort.signal,onMessage:m=>{messages.push(m)},onProgress:p=>{progress.push(p)}})
   expect(result.completion.stdoutDrained).toBe(true)
   if(mode==='retry-limit'){expect(result.failure).toBe('model_failed');expect(n).toBe(5)}
-  else {
+  else if(mode==='image'){
+   expect(result.failure).toBeUndefined()
+   const blocks=requests.flatMap(r=>r.messages).flatMap((m:any)=>Array.isArray(m.content)?m.content:[])
+   const read=blocks.find((b:any)=>b.type==='tool_result'&&b.tool_use_id==='tool-1')
+   expect(read?.is_error).not.toBe(true)
+   expect(read?.content?.some((b:any)=>b.type==='image')).toBe(true)
+  }else {
    expect(result.failure).toBeUndefined();expect(result.result?.structured_output).toEqual({ok:true})
    expect(await readFile(join(workspace,'target.md'),'utf8')).toBe('FINAL\n')
    expect(await readFile(join(dir,'outside.md'),'utf8')).toBe('SECRET\n')
    const log=(await readFile(join(dir,'events.jsonl'),'utf8')).trim().split('\n').map(x=>JSON.parse(x))
    expect(log.filter(x=>x.event==='permission').map(x=>x.data.allowed)).toEqual(mode==='working-files'
-    ?[true,false,false,true,false,true,true,false]:[true,false,false,true,false,false,true])
+    ?[true,false,false,true,false,true,true,false,true,true]:[true,false,false,true,false,false,true])
+   expect(log.find(x=>x.event==='started').data.cwd).toBe(workspace)
+   const rejected=log.find(x=>x.event==='permission'&&x.data.path===join(dir,'outside.md'))
+   expect(rejected.data.reason).toContain('outside this task workspace')
+   expect(rejected.data.reason).toContain(workspace)
+   expect(JSON.stringify(requests.at(-1).messages)).toContain('No authorization request has been opened.')
+   expect(JSON.stringify(requests[0].system)).toContain(workspace)
+   expect(requests[0].tools.find((t:any)=>t.name==='Write').input_schema.properties.file_path.description)
+    .toContain('relative to the current working directory')
    if(mode==='working-files'){
     expect(await readFile(join(workspace,'other.md'),'utf8')).toBe('BAD')
     expect(await readFile(join(workspace,'docs/GDD.md'),'utf8')).toBe('Test geometry: legs 3 and 4.\n')
+    const results=messages.flatMap(m=>m.type==='user'&&Array.isArray(m.message?.content)?m.message.content:[])
+    const shell=results.find((b:any)=>b.type==='tool_result'&&b.tool_use_id==='tool-9')
+    expect(shell?.is_error).not.toBe(true)
+    expect(JSON.stringify(shell?.content)).toContain('test')
+    const scratch=results.find((b:any)=>b.type==='tool_result'&&b.tool_use_id==='tool-10')
+    expect(scratch?.is_error).not.toBe(true)
+    expect(JSON.stringify(scratch?.content)).toContain('probe')
    }
    expect(progress.length).toBeGreaterThan(0)
    expect(requests[0].tools.map((t:any)=>t.name)).toEqual(expect.arrayContaining(['Read','Edit','Write','Glob','Grep','StructuredOutput']))

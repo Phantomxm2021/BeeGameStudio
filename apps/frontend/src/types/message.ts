@@ -5,7 +5,7 @@
  * the frontend and backend, including WebSocket messages and token usage tracking.
  */
 
-import type { ChatAttachmentPayload } from '../services/chatAttachments'
+import type { ChatAttachment } from '../services/chatAttachments'
 
 /**
  * Message type enumeration
@@ -237,7 +237,8 @@ export interface Message {
   content: string
 
   /** Image or document attachments submitted with the message */
-  attachments?: ChatAttachmentPayload[]
+  attachments?: ChatAttachment[]
+  todoScope?: string
 
   /** Timestamp when the message was created (Unix timestamp in milliseconds) */
   timestamp: number
@@ -262,6 +263,9 @@ export interface Message {
 
   /** Elapsed time covered by a persisted reasoning record. */
   thinkingDurationMs?: number
+  streamStatus?: 'streaming' | 'complete'
+  completionReason?: 'stopped' | 'failed' | 'incomplete'
+  sequence?: number
 
   /** Ordered assistant content blocks from the raw response message. */
   contentBlocks?: AssistantContentBlock[]
@@ -368,6 +372,9 @@ export interface RuntimeContextEvidence {
  * Represents a message received from the backend via WebSocket
  */
 export interface ProjectEventMessage {
+  todoScope?: string
+  /** Checkpoints replace block content; deltas append to it. */
+  content_mode?: 'delta' | 'snapshot'
   /** Type of the WebSocket message */
   type: ProjectEventMessageType
 
@@ -442,6 +449,7 @@ export interface ProjectEventMessage {
   subagent_trace?: string
 
   /** Structured response grounding metadata passed through from runtime events. */
+  attachments?: ChatAttachment[]
   sources?: Array<{ id?: string; title?: string; domain?: string; url?: string }>
   citations?: Array<{ id?: string; title?: string; domain?: string; url?: string }>
 

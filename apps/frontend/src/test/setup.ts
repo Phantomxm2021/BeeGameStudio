@@ -56,6 +56,7 @@ beforeAll(() => {
     class IntersectionObserverMock implements IntersectionObserver {
       readonly root: Element | Document | null = null;
       readonly rootMargin = '0px';
+      readonly scrollMargin = '0px';
       readonly thresholds = [0];
       constructor(_callback: IntersectionObserverCallback, _options?: IntersectionObserverInit) {}
       disconnect() {}
@@ -68,6 +69,11 @@ beforeAll(() => {
       writable: true,
       configurable: true,
     });
+  }
+
+  // BeUI favicons decode images before displaying them; JSDOM has no decoder.
+  if (!HTMLImageElement.prototype.decode) {
+    HTMLImageElement.prototype.decode = () => Promise.resolve();
   }
 });
 

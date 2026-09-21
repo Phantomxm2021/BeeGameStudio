@@ -25,6 +25,17 @@ describe('useProjectEventPolling project event polling', () => {
     vi.clearAllMocks();
   });
 
+  it('does not replay from zero while initial history is still establishing its cursor', async () => {
+    const { rerender } = renderHook(({ enabled }) => useProjectEventPolling({
+      projectId: 'history-first', enabled, onMessage: vi.fn(),
+    }), { initialProps: { enabled: false } });
+    await act(async () => {});
+    expect(streamMessages).not.toHaveBeenCalled();
+    expect(pollMessages).not.toHaveBeenCalled();
+    rerender({ enabled: true });
+    await waitFor(() => expect(streamMessages).toHaveBeenCalledTimes(1));
+  });
+
   it('delivers persisted project events without opening a browser WebSocket', async () => {
     const NativeWebSocket = globalThis.WebSocket;
     const webSocketConstructor = vi.fn();

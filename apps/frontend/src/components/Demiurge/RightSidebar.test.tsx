@@ -19,6 +19,7 @@ vi.mock('../../services/api', () => ({
     api: {
         getArtifacts: vi.fn().mockResolvedValue([]),
         getChatHistoryPaginationState: vi.fn(() => ({ initialized: false, hasMore: false })),
+        getOlderChatHistory: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
         getArtifactReviewStatus: vi.fn().mockResolvedValue({}),
         getArtifactContent: vi.fn().mockResolvedValue(''),
         downloadProjectPackage: vi.fn().mockResolvedValue({ blob: new Blob(['zip']), filename: 'project.zip' }),
@@ -56,10 +57,26 @@ function deferred<T>() {
 describe('RightSidebar tabs', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(api.getChatHistoryPaginationState).mockReturnValue({ initialized: false, hasMore: false });
     });
 
     afterEach(() => {
         vi.useRealTimers();
+    });
+
+    it('loads older history only after reader interaction, not an initial layout scroll', async () => {
+        vi.mocked(api.getChatHistoryPaginationState).mockReturnValue({ initialized: true, hasMore: true });
+        render(<RightSidebar projectId="history-project" lang="en"
+            messages={[{ id: 'latest', sender: 'beegame', content: 'Latest answer', timestamp: 1 }]}
+            progress={0} onSendMessage={vi.fn()} isLoading={false}
+            waitingPermission={{ kind: 'none', isBlockingChat: false, isWaitingStatus: false, message: '', placeholder: 'Type...' }}
+        />);
+        const viewport = screen.getByRole('region', { name: 'Conversation' });
+        fireEvent.scroll(viewport, { target: { scrollTop: 0 } });
+        expect(api.getOlderChatHistory).not.toHaveBeenCalled();
+        fireEvent.wheel(viewport, { deltaY: -100 });
+        fireEvent.scroll(viewport, { target: { scrollTop: 0 } });
+        await waitFor(() => expect(api.getOlderChatHistory).toHaveBeenCalledTimes(1));
     });
 
     it('shows chat, todo, and artifacts tabs in canonical order', () => {
@@ -110,7 +127,7 @@ describe('RightSidebar tabs', () => {
         expect(screen.queryByText('Build the scene')).not.toBeInTheDocument();
         await user.click(screen.getByRole('tab', { name: 'Todo' }));
         expect(screen.getByText('Build the scene')).toBeInTheDocument();
-        expect(screen.getByRole('region', { name: /^Current tasks/ })).toBeInTheDocument();
+        expect(screen.getByRole('region', { name: /^Tasks/ })).toBeInTheDocument();
     });
 
     it('opens the independent Scene Editor from the Scene entry', async () => {

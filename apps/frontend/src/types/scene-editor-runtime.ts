@@ -19,9 +19,14 @@ export interface SceneEditorProps {
   onSave?: (document: SceneDocument) => void | Promise<void>;
   onClose?: () => void;
   onDirtyChange?: (dirty: boolean, saving: boolean) => void;
+  sceneChoices?: { id: string; label: string }[];
+  selectedSceneId?: string;
+  onSelectScene?: (id: string) => void;
+  sceneSwitchDisabled?: boolean;
 }
 
 
 export declare const SceneEditor: ComponentType<SceneEditorProps>;
 
 export { spriteSheetSelection, parseSpriteSheet } from '../../../../packages/scene-editor/src/sprite-sheet';
+export { uiAnchor, uiLocalMatrix } from '../../../../packages/scene-editor/src/content-coordinates';
