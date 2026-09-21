@@ -71,6 +71,21 @@ beforeAll(() => {
     });
   }
 
+  // JSDOM does not implement media queries. Visual libraries may use this to
+  // select a palette even when their theme is explicitly set.
+  if (!window.matchMedia) {
+    window.matchMedia = (query: string): MediaQueryList => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    });
+  }
+
   // BeUI favicons decode images before displaying them; JSDOM has no decoder.
   if (!HTMLImageElement.prototype.decode) {
     HTMLImageElement.prototype.decode = () => Promise.resolve();

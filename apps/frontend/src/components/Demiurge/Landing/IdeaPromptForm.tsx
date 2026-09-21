@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { BorderBeam } from 'border-beam';
 import { ArrowRight, Check, ChevronDown, CircleHelp, FileText, Image as ImageIcon, LayoutTemplate, Lightbulb, Loader2, Plus, Send, Video, X } from 'lucide-react';
 import type { ChatAttachmentPayload } from '../../../services/api';
 import { CHAT_ATTACHMENT_ACCEPT, filesToChatAttachments } from '../../../services/chatAttachments';
@@ -10,6 +11,7 @@ interface IdeaPromptFormProps {
     placeholder: string;
     generateLabel: string;
     isTransitioning: boolean;
+    isThinking: boolean;
     onChange: (value: string) => void;
     onSubmit: (event: React.FormEvent) => void;
     attachments: ChatAttachmentPayload[];
@@ -24,7 +26,7 @@ type OpenMenu = 'attachments' | 'mode' | null;
 
 export function IdeaPromptForm({
     value, placeholder, generateLabel, isTransitioning, onChange, onSubmit,
-    attachments, onAttachmentsChange,
+    isThinking, attachments, onAttachmentsChange,
 }: IdeaPromptFormProps) {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const fileRef = useRef<HTMLInputElement>(null);
@@ -55,7 +57,20 @@ export function IdeaPromptForm({
             }
             onSubmit(event);
         }}>
-            <fieldset className={styles.root} disabled={isTransitioning} data-testid="idea-prompt-surface">
+            <BorderBeam
+                className={styles.beamPreview}
+                data-testid="idea-prompt-beam"
+                size="pulse-outside"
+                colorVariant="sunset"
+                theme="light"
+                strength={0.7}
+                duration={2.8}
+                brightness={1.5}
+                saturation={0.9}
+                borderRadius={30}
+                active={isThinking}
+            >
+                <fieldset className={styles.root} disabled={isTransitioning} data-testid="idea-prompt-surface">
                 <div className={styles.surface}>
                 <div className={styles.inputPanel}>
                     {attachments.length > 0 && (
@@ -133,7 +148,8 @@ export function IdeaPromptForm({
                         event.target.value = '';
                         void addFiles(files);
                     }} />
-            </fieldset>
+                </fieldset>
+            </BorderBeam>
             {attachmentError && <p className={styles.error} role="alert">{attachmentError}</p>}
         </form>
     );
