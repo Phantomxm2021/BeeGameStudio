@@ -730,6 +730,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const icpNumber = import.meta.env.VITE_ICP_RECORD_NUMBER as string | undefined;
   const intakeTranslate: Translate = (key, options) => translate(`intake.${key}`, options);
   const intakeText = createLandingIntakeCopy(intakeTranslate);
+  // Login, billing consent and local UI transitions are not Agent thinking.
+  const isIdeaAgentThinking = intakePhase === 'generating_options' || attachmentBuildPhase === 'analyzing';
   const showAuthError = (message: string) => {
     setLoginError(message);
     setAuthFeedbackDialog({
@@ -1526,6 +1528,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             placeholder={t.ideaPlaceholder}
             generateLabel={t.generate}
             isTransitioning={isTransitioning || isPreparing}
+            isThinking={isIdeaAgentThinking}
             onChange={handleProjectNameChange}
             onSubmit={handleStart}
             attachments={attachmentBuildAttachments}

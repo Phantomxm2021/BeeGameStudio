@@ -1415,6 +1415,7 @@ describe('LandingView bootstrap submission', () => {
     expect(screen.queryByText('正在根据你的想法生成可选方案...')).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(textbox).toBeDisabled();
+    expect(screen.getByTestId('idea-prompt-beam')).toHaveAttribute('data-active');
 
     resolveOptions({
       maturity: 'vague',
@@ -1425,6 +1426,7 @@ describe('LandingView bootstrap submission', () => {
       options: [],
     });
     await waitFor(() => expect(runIdeaIntake).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId('idea-prompt-beam')).not.toHaveAttribute('data-active'));
     expect(onStart).not.toHaveBeenCalled();
   });
 
@@ -1712,6 +1714,7 @@ describe('LandingView bootstrap submission', () => {
   it('renders the idea prompt as a semantic surface', async () => {
     await renderLanding();
 
+    expect(screen.getByTestId('idea-prompt-beam')).not.toHaveAttribute('data-active');
     expect(screen.getByTestId('idea-prompt-surface')).toContainElement(screen.getByRole('textbox'));
     expect(screen.getByRole('textbox')).toHaveAttribute('rows', '2');
     expect(screen.queryByTestId('progressive-blur-layer')).not.toBeInTheDocument();
