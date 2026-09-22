@@ -7,6 +7,7 @@ import { CANONICAL_ASSET_MANIFEST } from './types'
 export type WorkflowDeliveryGate = {
   allowed: boolean
   issues: string[]
+  workflow?: { phase: string; status: string; blockedReason?: string }
 }
 
 /**
@@ -24,7 +25,8 @@ export async function evaluateWorkflowDeliveryGate(input: {
   if (run.status !== 'completed' || run.phase !== 'DELIVERY') {
     return {
       allowed: false,
-      issues: [`Delivery workflow is ${run.status} in ${run.phase}.`],
+      issues: [run.blockedReason || `Delivery workflow is ${run.status} in ${run.phase}.`],
+      workflow: { phase: run.phase, status: run.status, blockedReason: run.blockedReason },
     }
   }
   if (run.evidence.acceptance?.status !== 'passed') {

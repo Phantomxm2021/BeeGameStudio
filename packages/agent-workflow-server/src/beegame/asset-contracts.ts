@@ -248,7 +248,29 @@ export async function readBeeGameAssetManifest(
   workspacePath: string,
 ): Promise<BeeGameAssetManifest> {
   const root = normalizeWorkspacePath(workspacePath)
-  return readBeeGameAssetManifestSync(root)
+  let source: string
+  try {
+    source = await readFile(resolveInsideWorkspace(root, ASSET_MANIFEST_PATH), 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyManifest()
+    throw new BeeGameAssetManifestError(['manifest must contain valid JSON.'])
+  }
+  let indexValue: unknown
+  try {
+    indexValue = JSON.parse(source)
+  } catch {
+    throw new BeeGameAssetManifestError(['manifest must contain valid JSON.'])
+  }
+  const index = parseManifestIndex(indexValue)
+  let modules: unknown[]
+  try {
+    modules = await Promise.all([index.modules.requirements, ...index.modules.resources].map(async path =>
+      JSON.parse(await readFile(resolveInsideWorkspace(root, path), 'utf8')) as unknown,
+    ))
+  } catch {
+    throw new BeeGameAssetManifestError(['every registered manifest module must exist and contain valid JSON.'])
+  }
+  return parseManifestModules(index, modules[0], modules.slice(1))
 }
 
 export function readBeeGameAssetManifestSync(
@@ -282,6 +304,10 @@ export function readBeeGameAssetManifestSync(
       'every registered manifest module must exist and contain valid JSON.',
     ])
   }
+  return parseManifestModules(index, requirementsValue, resources)
+}
+
+function parseManifestModules(index: ReturnType<typeof parseManifestIndex>, requirementsValue: unknown, resources: unknown[]): BeeGameAssetManifest {
   if (!isRecord(requirementsValue))
     throw new BeeGameAssetManifestError([
       'requirements module root must be an object.',

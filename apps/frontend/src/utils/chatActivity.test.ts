@@ -1,8 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { settleChatActivity } from './chatActivity';
+import { hasActiveSubagents, isProjectExecutionActive, settleChatActivity } from './chatActivity';
 import { transcriptEventsToHistory } from '../services/beeGameAdapter';
 
 describe('terminal Chat activity', () => {
+  it('keeps native follow-ups busy independently of historical delivery verdicts', () => {
+    for (const status of ['completed', 'failed', 'stopped', 'blocked', undefined]) {
+      expect(isProjectExecutionActive({ phase: 'running', workflow: { status } })).toBe(true);
+      expect(isProjectExecutionActive({ phase: 'idle', workflow: { status } })).toBe(false);
+    }
+    expect(isProjectExecutionActive({ phase: 'waiting_approval' })).toBe(true);
+    expect(isProjectExecutionActive({ phase: 'idle', workflow: { status: 'running' } })).toBe(true);
+    expect(isProjectExecutionActive({ phase: 'paused' })).toBe(false);
+    expect(isProjectExecutionActive(null)).toBe(false);
+  });
+  it('only active child lifecycle blocks input; stopped, failed and incomplete history does not', () => {
+    expect(hasActiveSubagents([{ isSubagentTool: true, toolStatus: 'running' }])).toBe(true);
+    for (const completionReason of ['stopped', 'failed', 'incomplete'] as const)
+      expect(hasActiveSubagents([{ isSubagentTool: true, toolStatus: 'running', completionReason }])).toBe(false);
+    expect(hasActiveSubagents([{ isSubagentTool: true, toolStatus: 'completed' }])).toBe(false);
+    expect(hasActiveSubagents([{ toolStatus: 'running' }])).toBe(false);
+  });
+
   it('session stop settles turnless mirrored tools without stopping another session', () => {
     const events = [
       { id: 1, sessionId: 's', type: 'tool.started', text: 'Bash',

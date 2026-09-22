@@ -560,6 +560,12 @@
     "account": "账号"
   },
   "beegame": {
+    "subagentActivity": {
+      "legacy": "此记录为纯文本，缺少来源信息，按原文保留。",
+      "recent": "仅显示最近活动；较早记录或过长输出已省略。",
+      "truncated": "此输出已截断，并非完整文件或执行结果。",
+      "command": "命令", "output": "工具输出", "file": "文件内容"
+    },
     "assistantName": "BeeGame",
     "previewTitle": "预览",
     "collabFlow": "协作流",
@@ -718,6 +724,16 @@
     "permissionRiskLabel": "风险提示",
     "permissionRiskGeneric": "可能创建文件、安装依赖或访问网络",
     "permissionPendingPlaceholder": "等待权限确认",
+    "userQuestion": {
+      "custom": "或输入你自己的回答…",
+      "submit": "提交回答",
+      "previous": "上一题",
+      "next": "下一题",
+      "dismiss": "暂不回答",
+      "progress": "第 {current} 题，共 {total} 题",
+      "previews": "选项预览",
+      "invalid": "无法显示此问题。可以选择暂不回答，让 Agent 继续。"
+    },
     "allowOnce": "允许本次",
     "allowForSession": "当前会话允许",
     "clarificationRequired": "需要澄清",
@@ -844,6 +860,13 @@
       "approvalWaiting": "当前项目正在等待审批，不能继续执行普通消息。"
     },
     "livePreview": {
+      "previewPageLoading": "正在加载预览页面…",
+      "previewPageFailed": "预览页面加载失败或超时。这不代表游戏代码有误；请重新加载，若持续失败需检查预览服务。",
+      "deploymentVerificationScope": "Chat 的完成或 PASS 只表示该次任务结果，不等于当前版本已通过发布验收。",
+      "deploymentAcceptanceRequired": "当前版本需要重新验收。请明确请求验收当前版本；无需因此重跑资源和内容阶段。重新检查只读取状态，不会启动 Agent。",
+      "openStandalone": "独立窗口预览",
+      "stopping": "正在停止预览",
+      "consumedCredits": "已消耗 Credit",
       "title": "游戏预览",
       "starting": "正在准备预览",
       "waiting": "等待预览生成",
@@ -868,6 +891,14 @@
       "deploymentFailed": "发布失败",
       "deploymentFailureLog": "失败日志",
       "deploymentDialogDescription": "发布会重新构建当前项目，并生成一个可分享的线上版本。",
+      "deploymentChecking": "正在检查发布条件…",
+      "deploymentPublicNotice": "确认发布后将上传到 Cloudflare，获得公开访问链接。",
+      "deploymentNotConfigured": "尚未配置公开发布目标；本地预览不等于公网发布。",
+      "deploymentBlocked": "暂时不能发布：",
+      "deploymentRecheck": "重新检查",
+      "deploymentBackground": "可关闭此窗口，发布将在后台继续",
+      "deploymentCopyLink": "复制发布链接",
+      "deploymentCopied": "已复制",
       "deploymentLatest": "最新版本",
       "deploymentVersions": "历史版本",
       "deploymentNotPublished": "尚未发布",

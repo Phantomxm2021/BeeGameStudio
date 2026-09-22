@@ -3,18 +3,19 @@ import type { Language } from './AgentsConfig';
 import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { api, type BeeGameAssetManifestPayload } from '../../services/api';
 import type { ChatAttachmentPayload } from '../../services/api';
-import { isBeeGameProjectPackageArtifactId } from '../../services/beeGameAdapter';
+import { beeGameAdapter, isBeeGameProjectPackageArtifactId } from '../../services/beeGameAdapter';
 import { artifactProcessor } from '../../utils/artifactProcessor';
 import { deriveDocumentProgress, isBaselineDocumentPath } from '../../utils/documentProgress';
 import { isBeeGamePermission } from './Sidebar/SidebarUtils';
 import type { WaitingPermissionState } from '../../utils/waitingPermission';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, PermissionDisplayModel } from '../../viewModels/displayModels';
 import { useChatStore } from '../../store/chatStore';
+import { hasActiveSubagents } from '../../utils/chatActivity';
 import { normalizeChatHistory } from '../../utils/chatHistory';
 
 // Modular Panels
 import { ChatPanel } from './Sidebar/ChatPanel';
-import { ArtifactsPanel } from './Sidebar/ArtifactsPanel';
+import { ArtifactsPanel, type ArtifactEditorFile } from './Sidebar/ArtifactsPanel';
 import { AssetsPanel } from './Sidebar/AssetsPanel';
 import { ArtifactPreviewModal } from './Sidebar/ArtifactPreviewModal';
 import { buildArtifactViewModel, type ArtifactEditorKind } from './Sidebar/artifactViewModel';
@@ -26,7 +27,8 @@ import { deriveCurrentProjectTodos } from '../../utils/projectTodos';
 import {
     closeProjectEditorRoute,
     getProjectEditorRoute,
-    openProjectEditorRoute,
+    getProjectEditorFileRoute,
+    openProjectEditorFileRoute,
     WORKSPACE_ROUTE_CHANGE_EVENT,
 } from '../../navigation/workspaceRoute';
 
@@ -59,7 +61,8 @@ interface RightSidebarProps {
     onResolveToolPermission?: (
         permission: { gate_id: string },
         decision?: 'allow' | 'deny',
-        scope?: 'once' | 'session'
+        scope?: 'once' | 'session',
+        answers?: Record<string, string>
     ) => Promise<void>;
     permissionState?: {
         gateId: string | null;
@@ -69,8 +72,6 @@ interface RightSidebarProps {
     };
     pendingPermissions?: PermissionDisplayModel[];
     projectStatus?: ProjectRuntimeDisplayModel | null;
-    onWorkflowAction?: (action: 'resume' | 'retry') => void | Promise<void>;
-    isWorkflowActionPending?: boolean;
     waitingPermission: WaitingPermissionState;
     canSendMessage?: boolean;
     canApproveTool?: boolean;
@@ -103,8 +104,6 @@ export function RightSidebar({
     permissionState = { gateId: null, action: null, phase: 'idle', message: '' },
     pendingPermissions = [],
     projectStatus,
-    onWorkflowAction,
-    isWorkflowActionPending = false,
     waitingPermission,
     canSendMessage = true,
     canApproveTool = true,
@@ -118,11 +117,16 @@ export function RightSidebar({
     const [activeTab, setActiveTab] = useState<'chat' | 'todo' | 'artifacts'>('chat');
     const [showAssets, setShowAssets] = useState(false);
     const [chatInput, setChatInput] = useState('');
+    const [isSubmittingMessage, setIsSubmittingMessage] = useState(false);
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [attachments, setAttachments] = useState<ChatAttachmentPayload[]>([]);
     const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
     const [isArtifactsLoading, setIsArtifactsLoading] = useState(false);
     const [artifactsError, setArtifactsError] = useState(false);
+    const [editorFiles, setEditorFiles] = useState<ArtifactEditorFile[]>([]);
+    const [isEditorFilesLoading, setIsEditorFilesLoading] = useState(false);
+    const [editorFilesError, setEditorFilesError] = useState<string | null>(null);
+    const editorFilesAbortRef = useRef<AbortController | null>(null);
     const [assetManifest, setAssetManifest] = useState<BeeGameAssetManifestPayload | null>(null);
     const [isAssetsLoading, setIsAssetsLoading] = useState(false);
     const [isUploadingProjectResource, setIsUploadingProjectResource] = useState(false);
@@ -133,6 +137,7 @@ export function RightSidebar({
     const [isPreviewLoading, setIsPreviewLoading] = useState(false);
     const [isSceneEditorOpen, setIsSceneEditorOpen] = useState(() => getProjectEditorRoute(projectId) === 'scene');
     const [isUiEditorOpen, setIsUiEditorOpen] = useState(() => getProjectEditorRoute(projectId) === 'ui');
+    const [editorFilePath, setEditorFilePath] = useState(() => getProjectEditorFileRoute(projectId));
     const [hasOlderHistory, setHasOlderHistory] = useState(false);
     const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
     const submittedDraftRef = useRef<{ projectId: string; content: string; attachments: ChatAttachmentPayload[]; supersedesMessageId?: string } | null>(null);
@@ -162,6 +167,7 @@ export function RightSidebar({
             const editor = getProjectEditorRoute(projectId);
             setIsSceneEditorOpen(editor === 'scene');
             setIsUiEditorOpen(editor === 'ui');
+            setEditorFilePath(getProjectEditorFileRoute(projectId));
         };
         syncEditorRoute();
         window.addEventListener('popstate', syncEditorRoute);
@@ -185,6 +191,7 @@ export function RightSidebar({
         // Project changes reset local composer state before the next render.
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setChatInput('');
+        setIsSubmittingMessage(false);
         setAttachments([]);
         setEditingMessageId(null);
         setHasOlderHistory(false);
@@ -238,7 +245,8 @@ export function RightSidebar({
             }
         }
     }, [hasOlderHistory, isLoadingOlderHistory, loadHistory, messages.length, projectId]);
-    const isComposerLocked = isLoading || isRuntimeBusy;
+    const isAgentWorking = isLoading || hasActiveSubagents(messages);
+    const isComposerLocked = isSubmittingMessage || isAgentWorking || isRuntimeBusy;
     const canMutateAssets = canUploadAssets && !isRuntimeBusy;
     const documentProgress = useMemo(
         () => deriveDocumentProgress(messages, artifacts, projectStatus?.workflow),
@@ -269,8 +277,12 @@ export function RightSidebar({
         setAssetManifest(null);
         setArtifacts([]);
         setArtifactsError(false);
+        setEditorFiles([]);
+        setEditorFilesError(null);
+        setIsEditorFilesLoading(false);
         setIsUploadingProjectResource(false);
         setIsAssetsLoading(false);
+        return () => { editorFilesAbortRef.current?.abort(); };
     }, [projectId]);
 
     // Derived Data
@@ -291,6 +303,7 @@ export function RightSidebar({
         submittedDraftRef.current = submittedDraft;
         const requestId = ++sendRequestIdRef.current;
         sendInFlightRef.current = true;
+        setIsSubmittingMessage(true);
         try {
             const accepted = await onSendMessage(content, requestAttachments, requestSupersedesMessageId);
             const currentDraft = currentDraftRef.current;
@@ -308,7 +321,10 @@ export function RightSidebar({
         } catch {
             // Keep the exact draft available for retry when the transport rejects.
         } finally {
-            if (activeProjectRef.current === requestProjectId && sendRequestIdRef.current === requestId) sendInFlightRef.current = false;
+            if (activeProjectRef.current === requestProjectId && sendRequestIdRef.current === requestId) {
+                sendInFlightRef.current = false;
+                setIsSubmittingMessage(false);
+            }
         }
     };
 
@@ -390,12 +406,35 @@ export function RightSidebar({
         }
     };
 
-    const handleOpenEditor = (kind: ArtifactEditorKind) => {
-        if (kind === 'scene') {
-            openProjectEditorRoute(projectId, 'scene');
-            return;
+    const loadEditorFiles = async () => {
+        editorFilesAbortRef.current?.abort();
+        const controller = new AbortController();
+        editorFilesAbortRef.current = controller;
+        setIsEditorFilesLoading(true);
+        setEditorFilesError(null);
+        try {
+            const snapshot = await beeGameAdapter.getProjectGameContentFileList(projectId, controller.signal);
+            if (controller.signal.aborted || activeProjectRef.current !== projectId) return;
+            const files: ArtifactEditorFile[] = [];
+            for (const item of snapshot.documents ?? []) {
+                const kind = item.kind;
+                if (kind === 'scene-2d' || kind === 'scene-3d' || kind === 'ui-screen' || kind === 'ui-hud') {
+                    files.push({ path: item.path, id: item.id, kind: kind.startsWith('scene-') ? 'scene' : 'ui' });
+                }
+            }
+            setEditorFiles(files);
+        } catch {
+            if (!controller.signal.aborted && activeProjectRef.current === projectId) {
+                setEditorFiles([]);
+                setEditorFilesError(lang === 'zh' ? '无法加载文件列表，请重试。' : 'Unable to load files. Please try again.');
+            }
+        } finally {
+            if (!controller.signal.aborted && activeProjectRef.current === projectId) setIsEditorFilesLoading(false);
         }
-        openProjectEditorRoute(projectId, 'ui');
+    };
+
+    const handleOpenEditor = (kind: ArtifactEditorKind, path: string) => {
+        openProjectEditorFileRoute(projectId, kind, path);
     };
 
     const handleUploadAsset = async (file: File) => {
@@ -547,7 +586,7 @@ export function RightSidebar({
                     <TabsContent key={projectId} value="chat" keepMounted className="relative min-h-0 min-w-0 flex-1 overflow-hidden pointer-events-auto data-[hidden]:hidden">
                             <ChatPanel 
                                 messages={messages}
-                                isLoading={isLoading}
+                                isLoading={isAgentWorking}
                                 streamingMessageId={streamingMessageId}
                                 onStop={onStopTask}
                                 isStopping={isStopping}
@@ -555,8 +594,7 @@ export function RightSidebar({
                                 chatInput={chatInput}
                                 onChatInputChange={setChatInput}
                                 onSend={handleSend}
-                                onSendMessage={onSendMessage}
-                                onEditMessage={!isLoading ? handleEditMessage : undefined}
+                                onEditMessage={!isComposerLocked ? handleEditMessage : undefined}
                                 editingMessageId={editingMessageId}
                                 onCancelEdit={handleCancelEdit}
                                 attachments={attachments}
@@ -577,8 +615,6 @@ export function RightSidebar({
                             pendingPermissions={pendingPermissions}
                                 waitingPermission={waitingPermission}
                                 projectStatus={projectStatus}
-                                onWorkflowAction={onWorkflowAction}
-                                isWorkflowActionPending={isWorkflowActionPending}
                                 canSendMessage={canSendMessage}
                                 lang={lang}
                                 currentUserDisplayName={currentUserDisplayName}
@@ -606,6 +642,7 @@ export function RightSidebar({
                                     />
                                 ) : (
                                     <ArtifactsPanel
+                                        key={projectId}
                                         artifacts={artifacts}
                                         isLoading={isArtifactsLoading}
                                         onPreview={handlePreviewArtifact}
@@ -613,6 +650,10 @@ export function RightSidebar({
                                         canExportProject={canExportProject}
                                         documentProgress={documentProgress}
                                         onOpenEditor={handleOpenEditor}
+                                        editorFiles={editorFiles}
+                                        isEditorFilesLoading={isEditorFilesLoading}
+                                        editorFilesError={editorFilesError}
+                                        onLoadEditorFiles={() => { void loadEditorFiles(); }}
                                         error={artifactsError ? (uiText.artifactLoadFailed || 'Failed to load deliverables. Please try again.') : null}
                                         lang={lang}
                                         onOpenAssets={() => setShowAssets(true)}
@@ -634,12 +675,14 @@ export function RightSidebar({
             {isSceneEditorOpen ? (
                 <SceneEditorOverlay
                     projectId={projectId}
+                    initialDocumentPath={editorFilePath}
                     onClose={() => closeProjectEditorRoute(projectId)}
                 />
             ) : null}
             {isUiEditorOpen ? (
                 <UiEditorOverlay
                     projectId={projectId}
+                    initialDocumentPath={editorFilePath}
                     onClose={() => closeProjectEditorRoute(projectId)}
                 />
             ) : null}

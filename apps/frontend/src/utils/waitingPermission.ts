@@ -56,10 +56,10 @@ export const getWaitingPermissionState = (
   if (workflow?.status === 'blocked' && workflow.block?.message) {
     return {
       kind: 'workflow',
-      isWaitingStatus: true,
-      isBlockingChat: true,
+      isWaitingStatus: false,
+      isBlockingChat: false,
       message: workflow.block.message,
-      placeholder: '当前 workflow 已暂停...',
+      placeholder: '说明接下来要做什么，或发送“继续”...',
     };
   }
 

@@ -71,6 +71,7 @@ export type ChatDisplayMessage = Pick<
   | 'subagentPrompt'
   | 'subagentOutput'
   | 'subagentTrace'
+  | 'subagentActivity'
 > & {
   sources?: ChatDisplaySource[]
   citations?: ChatDisplaySource[]
@@ -663,6 +664,7 @@ export const toChatDisplayMessage = (message: Message): ChatDisplayMessage => ({
   subagentPrompt: message.subagentPrompt,
   subagentOutput: message.subagentOutput,
   subagentTrace: message.subagentTrace,
+  subagentActivity: message.subagentActivity,
   sources: normalizeDisplaySources(message.sources),
   citations: normalizeDisplaySources(message.citations),
 })

@@ -402,35 +402,38 @@ export function parseForSecurityFromAst(
   cmd: string,
   root: Node | typeof PARSE_ABORTED,
 ): ParseForSecurityResult {
+  // Quoted heredoc bodies are file/stdin data, not shell syntax. Keep the
+  // surrounding command (including redirects and following commands) intact.
+  const shellSyntax = root === PARSE_ABORTED ? cmd : maskLiteralHeredocBodies(cmd, root)
   // Pre-checks: characters that cause tree-sitter and bash to disagree on
   // word boundaries. These run before tree-sitter because they're the known
   // tree-sitter/bash differentials. Everything after this point trusts
   // tree-sitter's tokenization.
-  if (CONTROL_CHAR_RE.test(cmd)) {
+  if (CONTROL_CHAR_RE.test(shellSyntax)) {
     return { kind: 'too-complex', reason: 'Contains control characters' }
   }
-  if (UNICODE_WHITESPACE_RE.test(cmd)) {
+  if (UNICODE_WHITESPACE_RE.test(shellSyntax)) {
     return { kind: 'too-complex', reason: 'Contains Unicode whitespace' }
   }
-  if (BACKSLASH_WHITESPACE_RE.test(cmd)) {
+  if (BACKSLASH_WHITESPACE_RE.test(shellSyntax)) {
     return {
       kind: 'too-complex',
       reason: 'Contains backslash-escaped whitespace',
     }
   }
-  if (ZSH_TILDE_BRACKET_RE.test(cmd)) {
+  if (ZSH_TILDE_BRACKET_RE.test(shellSyntax)) {
     return {
       kind: 'too-complex',
       reason: 'Contains zsh ~[ dynamic directory syntax',
     }
   }
-  if (ZSH_EQUALS_EXPANSION_RE.test(cmd)) {
+  if (ZSH_EQUALS_EXPANSION_RE.test(shellSyntax)) {
     return {
       kind: 'too-complex',
       reason: 'Contains zsh =cmd equals expansion',
     }
   }
-  if (BRACE_WITH_QUOTE_RE.test(maskBracesInQuotedContexts(cmd))) {
+  if (BRACE_WITH_QUOTE_RE.test(maskBracesInQuotedContexts(shellSyntax))) {
     return {
       kind: 'too-complex',
       reason: 'Contains brace with quote character (expansion obfuscation)',
@@ -1127,18 +1130,29 @@ function walkFileRedirect(
   return { op, target, fd }
 }
 
+function maskLiteralHeredocBodies(cmd: string, root: Node): string {
+  // AST offsets are UTF-8 bytes, not JavaScript character indices.
+  let bytes: Buffer | undefined
+  const visit = (node: Node) => {
+    if (node.type === 'heredoc_redirect' && walkHeredocRedirect(node) === null &&
+        node.children.some(child => child.type === 'heredoc_end')) {
+      const body = node.children.find(child => child.type === 'heredoc_body')
+      if (body) {
+        bytes ??= Buffer.from(cmd)
+        bytes.fill(32, body.startIndex, body.endIndex)
+      }
+      return
+    }
+    for (const child of node.children) visit(child)
+  }
+  visit(root)
+  return bytes?.toString() ?? cmd
+}
+
 /**
- * Heredoc redirect. Only quoted-delimiter heredocs (<<'EOF') are safe —
- * their bodies are literal text. Unquoted-delimiter heredocs (<<EOF)
- * undergo full parameter/command/arithmetic expansion in the body.
- *
- * SECURITY: tree-sitter-bash has a grammar gap — backticks (`...`) inside
- * an unquoted heredoc body are NOT parsed as command_substitution nodes
- * (body.children is empty, backticks are in body.text). But bash DOES
- * execute them. We cannot safely relax the quoted-delimiter requirement
- * by checking body children for expansion nodes — we'd miss backtick
- * substitution. Keep rejecting all unquoted heredocs. Users should use
- * <<'EOF' to get a literal body, which the model already prefers.
+ * Only quoted-delimiter heredocs contain literal data. Unquoted bodies can
+ * execute backticks even when the parser emits no command_substitution node;
+ * keep rejecting them rather than inferring safety from an empty child list.
  */
 function walkHeredocRedirect(node: Node): ParseForSecurityResult | null {
   let startText: string | null = null

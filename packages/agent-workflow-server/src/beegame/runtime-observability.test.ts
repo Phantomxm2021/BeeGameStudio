@@ -169,7 +169,8 @@ describe('passive native runtime observability', () => {
     }
   })
 
-  test('records a user cancellation without reporting a runtime error', async () => {
+  for (const reason of ['user_stop', 'service_shutdown'] as const)
+  test(`records ${reason} without reporting a runtime error`, async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-cancelled-'))
     try {
       const errors: string[] = []
@@ -181,7 +182,8 @@ describe('passive native runtime observability', () => {
         errorSink: message => errors.push(message),
       })
       observer.beginTurn({ requestId: 'request-cancelled' })
-      observer.finishTurn({ outcome: 'cancelled_by_user' })
+      const outcome = reason === 'user_stop' ? 'cancelled_by_user' : 'aborted'
+      observer.finishTurn({ outcome, stopReason: reason })
       await observer.flush()
 
       const raw = await readFile(
@@ -190,7 +192,8 @@ describe('passive native runtime observability', () => {
       )
       expect(JSON.parse(raw.trim().split('\n').at(-1)!)).toMatchObject({
         type: 'turn_terminal',
-        outcome: 'cancelled_by_user',
+        outcome,
+        stopReason: reason,
       })
       expect(errors).toEqual([])
     } finally {

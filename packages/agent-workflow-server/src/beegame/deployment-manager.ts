@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import {
   cp,
@@ -6,6 +6,7 @@ import {
   realpath,
   readdir,
   readFile,
+  rename,
   rm,
   stat,
   writeFile,
@@ -79,6 +80,7 @@ export type BeeGameDeploymentFile = {
 }
 
 export type BeeGameDeploymentPublisher = {
+  verifyPublished?: (url: string, files: BeeGameDeploymentFile[]) => Promise<void>
   publishStaticDirectory(input: {
     deploymentId: string
     sessionId: string
@@ -103,6 +105,23 @@ export type BeeGameDeploymentManagerOptions = {
   runner?: BeeGameDeploymentRunner
   outputCandidates?: string[]
   publisher?: BeeGameDeploymentPublisher
+}
+
+type DeploymentInput = {
+  sessionId: string
+  userId?: string
+  projectId?: string
+  workspacePath: string
+  authToken?: string
+}
+
+export function mergeDeploymentRecords(...groups: BeeGameDeploymentRecord[][]): BeeGameDeploymentRecord[] {
+  const records = new Map<string, BeeGameDeploymentRecord>()
+  for (const group of groups) for (const record of group) {
+    const previous = records.get(record.id)
+    if (!previous || record.updatedAt >= previous.updatedAt) records.set(record.id, record)
+  }
+  return [...records.values()].sort(compareDeploymentRecordsNewestFirst)
 }
 
 type PackageManifest = {
@@ -141,6 +160,9 @@ export class BeeGameDeploymentManager {
   private readonly runner: BeeGameDeploymentRunner
   private readonly outputCandidates: string[]
   private readonly publisher?: BeeGameDeploymentPublisher
+  private recordWrites: Promise<void> = Promise.resolve()
+  private readonly active = new Map<string, Promise<BeeGameDeploymentRecord>>()
+  private readonly ready: Promise<void>
 
   constructor(options: BeeGameDeploymentManagerOptions) {
     this.deploymentsRoot = join(options.dataRoot, 'deployments')
@@ -149,9 +171,32 @@ export class BeeGameDeploymentManager {
     this.runner = options.runner ?? runDeploymentCommand
     this.outputCandidates = options.outputCandidates ?? DEFAULT_OUTPUT_CANDIDATES
     this.publisher = options.publisher
+    this.ready = this.recoverInterrupted()
+  }
+
+  get destination(): 'remote' | 'local' { return this.publisher ? 'remote' : 'local' }
+  isPublishing(userId: string, workspacePath: string): boolean {
+    return this.active.has(`${userId}:${resolve(workspacePath)}`)
+  }
+
+  /** Return the durable queued record, not a request held open for the entire build. */
+  start(input: DeploymentInput, persistRecord?: (record: BeeGameDeploymentRecord) => Promise<unknown>): Promise<BeeGameDeploymentRecord> {
+    const key = `${input.userId ?? ''}:${resolve(input.workspacePath)}`
+    const existing = this.active.get(key)
+    if (existing) return existing
+    let queued!: (record: BeeGameDeploymentRecord) => void
+    let failed!: (error: unknown) => void
+    const accepted = new Promise<BeeGameDeploymentRecord>((resolve, reject) => { queued = resolve; failed = reject })
+    this.active.set(key, accepted)
+    void this.deploy(input, queued, persistRecord).catch(error => {
+      failed(error)
+      console.error('[deployment] Background publication or metadata persistence failed:', error instanceof Error ? error.message : 'Unknown error')
+    }).finally(() => { this.active.delete(key) })
+    return accepted
   }
 
   async list(sessionId?: string): Promise<BeeGameDeploymentRecord[]> {
+    await this.ready
     const records = await this.loadRecords()
     return sessionId
       ? records.filter(record => record.sessionId === sessionId)
@@ -162,6 +207,8 @@ export class BeeGameDeploymentManager {
     dryRun: boolean
     keepSuccessfulPerProject?: number
   }): Promise<BeeGameDeploymentRetentionResult> {
+    await this.ready
+    if (!input.dryRun && this.active.size) throw new Error('Wait for active publications before cleaning deployment history')
     const keepSuccessfulPerProject = Math.max(1, input.keepSuccessfulPerProject ?? 6)
     const records = await this.loadRecords()
     const retainedIds = new Set<string>()
@@ -224,19 +271,12 @@ export class BeeGameDeploymentManager {
     }
   }
 
-  async deploy(input: {
-    sessionId: string
-    userId?: string
-    projectId?: string
-    workspacePath: string
-    authToken?: string
-  }): Promise<BeeGameDeploymentRecord> {
+  async deploy(input: DeploymentInput, onQueued?: (record: BeeGameDeploymentRecord) => void,
+    persistRecord?: (record: BeeGameDeploymentRecord) => Promise<unknown>): Promise<BeeGameDeploymentRecord> {
+    await this.ready
     const now = new Date().toISOString()
     const workspacePath = resolve(input.workspacePath)
-    const id = `deploy_${createHash('sha1')
-      .update(`${input.sessionId}-${workspacePath}-${now}`)
-      .digest('hex')
-      .slice(0, 12)}`
+    const id = `deploy_${randomUUID().replaceAll('-', '')}`
     let record: BeeGameDeploymentRecord = {
       id,
       sessionId: input.sessionId,
@@ -248,13 +288,18 @@ export class BeeGameDeploymentManager {
       updatedAt: now,
     }
     await this.saveRecord(record)
+    onQueued?.(record)
 
     try {
+      if (this.publisher?.verifyPublished && !persistRecord) {
+        throw new Error('Worker publishing requires deployment record persistence before public verification')
+      }
       const acceptedWorkspaceRevision = await computeWorkspaceRevision(workspacePath)
       const plan = createDeploymentPlan(workspacePath)
       if (!plan.supported) {
         record = this.fail(record, plan.message)
         await this.saveRecord(record)
+        await persistRecord?.(record)
         return record
       }
 
@@ -278,6 +323,7 @@ export class BeeGameDeploymentManager {
           `Build command failed with exit code ${result.exitCode}`,
         )
         await this.saveRecord(record)
+        await persistRecord?.(record)
         return record
       }
       if (
@@ -286,9 +332,10 @@ export class BeeGameDeploymentManager {
       ) {
         record = this.fail(
           { ...record, buildLog },
-          'Project source changed during the deployment build. Re-run the delivery workflow for the new revision.',
+          'Project source changed during the deployment build. Verify the updated project before publishing again.',
         )
         await this.saveRecord(record)
+        await persistRecord?.(record)
         return record
       }
 
@@ -309,6 +356,7 @@ export class BeeGameDeploymentManager {
       await cp(outputDir, artifactPath, { recursive: true })
       await validateDeploymentArtifact(artifactPath)
       const artifactHash = await hashDirectory(artifactPath)
+      const files = await createDeploymentFiles(artifactPath)
       const published = this.publisher
         ? await this.publisher.publishStaticDirectory({
             deploymentId: id,
@@ -319,7 +367,7 @@ export class BeeGameDeploymentManager {
             outputDir,
             artifactHash,
             ...(input.authToken ? { authToken: input.authToken } : {}),
-            files: await createDeploymentFiles(artifactPath),
+            files,
           })
         : undefined
       const deployedAt = new Date().toISOString()
@@ -336,16 +384,30 @@ export class BeeGameDeploymentManager {
         updatedAt: deployedAt,
         deployedAt,
       }
+      if (this.publisher?.verifyPublished) {
+        // The delivery Worker only serves versions registered as public in the
+        // database. Keep local/UI status publishing until anonymous verification
+        // completes; a failed check revokes the database record below.
+        await persistRecord!(record)
+        await this.saveRecord({ ...record, status: 'publishing', updatedAt: new Date().toISOString() })
+        await this.publisher.verifyPublished(record.url, files)
+        record = { ...record, updatedAt: new Date().toISOString() }
+      }
       await this.saveRecord(record)
+      if (!this.publisher?.verifyPublished) await persistRecord?.(record)
       return record
     } catch (error) {
       record = this.fail(record, error instanceof Error ? error.message : String(error))
+      try { await persistRecord?.(record) } catch (persistenceError) {
+        record = this.fail(record, `${record.message}; failed to persist publication failure: ${persistenceError instanceof Error ? persistenceError.message : String(persistenceError)}`)
+      }
       await this.saveRecord(record)
       return record
     }
   }
 
   async rollbackTo(source: BeeGameDeploymentRecord): Promise<BeeGameDeploymentRecord> {
+    await this.ready
     if (source.status !== 'succeeded' || !source.url) {
       throw new Error('Only successful deployments can be restored')
     }
@@ -460,20 +522,27 @@ export class BeeGameDeploymentManager {
   }
 
   private async saveRecord(record: BeeGameDeploymentRecord): Promise<void> {
-    await mkdir(this.deploymentsRoot, { recursive: true })
-    const records = await this.loadRecords()
-    const existingIndex = records.findIndex(item => item.id === record.id)
-    if (existingIndex >= 0) {
-      records[existingIndex] = record
-    } else {
-      records.unshift(record)
-    }
-    await this.saveRecords(records)
+    const write = this.recordWrites.catch(() => undefined).then(async () => {
+      const records = await this.loadRecords()
+      await this.saveRecords(mergeDeploymentRecords(records, [record]))
+    })
+    this.recordWrites = write
+    await write
   }
 
   private async saveRecords(records: BeeGameDeploymentRecord[]): Promise<void> {
     await mkdir(this.deploymentsRoot, { recursive: true })
-    await writeFile(this.recordsPath, `${JSON.stringify(records, null, 2)}\n`)
+    const temporary = `${this.recordsPath}.${randomUUID()}.tmp`
+    await writeFile(temporary, `${JSON.stringify(records, null, 2)}\n`)
+    await rename(temporary, this.recordsPath)
+  }
+
+  private async recoverInterrupted(): Promise<void> {
+    const records = await this.loadRecords()
+    if (!records.some(record => ['queued', 'building', 'publishing'].includes(record.status))) return
+    await this.saveRecords(records.map(record => ['queued', 'building', 'publishing'].includes(record.status)
+      ? this.fail(record, 'Publishing was interrupted by a service restart. No successful release was confirmed; publish again when ready.')
+      : record))
   }
 
   private async deleteLocalArtifact(record: BeeGameDeploymentRecord): Promise<boolean> {

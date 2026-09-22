@@ -93,6 +93,7 @@ describe('apiClient defaults', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/auth/session/refresh', {
       method: 'POST',
       credentials: 'include',
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -376,6 +377,19 @@ describe('apiClient defaults', () => {
     });
     expect(consoleError).not.toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+
+  it.each([
+    ['ECONNABORTED', true, 'request_timeout', '请求超时，服务未及时响应，请稍后重试'],
+    ['ETIMEDOUT', true, 'request_timeout', '请求超时，服务未及时响应，请稍后重试'],
+    ['ERR_NETWORK', false, 'network_offline', '当前设备离线，请恢复网络连接'],
+    ['ERR_NETWORK', true, 'connection_unavailable', '未能连接 BeeGame 服务，请稍后重试'],
+  ])('classifies %s (online=%s) without blaming local network by default', async (code, online, expectedCode, message) => {
+    vi.stubGlobal('navigator', { onLine: online });
+    await expect(apiClient.get('/api/current-user', {
+      headers: { 'Hide-Error-Log': 'true', 'Hide-Error-Toast': 'true' },
+      adapter: async config => { throw new AxiosError('transport failure', code as string, config, {}); },
+    })).rejects.toMatchObject({ code: expectedCode, message, recoverable: true });
   });
 });
 

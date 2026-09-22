@@ -3,6 +3,8 @@ import { mkdtemp, readFile, rm, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
+import sharp from 'sharp'
+import type { BeeGameModelGenerateInput } from '../beegame/model-runtime-host'
 import { createAgentWorkflowApp } from '../app'
 import type { FoundationAuthoringHost } from '../beegame/foundation-authoring-host'
 import type { BeeGameSessionRunner } from '../beegame/session-manager'
@@ -48,7 +50,7 @@ function fakeAuthor(calls: AuthorCalls): FoundationAuthoringHost {
   }
 }
 
-async function fixture(stageOptions: Partial<Pick<NonNullable<Parameters<typeof createAgentWorkflowApp>[0]>, 'foundationReviewerHostFactory'>> = {}) {
+async function fixture(stageOptions: Partial<Pick<NonNullable<Parameters<typeof createAgentWorkflowApp>[0]>, 'foundationReviewerHostFactory' | 'modelRuntimeHost'>> = {}) {
   const root = await mkdtemp(join(tmpdir(), 'beegame-public-author-routes-'))
   roots.push(root)
   const ownerId = 'public-author-owner'
@@ -99,6 +101,76 @@ afterEach(async () => {
 })
 
 describe('public foundation authoring app routes', () => {
+  test('creative intake delivers written instructions, document text and image pixels to the model boundary', async () => {
+    const modelCalls: BeeGameModelGenerateInput[] = []
+    const f = await fixture({ modelRuntimeHost: {
+      generate: async () => { throw new Error('Unexpected legacy model call') },
+      generateWithUsage: async input => {
+        modelCalls.push(input)
+        // Stop at the model boundary: no network, token usage, billing or generation.
+        throw new Error('offline-reference-boundary-verified')
+      },
+    } })
+    try {
+      const png = await sharp({ create: { width: 8, height: 8, channels: 4, background: '#aabbcc' } }).png().toBuffer()
+      const response = await f.app.request('/api/beegame-intake/jobs', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: 'Use the art but preserve puzzle gameplay', language: 'en', attachments: [
+          { type: 'file', filename: 'rules.md', mediaType: 'text/markdown', data: Buffer.from('Keep the original rules').toString('base64') },
+          { type: 'image', filename: 'art.png', mediaType: 'image/png', data: png.toString('base64') },
+        ] }),
+      })
+      expect(response.status).toBe(202)
+      const { jobId } = await response.json() as { jobId: string }
+      let status = 'running'
+      for (let i = 0; i < 100 && status === 'running'; i++) {
+        const job = await (await f.app.request('/api/beegame-intake/jobs/' + jobId)).json() as { status: string }
+        status = job.status
+        if (status === 'running') await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      expect(status).toBe('failed') // Intentional fixture stop, not a real provider failure.
+      expect(modelCalls).toHaveLength(1)
+      const parts = modelCalls[0]!.messages[0]!.content
+      expect(Array.isArray(parts)).toBe(true)
+      if (typeof parts === 'string') throw new Error('References lost')
+      expect(parts.filter(part => part.type === 'text').map(part => part.text).join('\n')).toContain('Keep the original rules')
+      expect(parts.filter(part => part.type === 'text').map(part => part.text).join('\n')).toContain('preserve puzzle gameplay')
+      expect(parts.filter(part => part.type === 'image')).toHaveLength(1)
+      expect(f.calls.start).toHaveLength(0)
+    } finally { for (const cleanup of f.cleanups.reverse()) await cleanup() }
+  })
+
+  test('blueprint bootstrap preserves original references and passes paths to author without an intake model call', async () => {
+    const f = await fixture();
+    try {
+      const bytes = Buffer.from('# User blueprint\nKeep the supplied design.');
+      const response = await f.app.request('/api/projects/bootstrap', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          project: { id: 'blueprint-references', name: 'Blueprint', created_at: Date.now() },
+          brief: {
+            idea: 'Build my blueprint', creationMode: 'blueprint', language: 'en', resourceLibraryUsage: 'optional',
+            attachments: [{ type: 'file', filename: 'blueprint.md', mediaType: 'text/markdown', data: bytes.toString('base64') }],
+            referenceFiles: [{ relativePath: '/untrusted/client/path' }],
+          },
+        }),
+      });
+      expect(response.status).toBe(202);
+      const { project } = await response.json() as { project: { root_path: string } };
+      const state = (await createRunStore(project.root_path, 'public-author-owner').load())!;
+      const brief = JSON.parse(state.confirmedBriefContext);
+      expect(brief.creation_mode).toBe('blueprint');
+      expect(brief.reference_files).toHaveLength(1);
+      expect(brief.reference_files[0].filename).toBe('blueprint.md');
+      expect(brief.reference_files[0].relativePath).toMatch(/^\.beegame-attachments\//);
+      expect(await readFile(join(project.root_path, brief.reference_files[0].relativePath))).toEqual(bytes);
+      expect(brief.reference_files[0].sha256).toBe(createHash('sha256').update(bytes).digest('hex'));
+      expect(state.confirmedBriefContext).not.toContain(bytes.toString('base64'));
+      expect(f.calls.start).toHaveLength(1);
+      expect(f.runnerStarts).toBe(0);
+    } finally { for (const cleanup of f.cleanups.reverse()) await cleanup(); }
+  });
+
   test('completed author hands off to public review; display, stop, resume and shutdown follow the active module', async () => {
     const handle = { protocolVersion: 1 as const, producer: 'foundation-reviewer' as const, id: randomUUID() }
     let state: 'running' | 'stopped' = 'running'

@@ -135,7 +135,7 @@ test('native author submits one file-agent call without delegation policy', asyn
   })
   expect(result.report?.status).toBe('completed')
   expect(captured.writablePaths).toEqual([...CANONICAL_FOUNDATION_DOCUMENTS])
-  expect(captured.readOnlyPaths).toEqual(['requirements.md'])
+  expect(captured.readOnlyPaths).toEqual(['requirements.md', '.beegame-attachments'])
   expect(captured).not.toHaveProperty('delegateOutputPaths')
   expect(captured).not.toHaveProperty('delegatePrerequisitePaths')
 })

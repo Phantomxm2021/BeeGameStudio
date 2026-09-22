@@ -19,6 +19,10 @@ if (import.meta.main) {
   const server = Bun.serve({
     hostname: host,
     port,
+    // A request performs authentication before its ledger query. The default
+    // 10s can close that connection before both operations finish.
+    // Match the dashboard server; individual auth calls still abort at 8s.
+    idleTimeout: 30,
     fetch: createBeeGameBillingServerApp().fetch,
   })
   console.log(

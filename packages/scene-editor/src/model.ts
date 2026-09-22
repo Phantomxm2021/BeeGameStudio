@@ -45,7 +45,10 @@ export type RectTransformComponent = ComponentBase<'rect-transform'> & {
   properties: Record<string, unknown>
 }
 export type ImageComponent = ComponentBase<'image'> & { assetId?: string; member?: string; material: MaterialOverride; properties: Record<string, unknown> }
-export type TextComponent = ComponentBase<'text'> & { text: string; properties: Record<string, unknown> }
+/** Text is an authoring component.  A font reference is kept separately from
+ * free-form properties so viewport/editor code can load the same authored font
+ * as the UI renderer without inventing a second text format. */
+export type TextComponent = ComponentBase<'text'> & { text: string; fontAssetId?: string; properties: Record<string, unknown> }
 export type Collider2DComponent = BoxCollider2DComponent | CircleCollider2DComponent | CapsuleCollider2DComponent | PolygonCollider2DComponent
 export type Collider3DComponent = BoxColliderComponent | SphereColliderComponent | CapsuleColliderComponent | MeshColliderComponent
 export type SceneComponent = SpriteRendererComponent | MeshFilterComponent | MeshRendererComponent | SkinnedMeshRendererComponent | GridComponent | TilemapComponent | TilemapRendererComponent | AnimatorComponent | Collider2DComponent | Rigidbody2DComponent | Collider3DComponent | RigidbodyComponent | AudioSourceComponent | AudioListenerComponent | ParticleSystemComponent | ParticleSystemRendererComponent | Light2DComponent | LightComponent | CameraComponent | CanvasComponent | CanvasRendererComponent | RectTransformComponent | ImageComponent | TextComponent

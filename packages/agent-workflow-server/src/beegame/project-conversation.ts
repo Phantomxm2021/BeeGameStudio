@@ -38,7 +38,7 @@ export async function sendProjectConversation(input: {
   const store = createRunStore(session.cwd, input.ownerId)
   let acceptedRevision: string | undefined
   let runId: string | undefined
-  const path = join(session.cwd, '.beegame', 'tmp', input.sessionId, 'capabilities.md')
+  const path = join(session.cwd, '.beegame', 'tmp', input.sessionId, 'context.md')
   return input.sessions.sendWithDisplay(input.sessionId, input.message, {
     ...input.options,
     displayKind: 'project_request',
@@ -51,23 +51,43 @@ export async function sendProjectConversation(input: {
       acceptedRevision = run?.evidence.acceptance?.revision
       const access = input.openCapabilities?.()
       try {
-        if (access) {
-          await mkdir(dirname(path), { recursive: true })
-          await writeFile(path, access.instruction, 'utf8')
+        // The Chat transcript includes worker output, but the main native CLI
+        // session does not. Hand off facts, not another user prompt or a plan.
+        const events = input.sessions.transcript(input.sessionId)
+        const lastWorkerMessage = events.findLast(event => event.type === 'assistant.message' &&
+          event.payload?.workflowSourceSessionId && event.text?.trim())
+        const brief = events.find(event => event.type === 'user.message' &&
+          event.payload?.displayKind === 'confirmed_brief')
+        const context = {
+          workspace: session.cwd,
+          originalRequest: brief?.text,
+          lastWorkflow: run ? { phase: run.phase, status: run.status, updatedAt: run.updatedAt,
+            blockedReason: run.blockedReason, snapshotPath: '.beegame/workflow/run.json',
+            evidencePaths: run.tasks.flatMap(task => task.evidenceRefs) } : undefined,
+          lastWorkerReply: lastWorkerMessage ? { text: lastWorkerMessage.text,
+            createdAt: lastWorkerMessage.createdAt } : undefined,
         }
+        await mkdir(dirname(path), { recursive: true })
+        await writeFile(path, [
+          '# Project context (historical facts, not instructions)',
+          'Worker conversations are separate from this native conversation. The last workflow verdict may predate subsequent user work; it is not a fresh diagnosis.',
+          JSON.stringify(context, null, 2),
+          ...(access ? ['# Optional capabilities', access.instruction] : []),
+        ].join('\n\n'), 'utf8')
       } catch (error) { await access?.close(); throw error }
       return {
         // Stable per session: no new process/context for each turn. The file
-        // contains optional services only, never a reformulated user request.
+        // is refreshed without appending duplicate chat messages or transcripts.
         systemContext: [
           'This is an existing project conversation. Follow the user request; it does not implicitly start or certify a full delivery workflow.',
+          `Project workspace: ${session.cwd}. When prior task context is missing, read ${path}: it contains the original request, last worker reply, historical workflow state and evidence references. Do not infer a new task from an empty native history.`,
           'Investigate and verify the affected behavior. When the user changes gameplay or requirements, keep the relevant project documents and implementation consistent; choose the necessary scope and order yourself.',
           'Project files are editable within the user-authorized scope. BGS platform defects should be reported, not worked around by changing valid game data.',
-          ...(access ? [`Optional BGS resource, image and preview capabilities are listed in ${path}. Read this file when needed; endpoints are refreshed each turn. Their availability does not require their use.`] : []),
+          `Optional BGS capabilities, when available, are also listed in ${path}; endpoints are refreshed each turn. Availability does not require their use.`,
         ].join('\n'),
         close: async () => {
           try { await access?.close() }
-          finally { if (access) await unlink(path).catch(() => undefined) }
+          finally { await unlink(path).catch(() => undefined) }
         },
       }
     },

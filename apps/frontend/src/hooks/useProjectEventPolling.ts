@@ -132,11 +132,13 @@ export const useProjectEventPolling = ({
           console.warn('[ProjectEvents] Poll failed:', error);
         }
         if (reconnectAttemptsRef.current === 3) {
-          callbacksRef.current.showToastError?.('BeeGame 连接暂时不可用，正在自动重连');
+          callbacksRef.current.showToastError?.(isAuthenticationServiceUnavailable(error)
+            ? '登录验证服务暂时不可用，正在自动恢复连接'
+            : 'BeeGame 连接暂时不可用，正在自动重连');
         }
         schedule(
           () => void poll(),
-          Math.min(15_000, 500 * 2 ** Math.min(reconnectAttemptsRef.current - 1, 5)),
+          reconnectDelay(error, reconnectAttemptsRef.current),
         );
       }
     };
@@ -182,11 +184,13 @@ export const useProjectEventPolling = ({
           console.warn('[ProjectEvents] SSE failed:', error);
         }
         if (reconnectAttemptsRef.current === 3) {
-          callbacksRef.current.showToastError?.('BeeGame 连接暂时不可用，正在自动重连');
+          callbacksRef.current.showToastError?.(isAuthenticationServiceUnavailable(error)
+            ? '登录验证服务暂时不可用，正在自动恢复连接'
+            : 'BeeGame 连接暂时不可用，正在自动重连');
         }
         schedule(
           () => void stream(),
-          Math.min(15_000, 500 * 2 ** Math.min(reconnectAttemptsRef.current - 1, 5)),
+          reconnectDelay(error, reconnectAttemptsRef.current),
         );
       } finally {
         streamAbortController = null;
@@ -215,3 +219,10 @@ export const useProjectEventPolling = ({
     disconnect,
   };
 };
+
+function reconnectDelay(error: unknown, attempts: number): number {
+  const retryAfterMs = (error as { retryAfterMs?: unknown } | null)?.retryAfterMs;
+  const suggestedDelay = typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs)
+    ? Math.max(0, Math.min(60_000, retryAfterMs)) : 0;
+  return Math.max(suggestedDelay, Math.min(15_000, 500 * 2 ** Math.min(attempts - 1, 5)));
+}

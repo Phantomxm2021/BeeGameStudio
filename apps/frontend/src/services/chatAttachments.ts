@@ -58,6 +58,9 @@ type AllowedAttachment = {
 };
 
 const ALLOWED_ATTACHMENTS: Record<string, AllowedAttachment> = {
+    '.mp4': { kind: 'file', mediaTypes: ['video/mp4'] },
+    '.mov': { kind: 'file', mediaTypes: ['video/quicktime'] },
+    '.webm': { kind: 'file', mediaTypes: ['video/webm'] },
     '.png': { kind: 'image', mediaTypes: ['image/png'] },
     '.jpg': { kind: 'image', mediaTypes: ['image/jpeg'] },
     '.jpeg': { kind: 'image', mediaTypes: ['image/jpeg'] },
@@ -109,7 +112,8 @@ const fileToChatAttachment = (file: File): Promise<ChatAttachmentPayload | null>
                 resolve(null);
                 return;
             }
-            const mediaType = file.type || definition.mediaTypes[0];
+            const reportedType = file.type.trim().toLowerCase();
+            const mediaType = GENERIC_UNKNOWN_MEDIA_TYPES.has(reportedType) ? definition.mediaTypes[0] : reportedType;
             if (definition.kind === 'image') {
                 resolve({
                     type: 'image',

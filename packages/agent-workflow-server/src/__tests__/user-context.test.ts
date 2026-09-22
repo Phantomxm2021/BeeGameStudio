@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test, spyOn } from 'bun:test'
 import {
   BeeGameAuthUnavailableError,
   createConfiguredUserResolver,
@@ -180,10 +180,12 @@ describe('BeeGame user context', () => {
       name: 'BeeGameAuthUnavailableError',
       reason: 'timeout',
     })
-    await expect(resolver?.(request())).resolves.toEqual({
-      id: 'recovered-user',
-      role: 'developer',
-    })
+    await expect(resolver?.(request())).rejects.toBeInstanceOf(BeeGameAuthUnavailableError)
+    expect(calls).toBe(1)
+    const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 1_001)
+    try {
+      await expect(resolver?.(request())).resolves.toEqual({ id: 'recovered-user', role: 'developer' })
+    } finally { clock.mockRestore() }
     expect(calls).toBe(2)
   })
 
@@ -211,6 +213,21 @@ describe('BeeGame user context', () => {
     expect(calls).toBe(1)
     expect(first).toEqual({ id: 'owner-user', role: 'owner' })
     expect(second).toEqual(first)
+  })
+
+  test('keeps the lookup deadline active while reading the response body', async () => {
+    let signal: AbortSignal | undefined
+    const resolver = createSupabaseUserResolver({ url: 'https://offline.invalid', apiKey: 'fixture', resolveTimeoutMs: 10,
+      fetchImpl: async (_url, init) => {
+        signal = init?.signal ?? undefined
+        return new Response(new ReadableStream({ start(controller) {
+          signal!.addEventListener('abort', () => controller.error(new DOMException('Timeout', 'AbortError')), { once: true })
+        } }))
+      },
+    })!
+    await expect(resolver(new Request('http://localhost', { headers: { authorization: 'Bearer fixture' } })))
+      .rejects.toMatchObject({ reason: 'timeout' })
+    expect(signal?.aborted).toBe(true)
   })
 
   test('serves a recently verified user while Supabase context revalidation is temporarily unavailable', async () => {

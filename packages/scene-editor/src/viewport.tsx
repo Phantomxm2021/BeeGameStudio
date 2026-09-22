@@ -579,32 +579,189 @@ function Primitive({ node, assets, diagnose, pixelsPerUnit, rectSize, flat2d }: 
   return <mesh castShadow receiveShadow renderOrder={flat2d ? rendererOrder(node) : 0} position={rendererOffset(node, size)} scale={[...size, 1]}><planeGeometry args={[1, 1]} />{material}{texture && sprite?.frameWidth && sprite.frameHeight ? <SpriteAnimation key={texture.uuid} texture={texture} sprite={sprite} /> : null}</mesh>
 }
 
-function TextPreview({ node, rectSize }: { node: SceneNode; rectSize?: [number, number] }) {
+/** Keep the authored font identity stable across the UI and scene previews. */
+export function textFontFamily(assetId: string): string {
+  return `BGS-${assetId.replace(/[^a-z0-9_-]/gi, '-')}`
+}
+
+type SceneFontEntry = { refs: number; face?: FontFace; promise: Promise<boolean> }
+const sceneFontFaces = new Map<string, SceneFontEntry>()
+
+function fontCacheKey(assetId: string, url: string): string {
+  // Asset bytes can be a large data URL. Hash the URL for cache identity so a
+  // long base64 string is not retained again as a Map key.
+  let hash = 2166136261
+  for (let index = 0; index < url.length; index += 1) hash = Math.imul(hash ^ url.charCodeAt(index), 16777619)
+  return `${assetId}:${hash >>> 0}`
+}
+
+function acquireSceneFont(assetId: string, url: string): { promise: Promise<boolean>; release: () => void } {
+  if (typeof FontFace === 'undefined' || typeof document === 'undefined' || !document.fonts || typeof document.fonts.add !== 'function') return { promise: Promise.resolve(false), release: () => undefined }
+  const key = fontCacheKey(assetId, url)
+  const existing = sceneFontFaces.get(key)
+  if (existing) {
+    existing.refs += 1
+    let released = false
+    return {
+      promise: existing.promise,
+      release: () => {
+        if (released) return
+        released = true
+        existing.refs -= 1
+        if (existing.refs > 0) return
+        void existing.promise.then(() => {
+          if (sceneFontFaces.get(key) !== existing || existing.refs > 0) return
+          if (existing.face && typeof document.fonts.delete === 'function') document.fonts.delete(existing.face)
+          sceneFontFaces.delete(key)
+        })
+      },
+    }
+  }
+  const family = textFontFamily(assetId)
+  const entry = { refs: 1, face: undefined, promise: Promise.resolve(false) } as SceneFontEntry
+  entry.promise = new FontFace(family, `url("${url}")`).load().then(face => {
+    entry.face = face
+    document.fonts.add(face)
+    return true
+  }).catch(() => false)
+  sceneFontFaces.set(key, entry)
+  let released = false
+  return {
+    promise: entry.promise,
+    release: () => {
+      if (released) return
+      released = true
+      entry.refs -= 1
+      if (entry.refs > 0) return
+      void entry.promise.then(() => {
+        if (sceneFontFaces.get(key) !== entry || entry.refs > 0) return
+        if (entry.face && typeof document.fonts.delete === 'function') document.fonts.delete(entry.face)
+        sceneFontFaces.delete(key)
+      })
+    },
+  }
+}
+
+function textPadding(value: unknown) {
+  const scalar = (input: unknown) => typeof input === 'number' && Number.isFinite(input) ? Math.max(0, input) : 0
+  if (typeof value === 'number') {
+    const all = scalar(value)
+    return { top: all, right: all, bottom: all, left: all }
+  }
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+  return { top: scalar(source.top), right: scalar(source.right), bottom: scalar(source.bottom), left: scalar(source.left) }
+}
+
+function wrapTextLines(context: CanvasRenderingContext2D, value: string, maxWidth?: number): string[] {
+  const paragraphs = value.split('\n')
+  if (!maxWidth || maxWidth <= 0) return paragraphs
+  return paragraphs.flatMap(paragraph => {
+    if (!paragraph) return ['']
+    const lines: string[] = []
+    let line = ''
+    for (const character of Array.from(paragraph)) {
+      const candidate = line + character
+      if (line && context.measureText(candidate).width > maxWidth) {
+        lines.push(line)
+        line = character
+      } else line = candidate
+    }
+    lines.push(line)
+    return lines
+  })
+}
+
+/**
+ * Convert authored scene text metrics into a canvas raster size without
+ * changing the authored font size.  In a 2D scene, pixelsPerUnit only maps
+ * the RectTransform to texture pixels; it must not be applied to the glyph
+ * size a second time.
+ */
+export function textRasterMetrics(fontSizeValue: unknown, rectSize: [number, number] | undefined, pixelsPerUnit: number, flat2d: boolean) {
+  const density = flat2d ? Math.max(1, pixelsPerUnit) : 1
+  const fontSize = Math.max(1, typeof fontSizeValue === 'number' && Number.isFinite(fontSizeValue) ? fontSizeValue : 32)
+  return {
+    density,
+    fontSize,
+    width: rectSize ? Math.max(1, Math.round(rectSize[0] * density)) : undefined,
+    height: rectSize ? Math.max(1, Math.round(rectSize[1] * density)) : undefined,
+  }
+}
+
+function TextPreview({ node, rectSize, assets, pixelsPerUnit, flat2d }: { node: SceneNode; rectSize?: [number, number]; assets: Record<string, SceneAsset>; pixelsPerUnit: number; flat2d: boolean }) {
   const component = componentOf(node, 'text')
+  const fontAssetId = component?.fontAssetId
+  const fontAsset = fontAssetId ? assets[fontAssetId] ?? assets[fontAssetId.split(':', 1)[0]] : undefined
+  // Prefer the bytes loaded by SceneEditorOverlay. A stale/remote URI must
+  // not win over the verified local font payload used by this document.
+  const fontUrl = fontAsset?.bytes?.startsWith('data:') ? fontAsset.bytes : fontAsset?.uri
+  const [fontReady, setFontReady] = useState(false)
+  useEffect(() => {
+    let active = true
+    setFontReady(false)
+    if (!fontAssetId || !fontUrl) return () => { active = false }
+    const font = acquireSceneFont(fontAssetId, fontUrl)
+    void font.promise.then(ready => { if (active) setFontReady(ready) })
+    return () => { active = false; font.release() }
+  }, [fontAssetId, fontUrl])
   const texture = useMemo(() => {
     if (!componentVisibleInEditor(component) || !component) return null
-    const fontSize = Math.max(8, Number(component.properties.fontSize) || 32)
-    const lines = component.text.split('\n')
+    const raster = textRasterMetrics(component.properties.fontSize, rectSize, pixelsPerUnit, flat2d)
+    const { fontSize } = raster
+    const fontWeight = typeof component.properties.fontWeight === 'number'
+      ? Math.max(100, Math.min(900, component.properties.fontWeight))
+      : component.properties.bold === true ? 700 : 400
+    const authoredFamily = typeof component.properties.fontFamily === 'string' && component.properties.fontFamily.trim()
+      ? component.properties.fontFamily.trim()
+      : '"SF Pro Text", "PingFang SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif'
+    const family = fontReady && fontAssetId ? `"${textFontFamily(fontAssetId)}", ${authoredFamily}` : authoredFamily
+    const lineHeightSource = typeof component.properties.lineHeight === 'number' && component.properties.lineHeight > 0 ? component.properties.lineHeight : 1.35
+    const lineHeight = (lineHeightSource <= 4 ? lineHeightSource * fontSize : lineHeightSource)
+    const alignSource = component.properties.textAlign ?? component.properties.align
+    const align = alignSource === 'left' || alignSource === 'right' || alignSource === 'center' ? alignSource : 'center'
+    const verticalSource = component.properties.verticalAlign ?? component.properties.textVerticalAlign
+    const vertical = verticalSource === 'top' || verticalSource === 'bottom' ? verticalSource : 'center'
+    const padding = textPadding(component.properties.padding)
     const canvas = window.document.createElement('canvas')
     const context = canvas.getContext('2d')!
-    context.font = `${fontSize}px "SF Pro Text", "PingFang SC", sans-serif`
-    const width = Math.max(1, ...lines.map(line => context.measureText(line || ' ').width))
-    canvas.width = Math.ceil(width + fontSize)
-    canvas.height = Math.ceil(lines.length * fontSize * 1.25 + fontSize * .5)
-    context.font = `${fontSize}px "SF Pro Text", "PingFang SC", sans-serif`
-    context.fillStyle = typeof component.properties.color === 'string' ? component.properties.color : '#ffffff'
-    context.textAlign = 'center'
+    context.font = `${fontWeight} ${fontSize}px ${family}`
+    const rawLines = component.text.split('\n')
+    const measuredWidth = Math.max(1, ...rawLines.map(line => context.measureText(line || ' ').width))
+    const targetWidth = raster.width ?? Math.ceil(measuredWidth + padding.left + padding.right)
+    const lines = wrapTextLines(context, component.text, raster.width ? Math.max(1, targetWidth - padding.left - padding.right) : undefined)
+    const targetHeight = raster.height ?? Math.ceil(lines.length * lineHeight + padding.top + padding.bottom)
+    // The texture uses the same pixel dimensions as the authored 2D rect.
+    // Scaling a tightly measured text canvas to a wide RectTransform stretches
+    // glyphs and was the source of the distorted Scene Editor typography.
+    canvas.width = targetWidth
+    canvas.height = targetHeight
+    context.font = `${fontWeight} ${fontSize}px ${family}`
+    context.fillStyle = typeof component.properties.color === 'string' ? component.properties.color : typeof component.properties.textColor === 'string' ? component.properties.textColor : '#ffffff'
+    context.textAlign = align
     context.textBaseline = 'middle'
-    lines.forEach((line, index) => context.fillText(line, canvas.width / 2, fontSize * .25 + fontSize * 1.25 * (index + .5)))
+    const contentLeft = padding.left
+    const contentRight = canvas.width - padding.right
+    const x = align === 'left' ? contentLeft : align === 'right' ? contentRight : (contentLeft + contentRight) / 2
+    const blockHeight = lines.length * lineHeight
+    const firstBaseline = vertical === 'top'
+      ? padding.top + lineHeight / 2
+      : vertical === 'bottom'
+        ? canvas.height - padding.bottom - blockHeight + lineHeight / 2
+        : (canvas.height - blockHeight) / 2 + lineHeight / 2
+    lines.forEach((line, index) => context.fillText(line, x, firstBaseline + lineHeight * index))
     const map = new THREE.CanvasTexture(canvas)
     map.colorSpace = THREE.SRGBColorSpace
     return map
-  }, [component?.text, component?.enabled, component?.properties.fontSize, component?.properties.color])
+  }, [component?.text, component?.enabled, component?.fontAssetId, component?.properties.fontSize, component?.properties.fontWeight, component?.properties.bold, component?.properties.fontFamily, component?.properties.lineHeight, component?.properties.align, component?.properties.textAlign, component?.properties.verticalAlign, component?.properties.textVerticalAlign, component?.properties.padding, component?.properties.color, component?.properties.textColor, fontReady, flat2d, pixelsPerUnit, rectSize?.[0], rectSize?.[1]])
   useEffect(() => () => texture?.dispose(), [texture])
   if (!texture || !component) return null
   const rect = componentOf(node, 'rect-transform')
-  const size: [number, number] = rectSize ?? (rect ? [Math.max(.01, rect.sizeDelta[0]), Math.max(.01, rect.sizeDelta[1])] : [Math.max(1, texture.image.width / texture.image.height), 1])
-  return <mesh position={rendererOffset(node, size)} scale={[size[0], size[1], 1]}><planeGeometry args={[1, 1]} /><meshBasicMaterial map={texture} transparent depthWrite={false} toneMapped={false} /></mesh>
+  const size: [number, number] = rectSize ?? (rect ? [Math.max(.01, rect.sizeDelta[0]), Math.max(.01, rect.sizeDelta[1])] : [Math.max(.01, texture.image.width / texture.image.height), 1])
+  // 2D scene content is painter-ordered.  Text must not disappear behind a
+  // card/background mesh merely because both planes share the same camera
+  // depth; use the authored node order and keep the text overlay out of the
+  // depth buffer, just like the sprite renderer path.
+  return <mesh renderOrder={flat2d ? rendererOrder(node) : 0} position={rendererOffset(node, size)} scale={[size[0], size[1], 1]}><planeGeometry args={[1, 1]} /><meshBasicMaterial map={texture} transparent depthWrite={false} depthTest={flat2d ? false : true} toneMapped={false} /></mesh>
 }
 
 function seeded(index: number, salt: number): number {
@@ -845,7 +1002,7 @@ function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableId
     {preview && (preview.motion || preview.patrol || preview.animation) ? <NodeAnimation group={group} node={node} nodes={document.nodes} preview={preview} pixelsPerUnit={pixelsPerUnit} paused={dragging || isSelected} /> : null}
     {componentOf(node, 'sprite-renderer') || componentOf(node, 'image') ? <Primitive node={node} flat2d={document.dimension === '2d'} rectSize={rectSize} pixelsPerUnit={pixelsPerUnit} assets={document.assets} diagnose={diagnose} /> : null}
     {componentOf(node, 'tilemap') ? <TilemapPreview node={node} document={document} diagnose={diagnose} showGizmos={showGizmos} brush={tileBrush?.nodeId===node.id && !node.locked && node.editable!==false && !unpickableIds.includes(node.id) ? tileBrush : undefined} /> : null}
-    {componentOf(node, 'text') ? <TextPreview node={node} rectSize={rectSize} /> : null}
+    {componentOf(node, 'text') ? <TextPreview node={node} rectSize={rectSize} assets={document.assets} pixelsPerUnit={pixelsPerUnit} flat2d={document.dimension === '2d'} /> : null}
     {componentOf(node, 'mesh-filter') && componentOf(node, 'mesh-renderer') ? <ModelAsset asset={document.assets[componentOf(node, 'mesh-filter')!.assetId]} override={componentOf(node, 'mesh-renderer')!.material} assets={document.assets} diagnose={diagnose} /> : null}
     {componentOf(node, 'skinned-mesh-renderer') ? <ModelAsset asset={document.assets[componentOf(node, 'skinned-mesh-renderer')!.assetId]} override={componentOf(node, 'skinned-mesh-renderer')!.material} assets={document.assets} diagnose={diagnose} /> : null}
     {componentOf(node, 'particle-system') ? <ParticleEmitterPreview node={node} pixelsPerUnit={pixelsPerUnit} assets={document.assets} diagnose={diagnose} /> : null}

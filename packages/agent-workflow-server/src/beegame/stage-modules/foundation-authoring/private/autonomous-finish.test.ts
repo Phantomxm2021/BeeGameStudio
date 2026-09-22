@@ -7,7 +7,8 @@ import { CANONICAL_FOUNDATION_DOCUMENTS } from './domain/types'
 import { createAutonomousAuthorLifecycle } from './autonomous-lifecycle'
 import { runAutonomousAuthor, type AutonomousNativeExecutor } from './autonomous-native'
 import { boundedFinishExecutionLimits, defaultAuthorExecutionLimits } from './execution-budget'
-import { authorBytesDigest } from './autonomous-files'
+import { authorBytesDigest, captureAuthorBaseline, initializeAutonomousFiles } from './autonomous-files'
+import { materializeBeeGameAttachments } from '../../../session-manager'
 import type { UsageBillingClient } from '../../../../billing/public'
 
 const roots: string[] = []
@@ -40,6 +41,21 @@ test('explicit diagnostic thresholds remain available without output caps', () =
   expect(boundedFinishExecutionLimits(smaller)).toEqual({ maxActiveMs: 99, maxNoDocumentProgressMs: 22 })
   expect(defaultAuthorExecutionLimits).not.toHaveProperty('maxOutputTokens')
   expect(defaultAuthorExecutionLimits.maxActiveMs).toBe(30 * 60_000)
+})
+
+test('author candidate receives exact original references and refuses changed source bytes', async () => {
+  const root = await workspace()
+  const bytes = Buffer.from('User-provided blueprint.')
+  const files = await materializeBeeGameAttachments(root, [{ type: 'file', filename: 'blueprint.md', mediaType: 'text/markdown', data: bytes.toString('base64') }])
+  const reference = { ...files[0]!, sha256: authorBytesDigest(bytes) }
+  const input = start()
+  input.input.confirmedBrief = JSON.stringify({ creation_mode: 'blueprint', reference_files: [reference] })
+  const baseline = await captureAuthorBaseline(root)
+  const candidatePath = join(root, 'candidate')
+  await initializeAutonomousFiles({ workspacePath: root, candidatePath, start: input, baseline })
+  expect(await readFile(join(candidatePath, reference.relativePath))).toEqual(bytes)
+  await writeFile(join(root, reference.relativePath), 'changed')
+  await expect(initializeAutonomousFiles({ workspacePath: root, candidatePath: join(root, 'other'), start: input, baseline })).rejects.toThrow('changed')
 })
 
 test('an explicit resumed old candidate finishes unchanged drafts without production time limits and seals two usages', async () => {

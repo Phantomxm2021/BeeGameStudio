@@ -138,6 +138,9 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response.data,
   async (error: AxiosError) => {
+    // Token preparation can fail before Axios has a response. Preserve the
+    // typed transient error instead of turning it into a generic API failure.
+    if (isAuthenticationServiceUnavailable(error)) return Promise.reject(error);
     let authenticationIsDefinitivelyInvalid = false;
     if (
       error.response?.status === 401 &&
@@ -211,7 +214,16 @@ apiClient.interceptors.response.use(
           errorMessage = backendMessage || `请求失败 (${status})`;
       }
     } else if (error.request) {
-      errorMessage = '网络连接失败，请检查网络设置';
+      if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+        errorCode = 'request_timeout';
+        errorMessage = '请求超时，服务未及时响应，请稍后重试';
+      } else if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        errorCode = 'network_offline';
+        errorMessage = '当前设备离线，请恢复网络连接';
+      } else {
+        errorCode = 'connection_unavailable';
+        errorMessage = '未能连接 BeeGame 服务，请稍后重试';
+      }
     } else {
       errorMessage = error.message || '请求配置错误';
     }
@@ -222,7 +234,9 @@ apiClient.interceptors.response.use(
       console.error('API Error:', error);
     }
 
-    if (showToastError && !hideToast && !temporaryAuthenticationFailure) {
+    // A definitive auth failure displays sign-in UI via the event. A service
+    // 401 after successful refresh remains a scoped error, not global logout.
+    if (showToastError && !hideToast && !temporaryAuthenticationFailure && !authenticationIsDefinitivelyInvalid) {
       showToastError(errorMessage);
     }
 
@@ -238,7 +252,8 @@ apiClient.interceptors.response.use(
     enhancedError.status = error.response?.status;
     enhancedError.code = errorCode;
     enhancedError.hostname = errorHostname;
-    enhancedError.recoverable = responseData?.recoverable === true;
+    enhancedError.recoverable = responseData?.recoverable === true ||
+      ['request_timeout', 'network_offline', 'connection_unavailable'].includes(errorCode ?? '');
     enhancedError.retryAfterMs = typeof responseData?.retry_after_ms === 'number'
       ? responseData.retry_after_ms
       : undefined;

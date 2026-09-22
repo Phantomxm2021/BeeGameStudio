@@ -2,9 +2,32 @@ import { describe, expect, test } from 'bun:test'
 import { resolve } from 'node:path'
 import {
   buildBeeGameDevPlan,
+  waitForBeeGameDevServices,
 } from './beegame-dev-lib'
 
 describe('BeeGame local dev launcher helpers', () => {
+  test('a failed frontend is reported without terminating a surviving service', async () => {
+    // Harmless, test-owned processes only. Never run pkill against live services.
+    const frontend = Bun.spawn([process.execPath, '-e', 'process.exit(7)'], { stdout: 'ignore', stderr: 'ignore' })
+    const runtime = Bun.spawn([process.execPath, '-e', 'setInterval(() => {}, 1000)'], { stdout: 'ignore', stderr: 'ignore' })
+    const events: Array<{ service: string; pid: number; exitCode: number | null; signal: string | null }> = []
+    let complete = false
+    const waiting = waitForBeeGameDevServices([
+      { name: 'frontend', child: frontend }, { name: 'runtime', child: runtime },
+    ], event => events.push(event)).then(() => { complete = true })
+    try {
+      await frontend.exited
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(events).toEqual([{ service: 'frontend', pid: frontend.pid, exitCode: 7, signal: null }])
+      expect(runtime.exitCode).toBeNull()
+      expect(complete).toBe(false)
+    } finally {
+      runtime.kill('SIGTERM')
+      await waiting
+    }
+    expect(events.at(-1)).toMatchObject({ service: 'runtime', pid: runtime.pid, signal: 'SIGTERM' })
+  })
+
   test('plans all local BeeGame services with stable default ports', () => {
     const plan = buildBeeGameDevPlan([], {
       cwd: '/repo',

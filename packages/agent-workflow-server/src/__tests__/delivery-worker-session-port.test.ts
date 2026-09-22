@@ -57,9 +57,11 @@ describe('delivery worker session credentials', () => {
     let prompt = ''
     let imageAccessClosed = 0
     let previewAccessClosed = 0
+    const stopCalls: unknown[][] = []
     const sessions = {
       start() { return { id: 'resource-access-worker' } }, updateAuthToken() {},
-      async sendWithDisplay(_id: string, text: string) { prompt = text }, stop() {},
+      async sendWithDisplay(_id: string, text: string) { prompt = text },
+      stop(...args: unknown[]) { stopCalls.push(args) },
     } as unknown as BeeGameSessionManager
     const port = createBeeGameDeliveryWorkerPort({
       sessions, userId: 'user-1', resourceLibraryBaseUrl: 'https://library.test',
@@ -106,6 +108,7 @@ describe('delivery worker session credentials', () => {
       const base = prompt.match(/Base URL: (\S+)/)![1]!
       expect((await fetch(base + '/api/admin')).status).toBe(405)
       await port.stop('resource-access', 'user stopped')
+      expect(stopCalls).toEqual([['resource-access-worker', 'user stopped']])
       expect(imageAccessClosed).toBe(1)
       expect(previewAccessClosed).toBe(workerType === 'implementation-worker' ? 1 : 0)
       await expect(fetch(base + '/api/admin')).rejects.toThrow()

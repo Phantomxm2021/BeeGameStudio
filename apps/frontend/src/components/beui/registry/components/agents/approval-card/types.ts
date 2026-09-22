@@ -51,6 +51,13 @@ export interface ApprovalCardProps {
   onDismiss?: () => void;
   approveLabel?: ReactNode;
   submitLabel?: ReactNode;
+  questionLabels?: {
+    previous: string;
+    next: string;
+    submit: string;
+    dismiss: string;
+    progress: (current: number, total: number) => string;
+  };
   result?: ReactNode;
   className?: string;
 }

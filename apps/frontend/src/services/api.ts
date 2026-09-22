@@ -149,6 +149,13 @@ export interface BeeGameDeploymentPayload {
   deployedAt?: string
 }
 
+export interface BeeGameDeploymentReadiness {
+  allowed: boolean
+  issues: string[]
+  workflow?: { phase: string; status: string; blockedReason?: string }
+  destination: 'remote' | 'local'
+}
+
 export interface BeeGameAssetRequirementPayload {
   id: string
   name?: string
@@ -427,6 +434,7 @@ export interface ResolveToolPermissionPayload {
   decision: 'allow' | 'deny'
   message?: string
   scope?: 'once' | 'session'
+  answers?: Record<string, string>
 }
 
 // API 方法定义
@@ -458,7 +466,6 @@ export const api = {
   resumeWorkflow: (projectId: string) =>
     beeGameAdapter.resumeWorkflow(projectId),
 
-  retryWorkflow: (projectId: string) => beeGameAdapter.retryWorkflow(projectId),
   requestProjectAction: (data: {
     project_id: string
     kind: 'build_error_repair' | 'deployment_failure_repair'
@@ -600,6 +607,7 @@ export const api = {
     beeGameAdapter.stopProjectPreview(projectId),
 
   deployProject: (projectId: string) => beeGameAdapter.deployProject(projectId),
+  getDeploymentReadiness: (projectId: string) => beeGameAdapter.getDeploymentReadiness(projectId),
 
   listProjectDeployments: (projectId: string) =>
     beeGameAdapter.listProjectDeployments(projectId),

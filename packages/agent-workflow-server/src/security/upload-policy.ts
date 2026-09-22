@@ -12,6 +12,9 @@ export const MAX_BEEGAME_PROJECT_ASSET_BYTES = 256 * 1024 * 1024
 export const MAX_BEEGAME_PROJECT_ASSET_REQUEST_BYTES = MAX_BEEGAME_PROJECT_ASSET_BYTES + 2 * 1024 * 1024
 
 const MIME_EXTENSIONS: Record<string, readonly string[]> = {
+  'video/mp4': ['.mp4'],
+  'video/quicktime': ['.mov'],
+  'video/webm': ['.webm'],
   'image/png': ['.png'],
   'image/jpeg': ['.jpg', '.jpeg'],
   'image/webp': ['.webp'],
@@ -100,7 +103,7 @@ function decodeBase64(value: string): Uint8Array {
     const char = value[index]!
     if (char === '=') {
       padding += 1
-      if (index < value.length - padding || padding > 2) throw new BeeGameUploadPolicyError()
+      if (index < value.length - 2 || padding > 2) throw new BeeGameUploadPolicyError()
     } else if (padding > 0 || !isBase64Char(char)) {
       throw new BeeGameUploadPolicyError()
     }
@@ -116,6 +119,11 @@ function isBase64Char(value: string): boolean {
 }
 
 function verifyContent(mediaType: string, extension: string, bytes: Uint8Array): void {
+  if (mediaType === 'video/webm' && !startsWith(bytes, [0x1a, 0x45, 0xdf, 0xa3])) throw new BeeGameUploadPolicyError()
+  if (mediaType === 'video/mp4' || mediaType === 'video/quicktime') {
+    const box = Buffer.from(bytes.slice(4, 8)).toString('ascii')
+    if (!['ftyp', 'moov', 'mdat', 'wide'].includes(box)) throw new BeeGameUploadPolicyError()
+  }
   if (mediaType === 'image/png' && !startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) throw new BeeGameUploadPolicyError()
   if (mediaType === 'image/jpeg' && !startsWith(bytes, [0xff, 0xd8, 0xff])) throw new BeeGameUploadPolicyError()
   if (mediaType === 'image/webp' && (!startsWithAscii(bytes, 'RIFF') || !startsWithAscii(bytes.slice(8), 'WEBP'))) throw new BeeGameUploadPolicyError()

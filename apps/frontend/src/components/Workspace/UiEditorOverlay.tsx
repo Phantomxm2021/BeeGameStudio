@@ -3,7 +3,7 @@ import { Matrix4 } from 'three';
 import { uiAnchor, uiLocalMatrix, uiPaintOrder } from '@beegame/scene-editor';
 import { uiAtlasImages, uiImageKey, resolveUiImage } from './uiAtlas';
 import { mapEditorAssets } from './editorAssetLoading';
-import { currentKeyboardLabels } from '@beegame/scene-editor/platform';
+import { currentKeyboardLabels, resolveUnityNavigationAction, wheelPixels } from '@beegame/scene-editor/platform';
 import {
   BoxSelect,
   Circle,
@@ -13,6 +13,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  Hand,
   Image as ImageIcon,
   ListChecks,
   Menu,
@@ -20,6 +21,7 @@ import {
   Maximize2,
   MousePointer2,
   MousePointerBan,
+  Mouse,
   Move,
   PanelTop,
   PanelsTopLeft,
@@ -32,6 +34,7 @@ import {
   SlidersHorizontal,
   Type,
   ToggleLeft,
+  Touchpad,
   Trash2,
   Undo2,
   X,
@@ -58,6 +61,7 @@ import './UiEditorOverlay.css';
 interface UiEditorOverlayProps {
   projectId: string;
   onClose: () => void;
+  initialDocumentPath?: string | null;
 }
 
 type UiSnapshot = {
@@ -81,7 +85,7 @@ const INITIAL_UI_LOAD_STATE: EditorLoadState = {
   label: 'Opening UI',
   detail: 'Connecting to the project…',
 };
-type GizmoMode = 'select' | 'move' | 'rotate' | 'scale';
+type GizmoMode = 'hand' | 'move' | 'rotate' | 'scale';
 type UiComponentKind = 'text' | 'image' | 'button' | 'slider' | 'dropdown' | 'tab' | 'toggle' | 'panel';
 type UnityImageType = 'simple' | 'sliced' | 'tiled' | 'filled';
 type UiNodeKind =
@@ -105,7 +109,7 @@ const ANCHOR_PRESETS = [
   'bottom-left', 'bottom-center', 'bottom-right',
 ] as const;
 type TransformDrag = {
-  kind: Exclude<GizmoMode, 'select'>;
+  kind: Exclude<GizmoMode, 'hand'>;
   startX: number;
   startY: number;
   position: [number, number];
@@ -119,8 +123,9 @@ type TransformDrag = {
   parentMatrix: Matrix4;
 };
 
-export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
+export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiEditorOverlayProps) {
   const keyboard = currentKeyboardLabels();
+  const shortcut = (...keys: string[]) => keys.join(keyboard.apple ? '' : '+');
   const [documents, setDocuments] = useState<UiSnapshot[]>([]);
   const [current, setCurrent] = useState<UiSnapshot>();
   const [selectedId, setSelectedId] = useState('');
@@ -143,6 +148,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
   const [screenMenuOpen, setScreenMenuOpen] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
+  const selectedImageCardRef = useRef<HTMLButtonElement>(null);
   const [assetSearch, setAssetSearch] = useState('');
   const [pickerLoading, setPickerLoading] = useState(false);
   const loadMoreAssetsRef = useRef<(() => Promise<void>) | undefined>(undefined);
@@ -153,7 +159,8 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
   const [renamingId, setRenamingId] = useState('');
   const [renameValue, setRenameValue] = useState('');
   const stageRef = useRef<HTMLDivElement>(null);
-  const panRef = useRef<{ x: number; y: number; clientX: number; clientY: number } | undefined>(undefined);
+  const viewportRef = useRef<HTMLElement>(null);
+  const panRef = useRef<{ x: number; y: number; clientX: number; clientY: number; zoom: number; action: 'pan' | 'dolly'; pointerId: number } | undefined>(undefined);
   const transformRef = useRef<TransformDrag | undefined>(undefined);
   const undoRef = useRef<UiSnapshot[]>([]);
   const redoRef = useRef<UiSnapshot[]>([]);
@@ -190,39 +197,76 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
     setPickerLoading(false);
     setMessage('Loading project UI…');
     setLoadState(INITIAL_UI_LOAD_STATE);
-    void beeGameAdapter.getProjectGameContent(projectId, signal).then(async snapshot => {
+    void Promise.all([
+      beeGameAdapter.getProjectGameContent(projectId, signal),
+      beeGameAdapter.getProjectAssets(projectId, signal),
+    ]).then(async ([snapshot, manifest]) => {
       if (!active) return;
       if ((snapshot.state !== 'ready' && snapshot.state !== 'draft') || !snapshot.documents) {
         setLoadState({ status: 'error', progress: 20, label: 'UI unavailable', detail: `UI content is not available yet (${snapshot.state.replaceAll('_', ' ')}).` });
         return;
       }
+      const requestedDocumentPath = initialDocumentPath?.trim() || undefined;
+      const requestedDocument = requestedDocumentPath
+        ? snapshot.documents.find(item => item.path === requestedDocumentPath)
+        : undefined;
+      if (requestedDocumentPath && !requestedDocument) {
+        setLoadState({
+          status: 'error',
+          progress: 20,
+          label: 'UI unavailable',
+          detail: `Requested UI document "${requestedDocumentPath}" was not found in this project.`,
+        });
+        return;
+      }
+      const requestedKind = requestedDocument?.document as { kind?: string } | undefined;
+      if (requestedDocumentPath && requestedDocument && requestedKind?.kind !== 'ui-screen' && requestedKind?.kind !== 'ui-hud') {
+        setLoadState({
+          status: 'error',
+          progress: 20,
+          label: 'UI unavailable',
+          detail: `Requested document "${requestedDocumentPath}" is not an editable UI screen or HUD.`,
+        });
+        return;
+      }
       const uiDocuments = snapshot.documents.flatMap(item => {
         const document = item.document as Partial<BeeGameUiContentDocument>;
-        return document.kind === 'ui-screen' || document.kind === 'ui-hud' || document.kind === 'ui-flow'
+        return document.kind === 'ui-screen' || document.kind === 'ui-hud'
           ? [{ ...item, document: item.document as BeeGameUiContentDocument }]
           : [];
       });
       if (!uiDocuments.length) {
-        setLoadState({ status: 'error', progress: 28, label: 'No UI found', detail: 'The content package has no UI documents.' });
+        setLoadState({ status: 'error', progress: 28, label: 'No UI screens found', detail: 'The content package has no UI screen or HUD documents. App flow is navigation data, not an editable screen.' });
         return;
       }
-      const uiLabel = uiDocuments[0].document.id;
+      const initialUiDocument = requestedDocumentPath
+        ? uiDocuments.find(document => document.path === requestedDocumentPath)
+        : uiDocuments[0];
+      if (!initialUiDocument) {
+        setLoadState({
+          status: 'error',
+          progress: 28,
+          label: 'UI unavailable',
+          detail: `Requested UI document "${requestedDocumentPath}" could not be opened.`,
+        });
+        return;
+      }
+      const uiLabel = initialUiDocument.document.id;
       setDocuments(uiDocuments);
       savedContentRef.current = Object.fromEntries(uiDocuments.map(document => [document.path, JSON.stringify(document.document)]));
       revisionsRef.current = Object.fromEntries(uiDocuments.map(document => [document.path, document.revision]));
       historyRef.current.clear();
-      const initialDocument = structuredClone(uiDocuments[0]);
+      const initialDocument = structuredClone(initialUiDocument);
       currentRef.current = initialDocument;
       setCurrent(initialDocument);
-      setSelectedId(uiDocuments[0].document.data.rootId);
-      setExpandedIds(new Set(uiDocuments[0].document.data.nodes.map(node => node.id)));
+      setSelectedId(initialUiDocument.document.data.rootId);
+      setExpandedIds(new Set(initialUiDocument.document.data.nodes.map(node => node.id)));
       undoRef.current = [];
       redoRef.current = [];
       setMessage('Loading UI assets…');
       updateLoadState({ progress: 32, label: uiLabel, detail: 'UI document loaded' });
 
       try {
-        const manifest = await beeGameAdapter.getProjectAssets(projectId, signal);
         if (!active) return;
         const resources = manifest.resources.filter(resource => resource.status === 'verified');
         setAssetOptions(resources.map(resource => ({
@@ -268,52 +312,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
           .flatMap(resource => resource.file_paths
             .filter(path => UI_IMAGE.test(path))
             .map(path => ({ resource, path })));
-        const loaded = await mapEditorAssets(imageTargets, async ({ resource, path }) => {
-              try {
-                const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal);
-                const url = URL.createObjectURL(blob);
-                if (!active) {
-                  URL.revokeObjectURL(url);
-                  return [] as Array<readonly [string, string]>;
-                }
-                objectUrls.push(url);
-                const member = fileStem(path);
-                const aliases = [path];
-                if (resource.file_paths.filter(file => UI_IMAGE.test(file) && fileStem(file) === member).length === 1) aliases.push(member);
-                const entries: Array<readonly [string, string]> = aliases.map(alias => [`${resource.id}:${alias}`, url] as const);
-                if (path === resource.root_path) entries.push([resource.id, url]);
-                const sidecar = resource.file_paths.find(file => file === path.replace(/\.[^.]+$/, '.json'));
-                if (sidecar) {
-                  const metadata = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, sidecar, signal);
-                  const frames = await uiAtlasImages(url, JSON.parse(await metadata.text()), signal);
-                  for (const [frame, cropped] of Object.entries(frames)) {
-                    for (const alias of aliases) entries.push([`${resource.id}:${alias}#${frame}`, cropped]);
-                    if (path === resource.root_path) entries.push([`${resource.id}#${frame}`, cropped]);
-                  }
-                }
-                return entries;
-              } catch (error) {
-                if (isUiAbortError(error)) throw error;
-                failedAsset(resource.id, path, error);
-                return [] as Array<readonly [string, string]>;
-              } finally {
-                if (!signal.aborted) markFileLoaded(resource.id, path);
-              }
-            });
-        if (!active) return;
-        const entries = loaded.flat();
-        for (const resource of manifest.resources) {
-          if (entries.some(([key]) => key === resource.id)) continue;
-          const first = entries.find(([key]) => key.startsWith(`${resource.id}:`));
-          if (first) entries.push([resource.id, first[1]]);
-        }
-        setAssetUrls(previous => ({ ...previous, ...Object.fromEntries(entries) }));
-        setAssetOptions(options => options.map(option => ({ ...option, members: option.members.flatMap(member => {
-          const prefix = `${option.id}:${member}#`;
-          const frames = entries.filter(([key]) => key.startsWith(prefix)).map(([key]) => `${member}#${key.slice(prefix.length)}`);
-          return frames.length ? frames : [member];
-        }) })));
-        const fonts = await mapEditorAssets(resources.filter(resource => resource.file_paths.some(item => UI_FONT.test(item))), async resource => {
+        const loadFonts = () => mapEditorAssets(resources.filter(resource => resource.file_paths.some(item => UI_FONT.test(item))), async resource => {
           const path = resource.file_paths.find(item => UI_FONT.test(item));
           if (!path) return undefined;
           return beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal).then(async blob => {
@@ -337,7 +336,52 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
           }).finally(() => {
             if (!signal.aborted) markFileLoaded(resource.id, path);
           });
-        });
+        }, signal);
+        const [loaded, fonts] = await Promise.all([mapEditorAssets(imageTargets, async ({ resource, path }) => {
+              try {
+                const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal);
+                const url = URL.createObjectURL(blob);
+                if (!active) {
+                  URL.revokeObjectURL(url);
+                  return [] as Array<readonly [string, string]>;
+                }
+                objectUrls.push(url);
+                const member = fileStem(path);
+                const aliases = [path];
+                if (resource.file_paths.filter(file => UI_IMAGE.test(file) && fileStem(file) === member).length === 1) aliases.push(member);
+                const entries: Array<readonly [string, string]> = aliases.map(alias => [`${resource.id}:${alias}`, url] as const);
+                if (path === resource.root_path) entries.push([resource.id, url]);
+                const sidecar = resource.file_paths.find(file => file === path.replace(/\.[^.]+$/, '.json'));
+                if (sidecar) {
+                  const metadata = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, sidecar, signal);
+                  const frames = await uiAtlasImages(url, JSON.parse(await metadata.text()), signal, objectUrls);
+                  for (const [frame, cropped] of Object.entries(frames)) {
+                    for (const alias of aliases) entries.push([`${resource.id}:${alias}#${frame}`, cropped]);
+                    if (path === resource.root_path) entries.push([`${resource.id}#${frame}`, cropped]);
+                  }
+                }
+                return entries;
+              } catch (error) {
+                if (isUiAbortError(error)) throw error;
+                failedAsset(resource.id, path, error);
+                return [] as Array<readonly [string, string]>;
+              } finally {
+                if (!signal.aborted) markFileLoaded(resource.id, path);
+              }
+            }, signal), loadFonts()]);
+        if (!active) return;
+        const entries = loaded.flat();
+        for (const resource of manifest.resources) {
+          if (entries.some(([key]) => key === resource.id)) continue;
+          const first = entries.find(([key]) => key.startsWith(`${resource.id}:`));
+          if (first) entries.push([resource.id, first[1]]);
+        }
+        setAssetUrls(previous => ({ ...previous, ...Object.fromEntries(entries) }));
+        setAssetOptions(options => options.map(option => ({ ...option, members: option.members.flatMap(member => {
+          const prefix = `${option.id}:${member}#`;
+          const frames = entries.filter(([key]) => key.startsWith(prefix)).map(([key]) => `${member}#${key.slice(prefix.length)}`);
+          return frames.length ? frames : [member];
+        }) })));
         if (active) setFontFamilies(previous => ({ ...previous, ...Object.fromEntries(fonts.filter((item): item is readonly [string, string] => Boolean(item))) }));
         if (failedFiles.length) throw new Error(`Failed to load ${failedFiles.length} assets: ${failedFiles.join(', ')}`);
         if (active) setMessage(optionalFailures.length ? `Optional assets unavailable: ${optionalFailures.join(' · ')}` : '');
@@ -357,7 +401,6 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
           return pickerRequest;
         };
         updateLoadState({ progress: 100, label: uiLabel, detail: 'UI ready' });
-        await waitForUiTransition(signal);
         if (active && !signal.aborted) setLoadState({ status: 'ready', progress: 100, label: uiLabel, detail: 'UI ready' });
       } catch (error) {
         if (active && !isUiAbortError(error)) {
@@ -375,9 +418,10 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
       objectUrls.forEach(url => URL.revokeObjectURL(url));
       loadedFontFaces.forEach(face => document.fonts.delete(face));
     };
-  }, [projectId, loadAttempt]);
+  }, [initialDocumentPath, projectId, loadAttempt]);
 
-  const selected = current?.document.data.nodes.find(node => node.id === selectedId);
+  const nodesById = useMemo(() => new Map(current?.document.data.nodes.map(node => [node.id, node]) ?? []), [current]);
+  const selected = nodesById.get(selectedId);
   const children = useMemo(() => childIds(current?.document.data.nodes ?? []), [current]);
   const paintChildren = useMemo(() => current
     ? uiPaintChildren(current.document.data.nodes, current.document.data.rootId)
@@ -398,17 +442,26 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
     ? selected.data.border as Record<string, unknown>
     : selectedSlice ? { left: selectedSlice[0], right: selectedSlice[1], top: selectedSlice[2], bottom: selectedSlice[3] } : {};
   const frameIssues = current?.document.data.nodes.flatMap(node => {
-    if (!node.assetRef) return [];
-    const states = node.data?.stateFrames;
-    const frames = [node.data?.frame ?? node.data?.initialFacing, ...(states && typeof states === 'object' ? Object.values(states) : [])];
+    const { assetRef, data } = uiNodeImageSource(node);
+    if (!assetRef) return [];
+    const states = data?.stateFrames;
+    const frames = [data?.frame ?? data?.initialFacing, ...(states && typeof states === 'object' ? Object.values(states) : [])];
     return [...new Set(frames.filter((frame): frame is string => typeof frame === 'string'))]
-      .filter(frame => !assetUrls[uiImageKey(node.assetRef!, { ...node.data, frame })])
-      .map(frame => `${node.id}: unresolved frame "${frame}" in ${node.assetRef}; check the registered atlas metadata`);
+      .filter(frame => !assetUrls[uiImageKey(assetRef, { ...data, frame })])
+      .map(frame => `${node.id}: unresolved frame "${frame}" in ${assetRef}; check the registered atlas metadata`);
   }) ?? [];
   const selectedKind = selected ? uiNodeKind(selected.role) : 'other';
+  const selectedImageSource = selected ? uiNodeImageSource(selected) : undefined;
+  const selectedImageUrl = selected ? resolveNodeImage(selected, assetUrls) : undefined;
+  const selectedBackground = typeof selected?.style?.background === 'object' && selected.style.background !== null
+    ? selected.style.background as Record<string, unknown> : undefined;
   const textCapable = selected ? supportsTextNode(selectedKind) : false;
   const imageCapable = selected ? supportsImageNode(selectedKind) : false;
   const visualNode = selected ? isVisualNode(selectedKind) : false;
+
+  useEffect(() => {
+    if (imagePickerOpen && !assetSearch) selectedImageCardRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [imagePickerOpen, assetSearch, assetUrls]);
 
   useEffect(() => {
     if (current && !current.document.data.nodes.some(node => node.id === selectedId)) {
@@ -647,20 +700,26 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
     commitCurrent(next => {
       const node = next.document.data.nodes.find(item => item.id === selected.id);
       if (!node) return;
-      if (!resourceId) {
-        delete node.assetRef;
-        node.data = { ...node.data };
-        for (const key of ['member', 'frame', 'frameParts', 'stateFrames', 'initialFacing']) delete node.data[key];
-        return;
-      }
-      node.assetRef = resourceId;
       node.data = { ...node.data };
+      const kind = uiNodeKind(node.role);
+      const assetBacked = kind === 'image' || kind === 'nine-slice';
+      const reference = assetBacked ? node.data : { ...(
+        typeof node.data.image === 'object' && node.data.image !== null ? node.data.image as Record<string, unknown> : {}
+      ) };
+      // Structural / control roles own an image reference, not a top-level assetRef.
+      if (assetBacked && resourceId) node.assetRef = resourceId;
+      else delete node.assetRef;
+      if (!assetBacked) {
+        if (resourceId) reference.assetRef = resourceId;
+        else delete reference.assetRef;
+        node.data.image = reference;
+        for (const key of ['member', 'frame', 'frameParts', 'stateFrames', 'initialFacing']) delete node.data[key];
+      }
+      for (const key of ['member', 'frame', 'frameParts', 'stateFrames', 'initialFacing']) delete reference[key];
+      if (!resourceId) return;
       const [file, frame] = (member ?? option?.members[0] ?? '').split('#');
-      if (file) node.data.member = file;
-      else delete node.data.member;
-      if (frame) node.data.frame = frame;
-      else delete node.data.frame;
-      delete node.data.frameParts;
+      if (file) reference.member = file;
+      if (frame) reference.frame = frame;
       if (resourceId && !next.document.assetRefs.includes(resourceId)) next.document.assetRefs.push(resourceId);
     });
     setImagePickerOpen(false);
@@ -720,6 +779,24 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
     setPan({ x: 0, y: 0 });
   };
 
+  const frameSelection = () => {
+    const viewport = viewportRef.current;
+    if (!viewport || !selected || !current || selected.id === current.document.data.rootId) { resetView(); return; }
+    const [width, height] = nodeSize(selected);
+    const m = parentTransform(selected, current.document.data.nodes).multiply(localTransform(selected, current.document.data.nodes)).elements;
+    const centerX = m[12] + (m[0] * width + m[4] * height) / 2;
+    const centerY = m[13] + (m[1] * width + m[5] * height) / 2;
+    const left = collapsedPanels.hierarchy ? 32 : 300;
+    const right = collapsedPanels.inspector ? 32 : 300;
+    const nextZoom = clampZoom(Math.min(
+      Math.max(1, viewport.clientWidth - left - right - 80) / Math.max(1, Math.abs(m[0] * width) + Math.abs(m[4] * height)),
+      Math.max(1, viewport.clientHeight - 160) / Math.max(1, Math.abs(m[1] * width) + Math.abs(m[5] * height)),
+    ));
+    const [canvasWidth, canvasHeight] = canvasSize(current.document);
+    setZoom(nextZoom);
+    setPan({ x: (canvasWidth / 2 - centerX) * nextZoom + (left - right) / 2, y: (canvasHeight / 2 - centerY) * nextZoom });
+  };
+
   useEffect(() => {
     if (loadState.status === 'ready' && stageRef.current?.parentElement?.clientWidth) resetView();
     // Fit only on document entry, not on every inspector edit.
@@ -743,6 +820,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
   };
 
   const beginTransform = (kind: TransformDrag['kind'], event: React.PointerEvent<HTMLElement>) => {
+    if (event.button !== 0 || panRef.current) return;
     const snapshot = currentRef.current;
     if (!selected || !snapshot || selected.id === snapshot.document.data.rootId) return;
     event.preventDefault();
@@ -819,10 +897,53 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
   }, [selectedId, snap, zoom]);
 
   useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    // Native non-passive listener also prevents browser zoom for trackpad pinch.
+    const wheel = (event: WheelEvent) => {
+      event.preventDefault();
+      if (transformRef.current || panRef.current) return;
+      const delta = wheelPixels(event, viewport.clientHeight) * (event.shiftKey ? 3 : 1);
+      setZoom(value => clampZoom(value * Math.exp(-delta * .0015)));
+    };
+    const stop = () => {
+      const drag = panRef.current;
+      panRef.current = undefined;
+      setPanning(false);
+      if (drag && viewport.hasPointerCapture(drag.pointerId)) viewport.releasePointerCapture(drag.pointerId);
+    };
+    viewport.addEventListener('wheel', wheel, { passive: false });
+    viewport.addEventListener('lostpointercapture', stop);
+    window.addEventListener('blur', stop);
+    return () => {
+      stop();
+      viewport.removeEventListener('wheel', wheel);
+      viewport.removeEventListener('lostpointercapture', stop);
+      window.removeEventListener('blur', stop);
+    };
+  }, [loadState.status]);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      const editing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement;
+      if (event.defaultPrevented || event.isComposing) return;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const editing = Boolean(target?.closest('input,textarea,select,[contenteditable="true"]'));
       if (event.key === 'Escape') {
+        if (transformRef.current) {
+          event.preventDefault();
+          const drag = transformRef.current;
+          transformRef.current = undefined;
+          applyCurrent(drag.before);
+          return;
+        }
+        if (panRef.current) {
+          event.preventDefault();
+          const drag = panRef.current;
+          panRef.current = undefined;
+          setPanning(false);
+          if (viewportRef.current?.hasPointerCapture(drag.pointerId)) viewportRef.current.releasePointerCapture(drag.pointerId);
+          return;
+        }
         if (closeRequested) return;
         if (document.querySelector('.ui-editor-overlay [aria-expanded="true"][aria-haspopup="listbox"]')) return;
         if (contextMenuOpen) setContextMenuOpen(false);
@@ -843,10 +964,13 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); return; }
       if (editing) return;
-      if (event.key.toLowerCase() === 'q') setGizmoMode('select');
-      if (event.key.toLowerCase() === 'w') setGizmoMode('move');
-      if (event.key.toLowerCase() === 'e') setGizmoMode('rotate');
-      if (event.key.toLowerCase() === 'r') setGizmoMode('scale');
+      if (target?.closest('[role="slider"],[role="menu"],[role="listbox"],[role="combobox"]')) return;
+      if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.repeat && !transformRef.current && !panRef.current) {
+        const tools: Record<string, GizmoMode> = { q: 'hand', w: 'move', e: 'rotate', r: 'scale' };
+        const tool = tools[event.key.toLowerCase()];
+        if (tool) { event.preventDefault(); setGizmoMode(tool); return; }
+        if (event.key.toLowerCase() === 'f') { event.preventDefault(); frameSelection(); return; }
+      }
       if ((event.key === 'Delete' || event.key === 'Backspace') && selected && selected.id !== current?.document.data.rootId) { event.preventDefault(); deleteSelected(); }
       if ((keyboard.apple ? event.key === 'Enter' : event.key === 'F2') && selected) beginRename(selected);
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'd') { event.preventDefault(); duplicateSelected(); }
@@ -889,7 +1013,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
 
   const renderHierarchyNode = (id: string): React.ReactNode => {
     if (!current) return null;
-    const node = current.document.data.nodes.find(item => item.id === id);
+    const node = nodesById.get(id);
     if (!node) return null;
     const childList = children.get(id) ?? [];
     const open = expandedIds.has(id);
@@ -916,8 +1040,8 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
       </div>
       </ContextMenuTrigger>
       <ContextMenuContent ariaLabel="Hierarchy context menu" className="ui-editor-popup">
-        <ContextMenuItem onSelect={() => beginRename(node)}><Pencil size={14} />Rename<ContextMenuShortcut>{keyboard.apple ? 'Return' : 'F2'}</ContextMenuShortcut></ContextMenuItem>
-        <ContextMenuItem onSelect={duplicateSelected} disabled={node.id === current.document.data.rootId}><Copy size={14} />Duplicate<ContextMenuShortcut>{keyboard.modifier}D</ContextMenuShortcut></ContextMenuItem>
+        <ContextMenuItem onSelect={() => beginRename(node)}><Pencil size={14} />Rename<ContextMenuShortcut aria-label={keyboard.apple ? 'Return' : 'F2'}>{keyboard.rename}</ContextMenuShortcut></ContextMenuItem>
+        <ContextMenuItem onSelect={duplicateSelected} disabled={node.id === current.document.data.rootId}><Copy size={14} />Duplicate<ContextMenuShortcut>{shortcut(keyboard.modifier, 'D')}</ContextMenuShortcut></ContextMenuItem>
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={deleteSelected} disabled={node.id === current.document.data.rootId} tone="destructive"><Trash2 size={14} />Delete<ContextMenuShortcut>{keyboard.delete}</ContextMenuShortcut></ContextMenuItem>
       </ContextMenuContent>
@@ -954,35 +1078,29 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
           </div>
         </aside>
         <section
-          className={`ui-editor-stage-wrap${panning ? ' is-panning' : ''}${snap ? ' show-grid' : ''}`}
-          onPointerDown={event => {
-            if (event.button !== 1) return;
+          ref={viewportRef}
+          tabIndex={0}
+          aria-label="UI viewport"
+          className={`ui-editor-stage-wrap${gizmoMode === 'hand' ? ' is-hand' : ''}${panning ? ' is-panning' : ''}${snap ? ' show-grid' : ''}`}
+          onPointerDownCapture={event => {
+            if (transformRef.current || panRef.current) return;
+            const action = resolveUnityNavigationAction(event, { viewMode: '2d', handMode: gizmoMode === 'hand', apple: keyboard.apple });
+            if (action !== 'pan' && action !== 'dolly') return;
             event.preventDefault();
-            panRef.current = { x: pan.x, y: pan.y, clientX: event.clientX, clientY: event.clientY };
+            event.stopPropagation();
+            event.currentTarget.focus({ preventScroll: true });
+            panRef.current = { x: pan.x, y: pan.y, clientX: event.clientX, clientY: event.clientY, zoom, action, pointerId: event.pointerId };
             setPanning(true);
             event.currentTarget.setPointerCapture(event.pointerId);
           }}
           onPointerMove={event => {
             const start = panRef.current;
-            if (start) setPan({ x: start.x + event.clientX - start.clientX, y: start.y + event.clientY - start.clientY });
+            if (!start || start.pointerId !== event.pointerId) return;
+            if (start.action === 'pan') setPan({ x: start.x + event.clientX - start.clientX, y: start.y + event.clientY - start.clientY });
+            else setZoom(clampZoom(start.zoom * Math.exp(-(event.clientY - start.clientY) * .01)));
           }}
-          onPointerUp={event => { if (panRef.current) { panRef.current = undefined; setPanning(false); event.currentTarget.releasePointerCapture(event.pointerId); } }}
+          onPointerUp={event => { if (panRef.current?.pointerId === event.pointerId) { panRef.current = undefined; setPanning(false); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); } }}
           onPointerCancel={() => { panRef.current = undefined; setPanning(false); }}
-          onWheel={event => {
-            event.preventDefault();
-            if (event.ctrlKey || !keyboard.apple || event.deltaMode !== 0 || (event.deltaX === 0 && Math.abs(event.deltaY) >= 40 && Number.isInteger(event.deltaY))) {
-              // macOS trackpad pinch gestures are exposed by Chromium as
-              // ctrl+wheel. Keep their small deltas for smooth native zoom.
-              const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 100 : 1);
-              setZoom(value => clampZoom(value * Math.exp(-delta * (event.ctrlKey ? .01 : .002))));
-              return;
-            }
-            // Two-finger scrolling pans the canvas on both axes. Shift+wheel
-            // remains useful for horizontal panning with a conventional mouse.
-            const dx = event.shiftKey && event.deltaX === 0 ? event.deltaY : event.deltaX;
-            const dy = event.shiftKey && event.deltaX === 0 ? 0 : event.deltaY;
-            setPan(value => ({ x: value.x - dx, y: value.y - dy }));
-          }}
         >
           <div ref={stageRef} className="ui-editor-stage" aria-label="UI preview" style={{ width: canvasSize(current?.document)[0], height: canvasSize(current?.document)[1], transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
             {current ? renderUiNode(current.document.data.rootId, current.document.data.nodes, paintChildren, assetUrls, fontFamilies, selectedId, setSelectedId, hiddenIds, unpickableIds, true) : null}
@@ -995,7 +1113,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
                 style={componentGizmoStyle(node, current.document.data.nodes)}
                 aria-label={`Select ${node.name ?? node.id}`}
                 title={`${node.name ?? node.id} · ${node.role}`}
-                onPointerDown={event => { event.stopPropagation(); setSelectedId(node.id); }}
+                onPointerDown={event => { if (event.button === 0) { event.stopPropagation(); setSelectedId(node.id); } }}
               >{roleIcon(node.role)}</button>) : null}
             {current && selected && isTransformNode(selectedKind) && isNodeVisible(selected, current.document.data.nodes, hiddenIds) && selected.id !== current.document.data.rootId && showGizmos && !hiddenIds.has(selected.id) && !unpickableIds.has(selected.id) ? <SelectionGizmo node={selected} nodes={current.document.data.nodes} mode={gizmoMode} onBegin={beginTransform} /> : null}
           </div>
@@ -1004,9 +1122,9 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
           <MenuPrimitive.Root open={menuOpen} onOpenChange={setMenuOpen}>
             <MenuPrimitive.Trigger render={<Button variant="ghost" size="icon" aria-label="Editor menu" />}><Menu size={18} /></MenuPrimitive.Trigger>
             <EditorMenuPopup>
-              <MenuPrimitive.Item onClick={() => void save()} disabled={!current || saving}><Save size={14} />{saving ? 'Saving…' : 'Save'}<kbd>{keyboard.modifier}S</kbd></MenuPrimitive.Item>
-              <MenuPrimitive.Item aria-label="Undo" onClick={undo} disabled={!undoRef.current.length}><Undo2 size={14} />Undo<kbd>{keyboard.modifier}Z</kbd></MenuPrimitive.Item>
-              <MenuPrimitive.Item aria-label="Redo" onClick={redo} disabled={!redoRef.current.length}><Redo2 size={14} />Redo<kbd>{keyboard.apple ? `${keyboard.shift}${keyboard.modifier}Z` : `${keyboard.modifier}Y`}</kbd></MenuPrimitive.Item>
+              <MenuPrimitive.Item onClick={() => void save()} disabled={!current || saving}><Save size={14} />{saving ? 'Saving…' : 'Save'}<kbd>{shortcut(keyboard.modifier, 'S')}</kbd></MenuPrimitive.Item>
+              <MenuPrimitive.Item aria-label="Undo" onClick={undo} disabled={!undoRef.current.length}><Undo2 size={14} />Undo<kbd>{shortcut(keyboard.modifier, 'Z')}</kbd></MenuPrimitive.Item>
+              <MenuPrimitive.Item aria-label="Redo" onClick={redo} disabled={!redoRef.current.length}><Redo2 size={14} />Redo<kbd>{keyboard.apple ? shortcut(keyboard.shift, keyboard.modifier, 'Z') : shortcut(keyboard.modifier, 'Y')}</kbd></MenuPrimitive.Item>
               <MenuPrimitive.Item aria-label="Delete" onClick={deleteSelected} disabled={!selected || selected.id === current?.document.data.rootId}><Trash2 size={14} />Delete<kbd>{keyboard.delete}</kbd></MenuPrimitive.Item>
               {documents.length > 1 ? <MenuPrimitive.SubmenuRoot open={screenMenuOpen} onOpenChange={setScreenMenuOpen}>
                 <MenuPrimitive.SubmenuTrigger aria-label="Screens"><PanelsTopLeft size={14} />Screens<ChevronRight size={13} /></MenuPrimitive.SubmenuTrigger>
@@ -1023,7 +1141,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
             </EditorMenuPopup>
           </MenuPrimitive.Root>
           <span className="ui-editor-toolbar-divider" />
-          <Button variant="ghost" size="sm" type="button" aria-pressed={gizmoMode === 'select'} className={gizmoMode === 'select' ? 'active' : ''} aria-label="Select tool" title="Select (Q)" onClick={() => setGizmoMode('select')}><MousePointer2 size={16} /></Button>
+          <Button variant="ghost" size="sm" type="button" aria-pressed={gizmoMode === 'hand'} className={gizmoMode === 'hand' ? 'active' : ''} aria-label="Hand tool" title="Hand / Pan (Q)" onClick={() => setGizmoMode('hand')}><Hand size={16} /></Button>
           <Button variant="ghost" size="sm" type="button" aria-pressed={gizmoMode === 'move'} className={gizmoMode === 'move' ? 'active' : ''} aria-label="Move tool" title="Move (W)" onClick={() => setGizmoMode('move')}><Move size={16} /></Button>
           <Button variant="ghost" size="sm" type="button" aria-pressed={gizmoMode === 'rotate'} className={gizmoMode === 'rotate' ? 'active' : ''} aria-label="Rotate tool" title="Rotate (E)" onClick={() => setGizmoMode('rotate')}><RotateCw size={16} /></Button>
           <Button variant="ghost" size="sm" type="button" aria-pressed={gizmoMode === 'scale'} className={gizmoMode === 'scale' ? 'active' : ''} aria-label="Scale tool" title="Scale (R)" onClick={() => setGizmoMode('scale')}><Scaling size={16} /></Button>
@@ -1031,9 +1149,9 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
           <Button variant="ghost" size="sm" type="button" className={showGizmos ? 'active' : ''} aria-pressed={showGizmos} aria-label="Toggle gizmos" title="Show component gizmos" onClick={() => setShowGizmos(value => !value)}><BoxSelect size={16} /></Button>
           <Button variant="ghost" size="sm" type="button" className={snap ? 'active' : ''} aria-pressed={snap} aria-label="Snap" title="Snap to 8px / 15°" onClick={() => setSnap(value => !value)}><Magnet size={16} /><span>Snap</span></Button>
           <span className="ui-editor-toolbar-divider" />
-          <Button variant="ghost" size="sm" type="button" aria-label="Zoom out" title={`Zoom out (${keyboard.modifier}-)`} onClick={() => setZoom(value => clampZoom(value - .1))}><ZoomOut size={15} /></Button>
-          <Button variant="ghost" size="sm" type="button" className="ui-editor-zoom-value" aria-label="Reset view" title="Reset view (Ctrl/Cmd+0)" onClick={resetView}>{Math.round(zoom * 100)}%</Button>
-          <Button variant="ghost" size="sm" type="button" aria-label="Zoom in" title={`Zoom in (${keyboard.modifier}+)`} onClick={() => setZoom(value => clampZoom(value + .1))}><ZoomIn size={15} /></Button>
+          <Button variant="ghost" size="sm" type="button" aria-label="Zoom out" title={`Zoom out (${shortcut(keyboard.modifier, '−')})`} onClick={() => setZoom(value => clampZoom(value - .1))}><ZoomOut size={15} /></Button>
+          <Button variant="ghost" size="sm" type="button" className="ui-editor-zoom-value" aria-label="Reset view" title={`Reset view (${shortcut(keyboard.modifier, '0')})`} onClick={resetView}>{Math.round(zoom * 100)}%</Button>
+          <Button variant="ghost" size="sm" type="button" aria-label="Zoom in" title={`Zoom in (${shortcut(keyboard.modifier, '+')})`} onClick={() => setZoom(value => clampZoom(value + .1))}><ZoomIn size={15} /></Button>
           <Button variant="ghost" size="sm" type="button" aria-label="Frame canvas" title="Frame canvas" onClick={resetView}><Maximize2 size={15} /></Button>
         </div>
         <aside className={`ui-editor-panel ui-editor-inspector${collapsedPanels.inspector ? ' is-collapsed' : ''}`} aria-label="UI inspector" inert={collapsedPanels.inspector}>
@@ -1081,7 +1199,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
                 {imageCapable ? <>
                   <div className="ui-editor-source-image-field"><span>Source Image</span><Button variant="outline" aria-label="Choose source image" className="ui-editor-source-image" aria-haspopup="dialog" aria-expanded={imagePickerOpen} onClick={() => { setAssetSearch(''); setImagePickerOpen(true); void loadMoreAssetsRef.current?.(); }}>
                     {resolveNodeImage(selected, assetUrls) ? <img src={resolveNodeImage(selected, assetUrls)} alt="" /> : <ImageIcon size={15} />}
-                    <span>{typeof selected.data?.frame === 'string' ? selected.data.frame : typeof selected.data?.member === 'string' ? selected.data.member : selected.assetRef ?? 'Choose image'}</span><ChevronRight size={12} />
+                    <span>{typeof selectedImageSource?.data?.frame === 'string' ? selectedImageSource.data.frame : typeof selectedImageSource?.data?.member === 'string' ? selectedImageSource.data.member : selectedImageSource?.assetRef ?? 'Choose image'}</span><ChevronRight size={12} />
                   </Button></div>
                   <EditorSelect label="Image Type" ariaLabel="Image type" value={selectedImageType} onValueChange={value => updateImage('type', value as UnityImageType)} options={[['simple', 'Simple'], ['sliced', 'Sliced'], ['tiled', 'Tiled'], ['filled', 'Filled']]} />
                   {selectedImageType === 'simple' || selectedImageType === 'filled' ? <div className="ui-editor-check-field"><span>Preserve Aspect</span><Switch size="sm" aria-label="Preserve aspect" checked={selectedImage.preserveAspect === true || (!('preserveAspect' in selectedImage) && selected.data?.fit === 'contain')} onCheckedChange={checked => updateImage('preserveAspect', checked)} /></div> : null}
@@ -1137,7 +1255,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
               </div></details> : null}
               {visualNode ? <details className="ui-editor-inspector-component ui-editor-component-appearance" open><summary><ChevronRight size={12} className="ui-editor-component-chevron" /><ImageIcon size={14} /><span>Appearance</span></summary><div className="ui-editor-section">
                 <ColorField label="Color" value={typeof selected.style?.color === 'string' ? selected.style.color : typeof selected.data?.color === 'string' ? selected.data.color : '#ffffff'} onChange={value => updateStyle('color', value)} />
-                <ColorField label="Background" value={typeof selected.style?.background === 'string' ? selected.style.background : '#000000'} onChange={value => updateStyle('background', value)} />
+                <ColorField label="Background" value={typeof selectedBackground?.color === 'string' ? selectedBackground.color : typeof selected.style?.background === 'string' ? selected.style.background : typeof selected.style?.fill === 'string' ? selected.style.fill : '#000000'} onChange={value => updateStyle('background', selectedBackground ? { ...selectedBackground, color: value } : value)} />
                 <label>Radius<EditorInput type="number" min="0" value={typeof selected.style?.cornerRadius === 'number' ? selected.style.cornerRadius : 0} onChange={event => updateStyle('cornerRadius', Math.max(0, Number(event.target.value)))} /></label>
                 <EditorRange label="Opacity" value={typeof selected.style?.opacity === 'number' ? selected.style.opacity : typeof selected.data?.alpha === 'number' ? selected.data.alpha : 1} onBegin={() => { inspectorEditRef.current = structuredClone(currentRef.current); }} onEnd={finishInspectorEdit} onChange={value => updateStyle('opacity', value)} />
                 {textCapable ? <>
@@ -1166,30 +1284,38 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
             </span>
           </div>
           <div className="ui-editor-viewport-hints" aria-label="UI navigation hints">
-            <span title="Press Q to select"><MousePointer2 size={13} /><kbd>Q</kbd><span>Select</span></span>
+            <span title="Press Q and drag to pan"><Hand size={13} /><kbd>Q</kbd><span>Pan</span></span>
             <span title="Press W to move"><Move size={13} /><kbd>W</kbd><span>Move</span></span>
+            <span title="Press E to rotate"><RotateCw size={13} /><kbd>E</kbd><span>Rotate</span></span>
+            <span title="Press R to scale"><Scaling size={13} /><kbd>R</kbd><span>Scale</span></span>
+            <span title="Frame selected object"><Maximize2 size={13} /><kbd>F</kbd><span>Focus</span></span>
             {keyboard.apple ? <>
-              <span title="Use two fingers on the trackpad to pan"><MousePointer2 size={13} /><span>Two-finger · Pan</span></span>
-              <span title="Pinch on the trackpad to zoom"><ZoomIn size={13} /><span>Pinch · Zoom</span></span>
+              <span title="Option+Command+left drag, or middle/right drag to pan"><MousePointer2 size={13} aria-hidden="true" /><kbd aria-label="Option">{keyboard.alt}</kbd><kbd aria-label="Command">{keyboard.modifier}</kbd><span>Drag · Pan</span></span>
+              <span title={`Scroll or pinch to zoom; ${keyboard.alt}${keyboard.control} + left drag also zooms`}><Touchpad size={13} aria-hidden="true" /><span>Scroll / Pinch · Zoom</span></span>
             </> : <>
-              <span title="Drag with the middle mouse button to pan"><MousePointer2 size={13} /><span>Middle · Pan</span></span>
-              <span title="Scroll the mouse wheel to zoom"><ZoomIn size={13} /><span>Scroll · Zoom</span></span>
+              <span title="Middle/right drag or Alt+Ctrl+left drag to pan"><Mouse size={13} aria-hidden="true" /><kbd>MMB / RMB</kbd><span>Drag · Pan</span></span>
+              <span title="Scroll the mouse wheel to zoom"><Mouse size={13} aria-hidden="true" /><span>Scroll · Zoom</span></span>
             </>}
-            <span title="Hold Shift while dragging a scale handle to preserve proportions"><Scaling size={13} /><kbd>{keyboard.shift}</kbd><span>Drag · Proportional</span></span>
+            <span title="Hold Shift while dragging a scale handle to preserve proportions"><Scaling size={13} /><kbd aria-label="Shift">{keyboard.shift}</kbd><span>Drag · Proportional</span></span>
           </div>
         </footer>
         <div className="ui-editor-notice" role="alert">{/^(Saved|Saving…|Duplicated|Added |Deleted |$)/.test(message) ? frameIssues.join('; ') : message}</div>
       </main>
       <Dialog open={imagePickerOpen} onOpenChange={setImagePickerOpen}>
         <DialogContent className="ui-editor-asset-dialog" onKeyDown={event => event.stopPropagation()}>
-          <DialogTitle>Select Source Image</DialogTitle><DialogDescription>{imageAssets.reduce((count, asset) => count + asset.members.length, 0)} project images available</DialogDescription>
-          <Input aria-label="Search images" placeholder="Search images…" value={assetSearch} onChange={setAssetSearch} />
+          <div className="ui-editor-asset-dialog-header">
+            <div><DialogTitle>Select Source Image</DialogTitle><DialogDescription>{imageAssets.reduce((count, asset) => count + asset.members.length, 0)} project images available</DialogDescription></div>
+            <Button variant="ghost" size="icon" aria-label="Close image picker" onClick={() => setImagePickerOpen(false)}><X size={16} aria-hidden="true" /></Button>
+          </div>
+          <Input className="ui-editor-asset-search" classNames={{ field: 'ui-editor-asset-search-field', input: 'text-sm' }} aria-label="Search images" placeholder="Search images…" value={assetSearch} onChange={setAssetSearch} />
           {pickerLoading ? <p role="status">Loading project images…</p> : null}
           <div className="ui-editor-asset-grid">
-            {selectedKind !== 'image' && selectedKind !== 'nine-slice' ? <Button variant="outline" aria-label="Clear source image" onClick={() => selectImageAsset('')}>None</Button> : null}
+            {selectedKind !== 'image' && selectedKind !== 'nine-slice' ? <Button variant="outline" aria-label="Clear source image" aria-pressed={!selectedImageSource?.assetRef} onClick={() => selectImageAsset('')}>None</Button> : null}
             {imageAssets.flatMap(asset => asset.members.filter(member => `${asset.label} ${member}`.toLowerCase().includes(assetSearch.toLowerCase())).map(member => {
               const url = assetUrls[`${asset.id}:${member}`];
-              return <Button variant="ghost" disabled={!url} className="ui-editor-asset-card" aria-pressed={selected?.assetRef === asset.id && selected?.data?.member === member} aria-label={`Use image ${member}`} key={`${asset.id}:${member}`} onClick={() => selectImageAsset(asset.id, member)}>{url ? <img loading="lazy" src={url} alt="" /> : <ImageIcon size={20} />}<span title={member}>{member}</span></Button>;
+              // Match the resolved image, including root/path aliases and atlas frames.
+              const isSelected = selectedImageSource?.assetRef === asset.id && Boolean(url) && selectedImageUrl === url;
+              return <Button ref={isSelected ? selectedImageCardRef : undefined} variant="ghost" disabled={!url} className="ui-editor-asset-card" aria-pressed={isSelected} aria-label={`Use image ${member}`} key={`${asset.id}:${member}`} onClick={() => selectImageAsset(asset.id, member)}>{url ? <img loading="lazy" src={url} alt="" /> : <ImageIcon size={20} />}<span title={member}>{member}</span>{isSelected ? <CircleCheck className="ui-editor-asset-selected" size={16} aria-hidden="true" /> : null}</Button>;
             }))}
           </div>
           {!imageAssets.some(asset => asset.members.some(member => `${asset.label} ${member}`.toLowerCase().includes(assetSearch.toLowerCase()))) ? <p>No matching images.</p> : null}
@@ -1335,7 +1461,7 @@ function supportsImageNode(kind: UiNodeKind): boolean {
 }
 
 function isVisualNode(kind: UiNodeKind): boolean {
-  return kind !== 'flow' && kind !== 'flow-screen' && kind !== 'container' && kind !== 'canvas';
+  return kind !== 'flow' && kind !== 'flow-screen' && kind !== 'canvas';
 }
 
 function isTransformNode(kind: UiNodeKind): boolean {
@@ -1417,7 +1543,7 @@ function snapValue(value: number, increment: number): number {
 }
 
 function clampZoom(value: number): number {
-  return Math.max(.2, Math.min(3, Math.round(value * 100) / 100));
+  return Math.max(.1, Math.min(3, value));
 }
 
 function nodeSize(node: BeeGameUiContentNode): [number, number] {
@@ -1504,7 +1630,9 @@ function childIds(nodes: BeeGameUiContentNode[]): Map<string, string[]> {
   const output = new Map<string, string[]>();
   for (const node of nodes) {
     if (!node.parentId) continue;
-    output.set(node.parentId, [...(output.get(node.parentId) ?? []), node.id]);
+    const children = output.get(node.parentId) ?? [];
+    children.push(node.id);
+    output.set(node.parentId, children);
   }
   return output;
 }
@@ -1691,9 +1819,17 @@ function uiNodeStyle(node: BeeGameUiContentNode, root: boolean, fontFamilies: Re
   return output;
 }
 
+function uiNodeImageSource(node: BeeGameUiContentNode): { assetRef?: string; data?: Record<string, unknown> } {
+  const image = typeof node.data?.image === 'object' && node.data.image !== null
+    ? node.data.image as Record<string, unknown> : undefined;
+  return typeof image?.assetRef === 'string'
+    ? { assetRef: image.assetRef, data: { ...node.data, ...image } }
+    : { assetRef: node.assetRef, data: node.data };
+}
+
 function resolveNodeImage(node: BeeGameUiContentNode, assetUrls: Record<string, string>): string | undefined {
-  if (!node.assetRef) return undefined;
-  return resolveUiImage(node.assetRef, node.data, assetUrls);
+  const { assetRef, data } = uiNodeImageSource(node);
+  return assetRef ? resolveUiImage(assetRef, data, assetUrls) : undefined;
 }
 
 function EditorSelect({ label, ariaLabel, value, onValueChange, options }: { label: string; ariaLabel: string; value: string; onValueChange: (value: string) => void; options: ReadonlyArray<readonly [string, string]> }) {
@@ -1742,14 +1878,4 @@ function fileStem(path: string): string {
 
 function isUiAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
-}
-
-function waitForUiTransition(signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(resolve, 180);
-    signal.addEventListener('abort', () => {
-      window.clearTimeout(timer);
-      reject(new DOMException('UI loading was stopped.', 'AbortError'));
-    }, { once: true });
-  });
 }

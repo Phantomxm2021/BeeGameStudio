@@ -4,6 +4,7 @@ import {
   onDesktopOAuthCallback,
   openExternal,
 } from '../lib/platform';
+import { authRetryDelay } from './authRetry';
 
 export type BeeGameSupabaseUser = {
   id: string;
@@ -64,6 +65,7 @@ let pendingRedirectConsumption: {
 } | null = null;
 let pendingSessionInitialization: Promise<BeeGameSupabaseSession | null> | null = null;
 let pendingSessionRefresh: Promise<BeeGameSupabaseSession | null> | null = null;
+let refreshFailure: { error: unknown; attempts: number; retryAt: number } | null = null;
 let desktopOAuthListenerSetup = false;
 let httpOnlySessionUser: BeeGameSupabaseUser | null = null;
 let httpOnlySessionExpiresAt = 0;
@@ -446,6 +448,9 @@ export async function hydrateSupabaseSessionUser(): Promise<BeeGameSupabaseSessi
           status: response.status,
         });
       }
+      if (response.status !== 401) throw new SupabaseAuthApiError('Session lookup temporarily unavailable', {
+        status: 503, code: 'authentication_unavailable',
+      });
       return null;
     }
     const cookieSession = toCookieSession(await response.json());
@@ -517,7 +522,18 @@ export function initializeSupabaseSession(): Promise<BeeGameSupabaseSession | nu
 
 export async function refreshSupabaseSession(): Promise<BeeGameSupabaseSession | null> {
   if (pendingSessionRefresh) return pendingSessionRefresh;
-  const refresh = refreshSupabaseSessionOnce().finally(() => {
+  if (refreshFailure && refreshFailure.retryAt > Date.now()) throw refreshFailure.error;
+  const refresh = refreshSupabaseSessionOnce().then(session => {
+    refreshFailure = null;
+    return session;
+  }).catch(cause => {
+    const error = cause instanceof SupabaseAuthApiError ? cause : new SupabaseAuthApiError('Session refresh temporarily unavailable', {
+      status: 503, code: 'authentication_unavailable',
+    });
+    const attempts = (refreshFailure?.attempts ?? 0) + 1;
+    refreshFailure = { error, attempts, retryAt: Date.now() + authRetryDelay(attempts, error) };
+    throw error;
+  }).finally(() => {
     if (pendingSessionRefresh === refresh) pendingSessionRefresh = null;
   });
   pendingSessionRefresh = refresh;
@@ -542,7 +558,9 @@ async function refreshSupabaseSessionOnce(): Promise<BeeGameSupabaseSession | nu
         httpOnlySessionExpiresAt = 0;
         return null;
       }
-      throw new Error(`Secure session refresh is temporarily unavailable (${response.status})`);
+      throw new SupabaseAuthApiError(`Secure session refresh is temporarily unavailable (${response.status})`, {
+        status: 503, code: 'authentication_unavailable',
+      });
     }
     const value = await response.json() as unknown;
     const session = toCookieSession(value);
@@ -572,7 +590,9 @@ async function refreshSupabaseSessionOnce(): Promise<BeeGameSupabaseSession | nu
       clearSupabaseSession();
       return null;
     }
-    throw new Error(`Supabase session refresh is temporarily unavailable (${response.status})`);
+    throw new SupabaseAuthApiError(`Supabase session refresh is temporarily unavailable (${response.status})`, {
+      status: 503, code: 'authentication_unavailable',
+    });
   }
   const refreshed = toSupabaseSession(await response.json());
   saveSupabaseSession({
@@ -590,19 +610,19 @@ async function fetchAuthRefreshWithRetry(
   init: RequestInit,
 ): Promise<Response> {
   const retryDelays = [250, 750];
-  let lastError: unknown;
   for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
     try {
-      return await fetch(input, init);
+      return await fetch(input, { ...init, signal: AbortSignal.timeout(12_000) });
     } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') throw error;
-      lastError = error;
+      if (error instanceof DOMException && ['AbortError', 'TimeoutError'].includes(error.name)) break;
       const delay = retryDelays[attempt];
       if (delay === undefined) break;
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
-  throw lastError;
+  throw new SupabaseAuthApiError('Authentication service is temporarily unavailable', {
+    status: 503, code: 'authentication_unavailable',
+  });
 }
 
 function isDefinitiveAuthenticationFailure(status: number): boolean {
@@ -610,6 +630,7 @@ function isDefinitiveAuthenticationFailure(status: number): boolean {
 }
 
 export function clearSupabaseSession(): void {
+  refreshFailure = null;
   localStorage.removeItem(SESSION_STORAGE_KEY);
   httpOnlySessionUser = null;
   httpOnlySessionExpiresAt = 0;
@@ -626,6 +647,7 @@ function saveSupabaseSession(session: BeeGameSupabaseSession): void {
 }
 
 async function persistSupabaseSession(session: BeeGameSupabaseSession): Promise<void> {
+  refreshFailure = null;
   if (!isHttpOnlySessionsEnabled()) {
     saveSupabaseSession(session);
     return;

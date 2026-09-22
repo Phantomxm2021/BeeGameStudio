@@ -16,7 +16,7 @@
 .ui-editor-anchor-presets button { position: relative; min-width: 0; min-height: 0; padding: 0; border: 1px solid #ffffff12; border-radius: 2px; background: #ffffff05; }
 .ui-editor-source-image { min-width: 0; height: 34px; display: grid; grid-template-columns: 28px minmax(0, 1fr) 12px; align-items: center; gap: 6px; padding: 3px 6px; border: 1px solid #ffffff12; border-radius: 4px; background: #111318; color: #d4d7df; text-align: left; cursor: pointer; }
 .ui-editor-asset-card:hover,.ui-editor-asset-card.selected { border-color: #55aaff; background: #203347; color: #fff; }
-.ui-editor-viewport-hints kbd { padding: 1px 3px; border: 1px solid #ffffff20; border-radius: 3px; color: #d4d6db; }
+.ui-editor-viewport-hints kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 19px; height: 20px; padding: 0 4px; border: 1px solid #ffffff20; border-radius: 4px; background: #ffffff05; color: #d4d6db; font: inherit; line-height: 1; }
 .ui-editor-notice { position: absolute; left: 20px; bottom: 42px; z-index: 20; max-width: calc(100% - 40px); padding: 8px 12px; border: 1px solid #b7793338; border-radius: 7px; background: #30261fea; color: #eac69c; font-size: 11px; }
 .ui-editor-node[data-role="button"],.ui-editor-node[data-role="dropdown"],.ui-editor-node[data-role="tab"] { border: 1px solid #ffffff26; box-shadow: inset 0 1px #ffffff18; }
 .ui-editor-slider-handle { position: absolute; top: 50%; width: max(10px, 100% / 12); aspect-ratio: 1; border: 1px solid #ffffffb8; border-radius: 50%; translate: -50% -50%; background: #f7f8fb; box-shadow: 0 1px 3px #0009; }
@@ -58,7 +58,8 @@
 .ui-editor-row-actions button:hover { background: #ffffff12; color: #fff; }
 .ui-editor-stage-wrap { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; overscroll-behavior: none; padding: 0; background-color: #3c3f43; background-image: linear-gradient(#ffffff0a 1px, transparent 1px), linear-gradient(90deg, #ffffff0a 1px, transparent 1px); background-position: center; background-size: 16px 16px; touch-action: none; }
 .ui-editor-stage-wrap.show-grid { background-image: linear-gradient(#6ba6d51f 1px, transparent 1px), linear-gradient(90deg, #6ba6d51f 1px, transparent 1px); background-size: 8px 8px; }
-.ui-editor-stage-wrap.is-panning { cursor: grabbing; }
+.ui-editor-stage-wrap.is-hand, .ui-editor-stage-wrap.is-hand * { cursor: grab; }
+.ui-editor-stage-wrap.is-panning, .ui-editor-stage-wrap.is-panning * { cursor: grabbing; }
 .ui-editor-stage { position: relative; flex: 0 0 auto;  overflow: visible; background: #292d34; box-shadow: 0 16px 48px #0007, 0 0 0 1px #ffffff12; transform-origin: center; }
 .ui-editor-floating-toolbar button { min-height: 32px; display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; color: #e4e4eb; }
 .ui-editor-floating-toolbar button:disabled { cursor: default; opacity: .45; }
@@ -155,7 +156,7 @@
 @media (prefers-reduced-motion: reduce) { .ui-editor-panel,.ui-editor-panel-toggle { transition: none; } }
 
 /* Portals live outside the dark editor; never inherit the light home theme. */
-.ui-editor-popup,.ui-editor-select-content {
+.ui-editor-popup,.ui-editor-select-content,.ui-editor-asset-dialog {
   color-scheme: dark;
   --background: #181a20;
   --card: #181a20;
@@ -186,11 +187,14 @@
 .ui-editor-asset-dialog { width: min(560px, calc(100vw - 24px)); max-width: 560px; color: #e4e4eb; background: #181a20; }
 .ui-editor-asset-dialog h2 { font-size: 16px; line-height: 22px; font-weight: 600; }
 .ui-editor-asset-dialog p { font-size: 12px; line-height: 18px; color: #939aa7; }
-.ui-editor-asset-dialog > .relative { margin: 16px 0; }
+.ui-editor-asset-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ui-editor-asset-search { margin: 12px 0; }
+.ui-editor-asset-search-field { height: 31px; }
 .ui-editor-asset-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(92px,1fr)); gap: 8px; max-height: min(440px, calc(100dvh - 220px)); overflow: auto; margin: 16px 0 0; }
-.ui-editor-asset-card { display: grid; grid-template-rows: 66px 18px; place-items: center; gap: 3px; height: 94px; padding: 4px; min-width: 0; border: 1px solid #ffffff10; border-radius: 8px; background: #171a20; color: #aeb4bf; overflow: hidden; }
+.ui-editor-asset-card { position: relative; display: grid; grid-template-rows: 66px 18px; place-items: center; gap: 3px; height: 94px; padding: 4px; min-width: 0; border: 1px solid #ffffff10; border-radius: 8px; background: #171a20; color: #aeb4bf; overflow: hidden; }
 .ui-editor-asset-card img { width: 100%; height: 66px; object-fit: contain; border-radius: 5px; background: repeating-conic-gradient(#272a31 0 25%, #1e2026 0 50%) 50% / 8px 8px; }
 .ui-editor-asset-card span { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .ui-editor-asset-card[aria-pressed=true] { border-color: #80bdff; background: #203347; }
+.ui-editor-asset-selected { position: absolute; top: 6px; right: 6px; color: #80bdff; background: #181a20; border-radius: 50%; }
 .ui-editor-canvas-info { padding: 12px; color: #b2b7c1; font-size: 12px; }
 @media (prefers-reduced-motion: reduce) { .ui-editor-menu { transition: none; } }

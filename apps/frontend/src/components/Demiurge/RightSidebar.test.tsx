@@ -4,7 +4,9 @@ import userEvent from '@testing-library/user-event';
 
 import { RightSidebar } from './RightSidebar';
 import { api } from '../../services/api';
+import { beeGameAdapter } from '../../services/beeGameAdapter';
 import * as apiClient from '../../services/apiClient';
+import { getWaitingPermissionState } from '../../utils/waitingPermission';
 
 vi.mock('../../store/systemStore', () => ({
     useSystemStore: () => ({
@@ -39,6 +41,7 @@ vi.mock('../../services/beeGameAdapter', () => ({
     isBeeGameProjectPackageArtifactId: (id: string) => id.startsWith('beegame-project-package:'),
     beeGameAdapter: {
         getProjectGameContent: vi.fn().mockResolvedValue({ state: 'awaiting_content' }),
+        getProjectGameContentFileList: vi.fn().mockResolvedValue({ state: 'awaiting_content' }),
         getProjectAssets: vi.fn().mockResolvedValue({ version: 9, requirements: [], resources: [] }),
     },
 }));
@@ -56,6 +59,159 @@ function deferred<T>() {
 }
 
 describe('RightSidebar tabs', () => {
+    it('locks typing, attachments and send while a child runs after the parent, but keeps stop and details available', async () => {
+        const onSendMessage = vi.fn();
+        const onStopTask = vi.fn();
+        const child = { id: 'active-child', sender: 'beegame', type: 'tool' as const, timestamp: Date.now(),
+            content: 'Inspecting', toolName: 'Agent', toolStatus: 'running' as const, isSubagentTool: true };
+        const props = { projectId: 'child-running', lang: 'en' as const, progress: 0, messages: [child],
+            onSendMessage, onStopTask, isLoading: false, waitingPermission: getWaitingPermissionState(null) };
+        const { rerender } = render(<RightSidebar {...props} />);
+        expect(getChatInput()).toHaveAttribute('readonly');
+        expect(screen.getByTestId('beegame-chat-attach-button')).toBeDisabled();
+        expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument();
+        fireEvent.keyDown(getChatInput(), { key: 'Enter' });
+        expect(onSendMessage).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: 'Stop task' }));
+        expect(onStopTask).toHaveBeenCalledOnce();
+        rerender(<RightSidebar {...props} messages={[{ ...child, toolStatus: 'completed' }]} />);
+        expect(getChatInput()).not.toHaveAttribute('readonly');
+        expect(getChatInput()).toBeEnabled();
+    });
+
+    it('locks and dims a submitted draft immediately, then clears it on acceptance while Stop stays available', async () => {
+        const request = deferred<boolean>();
+        const onSendMessage = vi.fn(() => request.promise);
+        const onStopTask = vi.fn();
+        const props = { projectId: 'send-pending', lang: 'en' as const, progress: 0, messages: [],
+            onSendMessage, onStopTask, isLoading: false, waitingPermission: getWaitingPermissionState(null) };
+        const { rerender } = render(<RightSidebar {...props} />);
+        fireEvent.change(getChatInput(), { target: { value: '继续' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        expect(getChatInput()).toHaveValue('继续');
+        expect(getChatInput()).toBeDisabled();
+        expect(getChatInput()).toHaveAttribute('readonly');
+        expect(getChatInput().closest('form')).toHaveClass('[&_textarea:read-only]:opacity-50');
+        fireEvent.keyDown(getChatInput(), { key: 'Enter' });
+        expect(onSendMessage).toHaveBeenCalledTimes(1);
+        rerender(<RightSidebar {...props} isLoading />);
+        expect(getChatInput()).toHaveAttribute('readonly');
+        expect(screen.getByRole('button', { name: 'Stop task' })).toBeEnabled();
+        fireEvent.click(screen.getByRole('button', { name: 'Stop task' }));
+        expect(onStopTask).toHaveBeenCalledOnce();
+        await act(async () => request.resolve(true));
+        expect(getChatInput()).toHaveValue('');
+    });
+
+    it.each(['rejected', 'failed'])('restores editing and preserves the draft when send is %s', async outcome => {
+        const request = deferred<boolean>();
+        render(<RightSidebar projectId="send-failure" lang="en" progress={0} messages={[]}
+            onSendMessage={() => request.promise} isLoading={false} waitingPermission={getWaitingPermissionState(null)} />);
+        fireEvent.change(getChatInput(), { target: { value: '保留这段草稿' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        await act(async () => outcome === 'failed' ? request.reject(new Error('Network failed')) : request.resolve(false));
+        expect(getChatInput()).toHaveValue('保留这段草稿');
+        expect(getChatInput()).toBeEnabled();
+        expect(getChatInput()).not.toHaveAttribute('readonly');
+        expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled();
+    });
+
+    it('does not clear a different project draft when an earlier send completes', async () => {
+        const request = deferred<boolean>();
+        const props = { lang: 'en' as const, progress: 0, messages: [], onSendMessage: () => request.promise,
+            isLoading: false, waitingPermission: getWaitingPermissionState(null) };
+        const { rerender } = render(<RightSidebar {...props} projectId="first" />);
+        fireEvent.change(getChatInput(), { target: { value: 'First project' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        rerender(<RightSidebar {...props} projectId="second" />);
+        expect(getChatInput()).toBeEnabled();
+        fireEvent.change(getChatInput(), { target: { value: 'Second project draft' } });
+        await act(async () => request.resolve(true));
+        expect(getChatInput()).toHaveValue('Second project draft');
+    });
+    it('shows a live question even after a completed workflow and submits it as an answer', async () => {
+        const onResolveToolPermission = vi.fn().mockResolvedValue(undefined);
+        const projectStatus = { project_id: 'p', workflow: { status: 'completed' as const } };
+        render(<RightSidebar projectId="p" lang="en" progress={100} isLoading={false}
+            onSendMessage={vi.fn()} messages={[]} projectStatus={projectStatus}
+            onResolveToolPermission={onResolveToolPermission}
+            pendingPermissions={[{ gate_id: 'question', type: 'BEEGAME_PERMISSION', permission_tool_name: 'AskUserQuestion',
+                artifact: { input: { questions: [{ question: 'Style?', options: [{ label: 'Pixel' }, { label: 'Vector' }] }] } },
+            }]}
+            waitingPermission={getWaitingPermissionState(projectStatus)} />);
+        expect(screen.getByTestId('beegame-question-panel')).toBeInTheDocument();
+        expect(screen.queryByTestId('beegame-permission-panel')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('radio', { name: 'Pixel' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Submit answers' }));
+        expect(onResolveToolPermission).toHaveBeenCalledWith({ gate_id: 'question' }, 'allow', 'once', { 'Style?': 'Pixel' });
+    });
+    it.each(['Bash', 'AskUserQuestion'])('shows only the actionable %s card while waiting for permission', (toolName) => {
+        const projectStatus = { project_id: 'p', blocked: true, blocked_reason: 'Bash requires permission.' };
+        const pendingPermissions = [{ gate_id: 'gate', type: 'BEEGAME_PERMISSION' as const,
+            permission_tool_name: toolName, artifact: { input: { command: 'pwd',
+                questions: [{ question: 'Style?', options: [{ label: 'Pixel' }, { label: 'Vector' }] }] } } }];
+        render(<RightSidebar projectId="p" lang="zh" progress={0} isLoading={false}
+            onSendMessage={vi.fn()} messages={[]} projectStatus={projectStatus}
+            pendingPermissions={pendingPermissions}
+            waitingPermission={getWaitingPermissionState(projectStatus, pendingPermissions)} />);
+        expect(screen.queryByText('当前任务需要处理，原因如下。')).not.toBeInTheDocument();
+        expect(screen.queryByText('Bash requires permission.')).not.toBeInTheDocument();
+        expect(screen.queryByText(/可在聊天中说明要求/)).not.toBeInTheDocument();
+        expect(screen.getByTestId(toolName === 'Bash' ? 'beegame-permission-panel' : 'beegame-question-panel')).toBeInTheDocument();
+        expect(screen.getByTestId('beegame-chat-input')).toBeDisabled();
+    });
+    it('omits the standalone blocker and sends continue as ordinary chat', async () => {
+        const onSendMessage = vi.fn();
+        const projectStatus = { project_id: 'blocked-project', blocked: true, workflow: {
+                runId: 'run', status: 'blocked' as const, nextAction: 'retry' as const,
+                block: { message: '验收未通过', detail: 'dist/assets/runtime：缺少验收证据' },
+            } };
+        render(<RightSidebar projectId="blocked-project" lang="zh" progress={0} onSendMessage={onSendMessage} isLoading={false}
+            messages={[]} projectStatus={projectStatus}
+            waitingPermission={getWaitingPermissionState(projectStatus)} />);
+        expect(screen.queryByText('dist/assets/runtime：缺少验收证据')).toBeNull();
+        expect(screen.queryByText('当前任务需要处理，原因如下。')).toBeNull();
+        expect(screen.queryByRole('button', { name: /重试工作流|继续工作流/ })).toBeNull();
+        expect(getChatInput().disabled).toBe(false);
+        fireEvent.change(getChatInput(), { target: { value: '继续' } });
+        fireEvent.keyDown(getChatInput(), { key: 'Enter', code: 'Enter' });
+        await waitFor(() => expect(onSendMessage).toHaveBeenCalledTimes(1));
+        expect(onSendMessage.mock.calls[0][0]).toBe('继续');
+    });
+    it('does not present historical workflow failure as the current conversation blocker', () => {
+        render(<RightSidebar projectId="conversation" lang="zh" progress={0} onSendMessage={vi.fn()} isLoading={false}
+            messages={[]} projectStatus={{ project_id: 'conversation', phase: 'idle', blocked: false, blocked_reason: null,
+                workflow: { runId: 'old-run', status: 'blocked', nextAction: 'retry',
+                    block: { message: 'Delivery has unresolved issues: historical verdict' } } }}
+            waitingPermission={getWaitingPermissionState()} />);
+        expect(screen.queryByText(/Delivery has unresolved issues/)).toBeNull();
+        expect(screen.queryByText('当前任务需要处理，原因如下。')).toBeNull();
+        expect(getChatInput().disabled).toBe(false);
+    });
+    it('does not recreate the standalone notice from conversation or historical workflow blockers', () => {
+        render(<RightSidebar projectId="conversation" lang="zh" progress={0} onSendMessage={vi.fn()} isLoading={false}
+            messages={[]} projectStatus={{ project_id: 'conversation', blocked: true, blocked_reason: 'Model transport disconnected',
+                workflow: { runId: 'old-run', status: 'blocked', block: { message: 'Old delivery failed' } } }}
+            waitingPermission={getWaitingPermissionState()} />);
+        expect(screen.queryByText('Model transport disconnected')).toBeNull();
+        expect(screen.queryByText('Old delivery failed')).toBeNull();
+    });
+    it('does not resurrect the permission notice after its actionable card disappears', () => {
+        const projectStatus = { project_id: 'p', blocked: true, blocked_reason: 'Bash requires permission.' };
+        const permissions = [{ gate_id: 'gate', type: 'BEEGAME_PERMISSION' as const,
+            permission_tool_name: 'Bash', artifact: { input: { command: 'pwd' } } }];
+        const props = { projectId: 'p', lang: 'zh' as const, progress: 0, isLoading: false,
+            onSendMessage: vi.fn(), messages: [], projectStatus };
+        const { rerender } = render(<RightSidebar {...props} pendingPermissions={permissions}
+            waitingPermission={getWaitingPermissionState(projectStatus, permissions)} />);
+        expect(screen.getByTestId('beegame-permission-panel')).toBeInTheDocument();
+        rerender(<RightSidebar {...props} pendingPermissions={[]}
+            waitingPermission={getWaitingPermissionState(projectStatus)} />);
+        expect(screen.queryByTestId('beegame-permission-panel')).not.toBeInTheDocument();
+        expect(screen.queryByText('当前任务需要处理，原因如下。')).not.toBeInTheDocument();
+        expect(screen.queryByText('Bash requires permission.')).not.toBeInTheDocument();
+        expect(screen.queryByText(/可在聊天中说明要求/)).not.toBeInTheDocument();
+    });
     it('keeps loaded Chat images mounted across tab switches and releases them on exit', async () => {
         const fetchImage = vi.spyOn(apiClient, 'authenticatedFetch').mockResolvedValue(new Response(new Blob(['image'], { type:'image/png' })));
         const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:kept-image');
@@ -156,58 +312,33 @@ describe('RightSidebar tabs', () => {
         expect(screen.getByRole('region', { name: /^Tasks/ })).toBeInTheDocument();
     });
 
-    it('opens the independent Scene Editor from the Scene entry', async () => {
+    it.each(['scene', 'ui'] as const)('lists %s JSON files before opening the chosen file in a new tab', async kind => {
         const user = userEvent.setup();
-        render(
-            <RightSidebar
-                projectId="proj_1"
-                lang="en"
-                messages={[]}
-                progress={0}
-                onSendMessage={vi.fn()}
-                isLoading={false}
-                waitingPermission={{
-                    kind: 'none',
-                    isBlockingChat: false,
-                    isWaitingStatus: false,
-                    message: '',
-                    placeholder: 'Type...',
-                }}
-            />
-        );
-
+        const open = vi.spyOn(window, 'open').mockReturnValue(null);
+        window.history.replaceState({}, '', '/?project=proj_1');
+        vi.mocked(beeGameAdapter.getProjectGameContentFileList).mockResolvedValueOnce({ state: 'ready', documents: [
+            { path: 'scenes/a.json', revision: 'a', id: 'scene.a', kind: 'scene-2d' },
+            { path: 'scenes/b.json', revision: 'b', id: 'scene.b', kind: 'scene-3d' },
+            { path: 'ui/menu.json', revision: 'c', id: 'ui.menu', kind: 'ui-screen' },
+            { path: 'ui/hud.json', revision: 'd', id: 'ui.hud', kind: 'ui-hud' },
+            { path: 'ui/app-flow.json', revision: 'e', id: 'ui.flow', kind: 'ui-flow' },
+        ] });
+        const before = window.location.href;
+        render(<RightSidebar projectId="proj_1" lang="en" messages={[]} progress={0} onSendMessage={vi.fn()} isLoading={false}
+            waitingPermission={{kind:'none',isBlockingChat:false,isWaitingStatus:false,message:'',placeholder:'Type...'}} />);
         await user.click(screen.getByRole('tab', { name: /^Artifacts/ }));
-        await user.click(await screen.findByRole('button', { name: 'Scene' }));
-        expect(await screen.findByRole('dialog', { name: 'Scene Editor' })).toBeInTheDocument();
-        await user.keyboard('{Escape}');
-        expect(screen.queryByRole('dialog', { name: 'Scene Editor' })).not.toBeInTheDocument();
-    });
-
-    it('opens the independent UI Editor from the UI entry', async () => {
-        const user = userEvent.setup();
-        render(
-            <RightSidebar
-                projectId="proj_1"
-                lang="en"
-                messages={[]}
-                progress={0}
-                onSendMessage={vi.fn()}
-                isLoading={false}
-                waitingPermission={{
-                    kind: 'none',
-                    isBlockingChat: false,
-                    isWaitingStatus: false,
-                    message: '',
-                    placeholder: 'Type...',
-                }}
-            />
-        );
-
-        await user.click(screen.getByRole('tab', { name: /^Artifacts/ }));
-        await user.click(await screen.findByRole('button', { name: 'UI' }));
-        expect(await screen.findByRole('dialog', { name: 'UI Editor' })).toBeInTheDocument();
-        await user.keyboard('{Escape}');
-        expect(screen.queryByRole('dialog', { name: 'UI Editor' })).not.toBeInTheDocument();
+        expect(beeGameAdapter.getProjectGameContentFileList).not.toHaveBeenCalled();
+        await user.click(screen.getByRole('button', { name: kind === 'scene' ? 'Scene' : 'UI', exact: true }));
+        const file = kind === 'scene' ? 'b.json' : 'hud.json';
+        await user.click(await screen.findByRole('button', { name: new RegExp(file) }));
+        expect(screen.queryByText('app-flow.json')).not.toBeInTheDocument();
+        const url = new URL(String(open.mock.calls[0][0]));
+        expect(url.searchParams.get('editor')).toBe(kind);
+        expect(url.searchParams.get('editorFile')).toBe(kind === 'scene' ? 'scenes/b.json' : 'ui/hud.json');
+        expect(open).toHaveBeenCalledWith(expect.any(String), '_blank', 'noopener,noreferrer');
+        expect(window.location.href).toBe(before);
+        expect(screen.queryByRole('dialog', { name: /Editor/ })).not.toBeInTheDocument();
+        open.mockRestore();
     });
 
     it('shows durable foundation completion in the deliverables tab count before opening it', () => {
@@ -244,7 +375,7 @@ describe('RightSidebar tabs', () => {
 
         // The fixture above intentionally uses non-canonical names to prove
         // that unrelated workflow tasks do not inflate the document counter.
-        expect(screen.getByRole('tab', { name: /^Artifacts/ })).toHaveTextContent('10');
+        expect(screen.getByRole('tab', { name: /^Artifacts/ })).toHaveTextContent('3');
     });
 
     it('refreshes artifacts when a Level or Balance document event arrives', async () => {
@@ -376,6 +507,7 @@ describe('RightSidebar tabs', () => {
         await waitFor(() => expect(api.getArtifacts).toHaveBeenCalledTimes(2));
 
         await act(async () => second.resolve([{ id: 'new', path: 'docs/new.md', name: 'new.md' }]));
+        fireEvent.click(screen.getByRole('button', { name: /项目文档/ }));
         await waitFor(() => expect(screen.getByText('new.md')).toBeInTheDocument());
         await act(async () => first.resolve([{ id: 'old', path: 'docs/old.md', name: 'old.md' }]));
         await waitFor(() => expect(screen.queryByText('old.md')).not.toBeInTheDocument());
@@ -409,6 +541,7 @@ describe('RightSidebar tabs', () => {
         await userEvent.setup().click(screen.getByRole('tab', { name: /^Artifacts/ }));
         await waitFor(() => expect(api.getArtifacts).toHaveBeenCalledTimes(1));
         await act(async () => first.resolve([{ id: 'old', path: 'docs/old.md', name: 'old.md' }]));
+        fireEvent.click(screen.getByRole('button', { name: /项目文档/ }));
         await waitFor(() => expect(screen.getByText('old.md')).toBeInTheDocument());
 
         view.rerender(
@@ -432,6 +565,7 @@ describe('RightSidebar tabs', () => {
         expect(screen.queryByText('old.md')).not.toBeInTheDocument();
         await waitFor(() => expect(api.getArtifacts).toHaveBeenCalledTimes(2));
         await act(async () => second.resolve([{ id: 'new', path: 'docs/new.md', name: 'new.md' }]));
+        fireEvent.click(screen.getByRole('button', { name: /项目文档/ }));
         await waitFor(() => expect(screen.getByText('new.md')).toBeInTheDocument());
     });
 

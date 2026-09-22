@@ -34,6 +34,36 @@ function startRuntime() {
 }
 
 describe('native CLI process runner', () => {
+  for (const isolated of [false, true]) {
+    test(`returns user answers to native CLI in ${isolated ? 'isolated' : 'normal'} sessions`, async () => {
+      const root = await realpath(await mkdtemp(join(tmpdir(), 'native-question-')))
+      const runtime = await createNativeCliProcessRunner({
+        command: [process.execPath, fixturePath],
+      }).start({
+        sessionId: 'question-test', cwd: root, env: {},
+        ...(isolated ? { isolatedTask: { workspacePath: root, readOnlyPaths: [] } } : {}),
+      })
+      const messages: Record<string, unknown>[] = []
+      let requested = false
+      try {
+        await runtime.submit({
+          prompt: 'question', signal: new AbortController().signal,
+          onMessage: message => { messages.push(message) },
+          requestPermission: async request => {
+            requested = true
+            expect(request.toolName).toBe('AskUserQuestion')
+            return { behavior: 'allow', updatedInput: { ...request.input, answers: { 'Which style?': 'Pixel' } } }
+          },
+        })
+        expect(requested).toBe(true)
+        const reply = messages.at(-1)?.permissionResponse as { response: { response: Record<string, unknown> } }
+        expect(reply.response.response).toMatchObject({
+          behavior: 'allow',
+          updatedInput: { questions: [{ question: 'Which style?' }], answers: { 'Which style?': 'Pixel' } },
+        })
+      } finally { runtime.dispose?.(); await rm(root, { recursive: true, force: true }) }
+    })
+  }
   test('gives each session a stable, project-local scratch directory', async () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), 'session-scratch-')))
     try {
@@ -76,6 +106,18 @@ describe('native CLI process runner', () => {
     } finally { runtime.dispose?.() }
   })
   for (const source of ['policy', 'user'] as const) {
+    test(`keeps ${source} approvals distinct in the native permission response`, async () => {
+      const runtime = await startRuntime()
+      const messages: Record<string, unknown>[] = []
+      try {
+        await runtime.submit({ prompt: 'permission', signal: new AbortController().signal,
+          onMessage: message => { messages.push(message) },
+          requestPermission: async () => ({ behavior: 'allow', source, scope: 'once' }) })
+        const reply = messages.at(-1)?.permissionResponse as { response: { response: Record<string, unknown> } }
+        expect(reply.response.response.behavior).toBe('allow')
+        expect(reply.response.response.decisionClassification).toBe(source === 'user' ? 'user_temporary' : undefined)
+      } finally { runtime.dispose?.() }
+    })
     test(`keeps ${source} denials distinct in the native permission response`, async () => {
       const runtime = await startRuntime()
       const messages: Record<string, unknown>[] = []
@@ -127,10 +169,28 @@ describe('native CLI process runner', () => {
     const controller = new AbortController()
     try {
       await expect(runtime.submit({ prompt: 'agent-lifecycle:pending', signal: controller.signal,
-        onMessage: message => { if (message.type === 'result') controller.abort() },
+        onMessage: message => { if (message.type === 'result') controller.abort('user_stop') },
         requestPermission: async () => ({ behavior: 'deny' }) })).rejects.toThrow('cancelled by user')
     } finally { runtime.dispose?.() }
   })
+
+  for (const reason of ['user_stop', 'service_shutdown', undefined]) {
+    test(`records ${reason ?? 'unknown abort'} without inventing user intent`, async () => {
+      const terminals: Record<string, unknown>[] = []
+      const runtime = await createNativeCliProcessRunner({
+        command: [process.execPath, fixturePath],
+        observabilityFactory: () => ({ beginTurn() {}, observeStdoutChunk() {}, observeLine() {}, observeMessage() {},
+          finishTurn: result => { terminals.push(result) }, flush: async () => {} }),
+      }).start({ sessionId: 'stop-reason', cwd: process.cwd(), env: {} })
+      const controller = new AbortController()
+      try {
+        await expect(runtime.submit({ prompt: 'agent-lifecycle:pending', signal: controller.signal,
+          onMessage: message => { if (message.type === 'result') controller.abort(reason) },
+          requestPermission: async () => ({ behavior: 'deny' }) })).rejects.toThrow()
+        expect(terminals).toEqual([{ outcome: reason === 'user_stop' ? 'cancelled_by_user' : 'aborted', stopReason: reason ?? 'aborted' }])
+      } finally { runtime.dispose?.() }
+    })
+  }
 
   test('does not override native provider stream recovery policy', () => {
     const env = nativeRuntimeEnvironment({
@@ -407,7 +467,9 @@ describe('native CLI process runner', () => {
       {
         toolUseID: 'tool-1',
         toolName: 'Write',
-        message: 'Write requires permission.',
+        message: 'Target requires explicit authorization',
+        decisionReason: 'Target requires explicit authorization',
+        blockedPath: 'docs/GDD.md',
         input: { file_path: 'docs/GDD.md', content: 'test' },
         permissionSuggestions: [
           {

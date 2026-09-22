@@ -1347,6 +1347,14 @@ function checkSandboxAutoAllow(
     }
   }
   // No explicit rules, so auto-allow with sandbox
+  // Keep destructive path checks even in auto-allow mode. Isolation is not
+  // user authorization to remove a critical directory.
+  for (const sub of subcommands) {
+    if (/^(?:\S*\/)?(?:rm|rmdir)(?:\s|$)/.test(sub.trim())) {
+      const removal = checkPathConstraints({ ...input, command: sub }, getCwd(), toolPermissionContext)
+      if (removal.behavior !== 'passthrough') return removal
+    }
+  }
 
   return {
     behavior: 'allow',
@@ -1666,6 +1674,32 @@ export async function bashToolHasPermission(
   getCommandSubcommandPrefixFn = getCommandSubcommandPrefix,
 ): Promise<PermissionResult> {
   let appState = context.getAppState()
+  let sandboxAutoAllowResult: PermissionResult | undefined
+
+  // The user opted into automatic execution WITH OS isolation. Do not turn
+  // ordinary variables, loops or heredocs into host permission requests before
+  // consulting that policy. Explicit deny/ask rules still win; unsandboxed
+  // commands and plan mode continue through the normal permission checks.
+  if (
+    appState.toolPermissionContext.mode !== 'plan' &&
+    SandboxManager.isSandboxingEnabled() &&
+    SandboxManager.isAutoAllowBashIfSandboxedEnabled() &&
+    shouldUseSandbox(input)
+  ) {
+    sandboxAutoAllowResult = checkSandboxAutoAllow(
+      input,
+      appState.toolPermissionContext,
+    )
+    // With explicit command rules, dynamic syntax must still be analyzed:
+    // a textual split cannot prove that $(...) or eval obeys a deny rule.
+    const hasCommandRules = [
+      ...Object.values(appState.toolPermissionContext.alwaysDenyRules).flat(),
+      ...Object.values(appState.toolPermissionContext.alwaysAskRules).flat(),
+    ].some(rule => rule.startsWith('Bash(') && rule !== 'Bash(*)')
+    if (sandboxAutoAllowResult.behavior !== 'allow' || !hasCommandRules) {
+      return sandboxAutoAllowResult
+    }
+  }
 
   // 0. AST-based security parse. This replaces both tryParseShellCommand
   // (the shell-quote pre-check) and the bashCommandIsSafe misparsing gate.
@@ -1826,21 +1860,7 @@ export async function bashToolHasPermission(
     }
   }
 
-  // Check sandbox auto-allow (which respects explicit deny/ask rules)
-  // Only call this if sandboxing and auto-allow are both enabled
-  if (
-    SandboxManager.isSandboxingEnabled() &&
-    SandboxManager.isAutoAllowBashIfSandboxedEnabled() &&
-    shouldUseSandbox(input)
-  ) {
-    const sandboxAutoAllowResult = checkSandboxAutoAllow(
-      input,
-      appState.toolPermissionContext,
-    )
-    if (sandboxAutoAllowResult.behavior !== 'passthrough') {
-      return sandboxAutoAllowResult
-    }
-  }
+  if (sandboxAutoAllowResult?.behavior === 'allow' && astResult.kind === 'simple') return sandboxAutoAllowResult
 
   // Check exact match first
   const exactMatchResult = bashToolCheckExactMatchPermission(

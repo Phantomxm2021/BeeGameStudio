@@ -19,10 +19,10 @@ import { useSystemStore } from '../store/systemStore'
 import {
   api,
   type ChatAttachmentPayload,
-  type ProjectBaselineStatusPayload,
 } from '../services/api'
 import type { ContinueTaskResponse, SendMessageResponse } from '../services/api'
 import type { ProjectEventMessage } from '../types/message'
+import { hasActiveSubagents, isProjectExecutionActive } from '../utils/chatActivity'
 import type { ProjectEventPollingState } from './useProjectEventPolling'
 import { normalizeChatHistory } from '../utils/chatHistory'
 import { normalizeProjectEventSemanticType } from '../utils/messageSemantics'
@@ -42,13 +42,6 @@ function getErrorDisplayMessage(error: unknown, fallback: string): string {
     return message || fallback
   }
   return fallback
-}
-
-function isProjectWorkflowActive(
-  status?: ProjectBaselineStatusPayload | null,
-): boolean {
-  const workflowStatus = toProjectRuntimeDisplayModel(status)?.workflow?.status
-  return workflowStatus === 'running' || workflowStatus === 'verifying'
 }
 
 /**
@@ -211,6 +204,7 @@ export const useChat = ({
     setCurrentSender,
     setIsStreaming,
     loadHistory,
+    hasRunningSubagents,
   } = useChatStore(
     useShallow(state => ({
       addMessage: state.addMessage,
@@ -221,6 +215,7 @@ export const useChat = ({
       setCurrentSender: state.setCurrentSender,
       setIsStreaming: state.setIsStreaming,
       loadHistory: state.loadHistory,
+      hasRunningSubagents: hasActiveSubagents(state.messages),
     })),
   )
   const { pendingPermissions, projectStatus } = useProjectStore(
@@ -386,6 +381,7 @@ export const useChat = ({
                 subagentPrompt: message.subagent_prompt,
                 subagentOutput: message.subagent_output,
                 subagentTrace: message.subagent_trace,
+                subagentActivity: message.subagent_activity,
               },
               message.timestamp,
               message.message_id,
@@ -420,6 +416,7 @@ export const useChat = ({
                 subagentPrompt: message.subagent_prompt,
                 subagentOutput: message.subagent_output,
                 subagentTrace: message.subagent_trace,
+                subagentActivity: message.subagent_activity,
               },
               message.timestamp,
               message.message_id,
@@ -701,6 +698,7 @@ export const useChat = ({
             addMessage({
               id: toolMessageId,
               messageId: toolMessageId,
+              taskId: message.task_id,
               sender: 'system',
               content:
                 message.content || `Tool: ${message.tool}\nStatus: running`,
@@ -727,6 +725,7 @@ export const useChat = ({
               subagentPrompt: message.subagent_prompt,
               subagentOutput: message.subagent_output,
               subagentTrace: message.subagent_trace,
+              subagentActivity: message.subagent_activity,
             })
             refs.onTaskEvent?.('tool_start', message)
           }
@@ -756,6 +755,7 @@ export const useChat = ({
             addMessage({
               id: toolMessageId,
               messageId: toolMessageId,
+              taskId: message.task_id,
               sender: 'system',
               content:
                 message.content ||
@@ -784,6 +784,7 @@ export const useChat = ({
               subagentPrompt: message.subagent_prompt,
               subagentOutput: message.subagent_output,
               subagentTrace: message.subagent_trace,
+              subagentActivity: message.subagent_activity,
             })
             refs.onTaskEvent?.('tool_end', message)
           }
@@ -867,7 +868,7 @@ export const useChat = ({
       // BeeGame has one server-owned runtime-state snapshot.
       await refreshProjectVisibility()
       const projectStatus = useProjectStore.getState().projectStatus
-      if (isProjectWorkflowActive(projectStatus)) {
+      if (projectStatus?.project_id === projectId && isProjectExecutionActive(projectStatus)) {
         setCurrentTaskId(currentTaskId || projectId)
         setIsLoading(true)
         setCanContinue(false)
@@ -908,7 +909,7 @@ export const useChat = ({
 
   useEffect(() => {
     if (!projectStatus || projectStatus.project_id !== projectId) return
-    if (isProjectWorkflowActive(projectStatus)) {
+    if (isProjectExecutionActive(projectStatus)) {
       setIsLoading(true)
       setCanContinue(false)
       setCurrentTaskId(current => current || projectId)
@@ -944,6 +945,9 @@ export const useChat = ({
       attachments?: ChatAttachmentPayload[],
       supersedesMessageId?: string,
     ) => {
+      if (hasActiveSubagents(useChatStore.getState().messages)) return false
+      const runtime = useProjectStore.getState().projectStatus
+      if (runtime?.project_id === projectId && isProjectExecutionActive(runtime)) return false
       if (waitingPermission.isBlockingChat) {
         emitWaitingPermissionBlock(waitingPermission.message)
         return false
@@ -1030,6 +1034,9 @@ export const useChat = ({
    * Requirements: 6.4
    */
   const continueTask = useCallback(async () => {
+    if (hasActiveSubagents(useChatStore.getState().messages)) return
+    const runtime = useProjectStore.getState().projectStatus
+    if (runtime?.project_id === projectId && isProjectExecutionActive(runtime)) return
     if (waitingPermission.isBlockingChat) {
       emitWaitingPermissionBlock(waitingPermission.message)
       return
@@ -1140,6 +1147,7 @@ export const useChat = ({
       permission: { gate_id: string },
       decision: 'allow' | 'deny' = 'allow',
       scope: 'once' | 'session' = 'once',
+      answers?: Record<string, string>,
     ) => {
       const permissionSnapshot = pendingPermissions.find(
         item =>
@@ -1156,15 +1164,15 @@ export const useChat = ({
           message: submittedMessage,
         })
 
-        showToastSuccess?.(submittedMessage)
-
         await api.resolveToolPermission({
           project_id: projectId,
           gate_id: permission.gate_id,
           decision,
           scope,
+          ...(answers ? { answers } : {}),
         })
 
+        if (!answers) showToastSuccess?.(submittedMessage)
         removePendingPermission(permission.gate_id)
         await refreshProjectVisibility()
         setPermissionState({
@@ -1212,10 +1220,10 @@ export const useChat = ({
     stopTask,
     resolveToolPermission,
     permissionState,
-    isLoading,
+    isLoading: isLoading || hasRunningSubagents,
     isStopping,
     currentTaskId,
-    canContinue,
+    canContinue: canContinue && !hasRunningSubagents,
     wsState,
   }
 }

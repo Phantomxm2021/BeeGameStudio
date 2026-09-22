@@ -43,6 +43,8 @@ export async function proxyBeeGameBillingRequest(
   const responseHeaders = new Headers()
   const contentType = response.headers.get('content-type')
   if (contentType) responseHeaders.set('content-type', contentType)
+  const retryAfter = response.headers.get('retry-after')
+  if (retryAfter) responseHeaders.set('retry-after', retryAfter)
   return new Response(await response.text(), {
     status: response.status,
     headers: responseHeaders,

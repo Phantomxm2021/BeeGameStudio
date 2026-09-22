@@ -26,6 +26,7 @@ interface ChatMessageSemantic {
   subagentPrompt?: string;
   subagentOutput?: string;
   subagentTrace?: string;
+  subagentActivity?: Message['subagentActivity'];
   sources?: Message['sources'];
   citations?: Message['citations'];
   thinkingDurationMs?: number;
@@ -137,6 +138,7 @@ function mergeMessages(existing: Message, incoming: Message): Message {
     subagentPrompt: incoming.subagentPrompt ?? existing.subagentPrompt,
     subagentOutput: incoming.subagentOutput ?? existing.subagentOutput,
     subagentTrace: incoming.subagentTrace ?? existing.subagentTrace,
+    subagentActivity: incoming.subagentActivity ?? existing.subagentActivity,
     timestamp: existing.timestamp || incoming.timestamp,
     sequence: existing.sequence ?? incoming.sequence,
     type: incoming.type || existing.type,
@@ -250,6 +252,7 @@ export const useChatStore = create<ChatState>()(
               subagentPrompt: semantic?.subagentPrompt || existing.subagentPrompt,
               subagentOutput: semantic?.subagentOutput || existing.subagentOutput,
               subagentTrace: semantic?.subagentTrace || existing.subagentTrace,
+              subagentActivity: semantic?.subagentActivity ?? existing.subagentActivity,
               sources: semantic?.sources || existing.sources,
               citations: semantic?.citations || existing.citations,
             });
@@ -285,6 +288,7 @@ export const useChatStore = create<ChatState>()(
             subagentPrompt: semantic?.subagentPrompt,
             subagentOutput: semantic?.subagentOutput,
             subagentTrace: semantic?.subagentTrace,
+            subagentActivity: semantic?.subagentActivity,
             sources: semantic?.sources,
             citations: semantic?.citations,
             thinkingDurationMs: semantic?.thinkingDurationMs,
@@ -396,6 +400,7 @@ export const useChatStore = create<ChatState>()(
             subagentPrompt: semantic?.subagentPrompt,
             subagentOutput: semantic?.subagentOutput,
             subagentTrace: semantic?.subagentTrace,
+            subagentActivity: semantic?.subagentActivity,
             sources: semantic?.sources,
             citations: semantic?.citations,
             thinkingDurationMs: semantic?.thinkingDurationMs,

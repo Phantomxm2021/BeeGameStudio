@@ -25,6 +25,25 @@ export type BeeGameDevPorts = {
 
 export type BeeGameDevProcessName = 'billing' | 'skills' | 'resources' | 'runtime' | 'frontend'
 
+/** A failed service is observable, not an instruction to stop its siblings. */
+export async function waitForBeeGameDevServices(
+  services: Array<{ name: BeeGameDevProcessName; child: {
+    pid: number
+    exited: Promise<number>
+    signalCode: string | null
+  } }>,
+  report: (event: { service: BeeGameDevProcessName; pid: number; exitCode: number | null; signal: string | null; error?: string }) => void,
+): Promise<void> {
+  await Promise.all(services.map(async ({ name, child }) => {
+    try {
+      const exitCode = await child.exited
+      report({ service: name, pid: child.pid, exitCode, signal: child.signalCode })
+    } catch (error) {
+      report({ service: name, pid: child.pid, exitCode: null, signal: child.signalCode, error: String(error) })
+    }
+  }))
+}
+
 export type BeeGameDevProcessPlan = {
   name: BeeGameDevProcessName
   command: string[]

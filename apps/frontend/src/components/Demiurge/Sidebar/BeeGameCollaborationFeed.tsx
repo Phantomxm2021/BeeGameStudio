@@ -18,10 +18,12 @@ import { ReasoningText } from '../../beui/registry/components/agents/loading-sta
 import { StreamingResponse } from '../../beui/registry/components/agents/streaming-response';
 import { ToolResult, ToolResultOutput } from '../../beui/registry/components/agents/tool-result';
 import { Drawer } from '../../beui/registry/components/motion/drawer';
+import { AnimatedBadge, type AnimatedBadgeStatus } from '../../beui/registry/components/motion/animated-badge';
 import { shortenAbsolutePathsForDisplay } from '../../../utils/chatPathDisplay';
 import { ArtifactCard } from './ArtifactCard';
 import { chatStageLabels } from '../../../utils/chatStageLabels';
 import { ChatAttachmentView } from './ChatAttachmentView';
+import { SubagentActivityView } from './SubagentActivityView';
 
 type BeeGameCollaborationFeedProps = {
     messages: ChatDisplayMessage[];
@@ -31,7 +33,6 @@ type BeeGameCollaborationFeedProps = {
     currentUserEmail?: string;
     currentUserAvatarUrl?: string;
     onEditMessage?: (message: ChatDisplayMessage) => void;
-    onRetryResponse?: (message: string) => void;
     isLoading?: boolean;
     streamingMessageId?: string | null;
 };
@@ -65,6 +66,7 @@ type ToolFeedMessage = ChatDisplayMessage & {
 };
 
 type NormalizedTool = {
+    subagentActivity?: ChatDisplayMessage['subagentActivity'];
     attachments?: ChatDisplayMessage['attachments'];
     completionReason?: ChatDisplayMessage['completionReason'];
     id: string;
@@ -249,6 +251,7 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
         subagentPrompt: message.subagentPrompt,
         subagentOutput: message.subagentOutput,
         subagentTrace: message.subagentTrace,
+        subagentActivity: message.subagentActivity,
         input: message.toolInput ?? message.tool_input,
         before: message.toolBefore ?? message.tool_before,
         after: message.toolAfter ?? message.tool_after,
@@ -640,7 +643,6 @@ export const BeeGameCollaborationFeed = memo(({
     messages,
     lang = 'en',
     onEditMessage,
-    onRetryResponse,
     onPreviewArtifact,
     isLoading = false,
     streamingMessageId = null,
@@ -689,9 +691,6 @@ export const BeeGameCollaborationFeed = memo(({
         <>
         <MessageGroup spacing="compact">
             {entriesWithDates.map(({ entry, dateKey, dateLabel, showDateSeparator, showStageSeparator, stage }, entryIndex) => {
-                const previousUserMessage = entry.kind === 'response'
-                    ? [...entries.slice(0, entryIndex)].reverse().find((candidate): candidate is Extract<FeedEntry, { kind: 'user' }> => candidate.kind === 'user')?.message
-                    : undefined;
                 const hasLaterResponseInConversationTurn = entry.kind === 'response' && hasLaterAgentResponseBeforeUser(entries, entryIndex);
                 return <Fragment key={entry.kind === 'user' || entry.kind === 'context' ? entry.message.id : entry.id}>
                     {showDateSeparator && dateKey && dateLabel ? <DateSeparator dateKey={dateKey} label={dateLabel} /> : null}
@@ -730,7 +729,6 @@ export const BeeGameCollaborationFeed = memo(({
                                 const response = <StreamingResponse
                                     status={status}
                                     copyText={responseText || undefined}
-                                    onRetry={previousUserMessage && onRetryResponse ? () => onRetryResponse(previousUserMessage.content) : undefined}
                                     announce={false}
                                     showActions={Boolean(responseText) && !hasLaterResponseInConversationTurn}
                                     sources={sources}
@@ -810,32 +808,62 @@ function ThinkingActivity({ part, lang, working }: { part: Extract<ResponsePart,
         defaultOpen={false} className="w-full text-[var(--text-secondary)]" />;
 }
 
+function subagentStatus(tool: NormalizedTool, lang: Language) {
+    // Cancellation / incomplete snapshots are terminal, not successful completions.
+    const state = tool.completionReason === 'stopped' || tool.completionReason === 'incomplete'
+        ? tool.completionReason : tool.status;
+    const labels: Record<typeof state, { status: AnimatedBadgeStatus; zh: string; en: string }> = {
+        running: { status: 'loading', zh: '工作中', en: 'Working' },
+        completed: { status: 'success', zh: '已完成', en: 'Completed' },
+        failed: { status: 'danger', zh: '失败', en: 'Failed' },
+        stopped: { status: 'neutral', zh: '已停止', en: 'Stopped' },
+        incomplete: { status: 'warning', zh: '未完成', en: 'Incomplete' },
+    };
+    const { status, ...label } = labels[state];
+    const text = lang.startsWith('zh') ? label.zh : label.en;
+    return { state, status, text };
+}
+
+function SubagentStatusBadge({ tool, lang }: { tool: NormalizedTool; lang: Language }) {
+    const { state, status, text } = subagentStatus(tool, lang);
+    return <AnimatedBadge status={status} size="sm" contentKey={state}
+        role="status" aria-label={text} aria-live="polite" aria-atomic="true"
+        data-subagent-state={state} className="text-xs">
+        {text}
+    </AnimatedBadge>;
+}
+
 function SubagentToolSummary({ tool, lang, onOpen }: { tool: NormalizedTool; lang: Language; onOpen: () => void }) {
-    const running = tool.status === 'running';
-    const failed = tool.status === 'failed';
-    const title = lang === 'zh' ? '子任务' : 'Subagent';
+    const title = lang.startsWith('zh') ? '子任务' : 'Subagent';
     const normalizedName = tool.name.trim().toLowerCase();
     const name = normalizedName && !['agent', 'subagent', 'task'].includes(normalizedName) ? tool.name : title;
-    const statusLabel = tool.completionReason === 'stopped' ? (lang === 'zh' ? '已停止' : 'Stopped')
-        : tool.completionReason === 'incomplete' ? (lang === 'zh' ? '未完成' : 'Incomplete') : running
-        ? (lang === 'zh' ? '执行中' : 'Working')
-        : failed
-            ? (lang === 'zh' ? '失败' : 'Failed')
-            : (lang === 'zh' ? '已完成' : 'Completed');
+    const { state, status, text } = subagentStatus(tool, lang);
     return <div
         className="my-1"
         data-testid={`beegame-subagent-disclosure-${tool.id}`}
     >
-        <button
-            type="button"
+        <AnimatedBadge
+            role="button"
+            tabIndex={0}
+            status={status}
+            size="md"
+            contentKey={`${name}-${state}`}
+            data-subagent-state={state}
+            aria-label={`${name} · ${text}`}
+            aria-haspopup="dialog"
             onClick={onOpen}
-            className="inline-flex h-8 max-w-full items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-2)] px-2.5 text-left text-xs font-medium text-[var(--text-secondary)] shadow-sm outline-none transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+            onKeyDown={event => {
+                if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onOpen(); }
+            }}
+            className="max-w-full cursor-pointer text-left outline-none hover:brightness-110 focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
         >
-            <Bot aria-hidden="true" className="size-3.5 shrink-0" />
-            <span className="max-w-40 truncate">{name}</span>
-            <span className={`shrink-0 ${failed ? 'text-[var(--destructive)]' : 'text-[var(--text-muted)]'}`}>{statusLabel}</span>
-            <ChevronRight aria-hidden="true" className="size-3 shrink-0" />
-        </button>
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+                <span className="min-w-0 max-w-40 truncate">{name}</span>
+                <span aria-hidden="true" className="opacity-40">·</span>
+                <span role="status" aria-label={text} aria-live="polite" aria-atomic="true">{text}</span>
+                <ChevronRight aria-hidden="true" className="size-3 shrink-0 opacity-60" />
+            </span>
+        </AnimatedBadge>
     </div>;
 }
 
@@ -848,17 +876,9 @@ function AgentRunDetailView({
     lang: Language;
     onBack: () => void;
 }) {
-    const running = detail.tool.status === 'running';
-    const failed = detail.tool.status === 'failed';
     const title = lang === 'zh' ? '子任务' : 'Subagent';
-    const statusLabel = detail.tool.completionReason === 'stopped' ? (lang === 'zh' ? '已停止' : 'Stopped')
-        : detail.tool.completionReason === 'incomplete' ? (lang === 'zh' ? '未完成' : 'Incomplete') : running
-        ? (lang === 'zh' ? '执行中' : 'Working')
-        : failed
-            ? (lang === 'zh' ? '失败' : 'Failed')
-            : (lang === 'zh' ? '已完成' : 'Completed');
     const prompt = displayText(String(detail.tool.subagentPrompt || detail.tool.detail || '').trim());
-    const output = displayText(String(detail.tool.subagentOutput || detail.tool.output || '').trim());
+    const output = detail.tool.status === 'running' ? '' : displayText(String(detail.tool.subagentOutput || detail.tool.output || '').trim());
     const trace = displayText(String(detail.tool.subagentTrace || '').trim());
 
     return <section className="min-w-0 space-y-4 px-1 py-2" data-testid="beegame-agent-run-detail">
@@ -874,8 +894,8 @@ function AgentRunDetailView({
             <Bot aria-hidden="true" className="size-4 shrink-0 text-[var(--text-secondary)]" />
             <div className="min-w-0 flex-1">
                 <h2 className="type-chat-h3 truncate text-[var(--text-primary)]">{title}</h2>
-                <p className={`type-caption-1 ${failed ? 'text-[var(--destructive)]' : 'text-[var(--text-muted)]'}`}>{statusLabel}</p>
             </div>
+            <SubagentStatusBadge tool={detail.tool} lang={lang} />
         </header>
         <div className="space-y-4" data-testid={`beegame-subagent-detail-${detail.tool.id}`}>
             {prompt ? <section>
@@ -886,9 +906,10 @@ function AgentRunDetailView({
                 <h3 className="mb-1 type-caption-1 font-medium text-[var(--text-muted)]">{lang === 'zh' ? '结果' : 'Result'}</h3>
                 <MarkdownRenderer content={output} messageId={`${detail.tool.id}-subagent-output`} lang={lang} />
             </section> : null}
-            {trace ? <section>
+            {detail.tool.subagentActivity || trace ? <section>
                 <h3 className="mb-1 type-caption-1 font-medium text-[var(--text-muted)]">{lang === 'zh' ? '执行记录' : 'Trace'}</h3>
-                <pre className="type-code max-h-[32rem] overflow-auto whitespace-pre-wrap rounded-md bg-[var(--surface-3)] p-2 text-[var(--text-secondary)]">{trace}</pre>
+                <SubagentActivityView activity={detail.tool.subagentActivity} legacyTrace={trace} lang={lang}
+                    running={detail.tool.status === 'running' && !detail.tool.completionReason} />
             </section> : null}
         </div>
     </section>;

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createNativeSubagentChatEnricher, readVisibleSubagentTrace } from './native-subagent-chat'
+import { createNativeSubagentChatEnricher, readVisibleSubagentActivity } from './native-subagent-chat'
 import { createStageChatProjector, type StageChatEvent } from './stage-chat-events'
 
 describe('native subagent chat observation', () => {
@@ -26,13 +26,49 @@ describe('native subagent chat observation', () => {
       expect(launch.payload).toHaveProperty('nativeBackgroundTask.taskId', 'task-1')
       const progress = enrich({ type: 'system.status', payload: { type: 'system', subtype: 'task_progress', task_id: 'task-1' } })
       expect(progress.payload).toMatchObject({ toolUseID: 'agent-1', input })
-      expect(progress.payload).toHaveProperty('subagentTrace')
-      const trace = readVisibleSubagentTrace(path)!
-      expect(trace).toContain('Checking manifest')
-      expect(trace).toContain('[read-1] Read')
-      expect(trace).toContain('valid manifest')
-      expect(trace).not.toContain('private thought')
-      expect(readVisibleSubagentTrace(join(dir, 'missing'))).toBeUndefined()
+      expect(progress.payload).toHaveProperty('subagentActivity')
+      const activity = readVisibleSubagentActivity(path)!
+      expect(activity.entries).toMatchObject([
+        { kind: 'message', text: 'Checking manifest' },
+        { id: 'read-1', kind: 'tool', toolName: 'Read', filePath: 'manifest.json', status: 'completed', output: 'valid manifest' },
+      ])
+      expect(JSON.stringify(activity)).not.toContain('private thought')
+      expect(readVisibleSubagentActivity(join(dir, 'missing'))).toBeUndefined()
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  test('keeps tool identity and filename when truncating a long source result, and distinguishes shell failure', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'subagent-structured-'))
+    try {
+      const path = join(dir, 'child.output')
+      writeFileSync(path, [
+        { type: 'assistant', message: { content: [
+          { type: 'tool_use', id: 'read', name: 'Read', input: { file_path: 'src/Game.tsx' } },
+          { type: 'tool_use', id: 'bash', name: 'Bash', input: { command: 'bun test' } },
+        ] } },
+        { type: 'user', message: { content: [
+          { type: 'tool_result', tool_use_id: 'read', content: 'const item = <div />;\n'.repeat(1500) },
+          { type: 'tool_result', tool_use_id: 'bash', is_error: true, content: 'test failed' },
+        ] } },
+      ].map(row => JSON.stringify(row)).join('\n'))
+      const activity = readVisibleSubagentActivity(path)!
+      expect(activity.truncated).toBe(true)
+      expect(activity.entries[0]).toMatchObject({ id: 'read', filePath: 'src/Game.tsx', truncated: true, status: 'completed' })
+      expect(activity.entries[1]).toMatchObject({ id: 'bash', command: 'bun test', status: 'failed', output: 'test failed' })
+      expect(JSON.stringify(activity).length).toBeLessThan(24000)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  test('does not guess a source language for a result whose invocation is outside the retained tail', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'subagent-orphan-'))
+    try {
+      const path = join(dir, 'child.output')
+      writeFileSync(path, JSON.stringify({ type: 'user', message: { content: [
+        { type: 'tool_result', tool_use_id: 'unknown', content: '<div>Hello</div>' },
+      ] } }))
+      expect(readVisibleSubagentActivity(path)?.entries[0]).toEqual({
+        id: 'unknown', kind: 'tool', toolName: '', status: 'completed', output: '<div>Hello</div>',
+      })
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 

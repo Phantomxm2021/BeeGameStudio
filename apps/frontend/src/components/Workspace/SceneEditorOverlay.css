@@ -8,6 +8,7 @@
      matching dark-surface tokens locally. */
   --foreground: #f4f4f5;
   --primary: #f4f4f5;
+  --primary-foreground: #202126;
   --border: color-mix(in srgb, #ffffff 14%, transparent);
   position: absolute;
   inset: 0;
@@ -100,18 +101,6 @@
   justify-content: center;
   margin: 24px auto 0;
 }
-
-.scene-loading-action {
-  padding: 7px 11px;
-  border-radius: 8px;
-  color: rgba(243, 244, 247, 0.66);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.scene-loading-action:hover { color: #fff; background: rgba(255, 255, 255, 0.07); }
-.scene-loading-action.primary { color: #fff; background: #287fda; }
-.scene-loading-action.primary:hover { background: #3190ef; }
 
 .scene-loading-actions {
   display: flex;

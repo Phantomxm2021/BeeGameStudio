@@ -58,6 +58,26 @@ function resolveAssetId(resourceId: string | undefined, data: Record<string, unk
   return resourceId;
 }
 
+/**
+ * Scene text historically used `data.member` for the font file while the
+ * canonical contract uses `data.font.assetRef` (+ optional `member`).  Accept
+ * both at the adapter boundary so the editor renders the authored font and
+ * saves the canonical reference without making the viewport guess from a
+ * node name.
+ */
+function textFontAssetId(data: Record<string, unknown>, members?: Record<string, Record<string, string>>): string | undefined {
+  const font = record(data.font);
+  const resourceId = typeof font?.assetRef === 'string' ? font.assetRef : undefined;
+  const member = typeof font?.member === 'string' ? font.member : typeof data.member === 'string' ? data.member : undefined;
+  if (resourceId) return resolveAssetId(resourceId, { member }, members);
+  if (!member || !members) return undefined;
+  for (const options of Object.values(members)) {
+    const resolved = options[member];
+    if (resolved) return resolved;
+  }
+  return undefined;
+}
+
 function material(data: Record<string, unknown>, assetId?: string): MaterialOverride {
   const source = record(data.material); const color = typeof source?.color === 'string' ? source.color : typeof data.color === 'string' ? data.color : '#ffffff';
   return { mode: source?.mode === 'standard' ? 'standard' : 'unlit', color, metalness: finite(source?.metalness, 0), roughness: finite(source?.roughness, 1), opacity: Math.min(1, Math.max(0, finite(source?.opacity, finite(data.opacity, finite(data.alpha, 1))))), alphaMode: ['opaque', 'mask', 'blend'].includes(String(source?.alphaMode)) ? source?.alphaMode as MaterialOverride['alphaMode'] : 'blend', ...(assetId ? { textureAssetId: assetId } : {}) };
@@ -145,11 +165,23 @@ function toEditorComponent(input: { node: BeeGameContentNode; component: Canonic
     // Rects always use top-left coordinates, including Canvas UI in a 3D scene.
     return { id, type: 'rect-transform', enabled, anchorMin: [min[0], 1-max[1]], anchorMax: [max[0], 1-min[1]], pivot: [pivot[0], 1-pivot[1]], anchoredPosition: [offset[0]/unit, -offset[1]/unit], sizeDelta: [size[0]/unit, size[1]/unit], properties: data };
   }
-  if (component.type === 'text') return { id, type: 'text', enabled, text: typeof data.text === 'string' ? data.text : '', properties: data };
+  if (component.type === 'text') {
+    const fontAssetId = textFontAssetId(data, input.members);
+    return { id, type: 'text', enabled, text: typeof data.text === 'string' ? data.text : '', ...(fontAssetId ? { fontAssetId } : {}), properties: data };
+  }
   throw new Error(`Unsupported scene component ${component.type}`);
 }
 
-const childrenByParent = (nodes: BeeGameContentNode[]) => { const result = new Map<string, string[]>(); for (const node of nodes) if (node.parentId) result.set(node.parentId, [...(result.get(node.parentId) ?? []), node.id]); return result; };
+const childrenByParent = (nodes: BeeGameContentNode[]) => {
+  const result = new Map<string, string[]>();
+  for (const node of nodes) {
+    if (!node.parentId) continue;
+    const children = result.get(node.parentId) ?? [];
+    children.push(node.id);
+    result.set(node.parentId, children);
+  }
+  return result;
+};
 
 export function sceneContentToEditorDocument(input: { document: BeeGameSceneContentDocument; documentRevision: string; foundationDocumentRevision: string; assetManifestRevision: string; assets?: Record<string, SceneAsset>; assetMembers?: Record<string, Record<string, string>> }): SceneDocument {
   for (const node of input.document.data.nodes) for (const component of node.components ?? []) if (component.type === 'tilemap') {
@@ -189,7 +221,20 @@ function toCanonicalComponent(component: SceneComponent, metrics: CanvasMetrics,
   if (component.type === 'camera') return { id: component.id, type: component.type, data: { ...props, orthographic: component.orthographic, ...(component.orthographicSize === undefined ? {} : { orthographicSize: component.orthographicSize }), ...(component.nearClip === undefined ? {} : { nearClip: component.nearClip }), ...(component.farClip === undefined ? {} : { farClip: component.farClip }), ...enabled } };
   if (component.type === 'canvas') return { id: component.id, type: component.type, data: { ...props, renderMode: component.renderMode, ...enabled } };
   if (component.type === 'rect-transform') return { id: component.id, type: component.type, data: { ...props, anchorMin: [component.anchorMin[0], 1-component.anchorMax[1]], anchorMax: [component.anchorMax[0], 1-component.anchorMin[1]], pivot: [component.pivot[0], 1-component.pivot[1]], anchoredPosition: [component.anchoredPosition[0]*unit, -component.anchoredPosition[1]*unit], sizeDelta: component.sizeDelta.map(value => value * unit), ...enabled } };
-  if (component.type === 'text') return { id: component.id, type: component.type, data: { ...props, text: component.text, ...enabled } };
+  if (component.type === 'text') {
+    const data: Record<string, unknown> = { ...props, text: component.text, ...enabled };
+    if (component.fontAssetId) {
+      const font = record(data.font) ?? {};
+      const fontMember = component.fontAssetId.includes(':')
+        ? component.fontAssetId.slice(component.fontAssetId.indexOf(':') + 1)
+        : typeof font.member === 'string' ? font.member : typeof data.member === 'string' ? data.member : undefined;
+      data.font = { ...font, assetRef: sourceAssetId(component.fontAssetId), ...(fontMember ? { member: fontMember } : {}) };
+      // `member` was the pre-v2 location. Keep the migration one-way when a
+      // text component is saved so runtime consumers have one font contract.
+      delete data.member;
+    }
+    return { id: component.id, type: component.type, data };
+  }
   throw new Error(`Unsupported scene component ${component satisfies never}`);
 }
 

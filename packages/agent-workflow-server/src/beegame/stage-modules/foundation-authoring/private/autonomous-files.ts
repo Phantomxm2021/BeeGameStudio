@@ -7,12 +7,13 @@ import { authorDigest, type AuthorDocumentsResult, type AuthorStartInput } from 
 import { CANONICAL_FOUNDATION_DOCUMENTS, type FoundationDocumentPath } from './domain/types'
 import { canonicalizeAuthoredDocument } from './domain/authored-document-receipt'
 import { computeDocumentRevision, computeWorkspaceRevision } from './domain/revision'
+import { readConfirmedReferenceFiles } from '../../../confirmed-reference-files'
 
 export const autonomousDocumentLimit = 2 * 1024 * 1024
 export const authorBytesDigest = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex')
 export type AuthorBaseline = Record<FoundationDocumentPath, string | null>
 export const authorBaselineSchema = z.record(z.enum(CANONICAL_FOUNDATION_DOCUMENTS), z.string().regex(/^[a-f0-9]{64}$/).nullable())
-export const autonomousAuthorReadOnlyPaths = Object.freeze(['requirements.md'])
+export const autonomousAuthorReadOnlyPaths = Object.freeze(['requirements.md', '.beegame-attachments'])
 export const autonomousPreparedSchema = z.strictObject({
   version: z.literal('autonomous-author-bundle.v1'),
   inputDigest: z.string().regex(/^[a-f0-9]{64}$/),
@@ -81,6 +82,9 @@ export async function initializeAutonomousFiles(input: {
   const requirements = input.start.input.confirmedBrief + (input.start.input.changeRequest
     ? `\n\nAdditional confirmed change request:\n${input.start.input.changeRequest}` : '')
   await writeOnce(join(input.candidatePath, 'requirements.md'), Buffer.from(requirements))
+  const references = await readConfirmedReferenceFiles(input.workspacePath, input.start.input.confirmedBrief)
+  if (references.length) await ensureRealDirectory(join(input.candidatePath, '.beegame-attachments'))
+  for (const reference of references) await writeOnce(join(input.candidatePath, reference.path), reference.bytes)
 }
 
 export async function validateAutonomousEvidence(candidatePath: string, start: AuthorStartInput): Promise<void> {

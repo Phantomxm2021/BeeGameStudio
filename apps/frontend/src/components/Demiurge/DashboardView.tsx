@@ -6,8 +6,9 @@ import { useSystemStore } from '../../store/systemStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useChatStore } from '../../store/chatStore';
 import { useChat } from '../../hooks/useChat';
-import { useToast } from '../../hooks/useToast';
+import { useToastContext } from '../../contexts/ToastContext';
 import { isAuthenticationServiceUnavailable } from '../../services/apiClient';
+import { authRetryDelay } from '../../services/authRetry';
 import type { Language } from './AgentsConfig';
 
 import { BeeGameLivePreviewPage, type DashboardStatus } from './BeeGameLivePreviewPage';
@@ -21,15 +22,12 @@ import {
   toPermissionDisplayModels,
   type ProjectRuntimeDisplayModel,
 } from '../../viewModels/displayModels';
-import {
-  getCreditBalance,
-  getCreditSummary,
-  type BeeGameCreditBalance,
-  type BeeGameUsageSummary,
-} from '../../services/creditsApi';
+import { useCredits } from '../../hooks/useCredits';
 import { normalizeI18nLanguage } from '../../i18n/useBeeGameTranslations';
 import { countPendingToolPermissions, usePermissionTabAttention } from '../../hooks/usePermissionTabAttention';
 import { isCompletedFoundationAuthoringPause } from '../../utils/documentProgress';
+import { getProjectDisplayName } from '../../utils/projectDisplayName';
+import { isProjectExecutionActive } from '../../utils/chatActivity';
 
 interface DashboardViewProps {
   chatHistoryReady?: boolean;
@@ -39,12 +37,6 @@ interface DashboardViewProps {
   onSetLang: (lang: Language) => void;
   onBack?: () => void;
 }
-
-const getWorkspaceFolderName = (rootPath?: string): string => {
-  const normalized = String(rootPath || '').replaceAll('\\', '/');
-  const parts = normalized.split('/').filter(Boolean);
-  return parts[parts.length - 1] || '';
-};
 
 const upsertDeploymentHistory = (
   current: BeeGameDeploymentPayload[],
@@ -96,16 +88,12 @@ const withProjectSyncTimeout = async <T,>(operation: Promise<T>, message: string
 };
 
 export function DashboardView({ projectId, projectName, lang, onSetLang, onBack, chatHistoryReady = true }: DashboardViewProps) {
-  const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
-  const [creditSummary, setCreditSummary] = useState<BeeGameUsageSummary | null>(null);
   const [deploymentHistory, setDeploymentHistory] = useState<BeeGameDeploymentPayload[]>([]);
+  const deploymentInProgress = deploymentHistory.some(item => ['queued', 'building', 'publishing'].includes(item.status));
   const [isDeployingProject, setDeployingProject] = useState(false);
-  const [isWorkflowActionPending, setWorkflowActionPending] = useState(false);
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const creditRefreshPromiseRef = useRef<{ projectId: string; promise: Promise<void> } | null>(null);
   const reconnectResumeProjectRef = useRef<string | null>(null);
-  const activeCreditProjectRef = useRef(projectId);
   const previousBeeGameStatusRef = useRef<string | null>(null);
   const { i18n } = useTranslation('beegame');
   const translateBeeGame = useMemo(() => i18n.getFixedT(normalizeI18nLanguage(lang), 'beegame'), [i18n, lang]);
@@ -130,36 +118,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     })),
   );
   const { messages } = useChatStore(useShallow(state => ({ messages: state.messages })));
-  const { showSuccess, showError, showWarning } = useToast();
+  const { showSuccess, showError, showWarning } = useToastContext();
 
-  const refreshCredits = useCallback((): Promise<void> => {
-    if (creditRefreshPromiseRef.current?.projectId === projectId) {
-      return creditRefreshPromiseRef.current.promise;
-    }
-    const request = (async () => {
-      const [summaryResult, balanceResult] = await Promise.allSettled([
-        getCreditSummary(projectId),
-        getCreditBalance(),
-      ]);
-      if (activeCreditProjectRef.current !== projectId) return;
-      if (summaryResult.status === 'fulfilled') {
-        setCreditSummary(summaryResult.value);
-      } else {
-        logDashboardReadError('Failed to load credit summary:', summaryResult.reason);
-      }
-      if (balanceResult.status === 'fulfilled') {
-        setCreditBalance(balanceResult.value);
-      } else {
-        logDashboardReadError('Failed to load credit balance:', balanceResult.reason);
-      }
-    })().finally(() => {
-      if (creditRefreshPromiseRef.current?.promise === request) {
-        creditRefreshPromiseRef.current = null;
-      }
-    });
-    creditRefreshPromiseRef.current = { projectId, promise: request };
-    return request;
-  }, [projectId]);
+  const { creditBalance, creditSummary, refreshCredits } = useCredits(
+    projectId, authenticationStatus === 'authenticated', currentUser?.id,
+  );
 
   const refreshDeploymentHistory = useCallback(async (): Promise<BeeGameDeploymentPayload[]> => {
     try {
@@ -173,6 +136,25 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
   }, [projectId]);
 
   // Custom Hook for WebSocket & REST
+  useEffect(() => {
+    if (!deploymentInProgress || authenticationStatus !== 'authenticated') return;
+    let cancelled = false;
+    let warned = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const records = await api.listProjectDeployments(projectId);
+        if (!cancelled) { setDeploymentHistory(records); warned = false; }
+      } catch (error) {
+        if (!cancelled && !warned) { warned = true; showWarning(error instanceof Error ? error.message : String(error)); }
+      } finally {
+        if (!cancelled) timer = setTimeout(poll, 2500);
+      }
+    };
+    timer = setTimeout(poll, 1000);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [projectId, deploymentInProgress, authenticationStatus, showWarning]);
+
   const { sendMessage, stopTask, resolveToolPermission, permissionState, isLoading, isStopping, canContinue, wsState } = useChat({
     projectId,
     eventsEnabled: chatHistoryReady,
@@ -208,15 +190,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
   });
 
   useEffect(() => {
-    activeCreditProjectRef.current = projectId;
-    // Credit and deployment summaries belong to the selected project.
+    // Deployment summaries belong to the selected project.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setCreditBalance(null);
-    setCreditSummary(null);
     setDeploymentHistory([]);
-    void refreshCredits();
-    void refreshDeploymentHistory();
-  }, [projectId, refreshCredits, refreshDeploymentHistory]);
+    if (authenticationStatus === 'authenticated') void refreshDeploymentHistory();
+  }, [projectId, authenticationStatus, refreshDeploymentHistory]);
 
   // Local derived state mapped from backend
   const isOffline = wsState === 'failed' || wsState === 'disconnected';
@@ -297,30 +275,12 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     };
   }, [refreshCredits, workflowUsageRevision]);
 
-  useEffect(() => {
-    // Image charges and delayed ledger writes don't change workflow token
-    // counters. Reconcile the authoritative wallet while this view is visible.
-    const refresh = () => { if (document.visibilityState !== 'hidden') void refreshCredits(); };
-    const interval = setInterval(refresh, 5_000);
-    window.addEventListener('beegame:credits-updated', refresh);
-    window.addEventListener('focus', refresh);
-    document.addEventListener('visibilitychange', refresh);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('beegame:credits-updated', refresh);
-      window.removeEventListener('focus', refresh);
-      document.removeEventListener('visibilitychange', refresh);
-    };
-  }, [refreshCredits]);
-
-  const isPipelineActive = useMemo(() => {
-    const workflowStatus = projectRuntimeDisplay?.workflow?.status;
-    return workflowStatus === 'running' || workflowStatus === 'verifying';
-  }, [projectRuntimeDisplay?.workflow?.status]);
-  const isProjectWorkspaceMutationLocked = isProjectInteractionLocked || isProjectStarting || isPipelineActive;
+  const isExecutionBusy = isLoading || isStopping ||
+    (hasCurrentRuntimeSnapshot && isProjectExecutionActive(projectRuntimeDisplay)) || hasPendingToolPermission;
+  const isProjectWorkspaceMutationLocked = isProjectInteractionLocked || isProjectStarting || isExecutionBusy || deploymentInProgress;
   const canSendMessage = hasPermission('agent.send_message') && !isProjectWorkspaceMutationLocked;
   const canApproveTool = hasPermission('agent.approve_tool') && !isProjectInteractionLocked;
-  const canManagePreview = hasPermission('preview.manage') && !isProjectInteractionLocked;
+  const canManagePreview = hasPermission('preview.manage') && !isProjectWorkspaceMutationLocked;
   const canManageDeployment = hasPermission('deployment.manage') && !isProjectWorkspaceMutationLocked;
   const canUploadAssets = hasPermission('assets.upload') && !isProjectWorkspaceMutationLocked;
   const canExportProject = hasPermission('project.export');
@@ -337,6 +297,9 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     const acceptance = projectStatus?.acceptance?.status;
     if (isOffline) return 'offline';
     if (!hasCurrentRuntimeSnapshot) return 'starting';
+    if (hasPendingToolPermission || projectRuntimeDisplay?.phase === 'waiting_approval') return 'waiting_approval';
+    // A historical workflow verdict must not mask the active follow-up turn.
+    if (isExecutionBusy) return 'running';
     if (['blocked', 'failed', 'cancelled', 'stale'].includes(workflowStatus)) return 'paused';
     if (workflowStatus === 'completed') return 'finished';
     if (workflowStatus === 'running' || workflowStatus === 'verifying') return 'running';
@@ -355,6 +318,8 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     isOffline,
     hasCurrentRuntimeSnapshot,
     isLoading,
+    isExecutionBusy,
+    projectRuntimeDisplay?.phase,
     canContinue,
     hasPendingToolPermission,
     waitingPermission.isWaitingStatus,
@@ -373,17 +338,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         api.startProjectPreview(projectId),
         translateBeeGame('livePreview.syncTimeoutMessage'),
       );
-      setPreviewRefreshNonce(value => value + 1);
-      await refreshPreviewStatus();
-    } catch (error) {
-      showError(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  const handleRestartPreview = async () => {
-    if (!canManagePreview || isProjectWorkspaceMutationLocked) return;
-    try {
-      await api.restartProjectPreview(projectId);
       setPreviewRefreshNonce(value => value + 1);
       await refreshPreviewStatus();
     } catch (error) {
@@ -411,11 +365,12 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
       if (!refreshed.some(item => item.id === deployment.id)) {
         setDeploymentHistory(current => upsertDeploymentHistory(current, deployment));
       }
-      if (deployment.status !== 'succeeded' || !deployment.url) {
+      if (deployment.status === 'failed') {
         throw new Error(deployment.message || 'Deployment failed');
       }
     } catch (error) {
       showError(error instanceof Error ? error.message : String(error));
+      throw error;
     } finally {
       setDeployingProject(false);
     }
@@ -446,22 +401,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     const failedResult = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
     if (failedResult) throw failedResult.reason;
   }, [loadProjectRuntimeState, projectId, translateBeeGame]);
-
-  const handleWorkflowAction = useCallback(async (action: 'resume' | 'retry') => {
-    setWorkflowActionPending(true);
-    try {
-      if (action === 'retry') {
-        await api.retryWorkflow(projectId);
-      } else {
-        await api.resumeWorkflow(projectId);
-      }
-      await loadProjectRuntimeState(projectId);
-    } catch (error) {
-      showError(getErrorMessage(error, 'Unable to continue the workflow.'));
-    } finally {
-      setWorkflowActionPending(false);
-    }
-  }, [loadProjectRuntimeState, projectId, showError]);
 
   useEffect(() => {
     if (
@@ -496,13 +435,21 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     runProjectSync().catch(error => {
       showWarning(getErrorMessage(error, translateBeeGame('livePreview.syncFailedMessage')));
     });
+    let authFailures = 0;
+    let retryAt = 0;
+    let polling = false;
     const poll = () => {
-      if (document.hidden) return;
+      if (document.hidden || polling || Date.now() < retryAt) return;
 
-      if (currentStatus === 'running' || isPipelineActive) {
-        loadProjectRuntimeState(projectId).catch(error => {
+      if (isExecutionBusy) {
+        polling = true;
+        loadProjectRuntimeState(projectId).then(() => {
+          authFailures = 0;
+          retryAt = 0;
+        }).catch(error => {
+          if (isAuthenticationServiceUnavailable(error)) retryAt = Date.now() + authRetryDelay(++authFailures, error);
           logDashboardReadError('Failed to poll project runtime state:', error);
-        });
+        }).finally(() => { polling = false; });
       }
     };
 
@@ -528,7 +475,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     authenticationStatus,
     loadProjectRuntimeState,
     currentStatus,
-    isPipelineActive,
+    isExecutionBusy,
     runProjectSync,
     showWarning,
     translateBeeGame,
@@ -560,8 +507,8 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
   }, [currentStatus, isFoundationAuthoringPaused, translateBeeGame]);
 
   const displayProjectName = useMemo(() => {
-    return getWorkspaceFolderName(activeProject?.root_path) || projectName;
-  }, [activeProject?.root_path, projectName]);
+    return getProjectDisplayName({ root_path: activeProject?.root_path, name: projectName }, translateBeeGame('untitledProject'));
+  }, [activeProject?.root_path, projectName, translateBeeGame]);
 
   useEffect(() => {
     const previousStatus = previousBeeGameStatusRef.current;
@@ -576,6 +523,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
   return (
     <div className={`${isDark ? 'dark' : ''} h-full w-full overflow-hidden bg-background font-sans text-foreground`}>
       <BeeGameLivePreviewPage
+        projectId={projectId}
         lang={lang}
         projectName={displayProjectName}
         status={currentStatus === 'idle' ? 'idle' : (currentStatus as DashboardStatus)}
@@ -592,7 +540,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         deployments={deploymentHistory}
         previewRefreshNonce={previewRefreshNonce}
         onStartPreview={canManagePreview ? handleStartPreview : undefined}
-        onRestartPreview={canManagePreview ? handleRestartPreview : undefined}
         onStopPreview={canManagePreview ? handleStopPreview : undefined}
         onDeployProject={canManageDeployment ? handleDeployProject : undefined}
         onRollbackDeployment={canManageDeployment ? handleRollbackDeployment : undefined}
@@ -622,7 +569,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
               }
             : undefined
         }
-        isDeploying={isDeployingProject}
+        isDeploying={isDeployingProject || deploymentInProgress}
         onOpenExternal={url => window.open(url, '_blank', 'noopener,noreferrer')}
         onBack={onBack}
         onSetLang={onSetLang}
@@ -640,13 +587,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         isLoading={isLoading}
         onStopTask={stopTask}
         isStopping={isStopping}
-        isRuntimeBusy={currentStatus === 'running'}
+        isRuntimeBusy={isExecutionBusy}
         onResolveToolPermission={hasPendingToolPermission && canApproveTool && !isProjectInteractionLocked ? resolveToolPermission : undefined}
         permissionState={permissionState}
         pendingPermissions={permissionDisplayModels}
         projectStatus={projectRuntimeDisplay}
-        onWorkflowAction={handleWorkflowAction}
-        isWorkflowActionPending={isWorkflowActionPending}
         waitingPermission={waitingPermission}
         canSendMessage={canSendMessage}
         canApproveTool={canApproveTool}

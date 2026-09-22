@@ -24,7 +24,7 @@ describe('waitingPermission helpers', () => {
     expect(state.isBlockingChat).toBe(false)
   })
 
-  it('blocks chat for a blocked workflow', () => {
+  it('allows chat for a blocked workflow without presenting a tool approval', () => {
     const state = getWaitingPermissionState({
       project_id: 'project-1',
       workflow: {
@@ -34,7 +34,8 @@ describe('waitingPermission helpers', () => {
       },
     })
     expect(state.kind).toBe('workflow')
-    expect(state.isBlockingChat).toBe(true)
+    expect(state.isBlockingChat).toBe(false)
+    expect(state.isWaitingStatus).toBe(false)
   })
 
   it('derives waiting_approval from the canonical waiting flag', () => {

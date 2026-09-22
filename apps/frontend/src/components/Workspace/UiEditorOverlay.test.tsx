@@ -33,9 +33,114 @@ const uiDocument = {
 };
 
 describe('UiEditorOverlay', () => {
-  it.each(['button', 'shape'])('edits %s images without changing role, actions or layout; undo restores the image', async role => {
+  it('edits container backgrounds without losing background settings or children, with undo/redo and save', async () => {
+    const doc = structuredClone(uiDocument);
+    const layout = doc.data.nodes.find(node => node.id === 'layout')!;
+    layout.style = { background: { color: '#123456', opacity: 0.5, radius: 8 } } as typeof layout.style;
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{ path: 'content/ui/title.json', revision: 'a'.repeat(64), document: doc }] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 1, requirements: [], resources: [] });
+    const save = vi.spyOn(beeGameAdapter, 'saveProjectGameContentDocument').mockResolvedValue({ revision: 'b'.repeat(64), contentRevision: 'c'.repeat(64) });
+    render(<UiEditorOverlay projectId="container-style" onClose={vi.fn()} />);
+    fireEvent.click((await screen.findByRole('treeitem', { name: 'Settings layout' })).querySelector('.ui-editor-tree-row')!);
+    expect(screen.getByText('Appearance', { exact: true })).toBeVisible();
+    expect(screen.getByLabelText('Background value')).toHaveValue('#123456');
+    fireEvent.change(screen.getByLabelText('Background value'), { target: { value: '#654321' } });
+    fireEvent.blur(screen.getByLabelText('Background value'));
+    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    expect(screen.getByLabelText('Background value')).toHaveValue('#123456');
+    fireEvent.keyDown(window, { key: 'z', metaKey: true, shiftKey: true });
+    expect(screen.getByLabelText('Background value')).toHaveValue('#654321');
+    fireEvent.keyDown(window, { key: 's', metaKey: true });
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    const saved = save.mock.calls[0][1].document.data.nodes;
+    expect(saved.find(node => node.id === 'layout')).toMatchObject({ role: 'container', style: { background: { color: '#654321', opacity: 0.5, radius: 8 } } });
+    expect(saved.filter(node => node.id !== 'layout')).toEqual(doc.data.nodes.filter(node => node.id !== 'layout'));
+  });
+
+  it.each([undefined, 'button', 'assets/button.png'])('highlights the current image alias %s and provides a compact, closable picker', async member => {
+    const doc = { ...uiDocument, data: { rootId: 'root', nodes: [uiDocument.data.nodes[0],
+      { id: 'target', role: 'image', name: 'Target', parentId: 'root', assetRef: 'RES-UI', data: member ? { member } : {} },
+    ] } };
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{ path: 'content/ui/title.json', revision: 'a'.repeat(64), document: doc }] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 1, requirements: [], resources: [
+      { id: 'RES-UI', status: 'verified', root_path: 'assets/button.png', file_paths: ['assets/button.png'], source: { type: 'agent-authored' } },
+    ] });
+    vi.spyOn(beeGameAdapter, 'loadProjectAssetFile').mockResolvedValue(new Blob(['image']));
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:button');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const onClose = vi.fn();
+    render(<><style>{editorCss}</style><UiEditorOverlay projectId="image-alias" onClose={onClose} /></>);
+    fireEvent.click((await screen.findByRole('treeitem', { name: 'Target' })).querySelector('.ui-editor-tree-row')!);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose source image' }));
+    const picker = await screen.findByRole('dialog', { name: 'Select Source Image' });
+    const card = within(picker).getByRole('button', { name: 'Use image button' });
+    expect(card).toHaveAttribute('aria-pressed', 'true');
+    expect(card.querySelector('.ui-editor-asset-selected')).toBeInTheDocument();
+    expect(getComputedStyle(within(picker).getByRole('textbox', { name: 'Search images' }).parentElement!).height).toBe('31px');
+    fireEvent.change(within(picker).getByRole('textbox', { name: 'Search images' }), { target: { value: 'not-present' } });
+    expect(within(picker).getByText('No matching images.')).toBeInTheDocument();
+    fireEvent.click(within(picker).getByRole('button', { name: 'Close image picker' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Select Source Image' })).not.toBeInTheDocument());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId('ui-save-status')).toHaveTextContent('saved');
+  });
+
+  it('does not open app flow as a screen when no screens are available', async () => {
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{ path: 'content/ui/app-flow.json', revision: 'a'.repeat(64), document: { ...uiDocument, kind: 'ui-flow', id: 'app-flow' } }] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 1, requirements: [], resources: [] });
+    render(<UiEditorOverlay projectId="flow-only" onClose={vi.fn()} />);
+    expect(await screen.findByText('No UI screens found')).toBeVisible();
+    expect(screen.queryByLabelText('UI hierarchy')).not.toBeInTheDocument();
+  });
+
+  it('opens the requested UI path instead of the first screen', async () => {
+    const pauseDocument = structuredClone(uiDocument);
+    pauseDocument.id = 'ui_pause';
+    pauseDocument.kind = 'ui-hud';
+    pauseDocument.data.nodes[0].name = 'Pause HUD';
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [
+      { path: 'content/ui/title.json', revision: 'a'.repeat(64), document: uiDocument },
+      { path: 'content/ui/pause.json', revision: 'b'.repeat(64), document: pauseDocument },
+    ] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 1, requirements: [], resources: [] });
+
+    render(<UiEditorOverlay projectId="selected-ui" initialDocumentPath="content/ui/pause.json" onClose={vi.fn()} />);
+
+    await screen.findByLabelText('UI hierarchy');
+    expect(screen.getByTestId('ui-save-status').parentElement).toHaveTextContent('ui_pause');
+    expect(screen.getByRole('treeitem', { name: 'Pause HUD' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['content/ui/missing.json', /Requested UI document .* was not found/],
+    ['content/ui/app-flow.json', /Requested document .* is not an editable UI screen or HUD/],
+  ] as const)('reports an invalid requested path: %s', async (initialDocumentPath, detail) => {
+    const flowDocument = {...uiDocument, id: 'app-flow', kind: 'ui-flow' as const};
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [
+      { path: 'content/ui/title.json', revision: 'a'.repeat(64), document: uiDocument },
+      { path: 'content/ui/app-flow.json', revision: 'b'.repeat(64), document: flowDocument },
+    ] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 1, requirements: [], resources: [] });
+
+    render(<UiEditorOverlay projectId="selected-ui" initialDocumentPath={initialDocumentPath} onClose={vi.fn()} />);
+
+    expect(await screen.findByText(detail)).toBeInTheDocument();
+    expect(screen.queryByLabelText('UI hierarchy')).not.toBeInTheDocument();
+  });
+
+  it('starts the manifest request while UI content is still pending', () => {
+    vi.spyOn(beeGameAdapter,'getProjectGameContent').mockImplementation(() => new Promise(() => {}));
+    const manifest = vi.spyOn(beeGameAdapter,'getProjectAssets').mockResolvedValue({contract_state:'ready',version:9,requirements:[],resources:[]});
+    const { unmount } = render(<UiEditorOverlay projectId="parallel-load" onClose={vi.fn()} />);
+    expect(manifest).toHaveBeenCalledWith('parallel-load', expect.any(AbortSignal));
+    unmount();
+    expect(manifest.mock.calls[0][1]?.aborted).toBe(true);
+  });
+
+  it.each(['button', 'shape', 'container', 'group'])('edits %s images without changing role, actions or layout; undo restores the image', async role => {
     const node = { id: 'target', name: 'Target', role, parentId: 'root', text: 'Start',
-      layout: { position: [20, 30] as [number, number], size: [120, 40] as [number, number] }, actions: { click: 'start-game' } };
+      layout: { position: [20, 30] as [number, number], size: [120, 40] as [number, number] }, actions: { click: 'start-game' },
+      data: { image: { type: 'simple', preserveAspect: true } } };
     vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{
       path: 'content/ui/title.json', revision: 'a'.repeat(64),
       document: { ...uiDocument, data: { rootId: 'root', nodes: [uiDocument.data.nodes[0], node] } },
@@ -53,6 +158,7 @@ describe('UiEditorOverlay', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Use image button' }));
     expect(container.querySelector(`.ui-editor-node[data-role="${role}"] img`)).toHaveAttribute('src', 'blob:button');
     fireEvent.click(screen.getByRole('button', { name: 'Choose source image' }));
+    expect(screen.getByRole('button', { name: 'Use image button' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'Clear source image' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Select Source Image' })).not.toBeInTheDocument());
     expect(container.querySelector(`.ui-editor-node[data-role="${role}"] img`)).not.toBeInTheDocument();
@@ -64,7 +170,8 @@ describe('UiEditorOverlay', () => {
     expect(saved.role).toBe(role);
     expect(saved.actions).toEqual(node.actions);
     expect(saved.layout).toEqual(node.layout);
-    expect(saved.assetRef).toBe('RES-UI');
+    expect(saved.assetRef).toBeUndefined();
+    expect(saved.data?.image).toEqual({ assetRef: 'RES-UI', member: 'button', type: 'simple', preserveAspect: true });
   });
   it.each([false,true])('loads exact image paths without colliding basenames (atlas=%s)', async atlas => {
     const doc = { ...uiDocument, data: { rootId: 'root', nodes: [
@@ -91,16 +198,18 @@ describe('UiEditorOverlay', () => {
       });
       let cropX=0;
       vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue({drawImage:(_image:unknown,x:number)=>{cropX=x}} as unknown as CanvasRenderingContext2D);
-      vi.spyOn(HTMLCanvasElement.prototype,'toDataURL').mockImplementation(()=>`data:image/png;base64,${cropX===0?'FIRST':'SECOND'}`);
+      vi.spyOn(HTMLCanvasElement.prototype,'toBlob').mockImplementation(callback=>{const blob=new Blob();urls.set(blob,`blob:crop-${cropX===0?'FIRST':'SECOND'}`);queueMicrotask(()=>callback(blob));});
     }
     const {container}=render(<UiEditorOverlay projectId="exact-images" onClose={vi.fn()}/>);
     await screen.findByLabelText('UI hierarchy');
     const images=container.querySelectorAll('img.ui-editor-image');
-    expect([...images].map(image=>image.getAttribute('src'))).toEqual(atlas?['data:image/png;base64,FIRST','data:image/png;base64,SECOND']:['blob:first','blob:second']);
+    expect([...images].map(image=>image.getAttribute('src'))).toEqual(atlas?['blob:crop-FIRST','blob:crop-SECOND']:['blob:first','blob:second']);
     fireEvent.click(within(screen.getByLabelText('UI hierarchy')).getByText('first',{exact:true,selector:'.ui-editor-node-name'}).closest('.ui-editor-tree-row')!);
     fireEvent.click(screen.getByRole('button',{name:'Choose source image'}));
     expect(await screen.findByRole('button',{name:`Use image art/a/icon.png${atlas?'#idle':''}`})).toBeEnabled();
     expect(screen.getByRole('button',{name:`Use image art/b/icon.png${atlas?'#idle':''}`})).toBeEnabled();
+    expect(screen.getByRole('button',{name:`Use image art/a/icon.png${atlas?'#idle':''}`})).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button',{name:`Use image art/b/icon.png${atlas?'#idle':''}`})).toHaveAttribute('aria-pressed', 'false');
     expect(screen.queryByRole('button',{name:'Use image icon',exact:true})).not.toBeInTheDocument();
   });
 
@@ -418,7 +527,7 @@ describe('UiEditorOverlay', () => {
     expect(screen.getByRole('spinbutton', { name: 'Scale X' })).toHaveValue(3);
     expect(screen.getByRole('spinbutton', { name: 'Scale Y' })).toHaveValue(1.5);
     fireEvent.keyDown(window, { key: 'q' });
-    expect(screen.getByRole('button', { name: 'Select tool' })).toHaveClass('active');
+    expect(screen.getByRole('button', { name: 'Hand tool' })).toHaveClass('active');
     fireEvent.keyDown(window, { key: 'w' });
     expect(screen.getByRole('button', { name: 'Move tool' })).toHaveClass('active');
     expect(screen.getByRole('radiogroup', { name: 'Anchor preset' })).toBeInTheDocument();
@@ -434,9 +543,10 @@ describe('UiEditorOverlay', () => {
 
     const viewport = container.querySelector('.ui-editor-stage-wrap')!;
     fireEvent.wheel(viewport, { deltaY: 20 });
-    expect(container.querySelector('.ui-editor-stage')).toHaveStyle({ transform: 'translate(0px, 0px) scale(0.86)' });
+    const currentZoom = () => Number((container.querySelector('.ui-editor-stage') as HTMLElement).style.transform.match(/scale\(([^)]+)\)/)![1]);
+    expect(currentZoom()).toBeCloseTo(.9 * Math.exp(-20 * .0015));
     fireEvent.wheel(viewport, { ctrlKey: true, deltaY: -10 });
-    expect(container.querySelector('.ui-editor-stage')).toHaveStyle({ transform: 'translate(0px, 0px) scale(0.95)' });
+    expect(currentZoom()).toBeCloseTo(.9 * Math.exp(-10 * .0015));
 
     fireEvent.doubleClick(logo);
     const rename = screen.getByRole('textbox', { name: 'Rename UI element' });
@@ -490,7 +600,8 @@ describe('UiEditorOverlay', () => {
 
     fireEvent.click(within(hierarchy).getByText('Settings layout').closest('.ui-editor-tree-row')!);
     expect(screen.getByText('Layout Object')).toBeInTheDocument();
-    expect(screen.queryByText('Appearance')).not.toBeInTheDocument();
+    expect(screen.getByText('Appearance')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Choose source image' })).toBeInTheDocument();
 
     fireEvent.click(within(hierarchy).getByText('Pickup notice').closest('.ui-editor-tree-row')!);
     expect(screen.getByText('Toast Object')).toBeInTheDocument();
@@ -536,6 +647,7 @@ describe('UiEditorOverlay', () => {
     const sourceImage = screen.getByRole('button', { name: 'Choose source image' });
     fireEvent.click(sourceImage);
     const picker = await screen.findByRole('dialog', { name: 'Select Source Image' });
+    expect(getComputedStyle(picker).getPropertyValue('--foreground').trim()).toBe('#e4e4eb');
     fireEvent.keyDown(picker, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Select Source Image' })).not.toBeInTheDocument());
 
@@ -554,8 +666,9 @@ describe('UiEditorOverlay', () => {
     vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({
       state: 'ready',
       documents: [
+        { path: 'content/ui/app-flow.json', revision: 'f'.repeat(64), document: { ...uiDocument, id: 'app-flow', kind: 'ui-flow' } },
         { path: 'content/ui/title.json', revision: 'a'.repeat(64), document: uiDocument },
-        { path: 'content/ui/pause.json', revision: 'b'.repeat(64), document: pauseDocument },
+        { path: 'content/ui/pause.json', revision: 'b'.repeat(64), document: { ...pauseDocument, kind: 'ui-hud' } },
       ],
     });
     vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({
@@ -568,10 +681,12 @@ describe('UiEditorOverlay', () => {
     render(<UiEditorOverlay projectId="project-1" onClose={vi.fn()} />);
     await screen.findByLabelText('UI hierarchy');
     expect(screen.queryByRole('combobox', { name: 'UI document' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('ui-save-status').parentElement).toHaveTextContent('ui_title');
     fireEvent.click(screen.getByRole('button', { name: 'Editor menu' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Screens' }));
     const screens = screen.getByRole('menu', { name: 'UI screens' });
     expect(within(screens).getAllByRole('menuitem')).toHaveLength(2);
+    expect(within(screens).queryByRole('menuitem', { name: 'app-flow' })).not.toBeInTheDocument();
     fireEvent.click(within(screens).getByRole('menuitem', { name: 'ui_pause' }));
     expect(screen.getByTestId('ui-save-status').parentElement).toHaveTextContent('ui_pause');
   });
@@ -602,5 +717,91 @@ describe('UiEditorOverlay', () => {
     fireEvent.keyDown(logoRow, { key: 'Enter' });
     expect(screen.getByRole('textbox', { name: 'Rename UI element' })).toBeInTheDocument();
     expect(screen.getByLabelText('UI navigation hints')).toHaveTextContent('Pinch · Zoom');
+  });
+
+  it.each(['MacIntel', 'Win32', 'Linux x86_64'])('matches 2D scene navigation without moving UI data on %s', async platform => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{ path: 'content/ui/title.json', revision: 'a'.repeat(64), document: uiDocument }] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 1, requirements: [], resources: [] });
+    const onClose = vi.fn();
+    const { container } = render(<UiEditorOverlay projectId="navigation" onClose={onClose} />);
+    const hierarchy = await screen.findByLabelText('UI hierarchy');
+    const hints = screen.getByLabelText('UI navigation hints');
+    for (const label of ['QPan', 'WMove', 'ERotate', 'RScale', 'FFocus']) expect(hints).toHaveTextContent(label);
+    const apple = platform === 'MacIntel';
+    expect(within(hints).getByLabelText('Shift')).toHaveTextContent(apple ? '⇧' : 'Shift');
+    expect(screen.getByRole('button', { name: 'Reset view' })).toHaveAttribute('title', apple ? 'Reset view (⌘0)' : 'Reset view (Ctrl+0)');
+    if (apple) {
+      expect(within(hints).getByLabelText('Command')).toHaveTextContent('⌘');
+      expect(within(hints).getByLabelText('Option')).toHaveTextContent('⌥');
+      expect(hints.querySelector('.lucide-touchpad')).not.toBeNull();
+      expect(hints).not.toHaveTextContent('MMB / RMB');
+    } else {
+      expect(hints).toHaveTextContent('MMB / RMB');
+      expect(hints.querySelector('.lucide-mouse')).not.toBeNull();
+      expect(hints).not.toHaveTextContent('⌘');
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Editor menu' }));
+    expect(screen.getByText(apple ? '⌘S' : 'Ctrl+S')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Redo' })).toHaveTextContent(apple ? '⇧⌘Z' : 'Ctrl+Y');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.click(within(hierarchy).getByRole('treeitem', { name: 'Logo' }).querySelector('.ui-editor-tree-row')!);
+    const viewport = screen.getByLabelText('UI viewport');
+    const stage = container.querySelector('.ui-editor-stage') as HTMLElement;
+    let captured = false;
+    Object.assign(viewport, { setPointerCapture: () => { captured = true; }, hasPointerCapture: () => captured, releasePointerCapture: () => { captured = false; } });
+    for (const button of [1, 2]) {
+      // Start directly on a transform handle: navigation must win in capture phase.
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Move selected UI element' }), { button, pointerId: 1, clientX: 100, clientY: 100 });
+      fireEvent.pointerMove(viewport, { pointerId: 1, clientX: 140, clientY: 120 });
+      fireEvent.pointerUp(viewport, { button, pointerId: 1 });
+    }
+    expect(stage.style.transform).toContain('translate(80px, 40px)');
+    expect(screen.getByRole('spinbutton', { name: 'Position X' })).toHaveValue(100);
+    fireEvent.keyDown(viewport, { key: 'q' });
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Select Panel', exact: true }), { button: 0, pointerId: 2, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(viewport, { pointerId: 2, clientX: 120, clientY: 120 });
+    fireEvent.keyDown(viewport, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(captured).toBe(false);
+    expect(stage.style.transform).toContain('translate(100px, 60px)');
+    expect(within(hierarchy).getByRole('treeitem', { name: 'Logo' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(viewport, { key: 'w' });
+    const modifier = platform === 'MacIntel' ? { metaKey: true } : { ctrlKey: true };
+    fireEvent.pointerDown(viewport, { button: 0, altKey: true, ...modifier, pointerId: 3, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(viewport, { pointerId: 3, clientX: 10, clientY: 10 });
+    fireEvent.blur(window);
+    expect(captured).toBe(false);
+    expect(stage.style.transform).toContain('translate(110px, 70px)');
+    const zoom = () => Number(stage.style.transform.match(/scale\(([^)]+)\)/)![1]);
+    const beforeZoom = zoom();
+    const wheel = new WheelEvent('wheel', { deltaY: .5, bubbles: true, cancelable: true });
+    fireEvent(viewport, wheel);
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(zoom()).toBeLessThan(beforeZoom); // Fractional trackpad motion must not round away.
+    expect(stage.style.transform).toContain('translate(110px, 70px)');
+    fireEvent.pointerDown(viewport, { button: 2, altKey: true, pointerId: 4, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(viewport, { pointerId: 4, clientX: 0, clientY: -10 });
+    fireEvent.pointerUp(viewport, { pointerId: 4 });
+    expect(zoom()).toBeGreaterThan(beforeZoom);
+    fireEvent.keyDown(viewport, { key: 'q', metaKey: true });
+    expect(screen.getByRole('button', { name: 'Move tool' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.keyDown(screen.getByRole('spinbutton', { name: 'Position X' }), { key: 'q' });
+    expect(screen.getByRole('button', { name: 'Move tool' })).toHaveAttribute('aria-pressed', 'true');
+    Object.defineProperties(viewport, { clientWidth: { value: 1200 }, clientHeight: { value: 800 } });
+    fireEvent.keyDown(viewport, { key: 'f' });
+    expect(zoom()).toBeCloseTo(2.6);
+    expect(stage.style.transform).toContain('translate(1144px, 572px)');
+    expect(screen.getByRole('spinbutton', { name: 'Position X' })).toHaveValue(100);
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Move selected UI element' }), { button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(window, { clientX: 152, clientY: 100 });
+    expect(screen.getByRole('spinbutton', { name: 'Position X' })).toHaveValue(120);
+    fireEvent.keyDown(viewport, { key: 'Escape' });
+    fireEvent.pointerUp(window);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole('spinbutton', { name: 'Position X' })).toHaveValue(100);
+    // Framing and panning are viewport-only, not document edits.
+    fireEvent.keyDown(viewport, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

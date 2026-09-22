@@ -1,28 +1,13 @@
-import { memo } from 'react';
-import {
-    AlertCircle,
-    Box,
-    CheckCircle2,
-    ChevronRight,
-    Circle,
-    Download,
-    Eye,
-    FileArchive,
-    FileText,
-    FolderOpen,
-    LayoutPanelTop,
-    LoaderCircle,
-} from 'lucide-react';
+import { memo, useState } from 'react';
+import { AlertCircle, ArrowLeft, Box, CheckCircle2, ChevronRight, Circle, Download, ExternalLink, Eye, FileArchive, FileJson, FileText, FolderOpen, LayoutPanelTop, LoaderCircle, RefreshCw } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
 import { Skeleton } from '../../ui/skeleton';
 import type { DocumentProgressItem } from '../../../utils/documentProgress';
 import { Button } from '../../beui/project-button';
-import {
-    buildArtifactViewModel,
-    type ArtifactEditorKind,
-    type ArtifactListItem,
-} from './artifactViewModel';
+import { buildArtifactViewModel, type ArtifactEditorKind, type ArtifactListItem } from './artifactViewModel';
+
+export type ArtifactEditorFile = { path: string; id: string; kind: ArtifactEditorKind };
 
 interface ArtifactsPanelProps {
     artifacts: ArtifactListItem[];
@@ -34,175 +19,104 @@ interface ArtifactsPanelProps {
     error?: string | null;
     lang?: Language;
     onOpenAssets?: () => void;
-    onOpenEditor?: (kind: ArtifactEditorKind) => void;
+    onOpenEditor?: (kind: ArtifactEditorKind, path: string) => void;
+    editorFiles?: ArtifactEditorFile[];
+    isEditorFilesLoading?: boolean;
+    editorFilesError?: string | null;
+    onLoadEditorFiles?: () => void;
 }
 
+const rowClass = 'flex min-h-14 w-full min-w-0 items-center gap-3 border-b border-[var(--border)] px-3 py-2 text-left last:border-b-0 hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ring)]';
+const listClass = 'overflow-hidden rounded-lg border border-[var(--border)]';
+
 export const ArtifactsPanel = memo(({
-    artifacts,
-    isLoading,
-    onPreview,
-    onDownload,
-    canExportProject = true,
-    documentProgress,
-    error = null,
-    lang = 'en',
-    onOpenAssets,
-    onOpenEditor = () => undefined,
+    artifacts, isLoading, onPreview, onDownload, canExportProject = true, documentProgress, error = null,
+    lang = 'en', onOpenAssets, onOpenEditor, editorFiles = [], isEditorFilesLoading = false,
+    editorFilesError = null, onLoadEditorFiles,
 }: ArtifactsPanelProps) => {
-    const text: Record<string, string> = {
-        ...(useBeeGameText(lang) as Record<string, string>),
-        assets: useCommonText(lang).assets,
-    };
+    const [page, setPage] = useState<ArtifactEditorKind | 'documents' | null>(null);
+    const text: Record<string, string> = { ...(useBeeGameText(lang) as Record<string, string>), assets: useCommonText(lang).assets };
+    const zh = lang === 'zh';
     const view = buildArtifactViewModel(artifacts, documentProgress);
     const isInitialLoading = isLoading && artifacts.length === 0 && !documentProgress;
-
+    const labels = { scene: 'Scene', ui: 'UI', documents: text.documentProgress || 'Project documents' };
+    const files = editorFiles.filter(file => file.kind === page);
+    const openCategory = (category: NonNullable<typeof page>) => {
+        setPage(category);
+        if (category !== 'documents') onLoadEditorFiles?.();
+    };
     const progressIcon = (status: DocumentProgressItem['status']) => {
-        if (status === 'writing') return <LoaderCircle className="h-4 w-4 animate-spin text-[var(--warning)]" />;
-        if (status === 'ready') return <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />;
-        if (status === 'failed') return <AlertCircle className="h-4 w-4 text-[var(--destructive)]" />;
-        return <Circle className="h-4 w-4 text-[var(--text-muted)]" />;
+        if (status === 'writing') return <LoaderCircle className="size-4 animate-spin text-[var(--warning)]" />;
+        if (status === 'ready') return <CheckCircle2 className="size-4 text-[var(--success)]" />;
+        if (status === 'failed') return <AlertCircle className="size-4 text-[var(--destructive)]" />;
+        return <Circle className="size-4 text-[var(--text-muted)]" />;
     };
-    const progressLabel = (status: DocumentProgressItem['status']) => {
-        if (status === 'writing') return text.documentWriting || 'Writing';
-        if (status === 'ready') return text.documentReady || 'Ready';
-        if (status === 'failed') return text.documentFailed || 'Failed';
-        return text.documentPending || 'Pending';
-    };
-    const editorLabel = (kind: ArtifactEditorKind) => kind === 'scene' ? 'Scene' : 'UI';
+    const progressLabel = (status: DocumentProgressItem['status']) =>
+        status === 'writing' ? text.documentWriting || 'Writing' : status === 'ready' ? text.documentReady || 'Ready'
+            : status === 'failed' ? text.documentFailed || 'Failed' : text.documentPending || 'Pending';
 
-    return (
-        <div className="h-full min-w-0 overflow-x-hidden overflow-y-auto px-3 py-4 sm:px-4" aria-label={isInitialLoading ? text.loadingArtifacts : undefined}>
-            <div className="mb-4 flex min-w-0 items-center justify-between gap-3">
-                <div className="min-w-0">
-                    <h2 className="type-footnote font-medium text-[var(--text-primary)]">{text.artifacts || 'Artifacts'}</h2>
-                    <p className="type-caption-2 mt-1 truncate text-[var(--text-muted)]">{text.deliverables || 'Project outputs'}</p>
-                </div>
-                {onOpenAssets ? (
-                    <Button type="button" variant="ghost" size="sm" onClick={onOpenAssets} className="shrink-0 gap-2 text-[var(--text-secondary)]">
-                        <FolderOpen className="h-4 w-4" aria-hidden="true" />
-                        <span>{text.assets || 'Assets'}</span>
-                    </Button>
-                ) : null}
+    return <div className="h-full min-w-0 overflow-x-hidden overflow-y-auto px-3 py-4 sm:px-4" aria-label={isInitialLoading ? text.loadingArtifacts : undefined}>
+        <div className="mb-4 flex min-w-0 items-center gap-2">
+            {page ? <Button variant="ghost" size="icon" aria-label={zh ? '返回产物' : 'Back to artifacts'} onClick={() => setPage(null)}><ArrowLeft size={16} /></Button> : null}
+            <div className="min-w-0 flex-1">
+                <h2 className="type-footnote truncate font-medium text-[var(--text-primary)]">{page ? labels[page] : text.artifacts || 'Artifacts'}</h2>
+                <p className="type-caption-2 mt-1 text-[var(--text-muted)]">{page === 'documents' ? `${view.readyDocumentCount}/${view.documents.length} · ${zh ? '文件' : 'files'}` : page ? (zh ? '选择 JSON 文件，在新标签页中编辑' : 'Select a JSON file to edit in a new tab') : text.deliverables || 'Project outputs'}</p>
             </div>
-            {error ? (
-                <div role="alert" className="mb-4 rounded-md border border-[var(--destructive)]/40 bg-[var(--destructive)]/10 px-3 py-2 type-caption-2 text-[var(--destructive)]">
-                    {error}
-                </div>
-            ) : null}
-            {isInitialLoading ? (
-                <div className="mb-5 space-y-2 border-y border-[var(--border)] py-3">
-                    <Skeleton className="h-4 w-28 bg-[var(--surface-3)]" />
-                    <Skeleton className="h-8 w-full bg-[var(--surface-3)]" />
-                </div>
-            ) : null}
-
-            <section aria-label="Scene & UI" className="mb-5 min-w-0">
-                <h3 className="mb-2 type-footnote text-[var(--text-primary)]">Scene &amp; UI</h3>
-                <div className="overflow-hidden rounded-md border border-[var(--border)]">
-                    {view.editorEntries.map((kind) => {
-                        const Icon = kind === 'scene' ? Box : LayoutPanelTop;
-                        return (
-                            <button
-                                key={kind}
-                                type="button"
-                                className="flex min-h-12 w-full min-w-0 items-center gap-3 border-b border-[var(--border)] px-3 text-left transition-colors last:border-b-0 hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-inset"
-                                onClick={() => onOpenEditor(kind)}
-                            >
-                                <Icon className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" aria-hidden="true" />
-                                <span className="min-w-0 flex-1 truncate type-footnote text-[var(--text-primary)]">{editorLabel(kind)}</span>
-                                <ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-muted)]" aria-hidden="true" />
-                            </button>
-                        );
-                    })}
-                </div>
-            </section>
-
-            <section aria-label={text.documentProgress || 'Project documents'} className="mb-5 min-w-0">
-                <div className="mb-3 flex min-w-0 items-baseline justify-between gap-3">
-                    <div className="min-w-0">
-                        <h3 className="type-footnote text-[var(--text-primary)]">{text.documentProgress || 'Project documents'}</h3>
-                        <p className="type-caption-2 mt-1 truncate text-[var(--text-muted)]">{text.documentProgressHint || 'Produced in dependency order from the confirmed brief.'}</p>
-                    </div>
-                    <span className="type-caption-2 shrink-0 tabular-nums text-[var(--text-secondary)]">{view.readyDocumentCount}/{view.documents.length}</span>
-                </div>
-                <div className="overflow-hidden rounded-md border border-[var(--border)]">
-                    {view.documents.map((item) => {
-                        const artifactId = String(item.artifact?.artifact_id || item.artifact?.id || '').trim();
-                        return (
-                            <div key={item.path} data-status={item.status} className="flex min-h-12 min-w-0 items-center gap-3 border-b border-[var(--border)] px-3 last:border-b-0">
-                                {progressIcon(item.status)}
-                                <div className="min-w-0 flex-1">
-                                    <div className="type-footnote truncate text-[var(--text-primary)]">{item.name}</div>
-                                    <div className="type-caption-2 truncate text-[var(--text-muted)]">{item.path}</div>
-                                </div>
-                                <span className="type-caption-2 shrink-0 text-[var(--text-muted)]">{progressLabel(item.status)}</span>
-                                {item.status === 'ready' && artifactId ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => onPreview(artifactId, item.artifact?.name || item.name)}
-                                        title={text.preview}
-                                        className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
-                                    >
-                                        <Eye className="h-4 w-4" />
-                                    </button>
-                                ) : null}
-                            </div>
-                        );
-                    })}
-                </div>
-            </section>
-
-            {view.additionalArtifacts.length > 0 ? (
-                <section aria-label={text.otherArtifacts || 'Other deliverables'} className="min-w-0">
-                    <h3 className="mb-2 type-footnote text-[var(--text-primary)]">{text.otherArtifacts || 'Other deliverables'}</h3>
-                    <div className="overflow-x-hidden overflow-y-hidden rounded-md border border-[var(--border)]">
-                        <table className="w-full table-fixed border-collapse">
-                            <thead>
-                                <tr className="border-b border-[var(--border)]">
-                                    <th scope="col" className="type-caption-2 px-3 py-2 text-left text-[var(--text-muted)]">{text.artifactName || 'Name'}</th>
-                                    <th scope="col" className="type-caption-2 w-20 px-2 py-2 text-right text-[var(--text-muted)]">{text.actions || 'Actions'}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {view.additionalArtifacts.map((artifact) => {
-                                    const type = artifact.artifact_type || 'Document';
-                                    const artifactId = String(artifact.artifact_id || artifact.id || '').trim();
-                                    const isProjectPackage = Boolean(artifact.package_download);
-                                    const Icon = isProjectPackage ? FileArchive : FileText;
-                                    const artifactName = artifact.name || `${type} Doc`;
-                                    const reviewKey = artifactId || artifact.path || artifactName;
-                                    return (
-                                        <tr key={reviewKey} className="border-b border-[var(--border)] last:border-b-0 hover:bg-[var(--surface-hover)]">
-                                            <td className="max-w-0 px-3 py-3 align-middle">
-                                                <div className="flex min-w-0 items-center gap-3">
-                                                    <Icon className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" />
-                                                    <div className="min-w-0 truncate type-footnote text-[var(--text-primary)]">{artifactName}</div>
-                                                </div>
-                                            </td>
-                                            <td className="px-2 py-3 align-middle">
-                                                <div className="flex items-center justify-end gap-1">
-                                                    {!isProjectPackage ? (
-                                                        <button type="button" onClick={() => onPreview(reviewKey, artifactName)} title={text.preview} className="grid h-8 w-8 place-items-center rounded-md text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
-                                                            <Eye className="h-4 w-4" />
-                                                        </button>
-                                                    ) : null}
-                                                    {!isProjectPackage || canExportProject ? (
-                                                        <button type="button" onClick={() => onDownload(reviewKey, artifactName)} title={text.download} className="grid h-8 w-8 place-items-center rounded-md text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
-                                                            <Download className="h-4 w-4" />
-                                                        </button>
-                                                    ) : null}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                </section>
-            ) : null}
+            {!page && onOpenAssets ? <Button variant="ghost" size="sm" onClick={onOpenAssets}><FolderOpen size={16} /><span>{text.assets || 'Assets'}</span></Button> : null}
+            {page && page !== 'documents' && onLoadEditorFiles ? <Button variant="ghost" size="icon" disabled={isEditorFilesLoading} aria-label={zh ? '刷新文件列表' : 'Refresh files'} onClick={onLoadEditorFiles}><RefreshCw size={15} /></Button> : null}
         </div>
-    );
-});
+        {error ? <p role="alert" className="mb-4 type-caption-1 text-[var(--destructive)]">{error}</p> : null}
+        {isInitialLoading ? <div className="mb-4 space-y-2"><Skeleton className="h-4 w-28" /><Skeleton className="h-12 w-full" /></div> : null}
 
+        {!page ? <>
+            <section aria-label={text.artifacts || 'Artifacts'} className={listClass}>
+                {(['scene', 'ui', 'documents'] as const).map(category => {
+                    const Icon = category === 'scene' ? Box : category === 'ui' ? LayoutPanelTop : FileText;
+                    return <button key={category} type="button" className={rowClass} onClick={() => openCategory(category)}>
+                        <Icon className="size-4 shrink-0 text-[var(--text-secondary)]" aria-hidden="true" />
+                        <span className="min-w-0 flex-1 truncate type-footnote text-[var(--text-primary)]">{labels[category]}</span>
+                        {category === 'documents' ? <span className="type-caption-2 text-[var(--text-muted)]">{view.readyDocumentCount}/{view.documents.length}</span> : null}
+                        <ChevronRight className="size-4 shrink-0 text-[var(--text-muted)]" aria-hidden="true" />
+                    </button>;
+                })}
+            </section>
+            {view.additionalArtifacts.length ? <section className="mt-5" aria-label={text.otherArtifacts || 'Other deliverables'}>
+                <h3 className="mb-2 type-footnote text-[var(--text-primary)]">{text.otherArtifacts || 'Other deliverables'}</h3>
+                <div className={listClass}>{view.additionalArtifacts.map(artifact => {
+                    const id = String(artifact.artifact_id || artifact.id || artifact.path || artifact.name);
+                    const name = artifact.name || artifact.path || 'File';
+                    const Icon = artifact.package_download ? FileArchive : FileText;
+                    return <div key={id} className={rowClass}>
+                        <Icon size={16} className="shrink-0 text-[var(--text-muted)]" />
+                        <button type="button" className="min-w-0 flex-1 truncate text-left type-footnote text-[var(--text-primary)]" disabled={artifact.package_download} onClick={() => onPreview(id, name)}>{name}</button>
+                        {!artifact.package_download || canExportProject ? <Button variant="ghost" size="icon" aria-label={`${text.download || 'Download'} ${name}`} title={text.download} onClick={() => onDownload(id, name)}><Download size={15} /></Button> : null}
+                    </div>;
+                })}</div>
+            </section> : null}
+        </> : page === 'documents' ? <section aria-label={labels.documents} className={listClass}>
+            {view.documents.map(item => {
+                const id = String(item.artifact?.artifact_id || item.artifact?.id || '');
+                const name = item.artifact?.name || item.name;
+                const ready = item.status === 'ready' && Boolean(id);
+                return <div key={item.path} data-status={item.status} className="flex min-w-0 items-center border-b border-[var(--border)] pr-1 last:border-b-0">
+                    <button type="button" disabled={!ready} className={`${rowClass} flex-1 border-0 disabled:cursor-default disabled:hover:bg-transparent`} onClick={() => onPreview(id, name)}>
+                        <span className="shrink-0" aria-hidden="true">{progressIcon(item.status)}</span>
+                        <span className="min-w-0 flex-1"><span className="block truncate type-footnote text-[var(--text-primary)]">{item.name}</span><span className="block truncate type-caption-2 text-[var(--text-muted)]">{item.path}</span></span>
+                        <span className="shrink-0 type-caption-2 text-[var(--text-muted)]">{progressLabel(item.status)}</span>
+                    </button>
+                    {ready ? <Button variant="ghost" size="icon" aria-label={`${text.preview || 'Preview'} ${name}`} title={text.preview} onClick={() => onPreview(id, name)}><Eye size={15} /></Button> : null}
+                </div>;
+            })}
+        </section> : <section aria-label={`${labels[page]} files`}>
+            {editorFilesError ? <p role="alert" className="mb-3 type-caption-1 text-[var(--destructive)]">{editorFilesError}</p> : null}
+            {isEditorFilesLoading ? <div aria-label={zh ? '正在加载文件' : 'Loading files'} className="space-y-2"><Skeleton className="h-14 w-full" /><Skeleton className="h-14 w-full" /></div> : files.length ? <div className={listClass}>
+                {files.map(file => <button key={file.path} type="button" className={rowClass} onClick={() => onOpenEditor?.(file.kind, file.path)}>
+                    <FileJson size={16} className="shrink-0 text-[var(--text-secondary)]" aria-hidden="true" />
+                    <span className="min-w-0 flex-1"><span className="block truncate type-footnote text-[var(--text-primary)]">{file.path.split('/').at(-1)}</span><span className="block truncate type-caption-2 text-[var(--text-muted)]" title={file.id}>{file.path}</span></span>
+                    <ExternalLink size={14} className="shrink-0 text-[var(--text-muted)]" aria-hidden="true" />
+                </button>)}
+            </div> : !editorFilesError ? <p className="py-6 text-center type-footnote text-[var(--text-muted)]">{zh ? '暂无可编辑的 JSON 文件' : 'No editable JSON files yet'}</p> : null}
+        </section>}
+    </div>;
+});
 ArtifactsPanel.displayName = 'ArtifactsPanel';

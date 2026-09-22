@@ -1,7 +1,10 @@
 import { Hono, type Context } from 'hono'
+import { UserQuestionValidationError } from './beegame/user-question'
+import { intakeReferenceParts } from './beegame/intake-references'
 import { openPreviewTestAccess } from './beegame/preview-test-access'
 import { appendRuntimeDiagnostic } from './beegame/project-records'
 import { readChatAttachment } from './beegame/chat-attachments'
+import { materializeBeeGameAttachments } from './beegame/session-manager'
 import { appendProjectChatTimeline, projectChatEventsAfter } from './beegame/project-chat-timeline'
 import { runtimeActivity } from './beegame/runtime-activity'
 import { projectFoundationReviewDisplay } from './beegame/delivery-workflow/foundation-review-display'
@@ -72,9 +75,11 @@ import {
   type BeeGamePreviewReadinessProbe,
   type BeeGamePreviewRunner,
 } from './beegame/preview-manager'
-import { stripViteClientScript } from './beegame/vite-preview-host'
+import { proxyBeeGamePreviewRequest } from './beegame/preview-proxy'
+export { proxyBeeGamePreviewRequest } from './beegame/preview-proxy'
 import {
   BeeGameDeploymentManager,
+  mergeDeploymentRecords,
   createSupabaseStorageDeploymentPublisherFromEnv,
   type BeeGameDeploymentRecord,
   type BeeGameDeploymentRetentionResult,
@@ -126,7 +131,6 @@ import {
   BeeGameAuthUnavailableError,
   DEFAULT_LOCAL_USER_ID,
   createConfiguredUserResolver,
-  getBearerToken,
   hasBeeGamePermission,
   listBeeGamePermissions,
 } from './auth/user-context'
@@ -135,13 +139,11 @@ import { proxyAuthenticatedBillingRequest } from './auth/authenticated-billing-p
 import { proxyAuthenticatedSkillsRequest } from './auth/authenticated-skills-proxy'
 import { proxyAuthenticatedResourceRequest } from './auth/authenticated-resource-proxy'
 import {
-  PREVIEW_CAPABILITY_QUERY_PARAM,
   createPreviewCapabilityManager,
   type PreviewCapabilityManager,
 } from './auth/preview-capability'
 import {
   registerBeeGameSessionRoutes as registerHttpOnlySessionRoutes,
-  hasBeeGameSessionCookie,
   resolveValidRequestAccessToken,
   type BeeGameSessionCredential,
 } from './auth/session-routes'
@@ -496,6 +498,14 @@ export function createAgentWorkflowApp(
   validateSecretStorageAtStartup()
   const app = new Hono()
   app.onError((error, c) => {
+    // Covers auth middleware, session refresh and downstream service proxies.
+    if (error instanceof BeeGameAuthUnavailableError) {
+      return c.json({
+        error: 'Authentication unavailable', code: 'authentication_unavailable',
+        message: 'Authentication service is temporarily unavailable',
+        recoverable: true, retry_after_ms: 2_000,
+      }, 503, { 'Retry-After': '2' })
+    }
     if (isPrivilegedConfigurationPath(c.req.path)) {
       return privilegedRouteError(c, c.req.path, error)
     }
@@ -593,33 +603,16 @@ export function createAgentWorkflowApp(
     fetchImpl: serviceFetch,
   })
   const sessionAuth = registerHttpOnlySessionRoutes(app, {
+    fetchImpl: serviceFetch,
     sessionStorePath: options.sessionStorePath,
     isOriginAllowed: origin => Boolean(resolveApiCorsOrigin(origin)),
   })
-  const getRequestAuthToken = (request: Request): string | undefined =>
-    getBearerToken(request) ?? sessionAuth?.getAccessToken(request)
-  const baseUserResolver = options.currentUserResolver ?? configuredUserResolver
-  const requestUserResolver = sessionAuth
-    ? async (request: Request) => {
-        const accessToken = await resolveValidRequestAccessToken(
-          request,
-          sessionAuth,
-        )
-        const headers = new Headers(request.headers)
-        if (!accessToken) {
-          if (!hasBeeGameSessionCookie(request))
-            return baseUserResolver?.(request)
-          headers.delete('authorization')
-          return baseUserResolver?.(new Request(request, { headers }))
-        }
-        headers.set('authorization', `Bearer ${accessToken}`)
-        return baseUserResolver?.(new Request(request, { headers }))
-      }
-    : baseUserResolver
   const authContext = createBeeGameAuthContext({
     currentUser: options.currentUser,
-    currentUserResolver: requestUserResolver,
+    currentUserResolver: options.currentUserResolver ?? configuredUserResolver,
+    resolveAccessToken: request => resolveValidRequestAccessToken(request, sessionAuth),
   })
+  const getRequestAuthToken = authContext.getAccessToken
   const previewCapabilities = createPreviewCapabilityManager()
   const getCurrentUser = authContext.getCurrentUser
   const getCurrentUserDataRoot = (request?: Request) =>
@@ -1269,13 +1262,16 @@ export function createAgentWorkflowApp(
     if (!sessionId) return c.text('Preview not found', 404)
     const sessionMetadata = beeGameSessions.metadata(sessionId)
     if (!sessionMetadata) return c.text('Preview not found', 404)
-    const user =
-      options.currentUser ?? (await authContext.resolveRequestUser(c.req.raw))
     const capability = previewCapabilities.verifyRequest(c.req.raw, sessionId)
     const sandboxedSubresource = previewCapabilities.allowsSandboxedSubresource(
       c.req.raw,
       sessionId,
     )
+    // A valid, session-scoped preview grant does not need a second trip to
+    // the identity service for each module/image. Keep normal auth for callers
+    // without the existing preview grant; never fall back after failed auth.
+    const user = options.currentUser ?? (capability || sandboxedSubresource
+      ? undefined : await authContext.resolveRequestUser(c.req.raw))
     const authenticatedUserId = user?.id ?? capability?.userId
     if (!authenticatedUserId && !sandboxedSubresource)
       return c.text('Unauthorized', 401)
@@ -1326,25 +1322,7 @@ export function createAgentWorkflowApp(
       await next()
       return
     }
-    let user: BeeGameUserContext | undefined
-    try {
-      user = await authContext.resolveRequestUser(c.req.raw)
-    } catch (error) {
-      if (error instanceof BeeGameAuthUnavailableError) {
-        c.header('Retry-After', '2')
-        return c.json(
-          {
-            error: 'Authentication unavailable',
-            code: 'authentication_unavailable',
-            message: 'Authentication service is temporarily unavailable',
-            recoverable: true,
-            retry_after_ms: 2_000,
-          },
-          503,
-        )
-      }
-      throw error
-    }
+    const user = await authContext.resolveRequestUser(c.req.raw)
     if (!user) {
       return c.json(
         {
@@ -2601,6 +2579,10 @@ export function createAgentWorkflowApp(
     }
 
     try {
+      const referenceAttachments = brief.attachments === undefined || (Array.isArray(brief.attachments) && !brief.attachments.length)
+        ? [] : validateBeeGameAttachments(brief.attachments)
+      if (brief.creationMode !== undefined && brief.creationMode !== 'creative' && brief.creationMode !== 'blueprint')
+        return c.json({ error: 'Invalid creation mode' }, 400)
       const [workspacePath, modelConfigId] = await Promise.all([
         createManagedProjectWorkspacePath({
           defaultWorkspacePath: options.defaultWorkspacePath,
@@ -2619,6 +2601,11 @@ export function createAgentWorkflowApp(
         ),
       ])
       if (modelConfigId) await assertPermittedModelConfigRuntime(modelConfigId)
+      const referenceFiles = await materializeBeeGameAttachments(workspacePath, referenceAttachments)
+      const references = referenceFiles.map((file, index) => ({
+        ...file,
+        sha256: createHash('sha256').update(Buffer.from(referenceAttachments[index]!.data, 'base64')).digest('hex'),
+      }))
 
       const project = await dashboardRepository.upsertProject(c.req.raw, user, {
         id: projectId,
@@ -2652,9 +2639,13 @@ export function createAgentWorkflowApp(
         beeGameSessions.metadata(session.id),
       )
 
-      const confirmedBriefPrompt = buildConfirmedBriefPrompt(brief, language)
+      // Only server-created references enter the brief, never caller-supplied paths.
+      const confirmedBriefPrompt = buildConfirmedBriefPrompt({ ...brief, referenceFiles: references }, language)
       beeGameSessions.appendUserMessage(session.id, idea, {
         displayKind: 'confirmed_brief',
+        ...(referenceFiles.length ? { attachments: referenceFiles.map(file => ({
+          type: file.type, filename: file.filename, mediaType: file.mediaType, storageId: file.storageId, projectId,
+        })) } : {}),
       })
       const workflow = await startBeeGameDeliveryWorkflow({
         request: c.req.raw,
@@ -2685,6 +2676,7 @@ export function createAgentWorkflowApp(
         202,
       )
     } catch (err) {
+      if (err instanceof BeeGameUploadPolicyError) return uploadPolicyResponse(err)
       if (err instanceof ProjectQuotaExceededError) {
         return c.json(
           {
@@ -3014,6 +3006,7 @@ export function createAgentWorkflowApp(
         dashboardRepository,
         getUserDataRoot: getCurrentUserDataRoot,
         assertPermittedModelConfigRuntime,
+        authToken: getRequestAuthToken(c.req.raw),
       })
       return c.json(ensured)
     } catch (err) {
@@ -3367,7 +3360,10 @@ export function createAgentWorkflowApp(
         projectId: project.id,
         workspacePath,
       })
-      const snapshot = await controller.loadGameContentForEditing()
+      const metadataOnly = c.req.query('metadata') === '1'
+      const snapshot = metadataOnly
+        ? await controller.loadGameContentFileListForEditing()
+        : await controller.loadGameContentForEditing()
       return c.json({
         state:
           run.gameContentReceipt && snapshot.contentRevision === run.revision.content
@@ -3515,6 +3511,7 @@ export function createAgentWorkflowApp(
             behavior: decision,
             scope: permissionScope,
             remember: false,
+            answers: body.answers,
             ...(typeof body.message === 'string'
               ? { message: body.message }
               : {}),
@@ -3536,6 +3533,7 @@ export function createAgentWorkflowApp(
             behavior: decision,
             scope: permissionScope,
             remember: false,
+            answers: body.answers,
             ...(typeof body.message === 'string'
               ? { message: body.message }
               : {}),
@@ -3564,6 +3562,7 @@ export function createAgentWorkflowApp(
       )
       return c.json(resolved)
     } catch (err) {
+      if (err instanceof UserQuestionValidationError) return c.json({ error: err.message }, 400)
       return tracedRouteError(c, 'project.permissions.resolve', err, 404)
     }
   })
@@ -3634,6 +3633,7 @@ export function createAgentWorkflowApp(
         dashboardRepository,
         getUserDataRoot: getCurrentUserDataRoot,
         assertPermittedModelConfigRuntime,
+        authToken: getRequestAuthToken(c.req.raw),
       })
       assertProjectWorkspaceMutationIdle(ensured.session)
       const snapshot = await beeGamePreviews.start({
@@ -3680,6 +3680,7 @@ export function createAgentWorkflowApp(
         dashboardRepository,
         getUserDataRoot: getCurrentUserDataRoot,
         assertPermittedModelConfigRuntime,
+        authToken: getRequestAuthToken(c.req.raw),
       })
       assertProjectWorkspaceMutationIdle(ensured.session)
       const snapshot = await beeGamePreviews.restart({
@@ -3773,14 +3774,27 @@ export function createAgentWorkflowApp(
           user,
           sessionRef.sessionId,
         )) ?? []
-      const records =
-        persisted.length > 0
-          ? persisted
-          : await beeGameDeployments.list(sessionRef.sessionId)
+      const records = mergeDeploymentRecords(persisted, await beeGameDeployments.list(sessionRef.sessionId))
       return c.json(records)
     } catch (err) {
       return tracedRouteError(c, 'project.deployments.list', err)
     }
+  })
+
+  app.get('/api/projects/:id/deployment-readiness', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const project = await getOwnedProjectMetadata(c.req.raw, user, c.req.param('id'), dashboardRepository)
+      if (!project) return c.json({ error: 'Project not found' }, 404)
+      const sessionRef = await resolveBeeGameProjectSessionReference({ request: c.req.raw, user, project,
+        defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository })
+      const gate = sessionRef
+        ? await evaluateWorkflowDeliveryGate({ workspacePath: sessionRef.workspacePath, ownerId: user.id })
+        : { allowed: false, issues: ['Project session is not available.'] }
+      return c.json({ ...gate, destination: beeGameDeployments.destination })
+    } catch (err) { return tracedRouteError(c, 'project.deployment.readiness', err) }
   })
 
   app.post('/api/projects/:id/deployments', async c => {
@@ -3805,6 +3819,7 @@ export function createAgentWorkflowApp(
         dashboardRepository,
         getUserDataRoot: getCurrentUserDataRoot,
         assertPermittedModelConfigRuntime,
+        authToken: getRequestAuthToken(c.req.raw),
       })
       assertProjectWorkspaceMutationIdle(ensured.session)
       const deliveryGate = await evaluateWorkflowDeliveryGate({
@@ -3821,7 +3836,7 @@ export function createAgentWorkflowApp(
           409,
         )
       }
-      const deployment = await beeGameDeployments.deploy({
+      const deployment = await beeGameDeployments.start({
         sessionId: ensured.session.id,
         userId: user.id,
         projectId: project.id,
@@ -3829,13 +3844,8 @@ export function createAgentWorkflowApp(
         ...(getRequestAuthToken(c.req.raw)
           ? { authToken: getRequestAuthToken(c.req.raw) }
           : {}),
-      })
-      const persisted = await dashboardRepository.upsertDeploymentRecord(
-        c.req.raw,
-        user,
-        deployment,
-      )
-      return c.json(persisted || deployment)
+      }, record => dashboardRepository.upsertDeploymentRecord(c.req.raw, user, record))
+      return c.json(deployment, 202)
     } catch (err) {
       return tracedRouteError(c, 'project.deployments.create', err)
     }
@@ -3868,10 +3878,7 @@ export function createAgentWorkflowApp(
           user,
           sessionRef.sessionId,
         )) ?? []
-      const records =
-        persistedRecords.length > 0
-          ? persistedRecords
-          : await beeGameDeployments.list(sessionRef.sessionId)
+      const records = mergeDeploymentRecords(persistedRecords, await beeGameDeployments.list(sessionRef.sessionId))
       const source = records.find(
         record => record.id === c.req.param('deploymentId'),
       )
@@ -4049,6 +4056,7 @@ export function createAgentWorkflowApp(
         dashboardRepository,
         getUserDataRoot: getCurrentUserDataRoot,
         assertPermittedModelConfigRuntime,
+        authToken: getRequestAuthToken(c.req.raw),
       })
       assertProjectWorkspaceMutationIdle(ensured.session)
       const sessionMetadata = beeGameSessions.metadata(ensured.session.id)
@@ -4222,6 +4230,7 @@ export function createAgentWorkflowApp(
         modelConfigId,
       )
       const analysis = await generateBeeGameAttachmentAnalysis({
+        idea: typeof body.idea === 'string' ? body.idea : '',
         attachments,
         workspace: analysisWorkspace,
         language: typeof body.language === 'string' ? body.language : undefined,
@@ -4261,6 +4270,8 @@ export function createAgentWorkflowApp(
     })
     const intake = await generateBeeGameIntakeOptions({
       idea: String(body.idea),
+      referenceParts: body.attachments === undefined || (Array.isArray(body.attachments) && !body.attachments.length)
+        ? [] : await intakeReferenceParts(validateBeeGameAttachments(body.attachments)),
       language: typeof body.language === 'string' ? body.language : undefined,
       ownerId: user.id,
       modelConfigId,
@@ -4307,7 +4318,7 @@ export function createAgentWorkflowApp(
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'project.create')
     if (forbidden) return c.json(forbidden, 403)
-    const body = await readJson(c.req.raw)
+    const body = await readJson(c.req.raw, MAX_BEEGAME_REQUEST_BYTES)
     if (body.thinkingMode !== undefined) {
       return c.json({ error: 'Intake model behavior is server-owned' }, 400)
     }
@@ -4466,7 +4477,10 @@ export function createAgentWorkflowApp(
       startDeliveryWorkflow: startBeeGameDeliveryWorkflow,
       resumeDeliveryWorkflow: input =>
         continueBeeGameDeliveryWorkflow({ ...input, mode: 'resume' }),
-      sendProjectRequest: input => projectOperation(input.user.id, input.workspacePath, () => sendProjectConversation({
+      sendProjectRequest: input => projectOperation(input.user.id, input.workspacePath, () => {
+        if (beeGameDeployments.isPublishing(input.user.id, input.workspacePath))
+          throw new Error('Publishing is in progress. Wait for publication before editing the project.')
+        return sendProjectConversation({
         sessions: beeGameSessions, sessionId: input.sessionId, ownerId: input.user.id,
         message: input.message, options: { ...input.options,
           getValidAuthToken: refresh => sessionAuth?.getCredential?.(input.request)?.getValidAccessToken(refresh) },
@@ -4492,7 +4506,7 @@ export function createAgentWorkflowApp(
             }
           } catch (error) { library?.close(); image.close(); throw error }
         },
-      })),
+      }) }),
     },
   )
   return app
@@ -5047,6 +5061,7 @@ export function createUsageRecorder(input: {
 }
 
 async function generateBeeGameAttachmentAnalysis(input: {
+  idea?: string
   attachments: BeeGameAttachment[]
   workspace: string
   language?: string
@@ -5070,15 +5085,7 @@ async function generateBeeGameAttachmentAnalysis(input: {
       ? 'mixed'
       : 'image'
     : 'gdd'
-  const documentContext = input.attachments
-    .filter((item): item is BeeGameFileAttachment => item.type === 'file')
-    .map(item => {
-      const content = Buffer.from(item.data, 'base64')
-        .toString('utf8')
-        .slice(0, 100_000)
-      return `Document: ${item.filename}\nMIME: ${item.mediaType}\nContent:\n${content}`
-    })
-    .join('\n\n')
+  const referenceParts = await intakeReferenceParts(input.attachments)
   const text = [
     `Attachment source type: ${sourceType}`,
     'Analyze the uploaded game design inputs and return only JSON matching the requested schema.',
@@ -5090,20 +5097,10 @@ async function generateBeeGameAttachmentAnalysis(input: {
     'inferredDesign items: field, value, confidence, source.',
     'missingFields items: field, reason.',
     'conflicts items: field, gddValue, imageValue, resolution=needs_user_choice.',
-    documentContext,
+    `User request: ${input.idea || ''}`,
   ]
     .filter(Boolean)
     .join('\n\n')
-  const imageParts = input.attachments
-    .filter((item): item is BeeGameImageAttachment => item.type === 'image')
-    .map(item => ({
-      type: 'image' as const,
-      source: {
-        type: 'base64' as const,
-        media_type: item.mediaType,
-        data: item.data,
-      },
-    }))
   const rawContent = await generateBeeGameModelWithUsage(
     input.modelRuntimeHost,
     {
@@ -5113,7 +5110,7 @@ async function generateBeeGameAttachmentAnalysis(input: {
       messages: [
         {
           role: 'user',
-          content: [{ type: 'text', text }, ...imageParts],
+          content: [{ type: 'text', text }, ...referenceParts],
         },
       ],
       temperature: 0.2,
@@ -5144,6 +5141,7 @@ async function generateBeeGameAttachmentAnalysis(input: {
 
 async function generateBeeGameIntakeOptions(input: {
   idea: string
+  referenceParts?: Exclude<import('./beegame/model-runtime-host').BeeGameModelContent, string>
   language?: string
   ownerId: string
   modelConfigId?: string
@@ -5207,9 +5205,11 @@ async function generateBeeGameIntakeOptions(input: {
   const requestMessages = [
     {
       role: 'user',
-      content: `Game idea: ${input.idea}`,
+      content: input.referenceParts?.length
+        ? [{ type: 'text' as const, text: `Game idea: ${input.idea}\nUse the attached references to inform the three directions; preserve the user's explicit constraints.` }, ...input.referenceParts]
+        : `Game idea: ${input.idea}`,
     },
-  ] satisfies Array<{ role: 'user'; content: string }>
+  ] satisfies Array<{ role: 'user'; content: import('./beegame/model-runtime-host').BeeGameModelContent }>
   const firstContent = await generateBeeGameModelWithUsage(
     input.modelRuntimeHost,
     {
@@ -5705,6 +5705,7 @@ async function getOwnedProjectMetadata(
 
 async function ensureBeeGameProjectSession(input: {
   request: Request
+  authToken?: string
   user: BeeGameUserContext
   project: BeeGameProjectMetadata
   body: JsonObject
@@ -5793,9 +5794,7 @@ async function ensureBeeGameProjectSession(input: {
     ...(modelConfigId ? { modelConfigId } : {}),
     ...(language ? { language } : {}),
     userId: input.user.id,
-    ...(getBearerToken(input.request)
-      ? { authToken: getBearerToken(input.request) }
-      : {}),
+    ...(input.authToken ? { authToken: input.authToken } : {}),
     userDataRoot: input.getUserDataRoot(input.request),
   })
   const metadata = input.beeGameSessions.metadata(session.id)
@@ -7801,97 +7800,6 @@ function withPreviewCapability(
   }
 }
 
-export async function proxyBeeGamePreviewRequest(
-  request: Request,
-  sessionId: string,
-  internalBaseUrl: string,
-  preservePublicPath = false,
-): Promise<Response> {
-  const requestUrl = new URL(request.url)
-  const prefix = `/previews/${encodeURIComponent(sessionId)}`
-  const restPath = requestUrl.pathname.startsWith(prefix)
-    ? requestUrl.pathname.slice(prefix.length) || '/'
-    : '/'
-  const targetPath = preservePublicPath ? requestUrl.pathname : restPath
-  const target = new URL(targetPath, ensureTrailingSlash(internalBaseUrl))
-  // URLSearchParams mutation reserializes bare Vite flags (`raw` -> `raw=`),
-  // changing module semantics. Remove our credentials without rewriting the
-  // remaining query bytes, including repeated keys and percent encoding.
-  target.search = requestUrl.search.slice(1).split('&')
-    .filter(part => !new URLSearchParams(part).has(PREVIEW_CAPABILITY_QUERY_PARAM))
-    .join('&')
-  const headers = new Headers(request.headers)
-  headers.delete('host')
-  // The game dev server is untrusted project code, not an authenticated BGS API.
-  headers.delete('cookie')
-  headers.delete('authorization')
-  // fetch decodes response bodies. Prefer identity upstream, and still handle
-  // servers that send a compressed representation despite that preference.
-  headers.set('accept-encoding', 'identity')
-  const method = request.method.toUpperCase()
-  if (method === 'OPTIONS')
-    return new Response(null, { status: 204, headers: withPreviewCorsHeaders(new Headers()) })
-  let upstream: Response
-  try {
-    upstream = await fetch(target, {
-      method,
-      headers,
-      body: method === 'GET' || method === 'HEAD' ? undefined : request.body,
-      redirect: 'manual',
-    })
-  } catch (error) {
-    return new Response(
-      `Preview upstream unavailable: ${toErrorMessage(error)}`,
-      {
-        status: 502,
-        headers: withPreviewCorsHeaders(
-          new Headers({ 'content-type': 'text/plain; charset=UTF-8' }),
-        ),
-      },
-    )
-  }
-  const responseHeaders = withPreviewCorsHeaders(new Headers(upstream.headers))
-  responseHeaders.set('referrer-policy', 'no-referrer')
-  if (method === 'HEAD' || [204, 205, 304].includes(upstream.status))
-    return new Response(null, { status: upstream.status, statusText: upstream.statusText, headers: responseHeaders })
-  if (method !== 'HEAD' && upstream.status !== 304 && upstream.headers.has('content-encoding')) {
-    responseHeaders.delete('content-encoding')
-    responseHeaders.delete('content-length')
-    responseHeaders.delete('etag')
-    responseHeaders.delete('content-md5')
-  }
-  if (method === 'GET' && upstream.status !== 206 && isHtmlResponse(upstream.headers)) {
-    const html = await upstream.text()
-    responseHeaders.delete('content-length')
-    responseHeaders.delete('etag')
-    responseHeaders.delete('content-md5')
-    const previewHtml = stripViteClientScript(html, `${prefix}/`)
-    return new Response(
-      injectBeeGamePreviewConsoleBridge(previewHtml, sessionId),
-      {
-        status: upstream.status,
-        statusText: upstream.statusText,
-        headers: responseHeaders,
-      },
-    )
-  }
-  return new Response(upstream.body, {
-    status: upstream.status,
-    statusText: upstream.statusText,
-    headers: responseHeaders,
-  })
-}
-
-function isHtmlResponse(headers: Headers): boolean {
-  return (headers.get('content-type') || '').toLowerCase().includes('text/html')
-}
-
-function withPreviewCorsHeaders(headers: Headers): Headers {
-  headers.set('access-control-allow-origin', '*')
-  headers.set('access-control-allow-methods', 'GET, HEAD, OPTIONS')
-  headers.set('access-control-allow-headers', '*')
-  return headers
-}
 
 /**
  * API callers use session cookies/credentials, so a wildcard CORS response is
@@ -7907,65 +7815,6 @@ export function resolveApiCorsOrigin(origin: string): string | undefined {
   return [...localOrigins, ...configured].includes(origin) ? origin : undefined
 }
 
-function injectBeeGamePreviewConsoleBridge(
-  html: string,
-  sessionId: string,
-): string {
-  const bridge = `<script data-beegame-preview-console-bridge>
-(() => {
-  if (window.__beegamePreviewConsoleBridgeInstalled) return;
-  window.__beegamePreviewConsoleBridgeInstalled = true;
-  const sessionId = ${JSON.stringify(sessionId)};
-  const serialize = (value) => {
-    if (value instanceof Error) return value.stack || value.message || String(value);
-    if (typeof value === 'string') return value;
-    try { return JSON.stringify(value); } catch { return String(value); }
-  };
-  const emit = (level, values) => {
-    const message = values.map(serialize).filter(Boolean).join(' ');
-    if (!message) return;
-    const parentOrigin = (() => {
-      try {
-        return document.referrer ? new URL(document.referrer).origin : window.location.origin;
-      } catch {
-        return window.location.origin;
-      }
-    })();
-    window.parent?.postMessage({
-      type: 'beegame.preview.console',
-      sessionId,
-      level,
-      message,
-      createdAt: new Date().toISOString(),
-    }, parentOrigin);
-  };
-  for (const level of ['error', 'warn']) {
-    const original = console[level];
-    console[level] = (...args) => {
-      emit(level, args);
-      original.apply(console, args);
-    };
-  }
-  window.addEventListener('error', event => {
-    emit('error', [event.error || event.message || 'Unhandled preview error']);
-  });
-  window.addEventListener('unhandledrejection', event => {
-    emit('error', [event.reason || 'Unhandled preview promise rejection']);
-  });
-})();
-</script>`
-  const headClose = html.indexOf('</head>')
-  if (headClose >= 0)
-    return `${html.slice(0, headClose)}${bridge}${html.slice(headClose)}`
-  const bodyClose = html.indexOf('</body>')
-  if (bodyClose >= 0)
-    return `${html.slice(0, bodyClose)}${bridge}${html.slice(bodyClose)}`
-  return `${bridge}${html}`
-}
-
-function ensureTrailingSlash(value: string): string {
-  return value.endsWith('/') ? value : `${value}/`
-}
 
 function getBeeGamePayloadString(
   event: BeeGameEvent | undefined,
@@ -8495,12 +8344,10 @@ function registerBeeGameSessionRoutes(
           ...(options.getAuthToken(c.req.raw)
             ? { authToken: options.getAuthToken(c.req.raw) }
             : {}),
-        })
-        const persisted = await options.persistDeploymentRecord?.(
-          c.req.raw,
-          deployment,
-        )
-        return c.json(persisted ?? deployment)
+        }, undefined, options.persistDeploymentRecord
+          ? record => options.persistDeploymentRecord!(c.req.raw, record)
+          : undefined)
+        return c.json(deployment)
       } catch (err) {
         return c.json({ error: toErrorMessage(err) }, 400)
       }
@@ -8879,6 +8726,7 @@ function registerBeeGameSessionRoutes(
           behavior: decision,
           scope: permissionScope,
           remember: false,
+          answers: body.answers,
           ...(typeof body.message === 'string'
             ? { message: body.message }
             : {}),
@@ -8905,6 +8753,7 @@ function registerBeeGameSessionRoutes(
       }
       return c.json(resolved)
     } catch (err) {
+      if (err instanceof UserQuestionValidationError) return c.json({ error: err.message }, 400)
       return c.json({ error: toErrorMessage(err) }, 404)
     }
   })
@@ -9262,6 +9111,8 @@ function buildConfirmedBriefPrompt(
       confirmed_gdd: brief.confirmedGdd ?? null,
       build_source: brief.buildSource ?? null,
       analysis_id: brief.analysisId ?? null,
+      creation_mode: brief.creationMode === 'blueprint' ? 'blueprint' : 'creative',
+      reference_files: brief.referenceFiles ?? [],
       resource_library_usage: resourceLibraryUsage,
     },
     null,

@@ -560,6 +560,12 @@
     "account": "Account"
   },
   "beegame": {
+    "subagentActivity": {
+      "legacy": "Plain-text record: source metadata is unavailable; shown as-is.",
+      "recent": "Recent activity only; earlier records or long outputs have been omitted.",
+      "truncated": "This output is truncated; it is not the complete file or result.",
+      "command": "Command", "output": "Tool output", "file": "File content"
+    },
     "assistantName": "BeeGame",
     "previewTitle": "Preview",
     "collabFlow": "Collaboration",
@@ -718,6 +724,16 @@
     "permissionRiskLabel": "Risk",
     "permissionRiskGeneric": "May create files, install dependencies, or access the network",
     "permissionPendingPlaceholder": "Waiting for permission confirmation",
+    "userQuestion": {
+      "custom": "Or enter your own answer…",
+      "submit": "Submit answers",
+      "previous": "Previous question",
+      "next": "Next question",
+      "dismiss": "Decline to answer",
+      "progress": "Question {current} of {total}",
+      "previews": "Option previews",
+      "invalid": "The question could not be displayed. Decline it so the agent can continue."
+    },
     "allowOnce": "Allow once",
     "allowForSession": "Allow for session",
     "clarificationRequired": "Clarification Required",
@@ -844,6 +860,13 @@
       "approvalWaiting": "This project is waiting for approval. Resolve the approval request before sending a normal message."
     },
     "livePreview": {
+      "previewPageLoading": "Loading preview page…",
+      "previewPageFailed": "The preview page failed to load or timed out. This does not establish a game code defect. Reload; if it persists, check the preview service.",
+      "deploymentVerificationScope": "Completed or PASS in Chat describes that task, not release acceptance of the current version.",
+      "deploymentAcceptanceRequired": "The current version needs acceptance. Explicitly request verification of this version; this alone does not require rebuilding resources or content. Recheck only reads status and does not start an Agent.",
+      "openStandalone": "Preview in separate window",
+      "stopping": "Stopping preview",
+      "consumedCredits": "Credits used",
       "title": "Live Game Preview",
       "starting": "Preparing preview",
       "waiting": "Waiting for a playable surface",
@@ -868,6 +891,14 @@
       "deploymentFailed": "Deployment failed",
       "deploymentFailureLog": "Failure log",
       "deploymentDialogDescription": "Publishing rebuilds this project and creates a shareable live version.",
+      "deploymentChecking": "Checking publishing requirements…",
+      "deploymentPublicNotice": "Confirm to upload to Cloudflare and create a publicly accessible link.",
+      "deploymentNotConfigured": "Public hosting is not configured. A local preview is not a public release.",
+      "deploymentBlocked": "Publishing is not available:",
+      "deploymentRecheck": "Check again",
+      "deploymentBackground": "You can close this dialog; publishing continues in the background",
+      "deploymentCopyLink": "Copy published link",
+      "deploymentCopied": "Copied",
       "deploymentLatest": "Latest version",
       "deploymentVersions": "Version history",
       "deploymentNotPublished": "Not published yet",

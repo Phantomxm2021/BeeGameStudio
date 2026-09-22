@@ -1,12 +1,14 @@
 #!/usr/bin/env bun
 import {
   buildBeeGameDevPlan,
+  waitForBeeGameDevServices,
   DEFAULT_BEEGAME_BILLING_PORT,
   DEFAULT_BEEGAME_FRONTEND_PORT,
   DEFAULT_BEEGAME_RUNTIME_PORT,
   DEFAULT_BEEGAME_RESOURCE_PORT,
   DEFAULT_BEEGAME_SKILLS_PORT,
   type BeeGameDevPorts,
+  type BeeGameDevProcessName,
 } from './beegame-dev-lib'
 import { assertFixedServicePortsAvailable } from '../packages/agent-workflow-server/src/beegame/fixed-service-ports'
 import { loadEnvFile } from './beegame-migration-cli'
@@ -29,7 +31,7 @@ const plan = buildBeeGameDevPlan(argv, {
   ports,
   bunExecutable: process.execPath,
 })
-const children: Array<ReturnType<typeof Bun.spawn>> = []
+const children: Array<{ name: BeeGameDevProcessName; child: ReturnType<typeof Bun.spawn> }> = []
 
 await assertFixedServicePortsAvailable()
 console.log('Building Bee Game Studio native runtime...')
@@ -51,7 +53,7 @@ for (const processPlan of plan.processes) {
     stdout: 'inherit',
     stderr: 'inherit',
   })
-  children.push(child)
+  children.push({ name: processPlan.name, child })
 }
 
 console.log(`Frontend: http://127.0.0.1:${plan.ports.frontend}`)
@@ -67,11 +69,13 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   })
 }
 
-await Promise.race(children.map(child => child.exited))
-shutdown()
+await waitForBeeGameDevServices(children, event => {
+  console.error(JSON.stringify({ type: 'service.exited', timestamp: new Date().toISOString(), ...event }))
+  if (event.exitCode !== 0) process.exitCode = 1
+})
 
 function shutdown(): void {
-  for (const child of children) {
+  for (const { child } of children) {
     try {
       child.kill()
     } catch {

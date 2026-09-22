@@ -16,6 +16,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "mammoth": "^1.11.0",
+    "pdfjs-dist": "^5.4.0",
+    "exceljs": "^4.4.0",
     "@bee-game-studio/agent-workflow": "workspace:*",
     "@bee-game-studio/beegame-billing-core": "workspace:*",
     "@bee-game-studio/beegame-resource-core": "workspace:*",

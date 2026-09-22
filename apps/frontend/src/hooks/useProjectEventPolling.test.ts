@@ -8,7 +8,8 @@ const { pollMessages, streamMessages } = vi.hoisted(() => ({
 }));
 
 vi.mock('../services/apiClient', () => ({
-  isAuthenticationServiceUnavailable: () => false,
+  isAuthenticationServiceUnavailable: (error: { status?: number; code?: string }) =>
+    error?.status === 503 && error?.code === 'authentication_unavailable',
 }));
 
 vi.mock('../services/beeGameAdapter', () => ({
@@ -17,12 +18,15 @@ vi.mock('../services/beeGameAdapter', () => ({
 
 describe('useProjectEventPolling project event polling', () => {
   beforeEach(() => {
+    pollMessages.mockReset();
+    streamMessages.mockReset();
     pollMessages.mockResolvedValue({ lastEventId: 0, messages: [] });
     streamMessages.mockRejectedValue(Object.assign(new Error('SSE unsupported'), { status: 404 }));
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
   });
 
   it('does not replay from zero while initial history is still establishing its cursor', async () => {
@@ -111,6 +115,41 @@ describe('useProjectEventPolling project event polling', () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
     expect(warningLog).toHaveBeenCalledWith('[ProjectEvents] Poll failed:', expect.any(TypeError));
     warningLog.mockRestore();
+  });
+
+  it('waits through an auth outage and resumes SSE from the delivered cursor without closing the task', async () => {
+    vi.useFakeTimers();
+    const outage = Object.assign(new Error('Auth unavailable'), {
+      status: 503, code: 'authentication_unavailable', recoverable: true, retryAfterMs: 2000,
+    });
+    streamMessages.mockImplementationOnce(async (_project, _cursor, callbacks) => {
+      callbacks.onOpen();
+      callbacks.onMessage({ type: 'token', content: 'before outage' });
+      callbacks.onCursor(42);
+      throw outage;
+    }).mockRejectedValueOnce(outage).mockRejectedValueOnce(outage)
+      .mockImplementationOnce(async (_project, _cursor, callbacks, signal: AbortSignal) => {
+        callbacks.onOpen();
+        callbacks.onMessage({ type: 'token', content: 'after outage' });
+        callbacks.onCursor(43);
+        await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+      });
+    const onClose = vi.fn(), onMessage = vi.fn(), showToastError = vi.fn();
+    const { result, unmount } = renderHook(() => useProjectEventPolling({
+      projectId: 'recover-auth', onClose, onMessage, showToastError,
+    }));
+    await act(async () => {});
+    expect(result.current.state).toBe('reconnecting');
+    await act(async () => { await vi.advanceTimersByTimeAsync(1999); });
+    expect(streamMessages).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(4001); });
+    expect(result.current.state).toBe('connected');
+    expect(streamMessages.mock.calls.map(call => call[1])).toEqual([0, 42, 42, 42]);
+    expect(onMessage.mock.calls.map(([message]) => message.content)).toEqual(['before outage', 'after outage']);
+    expect(showToastError).toHaveBeenCalledWith('登录验证服务暂时不可用，正在自动恢复连接');
+    expect(onClose).not.toHaveBeenCalled();
+    expect(pollMessages).not.toHaveBeenCalled();
+    unmount();
   });
 
   it('stops polling when disconnected and can reconnect explicitly', async () => {

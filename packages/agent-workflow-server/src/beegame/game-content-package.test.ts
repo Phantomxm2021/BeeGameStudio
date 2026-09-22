@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { BeeGameAssetManifest } from './asset-contracts'
-import { auditBeeGameContentPackage, BEEGAME_SCENE_MODEL } from './game-content-package'
+import { auditBeeGameContentPackage, BEEGAME_SCENE_MODEL, loadBeeGameContentFileListForEditing } from './game-content-package'
 
 const HASH = 'a'.repeat(64)
 const workspaces: string[] = []
@@ -48,6 +48,28 @@ const logicalCameraData = {
 }
 
 describe('Unity-style Game Content scene contract', () => {
+  it('loads file metadata without returning document bodies', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'beegame-content-file-list-')); workspaces.push(workspace)
+    mkdirSync(join(workspace, 'content/scenes'), { recursive: true })
+    writeFileSync(join(workspace, 'content/index.json'), JSON.stringify({
+      schema: 'beegame-content-package.v2', id: 'test', dimension: '2d', documentRevision: HASH,
+      assetManifestRevision: HASH, entryScene: 'scene', files: ['scenes/scene.json'], sceneModel: BEEGAME_SCENE_MODEL,
+    }))
+    writeFileSync(join(workspace, 'content/scenes/scene.json'), JSON.stringify({
+      schema: 'beegame-content.v1', id: 'scene', kind: 'scene-2d', assetRefs: [],
+      data: { nodes: [{ id: 'root', data: { large: 'document body' } }] },
+    }))
+
+    const result = loadBeeGameContentFileListForEditing(workspace, {
+      documentRevision: HASH, assetManifestRevision: HASH, manifest,
+    })
+
+    expect(result.documents).toEqual([
+      { path: 'scenes/scene.json', revision: expect.any(String), id: 'scene', kind: 'scene-2d' },
+    ])
+    expect(result.documents[0]).not.toHaveProperty('document')
+  })
+
   it('accepts real 2D components and asset metadata for non-preview audio', () => {
     const result = audit({ schema: 'beegame-content.v1', id: 'scene', kind: 'scene-2d', assetRefs: ['RES-SPRITE', 'RES-PARTICLE', 'RES-AUDIO'], data: { cameraNodeId: 'camera', nodes: [
       { id: 'camera', transform: { position: [0, 0, 10] }, components: [component('camera-transform', 'camera', { data: logicalCameraData }), component('camera-listener', 'audio-listener', { data: {} })] },

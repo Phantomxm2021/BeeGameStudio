@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   BeeGameDeploymentManager,
   createSupabaseStorageDeploymentPublisher,
+  mergeDeploymentRecords,
   type BeeGameDeploymentRunner,
 } from '../beegame/deployment-manager'
 
@@ -20,6 +21,78 @@ describe('BeeGameDeploymentManager', () => {
 
   afterEach(async () => {
     await rm(root, { recursive: true, force: true })
+  })
+
+  test.each([false, true])('registers before Worker verification and revokes failure: %s', async (rejectVerification) => {
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
+    const statuses: string[] = []
+    const manager = new BeeGameDeploymentManager({ dataRoot: root,
+      runner: async () => {
+        await mkdir(join(workspace, 'dist'), { recursive: true })
+        await writeFile(join(workspace, 'dist/index.html'), '<main>Ready</main>')
+        return { exitCode: 0, stdout: '', stderr: '' }
+      },
+      publisher: {
+        publishStaticDirectory: async () => ({ url: 'https://games.test/test', manifestStorageObjectId: 'manifest' }),
+        verifyPublished: async () => {
+          expect(statuses).toEqual(['succeeded'])
+          expect((await manager.list())[0]?.status).toBe('publishing')
+          if (rejectVerification) throw new Error('Public page mismatch')
+        },
+      },
+    })
+    const result = await manager.deploy({sessionId: 'test', workspacePath: workspace}, undefined,
+      async record => { statuses.push(record.status) })
+    expect(result.status).toBe(rejectVerification ? 'failed' : 'succeeded')
+    expect(statuses).toEqual(rejectVerification ? ['succeeded', 'failed'] : ['succeeded'])
+    if (rejectVerification) expect(result.url).toBe('')
+  })
+
+  test('background publishing returns before build completion and deduplicates repeated clicks', async () => {
+    let release!: () => void
+    let runs = 0
+    const gate = new Promise<void>(resolve => { release = resolve })
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
+    const manager = new BeeGameDeploymentManager({ dataRoot: root, runner: async (_, options) => {
+      runs++
+      await gate
+      await mkdir(join(options.cwd, 'dist'), { recursive: true })
+      await writeFile(join(options.cwd, 'dist/index.html'), '<main>Ready</main>')
+      return { exitCode: 0, stdout: 'Built', stderr: '' }
+    } })
+    let finish!: () => void
+    const finished = new Promise<void>(resolve => { finish = resolve })
+    const input = { sessionId: 'session', userId: 'owner', workspacePath: workspace }
+    const first = await manager.start(input, async () => { finish() })
+    try {
+      const second = await manager.start(input)
+      expect(first.status).toBe('queued')
+      expect(second.id).toBe(first.id)
+      expect(manager.isPublishing('owner', workspace)).toBe(true)
+      expect(manager.isPublishing('other-owner', workspace)).toBe(false)
+    } finally { release(); await finished }
+    expect(runs).toBe(1)
+    const final = (await manager.list('session'))[0]!
+    expect(final.status).toBe('succeeded')
+    expect(mergeDeploymentRecords([final], [first])[0]?.status).toBe('succeeded')
+  })
+
+  test('parallel project records are not lost and interrupted records become explicit failures after restart', async () => {
+    const manager = new BeeGameDeploymentManager({ dataRoot: root })
+    const records = await Promise.all(Array.from({ length: 8 }, (_, index) => manager.deploy({
+      sessionId: `session-${index}`, workspacePath: workspace,
+    })))
+    expect(await manager.list()).toHaveLength(8)
+    expect(new Set(records.map(record => record.id)).size).toBe(8)
+    await writeFile(join(root, 'deployments/deployments.json'), JSON.stringify([
+      { ...records[0], status: 'building' }, ...records.slice(1),
+    ]))
+    const restarted = new BeeGameDeploymentManager({ dataRoot: root })
+    const recovered = (await restarted.list()).find(record => record.id === records[0]!.id)!
+    expect(recovered.status).toBe('failed')
+    expect(recovered.message).toContain('interrupted')
+    expect(recovered.url).toBe('')
+    expect(await restarted.list()).toHaveLength(8)
   })
 
   test('builds a package project and publishes static output', async () => {

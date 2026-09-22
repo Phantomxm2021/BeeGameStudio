@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { applyTextureRegion, rendererSize, rendererOffset, rendererOrder } from './viewport'
+import { applyTextureRegion, rendererSize, rendererOffset, rendererOrder, textRasterMetrics } from './viewport'
 import { identityTransform, type SceneNode } from './model'
 
 describe('sprite atlas texture regions', () => {
@@ -56,5 +56,9 @@ describe('sprite atlas texture regions', () => {
       ],
     }
     expect(rendererSize(node)).toEqual([4.8, 2.4])
+  })
+
+  it('keeps authored 2D font size in logical pixels while rasterizing the rect', () => {
+    expect(textRasterMetrics(28, [2, .6], 100, true)).toEqual({ density: 100, fontSize: 28, width: 200, height: 60 })
   })
 })

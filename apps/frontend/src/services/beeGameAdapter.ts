@@ -15,6 +15,7 @@ import type {
 import type { Project } from '../types/project'
 import type { AssistantContentBlock, ProjectEventMessage } from '../types/message'
 import { authenticatedFetch } from './apiClient'
+import { readSubagentActivity } from '@bee-game-studio/agent-workflow/subagent-activity'
 import { normalizeChatAttachments } from './chatAttachments'
 import { projectQuotaErrorMessage } from './projectQuotaError'
 import {
@@ -81,6 +82,17 @@ const projectRuntimeStateRequests = new Map<
   string,
   Promise<ProjectRuntimeStateWithPermissions>
 >()
+const projectRuntimeStateGenerations = new Map<string, number>()
+
+const invalidateProjectRuntimeState = (projectId: string): void => {
+  const normalizedProjectId = String(projectId || '').trim()
+  if (!normalizedProjectId) return
+  projectRuntimeStateGenerations.set(
+    normalizedProjectId,
+    (projectRuntimeStateGenerations.get(normalizedProjectId) ?? 0) + 1,
+  )
+  projectRuntimeStateRequests.delete(normalizedProjectId)
+}
 
 function fetchProjectRuntimeState(
   projectId: string,
@@ -88,9 +100,18 @@ function fetchProjectRuntimeState(
   const normalizedProjectId = String(projectId || '').trim()
   const existing = projectRuntimeStateRequests.get(normalizedProjectId)
   if (existing) return existing
+  const generation = projectRuntimeStateGenerations.get(normalizedProjectId) ?? 0
   const request = getJson<ProjectRuntimeStateWithPermissions>(
     `/api/projects/${encodeURIComponent(normalizedProjectId)}/runtime-state`,
-  ).finally(() => {
+  ).then(snapshot => {
+    // A preview mutation can complete while an earlier poll is still in
+    // flight. Do not let that old response overwrite the post-mutation state;
+    // join the replacement request instead.
+    if ((projectRuntimeStateGenerations.get(normalizedProjectId) ?? 0) !== generation) {
+      return fetchProjectRuntimeState(normalizedProjectId)
+    }
+    return snapshot
+  }).finally(() => {
     if (projectRuntimeStateRequests.get(normalizedProjectId) === request) {
       projectRuntimeStateRequests.delete(normalizedProjectId)
     }
@@ -191,6 +212,7 @@ type BeeGameIdeaIntakeRequest = {
   idea: string
   language?: BeeGameLanguage | string
   clientRequestId?: string
+  attachments?: ChatAttachmentPayload[]
 }
 
 export type BeeGameIntakeOption = {
@@ -257,6 +279,8 @@ export type BeeGameIntakeSettings = {
 }
 
 export type BeeGameBuildBrief = {
+  creationMode?: 'creative' | 'blueprint'
+  attachments?: ChatAttachmentPayload[]
   idea: string
   option: BeeGameIntakeOption
   settings: BeeGameIntakeSettings
@@ -367,6 +391,43 @@ export type BeeGameGameContentSnapshot = {
     revision: string
     document: BeeGameEditableContentDocument | Record<string, unknown>
   }>
+}
+
+export type BeeGameContentFileListSnapshot = Omit<BeeGameGameContentSnapshot, 'documents'> & {
+  documents?: Array<{
+    path: string
+    revision: string
+    id: string
+    kind: BeeGameEditableContentDocument['kind']
+  }>
+}
+
+function normalizeBeeGameContentFileList(
+  snapshot: BeeGameContentFileListSnapshot | BeeGameGameContentSnapshot,
+): BeeGameContentFileListSnapshot {
+  if (!snapshot.documents) {
+    // Both snapshot shapes omit documents while content is not available yet.
+    // Strip the discriminating union field before returning the lightweight
+    // file-list shape so callers never receive a full-document union here.
+    const { documents: _documents, ...metadata } = snapshot
+    return metadata
+  }
+  return {
+    ...snapshot,
+    documents: snapshot.documents.flatMap(item => {
+      if (!('document' in item)) return [item]
+      const document = item.document
+      if (!document || typeof document !== 'object' || Array.isArray(document)) return []
+      const record = document as Record<string, unknown>
+      if (typeof record.id !== 'string' || typeof record.kind !== 'string') return []
+      return [{
+        path: item.path,
+        revision: item.revision,
+        id: record.id,
+        kind: record.kind as BeeGameEditableContentDocument['kind'],
+      }]
+    }),
+  }
 }
 
 export type BeeGameContentDocumentSaveResult<
@@ -545,13 +606,6 @@ export const beeGameAdapter = {
     )
   },
 
-  async retryWorkflow(projectId: string): Promise<Record<string, unknown>> {
-    return postJson<Record<string, unknown>>(
-      `/api/projects/${encodeURIComponent(projectId)}/workflow/retry`,
-      { language: getCurrentUiLanguage() },
-    )
-  },
-
   async requestProjectAction(data: {
     project_id: string
     kind: 'build_error_repair' | 'deployment_failure_repair'
@@ -712,9 +766,9 @@ export const beeGameAdapter = {
       },
     )
     if (!response.ok) {
-      const error = new Error(await getResponseErrorMessage(response)) as Error & { status?: number }
-      error.status = response.status
-      throw error
+      // Use the same error envelope as polling: keep auth outage and retry
+      // metadata instead of reducing every SSE failure to a generic error.
+      await readResponse(response)
     }
     if (!response.body) throw new Error('BeeGame event stream has no response body')
     callbacks.onOpen?.()
@@ -782,16 +836,19 @@ export const beeGameAdapter = {
     decision: 'allow' | 'deny'
     message?: string
     scope?: 'once' | 'session'
+    answers?: Record<string, string>
   }): Promise<{ ok: boolean }> {
-    await postJson(
+    const result = await postJson<{ resolved?: boolean }>(
       `/api/projects/${encodeURIComponent(data.project_id)}/permissions/${encodeURIComponent(data.gate_id)}`,
       {
         decision: data.decision,
         remember: false,
         scope: data.scope ?? 'once',
+        ...(data.answers ? { answers: data.answers } : {}),
         ...(data.message ? { message: data.message } : {}),
       },
     )
+    if (result.resolved === false) throw new Error('This request is no longer pending. Refresh the conversation.')
     return { ok: true }
   },
 
@@ -883,25 +940,37 @@ export const beeGameAdapter = {
   },
 
   async startProjectPreview(projectId: string): Promise<BeeGamePreviewPayload> {
-    return postJson(
-      `/api/projects/${encodeURIComponent(projectId)}/preview`,
-      {},
-    )
+    try {
+      return await postJson(
+        `/api/projects/${encodeURIComponent(projectId)}/preview`,
+        {},
+      )
+    } finally {
+      invalidateProjectRuntimeState(projectId)
+    }
   },
 
   async restartProjectPreview(
     projectId: string,
   ): Promise<BeeGamePreviewPayload> {
-    return postJson(
-      `/api/projects/${encodeURIComponent(projectId)}/preview/restart`,
-      {},
-    )
+    try {
+      return await postJson(
+        `/api/projects/${encodeURIComponent(projectId)}/preview/restart`,
+        {},
+      )
+    } finally {
+      invalidateProjectRuntimeState(projectId)
+    }
   },
 
   async stopProjectPreview(projectId: string): Promise<BeeGamePreviewPayload> {
-    return deleteJson<BeeGamePreviewPayload>(
-      `/api/projects/${encodeURIComponent(projectId)}/preview`,
-    )
+    try {
+      return await deleteJson<BeeGamePreviewPayload>(
+        `/api/projects/${encodeURIComponent(projectId)}/preview`,
+      )
+    } finally {
+      invalidateProjectRuntimeState(projectId)
+    }
   },
 
   async deployProject(projectId: string): Promise<BeeGameDeploymentPayload> {
@@ -909,6 +978,10 @@ export const beeGameAdapter = {
       `/api/projects/${encodeURIComponent(projectId)}/deployments`,
       {},
     )
+  },
+
+  async getDeploymentReadiness(projectId: string): Promise<import('./api').BeeGameDeploymentReadiness> {
+    return getJson(`/api/projects/${encodeURIComponent(projectId)}/deployment-readiness`)
   },
 
   async listProjectDeployments(
@@ -947,6 +1020,17 @@ export const beeGameAdapter = {
       `/api/projects/${encodeURIComponent(projectId)}/game-content`,
       { signal },
     )
+  },
+
+  async getProjectGameContentFileList(
+    projectId: string,
+    signal?: AbortSignal,
+  ): Promise<BeeGameContentFileListSnapshot> {
+    const snapshot = await getJson<BeeGameContentFileListSnapshot | BeeGameGameContentSnapshot>(
+      `/api/projects/${encodeURIComponent(projectId)}/game-content?metadata=1`,
+      { signal },
+    )
+    return normalizeBeeGameContentFileList(snapshot)
   },
 
   async loadProjectAssetFile(
@@ -1421,6 +1505,7 @@ function eventsToHistory(
     subagentPrompt: message.subagent_prompt,
     subagentOutput: message.subagent_output,
     subagentTrace: message.subagent_trace,
+    subagentActivity: message.subagent_activity,
     sources: message.sources,
     attachments: message.attachments,
     citations: message.citations,
@@ -1720,6 +1805,7 @@ function eventToProjectEventMessagesBase(
           subagent_prompt: startedInfo.subagentPrompt,
           subagent_output: startedInfo.subagentOutput,
           subagent_trace: startedInfo.subagentTrace,
+          subagent_activity: readSubagentActivity(event.payload?.subagentActivity),
           timestamp: Date.parse(event.createdAt) || Date.now(),
         } as ProjectEventMessage,
       ]
@@ -1765,6 +1851,7 @@ function eventToProjectEventMessagesBase(
           subagent_prompt: progressInfo.subagentPrompt,
           subagent_output: progressInfo.subagentOutput,
           subagent_trace: progressInfo.subagentTrace,
+          subagent_activity: readSubagentActivity(event.payload?.subagentActivity),
           timestamp: Date.parse(event.createdAt) || Date.now(),
         } as ProjectEventMessage,
       ]
@@ -1820,6 +1907,7 @@ function eventToProjectEventMessagesBase(
           subagent_prompt: finishedInfo.subagentPrompt,
           subagent_output: finishedInfo.subagentOutput,
           subagent_trace: finishedInfo.subagentTrace,
+          subagent_activity: readSubagentActivity(event.payload?.subagentActivity),
           timestamp: Date.parse(event.createdAt) || Date.now(),
         } as ProjectEventMessage,
       ]
@@ -3081,6 +3169,7 @@ function buildIdeaIntakeRequestBody(
     idea: data.idea,
     language,
     clientRequestId: data.clientRequestId ?? createClientRequestId(),
+    ...(data.attachments?.length ? { attachments: data.attachments } : {}),
   }
 }
 
@@ -3226,7 +3315,10 @@ function getJsonErrorMessage(body: unknown): string | null {
   const quotaMessage = projectQuotaErrorMessage(body)
   if (quotaMessage) return quotaMessage
   if (typeof body !== 'object' || body === null) return null
-  const payload = body as { message?: unknown; error?: unknown }
+  const payload = body as { message?: unknown; error?: unknown; issues?: unknown }
+  if (Array.isArray(payload.issues) && payload.issues.some(issue => typeof issue === 'string')) {
+    return [payload.message || payload.error, ...payload.issues].filter(value => typeof value === 'string' && value.trim()).join('\n')
+  }
   if (typeof payload.message === 'string' && payload.message.trim())
     return payload.message
   if (typeof payload.error === 'string' && payload.error.trim())

@@ -6,6 +6,7 @@
  */
 
 import type { ChatAttachment } from '../services/chatAttachments'
+import type { SubagentActivitySnapshot } from '@bee-game-studio/agent-workflow/subagent-activity'
 
 /**
  * Message type enumeration
@@ -326,6 +327,7 @@ export interface Message {
   subagentPrompt?: string
   subagentOutput?: string
   subagentTrace?: string
+  subagentActivity?: SubagentActivitySnapshot
 
   /** Structured sources attached to an assistant response. */
   sources?: Array<{ id?: string; title?: string; domain?: string; url?: string }>
@@ -447,6 +449,7 @@ export interface ProjectEventMessage {
   subagent_prompt?: string
   subagent_output?: string
   subagent_trace?: string
+  subagent_activity?: SubagentActivitySnapshot
 
   /** Structured response grounding metadata passed through from runtime events. */
   attachments?: ChatAttachment[]

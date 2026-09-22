@@ -41,6 +41,17 @@ export type BeeGameContentEditorSnapshot = Readonly<{
   documents: readonly BeeGameContentDocumentSnapshot[]
 }>
 
+export type BeeGameContentFileListSnapshot = Readonly<{
+  contentRevision: string
+  index: BeeGameContentIndex
+  documents: readonly {
+    path: string
+    revision: string
+    id: string
+    kind: BeeGameContentDocument['kind']
+  }[]
+}>
+
 export type BeeGameContentDocumentSaveResult = BeeGameContentDocumentSnapshot &
   Readonly<{ contentRevision: string }>
 
@@ -743,6 +754,46 @@ export function loadBeeGameContentPackageForEditing(
     documents: audit.package.index.files.map(path =>
       loadBeeGameContentDocument(workspacePath, path),
     ),
+  }
+}
+
+/** Load only Scene/UI file metadata for the editor chooser. */
+export function loadBeeGameContentFileListForEditing(
+  workspacePath: string,
+  authority: BeeGameContentAuthority,
+): BeeGameContentFileListSnapshot {
+  const indexPath = resolve(workspacePath, BEEGAME_CONTENT_INDEX)
+  if (!existsSync(indexPath) || !statSync(indexPath).isFile())
+    throw new Error(`Missing ${BEEGAME_CONTENT_INDEX}.`)
+  const index = contentIndexSchema.parse(parseJson(indexPath))
+  if (index.documentRevision !== authority.documentRevision)
+    throw new Error(`${BEEGAME_CONTENT_INDEX}: documentRevision does not match authority.`)
+  if (index.assetManifestRevision !== authority.assetManifestRevision)
+    throw new Error(`${BEEGAME_CONTENT_INDEX}: assetManifestRevision does not match authority.`)
+
+  const rawDocuments = index.files.map(path => {
+    const absolute = safeContentFile(workspacePath, path)
+    if (!absolute || !existsSync(absolute) || !statSync(absolute).isFile())
+      throw new Error(`Content document is unavailable: ${path}`)
+    const raw = parseJson(absolute)
+    if (!isRecord(raw) || typeof raw.id !== 'string' || !raw.id.trim() ||
+      typeof raw.kind !== 'string' || !['scene-2d', 'scene-3d', 'ui-screen', 'ui-hud', 'ui-flow', 'vfx'].includes(raw.kind))
+      throw new Error(`Content document metadata is invalid: ${path}`)
+    return raw
+  })
+
+  return {
+    contentRevision: digest({ index, documents: rawDocuments }),
+    index,
+    documents: index.files.map((path, index) => {
+      const document = rawDocuments[index]!
+      return {
+        path,
+        revision: digest(document),
+        id: document.id as string,
+        kind: document.kind as BeeGameContentDocument['kind'],
+      }
+    }),
   }
 }
 

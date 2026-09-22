@@ -139,7 +139,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
     if (typeof input.sessions.disposeWorkflowWorker === 'function')
       await input.sessions.disposeWorkflowWorker(sessionId)
     else if (typeof input.sessions.stop === 'function')
-      input.sessions.stop(sessionId)
+      input.sessions.stop(sessionId, 'worker_disposed')
   }
   return {
     async start(request: WorkerDispatchRequest) {
@@ -288,7 +288,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
     async stop(dispatchId, reason) {
       const sessionId = sessions.get(dispatchId)
       // Stop model/tool work immediately, not after preview readiness/cleanup.
-      if (sessionId) input.sessions.stop(sessionId)
+      if (sessionId) input.sessions.stop(sessionId, reason)
       await closeLibraryAccess(dispatchId)
       if (!sessionId) {
         await input.sessions.disposeWorkflowDispatch?.(dispatchId)
@@ -322,7 +322,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
             session?.status === 'running' &&
             typeof input.sessions.stop === 'function'
           )
-            input.sessions.stop(sessionId)
+            input.sessions.stop(sessionId, 'worker_disposed')
           await disposeWorkflowSession(sessionId)
           disposed = true
         }

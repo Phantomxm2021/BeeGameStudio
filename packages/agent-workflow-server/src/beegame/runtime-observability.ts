@@ -126,6 +126,7 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
     finishTurn(result: {
       outcome: 'success' | 'error' | 'aborted' | 'cancelled_by_user'
       error?: unknown
+      stopReason?: string
     }): void {
       const finishedAt = clock()
       const error = result.error === undefined ? undefined : errorMessage(result.error)
@@ -138,6 +139,7 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
         provider: input.provider,
         model: input.model,
         outcome: result.outcome,
+        ...(result.stopReason ? { stopReason: result.stopReason } : {}),
         eventCount,
         byteCount,
         lastEventType,

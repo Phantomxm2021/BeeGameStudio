@@ -803,6 +803,108 @@ describe('LandingView bootstrap submission', () => {
     expect(runIdeaIntake).toHaveBeenCalledTimes(1);
   });
 
+  it('blueprint opens settings directly and restores them without generating three options', async () => {
+    const { unmount } = await renderLanding();
+    fireEvent.click(screen.getByRole('button', { name: '创意模式' }));
+    fireEvent.click(await screen.findByRole('button', { name: '蓝图模式' }));
+    await submitIdea('按我的蓝图制作一个解谜游戏');
+    expect(await screen.findByTestId('intake-settings')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '返回输入' })).toBeInTheDocument();
+    expect(screen.queryByTestId('intake-options')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '实时 Credit 扣除提示' })).not.toBeInTheDocument();
+    expect(runIdeaIntake).not.toHaveBeenCalled();
+    expect(analyzeAttachmentBuild).not.toHaveBeenCalled();
+    unmount();
+    await renderLanding();
+    expect(await screen.findByTestId('intake-settings')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '返回输入' }));
+    expect(screen.getByRole('textbox')).toHaveValue('按我的蓝图制作一个解谜游戏');
+    expect(screen.queryByTestId('intake-options')).not.toBeInTheDocument();
+    expect(runIdeaIntake).not.toHaveBeenCalled();
+  });
+
+  it('creative references accompany the typed idea through options and confirmed build', async () => {
+    const onStart = vi.fn().mockResolvedValue({});
+    await renderLanding({ onStart });
+    fireEvent.change(document.querySelector('#landing-attachment-upload')!, {
+      target: { files: [new File(['Keep the hand-drawn visual style.'], 'reference.md', { type: 'text/markdown' })] },
+    });
+    await screen.findByText('reference.md');
+    await submitIdeaAndConfirmIntake('参考附件，但玩法是解谜');
+    fireEvent.click(await screen.findByRole('button', { name: /LLM Mode A/ }));
+    expect(runIdeaIntake).toHaveBeenCalledWith(expect.objectContaining({
+      idea: '参考附件，但玩法是解谜',
+      attachments: [expect.objectContaining({ filename: 'reference.md', data: btoa('Keep the hand-drawn visual style.') })],
+    }));
+    expect(analyzeAttachmentBuild).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
+    fireEvent.click(screen.getByRole('button', { name: '开始构建' }));
+    await waitFor(() => expect(onStart).toHaveBeenCalledOnce());
+    expect(onStart.mock.calls[0][2]).toMatchObject({
+      creationMode: 'creative', attachments: [{ filename: 'reference.md', data: btoa('Keep the hand-drawn visual style.') }],
+    });
+  });
+
+  it('blueprint references enter settings without analysis and survive closing settings', async () => {
+    await renderLanding();
+    fireEvent.change(document.querySelector('#landing-attachment-upload')!, {
+      target: { files: [new File(['# Complete blueprint'], 'blueprint.md', { type: 'text/markdown' })] },
+    });
+    await screen.findByText('blueprint.md');
+    fireEvent.click(screen.getByRole('button', { name: '创意模式' }));
+    fireEvent.click(await screen.findByRole('button', { name: '蓝图模式' }));
+    await submitIdea('实现附件蓝图');
+    expect(await screen.findByTestId('intake-settings')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '返回输入' }));
+    expect(screen.getByText('blueprint.md')).toBeInTheDocument();
+    expect(runIdeaIntake).not.toHaveBeenCalled();
+    expect(analyzeAttachmentBuild).not.toHaveBeenCalled();
+  });
+
+  it('blueprint configured settings and original references reach the build entry', async () => {
+    const onStart = vi.fn().mockResolvedValue({});
+    await renderLanding({ onStart });
+    fireEvent.change(document.querySelector('#landing-attachment-upload')!, {
+      target: { files: [new File(['# Blueprint'], 'plan.md', { type: 'text/markdown' })] },
+    });
+    await screen.findByText('plan.md');
+    fireEvent.click(screen.getByRole('button', { name: '创意模式' }));
+    fireEvent.click(await screen.findByRole('button', { name: '蓝图模式' }));
+    await submitIdea('按蓝图制作');
+    for (const [label, value] of [['平台', 'Web'], ['引擎', 'React'], ['表现形式', '2D'], ['游戏类型', '解谜'], ['风格', '像素']]) {
+      fireEvent.click(screen.getByRole('button', { name: label, exact: true }));
+      fireEvent.click(await screen.findByRole('option', { name: value, exact: true }));
+    }
+    const inputTrigger = screen.getByText('输入方式').parentElement!.querySelector('button')!;
+    fireEvent.click(inputTrigger);
+    fireEvent.click(await screen.findByRole('option', { name: '键鼠', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '确认方案' }));
+    expect(screen.getByTestId('confirmed-brief')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '开始构建' }));
+    await waitFor(() => expect(onStart).toHaveBeenCalledOnce());
+    expect(onStart.mock.calls[0][2]).toMatchObject({
+      creationMode: 'blueprint', idea: '按蓝图制作',
+      attachments: [{ filename: 'plan.md', data: btoa('# Blueprint') }],
+      settings: { platform: 'Web', engine: 'React', dimension: '2D', genre: 'Puzzle', visualStyle: 'Pixel' },
+    });
+    expect(runIdeaIntake).not.toHaveBeenCalled();
+    expect(analyzeAttachmentBuild).not.toHaveBeenCalled();
+  });
+
+  it('blocks creative generation after refresh until references are reattached', async () => {
+    const { unmount } = await renderLanding();
+    fireEvent.change(document.querySelector('#landing-attachment-upload')!, {
+      target: { files: [new File(['# Reference'], 'reference.md', { type: 'text/markdown' })] },
+    });
+    await screen.findByText('reference.md');
+    await submitIdea('Use my reference');
+    unmount();
+    await renderLanding();
+    await confirmIntakeCreditQuote();
+    expect(await screen.findByText(/刷新后请返回输入重新添加参考文件/)).toBeInTheDocument();
+    expect(runIdeaIntake).not.toHaveBeenCalled();
+  });
+
   it('restores confirmed intake brief after a page refresh', async () => {
     const { unmount } = await renderLanding();
 

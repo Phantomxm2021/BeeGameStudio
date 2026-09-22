@@ -34,6 +34,9 @@ describe('chat attachment policy', () => {
             new File(['records'], 'sheet.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
             new File(['{"ok":true}'], 'data.json', { type: 'application/json' }),
             new File(['{"ok":true}\n'], 'events.jsonl', { type: 'application/jsonl' }),
+            new File(['video'], 'clip.mp4', { type: 'video/mp4' }),
+            new File(['video'], 'clip.mov', { type: 'video/quicktime' }),
+            new File(['video'], 'clip.webm', { type: 'video/webm' }),
         ];
 
         expect(files.every(isSupportedChatFile)).toBe(true);
@@ -48,12 +51,16 @@ describe('chat attachment policy', () => {
         expect(isSupportedChatFile(new File(['image'], 'animation.gif', { type: 'image/gif' }))).toBe(false);
         expect(isSupportedChatFile(new File(['image'], 'screen.png', { type: 'application/pdf' }))).toBe(false);
         expect(isSupportedChatFile(new File(['image'], 'screen.png', { type: 'image/gif' }))).toBe(false);
-        expect(isSupportedChatFile(new File(['video'], 'clip.mp4', { type: 'video/mp4' }))).toBe(false);
         expect(isSupportedChatFile(new File(['archive'], 'bundle.zip', { type: 'application/zip' }))).toBe(false);
     });
 
     it('rejects oversized attachments', () => {
         expect(isSupportedChatFile(new File([new Uint8Array(MAX_CHAT_ATTACHMENT_BYTES + 1)], 'large.txt', { type: 'text/plain' }))).toBe(false);
+    });
+
+    it('normalizes generic browser MIME before sending accepted references', async () => {
+        const files = await filesToChatAttachments([new File(['reference'], 'notes.md', { type: 'application/octet-stream' })]);
+        expect(files[0]?.mediaType).toBe('text/markdown');
     });
 
     it('converts files into typed Base64 attachments without including the data URL prefix', async () => {

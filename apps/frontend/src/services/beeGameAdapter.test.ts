@@ -12,6 +12,19 @@ import { deriveCurrentProjectTodos } from '../utils/projectTodos'
 
 const authenticatedFetchMock = vi.mocked(authenticatedFetch)
 
+it('sends answers through the permission endpoint and does not treat stale requests as submitted', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ resolved: true })))
+  const answers = { 'Which style?': 'Pixel' }
+  await beeGameAdapter.resolveToolPermission({ project_id: 'project', gate_id: 'question', decision: 'allow', answers })
+  const [url, request] = authenticatedFetchMock.mock.calls[0]
+  expect(url).toContain('/api/projects/project/permissions/question')
+  expect(JSON.parse(request?.body as string)).toEqual({ decision: 'allow', scope: 'once', remember: false, answers })
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ resolved: false, stale: true })))
+  await expect(beeGameAdapter.resolveToolPermission({ project_id: 'project', gate_id: 'question', decision: 'allow', answers }))
+    .rejects.toThrow('no longer pending')
+})
+
 const transcriptResponse = (overrides: Record<string, unknown> = {}) => new Response(JSON.stringify({
   sessionId: 'session-1',
   workspacePath: '/workspace',
@@ -107,10 +120,12 @@ describe('transcriptEventsToHistory', () => {
   })
 
   it('reconciles mirrored lifecycle, native progress, trace and terminal result into the same subagent card', () => {
+    const subagentActivity = { entries: [{ id: 'read-1', kind: 'tool', toolName: 'Read',
+      filePath: 'manifest.json', status: 'completed', output: '{}' }], truncated: false }
     const events = [...launchEvents(),
       nativeEvent(3, 'system.status', { type: 'system', subtype: 'task_progress', task_id: 'task-1', tool_use_id: 'agent-1',
         workflowSourceSessionId: 'worker-1', description: 'Reading manifest', last_tool_name: 'Read',
-        usage: { tool_uses: 45, duration_ms: 1083052, total_tokens: 156415 }, subagentTrace: '[read-1] Read manifest.json' }, 'main-chat'),
+        usage: { tool_uses: 45, duration_ms: 1083052, total_tokens: 156415 }, subagentTrace: '[read-1] Read manifest.json', subagentActivity }, 'main-chat'),
     ]
     const progress = transcriptEventsToHistory('project-1', events) as Record<string, unknown>[]
     expect(progress).toHaveLength(1)
@@ -125,6 +140,9 @@ describe('transcriptEventsToHistory', () => {
     expect(history.filter(message => message.isSubagentTool)).toHaveLength(1)
     expect(card).toMatchObject({ toolStatus: 'completed', subagentOutput: 'All assets checked', subagentPrompt: 'Check manifest' })
     expect(card?.subagentTrace).toContain('[read-1] Read')
+    expect(card?.subagentActivity).toEqual(subagentActivity)
+    const displayed = toChatDisplayMessages(normalizeChatHistory(history))
+    expect(displayed.find(message => message.isSubagentTool)?.subagentActivity).toEqual(subagentActivity)
   })
 
   it.each(['failed', 'stopped', 'killed'])('retains %s background task outcomes after foreground completion', status => {
@@ -187,6 +205,20 @@ describe('transcriptEventsToHistory', () => {
     } finally { vi.useRealTimers() }
   })
 
+  it('preserves the auth outage envelope and retry delay when opening an SSE stream', async () => {
+    authenticatedFetchMock.mockResolvedValueOnce(Response.json({
+      error: 'Authentication service is temporarily unavailable', code: 'authentication_unavailable',
+      recoverable: true, retry_after_ms: 2000,
+    }, { status: 503 }))
+    const onCursor = vi.fn(), onOpen = vi.fn()
+    await expect(beeGameAdapter.streamMessages('auth-outage', 42,
+      { onMessage: vi.fn(), onCursor, onOpen }, new AbortController().signal))
+      .rejects.toMatchObject({ status: 503, code: 'authentication_unavailable', recoverable: true, retryAfterMs: 2000 })
+    expect(onCursor).not.toHaveBeenCalled()
+    expect(onOpen).not.toHaveBeenCalled()
+    expect(authenticatedFetchMock.mock.calls.at(-1)?.[0]).toContain('after=42')
+  })
+
   it('loads a small latest page first and keeps the larger upward page intact', async () => {
     authenticatedFetchMock
       .mockResolvedValueOnce(transcriptResponse())
@@ -200,6 +232,106 @@ describe('transcriptEventsToHistory', () => {
     expect(authenticatedFetchMock.mock.calls[0]?.[0]).toContain('limit=50')
     expect(authenticatedFetchMock.mock.calls[1]?.[0]).toContain('limit=300')
     expect(authenticatedFetchMock.mock.calls[1]?.[0]).toContain('before=99')
+  })
+
+  it('requests Scene/UI file metadata without downloading document bodies', async () => {
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      state: 'ready',
+      documents: [{ path: 'scenes/main.json', revision: 'a'.repeat(64), id: 'scene.main', kind: 'scene-2d' }],
+    })))
+
+    const snapshot = await beeGameAdapter.getProjectGameContentFileList('project-1')
+
+    expect(authenticatedFetchMock.mock.calls[0]?.[0]).toBe('/api/projects/project-1/game-content?metadata=1')
+    expect(snapshot.documents).toEqual([
+      { path: 'scenes/main.json', revision: 'a'.repeat(64), id: 'scene.main', kind: 'scene-2d' },
+    ])
+    expect(snapshot.documents?.[0]).not.toHaveProperty('document')
+  })
+
+  it('normalizes one legacy full snapshot without retrying the heavy endpoint', async () => {
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      state: 'ready',
+      documents: [{
+        path: 'scenes/main.json', revision: 'a'.repeat(64),
+        document: { id: 'scene.main', kind: 'scene-2d', data: { nodes: [{ id: 'root' }] } },
+      }],
+    })))
+
+    const snapshot = await beeGameAdapter.getProjectGameContentFileList('project-1')
+
+    expect(snapshot.documents).toEqual([
+      { path: 'scenes/main.json', revision: 'a'.repeat(64), id: 'scene.main', kind: 'scene-2d' },
+    ])
+    expect(authenticatedFetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not let an in-flight runtime snapshot overwrite preview start state', async () => {
+    let resolveStale!: (response: Response) => void
+    let resolveFresh!: (response: Response) => void
+    const staleResponse = new Promise<Response>(resolve => { resolveStale = resolve })
+    const freshResponse = new Promise<Response>(resolve => { resolveFresh = resolve })
+    const previewResponse = {
+      sessionId: 'preview-session', workspacePath: '/workspace', status: 'running',
+      url: '/previews/preview-session/', updatedAt: '2026-09-22T00:00:01.000Z',
+    }
+    const runningRuntime = {
+      project_id: 'preview-race', phase: 'idle', blocked: false,
+      build_report: { status: 'passed', build_url: '/previews/preview-session/' },
+    }
+
+    authenticatedFetchMock
+      .mockReturnValueOnce(staleResponse)
+      .mockResolvedValueOnce(new Response(JSON.stringify(previewResponse)))
+      .mockReturnValueOnce(freshResponse)
+
+    const staleRuntime = beeGameAdapter.getProjectRuntimeState('preview-race')
+    await beeGameAdapter.startProjectPreview('preview-race')
+    const refreshedRuntime = beeGameAdapter.getProjectRuntimeState('preview-race')
+
+    resolveStale(new Response(JSON.stringify({
+      project_id: 'preview-race', phase: 'idle', blocked: false, build_report: null,
+    })))
+    resolveFresh(new Response(JSON.stringify(runningRuntime)))
+
+    await expect(staleRuntime).resolves.toMatchObject({ status: { build_report: runningRuntime.build_report } })
+    await expect(refreshedRuntime).resolves.toMatchObject({ status: { build_report: runningRuntime.build_report } })
+  })
+
+  it('does not let a runtime poll started during preview mutation return stale state', async () => {
+    let resolvePreview!: (response: Response) => void
+    let resolveDuringMutation!: (response: Response) => void
+    let resolveFresh!: (response: Response) => void
+    const previewResponse = new Promise<Response>(resolve => { resolvePreview = resolve })
+    const duringMutationResponse = new Promise<Response>(resolve => { resolveDuringMutation = resolve })
+    const freshResponse = new Promise<Response>(resolve => { resolveFresh = resolve })
+    const runningRuntime = {
+      project_id: 'preview-race-during-mutation', phase: 'idle', blocked: false,
+      build_report: { status: 'passed', build_url: '/previews/preview-session/' },
+    }
+
+    authenticatedFetchMock
+      .mockReturnValueOnce(previewResponse)
+      .mockReturnValueOnce(duringMutationResponse)
+      .mockReturnValueOnce(freshResponse)
+
+    const mutation = beeGameAdapter.startProjectPreview('preview-race-during-mutation')
+    const polledDuringMutation = beeGameAdapter.getProjectRuntimeState('preview-race-during-mutation')
+
+    resolvePreview(new Response(JSON.stringify({
+      sessionId: 'preview-session', workspacePath: '/workspace', status: 'running',
+      url: '/previews/preview-session/', updatedAt: '2026-09-22T00:00:01.000Z',
+    })))
+    await mutation
+
+    resolveDuringMutation(new Response(JSON.stringify({
+      project_id: 'preview-race-during-mutation', phase: 'idle', blocked: false, build_report: null,
+    })))
+    resolveFresh(new Response(JSON.stringify(runningRuntime)))
+
+    await expect(polledDuringMutation).resolves.toMatchObject({
+      status: { build_report: runningRuntime.build_report },
+    })
   })
 
   it('loads Todo snapshots from earlier stages independently of the latest chat page', async () => {

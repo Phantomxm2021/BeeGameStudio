@@ -6,21 +6,84 @@ import { SceneEditorOverlay } from './SceneEditorOverlay';
 import { tileSprite, tileBatches } from '../../../../../packages/scene-editor/src/tilemap-preview';
 import { parseGridData, parseTilemapData, type TilemapComponent } from '@beegame/scene-editor';
 import { editorDocumentToSceneContent } from './sceneContentAdapter';
+import * as sceneAdapter from './sceneContentAdapter';
 import { Texture } from 'three';
 
 vi.mock('@beegame/scene-editor', async importOriginal => ({
   ...await importOriginal<typeof import('@beegame/scene-editor')>(),
-  SceneEditor: ({ initialDocument }: { initialDocument: SceneDocument }) => (
+  SceneEditor: ({ initialDocument, sceneChoices, onSelectScene }: { initialDocument: SceneDocument; sceneChoices?: {id: string; label: string}[]; onSelectScene?: (id: string) => void }) => (
     <div data-testid="loaded-scene">
       {initialDocument.name}
       {Object.values(initialDocument.assets).map(asset => <span key={asset.id}>{asset.name}{asset.spriteSheet ? ` frame ${('frames' in asset.spriteSheet ? Object.keys(asset.spriteSheet.frames).length : asset.spriteSheet.frameWidth)}` : ''}</span>)}
       <output data-testid="scene-data">{JSON.stringify(initialDocument)}</output>
+      {sceneChoices?.map(choice => <button key={choice.id} onClick={() => onSelectScene?.(choice.id)}>{choice.label}</button>)}
     </div>
   ),
 }));
 
 describe('SceneEditorOverlay loading experience', () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it('converts only the opened scene and reuses it when switching back', async () => {
+    const revision = 'a'.repeat(64);
+    const documents = ['first', 'second'].map(id => ({path: `content/${id}.json`, revision, document: {
+      schema: 'beegame-content.v1' as const, id, kind: 'scene-2d' as const, assetRefs: [], data: {nodes: [{id:'root',components:[]}]},
+    }}));
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({state:'ready',index:{
+      schema:'beegame-content-package.v2',id:'content',dimension:'2d',documentRevision:revision,assetManifestRevision:revision,entryScene:'first',sceneModel:'game-object-v2',files:documents.map(d=>d.path),
+    },documents});
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({contract_state:'ready',version:9,requirements:[],resources:[]});
+    const convert = vi.spyOn(sceneAdapter, 'sceneContentToEditorDocument');
+    render(<SceneEditorOverlay projectId="lazy-scenes" onClose={vi.fn()} />);
+    await screen.findByTestId('loaded-scene');
+    expect(convert).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button',{name:'second',exact:true}));
+    expect(JSON.parse(screen.getByTestId('scene-data').textContent!).id).toBe('second');
+    expect(convert).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button',{name:'first',exact:true}));
+    expect(JSON.parse(screen.getByTestId('scene-data').textContent!).id).toBe('first');
+    expect(convert).toHaveBeenCalledTimes(2);
+  });
+
+  it('opens the requested scene path instead of the entry scene', async () => {
+    const revision = 'a'.repeat(64);
+    const documents = ['entry', 'requested'].map(id => ({path: `content/scenes/${id}.json`, revision, document: {
+      schema: 'beegame-content.v1' as const, id, kind: 'scene-2d' as const, assetRefs: [], data: {nodes: [{id: 'root', components: []}]},
+    }}));
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({state: 'ready', index: {
+      schema: 'beegame-content-package.v2', id: 'content', dimension: '2d', documentRevision: revision, assetManifestRevision: revision,
+      entryScene: 'entry', sceneModel: 'game-object-v2', files: documents.map(document => document.path),
+    }, documents});
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({contract_state: 'ready', version: 9, requirements: [], resources: []});
+
+    render(<SceneEditorOverlay projectId="selected-scene" initialDocumentPath="content/scenes/requested.json" onClose={vi.fn()} />);
+
+    await screen.findByTestId('loaded-scene');
+    expect(JSON.parse(screen.getByTestId('scene-data').textContent!).id).toBe('requested');
+  });
+
+  it.each([
+    ['content/scenes/missing.json', /Requested scene document .* was not found/],
+    ['content/ui/menu.json', /Requested document .* is not a scene document/],
+  ] as const)('reports an invalid requested path: %s', async (initialDocumentPath, detail) => {
+    const revision = 'a'.repeat(64);
+    const scene = {schema: 'beegame-content.v1' as const, id: 'entry', kind: 'scene-2d' as const, assetRefs: [], data: {nodes: [{id: 'root', components: []}]}};
+    const ui = {...scene, id: 'menu', kind: 'ui-screen' as const};
+    const documents = [
+      {path: 'content/scenes/entry.json', revision, document: scene},
+      {path: 'content/ui/menu.json', revision, document: ui},
+    ];
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({state: 'ready', index: {
+      schema: 'beegame-content-package.v2', id: 'content', dimension: '2d', documentRevision: revision, assetManifestRevision: revision,
+      entryScene: 'entry', sceneModel: 'game-object-v2', files: documents.map(document => document.path),
+    }, documents});
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({contract_state: 'ready', version: 9, requirements: [], resources: []});
+
+    render(<SceneEditorOverlay projectId="selected-scene" initialDocumentPath={initialDocumentPath} onClose={vi.fn()} />);
+
+    expect(await screen.findByText(detail)).toBeInTheDocument();
+    expect(screen.queryByTestId('loaded-scene')).not.toBeInTheDocument();
+  });
 
   function tilemapFixture(member = false, missing = '') {
     const revision = 'a'.repeat(64);
@@ -157,6 +220,31 @@ describe('SceneEditorOverlay loading experience', () => {
     expect(loadAsset).toHaveBeenCalledWith('project-1', 'RES-EXTRA', 'extra.png', expect.any(AbortSignal));
     expect(loadAsset).not.toHaveBeenCalledWith('project-1', 'RES-PENDING', expect.anything(), expect.anything());
     expect(screen.queryByText('Could not open scene')).not.toBeInTheDocument();
+  });
+
+  it('loads authored scene font members instead of falling back to metadata only', async () => {
+    const revision = 'a'.repeat(64);
+    const document: BeeGameSceneContentDocument = {
+      schema: 'beegame-content.v1', id: 'font-scene', kind: 'scene-2d', assetRefs: ['FONT-CN-01'], data: {
+        nodes: [{ id: 'title', components: [{ id: 'title-text', type: 'text', data: { text: '你好', fontSize: 18, member: 'assets/runtime/fonts/lxgw.woff2' } }] }],
+      },
+    };
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', index: {
+      schema: 'beegame-content-package.v2', id: 'content', dimension: '2d', documentRevision: revision, assetManifestRevision: revision,
+      entryScene: document.id, sceneModel: 'game-object-v2', files: ['content/font-scene.json'],
+    }, documents: [{ path: 'content/font-scene.json', revision, document }] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 9, requirements: [], resources: [{
+      id: 'FONT-CN-01', root_path: 'assets/runtime/fonts/lxgw.woff2', file_paths: ['assets/runtime/fonts/lxgw.woff2'], status: 'verified' as const,
+      source: { type: 'agent-authored' as const, created_at: '2026-09-19', reason: 'test' }, provisional: false, selected_at: '2026-09-19', selection_reason: [],
+    }] });
+    const loadFont = vi.spyOn(beeGameAdapter, 'loadProjectAssetFile').mockResolvedValue(new Blob(['font-bytes'], { type: 'font/woff2' }));
+
+    render(<SceneEditorOverlay projectId="font-project" onClose={vi.fn()} />);
+
+    const editor = JSON.parse((await screen.findByTestId('scene-data')).textContent!) as SceneDocument;
+    expect(loadFont).toHaveBeenCalledWith('font-project', 'FONT-CN-01', 'assets/runtime/fonts/lxgw.woff2', expect.any(AbortSignal));
+    expect(editor.assets['FONT-CN-01']?.bytes).toMatch(/^data:font\/woff2;base64,/);
+    expect(editor.nodes.title.components.find(component => component.type === 'text')).toMatchObject({ fontAssetId: 'FONT-CN-01' });
   });
 
   it('shows no navigation chrome and closes after interrupting an in-flight load', () => {

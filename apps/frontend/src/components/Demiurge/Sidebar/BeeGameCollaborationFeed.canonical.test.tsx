@@ -45,6 +45,44 @@ const CHECKLIST_FINAL_MESSAGE_ID = '021789435028095846a816464a9af9c0791e0f68a2ce
 const IMPLEMENTATION_MIXED_MESSAGE_ID = '0217894385633113d0449b03f13da7ad7c0359f0f1d760c19f272';
 
 describe('BeeGameCollaborationFeed canonical transcript', () => {
+  it('keeps only Copy in the assistant response footer', () => {
+    render(<BeeGameCollaborationFeed
+      messages={[{ id: 'assistant-response', sender: 'beegame', content: 'Answer', timestamp: Date.now() }]}
+    />);
+
+    expect(screen.getByRole('button', { name: 'Copy response' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry response' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Helpful' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Not helpful' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['running', undefined, 'running', '工作中', 'Working', 'border-primary/30'],
+    ['completed', undefined, 'completed', '已完成', 'Completed', 'border-emerald-500/30'],
+    ['failed', undefined, 'failed', '失败', 'Failed', 'border-destructive/30'],
+    ['failed', 'stopped', 'stopped', '已停止', 'Stopped', 'border-border'],
+    ['running', 'incomplete', 'incomplete', '未完成', 'Incomplete', 'border-amber-500/30'],
+  ] as const)('shows distinct subagent badges for %s / %s in the pill and drawer',
+    (toolStatus, completionReason, state, zh, en, color) => {
+      const message: ChatDisplayMessage = { id: 'badge-task', sender: 'beegame', type: 'tool',
+        content: 'Agent', timestamp: 100, toolName: 'Agent', isSubagentTool: true,
+        toolStatus, completionReason, subagentPrompt: 'Inspect assets' };
+      const { rerender } = render(<BeeGameCollaborationFeed messages={[message]} lang="zh" />);
+      const pill = screen.getByTestId('beegame-subagent-disclosure-badge-task');
+      const badge = within(pill).getByRole('button', { name: `子任务 · ${zh}` });
+      expect(badge).toHaveAttribute('data-subagent-state', state);
+      expect(badge).toHaveClass(color);
+      expect(badge.querySelectorAll('[data-subagent-state]')).toHaveLength(0);
+      expect(within(badge).getByRole('status', { name: zh })).not.toHaveClass('border', 'rounded-full');
+      // The badge must not introduce a second interactive control inside the pill.
+      expect(within(pill).getAllByRole('button')).toHaveLength(1);
+      fireEvent.click(within(pill).getByRole('button'));
+      expect(within(screen.getByTestId('beegame-agent-run-detail')).getByRole('status', { name: zh }))
+        .toHaveAttribute('data-subagent-state', state);
+      rerender(<BeeGameCollaborationFeed messages={[message]} lang="en" />);
+      expect(within(pill).getByRole('button', { name: `Subagent · ${en}` })).toHaveAttribute('data-subagent-state', state);
+    });
+
   it('labels cancelled tools as stopped rather than failed', () => {
     render(<BeeGameCollaborationFeed messages={[
       { id: 'cancelled', sender: 'beegame', type: 'tool', content: 'Bash', timestamp: 100,
@@ -78,15 +116,22 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
   it('updates the open subagent drawer as progress and terminal result arrive', () => {
     const message: ChatDisplayMessage = { id: 'subagent-live', sender: 'beegame', content: 'Subagent: Audit assets',
       type: 'tool', timestamp: Date.now(), toolName: 'Agent', toolStatus: 'running', isSubagentTool: true,
-      subagentPrompt: 'Audit assets', subagentTrace: 'Read manifest.json' };
+      subagentPrompt: 'Audit assets', subagentTrace: 'Read manifest.json', subagentOutput: 'Agent input streaming' };
     const { rerender } = render(<BeeGameCollaborationFeed messages={[message]} />);
+    expect(within(screen.getByTestId('beegame-subagent-disclosure-subagent-live')).getByRole('button', { name: /Working/ }))
+      .toHaveAttribute('data-subagent-state', 'running');
     fireEvent.click(within(screen.getByTestId('beegame-subagent-disclosure-subagent-live')).getByRole('button'));
     expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Read manifest.json');
+    expect(screen.getByTestId('beegame-agent-run-detail')).not.toHaveTextContent('Agent input streaming');
     rerender(<BeeGameCollaborationFeed messages={[{ ...message, toolStatus: 'completed',
       subagentTrace: 'Checked hashes and palette', subagentOutput: 'Audit passed' }]} />);
     expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Completed');
     expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Checked hashes and palette');
     expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Audit passed');
+    expect(within(screen.getByTestId('beegame-subagent-disclosure-subagent-live')).getByRole('button', { name: /Completed/ }))
+      .toHaveAttribute('data-subagent-state', 'completed');
+    expect(within(screen.getByTestId('beegame-agent-run-detail')).getByRole('status', { name: 'Completed' }))
+      .toHaveAttribute('data-subagent-state', 'completed');
   });
   it('starts with the real idea and keeps three independent turns in source order', () => {
     expect(sampleMessages[0]).toMatchObject({

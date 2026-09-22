@@ -684,16 +684,18 @@ function findAvailablePort(start: number): Promise<number> {
 async function waitForPreviewReady(url: string): Promise<boolean> {
   const deadline = Date.now() + getPreviewReadyTimeoutMs()
   while (Date.now() < deadline) {
-    if (await canReachPreview(url)) return true
+    if (await canReachPreview(url, Math.min(2_000, Math.max(1, deadline - Date.now())))) return true
     await sleep(getPreviewReadyPollMs())
   }
   return false
 }
 
-async function canReachPreview(url: string): Promise<boolean> {
+async function canReachPreview(url: string, timeoutMs: number): Promise<boolean> {
   try {
-    const response = await fetch(url, { method: 'GET' })
-    return response.status < 500
+    const response = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(timeoutMs) })
+    const ready = response.ok
+    await response.body?.cancel()
+    return ready
   } catch {
     return false
   }

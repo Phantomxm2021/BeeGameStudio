@@ -143,7 +143,7 @@ export function createR2DeploymentPublisher(options: {
           body: JSON.stringify({
             id,
             scope_type: 'project',
-            scope_id: input.deploymentId,
+            scope_id: input.projectId,
             owner_user_id: input.ownerId,
             project_id: input.projectId,
             provider: 'r2',
@@ -206,6 +206,22 @@ export function createR2DeploymentPublisher(options: {
   }
 
   return {
+    async verifyPublished(url, files) {
+      const entrypoint = files.find(file => file.path === 'index.html')
+      if (!entrypoint) throw new Error('Deployment is missing index.html')
+      const publicResponse = await fetchImpl(url, {
+        redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15_000),
+      }).catch(() => {
+        throw new Error('Public deployment verification failed: cannot reach the published page. Check the delivery Worker domain.')
+      })
+      if (!publicResponse.ok || !publicResponse.headers.get('content-type')?.toLowerCase().startsWith('text/html')) {
+        await publicResponse.body?.cancel()
+        throw new Error(`Public deployment verification failed (HTTP ${publicResponse.status}): check the Worker domain and public deployment record.`)
+      }
+      if (sha256(new Uint8Array(await publicResponse.arrayBuffer())) !== sha256(await entrypoint.bytes())) {
+        throw new Error('Public deployment verification failed: the delivery domain returned different content. Check BEEGAME_R2_DELIVERY_PUBLIC_BASE_URL and its Worker routing.')
+      }
+    },
     async publishStaticDirectory(input) {
       if (!input.userId || !input.projectId) {
         throw new Error(
@@ -273,8 +289,9 @@ export function createR2DeploymentPublisher(options: {
           authToken: input.authToken,
         })
         uploaded.push(manifest)
+        const url = `${publicBaseUrl}/deployments/${input.deploymentId}/files/index.html`
         return {
-          url: `${publicBaseUrl}/deployments/${input.deploymentId}/files/index.html`,
+          url,
           artifactPath: `r2://${bucket}/deployments/${input.deploymentId}`,
           manifestStorageObjectId: manifest.id,
           message: 'Static deployment published as an immutable R2 version',

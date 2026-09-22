@@ -10,6 +10,7 @@ import { Skeleton } from '../../ui/skeleton';
 import { Button } from '../../beui/project-button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../ui/dialog';
 import { DevProjectPurgePanel } from './DevProjectPurgePanel';
+import { getProjectDisplayName } from '../../../utils/projectDisplayName';
 
 interface ProjectHistoryModalProps {
   isOpen: boolean;
@@ -22,31 +23,6 @@ const formatProjectDate = (createdAt: number | string) => {
   const timestamp = typeof createdAt === 'string' ? Date.parse(createdAt) : createdAt;
   const date = Number.isFinite(timestamp) ? new Date(timestamp) : new Date();
   return date.toLocaleDateString();
-};
-
-const getPathFolderName = (path?: string): string => {
-  const normalized = String(path || '')
-    .replaceAll('\\', '/')
-    .replace(/\/+$/, '');
-  return normalized.split('/').filter(Boolean).at(-1) || '';
-};
-
-const isGeneratedProjectId = (value: string): boolean =>
-  /(^proj[_-]|^[a-f\d]{8,}$|--[a-f\d]{8,}$)/i.test(value.trim());
-
-const humanizeProjectName = (value: string): string => {
-  const withoutGeneratedSuffix = value
-    .replace(/--[a-f\d]{8,}$/i, '')
-    .trim();
-  if (!withoutGeneratedSuffix) return '';
-  return withoutGeneratedSuffix;
-};
-
-const getProjectDisplayName = (project: { name?: string; root_path?: string }, fallback: string): string => {
-  const folderName = humanizeProjectName(getPathFolderName(project.root_path));
-  if (folderName) return folderName;
-  const explicitName = String(project.name || '').trim();
-  return explicitName && !isGeneratedProjectId(explicitName) ? explicitName : fallback;
 };
 
 const MENU_WIDTH = 150;

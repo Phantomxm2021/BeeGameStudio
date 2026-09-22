@@ -158,11 +158,11 @@ function QuestionOptions({
   );
 }
 
-function ProgressDots({ current, ids }: { current: number; ids: string[] }) {
+function ProgressDots({ current, ids, label }: { current: number; ids: string[]; label?: string }) {
   return (
     <span className="flex gap-1.5">
       <span className="sr-only">
-        Question {current + 1} of {ids.length}
+        {label ?? `Question ${current + 1} of ${ids.length}`}
       </span>
       {ids.map((id, index) => (
         <motion.span
@@ -203,6 +203,7 @@ export function ApprovalCard({
   onDismiss,
   approveLabel = "Approve",
   submitLabel = "Submit response",
+  questionLabels,
   result,
   className,
 }: ApprovalCardProps) {
@@ -336,7 +337,8 @@ export function ApprovalCard({
             {onDismiss ? (
               <button
                 type="button"
-                aria-label="Dismiss"
+                aria-label={questionLabels?.dismiss ?? "Dismiss"}
+                disabled={busy}
                 onClick={onDismiss}
                 className="grid size-5 shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
               >
@@ -385,7 +387,7 @@ export function ApprovalCard({
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label="Previous question"
+                  aria-label={questionLabels?.previous ?? "Previous question"}
                   disabled={busy || currentStep === 0}
                   onClick={() => setStep(currentStep - 1)}
                   className="rounded-full"
@@ -395,13 +397,14 @@ export function ApprovalCard({
                 <ProgressDots
                   current={currentStep}
                   ids={questions.map((item) => item.id)}
+                  label={questionLabels?.progress(currentStep + 1, questions.length)}
                 />
                 <Button
                   size={currentStep === questions.length - 1 ? "sm" : "icon"}
                   aria-label={
                     currentStep === questions.length - 1
-                      ? "Submit response"
-                      : "Next question"
+                      ? (questionLabels?.submit ?? "Submit response")
+                      : (questionLabels?.next ?? "Next question")
                   }
                   disabled={busy || !isAnswered(currentAnswer)}
                   onClick={continueQuestion}

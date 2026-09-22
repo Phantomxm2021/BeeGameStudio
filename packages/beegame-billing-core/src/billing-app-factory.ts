@@ -21,6 +21,7 @@ export function createBeeGameBillingRouteApp(
   options: BeeGameBillingAppFactoryOptions,
 ): Hono {
   const app = new Hono()
+  const reportedAuthFailures = new WeakSet<object>()
   const failureOccurrences = new Map<
     string,
     { diagnosticId: string; repeatCount: number }
@@ -87,15 +88,30 @@ export function createBeeGameBillingRouteApp(
     try {
       user = await options.resolveRequestUser(c.req.raw)
     } catch (error) {
-      console.warn(
-        '[BeeGame billing] request user resolution unavailable:',
-        error,
-      )
+      const facts = error && typeof error === 'object'
+        ? error as { reason?: unknown; upstreamStatus?: unknown; elapsedMs?: unknown; retryAfterMs?: unknown } : {}
+      const retryAfterMs = typeof facts.retryAfterMs === 'number' && Number.isFinite(facts.retryAfterMs)
+        ? Math.max(1, Math.ceil(facts.retryAfterMs)) : 2000
+      if (facts.reason !== 'cooldown' && !reportedAuthFailures.has(facts)) {
+        reportedAuthFailures.add(facts)
+        // Do not log raw errors, request headers, tokens or provider bodies.
+        console.warn('[BeeGame billing] authentication unavailable', {
+          timestamp: new Date().toISOString(), path: c.req.path,
+          reason: ['timeout', 'network', 'upstream'].includes(String(facts.reason)) ? facts.reason : 'resolution_failed',
+          upstreamStatus: typeof facts.upstreamStatus === 'number' ? facts.upstreamStatus : undefined,
+          elapsedMs: typeof facts.elapsedMs === 'number' ? facts.elapsedMs : undefined,
+        })
+      }
       return c.json(
         {
           error: 'Authentication service is temporarily unavailable',
+          message: 'Authentication service is temporarily unavailable',
+          code: 'authentication_unavailable',
+          recoverable: true,
+          retry_after_ms: retryAfterMs,
         },
         503,
+        { 'Retry-After': String(Math.ceil(retryAfterMs / 1000)) },
       )
     }
     if (!user) {

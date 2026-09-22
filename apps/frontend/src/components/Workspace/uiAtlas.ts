@@ -4,7 +4,7 @@ const frameName = (name: string) => name.replace(/\.(png|webp|jpe?g)$/i, '');
 
 /** Materialize cropped sprites once, so image, tiled and nine-slice previews
  * all consume the same pixels rather than stretching the complete atlas. */
-export async function uiAtlasImages(src: string, metadata: unknown, signal: AbortSignal): Promise<Record<string, string>> {
+export async function uiAtlasImages(src: string, metadata: unknown, signal: AbortSignal, objectUrls: string[]): Promise<Record<string, string>> {
   const sheet = parseSpriteSheet(metadata);
   if (!sheet) return {};
   const image = new Image();
@@ -29,7 +29,7 @@ export async function uiAtlasImages(src: string, metadata: unknown, signal: Abor
     if (rect.x + rect.width > image.naturalWidth || rect.y + rect.height > image.naturalHeight) throw new Error(`Atlas frame outside image: ${name}`);
     canvas.width = rect.width; canvas.height = rect.height;
     context.drawImage(image, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height);
-    output[name] = canvas.toDataURL('image/png');
+    output[name] = await encodeFrame(canvas, signal, objectUrls);
   }
   const composites = (metadata as { meta?: { nine_slice?: Record<string, Record<string, string>> } }).meta?.nine_slice ?? {};
   for (const [name, parts] of Object.entries(composites)) {
@@ -46,9 +46,28 @@ export async function uiAtlasImages(src: string, metadata: unknown, signal: Abor
       context.drawImage(image, rect.x, rect.y, rect.width, rect.height,
         widths.slice(0, col).reduce((a, b) => a + b, 0), heights.slice(0, row).reduce((a, b) => a + b, 0), widths[col], heights[row]);
     }
-    output[name] = canvas.toDataURL('image/png');
+    output[name] = await encodeFrame(canvas, signal, objectUrls);
   }
   return output;
+}
+
+// Async encoding yields between frames (including Cancel input). Blob URLs avoid
+// base64 copies; the overlay owns their lifetime, just like the original atlas.
+async function encodeFrame(canvas: HTMLCanvasElement, signal: AbortSignal, objectUrls: string[]): Promise<string> {
+  signal.throwIfAborted();
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    canvas.toBlob(value => {
+      signal.removeEventListener('abort', abort);
+      if (value) resolve(value);
+      else reject(new Error('Cannot encode sprite atlas frame'));
+    }, 'image/png');
+  });
+  signal.throwIfAborted();
+  const url = URL.createObjectURL(blob);
+  objectUrls.push(url);
+  return url;
 }
 
 export function uiImageKey(assetRef: string, data: Record<string, unknown> = {}): string {

@@ -8,6 +8,18 @@ import { computeWorkspaceRevision, computeResourceRevision } from './revision'
 import { evaluateWorkflowDeliveryGate } from './delivery-gate'
 import { readRuntimeAcceptance, runtimeAcceptancePath } from './runtime-acceptance'
 
+test('stale acceptance exposes its actual reason without promoting a conversation PASS', async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), 'bgs-stale-acceptance-'))
+  try {
+    const run = createTestDeliveryRun({ ownerId: 'owner', projectId: 'project', documentRevision: 'a'.repeat(64) })
+    const blockedReason = 'Workspace changed after acceptance; revalidation is required.'
+    await createRunStore(workspacePath, 'owner').save({ ...run, phase: 'ACCEPTANCE', status: 'needs_action', blockedReason })
+    expect(await evaluateWorkflowDeliveryGate({ workspacePath, ownerId: 'owner' })).toMatchObject({
+      allowed: false, issues: [blockedReason], workflow: { phase: 'ACCEPTANCE', status: 'needs_action', blockedReason },
+    })
+  } finally { await rm(workspacePath, { recursive: true, force: true }) }
+})
+
 test('publishing requires explicit current runtime evidence, not merely passed in run.json', async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), 'bgs-publish-evidence-'))
   try {

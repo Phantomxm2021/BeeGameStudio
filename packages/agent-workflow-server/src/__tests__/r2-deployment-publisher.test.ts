@@ -5,10 +5,15 @@ import type {
 } from '@bee-game-studio/beegame-storage-core'
 import { createR2DeploymentPublisher } from '../beegame/r2-deployment-publisher'
 
-function metadataFetch(events: Array<Record<string, unknown>>): typeof fetch {
+function metadataFetch(events: Array<Record<string, unknown>>, publicHtml = '<main>game</main>'): typeof fetch {
   const rows = new Map<string, Record<string, unknown>>()
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
+    if (url.startsWith('https://games.test/deployments/')) {
+      expect(init?.headers).toBeUndefined()
+      expect(init?.redirect).toBe('error')
+      return new Response(publicHtml, { headers: { 'content-type': 'text/html; charset=utf-8' } })
+    }
     if (url.endsWith('/beegame_storage_objects') && init?.method === 'POST') {
       const row = JSON.parse(String(init.body)) as Record<string, unknown>
       rows.set(String(row.id), row)
@@ -31,6 +36,35 @@ function metadataFetch(events: Array<Record<string, unknown>>): typeof fetch {
 }
 
 describe('R2 deployment publisher', () => {
+  test('rejects a public domain returning another website with HTTP 200', async () => {
+    const deleted: string[] = []
+    const sizes = new Map<string, number>()
+    const publisher = createR2DeploymentPublisher({
+      baseUrl: 'https://supabase.test', anonKey: 'anon-key', bucket: 'delivery-data',
+      publicBaseUrl: 'https://games.test', fetchImpl: metadataFetch([], '<h1>Page not found</h1>'),
+      driver: {
+        provider: 'r2',
+        putObject: async (locator, bytes) => { sizes.set(locator.objectKey, bytes.byteLength) },
+        headObject: async locator => ({ byteSize: sizes.get(locator.objectKey)!, metadata: {} }),
+        deleteObject: async locator => { deleted.push(locator.objectKey) },
+        getObject: async () => undefined, createUploadUrl: async () => 'unused',
+        createDownloadUrl: async () => 'unused', copyObject: async () => undefined,
+        createMultipartUpload: async () => 'unused', createMultipartPartUploadUrl: async () => 'unused',
+        completeMultipartUpload: async () => undefined, abortMultipartUpload: async () => undefined,
+      },
+    })
+    const files = [{ path: 'index.html', bytes: async () => new TextEncoder().encode('<main>game</main>'), text: async () => '<main>game</main>' }]
+    const published = await publisher.publishStaticDirectory({
+      deploymentId: 'wrong-domain', sessionId: 'test', userId: 'test', projectId: 'test',
+      workspacePath: '/workspace', outputDir: '/workspace/dist', artifactHash: 'hash', authToken: 'private-token',
+      files,
+    })
+    await expect(publisher.verifyPublished!(published.url, files)).rejects.toThrow('delivery domain returned different content')
+    // Public verification follows registration; manager revokes that record on
+    // failure. Upload cleanup remains responsible only for incomplete uploads.
+    expect(deleted).toEqual([])
+  })
+
   test('publishes immutable files and makes the deployment manifest the final object', async () => {
     const metadataEvents: Array<Record<string, unknown>> = []
     const uploads: Array<{ locator: StorageObjectLocator; bytes: Uint8Array }> =
@@ -111,6 +145,12 @@ describe('R2 deployment publisher', () => {
     expect(metadataEvents.at(-1)).toEqual(
       expect.objectContaining({ operation: 'patch', status: 'ready' }),
     )
+    expect(metadataEvents.filter(event => event.operation === 'create').every(event =>
+      event.scope_id === 'project-1' && event.project_id === 'project-1' &&
+      (event.metadata as Record<string, unknown>).deployment_id === 'deploy-1')).toBe(true)
+    await publisher.verifyPublished!(result.url, [{ path: 'index.html',
+      bytes: async () => new TextEncoder().encode('<main>game</main>'),
+      text: async () => '<main>game</main>' }])
   })
 
   test('removes already uploaded objects when a later deployment file fails', async () => {

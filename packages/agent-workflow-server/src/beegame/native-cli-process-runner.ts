@@ -14,6 +14,7 @@ import { resolveNativeRuntimeCommand, nativeSessionTemporaryPath } from './nativ
 import { getSafeRuntimeProcessEnvironment } from './runtime-process-environment'
 import { createNativeTaskAccess, nativeTaskToolEnvironment } from '@bee-game-studio/agent-workflow/native-task-access'
 import { mkdir, realpath } from 'node:fs/promises'
+import { closeSessionTestBrowsers } from './native-test-browser-cleanup'
 import {
   createRuntimeObservability,
   type RuntimeObservability,
@@ -78,18 +79,21 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     requestId: string
     resolve(): void
     reject(error: Error): void
-    abort(): void
+    abort(reason?: unknown): void
     tasks: Map<string, { toolUseId?: string; running: boolean }>
     awaitingParentResult: boolean
   } | null = null
   private disposed = false
   private stderrTail = ''
   private nativeSessionId: string | undefined
+  private browserCleanup: Promise<void> = Promise.resolve()
+  private disposal: Promise<void> | undefined
 
   private constructor(
     private readonly child: RuntimeProcess,
     private readonly sessionInput: BeeGameSessionRunnerStartInput,
     private readonly observability: RuntimeObservability,
+    private readonly scratchPath: string,
     private readonly taskAccess?: Awaited<ReturnType<typeof createNativeTaskAccess>>,
   ) {
     this.nativeSessionId = sessionInput.resumeSessionId
@@ -131,6 +135,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
           ? { launchContract: input.runtimeLaunchContract }
           : {}),
       }),
+      taskAccess?.environment.TMPDIR ?? temporary!,
       taskAccess,
     )
     void runtime.consumeStdout()
@@ -140,29 +145,35 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   }
 
   async submit(input: BeeGameSessionSubmitInput): Promise<void> {
+    await this.browserCleanup
     if (this.disposed) throw new Error('Bee Game Studio native runtime is closed')
     if (this.activeTurn)
       throw new Error('Bee Game Studio native runtime already has an active turn')
     if (input.signal.aborted) return
     await new Promise<void>((resolve, reject) => {
       const requestId = crypto.randomUUID()
-      const abort = () => {
+      const abort = (reason: unknown = input.signal.reason) => {
         this.child.kill('SIGTERM')
+        const stopReason = typeof reason === 'string' ? reason : 'aborted'
         this.failActiveTurn(
-          new Error('Bee Game Studio native turn was cancelled by user'),
-          'cancelled_by_user',
+          new Error(stopReason === 'user_stop'
+            ? 'Bee Game Studio native turn was cancelled by user'
+            : `Bee Game Studio native turn was interrupted: ${stopReason}`),
+          stopReason === 'user_stop' ? 'cancelled_by_user' : 'aborted',
+          stopReason,
         )
       }
-      input.signal.addEventListener('abort', abort, { once: true })
+      const onAbort = () => abort(input.signal.reason)
+      input.signal.addEventListener('abort', onAbort, { once: true })
       this.activeTurn = {
         input,
         requestId,
         resolve: () => {
-          input.signal.removeEventListener('abort', abort)
+          input.signal.removeEventListener('abort', onAbort)
           resolve()
         },
         reject: error => {
-          input.signal.removeEventListener('abort', abort)
+          input.signal.removeEventListener('abort', onAbort)
           reject(error)
         },
         abort,
@@ -188,15 +199,22 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   }
 
   stop(): void {
-    this.activeTurn?.abort()
+    this.activeTurn?.abort('user_stop')
   }
 
-  dispose(): void {
-    if (this.disposed) return
+  dispose(): Promise<void> {
+    if (this.disposal) return this.disposal
     this.disposed = true
-    this.failActiveTurn(new Error('Bee Game Studio native runtime was closed'))
+    this.failActiveTurn(new Error('Bee Game Studio native runtime was closed'), 'aborted', 'runtime_disposed')
     this.child.stdin.end()
     if (this.child.exitCode === null) this.child.kill('SIGTERM')
+    return this.disposal = (async () => {
+      const timeout = setTimeout(() => {
+        if (this.child.exitCode === null) this.child.kill('SIGKILL')
+      }, 2000)
+      try { await this.child.exited } finally { clearTimeout(timeout) }
+      await this.cleanupTestBrowsers()
+    })()
   }
 
   private async consumeStdout(): Promise<void> {
@@ -287,6 +305,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       return
     }
     this.activeTurn = null
+    await this.cleanupTestBrowsers()
     if (isErrorResult(message)) {
       const error = new Error(nativeErrorDetail(message))
       this.observability.finishTurn({ outcome: 'error', error })
@@ -311,7 +330,10 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     const toolUseID = stringField(request, 'tool_use_id')
     const toolName = stringField(request, 'tool_name')
     const toolInput = objectField(request, 'input') ?? {}
-    if (this.taskAccess) {
+    const decisionReason = stringField(request, 'decision_reason')
+    const blockedPath = stringField(request, 'blocked_path')
+    // Questions need a human response, not a filesystem policy decision.
+    if (this.taskAccess && toolName !== 'AskUserQuestion') {
       const decision = await this.taskAccess.permission(request)
       this.write(permissionResponse(requestId, toolUseID,
         decision.behavior === 'allow' ? decision.updatedInput : toolInput,
@@ -330,8 +352,10 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       ? await requestPermission({
           toolUseID,
           toolName,
-          message: `${toolName} requires permission.`,
+          message: decisionReason || `${toolName} requires permission.`,
           input: toolInput,
+          ...(decisionReason ? { decisionReason } : {}),
+          ...(blockedPath ? { blockedPath } : {}),
           ...(permissionSuggestions ? { permissionSuggestions } : {}),
         })
       : ({ behavior: 'deny', message: 'Permission authority is unavailable.' } as const)
@@ -339,6 +363,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   }
 
   private onExit(code: number): void {
+    void this.cleanupTestBrowsers()
     if (this.disposed) return
     this.disposed = true
     const detail = this.stderrTail.trim()
@@ -354,18 +379,26 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   private failActiveTurn(
     error: Error,
     outcome?: 'error' | 'aborted' | 'cancelled_by_user',
+    stopReason?: string,
   ): void {
     const turn = this.activeTurn
     this.activeTurn = null
+    void this.cleanupTestBrowsers()
     if (turn) {
       this.observability.finishTurn({
         outcome:
           outcome ?? (error.message.includes('aborted') ? 'aborted' : 'error'),
-        ...(outcome === 'cancelled_by_user' ? {} : { error }),
+        ...(stopReason ? { stopReason } : {}),
+        ...(outcome === 'cancelled_by_user' || outcome === 'aborted' ? {} : { error }),
       })
       void this.observability.flush()
     }
     turn?.reject(error)
+  }
+
+  private cleanupTestBrowsers(): Promise<void> {
+    return this.browserCleanup = this.browserCleanup.then(() => closeSessionTestBrowsers(this.scratchPath))
+      .catch(error => { console.warn('[beegame] Test browser cleanup failed:', error instanceof Error ? error.message : String(error)) })
   }
 
   private write(message: Record<string, unknown>): void {
@@ -443,15 +476,15 @@ function permissionResponse(
         decision.behavior === 'allow'
           ? {
               behavior: 'allow',
-              updatedInput: input,
+              updatedInput: decision.updatedInput ?? input,
               toolUseID,
               ...(decision.updatedPermissions?.length
                 ? { updatedPermissions: decision.updatedPermissions }
                 : {}),
-              decisionClassification:
-                decision.scope === 'session'
-                  ? 'user_permanent'
-                  : 'user_temporary',
+              ...(decision.source === 'policy' ? {} : {
+                decisionClassification: decision.scope === 'session'
+                  ? 'user_permanent' : 'user_temporary',
+              }),
             }
           : {
               behavior: 'deny',

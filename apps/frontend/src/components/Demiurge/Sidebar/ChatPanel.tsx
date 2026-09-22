@@ -14,6 +14,7 @@ import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 import { Button } from '../../beui/project-button';
 import { ToolApproval, ToolApprovalCode } from '../../beui/registry/components/agents/tool-approval';
 import { PromptInput } from '../../beui/registry/components/agents/prompt-input';
+import { UserQuestionPanel } from './UserQuestionPanel';
 
 interface ChatPanelProps {
     messages: ChatDisplayMessage[];
@@ -24,7 +25,6 @@ interface ChatPanelProps {
     chatInput: string;
     onChatInputChange: (val: string) => void;
     onSend: () => void;
-    onSendMessage?: (message: string) => void;
     onEditMessage?: (message: ChatDisplayMessage) => void;
     editingMessageId?: string | null;
     onCancelEdit?: () => void;
@@ -41,7 +41,8 @@ interface ChatPanelProps {
     onResolveToolPermission?: (
         permission: { gate_id: string },
         decision?: 'allow' | 'deny',
-        scope?: 'once' | 'session'
+        scope?: 'once' | 'session',
+        answers?: Record<string, string>
     ) => Promise<void>;
     permissionState: {
         gateId: string | null;
@@ -53,8 +54,6 @@ interface ChatPanelProps {
     pendingPermissions: PermissionDisplayModel[];
     waitingPermission: WaitingPermissionState;
     projectStatus?: ProjectRuntimeDisplayModel | null;
-    onWorkflowAction?: (action: 'resume' | 'retry') => void | Promise<void>;
-    isWorkflowActionPending?: boolean;
     isComposerLocked?: boolean;
     canSendMessage?: boolean;
     lang?: Language;
@@ -190,7 +189,6 @@ export const ChatPanel = memo(({
     chatInput,
     onChatInputChange,
     onSend,
-    onSendMessage,
     onEditMessage,
     editingMessageId = null,
     onCancelEdit,
@@ -207,8 +205,6 @@ export const ChatPanel = memo(({
     pendingPermissions,
     waitingPermission,
     projectStatus,
-    onWorkflowAction,
-    isWorkflowActionPending = false,
     isComposerLocked = false,
     canSendMessage = true,
     lang = 'en',
@@ -226,21 +222,15 @@ export const ChatPanel = memo(({
     const attachFileLabel = text.attachFile || text.attachImage || 'Attach file';
     const workflowIsTerminal = ['completed', 'failed', 'cancelled', 'stale']
         .includes(String(projectStatus?.workflow?.status || ''));
-    const activeBeeGamePermissions = workflowIsTerminal
-        ? []
-        : pendingPermissions.filter(isBeeGamePermission).concat(
-            actionPermission && isBeeGamePermission(actionPermission) && !pendingPermissions.some(permission => permission.gate_id === actionPermission.gate_id)
+    const activeBeeGamePermissions = pendingPermissions.filter(isBeeGamePermission).concat(
+            !workflowIsTerminal && actionPermission && isBeeGamePermission(actionPermission) && !pendingPermissions.some(permission => permission.gate_id === actionPermission.gate_id)
                 ? [actionPermission]
                 : [],
         );
     const activeBeeGamePermission = activeBeeGamePermissions[0];
-    const workflowAction = projectStatus?.workflow?.nextAction;
-    const workflowActionLabel = workflowAction === 'retry'
-        ? 'Retry workflow'
-        : 'Continue workflow';
     const isComposerDisabled = !canSendMessage || isComposerLocked || isLoading || waitingPermission.isBlockingChat || Boolean(activeBeeGamePermission);
     const handleImageFiles = async (files: File[]) => {
-        if (!files.length || !onAddAttachments) return;
+        if (isComposerDisabled || !files.length || !onAddAttachments) return;
         const nextAttachments = await filesToChatAttachments(files);
         if (nextAttachments.length > 0) onAddAttachments(nextAttachments);
     };
@@ -309,32 +299,21 @@ export const ChatPanel = memo(({
                     currentUserEmail={currentUserEmail}
                     currentUserAvatarUrl={currentUserAvatarUrl}
                     onEditMessage={onEditMessage}
-                    onRetryResponse={(!isLoading && !isComposerLocked && onSendMessage) ? onSendMessage : undefined}
                     isLoading={isLoading}
                     streamingMessageId={streamingMessageId}
                 />
             </MessageScroller>
             <div className={composerShellClassName}>
-                {workflowAction && onWorkflowAction ? (
-                    <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
-                        <p className="type-caption-1 text-[var(--text-secondary)]">
-                            {workflowAction === 'retry'
-                                ? 'This workflow needs another attempt.'
-                                : 'This workflow is ready to continue.'}
-                        </p>
-                        <Button
-                            type="button"
-                            size="sm"
-                            disabled={isWorkflowActionPending || isLoading}
-                            onClick={() => void onWorkflowAction(workflowAction)}
-                            data-testid="beegame-workflow-action"
-                        >
-                            {isWorkflowActionPending ? 'Working…' : workflowActionLabel}
-                        </Button>
-                    </div>
-                ) : null}
                 {activeBeeGamePermissions.map(permission => (
-                    <BeUiPermissionPanel
+                    permission.permission_tool_name === 'AskUserQuestion' ? <UserQuestionPanel
+                        key={permission.gate_id}
+                        input={permission.artifact?.input}
+                        lang={lang}
+                        busy={permissionState.gateId === permission.gate_id && permissionState.phase === 'submitting'}
+                        error={permissionState.gateId === permission.gate_id && permissionState.phase === 'failed' ? permissionState.message : undefined}
+                        onSubmit={onResolveToolPermission ? answers => onResolveToolPermission(toPermissionPayload(permission), 'allow', 'once', answers) : undefined}
+                        onDismiss={onResolveToolPermission ? () => onResolveToolPermission(toPermissionPayload(permission), 'deny') : undefined}
+                    /> : <BeUiPermissionPanel
                         key={permission.gate_id}
                         permission={permission}
                         text={text}
@@ -369,6 +348,7 @@ export const ChatPanel = memo(({
                                         <button
                                             type="button"
                                             aria-label="Remove attachment"
+                                            disabled={isComposerDisabled}
                                             onClick={() => onRemoveAttachment?.(index)}
                                             className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--primary)] text-[var(--primary-foreground)]"
                                         >
@@ -404,7 +384,7 @@ export const ChatPanel = memo(({
                                     stopLabel={isStopping ? 'Stopping task' : 'Stop task'}
                                     allowEmptySubmit={attachments.length > 0}
                                     disabled={isStopping || (!isLoading && isComposerDisabled)}
-                                    readOnly={isLoading}
+                                    readOnly={isComposerLocked || isLoading}
                                     placeholder={effectiveComposerPlaceholder}
                                     aria-label={text.chatPlaceholder || 'Chat message'}
                                     data-testid="beegame-chat-input"
@@ -416,7 +396,7 @@ export const ChatPanel = memo(({
                                     }}
                                     onCompositionStart={() => setIsComposing(true)}
                                     onCompositionEnd={() => setIsComposing(false)}
-                                    className="border-[var(--border-strong)] bg-[var(--surface-2)]"
+                                    className="border-[var(--border-strong)] bg-[var(--surface-2)] [&_textarea]:transition-opacity [&_textarea:read-only]:opacity-50"
                                     leadingAction={(
                                         <div className="flex items-center gap-1" data-testid="beegame-chat-toolbar">
                                             <Button
@@ -436,6 +416,7 @@ export const ChatPanel = memo(({
                                                 <button
                                                     type="button"
                                                     aria-label="Cancel edit"
+                                                    disabled={isComposerDisabled}
                                                     title="Cancel edit"
                                                     onClick={onCancelEdit}
                                                     className="flex h-8 w-8 items-center justify-center rounded-md text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"

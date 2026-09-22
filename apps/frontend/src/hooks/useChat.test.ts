@@ -38,7 +38,7 @@ const { chatStoreState, useChatStoreMock, projectStoreState, useProjectStoreMock
     authenticationStatus: 'authenticated' as const,
     setIsSyncing: vi.fn(),
   };
-  const chatHook = Object.assign(() => chatState, {
+  const chatHook = Object.assign((selector?: (state: typeof chatState) => unknown) => selector ? selector(chatState) : chatState, {
     getState: () => chatState,
   });
   const projectHook = Object.assign(
@@ -103,8 +103,47 @@ vi.mock('../services/creditsApi', () => ({
 
 import { api } from '../services/api';
 import { useChat } from './useChat';
+import { settleChatActivity } from '../utils/chatActivity';
 
 describe('useChat clarification gate handling', () => {
+  it('keeps detached child work busy after parent completion and refuses a new send', async () => {
+    const child = { id: 'child', sender: 'beegame', type: 'tool', taskId: 'parent-task',
+      timestamp: 100, isSubagentTool: true, toolStatus: 'running' };
+    chatStoreState.messages = [child];
+    const { result, rerender } = renderHook(() => useChat({ projectId: 'p' }));
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'status', status: 'finished', task_id: 'parent-task' }));
+    expect(result.current.isLoading).toBe(true);
+    const calls = vi.mocked(api.sendMessage).mock.calls.length;
+    await act(async () => { expect(await result.current.sendMessage('new request')).toBe(false); });
+    expect(api.sendMessage).toHaveBeenCalledTimes(calls);
+    await act(async () => { await result.current.continueTask(); });
+    expect(api.continueTask).not.toHaveBeenCalled();
+    chatStoreState.messages = [{ ...child, toolStatus: 'completed' }];
+    rerender();
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it.each(['stopped', 'failed'] as const)('retains live child task scope so %s unlocks the composer', async (status) => {
+    const { result, rerender } = renderHook(() => useChat({ projectId: 'p' }));
+    act(() => latestWebSocketOptions.onMessage?.({
+      type: 'tool_start', task_id: 'parent', turn_id: 'turn',
+      tool: 'Agent', tool_use_id: 'child', is_subagent_tool: true, timestamp: 100,
+    }));
+    const child = chatStoreState.addMessage.mock.calls.at(-1)?.[0];
+    expect(child).toMatchObject({ taskId: 'parent', turnId: 'turn', toolStatus: 'running' });
+    chatStoreState.messages = [child];
+    rerender();
+    expect(result.current.isLoading).toBe(true);
+    act(() => latestWebSocketOptions.onMessage?.({
+      type: 'status', task_id: 'parent', turn_id: 'turn', status, timestamp: 200,
+    }));
+    expect(chatStoreState.settleActivity).toHaveBeenLastCalledWith('parent', 'turn', status, 200);
+    chatStoreState.messages = settleChatActivity(chatStoreState.messages,
+      { taskId: 'parent', turnId: 'turn', reason: status, at: 200 });
+    rerender();
+    expect(result.current.isLoading).toBe(false);
+  });
+
   beforeEach(() => {
     latestWebSocketOptions = {};
     projectStoreState.pendingPermissions = [];
@@ -401,6 +440,19 @@ describe('useChat clarification gate handling', () => {
     expect(result.current.currentTaskId).toBe('proj_1');
   });
 
+  it.each(['completed', 'failed', 'stopped', undefined])('locks a running native follow-up with workflow=%s, and unlocks on confirmed idle', async (status) => {
+    projectStoreState.projectStatus = { project_id: 'proj_1', phase: 'running',
+      workflow: status ? { status } : undefined };
+    const { result, rerender } = renderHook(() => useChat({ projectId: 'proj_1' }));
+    await waitFor(() => expect(result.current.isLoading).toBe(true));
+    await act(async () => { expect(await result.current.sendMessage('another request')).toBe(false); });
+    act(() => latestWebSocketOptions.onClose?.());
+    expect(result.current.isLoading).toBe(true);
+    projectStoreState.projectStatus = { ...projectStoreState.projectStatus, phase: 'idle' };
+    rerender();
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+  });
+
   it('does not carry an active turn lock into another project', async () => {
     projectStoreState.projectStatus = {
       project_id: 'proj_1',
@@ -504,6 +556,7 @@ describe('useChat clarification gate handling', () => {
 
     expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
       messageId: 'tool-start-1',
+      taskId: 'beegame_1',
       type: 'tool',
       taskKind: 'tool_execution',
     }));
@@ -537,6 +590,7 @@ describe('useChat clarification gate handling', () => {
     expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
       id: 'tool-card-1',
       messageId: 'tool-card-1',
+      taskId: 'beegame_1',
       type: 'tool',
       taskKind: 'tool_execution',
       toolName: 'Bash',
@@ -826,5 +880,17 @@ describe('useChat clarification gate handling', () => {
     expect(result.current.permissionState.phase).toBe('failed');
     expect(errorLog).toHaveBeenCalledWith('[useChat] Failed to resolve tool permission:', expect.any(Error));
     errorLog.mockRestore();
+  });
+
+  it('forwards question answers without creating a second chat message', async () => {
+    const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
+    const answers = { 'Which style?': 'Pixel' };
+    await act(async () => {
+      await result.current.resolveToolPermission({ gate_id: 'question' }, 'allow', 'once', answers);
+    });
+    expect(api.resolveToolPermission).toHaveBeenCalledWith({
+      project_id: 'proj_1', gate_id: 'question', decision: 'allow', scope: 'once', answers,
+    });
+    expect(api.sendMessage).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,5 @@
 import type { AssistantContentBlock, Message, MessageType } from '../types/message';
+import { readSubagentActivity } from '@bee-game-studio/agent-workflow/subagent-activity';
 import { normalizeHistorySemanticType } from './messageSemantics';
 import { normalizeChatSources } from './chatSources';
 import { normalizeChatAttachments } from '../services/chatAttachments';
@@ -249,6 +250,7 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
       subagentPrompt: readOptionalString('subagentPrompt', 'subagent_prompt'),
       subagentOutput: readOptionalString('subagentOutput', 'subagent_output'),
       subagentTrace: readOptionalString('subagentTrace', 'subagent_trace'),
+      subagentActivity: readSubagentActivity(record.subagentActivity ?? record.subagent_activity),
     };
 
     const existingIndex = seen.get(uniqueKey);

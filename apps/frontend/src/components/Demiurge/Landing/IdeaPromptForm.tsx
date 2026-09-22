@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { BorderBeam } from 'border-beam';
 import { ArrowRight, Check, ChevronDown, CircleHelp, FileText, Image as ImageIcon, LayoutTemplate, Lightbulb, Loader2, Plus, Send, Video, X } from 'lucide-react';
 import type { ChatAttachmentPayload } from '../../../services/api';
-import { CHAT_ATTACHMENT_ACCEPT, filesToChatAttachments } from '../../../services/chatAttachments';
+import { filesToChatAttachments, isSupportedChatFile, MAX_CHAT_ATTACHMENTS, MAX_CHAT_ATTACHMENT_TOTAL_BYTES } from '../../../services/chatAttachments';
 import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from '../../beui/registry/components/motion/popover-morph';
 import styles from './IdeaPromptForm.module.css';
 
@@ -16,22 +16,23 @@ interface IdeaPromptFormProps {
     onSubmit: (event: React.FormEvent) => void;
     attachments: ChatAttachmentPayload[];
     onAttachmentsChange: (attachments: ChatAttachmentPayload[]) => void;
+    creationMode: CreationMode;
+    onCreationModeChange: (mode: CreationMode) => void;
 }
 
-const DOCUMENT_ATTACHMENT_ACCEPT = '.pdf,.doc,.docx,.txt,.md,.csv,.xls,.xlsx,.json,.jsonl';
+const DOCUMENT_ATTACHMENT_ACCEPT = '.pdf,.docx,.txt,.md,.csv,.xlsx,.json,.jsonl';
 const IMAGE_ATTACHMENT_ACCEPT = '.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp';
 const VIDEO_ATTACHMENT_ACCEPT = '.mp4,.mov,.webm,video/mp4,video/quicktime,video/webm';
-type CreationMode = 'creative' | 'blueprint';
+export type CreationMode = 'creative' | 'blueprint';
 type OpenMenu = 'attachments' | 'mode' | null;
 
 export function IdeaPromptForm({
     value, placeholder, generateLabel, isTransitioning, onChange, onSubmit,
-    isThinking, attachments, onAttachmentsChange,
+    isThinking, attachments, onAttachmentsChange, creationMode, onCreationModeChange,
 }: IdeaPromptFormProps) {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const fileRef = useRef<HTMLInputElement>(null);
     const [attachmentError, setAttachmentError] = useState('');
-    const [creationMode, setCreationMode] = useState<CreationMode>('creative');
     const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
     const openAttachmentPicker = (accept: string) => {
         if (!fileRef.current) return;
@@ -41,8 +42,18 @@ export function IdeaPromptForm({
     const addFiles = async (files: File[]) => {
         setAttachmentError('');
         try {
+            if (files.some(file => !isSupportedChatFile(file) || /\.(doc|xls)$/i.test(file.name))) {
+                setAttachmentError('Unsupported reference or file over 10 MB. Use PDF, DOCX, XLSX, text, PNG/JPEG/WebP or MP4/MOV/WebM.');
+                return;
+            }
+            if (attachments.length + files.length > MAX_CHAT_ATTACHMENTS ||
+                files.reduce((size, file) => size + file.size, 0) + attachments.reduce((size, file) => size + Math.floor(file.data.length * 3 / 4), 0) > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
+                setAttachmentError('最多 8 个附件，总大小不超过 32 MB。');
+                return;
+            }
             const added = await filesToChatAttachments(files);
-            if (added.length) onAttachmentsChange([...attachments, ...added]);
+            const next = [...attachments, ...added];
+            if (added.length) onAttachmentsChange(next);
             else if (files.length) setAttachmentError('Unsupported file type or file too large.');
         } catch {
             setAttachmentError('Could not read the attachment. Please try again.');
@@ -79,7 +90,7 @@ export function IdeaPromptForm({
                                 <div className={styles.attachment} key={`${attachment.filename}-${index}`}>
                                     {attachment.type === 'image'
                                         ? <img src={`data:${attachment.mediaType};base64,${attachment.data}`} alt={attachment.filename || 'Image'} />
-                                        : <FileText aria-hidden="true" />}
+                                        : attachment.mediaType.startsWith('video/') ? <Video aria-hidden="true" /> : <FileText aria-hidden="true" />}
                                     <span>{attachment.filename}</span>
                                     <button type="button" aria-label={`Remove ${attachment.filename || 'attachment'}`}
                                         onClick={() => onAttachmentsChange(attachments.filter((_, i) => i !== index))}>
@@ -128,10 +139,10 @@ export function IdeaPromptForm({
                                 </button>
                             </MorphPopoverTrigger>
                             <MorphPopoverContent side="top" align="start" sideOffset={8} radius={16} className={styles.popoverMenu}>
-                                <button type="button" className={styles.popoverItem} onClick={() => { setCreationMode('creative'); setOpenMenu(null); }}>
+                                    <button type="button" className={styles.popoverItem} onClick={() => { onCreationModeChange('creative'); setOpenMenu(null); }}>
                                     <Lightbulb />创意模式{creationMode === 'creative' ? <Check className={styles.selectedIcon} /> : null}
                                 </button>
-                                <button type="button" className={styles.popoverItem} onClick={() => { setCreationMode('blueprint'); setOpenMenu(null); }}>
+                                <button type="button" className={styles.popoverItem} onClick={() => { onCreationModeChange('blueprint'); setOpenMenu(null); }}>
                                     <LayoutTemplate />蓝图模式{creationMode === 'blueprint' ? <Check className={styles.selectedIcon} /> : null}
                                 </button>
                             </MorphPopoverContent>
@@ -143,7 +154,7 @@ export function IdeaPromptForm({
                 </div>
                 </div>
                 <input ref={fileRef} id="landing-attachment-upload" type="file" hidden
-                    accept={CHAT_ATTACHMENT_ACCEPT} multiple onChange={event => {
+                    accept={[DOCUMENT_ATTACHMENT_ACCEPT, IMAGE_ATTACHMENT_ACCEPT, VIDEO_ATTACHMENT_ACCEPT].join(',')} multiple onChange={event => {
                         const files = Array.from(event.target.files || []);
                         event.target.value = '';
                         void addFiles(files);

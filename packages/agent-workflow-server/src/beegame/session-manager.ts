@@ -51,6 +51,7 @@ import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { createRunStore } from './delivery-workflow/run-store'
 import { createStageChatProjector } from './stage-chat-events'
 import { ChatJsonlReader } from './chat-jsonl-reader'
+import { answeredQuestionInput } from './user-question'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -72,6 +73,9 @@ const MAX_BEEGAME_ATTACHMENT_BYTES = 10 * 1024 * 1024
 const MAX_PROJECT_AGENT_RAW_LOG_BYTES = 8 * 1024 * 1024
 const PROJECT_AGENT_RAW_LOG_ARCHIVES = 3
 const DOCUMENT_ATTACHMENT_TYPES: Record<string, string[]> = {
+  '.mp4': ['video/mp4'],
+  '.mov': ['video/quicktime'],
+  '.webm': ['video/webm'],
   '.pdf': ['application/pdf'],
   '.doc': ['application/msword'],
   '.docx': [
@@ -363,17 +367,11 @@ export type BeeGameSessionSubmitInput = {
 export type BeeGameSessionRuntime = {
   submit(input: BeeGameSessionSubmitInput): Promise<void>
   stop(): void
-  dispose?(): void
+  dispose?(): void | Promise<void>
 }
 
 export type BeeGameSessionRunner = {
   start(input: BeeGameSessionRunnerStartInput): Promise<BeeGameSessionRuntime>
-}
-
-function disposeRunner(runner: BeeGameSessionRuntime | null): void {
-  if (!runner) return
-  if (runner.dispose) runner.dispose()
-  else runner.stop()
 }
 
 export type DashboardPermissionRequest = {
@@ -382,16 +380,20 @@ export type DashboardPermissionRequest = {
   message: string
   input: Record<string, unknown>
   permissionSuggestions?: Record<string, unknown>[]
+  decisionReason?: string
+  blockedPath?: string
 }
 
 export type DashboardPermissionDecision = {
   behavior: 'allow' | 'deny'
   message?: string
-  /** Host policy decisions must not be attributed to a user rejection. */
+  /** Host policy decisions must not be attributed to a user approval/rejection. */
   source?: 'policy' | 'user'
   /** Ephemeral approval scope. Never persisted across isolated sessions. */
   scope?: 'once' | 'session'
   updatedPermissions?: Record<string, unknown>[]
+  /** Native tool input returned after an interactive user response. */
+  updatedInput?: Record<string, unknown>
 }
 
 type PendingPermission = DashboardPermissionRequest & {
@@ -527,6 +529,16 @@ export type BeeGameSessionUsageBillingBackend = {
 }
 
 export class BeeGameSessionManager {
+  private readonly runnerDisposals = new Set<Promise<void>>()
+
+  private disposeRunner(runner: BeeGameSessionRuntime | null): Promise<void> {
+    if (!runner) return Promise.resolve()
+    const completion = Promise.resolve(runner.dispose ? runner.dispose() : runner.stop())
+      .catch(error => { console.error('[BeeGame] Runtime cleanup failed', error) })
+    this.runnerDisposals.add(completion)
+    void completion.then(() => this.runnerDisposals.delete(completion))
+    return completion
+  }
   private readonly sessions = new Map<string, SessionRecord>()
   private readonly subagentChat = new WeakMap<SessionRecord, ReturnType<typeof createNativeSubagentChatEnricher>>()
   private readonly eventSubscribers = new Map<
@@ -803,7 +815,7 @@ export class BeeGameSessionManager {
     projectId: string,
     workspacePath: string,
     toolUseID: string,
-    decision: DashboardPermissionDecision & { remember?: boolean },
+    decision: DashboardPermissionDecision & { remember?: boolean; answers?: unknown },
   ): { resolved: boolean; sessionId?: string } {
     const root = resolve(workspacePath)
     const candidates = [...this.sessions.values()].filter(
@@ -1119,14 +1131,14 @@ export class BeeGameSessionManager {
       if (display?.authToken) record.authToken = display.authToken
       if (display?.getValidAuthToken) record.getValidAuthToken = display.getValidAuthToken
       if (display?.language && display.language !== record.language) {
-        disposeRunner(record.runner)
+        await this.disposeRunner(record.runner)
         record.runner = null
         record.language = display.language
       }
       const context = await display?.prepareTurn?.()
       close = context?.close
       if (context && context.systemContext !== record.systemContext) {
-        disposeRunner(record.runner)
+        await this.disposeRunner(record.runner)
         record.runner = null
         record.systemContext = context.systemContext
       }
@@ -1219,22 +1231,23 @@ export class BeeGameSessionManager {
     }
   }
 
-  stop(sessionId: string): BeeGameSession {
+  stop(sessionId: string, reason = 'user_stop'): BeeGameSession {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
     if (record.session.status === 'running') {
-      record.abortController?.abort()
-      disposeRunner(record.runner)
+      record.session.status = 'stopped'
+      record.abortController?.abort(reason)
+      void this.disposeRunner(record.runner)
       record.runner = null
       this.resolveAllPendingPermissions(record, {
         behavior: 'deny',
+        source: 'policy',
         message: 'Session stopped before permission was resolved',
       })
-      record.session.status = 'stopped'
       record.session.turnStatus = 'idle'
       record.session.updatedAt = new Date()
       this.closeOpenThinkingLifecycle(record, 'session_stopped')
-      this.append(record, 'session.stopped', 'BeeGame session stopped')
+      this.append(record, 'session.stopped', 'BeeGame session stopped', { type: 'session.stopped', reason })
     }
     return cloneSession(record.session)
   }
@@ -1247,12 +1260,13 @@ export class BeeGameSessionManager {
     if (!record) throw new Error('Session not found')
 
     if (record.session.status === 'running') {
-      record.abortController?.abort()
-      disposeRunner(record.runner)
+      record.abortController?.abort('session_deleted')
+      await this.disposeRunner(record.runner)
       record.runner = null
       this.resolveAllPendingPermissions(record, {
         behavior: 'deny',
         message: 'Session deleted before permission was resolved',
+        source: 'policy',
       })
     }
 
@@ -1279,7 +1293,7 @@ export class BeeGameSessionManager {
   async disposeWorkflowWorker(sessionId: string): Promise<void> {
     const record = this.sessions.get(sessionId)
     if (!record?.workflowWorker) return
-    if (record.session.status === 'running') this.stop(sessionId)
+    if (record.session.status === 'running') this.stop(sessionId, 'worker_disposed')
     await this.waitForWorkflowWorkerIdle(sessionId)
     this.sessions.delete(sessionId)
     this.eventSubscribers.delete(sessionId)
@@ -1350,14 +1364,15 @@ export class BeeGameSessionManager {
       // Mark the session stopped before the transport can flush any more
       // messages. Aborting a runner while leaving the record "running" lets
       // late SDK events cross a hot-reload boundary and mutate durable state.
-      if (record.session.status === 'running') this.stop(record.session.id)
+      if (record.session.status === 'running') this.stop(record.session.id, 'service_shutdown')
       else {
-        record.abortController?.abort()
-        disposeRunner(record.runner)
+        record.abortController?.abort('service_shutdown')
+        void this.disposeRunner(record.runner)
         record.runner = null
         this.resolveAllPendingPermissions(record, {
           behavior: 'deny',
           message: 'BeeGame server stopped before permission was resolved',
+          source: 'policy',
         })
       }
       if (record.workflowWorker || record.activeTurn) {
@@ -1377,6 +1392,7 @@ export class BeeGameSessionManager {
       }
     }
     await Promise.all(workflowDrains)
+    await Promise.all(this.runnerDisposals)
     this.eventSubscribers.clear()
   }
 
@@ -1388,7 +1404,7 @@ export class BeeGameSessionManager {
     let refreshed = 0
     for (const record of this.sessions.values()) {
       if (record.session.turnStatus !== 'idle' || !record.runner) continue
-      disposeRunner(record.runner)
+      void this.disposeRunner(record.runner)
       record.runner = null
       refreshed += 1
     }
@@ -1528,7 +1544,7 @@ export class BeeGameSessionManager {
         }))
       record.runner = runner
       if (signal.aborted || record.session.status !== 'running') {
-        disposeRunner(runner)
+        await this.disposeRunner(runner)
         record.runner = null
         return
       }
@@ -1562,12 +1578,12 @@ export class BeeGameSessionManager {
         }
       } finally {
         if (signal.aborted && record.runner === runner) {
-          disposeRunner(record.runner)
+          await this.disposeRunner(record.runner)
           record.runner = null
         }
       }
     } catch (err) {
-      disposeRunner(record.runner)
+      await this.disposeRunner(record.runner)
       record.runner = null
       if (record.session.status === 'running') {
         this.closeOpenThinkingLifecycle(record, 'turn_failed')
@@ -1931,13 +1947,23 @@ export class BeeGameSessionManager {
   resolvePermission(
     sessionId: string,
     toolUseID: string,
-    decision: DashboardPermissionDecision & { remember?: boolean },
+    decision: DashboardPermissionDecision & { remember?: boolean; answers?: unknown },
   ): { resolved: boolean } {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
     const pending = record.pendingPermissions.get(toolUseID)
     if (!pending) throw new Error('Permission request not found')
 
+    // Validate before consuming the pending request so a failed submission can retry.
+    if (decision.behavior === 'allow' &&
+        (pending.toolName === 'AskUserQuestion' || decision.answers !== undefined)) {
+      decision = {
+        ...decision,
+        updatedInput: answeredQuestionInput(pending.toolName, pending.input, decision.answers),
+        scope: 'once',
+        updatedPermissions: [],
+      }
+    }
     record.pendingPermissions.delete(toolUseID)
     const resolvedDecision =
       decision.behavior === 'allow' &&
@@ -2007,7 +2033,7 @@ export class BeeGameSessionManager {
         autoApproved: true,
         reason: 'project_workspace_file_mutation',
       })
-      return Promise.resolve({ behavior: 'allow', scope: 'once' })
+      return Promise.resolve({ behavior: 'allow', source: 'policy', scope: 'once' })
     }
     const projectFileAccess = projectWorkspaceFileAccessAuthority(
       record,
@@ -2039,19 +2065,9 @@ export class BeeGameSessionManager {
           : {}),
       })
     }
-    if (record.workflowWorker === true) {
-      this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
-        type: 'permission.resolved',
-        toolUseID: request.toolUseID,
-        toolName: request.toolName,
-        decision: 'allow',
-        scope: 'once',
-        autoApproved: true,
-        reason: 'workflow_worker_tool_authority',
-        input: request.input,
-      })
-      return Promise.resolve({ behavior: 'allow', scope: 'once' })
-    }
+    // Native tools already execute permitted operations without asking here.
+    // Worker ownership is not permission to bypass a native safety prompt
+    // (including unsandboxed shell execution). Preserve that user decision.
     return new Promise(resolve => {
       record.pendingPermissions.set(request.toolUseID, {
         ...request,
@@ -2064,6 +2080,8 @@ export class BeeGameSessionManager {
         toolName: request.toolName,
         message: request.message,
         input: request.input,
+        ...(request.decisionReason ? { decisionReason: request.decisionReason } : {}),
+        ...(request.blockedPath ? { blockedPath: request.blockedPath } : {}),
       })
     })
   }

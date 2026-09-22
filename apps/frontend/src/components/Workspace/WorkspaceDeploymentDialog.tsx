@@ -1,9 +1,12 @@
-import { ExternalLink, FileText, RefreshCw, Rocket, X } from 'lucide-react';
-import type { BeeGameDeploymentPayload } from '../../services/api';
+import { useEffect, useState } from 'react';
+import { Check, Copy, ExternalLink, FileText, RefreshCw, Rocket, X } from 'lucide-react';
+import { api, type BeeGameDeploymentPayload, type BeeGameDeploymentReadiness } from '../../services/api';
+import { API_BASE_URL } from '../../services/apiClient';
 import { Button } from '../beui/project-button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog';
 
 export interface WorkspaceDeploymentDialogProps {
+  projectId: string;
   isOpen: boolean;
   deployments: BeeGameDeploymentPayload[];
   labels: Record<string, string>;
@@ -19,9 +22,10 @@ export interface WorkspaceDeploymentDialogProps {
 const normalizeUrl = (url?: string): string => {
   const value = String(url || '').trim();
   if (!value) return '';
-  if (/^https?:\/\//i.test(value)) return value;
-  if (typeof window === 'undefined') return value;
-  return new URL(value, window.location.origin).toString();
+  try {
+    const url = new URL(value, new URL(API_BASE_URL || '/', window.location.origin));
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : '';
+  } catch { return ''; }
 };
 
 const formatTime = (value?: string): string => {
@@ -39,6 +43,7 @@ const statusLabel = (status: BeeGameDeploymentPayload['status'] | undefined, lab
 };
 
 export function WorkspaceDeploymentDialog({
+  projectId,
   isOpen,
   deployments,
   labels,
@@ -50,17 +55,55 @@ export function WorkspaceDeploymentDialog({
   isDeploying,
   canDeploy,
 }: WorkspaceDeploymentDialogProps) {
+  const [readiness, setReadiness] = useState<BeeGameDeploymentReadiness>();
+  const [error, setError] = useState('');
+  const [checking, setChecking] = useState(false);
+  const [checkVersion, setCheckVersion] = useState(0);
+  const [copied, setCopied] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    if (!isOpen) return;
+    let disposed = false;
+    setChecking(true); setReadiness(undefined); setError(''); setCopied(false);
+    void api.getDeploymentReadiness(projectId).then(value => {
+      if (!disposed) setReadiness(value);
+    }).catch(reason => {
+      if (!disposed) setError(reason instanceof Error ? reason.message : String(reason));
+    }).finally(() => { if (!disposed) setChecking(false); });
+    return () => { disposed = true; };
+  }, [projectId, isOpen, checkVersion]);
+  const perform = async (action: () => void | Promise<void>) => {
+    if (submitting || isDeploying) return;
+    setSubmitting(true); setError('');
+    try { await action(); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setSubmitting(false); }
+  };
   if (!isOpen) return null;
   const latest = deployments[0];
   const latestUrl = normalizeUrl(latest?.url);
   const failureLog = latest?.status === 'failed' ? latest.buildLog || latest.message || labels.deploymentFailed : '';
+  const busy = isDeploying || submitting;
+  const activeStatus = latest && ['queued', 'building', 'publishing'].includes(latest.status) ? latest.status : undefined;
+  const canPublish = canDeploy && !busy && !checking && readiness?.allowed === true && readiness.destination === 'remote';
 
   return (
     <Dialog open={isOpen} onOpenChange={open => !open && onClose()}>
-      <DialogContent className="max-h-[min(720px,calc(100dvh-32px))] max-w-2xl bg-[var(--popover)] p-6 text-[var(--text-primary)]">
+      <DialogContent className="max-h-[min(720px,calc(100dvh-32px))] max-w-2xl overflow-y-auto bg-[var(--popover)] p-6 text-[var(--text-primary)]">
         <Button type="button" variant="ghost" size="icon" aria-label={labels.close || 'Close'} onClick={onClose} className="absolute right-4 top-4 text-[var(--text-secondary)]"><X className="h-4 w-4" /></Button>
         <DialogTitle className="type-title-2 pr-12">{labels.deploy}</DialogTitle>
         <DialogDescription className="type-callout mt-2 text-[var(--text-secondary)]">{labels.deploymentDialogDescription}</DialogDescription>
+        <div className="mt-4 space-y-2 type-footnote" aria-live="polite">
+          {checking ? <p role="status">{labels.deploymentChecking}</p> : null}
+          <p className="text-[var(--text-secondary)]">{labels.deploymentVerificationScope}</p>
+          {readiness?.workflow?.phase === 'ACCEPTANCE' && readiness.workflow.status === 'needs_action' ?
+            <p className="text-[var(--text-secondary)]">{labels.deploymentAcceptanceRequired}</p> : null}
+          {readiness?.destination === 'remote' ? <p className="text-[var(--text-secondary)]">{labels.deploymentPublicNotice}</p> : null}
+          {readiness?.destination === 'local' ? <p className="text-[var(--destructive)]">{labels.deploymentNotConfigured}</p> : null}
+          {readiness && !readiness.allowed ? <div role="alert"><p>{labels.deploymentBlocked}</p><ul className="mt-1 list-disc pl-5">{readiness.issues.map(issue => <li key={issue}>{issue}</li>)}</ul></div> : null}
+          {error ? <p role="alert" className="whitespace-pre-wrap text-[var(--destructive)]">{error}</p> : null}
+          {!busy && !checking && (error || !readiness?.allowed) ? <Button variant="link" onClick={() => setCheckVersion(value => value + 1)}>{labels.deploymentRecheck}</Button> : null}
+        </div>
 
         <div className="mt-6 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4">
           <div className="flex items-start justify-between gap-4">
@@ -72,13 +115,20 @@ export function WorkspaceDeploymentDialog({
               </div>
               {latest?.deployedAt || latest?.updatedAt ? <div className="type-footnote mt-1 text-[var(--text-muted)]">{formatTime(latest.deployedAt || latest.updatedAt)}</div> : null}
             </div>
-            <Button type="button" aria-label={isDeploying ? labels.deploying : latest ? labels.redeploy : labels.deploy} onClick={() => void onDeploy()} disabled={!canDeploy} className="h-9 shrink-0">
+            <Button type="button" aria-label={isDeploying ? labels.deploying : latest ? labels.redeploy : labels.deploy} onClick={() => void perform(onDeploy)} disabled={!canPublish} className="h-9 shrink-0 rounded-full">
               {isDeploying ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
               {isDeploying ? labels.deploying : latest ? labels.redeploy : labels.deploy}
             </Button>
           </div>
+          {busy || activeStatus ? <div role="status" className="mt-4 space-y-2">
+            <div className="flex gap-2">{(['queued', 'building', 'publishing'] as const).map(status => <div key={status} className={`h-1 flex-1 rounded-full ${activeStatus === status ? 'animate-pulse bg-[var(--text-primary)]' : 'bg-[var(--border)]'}`} />)}</div>
+            <p className="type-footnote text-[var(--text-secondary)]">{statusLabel(activeStatus || 'queued', labels)} · {labels.deploymentBackground}</p>
+          </div> : null}
+          {latest?.status === 'succeeded' && latestUrl ? <Button variant="outline" className="mt-3 rounded-full" onClick={() => {
+            void navigator.clipboard.writeText(latestUrl).then(() => setCopied(true)).catch(reason => setError(String(reason)));
+          }}>{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{copied ? labels.deploymentCopied : labels.deploymentCopyLink}</Button> : null}
           {failureLog ? <pre className="type-code-sm mt-3 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[var(--destructive)]">{failureLog}</pre> : latestUrl ? <div className="mt-3 flex items-center justify-between gap-3 text-[var(--text-secondary)]"><span className="truncate">{latestUrl}</span><Button type="button" variant="ghost" size="icon" aria-label={labels.openLive} onClick={() => onOpenExternal?.(latestUrl)}><ExternalLink className="h-4 w-4" /></Button></div> : <p className="type-footnote mt-3 text-[var(--text-muted)]">{labels.deploymentNotPublishedHint}</p>}
-          {failureLog ? <Button type="button" variant="link" onClick={() => void onFixDeploymentFailure?.()} className="mt-3 text-[var(--info)]">{labels.fixBuildErrors}</Button> : null}
+          {failureLog && onFixDeploymentFailure ? <Button type="button" variant="link" onClick={() => void perform(onFixDeploymentFailure)} disabled={busy} className="mt-3 text-[var(--info)]">{labels.fixBuildErrors}</Button> : null}
         </div>
 
         <div className="mt-6">

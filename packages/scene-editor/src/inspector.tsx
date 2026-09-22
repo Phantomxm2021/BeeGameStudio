@@ -200,11 +200,23 @@ function SpriteFrameProperty({ component, document, replace }: { component: Extr
         material: { ...component.material, ...(selection.frame ? { textureRegion: selection.frame } : {}) } }, 'Change sprite frame')
     }} /></Property>
 }
-function TextInspector({ component, replace }: { component: Extract<SceneComponent, { type: 'text' }>; replace: (next: SceneComponent, label: string) => void }) {
+function TextInspector({ component, document, replace }: { component: Extract<SceneComponent, { type: 'text' }>; document: SceneDocument; replace: (next: SceneComponent, label: string) => void }) {
   const [text, setText] = useState(component.text)
   useEffect(() => setText(component.text), [component.text])
+  const fonts = Object.values(document.assets).filter(asset => asset.mimeType.startsWith('font/') || /\.(?:woff2?|ttf|otf)$/i.test(asset.path))
   return <ComponentSection title="Text" icon={Image}>
     <Property label="Text"><textarea aria-label="Text content" value={text} onChange={event => setText(event.target.value)} onBlur={() => { if (text !== component.text) replace({ ...component, text }, 'Change text') }} /></Property>
+    {fonts.length ? <Property label="Font"><Select ariaLabel="Text font" value={component.fontAssetId ?? ''} options={[{ value: '', label: 'System default' }, ...fonts.map(asset => ({ value: asset.id, label: asset.name }))]} onValueChange={value => {
+      const properties = { ...component.properties }
+      delete properties.member
+      if (value) {
+        const previous = properties.font && typeof properties.font === 'object' && !Array.isArray(properties.font) ? properties.font as Record<string, unknown> : {}
+        const asset = fonts.find(item => item.id === value)
+        properties.font = { ...previous, assetRef: value.split(':', 1)[0], ...(asset?.path ? { member: asset.path } : {}) }
+      } else delete properties.font
+      const { fontAssetId: _previousFont, ...base } = component
+      replace({ ...base, ...(value ? { fontAssetId: value } : {}), properties }, 'Change text font')
+    }} /></Property> : null}
     <Property label="Font size"><DraftScalar aria-label="Text font size" type="number" min="1" step="1" value={Number(component.properties.fontSize) || 32} parse={Number} onCommit={value => replace({ ...component, properties: { ...component.properties, fontSize: Math.max(1, Number(value) || 1) } }, 'Change text font size')} /></Property>
     <Property label="Color"><input aria-label="Text color" type="color" value={typeof component.properties.color === 'string' ? component.properties.color : '#ffffff'} onChange={event => replace({ ...component, properties: { ...component.properties, color: event.target.value } }, 'Change text color')} /></Property>
   </ComponentSection>
@@ -218,7 +230,7 @@ function Vec2Property({ label, value, onCommit }: { label: string; value: [numbe
 function ComponentInspector({ node, component, document, commit }: { node: SceneNode; component: SceneComponent; document: SceneDocument; commit: Commit }) {
   const Icon = ICONS[component.type] ?? Box
   const replace = (next: SceneComponent, label: string) => { if (JSON.stringify(component) !== JSON.stringify(next)) commit([operations.component(node.id, next)], label) }
-  if (component.type === 'text') return <TextInspector component={component} replace={replace} />
+  if (component.type === 'text') return <TextInspector component={component} document={document} replace={replace} />
   if (component.type === 'sprite-renderer' || component.type === 'image' || component.type === 'mesh-renderer' || component.type === 'skinned-mesh-renderer' || component.type === 'particle-system-renderer') return <ComponentSection title={labelFor(component)} icon={Icon}><AssetProperty component={component} document={document} replace={replace} />{(component.type === 'sprite-renderer' || component.type === 'image') && <SpriteFrameProperty component={component} document={document} replace={replace} />}{document.dimension === '2d' && component.type === 'sprite-renderer' ? <NumberProperty label="Order in Layer" step="1" value={Number(component.properties.sortingOrder ?? node.order ?? 0)} onCommit={value => { if (Number.isFinite(value)) replace({ ...component, properties: { ...component.properties, sortingOrder: Math.round(value) } }, 'Change render order') }} /> : null}<Property label="Color"><input type="color" value={component.material.color} onChange={event => replace({ ...component, material: { ...component.material, color: event.target.value } }, 'Change renderer color')} /></Property><Property label="Opacity"><span data-edit-gesture className="scene-opacity-control"><RangeSlider aria-label="Renderer opacity" min={0} max={1} step={.01} showTicks={false} value={component.material.opacity} onValueChange={opacity => replace({ ...component, material: { ...component.material, opacity, alphaMode: opacity < 1 ? 'blend' : 'opaque' } }, 'Change renderer opacity')} className="scene-opacity-slider" /></span></Property></ComponentSection>
   if (component.type === 'grid') { const grid=parseGridData(component.properties); return <ComponentSection title="Grid" icon={Icon}><Vec2Property label="Cell size" value={grid.cellSize} onCommit={value=>replace({...component,properties:{...grid,cellSize:value}},'Change cell size')}/><Vec2Property label="Cell gap" value={grid.cellGap ?? [0,0]} onCommit={value=>replace({...component,properties:{...grid,cellGap:value}},'Change cell gap')}/></ComponentSection> }
   if (component.type === 'tilemap-renderer') return <ComponentSection title="Tilemap Renderer" icon={Icon}><NumberProperty label="Order in Layer" step="1" value={Number(component.properties.sortingOrder ?? 0)} onCommit={value=>replace({...component,properties:{...component.properties,sortingOrder:Math.round(value)}},'Change render order')}/></ComponentSection>

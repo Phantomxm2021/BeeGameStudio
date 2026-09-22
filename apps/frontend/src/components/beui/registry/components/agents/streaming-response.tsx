@@ -5,9 +5,6 @@ import {
   Check,
   ChevronDown,
   Copy,
-  RotateCcw,
-  ThumbsDown,
-  ThumbsUp,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
@@ -28,7 +25,6 @@ import { EASE_OUT, SPRING_PRESS, SPRING_SWAP } from "@/components/beui/registry/
 import { cn } from "@/components/beui/registry/lib/utils";
 
 export type StreamingResponseStatus = "streaming" | "complete" | "error";
-export type StreamingResponseFeedback = "up" | "down" | null;
 
 export interface StreamingResponseProps {
   /** Rendered response content. Pass plain text or the output of a Markdown renderer. */
@@ -38,16 +34,12 @@ export interface StreamingResponseProps {
   copyText?: string;
   /** Overrides the built-in clipboard action. */
   onCopy?: () => void | Promise<void>;
-  onRetry?: () => void;
   /** Optional sources shown as a compact footer disclosure after streaming. */
   sources?: CitationItem[];
   sourcesOpen?: boolean;
   defaultSourcesOpen?: boolean;
   onSourcesOpenChange?: (open: boolean) => void;
   sourceIdPrefix?: string;
-  feedback?: StreamingResponseFeedback;
-  defaultFeedback?: StreamingResponseFeedback;
-  onFeedbackChange?: (feedback: StreamingResponseFeedback) => void;
   /** Set false when a surrounding conversation log announces streamed text. */
   announce?: boolean;
   /** Hides the built-in completion actions without changing response status. */
@@ -59,12 +51,10 @@ export interface StreamingResponseProps {
 
 function ResponseAction({
   label,
-  active = false,
   onClick,
   children,
 }: {
   label: string;
-  active?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -75,13 +65,11 @@ function ResponseAction({
       type="button"
       aria-label={label}
       title={label}
-      aria-pressed={label === "Helpful" || label === "Not helpful" ? active : undefined}
       onClick={onClick}
       whileTap={reduce ? undefined : { scale: 0.9 }}
       transition={SPRING_PRESS}
       className={cn(
         "grid size-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-        active && "bg-muted text-foreground",
       )}
     >
       {children}
@@ -94,15 +82,11 @@ export function StreamingResponse({
   status = "streaming",
   copyText,
   onCopy,
-  onRetry,
   sources = [],
   sourcesOpen,
   defaultSourcesOpen = false,
   onSourcesOpenChange,
   sourceIdPrefix,
-  feedback,
-  defaultFeedback = null,
-  onFeedbackChange,
   announce = true,
   showActions = true,
   className,
@@ -112,19 +96,15 @@ export function StreamingResponse({
   const reduce = useReducedMotion() ?? false;
   const baseId = useId();
   const [copied, setCopied] = useState(false);
-  const [internalFeedback, setInternalFeedback] =
-    useState<StreamingResponseFeedback>(defaultFeedback);
   const [internalSourcesOpen, setInternalSourcesOpen] =
     useState(defaultSourcesOpen);
   const copyTimer = useRef<number | undefined>(undefined);
-  const currentFeedback = feedback ?? internalFeedback;
   const currentSourcesOpen = sourcesOpen ?? internalSourcesOpen;
   const streaming = status === "streaming";
-  const complete = status === "complete";
   const canCopy = Boolean(copyText || onCopy);
   const hasSources = sources.length > 0;
   const shouldShowActions =
-    showActions && !streaming && (canCopy || onRetry || complete || hasSources);
+    showActions && !streaming && (canCopy || hasSources);
   const sourcesContentId = `${baseId}-sources`;
   const resolvedSourcePrefix =
     sourceIdPrefix ?? `response-source-${baseId.replace(/:/g, "")}`;
@@ -144,12 +124,6 @@ export function StreamingResponse({
     if (copyTimer.current) window.clearTimeout(copyTimer.current);
     copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
   }, [copyText, onCopy]);
-
-  const setFeedback = (next: Exclude<StreamingResponseFeedback, null>) => {
-    const value = currentFeedback === next ? null : next;
-    if (feedback === undefined) setInternalFeedback(value);
-    onFeedbackChange?.(value);
-  };
 
   const setSourcesOpen = useCallback(
     (next: boolean) => {
@@ -196,29 +170,6 @@ export function StreamingResponse({
                     <Copy className="size-3.5" />
                   )}
                 </ResponseAction>
-              ) : null}
-              {onRetry ? (
-                <ResponseAction label="Retry response" onClick={onRetry}>
-                  <RotateCcw className="size-3.5" />
-                </ResponseAction>
-              ) : null}
-              {complete ? (
-                <>
-                  <ResponseAction
-                    label="Helpful"
-                    active={currentFeedback === "up"}
-                    onClick={() => setFeedback("up")}
-                  >
-                    <ThumbsUp className="size-3.5" />
-                  </ResponseAction>
-                  <ResponseAction
-                    label="Not helpful"
-                    active={currentFeedback === "down"}
-                    onClick={() => setFeedback("down")}
-                  >
-                    <ThumbsDown className="size-3.5" />
-                  </ResponseAction>
-                </>
               ) : null}
               {hasSources ? (
                 <button

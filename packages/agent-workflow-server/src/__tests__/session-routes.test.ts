@@ -26,6 +26,7 @@ import {
   SESSION_COOKIE_NAME,
 } from '../auth/session-routes'
 import { encryptSecret } from '../security/secret-crypto'
+import { BeeGameAuthUnavailableError } from '../auth/user-context'
 import type { BeeGameSessionRunner } from '../beegame/session-manager'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import { DELIVERY_PROGRESS_STAGES } from '../beegame/delivery-workflow/display-progress'
@@ -53,6 +54,23 @@ const originalFlag = process.env.BEEGAME_HTTPONLY_SESSIONS
 const originalKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
 const originalDataDir = process.env.AGENT_WORKFLOW_DATA_DIR
 const temporaryDirectories: string[] = []
+
+it('runtime returns recoverable 503 rather than 401 when token resolution is unavailable', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-auth-unavailable-'))
+  temporaryDirectories.push(root)
+  const cleanups: Array<() => void> = []
+  const app = createAgentWorkflowApp({
+    dashboardDataRoot: root, modelConfigStore: false, skillsConfig: false,
+    currentUserResolver: async () => { throw new BeeGameAuthUnavailableError() },
+    registerCleanup: cleanup => cleanups.push(cleanup),
+  })
+  try {
+    const response = await app.request('/api/usage-wallet')
+    expect(response.status).toBe(503)
+    expect(response.headers.get('retry-after')).toBe('2')
+    expect(await response.json()).toMatchObject({ code: 'authentication_unavailable', recoverable: true })
+  } finally { cleanups.forEach(cleanup => cleanup()) }
+})
 
 it('project chat forwards one raw request, preserves context, and continue does not dispatch delivery', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-project-chat-route-')))
@@ -121,6 +139,56 @@ it('project chat forwards one raw request, preserves context, and continue does 
     expect(await readFile(store.paths.snapshot, 'utf8')).toBe(before)
     release?.()
   } finally { release?.(); for (const cleanup of cleanups) await cleanup() }
+})
+
+it('question answers cross both HTTP permission routes without replacing native input', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-question-route-')))
+  temporaryDirectories.push(root)
+  const ownerId = 'question-owner'
+  const projectId = 'question-project'
+  const workspace = join(root, 'projects', 'users', ownerId, projectId)
+  await mkdir(workspace, { recursive: true })
+  const cleanups: Array<() => void> = []
+  const received: unknown[] = []
+  let requested = 0
+  const nativeInput = { questions: [{ question: 'Which style?', header: 'Style', options: [{ label: 'Pixel' }, { label: 'Vector' }] }] }
+  const app = createAgentWorkflowApp({
+    currentUser: { id: ownerId, role: 'owner' }, dashboardDataRoot: join(root, 'dashboard'),
+    defaultWorkspacePath: join(root, 'projects'), modelConfigStore: false, skillsConfig: false,
+    registerCleanup: cleanup => cleanups.push(cleanup),
+    sessionRunner: { start: async () => ({ stop() {}, submit: async turn => {
+      for (let i = 0; i < 2; i++) {
+        requested++
+        received.push(await turn.requestPermission({ toolUseID: `question-${i}`, toolName: 'AskUserQuestion',
+          input: nativeInput, message: 'AskUserQuestion requires permission.' }))
+      }
+      await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
+    } }) },
+  })
+  const post = (url: string, body: unknown) => app.request(url, { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  try {
+    expect((await post('/api/projects', { id: projectId, name: 'Question test', root_path: workspace, created_at: Date.now() })).status).toBe(200)
+    expect((await post('/api/model-configs', { name: 'Offline', provider: 'openai-compatible', apiKey: 'fake', models: { balanced: 'fake' }, isDefault: true })).status).toBe(200)
+    const ensured = await post(`/api/projects/${projectId}/session/ensure`, {})
+    const { session } = await ensured.json() as { session: { id: string } }
+    const sent = await post(`/api/beegame-sessions/${session.id}/input`, { text: 'Offline fixture', clientMessageId: 'offline-question', language: 'en' })
+    expect({ status: sent.status, body: await sent.json() }).toMatchObject({ status: 202 })
+    for (let i = 0; i < 2; i++) {
+      for (let n = 0; n < 200 && requested <= i; n++) await Bun.sleep(5)
+      const route = i === 0 ? `/api/projects/${projectId}` : `/api/beegame-sessions/${session.id}`
+      expect((await post(`${route}/permissions/question-${i}`, { decision: 'allow', answers: {} })).status).toBe(400)
+      expect((await post(`${route}/permissions/question-${i}`, {
+        decision: 'allow', answers: { 'Which style?': 'Pixel' },
+        updatedInput: { questions: [] }, // Clients cannot replace the agent's question.
+      })).status).toBe(200)
+    }
+    for (let n = 0; n < 200 && received.length < 2; n++) await Bun.sleep(5)
+    expect(received).toHaveLength(2)
+    for (const decision of received) expect(decision).toMatchObject({
+      behavior: 'allow', updatedInput: { ...nativeInput, answers: { 'Which style?': 'Pixel' } },
+    })
+  } finally { for (const cleanup of cleanups) await cleanup() }
 })
 
 function completeTestFoundationDocument(
@@ -202,6 +270,7 @@ function createApp(
     init?: Parameters<typeof fetch>[1],
   ) => Promise<Response> = fetch,
   sessionStorePath?: string,
+  refreshTimeoutMs?: number,
 ) {
   process.env.BEEGAME_HTTPONLY_SESSIONS = '1'
   process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 17).toString(
@@ -213,6 +282,7 @@ function createApp(
     supabaseAnonKey: 'anon-key',
     fetchImpl,
     sessionStorePath,
+    refreshTimeoutMs,
     isOriginAllowed: origin => origin === 'http://127.0.0.1:62173',
   })
   return app
@@ -563,6 +633,70 @@ describe('HttpOnly session routes', () => {
     expect(await credential?.getValidAccessToken({ forceRefresh: true })).toBe(
       'refreshed-access-token',
     )
+  })
+
+  it.each(['503', 'network', 'malformed', '401'])('token resolution preserves the distinction for refresh %s', async failure => {
+    const storePath = await createSessionStorePath()
+    process.env.BEEGAME_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 17).toString('base64')
+    process.env.BEEGAME_HTTPONLY_SESSIONS = '1'
+    const record = { accessToken: 'expired', refreshToken: 'refresh', expiresAt: Date.now() - 1000,
+      sessionExpiresAt: Date.now() + 60000, user: { id: 'user-1', role: 'viewer' } }
+    await Bun.write(storePath, JSON.stringify({ scoped: encryptSecret(JSON.stringify(record), 'auth:session') }))
+    const app = new Hono()
+    let recovering = false
+    const auth = registerBeeGameSessionRoutes(app, {
+      supabaseUrl: 'https://project.supabase.co', supabaseAnonKey: 'anon-key', sessionStorePath: storePath,
+      fetchImpl: async () => {
+        if (recovering) return Response.json({ access_token: 'fresh', expires_in: 3600 })
+        if (failure === 'network') throw new TypeError('Failed to fetch')
+        if (failure === 'malformed') return Response.json({})
+        return new Response('', { status: Number(failure) })
+      },
+    })!
+    const request = new Request('http://localhost/api/usage-wallet', { headers: { cookie: `${SESSION_COOKIE_NAME}=scoped` } })
+    const credential = auth.getCredential!(request)!
+    if (failure === '401') {
+      expect(await auth.getValidAccessToken(request)).toBeUndefined()
+      expect((await app.request('/api/auth/session', { headers: request.headers })).status).toBe(401)
+    } else {
+      await expect(auth.getValidAccessToken(request)).rejects.toMatchObject({ name: 'BeeGameAuthUnavailableError' })
+      await expect(credential.getValidAccessToken()).rejects.toMatchObject({ name: 'BeeGameAuthUnavailableError' })
+      expect((await app.request('/api/auth/session', { headers: request.headers })).status).toBe(200)
+      recovering = true
+      // Repeated callers must respect the failure cooldown, then recover.
+      await expect(auth.getValidAccessToken(request)).rejects.toMatchObject({ name: 'BeeGameAuthUnavailableError' })
+      const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 2_001)
+      try { expect(await auth.getValidAccessToken(request)).toBe('fresh') }
+      finally { clock.mockRestore() }
+    }
+  })
+
+  it('aborts stalled shared refreshes, cools down, and recovers the preserved session', async () => {
+    let calls = 0
+    let signal: AbortSignal | undefined
+    let recovering = false
+    const app = createApp(async (input, init) => {
+      if (!String(input).includes('/token?')) return Response.json({ id: 'user-1' })
+      calls++
+      if (recovering) return Response.json({ access_token: 'fresh', expires_in: 3600 })
+      signal = init?.signal ?? undefined
+      return new Promise<Response>((_, reject) => signal!.addEventListener('abort', () => reject(new DOMException('Timeout', 'AbortError')), { once: true }))
+    }, await createSessionStorePath(), 10)
+    const login = await app.request('/api/auth/session', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ access_token: 'access', refresh_token: 'refresh' }) })
+    const cookie = login.headers.get('set-cookie')!.split(';')[0]
+    const refresh = () => app.request('/api/auth/session/refresh', { method: 'POST', headers: { cookie, origin: 'http://localhost' } })
+    const results = await Promise.all([refresh(), refresh()])
+    expect(results.map(response => response.status)).toEqual([503, 503])
+    expect(signal?.aborted).toBe(true)
+    expect(calls).toBe(1)
+    expect((await refresh()).status).toBe(503)
+    expect(calls).toBe(1)
+    expect((await app.request('/api/auth/session', { headers: { cookie } })).status).toBe(200)
+    recovering = true
+    const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 2001)
+    try { expect((await refresh()).status).toBe(200); expect(calls).toBe(2) }
+    finally { clock.mockRestore() }
   })
 
   it('preserves the cookie session when the auth provider refresh is temporarily unavailable', async () => {

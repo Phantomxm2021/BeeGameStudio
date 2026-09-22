@@ -24,6 +24,35 @@ export interface ArtifactViewModel {
 }
 
 const editorEntries: readonly ArtifactEditorKind[] = ['scene', 'ui'];
+const artifactCategoryCount = 3;
+const projectDocumentStage = Math.max(...BEEGAME_DOCUMENT_BASELINE.map(document => document.stage)) + 1;
+const assetManifestFileNames = new Set(['asset-manifest.json', 'asset_manifest.json']);
+
+const artifactFileName = (value: unknown): string => {
+  const normalized = normalizeDocumentPath(value);
+  return normalized.split('/').filter(Boolean).at(-1)?.toLowerCase() || '';
+};
+
+const isAssetManifestArtifact = (artifact: ArtifactListItem): boolean => {
+  return [artifact.path, artifact.name].some(value => assetManifestFileNames.has(artifactFileName(value)));
+};
+
+const isProjectDocumentArtifact = (artifact: ArtifactListItem): boolean => {
+  const path = normalizeDocumentPath(artifact.path || artifact.name);
+  const lowerPath = path.toLowerCase();
+  const fileName = artifactFileName(path);
+  return lowerPath.startsWith('docs/') || fileName.endsWith('.md') || fileName.endsWith('.mdx');
+};
+
+const canonicalBaselinePathForArtifact = (artifact: ArtifactListItem): string | undefined => {
+  const path = normalizeDocumentPath(artifact.path);
+  const value = path || normalizeDocumentPath(artifact.name);
+  if (!value) return undefined;
+  const exact = BEEGAME_DOCUMENT_BASELINE.find(document => document.path === value);
+  if (exact) return exact.path;
+  if (value.includes('/')) return undefined;
+  return BEEGAME_DOCUMENT_BASELINE.find(document => document.path.split('/').at(-1) === value)?.path;
+};
 
 const artifactKey = (artifact: ArtifactListItem): string => {
   return String(artifact.artifact_id || artifact.id || normalizeDocumentPath(artifact.path || artifact.name) || artifact.name || '').trim();
@@ -40,11 +69,11 @@ const canonicalDocuments = (
 ): DocumentProgressItem[] => {
   const artifactByPath = new Map<string, ArtifactListItem>();
   for (const artifact of artifacts) {
+    if (isAssetManifestArtifact(artifact)) continue;
     const path = normalizeDocumentPath(artifact.path || artifact.name);
     if (path) artifactByPath.set(path, artifact);
-    const fileName = normalizeDocumentPath(artifact.name);
-    const baseline = BEEGAME_DOCUMENT_BASELINE.find(document => document.path.endsWith(`/${fileName}`));
-    if (baseline && !artifactByPath.has(baseline.path)) artifactByPath.set(baseline.path, artifact);
+    const baselinePath = canonicalBaselinePathForArtifact(artifact);
+    if (baselinePath && !artifactByPath.has(baselinePath)) artifactByPath.set(baselinePath, artifact);
   }
 
   const progressByPath = new Map<string, DocumentProgressItem>();
@@ -52,11 +81,14 @@ const canonicalDocuments = (
     const path = normalizeDocumentPath(item.path);
     if (!BEEGAME_DOCUMENT_BASELINE.some(document => document.path === path)) continue;
     const previous = progressByPath.get(path);
+    const artifact = item.artifact && !isAssetManifestArtifact(item.artifact)
+      ? item.artifact
+      : undefined;
     progressByPath.set(path, {
       ...(previous || {}),
       ...item,
       path,
-      artifact: item.artifact || previous?.artifact,
+      artifact: artifact || previous?.artifact,
     });
   }
 
@@ -79,14 +111,34 @@ export function buildArtifactViewModel(
   artifacts: ArtifactListItem[],
   documentProgress?: DocumentProgressItem[],
 ): ArtifactViewModel {
-  const documents = canonicalDocuments(artifacts, documentProgress);
+  const visibleArtifacts = artifacts.filter(artifact => !isAssetManifestArtifact(artifact));
+  const canonical = canonicalDocuments(visibleArtifacts, documentProgress);
   const baselineArtifactIds = new Set(
-    documents.map(item => item.artifact?.artifact_id || item.artifact?.id).filter(Boolean),
+    canonical.map(item => item.artifact?.artifact_id || item.artifact?.id).filter(Boolean),
   );
-  const baselinePaths = new Set(documents.map(item => normalizeDocumentPath(item.path)));
+  const baselinePaths = new Set(canonical.map(item => normalizeDocumentPath(item.path)));
+  const seenDocumentKeys = new Set<string>();
+  const additionalDocuments: DocumentProgressItem[] = [];
+  for (const artifact of visibleArtifacts) {
+    if (!isProjectDocumentArtifact(artifact)) continue;
+    const path = normalizeDocumentPath(artifact.path || artifact.name);
+    const key = path || artifactKey(artifact);
+    const id = artifact.artifact_id || artifact.id;
+    if (!key || (id && baselineArtifactIds.has(id)) || canonicalBaselinePathForArtifact(artifact) || baselinePaths.has(path) || seenDocumentKeys.has(key)) continue;
+    seenDocumentKeys.add(key);
+    additionalDocuments.push({
+      path,
+      name: artifact.name || path.split('/').filter(Boolean).at(-1) || path,
+      stage: projectDocumentStage,
+      status: 'ready',
+      artifact,
+    });
+  }
+  const documents = [...canonical, ...additionalDocuments];
   const seenArtifacts = new Set<string>();
-  const additionalArtifacts = artifacts.filter(artifact => {
+  const additionalArtifacts = visibleArtifacts.filter(artifact => {
     if (isEditorEntryArtifact(artifact)) return false;
+    if (isProjectDocumentArtifact(artifact)) return false;
     const id = artifact.artifact_id || artifact.id;
     if (id && baselineArtifactIds.has(id)) return false;
     if (baselinePaths.has(normalizeDocumentPath(artifact.path || artifact.name))) return false;
@@ -102,6 +154,6 @@ export function buildArtifactViewModel(
     additionalArtifacts,
     editorEntries,
     readyDocumentCount,
-    displayCount: documents.length + editorEntries.length + additionalArtifacts.length,
+    displayCount: artifactCategoryCount + additionalArtifacts.length,
   };
 }

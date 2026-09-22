@@ -29,6 +29,25 @@ async function command(name: string) {
 }
 function select(name: string) { fireEvent.click(screen.getByText(name, { selector: '.node-name' })); }
 describe('Scene Editor interaction regressions', () => {
+  it('can clear an authored font without leaving non-JSON values or a legacy font reference', async () => {
+    const document = makeFixture();
+    document.assets.font = { id: 'font', name: '中文字体', path: 'fonts/chinese.woff2', mimeType: 'font/woff2' };
+    document.nodes.flower.components = [{ id: 'label', type: 'text', enabled: true, text: '你好', fontAssetId: 'font', properties: { member: 'fonts/chinese.woff2', font: { assetRef: 'font' } } }];
+    document.nodes.flower.components.push({ id: 'rect', type: 'rect-transform', enabled: true, anchorMin: [0, 0], anchorMax: [0, 0], pivot: [.5, .5], anchoredPosition: [0, 0], sizeDelta: [2, 1], properties: {} });
+    const save = vi.fn();
+    render(<SceneEditor initialDocument={document} onSave={save} />);
+    select('Flower');
+    fireEvent.click(screen.getByRole('button', { name: 'Text font' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'System default' }));
+    expect(screen.queryByText(/Rejected:/)).toBeNull();
+    fireEvent.keyDown(screen.getByTestId('scene-editor'), { key: 's', metaKey: true });
+    await waitFor(() => expect(save).toHaveBeenCalledOnce());
+    const text = save.mock.calls[0][0].nodes.flower.components[0];
+    expect(text).not.toHaveProperty('fontAssetId');
+    expect(text.properties).not.toHaveProperty('font');
+    expect(text.properties).not.toHaveProperty('member');
+  });
+
   it('keeps portalled menu surfaces visible without host Tailwind utilities', async () => {
     render(<><style>{editorCss}</style><SceneEditor initialDocument={makeFixture()} /></>);
     const assertSurface = (element: Element) => {

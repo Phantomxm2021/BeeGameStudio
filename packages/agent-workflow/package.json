@@ -10,6 +10,7 @@
     "./native-diagnostics": "./src/native-diagnostics.ts",
     "./native-response-trace": "./src/native-response-trace.ts",
     "./native-evidence": "./src/native-evidence.ts",
+    "./subagent-activity": "./src/subagent-activity.ts",
     "./native-file-agent": "./src/native-file-agent.ts",
     "./native-task-access": "./src/native-task-access.ts",
     "./preview-environment": "./src/preview-environment.ts",

@@ -1,3 +1,5 @@
+import { authRequestTimeoutMs, verifiedTokenCacheUntil } from '@bee-game-studio/security-core'
+
 export type BeeGameRole = 'owner' | 'developer' | 'reviewer' | 'viewer'
 
 export type BeeGamePermission =
@@ -46,6 +48,7 @@ export class BeeGameAuthUnavailableError extends Error {
   constructor(
     message = 'Authentication service is temporarily unavailable',
     readonly reason: 'timeout' | 'network' | 'upstream' = 'upstream',
+    readonly upstreamStatus?: number,
   ) {
     super(message)
     this.name = 'BeeGameAuthUnavailableError'
@@ -137,6 +140,7 @@ export function createSupabaseUserResolver(
     tokenKey: string,
     token: string,
   ): Promise<BeeGameUserContext | undefined> => {
+    const startedAt = Date.now()
     const resolution = fetchSupabaseUserContext(
       baseUrl,
       apiKey,
@@ -147,11 +151,11 @@ export function createSupabaseUserResolver(
       .then(user => {
         retryStates.delete(tokenKey)
         if (user && (cacheTtlMs > 0 || staleTtlMs > 0)) {
-          const now = Date.now()
+          if (resolvedUsers.size >= 256) resolvedUsers.delete(resolvedUsers.keys().next().value!)
           resolvedUsers.set(tokenKey, {
             user,
-            expiresAt: now + cacheTtlMs,
-            staleUntil: now + cacheTtlMs + staleTtlMs,
+            expiresAt: verifiedTokenCacheUntil(token, cacheTtlMs),
+            staleUntil: verifiedTokenCacheUntil(token, cacheTtlMs + staleTtlMs),
           })
         } else {
           resolvedUsers.delete(tokenKey)
@@ -160,18 +164,16 @@ export function createSupabaseUserResolver(
       })
       .catch(error => {
         const cached = resolvedUsers.get(tokenKey)
-        if (
-          error instanceof BeeGameAuthUnavailableError &&
-          cached &&
-          cached.staleUntil > Date.now()
-        ) {
+        if (error instanceof BeeGameAuthUnavailableError) {
           const previousAttempts = retryStates.get(tokenKey)?.attempts ?? 0
           const attempts = previousAttempts + 1
+          if (retryStates.size >= 256) retryStates.delete(retryStates.keys().next().value!)
           retryStates.set(tokenKey, {
             attempts,
             retryAt: Date.now() + Math.min(30_000, retryBaseMs * 2 ** Math.min(attempts - 1, 5)),
           })
-          return cached.user
+          console.warn('[BeeGame identity lookup]', { reason: error.reason, upstreamStatus: error.upstreamStatus, elapsedMs: Date.now() - startedAt })
+          if (cached && cached.staleUntil > Date.now()) return cached.user
         }
         throw error
       })
@@ -198,11 +200,11 @@ export function createSupabaseUserResolver(
     }
     if (cached) {
       resolvedUsers.delete(tokenKey)
-      retryStates.delete(tokenKey)
     }
 
     const pending = pendingUsers.get(tokenKey)
     if (pending) return await pending
+    if ((retryStates.get(tokenKey)?.retryAt ?? 0) > now) throw new BeeGameAuthUnavailableError()
     return await startResolution(tokenKey, token)
   }
 }
@@ -249,36 +251,16 @@ async function fetchSupabaseUserContext(
   fetchImpl: BeeGameFetch,
   resolveTimeoutMs: number,
 ): Promise<BeeGameUserContext | undefined> {
-  const response = await fetchSupabaseUserContextResponse(
-    baseUrl,
-    apiKey,
-    token,
-    fetchImpl,
-    resolveTimeoutMs,
-  )
-  if (response.status === 401 || response.status === 403) return undefined
-  if (!response.ok) {
-    throw new BeeGameAuthUnavailableError()
-  }
-  return toSupabaseUserContext(await response.json())
-}
-
-async function fetchSupabaseUserContextResponse(
-  baseUrl: string,
-  apiKey: string,
-  token: string,
-  fetchImpl: BeeGameFetch,
-  resolveTimeoutMs: number,
-): Promise<Response> {
   const controller = new AbortController()
   const timeout = resolveTimeoutMs > 0
     ? setTimeout(() => controller.abort(), resolveTimeoutMs)
     : undefined
   try {
     const retryDelays = [75, 200]
+    let response: Response
     for (let attempt = 0; ; attempt += 1) {
       try {
-        return await fetchImpl(
+        response = await fetchImpl(
           joinUrl(baseUrl, '/rest/v1/rpc/beegame_current_user_context'),
           {
             method: 'POST',
@@ -291,12 +273,24 @@ async function fetchSupabaseUserContextResponse(
             signal: controller.signal,
           },
         )
+        break
       } catch (error) {
         if (controller.signal.aborted || attempt >= retryDelays.length) throw error
         await new Promise(resolve => setTimeout(resolve, retryDelays[attempt]))
       }
     }
+    if (response.status === 401 || response.status === 403) return undefined
+    if (!response.ok) throw new BeeGameAuthUnavailableError(undefined, 'upstream', response.status)
+    // Keep the deadline alive until the body has also been consumed.
+    const value = await response.json().catch(() => {
+      throw new BeeGameAuthUnavailableError(undefined, controller.signal.aborted ? 'timeout' : 'upstream', response.status)
+    })
+    if (value === null) return undefined
+    const user = toSupabaseUserContext(value)
+    if (!user) throw new BeeGameAuthUnavailableError(undefined, 'upstream', response.status)
+    return user
   } catch (error) {
+    if (error instanceof BeeGameAuthUnavailableError) throw error
     throw new BeeGameAuthUnavailableError(
       undefined,
       controller.signal.aborted ? 'timeout' : 'network',
@@ -315,11 +309,7 @@ function normalizeAuthCacheTtlMs(value: number | undefined): number {
 }
 
 function normalizeAuthResolveTimeoutMs(value: number | undefined): number {
-  const configured = value ?? Number.parseInt(
-    process.env.BEEGAME_AUTH_RESOLVE_TIMEOUT_MS ?? '',
-    10,
-  )
-  return Number.isFinite(configured) && configured >= 0 ? configured : 3_000
+  return authRequestTimeoutMs(value)
 }
 
 function normalizeAuthStaleTtlMs(value: number | undefined): number {

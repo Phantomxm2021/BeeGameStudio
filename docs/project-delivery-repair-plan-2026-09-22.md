@@ -1,5 +1,7 @@
 # 项目交付与修复：系统整改执行方案
 
+> 后续执行入口：[执行、预览与交付整改方针](system-execution-preview-remediation-plan-2026-09-22.md)。本文件保留历史记录；验收职责以后续方针 W5 为准，不因问题/未测列表非空就由 host 自动推翻 Agent 的交付结论。
+
 ## 边界与验收原则
 
 依据 mushroom-flag-dash--fa5e09356acf 的日志及系统代码审计。只修改 BGS；不改测试项目，不代替 Agent 编写游戏运行时，不强制使用 Tilemap，不新增预审 Agent、重试循环或游戏引擎。旧流程不是正确性标准。

@@ -51,6 +51,7 @@ type IntakeSettingsFormProps = {
   inputMenuRef: RefObject<HTMLDivElement | null>;
   inputMenuButtonRef: RefObject<HTMLButtonElement | null>;
   onBack: () => void;
+  backLabel?: string;
   onConfirm: () => void;
 };
 
@@ -65,6 +66,7 @@ export function IntakeSettingsForm({
   inputMenuRef,
   inputMenuButtonRef,
   onBack,
+  backLabel,
   onConfirm,
 }: IntakeSettingsFormProps) {
   const selectClass = 'mt-2 h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30';
@@ -103,7 +105,7 @@ export function IntakeSettingsForm({
         <textarea aria-label={copy.fields.notes} value={settings.notes || ''} onChange={event => onChange({ notes: event.target.value })} placeholder={copy.placeholders.notes} className="mt-2 min-h-24 w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/30" />
       </label>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-        <button type="button" onClick={onBack} className="h-9 rounded-lg border border-border px-4 text-sm font-medium text-foreground transition hover:bg-accent">{copy.actions.chooseAgain}</button>
+        <button type="button" onClick={onBack} className="h-9 rounded-lg border border-border px-4 text-sm font-medium text-foreground transition hover:bg-accent">{backLabel || copy.actions.chooseAgain}</button>
         <button type="button" onClick={onConfirm} className="h-9 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition hover:opacity-90">{copy.actions.confirmBrief}</button>
       </div>
     </div>

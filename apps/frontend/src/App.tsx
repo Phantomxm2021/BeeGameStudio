@@ -18,6 +18,7 @@ import {
   isAuthenticationServiceUnavailable,
 } from './services/apiClient';
 import { normalizeChatHistory } from './utils/chatHistory';
+import { authRetryDelay } from './services/authRetry';
 import type { StartProjectResult } from './types/project';
 import type { BeeGameBuildBrief } from './services/beeGameAdapter';
 import {
@@ -155,7 +156,7 @@ function App() {
           authenticationRetryTimerRef.current = setTimeout(() => {
             authenticationRetryTimerRef.current = null;
             setAuthenticationRetryVersion(version => version + 1);
-          }, 2_000);
+          }, authRetryDelay(authenticationRetryVersion + 1, error));
           return;
         }
         setAuthenticationStatus('anonymous');

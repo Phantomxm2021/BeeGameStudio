@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, ChevronDown, ExternalLink, Play, RefreshCw, Square, Upload } from 'lucide-react';
+import { ArrowLeft, ChevronDown, ExternalLink, LoaderCircle, Play, RefreshCw, Square, Upload } from 'lucide-react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { Button } from '../beui/project-button';
@@ -23,12 +23,7 @@ import { WorkspacePreviewPanel } from '../Workspace/WorkspacePreviewPanel';
 import { WorkspaceDeploymentDialog } from '../Workspace/WorkspaceDeploymentDialog';
 import { ThemeToggle } from '../beui/motion/theme-toggle';
 import { AccountActionsMenu } from './Landing/AccountActionsMenu';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '../ui/dropdown-menu';
+import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from '../beui/registry/components/motion/popover-morph';
 
 const ResourceLibraryPage = lazy(async () => {
   const module = await import('../ResourceLibrary/ResourceLibraryView');
@@ -44,6 +39,7 @@ type PreviewConsoleEntry = {
 };
 
 interface BeeGameLivePreviewPageProps {
+  projectId: string;
   lang: Language;
   projectName: string;
   status: DashboardStatus;
@@ -66,7 +62,6 @@ interface BeeGameLivePreviewPageProps {
   deployments?: BeeGameDeploymentPayload[];
   previewRefreshNonce?: number;
   onStartPreview?: () => void | Promise<void>;
-  onRestartPreview?: () => void | Promise<void>;
   onStopPreview?: () => void | Promise<void>;
   onDeployProject?: () => void | Promise<void>;
   onRollbackDeployment?: (deploymentId: string) => void | Promise<void>;
@@ -129,12 +124,14 @@ const collectBuildErrorLogs = (buildReport?: BuildReportPayload | null): string[
 };
 
 export function BeeGameLivePreviewPage({
+  projectId,
   lang,
   projectName,
   status,
   handoffNotice,
   credits,
   accountCreditBalance,
+  tokenUsage,
   isSyncing,
   isInteractionLocked = false,
   isWorkspaceBusy = false,
@@ -142,7 +139,6 @@ export function BeeGameLivePreviewPage({
   deployments = [],
   previewRefreshNonce = 0,
   onStartPreview,
-  onRestartPreview,
   onStopPreview,
   onDeployProject,
   onRollbackDeployment,
@@ -160,7 +156,6 @@ export function BeeGameLivePreviewPage({
   const [isHistoryOpen, setHistoryOpen] = useState(false);
   const [isProfileOpen, setProfileOpen] = useState(false);
   const [isProjectMenuOpen, setProjectMenuOpen] = useState(false);
-  const [isPreviewMenuOpen, setPreviewMenuOpen] = useState(false);
   useEffect(() => {
     const syncResourceRoute = () => setIsResourceLibraryOpen(isResourceLibraryRoute());
     window.addEventListener('popstate', syncResourceRoute);
@@ -202,7 +197,7 @@ export function BeeGameLivePreviewPage({
     !isStoppingPreview &&
     !isInteractionLocked &&
     !isWorkspaceBusy;
-  const canStopPreview = canShowPreview && !isStoppingPreview && !isInteractionLocked;
+  const canStopPreview = Boolean(onStopPreview) && canShowPreview && !isStoppingPreview && !isInteractionLocked && !isWorkspaceBusy;
   const canDeploy = Boolean(onDeployProject) && !isDeploying && !isInteractionLocked && !isWorkspaceBusy;
   const buildErrorLogs = collectBuildErrorLogs(buildReport);
   const runtimeErrorLogs = previewConsoleEntries
@@ -240,11 +235,6 @@ export function BeeGameLivePreviewPage({
     } finally {
       setStartingPreview(false);
     }
-  };
-  const handleRestart = async () => {
-    if (isInteractionLocked || isWorkspaceBusy) return;
-    setStoppedPreviewUrl('');
-    await onRestartPreview?.();
   };
   const handleDeploy = async () => {
     if (isInteractionLocked || isWorkspaceBusy) return;
@@ -315,28 +305,29 @@ export function BeeGameLivePreviewPage({
             onClick={onBack}
             className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-transparent bg-transparent text-[var(--text-secondary)] transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:border-[var(--border-strong)] focus-visible:bg-[var(--surface-hover)] focus-visible:text-[var(--text-primary)] focus-visible:outline-none sm:h-10 sm:w-10"
           >
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            <ArrowLeft className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
           </button>
-          <DropdownMenu open={isProjectMenuOpen} onOpenChange={setProjectMenuOpen}>
-            <DropdownMenuTrigger
-              render={<button type="button" data-testid="beegame-project-info-trigger" aria-label={`${projectName}, ${labels.projectInfo || 'Project info'}`} />}
-              onClick={(event) => {
-                if (event.currentTarget.getAttribute('aria-expanded') !== 'true') setProjectMenuOpen(true);
-              }}
+          <MorphPopover open={isProjectMenuOpen} onOpenChange={setProjectMenuOpen} className="min-w-0 max-w-[min(52vw,28rem)]">
+            <MorphPopoverTrigger>
+              <button type="button" data-testid="beegame-project-info-trigger" aria-label={`${projectName}, ${labels.projectInfo || 'Project info'}`}
               className="group flex min-w-0 max-w-[min(52vw,28rem)] flex-[0_1_auto] items-center gap-1.5 rounded-md border-0 bg-transparent px-1.5 py-1 text-left transition hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
             >
               <span data-testid="beegame-project-trigger" className="type-body-lg min-w-0 flex-1 truncate font-semibold text-[var(--text-primary)]">{projectName}</span>
               <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)] transition-transform group-data-[open]:rotate-180" aria-hidden="true" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-[min(20rem,calc(100vw-1rem))]">
-              <div id="beegame-project-hint" data-testid="beegame-project-hint" className="border-b border-[var(--border)] px-3 py-2.5">
+              </button>
+            </MorphPopoverTrigger>
+            <MorphPopoverContent align="start" radius={16} className="w-[min(20rem,calc(100vw-1rem))] bg-popover text-popover-foreground">
+              <div id="beegame-project-hint" data-testid="beegame-project-hint" className="px-4 py-3">
                 <div className="type-footnote truncate text-[var(--text-primary)]">{projectName}</div>
-                <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5">
-                  <ProjectHintRow label={labels.credits || 'Credit'} value={formatCreditAmount(credits?.consumedCredits ?? 0)} />
+                <div className="mt-2">
+                  <ProjectHintRow label={labels.consumedCredits} value={formatCreditAmount(credits?.consumedCredits)} />
+                  <ProjectHintRow label={labels.inputTokens} value={formatUsage(tokenUsage?.input_tokens ?? tokenUsage?.prompt_tokens)} />
+                  <ProjectHintRow label={labels.cachedInputTokens} value={formatUsage(tokenUsage?.cache_read_tokens ?? tokenUsage?.cached_input_tokens)} />
+                  <ProjectHintRow label={labels.outputTokens} value={formatUsage(tokenUsage?.output_tokens ?? tokenUsage?.completion_tokens)} />
                 </div>
               </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </MorphPopoverContent>
+          </MorphPopover>
           {isSyncing ? (
             <div
               data-testid="beegame-sync-status"
@@ -362,30 +353,27 @@ export function BeeGameLivePreviewPage({
               type="button"
               variant="ghost"
               size="sm"
-              aria-label={isStartingPreview ? labels.starting : canShowPreview ? labels.stop : labels.play}
-              disabled={!canStartPreview}
-              onClick={() => void handlePlay()}
+              aria-label={canShowPreview ? labels.stop : labels.play}
+              aria-busy={isStartingPreview || isStoppingPreview}
+              disabled={canShowPreview ? !canStopPreview : !canStartPreview}
+              onClick={() => void (canShowPreview ? handleStop() : handlePlay())}
               className="h-full min-w-0 flex-1 justify-center rounded-none border-0 px-3 text-[var(--text-primary)] hover:bg-[var(--surface-hover)] sm:px-5"
             >
-              <Play className="h-3.5 w-3.5 fill-current" />
-              <span className="max-[899px]:hidden">Preview</span>
+              {isStartingPreview || isStoppingPreview ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : canShowPreview ? <Square className="h-3.5 w-3.5 fill-current" /> : <Play className="h-3.5 w-3.5 fill-current" />}
+              <span className="max-[899px]:hidden">{canShowPreview ? labels.stop : uiText.preview}</span>
             </Button>
-            <DropdownMenu open={isPreviewMenuOpen} onOpenChange={setPreviewMenuOpen}>
-              <DropdownMenuTrigger
-                render={<button type="button" aria-label={labels.actions || 'Actions'} />}
-                onClick={(event) => {
-                  if (event.currentTarget.getAttribute('aria-expanded') !== 'true') setPreviewMenuOpen(true);
-                }}
-                className="grid h-full w-11 shrink-0 place-items-center border-l border-[var(--border)] text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
-              >
-                <ChevronDown className="h-4 w-4" aria-hidden="true" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem disabled={!canStopPreview} onClick={() => void handleStop()}><Square className="h-4 w-4" />{labels.stop}</DropdownMenuItem>
-                <DropdownMenuItem disabled={!canShowPreview || isInteractionLocked} onClick={() => void handleRestart()}><RefreshCw className="h-4 w-4" />{labels.reload}</DropdownMenuItem>
-                <DropdownMenuItem disabled={!canShowPreview} onClick={() => previewUrl && onOpenExternal?.(previewUrl)}><ExternalLink className="h-4 w-4" />{labels.openLive || labels.open}</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label={labels.openStandalone}
+              title={labels.openStandalone}
+              disabled={!canShowPreview || !onOpenExternal || isInteractionLocked || isWorkspaceBusy || isStoppingPreview}
+              onClick={() => !isInteractionLocked && !isWorkspaceBusy && previewUrl && onOpenExternal?.(previewUrl)}
+              className="h-full w-11 shrink-0 rounded-none border-0 border-l border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
+            >
+              <ExternalLink className="h-4 w-4" aria-hidden="true" />
+            </Button>
           </div>
           <Button
             type="button"
@@ -393,11 +381,11 @@ export function BeeGameLivePreviewPage({
             size="sm"
             aria-label={isDeploying ? labels.deploying : labels.deploy}
             disabled={!canDeploy}
-            onClick={() => setDeploymentDialogOpen(true)}
+            onClick={() => { if (canDeploy) setDeploymentDialogOpen(true); }}
             className="h-10 min-w-10 rounded-full min-[900px]:min-w-[112px]"
           >
             <Upload className="h-3.5 w-3.5 min-[900px]:hidden" />
-            <span className="max-[899px]:hidden">{isDeploying ? labels.deploying : 'Build'}</span>
+            <span className="max-[899px]:hidden">{isDeploying ? labels.deploying : labels.deploy}</span>
           </Button>
           <AccountActionsMenu
             lang={lang}
@@ -489,6 +477,7 @@ export function BeeGameLivePreviewPage({
         }}
       />
       <WorkspaceDeploymentDialog
+        projectId={projectId}
         isOpen={isDeploymentDialogOpen}
         deployments={deployments}
         labels={labels}
@@ -506,8 +495,12 @@ export function BeeGameLivePreviewPage({
 
 
 
-function formatCreditAmount(value: number): string {
-  return Math.round(Math.max(0, Number(value) || 0)).toLocaleString();
+function formatCreditAmount(value?: number): string {
+  return value === undefined ? '—' : Math.max(0, value).toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function formatUsage(value?: number): string {
+  return value === undefined ? '—' : Math.max(0, value).toLocaleString();
 }
 
 function ProjectHintRow({ label, value, detail }: { label: string; value: string; detail?: string }) {

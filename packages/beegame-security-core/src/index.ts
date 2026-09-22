@@ -16,3 +16,4 @@ export {
   type TLSAwareFetch,
   type TLSAwareFetchOptions,
 } from './tls-aware-fetch'
+export { authRequestTimeoutMs, verifiedTokenCacheUntil } from './auth-timing'

@@ -198,4 +198,29 @@ describe('Unity-style scene adapter', () => {
     const output = sceneContentToEditorDocument({ document: input, documentRevision: HASH, foundationDocumentRevision: HASH, assetManifestRevision: HASH, assets, assetMembers });
     expect(output.nodes.idle.components[0]).toMatchObject({ type: 'sprite-renderer', assetId: 'RES-FOX' });
   });
+
+  it('resolves scene text fonts using the canonical reference and legacy member form', () => {
+    const input = scene();
+    input.assetRefs.push('FONT-CN-01');
+    input.data.nodes.push({
+      id: 'text', parentId: 'root', transform: { position: [20, 20, 0] },
+      components: [
+        { id: 'text-rect', type: 'rect-transform', data: { anchorMin: [0, 0], anchorMax: [0, 0], pivot: [.5, .5], anchoredPosition: [0, 0], sizeDelta: [240, 40] } },
+        { id: 'text-renderer', type: 'text', data: { text: '你好', fontSize: 22, member: 'fonts/lxgw.woff2' } },
+      ],
+    });
+    const fontAsset: SceneAsset = { id: 'FONT-CN-01:fonts/lxgw.woff2', name: 'lxgw.woff2', mimeType: 'font/woff2', path: 'fonts/lxgw.woff2', uri: 'blob:font' };
+    const editor = sceneContentToEditorDocument({
+      document: input,
+      documentRevision: HASH,
+      foundationDocumentRevision: HASH,
+      assetManifestRevision: HASH,
+      assets: { ...assets, 'FONT-CN-01': fontAsset, [fontAsset.id]: fontAsset },
+      assetMembers: { ...assetMembers, 'FONT-CN-01': { 'fonts/lxgw.woff2': fontAsset.id } },
+    });
+    expect(editor.nodes.text.components.find(component => component.type === 'text')).toMatchObject({ fontAssetId: fontAsset.id });
+    const saved = editorDocumentToSceneContent(editor, input);
+    expect(saved.data.nodes.find(node => node.id === 'text')?.components?.find(component => component.type === 'text')?.data).toMatchObject({ font: { assetRef: 'FONT-CN-01', member: 'fonts/lxgw.woff2' }, text: '你好' });
+    expect(saved.data.nodes.find(node => node.id === 'text')?.components?.find(component => component.type === 'text')?.data).not.toHaveProperty('member');
+  });
 });

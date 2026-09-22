@@ -3,7 +3,7 @@ import { isWorkflowEvidenceFile, resolveWorkflowEvidencePath } from './evidence'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { DeliveryRun, EvidenceRef } from './types'
-import { runtimeEvidenceIsCurrent, type RuntimeAcceptance } from './runtime-acceptance'
+import { readRuntimeAcceptance, runtimeEvidenceIsCurrent, type RuntimeAcceptance } from './runtime-acceptance'
 
 function currentImplementationRevision(run: DeliveryRun): string {
   return run.revision.implementation ?? run.revision.workspace
@@ -64,8 +64,36 @@ export async function confirmAcceptanceFromImplementation(input: {
     throw new Error('acceptance requires implementation evidence in the workspace')
   const runtimeReports: RuntimeAcceptance[] = []
   for (const path of taskEvidence) {
-    const recorded = JSON.parse(await readFile(resolveWorkflowEvidencePath(input.workspacePath, path)!, 'utf8'))
+    const evidenceFile = resolveWorkflowEvidencePath(input.workspacePath, path)!
+    const recorded = JSON.parse(await readFile(evidenceFile, 'utf8'))
     if (recorded.revision !== revision) throw new Error('implementation evidence contents reference a different revision')
+    // Only retry a failed parse. Never re-baseline successfully captured hashes:
+    // a changed build still requires fresh Agent verification, not another click.
+    const previous = recorded.runtimeAcceptance as RuntimeAcceptance | undefined
+    const dispatchId = /^\.beegame\/workflow\/evidence\/implementation-([\w-]+)\.json$/.exec(path)?.[1]
+    if (dispatchId && previous?.status === 'blocked' && previous.environment === 'not-established' &&
+        previous.summary.startsWith('Invalid runtime acceptance record:')) {
+      const refreshed = await readRuntimeAcceptance(input.workspacePath, dispatchId)
+      if (refreshed) {
+        recorded.runtimeAcceptance = refreshed
+        await writeFile(evidenceFile, `${JSON.stringify(recorded, null, 2)}\n`, 'utf8')
+      }
+    }
+    // Older host versions replaced an agent pass solely because a limitation
+    // list was nonempty. Re-evaluate that derived verdict, never its hash baseline.
+    if (dispatchId && previous?.status === 'blocked' &&
+        /^(Delivery has unresolved issues:|Delivery has unverified work:)/.test(previous.summary)) {
+      const refreshed = await readRuntimeAcceptance(input.workspacePath, dispatchId)
+      if (refreshed?.status === 'passed' &&
+          previous.summary.endsWith(`\nAgent report: ${refreshed.summary}`) &&
+          JSON.stringify(previous.verification) === JSON.stringify(refreshed.verification) &&
+          JSON.stringify(previous.evidence) === JSON.stringify(refreshed.evidence) &&
+          JSON.stringify(previous.artifacts) === JSON.stringify(refreshed.artifacts) &&
+          await runtimeEvidenceIsCurrent(input.workspacePath, [{ ...previous, status: 'passed' }])) {
+        recorded.runtimeAcceptance = { ...previous, status: 'passed', summary: refreshed.summary }
+        await writeFile(evidenceFile, `${JSON.stringify(recorded, null, 2)}\n`, 'utf8')
+      }
+    }
     if (recorded.runtimeAcceptance) runtimeReports.push(recorded.runtimeAcceptance)
   }
 

@@ -7,9 +7,8 @@ import { normalizeI18nLanguage, useCommonText } from '../../i18n/useBeeGameTrans
 import { useProjectStore } from '../../store/projectStore';
 import { useSystemStore } from '../../store/systemStore';
 import { HeroIntro } from './Landing/HeroIntro';
-import { IdeaPromptForm } from './Landing/IdeaPromptForm';
+import { IdeaPromptForm, type CreationMode } from './Landing/IdeaPromptForm';
 import { BeeGameLogo } from '../BeeGameLogo';
-import { AttachmentBuildReview } from './Landing/AttachmentBuildReview';
 import { AccountActionsMenu } from './Landing/AccountActionsMenu';
 import { LandingImageBackground } from './Landing/LandingImageBackground';
 import { CreditStoreModal } from './Landing/CreditStoreModal';
@@ -37,7 +36,7 @@ import {
   type BeeGameIntakeSettings,
 } from '../../services/beeGameAdapter';
 
-import { getCreditBalance, type BeeGameCreditBalance } from '../../services/creditsApi';
+import { useCredits } from '../../hooks/useCredits';
 import {
   clearSupabaseSession,
   isSupabaseAuthConfigured,
@@ -50,7 +49,6 @@ import {
 } from '../../services/supabaseAuthApi';
 import { getInvitationPublicSettings } from '../../services/invitationApi';
 import type { ChatAttachmentPayload } from '../../services/api';
-import type { AttachmentBuildAnalysis } from '../../services/attachmentBuild';
 
 const ResourceLibraryPage = lazy(async () => {
   const module = await import('../ResourceLibrary/ResourceLibraryView');
@@ -65,7 +63,6 @@ type IntakePhase =
   | 'confirming_brief'
   | 'starting_build';
 
-type AttachmentBuildPhase = 'idle' | 'analyzing' | 'needs_confirmation' | 'needs_input' | 'ready_to_build' | 'failed';
 
 export type IntakeCopy = {
   modal: {
@@ -317,60 +314,15 @@ function hasRequiredProductionSettings(settings: BeeGameIntakeSettings): boolean
   );
 }
 
-function buildAttachmentBrief(
-  analysis: AttachmentBuildAnalysis,
-  idea: string,
-  language: Language,
-  resourceLibraryUsage: BeeGameIntakeSettings['resourceLibraryUsage'],
-): BeeGameBuildBrief {
-  const title = idea.trim() || 'Uploaded game';
-  const option = {
-    id: `attachment-${analysis.analysisId}`,
-    title,
-    pitch: 'Build directly from the user-confirmed attachment design.',
-    gameplay: analysis.gddDraft,
-    coreGameplayHypothesis: analysis.gddDraft,
-    experienceSnapshot: analysis.gddDraft,
-    playerFirstMinute: analysis.gddDraft,
-    whyFitsIdea: analysis.gddDraft,
-    playablePrototype: analysis.gddDraft,
-    validationTarget: analysis.gddDraft,
-    coreMechanic: analysis.gddDraft,
-    firstBuild: analysis.gddDraft,
-    validationGoal: analysis.gddDraft,
-    risk: 'Resolve only genuinely blocking gaps during implementation.',
-    fit: 'Attachment-confirmed design',
-    firstPlayableValidation: analysis.gddDraft,
-    riskComplexity: 'Review confirmed GDD against implementation.',
-    recommendedPlatform: '',
-    recommendedEngine: '',
-    recommendedDimension: '',
-    recommendedGenre: '',
-    recommendedStyle: '',
-    recommendedInputs: [],
-    scope: 'Attachment-defined scope',
-  } satisfies BeeGameIntakeOption;
+function blueprintOption(idea: string): BeeGameIntakeOption {
   return {
-    idea,
-    option,
-    settings: {
-      platform: '',
-      engine: '',
-      visualStyle: '',
-      dimension: '',
-      genre: '',
-      inputs: [],
-      scope: option.scope,
-      resourceLibraryUsage,
-    },
-    language,
-    documentLanguage: language,
-    gameUserVisibleLanguage: language,
-    agentResponseLanguage: language,
-    title,
-    confirmedGdd: analysis.gddDraft,
-    buildSource: analysis.sourceType,
-    analysisId: analysis.analysisId,
+    id: 'blueprint', title: idea.slice(0, 80), gameplay: idea,
+    pitch: '', coreGameplayHypothesis: '', experienceSnapshot: '', playerFirstMinute: '',
+    whyFitsIdea: '', playablePrototype: '', validationTarget: '', coreMechanic: '',
+    firstBuild: '', validationGoal: '', risk: '', fit: '', firstPlayableValidation: '',
+    riskComplexity: '', recommendedPlatform: '', recommendedEngine: '',
+    recommendedDimension: '', recommendedGenre: '', recommendedStyle: '',
+    recommendedInputs: [], scope: '',
   };
 }
 
@@ -389,15 +341,21 @@ type RestorableIntakePhase = Extract<IntakePhase, 'options_ready' | 'configuring
 
 type PendingAuthIdeaState = {
   idea: string;
+  creationMode?: CreationMode;
+  referenceNames?: string[];
   createdAt: number;
 };
 
 type PendingIdeaDraftState = {
   idea: string;
+  creationMode?: CreationMode;
+  referenceNames?: string[];
   createdAt: number;
 };
 
 type PendingIntakeFlowState = {
+  creationMode?: CreationMode;
+  referenceNames?: string[];
   phase: RestorableIntakePhase;
   idea: string;
   language: Language;
@@ -445,10 +403,10 @@ function readPendingIdeaDraftState(): PendingIdeaDraftState | null {
   }
 }
 
-function writePendingIdeaDraftState(idea: string): void {
+function writePendingIdeaDraftState(idea: string, creationMode: CreationMode, referenceNames: string[]): void {
   const normalizedIdea = idea.trim();
   try {
-    if (!normalizedIdea) {
+    if (!normalizedIdea && !referenceNames.length) {
       clearPendingIdeaDraftState();
       return;
     }
@@ -456,6 +414,8 @@ function writePendingIdeaDraftState(idea: string): void {
       pendingIdeaDraftStorageKey,
       JSON.stringify({
         idea: normalizedIdea,
+        creationMode,
+        referenceNames,
         createdAt: Date.now(),
       }),
     );
@@ -549,7 +509,7 @@ function clearPendingRealtimeBillingIdea(): void {
   }
 }
 
-function writePendingAuthIdeaState(idea: string): void {
+function writePendingAuthIdeaState(idea: string, creationMode: CreationMode, referenceNames: string[]): void {
   const normalizedIdea = idea.trim();
   if (!normalizedIdea) return;
   try {
@@ -557,6 +517,8 @@ function writePendingAuthIdeaState(idea: string): void {
       pendingAuthIdeaStorageKey,
       JSON.stringify({
         idea: normalizedIdea,
+        creationMode,
+        referenceNames,
         createdAt: Date.now(),
       }),
     );
@@ -592,7 +554,6 @@ function isPendingIdeaDraftState(value: unknown): value is PendingIdeaDraftState
   return (
     isRecord(value) &&
     typeof value.idea === 'string' &&
-    value.idea.trim().length > 0 &&
     typeof value.createdAt === 'number' &&
     Number.isFinite(value.createdAt)
   );
@@ -603,7 +564,7 @@ function isPendingIntakeFlowState(value: unknown): value is PendingIntakeFlowSta
   const phase = value.phase;
   if (phase !== 'options_ready' && phase !== 'configuring_details' && phase !== 'confirming_brief') return false;
   if (typeof value.idea !== 'string' || value.idea.trim().length === 0) return false;
-  if (!Array.isArray(value.options) || value.options.length !== 3) return false;
+  if (!Array.isArray(value.options) || (value.creationMode === 'blueprint' ? value.options.length !== 0 : value.options.length !== 3)) return false;
   if (typeof value.language !== 'string') return false;
   if (typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt)) return false;
   if (
@@ -656,14 +617,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const [settings, setSettings] = useState<BeeGameIntakeSettings | null>(restoredIntakeFlow?.settings || null);
   const [intakeError, setIntakeError] = useState('');
   const [attachmentBuildAttachments, setAttachmentBuildAttachments] = useState<ChatAttachmentPayload[]>([]);
-  const [attachmentBuildPhase, setAttachmentBuildPhase] = useState<AttachmentBuildPhase>('idle');
-  const [attachmentBuildAnalysis, setAttachmentBuildAnalysis] = useState<AttachmentBuildAnalysis | null>(null);
-  const [attachmentBuildConflictSelections, setAttachmentBuildConflictSelections] = useState<
-    Record<string, 'gdd' | 'image' | 'custom'>
-  >({});
-  const [attachmentResourceLibraryUsage, setAttachmentResourceLibraryUsage] =
-    useState<BeeGameIntakeSettings['resourceLibraryUsage']>('preferred');
-  const [isAttachmentBuildSubmitting, setIsAttachmentBuildSubmitting] = useState(false);
+  const [creationMode, setCreationMode] = useState<CreationMode>(restoredIntakeFlow?.creationMode || readPendingAuthIdeaState()?.creationMode || restoredIdeaDraft?.creationMode || 'creative');
+  const [requiredReferenceNames, setRequiredReferenceNames] = useState<string[]>(restoredIntakeFlow?.referenceNames || restoredIdeaDraft?.referenceNames || []);
   const [isLoginPromptOpen, setIsLoginPromptOpen] = useState(false);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -681,7 +636,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const [pendingIdeaAfterLogin, setPendingIdeaAfterLogin] = useState('');
   const [pendingRealtimeBillingIdea, setPendingRealtimeBillingIdea] = useState(restoredRealtimeBillingIdea);
   const [isRealtimeBillingNoticeOpen, setIsRealtimeBillingNoticeOpen] = useState(Boolean(restoredRealtimeBillingIdea));
-  const [creditBalance, setCreditBalance] = useState<BeeGameCreditBalance | null>(null);
   const [isInputMenuOpen, setIsInputMenuOpen] = useState(false);
   const inputMenuRef = useRef<HTMLDivElement | null>(null);
   const inputMenuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -731,7 +685,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const intakeTranslate: Translate = (key, options) => translate(`intake.${key}`, options);
   const intakeText = createLandingIntakeCopy(intakeTranslate);
   // Login, billing consent and local UI transitions are not Agent thinking.
-  const isIdeaAgentThinking = intakePhase === 'generating_options' || attachmentBuildPhase === 'analyzing';
+  const isIdeaAgentThinking = intakePhase === 'generating_options';
   const showAuthError = (message: string) => {
     setLoginError(message);
     setAuthFeedbackDialog({
@@ -769,23 +723,22 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const localizedOptionLabel = (value: string): string => translate(`intake.options.${value}`, { defaultValue: value });
   const productionSettingOptions: ProductionSettingOptions = CONFIGURED_PRODUCTION_SETTING_OPTIONS;
   const shouldShowIntakeModal =
-    (intakePhase !== 'idle' && intakePhase !== 'generating_options' && intakePhase !== 'starting_build') ||
-    attachmentBuildPhase !== 'idle';
+    (intakePhase !== 'idle' && intakePhase !== 'generating_options' && intakePhase !== 'starting_build');
   const modalTitle =
-    attachmentBuildPhase !== 'idle'
-      ? 'Review uploaded design'
-      : intakePhase === 'options_ready'
+    intakePhase === 'options_ready'
         ? intakeText.modal.chooseOption
         : intakePhase === 'configuring_details'
-          ? selectedOption?.title || intakeText.modal.productionSettings
+          ? (creationMode === 'blueprint' ? intakeText.modal.productionSettings : selectedOption?.title || intakeText.modal.productionSettings)
           : intakePhase === 'confirming_brief'
             ? selectedOption?.title || intakeText.modal.confirmBuildBrief
             : intakeText.modal.startBuild;
   const intakeModalWidthClass =
-    attachmentBuildPhase !== 'idle' || intakePhase === 'options_ready' ? 'max-w-5xl' : 'max-w-[34rem]';
+    intakePhase === 'options_ready' ? 'max-w-5xl' : 'max-w-[34rem]';
 
   const setActiveProject = useProjectStore(state => state.setActiveProject);
   const currentUser = useSystemStore(state => state.currentUser);
+  const authenticationStatus = useSystemStore(state => state.authenticationStatus);
+  const { creditBalance } = useCredits(undefined, authenticationStatus === 'authenticated', currentUser?.id);
   const loadCurrentUser = useSystemStore(state => state.loadCurrentUser);
 
   const persistIntakeFlow = (
@@ -803,57 +756,15 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       options,
       selectedOption: option || undefined,
       settings: nextSettings || undefined,
+      creationMode,
+      referenceNames: attachmentBuildAttachments.map(item => item.filename || 'image'),
     });
   };
-
-  useEffect(() => {
-    if (!currentUser) {
-      setCreditBalance(null);
-      return;
-    }
-    let cancelled = false;
-    void getCreditBalance()
-      .then(balance => {
-        if (!cancelled) setCreditBalance(balance);
-      })
-      .catch(() => {
-        if (!cancelled) setCreditBalance(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [currentUser?.id]);
-
-  useEffect(() => {
-    if (!currentUser) return;
-    let active = true;
-    let pending = false;
-    const refreshCredits = () => {
-      if (pending || document.visibilityState === 'hidden') return;
-      pending = true;
-      void getCreditBalance()
-        .then(balance => { if (active) setCreditBalance(balance); })
-        .catch(() => {})
-        .finally(() => { pending = false; });
-    };
-    const interval = window.setInterval(refreshCredits, 5000);
-    window.addEventListener('beegame:credits-updated', refreshCredits);
-    window.addEventListener('focus', refreshCredits);
-    document.addEventListener('visibilitychange', refreshCredits);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-      window.removeEventListener('beegame:credits-updated', refreshCredits);
-      window.removeEventListener('focus', refreshCredits);
-      document.removeEventListener('visibilitychange', refreshCredits);
-    };
-  }, [currentUser?.id]);
 
   const handleSignOut = async () => {
     clearIntakeRecoveryState();
     clearPendingAuthIdeaState();
     clearSupabaseSession();
-    setCreditBalance(null);
     await loadCurrentUser();
   };
 
@@ -878,9 +789,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     await loadCurrentUser();
     const latestUser = useSystemStore.getState().currentUser;
     if (!latestUser) {
-      const pendingIdea = projectName.trim();
+      const pendingIdea = projectName.trim() || attachmentBuildAttachments.map(item => item.filename || 'image').join(', ');
       setPendingIdeaAfterLogin(pendingIdea);
-      writePendingAuthIdeaState(pendingIdea);
+      writePendingAuthIdeaState(pendingIdea, creationMode, attachmentBuildAttachments.map(file => file.filename || 'image'));
       setIsLoginPromptOpen(true);
       return false;
     }
@@ -888,9 +799,10 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   };
 
   const startIntake = async (idea: string) => {
+    if (!hasReferenceFiles()) return;
     setIntakeError('');
     clearPendingIntakeFlowState();
-    writePendingIdeaDraftState(idea);
+    writePendingIdeaDraftState(idea, creationMode, requiredReferenceNames);
     await runIntake(idea);
   };
 
@@ -910,7 +822,13 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     setProjectName(pendingAuthIdea.idea);
     setPendingIdeaAfterLogin('');
     setIsLoginPromptOpen(false);
-    requestIntakeStart(pendingAuthIdea.idea);
+    const missingReferences = pendingAuthIdea.referenceNames?.filter(name => !attachmentBuildAttachments.some(file => (file.filename || 'image') === name)) || [];
+    if (missingReferences.length) {
+      setIntakeError(lang.startsWith('zh') ? '登录跳转后请重新添加参考文件，再继续。' : 'Please reattach your references after signing in, then continue.');
+      return;
+    }
+    if (creationMode === 'blueprint') openBlueprintSettings(pendingAuthIdea.idea);
+    else requestIntakeStart(pendingAuthIdea.idea);
   }, [currentUser?.id]);
 
   useEffect(() => {
@@ -958,6 +876,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       const intake = await beeGameAdapter.runIdeaIntake({
         idea,
         language: lang,
+        ...(attachmentBuildAttachments.length ? { attachments: attachmentBuildAttachments } : {}),
       });
       const nextOptions = intake.options;
       setIntakeOptions(nextOptions);
@@ -968,6 +887,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         idea: projectName.trim() || idea,
         language: lang,
         options: nextOptions,
+        creationMode,
+        referenceNames: attachmentBuildAttachments.map(item => item.filename || 'image'),
       });
       setIsPreparing(false);
     } catch (error) {
@@ -979,61 +900,28 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     }
   };
 
-  const runAttachmentBuildAnalysis = async () => {
-    setAttachmentBuildPhase('analyzing');
-    setIsPreparing(true);
-    setIntakeError('');
-    try {
-      const analysis = await beeGameAdapter.analyzeAttachmentBuild({
-        idea: projectName.trim(),
-        attachments: attachmentBuildAttachments,
-        language: lang,
-        clientRequestId: `landing_attachment_${Date.now()}`,
-      });
-      setAttachmentBuildAnalysis(analysis);
-      setAttachmentBuildConflictSelections({});
-      setAttachmentBuildPhase(analysis.completeness === 'partial' ? 'needs_input' : 'needs_confirmation');
-    } catch (error) {
-      setAttachmentBuildPhase('failed');
-      setIntakeError(error instanceof Error ? error.message : 'Attachment analysis failed');
-    } finally {
-      setIsPreparing(false);
-    }
-  };
-
-  const handleConfirmAttachmentBuild = async () => {
-    if (!attachmentBuildAnalysis) return;
-    const unresolvedConflict = attachmentBuildAnalysis.conflicts.find(
-      item => !attachmentBuildConflictSelections[item.field],
-    );
-    if (unresolvedConflict) {
-      setIntakeError(`请先确认冲突字段：${unresolvedConflict.field}`);
-      return;
-    }
-    const brief = buildAttachmentBrief(
-      attachmentBuildAnalysis,
-      projectName.trim(),
-      lang,
-      attachmentResourceLibraryUsage,
-    );
-    setIsAttachmentBuildSubmitting(true);
-    setIsPreparing(true);
-    setIntakeError('');
-    try {
-      await startConfirmedBuild(brief);
-    } catch (error) {
-      setIsAttachmentBuildSubmitting(false);
-      setIntakeError(error instanceof Error ? error.message : intakeText.errors.projectStartFailed);
-    } finally {
-      setIsPreparing(false);
-    }
+  const openBlueprintSettings = (idea: string) => {
+    const option = blueprintOption(idea);
+    const nextSettings = { ...settingsFromOption(option), scope: idea };
+    setSelectedOption(option);
+    setSettings(nextSettings);
+    setIntakeOptions([]);
+    setIntakePhase('configuring_details');
+    setIsPreparing(false);
+    writePendingIntakeFlowState({
+      phase: 'configuring_details', idea, language: lang, creationMode: 'blueprint',
+      options: [], selectedOption: option, settings: nextSettings,
+      referenceNames: attachmentBuildAttachments.map(item => item.filename || 'image'),
+    });
   };
 
   const handleStart = async (event: React.FormEvent) => {
     event.preventDefault();
-    const idea = projectName.trim();
+    const idea = projectName.trim() || attachmentBuildAttachments.map(item => item.filename || 'image').join(', ');
     if ((!idea && attachmentBuildAttachments.length === 0) || isTransitioning || isPreparing) return;
-    writePendingIdeaDraftState(idea);
+    if (!hasReferenceFiles()) return;
+    if (!projectName.trim()) setProjectName(idea);
+    writePendingIdeaDraftState(idea, creationMode, requiredReferenceNames);
     clearPendingIntakeFlowState();
     setIntakeError('');
     setIsPreparing(true);
@@ -1042,8 +930,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       setIsPreparing(false);
       return;
     }
-    if (attachmentBuildAttachments.length > 0) {
-      await runAttachmentBuildAnalysis();
+    if (creationMode === 'blueprint') {
+      openBlueprintSettings(idea);
       return;
     }
     setIsPreparing(false);
@@ -1124,7 +1012,8 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         setProjectName(nextIdea);
         const canGenerate = await ensureGenerationAccess();
         if (canGenerate) {
-          requestIntakeStart(nextIdea);
+          if (creationMode === 'blueprint') openBlueprintSettings(nextIdea);
+          else requestIntakeStart(nextIdea);
         }
       }
     } catch (error) {
@@ -1160,7 +1049,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const handleOAuthSignIn = async (provider: SupabaseOAuthProvider) => {
     setLoginError('');
     try {
-      writePendingAuthIdeaState(pendingIdeaAfterLogin);
+      writePendingAuthIdeaState(pendingIdeaAfterLogin, creationMode, attachmentBuildAttachments.map(file => file.filename || 'image'));
       if (invitationCode.trim()) {
         await signInWithSupabaseOAuth(provider, { invitationCode });
       } else {
@@ -1174,7 +1063,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
   const handleProjectNameChange = (value: string) => {
     setProjectName(value);
-    writePendingIdeaDraftState(value);
+    writePendingIdeaDraftState(value, creationMode, requiredReferenceNames);
     if (intakePhase !== 'idle' && !isPreparing && !isTransitioning) {
       setIntakePhase('idle');
       setIntakeOptions([]);
@@ -1237,6 +1126,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   };
 
   const handleBackToOptions = () => {
+    if (creationMode === 'blueprint') {
+      setIntakePhase('idle');
+      clearPendingIntakeFlowState();
+      return;
+    }
     setIntakePhase('options_ready');
     setSelectedOption(null);
     setSettings(null);
@@ -1252,9 +1146,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     setSettings(null);
     setIsInputMenuOpen(false);
     setIntakeError('');
-    setAttachmentBuildPhase('idle');
-    setAttachmentBuildAnalysis(null);
-    setAttachmentBuildAttachments([]);
+    // Closing settings does not discard the user's original reference files.
     clearIntakeRecoveryState();
   };
 
@@ -1269,16 +1161,26 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       setIsTransitioning(true);
     } catch (error) {
       setIsPreparing(false);
-      setIsAttachmentBuildSubmitting(false);
       setIntakePhase('confirming_brief');
       setIntakeError(error instanceof Error ? error.message : intakeText.errors.projectStartFailed);
       console.error('Failed to start confirmed project:', error);
     }
   };
 
+  const hasReferenceFiles = (): boolean => {
+    const missing = requiredReferenceNames.filter(name => !attachmentBuildAttachments.some(file => (file.filename || 'image') === name));
+    if (missing.length) {
+      setIntakeError(`${lang.startsWith('zh') ? '刷新后请返回输入重新添加参考文件：' : 'Return to input and reattach references after refreshing: '}${missing.join(', ')}`);
+      return false;
+    }
+    return true;
+  };
+
   const handleStartBuild = async () => {
-    if (!selectedOption || !settings || isTransitioning || isPreparing) return;
+    if (!selectedOption || !settings || isTransitioning || isPreparing || !hasReferenceFiles()) return;
     const brief: BeeGameBuildBrief = {
+      creationMode,
+      attachments: attachmentBuildAttachments,
       idea: projectName.trim(),
       option: selectedOption,
       settings: {
@@ -1524,6 +1426,16 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
           <HeroIntro title={t.landingTitle} connector={heroPhrases[lang].connector} subtitle={t.landingSubtitle} rotatingWords={heroPhrases[lang].words} isTransitioning={isTransitioning} />
 
           <IdeaPromptForm
+            creationMode={creationMode}
+            onCreationModeChange={mode => {
+              setCreationMode(mode);
+              writePendingIdeaDraftState(projectName, mode, requiredReferenceNames);
+              setIntakePhase('idle');
+              setSelectedOption(null);
+              setSettings(null);
+              setIntakeOptions([]);
+              clearPendingIntakeFlowState();
+            }}
             value={projectName}
             placeholder={t.ideaPlaceholder}
             generateLabel={t.generate}
@@ -1532,7 +1444,12 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             onChange={handleProjectNameChange}
             onSubmit={handleStart}
             attachments={attachmentBuildAttachments}
-            onAttachmentsChange={setAttachmentBuildAttachments}
+            onAttachmentsChange={files => {
+              setAttachmentBuildAttachments(files);
+              setRequiredReferenceNames(files.map(item => item.filename || 'image'));
+              writePendingIdeaDraftState(projectName, creationMode, files.map(item => item.filename || 'image'));
+              clearPendingIntakeFlowState();
+            }}
           />
         </div>
       </main> : <LandingContentPage page={landingPage} language={lang} onBack={() => navigateLandingPage('home')} />}
@@ -1568,30 +1485,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
               </button>
             </div>
             <div className="scrollbar-premium relative z-10 min-h-0 flex-1 overflow-y-auto px-6 pb-6">
-              {attachmentBuildPhase !== 'idle' ? (
-                attachmentBuildAnalysis ? (
-                  <AttachmentBuildReview
-                    analysis={attachmentBuildAnalysis}
-                    lang={lang}
-                    isSubmitting={isAttachmentBuildSubmitting}
-                    onChangeDraft={draft => setAttachmentBuildAnalysis({ ...attachmentBuildAnalysis, gddDraft: draft })}
-                    onSelectConflict={(field, choice) =>
-                      setAttachmentBuildConflictSelections(current => ({ ...current, [field]: choice }))
-                    }
-                    onRetry={() => void runAttachmentBuildAnalysis()}
-                    onConfirm={handleConfirmAttachmentBuild}
-                    resourceLibraryUsage={attachmentResourceLibraryUsage}
-                    onResourceLibraryUsageChange={setAttachmentResourceLibraryUsage}
-                  />
-                ) : (
-                  <div data-testid="attachment-build-analysis" className="text-sm text-muted-foreground">
-                    {attachmentBuildPhase === 'analyzing'
-                      ? '正在分析上传的 GDD 和图片…'
-                      : '附件分析失败，请重试或移除附件。'}
-                  </div>
-                )
-              ) : null}
-
               {intakePhase === 'options_ready' ? (
                 <IntakeOptionCards
                   options={intakeOptions}
@@ -1613,6 +1506,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                   inputMenuRef={inputMenuRef}
                   inputMenuButtonRef={inputMenuButtonRef}
                   onBack={handleBackToOptions}
+                  backLabel={creationMode === 'blueprint' ? (lang.startsWith('zh') ? '返回输入' : 'Back to input') : undefined}
                   onConfirm={handleConfirmSettings}
                 />
               ) : null}

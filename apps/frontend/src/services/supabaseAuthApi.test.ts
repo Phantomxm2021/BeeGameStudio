@@ -33,6 +33,41 @@ describe('supabaseAuthApi', () => {
     expect(isSupabaseAuthConfigured()).toBe(true);
   });
 
+  it('keeps a failed secure session lookup recoverable instead of treating it as logout', async () => {
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 503 })));
+    await expect(hydrateSupabaseSessionUser()).rejects.toMatchObject({ status: 503, code: 'authentication_unavailable' });
+  });
+
+  it('suppresses repeated refreshes during cooldown, then recovers', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response('', { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ authenticated: true, expires_at: Date.now() + 3600000, user: { id: 'user' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(refreshSupabaseSession()).rejects.toMatchObject({ code: 'authentication_unavailable' });
+    await expect(refreshSupabaseSession()).rejects.toMatchObject({ code: 'authentication_unavailable' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2001);
+    expect((await refreshSupabaseSession())?.user.id).toBe('user');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('bounds a hanging refresh and reports a temporary failure', async () => {
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    vi.stubGlobal('fetch', vi.fn((_input, init) => new Promise((_, reject) => {
+      init.signal.addEventListener('abort', () => reject(new DOMException('Timed out', 'TimeoutError')));
+    })));
+    try {
+      const assertion = expect(refreshSupabaseSession()).rejects.toMatchObject({ code: 'authentication_unavailable' });
+      controller.abort();
+      await assertion;
+      expect(timeout).toHaveBeenCalledWith(12000);
+    } finally { timeout.mockRestore(); }
+  });
+
   it('signs in with email/password and stores the session access token', async () => {
     vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
@@ -203,6 +238,7 @@ describe('supabaseAuthApi', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/auth/session/refresh', {
       method: 'POST',
       credentials: 'include',
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -315,7 +351,7 @@ describe('supabaseAuthApi', () => {
     );
   });
 
-  it('clears the stored session only when refresh fails', async () => {
+  it('clears the stored session when refresh explicitly rejects the credentials', async () => {
     vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
     localStorage.setItem('beegame_supabase_session', JSON.stringify({
@@ -328,6 +364,30 @@ describe('supabaseAuthApi', () => {
 
     await expect(refreshSupabaseSession()).resolves.toBeNull();
     expect(localStorage.getItem('beegame_supabase_session')).toBeNull();
+  });
+
+  it.each(['unavailable', 'network'] as const)('preserves login and classifies refresh %s as a temporary outage', async (failure) => {
+    vi.useFakeTimers();
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+    const stored = JSON.stringify({
+      accessToken: 'expired-token', refreshToken: 'refresh-token',
+      expiresAt: Date.now() - 1000, user: { id: 'user-1' },
+    });
+    localStorage.setItem('beegame_supabase_session', stored);
+    vi.stubGlobal('fetch', failure === 'network'
+      ? vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+      : vi.fn().mockResolvedValue(new Response('temporarily unavailable', { status: 503 })));
+    try {
+      const assertion = expect(refreshSupabaseSession()).rejects.toMatchObject({
+        status: 503, code: 'authentication_unavailable',
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+      await assertion;
+      expect(localStorage.getItem('beegame_supabase_session')).toBe(stored);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps the stored session and retries a transient refresh network failure', async () => {

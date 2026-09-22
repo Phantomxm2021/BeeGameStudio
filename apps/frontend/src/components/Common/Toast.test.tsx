@@ -33,7 +33,7 @@ describe('Toast Component', () => {
     );
     
     expect(screen.getByText('操作成功')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveClass('bg-success/10', 'text-success');
+    expect(screen.getByText('操作成功').closest('li')?.querySelector('.text-emerald-600')).toBeInTheDocument();
   });
 
   it('should render error toast with correct styling', () => {
@@ -49,7 +49,7 @@ describe('Toast Component', () => {
     );
     
     expect(screen.getByText('操作失败')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveClass('bg-destructive/10', 'text-destructive');
+    expect(screen.getByText('操作失败').closest('li')?.querySelector('.text-destructive')).toBeInTheDocument();
   });
 
   it('should render warning toast with correct styling', () => {
@@ -65,7 +65,7 @@ describe('Toast Component', () => {
     );
     
     expect(screen.getByText('请注意')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveClass('bg-warning/10', 'text-warning');
+    expect(screen.getByText('请注意').closest('li')?.querySelector('.text-amber-600')).toBeInTheDocument();
   });
 
   it('should call onDismiss when close button is clicked', () => {
@@ -80,7 +80,7 @@ describe('Toast Component', () => {
       />
     );
     
-    const closeButton = screen.getByLabelText('关闭通知');
+    const closeButton = screen.getByLabelText('Dismiss toast');
     fireEvent.click(closeButton);
     
     expect(onDismiss).toHaveBeenCalledTimes(1);
@@ -157,9 +157,9 @@ describe('Toast Component', () => {
       />
     );
     
-    const alert = screen.getByRole('alert');
+    const alert = screen.getByRole('list');
     expect(alert).toHaveAttribute('aria-live', 'polite');
-    expect(alert).toHaveAttribute('aria-atomic', 'true');
+    expect(alert).toHaveAttribute('aria-atomic', 'false');
   });
 });
 
@@ -189,7 +189,7 @@ describe('ToastContainer Component', () => {
     
     render(<ToastContainer toasts={toasts} onDismiss={onDismiss} />);
     
-    const closeButton = screen.getByLabelText('关闭通知');
+    const closeButton = screen.getByLabelText('Dismiss toast');
     fireEvent.click(closeButton);
     
     expect(onDismiss).toHaveBeenCalledWith('toast-1');

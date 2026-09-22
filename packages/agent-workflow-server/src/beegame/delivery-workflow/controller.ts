@@ -9,6 +9,7 @@ import { readBeeGameAssetManifestSync } from '../asset-contracts'
 import {
   acceptBeeGameContentPackage,
   auditBeeGameContentPackage,
+  loadBeeGameContentFileListForEditing,
   loadBeeGameContentPackageForEditing,
   saveBeeGameContentDocument,
   type BeeGameContentDocument,
@@ -983,6 +984,15 @@ export function createDeliveryWorkflowController(input: {
     )
   }
 
+  async function loadGameContentFileListForEditing() {
+    const current = await store.load()
+    if (!current) throw new Error('Workflow is unavailable')
+    return loadBeeGameContentFileListForEditing(
+      input.workspacePath,
+      await gameContentAuthority(current),
+    )
+  }
+
   function saveGameContentEdit(edit: {
     path: string
     expectedRevision: string
@@ -1042,8 +1052,10 @@ export function createDeliveryWorkflowController(input: {
       try {
         await serialize(async () => {
           const current = await store.load()
-          if (current && isPublicStageActive(current) && current.status !== 'stopped')
-            await stopFoundation(current, 'Application host is shutting down.')
+          if (current && current.status !== 'stopped' && (
+            isPublicStageActive(current) || current.activeDispatch?.status === 'running'
+          ))
+            await stopFoundation(current, 'service_shutdown')
         })
       } finally { authorLink?.dispose(); reviewLink?.dispose() }
     },
@@ -1051,6 +1063,7 @@ export function createDeliveryWorkflowController(input: {
     ensureProgress,
     requestChange,
     loadGameContentForEditing,
+    loadGameContentFileListForEditing,
     saveGameContentEdit,
     publishGameContentEdits,
   }

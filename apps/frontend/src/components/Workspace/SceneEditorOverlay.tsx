@@ -23,13 +23,14 @@ const SceneEditor = lazy(loadSceneEditor);
 interface SceneEditorOverlayProps {
   projectId: string;
   onClose: () => void;
+  initialDocumentPath?: string | null;
 }
 
 type SceneSnapshot = {
   path: string;
   revision: string;
   document: BeeGameSceneContentDocument;
-  editorDocument: SceneDocument;
+  loadDocument: () => SceneDocument;
 };
 
 type SceneLoadState = EditorLoadState;
@@ -41,7 +42,7 @@ const INITIAL_LOAD_STATE: SceneLoadState = {
   detail: 'Connecting to the project…',
 };
 
-export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayProps) {
+export function SceneEditorOverlay({ projectId, onClose, initialDocumentPath }: SceneEditorOverlayProps) {
   const [initialDocument, setInitialDocument] = useState<SceneDocument>();
   const [scenes, setScenes] = useState<SceneSnapshot[]>([]);
   const [selectedScenePath, setSelectedScenePath] = useState('');
@@ -87,6 +88,29 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           setLoadState({ status: 'error', progress: prerequisiteProgress, label: 'Scene unavailable', detail: `Scene content is not available yet (${snapshot.state.replaceAll('_', ' ')}).` });
           return;
         }
+        const requestedDocumentPath = initialDocumentPath?.trim() || undefined;
+        const requestedDocument = requestedDocumentPath
+          ? snapshot.documents?.find(item => item.path === requestedDocumentPath)
+          : undefined;
+        if (requestedDocumentPath && !requestedDocument) {
+          setLoadState({
+            status: 'error',
+            progress: prerequisiteProgress,
+            label: 'Scene unavailable',
+            detail: `Requested scene document "${requestedDocumentPath}" was not found in this project.`,
+          });
+          return;
+        }
+        const requestedKind = requestedDocument?.document as Partial<BeeGameSceneContentDocument> | undefined;
+        if (requestedDocumentPath && requestedDocument && requestedKind?.kind !== 'scene-2d' && requestedKind?.kind !== 'scene-3d') {
+          setLoadState({
+            status: 'error',
+            progress: prerequisiteProgress,
+            label: 'Scene unavailable',
+            detail: `Requested document "${requestedDocumentPath}" is not a scene document.`,
+          });
+          return;
+        }
         const sceneEntries = snapshot.documents?.flatMap(item => {
           const document = item.document as Partial<BeeGameSceneContentDocument>;
           return document.kind === 'scene-2d' || document.kind === 'scene-3d'
@@ -97,8 +121,19 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           setLoadState({ status: 'error', progress: prerequisiteProgress, label: 'No scene found', detail: 'The content package has no Scene documents yet.' });
           return;
         }
-        const targetScene = sceneEntries.find(scene => scene.document.id === snapshot.index?.entryScene)
-          ?? sceneEntries[0];
+        const targetScene = requestedDocumentPath
+          ? sceneEntries.find(scene => scene.path === requestedDocumentPath)
+          : sceneEntries.find(scene => scene.document.id === snapshot.index?.entryScene)
+            ?? sceneEntries[0];
+        if (!targetScene) {
+          setLoadState({
+            status: 'error',
+            progress: prerequisiteProgress,
+            label: 'Scene unavailable',
+            detail: `Requested scene document "${requestedDocumentPath}" could not be opened.`,
+          });
+          return;
+        }
         const sceneLoadLabel = targetScene.document.id;
         // The picker must include verified project resources, not just existing scene references.
         if (!active || signal.aborted) return;
@@ -123,8 +158,8 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           };
         }
         const loadTargets = availableResources.flatMap(resource => resource.file_paths
-          .filter(path => SCENE_PREVIEW.test(path) || /\.json$/i.test(path))
-          .map(path => ({ name: `${resource.id} · ${path.split('/').at(-1) ?? path}` })));
+          .filter(path => SCENE_PREVIEW.test(path) || SCENE_FONT.test(path) || /\.json$/i.test(path))
+          .map(path => ({ resource, path, name: `${resource.id} · ${path.split('/').at(-1) ?? path}` })));
         const totalFiles = loadTargets.length;
         let loadedFiles = 0;
         const markFileLoaded = (name: string) => {
@@ -140,24 +175,54 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           label: sceneLoadLabel,
           detail: totalFiles ? `${loadTargets[0].name} · 0 of ${totalFiles}` : 'No external scene assets required',
         });
-        await mapEditorAssets(availableResources, async resource => {
-          const previewPaths = resource.file_paths.filter(path => SCENE_PREVIEW.test(path));
+        // One file-level queue keeps the former 4 x 4 ceiling without making
+        // small packs/metadata wait for a resource-level slot or all its images.
+        const loadedFilesData = await mapEditorAssets(loadTargets, async ({ resource, path, name }) => {
+          try {
+            const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal);
+            if (/\.json$/i.test(path)) {
+              const value = JSON.parse(await blob.text()) as unknown;
+              throwIfAborted(signal);
+              const sheet = parseSpriteSheet(value);
+              const tileSet = (value as { schema?: string } | null)?.schema === 'beegame-tileset.v1' ? parseTileSet(value) : undefined;
+              return { resourceId: resource.id, path, sheet, tileSet };
+            }
+            return { resourceId: resource.id, path, bytes: await blobToDataUrl(blob, signal) };
+          } catch (error) {
+            if (isAbortError(error)) throw error;
+            failedAsset(resource.id, path, error);
+            return undefined;
+          } finally {
+            if (!signal.aborted) markFileLoaded(name);
+          }
+        }, signal, 16);
+        const filesByResource = new Map<string, NonNullable<typeof loadedFilesData[number]>[]>();
+        for (const item of loadedFilesData) {
+          if (!item) continue;
+          const files = filesByResource.get(item.resourceId) ?? [];
+          files.push(item);
+          filesByResource.set(item.resourceId, files);
+        }
+        for (const resource of availableResources) {
+          // Fonts are first-class scene text assets. Keep them in the same
+          // asset table as images so the scene viewport can resolve the exact
+          // authored font reference instead of falling back to a system font.
+          const previewPaths = resource.file_paths.filter(path => SCENE_PREVIEW.test(path) || SCENE_FONT.test(path));
+          const stemCounts = new Map<string, number>();
+          for (const path of previewPaths) stemCounts.set(fileStem(path), (stemCounts.get(fileStem(path)) ?? 0) + 1);
           const members: Record<string, string> = {};
           const tables: Record<string, SpriteSheet> = {};
-          const loaded = await mapEditorAssets(previewPaths, async path => {
-            try {
-              const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal);
-              return { path, bytes: await blobToDataUrl(blob, signal) };
-            } catch (error) {
-              if (isAbortError(error)) throw error;
-              failedAsset(resource.id, path, error);
-              return undefined;
-            } finally {
-              if (!signal.aborted) markFileLoaded(`${resource.id} · ${path.split('/').at(-1) ?? path}`);
+          for (const item of filesByResource.get(resource.id) ?? []) {
+            if (item.bytes === undefined) {
+              const { path, sheet, tileSet } = item;
+              if (sheet) tables[path] = sheet;
+              if (sheet || tileSet) {
+                const id = tileSet && path === resource.root_path ? resource.id : `${resource.id}:${path}`;
+                assets[id] = { id, resourceId: resource.id, name: path.split('/').at(-1)!, path, mimeType: 'application/json', ...(sheet ? { spriteSheet: sheet } : {}), ...(tileSet ? { tileSet } : {}) };
+                members[path] = id;
+              }
+              continue;
             }
-          });
-          for (const item of loaded) {
-            if (!item) continue;
             const member = fileStem(item.path);
             const assetId = item.path === resource.root_path ? resource.id : `${resource.id}:${item.path}`;
             assets[assetId] = {
@@ -168,30 +233,9 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
               path: item.path,
               bytes: item.bytes,
             };
-            if (previewPaths.filter(path => fileStem(path) === member).length === 1) members[member] = assetId;
+            if (stemCounts.get(member) === 1) members[member] = assetId;
             members[item.path] = assetId;
           }
-          const tablePaths = resource.file_paths.filter(path => /\.json$/i.test(path));
-          await mapEditorAssets(tablePaths, async path => {
-            try {
-              const blob = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal);
-              const value = JSON.parse(await blob.text()) as unknown;
-              throwIfAborted(signal);
-              const sheet = parseSpriteSheet(value);
-              if (sheet) tables[path] = sheet;
-              const tileSet = (value as { schema?: string } | null)?.schema === 'beegame-tileset.v1' ? parseTileSet(value) : undefined;
-              if (sheet || tileSet) {
-                const id = tileSet && path === resource.root_path ? resource.id : `${resource.id}:${path}`;
-                assets[id] = { id, resourceId: resource.id, name: path.split('/').at(-1)!, path, mimeType: 'application/json', ...(sheet ? { spriteSheet: sheet } : {}), ...(tileSet ? { tileSet } : {}) };
-                members[path] = id;
-              }
-            } catch (error) {
-              if (isAbortError(error)) throw error;
-              failedAsset(resource.id, path, error);
-            } finally {
-              if (!signal.aborted) markFileLoaded(`${resource.id} · ${path.split('/').at(-1) ?? path}`);
-            }
-          });
           for (const path of previewPaths) {
             const assetId = members[path];
             const table = tables[path.replace(/\.[^.]+$/, '.json')];
@@ -201,7 +245,7 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           const rootMemberId = rootPath ? members[rootPath] : undefined;
           if (rootMemberId && !assets[resource.id].tileSet) assets[resource.id] = { ...assets[rootMemberId], id: resource.id };
           assetMembers[resource.id] = members;
-        });
+        }
         if (!active || signal.aborted) return;
         // Resolve the same explicit dependency chain as the authored contract:
         // Tilemap -> TileSet -> image (+ named atlas frame).
@@ -231,28 +275,30 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
           return;
         }
         updateLoadState({ progress: 94, label: sceneLoadLabel, detail: 'Resolving hierarchy, transforms, and sprite regions…' });
-        const availableScenes = sceneEntries.map(scene => ({
-          path: scene.path,
-          revision: scene.revision,
-          document: scene.document,
-          editorDocument: sceneContentToEditorDocument({
+        const availableScenes = sceneEntries.map(scene => {
+          let editorDocument: SceneDocument | undefined;
+          return {
+            path: scene.path,
+            revision: scene.revision,
             document: scene.document,
-            documentRevision: scene.revision,
-            foundationDocumentRevision: snapshot.index!.documentRevision,
-            assetManifestRevision: snapshot.index!.assetManifestRevision,
-            assets,
-            assetMembers,
-          }),
-        }));
-        const entry = availableScenes.find(scene => scene.document.id === snapshot.index?.entryScene)
-          ?? availableScenes[0];
+            // Materialize only the opened scene, then reuse it when switching back.
+            loadDocument: () => editorDocument ??= sceneContentToEditorDocument({
+              document: scene.document,
+              documentRevision: scene.revision,
+              foundationDocumentRevision: snapshot.index!.documentRevision,
+              assetManifestRevision: snapshot.index!.assetManifestRevision,
+              assets,
+              assetMembers,
+            }),
+          };
+        });
+        const entry = availableScenes.find(scene => scene.path === targetScene.path);
         if (!entry) return;
         canonicalRef.current = { path: entry.path, revision: entry.revision, document: entry.document };
         setScenes(availableScenes);
         setSelectedScenePath(entry.path);
-        setInitialDocument(entry.editorDocument);
+        setInitialDocument(entry.loadDocument());
         updateLoadState({ progress: 100, label: 'Scene ready', detail: entry.document.id });
-        await waitForTransition(signal);
         if (active && !signal.aborted) setLoadState({ status: 'ready', progress: 100, label: 'Scene ready', detail: entry.document.id });
       })
       .catch(error => {
@@ -265,7 +311,7 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
       controller.abort();
       if (loadControllerRef.current === controller) loadControllerRef.current = undefined;
     };
-  }, [projectId, loadAttempt]);
+  }, [initialDocumentPath, projectId, loadAttempt]);
 
   const closeEditor = () => {
     loadControllerRef.current?.abort();
@@ -303,9 +349,14 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
     if (editorDirty || editorSaving) return;
     const next = scenes.find(scene => scene.path === path);
     if (!next) return;
-    canonicalRef.current = { path: next.path, revision: next.revision, document: next.document };
-    setSelectedScenePath(next.path);
-    setInitialDocument(next.editorDocument);
+    try {
+      const document = next.loadDocument();
+      canonicalRef.current = { path: next.path, revision: next.revision, document: next.document };
+      setSelectedScenePath(next.path);
+      setInitialDocument(document);
+    } catch (error) {
+      setLoadState({ status: 'error', progress: 100, label: 'Could not open scene', detail: error instanceof Error ? error.message : String(error) });
+    }
   };
 
   const save = async (document: SceneDocument) => {
@@ -326,7 +377,7 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
       source: { ...document.source, contentDigest: saved.revision, contentRevision: saved.revision },
     };
     setScenes(items => items.map(item => item.path === saved.path
-      ? { ...item, revision: saved.revision, document: saved.document, editorDocument: savedEditorDocument }
+      ? { ...item, revision: saved.revision, document: saved.document, loadDocument: () => savedEditorDocument }
       : item));
   };
 
@@ -373,9 +424,10 @@ export function SceneEditorOverlay({ projectId, onClose }: SceneEditorOverlayPro
 
 const SCENE_IMAGE = /\.(?:png|jpe?g|webp|gif|avif|bmp)$/i;
 const SCENE_PREVIEW = /\.(?:png|jpe?g|webp|gif|avif|bmp|glb|gltf|bin)$/i;
+const SCENE_FONT = /\.(?:woff2?|ttf|otf)$/i;
 function preferredScenePreviewPath(rootPath: string, filePaths: string[]): string | undefined {
-  if (SCENE_PREVIEW.test(rootPath)) return rootPath;
-  return filePaths.find(path => SCENE_PREVIEW.test(path));
+  if (SCENE_PREVIEW.test(rootPath) || SCENE_FONT.test(rootPath)) return rootPath;
+  return filePaths.find(path => SCENE_PREVIEW.test(path) || SCENE_FONT.test(path));
 }
 
 function fileStem(path: string): string {
@@ -411,16 +463,6 @@ function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
 }
 
-function waitForTransition(signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(resolve, 180);
-    signal.addEventListener('abort', () => {
-      window.clearTimeout(timer);
-      reject(new DOMException('Scene loading was stopped.', 'AbortError'));
-    }, { once: true });
-  });
-}
-
 function assetMimeType(path: string): string {
   const extension = path.split('.').at(-1)?.toLowerCase();
   if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
@@ -433,5 +475,9 @@ function assetMimeType(path: string): string {
   if (extension === 'ogg') return 'audio/ogg';
   if (extension === 'mp3') return 'audio/mpeg';
   if (extension === 'wav') return 'audio/wav';
+  if (extension === 'woff') return 'font/woff';
+  if (extension === 'woff2') return 'font/woff2';
+  if (extension === 'ttf') return 'font/ttf';
+  if (extension === 'otf') return 'font/otf';
   return 'application/octet-stream';
 }

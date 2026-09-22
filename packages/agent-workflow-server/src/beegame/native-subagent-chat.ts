@@ -1,6 +1,7 @@
 import { closeSync, fstatSync, openSync, readSync } from 'node:fs'
 import { parseNativeBackgroundTaskLaunch } from './native-background-task-output'
 import { createResponseRedactor } from '@bee-game-studio/agent-workflow/native-response-trace'
+import type { SubagentActivityEntry, SubagentActivitySnapshot } from '@bee-game-studio/agent-workflow/subagent-activity'
 
 export function isNativeTaskLifecycle(payload?: Record<string, unknown>): boolean {
   return payload?.type === 'system' &&
@@ -41,14 +42,14 @@ export function createNativeSubagentChatEnricher() {
       ...(p.prompt ? { prompt: p.prompt } : {}),
     })
     inputs.set(id, input)
-    const trace = readOutput && outputFile ? readVisibleSubagentTrace(outputFile) : undefined
+    const activity = readOutput && outputFile ? readVisibleSubagentActivity(outputFile) : undefined
     return { ...event, payload: { ...p, toolUseID: id, toolName: 'Agent', input,
-      ...(trace ? { subagentTrace: trace } : {}) } }
+      ...(activity ? { subagentActivity: activity } : {}) } }
   }
 }
 
 /** Bounded visible transcript tail; omits private thinking and transport records. */
-export function readVisibleSubagentTrace(path: string): string | undefined {
+export function readVisibleSubagentActivity(path: string): SubagentActivitySnapshot | undefined {
   let fd: number | undefined
   try {
     fd = openSync(path, 'r')
@@ -58,26 +59,62 @@ export function readVisibleSubagentTrace(path: string): string | undefined {
     readSync(fd, bytes, 0, length, size - length)
     const lines = bytes.toString('utf8').split('\n')
     if (size > length) lines.shift()
-    const visible: string[] = []
+    const entries: SubagentActivityEntry[] = []
+    const tools = new Map<string, Extract<SubagentActivityEntry, { kind: 'tool' }>>()
+    const clip = (value: string, entry: SubagentActivityEntry) => {
+      if (value.length <= 8000) return value
+      entry.truncated = true
+      return value.slice(0, 8000)
+    }
     for (const line of lines) {
       let row: Record<string, unknown>
       try { row = record(redactVisible(JSON.parse(line))) } catch { continue }
       if (row.type !== 'assistant' && row.type !== 'user') continue
       const content = record(row.message).content
       if (!Array.isArray(content)) continue
-      for (const block of content.map(record)) {
-        if (block.type === 'text' && row.type === 'assistant') visible.push(str(block.text))
-        if (block.type === 'tool_use') visible.push(`[${str(block.id)}] ${str(block.name)} ${JSON.stringify(block.input ?? {})}`)
+      for (const [blockIndex, block] of content.map(record).entries()) {
+        if (block.type === 'text' && row.type === 'assistant' && str(block.text)) {
+          const messageId = str(row.uuid) || str(record(row.message).id) || `${size - length}-${entries.length}`
+          const entry: SubagentActivityEntry = { id: `message-${messageId}-${blockIndex}`, kind: 'message', text: '' }
+          entry.text = clip(str(block.text), entry)
+          entries.push(entry)
+        }
+        if (block.type === 'tool_use') {
+          const input = record(block.input)
+          const id = str(block.id)
+          const entry: Extract<SubagentActivityEntry, { kind: 'tool' }> = {
+            id, kind: 'tool', toolName: str(block.name), status: 'running',
+            ...(str(input.file_path || input.path) ? { filePath: str(input.file_path || input.path) } : {}),
+          }
+          if (str(input.command)) entry.command = clip(str(input.command), entry)
+          if (!entry.command && !entry.filePath) entry.input = clip(JSON.stringify(input), entry)
+          entries.push(entry)
+          tools.set(id, entry)
+        }
         if (block.type === 'tool_result') {
           const output = typeof block.content === 'string' ? block.content :
             Array.isArray(block.content) ? block.content.map(item => str(record(item).text)).join('\n') : ''
-          visible.push(`[${str(block.tool_use_id)}] ${block.is_error ? 'failed' : 'result'}: ${output}`)
+          const id = str(block.tool_use_id)
+          let entry = tools.get(id)
+          if (!entry) {
+            // A bounded tail may not contain the invocation. Do not guess its type.
+            entry = { id, kind: 'tool', toolName: '', status: 'completed' }
+            entries.push(entry)
+            tools.set(id, entry)
+          }
+          entry.status = block.is_error ? 'failed' : 'completed'
+          entry.output = clip(output, entry)
         }
       }
     }
-    const trace = visible.filter(Boolean).join('\n\n')
-    const truncated = size > length || trace.length > 16_000
-    return trace ? `${truncated ? '[Recent visible activity; earlier output omitted]\n' : ''}${trace.slice(-16_000)}` : undefined
+    let truncated = size > length || entries.some(entry => entry.truncated)
+    // Trim whole entries, never detach a file/command from its output.
+    let total = entries.reduce((sum, entry) => sum + JSON.stringify(entry).length, 0)
+    while (entries.length > 1 && (total > 24_000 || entries.length > 40)) {
+      total -= JSON.stringify(entries.shift()!).length
+      truncated = true
+    }
+    return entries.length ? { entries, truncated } : undefined
   } catch { return undefined }
   finally { if (fd !== undefined) closeSync(fd) }
 }

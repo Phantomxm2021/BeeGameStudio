@@ -86,6 +86,50 @@ for (const changed of [false, true]) test(`completed task facts survive a ${chan
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
+test('continue uses ordinary conversation with existing blocker facts, without restarting or certifying delivery', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-conversation-blocked-'))
+  const workspace = join(root, 'project')
+  const starts: BeeGameSessionRunnerStartInput[] = []
+  const prompts: unknown[] = []
+  let observedReason: string | undefined
+  let handoff = ''
+  const manager = new BeeGameSessionManager({ async start(start) {
+    starts.push(start)
+    return { stop() {}, async submit(turn) {
+      prompts.push(turn.prompt)
+      observedReason = (await createRunStore(workspace, 'owner').load())?.blockedReason
+      handoff = await readFile(join(workspace, '.beegame/tmp', start.sessionId, 'context.md'), 'utf8')
+      await turn.onMessage({ type: 'result', subtype: 'success', result: '已读取现有阻塞原因' })
+    } }
+  } }, root)
+  try {
+    const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+    manager.appendUserMessage(session.id, '做一个老师批改作业的游戏', { displayKind: 'confirmed_brief' })
+    manager.appendProjectChatEvent({ userId: 'owner', projectId: 'project', workspacePath: workspace,
+      type: 'assistant.message', text: '实现已完成，待核对触控区域。',
+      payload: { type: 'assistant.message', workflowSourceSessionId: 'implementation-worker' } })
+    const store = createRunStore(workspace, 'owner')
+    const run = { ...createTestDeliveryRun({ ownerId: 'owner', projectId: 'project' }),
+      phase: 'ACCEPTANCE' as const, status: 'needs_action' as const, blockedReason: 'Runtime evidence missing' }
+    await store.commit(run, { runId: run.runId, type: 'run.created', phase: run.phase, status: run.status, revision: run.revision })
+    const before = await readFile(store.paths.snapshot, 'utf8')
+    await sendProjectConversation({ sessions: manager, sessionId: session.id, ownerId: 'owner', message: '继续' })
+    await idle(manager, session.id)
+    expect(prompts).toEqual(['继续'])
+    expect(starts[0]?.systemContext).toContain('context.md')
+    expect(starts[0]?.systemContext).not.toContain('做一个老师批改作业的游戏')
+    expect(handoff).toContain('做一个老师批改作业的游戏')
+    expect(handoff).toContain('实现已完成，待核对触控区域。')
+    expect(handoff).toContain(run.blockedReason)
+    expect(handoff).toContain('.beegame/workflow/run.json')
+    expect(await Bun.file(join(workspace, '.beegame/tmp', session.id, 'context.md')).exists()).toBe(false)
+    expect(starts[0]?.workflowWorker).toBeUndefined()
+    expect(observedReason).toBe(run.blockedReason)
+    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(before)
+    expect(manager.events(session.id).filter(e => e.type === 'user.message' && e.text === '继续')).toHaveLength(1)
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
 test('busy workflow rejects the request before publishing a user message or opening capabilities', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-conversation-busy-'))
   const manager = new BeeGameSessionManager({ async start() { throw new Error('Must not start a model') } }, root)
