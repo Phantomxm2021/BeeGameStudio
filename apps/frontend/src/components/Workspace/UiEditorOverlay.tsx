@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Matrix4 } from 'three';
-import { uiAnchor, uiLocalMatrix } from '@beegame/scene-editor';
+import { uiAnchor, uiLocalMatrix, uiPaintOrder } from '@beegame/scene-editor';
 import { uiAtlasImages, uiImageKey, resolveUiImage } from './uiAtlas';
 import { mapEditorAssets } from './editorAssetLoading';
 import { currentKeyboardLabels } from '@beegame/scene-editor/platform';
@@ -228,7 +228,8 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
         setAssetOptions(resources.map(resource => ({
           id: resource.id,
           label: resource.id,
-          members: resource.file_paths.filter(path => UI_IMAGE.test(path)).map(fileStem),
+          members: resource.file_paths.filter(path => UI_IMAGE.test(path)).map(path =>
+            resource.file_paths.filter(file => UI_IMAGE.test(file) && fileStem(file) === fileStem(path)).length === 1 ? fileStem(path) : path),
           font: resource.file_paths.some(path => UI_FONT.test(path)) || /font/i.test(resource.asset_kind ?? resource.id),
         })));
         const requiredAssets = new Set(uiDocuments.flatMap(item => item.document.assetRefs));
@@ -277,14 +278,16 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
                 }
                 objectUrls.push(url);
                 const member = fileStem(path);
-                const entries: Array<readonly [string, string]> = [[`${resource.id}:${member}`, url]];
+                const aliases = [path];
+                if (resource.file_paths.filter(file => UI_IMAGE.test(file) && fileStem(file) === member).length === 1) aliases.push(member);
+                const entries: Array<readonly [string, string]> = aliases.map(alias => [`${resource.id}:${alias}`, url] as const);
                 if (path === resource.root_path) entries.push([resource.id, url]);
                 const sidecar = resource.file_paths.find(file => file === path.replace(/\.[^.]+$/, '.json'));
                 if (sidecar) {
                   const metadata = await beeGameAdapter.loadProjectAssetFile(projectId, resource.id, sidecar, signal);
                   const frames = await uiAtlasImages(url, JSON.parse(await metadata.text()), signal);
                   for (const [frame, cropped] of Object.entries(frames)) {
-                    entries.push([`${resource.id}:${member}#${frame}`, cropped]);
+                    for (const alias of aliases) entries.push([`${resource.id}:${alias}#${frame}`, cropped]);
                     if (path === resource.root_path) entries.push([`${resource.id}#${frame}`, cropped]);
                   }
                 }
@@ -376,6 +379,9 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
 
   const selected = current?.document.data.nodes.find(node => node.id === selectedId);
   const children = useMemo(() => childIds(current?.document.data.nodes ?? []), [current]);
+  const paintChildren = useMemo(() => current
+    ? uiPaintChildren(current.document.data.nodes, current.document.data.rootId)
+    : new Map<string, string[]>(), [current]);
   const imageAssets = assetOptions.filter(option => !option.font && option.members.length);
   const fontAssets = assetOptions.filter(option => option.font);
   const selectedFont = typeof selected?.data?.font === 'object' && selected.data.font !== null
@@ -641,7 +647,12 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
     commitCurrent(next => {
       const node = next.document.data.nodes.find(item => item.id === selected.id);
       if (!node) return;
-      if (!resourceId) return;
+      if (!resourceId) {
+        delete node.assetRef;
+        node.data = { ...node.data };
+        for (const key of ['member', 'frame', 'frameParts', 'stateFrames', 'initialFacing']) delete node.data[key];
+        return;
+      }
       node.assetRef = resourceId;
       node.data = { ...node.data };
       const [file, frame] = (member ?? option?.members[0] ?? '').split('#');
@@ -974,7 +985,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
           }}
         >
           <div ref={stageRef} className="ui-editor-stage" aria-label="UI preview" style={{ width: canvasSize(current?.document)[0], height: canvasSize(current?.document)[1], transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
-            {current ? renderUiNode(current.document.data.rootId, current.document.data.nodes, children, assetUrls, fontFamilies, selectedId, setSelectedId, hiddenIds, unpickableIds, true) : null}
+            {current ? renderUiNode(current.document.data.rootId, current.document.data.nodes, paintChildren, assetUrls, fontFamilies, selectedId, setSelectedId, hiddenIds, unpickableIds, true) : null}
             {current && showGizmos ? current.document.data.nodes
               .filter(node => node.id !== current.document.data.rootId && isTransformNode(uiNodeKind(node.role)) && isNodeVisible(node, current.document.data.nodes, hiddenIds) && !unpickableIds.has(node.id))
               .map(node => <button
@@ -1175,6 +1186,7 @@ export function UiEditorOverlay({ projectId, onClose }: UiEditorOverlayProps) {
           <Input aria-label="Search images" placeholder="Search images…" value={assetSearch} onChange={setAssetSearch} />
           {pickerLoading ? <p role="status">Loading project images…</p> : null}
           <div className="ui-editor-asset-grid">
+            {selectedKind !== 'image' && selectedKind !== 'nine-slice' ? <Button variant="outline" aria-label="Clear source image" onClick={() => selectImageAsset('')}>None</Button> : null}
             {imageAssets.flatMap(asset => asset.members.filter(member => `${asset.label} ${member}`.toLowerCase().includes(assetSearch.toLowerCase())).map(member => {
               const url = assetUrls[`${asset.id}:${member}`];
               return <Button variant="ghost" disabled={!url} className="ui-editor-asset-card" aria-pressed={selected?.assetRef === asset.id && selected?.data?.member === member} aria-label={`Use image ${member}`} key={`${asset.id}:${member}`} onClick={() => selectImageAsset(asset.id, member)}>{url ? <img loading="lazy" src={url} alt="" /> : <ImageIcon size={20} />}<span title={member}>{member}</span></Button>;
@@ -1317,7 +1329,9 @@ function supportsTextNode(kind: UiNodeKind): boolean {
 }
 
 function supportsImageNode(kind: UiNodeKind): boolean {
-  return kind === 'image' || kind === 'nine-slice';
+  // A node's interaction role does not determine whether its visual can use
+  // an image. Keep button behavior/text intact when changing its background.
+  return isVisualNode(kind) && kind !== 'text' && kind !== 'particle-system' && kind !== 'other';
 }
 
 function isVisualNode(kind: UiNodeKind): boolean {
@@ -1491,6 +1505,20 @@ function childIds(nodes: BeeGameUiContentNode[]): Map<string, string[]> {
   for (const node of nodes) {
     if (!node.parentId) continue;
     output.set(node.parentId, [...(output.get(node.parentId) ?? []), node.id]);
+  }
+  return output;
+}
+
+/** Preview ordering comes from the same renderer-independent contract exposed
+ * to generated runtimes. Hierarchy ordering stays independent so disabled
+ * objects remain editable. */
+function uiPaintChildren(nodes: BeeGameUiContentNode[], rootId: string): Map<string, string[]> {
+  const byId = new Map(nodes.map(node => [node.id, node]));
+  const output = new Map<string, string[]>();
+  for (const step of uiPaintOrder(nodes, rootId)) {
+    if (step.phase !== 'background' || step.nodeId === rootId) continue;
+    const node = byId.get(step.nodeId)!;
+    output.set(node.parentId!, [...(output.get(node.parentId!) ?? []), node.id]);
   }
   return output;
 }

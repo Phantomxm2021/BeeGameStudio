@@ -18,6 +18,7 @@ test('reviewer host exposes four frozen operations without infrastructure access
   const f = fixture()
   let resolutions = 0
   const host = createFoundationReviewerHost({ ...f.options, command: undefined,
+    language: 'zh',
     getCommand() { resolutions++; return ['must-not-run'] },
   })
   expect(Object.keys(host).sort()).toEqual(['getResult', 'resume', 'start', 'stop'])
@@ -51,5 +52,6 @@ test('reviewer host rejects extra authority and invalid command wiring', () => {
   expect(() => createFoundationReviewerHost({ ...f.options, getCommand: () => ['unused'] })).toThrow('exactly one')
   expect(() => createFoundationReviewerHost({ ...f.options, command: [] })).toThrow('command is invalid')
   expect(() => createFoundationReviewerHost({ ...f.options, ownerId: '' })).toThrow('ownerId')
+  expect(() => createFoundationReviewerHost({ ...f.options, language: '' })).toThrow('language')
   expect(f.accesses()).toBe(0)
 })

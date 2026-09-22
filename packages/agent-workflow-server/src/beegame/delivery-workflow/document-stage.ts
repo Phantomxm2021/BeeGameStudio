@@ -47,7 +47,6 @@ export async function startChecklistDraftStage(input: {
     phase: 'DOCUMENT_REVIEW',
     revision: input.run.revision.document,
     allowedPaths: [candidatePath],
-    projectReadScope: 'empty',
     contract: {
       confirmedBriefDigest: input.run.confirmedBriefDigest,
       documentSet: 'checklist',

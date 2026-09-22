@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import { realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -330,6 +331,9 @@ export async function startVitePreviewHost(
   workspacePath: string,
   options: HostOptions,
 ): Promise<ViteServer> {
+  // Vite resolves module IDs through realpath. Its FS allow-list/root must use
+  // the same identity, especially /var -> /private/var and linked workspaces.
+  workspacePath = await realpath(workspacePath)
   const projectRequire = createRequire(join(workspacePath, 'package.json'))
   const viteEntry = projectRequire.resolve('vite')
   const vite = await import(pathToFileURL(viteEntry).href) as ViteModule

@@ -5,6 +5,21 @@ import sharp from 'sharp'
 import {tmpdir} from 'node:os'
 import {runNativeFileAgent,nativeFileAgentEnvironment,nativeChatEventsPath} from '../native-file-agent'
 const cli=process.env.BEEGAME_REVIEW_TEST_CLI??join(import.meta.dir,'../../../../dist/cli-bun.js')
+test('a failed progress display does not terminate native execution or drop the result', async () => {
+ const dir=await realpath(await mkdtemp(join(tmpdir(),'native-progress-failure-')))
+ const workspace=join(dir,'workspace');await mkdir(workspace)
+ let progressCalls=0, results=0
+ try {
+  const result=await runNativeFileAgent({command:[process.execPath,join(import.meta.dir,'fixtures/native-file-stream.ts')],env:{},
+   workspacePath:workspace,writablePaths:[],prompt:'offline',schema:{type:'object'},logPath:join(dir,'log.jsonl'),
+   onProgress:()=>{progressCalls++;throw new Error('Display unavailable')},
+   onMessage:message=>{if(message.type==='result')results++}})
+  expect(result.failure).toBeUndefined()
+  expect(result.result?.structured_output).toEqual({ok:true})
+  expect(progressCalls).toBe(1)
+  expect(results).toBe(1)
+ } finally {await rm(dir,{recursive:true,force:true})}
+})
 test('stream activity is observable without leaking payloads', async () => {
  const dir=await realpath(await mkdtemp(join(tmpdir(),'native-stream-')))
  const workspace=join(dir,'workspace');await mkdir(workspace)

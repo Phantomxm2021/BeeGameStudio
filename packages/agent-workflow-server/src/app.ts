@@ -1,4 +1,6 @@
 import { Hono, type Context } from 'hono'
+import { openPreviewTestAccess } from './beegame/preview-test-access'
+import { appendRuntimeDiagnostic } from './beegame/project-records'
 import { readChatAttachment } from './beegame/chat-attachments'
 import { appendProjectChatTimeline, projectChatEventsAfter } from './beegame/project-chat-timeline'
 import { runtimeActivity } from './beegame/runtime-activity'
@@ -211,6 +213,8 @@ import { createInitialDeliveryRun } from './beegame/delivery-workflow/run-store'
 import { transitionDeliveryRun } from './beegame/delivery-workflow/transition'
 import { createDeliveryWorkflowController } from './beegame/delivery-workflow/controller'
 import { createBeeGameDeliveryWorkerPort } from './beegame/delivery-worker-session-port'
+import { sendProjectConversation, isProjectConversation, type ProjectConversationOptions } from './beegame/project-conversation'
+import { openResourceLibraryAccess } from './beegame/resource-library-access'
 import {
   createFoundationAuthoringHost,
   type FoundationAuthoringHost,
@@ -728,8 +732,47 @@ export function createAgentWorkflowApp(
       workspacePath: string
     }
   >()
-  const deliveryStartQueues = new Map<string, Promise<void>>()
-  const deliveryContinuationQueues = new Map<string, Promise<void>>()
+  const projectOperationQueues = new Map<string, Promise<void>>()
+  async function projectOperation<T>(ownerId: string, workspacePath: string, operation: () => Promise<T>): Promise<T> {
+    const key = `${ownerId}:${normalizeResolvedPath(workspacePath)}`
+    const queued = (projectOperationQueues.get(key) ?? Promise.resolve()).catch(() => undefined).then(operation)
+    const marker = queued.then(() => undefined, () => undefined)
+    projectOperationQueues.set(key, marker)
+    try { return await queued }
+    finally { if (projectOperationQueues.get(key) === marker) projectOperationQueues.delete(key) }
+  }
+  const openProjectPreviewAccess = (input: { request: Request; user: BeeGameUserContext; workspacePath: string; sessionId: string; keepProjectPreview?: boolean }) => {
+    const { workspacePath, sessionId } = input
+    const snapshot = () => {
+      const value = beeGamePreviews.status(sessionId, workspacePath)
+      return { ...value, ...(value.url ? { url: previewCapabilities.issueUrl(
+        new URL(value.url, input.request.url).href, sessionId, input.user.id,
+      ) } : {}) }
+    }
+    return openPreviewTestAccess({
+      recordingRoot: join(getCurrentUserDataRoot(input.request), 'preview-tests', createHash('sha256').update(sessionId).digest('hex')),
+      onRecordingFinished: report => appendRuntimeDiagnostic({
+        path: join(workspacePath, '.beegame', 'logs', 'native-runtime.jsonl'),
+        maxBytes: 4 * 1024 * 1024, archiveCount: 3,
+        record: { type: 'preview.recording.finished', sessionId, recordingId: report.id,
+          timestamp: report.endedAt, durationMs: report.durationMs, endReason: report.endReason,
+          counts: report.counts, files: report.files, droppedEvents: report.droppedEvents,
+          truncatedEvents: report.truncatedEvents, gameplayVerdict: report.gameplayVerdict },
+      }),
+      start: async mode => {
+        await beeGamePreviews.start({ sessionId, workspacePath, mode })
+        return snapshot()
+      },
+      status: snapshot,
+      stop: () => {
+        // A conversational session is also the user's Preview owner. Closing
+        // its test browser must not stop that shared, user-visible service.
+        if (input.keepProjectPreview) return
+        beeGamePreviews.stop(sessionId, workspacePath)
+        previewCapabilities.revokeSession(sessionId)
+      },
+    })
+  }
   const getDeliveryController = (input: {
     request: Request
     user: BeeGameUserContext
@@ -786,6 +829,7 @@ export function createAgentWorkflowApp(
               ) }
           : { status: 'not-running' }
       },
+      openPreviewAccess: context => openProjectPreviewAccess({ ...input, ...context }),
     })
     const authoringHostOptions: FoundationAuthoringHostOptions = {
       ownerId: input.user.id,
@@ -807,11 +851,11 @@ export function createAgentWorkflowApp(
     const author = (
       options.foundationAuthoringHostFactory ?? createFoundationAuthoringHost
     )(authoringHostOptions)
-    const { language: _authorLanguage, ...reviewHostOptions } = authoringHostOptions
-    const reviewer = (options.foundationReviewerHostFactory ?? createFoundationReviewerHost)(reviewHostOptions)
+    const reviewer = (options.foundationReviewerHostFactory ?? createFoundationReviewerHost)(authoringHostOptions)
     const controller = createDeliveryWorkflowController({
       workspacePath: workspaceKey,
       ownerId: input.user.id,
+      assertWorkspaceIdle: () => assertProjectConversationIdle(beeGameSessions, input.user.id, input.projectId, workspaceKey),
       workerPort,
       author,
       reviewer,
@@ -1080,22 +1124,10 @@ export function createAgentWorkflowApp(
   const continueBeeGameDeliveryWorkflow = async (
     input: Parameters<typeof continueBeeGameDeliveryWorkflowUnlocked>[0],
   ): Promise<DeliveryRun | undefined> => {
-    const key = `${input.user.id}:${normalizeResolvedPath(input.workspacePath)}`
-    const previous = deliveryContinuationQueues.get(key) ?? Promise.resolve()
-    const queued = previous
-      .catch(() => undefined)
-      .then(() => continueBeeGameDeliveryWorkflowUnlocked(input))
-    const marker = queued.then(
-      () => undefined,
-      () => undefined,
-    )
-    deliveryContinuationQueues.set(key, marker)
-    try {
-      return await queued
-    } finally {
-      if (deliveryContinuationQueues.get(key) === marker)
-        deliveryContinuationQueues.delete(key)
-    }
+    return projectOperation(input.user.id, input.workspacePath, async () => {
+      assertProjectConversationIdle(beeGameSessions, input.user.id, input.projectId, input.workspacePath)
+      return continueBeeGameDeliveryWorkflowUnlocked(input)
+    })
   }
   const startBeeGameDeliveryWorkflow = async (input: {
     request: Request
@@ -1106,23 +1138,10 @@ export function createAgentWorkflowApp(
     modelConfigId?: string
     language?: BeeGameSessionLanguage
   }) => {
-    const key = `${input.user.id}:${normalizeResolvedPath(input.workspacePath)}`
-    const previous = deliveryStartQueues.get(key) ?? Promise.resolve()
-    let queued!: Promise<{ runId: string; phase: string; status: string }>
-    queued = previous
-      .catch(() => undefined)
-      .then(() => startBeeGameDeliveryWorkflowUnlocked(input))
-    const marker = queued.then(
-      () => undefined,
-      () => undefined,
-    )
-    deliveryStartQueues.set(key, marker)
-    try {
-      return await queued
-    } finally {
-      if (deliveryStartQueues.get(key) === marker)
-        deliveryStartQueues.delete(key)
-    }
+    return projectOperation(input.user.id, input.workspacePath, async () => {
+      assertProjectConversationIdle(beeGameSessions, input.user.id, input.projectId, input.workspacePath)
+      return startBeeGameDeliveryWorkflowUnlocked(input)
+    })
   }
 
   const startBeeGameDeliveryWorkflowUnlocked = async (input: {
@@ -4447,10 +4466,33 @@ export function createAgentWorkflowApp(
       startDeliveryWorkflow: startBeeGameDeliveryWorkflow,
       resumeDeliveryWorkflow: input =>
         continueBeeGameDeliveryWorkflow({ ...input, mode: 'resume' }),
-      requestDeliveryChange: async input => {
-        const controller = getDeliveryController(input)
-        return controller.requestChange(input.run, input.message)
-      },
+      sendProjectRequest: input => projectOperation(input.user.id, input.workspacePath, () => sendProjectConversation({
+        sessions: beeGameSessions, sessionId: input.sessionId, ownerId: input.user.id,
+        message: input.message, options: { ...input.options,
+          getValidAuthToken: refresh => sessionAuth?.getCredential?.(input.request)?.getValidAccessToken(refresh) },
+        openCapabilities: () => {
+          const credential = sessionAuth?.getCredential?.(input.request)
+          const image = openImageGenerationAccess({ userId: input.user.id, projectId: input.projectId,
+            workspacePath: input.workspacePath, service: imageGeneration,
+            loadConfig: () => loadRuntimeImageConfig(dashboardDataRoot,
+              { remote: Boolean(supabaseStore), billing: billingConfig }, (url, init) => serviceFetch(url, init)),
+          })
+          let library: ReturnType<typeof openResourceLibraryAccess> | undefined
+          let preview: ReturnType<typeof openProjectPreviewAccess> | undefined
+          try {
+            library = options.resourceSelectionRuntimeConfig?.baseUrl ? openResourceLibraryAccess({
+              baseUrl: options.resourceSelectionRuntimeConfig.baseUrl,
+              getAuthToken: async () => credential?.getValidAccessToken(),
+            }) : undefined
+            preview = openProjectPreviewAccess({ ...input, keepProjectPreview: true })
+            return {
+              instruction: ['Project content format reference: .beegame/workflow/content-authoring-contract.json; resource index: assets/asset-manifest.json. Read when relevant to the requested change.',
+                library?.instruction ?? 'Built-in resource library is not configured.', image.instruction, preview.instruction].join('\n\n'),
+              close: async () => { library?.close(); image.close(); await preview?.close() },
+            }
+          } catch (error) { library?.close(); image.close(); throw error }
+        },
+      })),
     },
   )
   return app
@@ -5893,7 +5935,8 @@ async function getBeeGameProjectRuntimeState(input: {
     pending,
     snapshot?.phaseStatus === 'recovered',
   )
-  const runtime = applyWorkflowRuntimeStatus(nativeRuntime, workflowSnapshot)
+  const conversation = isProjectConversation(events) && workflowSnapshot?.status !== 'running'
+  const runtime = conversation ? nativeRuntime : applyWorkflowRuntimeStatus(nativeRuntime, workflowSnapshot)
   const preview = getProjectPreviewSnapshot({
     sessionId: sessionRef.sessionId,
     workspacePath: sessionRef.workspacePath,
@@ -5926,7 +5969,7 @@ async function getBeeGameProjectRuntimeState(input: {
       })
     : null
   const context = deriveBeeGameContextVisibility(events, snapshot) ?? {}
-  if (workflowUsage && workflowUsage.total_tokens > 0) {
+  if (!conversation && workflowUsage && workflowUsage.total_tokens > 0) {
     // A managed project uses the workflow run ledger as its token authority;
     // the native session is only the transport for workflow workers. Do not
     // merge a second session snapshot into the same project total.
@@ -5934,7 +5977,7 @@ async function getBeeGameProjectRuntimeState(input: {
       ...workflowUsage,
     }
   }
-  const workflowReason = isWorkflowTerminalFailure(workflowSnapshot)
+  const workflowReason = !conversation && isWorkflowTerminalFailure(workflowSnapshot)
     ? workflowDisplayReason(workflowSnapshot)
     : undefined
   const runtimeFailureReason =
@@ -5947,7 +5990,7 @@ async function getBeeGameProjectRuntimeState(input: {
     blocked:
       pending.length > 0 ||
       runtime.agentStatus === 'failed' ||
-      isWorkflowTerminalFailure(workflowSnapshot),
+      (!conversation && isWorkflowTerminalFailure(workflowSnapshot)),
     ...(workflowReason
       ? projectRuntimeBlockedReasonFields(workflowReason)
       : runtimeFailureReason
@@ -6415,6 +6458,10 @@ function assertProjectWorkspaceMutationIdle(session: BeeGameSession): void {
   if (session.turnStatus !== 'idle') {
     throw new ProjectWorkspaceBusyError()
   }
+}
+
+function assertProjectConversationIdle(sessions: BeeGameSessionManager, ownerId: string, projectId: string, workspacePath: string): void {
+  if (sessions.hasActiveProjectTurn(ownerId, projectId, workspacePath)) throw new ProjectWorkspaceBusyError()
 }
 
 function projectWorkspaceMutationRouteError(
@@ -7767,13 +7814,20 @@ export async function proxyBeeGamePreviewRequest(
     : '/'
   const targetPath = preservePublicPath ? requestUrl.pathname : restPath
   const target = new URL(targetPath, ensureTrailingSlash(internalBaseUrl))
-  requestUrl.searchParams.delete(PREVIEW_CAPABILITY_QUERY_PARAM)
-  target.search = requestUrl.search
+  // URLSearchParams mutation reserializes bare Vite flags (`raw` -> `raw=`),
+  // changing module semantics. Remove our credentials without rewriting the
+  // remaining query bytes, including repeated keys and percent encoding.
+  target.search = requestUrl.search.slice(1).split('&')
+    .filter(part => !new URLSearchParams(part).has(PREVIEW_CAPABILITY_QUERY_PARAM))
+    .join('&')
   const headers = new Headers(request.headers)
   headers.delete('host')
   // The game dev server is untrusted project code, not an authenticated BGS API.
   headers.delete('cookie')
   headers.delete('authorization')
+  // fetch decodes response bodies. Prefer identity upstream, and still handle
+  // servers that send a compressed representation despite that preference.
+  headers.set('accept-encoding', 'identity')
   const method = request.method.toUpperCase()
   if (method === 'OPTIONS')
     return new Response(null, { status: 204, headers: withPreviewCorsHeaders(new Headers()) })
@@ -7798,9 +7852,19 @@ export async function proxyBeeGamePreviewRequest(
   }
   const responseHeaders = withPreviewCorsHeaders(new Headers(upstream.headers))
   responseHeaders.set('referrer-policy', 'no-referrer')
-  if (method === 'GET' && isHtmlResponse(upstream.headers)) {
+  if (method === 'HEAD' || [204, 205, 304].includes(upstream.status))
+    return new Response(null, { status: upstream.status, statusText: upstream.statusText, headers: responseHeaders })
+  if (method !== 'HEAD' && upstream.status !== 304 && upstream.headers.has('content-encoding')) {
+    responseHeaders.delete('content-encoding')
+    responseHeaders.delete('content-length')
+    responseHeaders.delete('etag')
+    responseHeaders.delete('content-md5')
+  }
+  if (method === 'GET' && upstream.status !== 206 && isHtmlResponse(upstream.headers)) {
     const html = await upstream.text()
     responseHeaders.delete('content-length')
+    responseHeaders.delete('etag')
+    responseHeaders.delete('content-md5')
     const previewHtml = stripViteClientScript(html, `${prefix}/`)
     return new Response(
       injectBeeGamePreviewConsoleBridge(previewHtml, sessionId),
@@ -8003,13 +8067,14 @@ function registerBeeGameSessionRoutes(
       modelConfigId?: string
       language?: BeeGameSessionLanguage
     }) => Promise<unknown>
-    requestDeliveryChange?: (input: {
+    sendProjectRequest?: (input: {
       request: Request
       user: BeeGameUserContext
       projectId: string
       workspacePath: string
-      run: import('./beegame/delivery-workflow/types').DeliveryRun
+      sessionId: string
       message: string
+      options?: ProjectConversationOptions
     }) => Promise<unknown>
   },
 ): void {
@@ -8510,48 +8575,21 @@ function registerBeeGameSessionRoutes(
         ? beeGameSessions.metadata(session.id)
         : undefined
       if (session && metadata?.projectId) {
-        const store = createRunStore(
-          session.cwd,
-          options.getCurrentUser(c.req.raw).id,
-        )
-        const run = await store.load()
-        if (!run)
-          return c.json(
-            {
-              error:
-                'Project is unmanaged; start a new delivery workflow before changing files',
-              code: 'workflow_unmanaged',
-            },
-            409,
-          )
-        beeGameSessions.appendUserMessage(session.id, inputText, {
-          ...(clientMessageId ? { clientMessageId } : {}),
-          ...(supersedesMessageId ? { supersedesMessageId } : {}),
-          displayKind: 'change_request',
-        })
-        if (options.requestDeliveryChange) {
-          const dispatch = await options.requestDeliveryChange({
+        if (options.sendProjectRequest) {
+          const result = await options.sendProjectRequest({
             request: c.req.raw,
             user: options.getCurrentUser(c.req.raw),
             projectId: metadata.projectId,
             workspacePath: session.cwd,
-            run,
+            sessionId: session.id,
             message: inputText,
+            options: { clientMessageId, supersedesMessageId, attachments,
+              ...(isBeeGameSessionLanguage(body.language) ? { language: body.language } : {}),
+              authToken: options.getAuthToken(c.req.raw) },
           })
-          const change = isObject(dispatch) ? dispatch : {}
-          return c.json(
-            {
-              session,
-              runId:
-                typeof change.runId === 'string' ? change.runId : run.runId,
-              phase: run.phase,
-              status: 'running',
-              dispatch: change.dispatch ?? dispatch,
-            },
-            202,
-          )
+          return c.json(result, 202)
         }
-        return c.json({ error: 'Delivery workflow is unavailable' }, 503)
+        return c.json({ error: 'Project conversation is unavailable' }, 503)
       }
       return c.json(
         await beeGameSessions.sendWithDisplay(c.req.param('id'), inputText, {
@@ -8634,6 +8672,19 @@ function registerBeeGameSessionRoutes(
       if (session) {
         const metadata = beeGameSessions.metadata(session.id)
         if (metadata?.projectId) {
+          if (isProjectConversation(beeGameSessions.transcript(session.id))) {
+            if (!options.sendProjectRequest) return c.json({ error: 'Project conversation is unavailable' }, 503)
+            const previous = beeGameSessions.transcript(session.id).findLast(event => event.type === 'user.message')
+            const continuation = getServerOwnedContinuePrompt(language)
+            return c.json(await options.sendProjectRequest({
+              request: c.req.raw, user: options.getCurrentUser(c.req.raw),
+              sessionId: session.id, projectId: metadata.projectId, workspacePath: session.cwd,
+              // An old worker conversation has no native main-session context.
+              // Carry only the user's original request across that boundary.
+              message: previous?.payload?.displayKind === 'change_request' ? previous.text : continuation,
+              options: { displayText: continuation, language, authToken: options.getAuthToken(c.req.raw) },
+            }), 202)
+          }
           if (options.resumeDeliveryWorkflow) {
             const user = options.getCurrentUser(c.req.raw)
             const confirmedBriefContext = beeGameSessions
@@ -8722,13 +8773,8 @@ function registerBeeGameSessionRoutes(
             { error: 'Project has no managed delivery workflow' },
             409,
           )
-        beeGameSessions.appendUserMessage(
-          session.id,
-          getServerOwnedProjectActionLabel(kind, language),
-          { displayKind: 'change_request' },
-        )
-        if (!options.requestDeliveryChange)
-          return c.json({ error: 'Delivery workflow is unavailable' }, 503)
+        if (!options.sendProjectRequest)
+          return c.json({ error: 'Project conversation is unavailable' }, 503)
         const message = JSON.stringify({
           kind,
           buildReport: {
@@ -8738,23 +8784,17 @@ function registerBeeGameSessionRoutes(
             entrypoint: preview.entrypoint ?? null,
           },
         })
-        const changeDispatch = await options.requestDeliveryChange({
+        const result = await options.sendProjectRequest({
           request: c.req.raw,
           user: options.getCurrentUser(c.req.raw),
           projectId,
           workspacePath: session.cwd,
-          run,
+          sessionId: session.id,
           message,
+          options: { displayText: getServerOwnedProjectActionLabel(kind, language), language,
+            authToken: options.getAuthToken(c.req.raw) },
         })
-        return c.json(
-          {
-            runId: run.runId,
-            phase: run.phase,
-            status: 'running',
-            changeDispatch,
-          },
-          202,
-        )
+        return c.json(result, 202)
       }
       if (kind === 'deployment_failure_repair') {
         const session = beeGameSessions.get(c.req.param('id'))
@@ -8784,13 +8824,8 @@ function registerBeeGameSessionRoutes(
             { error: 'Project has no managed delivery workflow' },
             409,
           )
-        beeGameSessions.appendUserMessage(
-          session.id,
-          getServerOwnedProjectActionLabel(kind, language),
-          { displayKind: 'change_request' },
-        )
-        if (!options.requestDeliveryChange)
-          return c.json({ error: 'Delivery workflow is unavailable' }, 503)
+        if (!options.sendProjectRequest)
+          return c.json({ error: 'Project conversation is unavailable' }, 503)
         const message = JSON.stringify({
           kind,
           deploymentFailure: {
@@ -8798,23 +8833,17 @@ function registerBeeGameSessionRoutes(
             buildLog: latestFailure.buildLog ?? '',
           },
         })
-        const changeDispatch = await options.requestDeliveryChange({
+        const result = await options.sendProjectRequest({
           request: c.req.raw,
           user: options.getCurrentUser(c.req.raw),
           projectId,
           workspacePath: session.cwd,
-          run,
+          sessionId: session.id,
           message,
+          options: { displayText: getServerOwnedProjectActionLabel(kind, language), language,
+            authToken: options.getAuthToken(c.req.raw) },
         })
-        return c.json(
-          {
-            runId: run.runId,
-            phase: run.phase,
-            status: 'running',
-            changeDispatch,
-          },
-          202,
-        )
+        return c.json(result, 202)
       }
       return c.json({ error: 'Unsupported project action' }, 400)
     } catch (err) {

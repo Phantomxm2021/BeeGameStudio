@@ -17,6 +17,13 @@ type TaskPermission =
   | { behavior: 'allow'; updatedInput: Record<string, any> }
   | { behavior: 'deny'; message: string }
 
+/** Tool caches belong to the task, not the host's private runtime directory. */
+export function nativeTaskToolEnvironment(temporaryPath: string) {
+  const npmCache = resolve(temporaryPath, 'npm-cache')
+  return { TMPDIR: temporaryPath, CLAUDE_CODE_TMPDIR: temporaryPath,
+    NPM_CONFIG_CACHE: npmCache, npm_config_cache: npmCache }
+}
+
 /** Execution permissions, not an agent/tool-selection policy. The native CLI
  * exposes its normal tools. File effects stay in the task workspace, shell
  * effects are enforced by the native OS sandbox, and delegates inherit both. */
@@ -118,7 +125,7 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
     flags: ['--permission-mode', 'default', '--setting-sources', '', '--strict-mcp-config',
       '--settings', JSON.stringify(settings)],
     // Shell/MCP/LSP children do not need the parent model's credentials.
-    environment: { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', TMPDIR: temporaryPath, CLAUDE_CODE_TMPDIR: temporaryPath,
+    environment: { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', ...nativeTaskToolEnvironment(temporaryPath),
       BEEGAME_NATIVE_BACKGROUND_PERMISSIONS: '1',
       BEEGAME_NATIVE_TOOL_RESULTS_DIR: toolResultsPath,
     },

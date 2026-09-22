@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MarkdownRenderer } from './ChatMarkdownContent';
 
 describe('MarkdownRenderer structured output', () => {
@@ -12,6 +12,21 @@ describe('MarkdownRenderer structured output', () => {
     render(<MarkdownRenderer content="![Scene preview](https://example.com/scene.png)" />);
     expect(screen.getByRole('img', { name: 'Scene preview' })).toHaveAttribute('loading', 'lazy');
     expect(screen.getByRole('img')).toHaveClass('max-w-full', 'object-contain');
+  });
+  it('groups consecutive Markdown images into a horizontal gallery', () => {
+    const { container } = render(<MarkdownRenderer content={'![AI asset](https://example.com/a.png)\n![Drawn asset](https://example.com/b.png)'} />);
+    expect(container.querySelector('.chat-image-gallery')?.querySelectorAll('img')).toHaveLength(2);
+    expect(screen.getAllByRole('status')).toHaveLength(2);
+  });
+  it('preserves decoded images when the rest of a response streams in', () => {
+    const content = '![Preview](https://example.com/a.png)\n\nResult:';
+    const { rerender } = render(<MarkdownRenderer content={content} />);
+    const image = screen.getByRole('img');
+    fireEvent.load(image);
+    expect(screen.queryByRole('status')).toBeNull();
+    rerender(<MarkdownRenderer content={content + ' ready'} />);
+    expect(screen.getByRole('img')).toBe(image);
+    expect(screen.queryByRole('status')).toBeNull();
   });
   it('retains the entire JSON response instead of picking fields by name', () => {
     const content = JSON.stringify({

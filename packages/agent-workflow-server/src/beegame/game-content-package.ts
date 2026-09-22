@@ -9,282 +9,13 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path'
-import { z } from 'zod/v4'
-import { UI_ANCHORS } from '../../../scene-editor/src/content-coordinates'
 import type { BeeGameAssetManifest } from './asset-contracts'
 import { auditAssetContract } from './asset-contract-audit'
+import { parseTilemapData, validateTilemapGrid } from '../../../scene-editor/src/tilemap-data'
+import { readTileSetResource } from './tilemap-contract'
 
-export const BEEGAME_CONTENT_ROOT = 'content' as const
-export const BEEGAME_CONTENT_INDEX = 'content/index.json' as const
-export const BEEGAME_CONTENT_PACKAGE_SCHEMA =
-  'beegame-content-package.v2' as const
-export const BEEGAME_CONTENT_DOCUMENT_SCHEMA = 'beegame-content.v1' as const
-
-/**
- * Canonical UI object roles accepted by the engine-neutral content contract.
- *
- * A role describes the node's authored purpose; it is not an asset kind. Keep
- * this vocabulary closed so an author cannot silently invent a runtime type.
- */
-export const BEEGAME_UI_NODE_ROLES = [
-  'screen-root',
-  'hud-root',
-  'flow-root',
-  'flow-screen',
-  'container',
-  'text',
-  'image',
-  'sprite',
-  'nineSlicePanel',
-  'button',
-  'slider',
-  'toggle',
-  'dropdown',
-  'tab',
-  'shape',
-  'keycap',
-  'toast',
-  'worldPrompt',
-  'capsuleSegment',
-  'emitter',
-] as const
-
-export type BeeGameUiNodeRole = (typeof BEEGAME_UI_NODE_ROLES)[number]
-
-export const BEEGAME_UI_ASSET_BACKED_ROLES = [
-  'image',
-  'sprite',
-  'nineSlicePanel',
-] as const satisfies readonly BeeGameUiNodeRole[]
-
-export const BEEGAME_SCENE_MODEL = 'game-object-v2' as const
-export const BEEGAME_SCENE_COMPONENT_TYPES = [
-  'sprite-renderer',
-  'mesh-filter',
-  'mesh-renderer',
-  'skinned-mesh-renderer',
-  'grid',
-  'tilemap',
-  'tilemap-renderer',
-  'animator',
-  'box-collider-2d',
-  'circle-collider-2d',
-  'capsule-collider-2d',
-  'polygon-collider-2d',
-  'rigidbody-2d',
-  'box-collider',
-  'sphere-collider',
-  'capsule-collider',
-  'mesh-collider',
-  'rigidbody',
-  'audio-source',
-  'audio-listener',
-  'particle-system',
-  'particle-system-renderer',
-  'light-2d',
-  'light',
-  'camera',
-  'canvas',
-  'canvas-renderer',
-  'rect-transform',
-  'image',
-  'text',
-] as const
-export const BEEGAME_SCENE_ASSET_COMPONENT_TYPES = [
-  'sprite-renderer',
-  'mesh-filter',
-  'mesh-renderer',
-  'skinned-mesh-renderer',
-  'tilemap',
-  'animator',
-  'audio-source',
-  'particle-system-renderer',
-  'image',
-] as const satisfies readonly (typeof BEEGAME_SCENE_COMPONENT_TYPES)[number][]
-
-const digestSchema = z.string().regex(/^[a-f0-9]{64}$/)
-const finiteNumber = z.number().finite()
-const identifier = z.string().trim().min(1).max(256)
-const uniqueIdentifiers = z
-  .array(identifier)
-  .superRefine((values, context) => {
-    if (new Set(values).size !== values.length)
-      context.addIssue({ code: 'custom', message: 'values must be unique' })
-  })
-
-const contentIndexSchema = z
-  .strictObject({
-    schema: z.literal(BEEGAME_CONTENT_PACKAGE_SCHEMA),
-    id: identifier,
-    dimension: z.enum(['2d', '3d']),
-    documentRevision: digestSchema,
-    assetManifestRevision: digestSchema,
-    entryScene: identifier,
-    files: uniqueIdentifiers.min(1),
-    sceneModel: z.literal(BEEGAME_SCENE_MODEL),
-  })
-
-const transformSchema = z
-  .strictObject({
-    position: z.tuple([finiteNumber, finiteNumber, finiteNumber]),
-    rotation: z.tuple([finiteNumber, finiteNumber, finiteNumber]).optional(),
-    scale: z.tuple([finiteNumber, finiteNumber, finiteNumber]).optional(),
-  })
-
-const sceneComponentSchema = z
-  .strictObject({
-    /** Stable identity: editor/runtime references must not depend on array order. */
-    id: identifier,
-    type: z.enum(BEEGAME_SCENE_COMPONENT_TYPES),
-    assetRef: identifier.optional(),
-    data: z.record(z.string(), z.unknown()).optional(),
-  })
-
-const behaviorMetadataSchema = z
-  .strictObject({
-    id: identifier,
-    /** Closed at the shape level, intentionally open at the behavior vocabulary level. */
-    kind: identifier,
-    config: z.record(z.string(), z.unknown()),
-  })
-
-const sceneNodeDataSchema = z
-  .record(z.string(), z.unknown())
-  .superRefine((value, context) => {
-    if (value.behaviors === undefined) return
-    if (!Array.isArray(value.behaviors)) {
-      context.addIssue({
-        code: 'custom',
-        path: ['behaviors'],
-        message: 'behaviors must be an array of authored behavior metadata.',
-      })
-      return
-    }
-    const ids = new Set<string>()
-    value.behaviors.forEach((behavior, index) => {
-      const parsed = behaviorMetadataSchema.safeParse(behavior)
-      if (!parsed.success) {
-        context.addIssue({
-          code: 'custom',
-          path: ['behaviors', index],
-          message: 'behavior entries require id, kind and config.',
-        })
-        return
-      }
-      if (ids.has(parsed.data.id)) {
-        context.addIssue({
-          code: 'custom',
-          path: ['behaviors', index, 'id'],
-          message: `duplicate behavior id ${parsed.data.id}.`,
-        })
-      }
-      ids.add(parsed.data.id)
-    })
-  })
-
-const componentSceneNodeSchema = z
-  .strictObject({
-    id: identifier,
-    parentId: identifier.optional(),
-    name: z.string().trim().min(1).max(512).optional(),
-    semantic: uniqueIdentifiers.optional(),
-    enabled: z.boolean().optional(),
-    transform: transformSchema.optional(),
-    layer: identifier.optional(),
-    zIndex: finiteNumber.optional(),
-    components: z.array(sceneComponentSchema).optional(),
-    data: sceneNodeDataSchema.optional(),
-  })
-
-const uiLayoutSchema = z
-  .strictObject({
-    anchor: z.enum(Object.keys(UI_ANCHORS) as [keyof typeof UI_ANCHORS, ...(keyof typeof UI_ANCHORS)[]]).optional(),
-    position: z.tuple([finiteNumber, finiteNumber]).optional(),
-    size: z.tuple([finiteNumber.nonnegative(), finiteNumber.nonnegative()]).optional(),
-    rotation: finiteNumber.optional(),
-    scale: z.tuple([finiteNumber, finiteNumber]).optional(),
-  })
-
-const uiNodeSchema = z
-  .strictObject({
-    id: identifier,
-    parentId: identifier.optional(),
-    role: z.enum(BEEGAME_UI_NODE_ROLES),
-    enabled: z.boolean().optional(),
-    name: z.string().trim().min(1).max(512).optional(),
-    text: z.string().optional(),
-    assetRef: identifier.optional(),
-    layout: uiLayoutSchema.optional(),
-    bindings: z.record(z.string(), z.string()).optional(),
-    actions: z.record(z.string(), identifier).optional(),
-    style: z.record(z.string(), z.unknown()).optional(),
-    data: z.record(z.string(), z.unknown()).optional(),
-  })
-
-const vfxNodeSchema = z
-  .strictObject({
-    id: identifier,
-    parentId: identifier.optional(),
-    name: z.string().trim().min(1).max(512).optional(),
-    type: identifier,
-    assetRef: identifier.optional(),
-    data: z.record(z.string(), z.unknown()).optional(),
-  })
-
-const contentHeader = {
-  schema: z.literal(BEEGAME_CONTENT_DOCUMENT_SCHEMA),
-  id: identifier,
-  assetRefs: uniqueIdentifiers,
-} as const
-
-const sceneDocumentBaseSchema = z
-  .strictObject({
-    ...contentHeader,
-    kind: z.string(),
-    data: z
-      .strictObject({
-        nodes: z.array(componentSceneNodeSchema).min(1),
-        cameraNodeId: identifier.optional(),
-        settings: z.record(z.string(), z.unknown()).optional(),
-      }),
-  })
-const scene2dDocumentSchema = sceneDocumentBaseSchema.extend({ kind: z.literal('scene-2d') })
-const scene3dDocumentSchema = sceneDocumentBaseSchema.extend({ kind: z.literal('scene-3d') })
-
-const uiDocumentSchema = z
-  .strictObject({
-    ...contentHeader,
-    kind: z.enum(['ui-screen', 'ui-hud', 'ui-flow']),
-    data: z
-      .strictObject({
-        rootId: identifier,
-        nodes: z.array(uiNodeSchema).min(1),
-      }),
-  })
-
-const vfxDocumentSchema = z
-  .strictObject({
-    ...contentHeader,
-    kind: z.literal('vfx'),
-    data: z
-      .strictObject({
-        nodes: z.array(vfxNodeSchema).min(1),
-      }),
-  })
-
-const contentDocumentSchema = z.discriminatedUnion('kind', [
-  scene2dDocumentSchema,
-  scene3dDocumentSchema,
-  uiDocumentSchema,
-  vfxDocumentSchema,
-])
-
-export type BeeGameContentIndex = z.infer<typeof contentIndexSchema>
-export type BeeGameContentDocument = z.infer<typeof contentDocumentSchema>
-export type BeeGameSceneContentDocument = Extract<
-  BeeGameContentDocument,
-  { kind: 'scene-2d' | 'scene-3d' }
->
+export * from './game-content-schema'
+import { BEEGAME_CONTENT_ROOT, BEEGAME_CONTENT_INDEX, BEEGAME_UI_ASSET_BACKED_ROLES, BEEGAME_SCENE_COMPONENT_TYPES, BEEGAME_SCENE_ASSET_COMPONENT_TYPES, contentIndexSchema, contentDocumentSchema, type BeeGameContentIndex, type BeeGameContentDocument } from './game-content-schema'
 
 export type BeeGameContentAuthority = Readonly<{
   documentRevision: string
@@ -550,7 +281,7 @@ function validateAssetMembers(
       const name = basename(filePath)
       return name.length > 0 && basename(name, extname(name)) === member
     }) ?? false
-    if (!explicitMember && !fileStemMember)
+    if (!explicitMember && !fileStemMember && !resource?.file_paths.includes(member))
       issues.push(
         `${path}: ${[...trail, 'member'].join('.')} does not resolve member ${member} in asset ${assetRef}.`,
       )
@@ -696,6 +427,13 @@ function validateComponentScene(input: {
           `${input.path}: Scene component ${component.type} requires assetRef (${node.id}).`,
         )
       const data = component.data ?? {}
+      if (component.type === 'tilemap') {
+        try {
+          if (input.document.kind !== 'scene-2d') throw Error('Rectangular Tilemap requires a 2D scene')
+          validateTilemapGrid(input.document.data.nodes, node, parseTilemapData(data))
+          if (!node.components?.some(c => c.type === 'tilemap-renderer')) throw Error('Tilemap requires TilemapRenderer')
+        } catch (error) { issue(node.id, component.type, String(error)) }
+      }
       const embeddedReference = findEmbeddedReference(data)
       if (embeddedReference)
         input.issues.push(
@@ -940,6 +678,17 @@ export function auditBeeGameContentPackage(
       authority,
       issues,
     })
+    if (document.kind === 'scene-2d' || document.kind === 'scene-3d') {
+      for (const node of document.data.nodes) for (const component of node.components ?? []) {
+        if (component.type !== 'tilemap' || !component.assetRef) continue
+        try {
+          const map = parseTilemapData(component.data)
+          const tileset = readTileSetResource(workspace, authority.manifest, component.assetRef, map.member)
+          for (const cell of map.cells) if (!Object.hasOwn(tileset.tiles, cell.tileId))
+            throw Error(`Missing tile ${cell.tileId} at [${cell.x},${cell.y}]`)
+        } catch (error) { issues.push(`${path}: Tilemap ${node.id}: ${String(error)}`) }
+      }
+    }
     documents.push(document)
   }
 
@@ -960,16 +709,6 @@ export function auditBeeGameContentPackage(
     issues: [],
     package: Object.freeze({ ...value, digest: digest(value) }),
   }
-}
-
-export function parseBeeGameContentIndex(value: unknown): BeeGameContentIndex {
-  return contentIndexSchema.parse(structuredClone(value))
-}
-
-export function parseBeeGameContentDocument(
-  value: unknown,
-): BeeGameContentDocument {
-  return contentDocumentSchema.parse(structuredClone(value))
 }
 
 /** Load one canonical Scene/UI document for direct editor mutation. */

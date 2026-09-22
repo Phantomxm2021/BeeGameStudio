@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { FileText, ImageOff, LoaderCircle } from 'lucide-react';
+import { FileText } from 'lucide-react';
+import { ChatImage } from './ChatImage';
 import type { ChatAttachment } from '../../../services/chatAttachments';
 import { authenticatedFetch, buildApiUrl } from '../../../services/apiClient';
 
-export function ChatAttachmentView({ attachment }: { attachment: ChatAttachment }) {
+export function ChatAttachmentView({ attachment, lang = 'en' }: { attachment: ChatAttachment; lang?: string }) {
     const [image, setImage] = useState<{ url?: string; error?: boolean }>({});
     const reference = 'storageId' in attachment ? attachment : undefined;
     const source = reference ? buildApiUrl(`/api/projects/${encodeURIComponent(reference.projectId)}/chat-attachments/${encodeURIComponent(reference.storageId)}`) : undefined;
@@ -27,15 +28,12 @@ export function ChatAttachmentView({ attachment }: { attachment: ChatAttachment 
         return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
     }, [source, attachment.type]);
     const url = attachment.data ? `data:${attachment.mediaType};base64,${attachment.data}` : image.url;
-    if (attachment.type === 'image' && url && !image.error) return <img src={url}
-        alt={attachment.filename || 'Image'} loading="lazy" decoding="async"
-        onError={() => setImage({ error: true })}
-        className="max-h-48 max-w-full rounded-lg object-contain" />;
-    const pending = attachment.type === 'image' && Boolean(source) && !image.error;
-    const Icon = pending ? LoaderCircle : attachment.type === 'image' ? ImageOff : FileText;
+    if (attachment.type === 'image') return <ChatImage key={url || source} src={url}
+        alt={attachment.filename || (lang === 'zh' ? '图片' : 'Image')} lang={lang}
+        pending={!url && Boolean(source) && !image.error} error={image.error || (!url && !source)} />;
     return <span className="inline-flex max-w-full items-center gap-2 rounded-lg border border-current/10 px-2 py-1 type-caption-1"
-        aria-busy={pending}>
-        <Icon className={`size-4 shrink-0${pending ? ' animate-spin' : ''}`} aria-hidden="true" />
+        >
+        <FileText className="size-4 shrink-0" aria-hidden="true" />
         <span className="truncate">{attachment.filename || 'Attachment'}</span>
     </span>;
 }

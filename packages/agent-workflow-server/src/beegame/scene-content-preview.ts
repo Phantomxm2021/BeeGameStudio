@@ -5,6 +5,8 @@ import { parseSpriteSheet, spriteSheetSelection } from '../../../scene-editor/sr
 import { affine2d, compose2d, point2d, rectLayout, type Affine2D } from '../../../scene-editor/src/content-coordinates'
 import { readBeeGameAssetManifestSync, type BeeGameProjectResource } from './asset-contracts'
 import { auditBeeGameContentPackage, type BeeGameContentDocument } from './game-content-package'
+import { parseGridData, parseTilemapData } from '../../../scene-editor/src/tilemap-data'
+import { tilemapContentOverlay } from './tilemap-content-preview'
 
 type RecordValue = Record<string, unknown>
 type SceneDocument = Extract<BeeGameContentDocument, { kind: 'scene-2d' }>
@@ -60,32 +62,12 @@ function explicitMember(node: SceneNode): string | undefined {
   return text(data?.member) ?? text(texture?.member) ?? text(idle?.member)
 }
 
-function normalizedTokens(value: string): string[] {
-  return value.toLowerCase().split(/[^a-z0-9]+/u).filter(token => token && !/^\d+$/u.test(token))
-}
-
-function inferredMember(node: SceneNode, resource: BeeGameProjectResource): string | undefined {
-  const explicit = explicitMember(node)
-  if (explicit) return explicit
-  const visualMembers = resource.file_paths
-    .filter(path => /\.(?:png|jpe?g|webp|gif|avif)$/iu.test(path))
-    .map(path => stem(path))
-  if (visualMembers.includes(node.id)) return node.id
-  const nodeTokens = normalizedTokens(node.id).filter(token => !['bg', 'deco', 'post'].includes(token))
-  let best: { member: string; score: number } | undefined
-  for (const member of visualMembers) {
-    const memberTokens = normalizedTokens(member).filter(token => !['sp', 'prop', 'ui', 'fx'].includes(token))
-    const score = nodeTokens.filter(token => memberTokens.includes(token)).length
-    if (score > 0 && (!best || score > best.score)) best = { member, score }
-  }
-  return best?.member
-}
-
 function resourcePath(resource: BeeGameProjectResource, member?: string): string | undefined {
   if (!member) return resource.root_path
-  return resource.file_paths.find(path =>
-    stem(path) === member && /\.(?:png|jpe?g|webp|gif|avif)$/iu.test(path),
-  )
+  if (resource.file_paths.includes(member)) return member
+  const matches = resource.file_paths.filter(path => stem(path) === member && /\.(?:png|jpe?g|webp|gif|avif)$/iu.test(path))
+  if (matches.length !== 1) throw Error(`Missing or ambiguous resource member: ${resource.id}/${member}`)
+  return matches[0]
 }
 
 function nodeSize(node: SceneNode, nodes: Map<string, SceneNode>): { width: number; height: number } {
@@ -175,6 +157,12 @@ function visibleInDefaultState(node: SceneNode): boolean {
   return !condition || condition === 'state != caught' || condition.endsWith('.notCollected')
 }
 
+function visibleInHierarchy(node: SceneNode, nodes: Map<string, SceneNode>): boolean {
+  if (!visibleInDefaultState(node)) return false
+  const parent = node.parentId ? nodes.get(node.parentId) : undefined
+  return !parent || visibleInHierarchy(parent, nodes)
+}
+
 function canvasSize(scene: SceneDocument): { width: number; height: number } {
   const coordinates = record(scene.data.settings?.coordinateSystem)
   const camera = scene.data.cameraNodeId
@@ -205,7 +193,9 @@ export async function firstSpriteFrame(input: {
   bytes: Buffer
   node: SceneNode
 }): Promise<Buffer> {
-  const tablePath = input.resource.file_paths.find(path => stem(path) === input.member && extname(path).toLowerCase() === '.json')
+  const imagePath = input.resource.file_paths.includes(input.member) ? input.member
+    : input.resource.file_paths.find(path => stem(path) === input.member && /\.(png|webp|jpe?g|gif|avif)$/i.test(path))
+  const tablePath = imagePath && input.resource.file_paths.find(path => path === imagePath.replace(/\.[^.]+$/, '.json'))
   try {
     const data = visualData(input.node) ?? {}
     const table = tablePath ? parseSpriteSheet(JSON.parse(await readFile(resolve(input.workspacePath, tablePath), 'utf8'))) : undefined
@@ -314,10 +304,29 @@ export async function renderSceneContentPreviews(workspacePath: string): Promise
     const ordered = [...document.data.nodes].sort((left, right) => {
       const leftLayer = left.layer ? layers.get(left.layer) ?? 0 : 0
       const rightLayer = right.layer ? layers.get(right.layer) ?? 0 : 0
-      return leftLayer - rightLayer || (left.zIndex ?? 0) - (right.zIndex ?? 0)
+      const leftOrder = number(visualData(left)?.sortingOrder, left.zIndex ?? 0)
+      const rightOrder = number(visualData(right)?.sortingOrder, right.zIndex ?? 0)
+      return leftLayer - rightLayer || leftOrder - rightOrder
     })
     for (const node of ordered) {
-      if (!visibleInDefaultState(node)) continue
+      if (!visibleInHierarchy(node, nodes)) continue
+      const tilemap = component(node, 'tilemap')
+      if (tilemap) {
+        const renderer = component(node, 'tilemap-renderer')
+        if (tilemap.data?.enabled === false || renderer?.data?.enabled === false) continue
+        try {
+          const map = parseTilemapData(tilemap.data)
+          const gridNode = nodes.get(map.gridNodeId)
+          const grid = gridNode && component(gridNode, 'grid')
+          if (grid?.data?.enabled === false) continue
+          const overlay = await tilemapContentOverlay({
+            workspacePath, manifest, assetRef: tilemap.assetRef!, map,
+            grid: parseGridData(grid?.data), pose: worldPose(node, nodes, poseCache), canvas: size,
+          })
+          if (overlay) composites.push(overlay)
+        } catch (error) { failed(node.id, error) }
+        continue
+      }
       const pose = worldPose(node, nodes, poseCache)
       const visual = visualComponent(node)
       const particle = particleData(node)
@@ -387,7 +396,7 @@ export async function renderSceneContentPreviews(workspacePath: string): Promise
       if (!resourceId) continue
       const resource = resources.get(resourceId)
       if (!resource || resource.status !== 'verified') continue
-      const member = inferredMember(node, resource)
+      const member = explicitMember(node)
       const path = resourcePath(resource, member)
       if (!path || !/\.(?:png|jpe?g|webp|gif|avif)$/iu.test(path)) continue
       try {

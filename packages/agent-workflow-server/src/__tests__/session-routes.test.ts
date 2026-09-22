@@ -54,6 +54,75 @@ const originalKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
 const originalDataDir = process.env.AGENT_WORKFLOW_DATA_DIR
 const temporaryDirectories: string[] = []
 
+it('project chat forwards one raw request, preserves context, and continue does not dispatch delivery', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-project-chat-route-')))
+  temporaryDirectories.push(root)
+  const ownerId = 'conversation-owner'
+  const projectId = 'conversation-project'
+  const projectsRoot = join(root, 'projects')
+  const workspace = join(projectsRoot, 'users', ownerId, projectId)
+  await mkdir(workspace, { recursive: true })
+  const prompts: unknown[] = []
+  let starts = 0
+  let release: (() => void) | undefined
+  const cleanups: Array<() => void> = []
+  const app = createAgentWorkflowApp({
+    currentUser: { id: ownerId, role: 'owner' }, dashboardDataRoot: join(root, 'dashboard'),
+    defaultWorkspacePath: projectsRoot, modelConfigStore: false, skillsConfig: false,
+    registerCleanup: cleanup => cleanups.push(cleanup),
+    sessionRunner: { start: async input => {
+      starts++
+      expect(input.workflowWorker).toBeUndefined()
+      expect(input.cwd).toBe(workspace)
+      return { stop() { release?.() }, submit: async turn => {
+        prompts.push(turn.prompt)
+        await new Promise<void>(resolve => { release = resolve; turn.signal.addEventListener('abort', () => resolve(), { once: true }) })
+        await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
+      } }
+    } },
+  })
+  const post = (url: string, body: unknown) => app.request(url, { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  try {
+    expect((await post('/api/projects', { id: projectId, name: 'Conversation test', root_path: workspace, created_at: Date.now() })).status).toBe(200)
+    expect((await post('/api/model-configs', { name: 'Mock runtime', provider: 'openai-compatible', apiKey: 'fake', models: { balanced: 'fake' }, isDefault: true })).status).toBe(200)
+    const ensured = await post(`/api/projects/${projectId}/session/ensure`, { language: 'zh' })
+    expect(ensured.status).toBe(200)
+    const { session } = await ensured.json() as { session: { id: string } }
+    // A stopped delivery must not make a native follow-up appear stopped.
+    const store = createRunStore(workspace, ownerId)
+    const run = { ...createTestDeliveryRun({ ownerId, projectId }), phase: 'IMPLEMENTATION' as const, status: 'stopped' as const }
+    await store.commit(run, { runId: run.runId, type: 'run.stopped', phase: run.phase, status: run.status, revision: run.revision })
+    const before = await readFile(store.paths.snapshot, 'utf8')
+    const sent = await post(`/api/beegame-sessions/${session.id}/input`, { text: '按钮没字，请修复', clientMessageId: 'request-one', language: 'zh' })
+    expect({ httpStatus: sent.status, ...(await sent.json() as object) }).toMatchObject({ httpStatus: 202, status: 'running', turnStatus: 'running' })
+    for (let i = 0; i < 200 && prompts.length === 0; i++) await Bun.sleep(5)
+    if (!prompts.length) {
+      const transcript = await (await app.request(`/api/beegame-sessions/${session.id}/transcript`)).json() as Array<{ type: string; text: string }>
+      expect(transcript.filter(e => e.type === 'turn.failed').map(e => e.text)).toEqual([])
+    }
+    expect(prompts).toEqual(['按钮没字，请修复'])
+    const state = await (await app.request(`/api/projects/${projectId}/runtime-state`)).json() as Record<string, unknown>
+    expect(state.phase).toBe('running')
+    expect(state.blocked).toBe(false)
+    // Transport retries are keyed by request ID, never by matching text.
+    expect((await post(`/api/beegame-sessions/${session.id}/input`, { text: '按钮没字，请修复', clientMessageId: 'request-one', language: 'zh' })).status).toBe(202)
+    expect(prompts).toHaveLength(1)
+    release?.()
+    for (let i = 0; i < 200; i++) {
+      const current = await (await app.request(`/api/beegame-sessions/${session.id}`)).json() as { turnStatus: string }
+      if (current.turnStatus === 'idle') break
+      await Bun.sleep(5)
+    }
+    expect((await post(`/api/beegame-sessions/${session.id}/continue`, { language: 'zh' })).status).toBe(202)
+    for (let i = 0; i < 200 && prompts.length < 2; i++) await Bun.sleep(5)
+    expect(prompts).toEqual(['按钮没字，请修复', '继续任务'])
+    expect(starts).toBe(1)
+    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(before)
+    release?.()
+  } finally { release?.(); for (const cleanup of cleanups) await cleanup() }
+})
+
 function completeTestFoundationDocument(
   path: (typeof CANONICAL_FOUNDATION_DOCUMENTS)[number],
 ): string {

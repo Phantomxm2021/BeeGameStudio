@@ -21,6 +21,7 @@ export type FoundationReviewerHostOptions = {
   workspacePath: string
   dataDir: string
   modelConfigId?: string
+  language?: string
   /** Static command for offline hosts. Mutually exclusive with getCommand. */
   command?: readonly string[]
   /** Lazy command resolver for hosts whose native runtime is not boot-ready. */
@@ -56,6 +57,7 @@ export function createFoundationReviewerHost(
   const boundWorkspacePath = options.workspacePath
   const boundDataDir = options.dataDir
   const boundModelConfigId = options.modelConfigId
+  const boundLanguage = options.language
   const boundCommand = options.command ? [...options.command] : undefined
   const boundGetCommand = options.getCommand
   const boundGetCredential = options.getCredential
@@ -100,7 +102,7 @@ export function createFoundationReviewerHost(
         })
         const workspacePath = await realpath(boundWorkspacePath)
         return createFoundationReviewer(
-          { workspacePath },
+          { workspacePath, ...(boundLanguage ? { language: boundLanguage } : {}) },
           { runtimeConfiguration, billing },
         )
       })
@@ -127,6 +129,7 @@ const HOST_OPTION_KEYS = new Set([
   'workspacePath',
   'dataDir',
   'modelConfigId',
+  'language',
   'command',
   'getCommand',
   'getCredential',
@@ -148,6 +151,7 @@ function assertHostOptions(value: FoundationReviewerHostOptions): void {
   assertNonEmpty(value.workspacePath, 'workspacePath')
   assertNonEmpty(value.dataDir, 'dataDir')
   if (value.modelConfigId !== undefined) assertNonEmpty(value.modelConfigId, 'modelConfigId')
+  if (value.language !== undefined) assertNonEmpty(value.language, 'language')
   if (typeof value.getCredential !== 'function') {
     throw new TypeError('foundation reviewer host credential getter is required')
   }

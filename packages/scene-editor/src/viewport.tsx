@@ -9,6 +9,9 @@ import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
 import type { ModelSelection } from './model-structure'
 import { componentOf, DEFAULT_SCENE_SETTINGS } from './model'
 import { colliderOutline } from './collider-outline'
+import { TilemapPreview } from './tilemap-preview'
+import type { TileBrush } from './tilemap-brush'
+import { acquireTextureSource } from './texture-cache'
 import { editorRect, rectTransform } from './rect-transform'
 import { LightGizmo, lightConePoints } from './light-gizmo'
 import { isApplePlatform, resolveUnityNavigationAction, wheelPixels } from './navigation'
@@ -18,6 +21,7 @@ import type { Collider2DComponent, Collider3DComponent, LightKind, MaterialOverr
 export type SceneViewportMode = 'select' | 'translate' | 'rotate' | 'scale' | 'hand'
 export type SceneViewMode = '2d' | '3d'
 export type SceneViewportProps = {
+  tileBrush?: TileBrush
   document: SceneDocument
   initialView?: { position: [number, number, number]; target: [number, number, number]; showGizmos?: boolean }
   selected: string
@@ -347,24 +351,30 @@ export function applyTextureRegion(
 }
 
 function useLocalTexture(uri: string | undefined, region?: MaterialOverride['textureRegion'], onDiagnostic?: (message: string) => void) {
-  const [texture, setTexture] = useState<THREE.Texture | null>(null)
+  const [source, setSource] = useState<{ uri: string; texture: THREE.Texture } | null>(null)
+  const diagnostic = useRef(onDiagnostic)
+  diagnostic.current = onDiagnostic
   useEffect(() => {
     let alive = true
-    let loaded: THREE.Texture | null = null
-    setTexture(null)
+    setSource(null)
     if (!uri) return () => { alive = false }
-    const loader = new THREE.TextureLoader()
-    loader.load(uri, next => {
-      if (!alive) { next.dispose(); return }
-      loaded = next
-      next.colorSpace = THREE.SRGBColorSpace
-      if (region && !applyTextureRegion(next, region)) {
-        onDiagnostic?.('Texture region falls outside the decoded image')
-      }
-      setTexture(next)
-    }, undefined, () => onDiagnostic?.('Local texture asset could not be decoded'))
-    return () => { alive = false; loaded?.dispose() }
-  }, [uri, region?.x, region?.y, region?.width, region?.height, onDiagnostic])
+    const shared = acquireTextureSource(uri)
+    void shared.texture.then(texture => {
+      if (alive) setSource({ uri, texture })
+    }, () => { if (alive) diagnostic.current?.('Local texture asset could not be decoded') })
+    return () => { alive = false; shared.release() }
+  }, [uri])
+  const texture = useMemo(() => {
+    if (!source || source.uri !== uri) return null
+    const next = source.texture.clone()
+    if (region) applyTextureRegion(next, region)
+    return next
+  }, [source, uri, region?.x, region?.y, region?.width, region?.height])
+  useEffect(() => {
+    if (texture && region && !applyTextureRegion(texture, region))
+      diagnostic.current?.('Texture region falls outside the decoded image')
+    return () => { texture?.dispose() }
+  }, [texture])
   return texture
 }
 
@@ -414,7 +424,7 @@ function preview2d(node: SceneNode): Preview2D | undefined {
 }
 
 export function rendererSize(node: SceneNode, pixelsPerUnit = 100): [number, number] {
-  const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image') ?? componentOf(node, 'tilemap')
+  const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image')
   const properties = renderer && 'properties' in renderer ? renderer.properties : undefined
   const value = properties?.size
   const sprite = properties?.sprite
@@ -435,7 +445,7 @@ export function rendererSize(node: SceneNode, pixelsPerUnit = 100): [number, num
 export function rendererOffset(node: SceneNode, size: readonly number[]): [number, number, number] {
   const rect = componentOf(node, 'rect-transform')
   if (rect) return [(.5-rect.pivot[0])*size[0], (.5-rect.pivot[1])*size[1], 0]
-  const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image') ?? componentOf(node, 'tilemap')
+  const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image')
   const anchor = renderer?.properties.anchor
   const value = Array.isArray(anchor) ? anchor : anchor && typeof anchor === 'object' ? [(anchor as {x?: number}).x, (anchor as {y?: number}).y] : [.5, .5]
   const x = typeof value[0] === 'number' ? value[0] : .5, y = typeof value[1] === 'number' ? value[1] : .5
@@ -496,15 +506,42 @@ export function rendererOrder(node: SceneNode): number {
   return typeof order === 'number' && Number.isFinite(order) ? order : 0
 }
 
-function Primitive({ node, assets, diagnose, pixelsPerUnit, rectSize, flat2d }: { pixelsPerUnit: number; node: SceneNode; assets: Record<string, SceneAsset>; diagnose: (message: string) => void; rectSize?: [number, number]; flat2d?: boolean }) {
-  const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image')
-  const tilemap = componentOf(node, 'tilemap')
-  const tilemapRenderer = componentOf(node, 'tilemap-renderer')
-  const materialData = renderer?.material
-    ?? (tilemapRenderer && tilemap ? { ...tilemapRenderer.material, textureAssetId: tilemap.assetId } : undefined)
-  const texture = useLocalTexture(localAssetUri(materialData?.textureAssetId ? assets[materialData.textureAssetId] : undefined), materialData?.textureRegion, diagnose)
-  const sprite = preview2d(node)?.sprite
+function NodeAnimation({ group, node, nodes, preview, pixelsPerUnit, paused }: {
+  group: React.RefObject<THREE.Group | null>; node: SceneNode; nodes: SceneDocument['nodes'];
+  preview: Preview2D; pixelsPerUnit: number; paused: boolean
+}) {
+  const position = useMemo(() => rectTransform(node, nodes).position, [node, nodes])
+  useFrame(({ clock }) => {
+    const object = group.current
+    if (!object || paused) return
+    const time = clock.elapsedTime
+    object.position.set(...position)
+    object.scale.set(...node.transform.scale)
+    const patrol = preview.patrol ? patrolPosition(preview.patrol, time, pixelsPerUnit) : undefined
+    if (patrol) { object.position.x = patrol.x; object.position.y = patrol.y }
+    const motion = preview.motion
+    if (motion?.kind === 'vertical-bob') object.position.y += Math.sin(time * Math.PI * 2 / Math.max(.1, typeof motion.periodSecs === 'number' ? motion.periodSecs : 2.4)) * (motion.amplitudePx ?? 0) / pixelsPerUnit
+    else if (motion?.kind === 'horizontal-drift') object.position.x += Math.sin(time * Math.PI / 8) * Math.max(.02, (motion.speedPxPerSec ?? 0) / pixelsPerUnit)
+    const animation = preview.animation
+    if (animation?.kind === 'breathe' || animation?.kind === 'pulse') {
+      const wave = (Math.sin(time * Math.PI * 2 / Math.max(.1, animation.periodSecs ?? 2.4)) + 1) / 2
+      const scale = (animation.scaleMin ?? 1) + ((animation.scaleMax ?? 1) - (animation.scaleMin ?? 1)) * wave
+      object.scale.set(node.transform.scale[0] * scale, node.transform.scale[1] * scale, node.transform.scale[2])
+      const baseOpacity = componentOf(node, 'sprite-renderer')?.material.opacity ?? 1
+      const opacity = (animation.alphaMin ?? baseOpacity) + ((animation.alphaMax ?? baseOpacity) - (animation.alphaMin ?? baseOpacity)) * wave
+      object.traverse(child => {
+        const mesh = child as THREE.Mesh
+        const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []
+        for (const material of materials) if ('opacity' in material) { material.opacity = opacity; material.transparent = opacity < 1 }
+      })
+    }
+  })
+  return null
+}
+
+function SpriteAnimation({ texture, sprite }: { texture: THREE.Texture; sprite: NonNullable<Preview2D['sprite']> }) {
   const frame = useRef(-1)
+  useEffect(() => { frame.current = -1 }, [texture, sprite.frameWidth, sprite.frameHeight, sprite.framesPerFacing, sprite.initialFacing, sprite.facings?.join('|')])
   useFrame(({ clock }) => {
     if (!texture || !sprite?.frameWidth || !sprite.frameHeight) return
     const nextFrame = spriteFrameAt(sprite, clock.elapsedTime * 1000)
@@ -518,8 +555,17 @@ function Primitive({ node, assets, diagnose, pixelsPerUnit, rectSize, flat2d }: 
     if (x + sprite.frameWidth > imageWidth || sprite.frameHeight > imageHeight) return
     texture.repeat.set(sprite.frameWidth / imageWidth, sprite.frameHeight / imageHeight)
     texture.offset.set(x / imageWidth, 1 - sprite.frameHeight / imageHeight)
-    texture.needsUpdate = true
+    // Offset/repeat update the UV matrix; pixels did not change. Marking the
+    // texture dirty here would upload the same atlas again on every frame.
   })
+  return null
+}
+
+function Primitive({ node, assets, diagnose, pixelsPerUnit, rectSize, flat2d }: { pixelsPerUnit: number; node: SceneNode; assets: Record<string, SceneAsset>; diagnose: (message: string) => void; rectSize?: [number, number]; flat2d?: boolean }) {
+  const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image')
+  const materialData = renderer?.material
+  const texture = useLocalTexture(localAssetUri(materialData?.textureAssetId ? assets[materialData.textureAssetId] : undefined), materialData?.textureRegion, diagnose)
+  const sprite = preview2d(node)?.sprite
   const props = materialProps(materialData, texture)
   if (flat2d) { props.transparent = true; props.depthWrite = false }
   const blending = preview2d(node)?.blend === 'additive' ? THREE.AdditiveBlending : THREE.NormalBlending
@@ -528,9 +574,9 @@ function Primitive({ node, assets, diagnose, pixelsPerUnit, rectSize, flat2d }: 
   // texture identity changes so image-backed 2D planes stop rendering white.
   const materialKey = texture?.uuid ?? 'no-texture'
   const material = materialData?.mode === 'standard' ? <meshStandardMaterial key={materialKey} {...props} blending={blending} metalness={materialData.metalness} roughness={materialData.roughness} /> : <meshBasicMaterial key={materialKey} {...props} blending={blending} />
-  if (!(componentVisibleInEditor(renderer) || (componentVisibleInEditor(tilemap) && componentVisibleInEditor(tilemapRenderer)))) return null
+  if (!componentVisibleInEditor(renderer)) return null
   const size = rectSize ?? rendererSize(node, pixelsPerUnit)
-  return <mesh castShadow receiveShadow renderOrder={flat2d ? rendererOrder(node) : 0} position={rendererOffset(node, size)} scale={[...size, 1]}><planeGeometry args={[1, 1]} />{material}</mesh>
+  return <mesh castShadow receiveShadow renderOrder={flat2d ? rendererOrder(node) : 0} position={rendererOffset(node, size)} scale={[...size, 1]}><planeGeometry args={[1, 1]} />{material}{texture && sprite?.frameWidth && sprite.frameHeight ? <SpriteAnimation key={texture.uuid} texture={texture} sprite={sprite} /> : null}</mesh>
 }
 
 function TextPreview({ node, rectSize }: { node: SceneNode; rectSize?: [number, number] }) {
@@ -767,7 +813,7 @@ function SelectionOutline({ selectedIds, modelSelection, color, width }: { selec
   return null
 }
 
-function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableIds, onSelect, mode, space, snap, onTransform, orbit, diagnose, showGizmos, viewMode }: { id: string; document: SceneDocument; selected: string; selectedIds: readonly string[]; hiddenIds: readonly string[]; unpickableIds: readonly string[]; onSelect: (id: string, modifiers?: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => void; mode: SceneViewportMode; space: 'local' | 'world'; snap: boolean; onTransform: (transform: Transform) => void; orbit: MutableRefObject<any>; diagnose: (message: string) => void; showGizmos: boolean; viewMode: SceneViewMode }) {
+function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableIds, onSelect, mode, space, snap, onTransform, orbit, diagnose, showGizmos, viewMode, tileBrush }: { id: string; document: SceneDocument; selected: string; selectedIds: readonly string[]; hiddenIds: readonly string[]; unpickableIds: readonly string[]; onSelect: (id: string, modifiers?: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => void; mode: SceneViewportMode; space: 'local' | 'world'; snap: boolean; onTransform: (transform: Transform) => void; orbit: MutableRefObject<any>; diagnose: (message: string) => void; showGizmos: boolean; viewMode: SceneViewMode; tileBrush?: TileBrush }) {
   const pixelsPerUnit = document.pixelsPerUnit ?? 100
   const node = document.nodes[id]
   const group = useRef<THREE.Group>(null)
@@ -776,31 +822,6 @@ function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableId
   const start = useRef<Transform | null>(null)
   const [dragging, setDragging] = useState(false)
   const preview = node ? preview2d(node) : undefined
-  useFrame(({ clock }) => {
-    const object = group.current
-    if (!object || !node || dragging || selectedIds.includes(node.id)) return
-    const time = clock.elapsedTime
-    object.position.set(...rectTransform(node, document.nodes).position)
-    object.scale.set(...node.transform.scale)
-    const patrol = preview?.patrol ? patrolPosition(preview.patrol, time, pixelsPerUnit) : undefined
-    if (patrol) { object.position.x = patrol.x; object.position.y = patrol.y }
-    const motion = preview?.motion
-    if (motion?.kind === 'vertical-bob') object.position.y += Math.sin(time * Math.PI * 2 / Math.max(.1, typeof motion.periodSecs === 'number' ? motion.periodSecs : 2.4)) * (motion.amplitudePx ?? 0) / pixelsPerUnit
-    else if (motion?.kind === 'horizontal-drift') object.position.x += Math.sin(time * Math.PI / 8) * Math.max(.02, (motion.speedPxPerSec ?? 0) / pixelsPerUnit)
-    const animation = preview?.animation
-    if (animation?.kind === 'breathe' || animation?.kind === 'pulse') {
-      const wave = (Math.sin(time * Math.PI * 2 / Math.max(.1, animation.periodSecs ?? 2.4)) + 1) / 2
-      const scale = (animation.scaleMin ?? 1) + ((animation.scaleMax ?? 1) - (animation.scaleMin ?? 1)) * wave
-      object.scale.set(node.transform.scale[0] * scale, node.transform.scale[1] * scale, node.transform.scale[2])
-      const baseOpacity = componentOf(node, 'sprite-renderer')?.material.opacity ?? 1
-      const opacity = (animation.alphaMin ?? baseOpacity) + ((animation.alphaMax ?? baseOpacity) - (animation.alphaMin ?? baseOpacity)) * wave
-      object.traverse(child => {
-        const mesh = child as THREE.Mesh
-        const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []
-        for (const material of materials) if ('opacity' in material) { material.opacity = opacity; material.transparent = opacity < 1 }
-      })
-    }
-  })
   useEffect(() => {
     if (!dragging) return
     const cancel = () => { if (group.current && start.current && node) { group.current.position.set(...rectTransform(node, document.nodes, start.current).position); group.current.rotation.set(...start.current.rotation); group.current.scale.set(...start.current.scale) }; start.current = null; if (controls.current) { controls.current.dragging = false; controls.current.axis = null }; setDragging(false); orbit.current && (orbit.current.enabled = true) }
@@ -820,8 +841,10 @@ function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableId
     start.current = null; setDragging(false); if (orbit.current) orbit.current.enabled = true
   }
   const rectSize = editorRect(node, document.nodes)?.size
-  return <><group ref={group} name={node.id} position={rectTransform(node, document.nodes).position} rotation={node.transform.rotation as any} scale={node.transform.scale} onClick={event => { event.stopPropagation(); if (!unpickableIds.includes(node.id) && mode !== 'hand' && !event.altKey) onSelect(node.id, { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey }) }}>
-    {componentOf(node, 'sprite-renderer') || componentOf(node, 'image') || componentOf(node, 'tilemap') ? <Primitive node={node} flat2d={document.dimension === '2d'} rectSize={rectSize} pixelsPerUnit={pixelsPerUnit} assets={document.assets} diagnose={diagnose} /> : null}
+  return <><group ref={group} name={node.id} position={rectTransform(node, document.nodes).position} rotation={node.transform.rotation as any} scale={node.transform.scale} onClick={event => { event.stopPropagation(); if (!tileBrush && !unpickableIds.includes(node.id) && mode !== 'hand' && !event.altKey) onSelect(node.id, { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey }) }}>
+    {preview && (preview.motion || preview.patrol || preview.animation) ? <NodeAnimation group={group} node={node} nodes={document.nodes} preview={preview} pixelsPerUnit={pixelsPerUnit} paused={dragging || isSelected} /> : null}
+    {componentOf(node, 'sprite-renderer') || componentOf(node, 'image') ? <Primitive node={node} flat2d={document.dimension === '2d'} rectSize={rectSize} pixelsPerUnit={pixelsPerUnit} assets={document.assets} diagnose={diagnose} /> : null}
+    {componentOf(node, 'tilemap') ? <TilemapPreview node={node} document={document} diagnose={diagnose} showGizmos={showGizmos} brush={tileBrush?.nodeId===node.id && !node.locked && node.editable!==false && !unpickableIds.includes(node.id) ? tileBrush : undefined} /> : null}
     {componentOf(node, 'text') ? <TextPreview node={node} rectSize={rectSize} /> : null}
     {componentOf(node, 'mesh-filter') && componentOf(node, 'mesh-renderer') ? <ModelAsset asset={document.assets[componentOf(node, 'mesh-filter')!.assetId]} override={componentOf(node, 'mesh-renderer')!.material} assets={document.assets} diagnose={diagnose} /> : null}
     {componentOf(node, 'skinned-mesh-renderer') ? <ModelAsset asset={document.assets[componentOf(node, 'skinned-mesh-renderer')!.assetId]} override={componentOf(node, 'skinned-mesh-renderer')!.material} assets={document.assets} diagnose={diagnose} /> : null}
@@ -830,7 +853,7 @@ function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableId
     {showGizmos && (viewMode === '3d' || isSelected) ? node.components.filter((component): component is Collider2DComponent => ['box-collider-2d', 'circle-collider-2d', 'capsule-collider-2d', 'polygon-collider-2d'].includes(component.type) && component.enabled).map(component => <Volume2D key={component.id} volume={component} />) : null}
     {showGizmos && (viewMode === '3d' || isSelected) ? node.components.filter((component): component is Collider3DComponent => ['box-collider', 'sphere-collider', 'capsule-collider', 'mesh-collider'].includes(component.type) && component.enabled).map(component => <Volume3D key={component.id} volume={component} />) : null}
     {viewMode === '3d' && !node.components.some(component => ['sprite-renderer', 'image', 'tilemap-renderer', 'mesh-renderer', 'skinned-mesh-renderer', 'particle-system', 'light-2d', 'light'].includes(component.type)) && showGizmos ? <axesHelper args={[.35]} /> : null}
-    {node.children.map(child => <NodeView key={child} id={child} document={document} selected={selected} selectedIds={selectedIds} hiddenIds={hiddenIds} unpickableIds={unpickableIds} onSelect={onSelect} mode={mode} space={space} snap={snap} onTransform={onTransform} orbit={orbit} diagnose={diagnose} showGizmos={showGizmos} viewMode={viewMode} />)}
+    {node.children.map(child => <NodeView key={child} id={child} document={document} selected={selected} selectedIds={selectedIds} hiddenIds={hiddenIds} unpickableIds={unpickableIds} onSelect={onSelect} mode={mode} space={space} snap={snap} onTransform={onTransform} orbit={orbit} diagnose={diagnose} showGizmos={showGizmos} viewMode={viewMode} tileBrush={tileBrush} />)}
   </group>{showGizmos && isSelected && selected === node.id && !node.locked && node.editable !== false && mode !== 'select' && mode !== 'hand' ? createPortal(<TransformControls ref={controls} object={group as MutableRefObject<THREE.Group>} mode={mode} space={space} size={viewMode === '2d' ? 1.35 : 1} showX={viewMode === '3d' || mode !== 'rotate'} showY={viewMode === '3d' || mode !== 'rotate'} showZ={viewMode === '3d' || mode === 'rotate'} translationSnap={snap ? .25 : undefined} rotationSnap={snap ? Math.PI / 12 : undefined} scaleSnap={snap ? .25 : undefined} onMouseDown={() => { start.current = structuredClone(node.transform); setDragging(true); if (orbit.current) orbit.current.enabled = false }} onMouseUp={finish} />, scene) : null}</>
 }
 
@@ -903,7 +926,7 @@ function Light({ node, selected, gizmoColor, showIcon, dimension }: { node: Scen
   </group>
 }
 
-function SceneContents({ document, selected, selectedIds = [selected], modelSelection, hiddenIds = [], unpickableIds = [], onSelect, mode, space, snap, focus, onTransform, onDiagnostic, initialView, showGizmos = true, viewMode }: SceneViewportProps) {
+function SceneContents({ document, selected, selectedIds = [selected], modelSelection, hiddenIds = [], unpickableIds = [], onSelect, mode, space, snap, focus, onTransform, onDiagnostic, initialView, showGizmos = true, viewMode, tileBrush }: SceneViewportProps) {
   const settings = document.settings ?? DEFAULT_SCENE_SETTINGS
   const { gl } = useThree()
   useEffect(() => { gl.toneMappingExposure = settings.exposure }, [gl, settings.exposure])
@@ -912,7 +935,7 @@ function SceneContents({ document, selected, selectedIds = [selected], modelSele
   const diagnosticCallback = useRef(onDiagnostic)
   diagnosticCallback.current = onDiagnostic
   const diagnose = useMemo(() => reportOnce(message => diagnosticCallback.current?.(message)), [])
-  return <><color attach="background" args={[settings.background]} /><ambientLight color={settings.ambientColor} intensity={settings.ambientIntensity} />{settings.fogEnabled && <fog attach="fog" args={[settings.fogColor, settings.fogNear, settings.fogFar]} />}{settings.showGrid && <Grid position={viewMode === '2d' ? [0, 0, 2] : undefined} rotation={viewMode === '2d' ? [Math.PI / 2, 0, 0] : undefined} userData={{ editorHelper: true }} args={[40, 40]} cellSize={1} sectionSize={5} sectionColor="#747980" cellColor="#555a61" fadeDistance={35} infiniteGrid />}<NavigationController orbit={orbit} handMode={mode === 'hand'} viewMode={viewMode} onTemporarySnap={setTemporarySnap} /><OrbitControls ref={orbit} target={initialView?.target} makeDefault enableRotate={false} enableDamping={false} enablePan={false} enableZoom={false} mouseButtons={{ LEFT: -1 as any, MIDDLE: -1 as any, RIGHT: -1 as any }} /><CameraRig document={document} selected={selected} modelSelection={modelSelection} focus={focus} orbit={orbit} /><SelectionOutline selectedIds={selectedIds} modelSelection={modelSelection} color={settings.selectionColor ?? '#ffad46'} width={settings.selectionWidth ?? 3} />{showGizmos && <GizmoHelper renderPriority={2} alignment="bottom-center" margin={[0, 136]}><GizmoViewport axisColors={['#d87178', '#66a58b', '#6e8ec7']} labelColor="white" /></GizmoHelper>}{document.rootIds.map(id => <NodeView key={id} id={id} document={document} selected={selected} selectedIds={selectedIds} hiddenIds={hiddenIds} unpickableIds={unpickableIds} onSelect={onSelect} mode={modelSelection ? 'select' : mode} space={space} snap={snap || temporarySnap} onTransform={onTransform} orbit={orbit} diagnose={diagnose} showGizmos={showGizmos} viewMode={viewMode} />)}</>
+  return <><color attach="background" args={[settings.background]} /><ambientLight color={settings.ambientColor} intensity={settings.ambientIntensity} />{settings.fogEnabled && <fog attach="fog" args={[settings.fogColor, settings.fogNear, settings.fogFar]} />}{settings.showGrid && <Grid position={viewMode === '2d' ? [0, 0, 2] : undefined} rotation={viewMode === '2d' ? [Math.PI / 2, 0, 0] : undefined} userData={{ editorHelper: true }} args={[40, 40]} cellSize={1} sectionSize={5} sectionColor="#747980" cellColor="#555a61" fadeDistance={35} infiniteGrid />}<NavigationController orbit={orbit} handMode={mode === 'hand'} viewMode={viewMode} onTemporarySnap={setTemporarySnap} /><OrbitControls ref={orbit} target={initialView?.target} makeDefault enableRotate={false} enableDamping={false} enablePan={false} enableZoom={false} mouseButtons={{ LEFT: -1 as any, MIDDLE: -1 as any, RIGHT: -1 as any }} /><CameraRig document={document} selected={selected} modelSelection={modelSelection} focus={focus} orbit={orbit} /><SelectionOutline selectedIds={selectedIds} modelSelection={modelSelection} color={settings.selectionColor ?? '#ffad46'} width={settings.selectionWidth ?? 3} />{showGizmos && <GizmoHelper renderPriority={2} alignment="bottom-center" margin={[0, 136]}><GizmoViewport axisColors={['#d87178', '#66a58b', '#6e8ec7']} labelColor="white" /></GizmoHelper>}{document.rootIds.map(id => <NodeView key={id} id={id} document={document} selected={selected} selectedIds={selectedIds} hiddenIds={hiddenIds} unpickableIds={unpickableIds} onSelect={onSelect} mode={modelSelection ? 'select' : mode} space={space} snap={snap || temporarySnap} onTransform={onTransform} orbit={orbit} diagnose={diagnose} showGizmos={showGizmos} viewMode={viewMode} tileBrush={tileBrush} />)}</>
 }
 
 /** Self-contained R3F viewport used by the independent scene editor. */
@@ -923,7 +946,7 @@ export function SceneViewport(props: SceneViewportProps) {
   const camera = effectiveOrtho
     ? { position: position ?? (props.viewMode === '2d' ? [0, 0, 10] as const : [7, 6, 7] as const), zoom: 65 }
     : { position: position ?? [7, 5, 7] as [number, number, number], fov: 45 }
-  return <Canvas shadows events={viewportEvents} key={`${props.viewMode}-${effectiveOrtho ? 'orthographic' : 'perspective'}-${props.document.dimension}`} orthographic={effectiveOrtho} camera={camera} onPointerMissed={event => props.onSelect('', { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey })} onCreated={({ gl }) => { gl.setClearColor('#3c3f43'); gl.domElement.tabIndex = 0; gl.domElement.setAttribute('aria-label', 'Scene viewport') }}><SceneContents {...props} /></Canvas>
+  return <Canvas shadows events={viewportEvents} key={`${props.viewMode}-${effectiveOrtho ? 'orthographic' : 'perspective'}-${props.document.dimension}`} orthographic={effectiveOrtho} camera={camera} onPointerMissed={event => !props.tileBrush && props.onSelect('', { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey })} onCreated={({ gl }) => { gl.setClearColor('#3c3f43'); gl.domElement.tabIndex = 0; gl.domElement.setAttribute('aria-label', 'Scene viewport') }}><SceneContents {...props} /></Canvas>
 }
 
 export default SceneViewport

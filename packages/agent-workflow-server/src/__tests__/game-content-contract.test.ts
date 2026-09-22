@@ -18,6 +18,8 @@ const assetManifestRevision = 'b'.repeat(64)
 
 test('authoring and every implementation attempt share explicit coordinate semantics', () => {
   expect(authority().contract.output.format.coordinates).toEqual(CONTENT_COORDINATE_CONTRACT)
+  const layout = authority().contract.output.format.uiLayoutContract as { paintOrder: { rule: string } }
+  expect(layout.paintOrder.rule).toBe(CONTENT_COORDINATE_CONTRACT.uiPaint)
   for (const contract of [{}, { currentImplementationIssues:['repair content'] }]) {
     const prompt = buildWorkerPrompt({runId:'r',ownerId:'o',projectId:'p',workspacePath:'/workspace',workerType:'implementation-worker',phase:'IMPLEMENTATION',revision:documentRevision,allowedPaths:['./'],contract})
     expect(prompt).toContain(JSON.stringify(CONTENT_COORDINATE_CONTRACT))

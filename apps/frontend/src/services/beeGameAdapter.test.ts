@@ -21,6 +21,15 @@ const transcriptResponse = (overrides: Record<string, unknown> = {}) => new Resp
 }))
 
 describe('transcriptEventsToHistory', () => {
+  it('omits internal worker envelopes but keeps two genuine identical user requests', () => {
+    const events = ['project_request', 'workflow_worker', 'project_request'].map((displayKind, index) => ({
+      id: index + 1, sessionId: 'main', type: 'user.message', text: '修复按钮',
+      createdAt: new Date(1000 + index).toISOString(), payload: { type: 'user.message', displayKind, clientMessageId: `client-${index}` },
+    }))
+    const history = transcriptEventsToHistory('project', events)
+    expect(history).toHaveLength(2)
+    expect(history.map(message => message.content)).toEqual(['修复按钮', '修复按钮'])
+  })
   const stageThinking = (id: number, status: string, text: string, transport: string) => ({
     id, sessionId: transport, turnId: 'workflow-stage:author:query-1',
     type: 'assistant.thinking' as const, text,

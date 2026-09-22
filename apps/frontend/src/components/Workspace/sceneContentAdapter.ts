@@ -1,4 +1,4 @@
-import { spriteSheetSelection } from '@beegame/scene-editor';
+import { spriteSheetSelection, parseGridData, parseTilemapData, parseTilemapRendererData, validateTilemapGrid } from '@beegame/scene-editor';
 import type { MaterialOverride, SceneAsset, SceneComponent, SceneDocument, SceneNode, Transform } from '@beegame/scene-editor';
 import type { BeeGameContentNode, BeeGameSceneContentDocument } from '../../services/beeGameAdapter';
 
@@ -97,6 +97,10 @@ function canonicalParticleProperties(data: Record<string, unknown>, _metrics: Ca
 function toEditorComponent(input: { node: BeeGameContentNode; component: CanonicalComponent; dimension: '2d' | '3d'; metrics: CanvasMetrics; members?: Record<string, Record<string, string>>; assets?: Record<string, SceneAsset> }): SceneComponent {
   const { node, component, metrics } = input; const id = component.id; if (!id) throw new Error(`Component ${node.id} is missing persistent id`); const data = componentData(component); const enabled = data.enabled !== false;
   const resourceId = component.assetRef; const assetId = resolveAssetId(resourceId, data, input.members); const member = assetId?.includes(':') ? assetId.slice(assetId.indexOf(':') + 1) : explicitMember(data);
+  if (component.type === 'grid') parseGridData(data);
+  if (component.type === 'tilemap') parseTilemapData(data);
+  if (component.type === 'tilemap' && explicitMember(data) && !input.members?.[resourceId!]?.[explicitMember(data)!]) throw new Error(`Tilemap ${node.id}: missing exact TileSet member ${explicitMember(data)}`);
+  if (component.type === 'tilemap-renderer') parseTilemapRendererData(data);
   if (component.type === 'sprite-renderer' || component.type === 'image') {
     if (component.type === 'sprite-renderer' && !assetId) throw new Error(`${component.type} ${node.id} requires assetRef`);
     const animator = node.components?.find(c => c.type === 'animator');
@@ -105,12 +109,12 @@ function toEditorComponent(input: { node: BeeGameContentNode; component: Canonic
     const common = { id, enabled, ...(assetId ? { assetId } : {}), ...(member ? { member } : {}), material: { ...material(data, assetId), ...(region ? { textureRegion: region } : {}) }, properties: data };
     return component.type === 'sprite-renderer' ? { ...common, assetId: assetId!, type: 'sprite-renderer', ...(region ? { frame: region } : {}), ...(animation ? { animation } : {}) } : { ...common, type: 'image' };
   }
-  if (component.type === 'mesh-filter' || component.type === 'tilemap') { if (!assetId) throw new Error(`${component.type} ${node.id} requires assetRef`); return { id, type: component.type, enabled, assetId, ...(member ? { member } : {}), properties: data }; }
+  if (component.type === 'mesh-filter' || component.type === 'tilemap') { if (!assetId) throw new Error(`${component.type} ${node.id} requires assetRef`); const selectedMember = component.type === 'tilemap' ? explicitMember(data) : member; return { id, type: component.type, enabled, assetId, ...(selectedMember ? { member: selectedMember } : {}), properties: data }; }
   if (component.type === 'mesh-renderer') return { id, type: 'mesh-renderer', enabled, ...(assetId ? { assetId } : {}), material: material(data, assetId), properties: data };
   if (component.type === 'skinned-mesh-renderer') { if (!assetId) throw new Error(`skinned-mesh-renderer ${node.id} requires assetRef`); return { id, type: 'skinned-mesh-renderer', enabled, assetId, ...(member ? { member } : {}), material: material(data, assetId), properties: data }; }
   if (component.type === 'particle-system') return { id, type: component.type, enabled, properties: input.dimension === '2d' ? editorParticleProperties(data, metrics) : data };
   if (component.type === 'grid' || component.type === 'audio-listener' || component.type === 'canvas-renderer') return { id, type: component.type, enabled, properties: data };
-  if (component.type === 'tilemap-renderer') return { id, type: 'tilemap-renderer', enabled, material: material(data, assetId), properties: data };
+  if (component.type === 'tilemap-renderer') return { id, type: 'tilemap-renderer', enabled, properties: data };
   if (component.type === 'animator') return { id, type: 'animator', enabled, ...(assetId ? { assetId } : {}), controller: data };
   const unit = input.dimension === '2d' ? metrics.pixelsPerUnit : 1;
   const point = (value: [number, number]): [number, number] => [value[0] / unit, value[1] / unit * (input.dimension === '2d' ? -1 : 1)];
@@ -148,6 +152,10 @@ function toEditorComponent(input: { node: BeeGameContentNode; component: Canonic
 const childrenByParent = (nodes: BeeGameContentNode[]) => { const result = new Map<string, string[]>(); for (const node of nodes) if (node.parentId) result.set(node.parentId, [...(result.get(node.parentId) ?? []), node.id]); return result; };
 
 export function sceneContentToEditorDocument(input: { document: BeeGameSceneContentDocument; documentRevision: string; foundationDocumentRevision: string; assetManifestRevision: string; assets?: Record<string, SceneAsset>; assetMembers?: Record<string, Record<string, string>> }): SceneDocument {
+  for (const node of input.document.data.nodes) for (const component of node.components ?? []) if (component.type === 'tilemap') {
+    if (input.document.kind !== 'scene-2d') throw new Error('Tilemap currently supports rectangular 2D scenes only');
+    validateTilemapGrid(input.document.data.nodes, node, parseTilemapData(component.data));
+  }
   const dimension = input.document.kind === 'scene-3d' ? '3d' : '2d'; const layers = layerOrders(input.document.data.settings); const metrics = canvasMetrics(input.document.data.settings); const children = childrenByParent(input.document.data.nodes);
   const nodes = Object.fromEntries(input.document.data.nodes.map(node => [node.id, { id: node.id, name: node.name ?? node.id, parentId: node.parentId ?? null, children: children.get(node.id) ?? [], active: node.enabled !== false, locked: false, transform: editorTransform(node, dimension, layers, metrics), ...(node.layer ? { layer: node.layer } : {}), ...(node.zIndex === undefined ? {} : { order: node.zIndex }), tags: [...(node.semantic ?? [])], metadata: structuredClone(node.data ?? {}), components: (node.components ?? []).map(component => toEditorComponent({ node, component, dimension, metrics, members: input.assetMembers, assets: input.assets })) } satisfies SceneNode]));
   // Opening an editor must not infer and persist rotations from gameplay labels.

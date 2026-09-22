@@ -1004,10 +1004,12 @@ describe('delivery workflow recovery', () => {
               ownerId: run.ownerId,
               workerPort,
             })
-            await controller.requestChange(
+            await expect(controller.requestChange(
               historicalRun,
               historicalRun.changeRequest ?? 'Synthetic change request.',
-            )
+            )).rejects.toThrow('native project conversation')
+            expect(started).toHaveLength(0)
+            return
           } else await resumeFromDisk(false)
           expect(started.map(request => request.workerType)).toEqual([
             workerType,
@@ -1020,12 +1022,15 @@ describe('delivery workflow recovery', () => {
           ownerId: run.ownerId,
           workerPort,
         })
-        if (workerType === 'change-impact-analyzer')
-          await firstController.requestChange(
+        if (workerType === 'change-impact-analyzer') {
+          await expect(firstController.requestChange(
             run,
             run.changeRequest ?? 'Synthetic change request.',
-          )
-        else await firstController.resume(run)
+          )).rejects.toThrow('native project conversation')
+          expect(started).toHaveLength(0)
+          return
+        }
+        await firstController.resume(run)
         const active = (await store.load())?.activeDispatch
         expect(active?.request?.workerType).toBe(workerType)
         const originalRequest = active!.request!

@@ -180,6 +180,11 @@ const WORKFLOW_WORKER_CHAT_EVENTS = new Set<BeeGameEventType>([
   'tool.failed',
   'tool.progress',
   'system.status',
+  'turn.completed',
+  'turn.empty',
+  'turn.failed',
+  'session.stopped',
+  'session.failed',
 ])
 
 export type BeeGameEventSubscriber = (event: BeeGameEvent) => void
@@ -264,6 +269,10 @@ export type DeleteBeeGameSessionResult = {
 
 export type BeeGameSessionRunnerStartInput = {
   sessionId: string
+  /** Host capability discovery, separate from the user's message. */
+  systemContext?: string
+  /** Optional private execution directory; Chat and billing retain project identity. */
+  isolatedTask?: { workspacePath: string; readOnlyPaths: string[] }
   /** Platform evidence root exposed only through read-only contract facts. */
   deliveryEvidenceDataRoot?: string
   resumeSessionId?: string
@@ -278,10 +287,7 @@ export type BeeGameSessionRunnerStartInput = {
   workflowWorkerType?: string
   workflowDispatchId?: string
   workflowAllowedPaths?: string[]
-  workflowAllowedTools?: string[]
-  workflowProjectReadScope?: 'empty' | 'allowed'
   workflowProtectedPaths?: string[]
-  workflowReadOnlyPaths?: string[]
   language?: BeeGameSessionLanguage
   /** Native background tasks may outlive the foreground turn that spawned them. */
   onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
@@ -342,6 +348,8 @@ const RUNTIME_MODEL_ENV_KEYS = new Set([
 
 export type BeeGameSessionSubmitInput = {
   prompt: BeeGamePromptInput
+  /** Refreshed each turn, including when the native process is reused. */
+  language?: BeeGameSessionLanguage
   /** User-confirmed context exposed read-only to platform contract tools. */
   confirmedBriefContext?: string
   signal: AbortSignal
@@ -401,7 +409,10 @@ export type BeeGamePendingPermission = DashboardPermissionRequest & {
 }
 
 type SessionRecord = {
+  systemContext?: string
+  preparingTurn?: boolean
   session: BeeGameSession
+  isolatedTask?: { workspacePath: string; readOnlyPaths: string[] }
   /** Native runtime UUID, distinct from session.id (the BGS routing key). */
   nativeSessionId?: string
   /** Workflow workers have isolated transcripts and may share a workspace lease with the chat surface. */
@@ -410,10 +421,7 @@ type SessionRecord = {
   workflowDispatchId?: string
   workflowWorkerType?: string
   workflowAllowedPaths?: string[]
-  workflowAllowedTools?: string[]
-  workflowProjectReadScope?: 'empty' | 'allowed'
   workflowProtectedPaths?: string[]
-  workflowReadOnlyPaths?: string[]
   runtime: RuntimeModelConfig | undefined
   userId: string
   authToken?: string
@@ -463,6 +471,7 @@ type SessionRecord = {
 
 export type StartBeeGameSessionInput = {
   workspacePath: string
+  isolatedTask?: { workspacePath: string; readOnlyPaths: string[] }
   projectId?: string
   modelConfigId?: string
   transcriptSessionId?: string
@@ -480,10 +489,7 @@ export type StartBeeGameSessionInput = {
   workflowDispatchId?: string
   workflowWorkerType?: string
   workflowAllowedPaths?: string[]
-  workflowAllowedTools?: string[]
-  workflowProjectReadScope?: 'empty' | 'allowed'
   workflowProtectedPaths?: string[]
-  workflowReadOnlyPaths?: string[]
 }
 
 export type BeeGameSessionInternalMetadata = {
@@ -588,6 +594,8 @@ export class BeeGameSessionManager {
         `Workspace is already leased by active BeeGame session ${existingLease.session.id}`,
       )
     }
+    if (!input.workflowWorker && input.projectId && this.hasActiveProjectTurn(input.userId, input.projectId, cwd))
+      throw new Error('Previous project request is still stopping')
     mkdirSync(cwd, { recursive: true })
     const runtime = input.modelConfigId
       ? mapModelConfigToRuntime(input.modelConfigId)
@@ -620,6 +628,7 @@ export class BeeGameSessionManager {
     )
     const record: SessionRecord = {
       session,
+      ...(input.isolatedTask ? { isolatedTask: input.isolatedTask } : {}),
       ...(input.resumeNativeSessionId
         ? { nativeSessionId: input.resumeNativeSessionId }
         : {}),
@@ -640,17 +649,8 @@ export class BeeGameSessionManager {
       ...(input.workflowAllowedPaths
         ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
         : {}),
-      ...(input.workflowAllowedTools
-        ? { workflowAllowedTools: [...input.workflowAllowedTools] }
-        : {}),
-      ...(input.workflowProjectReadScope
-        ? { workflowProjectReadScope: input.workflowProjectReadScope }
-        : {}),
       ...(input.workflowProtectedPaths
         ? { workflowProtectedPaths: [...input.workflowProtectedPaths] }
-        : {}),
-      ...(input.workflowReadOnlyPaths
-        ? { workflowReadOnlyPaths: [...input.workflowReadOnlyPaths] }
         : {}),
       runtime,
       userId: input.userId,
@@ -711,6 +711,12 @@ export class BeeGameSessionManager {
         {
           type: 'session.started',
           ...(record.language ? { language: record.language } : {}),
+          ...(record.workflowWorker ? {
+            workflowWorker: true,
+            workflowWorkerType: record.workflowWorkerType,
+            workflowRunId: record.workflowRunId,
+            workflowDispatchId: record.workflowDispatchId,
+          } : {}),
         },
       )
     }
@@ -837,6 +843,13 @@ export class BeeGameSessionManager {
   get(sessionId: string): BeeGameSession | undefined {
     const record = this.sessions.get(sessionId)
     return record ? cloneSession(record.session) : undefined
+  }
+
+  hasActiveProjectTurn(userId: string, projectId: string, workspacePath: string, exceptSessionId?: string): boolean {
+    return [...this.sessions.values()].some(record => !record.workflowWorker &&
+      record.userId === userId && record.projectId === projectId &&
+      resolve(record.session.cwd) === resolve(workspacePath) && record.session.id !== exceptSessionId &&
+      (record.session.turnStatus !== 'idle' || Boolean(record.activeTurn) || Boolean(record.preparingTurn)))
   }
 
   language(sessionId: string): BeeGameSessionLanguage | undefined {
@@ -1073,12 +1086,15 @@ export class BeeGameSessionManager {
       displayKind?: string
       taskType?: string
       authToken?: string
+      getValidAuthToken?: SessionRecord['getValidAuthToken']
       clientMessageId?: string
       supersedesMessageId?: string
       language?: BeeGameSessionLanguage
       attachments?: BeeGameAttachment[]
       confirmedBriefContext?: string
       onTurnAccepted?: () => void
+      prepareTurn?: () => Promise<{ systemContext?: string; close?: () => Promise<void> }>
+      onTurnSettled?: () => Promise<void>
     },
   ): Promise<BeeGameSession> {
     const record = this.sessions.get(sessionId)
@@ -1086,17 +1102,35 @@ export class BeeGameSessionManager {
     if (record.session.status !== 'running') {
       throw new Error('Session is not running')
     }
-    if (record.session.turnStatus !== 'idle') {
+    if (record.session.turnStatus !== 'idle' || record.preparingTurn || record.activeTurn) {
       throw new Error('Session is already processing a prompt')
     }
+    if (record.projectId && !record.workflowWorker && this.hasActiveProjectTurn(
+      record.userId, record.projectId, record.session.cwd, sessionId,
+    )) throw new Error('Previous project request is still stopping')
     // Claim the turn synchronously before any preparation, hooks, or remote
     // credit calls can yield. Delivery resume and polling paths may race each
     // other; without this claim they can start the same logical turn twice.
     record.session.turnStatus = 'running'
+    record.preparingTurn = true
     let turnAccepted = false
+    let close: (() => Promise<void>) | undefined
     try {
       if (display?.authToken) record.authToken = display.authToken
-      if (display?.language) record.language = display.language
+      if (display?.getValidAuthToken) record.getValidAuthToken = display.getValidAuthToken
+      if (display?.language && display.language !== record.language) {
+        disposeRunner(record.runner)
+        record.runner = null
+        record.language = display.language
+      }
+      const context = await display?.prepareTurn?.()
+      close = context?.close
+      if (context && context.systemContext !== record.systemContext) {
+        disposeRunner(record.runner)
+        record.runner = null
+        record.systemContext = context.systemContext
+      }
+      if (record.session.status !== 'running') throw new Error('Session was stopped during turn preparation')
       if (display?.confirmedBriefContext) {
         record.confirmedBriefContext = display.confirmedBriefContext
         recordConfirmedBriefEvidence({
@@ -1125,6 +1159,7 @@ export class BeeGameSessionManager {
         attachments: display?.attachments,
         displayKind: display?.displayKind,
       })
+      if (record.session.status !== 'running') throw new Error('Session was stopped during turn preparation')
       const nextTurnId = `beegame-turn-${record.session.id}-${record.nextTurnIndex}`
       record.assistantPartialTextByMessage.clear()
       record.activeAssistantMessageId = null
@@ -1159,6 +1194,10 @@ export class BeeGameSessionManager {
       activeTurn = this.runDirectTurn(
         record,
         preparedPrompt.prompt,
+        async () => {
+          try { await display?.onTurnSettled?.() }
+          finally { await close?.() }
+        },
       ).finally(() => {
         if (record.activeTurn === activeTurn) record.activeTurn = undefined
       })
@@ -1167,11 +1206,16 @@ export class BeeGameSessionManager {
       return cloneSession(record.session)
     } catch (error) {
       if (!turnAccepted) {
-        record.currentTurnId = null
-        record.abortController = null
-        record.session.turnStatus = 'idle'
+        try { await close?.() }
+        finally {
+          record.currentTurnId = null
+          record.abortController = null
+          record.session.turnStatus = 'idle'
+        }
       }
       throw error
+    } finally {
+      record.preparingTurn = false
     }
   }
 
@@ -1316,7 +1360,7 @@ export class BeeGameSessionManager {
           message: 'BeeGame server stopped before permission was resolved',
         })
       }
-      if (record.workflowWorker) {
+      if (record.workflowWorker || record.activeTurn) {
         workflowDrains.push(
           (async () => {
             await record.activeTurn?.catch(() => undefined)
@@ -1419,6 +1463,7 @@ export class BeeGameSessionManager {
   private async runDirectTurn(
     record: SessionRecord,
     prompt: BeeGamePromptInput,
+    settle?: () => Promise<void>,
   ): Promise<void> {
     try {
       const signal = record.abortController?.signal
@@ -1430,10 +1475,13 @@ export class BeeGameSessionManager {
       const env: Record<string, string> = {
         ...buildRuntimeEnv(selectedEnvironment),
       }
+      if (signal.aborted || record.session.status !== 'running') return
       const runner =
         record.runner ??
         (await this.runner.start({
           sessionId: record.session.id,
+          systemContext: record.systemContext,
+          ...(record.isolatedTask ? { isolatedTask: record.isolatedTask } : {}),
           deliveryEvidenceDataRoot: this.dashboardDataRoot,
           ...(record.nativeSessionId
             ? { resumeSessionId: record.nativeSessionId }
@@ -1473,21 +1521,17 @@ export class BeeGameSessionManager {
           ...(record.workflowAllowedPaths
             ? { workflowAllowedPaths: [...record.workflowAllowedPaths] }
             : {}),
-          ...(record.workflowAllowedTools
-            ? { workflowAllowedTools: [...record.workflowAllowedTools] }
-            : {}),
-          ...(record.workflowProjectReadScope
-            ? { workflowProjectReadScope: record.workflowProjectReadScope }
-            : {}),
           ...(record.workflowProtectedPaths
             ? { workflowProtectedPaths: [...record.workflowProtectedPaths] }
-            : {}),
-          ...(record.workflowReadOnlyPaths
-            ? { workflowReadOnlyPaths: [...record.workflowReadOnlyPaths] }
             : {}),
           requestPermission: request => this.requestPermission(record, request),
         }))
       record.runner = runner
+      if (signal.aborted || record.session.status !== 'running') {
+        disposeRunner(runner)
+        record.runner = null
+        return
+      }
       await this.submitToRunner(
         record,
         runner,
@@ -1534,6 +1578,10 @@ export class BeeGameSessionManager {
         )
       }
     } finally {
+      try { await settle?.() }
+      catch (error) {
+        this.append(record, 'system.status', `Request cleanup failed: ${toErrorMessage(error)}`)
+      }
       const terminalTurnId = record.currentTurnId
       if (record.workflowWorker) {
         // Workflow usage is accounting telemetry. Persist it once per turn,
@@ -1614,6 +1662,7 @@ export class BeeGameSessionManager {
     let executionError: Error | undefined
     await runner.submit({
       prompt,
+      ...(record.language ? { language: record.language } : {}),
       ...(record.confirmedBriefContext
         ? { confirmedBriefContext: record.confirmedBriefContext }
         : {}),
@@ -1922,19 +1971,6 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision> {
-    const toolRestriction = workflowToolRestriction(record, request)
-    if (toolRestriction) {
-      this.append(record, 'permission.resolved', `${request.toolName}: deny`, {
-        type: 'permission.resolved',
-        toolUseID: request.toolUseID,
-        toolName: request.toolName,
-        decision: 'deny',
-        scope: 'once',
-        autoDenied: true,
-        reason: 'workflow_tool_not_allowed',
-      })
-      return Promise.resolve({ behavior: 'deny', scope: 'once', source: 'policy', message: toolRestriction })
-    }
     const workflowMutation = workflowFileMutationAuthority(record, request)
     if (workflowMutation) {
       this.append(
@@ -2113,7 +2149,7 @@ export class BeeGameSessionManager {
         })
       }
     }
-    if (record.projectId) {
+    if (record.projectId && (!record.workflowWorker || isWorkerChatEvent(event))) {
       for (const subscription of this.projectEventSubscribers) {
         if (
           subscription.userId !== record.userId ||
@@ -2466,14 +2502,18 @@ export async function readWorkflowWorkerChatHistoryFromDisk(
     }
     const sourceSessionId = events.find(event => event.sessionId)?.sessionId
     if (!sourceSessionId || sourceSessionId === mainSessionId) continue
+    const workerMetadata = events.find(event =>
+      event.type === 'session.started' && event.payload?.workflowWorker === true,
+    )
+    // Older transcripts predate explicit worker metadata.
     const workerStart = events.find(
       event =>
         event.type === 'turn.started' &&
         event.text.includes('BeeGame delivery worker:'),
     )
-    if (!workerStart) continue
-    const workflowWorkerType = workerStart.text
-      .match(/BeeGame delivery worker:\s*([^\s]+)/)?.[1]
+    if (!workerMetadata && !workerStart) continue
+    const workflowWorkerType = getDashboardPayloadString(workerMetadata?.payload, 'workflowWorkerType')
+      ?? workerStart?.text.match(/BeeGame delivery worker:\s*([^\s]+)/)?.[1]
     const enrich = createNativeSubagentChatEnricher()
     const latestNativeTask = new Map<string, number>()
     for (const event of events) {
@@ -3976,15 +4016,6 @@ function isFileMutationTool(toolName: string): boolean {
   return ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(toolName)
 }
 
-export function workflowToolRestriction(
-  record: SessionRecord,
-  request: DashboardPermissionRequest,
-): string | undefined {
-  const allowed = record.workflowAllowedTools
-  if (!allowed || allowed.includes(request.toolName)) return undefined
-  return `This workflow worker may use only: ${allowed.join(', ')}.`
-}
-
 function authorizeProjectWorkspaceFileMutation(
   record: SessionRecord,
   request: DashboardPermissionRequest,
@@ -4002,7 +4033,6 @@ type ProjectWorkspaceFileAccessAuthority = {
   behavior: 'allow' | 'deny'
   reason:
     | 'project_workspace_file_access'
-    | 'project_workspace_read_scope_empty'
     | 'project_workspace_boundary'
     | 'project_workspace_target_invalid'
   message?: string
@@ -4013,54 +4043,6 @@ function projectWorkspaceFileAccessAuthority(
   request: DashboardPermissionRequest,
 ): ProjectWorkspaceFileAccessAuthority | undefined {
   if (!record.projectId) return undefined
-  if (
-    record.workflowProjectReadScope === 'empty' &&
-    ['Read', 'Grep', 'Glob'].includes(request.toolName)
-  )
-    return {
-      behavior: 'deny',
-      reason: 'project_workspace_read_scope_empty',
-      message: `${request.toolName} is disabled for this scoped audit worker; use the assigned packet only.`,
-    }
-  if (
-    record.workflowWorker === true &&
-    record.workflowProjectReadScope === 'allowed' &&
-    ['Read', 'Grep', 'Glob'].includes(request.toolName)
-  ) {
-    if (request.toolName !== 'Read')
-      return {
-        behavior: 'deny',
-        reason: 'project_workspace_read_scope_empty',
-        message: 'Scoped workflow workers may use Read only on an assigned path.',
-      }
-    const inputPath = request.input.file_path
-    if (typeof inputPath !== 'string' || !inputPath.trim())
-      return {
-        behavior: 'deny',
-        reason: 'project_workspace_target_invalid',
-        message: 'Read requires one assigned staged path.',
-      }
-    const workspaceRoot = resolveExistingPath(record.session.cwd)
-    const targetPath = resolveProspectivePath(record.session.cwd, inputPath)
-    const rel = relative(workspaceRoot, targetPath)
-    if (rel === '' || rel.startsWith('..') || isAbsolute(rel))
-      return {
-        behavior: 'deny',
-        reason: 'project_workspace_boundary',
-        message: 'Read may not access files outside the project workspace.',
-      }
-    const allowed = (record.workflowAllowedPaths ?? []).some(entry => {
-      const configured = entry.trim()
-      return configured && targetPath === resolveProspectivePath(record.session.cwd, configured)
-    })
-    return allowed
-      ? { behavior: 'allow', reason: 'project_workspace_file_access' }
-      : {
-          behavior: 'deny',
-          reason: 'project_workspace_read_scope_empty',
-          message: 'Scoped workflow workers may read only their assigned path.',
-        }
-  }
   const pathKey = request.toolName === 'Read' ? 'file_path' : 'path'
   if (!['Read', 'Grep', 'Glob'].includes(request.toolName)) return undefined
   const inputPath = request.input[pathKey]
@@ -4143,7 +4125,7 @@ function workflowFileMutationAuthority(
       message: `Workflow workers may not mutate protected project authority: ${protectedPath}.`,
     }
   const scratchPath = nativeSessionTemporaryPath(workspaceRoot, record.session.id)
-  const allowed = pathMatchesConfiguredScope(workspaceRoot, targetPath, scratchPath) || (record.workflowAllowedPaths ?? []).some(entry => {
+  const allowed = pathMatchesConfiguredScope(workspaceRoot, targetPath, `${scratchPath}/`) || (record.workflowAllowedPaths ?? []).some(entry => {
     return pathMatchesConfiguredScope(record.session.cwd, targetPath, entry)
   })
   return allowed

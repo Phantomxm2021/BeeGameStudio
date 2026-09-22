@@ -431,8 +431,11 @@ export function createRunStore(workspacePath: string, ownerId: string) {
         flag: 'wx',
       })
       await link(pendingPath, filePaths.lock)
-    } catch {
-      throw new WorkflowStoreError('workflow project is locked', 'locked')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST')
+        throw new WorkflowStoreError('workflow project is locked', 'locked')
+      throw new WorkflowStoreError(
+        `unable to acquire workflow lock: ${error instanceof Error ? error.message : String(error)}`, 'io')
     } finally {
       await unlink(pendingPath).catch(() => undefined)
     }

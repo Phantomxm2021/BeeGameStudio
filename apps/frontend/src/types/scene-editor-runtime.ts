@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import type { SceneDocument } from '../../../../packages/scene-editor/src/model';
+export { parseTileSet, parseGridData, parseTilemapData, parseTilemapRendererData, validateTilemapGrid } from '../../../../packages/scene-editor/src/tilemap-data';
 
 export type {
   SceneDocument,
@@ -28,5 +29,5 @@ export interface SceneEditorProps {
 
 export declare const SceneEditor: ComponentType<SceneEditorProps>;
 
-export { spriteSheetSelection, parseSpriteSheet } from '../../../../packages/scene-editor/src/sprite-sheet';
-export { uiAnchor, uiLocalMatrix } from '../../../../packages/scene-editor/src/content-coordinates';
+export { spriteSheetSelection, parseSpriteSheet, atlasFrameName } from '../../../../packages/scene-editor/src/sprite-sheet';
+export { uiAnchor, uiLocalMatrix, uiPaintOrder } from '../../../../packages/scene-editor/src/content-coordinates';

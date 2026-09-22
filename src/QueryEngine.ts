@@ -678,7 +678,6 @@ export class QueryEngine {
     const failedStructuredOutputCallIds = new Set<string>()
     let structuredOutputCount = 0
     const singleOutputToolMode = Boolean(jsonSchema && hasStructuredOutputTool && (tools.length === 1 ||
-      process.env.BEEGAME_WORKFLOW_WORKER_TYPE === 'foundation-reviewer-tools-v2' ||
       process.env.BEEGAME_STRUCTURED_OUTPUT_IS_TERMINAL === '1'))
     // Track the last stop_reason from assistant messages
     let lastStopReason: string | null = null

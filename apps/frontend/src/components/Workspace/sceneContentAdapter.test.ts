@@ -25,6 +25,24 @@ function scene(): BeeGameSceneContentDocument {
 }
 
 describe('Unity-style scene adapter', () => {
+  it('round-trips versioned Tilemap cells and parent transforms without scaling cell data', () => {
+    const input:BeeGameSceneContentDocument={schema:'beegame-content.v1',id:'tile-scene',kind:'scene-2d',assetRefs:['RES-TILES'],data:{
+      settings:{coordinateSystem:{origin:'top-left',units:'logical-pixels',width:320,height:180,pixelsPerUnit:32}},
+      nodes:[
+        {id:'grid',transform:{position:[64,96,0],rotation:[0,0,.5],scale:[2,1,1]},components:[{id:'g',type:'grid',data:{schema:'grid.v1',cellSize:[32,32]}}]},
+        {id:'map',parentId:'grid',transform:{position:[16,32,0]},components:[
+          {id:'m',type:'tilemap',assetRef:'RES-TILES',data:{schema:'tilemap.v1',gridNodeId:'grid',cells:[{x:-1,y:2,tileId:'tree'}]}},
+          {id:'r',type:'tilemap-renderer',data:{schema:'tilemap-renderer.v1',sortingOrder:2}},
+        ]},
+      ],
+    }};
+    const editor=sceneContentToEditorDocument({document:input,documentRevision:HASH,foundationDocumentRevision:HASH,assetManifestRevision:HASH});
+    expect(editor.nodes.map.transform.position).toEqual([.5,-1,0]);
+    expect(editor.nodes.map.components[0]).toMatchObject({properties:{cells:[{x:-1,y:2,tileId:'tree'}]}});
+    const saved=editorDocumentToSceneContent(editor,input);
+    expect(saved.data.nodes[1].components).toEqual(input.data.nodes[1].components);
+    expect(saved.data.nodes[0].transform).toEqual(input.data.nodes[0].transform);
+  });
   it('round-trips 2D rotation, Z, scale and rect anchors at the editor boundary', () => {
     const input = scene();
     input.data.settings = { coordinateSystem:{width:960,height:540,pixelsPerUnit:32}, layers:[{id:'actors',order:5}] };

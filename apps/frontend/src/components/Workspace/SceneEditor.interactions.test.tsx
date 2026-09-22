@@ -3,6 +3,8 @@ import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SceneEditor } from '../../../../../packages/scene-editor/src/editor';
 import { makeFixture, type SceneDocument } from '../../../../../packages/scene-editor/src/model';
+import { readFileSync } from 'node:fs';
+const editorCss = readFileSync('../../packages/scene-editor/src/styles.css', 'utf8');
 
 vi.mock('../../../../../packages/scene-editor/src/viewport', () => ({
   SceneViewport: ({ onDiagnostic }: { onDiagnostic: (message: string) => void }) => <button onClick={() => onDiagnostic('Local texture asset could not be decoded')}>Simulate texture error</button>,
@@ -27,6 +29,31 @@ async function command(name: string) {
 }
 function select(name: string) { fireEvent.click(screen.getByText(name, { selector: '.node-name' })); }
 describe('Scene Editor interaction regressions', () => {
+  it('keeps portalled menu surfaces visible without host Tailwind utilities', async () => {
+    render(<><style>{editorCss}</style><SceneEditor initialDocument={makeFixture()} /></>);
+    const assertSurface = (element: Element) => {
+      // jsdom does not resolve inherited var() colors; check the real matching
+      // CSS declarations here and verify resolved colors in the browser fixture.
+      const rules = [...document.styleSheets].flatMap(sheet => [...sheet.cssRules])
+        .filter((rule): rule is CSSStyleRule => 'selectorText' in rule && element.matches((rule as CSSStyleRule).selectorText));
+      expect(rules.some(rule => rule.style.getPropertyValue('background') === 'var(--editor-surface)')).toBe(true);
+      expect(rules.some(rule => rule.style.getPropertyValue('border') === '1px solid var(--editor-border)')).toBe(true);
+    };
+    openActions();
+    const menu = await screen.findByRole('menu', { name: 'Scene actions' });
+    assertSurface(menu.closest('.scene-menu-surface')!);
+    expect(getComputedStyle(menu.closest('[data-morph-popover-portal]')!).position).toBe('fixed');
+    fireEvent.pointerEnter(within(menu).getByRole('menuitem', { name: 'Add light' }));
+    assertSurface(await screen.findByRole('menu', { name: 'Add light' }));
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Hide gizmos' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View mode', exact: true }));
+    assertSurface(await screen.findByRole('listbox', { name: 'View mode' }));
+    fireEvent.click(screen.getByRole('option', { name: '2D', exact: true }));
+    fireEvent.contextMenu(screen.getByText('Flower', { selector: '.node-name' }), { clientX: 80, clientY: 120 });
+    const context = await screen.findByRole('menu', { name: 'Hierarchy actions' });
+    assertSurface(context);
+    expect(getComputedStyle(context.closest('[data-context-menu-portal]')!).position).toBe('fixed');
+  });
   it('selects portalled view mode and coordinate space without refocusing the viewport', async () => {
     render(<SceneEditor initialDocument={makeFixture()} />);
     for (const [name, next] of [['View mode', '2D'], ['View mode', '3D'], ['Coordinate space', 'World'], ['Coordinate space', 'Local']]) {

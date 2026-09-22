@@ -13,6 +13,19 @@ const resourceStorage: R2ResourceStorage = {
   listPackObjects: async () => [],
 }
 
+test('paused processing does not disable authenticated catalog browsing', async () => {
+  const app = createBeeGameResourceServerApp({ repository: createInMemoryResourceRepository({ packs: [], elements: [] }),
+    currentUser: { id: 'owner', role: 'owner' }, processingEnabled: false })
+  const health = await app.fetch(new Request('http://resource/health'))
+  expect(await health.json()).toEqual({ status: 'ok', processingEnabled: false })
+  expect((await app.fetch(new Request('http://resource/api/resource-search?status=published'))).status).toBe(200)
+  for (const suffix of ['processing-jobs', 'processing-jobs/job/retry', 'semantic-curation', 'semantic-curation/job/retry']) {
+    const response = await app.fetch(new Request(`http://resource/api/resource-packs/pack/${suffix}`, { method: 'POST' }))
+    expect(response.status).toBe(503)
+    expect(await response.text()).toContain('processing_paused')
+  }
+})
+
 const repository = createInMemoryResourceRepository({
   packs: [{
     id: 'pack-1', name: 'Example Pack',
@@ -113,7 +126,7 @@ describe('resource service app', () => {
     const app = createBeeGameResourceServerApp({ repository })
     const response = await app.fetch(new Request('http://resource.test/health'))
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ status: 'ok' })
+    expect(await response.json()).toEqual({ status: 'ok', processingEnabled: true })
   })
 
   test('allows browser cross-origin requests and preflight checks', async () => {

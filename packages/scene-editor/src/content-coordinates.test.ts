@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { affine2d, compose2d, point2d, rectLayout, uiAnchor, uiLocalMatrix } from './content-coordinates'
+import { affine2d, compose2d, point2d, rectLayout, uiAnchor, uiLocalMatrix, uiPaintOrder, UI_PAINT_CONFORMANCE_FIXTURE } from './content-coordinates'
 import { editorRect, rectTransform } from './rect-transform'
 import { identityTransform, makeFixture, type SceneNode } from './model'
 import { nodeWorldMatrix, transformSelection } from './selection-transform'
@@ -18,6 +18,13 @@ describe('Content coordinates', () => {
     const button = uiLocalMatrix([264,250], [264,52], uiAnchor('middle-center'), [0,-84])
     expect(point2d(menu,0,0)).toEqual([348,215])
     expect(point2d(compose2d(menu,button),0,0)).toEqual([348,230])
+  })
+  it('defines one paint order for editors and runtime consumers', () => {
+    expect(uiPaintOrder(UI_PAINT_CONFORMANCE_FIXTURE.nodes, UI_PAINT_CONFORMANCE_FIXTURE.rootId))
+      .toEqual(UI_PAINT_CONFORMANCE_FIXTURE.expected)
+    expect(uiPaintOrder([{ id:'root' }, { id:'hidden',parentId:'root',enabled:false }, { id:'child',parentId:'hidden' }], 'root'))
+      .toEqual([{nodeId:'root',phase:'background'},{nodeId:'root',phase:'content'}])
+    expect(() => uiPaintOrder([{id:'root'},{id:'orphan',parentId:'missing'}], 'root')).toThrow('Unknown UI parent')
   })
   it('rotates and scales around a custom pivot rather than the center', () => {
     const matrix = uiLocalMatrix([960,540], [240,20], uiAnchor('middle-center'), [-118,70], [0,.5], Math.PI/2, [2,3])

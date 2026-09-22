@@ -11,6 +11,33 @@ describe('BeeGamePreviewManager generic Vite contract', () => {
     await Promise.all(workspaces.splice(0).map(workspace => rm(workspace, { recursive: true, force: true })))
   })
 
+  test('production selection never silently reuses development or starts a build', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'preview-modes-'))
+    workspaces.push(workspace)
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { dev: 'vite', preview: 'vite preview', build: 'vite build' }, devDependencies: { vite: '*' } }))
+    const calls: { command: string[]; env: Record<string, string> }[] = []
+    let stopped = 0
+    const manager = new BeeGamePreviewManager((command, options) => {
+      calls.push({ command, env: options.env }); return { kill() { stopped++ } }
+    }, 63100, async () => 63100, async () => true)
+    try {
+      await manager.start({ sessionId: 'test', workspacePath: workspace })
+      const production = await manager.start({ sessionId: 'test', workspacePath: workspace, mode: 'production' })
+      expect(calls).toHaveLength(2)
+      expect(stopped).toBe(1)
+      expect(production.mode).toBe('production')
+      expect(calls[1]!.command).toContain('preview')
+      expect(calls[1]!.command).not.toContain('build')
+      expect(calls[1]!.env.NODE_ENV).toBe('production')
+      await manager.start({ sessionId: 'test', workspacePath: workspace, mode: 'production' })
+      expect(calls).toHaveLength(2)
+    } finally { manager.dispose() }
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { dev: 'vite' } }))
+    const missing = await manager.start({ sessionId: 'missing', workspacePath: workspace, mode: 'production' })
+    expect(missing.status).toBe('unsupported')
+    expect(calls).toHaveLength(2)
+  })
+
   test('isolates a Vite development client from a production runtime environment', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'generic-vite-preview-'))
     workspaces.push(workspace)

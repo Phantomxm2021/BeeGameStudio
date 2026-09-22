@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 
 import { RightSidebar } from './RightSidebar';
 import { api } from '../../services/api';
+import * as apiClient from '../../services/apiClient';
 
 vi.mock('../../store/systemStore', () => ({
     useSystemStore: () => ({
@@ -55,6 +56,31 @@ function deferred<T>() {
 }
 
 describe('RightSidebar tabs', () => {
+    it('keeps loaded Chat images mounted across tab switches and releases them on exit', async () => {
+        const fetchImage = vi.spyOn(apiClient, 'authenticatedFetch').mockResolvedValue(new Response(new Blob(['image'], { type:'image/png' })));
+        const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:kept-image');
+        const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+        const view = render(<RightSidebar projectId="image-project" lang="en" progress={0} onSendMessage={vi.fn()} isLoading={false}
+            messages={[{id:'image-message',sender:'user',content:'Picture',timestamp:1,attachments:[{
+                type:'image',filename:'asset.png',mediaType:'image/png',projectId:'image-project',
+                storageId:'00000000-0000-0000-0000-000000000000-image.png',
+            }]}]}
+            waitingPermission={{kind:'none',isBlockingChat:false,isWaitingStatus:false,message:'',placeholder:'Type...'}} />);
+        try {
+            const image = await screen.findByRole('img', {name:'asset.png'});
+            fireEvent.load(image);
+            fireEvent.click(screen.getByRole('tab', {name:'Todo'}));
+            expect(image.isConnected).toBe(true);
+            expect(screen.queryByRole('img', {name:'asset.png'})).toBeNull();
+            fireEvent.click(screen.getByRole('tab', {name:/Artifacts/}));
+            fireEvent.click(screen.getByRole('tab', {name:'Chat'}));
+            expect(screen.getByRole('img', {name:'asset.png'})).toBe(image);
+            expect(fetchImage).toHaveBeenCalledTimes(1);
+            expect(revoke).not.toHaveBeenCalled();
+            view.unmount();
+            expect(revoke).toHaveBeenCalledWith('blob:kept-image');
+        } finally { view.unmount(); fetchImage.mockRestore(); create.mockRestore(); revoke.mockRestore(); }
+    });
     beforeEach(() => {
         vi.clearAllMocks();
         vi.mocked(api.getChatHistoryPaginationState).mockReturnValue({ initialized: false, hasMore: false });

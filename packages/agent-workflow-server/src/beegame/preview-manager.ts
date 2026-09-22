@@ -12,6 +12,7 @@ export type BeeGamePreviewStatus =
   | 'unsupported'
 
 export type BeeGamePreviewSnapshot = {
+  mode?: 'development' | 'production'
   sessionId: string
   workspacePath: string
   status: BeeGamePreviewStatus
@@ -25,6 +26,7 @@ export type BeeGamePreviewSnapshot = {
 }
 
 export type BeeGamePreviewStartOptions = {
+  mode?: 'development' | 'production'
   sessionId: string
   workspacePath: string
 }
@@ -67,7 +69,7 @@ type PreviewProcessPlan = {
   command: string[]
   script: string
   entrypoint: string
-  nodeEnv?: 'development'
+  nodeEnv?: 'development' | 'production'
   url?: string
 }
 
@@ -123,6 +125,7 @@ export class BeeGamePreviewManager {
     if (
       existing &&
       sameWorkspace(existing.snapshot.workspacePath, workspacePath) &&
+      (existing.snapshot.mode ?? 'development') === (options.mode ?? 'development') &&
       existing.snapshot.status === 'running'
     ) {
       return { ...existing.snapshot }
@@ -136,6 +139,7 @@ export class BeeGamePreviewManager {
       this.portStart,
       this.allocatePort,
       publicPath,
+      options.mode ?? 'development',
     )
     if (!plan.supported) {
       const snapshot = this.createSnapshot(options.sessionId, workspacePath, 'unsupported', {
@@ -147,6 +151,7 @@ export class BeeGamePreviewManager {
 
     const startedAt = new Date().toISOString()
     const snapshot = this.createSnapshot(options.sessionId, workspacePath, 'starting', {
+      mode: options.mode ?? 'development',
       url: '',
       port: plan.port,
       command: plan.command.join(' '),
@@ -339,6 +344,7 @@ async function createPreviewPlan(
   portStart: number,
   allocatePort: BeeGamePreviewPortAllocator,
   publicPath: string,
+  mode: 'development' | 'production' = 'development',
 ): Promise<
   | { supported: false; message: string }
   | SupportedPreviewPlan
@@ -357,14 +363,15 @@ async function createPreviewPlan(
     portStart,
     allocatePort,
     publicPath,
+    mode,
   )
   if (splitPlan) return splitPlan
 
-  const script = chooseScript(manifest, ['dev', 'preview', 'start'])
+  const script = chooseScript(manifest, mode === 'production' ? ['preview'] : ['dev', 'preview', 'start'])
   if (!script) {
     return {
       supported: false,
-      message: 'Preview host did not find a dev, preview, or start script',
+      message: mode === 'production' ? 'Production preview requires an existing build and a preview script; no dev fallback was started' : 'Preview host did not find a dev, preview, or start script',
     }
   }
   const port = await allocatePort(portStart)
@@ -384,7 +391,7 @@ async function createPreviewPlan(
       command,
       script,
       entrypoint: 'package.json',
-      nodeEnv: usesVite(manifest, script) && script === 'dev' ? 'development' : undefined,
+      nodeEnv: mode === 'production' ? 'production' : usesVite(manifest, script) && script === 'dev' ? 'development' : undefined,
       url,
     }],
   }
@@ -396,6 +403,7 @@ async function createSplitClientServerPreviewPlan(
   portStart: number,
   allocatePort: BeeGamePreviewPortAllocator,
   publicPath: string,
+  mode: 'development' | 'production',
 ): Promise<SupportedPreviewPlan | undefined> {
   const clientCwd = join(workspacePath, 'client')
   const clientManifestPath = join(clientCwd, 'package.json')
@@ -409,7 +417,7 @@ async function createSplitClientServerPreviewPlan(
     portStart,
     allocatePort,
   )
-  const clientScript = chooseScript(clientManifest, ['dev', 'preview', 'start'])
+  const clientScript = chooseScript(clientManifest, mode === 'production' ? ['preview'] : ['dev', 'preview', 'start'])
   if (!clientScript) return undefined
   const clientPort = await allocatePort(portStart)
   const clientCommand = buildRunCommand(clientCwd, clientManifest, clientScript, clientPort, publicPath)
@@ -421,7 +429,7 @@ async function createSplitClientServerPreviewPlan(
     command: clientCommand,
     script: clientScript,
     entrypoint: 'client/package.json',
-    nodeEnv: usesVite(clientManifest, clientScript) && clientScript === 'dev'
+    nodeEnv: mode === 'production' ? 'production' : usesVite(clientManifest, clientScript) && clientScript === 'dev'
       ? 'development'
       : undefined,
     url: clientUrl,

@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { beeGameAdapter } from '../../services/beeGameAdapter';
 import { UiEditorOverlay } from './UiEditorOverlay';
+import { readFileSync } from 'node:fs';
+const editorCss = readFileSync('src/components/Workspace/UiEditorOverlay.css', 'utf8');
 
 function selectEditorOption(label: string, option: string) {
   fireEvent.click(screen.getByLabelText(label));
@@ -31,6 +33,77 @@ const uiDocument = {
 };
 
 describe('UiEditorOverlay', () => {
+  it.each(['button', 'shape'])('edits %s images without changing role, actions or layout; undo restores the image', async role => {
+    const node = { id: 'target', name: 'Target', role, parentId: 'root', text: 'Start',
+      layout: { position: [20, 30] as [number, number], size: [120, 40] as [number, number] }, actions: { click: 'start-game' } };
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{
+      path: 'content/ui/title.json', revision: 'a'.repeat(64),
+      document: { ...uiDocument, data: { rootId: 'root', nodes: [uiDocument.data.nodes[0], node] } },
+    }] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 9, requirements: [],
+      resources: [{ id: 'RES-UI', status: 'verified', root_path: 'assets/button.png', file_paths: ['assets/button.png'], source: { type: 'agent-authored' } }] });
+    vi.spyOn(beeGameAdapter, 'loadProjectAssetFile').mockResolvedValue(new Blob(['image']));
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:button');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const save = vi.spyOn(beeGameAdapter, 'saveProjectGameContentDocument').mockResolvedValue({ revision: 'b'.repeat(64), contentRevision: 'c'.repeat(64) });
+    const { container } = render(<UiEditorOverlay projectId="image-capability" onClose={vi.fn()} />);
+    const target = await screen.findByRole('treeitem', { name: 'Target' });
+    fireEvent.click(target.querySelector('.ui-editor-tree-row')!);
+    fireEvent.click(screen.getByRole('button', { name: 'Choose source image' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Use image button' }));
+    expect(container.querySelector(`.ui-editor-node[data-role="${role}"] img`)).toHaveAttribute('src', 'blob:button');
+    fireEvent.click(screen.getByRole('button', { name: 'Choose source image' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear source image' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Select Source Image' })).not.toBeInTheDocument());
+    expect(container.querySelector(`.ui-editor-node[data-role="${role}"] img`)).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'z', metaKey: true });
+    expect(container.querySelector(`.ui-editor-node[data-role="${role}"] img`)).toHaveAttribute('src', 'blob:button');
+    fireEvent.keyDown(window, { key: 's', metaKey: true });
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    const saved = save.mock.calls.at(-1)![1].document.data.nodes.find(item => item.id === 'target')!;
+    expect(saved.role).toBe(role);
+    expect(saved.actions).toEqual(node.actions);
+    expect(saved.layout).toEqual(node.layout);
+    expect(saved.assetRef).toBe('RES-UI');
+  });
+  it.each([false,true])('loads exact image paths without colliding basenames (atlas=%s)', async atlas => {
+    const doc = { ...uiDocument, data: { rootId: 'root', nodes: [
+      uiDocument.data.nodes[0],
+      {id:'first',role:'image',parentId:'root',assetRef:'RES-UI',layout:{size:[32,32]},data:{member:'art/a/icon.png',...(atlas?{frame:'idle'}:{})}},
+      {id:'second',role:'image',parentId:'root',assetRef:'RES-UI',layout:{size:[32,32]},data:{member:'art/b/icon.png',...(atlas?{frame:'idle'}:{})}},
+    ] }};
+    vi.spyOn(beeGameAdapter,'getProjectGameContent').mockResolvedValue({state:'ready',documents:[{path:'content/ui/title.json',revision:'a'.repeat(64),document:doc as typeof uiDocument}]});
+    vi.spyOn(beeGameAdapter,'getProjectAssets').mockResolvedValue({contract_state:'ready',version:9,requirements:[],resources:[{
+      id:'RES-UI',status:'verified',root_path:'art/a/icon.png',
+      file_paths:['art/a/icon.png','art/b/icon.png',...(atlas?['art/a/icon.json','art/b/icon.json']:[])],source:{type:'agent-authored'},
+    }]});
+    const urls=new WeakMap<Blob,string>();
+    vi.spyOn(beeGameAdapter,'loadProjectAssetFile').mockImplementation(async(_project,_resource,path)=>{
+      if(path.endsWith('.json')) return new Blob([JSON.stringify({frames:{idle:{frame:{x:path.includes('/a/')?0:32,y:0,w:32,h:32}}}})],{type:'application/json'});
+      const blob=new Blob(['image'],{type:'image/png'});urls.set(blob,path.includes('/a/')?'blob:first':'blob:second');return blob;
+    });
+    vi.spyOn(URL,'createObjectURL').mockImplementation(blob=>urls.get(blob as Blob)!);
+    vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>undefined);
+    if(atlas){
+      vi.stubGlobal('Image',class {
+        onload?:()=>void; onerror?:()=>void; naturalWidth=64; naturalHeight=32;
+        set src(value:string){if(value)queueMicrotask(()=>this.onload?.())}
+      });
+      let cropX=0;
+      vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue({drawImage:(_image:unknown,x:number)=>{cropX=x}} as unknown as CanvasRenderingContext2D);
+      vi.spyOn(HTMLCanvasElement.prototype,'toDataURL').mockImplementation(()=>`data:image/png;base64,${cropX===0?'FIRST':'SECOND'}`);
+    }
+    const {container}=render(<UiEditorOverlay projectId="exact-images" onClose={vi.fn()}/>);
+    await screen.findByLabelText('UI hierarchy');
+    const images=container.querySelectorAll('img.ui-editor-image');
+    expect([...images].map(image=>image.getAttribute('src'))).toEqual(atlas?['data:image/png;base64,FIRST','data:image/png;base64,SECOND']:['blob:first','blob:second']);
+    fireEvent.click(within(screen.getByLabelText('UI hierarchy')).getByText('first',{exact:true,selector:'.ui-editor-node-name'}).closest('.ui-editor-tree-row')!);
+    fireEvent.click(screen.getByRole('button',{name:'Choose source image'}));
+    expect(await screen.findByRole('button',{name:`Use image art/a/icon.png${atlas?'#idle':''}`})).toBeEnabled();
+    expect(screen.getByRole('button',{name:`Use image art/b/icon.png${atlas?'#idle':''}`})).toBeEnabled();
+    expect(screen.queryByRole('button',{name:'Use image icon',exact:true})).not.toBeInTheDocument();
+  });
+
   it('defers unreferenced resources until the picker opens and loads them only once', async () => {
     vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{ path: 'content/ui/title.json', revision: 'a'.repeat(64), document: uiDocument }] });
     const resource = (id: string, path: string) => ({ id, root_path: path, file_paths: [path], status: 'verified' as const,
@@ -441,15 +514,16 @@ describe('UiEditorOverlay', () => {
       resources: [],
     });
 
-    render(<UiEditorOverlay projectId="project-1" onClose={vi.fn()} />);
+    render(<><style>{editorCss}</style><UiEditorOverlay projectId="project-1" onClose={vi.fn()} /></>);
     const hierarchy = await screen.findByLabelText('UI hierarchy');
     const editorMenu = screen.getByRole('button', { name: 'Editor menu' });
     const zoomIn = screen.getByRole('button', { name: 'Zoom in' });
 
     fireEvent.click(editorMenu);
     const addUi = screen.getByRole('menuitem', { name: 'Add UI' });
+    expect(getComputedStyle(addUi.closest('[role=menu]')!).backgroundColor).toBe('rgb(24, 26, 32)');
     fireEvent.click(addUi);
-    expect(screen.getByRole('menu', { name: 'Add UI objects' })).toBeInTheDocument();
+    expect(getComputedStyle(screen.getByRole('menu', { name: 'Add UI objects' })).backgroundColor).toBe('rgb(24, 26, 32)');
     fireEvent.pointerDown(zoomIn);
     await waitFor(() => expect(screen.queryByRole('menu', { name: 'Add UI objects' })).not.toBeInTheDocument());
 
@@ -467,6 +541,8 @@ describe('UiEditorOverlay', () => {
 
     fireEvent.contextMenu(logoRow, { clientX: 80, clientY: 120 });
     const rename = await screen.findByRole('menuitem', { name: 'Rename' });
+    expect(getComputedStyle(rename.closest('[role=menu]')!).backgroundColor).toBe('rgb(24, 26, 32)');
+    expect(getComputedStyle(rename.closest('[role=menu]')!).getPropertyValue('--foreground').trim()).toBe('#e4e4eb');
     act(() => { rename.focus(); zoomIn.focus(); });
     await waitFor(() => expect(screen.queryByRole('menu', { name: 'Hierarchy context menu' })).not.toBeInTheDocument());
   });

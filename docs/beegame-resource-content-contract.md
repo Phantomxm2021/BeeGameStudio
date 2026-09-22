@@ -1,223 +1,82 @@
-# BeeGame 资源与 Game Content Package 合同
+# BeeGame 资源与 Scene/UI 数据合同
 
-坐标、锚点和父子变换的当前统一语义见 [Content 坐标约定](./content-coordinate-contract-2026-09-20.md)。文中的引擎类比不覆盖该约定。
+2026-09-21 修订。替代早期 IR 前置、Scene node.kind 和 Content v1 索引示例，不做猜测式兼容或自动项目迁移。
 
-状态：Resource Delivery、Manifest 绑定及 Scene2D/UI Content Authoring 已接入生产 Workflow。VFX、角色、动画、音频和玩法配置仍明确留在后续阶段。
+## 职责
 
-## 1. 唯一流程
+**BGS 定义数据并提供编辑器；Agent 选择技术，编写数据加载、解析及游戏代码。不是 BGS 游戏引擎。**
 
-```text
-已发布 Game IR
-  -> Resource Agent 获取或制作真实资源
-  -> Asset Manifest 发布资源事实
-  -> Content Agent 生成 Game Content Package
-  -> 目标实现 Agent 消费 Content Package 与 Manifest
-  -> 目标运行时验收
-```
+- Resource：素材文件、图集/Tile 定义、Manifest 的来源、引用、hash 与状态。
+- Content：Scene/UI/VFX 的组成、实例布局和配置。
+- Scene/UI Editor：同一数据的编辑、保存、撤销；编辑器渲染实现不成为游戏依赖。
+- Implementation：读取同一 Content 和资源；允许可重建的目标技术产物，不维护第二份独立布局。
+- Workflow：提供上下文、检查结构与引用、记录产物版本。不增加阶段或限制 Agent 工具、创意、引擎选择。
 
-Resource 和 Content 是两个独立阶段。资源阶段不写 Scene、UI 或玩法配置；Content 阶段不下载资源、不修改 Manifest、不写目标引擎代码。
+当前输入是已接受设计文档 → Resource → Content → Implementation，不要求旧版独立 IR 前置。
 
-完整实施顺序与验收计划见[引擎中立 Game Content Package 实践方案](./engine-neutral-content-package-practice-plan-2026-09-15.md)。
+## 文件与版本
 
-## 2. 权威边界
+只用 JSON，不同时维护 YAML。沿用现有入口：
 
-### 2.1 Asset Manifest
+- `assets/asset-manifest.json` 与 `assets/manifest/{requirements,resources}/*.json`：Manifest v9。
+- `assets/runtime/**`、`assets/generated/**`：素材和资源定义。
+- `content/index.json`：`beegame-content-package.v2`，`sceneModel: "game-object-v2"`。
+- 叶子：`beegame-content.v1`；kind 为 `scene-2d|scene-3d|ui-screen|ui-hud|ui-flow|vfx`，分别放在 scenes/ui/vfx 目录。
 
-Asset Manifest 只记录：
+索引声明 `id, dimension, documentRevision, assetManifestRevision, entryScene, files, sceneModel`；files 是 content 相对路径。revision 对应接受的文档和资源版本。
 
-- Game IR 声明的逻辑资源需求；
-- 项目实际拥有的本地资源；
-- 文件路径、hash、来源、许可证、依赖与验证状态；
-- 资源需求到真实资源的绑定。
+叶子声明 `schema,id,kind,assetRefs,data`。引用指向 Manifest 中 verified 的资源；多文件资源使用明确 member。路径必须登记且在项目内，不用 URL、绝对路径或内嵌字节绕过资源身份。
 
-Manifest 不记录场景层级、位置、UI、事件、动画状态或目标引擎对象。
+## Scene 与 UI
 
-资源文件仍位于：
+Scene 使用稳定节点 ID、parentId、父局部 Transform 和具有稳定 ID 的组件。组件类型来自实际 schema 的闭集，不把树、HUD、警觉槽等业务名称当渲染器。自定义行为说明保留在既有 node.data.behaviors。
 
-```text
-assets/runtime/**
-assets/generated/**
-assets/asset-manifest.json
-assets/manifest/**
-```
+UI 保留当前 UI role、layout、style、bindings、actions，不为名称像 Unity 而重写。根为 screen-root/hud-root/flow-root，不能使用旧 status-text/hud 示例角色。精确词汇见生成的 authoring format。
 
-旧 `assets/content/**` 不再是目标合同。生产接线切换时必须删除其 reader、writer、Prompt 和测试，不保留兼容入口。
+坐标、单位、旋转、pivot、UI anchor 的唯一解释见[坐标约定](./content-coordinate-contract-2026-09-20.md)。2D +Y 向下、逻辑像素；3D +Y 向上、米。父变换继承一次；图集矩形使用图片像素，显示尺寸不等于图片分辨率。
 
-### 2.2 Game Content Package
+## 矩形 Tilemap
 
-Content Package 位于独立根目录：
+借鉴 Unity 的 Grid/Tile/Tilemap 职责，不复制 Unity YAML 或内部对象。首批仅正交矩形 2D；不包含等距、六边形、规则自动铺设。
 
-```text
-content/
-  index.json
-  scenes/*.scene.json
-  ui/*.ui.json
-```
+| 所属 | 必填 | 可选与默认 |
+| --- | --- | --- |
+| Grid data | schema=`grid.v1`、cellSize=[正数,正数] | cellGap=[0,0]；enabled=true |
+| Tilemap data | schema=`tilemap.v1`、gridNodeId、cells | tileAnchor=[.5,.5]；collisionEnabled=false；member=资源 root_path；enabled=true |
+| TilemapRenderer data | schema=`tilemap-renderer.v1` | sortingOrder=0（整数，越大越前）；enabled=true |
+| TileSet 资源 JSON | schema=`beegame-tileset.v1`、tiles（tileId→定义） | 空集合有效 |
+| 每个 Tile | sprite、size=[正数,正数] | pivot=[.5,.5]；offset=[0,0]；collision 无 |
+| sprite | assetRef、member=已登记图片的完整项目相对路径 | atlasMember 与 frame 必须同时提供 |
 
-第一阶段只接受 `scene-2d`、`ui-screen`、`ui-hud` 和 `ui-flow`。未实现的 VFX、角色等类型不得以任意 `data` 冒充已支持。
+Tilemap.assetRef 引用 TileSet；同节点必须有 TilemapRenderer。gridNodeId 明确指向自身或祖先 Grid。严格版本化，拒绝未定义字段、重复格子、缺失 Tile/帧，不静默解释旧 Tilemap。
 
-这些文件不是目标引擎代码的临时输入副本，而是 Scene/UI Editor 直接加载、修改和保存的唯一可编辑权威。目标实现也直接消费同一 Package；禁止再派生第二套持久化 Scene/UI 配置。Game IR 保留规则和需求，不重复拥有完整节点树。
+- cells 是稀疏列表，例如 `[{x:-1,y:0,tileId:"ground"}]`。整数可为负，同层坐标唯一；空格省略，不创建大量 Sprite 节点。
+- 不同层用不同 Tilemap 节点；同层按 y、x 升序绘制。格子在 Tilemap 局部空间，Grid 提供规格。
+- Tile pivot 位置 = cell × (cellSize + cellGap) + cellSize × tileAnchor + offset。
+- Tile 左上角 = pivot 位置 − size × pivot。size 为逻辑像素，树冠可以大于格子。
+- atlasMember 属于 sprite.assetRef 的同一资源，frame 指定命名帧。格式：`frames: {ground:{frame:{x:0,y:0,w:32,h:32}}}`。拒绝 rotated/trimmed，不猜文件名。
+- collision 可包含 points（至少 3 个相对 Tile pivot 的二维点）、mode（solid/trigger/one-way）；one-way 还要求非零 normal。collisionEnabled=true 才启用。Agent 决定目标物理实现；编辑器仅显示轮廓。
+- TileSet 是既有 Manifest 的 data 资源，不新增注册库，也不保存 Scene 格子布局。普通图片不增加 JSON 包装。
 
-## 3. 根索引
+字段示例由 `tilemap-authoring-contract.ts` 同时提供给资源与内容任务，并由测试验证。Implementation 自行映射目标技术，无需导入 BGS 包。
 
-`content/index.json` 使用固定 schema：
+重复网格环境优先评估 Tilemap，是否采用由 Agent 判断；角色、自由装饰、机关、非网格背景不强制使用。
 
-```json
-{
-  "schema": "beegame-content-package.v1",
-  "id": "game-content",
-  "dimension": "2d",
-  "irRevision": "<published-ir-revision>",
-  "assetManifestRevision": "<published-manifest-revision>",
-  "entryScene": "scene.main",
-  "files": [
-    "scenes/main.scene.json",
-    "ui/hud.ui.json"
-  ]
-}
-```
+## 编辑器图片加载
 
-根索引是唯一 package 入口。它必须列出全部叶子文件，并绑定同一项目的 IR 与 Manifest revision。不得存在未注册叶子文件或第二份索引。
+- Tilemap 加载链：Scene 的 Tilemap.assetRef → Manifest 的 TileSet JSON → tiles[tileId].sprite.assetRef/member → 图片；使用图集时再按 atlasMember/frame 取精确矩形。独立图片不需要图集 JSON；TileSet 可以跨图片资源复用 Tile。
+- 地图保存的是 cells 与 Tile 引用，不是一张空白大图上的像素，也不为每格创建独立 Sprite 节点。Tilemap 属于 Scene；UI 图标、面板通过自己的 image/member/frame 引用图片。
+- Scene/UI 均支持完整图片路径；同名文件不互相覆盖。已有短 member 只在资源内无歧义时解析。普通 Sprite/UI 现有图集规则是同目录、同文件名的 JSON，Tilemap 使用显式 atlasMember，不猜名称。
+- TileSet 的间接图片/图集缺失或请求失败会阻止 Scene 以“加载成功”状态打开；报错指出具体 Tile 与路径。图片解码/帧越界仍需实际图像验证。
+- 资源/内容 Agent 已获得同一 authoring contract；Implementation 的实际 dispatch 会交接该合同路径。游戏侧由 Agent 使用所选技术加载同一数据，不自动获得 BGS 编辑器的渲染代码。
 
-## 4. 公共叶子头
+## 验证和限制
 
-所有叶子文件使用 JSON 和相同公共头：
+- 现有资源/内容验收检查结构、资源身份、路径、图集和格子引用。
+- 编辑器提供 Tile Palette：Active Target 指定 Tilemap，选择真实图集帧；支持 Paint（B）、Erase（D）、Pick（I，拾取后回到 Paint）、Box Fill（U）。拖动先预览，松手整笔提交一次 Undo/Redo；Escape、失焦、切换目标取消未提交笔画。保存仍只修改 Tilemap.cells，不改资源或生成游戏引擎代码。
+- 这是 Unity Tile Palette 工作方式的矩形网格子集，不是 Unity 文件格式/全功能兼容；尚无多格印章、Flood Fill、Tile 选区移动、旋转/翻转及 Rule Tile。
+- PNG 图集边界可由后端读头部检查；其他格式仍需解码验证。编辑器检查实际图片尺寸，结构检查不能代替视觉验收。
+- 静态 Scene PNG 工具支持矩形 2D Tilemap，按图片/命名帧、Grid、Tile 锚点和父级变换绘制；缺失或无法解码的资源明确失败。它只是诊断快照，不是游戏运行时或玩法验收，不应要求 Agent 为预览限制改坏合法 Content。
+- 结构通过不代表玩法、性能或游戏交付通过；新项目测试由用户安排，付费复测暂缓。
 
-```json
-{
-  "schema": "beegame-content.v1",
-  "id": "scene.main",
-  "kind": "scene-2d",
-  "irRefs": ["world.main"],
-  "assetRefs": ["asset.background"],
-  "data": {}
-}
-```
-
-- `irRefs` 必须解析到绑定 revision 的真实 IR node；
-- `assetRefs` 必须解析到绑定 Manifest 中的 verified resource；
-- `data` 只能通过 `assetRef` 使用资源，不能写资源路径、URL 或 data URI；
-- 一个事实只保留一个 owner，不把完整 IR node 或 Manifest record 复制到叶子文件。
-
-## 5. Scene2D
-
-Scene 与 UI 永远分离。`scene-2d` 保存世界空间节点：
-
-```json
-{
-  "schema": "beegame-content.v1",
-  "id": "scene.main",
-  "kind": "scene-2d",
-  "irRefs": ["world.main"],
-  "assetRefs": ["asset.background"],
-  "data": {
-    "cameraNodeId": "camera.main",
-    "nodes": [
-      { "id": "world", "kind": "group" },
-      {
-        "id": "background",
-        "parentId": "world",
-        "kind": "sprite",
-        "layer": "background",
-        "zIndex": 0,
-        "assetRef": "asset.background",
-        "transform": { "position": [0, 0], "scale": [1, 1] }
-      },
-      {
-        "id": "camera.main",
-        "parentId": "world",
-        "kind": "camera",
-        "transform": { "position": [0, 0] }
-      }
-    ]
-  }
-}
-```
-
-第一阶段验证：节点 ID 唯一、parent 引用闭合、层级无循环、camera 引用存在、节点资源已在公共头声明。
-
-编辑器稳定字段为 `transform`、`assetRef` 与 `components`；移动、旋转、缩放和资源替换直接更新这些字段。
-
-`kind` 和 `data` 表达引擎中立语义，不允许出现 React component、Unity GameObject、Godot Node 或 Unreal Actor 等目标实现类型。
-
-## 6. UI
-
-UI 保存屏幕空间结构，不写入 Scene 文件：
-
-```json
-{
-  "schema": "beegame-content.v1",
-  "id": "ui.hud",
-  "kind": "ui-hud",
-  "irRefs": ["presentation.hud"],
-  "assetRefs": [],
-  "data": {
-    "rootId": "hud.root",
-    "nodes": [
-      { "id": "hud.root", "role": "hud" },
-      {
-        "id": "score",
-        "parentId": "hud.root",
-        "role": "status-text",
-        "text": "0",
-        "layout": {
-          "anchor": "top-right",
-          "position": [-24, 24],
-          "size": [220, 48]
-        },
-        "bindings": { "text": "game.score.formatted" },
-        "actions": { "click": "score.details.open" }
-      }
-    ]
-  }
-}
-```
-
-第一阶段验证：唯一根节点存在且无 parent、其他节点均有 parent、parent 引用闭合、层级无循环、资源引用已声明。
-
-编辑器稳定字段为 `layout`、`assetRef`、`bindings`、`actions` 与 `style`；锚点、位置、尺寸、缩放、资源、状态绑定和动作修改直接写回这些字段。
-
-UI 与 Scene 只能通过稳定状态、事件或锚点 ID 关联，不能互相嵌入完整节点树。
-
-## 7. Workflow 职责
-
-当前实现的上下文交付、预览错误处理与验收边界见 [交付耗时与正确性调整](delivery-cost-correctness-adjustment-2026-09-20.md)。早期章节中的独立 IR 前置假设不适用于当前直接文档 → 资源 → Content 流程。
-
-实现期间的问题记录与定向修复以 [implementation-issue-repair-plan-2026-09-20.md](implementation-issue-repair-plan-2026-09-20.md) 为准：非阻塞缺陷先记后修，素材交资源修复任务，代码缺陷由实现任务处理。一次原生 CLI 任务可协调这些修复，不增加阶段或自动审计循环；资源事实与哈希仍归 Manifest，最终证据必须对应修复后的产物。
-
-Workflow 只做：
-
-- 向一次直接 CLI Content 任务提供已接受文档、Manifest 路径及版本；格式契约落盘后按需读取，不重复内嵌完整 Manifest；
-- Content 职责为编写 `content/**`，不增加原生工具拦截；
-- 保存 Content Package revision 和 digest；
-- 执行 JSON、ID、版本、引用、层级和路径旁路校验；
-- 将同一 Content Package 交给目标实现 Agent。
-
-Workflow 不做：
-
-- 固定 Agent 工具或文件操作步骤；
-- 规定 Subagent、Skill 或搜索方式；
-- 根据节点数量、时间或 tokens 判断内容质量；
-- 自动追加审计、修订或完善轮次；
-- 生成引擎对象或维护 Engine Adapter。
-
-## 8. 正确实施顺序与完成标准
-
-### 8.1 Resource Delivery 前置阶段
-
-1. Resource Agent 只消费已发布 Game IR；
-2. 自主搜索、选择或制作真实资源；
-3. Manifest 独立保存 requirement→resource 绑定；
-4. 资源通过不再依赖旧 `assets/content`；
-5. 删除资源阶段的 Scene/UI 配置职责和旧 Content reader/writer。
-
-Resource Delivery 未完成时，Content Authoring 不得启动。
-
-### 8.2 Scene/UI Content 阶段
-
-1. `content/index.json`、Scene2D、UI schema 与读取审计通过；
-2. IR node、verified asset、入口 Scene 和节点层级引用可确定性验证；
-3. Scene 与 UI 分文件、分职责；
-4. 资源路径旁路被拒绝；
-5. VFX 等未实现类型被明确拒绝；
-6. 只接入一次直接 CLI Content Authoring 调用，不启动整游戏实现。
+实施与验证进度见[落地方案](./scene-ui-data-contract-plan-2026-09-21.md)。不改已有示例项目，不引入游戏 renderer、game loop、物理或运行时资源管理模块。

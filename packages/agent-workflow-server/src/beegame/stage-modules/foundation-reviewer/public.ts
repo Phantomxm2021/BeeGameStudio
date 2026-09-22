@@ -12,7 +12,7 @@ export { createEvidenceWriter as createReviewerEvidenceWriter, evidenceSecrets a
 export type { SingleReviewStart as ReviewerStartInput, SingleReviewHandle as ReviewerHandle,
   SingleReviewResume as ReviewerResumeInput, SingleReviewStop as ReviewerStopInput,
   SingleReviewResult as ReviewerResult, SingleReviewPublishedResult as ReviewerReviewResult } from './private/single-agent-publication'
-export type ReviewerConfiguration = Readonly<{ workspacePath: string }>
+export type ReviewerConfiguration = Readonly<{ workspacePath: string; language?: string }>
 export type ReviewerInfrastructure = Readonly<{ runtimeConfiguration: RuntimeConfigurationClient; billing: UsageBillingClient }>
 
 /** Only copied public input is accepted; no worker, journal, or admission callback escapes. */
@@ -22,9 +22,9 @@ export function foundationReviewerInputDigest(value: Pick<SingleReviewStart, 'ow
 
 /** Sole production entry point for the isolated single-agent full audit. */
 export function createFoundationReviewer(config: ReviewerConfiguration, infrastructure: ReviewerInfrastructure): SingleReviewerOperations {
-  const parsed = z.object({ workspacePath: z.string().min(1) }).strict().parse(config)
+  const parsed = z.object({ workspacePath: z.string().min(1), language: z.string().min(1).optional() }).strict().parse(config)
   if (!isAbsolute(parsed.workspacePath)) throw new Error('Reviewer workspace must be absolute')
-  const operations = createSingleReviewerLifecycle(parsed.workspacePath, infrastructure)
+  const operations = createSingleReviewerLifecycle(parsed.workspacePath, infrastructure, parsed.language)
   async function invoke<T>(operation: () => Promise<T>): Promise<T> {
     try { return await operation() }
     catch { throw new Error('Reviewer operation could not be accepted or safely completed') }

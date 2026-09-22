@@ -1,7 +1,7 @@
 # Implementation 耗时审计与系统调整建议
 
 样本：mushroom-platform-quest--9b076afc632c；dispatch 62182a2c-26d1-4b0b-b1a4-3969f7855a4c。
-本次只读检查项目与原生 transcript，没有继续 workflow、模型调用或修改项目产物。本文件是诊断与待实施方案，不表示以下新增调整已经完成。
+诊断阶段只读检查项目与原生 transcript。以下保留根因和调整依据；已落地范围见文末。系统修复没有继续 workflow、调用模型或修改项目产物。
 
 ## 计时口径
 
@@ -66,3 +66,37 @@ delivery-worker-session-port.ts 仅注入 PREVIEW_ENVIRONMENT 和 getPreviewCont
 4. 新项目中观察初版构建后的返工区间、浏览器启动失败、重复测试环境代码，以及验证证据质量。先不承诺节省比例，不以减少真实检查或强制 Agent 并行达成指标。
 
 仅日志去重、快一点文件扫描不能解释或解决本次 149 分钟主因，应降低优先级。交付收尾的 memory 误判已另行修复，它导致最终失败，但不是此前两小时的执行瓶颈。
+
+## 本轮落地与验收
+
+先提交已有全部改动：`18de25863`，205 个文件。之后的修复限于 BGS 系统：
+
+| 已落地 | 对应根因与边界 |
+|---|---|
+| 移除宿主 NODE_ENV 自动继承 | 原生任务及其 shell 子进程不再把 BGS development 当作项目构建模式；显式项目环境仍有效。 |
+| 独立测试 Chromium 生命周期 | 复现 macOS seatbelt 的 MachPort 启动失败后，由宿主按需启动已安装的 headless-shell。专属临时 profile、静音、仅本机 CDP，不下载、不使用个人 profile、不关闭 Chromium sandbox，不授予任意 Bash 无沙箱权限。 |
+| 实际 Preview 测试 API | Implementation 可自行启动/查询 development 或 production，并得到与 Dashboard 同 sandbox 的 iframe 宿主页。复用 preview-manager 和能力鉴权；不接受额外工作区、命令或任意代理地址。production 只调用已有 preview script，不隐式构建或回退 dev。 |
+| 会话清理 | 停止先中断 Agent；访问入口撤销、自己的预览和浏览器关闭、临时 profile 清理。并发浏览器启动合并；已退出的浏览器不返回假就绪。 |
+| 单一内容消费接口 | 现有 Schema 提取成纯模块，服务端继续使用同一个定义。可选 ESM 导出 Scene/UI 外层读取、坐标、图集解析；不复制另一套 Schema、不包含 Three.js/文件系统/游戏循环、不强制 Agent 使用，也不自动写入项目。 |
+
+验收用的是临时夹具，不是 mushroom 项目：
+
+- 13 个相关测试文件覆盖环境、内容、Worker 生命周期和 Preview；随后追加 macOS 沙箱客户端 CDP 实测。
+- 实际 Vite development 和已构建 production：经能力鉴权、原有 preview proxy 和 opaque-origin iframe 成功执行模块、获取 JSON 资源；800×600 viewport 正确，截图成功。
+- 宿主 NODE_ENV=development 时，隔离后的生产构建中 import.meta.env.DEV 为 false。
+- 原生文件系统沙箱内的客户端在网络已获授权条件下可连接宿主 CDP；未声称绕过网络授权或完成了付费父/子 Agent 回归。
+- 内容 ESM 可在独立临时目录直接执行，无 BGS 包安装依赖；不兼容错误的平铺 Scene 外层，也不静默吞掉缺失图集帧。
+
+完整工具输出继续沿用原生持久化记录。后续本轮已完成浏览器观察汇总：Agent 选择页面并开始一次 recording 后，被动收集该页与子 frame 的 console、页面异常、HTTP 错误和网络失败；finish 留存一次视口截图及冻结报告。GET/重复 finish 不驱动游戏、不重新截图或运行测试。独立详细报告/PNG 保存在所属用户数据目录的 preview-tests/<session hash>/，现有 native-runtime.jsonl 只追加索引与计数，没有新增一条完整工具日志流。
+
+### 浏览器记录补完验收（无模型费用）
+
+- API：POST /recordings {targetId, label, conditions}；GET /recordings 列表；GET /recordings/<id> 读取；POST /recordings/<id>/finish；GET /recordings/<id>/screenshot。只允许当前专用浏览器的 page，不接受输出路径或任意命令。
+- Agent 仍自行选择测试方法、页面、输入、断言和是否采用记录能力。采集器不导航、不输入、不修改缓存、不拦截请求、不暂停页面。协议参考 [Chrome DevTools Target](https://chromedevtools.github.io/devtools-protocol/tot/Target/)。
+- 报告记录实际起止时间、耗时、Preview 模式、目标页、计数和错误。conditions 明确标记 agent-declared；gameplayVerdict 恒为 not-evaluated。浏览器连接/采集完成不等于游戏合格。
+- 排除记录开始前缓存的控制台事件；开始记录前或 attachment readiness 前的事件不保证补录。退出/断开、截图失败、存储失败均显式反映；会话结束时未完成记录使用 session-closed，不伪装已验收。
+- 每份保留最多 1000 条、单条最多 4096 字符，丢弃/截断计数可见。最多缓存 32 份，DELETE 已结束记录仅释放内存，不删除归档。PNG 保存后从运行时内存释放，读取时再加载；不为截图建立连续视频或轮询。
+- 临时 Vite 开发与生产夹具实测：iframe 资源加载、页面异常、HTTP 失败、连接失败、截图文件与接口字节一致、报告重读/重复 finish 稳定、每次连续 10 次读取不产生新游戏执行、旧 console 不串入下一次、其他 page 的错误不串入、超过 1000 条后明确报告截断、关闭清理和归档保留。
+- 用户已明确选择：**先完成无费用验证，付费新项目复测暂缓**。以上不是一次新游戏生成 benchmark，不据此报告生成耗时减少百分比。
+
+这些修复消除已复现的环境、浏览器能力和格式消费障碍，不证明具体游戏可达、交付合格或耗时已降低某个比例。后续需在用户启动的新项目中观察返工区间和重复测试次数；不得靠自动重试旧 workflow、修改关卡/HUD 或减少真实验收来获得数据。

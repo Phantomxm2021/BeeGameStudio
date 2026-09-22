@@ -61,7 +61,9 @@ export class ProjectChatTimeline {
       event.createdAt = new Date(event.createdAt)
       const { textId } = this.records[low++]!
       if (textId) event.payload = { ...event.payload!, assistantBlockId: textId }
-      events.push(event)
+      // Old live subscriptions admitted internal worker prompts. Keep journal
+      // offsets/cursors intact, but never expose them as a user's utterance.
+      if (!(event.type === 'user.message' && event.payload?.displayKind === 'workflow_worker')) events.push(event)
     }
     return events
   }
@@ -72,6 +74,7 @@ export class ProjectChatTimeline {
       const batch: BeeGameEvent[] = []
       const batchKeys = new Set<string>()
       for (const event of incoming) {
+        if (event.type === 'user.message' && event.payload?.displayKind === 'workflow_worker') continue
         const key = sourceKey(event)
         if (this.keys.has(key) || batchKeys.has(key)) continue
         batchKeys.add(key)

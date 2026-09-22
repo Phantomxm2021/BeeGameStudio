@@ -2,6 +2,7 @@ import type { ApplyResult, SceneComponent, SceneDocument, SceneNode, SceneOperat
 import { clone, same } from './model'
 import { canonicalJson, sha256Sync } from './persistence'
 import { assertSceneDocument, assertSceneSettings } from './validation'
+import { parseTilemapData, type TileCell } from './tilemap-data'
 
 const fail = (message: string): ApplyResult => ({ document: undefined as never, inverse: [], applied: false, diagnostic: message })
 const nodeOrFail = (doc: SceneDocument, id: string) => doc.nodes[id]
@@ -12,6 +13,7 @@ function validateOperation(op: SceneOperation) {
   if (!op || typeof op !== 'object' || typeof op.type !== 'string') throw Error('Invalid scene operation')
   if ('nodeId' in op && (typeof op.nodeId !== 'string' || !op.nodeId.trim())) throw Error('Operation nodeId must be non-empty')
   const allowed: Record<string, string[]> = { 'scene.configure': ['type', 'name', 'settings', 'expectedName', 'expectedSettings'], 'scene.renameGameObject': ['type', 'nodeId', 'name', 'expectedName'], 'scene.setActive': ['type', 'nodeId', 'active', 'expectedActive'], 'scene.setLocked': ['type', 'nodeId', 'locked', 'expectedLocked'], 'scene.setTransform': ['type', 'nodeId', 'transform', 'expectedTransform'], 'scene.addGameObject': ['type', 'node', 'index', 'expectedParentExists'], 'scene.removeGameObject': ['type', 'nodeId', 'expectedExists'], 'scene.reparent': ['type', 'nodeId', 'parentId', 'index', 'expectedParentId'], 'scene.setComponent': ['type', 'nodeId', 'component', 'expectedComponent'], 'scene.removeComponent': ['type', 'nodeId', 'componentId', 'expectedComponent'], 'scene.addAsset': ['type', 'asset'], 'scene.removeAsset': ['type', 'assetId', 'expectedExists'] }
+  allowed['scene.setTileCells'] = ['type', 'nodeId', 'componentId', 'changes']
   if (!allowed[op.type] || Object.keys(op as object).some(key => !allowed[op.type].includes(key) || (op as any)[key] === undefined)) throw Error('Invalid or unknown scene operation property')
   switch (op.type) {
     case 'scene.configure':
@@ -28,6 +30,20 @@ function validateOperation(op: SceneOperation) {
     case 'scene.removeGameObject': if (op.expectedExists !== undefined && typeof op.expectedExists !== 'boolean') throw Error('expectedExists must be boolean'); break
     case 'scene.reparent': if (op.parentId !== null && typeof op.parentId !== 'string') throw Error('Parent ID must be string or null'); break
     case 'scene.setComponent': if (!op.component || typeof op.component.id !== 'string' || typeof op.component.type !== 'string' || typeof op.component.enabled !== 'boolean') throw Error('Invalid component'); break
+    case 'scene.setTileCells': {
+      if (typeof op.componentId !== 'string' || !op.componentId || !Array.isArray(op.changes) || !op.changes.length) throw Error('Invalid tile changes')
+      const seen = new Set<string>()
+      for (const cell of op.changes) {
+        if (!cell || Object.keys(cell).some(key => !['x','y','tileId','expectedTileId','index'].includes(key)) ||
+          !Number.isSafeInteger(cell.x) || !Number.isSafeInteger(cell.y) ||
+          ![cell.tileId,cell.expectedTileId].every(id => id === null || (typeof id === 'string' && !!id.trim() && id === id.trim())) ||
+          (cell.index !== undefined && (!Number.isSafeInteger(cell.index) || cell.index < 0))) throw Error('Invalid tile change')
+        const key = `${cell.x},${cell.y}`
+        if (seen.has(key)) throw Error('Duplicate tile change')
+        seen.add(key)
+      }
+      break
+    }
     case 'scene.removeComponent': if (typeof op.componentId !== 'string' || !op.componentId) throw Error('Invalid component ID'); break
     case 'scene.addAsset': if (!op.asset || typeof op.asset.id !== 'string' || !op.asset.id || typeof op.asset.path !== 'string' || typeof op.asset.mimeType !== 'string' || typeof op.asset.name !== 'string') throw Error('Invalid scene asset'); break
     case 'scene.removeAsset': if (op.expectedExists !== undefined && typeof op.expectedExists !== 'boolean') throw Error('expectedExists must be boolean'); break
@@ -58,6 +74,31 @@ function assertParentEditable(doc: SceneDocument, parentId: string | null) { if 
 
 function applyOne(doc: SceneDocument, op: SceneOperation): SceneOperation[] {
   switch (op.type) {
+    case 'scene.setTileCells': {
+      const node = nodeOrFail(doc, op.nodeId)
+      if (!node) throw Error('GameObject does not exist')
+      assertEditable(node, op.type)
+      const component = node.components.find(c => c.id === op.componentId && c.type === 'tilemap')
+      if (!component || component.type !== 'tilemap') throw Error('Tilemap does not exist')
+      const map = parseTilemapData(component.properties)
+      const byPosition = new Map(map.cells.map((cell, index) => [`${cell.x},${cell.y}`, {cell,index}]))
+      const updates = new Map(op.changes.map(change => [`${change.x},${change.y}`, change]))
+      const inverse = op.changes.map(change => {
+        const old = byPosition.get(`${change.x},${change.y}`)
+        if ((old?.cell.tileId ?? null) !== change.expectedTileId) throw Error('Tile cell is stale')
+        return {x:change.x,y:change.y,tileId:old?.cell.tileId ?? null,expectedTileId:change.tileId,...(old ? {index:old.index} : {})}
+      })
+      const cells = map.cells.flatMap(cell => {
+        const update = updates.get(`${cell.x},${cell.y}`)
+        return !update ? [cell] : update.tileId === null ? [] : [{x:cell.x,y:cell.y,tileId:update.tileId}]
+      })
+      // Preserve authored array order on erase/undo, not only rendered order.
+      const additions = op.changes.filter(c => c.tileId !== null && !byPosition.has(`${c.x},${c.y}`))
+        .sort((a,b) => (a.index ?? Infinity) - (b.index ?? Infinity))
+      for (const cell of additions) cells.splice(Math.min(cell.index ?? cells.length,cells.length),0,{x:cell.x,y:cell.y,tileId:cell.tileId!})
+      component.properties = {...map,cells}
+      return [{type:op.type,nodeId:op.nodeId,componentId:op.componentId,changes:inverse}]
+    }
     case 'scene.configure': {
       const stale = assertExpected(doc.name, op.expectedName, 'scene name') ?? assertExpected(doc.settings ?? null, op.expectedSettings, 'scene settings')
       if (stale) throw Error(stale)
@@ -108,6 +149,17 @@ export function patchFor(document: SceneDocument, operations: SceneOperation[], 
   return { schemaVersion: 'scene-patch.v2', domain: 'scene', operationSchemaVersion: 'scene-game-object-operations.v1', transactionId: crypto.randomUUID(), documentId: document.id, base: clone(document.source), origin, label, operations: clone(operations) }
 }
 export const operations = {
+  tileCells: (nodeId: string, componentId: string, before: readonly TileCell[], after: readonly TileCell[]): SceneOperation => {
+    const old = new Map(before.map(c => [`${c.x},${c.y}`, c]))
+    const next = new Map(after.map((cell,index) => [`${cell.x},${cell.y}`, {cell,index}]))
+    const changes: Extract<SceneOperation,{type:'scene.setTileCells'}>['changes'] = []
+    for (const cell of before) {
+      const value = next.get(`${cell.x},${cell.y}`)?.cell.tileId ?? null
+      if (value !== cell.tileId) changes.push({x:cell.x,y:cell.y,tileId:value,expectedTileId:cell.tileId})
+    }
+    for (const [key,{cell,index}] of next) if (!old.has(key)) changes.push({...cell,index,expectedTileId:null})
+    return {type:'scene.setTileCells',nodeId,componentId,changes}
+  },
   rename: (nodeId: string, name: string, expectedName?: string): SceneOperation => ({ type: 'scene.renameGameObject', nodeId, name, ...(expectedName === undefined ? {} : { expectedName }) }),
   active: (nodeId: string, active: boolean, expectedActive?: boolean): SceneOperation => ({ type: 'scene.setActive', nodeId, active, ...(expectedActive === undefined ? {} : { expectedActive }) }),
   locked: (nodeId: string, locked: boolean, expectedLocked?: boolean): SceneOperation => ({ type: 'scene.setLocked', nodeId, locked, ...(expectedLocked === undefined ? {} : { expectedLocked }) }),

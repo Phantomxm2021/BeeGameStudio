@@ -20,8 +20,67 @@ export const CONTENT_COORDINATE_CONTRACT = {
   hierarchy: 'Transform positions are parent-local. Compose parent * translation * rotation * scale exactly once. Sprite pivots offset the rendered geometry, never the GameObject or its children/colliders.',
   rotation: 'All persisted Transform.rotation and UI layout.rotation angles are radians. 3D uses XYZ Euler order. Positive 2D/UI rotation is clockwise in the y-down plane. A y-up editor reverses the 2D Z angle at import and export, not in saved Content.',
   ui: 'Screen UI uses top-left logical pixels regardless of scene dimension. Anchor and pivot coordinates are [x,y], with [0,0] top-left and [1,1] bottom-right. layout.position is a parent-local offset from layout.anchor. data.anchor optionally overrides the child pivot only. Local top-left = parentSize * anchor + position - childSize * pivot; rotate/scale around the pivot. Nested DOM uses local coordinates, never already accumulated world coordinates.',
+  uiPaint: 'For each enabled node paint its background/border first, then its own content (text, image or control graphics), then child nodes in document order. Later siblings paint over earlier siblings. A background is never a later overlay above the node content. Disabled nodes suppress their whole subtree.',
   rectTransform: 'Scene RectTransform uses the same top-left anchor/pivot convention as UI. size = parentRectSize * (anchorMax-anchorMin) + sizeDelta. Its pivot position = parentRectSize * (anchorMin+(anchorMax-anchorMin)*pivot-parentPivot) + anchoredPosition; add Transform.position once. A root rect has no parent rectangle. This is a Content convention, not implicit target-engine RectTransform semantics.',
   vfx: 'Emitter positions, zones, collider offsets and local effect geometry use their owning scene/UI coordinate space and inherit its transform once. Screen effects use logical pixels; 3D effects use world units. Texture/atlas rectangles always use top-left image pixels.',
+} as const
+
+export const UI_PAINT_PHASES = ['background', 'content'] as const
+export type UiPaintPhase = typeof UI_PAINT_PHASES[number]
+export type UiPaintNode = Readonly<{ id: string; parentId?: string; enabled?: boolean }>
+export type UiPaintStep = Readonly<{ nodeId: string; phase: UiPaintPhase }>
+
+/** A renderer-independent reference order for UI consumers and editor tests. */
+export function uiPaintOrder(nodes: readonly UiPaintNode[], rootId: string): UiPaintStep[] {
+  const byId = new Map<string, UiPaintNode>()
+  const children = new Map<string, UiPaintNode[]>()
+  for (const node of nodes) {
+    if (byId.has(node.id)) throw new Error(`Duplicate UI node: ${node.id}`)
+    byId.set(node.id, node)
+    if (node.id !== rootId) {
+      if (!node.parentId) throw new Error(`UI node has no parent: ${node.id}`)
+      const list = children.get(node.parentId) ?? []
+      list.push(node)
+      children.set(node.parentId, list)
+    }
+  }
+  if (!byId.has(rootId)) throw new Error(`Unknown UI root: ${rootId}`)
+  for (const node of nodes)
+    if (node.id !== rootId && !byId.has(node.parentId!))
+      throw new Error(`Unknown UI parent ${node.parentId}: ${node.id}`)
+  const output: UiPaintStep[] = [], visiting = new Set<string>(), visited = new Set<string>()
+  const visit = (node: UiPaintNode) => {
+    if (visiting.has(node.id)) throw new Error(`UI hierarchy cycle: ${node.id}`)
+    if (visited.has(node.id)) return
+    visiting.add(node.id); visited.add(node.id)
+    if (node.enabled !== false) {
+      output.push({ nodeId: node.id, phase: 'background' }, { nodeId: node.id, phase: 'content' })
+      for (const child of children.get(node.id) ?? []) visit(child)
+    } else {
+      const mark = (child: UiPaintNode) => { visited.add(child.id); for (const nested of children.get(child.id) ?? []) mark(nested) }
+      for (const child of children.get(node.id) ?? []) mark(child)
+    }
+    visiting.delete(node.id)
+  }
+  visit(byId.get(rootId)!)
+  if (visited.size !== nodes.length) throw new Error('UI hierarchy is disconnected from its root')
+  return output
+}
+
+export const UI_PAINT_CONFORMANCE_FIXTURE = {
+  rootId: 'root',
+  nodes: [
+    { id: 'root' },
+    { id: 'button', parentId: 'root' },
+    { id: 'label', parentId: 'button' },
+    { id: 'later-sibling', parentId: 'root' },
+  ],
+  expected: [
+    { nodeId: 'root', phase: 'background' }, { nodeId: 'root', phase: 'content' },
+    { nodeId: 'button', phase: 'background' }, { nodeId: 'button', phase: 'content' },
+    { nodeId: 'label', phase: 'background' }, { nodeId: 'label', phase: 'content' },
+    { nodeId: 'later-sibling', phase: 'background' }, { nodeId: 'later-sibling', phase: 'content' },
+  ],
 } as const
 
 // Canvas/SVG affine order: x'=a*x+c*y+e, y'=b*x+d*y+f.

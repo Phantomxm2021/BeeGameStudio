@@ -6,6 +6,20 @@ import { ProjectChatTimeline } from './project-chat-timeline'
 import type { BeeGameEvent } from './session-manager'
 import { compactTranscriptForChatHistory } from '../app'
 
+test('old leaked worker prompts are hidden without renumbering journal cursors or deduplicating user text', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'bgs-internal-chat-'))
+  try {
+    const path = join(dir, 'events.jsonl')
+    const make = (id: number, displayKind: string): BeeGameEvent => ({ id, sessionId: 'main', type: 'user.message',
+      text: '修复按钮', createdAt: new Date(id), payload: { type: 'user.message', displayKind } })
+    await writeFile(path, [make(1, 'change_request'), make(2, 'workflow_worker'), make(3, 'change_request')].map(e => JSON.stringify(e)).join('\n') + '\n')
+    const timeline = new ProjectChatTimeline(path)
+    expect((await timeline.append([])).map(e => e.id)).toEqual([1, 3])
+    expect((await timeline.append([make(4, 'workflow_worker')])).map(e => e.id)).toEqual([1, 3])
+    expect((await timeline.append([make(5, 'project_request')], 3)).map(e => e.id)).toEqual([4])
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
 test('journal offsets preserve large UTF-8 output and recover a torn final append', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'beegame-journal-offset-'))
   try {

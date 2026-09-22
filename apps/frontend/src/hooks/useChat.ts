@@ -494,6 +494,9 @@ export const useChat = ({
               message.status === 'stopped' ? 'stopped' : message.status === 'failed' ? 'failed' : 'incomplete',
               message.timestamp || Date.now())
           }
+          // A worker terminal settles only that worker's activity. The
+          // workflow/project status owns the composer and project lifecycle.
+          if (message.task_kind?.startsWith('workflow_stage:')) break
           // Task status update
           // Requirements: 6.2
           if (
@@ -663,6 +666,7 @@ export const useChat = ({
             taskKind: 'runtime_error',
             errorDetails: message.error || message.message || message.code,
           })
+          if (message.task_kind?.startsWith('workflow_stage:')) break
           setIsLoading(false)
           setPermissionState(prev => {
             if (

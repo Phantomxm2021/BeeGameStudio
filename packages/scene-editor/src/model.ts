@@ -13,7 +13,7 @@ export type MeshRendererComponent = ComponentBase<'mesh-renderer'> & { assetId?:
 export type SkinnedMeshRendererComponent = ComponentBase<'skinned-mesh-renderer'> & { assetId: string; member?: string; material: MaterialOverride; properties: Record<string, unknown> }
 export type GridComponent = ComponentBase<'grid'> & { properties: Record<string, unknown> }
 export type TilemapComponent = ComponentBase<'tilemap'> & { assetId: string; member?: string; properties: Record<string, unknown> }
-export type TilemapRendererComponent = ComponentBase<'tilemap-renderer'> & { material: MaterialOverride; properties: Record<string, unknown> }
+export type TilemapRendererComponent = ComponentBase<'tilemap-renderer'> & { properties: Record<string, unknown> }
 export type AnimatorComponent = ComponentBase<'animator'> & { assetId?: string; controller: Record<string, unknown> }
 export type BoxCollider2DComponent = ComponentBase<'box-collider-2d'> & { size: Vec2; offset: Vec2; isTrigger: boolean }
 export type CircleCollider2DComponent = ComponentBase<'circle-collider-2d'> & { radius: number; offset: Vec2; isTrigger: boolean }
@@ -53,7 +53,7 @@ export type SceneComponent = SpriteRendererComponent | MeshFilterComponent | Mes
 export interface SceneGameObject { id: string; name: string; parentId: string | null; children: string[]; active: boolean; locked: boolean; editable?: boolean; transform: Transform; layer?: string; order?: number; tags: string[]; components: SceneComponent[]; metadata?: Record<string, unknown>; source?: { irId?: string; occurrenceId?: string } }
 export type SceneNode = SceneGameObject
 export type SpriteSheet = { frames: Record<string, { x: number; y: number; width: number; height: number }> } | { frameWidth: number; frameHeight: number; framesPerFacing?: number; facings?: string[]; states?: string[]; frameDurationMs?: number[] }
-export interface SceneAsset { spriteSheet?: SpriteSheet; id: string; name: string; mimeType: string; path: string; bytes?: string; uri?: string; dependencies?: string[]; diagnostics?: string[] }
+export interface SceneAsset { resourceId?: string; tileSet?: import('./tilemap-data').TileSetData; spriteSheet?: SpriteSheet; id: string; name: string; mimeType: string; path: string; bytes?: string; uri?: string; dependencies?: string[]; diagnostics?: string[] }
 export interface SourceBinding { source: { kind: 'fixture'; fixtureId: string; fixtureDigest: string } | { kind: 'published-ir' | 'content-package'; publicationId: string; candidateDigest: string; sourceInputDigest: string }; contentDigest: string; contentRevision: string; contentSchemaVersion: string; adapterId: string; adapterVersion: string }
 export interface SceneSettings { background: string; showGrid: boolean; ambientColor: string; ambientIntensity: number; exposure: number; fogEnabled: boolean; fogColor: string; fogNear: number; fogFar: number; selectionColor?: string; selectionWidth?: number }
 export const DEFAULT_SCENE_SETTINGS: Readonly<SceneSettings> = { background: '#3c3f43', showGrid: true, ambientColor: '#ffffff', ambientIntensity: .2, exposure: 1, fogEnabled: false, fogColor: '#3c3f43', fogNear: 10, fogFar: 60, selectionColor: '#ffad46', selectionWidth: 3 }
@@ -69,6 +69,7 @@ export type SceneOperation =
   | { type: 'scene.removeGameObject'; nodeId: string; expectedExists?: boolean }
   | { type: 'scene.reparent'; nodeId: string; parentId: string | null; index?: number; expectedParentId?: string | null }
   | { type: 'scene.setComponent'; nodeId: string; component: SceneComponent; expectedComponent?: SceneComponent | null }
+  | { type: 'scene.setTileCells'; nodeId: string; componentId: string; changes: Array<{ x: number; y: number; tileId: string | null; expectedTileId: string | null; index?: number }> }
   | { type: 'scene.removeComponent'; nodeId: string; componentId: string; expectedComponent?: SceneComponent }
   | { type: 'scene.addAsset'; asset: SceneAsset }
   | { type: 'scene.removeAsset'; assetId: string; expectedExists?: boolean }

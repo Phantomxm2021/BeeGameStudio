@@ -24,7 +24,7 @@ import type { createFoundationReviewer } from '../stage-modules/foundation-revie
 import { isFoundationStageActive, isPublicStageActive } from './public-stage-routing'
 import { deriveAcceptedWorkflowUnits } from './accepted-unit-journal'
 import {
-buildChangeImpactDispatch,
+isProjectChange,
 buildQuestionAnswerDispatch,
 createChangeRequest,
 } from './change-request'
@@ -77,10 +77,12 @@ enterAcceptance,
 import {
 type WorkerTerminalResult
 } from './worker-contracts'
+import { readRuntimeAcceptance } from './runtime-acceptance'
 export function createDeliveryWorkflowController(input: {
   workspacePath: string
   ownerId: string
   workerPort: DeliveryWorkerPort
+  assertWorkspaceIdle?: () => void
   author?: ReturnType<typeof createFoundationAuthoring>
   reviewer?: ReturnType<typeof createFoundationReviewer>
   handoffRecoveryGraceMs?: number
@@ -92,6 +94,7 @@ export function createDeliveryWorkflowController(input: {
   const authorLink = input.author ? createFoundationAuthoringLink({ store, author: input.author,
     ...(reviewLink ? { onCompleted: (run: DeliveryRun) => ensureProgress(run) } : {}) }) : undefined
   async function progressPublicFoundation(run: DeliveryRun, resume = false) {
+    input.assertWorkspaceIdle?.()
     if (run.foundationReviewStage?.acceptedReview && run.status !== 'stopped' &&
         run.foundationReviewStage.control.action !== 'stop') {
       const documentRevision = await computeDocumentRevision(
@@ -170,10 +173,12 @@ export function createDeliveryWorkflowController(input: {
   dispatcher = {
     ...transportDispatcher,
     async dispatch(request) {
+      input.assertWorkspaceIdle?.()
+      if (isProjectChange(request)) throw new Error('Project requests use the native project conversation, not delivery dispatches')
       assertNoRetiredFoundationWorker(request)
       const run = await store.load()
       let contentContract: Record<string, unknown> = {}
-      if (run && run.runId === request.runId && request.workerType === 'implementation-worker') {
+      if (run && run.runId === request.runId && request.workerType === 'implementation-worker' && !isProjectChange(request)) {
         if (!run.gameContentReceipt)
           throw new Error('downstream work requires an accepted Scene/UI content receipt')
         const assetManifestRevision = run.revision.resource
@@ -298,6 +303,23 @@ export function createDeliveryWorkflowController(input: {
     if (run && isPublicStageActive(run) || record.phase === 'DOCUMENT_DRAFTING') return
     if (!run || run.activeDispatch?.dispatchId !== record.dispatchId) return
     let next: DeliveryRun = { ...run, activeDispatch: undefined }
+    if (isProjectChange(request) && result.workerType === 'implementation-worker') {
+      // Drain an already persisted old dispatch, but never create/resume one.
+      // Its native terminal is a request result, not delivery acceptance.
+      const revision = await computeWorkspaceRevision(input.workspacePath)
+      const changed = revision !== request.revision
+      const previousStatus = request.contract.previousStatus as DeliveryRun['status']
+      await persist({ ...next,
+        status: changed || previousStatus === 'running' ? 'needs_action' : previousStatus ?? 'needs_action',
+        ...(changed ? { completedAt: undefined, evidence: { ...next.evidence, acceptance: undefined } } : {}),
+        blockedReason: changed ? 'Workspace changed after acceptance; revalidation is required.'
+          : request.contract.previousBlockedReason as string | undefined,
+        lastAnswer: result.summary,
+        changeRequest: undefined, changeRoute: undefined,
+        changeAffectedRequirementIds: undefined, changeAffectedChecklistIds: undefined, changeRationale: undefined,
+      }, 'change.completed', { changed, answer: result.summary })
+      return
+    }
     if (result.workerType === 'change-impact-analyzer') {
       const message =
         typeof request?.contract.message === 'string'
@@ -700,6 +722,7 @@ export function createDeliveryWorkflowController(input: {
   }
 
   async function resumeUnlocked(run: DeliveryRun): Promise<void> {
+    input.assertWorkspaceIdle?.()
     if (isFoundationStageActive(run)) {
       await progressPublicFoundation(run)
       return
@@ -724,6 +747,17 @@ export function createDeliveryWorkflowController(input: {
         run.activeDispatch,
         handleTerminalUnlocked,
       )
+      return
+    }
+    if (run.changeRequest && run.changeRoute === undefined) {
+      if (run.activeDispatch?.status === 'running') return
+      throw new Error('Continue this project request in Chat; it is not a delivery workflow')
+    }
+    if (run.phase === 'DELIVERY' && !run.activeDispatch && !run.changeRequest) {
+      // A blocked follow-up (e.g. a platform error) is not a new delivery job.
+      // Explicit continue must not resurrect its old successful certificate.
+      await persist({ ...run, status: 'needs_action',
+        blockedReason: run.blockedReason ?? 'No delivery work is pending. Submit the specific follow-up request.' }, 'change.needs_action')
       return
     }
     if (
@@ -874,41 +908,6 @@ export function createDeliveryWorkflowController(input: {
     }
   }
 
-  async function requestChangeUnlocked(
-    run: DeliveryRun,
-    message: string,
-  ): Promise<unknown> {
-    if (
-      run.status === 'running' &&
-      run.activeDispatch &&
-      (run.activeDispatch.status === 'running' ||
-        Boolean(run.activeDispatch.terminalResult))
-    ) {
-      throw new Error(
-        'A workflow worker result is still being reconciled; wait for the current phase to settle before submitting another change.',
-      )
-    }
-    const analysisRun: DeliveryRun = {
-      ...run,
-      status: 'running',
-      activeDispatch: undefined,
-      blockedReason: undefined,
-      changeRequest: message,
-      changeRoute: undefined,
-      changeAffectedRequirementIds: undefined,
-      changeAffectedChecklistIds: undefined,
-      changeRationale: undefined,
-    }
-    await persist(analysisRun, 'change.request_received')
-    const request = buildChangeImpactDispatch(
-      analysisRun,
-      input.workspacePath,
-      message,
-    )
-    const dispatch = await dispatcher.dispatch(request)
-    return { runId: analysisRun.runId, dispatch }
-  }
-
   function resume(run: DeliveryRun): Promise<void> {
     return serialize(async () => {
       const latest = await store.load()
@@ -966,7 +965,8 @@ export function createDeliveryWorkflowController(input: {
     return serialize(async () => {
       const latest = await store.load()
       if (latest && isPublicStageActive(latest)) throw new Error('Public document stage is still active; change routing is unavailable')
-      return requestChangeUnlocked(run, message)
+      if (!latest || latest.runId !== run.runId) throw new Error('Delivery run is unavailable')
+      throw new Error('Project requests use the native project conversation, not delivery dispatches')
     })
   }
 

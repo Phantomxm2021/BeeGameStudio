@@ -28,7 +28,7 @@ const evidenceIdentity = (start: SingleReviewStart, handle: SingleReviewHandle, 
 const canResume = (state: SingleReviewState) => state.attempts.every(attempt => attempt.closed?.usageObserved)
 
 /** One native auditor; no strategy selection or historical protocol replay. */
-export function createSingleReviewerLifecycle(workspacePath: string, infrastructure: Infrastructure): SingleReviewerOperations {
+export function createSingleReviewerLifecycle(workspacePath: string, infrastructure: Infrastructure, language?: string): SingleReviewerOperations {
   if (!infrastructure || Object.keys(infrastructure).sort().join(',') !== 'billing,runtimeConfiguration' ||
     infrastructure.billing?.protocolVersion !== 1 || infrastructure.runtimeConfiguration?.protocolVersion !== 1 ||
     !infrastructure.billing.ownerId || infrastructure.billing.ownerId !== infrastructure.runtimeConfiguration.ownerId ||
@@ -149,7 +149,7 @@ export function createSingleReviewerLifecycle(workspacePath: string, infrastruct
       }, 250)
       const started = performance.now()
       try {
-        const completion = await runFileReview({ source: start.input, directory, configuration, signal: abort.signal,
+        const completion = await runFileReview({ source: start.input, directory, configuration, language, signal: abort.signal,
           onUsage: async usage => {
             await lease.assertOwned(); await append(journal, { kind: 'usage', attemptId, usage })
           },

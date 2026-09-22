@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises'
+import { TILEMAP_AUTHORING_CONTRACT } from './tilemap-authoring-contract'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -143,7 +144,11 @@ creation method.
 Named atlas entries must use \`frames: { "idle": { "frame": { "x": 0, "y": 0, "w": 32, "h": 32 } } }\`.
 Use an image and same-basename JSON sidecar in file_paths. Flat rectangles, rotated and trimmed entries are not supported.
 Every rectangle must fit inside the actual image dimensions. Render the full atlas before registering it; do not clamp rectangles to conceal cropped artwork.
-Run the resource checker after generating assets. The runtime and editors consume this same contract; do not add a private runtime-only format adapter.
+Run the resource checker after generating assets. Editors and Agent-written game code consume this data; the Agent owns target-engine mapping, not a BGS game runtime.
+
+## Optional rectangular TileSet data
+
+${json(TILEMAP_AUTHORING_CONTRACT)}
 
 ### \`assets/asset-manifest.json\`
 

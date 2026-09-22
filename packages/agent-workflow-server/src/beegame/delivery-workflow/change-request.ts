@@ -2,6 +2,11 @@ import { parseWorkerTerminalResult } from './worker-contracts'
 import type { DeliveryRun, WorkerDispatchRequest } from './types'
 import type { RunStore } from './run-store'
 
+/** Read-only recognition of persisted, pre-conversation dispatches. */
+export function isProjectChange(request: WorkerDispatchRequest | undefined): request is WorkerDispatchRequest & { contract: { purpose: 'project-change' } } {
+  return request?.workerType === 'implementation-worker' && request.contract.purpose === 'project-change'
+}
+
 export type ChangeRoute =
   | 'question'
   | 'implementation_only'
@@ -67,24 +72,6 @@ export async function createChangeRequest(input: {
     affectedChecklistIds: request.affectedChecklistIds,
   })
   return request
-}
-
-export function buildChangeImpactDispatch(
-  run: DeliveryRun,
-  workspacePath: string,
-  message: string,
-): WorkerDispatchRequest {
-  return {
-    runId: run.runId,
-    ownerId: run.ownerId,
-    projectId: run.projectId,
-    workspacePath,
-    workerType: 'change-impact-analyzer',
-    phase: run.phase,
-    revision: run.revision.workspace,
-    allowedPaths: [],
-    contract: { message, currentRevision: run.revision },
-  }
 }
 
 export function buildQuestionAnswerDispatch(

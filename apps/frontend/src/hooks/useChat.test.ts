@@ -135,6 +135,26 @@ describe('useChat clarification gate handling', () => {
     });
   });
 
+  it('worker terminals settle their activity without stopping the project composer', async () => {
+    const onTaskComplete = vi.fn();
+    const { result } = renderHook(() => useChat({ projectId: 'proj_1', onTaskComplete }));
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'status', status: 'running', task_id: 'main' }));
+    expect(result.current.isLoading).toBe(true);
+    for (const message of [
+      { type: 'status', status: 'idle' },
+      { type: 'status', status: 'stopped' },
+      { type: 'error', content: 'Worker failed' },
+    ]) {
+      act(() => latestWebSocketOptions.onMessage?.({ ...message, task_id: 'worker',
+        turnId: 'worker-turn', task_kind: 'workflow_stage:implementation', timestamp: 1234 }));
+      expect(result.current.isLoading).toBe(true);
+    }
+    expect(chatStoreState.settleActivity).toHaveBeenCalledWith('worker', 'worker-turn', 'failed', 1234);
+    expect(onTaskComplete).not.toHaveBeenCalled();
+    act(() => latestWebSocketOptions.onMessage?.({ type: 'status', status: 'stopped', task_id: 'main' }));
+    expect(result.current.isLoading).toBe(false);
+  });
+
   it('coalesces duplicate stop requests while waiting for backend confirmation', async () => {
     let resolveStop: (() => void) | undefined;
     vi.mocked(api.stopTask).mockImplementationOnce(() => new Promise(resolve => {

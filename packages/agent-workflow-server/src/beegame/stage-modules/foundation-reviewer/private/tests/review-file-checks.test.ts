@@ -48,6 +48,14 @@ test('Reviewer prompt uses a compact direct-review instruction', () => {
   for (const label of ['BLOCKER', 'HIGH', 'MEDIUM', 'LOW']) expect(prompt).not.toContain(label)
 })
 
+test('Reviewer carries the response language without translating identifiers or source text', () => {
+  expect(fileReviewPrompt('zh')).toContain('User response language: zh')
+  expect(fileReviewPrompt('zh')).toContain('thinking/reasoning summaries')
+  expect(fileReviewPrompt('en')).toContain('User response language: en')
+  expect(fileReviewPrompt('zh')).toContain('do not translate those')
+  expect(fileReviewPrompt()).not.toContain('User response language:')
+})
+
 test('Reviewer materializes exact source bytes and read-only requirements.md plus file facts, including unavailable requirements', async () => {
   for (const available of [true, false]) {
     const root = await mkdtemp(join(tmpdir(), 'review-source-paths-'))

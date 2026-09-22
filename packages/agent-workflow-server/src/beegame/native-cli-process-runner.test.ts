@@ -7,6 +7,7 @@ import {
   createNativeCliProcessRunner,
   nativeRuntimeEnvironment,
   nativeRuntimeCommand,
+  nativePromptContent,
   prepareNativeSessionTemporaryDirectory,
 } from './native-cli-process-runner'
 
@@ -48,6 +49,17 @@ describe('native CLI process runner', () => {
     const command = nativeRuntimeCommand({ sessionId: 'language', cwd: process.cwd(), env: {}, language: 'zh' })
     expect(command[command.indexOf('--append-system-prompt') + 1]).toContain('User response language: zh')
     expect(command).not.toContain('--tools')
+    expect(command[command.indexOf('--append-system-prompt') + 1]).toContain('thinking/reasoning summaries')
+  })
+
+  test('keeps language instructions out of the user message and preserves images', () => {
+    const prompt = [{type:'text' as const,text:'Make a game'}, {type:'image' as const,source:{type:'base64' as const,media_type:'image/png' as const,data:'abc'}}]
+    const zh = nativePromptContent(prompt, 'zh') as unknown[]
+    const en = nativePromptContent(prompt, 'en') as unknown[]
+    expect(zh).toBe(prompt)
+    expect(en).toBe(prompt)
+    expect(nativePromptContent(prompt)).toBe(prompt)
+    expect(prompt).toHaveLength(2)
   })
 
   test('awaits attachment persistence before delivering later terminal messages', async () => {

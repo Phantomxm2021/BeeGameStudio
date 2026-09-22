@@ -14,7 +14,7 @@ describe('Scene preview coordinates', () => {
     }
   })
   it('reports unreadable sprite metadata instead of silently showing the whole atlas', async () => {
-    await expect(firstSpriteFrame({ workspacePath: '/missing', resource: {file_paths:['idle.json']} as any,
+    await expect(firstSpriteFrame({ workspacePath: '/missing', resource: {file_paths:['idle.png','idle.json']} as any,
       member:'idle', bytes:Buffer.from('invalid'), node:{id:'fox'} }))
       .rejects.toThrow('Sprite frame fox/idle')
   })

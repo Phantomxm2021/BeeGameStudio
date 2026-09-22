@@ -29,10 +29,34 @@ import { type ChecklistAuthority } from '../beegame/checklist-authority-projecti
 import { CANONICAL_FOUNDATION_DOCUMENTS } from '../beegame/foundation-documents'
 
 describe('delivery worker session credentials', () => {
+  test('a follow-up cannot start a delivery worker or open its capabilities', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'bgs-follow-up-capabilities-'))
+    let prompt = '', closed = 0
+    const starts: Record<string, unknown>[] = []
+    const sessions = { start(input: Record<string, unknown>) { starts.push(input); return { id: 'follow-up' } },
+      updateAuthToken() {}, stop() {}, async sendWithDisplay(_id: string, text: string) { prompt = text },
+    } as unknown as BeeGameSessionManager
+    const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'owner',
+      confirmedBriefContext: JSON.stringify({ kind: 'confirmed_build_brief', idea: 'Large original game specification' }),
+      openImageAccess: () => ({ instruction: 'Image API remains available', close() { closed++ } }),
+      openPreviewAccess: () => ({ instruction: 'Preview API remains available', async close() { closed++ } }),
+    })
+    const request: WorkerDispatchRequest = { dispatchId: 'follow-up', runId: 'run', ownerId: 'owner',
+      projectId: 'project', workspacePath, workerType: 'implementation-worker', phase: 'DELIVERY',
+      taskId: 'PROJECT_CHANGE', revision: 'revision', allowedPaths: ['./'],
+      contract: { purpose: 'project-change', changeRequest: 'Fix the pause button' } }
+    try {
+      await expect(port.start(request)).rejects.toThrow('native project conversation')
+      expect(prompt).toBe('')
+      expect(starts).toHaveLength(0)
+      expect(closed).toBe(0)
+    } finally { await port.stop(request.dispatchId!, 'cleanup'); await rm(workspacePath, { recursive: true, force: true }) }
+  })
   for (const workerType of ['resource-planner', 'implementation-worker'] as const)
   test(`${workerType} receives resource repair capabilities and stop revokes them`, async () => {
     let prompt = ''
     let imageAccessClosed = 0
+    let previewAccessClosed = 0
     const sessions = {
       start() { return { id: 'resource-access-worker' } }, updateAuthToken() {},
       async sendWithDisplay(_id: string, text: string) { prompt = text }, stop() {},
@@ -40,6 +64,11 @@ describe('delivery worker session credentials', () => {
     const port = createBeeGameDeliveryWorkerPort({
       sessions, userId: 'user-1', resourceLibraryBaseUrl: 'https://library.test',
       getAuthToken: () => 'private-user-token',
+      openPreviewAccess(context) {
+        expect(context.workspacePath).toBe('/tmp/resource-access')
+        expect(context.sessionId).toBe('resource-access-worker')
+        return { instruction: 'Owned Preview test capability', async close() { previewAccessClosed++ } }
+      },
       openImageAccess(projectId) {
         expect(projectId).toBe('project-1')
         return { instruction: 'Native image command available', close() { imageAccessClosed++ } }
@@ -53,17 +82,23 @@ describe('delivery worker session credentials', () => {
       await port.submit('resource-access', buildWorkerPrompt(request))
       if (workerType === 'resource-planner') {
       expect(prompt).toContain('licensed internet assets')
-      expect(prompt).toContain('Reusing previously generated assets does not waive')
-      expect(prompt).toContain('A built-in-library search is not an internet search')
-      expect(prompt).toContain('internet queries, candidate/page URLs, retrieval dates')
-      expect(prompt).toContain('AI image generation -> programmatic drawing')
+      expect(prompt).toContain('do not repeat searches solely to justify reusing a verified asset')
+      expect(prompt).toContain('verified provenance and license facts')
+      expect(prompt).not.toContain('Move to the next source only')
+      expect(prompt).toContain('not a mandatory search ladder')
+      expect(prompt).not.toContain('Required sourcing priority')
+      expect(prompt).toContain("user's explicit source constraints")
       expect(prompt).not.toContain('Before submission record')
       expect(prompt).toContain('no fixed search count or tool sequence')
       } else {
+        expect(prompt).toContain('Owned Preview test capability')
         expect(prompt).toContain('.beegame/implementation-issues.md')
-        expect(prompt).toContain('finish the game logic first')
-        expect(prompt).toContain('targeted resource repair task')
+        expect(prompt).not.toContain('finish the game logic first')
+        expect(prompt).toContain('choose investigation and repair order yourself')
+        expect(prompt).toContain('source-asset defects belong to targeted resource repair')
         expect(prompt).not.toContain('Content and Manifest may be corrected')
+        expect(prompt).toContain('uiPaintOrder(nodes, rootId)')
+        expect(prompt).toContain('DOM textContent')
       }
       expect(prompt).toContain('GET /api/resource-packs/{packId}/elements/{elementId}/resource-url')
       expect(prompt).not.toContain('private-user-token')
@@ -72,6 +107,7 @@ describe('delivery worker session credentials', () => {
       expect((await fetch(base + '/api/admin')).status).toBe(405)
       await port.stop('resource-access', 'user stopped')
       expect(imageAccessClosed).toBe(1)
+      expect(previewAccessClosed).toBe(workerType === 'implementation-worker' ? 1 : 0)
       await expect(fetch(base + '/api/admin')).rejects.toThrow()
     } finally { await port.stop('resource-access', 'test cleanup') }
   })

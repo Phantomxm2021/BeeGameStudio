@@ -51,6 +51,7 @@ export class ResourceRequestValidationError extends Error {}
 
 export type BeeGameResourceServerAppOptions = {
   repository: ResourceRepository
+  processingEnabled?: boolean
   currentUser?: ResourceUserContext
   currentUserResolver?: ResourceUserResolver
   /** Required when the backing repository uses a service-role credential that bypasses RLS. */
@@ -90,7 +91,7 @@ export function createBeeGameResourceServerApp(
       if (request.method === 'OPTIONS') return corsResponse(new Response(null, { status: 204 }), options.corsOrigin)
       const pathname = new URL(request.url).pathname
       if (request.method === 'GET' && pathname === '/health') {
-        return corsResponse(Response.json({ status: 'ok' }), options.corsOrigin)
+        return corsResponse(Response.json({ status: 'ok', processingEnabled: options.processingEnabled ?? true }), options.corsOrigin)
       }
       const serviceSelectionRequest = (
         (request.method === 'POST' && [
@@ -104,6 +105,9 @@ export function createBeeGameResourceServerApp(
       if (!serviceSelectionRequest && !hasResourceAdminPermission(user!)) {
         return corsResponse(jsonError(403, 'forbidden', 'Resource library administration is not allowed'), options.corsOrigin)
       }
+      if (options.processingEnabled === false && request.method === 'POST' &&
+          /^\/api\/resource-packs\/[^/]+\/(semantic-curation|processing-jobs)(\/[^/]+\/retry)?$/.test(pathname))
+        return corsResponse(jsonError(503, 'processing_paused', 'Background processing is paused; resource browsing and downloads remain available'), options.corsOrigin)
       const packPathMatch = pathname.match(/^\/api\/resource-packs\/([^/]+)(?:\/|$)/)
       if (!serviceSelectionRequest && packPathMatch && options.canManagePack) {
         try {

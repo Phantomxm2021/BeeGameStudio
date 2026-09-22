@@ -220,9 +220,6 @@ export function getToolsForDefaultPreset(): string[] {
  * NOTE: This MUST stay in sync with https://console.statsig.com/4aF3Ewatb6xPVpCwxb5nA3/dynamic_configs/claude_code_global_system_caching, in order to cache the system prompt across users.
  */
 export function getAllBaseTools(): Tools {
-  // Retired protocols fail closed. Native file agents use the regular tools
-  // below with an explicit --tools allowlist and workspace-bound permissions.
-  if (['foundation-reviewer-tools-v2', 'foundation-document-reviser'].includes(process.env.BEEGAME_WORKFLOW_WORKER_TYPE ?? '')) return []
   return [
     AgentTool,
     TaskOutputTool,

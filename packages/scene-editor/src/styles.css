@@ -29,6 +29,16 @@
   -webkit-font-smoothing: antialiased;
 }
 .scene-editor-host, .scene-editor-host * { box-sizing: border-box; }
+.tile-palette { position:absolute; z-index:12; left:16px; top:64px; width:260px; max-height:calc(100% - 140px); display:flex; flex-direction:column; gap:10px; padding:12px; border:1px solid var(--editor-border); border-radius:12px; background:var(--editor-panel); box-shadow:0 8px 28px #0005; }
+.tile-palette header { display:flex; align-items:center; justify-content:space-between; }
+.tile-palette label { display:flex; flex-direction:column; gap:6px; color:var(--editor-muted); }
+.tile-palette [role=toolbar] { display:flex; gap:4px; }
+.tile-palette .scene-button[aria-pressed=true] { background:var(--editor-hover); border-color:var(--editor-accent); }
+.tile-palette-items { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; overflow:auto; min-height:50px; }
+.tile-palette-items .scene-button { display:flex; flex-direction:column; gap:4px; height:72px; min-width:0; padding:6px; }
+.tile-palette-items img,.tile-palette-items svg { width:40px; height:40px; object-fit:contain; image-rendering:pixelated; }
+.tile-palette-items span { overflow:hidden; text-overflow:ellipsis; max-width:100%; white-space:nowrap; font-size:11px; }
+.tile-palette p { margin:0; color:var(--editor-muted); font-size:12px; line-height:1.4; }
 @layer base {
 .scene-editor-host button,.scene-editor-host input,.scene-editor-host select,.scene-editor-host textarea { font: inherit; color: inherit; }
 .scene-editor-host button { cursor: pointer; border: 1px solid transparent; border-radius: 5px; background: transparent; padding: 6px 9px; }
@@ -315,22 +325,38 @@
 .scene-editor-host .scene-select { min-width: 0; width: 100%; }
 .scene-editor-host .scene-select-trigger { width: 100%; height: 30px; min-height: 30px; padding: 0 8px; gap: 6px; font-size: 14px; line-height: 20px; }
 .scene-editor-host .scene-select-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.scene-editor-host .scene-select-content { font-size: 14px; color: var(--editor-text); }
+/* Portalled BeUI surfaces must also work without the host's Tailwind output. */
+.scene-editor-host .scene-menu-surface,
+.scene-editor-host .scene-select-content,
+.scene-editor-host .scene-context-content {
+  border: 1px solid var(--editor-border);
+  border-radius: 12px;
+  background: var(--editor-surface);
+  color: var(--editor-text);
+}
+.scene-editor-host [data-morph-popover-portal] { position: fixed; z-index: 9999; filter: drop-shadow(0 10px 18px #0004); }
+.scene-editor-host .scene-select-content { font-size: 14px; box-shadow: 0 8px 24px #0005; }
+.scene-editor-host .scene-select-content > div { padding: 4px; }
 .scene-editor-host .scene-select-content li { list-style: none; }
-.scene-editor-host .scene-select-content button { font-size: 14px; line-height: 20px; }
+.scene-editor-host .scene-select-content button { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px; padding: 6px 10px; font-size: 14px; line-height: 20px; text-align: left; }
+.scene-editor-host .scene-select-content button[aria-selected=true] { background: var(--editor-hover); }
+.scene-editor-host .scene-select-content button > svg { width: 14px; height: 14px; flex-shrink: 0; }
 .scene-editor-host .scene-switch button { width: 36px; height: 22px; min-height: 22px; padding: 3px; border-radius: 999px; }
 .scene-editor-host .scene-switch button > div,.scene-editor-host .scene-switch button > div > div { width: 14px; height: 14px; }
 .scene-editor-host .scene-opacity-control { width: 100%; overflow: visible; }
 .scene-editor-host .scene-opacity-slider { height: 28px; }
 .scene-editor-host .scene-opacity-slider [role=slider] { height: 18px; }
-.scene-editor-host .scene-menu-surface { width: 232px; padding: 5px; color: var(--editor-text); }
+.scene-editor-host .scene-menu-surface { width: 232px; max-width: calc(100vw - 16px); padding: 5px; overflow: hidden; }
 .scene-editor-host .scene-menu-item { display: flex; align-items: center; width: 100%; min-height: 34px; padding: 7px 10px; gap: 9px; border: 0; border-radius: 7px; font-size: 14px; line-height: 20px; text-align: left; }
 .scene-editor-host .scene-menu-item > svg:last-child:not(:first-child) { margin-left: auto; }
 .scene-editor-host .scene-menu-item:focus-visible { background: var(--editor-hover); }
 .scene-editor-host .scene-menu-separator { height: 1px; margin: 5px; background: var(--border); }
-.scene-editor-host .scene-context-content { min-width: 220px; font-size: 14px; color: var(--editor-text); }
-.scene-editor-host [data-context-menu-portal] { z-index: 130; }
-.scene-editor-host .scene-context-content [role=menuitem] { font-size: 14px; line-height: 20px; }
+.scene-editor-host .scene-context-content { min-width: 220px; padding: 6px; overflow: hidden; font-size: 14px; outline: none; }
+.scene-editor-host [data-context-menu-portal] { position: fixed; z-index: 130; filter: drop-shadow(0 12px 24px #0005); }
+.scene-editor-host [data-context-menu-portal][aria-hidden=true] { pointer-events: none; }
+.scene-editor-host .scene-context-content [role=menuitem] { position: relative; isolation: isolate; display: flex; align-items: center; width: 100%; gap: 10px; padding: 8px 10px; border-radius: 8px; font-size: 14px; line-height: 20px; text-align: left; }
+.scene-editor-host .scene-context-content hr { height: 1px; border: 0; margin: 5px; background: var(--editor-border); }
+.scene-editor-host .scene-context-content [role=menuitem] > span[aria-hidden=true] { margin-left: auto; padding-left: 16px; font-size: 10px; color: var(--editor-muted); }
 .scene-editor-host .scene-settings-tabs-list { width: 100%; justify-content: space-between; }
 .scene-editor-host .scene-settings-tabs-list [role=tab] { font-size: 14px; min-height: 30px; }
 .scene-editor-host .scene-button { font-size: 14px; line-height: 20px; }

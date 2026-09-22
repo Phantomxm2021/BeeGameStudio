@@ -1,4 +1,5 @@
 import { isAbsolute, resolve } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
 import {
   BEEGAME_FIXED_SERVICE_PORTS,
   assertFixedServicePortConfiguration,
@@ -78,6 +79,17 @@ export function buildBeeGameDevPlan(
   const workspacePath = resolve(configuredWorkspace)
   const frontendDir = resolve(input.cwd, values.frontend || 'apps/frontend')
   const bunExecutable = input.bunExecutable ?? 'bun'
+  const frontendCommand = [
+    bunExecutable,
+    'run',
+    'dev',
+    '--',
+    '--host',
+    '127.0.0.1',
+    '--port',
+    String(ports.frontend),
+    ...(needsViteDependencyRefresh(frontendDir) ? ['--force'] : []),
+  ]
   const urls = {
     frontend: `http://127.0.0.1:${ports.frontend}`,
     runtime: `http://127.0.0.1:${ports.runtime}`,
@@ -135,16 +147,7 @@ export function buildBeeGameDevPlan(
       },
       {
         name: 'frontend',
-        command: [
-          bunExecutable,
-          'run',
-          'dev',
-          '--',
-          '--host',
-          '127.0.0.1',
-          '--port',
-          String(ports.frontend),
-        ],
+        command: frontendCommand,
         cwd: frontendDir,
         env: buildFrontendEnv({
           baseEnv: input.env,
@@ -152,6 +155,25 @@ export function buildBeeGameDevPlan(
         }),
       },
     ],
+  }
+}
+
+/**
+ * A partially written Vite dependency manifest makes lazy route imports fail
+ * with an opaque "Failed to fetch dynamically imported module" error. This
+ * only forces Vite's normal optimizer when its cache is absent or empty; a
+ * healthy cache keeps the regular fast startup path.
+ */
+function needsViteDependencyRefresh(frontendDir: string): boolean {
+  const metadataPath = resolve(frontendDir, 'node_modules/.vite/deps/_metadata.json')
+  if (!existsSync(metadataPath)) return true
+  try {
+    const metadata = JSON.parse(readFileSync(metadataPath, 'utf8')) as {
+      optimized?: Record<string, unknown>
+    }
+    return !metadata.optimized || Object.keys(metadata.optimized).length === 0
+  } catch {
+    return true
   }
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { getSDKExecutionErrorDetail, workflowToolRestriction } from './session-manager'
+import { getSDKExecutionErrorDetail } from './session-manager'
 
 describe('BeeGame SDK execution errors', () => {
   test('preserves a structured runtime result when the SDK omits its errors array', () => {
@@ -19,16 +19,4 @@ describe('BeeGame SDK execution errors', () => {
     })).toBe('Primary detail')
   })
 
-  test('limits Checklist authors to candidate writes without allowing a shell escape', () => {
-    const record = { workflowAllowedTools: ['Write', 'Edit'] }
-    expect(workflowToolRestriction(record as never, {
-      toolName: 'Write',
-    } as never)).toBeUndefined()
-    expect(workflowToolRestriction(record as never, {
-      toolName: 'Bash',
-    } as never)).toContain('Write, Edit')
-    expect(workflowToolRestriction(record as never, {
-      toolName: 'Read',
-    } as never)).toContain('Write, Edit')
-  })
 })

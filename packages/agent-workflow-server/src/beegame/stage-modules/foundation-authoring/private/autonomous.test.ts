@@ -104,12 +104,15 @@ test('the task prompt is a natural document assignment without an audit policy',
   const prompt = autonomousAuthorPrompt('zh')
   expect(prompt).toContain('requirements.md contains the confirmed game requirements')
   expect(prompt).toContain('Use your own judgment')
+  expect(prompt).toContain('User response language: zh')
+  expect(prompt).toContain('thinking/reasoning summaries')
   expect(prompt).not.toMatch(/audit|review|consistency check|finish immediately|GDD\.md first|Agent tool|delegat|run_in_background|expected_output_files|\.reference|authoring-reference|deliveryInterfaces|Attempt policy/i)
 })
 
 test('the finishing prompt naturally continues useful existing work', () => {
   const prompt = autonomousAuthorFinishPrompt('zh')
   expect(prompt).toContain('Preserve useful completed work')
+  expect(prompt).toContain('thinking/reasoning summaries')
   expect(prompt).toContain('Use your own judgment')
   expect(prompt).not.toMatch(/audit|review|consistency|repeat the check|finish immediately/i)
 })

@@ -119,8 +119,9 @@ test('host acceptance confirms current implementation evidence without dispatchi
     const observedPath = '.beegame/workflow/evidence/browser-observations.txt'
     await writeFile(join(workspacePath, observedPath), 'Observed title, start and pause in the target iframe.')
     const reportPath = join(workspacePath, runtimeAcceptancePath('test-dispatch'))
+    await writeFile(join(workspacePath, 'tested-game.js'), 'game bundle')
     for (const status of ['passed', 'failed', 'blocked'] as const) {
-      await writeFile(reportPath, JSON.stringify({status,summary:'Actual observations',environment:'Web Preview iframe',evidencePaths:[observedPath]}))
+      await writeFile(reportPath, JSON.stringify({status,summary:'Actual observations',environment:'Web Preview iframe',evidencePaths:[observedPath],artifactPaths:['tested-game.js'],verification:{target:'deployment',knownIssues:[],unverified:[]}}))
       const runtimeAcceptance = await readRuntimeAcceptance(workspacePath,'test-dispatch')
       await writeFile(join(workspacePath,evidencePath),JSON.stringify({revision:workspaceRevision,runtimeAcceptance}))
       const result = await confirmAcceptanceFromImplementation({run:completed,workspacePath})
@@ -128,7 +129,7 @@ test('host acceptance confirms current implementation evidence without dispatchi
       expect(result.phase).toBe(status === 'passed' ? 'DELIVERY' : 'ACCEPTANCE')
       if (status !== 'passed') expect(result.status).toBe('needs_action')
     }
-    await writeFile(reportPath,JSON.stringify({status:'passed',summary:'Observed',environment:'Web Preview iframe',evidencePaths:[observedPath]}))
+    await writeFile(reportPath,JSON.stringify({status:'passed',summary:'Observed',environment:'Web Preview iframe',evidencePaths:[observedPath],artifactPaths:['tested-game.js'],verification:{target:'deployment',knownIssues:[],unverified:[]}}))
     await writeFile(join(workspacePath,evidencePath),JSON.stringify({revision:workspaceRevision,runtimeAcceptance:await readRuntimeAcceptance(workspacePath,'test-dispatch')}))
     await writeFile(join(workspacePath,observedPath),'Changed after the Agent turn')
     expect((await confirmAcceptanceFromImplementation({run:completed,workspacePath})).evidence.acceptance?.status).toBe('blocked')

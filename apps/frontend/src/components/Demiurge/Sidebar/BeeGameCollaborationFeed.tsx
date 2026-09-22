@@ -965,9 +965,10 @@ function ResponseParts({
                 defaultOpen={status === 'working'}
                 className="w-full text-[var(--text-secondary)]"
             />);
-            toolParts.forEach(({ tool }) => tool.attachments?.forEach((attachment, attachmentIndex) => {
-                rendered.push(<ChatAttachmentView key={`tool-image-${tool.id}-${attachmentIndex}`} attachment={attachment} />);
-            }));
+            const images = toolParts.flatMap(({ tool }) => (tool.attachments || []).map((attachment, attachmentIndex) =>
+                <ChatAttachmentView key={`tool-image-${tool.id}-${attachmentIndex}`} attachment={attachment} lang={lang} />));
+            if (images.length) rendered.push(<div key={`tool-images-${part.tool.id}`} className="chat-image-gallery" role="group"
+                aria-label={lang === 'zh' ? '工具输出素材' : 'Tool media'}>{images}</div>);
             const artifactTools = toolParts
                 .map((candidate) => candidate.tool)
                 .filter((tool) => Boolean(tool.diff));
@@ -1158,8 +1159,8 @@ function UserMessageCard({
                 <MessageBubble variant="solid" className="max-w-full">
                     <MessageBubbleContent className="max-w-full">
                         <MarkdownRenderer content={message.content} messageId={message.id} lang={lang} bubble />
-                        {message.attachments?.length ? <div className="mt-2 flex flex-wrap gap-2">
-                            {message.attachments.map((attachment, index) => <ChatAttachmentView key={index} attachment={attachment} />)}
+                        {message.attachments?.length ? <div className="chat-image-gallery">
+                            {message.attachments.map((attachment, index) => <ChatAttachmentView key={index} attachment={attachment} lang={lang} />)}
                         </div> : null}
                     {onEdit ? <button
                         type="button"

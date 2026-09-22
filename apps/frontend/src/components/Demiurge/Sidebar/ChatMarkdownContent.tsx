@@ -1,5 +1,6 @@
 import { useMemo, memo } from 'react';
-import ReactMarkdown from 'react-markdown';
+import { ChatImage } from './ChatImage';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import type { Language } from '../AgentsConfig';
@@ -84,9 +85,102 @@ const tryParseStructuredJson = (input: string): unknown | null => {
 
 import MarkdownErrorBoundary from '../../Common/MarkdownErrorBoundary';
 
-export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble = false }: { content: string, messageId?: string; lang?: Language; bubble?: boolean }) => {
+export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble = false, lang = 'en' }: { content: string, messageId?: string; lang?: Language; bubble?: boolean }) => {
     const bodyTextClass = bubble ? 'text-[currentColor]' : 'text-[var(--text-secondary)]';
     const headingTextClass = bubble ? 'text-[currentColor]' : 'text-[var(--text-primary)]';
+    // Stable renderers preserve image load state while subsequent text streams in.
+    const markdownComponents = useMemo<Components>(() => ({
+        img: ({ src, alt }) => <ChatImage key={typeof src === 'string' ? src : ''} src={typeof src === 'string' ? src : undefined}
+            alt={alt || (lang === 'zh' ? '图片' : 'Image')} lang={lang} />,
+        p: ({ node, ...props }) => node?.children.some(child => child.type === 'element' && child.tagName === 'img') &&
+            node.children.every(child => child.type === 'text' ? !child.value.trim() : child.type === 'element' && ['img', 'br'].includes(child.tagName))
+            ? <div className="chat-image-gallery" {...props} /> : (
+            <p
+                className={`type-chat-body mb-2.5 ${bodyTextClass} last:mb-0 break-words [overflow-wrap:anywhere]`}
+                {...props}
+            />
+        ),
+        ul: (props) => (
+            <ul
+                className={`type-chat-body my-2 ml-4 list-disc space-y-0.5 ${bodyTextClass}`}
+                {...props}
+            />
+        ),
+        ol: (props) => (
+            <ol
+                className={`type-chat-body my-2 ml-4 list-decimal space-y-0.5 ${bodyTextClass}`}
+                {...props}
+            />
+        ),
+        li: (props) => <li className="break-words [overflow-wrap:anywhere]" {...props} />,
+        blockquote: (props) => <blockquote className={`type-chat-body my-3 border-l-2 border-[var(--border-strong)] pl-3 ${bodyTextClass}`} {...props} />,
+        h1: (props) => (
+            <h1
+                className={`type-chat-h1 mb-3 border-b border-[var(--border)] pb-2 ${headingTextClass}`}
+                {...props}
+            />
+        ),
+        h2: (props) => (
+            <h2
+                className={`type-chat-h2 mt-5 mb-2.5 ${headingTextClass}`}
+                {...props}
+            />
+        ),
+        h3: (props) => (
+            <h3
+                className={`type-chat-h3 mt-4 mb-2 ${headingTextClass}`}
+                {...props}
+            />
+        ),
+            a: (props) => <a className="text-[var(--info)] underline decoration-[var(--info)]/40 underline-offset-4 hover:text-[var(--text-primary)]" target="_blank" rel="noreferrer" {...props} />,
+            strong: (props) => <strong className={bubble ? 'opacity-100' : 'text-[var(--text-primary)]'} {...props} />,
+        table: (props) => (
+
+            <div className="my-6 w-full min-w-0 max-w-full overflow-x-auto rounded-lg border border-[var(--border)]">
+                    <table className="type-chat-body w-full border-collapse" {...props} />
+            </div>
+        ),
+        thead: (props) => <thead className="border-b border-[var(--border)] bg-[var(--surface-2)]" {...props} />,
+        tbody: (props) => <tbody className="divide-y divide-[var(--border)]" {...props} />,
+        tr: (props) => <tr className="transition-colors hover:bg-[var(--surface-hover)]" {...props} />,
+        th: (props) => <th className={`type-table-head px-4 py-3 text-left ${bubble ? 'text-[currentColor]' : 'text-[var(--text-muted)]'}`} {...props} />,
+        td: ({ children, ...props }) => {
+            const cellContent = Array.isArray(children) ? children.map(c => typeof c === 'string' ? c : '').join('') : String(children);
+            const color = detectColor(cellContent);
+            return (
+                    <td className="type-chat-body whitespace-pre-wrap break-words border-[var(--border)] px-3 py-2.5" {...props}>
+                    {color && <ColorSwatch color={color} />}
+                    {children}
+                </td>
+            );
+        },
+        pre: (props) => (
+            <pre className={`type-code my-3 max-w-full overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface-3)] p-3 ${bodyTextClass}`}>
+                {props.children}
+            </pre>
+        ),
+        code: ({ className, children, ...props }) => {
+            const match = /language-(\w+)/.exec(className || '');
+            // Detect inline if no language match and no newlines (languageless blocks have newlines)
+            const isInline = !match && !String(children).includes('\n');
+
+            if (isInline) {
+              const color = typeof children === 'string' ? detectColor(children) : null;
+              return (
+                <code className={`type-chat-inline-code break-words bg-[var(--surface-3)] ${bubble ? 'text-[currentColor]' : 'text-[var(--text-secondary)]'}`} {...props}>
+                    {color && <ColorSwatch color={color} />}
+                    {children}
+                </code>
+              );
+            }
+
+            return (
+              <code className={className} {...props}>
+                {children}
+              </code>
+            );
+        }
+    }), [lang, bubble, bodyTextClass, headingTextClass]);
     const { formattedMainContent, renderAsCsv, renderAsJson } = useMemo(() => {
         // Event classification belongs to the adapter, not to a field-name
         // heuristic that discards parts of a model's visible response.
@@ -141,97 +235,7 @@ export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble =
                     ) : (
                         <ReactMarkdown
                             remarkPlugins={[remarkGfm, remarkBreaks]}
-                            components={{
-                                img: ({ node: _node, ...props }) => <img {...props}
-                                    loading="lazy" decoding="async" referrerPolicy="no-referrer"
-                                    className="my-2 h-auto max-h-80 max-w-full rounded-xl object-contain" />,
-                                p: (props) => (
-                                    <p
-                                        className={`type-chat-body mb-2.5 ${bodyTextClass} last:mb-0 break-words [overflow-wrap:anywhere]`}
-                                        {...props}
-                                    />
-                                ),
-                                ul: (props) => (
-                                    <ul
-                                        className={`type-chat-body my-2 ml-4 list-disc space-y-0.5 ${bodyTextClass}`}
-                                        {...props}
-                                    />
-                                ),
-                                ol: (props) => (
-                                    <ol
-                                        className={`type-chat-body my-2 ml-4 list-decimal space-y-0.5 ${bodyTextClass}`}
-                                        {...props}
-                                    />
-                                ),
-                                li: (props) => <li className="break-words [overflow-wrap:anywhere]" {...props} />,
-                                blockquote: (props) => <blockquote className={`type-chat-body my-3 border-l-2 border-[var(--border-strong)] pl-3 ${bodyTextClass}`} {...props} />,
-                                h1: (props) => (
-                                    <h1
-                                        className={`type-chat-h1 mb-3 border-b border-[var(--border)] pb-2 ${headingTextClass}`}
-                                        {...props}
-                                    />
-                                ),
-                                h2: (props) => (
-                                    <h2
-                                        className={`type-chat-h2 mt-5 mb-2.5 ${headingTextClass}`}
-                                        {...props}
-                                    />
-                                ),
-                                h3: (props) => (
-                                    <h3
-                                        className={`type-chat-h3 mt-4 mb-2 ${headingTextClass}`}
-                                        {...props}
-                                    />
-                                ),
-	                                a: (props) => <a className="text-[var(--info)] underline decoration-[var(--info)]/40 underline-offset-4 hover:text-[var(--text-primary)]" target="_blank" rel="noreferrer" {...props} />,
-	                                strong: (props) => <strong className={bubble ? 'opacity-100' : 'text-[var(--text-primary)]'} {...props} />,
-                                table: (props) => (
-
-                                    <div className="my-6 w-full min-w-0 max-w-full overflow-x-auto rounded-lg border border-[var(--border)]">
-	                                        <table className="type-chat-body w-full border-collapse" {...props} />
-                                    </div>
-                                ),
-                                thead: (props) => <thead className="border-b border-[var(--border)] bg-[var(--surface-2)]" {...props} />,
-                                tbody: (props) => <tbody className="divide-y divide-[var(--border)]" {...props} />,
-                                tr: (props) => <tr className="transition-colors hover:bg-[var(--surface-hover)]" {...props} />,
-                                th: (props) => <th className={`type-table-head px-4 py-3 text-left ${bubble ? 'text-[currentColor]' : 'text-[var(--text-muted)]'}`} {...props} />,
-                                td: ({ children, ...props }) => {
-                                    const cellContent = Array.isArray(children) ? children.map(c => typeof c === 'string' ? c : '').join('') : String(children);
-                                    const color = detectColor(cellContent);
-                                    return (
-	                                        <td className="type-chat-body whitespace-pre-wrap break-words border-[var(--border)] px-3 py-2.5" {...props}>
-                                            {color && <ColorSwatch color={color} />}
-                                            {children}
-                                        </td>
-                                    );
-                                },
-                                pre: (props) => (
-                                    <pre className={`type-code my-3 max-w-full overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--surface-3)] p-3 ${bodyTextClass}`}>
-                                        {props.children}
-                                    </pre>
-                                ),
-                                code: ({ className, children, ...props }) => {
-                                    const match = /language-(\w+)/.exec(className || '');
-                                    // Detect inline if no language match and no newlines (languageless blocks have newlines)
-                                    const isInline = !match && !String(children).includes('\n');
-                                    
-                                    if (isInline) {
-                                      const color = typeof children === 'string' ? detectColor(children) : null;
-                                      return (
-                                        <code className={`type-chat-inline-code break-words bg-[var(--surface-3)] ${bubble ? 'text-[currentColor]' : 'text-[var(--text-secondary)]'}`} {...props}>
-                                            {color && <ColorSwatch color={color} />}
-                                            {children}
-                                        </code>
-                                      );
-                                    }
-
-                                    return (
-                                      <code className={className} {...props}>
-                                        {children}
-                                      </code>
-                                    );
-                                }
-                            }}
+                            components={markdownComponents}
                         >
                             {formattedMainContent}
                         </ReactMarkdown>

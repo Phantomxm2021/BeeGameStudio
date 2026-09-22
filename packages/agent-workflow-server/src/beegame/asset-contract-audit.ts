@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, statSync, realpathSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { parseSpriteSheet, validateSpriteSheetBounds } from '../../../scene-editor/src/sprite-sheet'
+import { readTileSetResource } from './tilemap-contract'
 import {
   BeeGameAssetManifestError,
   readBeeGameAssetManifestModulePathsSync,
@@ -100,6 +101,7 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
         else if (filePath.toLowerCase().endsWith('.json')) {
           try {
             const value = JSON.parse(readFileSync(absolute, 'utf8'))
+            if (value?.schema === 'beegame-tileset.v1') readTileSetResource(workspace, manifest, resource.id, filePath)
             const image = resource.file_paths.find(path => path === filePath.replace(/\.json$/i, '.png'))
             const imagePath = image && projectFile(workspace, image)
             if (imagePath && existsSync(imagePath)) {

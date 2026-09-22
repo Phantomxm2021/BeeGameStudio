@@ -25,6 +25,12 @@ test('runtime observability logs do not change workspace identity', async () => 
   const after = await computeWorkspaceRevision(workspace)
 
   expect(after).toBe(before)
+  await mkdir(join(workspace, '.beegame/tmp/session/cache'), { recursive: true })
+  await writeFile(join(workspace, '.beegame/tmp/session/cache/temporary.js'), 'test scaffolding, not deliverable')
+  expect(await computeWorkspaceRevision(workspace)).toBe(before)
+  await mkdir(join(workspace, '.beegame/chat'), { recursive: true })
+  await writeFile(join(workspace, '.beegame/chat/project-events.jsonl'), '{"type":"message"}\n')
+  expect(await computeWorkspaceRevision(workspace)).toBe(before)
 })
 
 test('implementation files still change workspace identity', async () => {

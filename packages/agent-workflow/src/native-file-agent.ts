@@ -7,7 +7,7 @@ import { createNativeToolDiagnostics } from './native-tool-diagnostics'
 import { createNativeResponseTraceLog, createResponseRedactor, projectResponseMessage, NATIVE_RESPONSE_TRACE_PREFIX } from './native-response-trace'
 import { NATIVE_DIAGNOSTIC_PREFIX, parseNativeDiagnostic } from './native-diagnostics'
 
-const SAFE_INHERITED = ['HOME', 'LANG', 'LC_ALL', 'LOGNAME', 'NODE_ENV', 'PATH', 'SHELL', 'TMPDIR', 'USER', 'CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING']
+const SAFE_INHERITED = ['HOME', 'LANG', 'LC_ALL', 'LOGNAME', 'PATH', 'SHELL', 'TMPDIR', 'USER', 'CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING']
 const CONFIG_KEYS = new Set([
   'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'DISABLE_TELEMETRY', 'DISABLE_ERROR_REPORTING',
   'BEEGAME_MODEL', 'BEEGAME_MODEL_TYPE', 'BEEGAME_CONFIG_DIR', 'NPM_CONFIG_CACHE', 'npm_config_cache', 'NPM_CONFIG_USERCONFIG', 'npm_config_userconfig',
@@ -113,6 +113,17 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
     return logQueue = logQueue.then(() => appendFile(path, line, { mode: 0o600 }))
   }
   const log = (event: string, data: unknown) => writeRecord(input.logPath, event, data)
+  let progressObserverFailed = false
+  const reportProgress = async (progress: FileAgentProgress) => {
+    if (progressObserverFailed) return
+    try { await input.onProgress?.(progress) }
+    catch {
+      // Display-only progress must not cancel native execution. Durable
+      // output and usage observers retain their separate failure handling.
+      progressObserverFailed = true
+      console.warn('[BeeGame] Progress display unavailable; native task continues.')
+    }
+  }
   // Workers can outlive the API process. Their durable, redacted Chat source
   // must remain readable independently of diagnostic retention/rotation.
   const chat = (event: string, data: unknown) => writeRecord(nativeChatEventsPath(input.logPath), event, data)
@@ -149,7 +160,7 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
     waitObservationQueue = waitObservationQueue.then(async () => {
       await log('upstream_waiting', { request: upstreamRequest, waitMs, lastActivityAt,
         modelResponses: modelIds.size, advisoryOnly: true, modelContinues: true })
-      await input.onProgress?.({ modelResponses: modelIds.size,
+      await reportProgress({ modelResponses: modelIds.size,
         message: `等待上游模型响应 · 已静默 ${Math.floor(waitMs / 1000)} 秒` })
     }).catch(() => { fail('observation_failed') })
   }
@@ -187,7 +198,7 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
         responseStopReason = event.delta.stop_reason
       if (event.type === 'content_block_delta' && Date.now() - lastProgressAt >= 1000) {
         lastProgressAt = Date.now()
-        await input.onProgress?.({ modelResponses: modelIds.size,
+        await reportProgress({ modelResponses: modelIds.size,
           message: `正在接收模型响应（流事件 ${streamEvents}）` })
       }
     }
@@ -203,14 +214,14 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
       modelIds.add(model.id)
       const progress = { modelResponses: modelIds.size, message: '正在接收模型响应' }
       await log('model_response', { ...progress, id: model.id })
-      await input.onProgress?.(progress)
+      await reportProgress(progress)
     }
     if (message.type === 'stream_request_start') {
       upstreamRequest++
       upstreamWaitStartedAt = Date.now()
       upstreamWaitBucket = 0
       await log('upstream_wait_started', { request: upstreamRequest, modelResponses: modelIds.size, lastActivityAt })
-      await input.onProgress?.({ modelResponses: modelIds.size, message: '等待上游模型响应' })
+      await reportProgress({ modelResponses: modelIds.size, message: '等待上游模型响应' })
     }
     if (message.type === 'control_request' && message.request?.subtype === 'can_use_tool') {
       const decision = !failure && !result ? await access.permission(message.request)
@@ -232,7 +243,7 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
         const progress = { modelResponses: modelIds.size,
           message: block.name + (typeof path === 'string' ? ' ' + relative(root, resolve(root, path)) : '') }
         await log('tool', { ...progress, id: block.id, ...diagnostics.started(block, message.parent_tool_use_id) })
-        await input.onProgress?.(progress)
+        await reportProgress(progress)
       }
     }
     if (message.type === 'user' && Array.isArray(message.message?.content)) {
@@ -252,7 +263,7 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
           modelContinues: true,
         })
         if (diagnostic.retrievalStatus === 'timeout' || diagnostic.retrievalStatus === 'not_ready')
-          await input.onProgress?.({ modelResponses: modelIds.size, message: '正在等待委派任务返回；本次取结果尚未完成' })
+          await reportProgress({ modelResponses: modelIds.size, message: '正在等待委派任务返回；本次取结果尚未完成' })
       }
     }
     if (message.type === 'result') {
@@ -322,7 +333,7 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
                   : data.event === 'response_headers'
                     ? '已收到上游响应头，等待模型流'
                     : undefined
-              if (message) await input.onProgress?.({ modelResponses: modelIds.size, message })
+              if (message) await reportProgress({ modelResponses: modelIds.size, message })
             }
           }
         } catch {

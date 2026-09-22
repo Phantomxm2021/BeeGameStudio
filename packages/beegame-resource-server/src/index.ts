@@ -1,6 +1,6 @@
 import { createInMemoryResourceRepository, resolveResourceSemanticVisualKind, type PackSummary, type ResourceElement, type ResourcePack } from '@bee-game-studio/beegame-resource-core'
 import { createBeeGameResourceServerApp, ResourceLifecycleNotFoundError } from './app'
-import { resolveBeeGameResourceListenOptions } from './env'
+import { resolveBeeGameResourceListenOptions, resourceProcessingEnabled } from './env'
 import { resolveBeeGameResourceSemanticRuntimeOptions } from './env'
 import { createSupabaseResourceRepository } from './supabase-resource-repository'
 import { createR2StorageDriver, resolveProjectStorageConfiguration } from '@bee-game-studio/beegame-storage-core'
@@ -26,6 +26,7 @@ if (import.meta.main) {
   await loadResourceSupabaseEnv()
   const resourceFetch = createResourceServerFetch()
   const { host, port } = resolveBeeGameResourceListenOptions()
+  const processingEnabled = resourceProcessingEnabled()
   const baseUrl = process.env.BEEGAME_SUPABASE_URL
   const serviceRoleKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
   const projectStorage = resolveProjectStorageConfiguration(process.env)
@@ -42,7 +43,7 @@ if (import.meta.main) {
     ? createSupabaseResourceModelConfigResolver({ baseUrl, serviceRoleKey, fetchImpl: resourceFetch })
     : undefined
   let semanticModel: ReturnType<typeof createResourceSemanticModelClient> | undefined
-  if (semanticRuntimeOptions.configured && semanticConfigResolver) {
+  if (processingEnabled && semanticRuntimeOptions.configured && semanticConfigResolver) {
     try {
       semanticModel = createResourceSemanticModelClient({ runtimeServerUrl: semanticRuntimeOptions.runtimeServerUrl!, serviceToken: semanticRuntimeOptions.serviceToken!, fetchImpl: resourceFetch })
     } catch (error) {
@@ -50,7 +51,7 @@ if (import.meta.main) {
     }
   }
   const inspectResourceElement = baseUrl && serviceRoleKey && r2ResourceStorage ? createSupabaseResourceReinspectionHandler({ baseUrl, serviceRoleKey, modelProcessor, r2Storage: r2ResourceStorage, fetchImpl: resourceFetch }) : undefined
-  const resourceProcessing = baseUrl && serviceRoleKey && inspectResourceElement
+  const resourceProcessing = processingEnabled && baseUrl && serviceRoleKey && inspectResourceElement
     ? createSupabaseResourceProcessingHandlers({
       baseUrl, serviceRoleKey, inspectElement: inspectResourceElement, fetchImpl: resourceFetch,
       canProcessKind: kind => kind === 'inspect-elements' || Boolean(semanticModel && semanticConfigResolver),
@@ -114,6 +115,7 @@ if (import.meta.main) {
     : undefined
   const app = createBeeGameResourceServerApp({
     repository,
+    processingEnabled,
     ...(process.env.BEEGAME_RESOURCE_SERVICE_TOKEN ? { serviceSelectionToken: process.env.BEEGAME_RESOURCE_SERVICE_TOKEN } : {}),
     ...(baseUrl && serviceRoleKey ? { currentUserResolver: createConfiguredResourceUserResolver(process.env, { fetchImpl: resourceFetch }), canManagePack: createSupabaseResourcePackAccessChecker({ baseUrl, serviceRoleKey, fetchImpl: resourceFetch }) } : {}),
     ...(baseUrl && serviceRoleKey && r2ResourceStorage ? createSupabaseResourceLifecycleHandlers({ baseUrl, serviceRoleKey, r2Storage: r2ResourceStorage, fetchImpl: resourceFetch }) : {}),

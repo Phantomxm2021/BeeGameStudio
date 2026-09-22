@@ -544,8 +544,7 @@ export function RightSidebar({
                     </div>
 
                     {/* Content Area */}
-                    <TabsContent value={activeTab} className="relative min-h-0 min-w-0 flex-1 overflow-hidden pointer-events-auto">
-                        {activeTab === 'chat' ? (
+                    <TabsContent key={projectId} value="chat" keepMounted className="relative min-h-0 min-w-0 flex-1 overflow-hidden pointer-events-auto data-[hidden]:hidden">
                             <ChatPanel 
                                 messages={messages}
                                 isLoading={isLoading}
@@ -589,9 +588,11 @@ export function RightSidebar({
                                 isLoadingOlderHistory={isLoadingOlderHistory}
                                 onLoadOlderHistory={handleLoadOlderHistory}
                             />
-                        ) : activeTab === 'todo' ? (
+                    </TabsContent>
+                    <TabsContent value="todo" className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
                             <TodoPanel items={currentTodos} lang={lang} />
-                        ) : (
+                    </TabsContent>
+                    <TabsContent value="artifacts" className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
                             <div className="h-full min-h-0">
                                 {showAssets ? (
                                     <AssetsPanel
@@ -618,7 +619,6 @@ export function RightSidebar({
                                     />
                                 )}
                             </div>
-                        )}
                     </TabsContent>
                 </Tabs>
             </div>

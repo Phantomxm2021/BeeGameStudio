@@ -21,6 +21,10 @@ import { Input } from './components/motion/input'
 import { Button } from './components/motion/button'
 import { Menu as MotionMenu, MenuItem, MenuSeparator, MenuSub } from './components/motion/menu'
 import { Select } from './components/motion/select'
+import { TilePalette } from './tile-palette'
+import { parseTilemapData } from './tilemap-data'
+import type { TilePaintTool } from './tilemap-paint'
+import type { TileBrush } from './tilemap-brush'
 
 type Mode = 'translate' | 'rotate' | 'scale' | 'hand'
 type DropPosition = 'before' | 'inside' | 'after'
@@ -130,6 +134,25 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
   const searchInputRef = useRef<HTMLInputElement>(null)
   const editorRootRef = useRef<HTMLDivElement>(null)
   const current = document.nodes[selected]
+  const [paletteOpen,setPaletteOpen]=useState(false)
+  const [paintTarget,setPaintTarget]=useState(''),[paintTile,setPaintTile]=useState(''),[paintTool,setPaintTool]=useState<TilePaintTool|null>(null)
+  const tilemapNodes=Object.values(document.nodes).filter(n=>componentOf(n,'tilemap'))
+  const targetId=tilemapNodes.some(n=>n.id===paintTarget)?paintTarget:tilemapNodes[0]?.id ?? ''
+  const targetNode=document.nodes[targetId], targetMap=targetNode&&componentOf(targetNode,'tilemap')
+  const tileSet=targetMap&&document.assets[targetMap.assetId]?.tileSet
+  const tileId=tileSet&&Object.hasOwn(tileSet.tiles,paintTile)?paintTile:Object.keys(tileSet?.tiles??{})[0]??''
+  const targetAvailable=(()=>{
+    if(document.dimension!=='2d'||viewMode!=='2d'||!targetNode||!targetMap?.enabled||!componentOf(targetNode,'tilemap-renderer')?.enabled)return false
+    const seen=new Set<string>()
+    let node:SceneNode|undefined=targetNode
+    while(node&&!seen.has(node.id)){
+      seen.add(node.id)
+      if(!node.active||node.locked||node.editable===false||hiddenIds.has(node.id)||unpickableIds.has(node.id))return false
+      node=node.parentId?document.nodes[node.parentId]:undefined
+    }
+    const grid=document.nodes[String(targetMap.properties.gridNodeId)]
+    return !!grid && componentOf(grid,'grid')?.enabled===true
+  })()
   const modelAssetId = current ? componentOf(current, 'mesh-filter')?.assetId ?? componentOf(current, 'skinned-mesh-renderer')?.assetId : undefined
   const structure = modelAssetId ? structures[modelAssetId] ?? undefined : undefined
   const selectedModelPart = modelSelection && structure ? structure.nodes[modelSelection.nodeIndex] : undefined
@@ -138,6 +161,28 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
   const setSelection = (ids: string[], primary = ids[0] ?? '') => { setModelSelection(null); const available = history.current.document.nodes; setSelectedIds([...new Set(ids.filter(id => Boolean(available[id])))].sort((a, b) => a === primary ? -1 : b === primary ? 1 : 0)) }
   const selectModelPart = (ownerId: string, nodeIndex: number) => { setSelection([ownerId]); setModelSelection({ ownerId, nodeIndex }) }
   const commit = (ops: Parameters<SceneHistory['commit']>[0], label: string) => { try { const next = history.current.commit(ops, label); setDocument({ ...next, nodes: { ...next.nodes }, assets: { ...next.assets } }); setNotice(''); setContextMenu(null); return true } catch (error) { setNotice(`Rejected: ${error instanceof Error ? error.message : String(error)}`); return false } }
+  const tileBrush:TileBrush|undefined=paletteOpen&&paintTool&&targetAvailable ? {
+    nodeId:targetId,tool:paintTool,tileId,
+    onPick:id=>{setPaintTile(id);setPaintTool('paint')},
+    onCommit:(id,base,cells)=>{
+      const node=history.current.document.nodes[id], component=node&&componentOf(node,'tilemap')
+      if(!component || canonicalJson(parseTilemapData(component.properties))!==canonicalJson(base)){setNotice('Tilemap changed during painting; stroke discarded');return}
+      commit([operations.tileCells(id,component.id,base.cells,cells)],paintTool==='erase'?'Erase tiles':paintTool==='box'?'Box fill tiles':'Paint tiles')
+    },
+  }:undefined
+  useEffect(()=>{
+    if(!paletteOpen)return
+    const key=(event:KeyboardEvent)=>{
+      const root=editorRootRef.current,target=event.target as HTMLElement|null
+      if(!root||!target||!root.contains(target)||event.isComposing||event.repeat||event.metaKey||event.ctrlKey||event.altKey)return
+      if(target.closest('input,textarea,select,[contenteditable=true],[role=dialog],[role=menu],[role=listbox]'))return
+      const k=event.key.toLowerCase(), tools:Record<string,TilePaintTool>={b:'paint',d:'erase',i:'pick',u:'box'}
+      if(tools[k]){event.preventDefault();setPaintTool(tools[k])}
+      else if(['q','w','e','r','escape'].includes(k))setPaintTool(null)
+    }
+    window.addEventListener('keydown',key)
+    return()=>window.removeEventListener('keydown',key)
+  },[paletteOpen])
   const addLight = (kind: LightKind) => {
     const id = `light-${crypto.randomUUID()}`
     const lightType = document.dimension === '2d' ? 'light-2d' : 'light'
@@ -283,13 +328,14 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
           />
           <span className="toolbar-divider" />
           <div className="scene-tools" role="toolbar" aria-label="Scene tools" aria-orientation="horizontal">
-            {SCENE_TOOLS.map(tool => { const Icon = TOOL_ICONS[tool.mode]; return <Button key={tool.mode} className={`icon-button ${mode === tool.mode ? 'active' : ''}`} aria-label={tool.label} aria-pressed={mode === tool.mode} title={`${tool.label} (${tool.key})`} onClick={() => setMode(tool.mode)}><Icon size={18} /></Button> })}
+            {SCENE_TOOLS.map(tool => { const Icon = TOOL_ICONS[tool.mode]; return <Button key={tool.mode} className={`icon-button ${!tileBrush && mode === tool.mode ? 'active' : ''}`} aria-label={tool.label} aria-pressed={!tileBrush && mode === tool.mode} title={`${tool.label} (${tool.key})`} onClick={() => {setPaintTool(null);setMode(tool.mode)}}><Icon size={18} /></Button> })}
           </div>
           <span className="toolbar-divider" />
           <ViewDropdown label="Coordinate space" value={space} options={[{ value: 'local', label: 'Local' }, { value: 'world', label: 'World' }]} onChange={value => setSpace(value as 'local' | 'world')} />
           <ViewDropdown label="View mode" value={viewMode} options={[{ value: '2d', label: '2D' }, { value: '3d', label: '3D' }]} onChange={value => setViewMode(value as SceneViewMode)} />
           <ViewDropdown label="Projection" value={viewMode === '2d' || ortho ? 'orthographic' : 'perspective'} options={[{ value: 'perspective', label: 'Perspective' }, { value: 'orthographic', label: 'Orthographic' }]} onChange={value => setOrtho(value === 'orthographic')} disabled={viewMode === '2d'} />
           <Button className="toolbar-toggle" aria-label="Snap" aria-pressed={snap} title="Grid snapping" onClick={() => setSnap(value => !value)}><Magnet size={16} /><span>Snap</span></Button>
+          <Button aria-label="Tile Palette" aria-pressed={paletteOpen} disabled={document.dimension!=='2d'||tilemapNodes.length===0} onClick={()=>{if(!paletteOpen&&current&&componentOf(current,'tilemap'))setPaintTarget(current.id);setPaletteOpen(v=>!v);setPaintTool(null)}}>Tiles</Button>
           <AssetLibraryDialog source={assetLibrary} assets={document.assets} onAdd={addModelAsset} open={assetLibraryOpen} onOpenChange={setAssetLibraryOpen} trigger={null} />
           {sceneSettingsOpen && <SceneSettingsDialog document={document} onSave={() => void saveDocument()} onApply={(name, settings) => {
             if (name === document.name && canonicalJson(settings) === canonicalJson(document.settings ?? DEFAULT_SCENE_SETTINGS)) return true
@@ -298,7 +344,8 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
         </div>
         </div>
 
-        <div className="scene-render-surface" data-mode={mode} data-view-mode={viewMode}><SceneViewport showGizmos={showGizmos} initialView={initialView} ortho={ortho} viewMode={viewMode} document={document} selected={selected} selectedIds={selectedIds} modelSelection={modelSelection} hiddenIds={[...hiddenIds]} unpickableIds={[...unpickableIds]} onSelect={(id, modifiers = { ctrlKey: false, metaKey: false, shiftKey: false }) => { if (!id) { setSelection([]); return } if (modifiers.shiftKey && selected) { const index = visibleIds.indexOf(id); const start = visibleIds.indexOf(selected); setSelection(visibleIds.slice(Math.min(start, index), Math.max(start, index) + 1), id) } else if (modifiers.ctrlKey || modifiers.metaKey) setSelection(selectedIds.includes(id) ? selectedIds.filter(value => value !== id) : [...selectedIds, id], id); else setSelection([id], id) }} mode={mode} space={space} snap={snap} focus={focus} onTransform={changeTransform} onDiagnostic={setNotice} /></div></main>
+        {paletteOpen && <TilePalette document={document} target={targetId} editable={targetAvailable} tool={paintTool} tileId={tileId} onTarget={id=>{setPaintTarget(id);setPaintTile('')}} onTool={setPaintTool} onTile={id=>{setPaintTile(id);setPaintTool('paint')}} onClose={()=>{setPaletteOpen(false);setPaintTool(null)}}/>}
+        <div className="scene-render-surface" data-mode={mode} data-view-mode={viewMode}><SceneViewport tileBrush={tileBrush} showGizmos={showGizmos} initialView={initialView} ortho={ortho} viewMode={viewMode} document={document} selected={selected} selectedIds={selectedIds} modelSelection={modelSelection} hiddenIds={[...hiddenIds]} unpickableIds={[...unpickableIds]} onSelect={(id, modifiers = { ctrlKey: false, metaKey: false, shiftKey: false }) => { if (!id) { setSelection([]); return } if (modifiers.shiftKey && selected) { const index = visibleIds.indexOf(id); const start = visibleIds.indexOf(selected); setSelection(visibleIds.slice(Math.min(start, index), Math.max(start, index) + 1), id) } else if (modifiers.ctrlKey || modifiers.metaKey) setSelection(selectedIds.includes(id) ? selectedIds.filter(value => value !== id) : [...selectedIds, id], id); else setSelection([id], id) }} mode={tileBrush?'select':mode} space={space} snap={snap} focus={focus} onTransform={changeTransform} onDiagnostic={setNotice} /></div></main>
       <aside onPointerDownCapture={event => { if ((event.target as HTMLElement).closest('[data-edit-gesture]')) history.current.beginGesture() }}
       onPointerUp={() => history.current.endGesture()} onPointerCancel={() => history.current.endGesture()} onLostPointerCapture={() => history.current.endGesture()}
       onFocusCapture={event => { if ((event.target as HTMLElement).matches('input[type="color"]')) history.current.beginGesture() }}
@@ -398,7 +445,14 @@ export function cloneSubtreeForDuplicate(document: SceneDocument, rootId: string
     copy.name = id === rootId ? `${copy.name} Copy` : copy.name
     copy.parentId = id === rootId ? source.parentId : idMap.get(source.parentId ?? '') ?? null
     copy.children = source.children.map(child => idMap.get(child)!).filter(Boolean)
-    copy.components = copy.components.map(component => ({ ...component, id: `${copy.id}:${component.type}:${crypto.randomUUID().slice(0, 8)}` }))
+    copy.components = copy.components.map(component => ({
+      ...component,
+      id: `${copy.id}:${component.type}:${crypto.randomUUID().slice(0, 8)}`,
+      ...(component.type === 'tilemap' ? { properties: {
+        ...component.properties,
+        gridNodeId: idMap.get(String(component.properties.gridNodeId)) ?? component.properties.gridNodeId,
+      } } : {}),
+    }))
     nodes.push(copy)
     source.children.forEach(build)
   }

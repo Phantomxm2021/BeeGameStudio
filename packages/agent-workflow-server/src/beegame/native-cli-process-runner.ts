@@ -1,3 +1,4 @@
+import { responseLanguageInstruction } from './response-language'
 import type {
   BeeGamePromptInput,
   DashboardSDKMessage,
@@ -11,6 +12,7 @@ import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { parseNativeTerminalTaskNotification } from './native-task-notification'
 import { resolveNativeRuntimeCommand, nativeSessionTemporaryPath } from './native-runtime-process-path'
 import { getSafeRuntimeProcessEnvironment } from './runtime-process-environment'
+import { createNativeTaskAccess, nativeTaskToolEnvironment } from '@bee-game-studio/agent-workflow/native-task-access'
 import { mkdir, realpath } from 'node:fs/promises'
 import {
   createRuntimeObservability,
@@ -63,8 +65,9 @@ export function nativeRuntimeCommand(
     '--include-partial-messages',
     '--replay-user-messages',
     '--permission-prompt-tool=stdio',
-    ...(input.language ? ['--append-system-prompt',
-      `User response language: ${input.language}. Use this language for user-visible messages, progress updates, and reasoning summaries you expose. Preserve code, identifiers, paths, and quoted source text in their original form.`] : []),
+    ...([input.language ? responseLanguageInstruction(input.language) : '', input.systemContext].filter(Boolean).length
+      ? ['--append-system-prompt', [input.language ? responseLanguageInstruction(input.language) : '', input.systemContext].filter(Boolean).join('\n\n')]
+      : []),
     ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : []),
   ]
 }
@@ -87,6 +90,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     private readonly child: RuntimeProcess,
     private readonly sessionInput: BeeGameSessionRunnerStartInput,
     private readonly observability: RuntimeObservability,
+    private readonly taskAccess?: Awaited<ReturnType<typeof createNativeTaskAccess>>,
   ) {
     this.nativeSessionId = sessionInput.resumeSessionId
   }
@@ -104,10 +108,14 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   ): Promise<NativeCliProcessRuntime> {
     if (command.length === 0)
       throw new Error('Bee Game Studio native runtime command is required')
-    const temporary = await prepareNativeSessionTemporaryDirectory(input.cwd, input.sessionId)
-    const child = Bun.spawn(command, {
-      cwd: input.cwd,
-      env: { ...nativeRuntimeEnvironment(input.env), TMPDIR: temporary, CLAUDE_CODE_TMPDIR: temporary },
+    const taskAccess = input.isolatedTask ? await createNativeTaskAccess({
+      ...input.isolatedTask, allowWorkingFiles: true,
+    }) : undefined
+    const temporary = taskAccess ? undefined : await prepareNativeSessionTemporaryDirectory(input.cwd, input.sessionId)
+    const child = Bun.spawn([...command, ...(taskAccess?.flags ?? [])], {
+      cwd: taskAccess?.root ?? input.cwd,
+      env: { ...nativeRuntimeEnvironment(input.env),
+        ...(taskAccess?.environment ?? nativeTaskToolEnvironment(temporary!)) },
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -123,6 +131,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
           ? { launchContract: input.runtimeLaunchContract }
           : {}),
       }),
+      taskAccess,
     )
     void runtime.consumeStdout()
     void runtime.consumeStderr()
@@ -172,7 +181,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         parent_tool_use_id: null,
         message: {
           role: 'user',
-          content: nativePromptContent(input.prompt),
+          content: nativePromptContent(input.prompt, input.language),
         },
       })
     })
@@ -302,6 +311,13 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     const toolUseID = stringField(request, 'tool_use_id')
     const toolName = stringField(request, 'tool_name')
     const toolInput = objectField(request, 'input') ?? {}
+    if (this.taskAccess) {
+      const decision = await this.taskAccess.permission(request)
+      this.write(permissionResponse(requestId, toolUseID,
+        decision.behavior === 'allow' ? decision.updatedInput : toolInput,
+        { ...decision, source: 'policy' }))
+      return
+    }
     const permissionSuggestions = Array.isArray(request.permission_suggestions)
       ? request.permission_suggestions.filter(
           (suggestion): suggestion is Record<string, unknown> =>
@@ -447,9 +463,10 @@ function permissionResponse(
   }
 }
 
-function nativePromptContent(prompt: BeeGamePromptInput): unknown {
-  if (typeof prompt === 'string') return [{ type: 'text', text: prompt }]
-  return prompt
+export function nativePromptContent(prompt: BeeGamePromptInput, language?: string): unknown {
+  // Language and capability discovery belong to system context, never to a
+  // fabricated second user message. Language changes restart/resume the CLI.
+  return typeof prompt === 'string' ? [{ type: 'text', text: prompt }] : prompt
 }
 
 export function nativeRuntimeEnvironment(

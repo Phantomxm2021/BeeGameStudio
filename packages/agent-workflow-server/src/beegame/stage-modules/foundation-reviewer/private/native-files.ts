@@ -7,17 +7,19 @@ import { getLatestRuntimeUsage, type ReviewUsageEvent, type ReviewNativeUsage } 
 import { diagnoseReviewOutput, type ReviewOutputDiagnostic } from './single-agent-diagnostic'
 import { buildReviewFileChecks } from './review-file-checks'
 import { sealReviewedDocument } from './reviewed-document-metadata'
+import { responseLanguageInstruction } from '../../../response-language'
 
 export { NATIVE_FILE_REVIEW_POLICY } from './single-agent-contract'
 export const fileReviewReportSchema = singleReviewReportSchema
 
-export function fileReviewPrompt(): string {
+export function fileReviewPrompt(language?: string): string {
   return [
     'Review the eight documents in docs/ against requirements.md, then directly correct only implementation-affecting contradictions or omissions.',
     'Work as a normal coding task: inspect the relevant files, make the needed edits promptly, and finish. Do not narrate or enumerate an audit checklist.',
     'The deliverables are the eight documents in docs/. requirements.md and review-context/ are read-only evidence.',
     'Do not edit version or updated_at; the service updates those fields when it seals a document whose authored content changed.',
     'When complete, use StructuredOutput with a concise summary of the review and corrections.',
+    ...(language ? [responseLanguageInstruction(language)] : []),
   ].join('\n')
 }
 
@@ -41,6 +43,7 @@ export async function prepareReviewFiles(directory: string, value: SingleReviewI
 export async function runFileReview(input: {
   source: SingleReviewInput; directory: string
   configuration: { command: readonly string[]; env: Readonly<Record<string, string>> }
+  language?: string
   signal: AbortSignal
   onUsage(usage: ReviewNativeUsage): Promise<void>
   onProgress(progress: FileAgentProgress): Promise<void>
@@ -57,7 +60,7 @@ export async function runFileReview(input: {
     readOnlyPaths: ['requirements.md', 'review-context'],
     logPath: join(input.directory, 'native-events.jsonl'), signal: input.signal,
     schema: z.toJSONSchema(fileReviewReportSchema, { target: 'draft-7' }),
-    prompt: fileReviewPrompt(),
+    prompt: fileReviewPrompt(input.language),
     onProgress: async progress => { modelMessages = progress.modelResponses; await input.onProgress(progress) },
     onMessage: async message => {
       const event = message.event as any, assistant = message.message as any

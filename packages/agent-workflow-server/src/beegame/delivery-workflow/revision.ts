@@ -11,6 +11,8 @@ export const REVISION_EXCLUDED_PREFIXES = [
   '.vite/',
   '.beegame/workflow/',
   '.beegame/logs/',
+  '.beegame/chat/',
+  '.beegame/tmp/',
   '.beegame-attachments/',
   'logs/',
   'node_modules/',

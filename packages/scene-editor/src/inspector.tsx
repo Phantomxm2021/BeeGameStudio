@@ -1,4 +1,6 @@
 import { spriteSheetSelection, atlasFrameName } from './sprite-sheet'
+import { parseGridData, parseTilemapData, setTileCell } from './tilemap-data'
+import { Button } from './components/motion/button'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { AudioLines, Box, Camera, ChevronRight, CircleDot, Image, Layers, Lightbulb, LockKeyhole, Move, Sparkles, UnlockKeyhole, type LucideIcon } from 'lucide-react'
 import { operations } from './commands'
@@ -33,7 +35,7 @@ function assetAccepted(component: SceneComponent, asset: SceneAsset): boolean {
   if (MODEL_COMPONENTS.has(component.type)) return asset.mimeType.startsWith('model/') || /\.(glb|gltf|fbx|obj)$/i.test(asset.name)
   if (component.type === 'audio-source') return asset.mimeType.startsWith('audio/')
   if (component.type === 'animator') return asset.mimeType.includes('json')
-  if (component.type === 'tilemap') return asset.mimeType.startsWith('image/') || asset.mimeType.includes('json')
+  if (component.type === 'tilemap') return !!asset.tileSet
   return false
 }
 function componentAssetId(component: SceneComponent): string | undefined {
@@ -105,7 +107,13 @@ export function withAsset(component: SceneComponent, assetId: string | undefined
     if (member) properties.member = member
     return { ...next, ...(assetId === undefined ? {} : { assetId, textureAssetId: assetId }), material: setTextureAsset(component.material, assetId), properties }
   }
-  if (component.type === 'mesh-filter' || component.type === 'skinned-mesh-renderer' || component.type === 'tilemap') return { ...setMember(component, assetId), assetId: assetId! }
+  if (component.type === 'tilemap') {
+    const next = setMember(component, assetId), properties = { ...component.properties }
+    delete properties.member
+    if (next.member) properties.member = next.member
+    return { ...next, assetId: assetId!, properties }
+  }
+  if (component.type === 'mesh-filter' || component.type === 'skinned-mesh-renderer') return { ...setMember(component, assetId), assetId: assetId! }
   if (component.type === 'mesh-collider' || component.type === 'audio-source' || component.type === 'animator') return { ...clearAsset(component), ...(assetId === undefined ? {} : { assetId }) }
   return component
 }
@@ -157,6 +165,23 @@ function AssetProperty({ component, document, replace }: { component: SceneCompo
   const label = component.type === 'audio-source' ? 'Audio clip' : component.type === 'animator' ? 'Controller' : component.type === 'tilemap' ? 'Tilemap' : MATERIAL_COMPONENTS.has(component.type) ? 'Material' : 'Mesh'
   return <Property label={label}><Select className="asset-picker" ariaLabel={`${labelFor(component)} ${label.toLowerCase()}`} value={current ?? ''} onValueChange={value => replace(withAsset(component, value || undefined), `Replace ${label.toLowerCase()}`)} options={[{ value: '', label: 'None', disabled: required }, ...assets.map(asset => ({ value: asset.id, label: asset.name }))]} /></Property>
 }
+function TilemapProperties({ component, document, replace }: { component: Extract<SceneComponent,{type:'tilemap'}>; document: SceneDocument; replace: (next: SceneComponent,label:string)=>void }) {
+  const [x,setX]=useState(0), [y,setY]=useState(0), [tileId,setTileId]=useState('')
+  const map=parseTilemapData(component.properties), tiles=document.assets[component.assetId]?.tileSet?.tiles ?? {}
+  const selected=Object.hasOwn(tiles,tileId) ? tileId : Object.keys(tiles)[0] ?? ''
+  return <>
+    <AssetProperty component={component} document={document} replace={replace}/>
+    <Vec2Property label="Tile anchor" value={map.tileAnchor ?? [.5,.5]} onCommit={value=>replace({...component,properties:{...map,tileAnchor:value}},'Change tile anchor')}/>
+    <Property label="Collision"><Switch aria-label="Tilemap collision" checked={map.collisionEnabled ?? false} onCheckedChange={value=>replace({...component,properties:{...map,collisionEnabled:value}},'Change tile collision')}/></Property>
+    <NumberProperty label="Cell X" step="1" value={x} onCommit={v=>setX(Math.round(v))}/>
+    <NumberProperty label="Cell Y" step="1" value={y} onCommit={v=>setY(Math.round(v))}/>
+    <Property label="Tile"><Select ariaLabel="Tile ID" value={selected} onValueChange={setTileId} options={Object.keys(tiles).map(value=>({value,label:value}))}/></Property>
+    <Property label={`${map.cells.length} cells`}><span>
+      <Button variant="outline" disabled={!selected} onClick={()=>replace({...component,properties:{...setTileCell(map,x,y,selected)}},'Set tile')}>Set cell</Button>
+      <Button disabled={!map.cells.some(c=>c.x===x && c.y===y)} onClick={()=>replace({...component,properties:{...setTileCell(map,x,y,null)}},'Remove tile')}>Remove</Button>
+    </span></Property>
+  </>
+}
 function SpriteFrameProperty({ component, document, replace }: { component: Extract<SceneComponent, { type: 'sprite-renderer' | 'image' }>; document: SceneDocument; replace: (next: SceneComponent, label: string) => void }) {
   const sheet = component.assetId ? document.assets[component.assetId]?.spriteSheet : undefined
   const atlas = sheet && 'frames' in sheet ? sheet : undefined
@@ -194,8 +219,11 @@ function ComponentInspector({ node, component, document, commit }: { node: Scene
   const Icon = ICONS[component.type] ?? Box
   const replace = (next: SceneComponent, label: string) => { if (JSON.stringify(component) !== JSON.stringify(next)) commit([operations.component(node.id, next)], label) }
   if (component.type === 'text') return <TextInspector component={component} replace={replace} />
-  if (component.type === 'sprite-renderer' || component.type === 'image' || component.type === 'mesh-renderer' || component.type === 'skinned-mesh-renderer' || component.type === 'tilemap-renderer' || component.type === 'particle-system-renderer') return <ComponentSection title={labelFor(component)} icon={Icon}>{component.type !== 'tilemap-renderer' && <AssetProperty component={component} document={document} replace={replace} />}{(component.type === 'sprite-renderer' || component.type === 'image') && <SpriteFrameProperty component={component} document={document} replace={replace} />}{document.dimension === '2d' && (component.type === 'sprite-renderer' || component.type === 'tilemap-renderer') ? <NumberProperty label="Order in Layer" step="1" value={Number(component.properties.sortingOrder ?? node.order ?? 0)} onCommit={value => { if (Number.isFinite(value)) replace({ ...component, properties: { ...component.properties, sortingOrder: Math.round(value) } }, 'Change render order') }} /> : null}<Property label="Color"><input type="color" value={component.material.color} onChange={event => replace({ ...component, material: { ...component.material, color: event.target.value } }, 'Change renderer color')} /></Property><Property label="Opacity"><span data-edit-gesture className="scene-opacity-control"><RangeSlider aria-label="Renderer opacity" min={0} max={1} step={.01} showTicks={false} value={component.material.opacity} onValueChange={opacity => replace({ ...component, material: { ...component.material, opacity, alphaMode: opacity < 1 ? 'blend' : 'opaque' } }, 'Change renderer opacity')} className="scene-opacity-slider" /></span></Property></ComponentSection>
-  if (component.type === 'mesh-filter' || component.type === 'tilemap' || component.type === 'animator') return <ComponentSection title={labelFor(component)} icon={Icon}><AssetProperty component={component} document={document} replace={replace} /></ComponentSection>
+  if (component.type === 'sprite-renderer' || component.type === 'image' || component.type === 'mesh-renderer' || component.type === 'skinned-mesh-renderer' || component.type === 'particle-system-renderer') return <ComponentSection title={labelFor(component)} icon={Icon}><AssetProperty component={component} document={document} replace={replace} />{(component.type === 'sprite-renderer' || component.type === 'image') && <SpriteFrameProperty component={component} document={document} replace={replace} />}{document.dimension === '2d' && component.type === 'sprite-renderer' ? <NumberProperty label="Order in Layer" step="1" value={Number(component.properties.sortingOrder ?? node.order ?? 0)} onCommit={value => { if (Number.isFinite(value)) replace({ ...component, properties: { ...component.properties, sortingOrder: Math.round(value) } }, 'Change render order') }} /> : null}<Property label="Color"><input type="color" value={component.material.color} onChange={event => replace({ ...component, material: { ...component.material, color: event.target.value } }, 'Change renderer color')} /></Property><Property label="Opacity"><span data-edit-gesture className="scene-opacity-control"><RangeSlider aria-label="Renderer opacity" min={0} max={1} step={.01} showTicks={false} value={component.material.opacity} onValueChange={opacity => replace({ ...component, material: { ...component.material, opacity, alphaMode: opacity < 1 ? 'blend' : 'opaque' } }, 'Change renderer opacity')} className="scene-opacity-slider" /></span></Property></ComponentSection>
+  if (component.type === 'grid') { const grid=parseGridData(component.properties); return <ComponentSection title="Grid" icon={Icon}><Vec2Property label="Cell size" value={grid.cellSize} onCommit={value=>replace({...component,properties:{...grid,cellSize:value}},'Change cell size')}/><Vec2Property label="Cell gap" value={grid.cellGap ?? [0,0]} onCommit={value=>replace({...component,properties:{...grid,cellGap:value}},'Change cell gap')}/></ComponentSection> }
+  if (component.type === 'tilemap-renderer') return <ComponentSection title="Tilemap Renderer" icon={Icon}><NumberProperty label="Order in Layer" step="1" value={Number(component.properties.sortingOrder ?? 0)} onCommit={value=>replace({...component,properties:{...component.properties,sortingOrder:Math.round(value)}},'Change render order')}/></ComponentSection>
+  if (component.type === 'tilemap') return <ComponentSection title="Tilemap" icon={Icon}><TilemapProperties component={component} document={document} replace={replace}/></ComponentSection>
+  if (component.type === 'mesh-filter' || component.type === 'animator') return <ComponentSection title={labelFor(component)} icon={Icon}><AssetProperty component={component} document={document} replace={replace} /></ComponentSection>
   if (component.type === 'particle-system') return <ParticleInspector component={component} replace={replace} />
   if (component.type === 'light-2d' || component.type === 'light') return <ComponentSection title={labelFor(component)} icon={Icon}><Property label="Type"><Select ariaLabel="Light type" value={component.light.kind} onValueChange={value => replace({ ...component, light: { ...component.light, kind: value as typeof component.light.kind } }, 'Change light type')} options={['ambient', 'directional', 'point', 'spot'].map(kind => ({ value: kind, label: kind }))} /></Property><Property label="Color"><input aria-label="Light color" type="color" value={component.light.color} onChange={event => replace({ ...component, light: { ...component.light, color: event.target.value } }, 'Change light color')} /></Property><NumberProperty label="Intensity" value={component.light.intensity} min={0} onCommit={value => replace({ ...component, light: { ...component.light, intensity: Math.max(0, value) } }, 'Change light intensity')} />{component.light.kind === 'point' || component.light.kind === 'spot' ? <NumberProperty label="Range" value={component.light.distance ?? 10} min={0} onCommit={value => replace({ ...component, light: { ...component.light, distance: Math.max(0, value) } }, 'Change light range')} /> : null}{component.light.kind === 'spot' ? <NumberProperty label="Angle °" value={(component.light.angle ?? Math.PI / 3) * 180 / Math.PI} min={1} step="1" onCommit={value => replace({ ...component, light: { ...component.light, angle: Math.max(1, value) * Math.PI / 180 } }, 'Change spot angle')} /> : null}</ComponentSection>
   if (component.type === 'camera') return <ComponentSection title="Camera" icon={Icon}><Property label="Orthographic"><Switch aria-label="Camera orthographic" checked={component.orthographic} onCheckedChange={checked => replace({ ...component, orthographic: checked }, 'Change camera projection')} /></Property>{component.orthographic ? <NumberProperty label="Orthographic size" value={component.orthographicSize ?? 3.6} min={.01} step="0.01" onCommit={value => replace({ ...component, orthographicSize: Math.max(.01, value) }, 'Change orthographic size')} /> : null}<NumberProperty label="Near clip" value={component.nearClip ?? .1} min={.001} step="0.01" onCommit={value => replace({ ...component, nearClip: Math.max(.001, value) }, 'Change near clip')} /><NumberProperty label="Far clip" value={component.farClip ?? 1000} min={.01} onCommit={value => replace({ ...component, farClip: Math.max(.01, value) }, 'Change far clip')} /></ComponentSection>

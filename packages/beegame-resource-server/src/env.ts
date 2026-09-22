@@ -2,6 +2,14 @@ import { resolveFixedServicePort } from '../../agent-workflow-server/src/beegame
 
 export type ResourceListenOptions = { host: string; port: number }
 
+/** Keep catalog/download service available while background processing is paused. */
+export function resourceProcessingEnabled(env: Record<string, string | undefined> = process.env): boolean {
+  const value = env.BEEGAME_RESOURCE_PROCESSING_ENABLED?.trim()
+  if (value !== undefined && value !== '0' && value !== '1')
+    throw new Error('BEEGAME_RESOURCE_PROCESSING_ENABLED must be 0 or 1')
+  return value !== '0'
+}
+
 export type ResourceSemanticRuntimeOptions = {
   configured: boolean
   runtimeServerUrl?: string

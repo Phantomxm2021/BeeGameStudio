@@ -320,6 +320,7 @@ export type WorkerDispatchRequest = {
   allowedPaths?: string[]
   protectedPaths?: string[]
   /** Explicit project-read scope; fact workers use the empty scope. */
+  /** Historical transcript/request data only; execution uses task isolation. */
   projectReadScope?: 'empty' | 'allowed'
   contract: Record<string, unknown>
 }

@@ -13,7 +13,11 @@ test('publishing requires explicit current runtime evidence, not merely passed i
   try {
     await mkdir(join(workspacePath,'.beegame/workflow/evidence'),{recursive:true})
     await writeFile(join(workspacePath,'game.js'),'initial implementation')
+    await mkdir(join(workspacePath,'dist'))
+    await writeFile(join(workspacePath,'dist/game.js'),'tested build')
     const report = {status:'passed',summary:'Observed gameplay in Preview',environment:'Web Preview iframe',
+      verification: { target: 'deployment', knownIssues: [], unverified: [] },
+      artifactPaths: ['dist/game.js'],
       evidencePaths:['.beegame/workflow/evidence/browser.txt']}
     await writeFile(join(workspacePath,report.evidencePaths[0]!), 'observed result')
     await writeFile(join(workspacePath,runtimeAcceptancePath('dispatch')),JSON.stringify(report))
