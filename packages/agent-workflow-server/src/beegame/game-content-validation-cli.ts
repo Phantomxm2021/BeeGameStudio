@@ -1,7 +1,8 @@
-import { readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { readBeeGameAssetManifestSync } from './asset-contracts'
 import { auditBeeGameContentPackage, parseBeeGameContentIndex } from './game-content-package'
+import { PROJECT_CONTENT_CONTRACT_PATH } from './project-delivery'
 import type { DeliveryRun } from './delivery-workflow/types'
 
 /** Read-only entry point to the exact host validation used after Content authoring. */
@@ -12,10 +13,15 @@ const validationScope = {
 
 export function validateGameContent(workspacePath: string) {
   const started = performance.now()
-  const run = JSON.parse(
-    readFileSync(resolve(workspacePath, '.beegame/workflow/run.json'), 'utf8'),
+  const legacyRunPath = resolve(workspacePath, '.beegame/workflow/run.json')
+  const nativeIndexPath = resolve(workspacePath, 'content/index.json')
+  const nativeIndex = existsSync(resolve(workspacePath, PROJECT_CONTENT_CONTRACT_PATH)) && existsSync(nativeIndexPath)
+    ? parseBeeGameContentIndex(JSON.parse(readFileSync(nativeIndexPath, 'utf8')))
+    : undefined
+  const run = nativeIndex ? undefined : JSON.parse(
+    readFileSync(legacyRunPath, 'utf8'),
   ) as DeliveryRun
-  const assetManifestRevision = run.revision.resource
+  const assetManifestRevision = nativeIndex?.assetManifestRevision ?? run?.revision.resource
   if (!assetManifestRevision)
     return {
       ...validationScope,
@@ -25,7 +31,7 @@ export function validateGameContent(workspacePath: string) {
       elapsedMs: Math.round(performance.now() - started),
     }
   const audit = auditBeeGameContentPackage(workspacePath, {
-    documentRevision: run.revision.document,
+    documentRevision: nativeIndex?.documentRevision ?? run!.revision.document,
     assetManifestRevision,
     manifest: readBeeGameAssetManifestSync(workspacePath),
   })

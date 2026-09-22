@@ -94,7 +94,7 @@ import {
   uploadBeeGameAsset,
   type BeeGameAssetManifest,
 } from './beegame/asset-contracts'
-import { parseBeeGameContentDocument } from './beegame/game-content-package'
+import { acceptBeeGameContentPackage, loadBeeGameContentFileListForEditing, loadBeeGameContentPackageForEditing, parseBeeGameContentDocument, saveBeeGameContentDocument } from './beegame/game-content-package'
 import type { ResourceSelectionRuntimeConfig } from './beegame/resource-selection-config'
 import { listDirectories } from './filesystem/directories'
 import { getDefaultWorkspacePath } from './filesystem/default-workspace'
@@ -226,6 +226,8 @@ import { createFoundationReviewerHost, type FoundationReviewerHostOptions, type 
 import { isPublicStageActive } from './beegame/delivery-workflow/public-stage-routing'
 import { resolveNativeRuntimeCommand } from './beegame/native-runtime-process-path'
 import { evaluateWorkflowDeliveryGate } from './beegame/delivery-workflow/delivery-gate'
+import type { RuntimeAcceptance } from './beegame/delivery-workflow/runtime-acceptance'
+import { beginProjectDelivery, evaluateProjectDeliveryGate, importProjectDeliveryAcceptance, nativeContentAuthority, pauseProjectDelivery, readProjectDelivery, resumeProjectDelivery } from './beegame/project-delivery'
 import type {
   DeliveryRun,
   DispatchRecord,
@@ -973,6 +975,8 @@ export function createAgentWorkflowApp(
     modelConfigId?: string
     language?: BeeGameSessionLanguage
   }): Promise<DeliveryRun | undefined> => {
+    if (await readProjectDelivery(input.workspacePath, dashboardDataRoot))
+      throw new Error('This project uses one native Agent; continue it in project chat')
     const store = createRunStore(input.workspacePath, input.user.id)
     let inspection
     try {
@@ -1146,6 +1150,8 @@ export function createAgentWorkflowApp(
     modelConfigId?: string
     language?: BeeGameSessionLanguage
   }): Promise<{ runId: string; phase: string; status: string }> => {
+    if (await readProjectDelivery(input.workspacePath, dashboardDataRoot))
+      throw new Error('This project uses one native Agent; a second delivery workflow cannot be started')
     const store = createRunStore(input.workspacePath, input.user.id)
     const existing = await store.load()
     if (existing) {
@@ -2641,26 +2647,24 @@ export function createAgentWorkflowApp(
 
       // Only server-created references enter the brief, never caller-supplied paths.
       const confirmedBriefPrompt = buildConfirmedBriefPrompt({ ...brief, referenceFiles: references }, language)
-      beeGameSessions.appendUserMessage(session.id, idea, {
-        displayKind: 'confirmed_brief',
-        ...(referenceFiles.length ? { attachments: referenceFiles.map(file => ({
-          type: file.type, filename: file.filename, mediaType: file.mediaType, storageId: file.storageId, projectId,
-        })) } : {}),
-      })
-      const workflow = await startBeeGameDeliveryWorkflow({
+      const confirmedBriefContext = extractConfirmedBriefContext(confirmedBriefPrompt)
+      await beginProjectDelivery(workspacePath, dashboardDataRoot, confirmedBriefContext)
+      await sendNativeProjectRequest({
         request: c.req.raw,
         user,
         projectId,
         workspacePath,
-        briefContext: extractConfirmedBriefContext(confirmedBriefPrompt),
-        ...(modelConfigId ? { modelConfigId } : {}),
-        ...(language ? { language } : {}),
+        sessionId: session.id,
+        message: confirmedBriefPrompt,
+        initialBrief: { displayText: idea, confirmedBriefContext },
+        options: { ...(language ? { language } : {}),
+          ...(getRequestAuthToken(c.req.raw) ? { authToken: getRequestAuthToken(c.req.raw) } : {}) },
       })
 
       return c.json(
         {
           project,
-          session,
+          session: beeGameSessions.get(session.id) ?? session,
           binding: createProjectSessionBinding(
             projectId,
             session.id,
@@ -2669,9 +2673,6 @@ export function createAgentWorkflowApp(
           ),
           task_id: session.id,
           status: 'starting',
-          runId: workflow.runId,
-          phase: workflow.phase,
-          workflowStatus: workflow.status,
         },
         202,
       )
@@ -3026,6 +3027,7 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       )
       if (!project) return c.json({ error: 'Project not found' }, 404)
+      if (project.root_path) await pauseProjectDelivery(project.root_path, dashboardDataRoot)
       const workflowWorkspacePath = project.root_path
       const workflowStore = workflowWorkspacePath
         ? createRunStore(workflowWorkspacePath, user.id)
@@ -3168,6 +3170,8 @@ export function createAgentWorkflowApp(
       })
       const workspacePath = sessionRef?.workspacePath ?? project.root_path
       if (!workspacePath) return c.json({ workflow: null, events: [] })
+      if (await readProjectDelivery(workspacePath, dashboardDataRoot))
+        return c.json({ workflow: null, events: [] })
       const store = createRunStore(workspacePath, user.id)
       const run = await readBeeGameWorkflowSnapshot(
         workspacePath,
@@ -3211,6 +3215,8 @@ export function createAgentWorkflowApp(
       })
       const workspacePath = sessionRef?.workspacePath ?? project.root_path
       if (!workspacePath) return c.json({ events: [] })
+      if (await readProjectDelivery(workspacePath, dashboardDataRoot))
+        return c.json({ events: [] })
       const after = c.req.query('after') || undefined
       const store = createRunStore(workspacePath, user.id)
       const run = await readBeeGameWorkflowSnapshot(
@@ -3253,6 +3259,8 @@ export function createAgentWorkflowApp(
       const workspacePath = sessionRef?.workspacePath ?? project.root_path
       if (!workspacePath)
         return c.json({ error: 'document_review_not_started' }, 409)
+      if (await readProjectDelivery(workspacePath, dashboardDataRoot))
+        return c.json({ error: 'Use project chat to continue this Agent', code: 'native_project_delivery' }, 409)
       const body = await readOptionalJson(c.req.raw)
       const runtimeBinding = await resolveProjectWorkflowRuntimeBinding({
         request: c.req.raw,
@@ -3303,6 +3311,8 @@ export function createAgentWorkflowApp(
       const workspacePath = sessionRef?.workspacePath ?? project.root_path
       if (!workspacePath)
         return c.json({ error: 'document_review_not_started' }, 409)
+      if (await readProjectDelivery(workspacePath, dashboardDataRoot))
+        return c.json({ error: 'Use project chat to continue this Agent', code: 'native_project_delivery' }, 409)
       const body = await readOptionalJson(c.req.raw)
       const taskId = typeof body.taskId === 'string' ? body.taskId : undefined
       const runtimeBinding = await resolveProjectWorkflowRuntimeBinding({
@@ -3349,6 +3359,15 @@ export function createAgentWorkflowApp(
         project.root_path,
         options.defaultWorkspacePath,
       )
+      if (await readProjectDelivery(workspacePath, dashboardDataRoot)) {
+        if (!(await stat(join(workspacePath, 'content/index.json')).catch(() => undefined))?.isFile())
+          return c.json({ state: 'awaiting_content' })
+        const authority = nativeContentAuthority(workspacePath)
+        const snapshot = c.req.query('metadata') === '1'
+          ? loadBeeGameContentFileListForEditing(workspacePath, authority)
+          : loadBeeGameContentPackageForEditing(workspacePath, authority)
+        return c.json({ state: 'ready', ...snapshot })
+      }
       const run = await createRunStore(workspacePath, user.id).load()
       if (!run?.foundationReviewStage?.acceptedReview)
         return c.json({ state: 'awaiting_documents' })
@@ -3401,6 +3420,13 @@ export function createAgentWorkflowApp(
         project.root_path,
         options.defaultWorkspacePath,
       )
+      if (await readProjectDelivery(workspacePath, dashboardDataRoot)) {
+        assertProjectConversationIdle(beeGameSessions, user.id, project.id, workspacePath)
+        return c.json(saveBeeGameContentDocument({ workspacePath,
+          path: body.path, expectedRevision: body.expectedRevision,
+          document: parseBeeGameContentDocument(body.document),
+          authority: nativeContentAuthority(workspacePath) }))
+      }
       const controller = getDeliveryController({
         request: c.req.raw,
         user,
@@ -3441,6 +3467,13 @@ export function createAgentWorkflowApp(
         project.root_path,
         options.defaultWorkspacePath,
       )
+      if (await readProjectDelivery(workspacePath, dashboardDataRoot)) {
+        assertProjectConversationIdle(beeGameSessions, user.id, project.id, workspacePath)
+        const receipt = acceptBeeGameContentPackage(workspacePath, nativeContentAuthority(workspacePath))
+        if (receipt.contentRevision !== body.contentRevision)
+          throw new Error('Scene/UI package revision changed before publish')
+        return c.json({ state: 'published', contentRevision: receipt.contentRevision }, 202)
+      }
       const controller = getDeliveryController({
         request: c.req.raw,
         user,
@@ -3791,7 +3824,8 @@ export function createAgentWorkflowApp(
       const sessionRef = await resolveBeeGameProjectSessionReference({ request: c.req.raw, user, project,
         defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository })
       const gate = sessionRef
-        ? await evaluateWorkflowDeliveryGate({ workspacePath: sessionRef.workspacePath, ownerId: user.id })
+        ? await evaluateProjectDeliveryGate(sessionRef.workspacePath, dashboardDataRoot) ??
+          await evaluateWorkflowDeliveryGate({ workspacePath: sessionRef.workspacePath, ownerId: user.id })
         : { allowed: false, issues: ['Project session is not available.'] }
       return c.json({ ...gate, destination: beeGameDeployments.destination })
     } catch (err) { return tracedRouteError(c, 'project.deployment.readiness', err) }
@@ -3822,15 +3856,13 @@ export function createAgentWorkflowApp(
         authToken: getRequestAuthToken(c.req.raw),
       })
       assertProjectWorkspaceMutationIdle(ensured.session)
-      const deliveryGate = await evaluateWorkflowDeliveryGate({
-        workspacePath: ensured.binding.workspacePath,
-        ownerId: user.id,
-      })
+      const deliveryGate = await evaluateProjectDeliveryGate(ensured.binding.workspacePath, dashboardDataRoot) ??
+        await evaluateWorkflowDeliveryGate({ workspacePath: ensured.binding.workspacePath, ownerId: user.id })
       if (!deliveryGate.allowed) {
         return c.json(
           {
-            error: 'Delivery workflow has not completed current acceptance',
-            code: 'workflow_delivery_not_ready',
+            error: 'Current project version has not passed delivery acceptance',
+            code: 'delivery_not_ready',
             issues: deliveryGate.issues,
           },
           409,
@@ -4414,6 +4446,99 @@ export function createAgentWorkflowApp(
     return c.json({ status: job.status })
   })
 
+  const migrateQuiescentProjectDelivery = async (input: {
+    user: BeeGameUserContext
+    projectId: string
+    workspacePath: string
+  }) => {
+    const store = createRunStore(input.workspacePath, input.user.id)
+    const run = await store.load()
+    const existing = await readProjectDelivery(input.workspacePath, dashboardDataRoot)
+    if (!run || !run.confirmedBriefContext?.trim()) return existing
+    if (run.projectId !== input.projectId)
+      throw new Error('Historical delivery snapshot belongs to another project')
+    if (!existing && (run.status === 'running' || run.activeDispatch?.status === 'running'))
+      return undefined // The current worker owns this turn; do not interrupt it.
+    const accepted = !existing?.accepted
+      ? await evaluateWorkflowDeliveryGate({ workspacePath: input.workspacePath, ownerId: input.user.id })
+      : undefined
+    const state = existing ?? await beginProjectDelivery(input.workspacePath, dashboardDataRoot, run.confirmedBriefContext)
+    if (accepted?.allowed && run.evidence.acceptance?.path) {
+      const path = run.evidence.acceptance.path
+      const receipt = JSON.parse(await readFile(join(input.workspacePath, path), 'utf8')) as {
+        revision: string
+        runtimeReports: RuntimeAcceptance[]
+      }
+      await importProjectDeliveryAcceptance({ workspacePath: input.workspacePath,
+        dataRoot: dashboardDataRoot, revision: receipt.revision,
+        reportPath: path, reports: receipt.runtimeReports })
+    }
+    return state
+  }
+
+  const sendNativeProjectRequest = (input: {
+    request: Request
+    user: BeeGameUserContext
+    projectId: string
+    workspacePath: string
+    sessionId: string
+    message: string
+    options?: ProjectConversationOptions
+    initialBrief?: { displayText: string; confirmedBriefContext: string }
+    autoContinuation?: boolean
+  }) => projectOperation(input.user.id, input.workspacePath, async () => {
+    if (beeGameDeployments.isPublishing(input.user.id, input.workspacePath))
+      throw new Error('Publishing is in progress. Wait for publication before editing the project.')
+    if (!input.initialBrief) await migrateQuiescentProjectDelivery(input)
+    return sendProjectConversation({
+      sessions: beeGameSessions, deliveryDataRoot: dashboardDataRoot,
+      sessionId: input.sessionId, ownerId: input.user.id,
+      message: input.message, initialBrief: input.initialBrief,
+      autoContinuation: input.autoContinuation,
+      options: { ...input.options,
+        getValidAuthToken: refresh => sessionAuth?.getCredential?.(input.request)?.getValidAccessToken(refresh) },
+      ...(!input.initialBrief && !input.autoContinuation ? { afterTurnSettled: () => {
+        void (async () => {
+          const state = await readProjectDelivery(input.workspacePath, dashboardDataRoot)
+          const session = beeGameSessions.get(input.sessionId)
+          if (!state || state.status !== 'active' || session?.status !== 'running' || session.turnStatus !== 'idle') return
+          if ((await evaluateProjectDeliveryGate(input.workspacePath, dashboardDataRoot))?.allowed) return
+          const language = input.options?.language ?? beeGameSessions.language(input.sessionId) ?? 'en'
+          await sendNativeProjectRequest({ ...input,
+            message: getServerOwnedContinuePrompt(language),
+            options: { language, authToken: input.options?.authToken },
+            autoContinuation: true,
+          })
+        })().catch(error => console.error('[BeeGame] Failed to continue project delivery:', error))
+      } } : {}),
+      openCapabilities: () => {
+        const credential = sessionAuth?.getCredential?.(input.request)
+        let image: ReturnType<typeof openImageGenerationAccess> | undefined
+        let library: ReturnType<typeof openResourceLibraryAccess> | undefined
+        let preview: ReturnType<typeof openProjectPreviewAccess> | undefined
+        try {
+          try { image = openImageGenerationAccess({ userId: input.user.id, projectId: input.projectId,
+            workspacePath: input.workspacePath, service: imageGeneration,
+            loadConfig: () => loadRuntimeImageConfig(dashboardDataRoot,
+              { remote: Boolean(supabaseStore), billing: billingConfig }, (url, init) => serviceFetch(url, init)),
+          }) } catch { /* Optional capability must not prevent project execution. */ }
+          try { library = options.resourceSelectionRuntimeConfig?.baseUrl ? openResourceLibraryAccess({
+            baseUrl: options.resourceSelectionRuntimeConfig.baseUrl,
+            getAuthToken: async () => credential?.getValidAccessToken(),
+          }) : undefined } catch { /* Library remains optional. */ }
+          try { preview = openProjectPreviewAccess({ ...input, keepProjectPreview: true }) }
+          catch { /* Agent can still build and test with native tools. */ }
+          return {
+            instruction: ['Project content format reference: .beegame/delivery/content-contract.json (native projects) or .beegame/workflow/content-authoring-contract.json (legacy projects); resource index: assets/asset-manifest.json. Read when relevant to the requested change.',
+              library?.instruction ?? 'Built-in resource library is unavailable.', image?.instruction ?? 'Image generation capability is unavailable.',
+              preview?.instruction ?? 'Project preview capability is unavailable.'].join('\n\n'),
+            close: async () => { library?.close(); image?.close(); await preview?.close() },
+          }
+        } catch (error) { library?.close(); image?.close(); throw error }
+      },
+    })
+  })
+
   registerBeeGameSessionRoutes(
     app,
     '/api/beegame-sessions',
@@ -4422,6 +4547,7 @@ export function createAgentWorkflowApp(
     beeGameDeployments,
     {
       defaultWorkspacePath: options.defaultWorkspacePath,
+      deliveryDataRoot: dashboardDataRoot,
       assertPermittedModelConfigRuntime,
       getCurrentUser,
       getAuthToken: getRequestAuthToken,
@@ -4477,36 +4603,9 @@ export function createAgentWorkflowApp(
       startDeliveryWorkflow: startBeeGameDeliveryWorkflow,
       resumeDeliveryWorkflow: input =>
         continueBeeGameDeliveryWorkflow({ ...input, mode: 'resume' }),
-      sendProjectRequest: input => projectOperation(input.user.id, input.workspacePath, () => {
-        if (beeGameDeployments.isPublishing(input.user.id, input.workspacePath))
-          throw new Error('Publishing is in progress. Wait for publication before editing the project.')
-        return sendProjectConversation({
-        sessions: beeGameSessions, sessionId: input.sessionId, ownerId: input.user.id,
-        message: input.message, options: { ...input.options,
-          getValidAuthToken: refresh => sessionAuth?.getCredential?.(input.request)?.getValidAccessToken(refresh) },
-        openCapabilities: () => {
-          const credential = sessionAuth?.getCredential?.(input.request)
-          const image = openImageGenerationAccess({ userId: input.user.id, projectId: input.projectId,
-            workspacePath: input.workspacePath, service: imageGeneration,
-            loadConfig: () => loadRuntimeImageConfig(dashboardDataRoot,
-              { remote: Boolean(supabaseStore), billing: billingConfig }, (url, init) => serviceFetch(url, init)),
-          })
-          let library: ReturnType<typeof openResourceLibraryAccess> | undefined
-          let preview: ReturnType<typeof openProjectPreviewAccess> | undefined
-          try {
-            library = options.resourceSelectionRuntimeConfig?.baseUrl ? openResourceLibraryAccess({
-              baseUrl: options.resourceSelectionRuntimeConfig.baseUrl,
-              getAuthToken: async () => credential?.getValidAccessToken(),
-            }) : undefined
-            preview = openProjectPreviewAccess({ ...input, keepProjectPreview: true })
-            return {
-              instruction: ['Project content format reference: .beegame/workflow/content-authoring-contract.json; resource index: assets/asset-manifest.json. Read when relevant to the requested change.',
-                library?.instruction ?? 'Built-in resource library is not configured.', image.instruction, preview.instruction].join('\n\n'),
-              close: async () => { library?.close(); image.close(); await preview?.close() },
-            }
-          } catch (error) { library?.close(); image.close(); throw error }
-        },
-      }) }),
+      sendProjectRequest: sendNativeProjectRequest,
+      migrateProjectDelivery: input => projectOperation(input.user.id, input.workspacePath,
+        () => migrateQuiescentProjectDelivery(input)),
     },
   )
   return app
@@ -5835,7 +5934,7 @@ async function getBeeGameProjectRuntimeState(input: {
   user: BeeGameUserContext
   project: BeeGameProjectMetadata
   defaultWorkspacePath?: string
-  dashboardDataRoot?: string
+  dashboardDataRoot: string
   beeGameSessions: BeeGameSessionManager
   beeGamePreviews: BeeGamePreviewManager
   previewCapabilities: PreviewCapabilityManager
@@ -5901,11 +6000,15 @@ async function getBeeGameProjectRuntimeState(input: {
   // durable delivery run has already reached a terminal state. Read the
   // workflow snapshot before deriving the public runtime status so a stale
   // session cannot mask a blocked or completed run.
-  const workflowSnapshot = await readBeeGameWorkflowSnapshot(
+  const nativeDelivery = await readProjectDelivery(sessionRef.workspacePath, input.dashboardDataRoot)
+  const workflowSnapshot = nativeDelivery ? null : await readBeeGameWorkflowSnapshot(
     sessionRef.workspacePath,
     input.user.id,
     dispatch => input.beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
   )
+  const nativeGate = nativeDelivery?.accepted
+    ? await evaluateProjectDeliveryGate(sessionRef.workspacePath, input.dashboardDataRoot)
+    : undefined
   const snapshot = getProjectRuntimeSnapshot({
     sessionId: sessionRef.sessionId,
     workspacePath: sessionRef.workspacePath,
@@ -5949,9 +6052,11 @@ async function getBeeGameProjectRuntimeState(input: {
     resources: [],
     project_target: undefined,
   }))
-  const acceptance = workflowSnapshot
-    ? toProjectAcceptanceStateFromWorkflow(workflowSnapshot)
-    : { status: 'not_run' }
+  const acceptance = nativeDelivery
+    ? { status: nativeGate?.allowed ? 'passed' : nativeDelivery.accepted ? 'stale' : 'not_run' }
+    : workflowSnapshot
+      ? toProjectAcceptanceStateFromWorkflow(workflowSnapshot)
+      : { status: 'not_run' }
   const workflowUsage = workflowSnapshot
     ? workflowUsageForView(
         workflowSnapshot,
@@ -7852,6 +7957,7 @@ function registerBeeGameSessionRoutes(
   beeGameDeployments: BeeGameDeploymentManager | undefined,
   options: {
     defaultWorkspacePath?: string
+    deliveryDataRoot: string
     assertPermittedModelConfigRuntime: (modelConfigId: string) => Promise<void>
     getCurrentUser: (request?: Request) => BeeGameUserContext
     getAuthToken: (request: Request) => string | undefined
@@ -7924,7 +8030,9 @@ function registerBeeGameSessionRoutes(
       sessionId: string
       message: string
       options?: ProjectConversationOptions
+      initialBrief?: { displayText: string; confirmedBriefContext: string }
     }) => Promise<unknown>
+    migrateProjectDelivery?: (input: { user: BeeGameUserContext; projectId: string; workspacePath: string }) => Promise<unknown>
   },
 ): void {
   const defaultWorkspacePath = options.defaultWorkspacePath
@@ -8325,12 +8433,13 @@ function registerBeeGameSessionRoutes(
         )
         const metadata = beeGameSessions.metadata(c.req.param('id'))
         const currentUser = options.getCurrentUser(c.req.raw)
-        const deliveryGate = await evaluateWorkflowDeliveryGate({ workspacePath, ownerId: currentUser.id })
+        const deliveryGate = await evaluateProjectDeliveryGate(workspacePath, options.deliveryDataRoot) ??
+          await evaluateWorkflowDeliveryGate({ workspacePath, ownerId: currentUser.id })
         if (!deliveryGate.allowed) {
           return c.json(
             {
-              error: 'Delivery workflow has not completed current acceptance',
-              code: 'workflow_delivery_not_ready',
+              error: 'Current project version has not passed delivery acceptance',
+              code: 'delivery_not_ready',
               issues: deliveryGate.issues,
             },
             409,
@@ -8478,27 +8587,24 @@ function registerBeeGameSessionRoutes(
       if (!session) return c.json({ error: 'Session not found' }, 404)
       const metadata = beeGameSessions.metadata(session.id)
       const projectId = metadata?.projectId ?? session.id
-      beeGameSessions.appendUserMessage(session.id, idea, {
-        displayKind: 'confirmed_brief',
-      })
-      if (!options.startDeliveryWorkflow)
-        return c.json({ error: 'Delivery workflow is unavailable' }, 503)
-      const workflow = await options.startDeliveryWorkflow({
+      if (!options.sendProjectRequest)
+        return c.json({ error: 'Project Agent is unavailable' }, 503)
+      const confirmedBriefContext = extractConfirmedBriefContext(prompt)
+      await beginProjectDelivery(session.cwd, options.deliveryDataRoot, confirmedBriefContext)
+      await options.sendProjectRequest({
         request: c.req.raw,
         user: options.getCurrentUser(c.req.raw),
         projectId,
         workspacePath: session.cwd,
-        briefContext: extractConfirmedBriefContext(prompt),
-        ...(session.modelConfigId
-          ? { modelConfigId: session.modelConfigId }
-          : {}),
-        ...(language ? { language } : {}),
+        sessionId: session.id,
+        message: prompt,
+        initialBrief: { displayText: idea, confirmedBriefContext },
+        options: { ...(language ? { language } : {}),
+          authToken: options.getAuthToken(c.req.raw) },
       })
       return c.json({
-        session,
-        runId: workflow.runId,
-        phase: workflow.phase,
-        status: workflow.status,
+        session: beeGameSessions.get(session.id),
+        status: 'running',
       })
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 400)
@@ -8519,6 +8625,41 @@ function registerBeeGameSessionRoutes(
       if (session) {
         const metadata = beeGameSessions.metadata(session.id)
         if (metadata?.projectId) {
+          await options.migrateProjectDelivery?.({ user: options.getCurrentUser(c.req.raw),
+            projectId: metadata.projectId, workspacePath: session.cwd })
+          const delivery = await readProjectDelivery(session.cwd, options.deliveryDataRoot)
+          if (delivery) {
+            const gate = await evaluateProjectDeliveryGate(session.cwd, options.deliveryDataRoot)
+            if (gate?.allowed) return c.json({ status: 'completed', sessionId: session.id })
+            if (!options.sendProjectRequest)
+              return c.json({ error: 'Project Agent is unavailable' }, 503)
+            if (session.turnStatus === 'running') return c.json(session, 202)
+            if (session.status !== 'running') {
+              beeGameSessions.start({ workspacePath: session.cwd,
+                projectId: metadata.projectId, userId: options.getCurrentUser(c.req.raw).id,
+                transcriptSessionId: session.id,
+                ...(session.modelConfigId ? { modelConfigId: session.modelConfigId } : {}),
+                language,
+                ...(options.getAuthToken(c.req.raw) ? { authToken: options.getAuthToken(c.req.raw) } : {}),
+              })
+            }
+            await resumeProjectDelivery(session.cwd, options.deliveryDataRoot)
+            try {
+              return c.json(await options.sendProjectRequest({
+                request: c.req.raw, user: options.getCurrentUser(c.req.raw),
+                sessionId: session.id, projectId: metadata.projectId, workspacePath: session.cwd,
+                message: getServerOwnedContinuePrompt(language),
+                options: { language, authToken: options.getAuthToken(c.req.raw) },
+              }), 202)
+            } catch (error) {
+              // A simultaneous Continue can pass the first status check before
+              // the other request begins its turn. A running Agent already owns it.
+              const current = beeGameSessions.get(session.id)
+              if (toErrorMessage(error) === 'Session is already processing a prompt' && current?.turnStatus === 'running')
+                return c.json(current, 202)
+              throw error
+            }
+          }
           if (isProjectConversation(beeGameSessions.transcript(session.id))) {
             if (!options.sendProjectRequest) return c.json({ error: 'Project conversation is unavailable' }, 503)
             const previous = beeGameSessions.transcript(session.id).findLast(event => event.type === 'user.message')

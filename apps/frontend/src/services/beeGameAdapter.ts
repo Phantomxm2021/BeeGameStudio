@@ -1584,6 +1584,7 @@ function eventToProjectEventMessagesBase(
   const taskId = event.sessionId
   switch (event.type) {
     case 'user.message':
+      if (getPayloadString(event, 'displayKind') === 'delivery_continue') return []
       return [
         baseMessage(
           'agent_message',
@@ -2057,7 +2058,7 @@ function normalizeBeeGameEvents(
     }
     if (event.type === 'user.message') {
       if (!options.includeUserMessages) continue
-      if (getPayloadString(event, 'displayKind') === 'workflow_worker') continue
+      if (['workflow_worker', 'delivery_continue'].includes(getPayloadString(event, 'displayKind'))) continue
       const identity = getPayloadString(event, 'clientMessageId') || getPayloadString(event, 'client_message_id') ||
         `${event.sessionId}:${event.turnId || ''}:${event.id}`
       if (seenUserMessages.has(identity)) continue

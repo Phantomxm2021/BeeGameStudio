@@ -35,7 +35,7 @@ const transcriptResponse = (overrides: Record<string, unknown> = {}) => new Resp
 
 describe('transcriptEventsToHistory', () => {
   it('omits internal worker envelopes but keeps two genuine identical user requests', () => {
-    const events = ['project_request', 'workflow_worker', 'project_request'].map((displayKind, index) => ({
+    const events = ['project_request', 'workflow_worker', 'delivery_continue', 'project_request'].map((displayKind, index) => ({
       id: index + 1, sessionId: 'main', type: 'user.message', text: '修复按钮',
       createdAt: new Date(1000 + index).toISOString(), payload: { type: 'user.message', displayKind, clientMessageId: `client-${index}` },
     }))

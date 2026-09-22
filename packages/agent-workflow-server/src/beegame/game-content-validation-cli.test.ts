@@ -69,3 +69,14 @@ test('validation feedback never claims runtime or playability verification', () 
     valid: false, scope: 'content-contract-and-references', runtimeVerified: false,
   })
 })
+
+test('migrated native projects validate authored content instead of stale workflow revisions', () => {
+  const { root } = fixture()
+  mkdirSync(join(root, '.beegame/workflow'), { recursive: true })
+  mkdirSync(join(root, '.beegame/delivery'), { recursive: true })
+  writeFileSync(join(root, '.beegame/workflow/run.json'), JSON.stringify({ revision: {} }))
+  writeFileSync(join(root, '.beegame/delivery/content-contract.json'), '{}')
+  const result = runGameContentCommand(root)
+  expect(result).toMatchObject({ scope: 'content-contract-and-references', runtimeVerified: false })
+  expect('issues' in result && result.issues).not.toContain('An accepted Asset Manifest revision is required.')
+})

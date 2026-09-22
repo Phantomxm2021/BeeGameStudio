@@ -61,11 +61,15 @@ async function artifactDigest(workspace: string, path: string, allowDirectory = 
 }
 
 export async function readRuntimeAcceptance(workspace: string, dispatchId: string): Promise<RuntimeAcceptance | undefined> {
+  return readRuntimeAcceptanceReport(workspace, runtimeAcceptancePath(dispatchId))
+}
+
+/** Read an Agent-authored result at a fixed project path, without a workflow dispatch. */
+export async function readRuntimeAcceptanceReport(workspace: string, reportPath: string): Promise<RuntimeAcceptance | undefined> {
   let text: string
   try {
-    const path = runtimeAcceptancePath(dispatchId)
-    await artifactDigest(workspace, path) // Reject symlink escapes before reading the report.
-    text = await readFile(resolve(workspace, path), 'utf8')
+    await artifactDigest(workspace, reportPath) // Reject symlink escapes before reading the report.
+    text = await readFile(resolve(workspace, reportPath), 'utf8')
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT' ||
         ((error as Error).cause as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return undefined
@@ -80,7 +84,7 @@ export async function readRuntimeAcceptance(workspace: string, dispatchId: strin
     if (report.status === 'passed' && report.scope !== 'request' && !report.evidencePaths.length)
       throw new Error('Passed runtime acceptance requires saved evidence')
     const evidence = await Promise.all([...new Set(report.evidencePaths)].map(async path => {
-      if (path === runtimeAcceptancePath(dispatchId)) throw new Error('The acceptance report cannot be its own evidence')
+      if (path === reportPath) throw new Error('The acceptance report cannot be its own evidence')
       return { path, sha256: await artifactDigest(workspace, path) }
     }))
     // Bind the actual tested output, even when build directories are excluded

@@ -39,7 +39,7 @@ test('editor image edits preserve container/control roles and pass the real save
     await writeFile(join(workspacePath, 'content/ui/menu.json'), JSON.stringify(document))
     const current = loadBeeGameContentDocument(workspacePath, 'ui/menu.json')
     const result = saveBeeGameContentDocument({ workspacePath, path: 'ui/menu.json', expectedRevision: current.revision, document, authority })
-    expect(result.document).toEqual(document)
+    expect(result.document as unknown).toEqual(document)
     // The editor must not solve visual capability by relaxing the structural contract.
     const invalid = structuredClone(document)
     Object.assign(invalid.data.nodes[1], { assetRef: 'RES-UI' })
