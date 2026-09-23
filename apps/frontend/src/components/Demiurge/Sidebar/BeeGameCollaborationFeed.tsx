@@ -1175,7 +1175,7 @@ function UserMessageCard({
     return (
             <MessageContent
             data-testid={`beegame-user-message-${message.id}`}
-            className="group/message relative min-w-0 !items-start"
+            className="group/message min-w-0 !items-start"
             >
                 <MessageBubble variant="solid" className="max-w-full">
                     <MessageBubbleContent className="max-w-full">
@@ -1183,17 +1183,19 @@ function UserMessageCard({
                         {message.attachments?.length ? <div className="chat-image-gallery">
                             {message.attachments.map((attachment, index) => <ChatAttachmentView key={index} attachment={attachment} lang={lang} />)}
                         </div> : null}
-                    {onEdit ? <button
+                    </MessageBubbleContent>
+                </MessageBubble>
+                {onEdit ? <div className="flex w-full justify-end px-2 pt-1">
+                    <button
                         type="button"
                         aria-label="Edit message"
                         title="Edit message"
                         onClick={() => onEdit(message)}
-                        className="absolute right-0 top-0 flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-secondary)] opacity-0 transition-opacity hover:text-[var(--text-primary)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] group-hover/message:opacity-100"
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
                     >
                         <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button> : null}
-                    </MessageBubbleContent>
-                </MessageBubble>
+                    </button>
+                </div> : null}
             </MessageContent>
     );
 }

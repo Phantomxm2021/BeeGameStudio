@@ -31,6 +31,20 @@ it('shows attachment-only user messages without treating documents as images', (
   expect(screen.getByText('brief.pdf')).toBeInTheDocument();
   expect(screen.getAllByRole('img')).toHaveLength(1);
 });
+
+it('places the user-message edit action below, not inside, the message bubble', () => {
+  render(<BeeGameCollaborationFeed
+    messages={[{ id: 'editable', sender: 'user', content: 'A test message', timestamp: Date.now() }]}
+    onEditMessage={() => undefined}
+  />);
+  const message = screen.getByTestId('beegame-user-message-editable');
+  const bubble = message.querySelector('[data-slot="message-bubble"]');
+  const editButton = within(message).getByRole('button', { name: 'Edit message' });
+
+  expect(bubble).not.toBeNull();
+  expect(editButton.closest('[data-slot="message-bubble"]')).toBeNull();
+  expect(Boolean(bubble!.compareDocumentPosition(editButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+});
 const IMPLEMENTATION_TURN_ID = 'beegame-turn-beegame_0889307bbd6142f186543e33306e9b01-1';
 it('shows tool screenshots outside the collapsed tool activity', () => {
   render(<BeeGameCollaborationFeed messages={[{ id: 'screenshot', sender: 'beegame', content: 'Read', timestamp: Date.now(),
