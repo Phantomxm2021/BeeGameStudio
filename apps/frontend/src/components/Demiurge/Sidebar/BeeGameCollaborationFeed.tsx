@@ -1,5 +1,5 @@
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, Bot, ChevronDown, ChevronRight, FileText, Pencil } from 'lucide-react';
+import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, Copy, FileText, Pencil } from 'lucide-react';
 import { type ChatDisplayMessage, type ChatDisplaySource } from '../../../viewModels/displayModels';
 import { MarkdownRenderer } from './ChatMarkdownContent';
 import type { Language } from '../AgentsConfig';
@@ -1163,6 +1163,19 @@ function StageSeparator({ stage, lang }: { stage: WorkflowStage; lang: Language 
     );
 }
 
+const userMessageActionLabels: Record<Language, { copy: string; copied: string }> = {
+    en: { copy: 'Copy message', copied: 'Message copied' },
+    zh: { copy: '复制消息', copied: '已复制消息' },
+    'zh-TW': { copy: '複製訊息', copied: '已複製訊息' },
+    ja: { copy: 'メッセージをコピー', copied: 'コピーしました' },
+    ko: { copy: '메시지 복사', copied: '복사됨' },
+    fr: { copy: 'Copier le message', copied: 'Message copié' },
+    de: { copy: 'Nachricht kopieren', copied: 'Nachricht kopiert' },
+    es: { copy: 'Copiar mensaje', copied: 'Mensaje copiado' },
+    it: { copy: 'Copia messaggio', copied: 'Messaggio copiato' },
+    pt: { copy: 'Copiar mensagem', copied: 'Mensagem copiada' },
+};
+
 function UserMessageCard({
     message,
     lang,
@@ -1172,6 +1185,24 @@ function UserMessageCard({
     lang: Language;
     onEdit?: (message: ChatDisplayMessage) => void;
 }) {
+    const [copied, setCopied] = useState(false);
+    const copyTimer = useRef<number | undefined>(undefined);
+    const handleCopy = async () => {
+        if (!navigator.clipboard?.writeText || !message.content) return;
+        try {
+            await navigator.clipboard.writeText(message.content);
+            setCopied(true);
+            if (copyTimer.current) window.clearTimeout(copyTimer.current);
+            copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
+        } catch {
+            setCopied(false);
+        }
+    };
+
+    useEffect(() => () => {
+        if (copyTimer.current) window.clearTimeout(copyTimer.current);
+    }, []);
+
     return (
             <MessageContent
             data-testid={`beegame-user-message-${message.id}`}
@@ -1185,8 +1216,17 @@ function UserMessageCard({
                         </div> : null}
                     </MessageBubbleContent>
                 </MessageBubble>
-                {onEdit ? <div className="flex w-full justify-end px-2 pt-1">
-                    <button
+                {(message.content || onEdit) ? <div className="flex w-full justify-end gap-1 px-2 pt-1">
+                    {message.content ? <button
+                        type="button"
+                        aria-label={copied ? userMessageActionLabels[lang].copied : userMessageActionLabels[lang].copy}
+                        title={copied ? userMessageActionLabels[lang].copied : userMessageActionLabels[lang].copy}
+                        onClick={() => void handleCopy()}
+                        className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+                    >
+                        {copied ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+                    </button> : null}
+                    {onEdit ? <button
                         type="button"
                         aria-label="Edit message"
                         title="Edit message"
@@ -1194,7 +1234,7 @@ function UserMessageCard({
                         className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
                     >
                         <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
+                    </button> : null}
                 </div> : null}
             </MessageContent>
     );
