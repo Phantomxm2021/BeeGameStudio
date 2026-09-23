@@ -39,6 +39,12 @@
 }
 
 @layer components {
+  .chat-attachment-remove { opacity: 1; pointer-events: auto; transition: opacity var(--motion-fast) var(--motion-easing); }
+  @media (hover: hover) and (pointer: fine) {
+    .chat-attachment-remove { opacity: 0; pointer-events: none; }
+    .chat-attachment-preview:hover .chat-attachment-remove,
+    .chat-attachment-preview:focus-within .chat-attachment-remove { opacity: 1; pointer-events: auto; }
+  }
   .type-hero { font-family: var(--font-display); font-size: 40px; line-height: 44px; font-weight: 600; letter-spacing: -0.025em; }
   .type-large-title, .type-display { font-family: var(--font-display); font-size: var(--type-h1-size); line-height: var(--type-h1-leading); font-weight: 600; letter-spacing: -0.02em; }
   .type-title-1, .type-page-title { font-family: var(--font-display); font-size: var(--type-h2-size); line-height: var(--type-h2-leading); font-weight: 600; letter-spacing: -0.015em; }

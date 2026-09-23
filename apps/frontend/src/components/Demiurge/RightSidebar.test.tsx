@@ -687,6 +687,12 @@ describe('RightSidebar tabs', () => {
         await user.upload(input, image);
 
         await waitFor(() => expect(screen.getByAltText('screen.png')).toBeInTheDocument());
+        const attachmentList = screen.getByTestId('beegame-chat-attachments');
+        expect(attachmentList).toHaveClass('justify-start');
+        expect(attachmentList).not.toHaveClass('px-4');
+        const attachmentPreview = screen.getByAltText('screen.png').closest('.chat-attachment-preview');
+        expect(attachmentPreview).toHaveClass('hover:border-[var(--ring)]', 'hover:ring-1', 'focus-within:ring-1');
+        expect(screen.getByRole('button', { name: 'Remove attachment' })).toHaveClass('chat-attachment-remove', 'bg-[var(--surface-1)]', 'text-[var(--text-primary)]');
         await user.click(screen.getByRole('button', { name: 'Send message' }));
 
         expect(onSendMessage).toHaveBeenCalledWith('', [

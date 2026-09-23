@@ -325,13 +325,13 @@ export const ChatPanel = memo(({
                     <div className="min-w-0" data-testid="beegame-chat-composer">
                         {attachments.length > 0 ? (
                             <div
-                                className="flex gap-3 overflow-x-auto px-4 pt-4 pb-2"
+                                className="flex justify-start px-1 gap-3 overflow-x-auto pt-4 pb-2"
                                 data-testid="beegame-chat-attachments"
                             >
                                 {attachments.map((attachment, index) => (
                                     <div
                                         key={`${attachment.filename || attachment.type}-${index}`}
-                                        className="relative h-16 w-16 flex-shrink-0 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-3)]"
+                                        className="chat-attachment-preview relative h-16 w-16 flex-shrink-0 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-3)] transition-[border-color,box-shadow,background-color] hover:border-[var(--ring)] hover:ring-1 hover:ring-[var(--ring)] focus-within:border-[var(--ring)] focus-within:ring-1 focus-within:ring-[var(--ring)]"
                                     >
                                         {attachment.type === 'image' ? (
                                             <img
@@ -350,7 +350,7 @@ export const ChatPanel = memo(({
                                             aria-label="Remove attachment"
                                             disabled={isComposerDisabled}
                                             onClick={() => onRemoveAttachment?.(index)}
-                                            className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--primary)] text-[var(--primary-foreground)]"
+                                            className="chat-attachment-remove absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-primary)] shadow-sm"
                                         >
                                             <X className="h-3 w-3" />
                                         </button>
