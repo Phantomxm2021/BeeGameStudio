@@ -5,6 +5,21 @@ import { join } from 'node:path'
 import { wrapCommandWithSandboxMacOS } from '@anthropic-ai/sandbox-runtime/dist/sandbox/macos-sandbox-utils.js'
 import { createNativeTaskAccess } from '../native-task-access'
 
+test('native file tasks can use public read-only research tools without opening local URLs', async () => {
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), 'native-research-')))
+  try {
+    const access = await createNativeTaskAccess({ workspacePath: workspace })
+    expect(access.settings.permissions.ask).toContain('WebSearch')
+    expect(access.settings.permissions.ask).toContain('WebFetch')
+    expect((await access.permission({ tool_name: 'WebSearch', input: { query: 'XR interaction design' } })).behavior).toBe('allow')
+    expect((await access.permission({ tool_name: 'WebFetch', input: { url: 'https://docs.example.org/xr' } })).behavior).toBe('allow')
+    for (const url of ['http://docs.example.org/xr', 'https://127.0.0.1/private',
+      'https://[::1]/private', 'https://example.local/private', 'https://user:secret@docs.example.org/xr'])
+      expect((await access.permission({ tool_name: 'WebFetch', input: { url } })).behavior, url).toBe('deny')
+    expect((await access.permission({ tool_name: 'UnknownWriteTool', input: { path: 'docs/draft.md' } })).behavior).toBe('deny')
+  } finally { await rm(workspace, { recursive: true, force: true }) }
+})
+
 test.skipIf(process.platform !== 'darwin')('task sandbox permits working-file rename/delete, not protected or external files', async () => {
   const dir = await realpath(await mkdtemp(join(tmpdir(), 'native-sandbox-')))
   const workspace = join(dir, 'workspace')

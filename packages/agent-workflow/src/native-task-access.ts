@@ -1,4 +1,5 @@
 import { lstat, mkdir, realpath } from 'node:fs/promises'
+import { isIP } from 'node:net'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 
 const within = (root: string, path: string) => {
@@ -55,7 +56,7 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
     permissions: {
       // Explicit ask rules also apply to normally auto-approved file reads and
       // sub-agent acceptEdits mode. No --tools/--disallowedTools filtering.
-      ask: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'NotebookEdit', 'LSP', 'Agent', 'Bash'],
+      ask: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'NotebookEdit', 'LSP', 'Agent', 'Bash', 'WebSearch', 'WebFetch'],
     },
     sandbox: {
       enabled: true,
@@ -102,6 +103,20 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
     if (name === 'Agent') {
       // Delegation is available, but cannot elevate the child's permission mode.
       return allow({ ...args, mode: 'default' })
+    }
+    // Research is a normal read-only CLI capability. Keep local/private URLs
+    // unavailable without selecting sources or directing the Agent's research.
+    if (name === 'WebSearch') return allow(args)
+    if (name === 'WebFetch') {
+      if (typeof args.url !== 'string') return deny('Invalid WebFetch input: expected an HTTPS URL.')
+      let url: URL
+      try { url = new URL(args.url) }
+      catch { return deny('Invalid WebFetch input: expected an HTTPS URL.') }
+      const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+      if (url.protocol !== 'https:' || url.username || url.password || isIP(host) !== 0 ||
+          host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal'))
+        return deny('WebFetch requires HTTPS without local hostnames, IP literals or embedded credentials.')
+      return allow(args)
     }
     const fileKey = name === 'NotebookEdit' ? 'notebook_path' : name === 'LSP' ? 'filePath'
       : ['Read', 'Edit', 'Write'].includes(name) ? 'file_path'
