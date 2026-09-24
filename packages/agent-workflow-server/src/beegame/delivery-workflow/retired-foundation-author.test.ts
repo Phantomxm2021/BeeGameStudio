@@ -46,9 +46,9 @@ test('retired shared Author modules stay absent and cannot return through import
     const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
     const inspect = (node: ts.Node): void => {
       if (ts.isFunctionDeclaration(node) && node.name?.text === 'restartDocumentStage') {
-        // The former automatic reset is a denial boundary, never a state writer.
-        expect(node.body?.statements).toHaveLength(1)
-        expect(ts.isThrowStatement(node.body!.statements[0]!)).toBe(true)
+        // Changed documents re-enter the public Reviewer, never the retired Author.
+        expect(node.getText(ast)).toContain('reviewLink.restartFromWorkspace')
+        expect(node.getText(ast)).not.toContain('authorLink')
       }
       ts.forEachChild(node, inspect)
     }

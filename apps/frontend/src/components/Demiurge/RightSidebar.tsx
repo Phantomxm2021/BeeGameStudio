@@ -3,7 +3,7 @@ import type { Language } from './AgentsConfig';
 import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { api, type BeeGameAssetManifestPayload } from '../../services/api';
 import type { ChatAttachmentPayload } from '../../services/api';
-import { beeGameAdapter, isBeeGameProjectPackageArtifactId } from '../../services/beeGameAdapter';
+import { beeGameAdapter, isBeeGameProjectPackageArtifactId, type BeeGameQueuedMessage } from '../../services/beeGameAdapter';
 import { artifactProcessor } from '../../utils/artifactProcessor';
 import { deriveDocumentProgress, isBaselineDocumentPath } from '../../utils/documentProgress';
 import { isBeeGamePermission } from './Sidebar/SidebarUtils';
@@ -117,7 +117,14 @@ export function RightSidebar({
     const [activeTab, setActiveTab] = useState<'chat' | 'todo' | 'artifacts'>('chat');
     const [showAssets, setShowAssets] = useState(false);
     const [chatInput, setChatInput] = useState('');
+    const [editDraft, setEditDraft] = useState('');
     const [isSubmittingMessage, setIsSubmittingMessage] = useState(false);
+    const [queuedState, setQueuedState] = useState<{ projectId: string; messages: BeeGameQueuedMessage[] }>(
+        { projectId, messages: [] },
+    );
+    const queuedMessages = queuedState.projectId === projectId ? queuedState.messages : [];
+    const [queueActionId, setQueueActionId] = useState<string | null>(null);
+    const [queueError, setQueueError] = useState<string | null>(null);
     const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
     const [attachments, setAttachments] = useState<ChatAttachmentPayload[]>([]);
     const [artifacts, setArtifacts] = useState<ArtifactRecord[]>([]);
@@ -140,13 +147,14 @@ export function RightSidebar({
     const [editorFilePath, setEditorFilePath] = useState(() => getProjectEditorFileRoute(projectId));
     const [hasOlderHistory, setHasOlderHistory] = useState(false);
     const [isLoadingOlderHistory, setIsLoadingOlderHistory] = useState(false);
-    const submittedDraftRef = useRef<{ projectId: string; content: string; attachments: ChatAttachmentPayload[]; supersedesMessageId?: string } | null>(null);
+    type DraftKind = 'composer' | 'edit';
+    type ChatDraftSnapshot = { projectId: string; content: string; attachments: ChatAttachmentPayload[]; supersedesMessageId?: string; kind: DraftKind };
+    const submittedDraftRef = useRef<ChatDraftSnapshot | null>(null);
     const sendInFlightRef = useRef(false);
     const sendRequestIdRef = useRef(0);
-    const currentDraftRef = useRef<{ projectId: string; content: string; attachments: ChatAttachmentPayload[]; supersedesMessageId?: string }>({
-        projectId,
-        content: '',
-        attachments: [],
+    const currentDraftRef = useRef<Record<DraftKind, ChatDraftSnapshot>>({
+        composer: { projectId, content: '', attachments: [], kind: 'composer' },
+        edit: { projectId, content: '', attachments: [], kind: 'edit' },
     });
     const loadHistory = useChatStore(state => state.loadHistory);
     const streamingMessageId = useChatStore(state => state.streamingMessageId);
@@ -154,6 +162,7 @@ export function RightSidebar({
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const activeProjectRef = useRef(projectId);
+    const queueRequestRef = useRef(0);
     const historyRequestRef = useRef(0);
     const artifactRequestRef = useRef(0);
     const artifactContentRequestRef = useRef(0);
@@ -180,6 +189,7 @@ export function RightSidebar({
 
     useEffect(() => {
         activeProjectRef.current = projectId;
+        queueRequestRef.current += 1;
         historyRequestRef.current += 1;
         artifactRequestRef.current += 1;
         artifactContentRequestRef.current += 1;
@@ -191,22 +201,24 @@ export function RightSidebar({
         // Project changes reset local composer state before the next render.
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setChatInput('');
+        setEditDraft('');
         setIsSubmittingMessage(false);
         setAttachments([]);
         setEditingMessageId(null);
         setHasOlderHistory(false);
         setIsLoadingOlderHistory(false);
         setShowAssets(false);
+        setQueuedState({ projectId, messages: [] });
+        setQueueActionId(null);
+        setQueueError(null);
     }, [projectId]);
 
     useEffect(() => {
         currentDraftRef.current = {
-            projectId,
-            content: chatInput,
-            attachments,
-            supersedesMessageId: editingMessageId || undefined,
+            composer: { projectId, content: chatInput, attachments, kind: 'composer' },
+            edit: { projectId, content: editDraft, attachments: [], supersedesMessageId: editingMessageId || undefined, kind: 'edit' },
         };
-    }, [attachments, chatInput, editingMessageId, projectId]);
+    }, [attachments, chatInput, editDraft, editingMessageId, projectId]);
 
     useEffect(() => {
         if (messages.length === 0) return;
@@ -245,30 +257,60 @@ export function RightSidebar({
             }
         }
     }, [hasOlderHistory, isLoadingOlderHistory, loadHistory, messages.length, projectId]);
-    const isAgentWorking = isLoading || hasActiveSubagents(messages);
-    const isComposerLocked = isSubmittingMessage || isAgentWorking || isRuntimeBusy;
+    const isAgentWorking = isLoading || isRuntimeBusy || hasActiveSubagents(messages);
+    const isComposerLocked = isSubmittingMessage;
+    const refreshQueuedMessages = useCallback(async () => {
+        const requestedProjectId = projectId;
+        const requestId = ++queueRequestRef.current;
+        try {
+            const messages = await beeGameAdapter.listQueuedMessages(requestedProjectId);
+            if (activeProjectRef.current === requestedProjectId && queueRequestRef.current === requestId)
+                setQueuedState({ projectId: requestedProjectId, messages });
+        } catch {
+            // Chat remains usable if queue status is temporarily unavailable.
+        }
+    }, [projectId]);
+    useEffect(() => {
+        queueMicrotask(() => { void refreshQueuedMessages(); });
+        if (!isAgentWorking && queuedMessages.length === 0) return;
+        const timer = window.setInterval(() => { void refreshQueuedMessages(); }, 3000);
+        return () => window.clearInterval(timer);
+    }, [isAgentWorking, queuedMessages.length, refreshQueuedMessages]);
+    const handleQueuedAction = async (messageId: string, action: 'steer' | 'delete') => {
+        if (queueActionId) return;
+        const requestedProjectId = projectId;
+        setQueueActionId(messageId);
+        setQueueError(null);
+        try {
+            if (action === 'steer') await beeGameAdapter.steerQueuedMessage(requestedProjectId, messageId);
+            else await beeGameAdapter.deleteQueuedMessage(requestedProjectId, messageId);
+            if (activeProjectRef.current === requestedProjectId) await refreshQueuedMessages();
+        } catch (error) {
+            if (activeProjectRef.current === requestedProjectId)
+                setQueueError(error instanceof Error ? error.message : 'Queued message action failed');
+        } finally {
+            if (activeProjectRef.current === requestedProjectId) setQueueActionId(null);
+        }
+    };
     const canMutateAssets = canUploadAssets && !isRuntimeBusy;
     const documentProgress = useMemo(
-        () => deriveDocumentProgress(messages, artifacts, projectStatus?.workflow),
-        [artifacts, messages, projectStatus?.workflow],
+        () => deriveDocumentProgress(messages, artifacts),
+        [artifacts, messages],
     );
     const artifactView = useMemo(
         () => buildArtifactViewModel(artifacts, documentProgress),
         [artifacts, documentProgress],
     );
     const currentTodos = useMemo(() => deriveCurrentProjectTodos(messages), [messages]);
+    const latestStageMessage = [...messages].reverse().find(message => message.taskKind?.startsWith('workflow_stage:'));
+    const isDocumentDrafting = latestStageMessage?.taskKind === 'workflow_stage:DOCUMENT_DRAFTING';
     const documentEventRevision = useMemo(
         () => [
             ...messages
                 .filter(message => isBaselineDocumentPath(message.artifactPath))
                 .map(message => `${message.id}:${message.toolStatus || ''}:${message.timestamp}`),
-            ...(projectStatus?.workflow?.tasks || [])
-                .map(task => `${task.title || task.id}:${task.status || ''}`)
-                .filter(entry => isBaselineDocumentPath(entry.split(':', 1)[0])),
-            ...(projectStatus?.workflow?.foundationDocuments || [])
-                .map(document => `${document.path}:${document.status}`),
         ].join('|'),
-        [messages, projectStatus?.workflow?.tasks, projectStatus?.workflow?.foundationDocuments],
+        [messages],
     );
 
     useEffect(() => {
@@ -293,20 +335,23 @@ export function RightSidebar({
     [pendingPermissions]);
 
     // Handlers
-    const handleSend = async () => {
-        if (sendInFlightRef.current || !canSendMessage || (!chatInput.trim() && attachments.length === 0) || isComposerLocked || waitingPermission.isBlockingChat) return;
-        const content = chatInput;
+    const handleSend = async (isEdit = false) => {
+        const kind: DraftKind = isEdit ? 'edit' : 'composer';
+        const content = isEdit ? editDraft : chatInput;
+        const requestAttachments = isEdit ? [] : [...attachments];
+        const requestSupersedesMessageId = isEdit ? editingMessageId || undefined : undefined;
+        if (sendInFlightRef.current || !canSendMessage || (!content.trim() && requestAttachments.length === 0) || isComposerLocked || waitingPermission.isBlockingChat) return;
+        if (isEdit && !requestSupersedesMessageId) return;
         const requestProjectId = projectId;
-        const requestAttachments = [...attachments];
-        const requestSupersedesMessageId = editingMessageId || undefined;
-        const submittedDraft = { projectId: requestProjectId, content, attachments: requestAttachments, supersedesMessageId: requestSupersedesMessageId };
+        const submittedDraft: ChatDraftSnapshot = { projectId: requestProjectId, content, attachments: requestAttachments, supersedesMessageId: requestSupersedesMessageId, kind };
         submittedDraftRef.current = submittedDraft;
         const requestId = ++sendRequestIdRef.current;
         sendInFlightRef.current = true;
         setIsSubmittingMessage(true);
         try {
             const accepted = await onSendMessage(content, requestAttachments, requestSupersedesMessageId);
-            const currentDraft = currentDraftRef.current;
+            if (accepted) void refreshQueuedMessages();
+            const currentDraft = currentDraftRef.current[kind];
             const sameAttachments = currentDraft.attachments.length === submittedDraft.attachments.length
                 && currentDraft.attachments.every((attachment, index) => attachment.data === submittedDraft.attachments[index]?.data && attachment.filename === submittedDraft.attachments[index]?.filename);
             const sameDraft = currentDraft.projectId === submittedDraft.projectId
@@ -314,9 +359,13 @@ export function RightSidebar({
                 && currentDraft.supersedesMessageId === submittedDraft.supersedesMessageId
                 && sameAttachments;
             if (activeProjectRef.current !== requestProjectId || sendRequestIdRef.current !== requestId || submittedDraftRef.current !== submittedDraft || !sameDraft || !accepted) return;
-            setChatInput('');
-            setAttachments([]);
-            setEditingMessageId(null);
+            if (isEdit) {
+                setEditDraft('');
+                setEditingMessageId(null);
+            } else {
+                setChatInput('');
+                setAttachments([]);
+            }
             submittedDraftRef.current = null;
         } catch {
             // Keep the exact draft available for retry when the transport rejects.
@@ -329,15 +378,14 @@ export function RightSidebar({
     };
 
     const handleEditMessage = (message: ChatDisplayMessage) => {
-        if (isComposerLocked || !canSendMessage) return;
-        setChatInput(message.content);
+        if (isComposerLocked || isAgentWorking || waitingPermission.isBlockingChat || beeGamePermissionReview || !canSendMessage) return;
+        setEditDraft(message.content);
         setEditingMessageId(message.id);
-        requestAnimationFrame(() => textareaRef.current?.focus());
     };
 
     const handleCancelEdit = () => {
         setEditingMessageId(null);
-        setChatInput('');
+        setEditDraft('');
     };
 
     const handleDownloadArtifact = async (artifactId: string, title: string) => {
@@ -591,10 +639,18 @@ export function RightSidebar({
                                 onStop={onStopTask}
                                 isStopping={isStopping}
                                 isComposerLocked={isComposerLocked}
+                                queuedMessages={queuedMessages}
+                                queueActionId={queueActionId}
+                                queueError={queueError}
+                                onSteerQueued={id => { void handleQueuedAction(id, 'steer'); }}
+                                onDeleteQueued={id => { void handleQueuedAction(id, 'delete'); }}
                                 chatInput={chatInput}
                                 onChatInputChange={setChatInput}
+                                editDraft={editDraft}
+                                onEditDraftChange={setEditDraft}
                                 onSend={handleSend}
-                                onEditMessage={!isComposerLocked ? handleEditMessage : undefined}
+                                onSubmitEdit={() => handleSend(true)}
+                                onEditMessage={!isComposerLocked && !isAgentWorking && !waitingPermission.isBlockingChat && !beeGamePermissionReview && canSendMessage ? handleEditMessage : undefined}
                                 editingMessageId={editingMessageId}
                                 onCancelEdit={handleCancelEdit}
                                 attachments={attachments}
@@ -614,7 +670,6 @@ export function RightSidebar({
                 actionPermission={beeGamePermissionReview}
                             pendingPermissions={pendingPermissions}
                                 waitingPermission={waitingPermission}
-                                projectStatus={projectStatus}
                                 canSendMessage={canSendMessage}
                                 lang={lang}
                                 currentUserDisplayName={currentUserDisplayName}
@@ -626,7 +681,7 @@ export function RightSidebar({
                             />
                     </TabsContent>
                     <TabsContent value="todo" className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-                            <TodoPanel items={currentTodos} lang={lang} />
+                            <TodoPanel items={currentTodos} documentProgress={isDocumentDrafting && currentTodos.length === 0 ? documentProgress : undefined} lang={lang} />
                     </TabsContent>
                     <TabsContent value="artifacts" className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
                             <div className="h-full min-h-0">

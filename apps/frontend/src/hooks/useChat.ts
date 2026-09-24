@@ -27,7 +27,6 @@ import type { ProjectEventPollingState } from './useProjectEventPolling'
 import { normalizeChatHistory } from '../utils/chatHistory'
 import { normalizeProjectEventSemanticType } from '../utils/messageSemantics'
 import { getWaitingPermissionState } from '../utils/waitingPermission'
-import { toProjectRuntimeDisplayModel } from '../viewModels/displayModels'
 
 const newClientMessageId = (): string =>
   `client-msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
@@ -243,11 +242,7 @@ export const useChat = ({
       setIsSyncing: state.setIsSyncing,
     })),
   )
-  const projectRuntimeDisplay = toProjectRuntimeDisplayModel(projectStatus)
-  const waitingPermission = getWaitingPermissionState(
-    projectRuntimeDisplay,
-    pendingPermissions,
-  )
+  const waitingPermission = getWaitingPermissionState(pendingPermissions)
 
   useEffect(() => {
     // These values describe one project's active turn. The hook remains
@@ -403,6 +398,9 @@ export const useChat = ({
               message.document_title,
               {
                 sequence: message.sequence,
+                clientMessageId: message.client_message_id,
+                supersedesMessageId: message.supersedes_message_id,
+                rewindAvailable: message.rewind_available,
                 attachments: message.attachments,
                 turnId: message.turnId || message.turn_id,
                 contentBlocks: message.content_blocks,
@@ -422,6 +420,14 @@ export const useChat = ({
               message.message_id,
             )
             setCurrentSender(message.sender)
+            if (message.sender === 'user' && message.supersedes_message_id) {
+              const generation = lifecycleRef.current.generation
+              void api.getChatHistory(projectId).then(history => {
+                if (lifecycleRef.current.mounted && lifecycleRef.current.projectId === projectId &&
+                    lifecycleRef.current.generation === generation)
+                  loadHistory(normalizeChatHistory(history))
+              }).catch(error => console.warn('[useChat] Could not refresh edited conversation:', error))
+            }
           }
           break
 
@@ -641,6 +647,23 @@ export const useChat = ({
           break
         }
 
+        case 'context_compaction':
+          if (!message.project_id || message.project_id === refs.projectId) {
+            addMessage({
+              id: message.message_id || `beegame-compaction-${message.task_id}-${message.turnId || message.turn_id || 'session'}`,
+              messageId: message.message_id,
+              sender: 'system',
+              content: message.content || 'compacting',
+              timestamp: message.timestamp || Date.now(),
+              sequence: message.sequence,
+              turnId: message.turnId || message.turn_id,
+              type: 'system_status',
+              taskKind: 'context_compaction',
+              streamStatus: message.status === 'running' ? 'streaming' : 'complete',
+            })
+          }
+          break
+
         case 'error': {
           useChatStore.getState().settleActivity(message.task_id, message.turnId || message.turn_id,
             'failed', message.timestamp || Date.now())
@@ -844,6 +867,7 @@ export const useChat = ({
     },
     [
       addMessage,
+      loadHistory,
       updateMessage,
       finalizeMessage,
       removeMessage,
@@ -945,9 +969,6 @@ export const useChat = ({
       attachments?: ChatAttachmentPayload[],
       supersedesMessageId?: string,
     ) => {
-      if (hasActiveSubagents(useChatStore.getState().messages)) return false
-      const runtime = useProjectStore.getState().projectStatus
-      if (runtime?.project_id === projectId && isProjectExecutionActive(runtime)) return false
       if (waitingPermission.isBlockingChat) {
         emitWaitingPermissionBlock(waitingPermission.message)
         return false
@@ -958,6 +979,9 @@ export const useChat = ({
         lifecycleRef.current.mounted &&
         lifecycleRef.current.projectId === requestProjectId &&
         lifecycleRef.current.generation === requestGeneration
+      const runtime = useProjectStore.getState().projectStatus
+      const wasBusy = isLoading || hasActiveSubagents(useChatStore.getState().messages) ||
+        (runtime?.project_id === projectId && isProjectExecutionActive(runtime))
       try {
         setIsLoading(true)
         setCanContinue(false)
@@ -968,8 +992,7 @@ export const useChat = ({
         const clientMessageId = newClientMessageId()
         const optimisticTimestamp = Date.now()
 
-        // Add user message to chat history
-        addMessage({
+        const showUserMessage = () => addMessage({
           id: clientMessageId,
           clientMessageId,
           supersedesMessageId,
@@ -979,6 +1002,9 @@ export const useChat = ({
           timestamp: optimisticTimestamp,
           type: 'text',
         })
+        // An active turn accepts new input as Queue by default. Do not briefly
+        // render it as a sent chat bubble before the server confirms its fate.
+        if (!wasBusy && !supersedesMessageId) showUserMessage()
 
         // Send message to backend via REST API
         const response = (await api.sendMessage({
@@ -991,8 +1017,23 @@ export const useChat = ({
         })) as SendMessageResponse
 
         if (!isCurrentRequest()) return false
+        if (supersedesMessageId) {
+          // A replacement rewinds the whole visible turn, not just its bubble.
+          // Reload the server's live branch before streaming its new output.
+          try {
+            const history = (await api.getChatHistory(projectId)) as unknown
+            if (isCurrentRequest()) loadHistory(normalizeChatHistory(history))
+          } catch (refreshError) {
+            // The edit was already accepted. A history refresh failure must
+            // not make the composer invite a duplicate replacement request.
+            console.warn('[useChat] Edited conversation refresh deferred:', refreshError)
+            void syncAfterReconnect()
+          }
+        } else if (response?.state === 'queued') {
+          if (!wasBusy) removeMessage(clientMessageId)
+        } else if (wasBusy) showUserMessage()
         setCurrentTaskId(response.task_id)
-        void syncAfterReconnect()
+        if (!supersedesMessageId) void syncAfterReconnect()
         return true
       } catch (error) {
         console.error('[useChat] Failed to send message:', error)
@@ -1019,13 +1060,16 @@ export const useChat = ({
     [
       projectId,
       addMessage,
+      removeMessage,
       onError,
       showToastError,
       wsState,
       reconnect,
       syncAfterReconnect,
+      loadHistory,
       waitingPermission,
       emitWaitingPermissionBlock,
+      isLoading,
     ],
   )
 
@@ -1184,6 +1228,15 @@ export const useChat = ({
         onTaskEvent?.('permission_resolved', { gate_id: permission.gate_id, decision })
       } catch (error) {
         console.error('[useChat] Failed to resolve tool permission:', error)
+        if ((error as { code?: string } | null)?.code === 'permission_not_pending') {
+          removePendingPermission(permission.gate_id)
+          setPermissionState({ gateId: null, action: null, phase: 'idle', message: '' })
+          await refreshProjectVisibility().catch(refreshError =>
+            console.error('[useChat] Failed to refresh expired permission:', refreshError),
+          )
+          showToastError?.('该权限请求已失效，已更新任务状态。')
+          return
+        }
         if (permissionSnapshot) {
           upsertPendingPermission(permissionSnapshot)
         }

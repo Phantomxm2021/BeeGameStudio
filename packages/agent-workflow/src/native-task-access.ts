@@ -20,8 +20,12 @@ type TaskPermission =
 /** Tool caches belong to the task, not the host's private runtime directory. */
 export function nativeTaskToolEnvironment(temporaryPath: string) {
   const npmCache = resolve(temporaryPath, 'npm-cache')
+  const bunCache = resolve(temporaryPath, 'bun-cache')
+  const bunTranspilerCache = resolve(temporaryPath, 'bun-transpiler-cache')
   return { TMPDIR: temporaryPath, CLAUDE_CODE_TMPDIR: temporaryPath,
-    NPM_CONFIG_CACHE: npmCache, npm_config_cache: npmCache }
+    NPM_CONFIG_CACHE: npmCache, npm_config_cache: npmCache,
+    BUN_INSTALL_CACHE_DIR: bunCache,
+    BUN_RUNTIME_TRANSPILER_CACHE_PATH: bunTranspilerCache }
 }
 
 /** Execution permissions, not an agent/tool-selection policy. The native CLI

@@ -6,6 +6,7 @@ import { createAgentWorkflowApp } from '../app'
 import { createRunStore } from '../beegame/delivery-workflow/run-store'
 import { computeWorkspaceRevision, computeResourceRevision } from '../beegame/delivery-workflow/revision'
 import { readRuntimeAcceptance, runtimeAcceptancePath } from '../beegame/delivery-workflow/runtime-acceptance'
+import { beginProjectDelivery, captureProjectDeliveryAcceptance, PROJECT_DELIVERY_REPORT_PATH } from '../beegame/project-delivery'
 import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 
 test('project publishing is gated, returns 202, and exposes progress without a model or real upload', async () => {
@@ -29,6 +30,12 @@ test('project publishing is gated, returns 202, and exposes progress without a m
   const post = (url: string, body: unknown = {}) => app.request(url, { method: 'POST',
     headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
   try {
+    const staticSite = join(root, 'dashboard', 'deployments', 'cached-version', 'site')
+    await mkdir(staticSite, { recursive: true })
+    await writeFile(join(staticSite, 'index.html'), '<main>Cached version</main>')
+    const staticResponse = await app.request('/deployments/cached-version/')
+    expect(staticResponse.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
+
     expect((await post('/api/projects', { id: project, name: 'Publish test', root_path: workspace, created_at: Date.now() })).status).toBe(200)
     await post('/api/model-configs', { name: 'Mock', provider: 'openai-compatible', apiKey: 'fake', models: { balanced: 'fake' }, isDefault: true })
     await post(`/api/projects/${project}/session/ensure`, { language: 'zh' })
@@ -54,6 +61,21 @@ test('project publishing is gated, returns 202, and exposes progress without a m
       evidence: { acceptance: { path: accepted, kind: 'acceptance', status: 'passed', revision, observedAt },
         gameContent: { path: 'content/index.json', kind: 'game_content', status: 'passed', revision: content, observedAt },
         resourcePreparation: { path: 'assets/asset-manifest.json', kind: 'resource_preparation', status: 'passed', revision: resource, observedAt } } })
+    // A legacy workflow snapshot is historical only. It must not authorize publication.
+    expect(await (await app.request(`/api/projects/${project}/deployment-readiness`)).json()).toMatchObject({ allowed: false })
+    expect((await post(`/api/projects/${project}/deployments`)).status).toBe(409)
+    expect(builds).toBe(0)
+
+    // The replacement project-delivery acceptance remains the sole publish authority.
+    await beginProjectDelivery(workspace, join(root, 'dashboard'), 'Publish test game')
+    await mkdir(join(workspace, '.beegame/delivery'), { recursive: true })
+    await writeFile(join(workspace, '.beegame/delivery/browser.txt'), 'Current build verified in browser')
+    const projectReport = { scope: 'delivery', status: 'passed', summary: 'Current build verified',
+      environment: 'Test preview', evidencePaths: ['.beegame/delivery/browser.txt'],
+      artifactPaths: ['dist/index.html'],
+      verification: { target: 'deployment', knownIssues: [], unverified: [] } }
+    await writeFile(join(workspace, PROJECT_DELIVERY_REPORT_PATH), JSON.stringify(projectReport))
+    await captureProjectDeliveryAcceptance(workspace, join(root, 'dashboard'), Date.now() - 5000)
     expect(await (await app.request(`/api/projects/${project}/deployment-readiness`)).json()).toMatchObject({ allowed: true, destination: 'remote' })
     const response = await post(`/api/projects/${project}/deployments`)
     expect(response.status).toBe(202)

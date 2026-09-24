@@ -3,17 +3,53 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createTestDeliveryRun } from '../../__tests__/delivery-workflow-test-helpers'
-import { confirmAcceptanceFromImplementation } from './validation-stage'
+import { confirmAcceptanceFromImplementation, confirmAcceptanceFromValidator, startAcceptance } from './validation-stage'
 import { readRuntimeAcceptance, runtimeAcceptancePath } from './runtime-acceptance'
 
-test('retry reparses a rejected record once, but never re-baselines changed verified artifacts', async () => {
+test('acceptance uses a separate turn in the same delivery run and requires both current reports', async () => {
+  const workspacePath = await mkdtemp(join(tmpdir(), 'bgs-independent-acceptance-'))
+  try {
+    await mkdir(join(workspacePath, '.beegame/delivery/evidence'), { recursive: true })
+    await writeFile(join(workspacePath, 'game.js'), 'tested build')
+    await writeFile(join(workspacePath, 'observed.txt'), 'played the current build')
+    const base = createTestDeliveryRun({ ownerId: 'owner', projectId: 'project' })
+    const revision = base.revision.workspace
+    const implementationPath = '.beegame/delivery/evidence/implementation.json'
+    const passedReport = { scope: 'delivery', status: 'passed', summary: 'Observed runtime', environment: 'Web Preview',
+      evidencePaths: ['observed.txt'], artifactPaths: ['game.js'],
+      verification: { target: 'deployment', knownIssues: [], unverified: [] } }
+    await writeFile(join(workspacePath, runtimeAcceptancePath('implementation')), JSON.stringify(passedReport))
+    const implementationReport = await readRuntimeAcceptance(workspacePath, 'implementation')
+    await writeFile(join(workspacePath, implementationPath), JSON.stringify({ revision, runtimeAcceptance: implementationReport }))
+    const run = { ...base, phase: 'ACCEPTANCE' as const,
+      tasks: [{ id: 'DIRECT_IMPLEMENTATION', title: 'Implement', checklistIds: [], resourceIds: [], contentIds: [],
+        allowedPaths: ['./'], status: 'completed' as const, attempt: 1,
+        completedRevision: revision, evidenceRefs: [implementationPath] }] }
+    let dispatched: any
+    await startAcceptance({ run, workspacePath, checklistIds: ['CHECK-1'], resourceIds: ['RES-1'],
+      contentIds: ['scene.main'], dispatcher: { async dispatch(request) { dispatched = request } } })
+    expect(dispatched.workerType).toBe('acceptance-validator')
+    expect(dispatched.contract.checklistIds).toEqual(['CHECK-1'])
+    const reviewPath = '.beegame/delivery/evidence/acceptance-review-validator.json'
+    const terminal = { workerType: 'acceptance-validator' as const, status: 'completed' as const,
+      revision, evidencePath: reviewPath }
+    await writeFile(join(workspacePath, runtimeAcceptancePath('validator')), JSON.stringify(passedReport))
+    await writeFile(join(workspacePath, reviewPath), JSON.stringify({ ...terminal,
+      runtimeAcceptance: await readRuntimeAcceptance(workspacePath, 'validator') }))
+    expect((await confirmAcceptanceFromValidator({ run, workspacePath, terminal })).phase).toBe('DELIVERY')
+    await writeFile(join(workspacePath, 'observed.txt'), 'changed after the check')
+    expect((await confirmAcceptanceFromValidator({ run, workspacePath, terminal })).evidence.acceptance?.status).toBe('blocked')
+  } finally { await rm(workspacePath, { recursive: true, force: true }) }
+})
+
+test('a rejected record stays rejected until the Agent writes fresh implementation evidence', async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), 'bgs-acceptance-retry-'))
   try {
-    await mkdir(join(workspacePath, '.beegame/workflow/evidence'), { recursive: true })
+    await mkdir(join(workspacePath, '.beegame/delivery/evidence'), { recursive: true })
     await mkdir(join(workspacePath, 'dist'))
     await writeFile(join(workspacePath, 'dist/main.js'), 'tested build')
     await writeFile(join(workspacePath, 'observations.txt'), 'Test observations')
-    const evidencePath = '.beegame/workflow/evidence/implementation-retry-test.json'
+    const evidencePath = '.beegame/delivery/evidence/implementation-retry-test.json'
     const base = createTestDeliveryRun({ ownerId: 'owner', projectId: 'project' })
     const run = { ...base, phase: 'ACCEPTANCE' as const,
       tasks: [{ id: 'DIRECT_IMPLEMENTATION', title: 'Implement', checklistIds: [], resourceIds: [], contentIds: [],
@@ -34,13 +70,12 @@ test('retry reparses a rejected record once, but never re-baselines changed veri
       verification: { ...rawReport.verification, knownIssues: ['Overlapping targets'] } }))
     const blocked = await confirmAcceptanceFromImplementation({ run, workspacePath })
     expect(blocked.status).toBe('needs_action')
-    expect(blocked.blockedReason).toContain('Overlapping targets')
-    expect(blocked.blockedReason).not.toContain('EISDIR')
+    expect(blocked.blockedReason).toContain('EISDIR')
     await writeFile(join(workspacePath, evidencePath), JSON.stringify(record))
     await writeFile(reportPath, JSON.stringify(rawReport))
-    expect((await confirmAcceptanceFromImplementation({ run, workspacePath })).evidence.acceptance?.status).toBe('passed')
+    expect((await confirmAcceptanceFromImplementation({ run, workspacePath })).evidence.acceptance?.status).toBe('blocked')
     const bound = await readFile(join(workspacePath, evidencePath), 'utf8')
-    expect(JSON.parse(bound).runtimeAcceptance.artifacts[0].path).toBe('dist')
+    expect(JSON.parse(bound).runtimeAcceptance.status).toBe('blocked')
     await writeFile(join(workspacePath, 'dist/main.js'), 'untested changed build')
     expect((await confirmAcceptanceFromImplementation({ run, workspacePath })).evidence.acceptance?.status).toBe('blocked')
     expect(await readFile(join(workspacePath, evidencePath), 'utf8')).toBe(bound)
@@ -48,10 +83,10 @@ test('retry reparses a rejected record once, but never re-baselines changed veri
 })
 
 for (const change of ['none', 'build', 'evidence', 'agent-verdict'] as const)
-test(`obsolete host veto is re-evaluated without replacing captured hashes: ${change}`, async () => {
+test(`old text-based veto is never reclassified from a later report: ${change}`, async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), 'bgs-obsolete-verdict-'))
   try {
-    await mkdir(join(workspacePath, '.beegame/workflow/evidence'), { recursive: true })
+    await mkdir(join(workspacePath, '.beegame/delivery/evidence'), { recursive: true })
     await writeFile(join(workspacePath, 'build.js'), 'tested build')
     await writeFile(join(workspacePath, 'observed.txt'), 'saved observations')
     const reportPath = join(workspacePath, runtimeAcceptancePath('old-policy'))
@@ -62,7 +97,7 @@ test(`obsolete host veto is re-evaluated without replacing captured hashes: ${ch
     const captured = (await readRuntimeAcceptance(workspacePath, 'old-policy'))!
     const previous = { ...captured, status: 'blocked',
       summary: `Delivery has unresolved issues: Development-only warning\nAgent report: ${raw.summary}` }
-    const evidencePath = '.beegame/workflow/evidence/implementation-old-policy.json'
+    const evidencePath = '.beegame/delivery/evidence/implementation-old-policy.json'
     const base = createTestDeliveryRun({ ownerId: 'owner', projectId: 'project' })
     const run = { ...base, phase: 'ACCEPTANCE' as const,
       tasks: [{ id: 'DIRECT_IMPLEMENTATION', title: 'Implement', checklistIds: [], resourceIds: [], contentIds: [],
@@ -73,10 +108,10 @@ test(`obsolete host veto is re-evaluated without replacing captured hashes: ${ch
     if (change === 'evidence') await writeFile(join(workspacePath, 'observed.txt'), 'changed observations')
     if (change === 'agent-verdict') await writeFile(reportPath, JSON.stringify({ ...raw, status: 'blocked' }))
     const result = await confirmAcceptanceFromImplementation({ run, workspacePath })
-    expect(result.evidence.acceptance?.status).toBe(change === 'none' ? 'passed' : 'blocked')
+    expect(result.evidence.acceptance?.status).toBe('blocked')
     const saved = JSON.parse(await readFile(join(workspacePath, evidencePath), 'utf8')).runtimeAcceptance
     expect(saved.evidence).toEqual(previous.evidence)
     expect(saved.artifacts).toEqual(previous.artifacts)
-    expect(saved.status).toBe(change === 'none' ? 'passed' : 'blocked')
+    expect(saved.status).toBe('blocked')
   } finally { await rm(workspacePath, { recursive: true, force: true }) }
 })

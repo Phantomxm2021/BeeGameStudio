@@ -3,6 +3,7 @@ import type { AuthorOperations } from './private/contract'
 import { createAutonomousAuthorLifecycle } from './private/autonomous-lifecycle'
 import type { RuntimeConfigurationClient } from '../../../runtime-configuration/public'
 import type { UsageBillingClient } from '../../../billing/public'
+import type { AutonomousNativeExecutor } from './private/autonomous-native'
 
 export type { AuthorStartInput, AuthorHandle, AuthorResumeInput, AuthorStopInput,
   AuthorResult, AuthorDocumentsResult, AuthorDocumentArtifact } from './private/contract'
@@ -13,7 +14,8 @@ export type AuthorInfrastructure = Readonly<{
 }>
 
 /** The only production entry point. Each invocation owns its entire author lifecycle. */
-export function createFoundationAuthoring(config: AuthorConfiguration, infrastructure: AuthorInfrastructure): AuthorOperations {
+export function createFoundationAuthoring(config: AuthorConfiguration, infrastructure: AuthorInfrastructure,
+  execute?: AutonomousNativeExecutor): AuthorOperations {
   if (!infrastructure || Object.keys(infrastructure).sort().join(',') !== 'billing,runtimeConfiguration' ||
     infrastructure.billing?.protocolVersion !== 1 || infrastructure.runtimeConfiguration?.protocolVersion !== 1 ||
     !infrastructure.billing.ownerId || infrastructure.billing.ownerId !== infrastructure.runtimeConfiguration.ownerId ||
@@ -22,7 +24,7 @@ export function createFoundationAuthoring(config: AuthorConfiguration, infrastru
   if (!config || Object.keys(config).some(key => !['workspacePath', 'privateRootPath', 'language', 'executionLimits'].includes(key)))
     throw new Error('Invalid author public configuration')
   const configuration = parseAuthorConfiguration({ ...config, model: { command: ['resolved-by-runtime-configuration'], env: {} } })
-  const operations = createAutonomousAuthorLifecycle(configuration, { ...infrastructure })
+  const operations = createAutonomousAuthorLifecycle(configuration, { ...infrastructure }, execute)
   async function invoke<T>(operation: () => Promise<T>): Promise<T> {
     try { return await operation() }
     catch { throw new Error('Author operation could not be accepted or safely completed') }

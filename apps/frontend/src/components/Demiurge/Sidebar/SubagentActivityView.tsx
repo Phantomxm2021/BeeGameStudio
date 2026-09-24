@@ -5,7 +5,7 @@ import { AgentCode, type AgentCodeLanguage } from '../../beui/registry/component
 import { ToolResult } from '../../beui/registry/components/agents/tool-result';
 import { MarkdownRenderer } from './ChatMarkdownContent';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
-import { shortenAbsolutePathsForDisplay } from '../../../utils/chatPathDisplay';
+import { filterPathsForDisplay } from '../../../utils/chatPathDisplay';
 import type { Language } from '../AgentsConfig';
 
 function fileLanguage(path?: string): AgentCodeLanguage {
@@ -39,7 +39,7 @@ export const SubagentActivityView = memo(function SubagentActivityView({ activit
     if (!activity) return <div className="space-y-2" data-testid="subagent-legacy-trace">
         <p className="type-caption-1 text-muted-foreground">{labels.legacy}</p>
         <div className="max-h-80 overflow-auto rounded-lg border border-border bg-muted/20 p-3">
-            <AgentCode code={legacyTrace || ''} language="text" />
+            <AgentCode code={filterPathsForDisplay(legacyTrace || '')} language="text" />
         </div>
     </div>;
 
@@ -47,26 +47,26 @@ export const SubagentActivityView = memo(function SubagentActivityView({ activit
         {activity.truncated && <p className="type-caption-1 text-muted-foreground">{labels.recent}</p>}
         {activity.entries.map(entry => {
             if (entry.kind === 'message') return <div key={entry.id}>
-                <MarkdownRenderer content={entry.text} messageId={entry.id} lang={lang} />
+                <MarkdownRenderer content={filterPathsForDisplay(entry.text)} messageId={entry.id} lang={lang} />
                 {entry.truncated && <p className="type-caption-1 text-muted-foreground">{labels.truncated}</p>}
             </div>;
             const isShell = entry.toolName === 'Bash';
             const isRead = entry.toolName === 'Read' && Boolean(entry.filePath) && entry.status !== 'failed';
             const status = entry.status === 'running' ? (running ? 'running' : 'cancelled') : entry.status === 'failed' ? 'error' : 'success';
             return <ToolResult key={entry.id} data-tool-id={entry.id} tool={entry.toolName || labels.output}
-                title={entry.filePath ? shortenAbsolutePathsForDisplay(entry.filePath) : entry.command?.split('\n')[0].slice(0, 100) || labels.output}
+                title={entry.filePath ? filterPathsForDisplay(entry.filePath) : filterPathsForDisplay(entry.command?.split('\n')[0].slice(0, 100) || labels.output)}
                 icon={entry.filePath ? <FileText className="size-4" /> : undefined}
                 kind={isShell ? 'terminal' : 'custom'} status={status} defaultOpen={entry.status === 'failed'}
-                collapseOnComplete={false} maxHeight={360} copyText={entry.output || entry.command || entry.input}
+                collapseOnComplete={false} maxHeight={360} copyText={filterPathsForDisplay(entry.output || entry.command || entry.input || '')}
                 className="min-w-0" contentClassName="space-y-3">
                 {entry.command && <section aria-label={labels.command}>
                     <p className="mb-2 type-caption-1 text-muted-foreground">{labels.command}</p>
-                    <AgentCode code={entry.command} language={isShell ? 'bash' : 'text'} />
+                    <AgentCode code={filterPathsForDisplay(entry.command)} language={isShell ? 'bash' : 'text'} />
                 </section>}
-                {entry.input && <AgentCode code={entry.input} language="json" />}
+                {entry.input && <AgentCode code={filterPathsForDisplay(entry.input)} language="json" />}
                 {entry.output !== undefined && <section aria-label={isRead ? labels.file : labels.output}>
                     <p className="mb-2 type-caption-1 text-muted-foreground">{isRead ? labels.file : labels.output}</p>
-                    {isRead ? <SourceOutput output={entry.output} path={entry.filePath} /> : <AgentCode code={entry.output} language="text" />}
+                    {isRead ? <SourceOutput output={filterPathsForDisplay(entry.output)} path={entry.filePath} /> : <AgentCode code={filterPathsForDisplay(entry.output)} language="text" />}
                 </section>}
                 {entry.truncated && <p className="type-caption-1 text-muted-foreground">{labels.truncated}</p>}
             </ToolResult>;

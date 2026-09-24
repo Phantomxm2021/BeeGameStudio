@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { BeeGameUsageBillingClient, BeeGameUsageBillingRecordInput, BeeGameUsageBillingRecordResult } from '@bee-game-studio/beegame-billing-core/usage-control-client'
 import { createFoundationAuthoringHost } from '../foundation-authoring-host'
+import { runAutonomousAuthor } from '../stage-modules/foundation-authoring/private/autonomous-native'
 import { createFoundationAuthoringLink } from './foundation-authoring-link'
 import { createDeliveryWorkflowController } from './controller'
 import { createInitialDeliveryRun, createRunStore } from './run-store'
@@ -60,6 +61,7 @@ async function fixture() {
       return {}
     },
     command: [process.execPath, fileURLToPath(new URL('../stage-modules/foundation-authoring/private/test-fixtures/native-author.ts', import.meta.url))],
+    execute: input => runAutonomousAuthor(input),
   })
   const bridge = createFoundationAuthoringLink({ store, author, pollIntervalMs: 60_000 })
   async function settle(active = bridge): Promise<DeliveryRun> {

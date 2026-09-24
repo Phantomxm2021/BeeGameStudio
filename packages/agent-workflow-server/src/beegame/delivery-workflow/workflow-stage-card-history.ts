@@ -353,14 +353,15 @@ function workflowStatus(run: DeliveryRun): DeliveryRunStatus {
 function workflowThinking(run: DeliveryRun): 'working' | 'waiting' | 'idle' {
   if (run.status !== 'running') return 'idle'
   if (run.authorStage && ['starting', 'running'].includes(run.authorStage.status)) return 'working'
+  if (run.foundationReviewStage && !run.foundationReviewStage.acceptedReview) return 'working'
   return run.activeDispatch?.status === 'running' ? 'working' : 'waiting'
 }
 function documentTasks(
   run: DeliveryRun,
   workspacePath: string,
 ): DocumentDisplayTask[] {
-  if (run.documentStep === 'FOUNDATION_REVIEW' && run.foundationReviewStage) return [{ id: 'foundation-public-stage',
-    title: 'Foundation Document Review',
+  if ((run.documentStep === 'FOUNDATION_REVIEW' || run.documentStep === 'FOUNDATION_REVISION') && run.foundationReviewStage) return [{ id: 'foundation-public-stage',
+    title: run.documentStep === 'FOUNDATION_REVISION' ? 'Foundation Document Revision' : 'Foundation Document Review',
     status: projectFoundationReviewDisplay(run.foundationReviewStage, run.status)!.taskStatus,
     attempt: 0, operation: 'review' }]
   const publicAuthorDisplay = projectPublicAuthorDisplay(run.authorStage)
@@ -536,7 +537,7 @@ export function projectCurrentStageCard(input: {
     : run.currentItemId?.startsWith('docs/')
       ? run.currentItemId
       : undefined
-  const foundationDisplay = run.documentStep === 'FOUNDATION_REVIEW'
+  const foundationDisplay = run.documentStep === 'FOUNDATION_REVIEW' || run.documentStep === 'FOUNDATION_REVISION'
     ? projectFoundationReviewDisplay(run.foundationReviewStage, run.status) : undefined
   const nextAction = foundationDisplay?.resumeAvailable ? 'resume' : blockedReason && !foundationDisplay?.terminal
     ? run.status === 'stopped'

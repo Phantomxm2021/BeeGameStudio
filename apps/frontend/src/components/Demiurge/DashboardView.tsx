@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useTranslation } from 'react-i18next';
-import { LoaderCircle } from 'lucide-react';
 import { useSystemStore } from '../../store/systemStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useChatStore } from '../../store/chatStore';
@@ -20,12 +19,10 @@ import {
   toChatDisplayMessages,
   toProjectRuntimeDisplayModel,
   toPermissionDisplayModels,
-  type ProjectRuntimeDisplayModel,
 } from '../../viewModels/displayModels';
 import { useCredits } from '../../hooks/useCredits';
 import { normalizeI18nLanguage } from '../../i18n/useBeeGameTranslations';
 import { countPendingToolPermissions, usePermissionTabAttention } from '../../hooks/usePermissionTabAttention';
-import { isCompletedFoundationAuthoringPause } from '../../utils/documentProgress';
 import { getProjectDisplayName } from '../../utils/projectDisplayName';
 import { isProjectExecutionActive } from '../../utils/chatActivity';
 
@@ -57,22 +54,6 @@ const logDashboardReadError = (label: string, error: unknown): void => {
   }
 };
 
-const shouldResumePublicStageOnReconnect = (
-  workflow: ProjectRuntimeDisplayModel['workflow'],
-): boolean => {
-  if (
-    !workflow ||
-    workflow.status !== 'running' ||
-    workflow.worker
-  ) {
-    return false;
-  }
-  // The server owns the reconnect decision for every public stage. The task
-  // list and display status cannot distinguish a live stage from one whose
-  // in-process watcher disappeared, so only act on the explicit projection.
-  return workflow.resumeOnReconnect === true;
-};
-
 const withProjectSyncTimeout = async <T,>(operation: Promise<T>, message: string): Promise<T> => {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -93,7 +74,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
   const [isDeployingProject, setDeployingProject] = useState(false);
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reconnectResumeProjectRef = useRef<string | null>(null);
   const previousBeeGameStatusRef = useRef<string | null>(null);
   const { i18n } = useTranslation('beegame');
   const translateBeeGame = useMemo(() => i18n.getFixedT(normalizeI18nLanguage(lang), 'beegame'), [i18n, lang]);
@@ -208,23 +188,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
   const displayMessages = useMemo(() => toChatDisplayMessages(messages), [messages]);
   const permissionDisplayModels = useMemo(() => toPermissionDisplayModels(pendingPermissions), [pendingPermissions]);
   const projectRuntimeDisplay = useMemo(() => toProjectRuntimeDisplayModel(projectStatus), [projectStatus]);
-  const workflowUsageRevision = useMemo(() => {
-    const usage = projectRuntimeDisplay?.workflow?.usage;
-    if (!usage) return '';
-    return [
-      usage.input_tokens ?? usage.prompt_tokens ?? 0,
-      usage.cache_read_tokens ?? 0,
-      usage.cache_creation_tokens ?? 0,
-      usage.output_tokens ?? usage.completion_tokens ?? 0,
-      usage.total_tokens ?? 0,
-    ].join(':');
-  }, [projectRuntimeDisplay?.workflow?.usage]);
-  // The durable workflow snapshot is the live, cumulative source from the
-  // beginning of this delivery run. Billing writes may trail it while a worker
-  // is streaming, so use the ledger only when no workflow snapshot exists.
   const projectTokenUsage = useMemo(() => {
-    const workflowUsage = projectRuntimeDisplay?.workflow?.usage;
-    if (workflowUsage) return workflowUsage;
     return creditSummary
       ? {
           prompt_tokens: creditSummary.inputTokens,
@@ -237,18 +201,17 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
           total_tokens: creditSummary.totalTokens,
         }
       : null;
-  }, [creditSummary, projectRuntimeDisplay?.workflow?.usage]);
+  }, [creditSummary]);
   const activeProject = useMemo(() => projects.find(project => project.id === projectId), [projectId, projects]);
   const isProjectStarting =
-    !projectRuntimeDisplay?.workflow &&
     // A persisted project-list snapshot is stale by definition. Do
     // not turn it into a fullscreen loading gate when the runtime
-    // request failed or the workflow already reached a terminal
+    // request failed or the Agent already reached a terminal state
     // state; the dashboard must remain available to show diagnostics.
     String(projectStatus?.phase || '').toLowerCase() === 'starting';
   const waitingPermission = useMemo(
-    () => getWaitingPermissionState(projectRuntimeDisplay, permissionDisplayModels),
-    [projectRuntimeDisplay, permissionDisplayModels],
+    () => getWaitingPermissionState(permissionDisplayModels),
+    [permissionDisplayModels],
   );
   const hasCurrentRuntimeSnapshot = projectStatus?.project_id === projectId;
   const isProjectInteractionLocked = isOpeningProject || isSyncing || !hasCurrentRuntimeSnapshot;
@@ -256,53 +219,24 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     projectStatus?.project_target?.runtime || projectStatus?.project_target?.platform || '',
   ).trim();
 
-  useEffect(() => {
-    if (!workflowUsageRevision) return undefined;
-    let cancelled = false;
-    let trailingRefresh: ReturnType<typeof setTimeout> | undefined;
-    // Workflow usage is persisted independently from the billing ledger.
-    // Refresh once more after the ledger write/retry window so the final
-    // usage snapshot cannot leave project credits one event behind.
-    void refreshCredits().finally(() => {
-      if (cancelled) return;
-      trailingRefresh = setTimeout(() => {
-        void refreshCredits();
-      }, 1_000);
-    });
-    return () => {
-      cancelled = true;
-      if (trailingRefresh) clearTimeout(trailingRefresh);
-    };
-  }, [refreshCredits, workflowUsageRevision]);
-
   const isExecutionBusy = isLoading || isStopping ||
     (hasCurrentRuntimeSnapshot && isProjectExecutionActive(projectRuntimeDisplay)) || hasPendingToolPermission;
   const isProjectWorkspaceMutationLocked = isProjectInteractionLocked || isProjectStarting || isExecutionBusy || deploymentInProgress;
-  const canSendMessage = hasPermission('agent.send_message') && !isProjectWorkspaceMutationLocked;
+  const canSendMessage = hasPermission('agent.send_message') && !isProjectInteractionLocked &&
+    !isProjectStarting && !isStopping && !hasPendingToolPermission && !deploymentInProgress;
   const canApproveTool = hasPermission('agent.approve_tool') && !isProjectInteractionLocked;
   const canManagePreview = hasPermission('preview.manage') && !isProjectWorkspaceMutationLocked;
   const canManageDeployment = hasPermission('deployment.manage') && !isProjectWorkspaceMutationLocked;
   const canUploadAssets = hasPermission('assets.upload') && !isProjectWorkspaceMutationLocked;
   const canExportProject = hasPermission('project.export');
 
-  const isFoundationAuthoringPaused = useMemo(
-    () => isCompletedFoundationAuthoringPause(displayMessages, projectRuntimeDisplay?.workflow),
-    [displayMessages, projectRuntimeDisplay?.workflow],
-  );
-
   // Derived state machine based on Requirements: 4.2
   const currentStatus = useMemo(() => {
-    const workflow = projectRuntimeDisplay?.workflow;
-    const workflowStatus = String(workflow?.status || '');
     const acceptance = projectStatus?.acceptance?.status;
     if (isOffline) return 'offline';
     if (!hasCurrentRuntimeSnapshot) return 'starting';
     if (hasPendingToolPermission || projectRuntimeDisplay?.phase === 'waiting_approval') return 'waiting_approval';
-    // A historical workflow verdict must not mask the active follow-up turn.
     if (isExecutionBusy) return 'running';
-    if (['blocked', 'failed', 'cancelled', 'stale'].includes(workflowStatus)) return 'paused';
-    if (workflowStatus === 'completed') return 'finished';
-    if (workflowStatus === 'running' || workflowStatus === 'verifying') return 'running';
     if (isProjectStarting) return 'starting';
     if (acceptance === 'failed' || acceptance === 'blocked' || acceptance === 'stale') return 'paused';
     return deriveDashboardStatus({
@@ -313,7 +247,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
       messages: displayMessages,
     });
   }, [
-    projectRuntimeDisplay?.workflow,
     projectStatus?.acceptance?.status,
     isOffline,
     hasCurrentRuntimeSnapshot,
@@ -402,33 +335,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     if (failedResult) throw failedResult.reason;
   }, [loadProjectRuntimeState, projectId, translateBeeGame]);
 
-  useEffect(() => {
-    if (
-      authenticationStatus !== 'authenticated' ||
-      !hasCurrentRuntimeSnapshot ||
-      reconnectResumeProjectRef.current === projectId ||
-      !shouldResumePublicStageOnReconnect(projectRuntimeDisplay?.workflow)
-    ) {
-      return;
-    }
-    reconnectResumeProjectRef.current = projectId;
-    void (async () => {
-      try {
-        await api.resumeWorkflow(projectId);
-        await loadProjectRuntimeState(projectId);
-      } catch (error) {
-        logDashboardReadError('Failed to resume workflow after reconnect:', error);
-      }
-    })();
-  }, [
-    authenticationStatus,
-    hasCurrentRuntimeSnapshot,
-    loadProjectRuntimeState,
-    projectId,
-    projectRuntimeDisplay?.workflow,
-  ]);
-
-  // Poll the persisted workflow snapshot as a reconnect-safe fallback.
+  // Refresh the active Agent's runtime state while it is working.
   useEffect(() => {
     if (!projectId || authenticationStatus !== 'authenticated') return;
 
@@ -453,9 +360,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
       }
     };
 
-    // Workflow state and cumulative usage are persisted server-side and
-    // refreshed once per second; the cursor endpoint remains available for
-    // reconnect/recovery without making chat text the state model.
     const interval = setInterval(poll, 1000);
 
     // Add visibility change listener to trigger immediate poll when returning to tab
@@ -489,22 +393,16 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     return () => clearTimeout(timeoutId);
   }, [isOpeningProject, isSyncing, showWarning, translateBeeGame]);
 
-  // BeeGame displays the server-owned workflow phase while preserving the live turn state.
   const progressPercent = useMemo(() => {
     if (currentStatus === 'running' || currentStatus === 'waiting_approval') return 50;
     return 0;
   }, [currentStatus]);
 
   const phaseLabel = useMemo(() => {
-    if (isFoundationAuthoringPaused) {
-      return translateBeeGame('dashboard.turn.foundationAuthoringPaused', {
-        defaultValue: 'Foundation documents complete · waiting for review',
-      });
-    }
     return translateBeeGame(`dashboard.turn.${currentStatus}`, {
       defaultValue: translateBeeGame('dashboard.turn.idle'),
     });
-  }, [currentStatus, isFoundationAuthoringPaused, translateBeeGame]);
+  }, [currentStatus, translateBeeGame]);
 
   const displayProjectName = useMemo(() => {
     return getProjectDisplayName({ root_path: activeProject?.root_path, name: projectName }, translateBeeGame('untitledProject'));
@@ -528,7 +426,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         projectName={displayProjectName}
         status={currentStatus === 'idle' ? 'idle' : (currentStatus as DashboardStatus)}
         phaseLabel={phaseLabel}
-        handoffNotice={isFoundationAuthoringPaused ? phaseLabel : undefined}
         credits={creditSummary}
         accountCreditBalance={creditBalance}
         isSyncing={isSyncing}
@@ -581,7 +478,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         messages={displayMessages}
         progress={progressPercent}
         onSendMessage={async (message, attachments?: ChatAttachmentPayload[], supersedesMessageId?: string) => {
-          if (isProjectWorkspaceMutationLocked) return false;
+          if (!canSendMessage) return false;
           return sendMessage(message, undefined, attachments, supersedesMessageId);
         }}
         isLoading={isLoading}
@@ -603,25 +500,6 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
           />
         }
       />
-      {isProjectStarting ? (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center overflow-hidden bg-background/95 px-6"
-          role="status"
-          aria-live="polite"
-          aria-label={translateBeeGame('dashboard.starting.title')}
-        >
-          <div className="pointer-events-none absolute inset-0 bg-primary/5" />
-          <div className="relative flex max-w-md flex-col items-center text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full border border-border/10 bg-muted shadow-[0_20px_70px_rgba(16,185,129,0.12)]">
-              <LoaderCircle className="h-6 w-6 animate-spin text-foreground" aria-hidden="true" />
-            </div>
-            <h2 className="type-title-2 mt-7 text-foreground">{translateBeeGame('dashboard.starting.title')}</h2>
-            <p className="type-body mt-3 max-w-sm text-muted-foreground">
-              {translateBeeGame('dashboard.starting.description')}
-            </p>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

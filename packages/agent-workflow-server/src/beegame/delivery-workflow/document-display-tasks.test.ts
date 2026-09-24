@@ -59,7 +59,7 @@ describe('workflow display tasks', () => {
   })
 
   test('leaves public reviewer and revision display to the stage-card projection', async () => {
-    for (const documentStep of ['FOUNDATION_REVIEW'] as const) {
+    for (const documentStep of ['FOUNDATION_REVIEW', 'FOUNDATION_REVISION'] as const) {
       expect(
         projectDocumentDisplayTasks({
           workspacePath: await workspace(),

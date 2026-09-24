@@ -10,33 +10,6 @@ export interface DocumentProgressItem {
   artifact?: any;
 }
 
-/**
- * The authoring handoff is intentionally a display-only exception to the
- * usual terminal-state mapping.  The server pauses after the complete
- * foundation set and before review; the workflow status is therefore
- * `stopped` (normalized to `cancelled` by the display model), but the user
- * should see a completed document set waiting for acceptance/review.
- */
-export interface FoundationAuthoringWorkflowSignal {
-  foundationDocuments?: readonly { path?: unknown; status?: unknown }[];
-  status?: unknown;
-  currentPhase?: unknown;
-  documentStep?: unknown;
-  tasks?: readonly {
-    id?: unknown;
-    title?: unknown;
-    status?: unknown;
-  }[];
-  block?: {
-    message?: unknown;
-    detail?: unknown;
-    code?: unknown;
-  };
-}
-
-export const FOUNDATION_AUTHORING_PAUSE_REASON =
-  'foundation authoring complete; paused before review';
-
 export const BEEGAME_DOCUMENT_BASELINE = [
   { path: 'docs/GDD.md', name: 'GDD', stage: 1 },
   { path: 'docs/LEVEL_SCENE_DESIGN.md', name: 'Level / Scene Design', stage: 2 },
@@ -60,38 +33,9 @@ export function isBaselineDocumentPath(value: unknown): boolean {
   return BEEGAME_DOCUMENT_BASELINE.some((document) => document.path === path);
 }
 
-export function isCompletedFoundationAuthoringPause(
-  messages: ChatDisplayMessage[],
-  workflow?: FoundationAuthoringWorkflowSignal | null,
-): boolean {
-  if (!workflow) return false;
-
-  const status = String(workflow.status || '').trim().toLowerCase();
-  if (workflow.block?.code === 'public_author_handoff') {
-    const phase = String(workflow.currentPhase || '').trim().toUpperCase();
-    if (!['needs_action', 'blocked', 'stopped', 'cancelled'].includes(status) ||
-      !['DOCUMENT_DRAFTING', 'DOCUMENT_REVIEW'].includes(phase)) return false;
-    // A public handoff must carry the complete current result projection.
-    // Stale transcript artifacts cannot fill gaps in that result.
-    return BEEGAME_DOCUMENT_BASELINE.every(document => workflow.tasks?.some(task =>
-      normalizeDocumentPath(task.title ?? task.id) === document.path && task.status === 'completed'));
-  }
-  if (status !== 'stopped' && status !== 'cancelled') return false;
-  if (String(workflow.currentPhase || '').trim().toUpperCase() !== 'DOCUMENT_DRAFTING') {
-    return false;
-  }
-
-  const hasExplicitPauseReason = [workflow.block?.message, workflow.block?.detail]
-    .some(value => String(value || '').trim().toLowerCase() === FOUNDATION_AUTHORING_PAUSE_REASON);
-  if (!hasExplicitPauseReason) return false;
-
-  return deriveDocumentProgress(messages, [], workflow).every(item => item.status === 'ready');
-}
-
 export function deriveDocumentProgress(
   messages: ChatDisplayMessage[],
   artifacts: any[],
-  workflow?: FoundationAuthoringWorkflowSignal | null,
 ): DocumentProgressItem[] {
   const artifactsByPath = new Map<string, any>();
   for (const artifact of artifacts) {
@@ -109,25 +53,6 @@ export function deriveDocumentProgress(
     if (message.toolStatus === 'running') statusByPath.set(path, 'writing');
     if (message.toolStatus === 'completed') statusByPath.set(path, 'ready');
     if (message.toolStatus === 'failed') statusByPath.set(path, 'failed');
-  }
-
-  // The durable workflow snapshot is available even when a project reload has
-  // not restored its transcript yet. Use only canonical document task titles;
-  // unrelated workflow tasks must never affect the document counter.
-  for (const task of workflow?.tasks || []) {
-    const path = normalizeDocumentPath(task.title ?? task.id);
-    if (!isBaselineDocumentPath(path)) continue;
-    const taskStatus = String(task.status || '').trim().toLowerCase();
-    if (taskStatus === 'completed') statusByPath.set(path, 'ready');
-    else if (taskStatus === 'running') statusByPath.set(path, 'writing');
-    else if (taskStatus === 'failed' || taskStatus === 'blocked') statusByPath.set(path, 'failed');
-  }
-
-  // The completed public author result survives switches to review/revision.
-  // Do not infer audit acceptance or drive execution from this display field.
-  for (const document of workflow?.foundationDocuments || []) {
-    const path = normalizeDocumentPath(document.path);
-    if (isBaselineDocumentPath(path) && document.status === 'ready') statusByPath.set(path, 'ready');
   }
 
   return BEEGAME_DOCUMENT_BASELINE.map((document) => {

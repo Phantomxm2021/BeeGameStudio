@@ -384,6 +384,7 @@ const workflowEventSchema: z.ZodType<WorkflowEvent> = z
       .enum([
         'FOUNDATION_DRAFTING',
         'FOUNDATION_REVIEW',
+        'FOUNDATION_REVISION',
         'CHECKLIST_DRAFTING',
       ])
       .optional(),
@@ -487,6 +488,7 @@ export const workflowUnitAcceptedEventSchema: z.ZodType<WorkflowUnitAcceptedEven
         .enum([
           'FOUNDATION_DRAFTING',
           'FOUNDATION_REVIEW',
+          'FOUNDATION_REVISION',
           'CHECKLIST_DRAFTING',
         ])
         .optional(),
@@ -542,6 +544,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
       .enum([
         'FOUNDATION_DRAFTING',
         'FOUNDATION_REVIEW',
+        'FOUNDATION_REVISION',
         'CHECKLIST_DRAFTING',
       ])
       .optional(),
@@ -669,7 +672,7 @@ export const deliveryRunSchema: z.ZodType<DeliveryRun> = z
           (!link.acceptedReview && run.phase !== 'DOCUMENT_REVIEW'))
         context.addIssue({ code: 'custom', path: ['foundationReviewStage'],
           message: 'Public foundation review must bind its author and cannot coexist with retired execution or downstream phases' })
-      if (!link.acceptedReview && run.documentStep !== 'FOUNDATION_REVIEW')
+      if (!link.acceptedReview && run.documentStep !== 'FOUNDATION_REVIEW' && run.documentStep !== 'FOUNDATION_REVISION')
         context.addIssue({ code: 'custom', path: ['documentStep'], message: 'Public foundation phase must use the document review step' })
     }
 

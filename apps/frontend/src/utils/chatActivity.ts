@@ -4,16 +4,11 @@ type Activity = {
   completionReason?: 'stopped' | 'failed' | 'incomplete';
 };
 
-/** A follow-up native turn can be running after its delivery workflow ended. */
+/** The server runtime phase is the source of truth for active project work. */
 export function isProjectExecutionActive(status?: {
   phase?: string;
-  workflow?: unknown;
 } | null): boolean {
-  const workflow = status?.workflow;
-  const workflowStatus = workflow && typeof workflow === 'object' && 'status' in workflow
-    ? workflow.status : undefined;
-  return ['starting', 'queued', 'running', 'resuming', 'waiting_approval'].includes(status?.phase ?? '') ||
-    (typeof workflowStatus === 'string' && ['running', 'verifying'].includes(workflowStatus));
+  return ['starting', 'queued', 'running', 'resuming', 'waiting_approval'].includes(status?.phase ?? '');
 }
 
 /** Parent completion is not child completion. Consume the canonical child

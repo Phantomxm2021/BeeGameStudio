@@ -296,8 +296,8 @@ function journalUsageHighWater(
   return usage
 }
 
-function paths(workspacePath: string) {
-  const directory = join(resolve(workspacePath), '.beegame', 'workflow')
+function paths(workspacePath: string, stateDirectory = join('.beegame', 'workflow')) {
+  const directory = resolve(workspacePath, stateDirectory)
   return {
     directory,
     snapshot: join(directory, 'run.json'),
@@ -370,8 +370,12 @@ export function createInitialDeliveryRun(input: {
   }
 }
 
-export function createRunStore(workspacePath: string, ownerId: string) {
-  const filePaths = paths(workspacePath)
+export function createRunStore(
+  workspacePath: string,
+  ownerId: string,
+  options: { stateDirectory?: string } = {},
+) {
+  const filePaths = paths(workspacePath, options.stateDirectory)
 
   function processIsAlive(processId: number): boolean {
     try {

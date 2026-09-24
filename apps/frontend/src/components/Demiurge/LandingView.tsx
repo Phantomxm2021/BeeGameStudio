@@ -1366,7 +1366,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
               </div>
               <DialogClose
                 aria-label={intakeText.auth.feedbackClose}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition hover:bg-accent"
               >
                 <X className="h-4 w-4" />
               </DialogClose>
@@ -1394,7 +1394,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
               <DialogClose
                 type="button"
                 aria-label={translate('intake.auth.legalClose')}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition hover:bg-accent"
               >
                 <X className="h-5 w-5" />
               </DialogClose>
@@ -1479,7 +1479,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
                 aria-label={intakeText.modal.close}
                 disabled={isPreparing || isTransitioning}
                 onClick={handleCloseIntake}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <X className="h-5 w-5" />
               </button>

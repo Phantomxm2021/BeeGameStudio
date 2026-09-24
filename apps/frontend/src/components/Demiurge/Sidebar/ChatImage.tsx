@@ -25,7 +25,7 @@ export function ChatImage({ src, alt, pending = false, error = false, lang = 'en
             <span className="chat-image-caption" title={alt}>{alt}</span>
             <DialogContent className="!max-w-[min(1100px,94vw)] !p-3">
                 <DialogTitle className="pr-10 !text-sm">{alt}</DialogTitle>
-                <DialogClose className="absolute right-3 top-3 rounded-full p-1" aria-label={lang === 'zh' ? '关闭预览' : 'Close preview'}><X size={20} /></DialogClose>
+                <DialogClose className="absolute right-3 top-3 grid size-8 place-items-center rounded-full border border-border bg-background/90 p-1 text-foreground shadow-sm hover:bg-accent" aria-label={lang === 'zh' ? '关闭预览' : 'Close preview'}><X size={16} /></DialogClose>
                 {src && <img src={src} alt={alt} referrerPolicy="no-referrer" className="mt-3 max-h-[80dvh] w-full object-contain" />}
             </DialogContent>
         </Dialog>

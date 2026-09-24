@@ -13,6 +13,7 @@ export function openResourceLibraryAccess(input: {
     throw new Error('Resource library requires an HTTP(S) endpoint')
   const key = randomBytes(32).toString('hex')
   const prefix = '/' + key
+  let catalogObserved = false
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -44,6 +45,7 @@ export function openResourceLibraryAccess(input: {
           redirect: 'error',
           signal: AbortSignal.timeout(30_000),
         })
+        if (response.ok) catalogObserved = true
         return new Response(response.body, {
           status: response.status,
           headers: { 'content-type': response.headers.get('content-type') ?? 'application/json', 'cache-control': 'no-store' },
@@ -65,6 +67,7 @@ export function openResourceLibraryAccess(input: {
       'Download selected files with native tools into assets/, retain source/license/pack/version and register actual hashes in Manifest. Keep this temporary endpoint out of project artifacts.',
       '401/403/503 are access failures, not evidence that the library has no suitable assets. Internet sourcing remains available independently through native search/browser or Bash HTTP tools.',
     ].join('\n'),
+    catalogObserved() { return catalogObserved },
     close() { server.stop(true) },
   }
 }

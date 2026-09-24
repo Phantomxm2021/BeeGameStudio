@@ -1,4 +1,5 @@
 import { runFileReview } from './native-files'
+import type { FileAgentInput, FileAgentResult } from '@bee-game-studio/agent-workflow/native-file-agent'
 import { randomUUID } from 'node:crypto'
 import { createEvidenceWriter, evidenceSecrets } from './single-agent-evidence'
 import { join } from 'node:path'
@@ -28,7 +29,8 @@ const evidenceIdentity = (start: SingleReviewStart, handle: SingleReviewHandle, 
 const canResume = (state: SingleReviewState) => state.attempts.every(attempt => attempt.closed?.usageObserved)
 
 /** One native auditor; no strategy selection or historical protocol replay. */
-export function createSingleReviewerLifecycle(workspacePath: string, infrastructure: Infrastructure, language?: string): SingleReviewerOperations {
+export function createSingleReviewerLifecycle(workspacePath: string, infrastructure: Infrastructure, language?: string,
+  execute?: (input: FileAgentInput) => Promise<FileAgentResult>): SingleReviewerOperations {
   if (!infrastructure || Object.keys(infrastructure).sort().join(',') !== 'billing,runtimeConfiguration' ||
     infrastructure.billing?.protocolVersion !== 1 || infrastructure.runtimeConfiguration?.protocolVersion !== 1 ||
     !infrastructure.billing.ownerId || infrastructure.billing.ownerId !== infrastructure.runtimeConfiguration.ownerId ||
@@ -150,6 +152,7 @@ export function createSingleReviewerLifecycle(workspacePath: string, infrastruct
       const started = performance.now()
       try {
         const completion = await runFileReview({ source: start.input, directory, configuration, language, signal: abort.signal,
+          ...(execute ? { execute } : {}),
           onUsage: async usage => {
             await lease.assertOwned(); await append(journal, { kind: 'usage', attemptId, usage })
           },

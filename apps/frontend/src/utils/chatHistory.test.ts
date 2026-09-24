@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { normalizeChatHistory } from './chatHistory';
 
 describe('normalizeChatHistory semantic metadata', () => {
+    it('does not hide system messages based on their language or wording', () => {
+        const content = '[人工关卡] GDD 已通过内部评审，请查阅并决策';
+        expect(normalizeChatHistory([{ id: 'legacy-notice', sender: 'system', content, timestamp: 1 }]))
+            .toMatchObject([{ content }]);
+    });
     it('preserves attachment-only user messages', () => {
         const attachments = [{ type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'scene.png' }];
         expect(normalizeChatHistory([{ id: 'image', sender: 'user', content: '', timestamp: 1, attachments }])[0])

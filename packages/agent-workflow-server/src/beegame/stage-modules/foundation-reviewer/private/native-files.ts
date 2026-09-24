@@ -1,7 +1,7 @@
 import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod/v4'
-import { runNativeFileAgent, nativeFileAgentEnvironment, type FileAgentProgress } from '@bee-game-studio/agent-workflow/native-file-agent'
+import { runNativeFileAgent, nativeFileAgentEnvironment, type FileAgentInput, type FileAgentResult, type FileAgentProgress } from '@bee-game-studio/agent-workflow/native-file-agent'
 import { captureSingleReviewInput, admitSingleReviewReport, singleReviewReportSchema, type SingleReviewInput } from './single-agent-contract'
 import { getLatestRuntimeUsage, type ReviewUsageEvent, type ReviewNativeUsage } from './native-usage'
 import { diagnoseReviewOutput, type ReviewOutputDiagnostic } from './single-agent-diagnostic'
@@ -14,11 +14,11 @@ export const fileReviewReportSchema = singleReviewReportSchema
 
 export function fileReviewPrompt(language?: string): string {
   return [
-    'Review the eight documents in docs/ against requirements.md, then directly correct only implementation-affecting contradictions or omissions.',
-    'Work as a normal coding task: inspect the relevant files, make the needed edits promptly, and finish. Do not narrate or enumerate an audit checklist.',
+    'Review all eight documents in docs/ against requirements.md and each other. Correct substantive omissions, contradictions, and requirements that would make the delivered game incomplete or inconsistent.',
+    'Choose the investigation and editing approach yourself. Inspect, edit, and recheck the affected documents until the review is complete; do not change them merely to satisfy a quota.',
     'The deliverables are the eight documents in docs/. requirements.md and review-context/ are read-only evidence.',
     'Do not edit version or updated_at; the service updates those fields when it seals a document whose authored content changed.',
-    'When complete, use StructuredOutput with a concise summary of the review and corrections.',
+    'When complete, give a concise natural-language summary of the review and corrections.',
     ...(language ? [responseLanguageInstruction(language)] : []),
   ].join('\n')
 }
@@ -47,19 +47,18 @@ export async function runFileReview(input: {
   signal: AbortSignal
   onUsage(usage: ReviewNativeUsage): Promise<void>
   onProgress(progress: FileAgentProgress): Promise<void>
+  execute?: (input: FileAgentInput) => Promise<FileAgentResult>
 }) {
   const { source, workspacePath } = await prepareReviewFiles(input.directory, input.source)
   const events: ReviewUsageEvent[] = []
   let messageId: string | undefined, usageObserved = false, previous = ''
   let modelMessages = 0
-  const response = await runNativeFileAgent({
-    command: input.configuration.command, env: { ...nativeFileAgentEnvironment(input.configuration.env),
-      BEEGAME_STRUCTURED_OUTPUT_IS_TERMINAL: '1' },
+  const response = await (input.execute ?? runNativeFileAgent)({
+    command: input.configuration.command, env: nativeFileAgentEnvironment(input.configuration.env),
     responseTrace: true,
     workspacePath, writablePaths: [...source.documents.map(document => document.path)], allowWorkingFiles: true,
     readOnlyPaths: ['requirements.md', 'review-context'],
     logPath: join(input.directory, 'native-events.jsonl'), signal: input.signal,
-    schema: z.toJSONSchema(fileReviewReportSchema, { target: 'draft-7' }),
     prompt: fileReviewPrompt(input.language),
     onProgress: async progress => { modelMessages = progress.modelResponses; await input.onProgress(progress) },
     onMessage: async message => {
@@ -86,11 +85,13 @@ export async function runFileReview(input: {
     // Preserve only the final deliverable, not reasoning or the stream. Failed
     // admission must not destroy the output or require another paid call to inspect it.
     await writeFile(join(input.directory, 'native-result.json'), JSON.stringify({
-      structured_output: response.result?.structured_output ?? null,
       result: response.result?.result ?? null,
     }), { flag: 'wx', mode: 0o600 })
     try {
-      const parsed = fileReviewReportSchema.parse(response.result?.structured_output)
+      // Files are the deliverable. A missing or oversized terminal message
+      // must not reject valid edits or force another paid Agent turn.
+      const terminalText = typeof response.result?.result === 'string' ? response.result.result.trim() : ''
+      const parsed = fileReviewReportSchema.parse({ summary: terminalText.slice(0, 8000) || 'Document review completed.' })
       report = admitSingleReviewReport(source, parsed)
     } catch (error) {
       failure = 'invalid_output'; diagnostic = diagnoseReviewOutput(error)

@@ -777,6 +777,23 @@ describe('delivery workflow recovery', () => {
     if (workspace) await rm(workspace, { recursive: true, force: true })
   })
 
+  test('a worker lost on restart is closed, but other status failures remain visible', async () => {
+    workspace = await mkdtemp(join(tmpdir(), 'beegame-recovery-worker-status-'))
+    let failure = 'worker session is not registered'
+    const dispatcher = createDeliveryDispatcher({
+      store: createRunStore(workspace, RECOVERY_OWNER_ID),
+      workerPort: {
+        async start() { throw new Error('not used') },
+        async submit() { throw new Error('not used') },
+        async stop() { throw new Error('not used') },
+        async status() { throw new Error(failure) },
+      },
+    })
+    expect(await dispatcher.workerIsOpen('orphaned-dispatch')).toBe(false)
+    failure = 'worker transport failed'
+    expect(dispatcher.workerIsOpen('orphaned-dispatch')).rejects.toThrow('worker transport failed')
+  })
+
   test('does not resume when stale worker shutdown fails', async () => {
     workspace = await mkdtemp(join(tmpdir(), 'beegame-recovery-stop-failure-'))
     const initial = createTestDeliveryRun({
@@ -998,7 +1015,7 @@ describe('delivery workflow recovery', () => {
         }
 
         if (checkpoint === 'before-dispatch') {
-          if (workerType === 'change-impact-analyzer') {
+          if (workerType === 'change-impact-analyzer' || workerType === 'question-answerer') {
             const controller = createDeliveryWorkflowController({
               workspacePath: workspace,
               ownerId: run.ownerId,
@@ -1022,7 +1039,7 @@ describe('delivery workflow recovery', () => {
           ownerId: run.ownerId,
           workerPort,
         })
-        if (workerType === 'change-impact-analyzer') {
+        if (workerType === 'change-impact-analyzer' || workerType === 'question-answerer') {
           await expect(firstController.requestChange(
             run,
             run.changeRequest ?? 'Synthetic change request.',

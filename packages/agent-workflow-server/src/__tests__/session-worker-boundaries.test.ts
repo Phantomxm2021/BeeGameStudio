@@ -57,6 +57,28 @@ test('service disposal records shutdown and resolves pending approval as policy,
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
+test('a permission callback arriving after shutdown cannot create a new approval gate', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-late-native-permission-'))
+  let decision: unknown
+  let ready!: () => void
+  const submitted = new Promise<void>(resolve => { ready = resolve })
+  const manager = new BeeGameSessionManager({ start: async () => ({ stop() {}, async submit(input) {
+    ready()
+    await new Promise<void>(resolve => input.signal.addEventListener('abort', () => resolve(), { once: true }))
+    decision = await input.requestPermission({ toolUseID: 'late-network',
+      toolName: 'SandboxNetworkAccess', input: { host: 'registry.npmjs.org' },
+      message: 'Network access requires permission.' })
+  } }) }, root)
+  try {
+    const session = manager.start({ workspacePath: root, userId: 'owner', projectId: 'project' })
+    await manager.sendWithDisplay(session.id, 'Offline shutdown fixture')
+    await submitted
+    await manager.dispose()
+    expect(decision).toMatchObject({ behavior: 'deny', source: 'policy' })
+    expect(manager.transcript(session.id).filter(event => event.type === 'permission.requested')).toHaveLength(0)
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+}, 3_000)
+
 for (const stoppedFirst of [false, true]) {
   test(`shutdown awaits asynchronous runtime cleanup (previously stopped: ${stoppedFirst})`, async () => {
     const root = await mkdtemp(join(tmpdir(), 'bgs-cleanup-drain-'))
@@ -87,7 +109,7 @@ for (const stoppedFirst of [false, true]) {
   })
 }
 
-test('scoped workers can write nested scratch files, not protected files or symlink escapes', async () => {
+test('workflow output paths guide deliverables but do not sandbox project edits', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-worker-boundary-')))
   const workspace = join(root, 'workspace')
   const decisions: string[] = []
@@ -108,12 +130,12 @@ test('scoped workers can write nested scratch files, not protected files or syml
   }) }, root)
   try {
     const session = manager.start({ workspacePath: workspace, userId: 'offline', projectId: 'test',
-      workflowWorker: true, workflowWorkerType: 'content-author', workflowAllowedPaths: ['content/'],
+      workflowWorker: true, workflowWorkerType: 'content-author',
       workflowProtectedPaths: ['assets/'] })
     await manager.sendWithDisplay(session.id, 'Offline fixture')
     for (let i = 0; i < 200 && manager.get(session.id)?.turnStatus !== 'idle'; i++)
       await new Promise(resolve => setTimeout(resolve, 5))
-    expect(decisions).toEqual(['allow', 'allow', 'deny', 'deny', 'deny'])
+    expect(decisions).toEqual(['allow', 'allow', 'deny', 'deny', 'allow'])
   } finally { manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 

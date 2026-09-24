@@ -61,6 +61,9 @@ export interface PromptInputProps extends Omit<
   onAction?: (action: string) => void;
   onSubmit?: (value: string, model?: string) => void | Promise<void>;
   loading?: boolean;
+  /** Let a non-empty draft replace Stop with Send while a turn is running. */
+  allowSubmitWhileLoading?: boolean;
+  stopDisabled?: boolean;
   onStop?: () => void;
   submitLabel?: string;
   stopLabel?: string;
@@ -68,6 +71,8 @@ export interface PromptInputProps extends Omit<
   allowEmptySubmit?: boolean;
   minRows?: number;
   maxRows?: number;
+  /** Applies the same typography to the textarea and its hidden size-measurement mirror. */
+  textClassName?: string;
   leadingAction?: ReactNode;
   className?: string;
 }
@@ -84,12 +89,15 @@ export function PromptInput({
   onAction,
   onSubmit,
   loading = false,
+  allowSubmitWhileLoading = false,
+  stopDisabled,
   onStop,
   submitLabel = "Send prompt",
   stopLabel = "Stop generating",
   allowEmptySubmit = false,
   minRows = 2,
   maxRows = 8,
+  textClassName = "type-input",
   leadingAction,
   className,
   textareaRef: externalTextareaRef,
@@ -112,7 +120,9 @@ export function PromptInput({
   const currentModel = models.find(
     (option) => option.value === currentModelValue,
   );
-  const canSubmit = (Boolean(currentValue.trim()) || allowEmptySubmit) && !disabled && !loading;
+  const hasDraft = Boolean(currentValue.trim()) || allowEmptySubmit;
+  const canSubmit = hasDraft && !disabled && (!loading || allowSubmitWhileLoading);
+  const showStop = loading && Boolean(onStop) && (!allowSubmitWhileLoading || !hasDraft || disabled);
 
   useEffect(() => {
     if (!externalTextareaRef) return;
@@ -165,7 +175,7 @@ export function PromptInput({
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
     const prompt = currentValue.trim();
-    if ((!prompt && !allowEmptySubmit) || disabled || loading) return;
+    if ((!prompt && !allowEmptySubmit) || disabled || (loading && !allowSubmitWhileLoading)) return;
 
     onSubmit?.(prompt, currentModelValue);
     if (value === undefined) setInternalValue("");
@@ -198,7 +208,7 @@ export function PromptInput({
       <div
         ref={measurementRef}
         aria-hidden="true"
-        className="type-input pointer-events-none invisible absolute inset-x-2 top-0 whitespace-pre-wrap px-2 [overflow-wrap:break-word]"
+        className={cn(textClassName, "pointer-events-none invisible absolute inset-x-2 top-0 whitespace-pre-wrap px-2 [overflow-wrap:break-word]")}
       >
         {`${currentValue}\u200b`}
       </div>
@@ -212,7 +222,7 @@ export function PromptInput({
         {...textareaProps}
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={handleKeyDown}
-        className="type-input scrollbar-hide block w-full resize-none overflow-y-auto bg-transparent px-2 pt-1.5 text-foreground outline-none placeholder:text-muted-foreground/55"
+        className={cn(textClassName, "scrollbar-hide block w-full resize-none overflow-y-auto bg-transparent px-2 pt-1.5 text-foreground outline-none placeholder:text-muted-foreground/55")}
       />
 
       <div className="mt-1 flex min-h-8 items-center gap-1">
@@ -320,23 +330,23 @@ export function PromptInput({
         ) : null}
 
         <Button
-          type={loading ? "button" : "submit"}
+          type={showStop ? "button" : "submit"}
           size="icon"
-          disabled={disabled || (loading ? !onStop : !canSubmit)}
-          aria-label={loading ? stopLabel : submitLabel}
-          onClick={loading ? onStop : undefined}
+          disabled={showStop ? (stopDisabled ?? disabled) : !canSubmit}
+          aria-label={showStop ? stopLabel : submitLabel}
+          onClick={showStop ? onStop : undefined}
           className="ml-auto size-8 rounded-full"
         >
           <AnimatePresence initial={false} mode="popLayout">
             <motion.span
-              key={loading ? "stop" : "send"}
+              key={showStop ? "stop" : "send"}
               initial={reduce ? { opacity: 1 } : { opacity: 0, y: 3, scale: 0.8 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3, scale: 0.8 }}
               transition={reduce ? { duration: 0 } : SPRING_SWAP}
               className="grid place-items-center"
             >
-              {loading ? (
+              {showStop ? (
                 <Square className="size-3 fill-current" />
               ) : (
                 <ArrowUp className="size-4" />

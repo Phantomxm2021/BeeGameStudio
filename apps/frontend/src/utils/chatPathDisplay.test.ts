@@ -1,31 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { shortenAbsolutePathsForDisplay } from './chatPathDisplay';
+import { filterPathsForDisplay } from './chatPathDisplay';
 
-describe('shortenAbsolutePathsForDisplay', () => {
-    it('keeps only the final name from Unix and Windows absolute paths', () => {
-        expect(shortenAbsolutePathsForDisplay(
-            'Read /Users/dev/work/game/docs/GDD.md then C:\\Users\\dev\\game\\src\\scene.tsx',
-        )).toBe('Read GDD.md then scene.tsx');
+describe('filterPathsForDisplay', () => {
+    it('hides absolute paths across platforms and project-relative paths', () => {
+        expect(filterPathsForDisplay('Read /Users/alice/Game/src/Player.ts and C:\\Users\\alice\\Game\\src\\World.json'))
+            .toBe('Read Player.ts and World.json');
+        expect(filterPathsForDisplay('Updated ./docs/GDD.md and src/scene/forest.json'))
+            .toBe('Updated GDD.md and forest.json');
+        expect(filterPathsForDisplay('Open file:///private/tmp/agent/output.json'))
+            .toBe('Open output.json');
     });
 
-    it('shortens absolute directories with a trailing slash', () => {
-        expect(shortenAbsolutePathsForDisplay('Working in /Users/dev/work/game/docs/'))
-            .toBe('Working in docs');
+    it('keeps only the final name of a directory path and hides internal workflow directories', () => {
+        expect(filterPathsForDisplay('Working in /Users/alice/work/game/docs/')).toBe('Working in docs');
+        expect(filterPathsForDisplay('Read .beegame/workflow/run-1/workspace/docs/GDD.md and review-context/run-1/review.json'))
+            .toBe('Read GDD.md and review.json');
     });
 
-    it('preserves URLs and relative paths', () => {
-        const value = 'Open https://example.com/assets/image.png and docs/GDD.md';
-        expect(shortenAbsolutePathsForDisplay(value)).toBe(value);
-    });
-
-    it('preserves user-facing root-relative routes', () => {
-        const value = 'Request /api/projects/current';
-        expect(shortenAbsolutePathsForDisplay(value)).toBe(value);
-    });
-
-    it('hides internal workflow storage paths while keeping their file names', () => {
-        expect(shortenAbsolutePathsForDisplay(
-            'Read .beegame/workflow/foundation-authoring/run-1/workspace/docs/GDD.md and review-context/run-1/review.json',
-        )).toBe('Read GDD.md and review.json');
+    it('does not rewrite URLs or ordinary slash-separated prose', () => {
+        expect(filterPathsForDisplay('See https://example.com/docs and natural/intentional/alive.'))
+            .toBe('See https://example.com/docs and natural/intentional/alive.');
+        expect(filterPathsForDisplay('Request /api/projects/current')).toBe('Request /api/projects/current');
     });
 });

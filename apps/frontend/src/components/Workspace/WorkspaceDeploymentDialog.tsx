@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Check, Copy, ExternalLink, FileText, RefreshCw, Rocket, X } from 'lucide-react';
+import { Check, Copy, ExternalLink, FileText, RefreshCw, Rocket } from 'lucide-react';
 import { api, type BeeGameDeploymentPayload, type BeeGameDeploymentReadiness } from '../../services/api';
 import { API_BASE_URL } from '../../services/apiClient';
+import { AnimatedBadge, type AnimatedBadgeStatus } from '../beui/registry/components/motion/animated-badge';
 import { Button } from '../beui/project-button';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../beui/motion/tabs';
+import { CloseIconButton } from '../ui/CloseIconButton';
+import { Dialog, DialogContent, DialogTitle } from '../ui/dialog';
 
 export interface WorkspaceDeploymentDialogProps {
   projectId: string;
@@ -40,6 +43,13 @@ const statusLabel = (status: BeeGameDeploymentPayload['status'] | undefined, lab
   if (status === 'building') return labels.deploymentBuilding;
   if (status === 'publishing') return labels.deploymentPublishing;
   return labels.deploymentQueued;
+};
+
+const statusTone = (status: BeeGameDeploymentPayload['status'] | undefined): AnimatedBadgeStatus => {
+  if (status === 'succeeded') return 'success';
+  if (status === 'failed') return 'danger';
+  if (status === 'queued' || status === 'building' || status === 'publishing') return 'loading';
+  return 'neutral';
 };
 
 export function WorkspaceDeploymentDialog({
@@ -89,56 +99,74 @@ export function WorkspaceDeploymentDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={open => !open && onClose()}>
-      <DialogContent className="max-h-[min(720px,calc(100dvh-32px))] max-w-2xl overflow-y-auto bg-[var(--popover)] p-6 text-[var(--text-primary)]">
-        <Button type="button" variant="ghost" size="icon" aria-label={labels.close || 'Close'} onClick={onClose} className="absolute right-4 top-4 text-[var(--text-secondary)]"><X className="h-4 w-4" /></Button>
+      <DialogContent className="flex h-[min(680px,calc(100dvh-32px))] max-h-[calc(100dvh-32px)] max-w-2xl flex-col overflow-hidden p-5 text-foreground sm:p-6">
+        <CloseIconButton label={labels.close || 'Close'} onClick={onClose} className="absolute right-4 top-4 text-[var(--text-secondary)]" />
         <DialogTitle className="type-title-2 pr-12">{labels.deploy}</DialogTitle>
-        <DialogDescription className="type-callout mt-2 text-[var(--text-secondary)]">{labels.deploymentDialogDescription}</DialogDescription>
-        <div className="mt-4 space-y-2 type-footnote" aria-live="polite">
-          {checking ? <p role="status">{labels.deploymentChecking}</p> : null}
-          <p className="text-[var(--text-secondary)]">{labels.deploymentVerificationScope}</p>
-          {readiness?.workflow?.phase === 'ACCEPTANCE' && readiness.workflow.status === 'needs_action' ?
-            <p className="text-[var(--text-secondary)]">{labels.deploymentAcceptanceRequired}</p> : null}
-          {readiness?.destination === 'remote' ? <p className="text-[var(--text-secondary)]">{labels.deploymentPublicNotice}</p> : null}
-          {readiness?.destination === 'local' ? <p className="text-[var(--destructive)]">{labels.deploymentNotConfigured}</p> : null}
-          {readiness && !readiness.allowed ? <div role="alert"><p>{labels.deploymentBlocked}</p><ul className="mt-1 list-disc pl-5">{readiness.issues.map(issue => <li key={issue}>{issue}</li>)}</ul></div> : null}
-          {error ? <p role="alert" className="whitespace-pre-wrap text-[var(--destructive)]">{error}</p> : null}
-          {!busy && !checking && (error || !readiness?.allowed) ? <Button variant="link" onClick={() => setCheckVersion(value => value + 1)}>{labels.deploymentRecheck}</Button> : null}
-        </div>
+        <Tabs defaultValue="publish" className="mt-5 flex-1">
+          <TabsList aria-label={labels.deploy}>
+            <TabsTrigger value="publish">{labels.deploy}</TabsTrigger>
+            <TabsTrigger value="history">{labels.deploymentVersions}</TabsTrigger>
+          </TabsList>
 
-        <div className="mt-6 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <div className="type-caption-1 text-[var(--text-muted)]">{labels.deploymentLatest}</div>
-              <div className="mt-2 flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${latest?.status === 'succeeded' ? 'bg-[var(--success)]' : latest?.status === 'failed' ? 'bg-[var(--destructive)]' : latest ? 'bg-[var(--warning)]' : 'bg-[var(--text-disabled)]'}`} />
-                <span className="type-headline truncate">{latest ? statusLabel(latest.status, labels) : labels.deploymentNotPublished}</span>
-              </div>
-              {latest?.deployedAt || latest?.updatedAt ? <div className="type-footnote mt-1 text-[var(--text-muted)]">{formatTime(latest.deployedAt || latest.updatedAt)}</div> : null}
+          <TabsContent value="publish" className="space-y-4 overflow-y-auto pt-4">
+            <div className="space-y-2 type-footnote" aria-live="polite">
+              {checking ? <p role="status" className="text-muted-foreground">{labels.deploymentChecking}</p> : null}
+              {readiness?.destination === 'local' ? <p className="text-destructive">{labels.deploymentNotConfigured}</p> : null}
+              {readiness && !readiness.allowed ? <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-3"><p>{labels.deploymentBlocked}</p><p className="mt-1 text-muted-foreground">{labels.deploymentVerificationScope}</p><ul className="mt-1 list-disc pl-5">{readiness.issues.map(issue => <li key={issue}>{issue}</li>)}</ul></div> : null}
+              {error ? <p role="alert" className="whitespace-pre-wrap text-destructive">{error}</p> : null}
+              {!busy && !checking && (error || !readiness?.allowed) ? <Button variant="outline" size="sm" onClick={() => setCheckVersion(value => value + 1)}>{labels.deploymentRecheck}</Button> : null}
             </div>
-            <Button type="button" aria-label={isDeploying ? labels.deploying : latest ? labels.redeploy : labels.deploy} onClick={() => void perform(onDeploy)} disabled={!canPublish} className="h-9 shrink-0 rounded-full">
-              {isDeploying ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
-              {isDeploying ? labels.deploying : latest ? labels.redeploy : labels.deploy}
-            </Button>
-          </div>
-          {busy || activeStatus ? <div role="status" className="mt-4 space-y-2">
-            <div className="flex gap-2">{(['queued', 'building', 'publishing'] as const).map(status => <div key={status} className={`h-1 flex-1 rounded-full ${activeStatus === status ? 'animate-pulse bg-[var(--text-primary)]' : 'bg-[var(--border)]'}`} />)}</div>
-            <p className="type-footnote text-[var(--text-secondary)]">{statusLabel(activeStatus || 'queued', labels)} · {labels.deploymentBackground}</p>
-          </div> : null}
-          {latest?.status === 'succeeded' && latestUrl ? <Button variant="outline" className="mt-3 rounded-full" onClick={() => {
-            void navigator.clipboard.writeText(latestUrl).then(() => setCopied(true)).catch(reason => setError(String(reason)));
-          }}>{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}{copied ? labels.deploymentCopied : labels.deploymentCopyLink}</Button> : null}
-          {failureLog ? <pre className="type-code-sm mt-3 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[var(--destructive)]">{failureLog}</pre> : latestUrl ? <div className="mt-3 flex items-center justify-between gap-3 text-[var(--text-secondary)]"><span className="truncate">{latestUrl}</span><Button type="button" variant="ghost" size="icon" aria-label={labels.openLive} onClick={() => onOpenExternal?.(latestUrl)}><ExternalLink className="h-4 w-4" /></Button></div> : <p className="type-footnote mt-3 text-[var(--text-muted)]">{labels.deploymentNotPublishedHint}</p>}
-          {failureLog && onFixDeploymentFailure ? <Button type="button" variant="link" onClick={() => void perform(onFixDeploymentFailure)} disabled={busy} className="mt-3 text-[var(--info)]">{labels.fixBuildErrors}</Button> : null}
-        </div>
 
-        <div className="mt-6">
-          <div className="type-caption-1 mb-3 text-[var(--text-muted)]">{labels.deploymentVersions}</div>
-          {deployments.length > 0 ? <div className="space-y-2">{deployments.map((deployment, index) => {
-            const deploymentUrl = normalizeUrl(deployment.url);
-            const canRollback = index > 0 && deployment.status === 'succeeded' && Boolean(onRollback);
-            return <div key={deployment.id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2"><div className="flex min-w-0 items-center gap-3"><FileText className="h-4 w-4 shrink-0 text-[var(--text-muted)]" /><div className="min-w-0"><div className="type-callout truncate">{labels.version} {deployments.length - index}</div><div className="type-footnote truncate text-[var(--text-muted)]">{statusLabel(deployment.status, labels)} · {formatTime(deployment.deployedAt || deployment.updatedAt)}</div></div></div><div className="flex shrink-0 items-center gap-2">{deploymentUrl ? <Button type="button" variant="ghost" size="icon" aria-label={labels.open} onClick={() => onOpenExternal?.(deploymentUrl)}><ExternalLink className="h-4 w-4" /></Button> : null}{canRollback ? <Button type="button" variant="link" disabled={isDeploying} onClick={() => void onRollback?.(deployment.id)} className="text-[var(--info)]">{labels.rollback || 'Rollback'}</Button> : null}</div></div>;
-          })}</div> : <div className="rounded-lg border border-[var(--border)] px-3 py-4 text-[var(--text-muted)]">{labels.deploymentNoVersions}</div>}
-        </div>
+            <div className="rounded-xl border border-border bg-card p-4 sm:p-5">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="type-caption-1 text-muted-foreground">{labels.deploymentLatest}</div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <AnimatedBadge status={statusTone(latest?.status)} size="sm" contentKey={latest?.status ?? 'unpublished'}>
+                      {latest ? statusLabel(latest.status, labels) : labels.deploymentNotPublished}
+                    </AnimatedBadge>
+                  </div>
+                  {latest?.deployedAt || latest?.updatedAt ? <div className="type-footnote mt-1 text-muted-foreground">{formatTime(latest.deployedAt || latest.updatedAt)}</div> : null}
+                </div>
+                <Button type="button" aria-label={isDeploying ? labels.deploying : latest ? labels.redeploy : labels.deploy} onClick={() => void perform(onDeploy)} disabled={!canPublish} className="shrink-0">
+                  {isDeploying ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}
+                  {isDeploying ? labels.deploying : latest ? labels.redeploy : labels.deploy}
+                </Button>
+              </div>
+
+              {busy || activeStatus ? <div role="status" className="mt-4 flex flex-wrap items-center gap-2">
+                {!activeStatus ? <AnimatedBadge status="loading" size="sm">{statusLabel('queued', labels)}</AnimatedBadge> : null}
+                <p className="type-footnote text-muted-foreground">{labels.deploymentBackground}</p>
+              </div> : null}
+              {failureLog ? <pre className="type-code-sm mt-3 max-h-32 overflow-auto whitespace-pre-wrap break-words text-destructive">{failureLog}</pre> : null}
+              {failureLog && onFixDeploymentFailure ? <Button type="button" variant="outline" size="sm" onClick={() => void perform(onFixDeploymentFailure)} disabled={busy} className="mt-3">{labels.fixBuildErrors}</Button> : null}
+            </div>
+
+            {latestUrl ? <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="type-caption-1 text-muted-foreground">{labels.openLive}</div>
+                <div className="type-callout truncate" title={latestUrl}>{latestUrl}</div>
+              </div>
+              <Button type="button" variant="ghost" size="icon" aria-label={labels.openLive} onClick={() => onOpenExternal?.(latestUrl)}><ExternalLink className="h-4 w-4" /></Button>
+              <Button type="button" variant="outline" size="icon" aria-label={copied ? labels.deploymentCopied : labels.deploymentCopyLink} onClick={() => {
+                void navigator.clipboard.writeText(latestUrl).then(() => setCopied(true)).catch(reason => setError(String(reason)));
+              }}>{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}</Button>
+            </div> : null}
+          </TabsContent>
+
+          <TabsContent value="history" className="space-y-2 overflow-y-auto pt-4">
+            {deployments.length > 0 ? <div className="space-y-2">{deployments.map((deployment, index) => {
+              const deploymentUrl = normalizeUrl(deployment.url);
+              const canRollback = index > 0 && deployment.status === 'succeeded' && Boolean(onRollback);
+              return <div key={deployment.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-3 py-2.5"><div className="flex min-w-0 items-center gap-3"><FileText className="h-4 w-4 shrink-0 text-muted-foreground" /><div className="min-w-0"><div className="type-callout truncate">{labels.version} {deployments.length - index}</div><div className="mt-1"><AnimatedBadge status={statusTone(deployment.status)} size="sm" contentKey={deployment.status}>{statusLabel(deployment.status, labels)}</AnimatedBadge></div><div className="type-footnote mt-1 truncate text-muted-foreground">{formatTime(deployment.deployedAt || deployment.updatedAt)}</div></div></div><div className="flex shrink-0 items-center gap-2">{deploymentUrl ? <Button type="button" variant="ghost" size="icon" aria-label={labels.open} onClick={() => onOpenExternal?.(deploymentUrl)}><ExternalLink className="h-4 w-4" /></Button> : null}{canRollback ? <Button type="button" variant="outline" size="sm" disabled={isDeploying} onClick={() => void onRollback?.(deployment.id)}>{labels.rollback || 'Rollback'}</Button> : null}</div></div>;
+            })}</div> : <div className="flex min-h-full items-center justify-center py-4">
+              <div role="status" className="flex w-full flex-col items-center justify-center rounded-xl border border-border bg-card px-6 py-10 text-center">
+                <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground"><FileText className="h-5 w-5" /></span>
+                <p className="type-callout text-muted-foreground">{labels.deploymentNoVersions}</p>
+              </div>
+            </div>}
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );

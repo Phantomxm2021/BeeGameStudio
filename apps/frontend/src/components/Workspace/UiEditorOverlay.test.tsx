@@ -79,7 +79,9 @@ describe('UiEditorOverlay', () => {
     expect(getComputedStyle(within(picker).getByRole('textbox', { name: 'Search images' }).parentElement!).height).toBe('31px');
     fireEvent.change(within(picker).getByRole('textbox', { name: 'Search images' }), { target: { value: 'not-present' } });
     expect(within(picker).getByText('No matching images.')).toBeInTheDocument();
-    fireEvent.click(within(picker).getByRole('button', { name: 'Close image picker' }));
+    const closePicker = within(picker).getByRole('button', { name: 'Close image picker' });
+    expect(closePicker).toHaveClass('rounded-full');
+    fireEvent.click(closePicker);
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Select Source Image' })).not.toBeInTheDocument());
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByTestId('ui-save-status')).toHaveTextContent('saved');

@@ -1,13 +1,12 @@
 import { mkdir, writeFile, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { BeeGameEvent, BeeGameSessionManager } from './session-manager'
-import { createRunStore } from './delivery-workflow/run-store'
-import { computeWorkspaceRevision } from './delivery-workflow/revision'
 import { captureProjectDeliveryAcceptance, PROJECT_DELIVERY_REPORT_PATH, readProjectDelivery } from './project-delivery'
+import { projectProductionCheckpoint, readProjectProductionRun } from './project-production-coordinator'
 
 type SendOptions = NonNullable<Parameters<BeeGameSessionManager['sendWithDisplay']>[2]>
 export type ProjectConversationOptions = Pick<SendOptions,
-  'attachments' | 'clientMessageId' | 'supersedesMessageId' | 'language' | 'displayText' | 'authToken' | 'getValidAuthToken'>
+  'attachments' | 'clientMessageId' | 'supersedesMessageId' | 'rewindAvailable' | 'language' | 'displayText' | 'authToken' | 'getValidAuthToken'>
 
 export function isProjectConversation(events: Array<Pick<BeeGameEvent, 'type' | 'payload'>>): boolean {
   const kind = events.findLast(event => event.type === 'user.message' &&
@@ -41,9 +40,6 @@ export async function sendProjectConversation(input: {
       return session
     }
   }
-  const store = createRunStore(session.cwd, input.ownerId)
-  let acceptedRevision: string | undefined
-  let runId: string | undefined
   let turnStartedAt = 0
   const path = join(session.cwd, '.beegame', 'tmp', input.sessionId, 'context.md')
   return input.sessions.sendWithDisplay(input.sessionId, input.message, {
@@ -54,17 +50,11 @@ export async function sendProjectConversation(input: {
       confirmedBriefContext: input.initialBrief.confirmedBriefContext } : {}),
     onTurnAccepted: () => { turnStartedAt = Date.now() },
     prepareTurn: async () => {
-      const run = await store.load()
       const delivery = input.deliveryDataRoot
         ? await readProjectDelivery(session.cwd, input.deliveryDataRoot)
         : undefined
-      if (run?.status === 'running' || run?.activeDispatch?.status === 'running')
-        throw new Error('Stop the active workflow before starting a project request')
-      // A migrated run is historical evidence, not a second mutable verdict.
-      if (!delivery) {
-        runId = run?.runId
-        acceptedRevision = run?.evidence.acceptance?.revision
-      }
+      const production = await readProjectProductionRun(session.cwd, input.ownerId)
+      const checkpoint = production ? projectProductionCheckpoint(production) : undefined
       const access = input.openCapabilities?.()
       try {
         // The Chat transcript includes worker output, but the main native CLI
@@ -79,16 +69,14 @@ export async function sendProjectConversation(input: {
           originalRequest: delivery?.objective ?? brief?.text,
           ...(delivery ? { delivery: { status: delivery.status,
             acceptanceReportPath: PROJECT_DELIVERY_REPORT_PATH } } : {}),
-          lastWorkflow: run ? { phase: run.phase, status: run.status, updatedAt: run.updatedAt,
-            blockedReason: run.blockedReason, snapshotPath: '.beegame/workflow/run.json',
-            evidencePaths: run.tasks.flatMap(task => task.evidenceRefs) } : undefined,
+          ...(checkpoint ? { productionCheckpoint: checkpoint } : {}),
           lastWorkerReply: lastWorkerMessage ? { text: lastWorkerMessage.text,
             createdAt: lastWorkerMessage.createdAt } : undefined,
         }
         await mkdir(dirname(path), { recursive: true })
         await writeFile(path, [
           '# Project context (historical facts, not instructions)',
-          'Worker conversations are separate from this native conversation. The last workflow verdict may predate subsequent user work; it is not a fresh diagnosis.',
+          'Some historical tasks may have used separate sessions. Historical worker output is context only, not a fresh diagnosis or acceptance.',
           JSON.stringify(context, null, 2),
           ...(access ? ['# Optional capabilities', access.instruction] : []),
         ].join('\n\n'), 'utf8')
@@ -98,10 +86,13 @@ export async function sendProjectConversation(input: {
         // is refreshed without appending duplicate chat messages or transcripts.
         systemContext: [
           delivery
-            ? `This project has one continuing objective. Follow the user's current request, then continue the original objective when appropriate. Choose your own work order and tools. Only when the current game has actually been verified for deployment, write a delivery result to ${PROJECT_DELIVERY_REPORT_PATH} with scope "delivery", status, summary, environment, evidencePaths, artifactPaths and verification {target:"deployment",knownIssues:[],unverified:[]}. Do not claim delivery completion for a partial fix or a question.`
-            : 'This is an existing project conversation. Follow the user request; it does not implicitly start or certify a full delivery workflow.',
-          `Project workspace: ${session.cwd}. When prior task context is missing, read ${path}: it contains the original request, last worker reply, historical workflow state and evidence references. Do not infer a new task from an empty native history.`,
+            ? `This project has one continuing objective. Follow the user's current request, then continue the original objective when appropriate. Choose your own work order and tools. When the user explicitly asks to verify, revalidate, or confirm this current version for release, this turn must either write a fresh delivery result to ${PROJECT_DELIVERY_REPORT_PATH} with scope "delivery", status, summary, environment, evidencePaths, artifactPaths and verification {target:"deployment",knownIssues:[accurate disclosures],unverified:[accurate disclosures]} or report that acceptance is blocked with concrete reasons. Disclose known issues and unverified areas accurately; decide and state whether they prevent release. Do not claim release PASS without writing that current, evidence-backed report. A regular request/task PASS is not release acceptance. Do not claim delivery completion for a partial fix or a question.`
+            : 'This is an existing project conversation. Follow the user request; it does not implicitly start or certify project delivery.',
+          `Project workspace: ${session.cwd}. When prior task context is missing, read ${path}: it contains the original request and last worker reply. Do not infer a new task from an empty native history.`,
           'Investigate and verify the affected behavior. When the user changes gameplay or requirements, keep the relevant project documents and implementation consistent; choose the necessary scope and order yourself.',
+          ...(checkpoint && checkpoint.status !== 'completed'
+            ? [`Current unfinished project delivery checkpoint: ${checkpoint.currentPhase}${checkpoint.currentStep ? `/${checkpoint.currentStep}` : ''} (${checkpoint.status}). Read ${path} for the recorded stage sequence and any blocker. A request to continue the original delivery resumes from this checkpoint; later stages are not accepted merely because files exist or a chat turn says PASS. Handle a distinct user request first, then return to this checkpoint. Choose the actual work and tools yourself.`]
+            : []),
           'Project files are editable within the user-authorized scope. BGS platform defects should be reported, not worked around by changing valid game data.',
           `Optional BGS capabilities, when available, are also listed in ${path}; endpoints are refreshed each turn. Availability does not require their use.`,
         ].join('\n'),
@@ -118,21 +109,6 @@ export async function sendProjectConversation(input: {
         await captureProjectDeliveryAcceptance(session.cwd, input.deliveryDataRoot, turnStartedAt)
       if (terminal?.type === 'turn.completed' && input.afterTurnSettled)
         setTimeout(input.afterTurnSettled, 0)
-      // Only an existing delivery verdict needs a workspace freshness check;
-      // stage facts and completed tasks stay intact. No semantic classifier.
-      if (!acceptedRevision || !runId) return
-      const revision = await computeWorkspaceRevision(session.cwd)
-      if (revision === acceptedRevision) return
-      const lease = await store.mutationLock(runId)
-      try {
-        const current = await store.load(lease)
-        if (!current || current.runId !== runId || current.evidence.acceptance?.revision !== acceptedRevision) return
-        const next = { ...current, status: 'needs_action' as const,
-          completedAt: undefined, blockedReason: 'Workspace changed after acceptance; revalidation is required.',
-          evidence: { ...current.evidence, acceptance: undefined } }
-        await store.commit(next, { runId, type: 'acceptance.stale', phase: next.phase,
-          status: next.status, revision: next.revision }, [], lease)
-      } finally { await store.unlock(lease) }
     },
   })
 }

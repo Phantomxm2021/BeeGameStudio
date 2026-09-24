@@ -35,10 +35,8 @@ describe('sanitizeWorkflowDisplayMessage', () => {
 })
 
 describe('projectWorkflowCurrentMessage', () => {
-  test('projects native review progress without exposing payloads', () => {
-    for (const value of ['模型响应 6 · Read docs/GDD.md', '模型响应 6 · 正在接收模型响应（流事件 123）', '模型响应 7 · StructuredOutput'])
-      expect(projectWorkflowCurrentMessage({ value, phase: 'DOCUMENT_REVIEW', documentStep: 'FOUNDATION_REVIEW' })).toBe(value)
-    for (const value of ['模型响应 6 · Read /Users/private/file', '模型响应 6 · Read ../secret', '模型响应 6 · arbitrary prose', '模型响应 6 · Read docs/GDD.md\nsecret'])
+  test('does not guess reviewer status from localized prose', () => {
+    for (const value of ['模型响应 6 · Read docs/GDD.md', 'Reading', '읽는 중', 'モデルの応答'])
       expect(projectWorkflowCurrentMessage({ value, phase: 'DOCUMENT_REVIEW', documentStep: 'FOUNDATION_REVIEW' })).toBe('')
   })
   test('hides raw reviewer and reviser prose from the foundation review card', () => {
@@ -51,35 +49,10 @@ describe('projectWorkflowCurrentMessage', () => {
 })
 
 describe('projectWorkflowDisplayReason', () => {
-  test.each([
-    ['Author reached its active-time limit.', '运行时间上限'],
-    ['Author reached its no-document-progress limit.', '未发生内容变化'],
-    ['Author reached its output-token limit.', '输出 token 上限'],
-  ])('explains preserved Author budget pauses: %s', (reason, detail) => {
-    const projection = projectWorkflowDisplayReason(reason + ' Working files and usage are preserved.')!
-    expect(projection.code).toBe('workflow_blocked')
-    expect(projection.message).toContain(detail)
-    expect(projection.message).toContain('草稿和用量已保留')
-    expect(projection.message).toContain('不会自动重试')
-    expect(projectWorkflowDisplayReason(projection)).toEqual(projection)
-  })
-  test('does not treat arbitrary worker text as an Author budget pause', () => {
-    expect(projectWorkflowDisplayReason('worker says Author reached its active-time limit.')?.message)
-      .not.toContain('草稿和用量已保留')
-  })
-  test.each([
-    ['user stopped workflow', 'user_stopped'],
-    [
-      'foundation audit derivation failed: missing document',
-      'derivation_failed',
-    ],
-    ['dispatch failed: worker transport unavailable', 'dispatch_failed'],
-    ['provider request failed: upstream unavailable', 'provider_failed'],
-  ] as const)('projects %s with a safe technical detail', (reason, code) => {
+  test.each(['user stopped workflow', 'provider request failed', '작업 실패', '処理に失敗'])('does not classify free-text reason: %s', reason => {
     const projection = projectWorkflowDisplayReason(reason)
-
-    expect(projection?.code).toBe(code)
-    expect(projection?.message).toBeTruthy()
+    expect(projection?.code).toBe('workflow_blocked')
+    expect(projection?.message).toBe('Workflow is blocked and needs attention.')
     expect(projection?.message).not.toContain(reason)
     expect(projection?.detail).toBe(reason)
     expect(projection?.diagnosticId).toMatch(/^workflow-[0-9a-f]{12}$/)
@@ -115,16 +88,16 @@ describe('projectWorkflowDisplayReason', () => {
     expect(projectWorkflowDisplayReason(projected)).toEqual(projected)
   })
 
-  test('preserves an existing diagnostic id outside the user-facing summary', () => {
+  test('does not infer a diagnostic id from prose', () => {
     const projection = projectWorkflowDisplayReason(
       '当前项目的工作流状态无效。诊断编号：trace-12345678',
     )
 
-    expect(projection).toMatchObject({ diagnosticId: 'trace-12345678' })
+    expect(projection?.diagnosticId).toMatch(/^workflow-[0-9a-f]{12}$/)
     expect(projection?.message).not.toContain('trace-12345678')
   })
 
-  test('projects a revision scope failure with actionable structured context', () => {
+  test('preserves structured context without classifying raw failure prose', () => {
     const raw =
       'foundation revision validation failed: admitted issue fix target is outside the authorized patch scope'
     const projection = projectWorkflowDisplayReason(raw, {
@@ -135,9 +108,8 @@ describe('projectWorkflowDisplayReason', () => {
     })
 
     expect(projection).toMatchObject({
-      code: 'revision_validation_failed',
-      message:
-        'Foundation revision validation failed: the document changed outside the authorized scope.',
+      code: 'workflow_blocked',
+      message: 'Workflow is blocked and needs attention.',
       stage: 'DOCUMENT_REVIEW',
       taskId: 'revision:docs/ASSET_PLAN.md',
       documentPath: 'docs/ASSET_PLAN.md',

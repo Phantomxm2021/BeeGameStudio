@@ -39,14 +39,15 @@ describe('API normalization', () => {
       active_agents: [' worker '],
       acceptance: { status: 'not_run' },
       workflow: { runId: 'run-1', status: 'running' },
-    })).toMatchObject({
+    } as never)).toMatchObject({
       project_id: 'project-1',
       phase: 'IMPLEMENTATION',
       blocked: false,
       active_agents: ['worker'],
       acceptance: { status: 'not_run' },
-      workflow: { runId: 'run-1', status: 'running' },
     })
+    expect(normalizeProjectBaselineStatusPayload({ workflow: { status: 'running' } } as never))
+      .not.toHaveProperty('workflow')
   })
 
   it('keeps only canonical tool-permission fields', () => {

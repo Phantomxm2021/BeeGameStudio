@@ -60,9 +60,6 @@ export const formatBeeGamePermissionSummary = (permission: PermissionLike): stri
     const command = String(input.command || '').trim();
     const path = String(input.path || input.file_path || input.notebook_path || '').trim();
     const target = command || compactPermissionPath(path);
-    if (content.includes('was blocked') && content.includes('allowed working directories')) {
-        return `${content} This is a workspace boundary. Change the session workspace if BeeGame should operate there.`;
-    }
     if (target) {
         return `BeeGame requests ${permission.title || 'tool access'}:\n${target}`;
     }

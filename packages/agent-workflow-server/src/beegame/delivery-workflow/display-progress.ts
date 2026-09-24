@@ -70,6 +70,8 @@ export function projectDeliveryProgress(
       ? 'INITIAL_DRAFTING'
       : workflow.documentStep === 'FOUNDATION_REVIEW'
         ? 'INITIAL_REVIEW'
+        : workflow.documentStep === 'FOUNDATION_REVISION'
+          ? 'REPAIRING'
         : workflow.documentStep === 'CHECKLIST_DRAFTING'
           ? 'CHECKLIST_DRAFTING'
           : undefined

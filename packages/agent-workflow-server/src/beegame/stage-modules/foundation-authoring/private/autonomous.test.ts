@@ -68,6 +68,7 @@ test('native failure preserves work and billing; resume remains explicit and ide
   const paused = await until(() => stage.getResult(handle), closed)
   expect(paused.status).toBe('needs_action')
   expect(paused.status === 'needs_action' && paused.reason).toContain('complete metered result')
+  expect(paused.status === 'needs_action' && paused.reason).toContain('model_failed')
   expect(paused.timing!.currentCallElapsedMs).toBe(0)
   expect(paused.timing!.historicalElapsedMs).toBeGreaterThanOrEqual(40)
   expect(f.submissions).toHaveLength(1)
@@ -100,13 +101,16 @@ test('autonomous author invokes one complete file bundle and preserves the publi
   expect(calls).toBe(1); expect(f.submissions).toHaveLength(1)
 })
 
-test('the task prompt is a natural document assignment without an audit policy', () => {
+test('the task prompt makes document coherence part of authoring without prescribing delegation', () => {
   const prompt = autonomousAuthorPrompt('zh')
   expect(prompt).toContain('requirements.md contains the confirmed game requirements')
   expect(prompt).toContain('Use your own judgment')
+  expect(prompt).toContain('substantive omissions and cross-document contradictions')
+  expect(prompt).toContain('Choose the depth, tools and work order yourself, including whether to collaborate')
   expect(prompt).toContain('User response language: zh')
   expect(prompt).toContain('thinking/reasoning summaries')
-  expect(prompt).not.toMatch(/audit|review|consistency check|finish immediately|GDD\.md first|Agent tool|delegat|run_in_background|expected_output_files|\.reference|authoring-reference|deliveryInterfaces|Attempt policy/i)
+  expect(prompt).not.toContain('StructuredOutput')
+  expect(prompt).not.toMatch(/finish immediately|GDD\.md first|Agent tool|delegat|run_in_background|expected_output_files|\.reference|authoring-reference|deliveryInterfaces|Attempt policy/i)
 })
 
 test('the finishing prompt naturally continues useful existing work', () => {
@@ -114,7 +118,9 @@ test('the finishing prompt naturally continues useful existing work', () => {
   expect(prompt).toContain('Preserve useful completed work')
   expect(prompt).toContain('thinking/reasoning summaries')
   expect(prompt).toContain('Use your own judgment')
-  expect(prompt).not.toMatch(/audit|review|consistency|repeat the check|finish immediately/i)
+  expect(prompt).toContain('checking the whole set for substantive omissions and cross-document contradictions')
+  expect(prompt).toContain('Choose the depth, tools and work order yourself, including whether to collaborate')
+  expect(prompt).not.toMatch(/one concise|finish immediately|do not repeat/i)
 })
 
 test('native author submits one file-agent call without delegation policy', async () => {
@@ -136,8 +142,42 @@ test('native author submits one file-agent call without delegation policy', asyn
   expect(result.report?.status).toBe('completed')
   expect(captured.writablePaths).toEqual([...CANONICAL_FOUNDATION_DOCUMENTS])
   expect(captured.readOnlyPaths).toEqual(['requirements.md', '.beegame-attachments'])
+  expect(captured.schema).toBeUndefined()
   expect(captured).not.toHaveProperty('delegateOutputPaths')
   expect(captured).not.toHaveProperty('delegatePrerequisitePaths')
+})
+
+test('native author accepts the CLI final summary without a structured-output envelope', async () => {
+  const f = await fixture()
+  const result = await runAutonomousAuthor({
+    configuration: f.config.model,
+    workspacePath: f.config.workspacePath,
+    logPath: join(f.config.workspacePath, 'author.log'),
+    signal: new AbortController().signal,
+    onUsage: async () => {},
+    onProgress: async () => {},
+  }, async input => {
+    await input.onMessage?.({ type: 'result', modelUsage: { fixture: { inputTokens: 3, outputTokens: 2 } } })
+    return { result: { result: 'Eight documents are written; review should continue next.' },
+      completion: { scope: 'direct-child', pid: null, exitCode: 0, signalCode: null, stdoutDrained: true, termination: 'term_requested' } }
+  })
+  expect(result.report).toEqual({ status: 'completed', summary: 'Eight documents are written; review should continue next.' })
+  expect(result.usage?.total_tokens).toBe(5)
+})
+
+test('native author does not reject authored files when the terminal omits prose', async () => {
+  const f = await fixture()
+  const result = await runAutonomousAuthor({
+    configuration: f.config.model, workspacePath: f.config.workspacePath,
+    logPath: join(f.config.workspacePath, 'author.log'),
+    signal: new AbortController().signal,
+    onUsage: async () => {}, onProgress: async () => {},
+  }, async input => {
+    await input.onMessage?.({ type: 'result', modelUsage: { fixture: { inputTokens: 3, outputTokens: 2 } } })
+    return { result: {}, completion: { scope: 'direct-child', pid: null, exitCode: 0,
+      signalCode: null, stdoutDrained: true, termination: 'none' } }
+  })
+  expect(result.report).toEqual({ status: 'completed', summary: 'Document drafting completed.' })
 })
 
 test('partial work remains private; stop preserves files and explicit resume continues the bundle', async () => {

@@ -4,7 +4,7 @@ import type { DeliveryRun, AuthorStageLink } from './types'
 import type { RunStore, WorkflowLock } from './run-store'
 
 type AuthorPort = ReturnType<typeof createFoundationAuthoring>
-const HANDOFF_REASON = 'Foundation documents are complete. Document review handoff is awaiting stage acceptance.'
+export const FOUNDATION_AUTHOR_REVIEW_HANDOFF_REASON = 'Foundation documents are complete. Document review handoff is awaiting stage acceptance.'
 
 function controlCommandId(link: AuthorStageLink): string {
   return `${link.requestId}:${link.control.action}:${link.control.sequence}`
@@ -87,7 +87,8 @@ export function createFoundationAuthoringLink(input: { store: RunStore; author: 
       if (link.result && link.result.resultId !== result.resultId) throw new Error('Author result changed after acceptance')
       return { ...run, authorStage: { ...link, status: 'completed', result: structuredClone(result) },
         phase: 'DOCUMENT_REVIEW', documentStep: 'FOUNDATION_REVIEW', status: stopped ? 'stopped' : 'needs_action',
-        thinking: 'idle', currentMessage: HANDOFF_REASON, blockedReason: stopped ? link.control.reason : HANDOFF_REASON,
+        thinking: 'idle', currentMessage: FOUNDATION_AUTHOR_REVIEW_HANDOFF_REASON,
+        blockedReason: stopped ? link.control.reason : FOUNDATION_AUTHOR_REVIEW_HANDOFF_REASON,
         revision: { ...run.revision, document: result.documentRevision, workspace: result.workspaceRevision } }
     }
     const status = outcome.status === 'running' ? (stopped ? 'needs_action' : 'running') : outcome.status

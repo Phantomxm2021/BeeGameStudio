@@ -35,6 +35,14 @@ type BeeGameSession = {
   updatedAt: string
 }
 
+export type BeeGameQueuedMessage = {
+  id: string
+  text: string
+  createdAt: string
+  state: 'pending' | 'dispatching'
+  attachmentCount: number
+}
+
 type BeeGameEvent = {
   id: number
   sessionId: string
@@ -169,6 +177,7 @@ type ChatHistoryCursorState = BeeGameTranscriptPage['page'] & {
   latestEventId: number
 }
 const chatHistoryCursorByProject = new Map<string, ChatHistoryCursorState>()
+const stoppedTurnsByProject = new Map<string, Set<string>>()
 
 type BeeGameDiscoveredArtifact = {
   path: string
@@ -539,18 +548,8 @@ export const beeGameAdapter = {
   async deleteProject(projectId: string): Promise<{ ok: boolean }> {
     await deleteProjectMetadata(projectId)
     chatHistoryCursorByProject.delete(projectId)
+    stoppedTurnsByProject.delete(projectId)
     return { ok: true }
-  },
-
-  async createReviewCopy(projectId: string): Promise<{
-    project: Project
-    runId: string
-    phase: string
-  }> {
-    return postJson(
-      `/api/projects/${encodeURIComponent(projectId)}/review-copy`,
-      {},
-    )
   },
 
   async sendMessage(data: {
@@ -563,7 +562,7 @@ export const beeGameAdapter = {
     const handle = await ensureProjectSession(data.project_id)
     const { session } = handle
     const language = getCurrentUiLanguage()
-    await sendBeeGameInput(session.id, data.content, {
+    const result = await sendBeeGameInput(session.id, data.content, {
       clientMessageId: data.client_message_id,
       supersedesMessageId: data.supersedes_message_id,
       language,
@@ -572,9 +571,24 @@ export const beeGameAdapter = {
     return {
       command_id: session.id,
       task_id: session.id,
-      state: 'running',
+      state: result.queued ? 'queued' : 'running',
       trace_id: data.client_message_id || session.id,
     }
+  },
+
+  async listQueuedMessages(projectId: string): Promise<BeeGameQueuedMessage[]> {
+    const result = await getJson<{ messages: BeeGameQueuedMessage[] }>(
+      `/api/projects/${encodeURIComponent(projectId)}/queued-messages`,
+    )
+    return result.messages
+  },
+
+  async deleteQueuedMessage(projectId: string, messageId: string): Promise<void> {
+    await deleteJson(`/api/projects/${encodeURIComponent(projectId)}/queued-messages/${encodeURIComponent(messageId)}`)
+  },
+
+  async steerQueuedMessage(projectId: string, messageId: string): Promise<void> {
+    await postJson(`/api/projects/${encodeURIComponent(projectId)}/queued-messages/${encodeURIComponent(messageId)}/steer`, {})
   },
 
   async continueTask(data: {
@@ -597,13 +611,6 @@ export const beeGameAdapter = {
       state: 'resuming',
       trace_id: session.id,
     }
-  },
-
-  async resumeWorkflow(projectId: string): Promise<Record<string, unknown>> {
-    return postJson<Record<string, unknown>>(
-      `/api/projects/${encodeURIComponent(projectId)}/workflow/resume`,
-      { language: getCurrentUiLanguage() },
-    )
   },
 
   async requestProjectAction(data: {
@@ -848,7 +855,10 @@ export const beeGameAdapter = {
         ...(data.message ? { message: data.message } : {}),
       },
     )
-    if (result.resolved === false) throw new Error('This request is no longer pending. Refresh the conversation.')
+    if (result.resolved === false) throw Object.assign(
+      new Error('This request is no longer pending. Refresh the conversation.'),
+      { code: 'permission_not_pending' },
+    )
     return { ok: true }
   },
 
@@ -1288,7 +1298,7 @@ async function sendBeeGameInput(
     language?: BeeGameLanguage
     attachments?: ChatAttachmentPayload[]
   },
-): Promise<BeeGameSession> {
+): Promise<BeeGameSession & { queued?: boolean; queueId?: string }> {
   return postJson(
     `/api/beegame-sessions/${encodeURIComponent(sessionId)}/input`,
     {
@@ -1411,9 +1421,20 @@ function eventsToHistory(
   )
   const thoughtMessages = new Map<string, ProjectEventMessage>()
   const toolMessages = new Map<string, ProjectEventMessage>()
+  const compactionMessages = new Map<string, ProjectEventMessage>()
   const thinkingStartedAtByMessage = new Map<string, number>()
   const endedThoughts = new Set<string>()
   const messages = projectedMessages.flatMap(message => {
+    if (message.type === 'context_compaction' && message.message_id) {
+      const existing = compactionMessages.get(message.message_id)
+      if (existing) {
+        existing.content = message.content
+        existing.status = message.status
+        return []
+      }
+      compactionMessages.set(message.message_id, message)
+      return [message]
+    }
     if ((message.type === 'tool_start' || message.type === 'tool_end') && message.message_id) {
       const existing = toolMessages.get(message.message_id)
       if (existing) {
@@ -1475,11 +1496,13 @@ function eventsToHistory(
     turn_id: message.turn_id || message.turnId,
     timestamp: message.timestamp || Date.now(),
     sequence: message.sequence,
-    streamStatus: message.type === 'token' || (message.type === 'thought' && !endedThoughts.has(message.message_id || '')) ? 'streaming' : 'complete',
+    streamStatus: message.type === 'token' || (message.type === 'thought' && !endedThoughts.has(message.message_id || '')) || (message.type === 'context_compaction' && message.status === 'running') ? 'streaming' : 'complete',
     thinkingDurationMs: message.thinking_duration_ms,
     type:
       message.type === 'agent_message' || message.type === 'token'
         ? 'text'
+        : message.type === 'context_compaction'
+          ? 'system_status'
         : message.type === 'thought'
           ? 'thought'
         : message.type === 'tool_start' || message.type === 'tool_end'
@@ -1555,7 +1578,7 @@ function eventToProjectEventMessages(
     // A stage is a workflow concern, independent of whether its implementation
     // happens to be a native module or a delivery worker. It must therefore
     // take precedence over generic transport kinds such as `agent_message`.
-    ...(workflowStage ? { task_kind: `workflow_stage:${workflowStage}` } : {}),
+    ...(workflowStage && message.type !== 'context_compaction' ? { task_kind: `workflow_stage:${workflowStage}` } : {}),
   }))
 }
 
@@ -1606,11 +1629,30 @@ function eventToProjectEventMessagesBase(
       ]
     case 'system.status': {
       const subtype = getPayloadString(event, 'subtype')
+      const status = getPayloadString(event, 'status')
+      const compacting = subtype === 'status' && status === 'compacting'
+      const compacted = subtype === 'compact_boundary'
+      if (compacting || compacted) {
+        const parentToolUseId = getPayloadString(event, 'parentToolUseID') || getPayloadString(event, 'parent_tool_use_id')
+        return [{
+          type: 'context_compaction',
+          task_id: taskId,
+          project_id: projectId,
+          sender: 'system',
+          message_id: `beegame-compaction-${event.sessionId}-${event.turnId || 'session'}-${parentToolUseId}`,
+          turnId: event.turnId,
+          turn_id: event.turnId,
+          content: compacted ? 'compacted' : 'compacting',
+          status: compacted ? 'finished' : 'running',
+          timestamp: Date.parse(event.createdAt) || Date.now(),
+          message_type: 'system_status',
+          task_kind: 'context_compaction',
+        }]
+      }
       if (!['task_started', 'task_progress', 'task_notification'].includes(subtype)) return []
       const id = getPayloadString(event, 'toolUseID') || getPayloadString(event, 'tool_use_id') || getPayloadString(event, 'task_id')
       if (!id) return []
       const terminal = subtype === 'task_notification'
-      const status = getPayloadString(event, 'status')
       const type = terminal && status === 'completed' ? 'tool.completed' :
         terminal && ['failed', 'stopped', 'killed'].includes(status) ? 'tool.failed' : 'tool.progress'
       const usage = getPayloadRecord(event, 'usage')
@@ -1621,7 +1663,8 @@ function eventToProjectEventMessagesBase(
       ].filter(Boolean).join(' · ')
       const input = getPayloadRecord(event, 'input')
       return eventToProjectEventMessagesBase(projectId, { ...event, type,
-        payload: { ...event.payload, type, toolUseID: id, toolName: 'Agent',
+        payload: { ...event.payload, type, toolUseID: id,
+          toolName: getPayloadString(event, 'task_type') === 'local_bash' ? 'Task' : 'Agent',
           input: { ...input,
             ...(getPayloadString(event, 'prompt') ? { prompt: getPayloadString(event, 'prompt') } : {}),
             trace: [getPayloadString(event, 'subagentTrace'), activity].filter(Boolean).join('\n\n'),
@@ -1861,6 +1904,20 @@ function eventToProjectEventMessagesBase(
     case 'tool.failed': {
       const finishedInput = getPayloadRecord(event, 'input')
       const finishedTool = getPayloadString(event, 'toolName') || event.text
+      const backgroundResult = getPayloadRecord(event, 'nativeBackgroundTaskResult')
+      const backgroundToolUseID = typeof backgroundResult.toolUseID === 'string' ? backgroundResult.toolUseID : ''
+      if (finishedTool === 'TaskOutput' && backgroundToolUseID &&
+          ['completed', 'failed', 'stopped', 'killed'].includes(String(backgroundResult.status))) {
+        const failed = backgroundResult.status !== 'completed'
+        return eventToProjectEventMessagesBase(projectId, { ...event,
+          type: failed ? 'tool.failed' : 'tool.completed',
+          payload: { ...event.payload, type: failed ? 'tool.failed' : 'tool.completed',
+            toolName: backgroundResult.toolName === 'Task' ? 'Task' : 'Agent', toolUseID: backgroundToolUseID,
+            input: getPayloadRecord(event, 'backgroundAgentInput'),
+            output: typeof backgroundResult.result === 'string' ? backgroundResult.result : '',
+          },
+        }, workspacePath)
+      }
       const output =
         typeof event.payload?.output === 'string'
           ? event.payload.output
@@ -2015,14 +2072,73 @@ function normalizeBeeGameEvents(
     includePartialsWhenFinalExists: boolean
   },
 ): BeeGameEvent[] {
+  // A replacement turn keeps the immutable audit stream, but only the live
+  // branch belongs in Chat. Do this before grouping thoughts/tools by turn.
+  const liveEvents: BeeGameEvent[] = []
+  for (const event of events) {
+    if (event.type === 'user.message') {
+      const target = getPayloadString(event, 'supersedesMessageId') || getPayloadString(event, 'supersedes_message_id')
+      if (target) {
+        const index = liveEvents.findIndex(candidate => candidate.type === 'user.message' &&
+          (getPayloadString(candidate, 'clientMessageId') === target || `beegame-event-${candidate.id}` === target))
+        if (index >= 0) {
+          const currentTurnStart = [...liveEvents].reverse().find(candidate => candidate.type === 'turn.started' && candidate.turnId === event.turnId)
+          const targetTurnId = liveEvents[index]?.turnId
+          const start = targetTurnId
+            ? liveEvents.findIndex(candidate => candidate.type === 'turn.started' && candidate.turnId === targetTurnId)
+            : index
+          liveEvents.splice(start >= 0 ? start : index)
+          if (currentTurnStart) liveEvents.push(currentTurnStart)
+        }
+      }
+    }
+    liveEvents.push(event)
+  }
+  events = liveEvents
+  // Earlier persisted transcripts have a native TaskOutput result but no
+  // terminal task_notification. Reconcile only the SDK's structured task ID;
+  // never infer task completion from free-form terminal output.
+  const startedTasks = new Map<string, { toolUseID: string; toolName: 'Agent' | 'Task'; input: Record<string, unknown> }>()
+  events = events.map(event => {
+    if (event.type === 'system.status' && getPayloadString(event, 'subtype') === 'task_started') {
+      const taskId = getPayloadString(event, 'task_id')
+      const toolUseID = getPayloadString(event, 'toolUseID') || getPayloadString(event, 'tool_use_id')
+      if (taskId && toolUseID) startedTasks.set(taskId, {
+        toolUseID, toolName: getPayloadString(event, 'task_type') === 'local_bash' ? 'Task' : 'Agent',
+        input: getPayloadRecord(event, 'input'),
+      })
+      return event
+    }
+    if (event.type === 'system.status' &&
+        ['task_progress', 'task_notification'].includes(getPayloadString(event, 'subtype'))) {
+      const task = startedTasks.get(getPayloadString(event, 'task_id'))
+      if (task && event.payload) return { ...event, payload: { ...event.payload,
+        toolUseID: task.toolUseID,
+        ...(task.toolName === 'Task' ? { task_type: 'local_bash' } : {}),
+      } }
+      return event
+    }
+    if (event.type !== 'tool.completed' || getPayloadString(event, 'toolName') !== 'TaskOutput' ||
+        event.payload?.nativeBackgroundTaskResult) return event
+    const result = getPayloadRecord(event, 'nativeTaskResult')
+    const task = startedTasks.get(typeof result.taskId === 'string' ? result.taskId : '')
+    if (!task || !event.payload || !['completed', 'failed', 'stopped', 'killed'].includes(String(result.status))) return event
+    return { ...event, payload: { ...event.payload, nativeBackgroundTaskResult: {
+      toolUseID: task.toolUseID, toolName: task.toolName, status: result.status,
+      ...(typeof result.result === 'string' ? { result: result.result } : {}),
+    }, backgroundAgentInput: task.input } }
+  })
   events = coalesceLogicalAssistantMessages(events)
   const visible: BeeGameEvent[] = []
   const terminalEventByTurn = new Map<string, number>()
+  const stoppedEventByTurn = new Map<string, number>()
   for (const event of events) {
     if (!event.turnId || !isTurnTerminalEvent(event)) continue
     const existing = terminalEventByTurn.get(event.turnId)
     if (existing === undefined || event.id < existing)
       terminalEventByTurn.set(event.turnId, event.id)
+    if (event.type === 'session.stopped' || event.type === 'session.failed')
+      stoppedEventByTurn.set(event.turnId, event.id)
   }
   const seenUserMessages = new Set<string>()
   const turnsWithFinal = new Set(
@@ -2049,6 +2165,9 @@ function normalizeBeeGameEvents(
     }
   }
   for (const event of events) {
+    const stoppedAt = event.turnId ? stoppedEventByTurn.get(event.turnId) : undefined
+    if (stoppedAt !== undefined && event.id > stoppedAt && event.type === 'system.status' &&
+        ['task_started', 'task_progress'].includes(getPayloadString(event, 'subtype'))) continue
     if (isLateRuntimeEvent(event, terminalEventByTurn)) continue
     if (event.type !== 'assistant.partial') {
       flushPartial()
@@ -2069,7 +2188,8 @@ function normalizeBeeGameEvents(
     if (
       event.type === 'system.status' &&
       event.text.trim().toLowerCase() === 'system' &&
-      !['task_started', 'task_progress', 'task_notification'].includes(getPayloadString(event, 'subtype'))
+      !['task_started', 'task_progress', 'task_notification', 'compact_boundary'].includes(getPayloadString(event, 'subtype')) &&
+      !(getPayloadString(event, 'subtype') === 'status' && getPayloadString(event, 'status') === 'compacting')
     ) {
       continue
     }
@@ -2387,11 +2507,19 @@ function isLateRuntimeEvent(
 }
 
 function normalizeLiveEvents(
-  _projectId: string,
+  projectId: string,
   events: BeeGameEvent[],
 ): BeeGameEvent[] {
-  return normalizeBeeGameEvents(events, {
-    includeUserMessages: false,
+  const stopped = stoppedTurnsByProject.get(projectId) ?? new Set<string>()
+  stoppedTurnsByProject.set(projectId, stopped)
+  const visible = events.filter(event => {
+    if (event.turnId && (event.type === 'session.stopped' || event.type === 'session.failed'))
+      stopped.add(event.turnId)
+    return !(event.turnId && stopped.has(event.turnId) && event.type === 'system.status' &&
+      ['task_started', 'task_progress'].includes(getPayloadString(event, 'subtype')))
+  })
+  return normalizeBeeGameEvents(visible, {
+    includeUserMessages: true,
     includePartialsWhenFinalExists: true,
   })
 }
@@ -2412,6 +2540,7 @@ function baseMessage(
       ? getPayloadString(event, 'supersedesMessageId') ||
         getPayloadString(event, 'supersedes_message_id')
       : ''
+  const rewindAvailable = sender === 'user' && event.payload?.rewindAvailable === true
   const messageId =
     sender === 'beegame'
       ? getBeeGameAssistantMessageId(event)
@@ -2432,6 +2561,7 @@ function baseMessage(
     ...(supersedesMessageId
       ? { supersedes_message_id: supersedesMessageId }
       : {}),
+    ...(rewindAvailable ? { rewind_available: true } : {}),
     ...(getEventSources(event, 'sources') ? { sources: getEventSources(event, 'sources') } : {}),
     ...(getEventSources(event, 'citations') ? { citations: getEventSources(event, 'citations') } : {}),
     ...(event.turnId ? { turnId: event.turnId, turn_id: event.turnId } : {}),
@@ -3097,19 +3227,6 @@ function summarizePermissionRequest(
     input.path || input.file_path || input.notebook_path || '',
   ).trim()
   const target = command || path
-  if (
-    message.includes('was blocked') &&
-    message.includes('allowed working directories')
-  ) {
-    return {
-      title: 'Workspace boundary',
-      description: message,
-      blockReason:
-        'BeeGame attempted to access a path outside the active workspace.',
-      nextAction:
-        'Deny this request, or restart the backend with AGENT_WORKFLOW_WORKSPACE_PATH set to the directory BeeGame should operate in.',
-    }
-  }
   return {
     title: `${toolName} permission`,
     description: target ? `${toolName}: ${target}` : message,

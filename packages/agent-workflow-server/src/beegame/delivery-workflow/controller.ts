@@ -36,6 +36,7 @@ completeDocumentDraft,
 startChecklistDraftStage,
 } from './document-stage'
 import { assertNoRetiredFoundationReviewRun, assertNoRetiredFoundationWorker } from './retired-foundation-review'
+import { assertNoRetiredAuthorHandoff, assertNoRetiredAuthorRun } from './retired-foundation-author'
 import { createFoundationAuthoringLink } from './foundation-authoring-link'
 import { createFoundationReviewLink } from './foundation-review-link'
 import {
@@ -53,14 +54,13 @@ import {
 completeGameContentStage,
 startGameContentStage,
 } from './game-content-stage'
-import { RETIRED_FOUNDATION_AUTHOR } from './retired-foundation-author'
 import {
 computeDocumentRevision,
 computeResourceRevision,
 computeWorkspaceRevision,
 } from './revision'
 import { createRunStore } from './run-store'
-import { stopRun } from './recovery'
+import { retryRun, stopRun } from './recovery'
 import { transitionDeliveryRun } from './transition'
 import type {
 DeliveryRun,
@@ -73,7 +73,9 @@ CANONICAL_DOCUMENT_ARTIFACTS
 } from './types'
 import {
 confirmAcceptanceFromImplementation,
+confirmAcceptanceFromValidator,
 enterAcceptance,
+startAcceptance,
 } from './validation-stage'
 import {
 type WorkerTerminalResult
@@ -82,13 +84,19 @@ import { readRuntimeAcceptance } from './runtime-acceptance'
 export function createDeliveryWorkflowController(input: {
   workspacePath: string
   ownerId: string
+  /** Allows an internal production coordinator to keep its private state out
+   * of the retired user-facing workflow namespace. */
+  stateDirectory?: string
+  /** Preserve durable production work for recovery after a runtime restart. */
+  preserveRunOnDispose?: boolean
   workerPort: DeliveryWorkerPort
   assertWorkspaceIdle?: () => void
   author?: ReturnType<typeof createFoundationAuthoring>
   reviewer?: ReturnType<typeof createFoundationReviewer>
   handoffRecoveryGraceMs?: number
 }) {
-  const store = createRunStore(input.workspacePath, input.ownerId)
+  const store = createRunStore(input.workspacePath, input.ownerId,
+    input.stateDirectory ? { stateDirectory: input.stateDirectory } : undefined)
   const reviewLink = input.reviewer ? createFoundationReviewLink({ workspacePath: input.workspacePath,
     store, reviewer: input.reviewer,
     onCompleted: (run: DeliveryRun) => { void ensureProgress(run).catch(() => undefined) } }) : undefined
@@ -98,21 +106,17 @@ export function createDeliveryWorkflowController(input: {
     input.assertWorkspaceIdle?.()
     if (run.foundationReviewStage?.acceptedReview && run.status !== 'stopped' &&
         run.foundationReviewStage.control.action !== 'stop') {
-      const documentRevision = await computeDocumentRevision(
-        input.workspacePath,
-        run.confirmedBriefDigest,
-      )
       const next: DeliveryRun = {
         ...run,
-        phase: 'RESOURCE_PREPARATION',
-        documentStep: undefined,
+        phase: 'DOCUMENT_REVIEW',
+        documentStep: 'CHECKLIST_DRAFTING',
         status: 'running',
         activeDispatch: undefined,
         activeTaskId: undefined,
         tasks: [],
         revision: {
           ...run.revision,
-          document: documentRevision,
+          document: run.foundationReviewStage.acceptedReview.documentSetDigest,
           resource: undefined,
           content: undefined,
           implementation: undefined,
@@ -230,6 +234,7 @@ export function createDeliveryWorkflowController(input: {
         runId: run.runId,
         type: eventType,
         phase: run.phase,
+        ...(run.documentStep ? { documentStep: run.documentStep } : {}),
         status: run.status,
         revision: run.revision,
         activeTaskId: run.activeTaskId,
@@ -578,12 +583,7 @@ export function createDeliveryWorkflowController(input: {
           return
         }
         next = await persist(enterAcceptance(next), 'phase.entered')
-        next = await confirmAcceptanceFromImplementation({
-          run: next,
-          workspacePath: input.workspacePath,
-        })
-        if (next.phase === 'DELIVERY') next = transitionDeliveryRun(next, { type: 'delivery_completed' })
-        await persist(next, next.status === 'completed' ? 'run.completed' : 'acceptance.needs_action')
+        await resumeUnlocked(next)
       } else {
         await startNextImplementationTask({
           run: next,
@@ -594,6 +594,12 @@ export function createDeliveryWorkflowController(input: {
             persist(started, 'task.started').then(() => undefined),
         })
       }
+      return
+    }
+    if (result.workerType === 'acceptance-validator') {
+      const accepted = await confirmAcceptanceFromValidator({ run: next, workspacePath: input.workspacePath, terminal: result })
+      await persist(accepted.phase === 'DELIVERY' ? transitionDeliveryRun(accepted, { type: 'delivery_completed' }) : accepted,
+        accepted.phase === 'DELIVERY' ? 'run.completed' : 'acceptance.needs_action')
       return
     }
   }
@@ -699,10 +705,11 @@ export function createDeliveryWorkflowController(input: {
   }
 
   async function restartDocumentStage(
-    _run: DeliveryRun,
-    _reason: string,
-  ): Promise<never> {
-    throw new Error(RETIRED_FOUNDATION_AUTHOR)
+    run: DeliveryRun,
+    reason: string,
+  ): Promise<void> {
+    if (!reviewLink) throw new Error('Foundation Reviewer is required to recheck changed documents')
+    await reviewLink.restartFromWorkspace(run, reason)
   }
 
   async function ensureDirectImplementationTask(
@@ -898,24 +905,41 @@ export function createDeliveryWorkflowController(input: {
         await restartGameContent(run, 'accepted Scene/UI content changed before acceptance')
         return
       }
-      const accepted = await confirmAcceptanceFromImplementation({
-        run,
-        workspacePath: input.workspacePath,
-      })
-      await persist(
-        accepted.phase === 'DELIVERY' ? transitionDeliveryRun(accepted, { type: 'delivery_completed' }) : accepted,
-        accepted.phase === 'DELIVERY' ? 'run.completed' : 'acceptance.needs_action',
-      )
+      const implementation = await confirmAcceptanceFromImplementation({ run, workspacePath: input.workspacePath })
+      if (implementation.evidence.acceptance?.status !== 'passed') {
+        await persist({ ...run, status: 'needs_action', activeDispatch: undefined,
+          blockedReason: implementation.blockedReason ?? 'Implementation runtime evidence is incomplete; independent acceptance was not started.' },
+        'acceptance.needs_action')
+        return
+      }
+      const facts = await contractFactsFor(run)
+      await startAcceptance({ run, workspacePath: input.workspacePath, dispatcher,
+        checklistIds: facts.checklistIds, resourceIds: facts.resourceIds, contentIds: facts.contentIds })
     }
   }
 
   function resume(run: DeliveryRun): Promise<void> {
     return serialize(async () => {
-      const latest = await store.load()
+      let latest = await store.load()
       if (!latest || latest.runId !== run.runId) return
       if (isFoundationStageActive(latest)) {
         await progressPublicFoundation(latest, true)
         return
+      }
+      if (latest.status === 'stopped' && latest.phase === 'DOCUMENT_DRAFTING' && !latest.authorStage) {
+        assertNoRetiredAuthorRun(latest)
+        assertNoRetiredAuthorHandoff(await store.readEvents(), latest.runId)
+        await requireAuthorLink().start(latest)
+        return
+      }
+      if (latest.status === 'stopped' || latest.status === 'needs_action' ||
+          latest.status === 'blocked' || latest.status === 'failed') {
+        latest = await retryRun({
+          store,
+          runId: latest.runId,
+          workspacePath: input.workspacePath,
+          sessionIsOpen: dispatch => dispatcher.workerIsOpen(dispatch.dispatchId),
+        })
       }
       // Re-read durable state before legacy recognition; a stale caller must
       // not bypass retirement checks or overwrite a newly persisted public link.
@@ -1050,13 +1074,14 @@ export function createDeliveryWorkflowController(input: {
     stopFoundation,
     async dispose(): Promise<void> {
       try {
-        await serialize(async () => {
-          const current = await store.load()
-          if (current && current.status !== 'stopped' && (
-            isPublicStageActive(current) || current.activeDispatch?.status === 'running'
-          ))
-            await stopFoundation(current, 'service_shutdown')
-        })
+        if (!input.preserveRunOnDispose)
+          await serialize(async () => {
+            const current = await store.load()
+            if (current && current.status !== 'stopped' && (
+              isPublicStageActive(current) || current.activeDispatch?.status === 'running'
+            ))
+              await stopFoundation(current, 'service_shutdown')
+          })
       } finally { authorLink?.dispose(); reviewLink?.dispose() }
     },
     resume,

@@ -42,11 +42,9 @@ export function projectWorkflowCurrentMessage(input: {
     input.phase === 'DOCUMENT_REVIEW' &&
       input.documentStep === 'FOUNDATION_REVIEW'
   ) {
-    // Admit the native runner's bounded progress vocabulary, never worker prose.
-    const value = typeof input.value === 'string' ? input.value : ''
-    return /^模型响应 \d+ · (?:正在接收模型响应(?:（流事件 \d+）)?|(?:Read|Glob|Grep|Edit|Write|StructuredOutput|Bash|Agent|TaskOutput|TodoWrite)(?: [a-zA-Z0-9_./-]+)?)$/.test(value)
-      && !value.includes('..') && !/ · \w+ \/| · \w+ [A-Za-z]:/.test(value)
-      ? value : ''
+    // Reviewer prose is not a status protocol. The stage card already has
+    // structured phase/status; avoid guessing from localized progress text.
+    return ''
   }
   return typeof input.value === 'string'
     ? sanitizeWorkflowDisplayMessage(input.value)
@@ -121,9 +119,7 @@ export function projectWorkflowDisplayReason(
   value: unknown,
   context: WorkflowDisplayReasonContext = {},
 ): WorkflowDisplayReason | undefined {
-  // Stage snapshots already carry the stable public projection. Preserve it
-  // instead of feeding the localized message back through the raw-reason
-  // classifier ("Workflow stopped by user." does not contain "user stopped").
+  // Stage snapshots already carry the stable public projection.
   if (
     value !== null &&
     typeof value === 'object' &&
@@ -162,74 +158,6 @@ export function projectWorkflowDisplayReason(
   }
   const reason = typeof value === 'string' ? value.trim() : ''
   if (!reason) return undefined
-  const normalized = reason.toLowerCase().replaceAll('-', ' ')
-  let code: WorkflowDisplayReasonCode = 'workflow_blocked'
-  let message = 'Workflow is blocked and needs attention.'
-
-  // Match only the host-owned Author reason prefixes, not arbitrary worker
-  // prose mentioning a budget. Keep the stable workflow_blocked public code.
-  const authorBudget = [
-    ['Author reached its active-time limit.', '本次编写已达到运行时间上限'],
-    ['Author reached its no-document-progress limit.', '文档持续未发生内容变化，本次编写已暂停'],
-    ['Author reached its output-token limit.', '本次编写已达到输出 token 上限'],
-  ].find(([prefix]) => reason.startsWith(prefix!))
-  if (authorBudget) {
-    message = `${authorBudget[1]}。草稿和用量已保留，等待手动继续；不会自动重试。`
-  } else if (
-    normalized.includes('user stopped') ||
-    normalized.includes('operator stopped')
-  ) {
-    code = 'user_stopped'
-    message = 'Workflow stopped by user.'
-  } else if (
-    normalized.includes('revision') &&
-    (normalized.includes('validation') ||
-      normalized.includes('fix target') ||
-      normalized.includes('issue coverage') ||
-      normalized.includes('authorized scope') ||
-      normalized.includes('unauthorized'))
-  ) {
-    code = 'revision_validation_failed'
-    if (
-      normalized.includes('outside') ||
-      normalized.includes('unauthorized') ||
-      normalized.includes('scope')
-    )
-      message =
-        'Foundation revision validation failed: the document changed outside the authorized scope.'
-    else if (normalized.includes('issue coverage'))
-      message =
-        'Foundation revision validation failed: the revision did not cover its assigned issues.'
-    else
-      message = 'Foundation revision validation failed.'
-  } else if (
-    (normalized.includes('document') || normalized.includes('markdown')) &&
-    (normalized.includes('contract') ||
-      normalized.includes('format') ||
-      normalized.includes('structured output') ||
-      normalized.includes('invalid'))
-  ) {
-    code = 'document_contract_failed'
-    message =
-      'Document authoring failed: the generated Markdown did not satisfy the document contract.'
-  } else if (normalized.includes('deriv')) {
-    code = 'derivation_failed'
-    message = 'Foundation audit could not be derived.'
-  } else if (
-    normalized.includes('provider') ||
-    normalized.includes('model') ||
-    normalized.includes('llm')
-  ) {
-    code = 'provider_failed'
-    message = 'Workflow provider failed.'
-  } else if (
-    normalized.includes('dispatch') ||
-    normalized.includes('worker') ||
-    normalized.includes('transport')
-  ) {
-    code = 'dispatch_failed'
-    message = 'Workflow dispatch failed.'
-  }
 
   const diagnosticId = `workflow-${createHash('sha256')
     .update(
@@ -242,14 +170,11 @@ export function projectWorkflowDisplayReason(
     )
     .digest('hex')
     .slice(0, 12)}`
-  const explicitDiagnosticId = reason.match(
-    /(?:diagnostic(?:\s+id)?|诊断编号)\s*[：:#-]?\s*([a-z0-9-]{8,})/i,
-  )?.[1]
   return {
-    message,
+    message: 'Workflow is blocked and needs attention.',
     detail: sanitizeWorkflowDisplayDetail(reason),
-    code,
-    diagnosticId: explicitDiagnosticId ?? diagnosticId,
+    code: 'workflow_blocked',
+    diagnosticId,
     ...context,
   }
 }

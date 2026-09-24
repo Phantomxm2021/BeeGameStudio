@@ -438,6 +438,7 @@ export class BeeGameDeploymentManager {
     | {
         body: Blob
         contentType: string
+        cacheControl: string
       }
     | undefined
   > {
@@ -470,6 +471,8 @@ export class BeeGameDeploymentManager {
       return {
         body: new Blob([bytes]),
         contentType: contentTypeForPath(resolvedTargetPath),
+        // Every deploy has a fresh opaque ID; published bytes at this URL never change.
+        cacheControl: 'public, max-age=31536000, immutable',
       }
     } catch {
       return undefined
@@ -592,6 +595,8 @@ export function createSupabaseStorageDeploymentPublisher(options: {
             apikey: options.anonKey,
             authorization: `Bearer ${input.authToken}`,
             'content-type': contentTypeForPath(file.path),
+            // Each deployment has a unique URL; its published bytes are immutable.
+            'cache-control': 'max-age=31536000',
             'x-upsert': 'true',
           },
           body,

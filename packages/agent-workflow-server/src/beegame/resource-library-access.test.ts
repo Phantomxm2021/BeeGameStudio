@@ -7,11 +7,13 @@ test('exposes existing semantic facets as read-only queries without permitting m
     fetchImpl: async (_url, init) => { bodies.push(String(init.body)); return Response.json({ items: [], facets: { usageTags: ['terrain'] } }) } })
   const base = access.instruction.match(/Base URL: (\S+)/)![1]!
   try {
+    expect(access.catalogObserved()).toBe(false)
     const body = JSON.stringify({ filters: { usageTags: ['terrain'], formats: ['png'] } })
     for (const path of ['/api/resource-catalog/packs', '/api/resource-catalog/packs/pack-1/elements']) {
       expect((await fetch(base + path, { method: 'POST', body })).status).toBe(200)
     }
     expect(bodies).toEqual([body, body])
+    expect(access.catalogObserved()).toBe(true)
     expect((await fetch(base + '/api/resource-packs/pack-1', { method: 'POST', body })).status).toBe(405)
   } finally { access.close() }
 })
@@ -30,6 +32,7 @@ test('native HTTP access reuses user auth, supports metadata/download and forbid
   })
   const base = access.instruction.match(/Base URL: (\S+)/)![1]!
   try {
+    expect(access.catalogObserved()).toBe(false)
     expect(access.instruction).not.toContain(token)
     expect((await fetch(base + '/api/resource-search?status=published')).status).toBe(200)
     token = 'refreshed-user-token'
@@ -60,6 +63,7 @@ test('unavailable auth and upstream errors are not empty search results', async 
     const noAuth = await fetch(base + '/api/resource-search')
     expect(noAuth.status).toBe(503)
     expect(await noAuth.text()).toContain('not an empty search result')
+    expect(access.catalogObserved()).toBe(false)
     authenticated = true
     const unavailable = await fetch(base + '/api/resource-search')
     expect(unavailable.status).toBe(503)

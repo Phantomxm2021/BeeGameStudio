@@ -16,7 +16,7 @@ describe('publishing confirmation', () => {
     const publish = await screen.findByRole('button', { name: '发布游戏' });
     await waitFor(() => expect(publish).toBeEnabled());
     expect(props.onDeploy).not.toHaveBeenCalled();
-    expect(screen.getByText(/上传到 Cloudflare/)).toBeTruthy();
+    expect(screen.queryByText(/上传到 Cloudflare/)).toBeNull();
     fireEvent.click(publish);
     await waitFor(() => expect(props.onDeploy).toHaveBeenCalledOnce());
   });
@@ -37,7 +37,7 @@ describe('publishing confirmation', () => {
     vi.mocked(api.getDeploymentReadiness).mockResolvedValue({ allowed: false, issues: ['Workspace changed after acceptance; revalidation is required.'],
       destination: 'remote', workflow: { phase: 'ACCEPTANCE', status: 'needs_action' } });
     render(<WorkspaceDeploymentDialog {...props} />);
-    expect(await screen.findByText(/当前版本需要重新验收/)).toBeTruthy();
+    expect(await screen.findByText(/Workspace changed after acceptance/)).toBeTruthy();
     expect(screen.getByText(/Chat 的完成或 PASS/)).toBeTruthy();
     expect(screen.getByRole('button', { name: '发布游戏' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '重新检查' }));
@@ -55,9 +55,28 @@ describe('publishing confirmation', () => {
     render(<WorkspaceDeploymentDialog {...props} isDeploying deployments={[{ id: 'version', sessionId: 'session', workspacePath: '/test',
       status: 'publishing', url: '', createdAt: '2026-09-22T00:00:00Z', updatedAt: '2026-09-22T00:00:00Z' }]} />);
     expect(await screen.findByText(/发布将在后台继续/)).toBeTruthy();
+    expect(screen.getAllByText('正在上传')).toHaveLength(1);
     expect(screen.getByRole('button', { name: '正在发布' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '关闭' }));
     expect(props.onClose).toHaveBeenCalledOnce();
     expect(props.onDeploy).not.toHaveBeenCalled();
+  });
+  it('keeps deployment history behind its own BUI tab', async () => {
+    render(<WorkspaceDeploymentDialog {...props} deployments={[{ id: 'version', sessionId: 'session', workspacePath: '/test',
+      status: 'succeeded', url: 'https://game.example', createdAt: '2026-09-22T00:00:00Z', updatedAt: '2026-09-22T00:00:00Z' }]} />);
+    expect(screen.getByRole('tab', { name: '发布游戏' }).getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(screen.getByRole('tab', { name: '历史版本' }));
+    expect(await screen.findByText('版本 1')).toBeTruthy();
+  });
+  it('keeps a stable dialog height and shows an empty card when there are no versions', async () => {
+    render(<WorkspaceDeploymentDialog {...props} />);
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.className).toContain('h-[min(680px,calc(100dvh-32px))]');
+
+    fireEvent.click(screen.getByRole('tab', { name: '历史版本' }));
+    const emptyCard = await screen.findByRole('status');
+    expect(emptyCard.textContent).toContain(labels.deploymentNoVersions);
+    expect(emptyCard.className).toContain('rounded-xl');
+    expect(emptyCard.className).toContain('bg-card');
   });
 });

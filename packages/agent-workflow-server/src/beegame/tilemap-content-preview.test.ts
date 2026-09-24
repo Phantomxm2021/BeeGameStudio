@@ -13,7 +13,7 @@ const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, {recursive:true,force:true}) })
 async function fixture() {
   const root=await mkdtemp(join(tmpdir(),'tilemap-preview-'));roots.push(root)
-  for(const path of ['assets/runtime','content/scenes','.beegame/workflow']) await mkdir(join(root,path),{recursive:true})
+  for(const path of ['assets/runtime','content/scenes']) await mkdir(join(root,path),{recursive:true})
   const save=(path:string,value:unknown)=>writeFile(join(root,path),JSON.stringify(value))
   const manifest:BeeGameAssetManifest={
     version:9,requirements:[],project_target:{asset_format_capabilities:['png','json'],runtime_asset_root:'assets/runtime',generated_asset_root:'assets/generated'},
@@ -31,7 +31,6 @@ async function fixture() {
   await save('assets/runtime/tiles.json',{schema:'beegame-tileset.v1',tiles:{red:tile('red'),green:tile('green'),tall:{...tile('green',[8,16]),pivot:[.5,1]}}})
   await save('assets/runtime/frames.json',{frames:{red:{frame:{x:0,y:0,w:8,h:8}},green:{frame:{x:8,y:0,w:8,h:8}}}})
   const hash='a'.repeat(64)
-  await save('.beegame/workflow/run.json',{revision:{document:hash,resource:hash}})
   await save('content/index.json',{schema:'beegame-content-package.v2',id:'test',dimension:'2d',documentRevision:hash,assetManifestRevision:hash,entryScene:'scene',files:['scenes/scene.json'],sceneModel:'game-object-v2'})
   const grid={schema:'grid.v1' as const,cellSize:[8,8] as [number,number]}
   const map:TilemapData={schema:'tilemap.v1',gridNodeId:'grid',cells:[{x:0,y:0,tileId:'red'},{x:1,y:0,tileId:'green'}]}
@@ -79,6 +78,9 @@ test('PNG preview respects renderer order, disabled renderer and disabled ancest
   let pixel=await f.render()
   expect(pixel(20,20)).toEqual([0,255,0,255])
   front.components[1].data.enabled=false;pixel=await f.render()
+  expect(pixel(20,20)).toEqual([255,0,0,255])
+  ;(f.document.data.nodes[1] as any).data={visibleWhen:'状态 == 已收集'}
+  pixel=await f.render()
   expect(pixel(20,20)).toEqual([255,0,0,255])
   ;(f.document.data.nodes[0] as any).enabled=false;pixel=await f.render()
   expect(pixel(20,20)).toEqual([24,26,32,255])

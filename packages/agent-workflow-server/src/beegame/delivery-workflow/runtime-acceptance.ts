@@ -30,7 +30,7 @@ export type RuntimeAcceptance = {
 
 export function runtimeAcceptancePath(dispatchId: string): string {
   if (!/^[\w-]+$/.test(dispatchId)) throw new Error('Invalid acceptance dispatch ID')
-  return `.beegame/workflow/evidence/runtime-${dispatchId}.json`
+  return `.beegame/delivery/evidence/runtime-${dispatchId}.json`
 }
 
 async function artifactDigest(workspace: string, path: string, allowDirectory = false): Promise<string> {

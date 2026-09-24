@@ -7,6 +7,7 @@ import { sendProjectConversation, isProjectConversation } from './project-conver
 import { createRunStore } from './delivery-workflow/run-store'
 import { computeWorkspaceRevision } from './delivery-workflow/revision'
 import { createTestDeliveryRun } from '../__tests__/delivery-workflow-test-helpers'
+import { beginProjectDelivery } from './project-delivery'
 
 async function idle(manager: BeeGameSessionManager, id: string) {
   for (let i = 0; i < 500 && manager.get(id)?.turnStatus !== 'idle'; i++)
@@ -52,7 +53,39 @@ test('raw project turns reuse native context; language change resumes, not a new
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
-for (const changed of [false, true]) test(`completed task facts survive a ${changed ? 'fix' : 'question'}; acceptance follows actual files`, async () => {
+test('an unfinished production checkpoint is supplied as context, not a language-specific command', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-conversation-docs-'))
+  const starts: BeeGameSessionRunnerStartInput[] = []
+  const prompts: unknown[] = []
+  const contexts: string[] = []
+  const manager = new BeeGameSessionManager({ async start(start) {
+    starts.push(start)
+    return { stop() {}, async submit(turn) {
+      prompts.push(turn.prompt)
+      contexts.push(await readFile(join(start.cwd, '.beegame/tmp', start.sessionId, 'context.md'), 'utf8'))
+      await turn.onMessage({ type: 'result', subtype: 'success', result: 'Received' })
+    } }
+  } }, root)
+  try {
+    const workspace = join(root, 'project')
+    const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+    const store = createRunStore(workspace, 'owner', { stateDirectory: '.beegame/delivery/production' })
+    const run = createTestDeliveryRun({ ownerId: 'owner', projectId: 'project', confirmedBriefContext: 'brief' })
+    await store.commit({ ...run, phase: 'RESOURCE_PREPARATION', status: 'stopped' },
+      { runId: run.runId, type: 'run.stopped', phase: 'RESOURCE_PREPARATION', status: 'stopped', revision: run.revision })
+    for (const message of ['続けてください', '계속해 주세요', 'Please fix the player first']) {
+      await sendProjectConversation({ sessions: manager, sessionId: session.id, ownerId: 'owner', message })
+      await idle(manager, session.id)
+    }
+    expect(prompts).toEqual(['続けてください', '계속해 주세요', 'Please fix the player first'])
+    expect(starts).toHaveLength(1)
+    expect(starts[0]?.systemContext).toContain('RESOURCE_PREPARATION (stopped)')
+    expect(contexts.every(context => context.includes('"currentPhase": "RESOURCE_PREPARATION"'))).toBe(true)
+    expect(contexts.every(context => context.includes('"recordedPriorStages": [\n      "DOCUMENT_DRAFTING",\n      "DOCUMENT_REVIEW"'))).toBe(true)
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+for (const changed of [false, true]) test(`archived delivery facts remain untouched after a ${changed ? 'fix' : 'question'}`, async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-conversation-verdict-'))
   const workspace = join(root, 'project')
   const manager = new BeeGameSessionManager({ async start() { return { stop() {}, async submit(turn) {
@@ -76,17 +109,37 @@ for (const changed of [false, true]) test(`completed task facts survive a ${chan
     const after = (await store.load())!
     expect(after.tasks).toEqual(run.tasks)
     expect(after.phase).toBe('DELIVERY')
-    if (changed) {
-      expect(after.status).toBe('needs_action')
-      expect(after.evidence.acceptance).toBeUndefined()
-    } else {
-      expect(await readFile(store.paths.snapshot, 'utf8')).toBe(before)
-    }
+    expect(after.status).toBe('completed')
+    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(before)
+    expect(await computeWorkspaceRevision(workspace) === revision).toBe(!changed)
     expect(manager.events(session.id).some(e => e.text?.includes('Request cleanup failed'))).toBe(false)
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
-test('continue uses ordinary conversation with existing blocker facts, without restarting or certifying delivery', async () => {
+test('delivery conversation requires a current evidence report for explicit release revalidation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-conversation-release-'))
+  const workspace = join(root, 'project')
+  const starts: BeeGameSessionRunnerStartInput[] = []
+  const manager = new BeeGameSessionManager({ async start(start) {
+    starts.push(start)
+    return { stop() {}, async submit(turn) {
+      await turn.onMessage({ type: 'result', subtype: 'success', result: '验收通过' })
+    } }
+  } }, root)
+  try {
+    const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+    await beginProjectDelivery(workspace, root, 'Build a playable game')
+    await sendProjectConversation({ sessions: manager, sessionId: session.id, ownerId: 'owner',
+      message: '验收当前版本', deliveryDataRoot: root })
+    await idle(manager, session.id)
+    expect(starts[0]?.systemContext).toContain(
+      'Do not claim release PASS without writing that current, evidence-backed report.',
+    )
+    expect(starts[0]?.systemContext).toContain('A regular request/task PASS is not release acceptance.')
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test('continue uses current conversation facts without reviving an archived workflow blocker', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-conversation-blocked-'))
   const workspace = join(root, 'project')
   const starts: BeeGameSessionRunnerStartInput[] = []
@@ -120,8 +173,8 @@ test('continue uses ordinary conversation with existing blocker facts, without r
     expect(starts[0]?.systemContext).not.toContain('做一个老师批改作业的游戏')
     expect(handoff).toContain('做一个老师批改作业的游戏')
     expect(handoff).toContain('实现已完成，待核对触控区域。')
-    expect(handoff).toContain(run.blockedReason)
-    expect(handoff).toContain('.beegame/workflow/run.json')
+    expect(handoff).not.toContain(run.blockedReason)
+    expect(handoff).not.toContain('.beegame/workflow/run.json')
     expect(await Bun.file(join(workspace, '.beegame/tmp', session.id, 'context.md')).exists()).toBe(false)
     expect(starts[0]?.workflowWorker).toBeUndefined()
     expect(observedReason).toBe(run.blockedReason)
@@ -130,17 +183,20 @@ test('continue uses ordinary conversation with existing blocker facts, without r
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
-test('busy workflow rejects the request before publishing a user message or opening capabilities', async () => {
+test('an archived running workflow snapshot does not block a native project request', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-conversation-busy-'))
-  const manager = new BeeGameSessionManager({ async start() { throw new Error('Must not start a model') } }, root)
+  const manager = new BeeGameSessionManager({ async start() { return { stop() {}, async submit(turn) {
+    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
+  } } } }, root)
   try {
     const session = manager.start({ workspacePath: join(root, 'project'), userId: 'owner', projectId: 'project' })
     const store = createRunStore(session.cwd, 'owner')
     const run = createTestDeliveryRun({ ownerId: 'owner', projectId: 'project' })
     await store.commit({ ...run, status: 'running' }, { runId: run.runId, type: 'run.created', phase: run.phase, status: 'running', revision: run.revision })
-    await expect(sendProjectConversation({ sessions: manager, sessionId: session.id, ownerId: 'owner', message: '修复',
-      openCapabilities: () => { throw new Error('Must not open services') } })).rejects.toThrow('Stop the active workflow')
-    expect(manager.events(session.id).filter(e => e.type === 'user.message')).toHaveLength(0)
+    await sendProjectConversation({ sessions: manager, sessionId: session.id, ownerId: 'owner', message: '修复' })
+    await idle(manager, session.id)
+    expect(manager.events(session.id).filter(e => e.type === 'user.message')).toHaveLength(1)
+    expect((await store.load())?.status).toBe('running')
     expect(manager.get(session.id)?.turnStatus).toBe('idle')
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
@@ -189,6 +245,34 @@ test('restart restores the native UUID and request identity without delivery rec
     expect(starts).toHaveLength(1)
     await sendProjectConversation({ sessions: manager, sessionId: restored.id, ownerId: 'owner', message: '继续' })
     await idle(manager, restored.id)
+    expect(starts[1]?.resumeSessionId).toBe('a28f9e61-96d5-4e38-981b-5acd25076508')
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test('stopping and continuing reuses the same project session and native context', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-conversation-stop-resume-'))
+  const starts: BeeGameSessionRunnerStartInput[] = []
+  const manager = new BeeGameSessionManager({ async start(start) {
+    starts.push(start)
+    start.onNativeSessionId?.('a28f9e61-96d5-4e38-981b-5acd25076508')
+    return { stop() {}, async submit(turn) {
+      await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
+    } }
+  } }, root)
+  try {
+    const base = { workspacePath: join(root, 'project'), userId: 'owner', projectId: 'project' }
+    const original = manager.start(base)
+    await sendProjectConversation({ sessions: manager, sessionId: original.id, ownerId: 'owner', message: '先检查UI' })
+    await idle(manager, original.id)
+    manager.stop(original.id)
+    await manager.waitForSessionIdle(original.id)
+    const resumed = manager.start({ ...base, transcriptSessionId: original.id })
+    expect(resumed.id).toBe(original.id)
+    expect(isProjectConversation(manager.transcript(resumed.id))).toBe(true)
+    await sendProjectConversation({ sessions: manager, sessionId: resumed.id, ownerId: 'owner', message: '继续修复' })
+    await idle(manager, resumed.id)
+    expect(starts).toHaveLength(2)
+    expect(starts[1]?.sessionId).toBe(original.id)
     expect(starts[1]?.resumeSessionId).toBe('a28f9e61-96d5-4e38-981b-5acd25076508')
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })

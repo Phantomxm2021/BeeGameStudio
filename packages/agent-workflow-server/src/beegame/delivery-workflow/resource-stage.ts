@@ -84,7 +84,7 @@ export async function completeResourceTask(input: {
   if (input.terminal?.workerType === 'resource-planner') {
     if (input.run.resourceProductionState.currentTask === 'RESOURCE_DELIVERED')
       throw new Error('resource preparation is already complete')
-    const accepted = await refreshResourceDelivery(input)
+    const accepted = await refreshResourceDelivery({ ...input, catalogObserved: input.terminal.catalogObserved === true })
     if (accepted.status === 'needs_action') return accepted
     return transitionDeliveryRun(accepted, {
       type: 'resource_preparation_ready',
@@ -99,6 +99,7 @@ export async function completeResourceTask(input: {
 export async function refreshResourceDelivery(input: {
   run: DeliveryRun
   workspacePath: string
+  catalogObserved?: boolean
 }): Promise<DeliveryRun> {
     const validation = validateResourceDelivery(input.workspacePath, input.run.confirmedBriefContext)
     if (!validation.valid) return {
@@ -120,6 +121,8 @@ export async function refreshResourceDelivery(input: {
     const missingRequirementIds = requiredIds.filter(
       requirementId => !bindingsByRequirement.has(requirementId),
     )
+    const resourceDigest = await computeResourceRevision(input.workspacePath, input.run.revision.document)
+    const priorReceipt = input.run.resourceProductionState.deliveryReceipt
     const deliveryReceipt =
       audit.present && !missingRequirementIds.length
         ? {
@@ -127,13 +130,9 @@ export async function refreshResourceDelivery(input: {
               requirementId,
               resourceIds: [...bindingsByRequirement.get(requirementId)!],
             })),
-            catalogObserved: audit.resources.some(
-              resource => resource.sourceType === 'resource-library',
-            ),
-            resourceDigest: await computeResourceRevision(
-              input.workspacePath,
-              input.run.revision.document,
-            ),
+            catalogObserved: input.catalogObserved === true ||
+              (priorReceipt?.resourceDigest === resourceDigest && priorReceipt.catalogObserved === true),
+            resourceDigest,
             acceptedAt: new Date().toISOString(),
           }
         : undefined

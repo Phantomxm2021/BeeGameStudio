@@ -1,9 +1,9 @@
-import { FileText, X } from 'lucide-react';
+import { FileText } from 'lucide-react';
 import { MarkdownRenderer } from './ChatMarkdownContent';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 import { Skeleton } from '../../ui/skeleton';
-import { Button } from '../../beui/project-button';
+import { CloseIconButton } from '../../ui/CloseIconButton';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../ui/dialog';
 
 interface ArtifactPreviewModalProps {
@@ -28,15 +28,7 @@ export function ArtifactPreviewModal({ isOpen, onClose, title, content, isLoadin
                         <DialogTitle className="truncate text-base">{title}</DialogTitle>
                         <DialogDescription>{text.artifactOnlinePreview}</DialogDescription>
                     </div>
-                    <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={text.close || 'Close'}
-                        onClick={onClose}
-                    >
-                        <X className="h-4 w-4" aria-hidden="true" />
-                    </Button>
+                    <CloseIconButton label={text.close || 'Close'} onClick={onClose} />
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-8 sm:py-8">
                             {isLoading ? (

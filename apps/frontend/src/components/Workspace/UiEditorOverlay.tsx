@@ -1305,7 +1305,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
         <DialogContent className="ui-editor-asset-dialog" onKeyDown={event => event.stopPropagation()}>
           <div className="ui-editor-asset-dialog-header">
             <div><DialogTitle>Select Source Image</DialogTitle><DialogDescription>{imageAssets.reduce((count, asset) => count + asset.members.length, 0)} project images available</DialogDescription></div>
-            <Button variant="ghost" size="icon" aria-label="Close image picker" onClick={() => setImagePickerOpen(false)}><X size={16} aria-hidden="true" /></Button>
+            <Button variant="ghost" size="icon" className="rounded-full" aria-label="Close image picker" onClick={() => setImagePickerOpen(false)}><X size={16} aria-hidden="true" /></Button>
           </div>
           <Input className="ui-editor-asset-search" classNames={{ field: 'ui-editor-asset-search-field', input: 'text-sm' }} aria-label="Search images" placeholder="Search images…" value={assetSearch} onChange={setAssetSearch} />
           {pickerLoading ? <p role="status">Loading project images…</p> : null}

@@ -386,8 +386,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     void this.cleanupTestBrowsers()
     if (turn) {
       this.observability.finishTurn({
-        outcome:
-          outcome ?? (error.message.includes('aborted') ? 'aborted' : 'error'),
+        outcome: outcome ?? 'error',
         ...(stopReason ? { stopReason } : {}),
         ...(outcome === 'cancelled_by_user' || outcome === 'aborted' ? {} : { error }),
       })

@@ -18,6 +18,11 @@ const props = {
 const live = { status: 'passed', build_url: '/previews/session/game/' };
 
 describe('dashboard header', () => {
+  it('shows an inline loading badge while the project is starting', () => {
+    render(<BeeGameLivePreviewPage {...props} status="starting" />);
+    expect(screen.getByTestId('beegame-sync-status')).toHaveTextContent('同步中');
+  });
+
   it('locks preview, external window and publishing while the workspace is busy, then unlocks', () => {
     const onStartPreview = vi.fn(), onStopPreview = vi.fn(), onDeployProject = vi.fn(), onOpenExternal = vi.fn();
     const actions = { onStartPreview, onStopPreview, onDeployProject, onOpenExternal };
@@ -109,11 +114,11 @@ describe('dashboard header', () => {
     expect(screen.getByRole('button', { name: '独立窗口预览' })).toBeDisabled();
   });
 
-  it('uses a left arrow for back navigation', () => {
+  it('uses a chevron-left icon for dashboard back navigation', () => {
     const onBack = vi.fn();
     render(<BeeGameLivePreviewPage {...props} onBack={onBack} />);
     const back = screen.getByRole('button', { name: '返回主页' });
-    expect(back.querySelector('.lucide-arrow-left')).not.toBeNull();
+    expect(back.querySelector('.lucide-chevron-left')).not.toBeNull();
     fireEvent.click(back);
     expect(onBack).toHaveBeenCalledOnce();
   });

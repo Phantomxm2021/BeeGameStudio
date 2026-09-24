@@ -14,6 +14,7 @@ import {
   createFoundationAuthoring,
   type AuthorConfiguration,
 } from './stage-modules/foundation-authoring/public'
+import type { AutonomousNativeExecutor } from './stage-modules/foundation-authoring/private/autonomous-native'
 
 type AuthorOperations = ReturnType<typeof createFoundationAuthoring>
 
@@ -35,6 +36,8 @@ export type FoundationAuthoringHostOptions = {
   getCredential: () => BeeGameSessionCredential | undefined
   getRuntimeEnv: DashboardRepository['getRuntimeEnv']
   billingClient: BeeGameUsageBillingClient
+  /** Required: production authoring must run through the project's primary conversation. */
+  execute: AutonomousNativeExecutor
 }
 
 /** The only object exposed to app/controller code from this host assembly. */
@@ -69,6 +72,7 @@ export function createFoundationAuthoringHost(
   const boundGetRuntimeEnv = options.getRuntimeEnv
   const boundRecordUsage = options.billingClient.recordUsage.bind(options.billingClient)
   const boundDebitRealTimeUsage = options.billingClient.debitRealTimeUsage.bind(options.billingClient)
+  const boundExecute = options.execute
 
   // This wrapper is deliberately stable while its delegated credential is
   // dynamic. AuthenticationClient performs the existing owner and token
@@ -111,7 +115,7 @@ export function createFoundationAuthoringHost(
             privateRootPath: join(workspacePath, '.beegame', 'workflow', 'foundation-authoring', 'state'),
             ...(boundLanguage ? { language: boundLanguage } : {}),
           }
-          return createFoundationAuthoring(config, { runtimeConfiguration, billing })
+          return createFoundationAuthoring(config, { runtimeConfiguration, billing }, boundExecute)
         })
       })
       const retryableAssembly = assembly.catch(error => {
@@ -143,6 +147,7 @@ const HOST_OPTION_KEYS = new Set([
   'getCredential',
   'getRuntimeEnv',
   'billingClient',
+  'execute',
 ])
 
 function assertHostOptions(value: FoundationAuthoringHostOptions): void {
@@ -165,6 +170,9 @@ function assertHostOptions(value: FoundationAuthoringHostOptions): void {
   }
   if (typeof value.getRuntimeEnv !== 'function') {
     throw new TypeError('foundation authoring host runtime environment reader is required')
+  }
+  if (typeof value.execute !== 'function') {
+    throw new TypeError('foundation authoring host must use the project conversation executor')
   }
   if (!value.billingClient ||
       typeof value.billingClient.recordUsage !== 'function' ||

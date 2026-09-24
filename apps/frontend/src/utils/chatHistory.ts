@@ -132,14 +132,6 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
     const attachments = normalizeChatAttachments(record.attachments);
     if (!content && !contentBlocks?.length && !attachments?.length) continue;
 
-    if (
-      sender === 'system' &&
-      /^\[人工关卡\]/.test(content) &&
-      /GDD\s*已通过内部评审|请查阅并决策|资源清单已生成|上传资源并审批继续/i.test(content)
-    ) {
-      continue;
-    }
-
     const taskId = typeof record.task_id === 'string' ? record.task_id : typeof record.taskId === 'string' ? record.taskId : undefined;
     const turnId = String(record.turn_id ?? record.turnId ?? metadata.turn_id ?? metadata.turnId ?? '').trim() || undefined;
     const timestamp = toTimestampMs(record.timestamp);
@@ -205,6 +197,7 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
       messageId: messageId || undefined,
       clientMessageId: finalClientMessageId,
       supersedesMessageId,
+      rewindAvailable: record.rewind_available === true || record.rewindAvailable === true || metadata.rewind_available === true,
       dedupeKey,
       sender,
       content,

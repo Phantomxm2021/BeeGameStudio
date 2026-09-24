@@ -82,6 +82,16 @@ describe('chat transcript compaction', () => {
     expect(compactTranscriptForChatHistory(events).map(event => event.payload?.subtype))
       .toEqual(['task_started', 'task_progress', 'task_notification'])
   })
+  test('retains native context compaction boundaries in Chat history', () => {
+    const base = { sessionId: 'session-1', turnId: 'turn-1', type: 'system.status' as const,
+      createdAt: new Date('2026-09-24T05:11:04Z') }
+    const events: BeeGameEvent[] = [
+      { ...base, id: 1, text: 'compacting', payload: { type: 'system', subtype: 'status', status: 'compacting' } },
+      { ...base, id: 2, text: 'system', payload: { type: 'system', subtype: 'compact_boundary',
+        compact_metadata: { trigger: 'auto', pre_tokens: 167212 } } },
+    ] as BeeGameEvent[]
+    expect(compactTranscriptForChatHistory(events).map(event => event.id)).toEqual([1, 2])
+  })
   test('preserves one completed Thinking lifecycle with its full duration', () => {
     const compacted = compactTranscriptForChatHistory([
       thinkingEvent(1, 'Checking', 'started', '2026-09-17T00:00:00.000Z'),

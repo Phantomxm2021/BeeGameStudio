@@ -1,9 +1,9 @@
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
-import { readBeeGameAssetManifestSync } from './asset-contracts'
-import { auditBeeGameContentPackage, parseBeeGameContentIndex } from './game-content-package'
+import { readBeeGameAssetManifestSync, type BeeGameAssetManifest } from './asset-contracts'
+import { auditBeeGameContentPackage, parseBeeGameContentIndex, type BeeGameContentPackage } from './game-content-package'
+import type { BeeGameContentIndex } from './game-content-schema'
 import { PROJECT_CONTENT_CONTRACT_PATH } from './project-delivery'
-import type { DeliveryRun } from './delivery-workflow/types'
 
 /** Read-only entry point to the exact host validation used after Content authoring. */
 const validationScope = {
@@ -11,17 +11,46 @@ const validationScope = {
   runtimeVerified: false,
 } as const
 
+/** A static estimate of the files implied by staged document dependencies. */
+export function summarizeContentLoadFootprint(
+  index: BeeGameContentIndex,
+  content: BeeGameContentPackage,
+  manifest: BeeGameAssetManifest,
+  fileSize: (path: string) => number,
+) {
+  const registry = index.documents
+  if (!registry) return undefined
+  const contentById = new Map(content.documents.map(document => [document.id, document]))
+  const filesFor = (phase: 'startup' | 'on-demand') => {
+    const assetIds = new Set<string>()
+    for (const entry of registry.filter(document => document.loadPhase === phase))
+      for (const assetId of contentById.get(entry.id)?.assetRefs ?? []) assetIds.add(assetId)
+    const files = new Set<string>()
+    for (const assetId of assetIds) {
+      const resource = manifest.resources.find(candidate => candidate.id === assetId)
+      for (const path of resource?.file_paths ?? []) files.add(path)
+    }
+    return { documentCount: registry.filter(document => document.loadPhase === phase).length, assetIds, files }
+  }
+  const startup = filesFor('startup')
+  const onDemand = filesFor('on-demand')
+  const deferredFiles = new Set([...onDemand.files].filter(path => !startup.files.has(path)))
+  const deferredAssets = new Set([...onDemand.assetIds].filter(id => !startup.assetIds.has(id)))
+  const bytes = (files: ReadonlySet<string>) => [...files].reduce((total, path) => total + fileSize(path), 0)
+  return {
+    basis: 'static manifest-file estimate; deferredOnly excludes startup assets/files; raw bytes, not transfer size or runtime proof',
+    startup: { documentCount: startup.documentCount, assetCount: startup.assetIds.size, fileCount: startup.files.size, rawBytes: bytes(startup.files) },
+    deferredOnly: { documentCount: onDemand.documentCount, assetCount: deferredAssets.size, fileCount: deferredFiles.size, rawBytes: bytes(deferredFiles) },
+  }
+}
+
 export function validateGameContent(workspacePath: string) {
   const started = performance.now()
-  const legacyRunPath = resolve(workspacePath, '.beegame/workflow/run.json')
   const nativeIndexPath = resolve(workspacePath, 'content/index.json')
   const nativeIndex = existsSync(resolve(workspacePath, PROJECT_CONTENT_CONTRACT_PATH)) && existsSync(nativeIndexPath)
     ? parseBeeGameContentIndex(JSON.parse(readFileSync(nativeIndexPath, 'utf8')))
     : undefined
-  const run = nativeIndex ? undefined : JSON.parse(
-    readFileSync(legacyRunPath, 'utf8'),
-  ) as DeliveryRun
-  const assetManifestRevision = nativeIndex?.assetManifestRevision ?? run?.revision.resource
+  const assetManifestRevision = nativeIndex?.assetManifestRevision
   if (!assetManifestRevision)
     return {
       ...validationScope,
@@ -31,15 +60,20 @@ export function validateGameContent(workspacePath: string) {
       elapsedMs: Math.round(performance.now() - started),
     }
   const audit = auditBeeGameContentPackage(workspacePath, {
-    documentRevision: nativeIndex?.documentRevision ?? run!.revision.document,
+    documentRevision: nativeIndex.documentRevision,
     assetManifestRevision,
     manifest: readBeeGameAssetManifestSync(workspacePath),
   })
+  const loadFootprint = audit.package && nativeIndex?.documents
+    ? summarizeContentLoadFootprint(nativeIndex, audit.package, readBeeGameAssetManifestSync(workspacePath),
+      path => statSync(resolve(workspacePath, path)).size)
+    : undefined
   return {
     ...validationScope,
     valid: audit.valid,
     issues: audit.issues,
     contentCount: audit.package?.documents.length ?? 0,
+    ...(loadFootprint ? { loadFootprint } : {}),
     elapsedMs: Math.round(performance.now() - started),
   }
 }

@@ -8,6 +8,7 @@ import { createRuntimeConfigurationClient } from '../runtime-configuration/publi
 import {
   createFoundationReviewer,
 } from './stage-modules/foundation-reviewer/public'
+import type { FileAgentInput, FileAgentResult } from '@bee-game-studio/agent-workflow/native-file-agent'
 
 type ReviewerOperations = ReturnType<typeof createFoundationReviewer>
 
@@ -30,6 +31,8 @@ export type FoundationReviewerHostOptions = {
   getCredential: () => BeeGameSessionCredential | undefined
   getRuntimeEnv: DashboardRepository['getRuntimeEnv']
   billingClient: BeeGameUsageBillingClient
+  /** Required: production review must run through the project's primary conversation. */
+  execute: (input: FileAgentInput) => Promise<FileAgentResult>
 }
 
 /** The only object exposed to app/controller code from this host assembly. */
@@ -64,6 +67,7 @@ export function createFoundationReviewerHost(
   const boundGetRuntimeEnv = options.getRuntimeEnv
   const boundRecordUsage = options.billingClient.recordUsage.bind(options.billingClient)
   const boundDebitRealTimeUsage = options.billingClient.debitRealTimeUsage.bind(options.billingClient)
+  const boundExecute = options.execute
 
   let stagePromise: Promise<ReviewerOperations> | undefined
   const getStage = (): Promise<ReviewerOperations> => {
@@ -104,6 +108,7 @@ export function createFoundationReviewerHost(
         return createFoundationReviewer(
           { workspacePath, ...(boundLanguage ? { language: boundLanguage } : {}) },
           { runtimeConfiguration, billing },
+          boundExecute,
         )
       })
       const retryableAssembly = assembly.catch(error => {
@@ -135,6 +140,7 @@ const HOST_OPTION_KEYS = new Set([
   'getCredential',
   'getRuntimeEnv',
   'billingClient',
+  'execute',
 ])
 
 function assertHostOptions(value: FoundationReviewerHostOptions): void {
@@ -157,6 +163,9 @@ function assertHostOptions(value: FoundationReviewerHostOptions): void {
   }
   if (typeof value.getRuntimeEnv !== 'function') {
     throw new TypeError('foundation reviewer host runtime environment reader is required')
+  }
+  if (typeof value.execute !== 'function') {
+    throw new TypeError('foundation reviewer host must use the project conversation executor')
   }
   if (!value.billingClient ||
       typeof value.billingClient.recordUsage !== 'function' ||

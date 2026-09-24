@@ -25,10 +25,10 @@ const manifest: BeeGameAssetManifest = {
 
 afterEach(() => { for (const workspace of workspaces.splice(0)) rmSync(workspace, { recursive: true, force: true }) })
 
-function audit(document: Record<string, unknown>, dimension: '2d' | '3d' = '2d', activeManifest: BeeGameAssetManifest = manifest) {
+function audit(document: Record<string, unknown>, dimension: '2d' | '3d' = '2d', activeManifest: BeeGameAssetManifest = manifest, indexFields: Record<string, unknown> = {}) {
   const workspace = mkdtempSync(join(tmpdir(), 'beegame-content-v2-')); workspaces.push(workspace)
   mkdirSync(join(workspace, 'content/scenes'), { recursive: true })
-  writeFileSync(join(workspace, 'content/index.json'), `${JSON.stringify({ schema: 'beegame-content-package.v2', id: 'test', dimension, documentRevision: HASH, assetManifestRevision: HASH, entryScene: 'scene', files: ['scenes/scene.json'], sceneModel: BEEGAME_SCENE_MODEL })}\n`)
+  writeFileSync(join(workspace, 'content/index.json'), `${JSON.stringify({ schema: 'beegame-content-package.v2', id: 'test', dimension, documentRevision: HASH, assetManifestRevision: HASH, entryScene: 'scene', files: ['scenes/scene.json'], sceneModel: BEEGAME_SCENE_MODEL, ...indexFields })}\n`)
   const data = (document.data && typeof document.data === 'object' ? document.data : {}) as Record<string, unknown>
   if (dimension === '2d' && !data.settings)
     data.settings = { coordinateSystem: { origin: 'top-left', units: 'logical-pixels', width: 1280, height: 720, pixelsPerUnit: 1 } }
@@ -48,6 +48,26 @@ const logicalCameraData = {
 }
 
 describe('Unity-style Game Content scene contract', () => {
+  it('validates an optional per-document load registry against the canonical files and kinds', () => {
+    const document = { schema: 'beegame-content.v1', id: 'scene', kind: 'scene-2d', assetRefs: [], data: { nodes: [{ id: 'root' }] } }
+    const valid = audit(document, '2d', manifest, { documents: [
+      { id: 'scene', path: 'scenes/scene.json', kind: 'scene-2d', loadPhase: 'startup' },
+    ] })
+    expect(valid.valid).toBe(true)
+
+    const wrongPath = audit(document, '2d', manifest, { documents: [
+      { id: 'scene', path: 'scenes/other.json', kind: 'scene-2d', loadPhase: 'startup' },
+    ] })
+    expect(wrongPath.valid).toBe(false)
+    expect(wrongPath.issues.join(' ')).toContain('document registry path mismatch for scene')
+
+    const deferredEntry = audit(document, '2d', manifest, { documents: [
+      { id: 'scene', path: 'scenes/scene.json', kind: 'scene-2d', loadPhase: 'on-demand' },
+    ] })
+    expect(deferredEntry.valid).toBe(false)
+    expect(deferredEntry.issues.join(' ')).toContain('entryScene must use startup loadPhase')
+  })
+
   it('loads file metadata without returning document bodies', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'beegame-content-file-list-')); workspaces.push(workspace)
     mkdirSync(join(workspace, 'content/scenes'), { recursive: true })

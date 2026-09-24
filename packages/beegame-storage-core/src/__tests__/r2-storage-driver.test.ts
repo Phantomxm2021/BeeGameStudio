@@ -63,6 +63,24 @@ describe('R2 storage driver', () => {
     })
   })
 
+  test('writes explicit HTTP cache metadata separately from object metadata', async () => {
+    let observedCommand: unknown
+    const driver = createR2StorageDriver({
+      endpoint: 'https://r2.test', accessKeyId: 'access', secretAccessKey: 'secret',
+      client: { send: async (command: unknown) => { observedCommand = command; return {} } } as never,
+    })
+    await driver.putObject(
+      { provider: 'r2', bucket: 'delivery', objectKey: 'deployments/deploy-1/files/index.html' },
+      new Uint8Array([1]), 'text/html', { 'beegame-sha256': 'abc' },
+      { cacheControl: 'public, max-age=31536000, immutable' },
+    )
+    expect((observedCommand as PutObjectCommand).input).toMatchObject({
+      ContentType: 'text/html',
+      Metadata: { 'beegame-sha256': 'abc' },
+      CacheControl: 'public, max-age=31536000, immutable',
+    })
+  })
+
   test('uses the Cloudflare account endpoint in path style without an empty-body checksum', async () => {
     const driver = createR2StorageDriver({
       accountId: '0123456789abcdef',

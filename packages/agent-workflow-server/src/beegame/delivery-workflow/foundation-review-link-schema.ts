@@ -39,6 +39,7 @@ export function createFoundationReviewLinkSchema(authorResult: z.ZodType<AuthorD
   return z.object({
     protocolVersion: z.literal(1), authorResultId: digest,
     importedAuthorResult: authorResult.optional(),
+    canonicalRecheck: z.literal(true).optional(),
     control: z.object({ sequence: z.number().int().nonnegative(), appliedSequence: z.number().int().nonnegative(),
       action: z.enum(['run', 'stop']), reason: z.string().min(1).max(2000).optional() }).strict(),
     invocation: z.object({ stage: z.literal('reviewer'), request: reviewerRequest, handle: handle.optional(),

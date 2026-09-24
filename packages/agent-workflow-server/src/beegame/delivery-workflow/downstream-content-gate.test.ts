@@ -76,8 +76,8 @@ test('host acceptance confirms current implementation evidence without dispatchi
     const assetManifestRevision = 'b'.repeat(64)
     const contentRevision = 'c'.repeat(64)
     const workspaceRevision = 'd'.repeat(64)
-    await mkdir(join(workspacePath, '.beegame/workflow/evidence'), { recursive: true })
-    const evidencePath = '.beegame/workflow/evidence/implementation.json'
+    await mkdir(join(workspacePath, '.beegame/delivery/evidence'), { recursive: true })
+    const evidencePath = '.beegame/delivery/evidence/implementation.json'
     await writeFile(join(workspacePath, evidencePath), JSON.stringify({ summary: 'Ran the game', revision: workspaceRevision }))
     const completed = {
       ...base,
@@ -116,7 +116,7 @@ test('host acceptance confirms current implementation evidence without dispatchi
     expect(receipt.runtimeVerification).toBe('not-assessed-by-host')
     expect(receipt.note).not.toContain('Agent performed the runtime inspection')
     const { readRuntimeAcceptance, runtimeAcceptancePath } = await import('./runtime-acceptance')
-    const observedPath = '.beegame/workflow/evidence/browser-observations.txt'
+    const observedPath = '.beegame/delivery/evidence/browser-observations.txt'
     await writeFile(join(workspacePath, observedPath), 'Observed title, start and pause in the target iframe.')
     const reportPath = join(workspacePath, runtimeAcceptancePath('test-dispatch'))
     await writeFile(join(workspacePath, 'tested-game.js'), 'game bundle')

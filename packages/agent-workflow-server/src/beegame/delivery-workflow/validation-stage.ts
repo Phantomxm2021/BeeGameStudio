@@ -2,8 +2,9 @@ import { transitionDeliveryRun } from './transition'
 import { isWorkflowEvidenceFile, resolveWorkflowEvidencePath } from './evidence'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import type { DeliveryRun, EvidenceRef } from './types'
-import { readRuntimeAcceptance, runtimeEvidenceIsCurrent, type RuntimeAcceptance } from './runtime-acceptance'
+import type { DeliveryRun, EvidenceRef, WorkerDispatchRequest } from './types'
+import type { WorkerTerminalResult } from './worker-contracts'
+import { runtimeEvidenceIsCurrent, type RuntimeAcceptance } from './runtime-acceptance'
 
 function currentImplementationRevision(run: DeliveryRun): string {
   return run.revision.implementation ?? run.revision.workspace
@@ -38,6 +39,54 @@ export function enterAcceptance(run: DeliveryRun): DeliveryRun {
   }
 }
 
+export async function startAcceptance(input: {
+  run: DeliveryRun
+  workspacePath: string
+  dispatcher: { dispatch(request: WorkerDispatchRequest): Promise<unknown> }
+  checklistIds: string[]
+  resourceIds: string[]
+  contentIds: string[]
+}): Promise<unknown> {
+  if (input.run.phase !== 'ACCEPTANCE' || !allTasksComplete(input.run))
+    throw new Error('acceptance requires completed implementation')
+  if (input.run.activeDispatch?.status === 'running') return input.run.activeDispatch
+  return input.dispatcher.dispatch({ runId: input.run.runId, ownerId: input.run.ownerId,
+    projectId: input.run.projectId, workspacePath: input.workspacePath,
+    workerType: 'acceptance-validator', phase: 'ACCEPTANCE',
+    revision: currentImplementationRevision(input.run), allowedPaths: [],
+    contract: { taskIds: input.run.tasks.map(task => task.id), checklistIds: input.checklistIds,
+      resourceIds: input.resourceIds, contentIds: input.contentIds } })
+}
+
+export async function confirmAcceptanceFromValidator(input: {
+  run: DeliveryRun
+  workspacePath: string
+  terminal: Extract<WorkerTerminalResult, { workerType: 'acceptance-validator' }>
+}): Promise<DeliveryRun> {
+  const revision = currentImplementationRevision(input.run)
+  if (input.run.phase !== 'ACCEPTANCE' || input.terminal.revision !== revision ||
+      !isWorkflowEvidenceFile(input.workspacePath, input.terminal.evidencePath))
+    throw new Error('independent acceptance evidence does not match the current run')
+  const path = resolveWorkflowEvidencePath(input.workspacePath, input.terminal.evidencePath)!
+  const recorded = JSON.parse(await readFile(path, 'utf8'))
+  if (recorded.workerType !== 'acceptance-validator' || recorded.revision !== revision ||
+      recorded.evidencePath !== input.terminal.evidencePath)
+    throw new Error('independent acceptance evidence binding changed')
+  const report = recorded.runtimeAcceptance as RuntimeAcceptance | undefined
+  if (!report) throw new Error('independent acceptance report is missing')
+  const implementation = await confirmAcceptanceFromImplementation({ run: input.run, workspacePath: input.workspacePath })
+  const current = await runtimeEvidenceIsCurrent(input.workspacePath, [report])
+  const status: EvidenceRef['status'] = implementation.evidence.acceptance?.status !== 'passed'
+    ? 'blocked' : report.status === 'failed' ? 'failed'
+      : report.status === 'passed' && current && !report.verification?.knownIssues.length &&
+        !report.verification?.unverified.length ? 'passed' : 'blocked'
+  const evidence: EvidenceRef = { path: input.terminal.evidencePath, kind: 'acceptance', revision,
+    status, observedAt: new Date().toISOString() }
+  const next = transitionDeliveryRun(input.run, { type: status === 'passed' ? 'acceptance_passed'
+    : status === 'failed' ? 'acceptance_failed' : 'acceptance_blocked', evidence })
+  return status === 'passed' ? next : { ...next, blockedReason: report.summary }
+}
+
 /**
  * Acceptance is a host confirmation of the implementation turn's current
  * evidence, not a second default model audit. The implementation Agent owns
@@ -67,33 +116,8 @@ export async function confirmAcceptanceFromImplementation(input: {
     const evidenceFile = resolveWorkflowEvidencePath(input.workspacePath, path)!
     const recorded = JSON.parse(await readFile(evidenceFile, 'utf8'))
     if (recorded.revision !== revision) throw new Error('implementation evidence contents reference a different revision')
-    // Only retry a failed parse. Never re-baseline successfully captured hashes:
-    // a changed build still requires fresh Agent verification, not another click.
-    const previous = recorded.runtimeAcceptance as RuntimeAcceptance | undefined
-    const dispatchId = /^\.beegame\/workflow\/evidence\/implementation-([\w-]+)\.json$/.exec(path)?.[1]
-    if (dispatchId && previous?.status === 'blocked' && previous.environment === 'not-established' &&
-        previous.summary.startsWith('Invalid runtime acceptance record:')) {
-      const refreshed = await readRuntimeAcceptance(input.workspacePath, dispatchId)
-      if (refreshed) {
-        recorded.runtimeAcceptance = refreshed
-        await writeFile(evidenceFile, `${JSON.stringify(recorded, null, 2)}\n`, 'utf8')
-      }
-    }
-    // Older host versions replaced an agent pass solely because a limitation
-    // list was nonempty. Re-evaluate that derived verdict, never its hash baseline.
-    if (dispatchId && previous?.status === 'blocked' &&
-        /^(Delivery has unresolved issues:|Delivery has unverified work:)/.test(previous.summary)) {
-      const refreshed = await readRuntimeAcceptance(input.workspacePath, dispatchId)
-      if (refreshed?.status === 'passed' &&
-          previous.summary.endsWith(`\nAgent report: ${refreshed.summary}`) &&
-          JSON.stringify(previous.verification) === JSON.stringify(refreshed.verification) &&
-          JSON.stringify(previous.evidence) === JSON.stringify(refreshed.evidence) &&
-          JSON.stringify(previous.artifacts) === JSON.stringify(refreshed.artifacts) &&
-          await runtimeEvidenceIsCurrent(input.workspacePath, [{ ...previous, status: 'passed' }])) {
-        recorded.runtimeAcceptance = { ...previous, status: 'passed', summary: refreshed.summary }
-        await writeFile(evidenceFile, `${JSON.stringify(recorded, null, 2)}\n`, 'utf8')
-      }
-    }
+    // Persisted evidence is immutable here. A later Agent report cannot
+    // silently reinterpret an old status based on its English summary text.
     if (recorded.runtimeAcceptance) runtimeReports.push(recorded.runtimeAcceptance)
   }
 
@@ -103,7 +127,7 @@ export async function confirmAcceptanceFromImplementation(input: {
   else if (runtimeReports.length === taskEvidence.length)
     status = await runtimeEvidenceIsCurrent(input.workspacePath, runtimeReports) ? 'passed' : 'blocked'
 
-  const evidencePath = `.beegame/workflow/evidence/acceptance-host-${revision}.json`
+  const evidencePath = `.beegame/delivery/evidence/acceptance-host-${revision}.json`
   const target = resolveWorkflowEvidencePath(input.workspacePath, evidencePath)
   if (!target) throw new Error('acceptance evidence path is invalid')
   await mkdir(dirname(target), { recursive: true })

@@ -4,6 +4,7 @@ import { createSingleReviewerLifecycle, type SingleReviewerOperations } from './
 import { singleReviewInputDigest, type SingleReviewStart } from './private/single-agent-publication'
 import type { RuntimeConfigurationClient } from '../../../runtime-configuration/public'
 import type { UsageBillingClient } from '../../../billing/public'
+import type { FileAgentInput, FileAgentResult } from '@bee-game-studio/agent-workflow/native-file-agent'
 // Diagnostic-only extension. Does not grant stage execution or mutate admission/billing evidence.
 export { createEvidenceWriter as createReviewerEvidenceWriter, evidenceSecrets as reviewerEvidenceSecrets,
   redactEvidence as redactReviewerEvidence, type EvidenceIds as ReviewerEvidenceIds,
@@ -21,10 +22,11 @@ export function foundationReviewerInputDigest(value: Pick<SingleReviewStart, 'ow
 }
 
 /** Sole production entry point for the isolated single-agent full audit. */
-export function createFoundationReviewer(config: ReviewerConfiguration, infrastructure: ReviewerInfrastructure): SingleReviewerOperations {
+export function createFoundationReviewer(config: ReviewerConfiguration, infrastructure: ReviewerInfrastructure,
+  execute?: (input: FileAgentInput) => Promise<FileAgentResult>): SingleReviewerOperations {
   const parsed = z.object({ workspacePath: z.string().min(1), language: z.string().min(1).optional() }).strict().parse(config)
   if (!isAbsolute(parsed.workspacePath)) throw new Error('Reviewer workspace must be absolute')
-  const operations = createSingleReviewerLifecycle(parsed.workspacePath, infrastructure, parsed.language)
+  const operations = createSingleReviewerLifecycle(parsed.workspacePath, infrastructure, parsed.language, execute)
   async function invoke<T>(operation: () => Promise<T>): Promise<T> {
     try { return await operation() }
     catch { throw new Error('Reviewer operation could not be accepted or safely completed') }

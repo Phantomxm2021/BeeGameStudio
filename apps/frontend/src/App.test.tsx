@@ -162,6 +162,17 @@ describe('App view routing', () => {
     expect(screen.queryByTestId('landing-view')).not.toBeInTheDocument();
   });
 
+  it('keeps the project loading page visible while authentication initializes', () => {
+    mockedAuthenticationStatus = 'initializing';
+    window.history.pushState({}, '', '/?project=proj_1');
+
+    render(<App />);
+
+    expect(screen.getByLabelText('Restoring project workspace')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Initializing BeeGame')).not.toBeInTheDocument();
+    expect(applyThemeToDocument).toHaveBeenLastCalledWith(true);
+  });
+
   it('shows a recovery state and retries a temporarily unavailable authentication service', async () => {
     vi.useFakeTimers();
     mockedAuthenticationStatus = 'initializing';
@@ -218,7 +229,11 @@ describe('App view routing', () => {
 
     render(<App />);
 
-    expect(screen.getByLabelText('Restoring project workspace')).toBeInTheDocument();
+    const restoreStatus = screen.getByLabelText('Restoring project workspace');
+    expect(restoreStatus).toHaveClass('bg-background');
+    expect(screen.getByText('正在恢复项目工作区')).toBeInTheDocument();
+    expect(screen.getByText('正在准备你的项目')).toBeInTheDocument();
+    expect(applyThemeToDocument).toHaveBeenLastCalledWith(true);
     expect(screen.queryByTestId('landing-view')).not.toBeInTheDocument();
     expect(screen.queryByTestId('dashboard-view')).not.toBeInTheDocument();
   });

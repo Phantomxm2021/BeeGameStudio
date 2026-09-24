@@ -6,7 +6,6 @@ import {
   mkdir,
   readFile,
   writeFile,
-  rm,
 } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
@@ -19,6 +18,7 @@ import {
   type WorkerDispatchRequest,
 } from './delivery-workflow/types'
 import { implementationWorkerTerminalSchema } from './delivery-workflow/worker-contracts'
+import { acceptanceValidatorTerminalSchema } from './delivery-workflow/worker-contracts'
 import {
   changeImpactTerminalSchema,
   contentAuthorTerminalSchema,
@@ -39,7 +39,7 @@ import {
 import { documentAuthoringMetrics } from './document-authoring-metrics'
 import { CONTENT_CONSUMER_INSTRUCTION } from './game-content-consumer-cli'
 import { isProjectChange } from './delivery-workflow/change-request'
-import { collectChecklistTask, prepareChecklistTask } from './checklist-task-workspace'
+import { readRuntimeAcceptance, runtimeAcceptancePath } from './delivery-workflow/runtime-acceptance'
 
 // Forward user-confirmed choices, not the host's global delivery instructions.
 function confirmedUserScope(context: string): string {
@@ -63,7 +63,8 @@ function taskTypeForWorker(
   return workerType === 'document-author' ||
     workerType === 'resource-planner' ||
     workerType === 'content-author' ||
-    workerType === 'implementation-worker'
+    workerType === 'implementation-worker' ||
+    workerType === 'acceptance-validator'
     ? 'edit_turn'
     : 'agent_turn'
 }
@@ -114,11 +115,14 @@ export function createBeeGameDeliveryWorkerPort(input: {
   openPreviewAccess?: (context: { projectId: string; workspacePath: string; sessionId: string }) => { instruction: string; close: () => Promise<void> }
 }): DeliveryWorkerPort {
   const sessions = new Map<string, string>()
+  const sharedProjectSessions = new Set<string>()
   const records = new Map<string, DispatchRecord>()
   const libraryAccess = new Map<string, ReturnType<typeof openResourceLibraryAccess>>()
+  const catalogObservation = new Map<string, boolean>()
   const imageAccess = new Map<string, { instruction: string; close: () => void }>()
   const previewAccess = new Map<string, { instruction: string; close: () => Promise<void> }>()
   const closeLibraryAccess = async (dispatchId: string) => {
+    if (libraryAccess.get(dispatchId)?.catalogObserved()) catalogObservation.set(dispatchId, true)
     libraryAccess.get(dispatchId)?.close()
     libraryAccess.delete(dispatchId)
     imageAccess.get(dispatchId)?.close()
@@ -129,12 +133,17 @@ export function createBeeGameDeliveryWorkerPort(input: {
   }
   const requests = new Map<string, WorkerDispatchRequest>()
   const documentAuthorityBlocks = new Map<string, string>()
-  const checklistTasks = new Map<string, Awaited<ReturnType<typeof prepareChecklistTask>>>()
   const eventOffsets = new Map<string, number>()
   const sessionEvents = (sessionId: string) =>
     typeof input.sessions.events === 'function'
       ? input.sessions.events(sessionId)
       : []
+  const dispatchEvents = (dispatchId: string, sessionId: string) => {
+    const events = sessionEvents(sessionId)
+    return sharedProjectSessions.has(dispatchId)
+      ? events.filter(event => event.payload?.workflowDispatchId === dispatchId)
+      : events.slice(eventOffsets.get(dispatchId) ?? 0)
+  }
   const disposeWorkflowSession = async (sessionId: string) => {
     if (typeof input.sessions.disposeWorkflowWorker === 'function')
       await input.sessions.disposeWorkflowWorker(sessionId)
@@ -158,10 +167,19 @@ export function createBeeGameDeliveryWorkerPort(input: {
           ? await buildDocumentAuthorAuthorityBlock(request)
           : ''
       const authToken = await input.getAuthToken?.()
-      const checklistTask = documentAuthorityBlock
-        ? await prepareChecklistTask({ ...request, dispatchId }, documentAuthorityBlock) : undefined
       let session
-      try { session = input.sessions.start({
+      const findProjectSession = input.sessions.projectConversationSessionId
+      const projectSessionId = typeof findProjectSession === 'function'
+        ? findProjectSession.call(input.sessions, input.userId, request.projectId, request.workspacePath)
+        : undefined
+      if (projectSessionId) {
+        session = input.sessions.get(projectSessionId)
+        if (!session || session.status !== 'running')
+          throw new Error('Project conversation session is not available for the next production stage')
+        sharedProjectSessions.add(dispatchId)
+      } else if (typeof findProjectSession === 'function') {
+        throw new Error('Project conversation session is required; refusing to start a separate workflow session')
+      } else try { session = input.sessions.start({
         workspacePath: request.workspacePath,
         projectId: request.projectId,
         userId: input.userId,
@@ -181,21 +199,16 @@ export function createBeeGameDeliveryWorkerPort(input: {
         workflowRunId: request.runId,
         workflowDispatchId: dispatchId,
         workflowWorkerType: request.workerType,
-        ...(checklistTask ? { isolatedTask: { workspacePath: checklistTask.workspacePath,
-          readOnlyPaths: checklistTask.readOnlyPaths } } : {}),
-        workflowAllowedPaths: request.allowedPaths ?? [],
         ...(request.protectedPaths
           ? { workflowProtectedPaths: [...request.protectedPaths] }
           : {}),
       }) } catch (error) {
-        if (checklistTask) await rm(checklistTask.workspacePath, { recursive: true, force: true })
         throw error
       }
-      if (checklistTask) checklistTasks.set(dispatchId, checklistTask)
       sessions.set(dispatchId, session.id)
       requests.set(dispatchId, { ...request, dispatchId })
       documentAuthorityBlocks.set(dispatchId, documentAuthorityBlock)
-      eventOffsets.set(dispatchId, 0)
+      eventOffsets.set(dispatchId, projectSessionId ? sessionEvents(session.id).length : 0)
       records.set(dispatchId, {
         dispatchId,
         workerType: request.workerType,
@@ -234,7 +247,8 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const confirmedBriefContext =
         input.confirmedBriefContext ??
         (await input.getConfirmedBriefContext?.())
-      if (request?.workerType === 'implementation-worker' && input.openPreviewAccess && !previewAccess.has(dispatchId)) {
+      if ((request?.workerType === 'implementation-worker' || request?.workerType === 'acceptance-validator') &&
+          input.openPreviewAccess && !previewAccess.has(dispatchId)) {
         previewAccess.set(dispatchId, input.openPreviewAccess({ projectId: request.projectId,
           workspacePath: request.workspacePath, sessionId }))
       }
@@ -248,10 +262,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         request && request.workerType !== 'document-author'
           ? "Bee Game Studio's native tools, reasoning, permissions, context management, and normal completion behavior remain unchanged. Use native capabilities as needed to complete and verify this task."
           : ''
-      const checklistTask = checklistTasks.get(dispatchId)
-      const workerPrompt = checklistTask
-        ? [languageInstruction, checklistTask.prompt].filter(Boolean).join('\n\n')
-        : [
+      const workerPrompt = [
         languageInstruction,
         request?.workerType === 'implementation-worker' ? CONTENT_CONSUMER_INSTRUCTION : '',
         ...(request?.workerType !== 'document-author' && confirmedBriefContext
@@ -261,7 +272,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
         prompt,
         resourceAccessInstruction,
         previewAccess.get(dispatchId)?.instruction,
-        ...(request?.workerType === 'implementation-worker'
+        ...(request?.workerType === 'implementation-worker' || request?.workerType === 'acceptance-validator'
           ? [`Actual host Preview environment: ${JSON.stringify({
               ...PREVIEW_ENVIRONMENT,
               projectId: request.projectId,
@@ -277,6 +288,13 @@ export function createBeeGameDeliveryWorkerPort(input: {
           records.get(dispatchId)?.workerType ?? 'question-answerer',
         ),
         displayKind: 'workflow_worker',
+        workflowContext: {
+          runId: request?.runId ?? '',
+          dispatchId,
+          workerType: request?.workerType ?? records.get(dispatchId)?.workerType ?? 'question-answerer',
+          phase: request?.phase ?? records.get(dispatchId)?.phase ?? 'BRIEF_CONFIRMED',
+          ...(request?.protectedPaths ? { protectedPaths: [...request.protectedPaths] } : {}),
+        },
         ...(authToken ? { authToken } : {}),
         ...(input.language ? { language: input.language } : {}),
       })
@@ -288,7 +306,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
     async stop(dispatchId, reason) {
       const sessionId = sessions.get(dispatchId)
       // Stop model/tool work immediately, not after preview readiness/cleanup.
-      if (sessionId) input.sessions.stop(sessionId, reason)
+      if (sessionId) {
+        if (sharedProjectSessions.has(dispatchId)) input.sessions.interruptTurn?.(sessionId, reason)
+        else input.sessions.stop(sessionId, reason)
+      }
       await closeLibraryAccess(dispatchId)
       if (!sessionId) {
         await input.sessions.disposeWorkflowDispatch?.(dispatchId)
@@ -316,7 +337,10 @@ export function createBeeGameDeliveryWorkerPort(input: {
       }
       let disposed = false
       try {
-        if (checklistTasks.has(dispatchId) || !options?.preserveSession) {
+        if (sharedProjectSessions.has(dispatchId)) {
+          // This dispatch borrowed the project's primary conversation. Closing
+          // the phase must never dispose that project session.
+        } else if (!options?.preserveSession) {
           const session = input.sessions.get(sessionId)
           if (
             session?.status === 'running' &&
@@ -327,14 +351,13 @@ export function createBeeGameDeliveryWorkerPort(input: {
           disposed = true
         }
       } finally {
-        const task = checklistTasks.get(dispatchId)
-        checklistTasks.delete(dispatchId)
-        if (task && disposed) await rm(task.workspacePath, { recursive: true, force: true })
         sessions.delete(dispatchId)
         records.delete(dispatchId)
         requests.delete(dispatchId)
+        catalogObservation.delete(dispatchId)
         documentAuthorityBlocks.delete(dispatchId)
         eventOffsets.delete(dispatchId)
+        sharedProjectSessions.delete(dispatchId)
       }
     },
     async status(dispatchId) {
@@ -367,11 +390,18 @@ export function createBeeGameDeliveryWorkerPort(input: {
       const sessionId = sessions.get(dispatchId)
       if (!sessionId) throw new Error('worker session is not registered')
       let closedTurnDrained = false
+      let turnStarted = false
       // Recovery policy belongs to the dispatcher. A transport-level fixed
       // deadline would fail a worker that is still making durable progress.
       while (true) {
-        const eventOffset = eventOffsets.get(dispatchId) ?? 0
-        let events = sessionEvents(sessionId).slice(eventOffset)
+        const dispatch = records.get(dispatchId)
+        if (dispatch?.status === 'interrupted') {
+          const error = new Error('Production stage was interrupted')
+          error.name = 'WorkerNeedsActionError'
+          throw error
+        }
+        let events = dispatchEvents(dispatchId, sessionId)
+        if (events.some(event => event.type === 'turn.started')) turnStarted = true
         const request = requests.get(dispatchId)
         let result = [...events]
           .reverse()
@@ -385,10 +415,12 @@ export function createBeeGameDeliveryWorkerPort(input: {
           // A foreground result does not end a native turn that launched
           // background subagents. Their files and usage must settle before the
           // host validates and accepts the worker output.
-          if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
+          if (sharedProjectSessions.has(dispatchId))
+            await input.sessions.waitForSessionIdle(sessionId)
+          else if (typeof input.sessions.waitForWorkflowWorkerIdle === 'function')
             await input.sessions.waitForWorkflowWorkerIdle(sessionId)
           await closeLibraryAccess(dispatchId)
-          events = sessionEvents(sessionId).slice(eventOffset)
+          events = dispatchEvents(dispatchId, sessionId)
           result = [...events].reverse().find(event =>
             event.type === 'result' || event.type === 'turn.failed' || event.type === 'turn.empty')
           if (!result) throw new Error('worker completed without a terminal result')
@@ -417,16 +449,13 @@ export function createBeeGameDeliveryWorkerPort(input: {
             return createDeterministicResourcePlannerTerminal({
               request,
               events,
+              catalogObserved: catalogObservation.get(dispatchId) === true,
             })
           }
           if (request?.workerType === 'content-author') {
             return createDeterministicContentAuthorTerminal({ request, events })
           }
           if (request && isDocumentAuthor(request)) {
-            const checklistTask = checklistTasks.get(dispatchId)
-            if (checklistTask) {
-              await collectChecklistTask(request, checklistTask)
-            }
             const targetPath = request.allowedPaths?.[0]
             if (!targetPath)
               throw new Error('document author target is missing')
@@ -458,6 +487,7 @@ export function createBeeGameDeliveryWorkerPort(input: {
           throw new Error('worker has no terminal result handler')
         }
         if (
+          !sharedProjectSessions.has(dispatchId) &&
           typeof input.sessions.isWorkflowWorkerOpen === 'function' &&
           !input.sessions.isWorkflowWorkerOpen(dispatchId)
         ) {
@@ -470,6 +500,18 @@ export function createBeeGameDeliveryWorkerPort(input: {
           const error = new Error(
             'worker stopped before producing a durable terminal result',
           )
+          error.name = 'WorkerNeedsActionError'
+          throw error
+        }
+        if (sharedProjectSessions.has(dispatchId) && turnStarted &&
+            input.sessions.get(sessionId)?.turnStatus === 'idle' && !closedTurnDrained) {
+          await input.sessions.waitForSessionIdle(sessionId)
+          closedTurnDrained = true
+          continue
+        }
+        if (sharedProjectSessions.has(dispatchId) && turnStarted &&
+            input.sessions.get(sessionId)?.turnStatus === 'idle' && closedTurnDrained) {
+          const error = new Error('Project conversation turn ended without a terminal result')
           error.name = 'WorkerNeedsActionError'
           throw error
         }
@@ -513,6 +555,16 @@ async function createDeterministicStructuredTerminal(input: {
       )
     case 'implementation-worker':
       return createDeterministicImplementationWorkerTerminal(input)
+    case 'acceptance-validator': {
+      const report = await readRuntimeAcceptance(input.request.workspacePath, input.request.dispatchId!)
+      if (!report) throw new Error('Acceptance Agent did not save its runtime result')
+      const evidencePath = `.beegame/delivery/evidence/acceptance-review-${input.request.dispatchId}.json`
+      const terminal = acceptanceValidatorTerminalSchema.parse({ workerType: 'acceptance-validator',
+        status: 'completed', revision: input.request.revision, evidencePath })
+      await writeCanonicalTerminalEvidence({ workspacePath: input.request.workspacePath, evidencePath,
+        value: { ...terminal, runtimeAcceptance: report } })
+      return terminal
+    }
     case 'change-impact-analyzer':
       return createNaturalChangeImpactTerminal(input)
     case 'question-answerer':
@@ -573,7 +625,7 @@ async function createNaturalChangeImpactTerminal(input: {
   const rationale = report.match(/(?:^|\n)RATIONALE:\s*(.+?)\s*$/imu)?.[1]?.trim()
   if (!classification || !rationale)
     throw new Error('change impact worker completed without the required final report')
-  const evidencePath = `.beegame/workflow/evidence/change-impact-${input.request.dispatchId}.json`
+  const evidencePath = `.beegame/delivery/evidence/change-impact-${input.request.dispatchId}.json`
   const terminal = changeImpactTerminalSchema.parse({
     workerType: 'change-impact-analyzer',
     classification,
@@ -595,7 +647,7 @@ async function createNaturalQuestionAnswerTerminal(input: {
   events: ReturnType<BeeGameSessionManager['events']>
 }) {
   const answer = finalResultText(input.events)
-  const evidencePath = `.beegame/workflow/evidence/question-answer-${input.request.dispatchId}.json`
+  const evidencePath = `.beegame/delivery/evidence/question-answer-${input.request.dispatchId}.json`
   const terminal = questionAnswerTerminalSchema.parse({
     workerType: 'question-answerer',
     answer,
@@ -638,6 +690,7 @@ function hasInFlightResourceMutation(events: BeeGameEvent[]): boolean {
 async function createDeterministicResourcePlannerTerminal(input: {
   request: WorkerDispatchRequest
   events: ReturnType<BeeGameSessionManager['events']>
+  catalogObserved?: boolean
 }) {
   const contract = auditAssetContract(input.request.workspacePath)
   const observedMutationPaths = completedProjectMutationPaths(
@@ -660,6 +713,7 @@ async function createDeterministicResourcePlannerTerminal(input: {
     workerType: 'resource-planner' as const,
     status: 'completed' as const,
     writtenPaths,
+    catalogObserved: input.catalogObserved === true,
   })
 }
 
@@ -698,7 +752,7 @@ function createDeterministicImplementationWorkerTerminal(input: {
   const changedPaths = [...new Set(
     completedProjectMutationPaths(input.request.workspacePath, input.events),
   )]
-  const evidencePath = `.beegame/workflow/evidence/implementation-${input.request.dispatchId}.json`
+  const evidencePath = `.beegame/delivery/evidence/implementation-${input.request.dispatchId}.json`
   return implementationWorkerTerminalSchema.parse({
     workerType: 'implementation-worker',
     taskId: input.request.taskId,

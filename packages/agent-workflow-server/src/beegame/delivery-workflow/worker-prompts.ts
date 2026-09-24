@@ -14,7 +14,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
   if (isProjectChange(request)) throw new Error('Project requests use the native project conversation, not worker prompts')
   const pathScope = request.allowedPaths?.length
       ? request.allowedPaths.join(', ')
-      : 'read-only'
+      : 'no single output directory is prescribed'
   const canonicalArtifacts =
     (request.workerType === 'document-author' &&
           request.contract.documentSet === 'checklist'
@@ -26,8 +26,8 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
     `Run: ${request.runId}`,
     `Revision: ${request.revision}`,
     `Workspace root: ${request.workspacePath}`,
-    `Writable paths: ${pathScope}`,
-    'Writable paths are workspace-relative. Save final artifacts within these paths. Use the provided TMPDIR for temporary working files; it is writable inside this project. Protected paths remain read-only.',
+    `Primary output location: ${pathScope}`,
+    'This is guidance for the stage deliverable, not a filesystem sandbox. Make related project changes where they are needed to complete the task. Stay inside the project workspace; explicitly protected paths remain read-only.',
     ...(request.protectedPaths?.length
       ? [`Protected paths (read-only, even inside writable paths): ${request.protectedPaths.join(', ')}`]
       : []),
@@ -45,7 +45,7 @@ export function buildWorkerPrompt(request: WorkerDispatchRequest): string {
       'Record unresolved issues and their evidence concisely in .beegame/implementation-issues.md when needed; choose investigation and repair order yourself. No empty report is needed.',
       'Resolve issues by responsibility: source-asset defects belong to targeted resource repair; loading/rendering/interaction defects belong to implementation. Coordinate resource repair using native delegation as useful, without restarting resource production. The implementation role must not silently rewrite source assets as a rendering fix; if handoff cannot be completed, report the unresolved issue.',
       'The resource repair owner must keep changed assets, Manifest hashes/metadata and processing provenance consistent. Do not blindly refresh hashes to pass validation. Existing resource capabilities are available for this handoff, not an instruction to generate new assets.',
-      'Use contract.resourceValidationCommand for the same read-only resource check as the host, then verify the affected build/runtime behavior after repairs. Update the issue notes with outcomes; do not reuse a pre-repair PASS or report passed while required fixes remain unresolved. No extra audit agent or automatic retry loop is required.',
+      'Use contract.resourceValidationCommand for the same read-only resource check as the host, then verify the affected build/runtime behavior after repairs. Update the issue notes with outcomes; do not reuse a pre-repair PASS or report passed while required fixes remain unresolved.',
       'Implement consumers from the actual Content data, including VFX/behavior fields, component types, events and resource members; do not assume a different field vocabulary. Keep parsing/types and focused tests in this project, and exercise the affected event paths. A package schema check alone does not prove its runtime consumers agree. Reuse useful project tests; no platform-fixed gameplay script or new engine adapter is required.',
     ] : []),
     'Use the confirmed contract and task payload as authority. Do not use chat transcript prose as product authority.',
@@ -78,7 +78,14 @@ function workerInstruction(request: WorkerDispatchRequest): string {
     case 'resource-planner':
       return [
         'Read the accepted Foundation documents and the Asset Manifest authoring contract at contract.contractPath, then autonomously obtain or make the runtime assets the game needs.',
-        'Prefer reusing suitable project or built-in library assets when they meet the requirements. Choose licensed internet assets, AI generation or programmatic drawing according to fit, quality, cost and the user\'s explicit source constraints. These are options, not a mandatory search ladder; do not repeat searches solely to justify reusing a verified asset.',
+        request.contract.resourceLibraryUsage === 'required'
+          ? 'Resource Library usage is required: integrate suitable verified library assets into the delivered game, or report the unmet requirement. Do not substitute other sources and claim the requirement passed.'
+          : request.contract.resourceLibraryUsage === 'preferred'
+            ? 'Resource Library usage is preferred: inspect suitable published Packs before creating or sourcing substitutes. If none fit, record the observed reason and choose another source.'
+            : request.contract.resourceLibraryUsage === 'optional'
+              ? 'Resource Library usage is optional: use suitable project or library assets when they improve the result.'
+              : 'Use suitable project or library assets when they improve the result; the confirmed Resource Library policy is not specified in this dispatch.',
+        'Choose licensed internet assets, AI generation or programmatic drawing according to fit, quality, cost and the user\'s explicit source constraints. These are options, not a mandatory search ladder; do not repeat searches solely to justify reusing a verified asset.',
         'Choose search queries, sources and tools autonomously; no fixed search count or tool sequence is required. Missing deferred tools or an unavailable library do not mean no suitable internet assets exist. Use the supplied library endpoint and native web/search/browser or Bash HTTP capabilities as available.',
         'Record actual sources checked and concrete suitability or access limitations in existing selection_reason/source fields. Do not claim no matching assets without a real search, silently substitute provisional assets for required final formats, or treat schema acceptance as visual/audio quality verification.',
         'For selected assets record verified provenance and license facts in source and a concise suitability reason in selection_reason; reference shared search evidence rather than repeating it for each group. Do not fabricate checks for sources you did not use. Procedural effects and non-image assets should use applicable capabilities, not an image-generation API.',
@@ -88,7 +95,7 @@ function workerInstruction(request: WorkerDispatchRequest): string {
         'Generated image dimensions are source-canvas dimensions, not a required game layout. Choose reusable tiles, sprites, layers or separate frames and compose them when appropriate for scrolling/platform games; no particular composition method is required.',
         'For repetitive grid environments, consider preparing a reusable TileSet alongside its tile images/atlas. If useful, register its beegame-tileset.v1 JSON as a data resource in the Manifest using the TileSet section of contract.contractPath. TileSet metadata is a resource-stage output; the following content stage writes cell placement and cannot modify assets. Choose whether this fits the game; do not generate a second image when existing verified tiles suffice.',
         'Finish normally with a concise summary. The host validates the persisted manifest after the turn.',
-        'contract.validationCommand runs the same read-only interface check as the host. Use it as needed; contract.validationIssues reports current interface issues to address while preserving usable assets. No separate verification agent is required.',
+        'contract.validationCommand runs the same read-only interface check as the host. Use it as needed; contract.validationIssues reports current interface issues to address while preserving usable assets.',
       ].join(' ')
     case 'content-author':
       if (
@@ -125,12 +132,14 @@ function workerInstruction(request: WorkerDispatchRequest): string {
           'Fix the deterministic host errors in contract.currentImplementationIssues, preserve valid work, run only the relevant checks, and finish normally.',
         ].join(' ')
       return [
-        'Complete contract.task within allowedPaths. Implement the accepted Foundation documents and contract.gameContent package for the selected target, and use the Manifest only to locate their referenced runtime assets.',
+        'Complete contract.task using the accepted Foundation documents and contract.gameContent package for the selected target, and use the Manifest to locate their referenced runtime assets. The listed output location is a deliverable hint, not a restriction on necessary supporting project changes.',
         'The running game must load content/index.json and its registered Scene/UI documents as runtime data. Do not copy their editable values into source code or a second generated configuration.',
         'Read the specific accepted document sections needed for implementation and keep the content package as the editable source of Scene/UI data.',
         'Keep Content references consistent with the accepted resources. Verify that authored transforms and resource references are actually consumed by the running game, and distinguish failed resource loading from source-asset defects.',
         'Work normally with native tools. Run the game and inspect the relevant visual and interaction results before finishing. Correct substantive functional, production-build, visual, or content conflicts you find. Choose the checks and workflow that are useful for this task; do not add a framework solely to satisfy this request. End with a concise account of what you observed and anything that remains unresolved.',
       ].join(' ')
+    case 'acceptance-validator':
+      return 'Independently run and inspect the current game against the accepted documents, resource Manifest, Scene/UI content, and gameplay checklist. This is a read-only acceptance turn in the same project conversation; do not fix project files here. Choose the relevant checks yourself, report failures or unverified behavior honestly, and do not treat the implementation summary as proof.'
     case 'change-impact-analyzer':
       return 'Review the requested change against the project as a read-only worker. Decide its actual impact autonomously; do not modify project files.'
     case 'question-answerer':
@@ -157,12 +166,14 @@ function terminalInstruction(request: WorkerDispatchRequest): string {
       return 'Finish the Scene/UI/VFX package under content/ and end normally with a concise summary. The host validates the package and creates its receipt.'
     case 'implementation-worker':
       return [
-        'Finish normally with a concise summary. Choose your own verification methods; no additional audit Agent or fixed test sequence is required.',
+        'Finish normally with a concise summary. Choose your own verification methods and work order.',
         'Automated browser tests must not play audible sound on the host: launch test Chromium with --mute-audio (headless alone does not mute). Preserve the game audio implementation. Use bounded waits and reject protocol errors. In finally, close the actual test pages/contexts and any browser process you started; disconnecting CDP alone does not close a page. Never stop an unrelated user browser.',
-        'Before finishing, reconcile your TodoWrite list with the observed results. Mark only verified work completed; explicitly leave failed or blocked work unresolved. A final prose summary does not update TodoWrite.',
+        'Report verified work and any unresolved or untested work accurately; use available native task tools if useful.',
         'Describe what your runtime evidence actually establishes: development or production build, actual host Preview or a separate test surface, normal player input or injected debug state. Teleporting to the finish may verify a finish trigger but does not establish level reachability. An equivalent local iframe does not prove the host proxy works. Choose useful checks autonomously; report the unverified surface or behavior rather than widening a narrow result into full acceptance.',
         request.dispatchId ? `Save a short JSON result at ${runtimeAcceptancePath(request.dispatchId)}: {"scope":"delivery","status":"passed|failed|blocked","summary":"observations","environment":"actual runtime surface tested","verification":{"target":"development|deployment","knownIssues":[],"unverified":[]},"evidencePaths":["workspace-relative saved screenshot or test report"],"artifactPaths":["workspace-relative files of the tested deliverable"]}. Record remaining defects in knownIssues and untested requirements or environments in unverified, even when individual checks passed. Deployment means the actual deliverable, not just a dev server or a successful compiler exit. Include its actual executable/build files and required runtime data in artifactPaths; not screenshots or build logs. The host hashes these files to detect later changes, but cannot prove a stale build is correct from its timestamp. Report passed only for observed success on the actual target environment, including the host iframe for Web Preview, with saved evidence. Report failed for observed defects or blocked when verification could not be completed. The host checks explicit coverage and evidence identity, not the truth of gameplay claims; it does not infer success from prose or prescribe test methods.` : '',
       ].filter(Boolean).join(' ')
+    case 'acceptance-validator':
+      return request.dispatchId ? `Save your observed result at ${runtimeAcceptancePath(request.dispatchId)} using the same delivery runtime report shape: {"scope":"delivery","status":"passed|failed|blocked","summary":"actual observations and unresolved issues","environment":"tested surface","verification":{"target":"development|deployment","knownIssues":[],"unverified":[]},"evidencePaths":["saved workspace-relative test evidence"],"artifactPaths":["workspace-relative tested deliverable"]}. A PASS requires an actual deployed-target runtime check and saved evidence; otherwise report failed or blocked. Use --mute-audio for automated browser checks and close only browsers you started. Finish with a concise natural-language conclusion.` : ''
     case 'change-impact-analyzer':
       return 'End with exactly four plain-text lines: `CLASSIFICATION: question|implementation_only|documents_required`, `AFFECTED_REQUIREMENTS: <comma-separated IDs or NONE>`, `AFFECTED_CHECKLIST: <comma-separated IDs or NONE>`, and `RATIONALE: <concise single-line rationale>`.'
     case 'question-answerer':

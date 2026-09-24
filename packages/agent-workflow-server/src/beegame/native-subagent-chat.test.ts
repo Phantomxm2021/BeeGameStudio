@@ -27,6 +27,12 @@ describe('native subagent chat observation', () => {
       const progress = enrich({ type: 'system.status', payload: { type: 'system', subtype: 'task_progress', task_id: 'task-1' } })
       expect(progress.payload).toMatchObject({ toolUseID: 'agent-1', input })
       expect(progress.payload).toHaveProperty('subagentActivity')
+      const terminal = enrich({ type: 'tool.completed', payload: { toolName: 'TaskOutput', toolUseID: 'wait-1',
+        input: { task_id: 'task-1' }, nativeTaskResult: { taskId: 'task-1', status: 'failed', result: 'Test failed' } } })
+      expect(terminal.payload).toMatchObject({ nativeBackgroundTaskResult: {
+        toolUseID: 'agent-1', status: 'failed', result: 'Test failed',
+      }, backgroundAgentInput: input })
+      expect(terminal.payload).toHaveProperty('subagentActivity')
       const activity = readVisibleSubagentActivity(path)!
       expect(activity.entries).toMatchObject([
         { kind: 'message', text: 'Checking manifest' },
@@ -57,6 +63,19 @@ describe('native subagent chat observation', () => {
       expect(activity.entries[1]).toMatchObject({ id: 'bash', command: 'bun test', status: 'failed', output: 'test failed' })
       expect(JSON.stringify(activity).length).toBeLessThan(24000)
     } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  test('labels native background shell work as a task and closes it from structured TaskOutput', () => {
+    const enrich = createNativeSubagentChatEnricher()
+    const started = enrich({ type: 'system.status', payload: { type: 'system', subtype: 'task_started',
+      task_id: 'shell-1', task_type: 'local_bash', tool_use_id: 'bash-call', description: 'Run tests' } })
+    expect(started.payload).toMatchObject({ toolName: 'Task', toolUseID: 'bash-call',
+      input: { description: 'Run tests' } })
+    const ended = enrich({ type: 'tool.completed', payload: { toolName: 'TaskOutput', toolUseID: 'wait-call',
+      nativeTaskResult: { taskId: 'shell-1', status: 'failed', result: 'Tests failed' } } })
+    expect(ended.payload).toMatchObject({ nativeBackgroundTaskResult: {
+      toolUseID: 'bash-call', toolName: 'Task', status: 'failed', result: 'Tests failed',
+    } })
   })
 
   test('does not guess a source language for a result whose invocation is outside the retained tail', () => {

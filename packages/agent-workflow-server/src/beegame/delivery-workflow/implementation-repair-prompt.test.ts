@@ -7,9 +7,8 @@ test('initial, resumed and change-request tasks share repair ownership and defer
     const prompt = buildWorkerPrompt({ dispatchId: 'test', runId: 'run', ownerId: 'owner',
       projectId: 'project', workspacePath: '/project', workerType: 'implementation-worker',
       phase: 'IMPLEMENTATION', revision: 'revision', allowedPaths: ['./'], contract } as WorkerDispatchRequest)
-    expect(prompt).toContain('finish the game logic first')
-    expect(prompt).toContain('truly block implementation')
-    expect(prompt).toContain('source-asset defects belong to a targeted resource repair task')
+    expect(prompt).toContain('Resolve issues by responsibility')
+    expect(prompt).toContain('source-asset defects belong to targeted resource repair')
     expect(prompt).toContain('Do not blindly refresh hashes')
     expect(prompt).toContain('after repairs')
     expect(prompt).not.toContain('Content and Manifest are editable project artifacts')
@@ -25,6 +24,6 @@ test('the prompt exposes the actual project boundary and protected exceptions', 
     workspacePath: '/project', workerType: 'implementation-worker', phase: 'IMPLEMENTATION',
     revision: 'revision', allowedPaths: ['./'], protectedPaths: ['docs/GDD.md', 'assets/'],
     contract: {} })
-  expect(prompt).toContain('including temporary files')
+  expect(prompt).toContain('not a filesystem sandbox')
   expect(prompt).toContain('Protected paths (read-only, even inside writable paths): docs/GDD.md, assets/')
 })

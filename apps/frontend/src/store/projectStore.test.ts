@@ -7,7 +7,6 @@ const {
   getProjectRuntimeState,
   getProjects,
   openProject,
-  createReviewCopy,
   bootstrapProjectFromBrief,
   chatActions,
   updateTokenUsage,
@@ -17,7 +16,6 @@ const {
   getProjectRuntimeState: vi.fn(),
   getProjects: vi.fn(),
   openProject: vi.fn(),
-  createReviewCopy: vi.fn(),
   bootstrapProjectFromBrief: vi.fn(),
   chatActions: {
     clearMessages: vi.fn(),
@@ -37,7 +35,6 @@ vi.mock('../services/api', async () => {
       getProjectRuntimeState,
       getProjects,
       openProject,
-      createReviewCopy,
       bootstrapProjectFromBrief,
     },
   }
@@ -72,7 +69,6 @@ describe('projectStore pending review normalization', () => {
     }))
     openProject.mockReset()
     openProject.mockResolvedValue({})
-    createReviewCopy.mockReset()
     bootstrapProjectFromBrief.mockReset()
     chatActions.clearMessages.mockReset()
     chatActions.addMessage.mockReset()
@@ -113,25 +109,6 @@ describe('projectStore pending review normalization', () => {
     } as Parameters<ReturnType<typeof useProjectStore.getState>['bootstrapProjectFromBrief']>[0])
     expect(chatActions.clearMessages).toHaveBeenCalledOnce()
     expect(chatActions.addMessage.mock.calls.filter(([message]) => message.sender === 'user')).toHaveLength(0)
-  })
-
-  it('inserts a created review copy once and returns it', async () => {
-    const source = { id: 'source', name: 'Source', created_at: 1 }
-    const copy = { id: 'copy', name: 'Source Review Copy', created_at: 2 }
-    useProjectStore.setState({ projects: [source] })
-    createReviewCopy.mockResolvedValue({
-      project: copy,
-      runId: 'run-copy',
-      phase: 'DOCUMENT_REVIEW',
-    })
-
-    await expect(
-      useProjectStore.getState().createReviewCopy('source'),
-    ).resolves.toEqual(copy)
-    expect(useProjectStore.getState().projects).toEqual([copy, source])
-
-    await useProjectStore.getState().createReviewCopy('source')
-    expect(useProjectStore.getState().projects).toEqual([copy, source])
   })
 
   it('does not use the last active project as browser navigation state', () => {

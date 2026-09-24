@@ -114,7 +114,7 @@ describe('Foundation authoring handoff pause', () => {
         status: 'running' as const,
       }
 
-      await controller.resume(staleRun)
+      await expect(controller.resume(staleRun)).rejects.toThrow('retired')
       await controller.ensureProgress(staleRun)
 
       expect(dispatches).toEqual([])

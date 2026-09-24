@@ -32,7 +32,6 @@ const { chatStoreState, useChatStoreMock, projectStoreState, useProjectStoreMock
   const systemState = {
     updateTokenUsage: vi.fn(),
     updateLastP2PRoute: vi.fn(),
-    loadPhases: vi.fn().mockResolvedValue(undefined),
     loadTokenUsage: vi.fn().mockResolvedValue(undefined),
     loadCurrentUser: vi.fn().mockResolvedValue(null),
     authenticationStatus: 'authenticated' as const,
@@ -106,7 +105,7 @@ import { useChat } from './useChat';
 import { settleChatActivity } from '../utils/chatActivity';
 
 describe('useChat clarification gate handling', () => {
-  it('keeps detached child work busy after parent completion and refuses a new send', async () => {
+  it('keeps detached child work busy after parent completion and queues a new send', async () => {
     const child = { id: 'child', sender: 'beegame', type: 'tool', taskId: 'parent-task',
       timestamp: 100, isSubagentTool: true, toolStatus: 'running' };
     chatStoreState.messages = [child];
@@ -114,13 +113,16 @@ describe('useChat clarification gate handling', () => {
     act(() => latestWebSocketOptions.onMessage?.({ type: 'status', status: 'finished', task_id: 'parent-task' }));
     expect(result.current.isLoading).toBe(true);
     const calls = vi.mocked(api.sendMessage).mock.calls.length;
-    await act(async () => { expect(await result.current.sendMessage('new request')).toBe(false); });
-    expect(api.sendMessage).toHaveBeenCalledTimes(calls);
+    vi.mocked(api.sendMessage).mockResolvedValueOnce({ task_id: 'parent-task', state: 'queued' } as never);
+    await act(async () => { expect(await result.current.sendMessage('new request')).toBe(true); });
+    expect(api.sendMessage).toHaveBeenCalledTimes(calls + 1);
+    expect(chatStoreState.addMessage).not.toHaveBeenCalledWith(expect.objectContaining({ sender: 'user', content: 'new request' }));
+    expect(chatStoreState.removeMessage).not.toHaveBeenCalled();
     await act(async () => { await result.current.continueTask(); });
     expect(api.continueTask).not.toHaveBeenCalled();
     chatStoreState.messages = [{ ...child, toolStatus: 'completed' }];
     rerender();
-    expect(result.current.isLoading).toBe(false);
+    expect(result.current.isLoading).toBe(true);
   });
 
   it.each(['stopped', 'failed'] as const)('retains live child task scope so %s unlocks the composer', async (status) => {
@@ -445,12 +447,26 @@ describe('useChat clarification gate handling', () => {
       workflow: status ? { status } : undefined };
     const { result, rerender } = renderHook(() => useChat({ projectId: 'proj_1' }));
     await waitFor(() => expect(result.current.isLoading).toBe(true));
-    await act(async () => { expect(await result.current.sendMessage('another request')).toBe(false); });
+    vi.mocked(api.sendMessage).mockResolvedValueOnce({ task_id: 'proj_1', state: 'queued' } as never);
+    await act(async () => { expect(await result.current.sendMessage('another request')).toBe(true); });
     act(() => latestWebSocketOptions.onClose?.());
     expect(result.current.isLoading).toBe(true);
     projectStoreState.projectStatus = { ...projectStoreState.projectStatus, phase: 'idle' };
     rerender();
     await waitFor(() => expect(result.current.isLoading).toBe(false));
+  });
+
+  it('does not flash a sent user bubble while a running turn queues input', async () => {
+    projectStoreState.projectStatus = { project_id: 'proj_1', phase: 'running' };
+    let resolveSend!: (response: unknown) => void;
+    vi.mocked(api.sendMessage).mockImplementationOnce(() => new Promise(resolve => { resolveSend = resolve; }) as never);
+    const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
+    await waitFor(() => expect(result.current.isLoading).toBe(true));
+    let send!: Promise<boolean>;
+    await act(async () => { send = result.current.sendMessage('Queue this'); });
+    expect(chatStoreState.addMessage).not.toHaveBeenCalledWith(expect.objectContaining({ sender: 'user', content: 'Queue this' }));
+    await act(async () => { resolveSend({ task_id: 'proj_1', state: 'queued' }); await send; });
+    expect(chatStoreState.addMessage).not.toHaveBeenCalledWith(expect.objectContaining({ sender: 'user', content: 'Queue this' }));
   });
 
   it('does not carry an active turn lock into another project', async () => {
@@ -681,7 +697,6 @@ describe('useChat clarification gate handling', () => {
       expect(projectStoreState.loadProjectRuntimeState).toHaveBeenCalledWith('proj_1');
       expect(api.getChatHistory).toHaveBeenCalledWith('proj_1');
     });
-    expect(systemStoreState.loadPhases).not.toHaveBeenCalled();
     expect(systemStoreState.loadTokenUsage).not.toHaveBeenCalled();
   });
 
@@ -702,6 +717,20 @@ describe('useChat clarification gate handling', () => {
       content: 'updated request',
       supersedes_message_id: 'msg_original',
     }));
+  });
+
+  it('does not report an accepted edit as failed when only the history refresh fails', async () => {
+    vi.mocked(api.sendMessage).mockResolvedValueOnce({ task_id: 'task_edited', state: 'running' } as any);
+    const showToastError = vi.fn();
+    const { result } = renderHook(() => useChat({ projectId: 'proj_1', showToastError }));
+    vi.mocked(api.getChatHistory).mockRejectedValueOnce(new Error('temporary history outage'));
+    let accepted = false;
+    await act(async () => {
+      accepted = await result.current.sendMessage('replacement', undefined, undefined, 'original');
+    });
+    expect(accepted).toBe(true);
+    expect(showToastError).not.toHaveBeenCalled();
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
   });
 
   it('ignores a late send response after the chat hook unmounts', async () => {
@@ -825,7 +854,6 @@ describe('useChat clarification gate handling', () => {
       expect(projectStoreState.loadProjectRuntimeState).toHaveBeenCalledWith('proj_1');
       expect(api.getChatHistory).toHaveBeenCalledWith('proj_1');
     });
-    expect(systemStoreState.loadPhases).not.toHaveBeenCalled();
     expect(systemStoreState.loadTokenUsage).not.toHaveBeenCalled();
   });
 
@@ -879,6 +907,26 @@ describe('useChat clarification gate handling', () => {
     expect(projectStoreState.upsertPendingPermission).toHaveBeenCalledWith(review);
     expect(result.current.permissionState.phase).toBe('failed');
     expect(errorLog).toHaveBeenCalledWith('[useChat] Failed to resolve tool permission:', expect.any(Error));
+    errorLog.mockRestore();
+  });
+
+  it('removes an expired permission instead of restoring its card', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const review = { gate_id: 'expired-gate', type: 'BEEGAME_PERMISSION' };
+    projectStoreState.pendingPermissions = [review];
+    vi.mocked(api.resolveToolPermission).mockRejectedValueOnce(Object.assign(
+      new Error('This request is no longer pending.'), { code: 'permission_not_pending' },
+    ));
+    const { result } = renderHook(() => useChat({ projectId: 'proj_1' }));
+
+    await act(async () => {
+      await result.current.resolveToolPermission(review as any);
+    });
+
+    expect(projectStoreState.removePendingPermission).toHaveBeenCalledWith('expired-gate');
+    expect(projectStoreState.upsertPendingPermission).not.toHaveBeenCalled();
+    expect(projectStoreState.loadProjectRuntimeState).toHaveBeenCalledWith('proj_1');
+    expect(result.current.permissionState.phase).toBe('idle');
     errorLog.mockRestore();
   });
 

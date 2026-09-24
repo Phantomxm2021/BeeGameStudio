@@ -1,5 +1,5 @@
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, Copy, FileText, Pencil } from 'lucide-react';
+import { ArrowLeft, Bot, Check, ChevronDown, ChevronRight, Copy, FileText, LoaderCircle, Pencil, Send, X } from 'lucide-react';
 import { type ChatDisplayMessage, type ChatDisplaySource } from '../../../viewModels/displayModels';
 import { MarkdownRenderer } from './ChatMarkdownContent';
 import type { Language } from '../AgentsConfig';
@@ -24,6 +24,7 @@ import { ArtifactCard } from './ArtifactCard';
 import { chatStageLabels } from '../../../utils/chatStageLabels';
 import { ChatAttachmentView } from './ChatAttachmentView';
 import { SubagentActivityView } from './SubagentActivityView';
+import { Button } from '../../beui/project-button';
 
 type BeeGameCollaborationFeedProps = {
     messages: ChatDisplayMessage[];
@@ -33,6 +34,12 @@ type BeeGameCollaborationFeedProps = {
     currentUserEmail?: string;
     currentUserAvatarUrl?: string;
     onEditMessage?: (message: ChatDisplayMessage) => void;
+    editingMessageId?: string | null;
+    editDraft?: string;
+    onEditDraftChange?: (value: string) => void;
+    onSubmitEdit?: () => void;
+    onCancelEdit?: () => void;
+    editDisabled?: boolean;
     isLoading?: boolean;
     streamingMessageId?: string | null;
 };
@@ -118,40 +125,8 @@ const isThinkingMessage = (message: ChatDisplayMessage): boolean => {
 
 const isContextUpdateMessage = (message: ChatDisplayMessage): boolean => {
     const raw = message as ChatDisplayMessage & { task_kind?: string };
-    return message.taskKind === 'context_update' || raw.task_kind === 'context_update';
-};
-
-const getStructuredLineValue = (content: string, label: string): string => {
-    const prefix = `${label}:`;
-    const line = content
-        .split('\n')
-        .map((item) => item.trim())
-        .find((item) => item.startsWith(prefix));
-    return line ? line.slice(prefix.length).trim() : '';
-};
-
-const getStatusFromText = (value: string): NormalizedTool['status'] | '' => {
-    const lower = value.trim().toLowerCase();
-    if (lower === 'completed' || lower.endsWith(' completed')) return 'completed';
-    if (lower === 'failed' || lower.endsWith(' failed')) return 'failed';
-    if (lower === 'running' || lower.startsWith('running ')) return 'running';
-    return '';
-};
-
-const getToolNameFromTitle = (value: string): string => {
-    const text = value.trim();
-    for (const suffix of [' completed', ' failed']) {
-        if (text.endsWith(suffix)) return text.slice(0, -suffix.length).trim();
-    }
-    if (text.startsWith('Running ')) return text.slice('Running '.length).trim();
-    return '';
-};
-
-const stripStructuredDetailLabel = (value: string): string => {
-    for (const label of ['Target:', 'Command:', 'Prompt:', 'Type:']) {
-        if (value.startsWith(label)) return value.slice(label.length).trim();
-    }
-    return value;
+    return message.taskKind === 'context_update' || raw.task_kind === 'context_update' ||
+        message.taskKind === 'context_compaction' || raw.task_kind === 'context_compaction';
 };
 
 const displayText = (value: string): string => shortenAbsolutePathsForDisplay(value);
@@ -171,13 +146,6 @@ const getToolKind = (toolName?: string): ToolKind => {
 const isHiddenPresentationTool = (toolName?: string): boolean => (
     String(toolName || '').trim().toLowerCase() === 'structuredoutput'
 );
-
-const inferWorkflowStage = (value: string): WorkflowStage | undefined => {
-    const normalized = value.toLowerCase();
-    if (normalized.includes('foundation-authoring')) return 'author';
-    if (normalized.includes('foundation-reviewer') || normalized.includes('foundation-review')) return 'reviewer';
-    return undefined;
-};
 
 const workflowStage = (message: ChatDisplayMessage): WorkflowStage | undefined => {
     const taskKind = String(message.taskKind || '').trim();
@@ -212,17 +180,13 @@ const isLocalSearchTool = (tool: NormalizedTool): boolean => {
 
 const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null => {
     const content = String(message.content || '');
-    const firstLine = content.split('\n').map((item) => item.trim()).find(Boolean) || '';
-    const structuredTool = getStructuredLineValue(content, 'Tool');
-    const titleTool = getToolNameFromTitle(firstLine);
-    const rawName = String(message.toolName || message.tool || structuredTool || titleTool || '').trim();
-    const name = rawName && rawName !== GENERIC_TOOL_NAME ? rawName : titleTool || structuredTool || GENERIC_TOOL_NAME;
-    const rawStatus = String(message.toolStatus || message.tool_status || getStructuredLineValue(content, 'Status') || '').trim();
-    const status = getStatusFromText(rawStatus) || getStatusFromText(firstLine) || 'running';
-    const structuredDetail = getStructuredLineValue(content, 'Target') || getStructuredLineValue(content, 'Command') || getStructuredLineValue(content, 'Prompt');
-    const rawDetail = String(message.toolDetail || message.tool_detail || structuredDetail || '').trim();
+    const name = String(message.toolName || message.tool || GENERIC_TOOL_NAME).trim() || GENERIC_TOOL_NAME;
+    const rawStatus = String(message.toolStatus || message.tool_status || '').trim();
+    const status: NormalizedTool['status'] = rawStatus === 'completed' || rawStatus === 'failed' || rawStatus === 'running'
+        ? rawStatus : (message.toolOutput || message.tool_output) ? 'completed' : 'running';
+    const rawDetail = String(message.toolDetail || message.tool_detail || '').trim();
     const fullSubagentOutput = String(message.subagentOutput || '').trim();
-    const output = fullSubagentOutput || String(message.toolOutput || message.tool_output || getStructuredLineValue(content, 'Output') || '').trim();
+    const output = fullSubagentOutput || String(message.toolOutput || message.tool_output || content).trim();
     const structuredPatch = message.toolStructuredPatch ?? message.structured_patch;
     const kind = getToolKind(name);
     const rawDiff = message.toolDiff || message.toolPatch || message.tool_diff || message.tool_patch || formatStructuredPatch(structuredPatch);
@@ -239,7 +203,7 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
         status,
         completionReason: message.completionReason,
         attachments: message.attachments,
-        detail: displayText(stripStructuredDetailLabel(rawDetail)),
+        detail: displayText(rawDetail),
         output,
         diff: diff ? displayText(diff) : undefined,
         artifactId: String(message.artifactId || message.artifact_id || '').trim() || undefined,
@@ -255,7 +219,7 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
         input: message.toolInput ?? message.tool_input,
         before: message.toolBefore ?? message.tool_before,
         after: message.toolAfter ?? message.tool_after,
-        stage: workflowStage(message) || inferWorkflowStage(`${rawDetail}\n${content}`),
+        stage: workflowStage(message),
     };
 };
 
@@ -545,6 +509,28 @@ const calendarDateLabel = (timestamp: number, lang: Language): string => new Int
     day: 'numeric',
 }).format(new Date(timestamp));
 
+const messageTimeLabel = (message: ChatDisplayMessage, lang: Language): string | undefined => {
+    const timestamp = Number(message.timestamp);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return undefined;
+    return new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', {
+        timeZone: SHANGHAI_TIME_ZONE,
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+    }).format(new Date(timestamp));
+};
+
+const responseTimeLabel = (entry: AgentResponseTurn, lang: Language): string | undefined => {
+    const timestamps = entry.parts.map((part) => part.timestamp).filter(Number.isFinite);
+    if (timestamps.length === 0) return undefined;
+    return new Intl.DateTimeFormat(lang === 'zh' ? 'zh-CN' : 'en-US', {
+        timeZone: SHANGHAI_TIME_ZONE,
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+    }).format(new Date(Math.max(...timestamps)));
+};
+
 const feedEntryTimestamp = (entry: FeedEntry): number => {
     if (entry.kind === 'user' || entry.kind === 'context') return messageTimestamp(entry.message);
     return Math.min(...entry.parts.map((part) => part.timestamp));
@@ -643,6 +629,12 @@ export const BeeGameCollaborationFeed = memo(({
     messages,
     lang = 'en',
     onEditMessage,
+    editingMessageId = null,
+    editDraft = '',
+    onEditDraftChange,
+    onSubmitEdit,
+    onCancelEdit,
+    editDisabled = false,
     onPreviewArtifact,
     isLoading = false,
     streamingMessageId = null,
@@ -650,6 +642,7 @@ export const BeeGameCollaborationFeed = memo(({
     const text = useBeeGameText(lang);
     const [detail, setDetail] = useState<AgentRunDetail | null>(null);
     const entries = useMemo(() => buildFeedEntries(messages), [messages]);
+    const latestUserMessageId = [...entries].reverse().find(entry => entry.kind === 'user')?.message.id;
     const currentDetail = useMemo(() => {
         if (!detail) return null;
         for (const entry of entries) {
@@ -699,11 +692,19 @@ export const BeeGameCollaborationFeed = memo(({
                         <Message key={entry.message.id} data-message-id={entry.message.id} data-scroll-anchor="false" from="user" className="mb-3 min-w-0"><UserMessageCard
                             message={entry.message}
                             lang={lang}
-                            onEdit={onEditMessage}
+                            onEdit={entry.message.id === latestUserMessageId && entry.message.rewindAvailable ? onEditMessage : undefined}
+                            isEditing={entry.message.id === latestUserMessageId && entry.message.rewindAvailable === true && editingMessageId === entry.message.id}
+                            editDraft={editDraft}
+                            onEditDraftChange={onEditDraftChange}
+                            onSubmitEdit={onSubmitEdit}
+                            onCancelEdit={onCancelEdit}
+                            editDisabled={editDisabled}
                         /></Message>
 
                     ) : entry.kind === 'context' ? (
-                        <ContextUpdateSeparator key={entry.message.id} text={text} />
+                        entry.message.taskKind === 'context_compaction'
+                            ? <CompactionMarker key={entry.message.id} message={entry.message} text={text} isLoading={isLoading} />
+                            : <ContextUpdateSeparator key={entry.message.id} text={text} />
                     ) : (
                     <Message
                         key={entry.id}
@@ -729,6 +730,8 @@ export const BeeGameCollaborationFeed = memo(({
                                 const response = <StreamingResponse
                                     status={status}
                                     copyText={responseText || undefined}
+                                    timeLabel={responseText && !hasLaterResponseInConversationTurn && status === 'complete'
+                                        ? responseTimeLabel(entry, lang) : undefined}
                                     announce={false}
                                     showActions={Boolean(responseText) && !hasLaterResponseInConversationTurn}
                                     sources={sources}
@@ -774,16 +777,16 @@ export const BeeGameCollaborationFeed = memo(({
 BeeGameCollaborationFeed.displayName = 'BeeGameCollaborationFeed';
 
 function ToolResultDetail({ tool, lang }: { tool: NormalizedTool; lang: Language }) {
-    return <ToolResult title={tool.name} status={tool.status === 'completed' ? 'success' : tool.status === 'failed' ? 'error' : 'running'}
-        defaultOpen collapseOnComplete={false} kind={tool.kind === 'bash' ? 'terminal' : 'custom'} copyText={tool.output}>
+    return <ToolResult title={displayText(tool.name)} status={tool.status === 'completed' ? 'success' : tool.status === 'failed' ? 'error' : 'running'}
+        defaultOpen collapseOnComplete={false} kind={tool.kind === 'bash' ? 'terminal' : 'custom'} copyText={displayText(tool.output)}>
         <div className="space-y-4">
             {tool.input !== undefined && <section>
                 <h3 className="mb-2 type-caption-1 text-[var(--text-muted)]">{lang === 'zh' ? '输入' : 'Input'}</h3>
-                <ToolResultOutput language="json">{JSON.stringify(tool.input, null, 2)}</ToolResultOutput>
+                <ToolResultOutput language="json">{displayText(JSON.stringify(tool.input, null, 2))}</ToolResultOutput>
             </section>}
             <section>
                 <h3 className="mb-2 type-caption-1 text-[var(--text-muted)]">{lang === 'zh' ? '输出' : 'Output'}</h3>
-                <ToolResultOutput>{tool.output || (lang === 'zh' ? '暂无输出' : 'No output yet')}</ToolResultOutput>
+                <ToolResultOutput>{displayText(tool.output || (lang === 'zh' ? '暂无输出' : 'No output yet'))}</ToolResultOutput>
             </section>
         </div>
     </ToolResult>;
@@ -801,7 +804,7 @@ function ThinkingActivity({ part, lang, working }: { part: Extract<ResponsePart,
         ? (lang === 'zh' ? '少于 1 秒' : 'less than 1s')
         : (lang === 'zh' ? `${Math.floor(elapsed / 1000)} 秒` : `${Math.floor(elapsed / 1000)}s`);
     return <AgentActivity items={[{ id: part.message.id, type: 'text', content: <MarkdownRenderer
-        content={part.message.thought || part.message.content || ''} messageId={part.message.id} lang={lang} /> }]}
+        content={displayText(part.message.thought || part.message.content || '')} messageId={part.message.id} lang={lang} /> }]}
         contentType="text" status={working ? 'working' : 'complete'}
         activeLabel={`${lang === 'zh' ? '正在思考' : 'Thinking'}${duration ? ` · ${duration}` : ''}`}
         summary={`${part.message.completionReason ? (lang === 'zh' ? '思考已中断' : 'Thinking interrupted') : (lang === 'zh' ? '已思考' : 'Thought')}${duration ? ` · ${duration}` : ''}`}
@@ -834,8 +837,10 @@ function SubagentStatusBadge({ tool, lang }: { tool: NormalizedTool; lang: Langu
 }
 
 function SubagentToolSummary({ tool, lang, onOpen }: { tool: NormalizedTool; lang: Language; onOpen: () => void }) {
-    const title = lang.startsWith('zh') ? '子任务' : 'Subagent';
     const normalizedName = tool.name.trim().toLowerCase();
+    const title = normalizedName === 'task'
+        ? (lang.startsWith('zh') ? '子任务' : 'Task')
+        : (lang.startsWith('zh') ? '子任务' : 'Subagent');
     const name = normalizedName && !['agent', 'subagent', 'task'].includes(normalizedName) ? tool.name : title;
     const { state, status, text } = subagentStatus(tool, lang);
     return <div
@@ -876,7 +881,9 @@ function AgentRunDetailView({
     lang: Language;
     onBack: () => void;
 }) {
-    const title = lang === 'zh' ? '子任务' : 'Subagent';
+    const title = detail.tool.name.trim().toLowerCase() === 'task'
+        ? (lang.startsWith('zh') ? '子任务' : 'Task')
+        : (lang.startsWith('zh') ? '子任务' : 'Subagent');
     const prompt = displayText(String(detail.tool.subagentPrompt || detail.tool.detail || '').trim());
     const output = detail.tool.status === 'running' ? '' : displayText(String(detail.tool.subagentOutput || detail.tool.output || '').trim());
     const trace = displayText(String(detail.tool.subagentTrace || '').trim());
@@ -1001,14 +1008,15 @@ function ResponseParts({
         }
         const presentation = messagePresentation(part.message);
         if (presentation === 'artifact' && part.message.artifactId && onPreviewArtifact) {
-            const title = part.message.documentTitle || part.message.artifactPath || (lang === 'zh' ? '项目产物' : 'Project artifact');
+            const title = displayText(part.message.documentTitle || (lang === 'zh' ? '项目产物' : 'Project artifact'));
+            const content = displayText(part.message.content);
             rendered.push(<ArtifactCard
                 key={`artifact-${part.message.id}`}
                 title={title}
                 sender={part.message.sender}
-                content={displayText(part.message.content)}
+                content={content}
                 artifactType={part.message.artifactType}
-                onPreview={() => onPreviewArtifact(part.message.artifactId!, title, part.message.content)}
+                onPreview={() => onPreviewArtifact(part.message.artifactId!, title, content)}
             />);
             continue;
         }
@@ -1131,7 +1139,24 @@ function ContextUpdateSeparator({ text }: { text: BeeGameText }) {
             data-variant="separator"
             className="type-muted bg-transparent py-2 text-[var(--text-muted)]"
         >
-            {text.contextCompacted}
+            {text.contextUpdate}
+        </MessageMarker>
+    );
+}
+
+function CompactionMarker({ message, text, isLoading }: { message: ChatDisplayMessage; text: BeeGameText; isLoading?: boolean }) {
+    const running = message.streamStatus === 'streaming' && isLoading;
+    const stopped = message.streamStatus === 'streaming' && !isLoading;
+    return (
+        <MessageMarker
+            data-testid="beegame-compaction-marker"
+            data-slot="marker"
+            data-variant={running ? 'status' : 'separator'}
+            role={running ? 'status' : undefined}
+            className="type-muted bg-transparent py-2 text-[var(--text-muted)]"
+        >
+            {running ? <LoaderCircle aria-hidden="true" className="mr-2 size-3.5 animate-spin" /> : null}
+            {running ? text.contextCompacting : stopped ? text.contextCompactionStopped : text.contextCompacted}
         </MessageMarker>
     );
 }
@@ -1163,30 +1188,45 @@ function StageSeparator({ stage, lang }: { stage: WorkflowStage; lang: Language 
     );
 }
 
-const userMessageActionLabels: Record<Language, { copy: string; copied: string }> = {
-    en: { copy: 'Copy message', copied: 'Message copied' },
-    zh: { copy: '复制消息', copied: '已复制消息' },
-    'zh-TW': { copy: '複製訊息', copied: '已複製訊息' },
-    ja: { copy: 'メッセージをコピー', copied: 'コピーしました' },
-    ko: { copy: '메시지 복사', copied: '복사됨' },
-    fr: { copy: 'Copier le message', copied: 'Message copié' },
-    de: { copy: 'Nachricht kopieren', copied: 'Nachricht kopiert' },
-    es: { copy: 'Copiar mensaje', copied: 'Mensaje copiado' },
-    it: { copy: 'Copia messaggio', copied: 'Messaggio copiato' },
-    pt: { copy: 'Copiar mensagem', copied: 'Mensagem copiada' },
+const userMessageActionLabels: Record<Language, { copy: string; copied: string; edit: string; cancel: string; send: string; placeholder: string }> = {
+    en: { copy: 'Copy message', copied: 'Message copied', edit: 'Edit message', cancel: 'Cancel', send: 'Send edit', placeholder: 'Edit your message…' },
+    zh: { copy: '复制消息', copied: '已复制消息', edit: '编辑消息', cancel: '取消', send: '发送修改', placeholder: '编辑你的消息…' },
+    'zh-TW': { copy: '複製訊息', copied: '已複製訊息', edit: '編輯訊息', cancel: '取消', send: '送出修改', placeholder: '編輯你的訊息…' },
+    ja: { copy: 'メッセージをコピー', copied: 'コピーしました', edit: 'メッセージを編集', cancel: 'キャンセル', send: '変更を送信', placeholder: 'メッセージを編集…' },
+    ko: { copy: '메시지 복사', copied: '복사됨', edit: '메시지 편집', cancel: '취소', send: '수정 전송', placeholder: '메시지 편집…' },
+    fr: { copy: 'Copier le message', copied: 'Message copié', edit: 'Modifier le message', cancel: 'Annuler', send: 'Envoyer la modification', placeholder: 'Modifier votre message…' },
+    de: { copy: 'Nachricht kopieren', copied: 'Nachricht kopiert', edit: 'Nachricht bearbeiten', cancel: 'Abbrechen', send: 'Änderung senden', placeholder: 'Nachricht bearbeiten…' },
+    es: { copy: 'Copiar mensaje', copied: 'Mensaje copiado', edit: 'Editar mensaje', cancel: 'Cancelar', send: 'Enviar cambio', placeholder: 'Edita tu mensaje…' },
+    it: { copy: 'Copia messaggio', copied: 'Messaggio copiato', edit: 'Modifica messaggio', cancel: 'Annulla', send: 'Invia modifica', placeholder: 'Modifica il tuo messaggio…' },
+    pt: { copy: 'Copiar mensagem', copied: 'Mensagem copiada', edit: 'Editar mensagem', cancel: 'Cancelar', send: 'Enviar alteração', placeholder: 'Edite sua mensagem…' },
 };
 
 function UserMessageCard({
     message,
     lang,
     onEdit,
+    isEditing,
+    editDraft,
+    onEditDraftChange,
+    onSubmitEdit,
+    onCancelEdit,
+    editDisabled,
 }: {
     message: ChatDisplayMessage;
     lang: Language;
     onEdit?: (message: ChatDisplayMessage) => void;
+    isEditing: boolean;
+    editDraft: string;
+    onEditDraftChange?: (value: string) => void;
+    onSubmitEdit?: () => void;
+    onCancelEdit?: () => void;
+    editDisabled: boolean;
 }) {
     const [copied, setCopied] = useState(false);
     const copyTimer = useRef<number | undefined>(undefined);
+    const editInputRef = useRef<HTMLTextAreaElement>(null);
+    const labels = userMessageActionLabels[lang];
+    const timeLabel = messageTimeLabel(message, lang);
     const handleCopy = async () => {
         if (!navigator.clipboard?.writeText || !message.content) return;
         try {
@@ -1203,20 +1243,92 @@ function UserMessageCard({
         if (copyTimer.current) window.clearTimeout(copyTimer.current);
     }, []);
 
+    useEffect(() => {
+        if (!isEditing) return;
+        editInputRef.current?.focus();
+        const end = editInputRef.current?.value.length ?? 0;
+        editInputRef.current?.setSelectionRange(end, end);
+    }, [isEditing]);
+
+    useLayoutEffect(() => {
+        if (!isEditing || !editInputRef.current) return;
+        const input = editInputRef.current;
+        input.style.height = 'auto';
+        input.style.height = `${Math.min(input.scrollHeight, 320)}px`;
+        input.style.overflowY = input.scrollHeight > 320 ? 'auto' : 'hidden';
+    }, [editDraft, isEditing]);
+
     return (
             <MessageContent
             data-testid={`beegame-user-message-${message.id}`}
             className="group/message min-w-0 !items-start"
             >
-                <MessageBubble variant="solid" className="max-w-full">
-                    <MessageBubbleContent className="max-w-full">
-                        <MarkdownRenderer content={message.content} messageId={message.id} lang={lang} bubble />
-                        {message.attachments?.length ? <div className="chat-image-gallery">
-                            {message.attachments.map((attachment, index) => <ChatAttachmentView key={index} attachment={attachment} lang={lang} />)}
-                        </div> : null}
-                    </MessageBubbleContent>
-                </MessageBubble>
-                {(message.content || onEdit) ? <div className="flex w-full justify-end gap-1 px-2 pt-1">
+                <div className="w-full min-w-0">
+                    {isEditing ? <div
+                        data-testid={`beegame-user-message-edit-input-${message.id}`}
+                        className="w-full min-w-0"
+                    >
+                        <div className="flex min-h-[200px] w-full min-w-0 flex-col rounded-[24px] border border-[var(--border)] bg-[var(--surface-3)] p-6 shadow-none">
+                            <textarea
+                                ref={editInputRef}
+                                aria-label={labels.edit}
+                                data-testid={`beegame-user-message-edit-textarea-${message.id}`}
+                                value={editDraft}
+                                onChange={event => onEditDraftChange?.(event.target.value)}
+                                onKeyDown={event => {
+                                    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                                        event.preventDefault();
+                                        if (!editDisabled && editDraft.trim()) onSubmitEdit?.();
+                                    }
+                                }}
+                                disabled={editDisabled}
+                                rows={2}
+                                placeholder={labels.placeholder}
+                                className="type-chat-body box-border block min-h-[112px] w-full min-w-0 max-w-full flex-1 resize-none rounded-lg border border-transparent bg-transparent px-0 py-0 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus-visible:border-transparent focus-visible:ring-0 disabled:opacity-60"
+                            />
+                            <div className="mt-auto flex justify-end gap-2 pt-4">
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    aria-label={labels.cancel}
+                                    onClick={onCancelEdit}
+                                    disabled={editDisabled}
+                                    className="rounded-full text-[var(--text-secondary)]"
+                                >
+                                    <X className="h-3.5 w-3.5" aria-hidden="true" />{labels.cancel}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    aria-label={labels.send}
+                                    onClick={onSubmitEdit}
+                                    disabled={editDisabled || !editDraft.trim()}
+                                    className="rounded-full"
+                                >
+                                    <Send className="h-3.5 w-3.5" aria-hidden="true" />{labels.send}
+                                </Button>
+                            </div>
+                        </div>
+                    </div> : (
+                        <MessageBubble variant="solid" className="max-w-full">
+                            <MessageBubbleContent className="max-w-full">
+                                <MarkdownRenderer content={message.content} messageId={message.id} lang={lang} bubble />
+                                {message.attachments?.length ? <div className="chat-image-gallery">
+                                    {message.attachments.map((attachment, index) => <ChatAttachmentView key={index} attachment={attachment} lang={lang} />)}
+                                </div> : null}
+                            </MessageBubbleContent>
+                        </MessageBubble>
+                    )}
+                </div>
+                {!isEditing && (message.content || onEdit) ? <div
+                    data-testid={`beegame-user-message-actions-${message.id}`}
+                    className="flex w-full items-center justify-end gap-1 px-2 pt-1 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100"
+                >
+                    {timeLabel ? <time
+                        dateTime={new Date(Number(message.timestamp)).toISOString()}
+                        className="type-caption-2 tabular-nums text-[var(--text-muted)]"
+                    >{timeLabel}</time> : null}
                     {message.content ? <button
                         type="button"
                         aria-label={copied ? userMessageActionLabels[lang].copied : userMessageActionLabels[lang].copy}
@@ -1228,8 +1340,8 @@ function UserMessageCard({
                     </button> : null}
                     {onEdit ? <button
                         type="button"
-                        aria-label="Edit message"
-                        title="Edit message"
+                        aria-label={labels.edit}
+                        title={labels.edit}
                         onClick={() => onEdit(message)}
                         className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
                     >

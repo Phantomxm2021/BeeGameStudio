@@ -23,6 +23,132 @@ test('project delivery changes exclude native memory and scratch, not project fi
   ])
   expect(completedProjectMutationPaths('/project', events)).toEqual(['src/main.ts', 'docs/GDD.md', 'assets/runtime/player.png'])
 })
+
+test('delivery stages borrow the project conversation instead of starting or closing a worker session', async () => {
+  let started = 0, stopped = 0, interrupted = 0, sentSession = ''
+  const projectSession = { id: 'project-chat', status: 'running', turnStatus: 'idle', createdAt: new Date() }
+  const sessions = {
+    projectConversationSessionId() { return projectSession.id },
+    get(id: string) { return id === projectSession.id ? projectSession : undefined },
+    start() { started++; throw new Error('must not create a phase session') },
+    updateAuthToken() {}, stop() { stopped++ }, interruptTurn() { interrupted++; return projectSession },
+    async sendWithDisplay(id: string) { sentSession = id },
+    events() { return [] }, async waitForSessionIdle() {},
+  } as unknown as BeeGameSessionManager
+  const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'owner' })
+  const request: WorkerDispatchRequest = { dispatchId: 'stage-1', runId: 'run-1', ownerId: 'owner',
+    projectId: 'project-1', workspacePath: '/tmp/project-1', workerType: 'question-answerer',
+    phase: 'DOCUMENT_DRAFTING', revision: 'rev-1', contract: {} }
+  await port.start(request)
+  await port.submit('stage-1', 'continue this same conversation')
+  expect(sentSession).toBe('project-chat')
+  expect(started).toBe(0)
+  await port.stop('stage-1', 'stop this stage only')
+  expect(interrupted).toBe(1)
+  expect(stopped).toBe(0)
+  await port.close?.('stage-1')
+  expect(stopped).toBe(0)
+})
+
+test('an idle project conversation is not mistaken for a finished turn before submit', async () => {
+  const events: BeeGameEvent[] = []
+  const projectSession = { id: 'project-chat', status: 'running', turnStatus: 'idle', createdAt: new Date() }
+  const sessions = {
+    projectConversationSessionId() { return projectSession.id },
+    get() { return projectSession },
+    updateAuthToken() {},
+    events() { return [...events] },
+    async waitForSessionIdle() {},
+    async sendWithDisplay() {
+      projectSession.turnStatus = 'running'
+      events.push({ id: 1, sessionId: projectSession.id, type: 'turn.started', text: 'started', createdAt: new Date(),
+        payload: { type: 'turn.started', workflowDispatchId: 'stage-2' } })
+      events.push({ id: 2, sessionId: projectSession.id, type: 'turn.failed', text: 'fixture failure after accepted turn', createdAt: new Date(),
+        payload: { type: 'turn.failed', workflowDispatchId: 'stage-2' } })
+      projectSession.turnStatus = 'idle'
+    },
+  } as unknown as BeeGameSessionManager
+  const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'owner' })
+  await port.start({ dispatchId: 'stage-2', runId: 'run-1', ownerId: 'owner',
+    projectId: 'project-1', workspacePath: '/tmp/project-1', workerType: 'resource-planner',
+    phase: 'RESOURCE_PREPARATION', revision: 'rev-1', contract: {} })
+  let settled = false
+  const terminal = port.waitForTerminal!('stage-2').then(() => {
+    settled = true
+    return new Error('unexpected success')
+  }, (error: Error) => {
+    settled = true
+    return error
+  })
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(settled).toBe(false)
+  await port.submit('stage-2', 'prepare resources')
+  expect((await terminal).message).toBe('fixture failure after accepted turn')
+  await port.close?.('stage-2')
+})
+
+test('a submitted project turn without a terminal result still needs action', async () => {
+  const events: BeeGameEvent[] = []
+  const projectSession = { id: 'project-chat', status: 'running', turnStatus: 'idle', createdAt: new Date() }
+  const sessions = {
+    projectConversationSessionId() { return projectSession.id },
+    get() { return projectSession },
+    updateAuthToken() {},
+    events() { return [...events] },
+    async waitForSessionIdle() {},
+    async sendWithDisplay() {
+      events.push({ id: 1, sessionId: projectSession.id, type: 'turn.started', text: 'started', createdAt: new Date(),
+        payload: { type: 'turn.started', workflowDispatchId: 'stage-3' } })
+    },
+  } as unknown as BeeGameSessionManager
+  const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'owner' })
+  await port.start({ dispatchId: 'stage-3', runId: 'run-1', ownerId: 'owner',
+    projectId: 'project-1', workspacePath: '/tmp/project-1', workerType: 'resource-planner',
+    phase: 'RESOURCE_PREPARATION', revision: 'rev-1', contract: {} })
+  await port.submit('stage-3', 'prepare resources')
+  await expect(port.waitForTerminal!('stage-3')).rejects.toThrow('Project conversation turn ended without a terminal result')
+  await port.close?.('stage-3')
+})
+
+test('a late event from the previous phase cannot terminate the next phase', async () => {
+  const events: BeeGameEvent[] = []
+  const projectSession = { id: 'project-chat', status: 'running', turnStatus: 'idle', createdAt: new Date() }
+  const sessions = {
+    projectConversationSessionId() { return projectSession.id },
+    get() { return projectSession },
+    updateAuthToken() {},
+    events() { return [...events] },
+    async waitForSessionIdle() {},
+    async sendWithDisplay() {
+      projectSession.turnStatus = 'running'
+      events.push({ id: 2, sessionId: projectSession.id, turnId: 'resource-turn', type: 'turn.started',
+        text: 'resource turn', createdAt: new Date(),
+        payload: { type: 'turn.started', workflowDispatchId: 'resource-stage' } })
+      events.push({ id: 3, sessionId: projectSession.id, turnId: 'resource-turn', type: 'result',
+        text: 'Resource work completed', createdAt: new Date(),
+        payload: { type: 'result', workflowDispatchId: 'resource-stage' } })
+      projectSession.turnStatus = 'idle'
+    },
+  } as unknown as BeeGameSessionManager
+  const port = createBeeGameDeliveryWorkerPort({ sessions, userId: 'owner' })
+  await port.start({ dispatchId: 'resource-stage', runId: 'run-1', ownerId: 'owner',
+    projectId: 'project-1', workspacePath: '/tmp/project-1', workerType: 'resource-planner',
+    phase: 'RESOURCE_PREPARATION', revision: 'rev-1', contract: {} })
+  // The previous phase's delayed event arrives after the new dispatch starts.
+  events.push({ id: 1, sessionId: projectSession.id, turnId: 'review-turn', type: 'turn.started',
+    text: 'review turn', createdAt: new Date(),
+    payload: { type: 'turn.started', workflowDispatchId: 'review-stage' } })
+  let settled = false
+  const terminal = port.waitForTerminal!('resource-stage').then(value => {
+    settled = true
+    return value
+  })
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(settled).toBe(false)
+  await port.submit('resource-stage', 'prepare resources')
+  expect(await terminal).toMatchObject({ workerType: 'resource-planner', status: 'completed' })
+  await port.close?.('resource-stage')
+})
 import type { WorkerDispatchRequest } from '../beegame/delivery-workflow/types'
 import { buildWorkerPrompt } from '../beegame/delivery-workflow/worker-prompts'
 import { type ChecklistAuthority } from '../beegame/checklist-authority-projection'
@@ -247,6 +373,7 @@ describe('delivery worker session credentials', () => {
         workerType: 'resource-planner',
         status: 'completed',
         writtenPaths: ['assets/asset-manifest.json'],
+        catalogObserved: false,
       })
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
@@ -316,10 +443,10 @@ describe('delivery worker session credentials', () => {
       summary: 'Implementation complete.',
       verificationResults: [],
       evidenceRefs: [
-        '.beegame/workflow/evidence/implementation-dispatch-implementation.json',
+        '.beegame/delivery/evidence/implementation-dispatch-implementation.json',
       ],
       evidencePath:
-        '.beegame/workflow/evidence/implementation-dispatch-implementation.json',
+        '.beegame/delivery/evidence/implementation-dispatch-implementation.json',
     })
     expect(idleWaits).toBe(1)
   })
@@ -351,7 +478,7 @@ describe('delivery worker session credentials', () => {
     expect(startInput?.transcriptSessionId).toBeUndefined()
   })
 
-  test('rejects the retired acceptance-validator worker instead of parsing a synthetic verdict', async () => {
+  test('acceptance requires a saved runtime report rather than a synthetic final verdict', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'beegame-acceptance-'))
     const sessions = {
       start() {
@@ -391,8 +518,21 @@ describe('delivery worker session credentials', () => {
       })
       await port.submit('dispatch-acceptance', 'Run acceptance')
       await expect(port.waitForTerminal?.('dispatch-acceptance')).rejects.toThrow(
-        'retired delivery worker: acceptance-validator',
+        'Acceptance Agent did not save its runtime result',
       )
+      await mkdir(join(workspacePath, '.beegame/delivery/evidence'), { recursive: true })
+      await writeFile(join(workspacePath, 'game.js'), 'tested build')
+      await writeFile(join(workspacePath, 'observed.txt'), 'actual browser observations')
+      await writeFile(join(workspacePath, '.beegame/delivery/evidence/runtime-dispatch-acceptance.json'), JSON.stringify({
+        scope: 'delivery', status: 'passed', summary: 'Verified the game', environment: 'Web Preview',
+        verification: { target: 'deployment', knownIssues: [], unverified: [] },
+        evidencePaths: ['observed.txt'], artifactPaths: ['game.js'],
+      }))
+      const terminal = await port.waitForTerminal?.('dispatch-acceptance')
+      expect(terminal).toMatchObject({ workerType: 'acceptance-validator', status: 'completed' })
+      const saved = JSON.parse(await readFile(join(workspacePath,
+        (terminal as { evidencePath: string }).evidencePath), 'utf8'))
+      expect(saved.runtimeAcceptance.status).toBe('passed')
     } finally {
       await rm(workspacePath, { recursive: true, force: true })
     }

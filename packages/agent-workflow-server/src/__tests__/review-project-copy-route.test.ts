@@ -143,8 +143,6 @@ async function fixture(options: { failReviewerStart?: boolean; projectId?: strin
   const app = createAgentWorkflowApp({
     currentUser: { id: ownerId, role: 'owner' }, dashboardDataRoot: join(root, 'dashboard'),
     defaultWorkspacePath: projectsRoot, modelConfigStore: false, skillsConfig: false, sessionRunner: runner,
-    foundationAuthoringHostFactory: () => fakeAuthor(() => { authorStartCount += 1 }),
-    foundationReviewerHostFactory: () => reviewer,
     registerCleanup: cleanup => cleanups.push(cleanup),
   })
   const created = await app.request('/api/projects', {
@@ -168,67 +166,40 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
-describe('POST /api/projects/:projectId/review-copy', () => {
-  test('copies the accepted public Author export into a fresh public Reviewer run', async () => {
+describe('removed delivery-workflow routes', () => {
+  test('does not create a workflow review copy and preserves the source archive', async () => {
     const f = await fixture()
     const sourceBefore = await readFile(join(f.sourceWorkspace, '.beegame/workflow/run.json'), 'utf8')
     const response = await f.app.request(`/api/projects/${f.projectId}/review-copy`, { method: 'POST' })
-    expect(response.status).toBe(201)
-    const payload = await response.json() as { project: { id: string; root_path: string }; runId: string; phase: string }
-    expect(payload.project.id).not.toBe(f.projectId)
-    expect(payload.project.root_path).not.toBe(f.sourceWorkspace)
-    expect(payload.phase).toBe('DOCUMENT_REVIEW')
-    const copied = await createRunStore(payload.project.root_path, f.ownerId).load()
-    expect(copied).toBeDefined()
-    expect(copied!.runId).toBe(payload.runId)
-    expect(copied!.projectId).toBe(payload.project.id)
-    expect(copied!.ownerId).toBe(f.ownerId)
-    expect(copied!.authorStage).toBeUndefined()
-    expect(copied!.activeDispatch).toBeUndefined()
-    expect(copied!.foundationReviewStage?.importedAuthorResult).toEqual(f.sourceResult)
+    expect(response.status).toBe(404)
+    const projects = await (await f.app.request('/api/projects')).json() as Array<{ id: string }>
+    expect(projects.map(project => project.id)).toEqual([f.projectId])
+    expect(f.reviewerStarts).toHaveLength(0)
     expect(f.authorStarts()).toBe(0)
-    expect(f.reviewerStarts).toHaveLength(1)
-    const request = f.reviewerStarts[0] as { ownerId: string; projectId: string; inputDigest: string; input: { subject: { kind: string; sourceResultId: string }; documents: unknown[] } }
-    expect(request.ownerId).toBe(f.ownerId)
-    expect(request.projectId).toBe(payload.project.id)
-    expect(request.input.subject).toMatchObject({ kind: 'initial', sourceResultId: f.sourceResult.resultId })
-    expect(request.input.documents).toHaveLength(8)
-    expect(request.inputDigest).toMatch(/^[a-f0-9]{64}$/)
-    const workflow = await f.app.request(`/api/projects/${payload.project.id}/workflow`)
-    expect(workflow.status).toBe(200)
-    const view = await workflow.json() as { workflow: { tasks: unknown[]; totalTaskCount: number; stageId: string; foundationDocuments?: Array<{ path: string; status: string }> } }
-    expect(view.workflow.stageId).toBe('DOCUMENT_REVIEW')
-    expect(view.workflow.tasks).toHaveLength(1)
-    expect(view.workflow.totalTaskCount).toBe(1)
-    expect(view.workflow.foundationDocuments).toHaveLength(8)
-    expect(view.workflow.foundationDocuments?.every(document => document.status === 'ready')).toBe(true)
     expect(await readFile(join(f.sourceWorkspace, '.beegame/workflow/run.json'), 'utf8')).toBe(sourceBefore)
     await Promise.all(f.cleanups.map(cleanup => cleanup()))
   })
 
-  test('stop and resume use the copied public Reviewer port', async () => {
+  test('resume and retry URLs are absent and cannot launch old workers', async () => {
     const f = await fixture()
-    const response = await f.app.request(`/api/projects/${f.projectId}/review-copy`, { method: 'POST' })
-    expect(response.status).toBe(201)
-    const payload = await response.json() as { project: { id: string } }
-    const stopped = await f.app.request(`/api/projects/${payload.project.id}/stop`, { method: 'POST' })
-    expect(stopped.status).toBe(200)
-    expect(f.reviewerStops).toHaveLength(1)
-    expect(f.authorStarts()).toBe(0)
-    const resumed = await f.app.request(`/api/projects/${payload.project.id}/workflow/resume`, { method: 'POST' })
-    expect(resumed.status).toBe(200)
-    expect(f.reviewerResumes).toHaveLength(1)
+    for (const action of ['resume', 'retry']) {
+      const response = await f.app.request(`/api/projects/${f.projectId}/workflow/${action}`, { method: 'POST' })
+      expect(response.status).toBe(404)
+    }
+    expect(f.reviewerStarts).toHaveLength(0)
+    expect(f.reviewerResumes).toHaveLength(0)
     expect(f.authorStarts()).toBe(0)
     await Promise.all(f.cleanups.map(cleanup => cleanup()))
   })
 
-  test('rejects a legacy snapshot without a completed public Author result', async () => {
+  test('workflow projections are retired without mutating archived snapshots', async () => {
     const f = await fixture()
     const legacySnapshot = JSON.stringify({ schemaVersion: 1, confirmedBriefContext: 'legacy only' })
     await writeFile(join(f.sourceWorkspace, '.beegame/workflow/run.json'), legacySnapshot, 'utf8')
     const response = await f.app.request(`/api/projects/${f.projectId}/review-copy`, { method: 'POST' })
-    expect(response.status).toBe(400)
-    expect(await response.json()).toMatchObject({ error: expect.any(String) })
+    expect(response.status).toBe(404)
+    const projection = await f.app.request(`/api/projects/${f.projectId}/workflow`)
+    expect(projection.status).toBe(404)
     const projects = await (await f.app.request('/api/projects')).json() as Array<{ id: string }>
     expect(projects.map(project => project.id)).toEqual([f.projectId])
     expect(f.reviewerStarts).toHaveLength(0)
@@ -237,18 +208,57 @@ describe('POST /api/projects/:projectId/review-copy', () => {
     await Promise.all(f.cleanups.map(cleanup => cleanup()))
   })
 
-  test('preserves the copied project when the public Reviewer start is ambiguous', async () => {
+  test('runtime acceptance ignores a legacy completed run and leaves it archived', async () => {
+    const f = await fixture()
+    const snapshotPath = join(f.sourceWorkspace, '.beegame/workflow/run.json')
+    const before = JSON.stringify({ phase: 'DELIVERY', status: 'completed', acceptance: { status: 'passed' } })
+    await mkdir(dirname(snapshotPath), { recursive: true })
+    await writeFile(snapshotPath, before)
+
+    const response = await f.app.request(`/api/projects/${f.projectId}/runtime-state`)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      acceptance: { status: 'not_run' },
+    })
+    expect(await readFile(snapshotPath, 'utf8')).toBe(before)
+    await Promise.all(f.cleanups.map(cleanup => cleanup()))
+  })
+
+  test('legacy game-content endpoints require the native project delivery record', async () => {
+    const f = await fixture()
+    const snapshotPath = join(f.sourceWorkspace, '.beegame/workflow/run.json')
+    const snapshotBefore = JSON.stringify({ phase: 'CONTENT', status: 'running', revision: {} })
+    await mkdir(dirname(snapshotPath), { recursive: true })
+    await writeFile(snapshotPath, snapshotBefore)
+
+    const read = await f.app.request(`/api/projects/${f.projectId}/game-content?metadata=1`)
+    expect(read.status).toBe(409)
+    expect(await read.json()).toMatchObject({ code: 'project_delivery_required' })
+
+    const edit = await f.app.request(`/api/projects/${f.projectId}/game-content/document`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'content/index.json', expectedRevision: 'a'.repeat(64), document: {} }),
+    })
+    expect(edit.status).toBe(409)
+
+    const publish = await f.app.request(`/api/projects/${f.projectId}/game-content/publish`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ contentRevision: 'a'.repeat(64) }),
+    })
+    expect(publish.status).toBe(409)
+    expect(await readFile(snapshotPath, 'utf8')).toBe(snapshotBefore)
+    await Promise.all(f.cleanups.map(cleanup => cleanup()))
+  })
+
+  test('does not invoke workflow authoring or reviewer when old data is present', async () => {
     const f = await fixture({ failReviewerStart: true })
     const sourceBefore = await readFile(join(f.sourceWorkspace, '.beegame/workflow/run.json'), 'utf8')
     const response = await f.app.request(`/api/projects/${f.projectId}/review-copy`, { method: 'POST' })
-    expect(response.status).toBe(400)
-    expect(f.reviewerStarts).toHaveLength(1)
+    expect(response.status).toBe(404)
+    expect(f.reviewerStarts).toHaveLength(0)
     expect(f.authorStarts()).toBe(0)
     const projects = await (await f.app.request('/api/projects')).json() as Array<{ id: string; root_path: string }>
-    const copy = projects.find(project => project.id !== f.projectId)
-    expect(copy).toBeDefined()
-    const copied = await createRunStore(copy!.root_path, f.ownerId).load()
-    expect(copied?.foundationReviewStage?.importedAuthorResult).toEqual(f.sourceResult)
+    expect(projects).toHaveLength(1)
     expect(await readFile(join(f.sourceWorkspace, '.beegame/workflow/run.json'), 'utf8')).toBe(sourceBefore)
     await Promise.all(f.cleanups.map(cleanup => cleanup()))
   })

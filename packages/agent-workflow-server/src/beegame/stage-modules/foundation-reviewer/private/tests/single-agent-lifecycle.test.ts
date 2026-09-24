@@ -87,17 +87,16 @@ test('one autonomous audit-and-correct task publishes, settles once, reopens and
   expect(f.calls).toHaveLength(1)
  }finally{await f.cleanup()}
 })
-for (const mode of ['invalid', 'extra-field']) test(mode+' report stops without host correction or another model call',async()=>{
- const f=await fixture(mode);try{
+test('valid reviewed files publish even when the native terminal omits its summary',async()=>{
+ const f=await fixture('missing-summary');try{
   const handle=await f.stage.start(f.start),result=await f.wait(handle)
-  expect(result).toMatchObject({status:'needs_action',billingStatus:'settled'})
+  expect(result).toMatchObject({status:'completed',billingStatus:'settled'})
   expect(f.resolutions()).toBe(1);expect(f.calls).toHaveLength(1)
-  expect(await readdir(singleReviewRoot(f.workspacePath,'owner',handle.id))).not.toContain('result')
+  expect(await readdir(singleReviewRoot(f.workspacePath,'owner',handle.id))).toContain('result')
   const nativeRoot=join(singleReviewRoot(f.workspacePath,'owner',handle.id),'native')
   const attempt=(await readdir(nativeRoot))[0]!
   const raw=JSON.parse(await readFile(join(nativeRoot,attempt,'native-result.json'),'utf8'))
-  expect(raw.structured_output).toBeDefined()
-  expect(JSON.parse(await readFile(join(nativeRoot,attempt,'output-diagnostic.json'),'utf8'))).toBeDefined()
+  expect(raw.result).toBeNull()
  }finally{await f.cleanup()}
 })
 test('billing retry publishes retained report without rerunning model',async()=>{

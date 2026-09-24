@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CreditCard, X } from 'lucide-react';
+import { CreditCard } from 'lucide-react';
 import type { Language } from '../AgentsConfig';
 import { normalizeI18nLanguage } from '../../../i18n/useBeeGameTranslations';
 import { Skeleton } from '../../ui/skeleton';
@@ -10,6 +10,7 @@ import {
   type BeeGameStripeCreditPack,
 } from '../../../services/creditsApi';
 import { Button } from '../../beui/project-button';
+import { CloseIconButton } from '../../ui/CloseIconButton';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../ui/dialog';
 
 interface CreditStoreModalProps {
@@ -94,15 +95,7 @@ export function CreditStoreModal({ isOpen, lang, onClose }: CreditStoreModalProp
             <DialogTitle className="type-title-2 text-foreground">{copy.title}</DialogTitle>
             <DialogDescription className="type-footnote mt-1 text-muted-foreground">{copy.description}</DialogDescription>
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={copy.close}
-            onClick={onClose}
-          >
-            <X className="h-4 w-4" />
-          </Button>
+          <CloseIconButton label={copy.close} onClick={onClose} />
         </div>
 
         <div className="mt-4 min-h-0">

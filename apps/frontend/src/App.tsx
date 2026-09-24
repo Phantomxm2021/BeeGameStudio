@@ -32,10 +32,30 @@ import type { Language } from './components/Demiurge/AgentsConfig';
 import { isResourceLibraryRoute } from './components/ResourceLibrary/resourceLibraryRoute';
 import { getProjectRouteId, WORKSPACE_ROUTE_CHANGE_EVENT } from './navigation/workspaceRoute';
 
+const loadDashboardView = () => import('./components/Demiurge/DashboardView');
+
 const DashboardView = lazy(async () => {
-  const module = await import('./components/Demiurge/DashboardView');
+  const module = await loadDashboardView();
   return { default: module.DashboardView };
 });
+
+function WorkspaceLoadingPage() {
+  return (
+    <div
+      className="flex min-h-screen items-center justify-center bg-background px-6 text-foreground"
+      role="status"
+      aria-label="Restoring project workspace"
+    >
+      <div className="flex w-full max-w-sm flex-col items-center text-center">
+        <h1 className="text-xl font-semibold tracking-[-0.025em]">正在恢复项目工作区</h1>
+        <p className="mt-2 text-sm text-muted-foreground">正在准备你的项目</p>
+        <div aria-hidden="true" className="mt-7 h-0.5 w-40 overflow-hidden rounded-full bg-foreground/10">
+          <span className="workspace-loading-beam block h-full w-1/3 rounded-full bg-foreground/70" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function App() {
   const {
@@ -105,11 +125,17 @@ function App() {
     };
   }, [syncActiveProjectFromRoute]);
 
-  // Landing and resource surfaces are always light. The persisted theme belongs
-  // to the project dashboard and is applied only while that surface is active.
+  useEffect(() => {
+    if (authenticationStatus === 'anonymous' || (!requestedProjectId && !activeProjectId)) return;
+    void loadDashboardView().catch(() => undefined);
+  }, [activeProjectId, authenticationStatus, requestedProjectId]);
+
+  // A project route keeps its theme while the workspace is being restored.
+  // Landing and resource surfaces remain light.
   useLayoutEffect(() => {
-    applyThemeToDocument(isDashboardVisible ? isDark : false);
-  }, [isDashboardVisible, isDark]);
+    const initializingProjectRoute = authenticationStatus === 'initializing' && Boolean(requestedProjectId) && !isResourceRoute;
+    applyThemeToDocument((isDashboardVisible || isProjectRouteRestoring || initializingProjectRoute) && isDark);
+  }, [authenticationStatus, isDashboardVisible, isDark, isProjectRouteRestoring, isResourceRoute, requestedProjectId]);
 
   // Initialize toast callbacks
   useEffect(() => {
@@ -243,6 +269,9 @@ function App() {
   };
 
   if (authenticationStatus === 'initializing') {
+    if (requestedProjectId && !isResourceRoute && !authenticationInitializationError) {
+      return <WorkspaceLoadingPage />;
+    }
     return (
       <div
         className="flex min-h-screen items-center justify-center bg-background px-6 text-center text-foreground"
@@ -260,25 +289,14 @@ function App() {
   }
 
   if (isProjectRouteRestoring) {
-    return (
-      <div
-        className="flex min-h-screen items-center justify-center bg-background px-6 text-center text-foreground"
-        role="status"
-        aria-label="Restoring project workspace"
-      >
-        <div className="flex max-w-sm flex-col items-center gap-4">
-          <span className="size-7 animate-spin rounded-full border-2 border-border/20 border-t-ring" aria-hidden="true" />
-          <p className="text-sm font-medium tracking-[-0.01em] text-foreground">正在恢复项目工作区…</p>
-        </div>
-      </div>
-    );
+    return <WorkspaceLoadingPage />;
   }
 
   return (
     <ErrorBoundary>
       {/* If we have an active project ID and valid project, render the Dashboard */}
       {isDashboardVisible ? (
-        <Suspense fallback={<div className="grid min-h-screen place-items-center bg-background"><span className="size-7 animate-spin rounded-full border-2 border-border/20 border-t-ring" /></div>}>
+        <Suspense fallback={<WorkspaceLoadingPage />}>
           <DashboardView
             chatHistoryReady={historyReadyProjectId === activeProjectId}
             projectId={activeProjectId!}

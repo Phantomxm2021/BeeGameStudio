@@ -23,16 +23,6 @@ import type {
   BeeGamePermission,
 } from '../services/currentUserApi';
 
-export interface PhaseInfo {
-  current_phase: number;
-  phase_name: string;
-  history: Array<{
-    phase: number;
-    name: string;
-    timestamp: number;
-  }>;
-}
-
 /** Keep the document theme class and native color-scheme in lockstep. */
 export function applyThemeToDocument(isDark: boolean): void {
   if (typeof document === 'undefined') return;
@@ -92,9 +82,6 @@ interface SystemState {
   /** Loading state for async operations */
   isLoading: boolean;
 
-  /** Team OS telemetry phase tracking */
-  phaseInfo: PhaseInfo | null;
-
   /**
    * Load current BeeGame user and role permissions.
    */
@@ -110,8 +97,6 @@ interface SystemState {
   /**
    * Load phase history from backend (Team OS Telemetry)
    */
-  loadPhases: (projectId: string) => Promise<void>;
-
   /**
    * Load cumulative token usage for a project
    */
@@ -156,7 +141,6 @@ export const useSystemStore = create<SystemState>()(
       tokenUsage: {},
       isLoading: false,
       isSyncing: false,
-      phaseInfo: null,
       isDark: true, // Default to dark mode
 
       taskUsage: {},
@@ -194,16 +178,6 @@ export const useSystemStore = create<SystemState>()(
       hasPermission: (permission: BeeGamePermission) => (
         Boolean(get().currentUser?.permissions.includes(permission))
       ),
-
-      loadPhases: async (projectId: string) => {
-        if (!projectId) return;
-        try {
-          const phases = (await api.getWorkflowPhases(projectId)) as unknown as PhaseInfo;
-          set({ phaseInfo: phases });
-        } catch (error) {
-          console.error('Failed to load telemetry phases:', error);
-        }
-      },
 
       loadTokenUsage: async (projectId: string) => {
         if (!projectId) return;

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readFileSync, realpathSync } from 'node:fs'
 import { mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { computeWorkspaceRevision, resolveWorkspaceRelativePath } from './delivery-workflow/revision'
 import { readBeeGameAssetManifestSync } from './asset-contracts'
 import { parseBeeGameContentIndex, type BeeGameContentAuthority } from './game-content-package'
@@ -16,16 +16,29 @@ import {
 export const PROJECT_DELIVERY_REPORT_PATH = '.beegame/delivery/acceptance.json'
 export const PROJECT_CONTENT_CONTRACT_PATH = '.beegame/delivery/content-contract.json'
 
+type ProjectDeliveryAcceptance = {
+  revision: string
+} & (
+  | {
+      source: 'chat'
+      sessionId: string
+      turnId: string
+      completedAt: string
+      resultSha256: string
+    }
+  | {
+      source?: 'report'
+      reportPath: string
+      reportSha256: string
+      reports: RuntimeAcceptance[]
+    }
+)
+
 type ProjectDeliveryState = {
   version: 1
   objective: string
   status: 'active' | 'paused'
-  accepted?: {
-    revision: string
-    reportPath: string
-    reportSha256: string
-    reports: RuntimeAcceptance[]
-  }
+  accepted?: ProjectDeliveryAcceptance
 }
 
 function statePath(workspacePath: string, dataRoot: string): string {
@@ -34,6 +47,8 @@ function statePath(workspacePath: string, dataRoot: string): string {
   const identity = createHash('sha256').update(canonical).digest('hex')
   return join(dataRoot, 'project-delivery', identity, 'state.json')
 }
+
+export const projectDeliveryStatePath = statePath
 
 async function save(workspacePath: string, dataRoot: string, state: ProjectDeliveryState): Promise<void> {
   const path = statePath(workspacePath, dataRoot)
@@ -98,44 +113,60 @@ export async function resumeProjectDelivery(workspacePath: string, dataRoot: str
 export async function captureProjectDeliveryAcceptance(workspacePath: string, dataRoot: string, turnStartedAt: number): Promise<void> {
   const state = await readProjectDelivery(workspacePath, dataRoot)
   if (!state || state.status !== 'active') return
-  const reportPath = join(workspacePath, PROJECT_DELIVERY_REPORT_PATH)
-  let reportStat
-  try { reportStat = await stat(reportPath) }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
-    throw error
+
+  const canonicalWorkspace = await realpath(workspacePath)
+  const freshReports: Array<{ path: string; absolutePath: string; mtimeMs: number; report?: RuntimeAcceptance }> = []
+  for (const path of [PROJECT_DELIVERY_REPORT_PATH]) {
+    const candidatePath = resolveWorkspaceRelativePath(workspacePath, path)
+    if (!candidatePath) continue
+    let canonicalReportPath: string
+    try { canonicalReportPath = await realpath(candidatePath) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+      throw error
+    }
+    const relativeReportPath = relative(canonicalWorkspace, canonicalReportPath)
+    if (!relativeReportPath || relativeReportPath === '..' ||
+        relativeReportPath.startsWith(`..${sep}`) || isAbsolute(relativeReportPath)) continue
+
+    let reportStat
+    try { reportStat = await stat(canonicalReportPath) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+      throw error
+    }
+    // A previous report cannot certify work performed in this turn.
+    if (!reportStat.isFile() || reportStat.mtimeMs < turnStartedAt) continue
+
+    let raw: unknown
+    try { raw = JSON.parse(await readFile(canonicalReportPath, 'utf8')) }
+    catch { continue }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const scope = (raw as { scope?: unknown }).scope
+    // Only the current delivery-scoped Chat report is authoritative.
+    if (scope !== 'delivery') continue
+    freshReports.push({
+      path,
+      absolutePath: canonicalReportPath,
+      mtimeMs: reportStat.mtimeMs,
+      report: await readRuntimeAcceptanceReport(workspacePath, path),
+    })
   }
-  // A previous report cannot certify work performed in this turn.
-  if (!reportStat.isFile() || reportStat.mtimeMs < turnStartedAt) return
-  const report = await readRuntimeAcceptanceReport(workspacePath, PROJECT_DELIVERY_REPORT_PATH)
-  if (!report || report.scope === 'request' || report.status !== 'passed' ||
+
+  // Do not fall back to an older passing report if the latest delivery report
+  // from this turn is failed, blocked, malformed, or has stale evidence.
+  const latest = freshReports.sort((left, right) => right.mtimeMs - left.mtimeMs)[0]
+  const report = latest?.report
+  if (!latest || latest.path !== PROJECT_DELIVERY_REPORT_PATH || !report ||
+      report.scope !== 'delivery' || report.status !== 'passed' ||
       !await runtimeEvidenceIsCurrent(workspacePath, [report])) return
-  const reportSha256 = createHash('sha256').update(await readFile(reportPath)).digest('hex')
+  const reportSha256 = createHash('sha256').update(await readFile(latest.absolutePath)).digest('hex')
+  if (state.accepted?.source === 'report' &&
+      state.accepted.reportSha256 === reportSha256) return
   const revision = await computeWorkspaceRevision(workspacePath)
   await save(workspacePath, dataRoot, { ...state, accepted: {
-    revision, reportPath: PROJECT_DELIVERY_REPORT_PATH, reportSha256, reports: [report],
-  } })
-}
-
-/** Preserve an already-current legacy acceptance without rerunning its Agent or validators. */
-export async function importProjectDeliveryAcceptance(input: {
-  workspacePath: string
-  dataRoot: string
-  revision: string
-  reportPath: string
-  reports: RuntimeAcceptance[]
-}): Promise<void> {
-  const state = await readProjectDelivery(input.workspacePath, input.dataRoot)
-  if (!state) throw new Error('Project delivery has not started')
-  if (input.revision !== await computeWorkspaceRevision(input.workspacePath) ||
-      !await runtimeEvidenceIsCurrent(input.workspacePath, input.reports))
-    throw new Error('Historical acceptance is no longer current')
-  const report = resolveWorkspaceRelativePath(input.workspacePath, input.reportPath)
-  if (!report) throw new Error('Historical acceptance path is invalid')
-  const reportSha256 = createHash('sha256').update(await readFile(report)).digest('hex')
-  await save(input.workspacePath, input.dataRoot, { ...state, accepted: {
-    revision: input.revision, reportPath: input.reportPath,
-    reportSha256, reports: input.reports,
+    source: 'report',
+    revision, reportPath: latest.path, reportSha256, reports: [report],
   } })
 }
 
@@ -149,6 +180,11 @@ export async function evaluateProjectDeliveryGate(workspacePath: string, dataRoo
   const { accepted } = state
   if (accepted.revision !== await computeWorkspaceRevision(workspacePath))
     return { allowed: false, issues: ['Workspace changed after acceptance; revalidation is required.'] }
+  if (accepted.source === 'chat') {
+    return { allowed: false, issues: ['Current version requires a delivery acceptance report.'] }
+  }
+  if (accepted.reportPath !== PROJECT_DELIVERY_REPORT_PATH)
+    return { allowed: false, issues: ['Delivery evidence changed after acceptance; revalidation is required.'] }
   let reportSha256: string
   try {
     const candidate = resolveWorkspaceRelativePath(workspacePath, accepted.reportPath)
@@ -163,9 +199,10 @@ export async function evaluateProjectDeliveryGate(workspacePath: string, dataRoo
   } catch {
     return { allowed: false, issues: ['Delivery acceptance report is missing.'] }
   }
+  const currentReport = await readRuntimeAcceptanceReport(workspacePath, PROJECT_DELIVERY_REPORT_PATH)
+  if (currentReport?.scope !== 'delivery' || currentReport.status !== 'passed')
+    return { allowed: false, issues: ['Delivery acceptance report is not a current delivery PASS.'] }
   if (reportSha256 !== accepted.reportSha256 ||
-      (accepted.reportPath === PROJECT_DELIVERY_REPORT_PATH &&
-        (await readRuntimeAcceptanceReport(workspacePath, PROJECT_DELIVERY_REPORT_PATH))?.status !== 'passed') ||
       !await runtimeEvidenceIsCurrent(workspacePath, accepted.reports))
     return { allowed: false, issues: ['Delivery evidence changed after acceptance; revalidation is required.'] }
   return { allowed: true, issues: [] }

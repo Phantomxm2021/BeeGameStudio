@@ -40,165 +40,6 @@ export type RenderHint =
   | 'structured_json'
   | 'csv_table'
 
-export type WorkflowCardStatus =
-  | 'draft'
-  | 'running'
-  | 'blocked'
-  | 'verifying'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'stale'
-
-export interface WorkflowCardTask {
-  id: string
-  title: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'stopped'
-  operation?: 'write' | 'review' | 'revise' | 'produce' | 'assemble'
-  attempt?: number
-  round?: number
-  issueSummary?: {
-    total: number
-    blocker: number
-    high: number
-    medium: number
-    low: number
-  }
-  usage?: {
-    input_tokens: number
-    cache_read_tokens: number
-    cache_creation_tokens: number
-    completion_tokens: number
-    total_tokens: number
-  }
-  durationMs?: number
-  failureReason?: string
-  failureCode?: string
-  diagnosticId?: string
-}
-
-export type WorkflowCardSubstage =
-  | 'INITIAL_DRAFTING'
-  | 'INITIAL_REVIEW'
-  | 'REPAIRING'
-  | 'CHECKLIST_DRAFTING'
-
-export interface FoundationReviewReport {
-  resultId?: string
-  resultDigest?: string
-  documentSetDigest?: string
-  summary?: string
-}
-
-export interface WorkflowCardStageSnapshot {
-  stageId: string
-  status: WorkflowCardStatus
-  currentPhase?: string
-  /** One-based current position in the server-owned delivery phase order. */
-  phaseIndex: number
-  phaseCount?: number
-  substage?: WorkflowCardSubstage
-  convergencePass?: number
-  documentStep?: string
-  worker?: string
-  thinking?: string
-  executionStatus?: string
-  currentItemId?: string
-  tasks?: WorkflowCardTask[]
-  completedTaskCount?: number
-  totalTaskCount?: number
-  createdAt?: string
-  completedAt?: string
-  updatedAt?: string
-  stageStartedAt?: string
-  /** Accumulated active execution time before the current active interval. */
-  elapsedMs?: number
-  /** Start of the current active interval; absent while paused or terminal. */
-  activeSince?: string
-  /** Trusted per-call timing; absent when the server cannot separate model/network waits. */
-  currentCallElapsedMs?: number
-  /** Trusted cumulative timing across prior calls; absent when not available. */
-  historicalElapsedMs?: number
-  block?: {
-    message: string
-    detail?: string
-    code?: string
-    diagnosticId?: string
-    stage?: string
-    taskId?: string
-    documentPath?: string
-    retryable?: boolean
-    nextAction?: string
-  }
-  foundationReviewReport?: FoundationReviewReport
-}
-
-export type WorkflowCardAction = 'resume' | 'retry'
-
-export type WorkflowRecoveryUnitKind =
-  | 'document'
-  | 'resource-inventory'
-  | 'resource-content'
-  | 'resource-gate'
-  | 'atomic-plan'
-  | 'implementation-task'
-  | 'implementation-audit'
-  | 'acceptance'
-
-export interface WorkflowCardPayload {
-  runId: string
-  /** Display-only completed author artifacts, independent of active stage tasks. */
-  foundationDocuments?: { path: string; status: 'ready' }[]
-  status: WorkflowCardStatus
-  currentPhase?: string
-  /** One-based current position in the server-owned delivery phase order. */
-  phaseIndex?: number
-  phaseCount?: number
-  substage?: WorkflowCardSubstage
-  convergencePass?: number
-  documentStep?: string
-  worker?: string
-  thinking?: string
-  executionStatus?: string
-  currentItemId?: string
-  tasks?: WorkflowCardTask[]
-  completedTaskCount?: number
-  totalTaskCount?: number
-  createdAt?: string
-  completedAt?: string
-  updatedAt?: string
-  stageStartedAt?: string
-  /** Accumulated active execution time before the current active interval. */
-  elapsedMs?: number
-  /** Start of the current active interval; absent while paused or terminal. */
-  activeSince?: string
-  currentCallElapsedMs?: number
-  historicalElapsedMs?: number
-  stageSnapshots?: WorkflowCardStageSnapshot[]
-  nextAction?: WorkflowCardAction
-  /** Server-owned reconnect signal for a stale foundation worker snapshot. */
-  resumeOnReconnect?: boolean
-  /** True only when the server can recover from the durable workflow state. */
-  recoverable?: boolean
-  /** Last phase proven by the durable accepted-unit journal. */
-  lastProvenPhase?: string
-  /** Last accepted current-protocol unit proven by the durable journal. */
-  lastProvenUnitId?: string
-  /** Current-protocol kind parsed from the accepted-unit contract. */
-  lastProvenUnitKind?: WorkflowRecoveryUnitKind
-  /** Safe canonical item identity only for document and review units. */
-  lastProvenItemId?: string
-  block?: {
-    message: string
-    detail?: string
-    code?: string
-    diagnosticId?: string
-    nextAction?: string
-  }
-  foundationReviewReport?: FoundationReviewReport
-  usage?: TokenUsage
-}
-
 export interface ModuleReadinessView {
   status: 'ready' | 'degraded' | 'blocked'
   details: Record<string, unknown>
@@ -227,6 +68,8 @@ export interface Message {
 
   /** Stable identity of the user message superseded by this message version */
   supersedesMessageId?: string
+  /** Server saved the state before this turn, so it can be replaced safely. */
+  rewindAvailable?: boolean
 
   /** Semantic dedupe key used when stable identities are unavailable */
   dedupeKey?: string
@@ -355,6 +198,7 @@ export type ProjectEventMessageType =
   | 'error_paused' // Error occurred, task paused
   | 'artifact_created' // Real-time artifact created event
   | 'context_update' // Context bundle visibility event
+  | 'context_compaction' // Native context compaction lifecycle marker
   | 'project_renamed' // Project renamed event (AI auto-naming)
 
 export interface RuntimeContextEvidence {
@@ -417,6 +261,7 @@ export interface ProjectEventMessage {
 
   /** Stable identity of the user message superseded by this message version */
   supersedes_message_id?: string
+  rewind_available?: boolean
 
   /** Tool name (optional, used for tool_start and tool_end types) */
   tool?: string

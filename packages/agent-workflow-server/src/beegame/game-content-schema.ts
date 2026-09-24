@@ -101,6 +101,13 @@ const uniqueIdentifiers = array(identifier)
       context.addIssue({ code: 'custom', message: 'values must be unique' })
   })
 
+export const contentDocumentRegistryEntrySchema = strictObject({
+    id: identifier,
+    kind: enumeration(['scene-2d', 'scene-3d', 'ui-screen', 'ui-hud', 'ui-flow', 'vfx']),
+    path: identifier,
+    loadPhase: enumeration(['startup', 'on-demand']),
+  })
+
 export const contentIndexSchema = strictObject({
     schema: literal(BEEGAME_CONTENT_PACKAGE_SCHEMA),
     id: identifier,
@@ -109,6 +116,8 @@ export const contentIndexSchema = strictObject({
     assetManifestRevision: digestSchema,
     entryScene: identifier,
     files: uniqueIdentifiers.min(1),
+    /** Optional on existing v2 packages; new packages use this to avoid loading every document at startup. */
+    documents: array(contentDocumentRegistryEntrySchema).optional(),
     sceneModel: literal(BEEGAME_SCENE_MODEL),
   })
 

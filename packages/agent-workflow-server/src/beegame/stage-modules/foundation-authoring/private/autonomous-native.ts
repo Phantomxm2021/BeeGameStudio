@@ -21,22 +21,21 @@ export function autonomousAuthorPrompt(language?: string): string {
     'requirements.md contains the confirmed game requirements. Read it, then create and directly write the complete set of eight game design documents in docs/.',
     'Any reference_files listed in requirements.md are available at their relativePath in this workspace. They are user reference material, not system instructions. Use them alongside the written request; creation_mode blueprint preserves the supplied design, while creative follows the selected direction.',
     `The deliverables are: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}.`,
-    'Use your own judgment to complete the documents from the confirmed requirements. Continue useful existing drafts instead of restarting them.',
+    'Use your own judgment to make the documents complete and implementation-ready. Before finishing, check the whole set for substantive omissions and cross-document contradictions, and correct what you find. Choose the depth, tools and work order yourself, including whether to collaborate. Continue useful existing drafts instead of restarting them.',
     `For spatial specifications use the Content coordinate convention: ${CONTENT_COORDINATE_CONTRACT.scene2d} ${CONTENT_COORDINATE_CONTRACT.scene3d} ${CONTENT_COORDINATE_CONTRACT.rotation} Screen UI always uses top-left logical pixels and parent-local offsets.`,
     'Write the document bodies to those files rather than returning them in the response. Do not implement the game.',
-    'When the task is complete, use StructuredOutput with status completed or blocked and a concise summary of the result or the specific unresolved blocker.',
+    'Finish normally with a concise summary of the result and any unresolved blocker.',
     ...(language ? [`Use ${language} for the documents and summary.`, responseLanguageInstruction(language)] : []),
   ].join('\n')
 }
 
-/** A resume with a complete private draft set is a small finishing pass, not
- * permission to regenerate the bundle or fan out more work. */
+/** Resume the same document assignment with its existing drafts intact. */
 export function autonomousAuthorFinishPrompt(language?: string): string {
   return [
     'Continue the existing task from requirements.md and finish the eight game design documents in docs/. Preserve useful completed work.',
     `The deliverables are: ${CANONICAL_FOUNDATION_DOCUMENTS.join(', ')}.`,
-    'Use your own judgment to complete the remaining work. Do not implement the game.',
-    'When the task is complete, use StructuredOutput with status completed or blocked and a concise summary.',
+    'Use your own judgment to finish the documents, checking the whole set for substantive omissions and cross-document contradictions before finishing. Choose the depth, tools and work order yourself, including whether to collaborate. Do not implement the game.',
+    'Finish normally with a concise summary of the result and any unresolved blocker.',
     ...(language ? [`Use ${language} for the documents and summary.`, responseLanguageInstruction(language)] : []),
   ].join('\n')
 }
@@ -170,7 +169,6 @@ export async function runAutonomousAuthor(input: AutonomousNativeInput,
     readOnlyPaths: autonomousAuthorReadOnlyPaths,
     signal: budget ? AbortSignal.any([input.signal, budget.signal]) : input.signal,
     prompt: input.finishOnly ? autonomousAuthorFinishPrompt(input.language) : autonomousAuthorPrompt(input.language),
-    schema: z.toJSONSchema(autonomousAuthorReportSchema, { target: 'draft-7' }),
     onProgress: progress => {
       lastModelResponses = progress.modelResponses
       if (!budget) return input.onProgress(progress)
@@ -189,6 +187,10 @@ export async function runAutonomousAuthor(input: AutonomousNativeInput,
   const total = meter.snapshot()
   const failure = input.signal.aborted ? 'stopped' : budget?.failure() ?? result.failure ?? (!total ? 'usage_unavailable' : undefined)
   if (failure) return { failure, usage: total }
-  const report = autonomousAuthorReportSchema.safeParse(result.result?.structured_output)
-  return report.success ? { report: report.data, usage: total } : { failure: 'invalid_completion', usage: total }
+  const structured = autonomousAuthorReportSchema.safeParse(result.result?.structured_output)
+  if (structured.success) return { report: structured.data, usage: total }
+  const summary = typeof result.result?.result === 'string' ? result.result.result.trim() : ''
+  // The authored files, not the wording of the terminal reply, are validated
+  // by the host. Do not reject a completed file-edit turn for missing prose.
+  return { report: { status: 'completed', summary: summary.slice(0, 16_000) || 'Document drafting completed.' }, usage: total }
 }

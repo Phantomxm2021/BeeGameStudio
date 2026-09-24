@@ -11,7 +11,6 @@ import {
   ReceiptText,
   ShieldCheck,
   Ticket,
-  X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ImageGenerationSettingsPanel, type ImageSettingsHandle, type ImageSettingsState } from '../../Settings/ImageGenerationSettingsPanel';
@@ -84,7 +83,7 @@ import { UserSkillsSettingsPanel } from '../../Settings/UserSkillsSettingsPanel'
 import { ModelConfigPanel } from '../../Settings/ModelConfigPanel';
 import { WebToolsPanel } from '../../Settings/WebToolsPanel';
 import { Dialog, DialogContent } from '../../ui/dialog';
-import { Button } from '../../beui/project-button';
+import { CloseIconButton } from '../../ui/CloseIconButton';
 import { Tabs, TabsList, TabsTrigger } from '../../beui/motion/tabs';
 import { ProjectSelect } from '../../beui/project-select';
 import { UsageBillingPanel, type BillingPackFormState, type BillingSettingsCopy } from '../../Settings/BillingSettingsPanel';
@@ -1013,9 +1012,7 @@ export function SettingsMenu({
             className="flex h-auto w-full shrink-0 flex-col border-b border-border bg-muted/30 p-2 sm:h-full sm:w-44 sm:border-b-0 sm:border-r sm:p-3"
           >
             <div className="mb-2 flex items-center justify-between sm:mb-4">
-              <Button type="button" variant="outline" size="icon" aria-label={text.closeSettings} onClick={onClose}>
-                <X className="h-4 w-4" />
-              </Button>
+              <CloseIconButton label={text.closeSettings} onClick={onClose} />
             </div>
             <Tabs value={activeSection} onValueChange={value => { setActiveSection(value as typeof activeSection); setActiveTab('general'); }}>
             <TabsList className="flex h-auto gap-1.5 overflow-x-auto border-0 pb-1 sm:block sm:space-y-1.5 sm:overflow-visible sm:pb-0" aria-label={t.systemSettings}>

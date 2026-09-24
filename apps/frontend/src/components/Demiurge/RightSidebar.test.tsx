@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { RightSidebar } from './RightSidebar';
@@ -40,6 +40,9 @@ vi.mock('../../services/api', () => ({
 vi.mock('../../services/beeGameAdapter', () => ({
     isBeeGameProjectPackageArtifactId: (id: string) => id.startsWith('beegame-project-package:'),
     beeGameAdapter: {
+        listQueuedMessages: vi.fn().mockResolvedValue([]),
+        steerQueuedMessage: vi.fn().mockResolvedValue(undefined),
+        deleteQueuedMessage: vi.fn().mockResolvedValue(undefined),
         getProjectGameContent: vi.fn().mockResolvedValue({ state: 'awaiting_content' }),
         getProjectGameContentFileList: vi.fn().mockResolvedValue({ state: 'awaiting_content' }),
         getProjectAssets: vi.fn().mockResolvedValue({ version: 9, requirements: [], resources: [] }),
@@ -59,24 +62,74 @@ function deferred<T>() {
 }
 
 describe('RightSidebar tabs', () => {
-    it('locks typing, attachments and send while a child runs after the parent, but keeps stop and details available', async () => {
-        const onSendMessage = vi.fn();
+    it('edits a user message inline and submits the replacement from there', async () => {
+        const onSendMessage = vi.fn().mockResolvedValue(true);
+        render(<RightSidebar projectId="inline-edit" lang="en" progress={0} isLoading={false}
+            messages={[{ id: 'user-edit-target', sender: 'user', content: 'Original request', timestamp: 1, rewindAvailable: true }]}
+            onSendMessage={onSendMessage} waitingPermission={getWaitingPermissionState([])} />);
+
+        const composerInput = screen.getByTestId('beegame-chat-input');
+        fireEvent.change(composerInput, { target: { value: 'Independent new prompt' } });
+        expect(composerInput).toHaveClass('type-chat-body');
+        expect(screen.getByTestId('beegame-chat-composer').parentElement).toHaveClass('shrink-0');
+        expect(screen.getByTestId('beegame-chat-composer').parentElement).not.toHaveClass('pt-3', 'pb-3');
+        const message = screen.getByTestId('beegame-user-message-user-edit-target');
+        expect(within(message).getByText('Original request').closest('p')).toHaveClass('type-chat-body');
+        fireEvent.click(screen.getByRole('button', { name: 'Edit message' }));
+        const inlineInput = within(message).getByRole('textbox', { name: 'Edit message' });
+        expect(inlineInput).toHaveClass('type-chat-body');
+        expect(message.querySelector('[data-slot="message-bubble"]')).toBeNull();
+        expect(within(message).getByTestId('beegame-user-message-edit-input-user-edit-target')).toContainElement(inlineInput);
+        expect(inlineInput).toHaveValue('Original request');
+        expect(screen.getByTestId('beegame-chat-composer')).toContainElement(composerInput);
+        expect(composerInput).toHaveValue('Independent new prompt');
+
+        fireEvent.change(inlineInput, { target: { value: 'Corrected request' } });
+        fireEvent.click(within(message).getByRole('button', { name: 'Send edit' }));
+        await waitFor(() => expect(onSendMessage).toHaveBeenCalledWith('Corrected request', [], 'user-edit-target'));
+        await waitFor(() => expect(screen.getByTestId('beegame-chat-composer')).toContainElement(composerInput));
+        expect(composerInput).toHaveValue('Independent new prompt');
+    });
+
+    it('hides the edit action while the Agent is running', () => {
+        render(<RightSidebar projectId="busy-edit" lang="en" progress={0} isLoading
+            messages={[{ id: 'original-request', sender: 'user', content: 'Original request', timestamp: 1 }]}
+            onSendMessage={vi.fn()} waitingPermission={getWaitingPermissionState([])} />);
+
+        expect(screen.getByText('Original request')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Edit message' })).not.toBeInTheDocument();
+    });
+
+    it('shows Stop while a child runs, then replaces it with Send for queued input', async () => {
+        const onSendMessage = vi.fn().mockResolvedValue(true);
         const onStopTask = vi.fn();
         const child = { id: 'active-child', sender: 'beegame', type: 'tool' as const, timestamp: Date.now(),
             content: 'Inspecting', toolName: 'Agent', toolStatus: 'running' as const, isSubagentTool: true };
         const props = { projectId: 'child-running', lang: 'en' as const, progress: 0, messages: [child],
-            onSendMessage, onStopTask, isLoading: false, waitingPermission: getWaitingPermissionState(null) };
+            onSendMessage, onStopTask, isLoading: false, waitingPermission: getWaitingPermissionState() };
         const { rerender } = render(<RightSidebar {...props} />);
-        expect(getChatInput()).toHaveAttribute('readonly');
-        expect(screen.getByTestId('beegame-chat-attach-button')).toBeDisabled();
+        expect(getChatInput()).not.toHaveAttribute('readonly');
+        expect(screen.getByTestId('beegame-chat-attach-button')).toBeEnabled();
+        expect(screen.getByRole('button', { name: 'Stop task' })).toBeEnabled();
         expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument();
-        fireEvent.keyDown(getChatInput(), { key: 'Enter' });
-        expect(onSendMessage).not.toHaveBeenCalled();
+        fireEvent.change(getChatInput(), { target: { value: 'Please queue this' } });
+        expect(screen.queryByRole('button', { name: 'Stop task' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        expect(onSendMessage).toHaveBeenCalledWith('Please queue this', [], undefined);
+        await waitFor(() => expect(getChatInput()).toHaveValue(''));
         fireEvent.click(screen.getByRole('button', { name: 'Stop task' }));
         expect(onStopTask).toHaveBeenCalledOnce();
         rerender(<RightSidebar {...props} messages={[{ ...child, toolStatus: 'completed' }]} />);
-        expect(getChatInput()).not.toHaveAttribute('readonly');
+        await waitFor(() => expect(getChatInput()).not.toHaveAttribute('readonly'));
         expect(getChatInput()).toBeEnabled();
+    });
+
+    it('uses the runtime busy state for Stop even before chat streaming begins', () => {
+        render(<RightSidebar projectId="runtime-starting" lang="en" progress={0} messages={[]}
+            onSendMessage={vi.fn().mockResolvedValue(true)} onStopTask={vi.fn()}
+            isLoading={false} isRuntimeBusy waitingPermission={getWaitingPermissionState()} />);
+        expect(screen.getByRole('button', { name: 'Stop task' })).toBeEnabled();
+        expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument();
     });
 
     it('locks and dims a submitted draft immediately, then clears it on acceptance while Stop stays available', async () => {
@@ -84,7 +137,7 @@ describe('RightSidebar tabs', () => {
         const onSendMessage = vi.fn(() => request.promise);
         const onStopTask = vi.fn();
         const props = { projectId: 'send-pending', lang: 'en' as const, progress: 0, messages: [],
-            onSendMessage, onStopTask, isLoading: false, waitingPermission: getWaitingPermissionState(null) };
+            onSendMessage, onStopTask, isLoading: false, waitingPermission: getWaitingPermissionState() };
         const { rerender } = render(<RightSidebar {...props} />);
         fireEvent.change(getChatInput(), { target: { value: '继续' } });
         fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
@@ -106,7 +159,7 @@ describe('RightSidebar tabs', () => {
     it.each(['rejected', 'failed'])('restores editing and preserves the draft when send is %s', async outcome => {
         const request = deferred<boolean>();
         render(<RightSidebar projectId="send-failure" lang="en" progress={0} messages={[]}
-            onSendMessage={() => request.promise} isLoading={false} waitingPermission={getWaitingPermissionState(null)} />);
+            onSendMessage={() => request.promise} isLoading={false} waitingPermission={getWaitingPermissionState()} />);
         fireEvent.change(getChatInput(), { target: { value: '保留这段草稿' } });
         fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
         await act(async () => outcome === 'failed' ? request.reject(new Error('Network failed')) : request.resolve(false));
@@ -119,7 +172,7 @@ describe('RightSidebar tabs', () => {
     it('does not clear a different project draft when an earlier send completes', async () => {
         const request = deferred<boolean>();
         const props = { lang: 'en' as const, progress: 0, messages: [], onSendMessage: () => request.promise,
-            isLoading: false, waitingPermission: getWaitingPermissionState(null) };
+            isLoading: false, waitingPermission: getWaitingPermissionState() };
         const { rerender } = render(<RightSidebar {...props} projectId="first" />);
         fireEvent.change(getChatInput(), { target: { value: 'First project' } });
         fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
@@ -138,7 +191,7 @@ describe('RightSidebar tabs', () => {
             pendingPermissions={[{ gate_id: 'question', type: 'BEEGAME_PERMISSION', permission_tool_name: 'AskUserQuestion',
                 artifact: { input: { questions: [{ question: 'Style?', options: [{ label: 'Pixel' }, { label: 'Vector' }] }] } },
             }]}
-            waitingPermission={getWaitingPermissionState(projectStatus)} />);
+            waitingPermission={getWaitingPermissionState()} />);
         expect(screen.getByTestId('beegame-question-panel')).toBeInTheDocument();
         expect(screen.queryByTestId('beegame-permission-panel')).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('radio', { name: 'Pixel' }));
@@ -153,7 +206,7 @@ describe('RightSidebar tabs', () => {
         render(<RightSidebar projectId="p" lang="zh" progress={0} isLoading={false}
             onSendMessage={vi.fn()} messages={[]} projectStatus={projectStatus}
             pendingPermissions={pendingPermissions}
-            waitingPermission={getWaitingPermissionState(projectStatus, pendingPermissions)} />);
+            waitingPermission={getWaitingPermissionState(pendingPermissions)} />);
         expect(screen.queryByText('当前任务需要处理，原因如下。')).not.toBeInTheDocument();
         expect(screen.queryByText('Bash requires permission.')).not.toBeInTheDocument();
         expect(screen.queryByText(/可在聊天中说明要求/)).not.toBeInTheDocument();
@@ -168,7 +221,7 @@ describe('RightSidebar tabs', () => {
             } };
         render(<RightSidebar projectId="blocked-project" lang="zh" progress={0} onSendMessage={onSendMessage} isLoading={false}
             messages={[]} projectStatus={projectStatus}
-            waitingPermission={getWaitingPermissionState(projectStatus)} />);
+            waitingPermission={getWaitingPermissionState()} />);
         expect(screen.queryByText('dist/assets/runtime：缺少验收证据')).toBeNull();
         expect(screen.queryByText('当前任务需要处理，原因如下。')).toBeNull();
         expect(screen.queryByRole('button', { name: /重试工作流|继续工作流/ })).toBeNull();
@@ -203,10 +256,10 @@ describe('RightSidebar tabs', () => {
         const props = { projectId: 'p', lang: 'zh' as const, progress: 0, isLoading: false,
             onSendMessage: vi.fn(), messages: [], projectStatus };
         const { rerender } = render(<RightSidebar {...props} pendingPermissions={permissions}
-            waitingPermission={getWaitingPermissionState(projectStatus, permissions)} />);
+            waitingPermission={getWaitingPermissionState(permissions)} />);
         expect(screen.getByTestId('beegame-permission-panel')).toBeInTheDocument();
         rerender(<RightSidebar {...props} pendingPermissions={[]}
-            waitingPermission={getWaitingPermissionState(projectStatus)} />);
+            waitingPermission={getWaitingPermissionState()} />);
         expect(screen.queryByTestId('beegame-permission-panel')).not.toBeInTheDocument();
         expect(screen.queryByText('当前任务需要处理，原因如下。')).not.toBeInTheDocument();
         expect(screen.queryByText('Bash requires permission.')).not.toBeInTheDocument();
@@ -239,6 +292,7 @@ describe('RightSidebar tabs', () => {
     });
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(beeGameAdapter.listQueuedMessages).mockResolvedValue([]);
         vi.mocked(api.getChatHistoryPaginationState).mockReturnValue({ initialized: false, hasMore: false });
     });
 
@@ -297,6 +351,7 @@ describe('RightSidebar tabs', () => {
                 lang="en"
                 messages={[{
                     id: 'todo-1', sender: 'system', content: '', timestamp: 1, type: 'tool', toolName: 'TodoWrite',
+                    taskKind: 'workflow_stage:DOCUMENT_DRAFTING',
                     toolInput: { todos: [{ content: 'Build the scene', status: 'in_progress' }] },
                 }]}
                 progress={0}
@@ -310,6 +365,19 @@ describe('RightSidebar tabs', () => {
         await user.click(screen.getByRole('tab', { name: 'Todo' }));
         expect(screen.getByText('Build the scene')).toBeInTheDocument();
         expect(screen.getByRole('region', { name: /^Tasks/ })).toBeInTheDocument();
+        expect(screen.queryByRole('region', { name: /Document delivery/ })).not.toBeInTheDocument();
+    });
+
+    it('shows passive document progress during drafting when the Agent emits no TodoWrite', async () => {
+        render(<RightSidebar projectId="document-author" lang="zh" progress={0} isLoading
+            messages={[{ id: 'author-writing', sender: 'system', content: '', timestamp: 1,
+                taskKind: 'workflow_stage:DOCUMENT_DRAFTING', type: 'tool', toolName: 'Write' }]}
+            onSendMessage={vi.fn()} waitingPermission={getWaitingPermissionState([])} />);
+
+        fireEvent.click(screen.getByRole('tab', { name: 'Todo' }));
+        expect(screen.getByRole('region', { name: /文档交付进度/ })).toBeInTheDocument();
+        expect(screen.getByText('GDD')).toBeInTheDocument();
+        expect(screen.queryByTestId('beegame-todo-empty')).not.toBeInTheDocument();
     });
 
     it.each(['scene', 'ui'] as const)('lists %s JSON files before opening the chosen file in a new tab', async kind => {
@@ -569,7 +637,73 @@ describe('RightSidebar tabs', () => {
         await waitFor(() => expect(screen.getByText('new.md')).toBeInTheDocument());
     });
 
-    it('does not send chat input while the runtime is busy', async () => {
+    it('shows a queued message above the composer with Steer and delete actions', async () => {
+        vi.mocked(beeGameAdapter.listQueuedMessages).mockResolvedValue([
+            { id: 'queued-1', text: 'Adjust player speed', state: 'pending', attachmentCount: 2 },
+        ] as never);
+        render(<RightSidebar projectId="proj_1" lang="en" messages={[]} progress={0}
+            onSendMessage={vi.fn()} isLoading waitingPermission={getWaitingPermissionState()} />);
+        const row = await screen.findByTestId('beegame-queued-messages');
+        expect(within(row).getByText('Adjust player speed')).toBeInTheDocument();
+        expect(within(row).getByLabelText('2 attachments')).toBeInTheDocument();
+        fireEvent.click(within(row).getByRole('button', { name: 'Steer queued message' }));
+        await waitFor(() => expect(beeGameAdapter.steerQueuedMessage).toHaveBeenCalledWith('proj_1', 'queued-1'));
+    });
+
+    it('does not show another project’s queued messages during project switching', async () => {
+        vi.mocked(beeGameAdapter.listQueuedMessages).mockImplementation(async project => project === 'first'
+            ? [{ id: 'first-queued', text: 'First project request', state: 'pending', attachmentCount: 0 } as never]
+            : []);
+        const props = { lang: 'en' as const, messages: [], progress: 0,
+            onSendMessage: vi.fn(), isLoading: false, waitingPermission: getWaitingPermissionState() };
+        const view = render(<RightSidebar {...props} projectId="first" />);
+        expect(await screen.findByText('First project request')).toBeInTheDocument();
+        view.rerender(<RightSidebar {...props} projectId="second" />);
+        expect(screen.queryByText('First project request')).not.toBeInTheDocument();
+    });
+
+    it('does not carry an unfinished queue action or its error into another project', async () => {
+        const oldDelete = deferred<void>();
+        vi.mocked(beeGameAdapter.listQueuedMessages).mockImplementation(async project => [{
+            id: `${project}-queued`, text: `${project} request`, state: 'pending', attachmentCount: 0,
+        }] as never);
+        vi.mocked(beeGameAdapter.deleteQueuedMessage).mockReturnValueOnce(oldDelete.promise);
+        const props = { lang: 'en' as const, messages: [], progress: 0,
+            onSendMessage: vi.fn(), isLoading: false, waitingPermission: getWaitingPermissionState() };
+        const view = render(<RightSidebar {...props} projectId="first" />);
+        expect(await screen.findByText('first request')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Delete queued message' }));
+        expect(beeGameAdapter.deleteQueuedMessage).toHaveBeenCalledWith('first', 'first-queued');
+
+        view.rerender(<RightSidebar {...props} projectId="second" />);
+        expect(await screen.findByText('second request')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Steer queued message' })).toBeEnabled();
+        await act(async () => oldDelete.reject(new Error('first project failed')));
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Steer queued message' })).toBeEnabled();
+    });
+
+    it('does not revive a deleted queue item from an older polling response', async () => {
+        const stale = deferred<Awaited<ReturnType<typeof beeGameAdapter.listQueuedMessages>>>();
+        const item = { id: 'to-delete', text: 'Remove this', state: 'pending', attachmentCount: 0 } as never;
+        let calls = 0;
+        vi.mocked(beeGameAdapter.listQueuedMessages).mockImplementation(async () => {
+            calls += 1;
+            if (calls === 1) return [item];
+            if (calls === 2) return stale.promise;
+            return [];
+        });
+        render(<RightSidebar projectId="queue-race" lang="en" messages={[]} progress={0}
+            onSendMessage={vi.fn()} isLoading waitingPermission={getWaitingPermissionState()} />);
+        expect(await screen.findByText('Remove this')).toBeInTheDocument();
+        await waitFor(() => expect(calls).toBeGreaterThanOrEqual(2));
+        fireEvent.click(screen.getByRole('button', { name: 'Delete queued message' }));
+        await waitFor(() => expect(screen.queryByText('Remove this')).not.toBeInTheDocument());
+        await act(async () => stale.resolve([item]));
+        expect(screen.queryByText('Remove this')).not.toBeInTheDocument();
+    });
+
+    it('queues chat input while the runtime is busy', async () => {
         const user = userEvent.setup();
         const onSendMessage = vi.fn();
 
@@ -592,11 +726,11 @@ describe('RightSidebar tabs', () => {
             />
         );
 
-        const input = screen.getByPlaceholderText(/AI 正在处理/i);
-        expect(input).toBeDisabled();
-
-        await user.click(screen.getByRole('tab', { name: 'Chat' }));
-        expect(onSendMessage).not.toHaveBeenCalled();
+        const input = getChatInput();
+        expect(input).toBeEnabled();
+        await user.type(input, 'Queue this request');
+        await user.click(screen.getByRole('button', { name: 'Send message' }));
+        expect(onSendMessage).toHaveBeenCalledWith('Queue this request', [], undefined);
     });
 
     it('does not expose runtime thinking controls in the project chat', async () => {

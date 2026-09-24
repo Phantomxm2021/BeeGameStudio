@@ -7,6 +7,8 @@ import type { AuthorDocumentsResult } from '../stage-modules/foundation-authorin
 import { foundationAuthorWorkspaceBaseline, publishFoundationAcceptedArtifacts } from './foundation-accepted-artifacts'
 import {
   createFoundationInitialReviewRequest,
+  createFoundationCurrentReviewRequest,
+  canonicalReviewSourceRevision,
   foundationPublicJson, foundationResultBinding,
 } from './foundation-public-handoff'
 
@@ -16,6 +18,8 @@ export type FoundationReviewLinkState = {
   authorResultId: string
   /** Copied public provenance, never an execution handle for this project. */
   importedAuthorResult?: AuthorDocumentsResult
+  /** This review is bound to canonical project files changed after initial publication. */
+  canonicalRecheck?: true
   control: { sequence: number; appliedSequence: number; action: 'run' | 'stop'; reason?: string }
   invocation: ReviewerInvocation
   acceptedReview?: ReviewerReviewResult
@@ -31,7 +35,7 @@ export type FoundationReviewLinkState = {
 }
 
 const PASSED_STOP = 'Foundation document review and correction completed. Explicit continuation is required.'
-const AUTO_HANDOFF = 'Foundation document review and correction completed. Starting resource delivery.'
+const AUTO_HANDOFF = 'Foundation document review and correction completed. Preparing the acceptance checklist.'
 
 function isComplete(link: FoundationReviewLinkState) {
   return Boolean(link.acceptedReview)
@@ -47,7 +51,17 @@ export function assertImportedFoundationAuthorBoundary(run: Pick<DeliveryRun,
       run.foundationDraftState.completedPaths.length || run.foundationDraftState.documents?.length)
     throw new Error('Imported Author provenance cannot replace identity or coexist with author execution')
   const input = link.invocation.request.input
-  if (link.invocation.stage !== 'reviewer' || input.subject.kind !== 'initial' ||
+  if (link.invocation.stage !== 'reviewer' || input.subject.kind !== 'initial')
+    throw new Error('Imported Reviewer request is invalid')
+  if (link.canonicalRecheck) {
+    if (!input.subject.sourceResultId.startsWith('canonical:') ||
+        input.subject.confirmedBriefDigest !== result.confirmedBriefDigest || input.documents.length !== result.documents.length ||
+        input.subject.sourceDocumentRevision !== canonicalReviewSourceRevision(input.documents) ||
+        input.subject.sourceResultId !== `canonical:${input.subject.sourceDocumentRevision}`)
+      throw new Error('Canonical Reviewer request does not bind the confirmed brief')
+    return
+  }
+  if (
       input.subject.sourceResultId !== result.resultId || input.subject.sourceDocumentRevision !== result.documentRevision ||
       input.subject.confirmedBriefDigest !== result.confirmedBriefDigest || input.documents.length !== result.documents.length ||
       input.documents.some((document, index) => {
@@ -77,9 +91,17 @@ export function createFoundationReviewLink(input: {
     } finally { await input.store.unlock(lock) }
   }
   async function save(run: DeliveryRun, lock: WorkflowLock, type: string) {
-    return input.store.commit(run, { runId: run.runId, type, phase: run.phase, status: run.status, revision: run.revision }, undefined, lock)
+    return input.store.commit(run, { runId: run.runId, type, phase: run.phase,
+      ...(run.documentStep ? { documentStep: run.documentStep } : {}), status: run.status, revision: run.revision }, undefined, lock)
   }
   function assertBoundary(run: DeliveryRun) {
+    const recheck = run.foundationReviewStage
+    if (recheck?.canonicalRecheck && (
+      recheck.invocation.request.input.subject.sourceDocumentRevision !==
+        canonicalReviewSourceRevision(recheck.invocation.request.input.documents) ||
+      recheck.invocation.request.input.subject.sourceResultId !==
+        `canonical:${recheck.invocation.request.input.subject.sourceDocumentRevision}`))
+      throw new Error('Canonical Reviewer request changed after capture')
     if (run.foundationReviewStage?.importedAuthorResult) {
       assertImportedFoundationAuthorBoundary(run)
       if (run.activeDispatch || run.foundationAuditState) throw new Error('Public review cannot coexist with legacy stage execution')
@@ -111,7 +133,7 @@ export function createFoundationReviewLink(input: {
     const timer = setTimeout(() => {
       timers.delete(run.runId)
       void ensureProgress(run).catch(() => undefined) // ensureProgress records observation failure durably.
-    }, input.pollIntervalMs ?? 250)
+    }, input.pollIntervalMs ?? 1000)
     timer.unref()
     timers.set(run.runId, timer)
   }
@@ -129,13 +151,15 @@ export function createFoundationReviewLink(input: {
       : outcome?.status === 'needs_action' || outcome?.status === 'failed' ? outcome.reason
       : stopping ? link.control.reason ?? 'Foundation stage stop is awaiting acknowledgment.'
       : outcome?.status === 'completed' && outcome.billingStatus !== 'settled' ? 'Foundation public result is awaiting billing settlement.' : undefined
+    const applyingRevision = !complete && outcome?.status === 'completed' && outcome.billingStatus === 'settled'
     return { ...run, foundationReviewStage: link,
       phase: 'DOCUMENT_REVIEW',
-      documentStep: 'FOUNDATION_REVIEW',
+      documentStep: applyingRevision || complete ? 'FOUNDATION_REVISION' : 'FOUNDATION_REVIEW',
       status, thinking: status === 'running' ? 'working' : 'idle', blockedReason: reason,
       currentMessage: complete ? (input.onCompleted ? AUTO_HANDOFF : PASSED_STOP) : stopping && status !== 'stopped'
         ? '停止请求已提交，正在等待执行退出或清理确认。' : status === 'running'
-        ? outcome?.progress ? `模型响应 ${outcome.progress.modelResponses} · ${outcome.progress.message}` : 'Foundation document review is running.' : undefined }
+        ? applyingRevision ? 'Applying reviewed document revisions.'
+          : outcome?.progress ? `模型响应 ${outcome.progress.modelResponses} · ${outcome.progress.message}` : 'Foundation document review is running.' : undefined }
   }
   async function initialize(run: DeliveryRun, lock: WorkflowLock) {
     assertBoundary(run)
@@ -221,7 +245,10 @@ export function createFoundationReviewLink(input: {
     // same accepted bytes; it never substitutes a snapshot read surface.
     run.revision = { ...run.revision, document: await publishFoundationAcceptedArtifacts({
       workspacePath: input.workspacePath, ...identity, review: result, expectedDocuments: result.documents,
-      ...(acceptedAuthor ? { expectedWorkspaceDigests: foundationAuthorWorkspaceBaseline(acceptedAuthor) } : {}),
+      ...(link.canonicalRecheck
+        ? { expectedWorkspaceDigests: invocation.request.input.documents.map(document => ({ path: document.path,
+          digest: createHash('sha256').update(document.content).digest('hex') })) }
+        : acceptedAuthor ? { expectedWorkspaceDigests: foundationAuthorWorkspaceBaseline(acceptedAuthor) } : {}),
     }) }
     link.acceptedReview = structuredClone(result)
   }
@@ -297,6 +324,29 @@ export function createFoundationReviewLink(input: {
   }
   return {
     ensureProgress,
+    async restartFromWorkspace(run: DeliveryRun, reason: string) {
+      const restarted = await locked(run.runId, async (current, lock) => {
+        assertBoundary(current)
+        const prior = current.foundationReviewStage
+        if (!prior?.acceptedReview) throw new Error('Canonical re-review requires accepted Foundation documents')
+        const request = await createFoundationCurrentReviewRequest({ workspacePath: input.workspacePath,
+          requestId: requestId(current, prior.control.sequence + 1),
+          confirmedBriefContext: current.confirmedBriefContext,
+          expected: { ownerId: current.ownerId, projectId: current.projectId,
+            confirmedBriefDigest: current.confirmedBriefDigest } })
+        const link: FoundationReviewLinkState = { protocolVersion: 1, authorResultId: prior.authorResultId,
+          ...(prior.importedAuthorResult ? { importedAuthorResult: prior.importedAuthorResult } : {}),
+          canonicalRecheck: true,
+          historicalElapsedMs: (prior.historicalElapsedMs ?? 0) + (prior.currentCallElapsedMs ?? 0),
+          control: { sequence: prior.control.sequence + 1, appliedSequence: prior.control.sequence + 1, action: 'run' },
+          invocation: { stage: 'reviewer', request } }
+        return save({ ...project(current, link), activeDispatch: undefined, activeTaskId: undefined,
+          tasks: [], gameContentReceipt: undefined, resourceProductionState: { currentTask: 'RESOURCE_DELIVERY' },
+          revision: { ...current.revision, resource: undefined, content: undefined, implementation: undefined },
+          evidence: {}, blockedReason: reason }, lock, 'foundation.public_review.restarted')
+      })
+      return ensureProgress(restarted)
+    },
     resume: (run: DeliveryRun) => control(run, 'run'),
     stop: (run: DeliveryRun, reason: string) => control(run, 'stop', reason),
     dispose() { closed = true; for (const timer of timers.values()) clearTimeout(timer); timers.clear() },

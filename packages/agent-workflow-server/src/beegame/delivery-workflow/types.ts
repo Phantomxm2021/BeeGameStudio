@@ -57,7 +57,7 @@ export const CANONICAL_DOCUMENT_ARTIFACTS = [
 export const CANONICAL_ASSET_MANIFEST = 'assets/asset-manifest.json' as const
 export const CANONICAL_GAME_CONTENT_INDEX = 'content/index.json' as const
 export const WORKFLOW_EVIDENCE_DIRECTORY =
-  '.beegame/workflow/evidence/' as const
+  '.beegame/delivery/evidence/' as const
 
 export const CANONICAL_PROJECT_ARTIFACTS = [
   ...CANONICAL_DOCUMENT_ARTIFACTS,
@@ -78,6 +78,7 @@ export type DeliveryPhase =
 export type DocumentWorkflowStep =
   | 'FOUNDATION_DRAFTING'
   | 'FOUNDATION_REVIEW'
+  | 'FOUNDATION_REVISION'
   | 'CHECKLIST_DRAFTING'
 
 /**

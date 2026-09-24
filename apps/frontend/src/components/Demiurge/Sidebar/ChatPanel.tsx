@@ -1,5 +1,5 @@
-import { memo, useRef } from 'react';
-import { FileText, Plus, X } from 'lucide-react';
+import { memo, useRef, useState } from 'react';
+import { CornerDownRight, Ellipsis, FileText, ListEnd, Paperclip, Plus, Trash2, X } from 'lucide-react';
 import { BeeGameCollaborationFeed } from './BeeGameCollaborationFeed';
 import {
     MessageScroller,
@@ -8,9 +8,10 @@ import type { ChatAttachmentPayload } from '../../../services/api';
 import { CHAT_ATTACHMENT_ACCEPT, filesToChatAttachments, isSupportedChatFile } from '../../../services/chatAttachments';
 import { formatPermissionSummary, isBeeGamePermission } from './SidebarUtils';
 import type { WaitingPermissionState } from '../../../utils/waitingPermission';
-import { type ChatDisplayMessage, type ProjectRuntimeDisplayModel, type PermissionDisplayModel } from '../../../viewModels/displayModels';
+import { type ChatDisplayMessage, type PermissionDisplayModel } from '../../../viewModels/displayModels';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
+import { filterPathsForDisplay } from '../../../utils/chatPathDisplay';
 import { Button } from '../../beui/project-button';
 import { ToolApproval, ToolApprovalCode } from '../../beui/registry/components/agents/tool-approval';
 import { PromptInput } from '../../beui/registry/components/agents/prompt-input';
@@ -19,6 +20,11 @@ import { UserQuestionPanel } from './UserQuestionPanel';
 interface ChatPanelProps {
     messages: ChatDisplayMessage[];
     isLoading: boolean;
+    queuedMessages?: Array<{ id: string; text: string; state: 'pending' | 'dispatching'; attachmentCount?: number }>;
+    queueActionId?: string | null;
+    queueError?: string | null;
+    onSteerQueued?: (id: string) => void;
+    onDeleteQueued?: (id: string) => void;
     streamingMessageId?: string | null;
     onStop?: () => void | Promise<void>;
     isStopping?: boolean;
@@ -27,6 +33,9 @@ interface ChatPanelProps {
     onSend: () => void;
     onEditMessage?: (message: ChatDisplayMessage) => void;
     editingMessageId?: string | null;
+    editDraft: string;
+    onEditDraftChange: (value: string) => void;
+    onSubmitEdit: () => void;
     onCancelEdit?: () => void;
     attachments?: ChatAttachmentPayload[];
     onAddAttachments?: (attachments: ChatAttachmentPayload[]) => void;
@@ -53,7 +62,6 @@ interface ChatPanelProps {
     actionPermission?: PermissionDisplayModel;
     pendingPermissions: PermissionDisplayModel[];
     waitingPermission: WaitingPermissionState;
-    projectStatus?: ProjectRuntimeDisplayModel | null;
     isComposerLocked?: boolean;
     canSendMessage?: boolean;
     lang?: Language;
@@ -142,6 +150,7 @@ const BeUiPermissionPanel = ({
         || (filePath ? getPermissionFileName(filePath) : '')
         || permission.title
         || formatPermissionSummary(permission);
+    const safeTarget = filterPathsForDisplay(target);
     const isAllowPending = permissionState.gateId === permission.gate_id && permissionState.action === 'allow' && permissionState.phase === 'submitting';
     const isDenyPending = permissionState.gateId === permission.gate_id && permissionState.action === 'deny' && permissionState.phase === 'submitting';
     const isNetworkPermission = permission.permission_tool_name === 'SandboxNetworkAccess';
@@ -164,7 +173,7 @@ const BeUiPermissionPanel = ({
                 parameters={[{
                     id: command ? 'command' : 'target',
                     label: parameterLabel,
-                    value: command ? <ToolApprovalCode code={target} language="bash" /> : target,
+                    value: command ? <ToolApprovalCode code={safeTarget} language="bash" /> : safeTarget,
                 }]}
                 onApprove={() => void onResolveToolPermission?.(toPermissionPayload(permission), 'allow', 'once')}
                 onAlwaysAllow={supportsSessionPermission
@@ -183,6 +192,11 @@ const BeUiPermissionPanel = ({
 export const ChatPanel = memo(({
     messages,
     isLoading,
+    queuedMessages = [],
+    queueActionId,
+    queueError,
+    onSteerQueued,
+    onDeleteQueued,
     streamingMessageId = null,
     onStop,
     isStopping = false,
@@ -191,6 +205,9 @@ export const ChatPanel = memo(({
     onSend,
     onEditMessage,
     editingMessageId = null,
+    editDraft,
+    onEditDraftChange,
+    onSubmitEdit,
     onCancelEdit,
     attachments = [],
     onAddAttachments,
@@ -204,7 +221,6 @@ export const ChatPanel = memo(({
     actionPermission,
     pendingPermissions,
     waitingPermission,
-    projectStatus,
     isComposerLocked = false,
     canSendMessage = true,
     lang = 'en',
@@ -218,17 +234,16 @@ export const ChatPanel = memo(({
     const text = useBeeGameText(lang);
     const attachmentInputRef = useRef<HTMLInputElement>(null);
     const historyScrollIntentRef = useRef(false);
+    const [expandedQueuedId, setExpandedQueuedId] = useState<string | null>(null);
     const composerPlaceholder = text.chatPlaceholder || waitingPermission.placeholder;
     const attachFileLabel = text.attachFile || text.attachImage || 'Attach file';
-    const workflowIsTerminal = ['completed', 'failed', 'cancelled', 'stale']
-        .includes(String(projectStatus?.workflow?.status || ''));
     const activeBeeGamePermissions = pendingPermissions.filter(isBeeGamePermission).concat(
-            !workflowIsTerminal && actionPermission && isBeeGamePermission(actionPermission) && !pendingPermissions.some(permission => permission.gate_id === actionPermission.gate_id)
+            actionPermission && isBeeGamePermission(actionPermission) && !pendingPermissions.some(permission => permission.gate_id === actionPermission.gate_id)
                 ? [actionPermission]
                 : [],
         );
     const activeBeeGamePermission = activeBeeGamePermissions[0];
-    const isComposerDisabled = !canSendMessage || isComposerLocked || isLoading || waitingPermission.isBlockingChat || Boolean(activeBeeGamePermission);
+    const isComposerDisabled = !canSendMessage || isComposerLocked || waitingPermission.isBlockingChat || Boolean(activeBeeGamePermission);
     const handleImageFiles = async (files: File[]) => {
         if (isComposerDisabled || !files.length || !onAddAttachments) return;
         const nextAttachments = await filesToChatAttachments(files);
@@ -236,10 +251,10 @@ export const ChatPanel = memo(({
     };
 
     const panelClassName = 'flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden';
-    const composerShellClassName = 'shrink-0 pb-3 pt-3';
+    const composerShellClassName = 'shrink-0';
     const effectiveComposerPlaceholder = activeBeeGamePermission
         ? text.permissionPendingPlaceholder
-        : isComposerLocked || isLoading
+        : isComposerLocked
             ? text.aiProcessing
             : composerPlaceholder;
 
@@ -299,6 +314,12 @@ export const ChatPanel = memo(({
                     currentUserEmail={currentUserEmail}
                     currentUserAvatarUrl={currentUserAvatarUrl}
                     onEditMessage={onEditMessage}
+                    editingMessageId={editingMessageId}
+                    editDraft={editDraft}
+                    onEditDraftChange={onEditDraftChange}
+                    onSubmitEdit={onSubmitEdit}
+                    onCancelEdit={onCancelEdit}
+                    editDisabled={isComposerDisabled || isStopping || isLoading}
                     isLoading={isLoading}
                     streamingMessageId={streamingMessageId}
                 />
@@ -321,6 +342,29 @@ export const ChatPanel = memo(({
                         onResolveToolPermission={onResolveToolPermission}
                     />
                 ))}
+                {queuedMessages.length > 0 ? (
+                    <div className="max-h-40 space-y-1.5 overflow-y-auto overscroll-contain px-2 pb-2" data-testid="beegame-queued-messages">
+                        {queuedMessages.map(message => (
+                            <div key={message.id} className="flex min-w-0 items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-[var(--text-secondary)]">
+                                <ListEnd className="h-4 w-4 shrink-0 opacity-65" aria-hidden="true" />
+                                <span className={`min-w-0 flex-1 text-sm text-[var(--text-primary)] ${expandedQueuedId === message.id ? 'break-words' : 'truncate'}`} title={filterPathsForDisplay(message.text)}>{filterPathsForDisplay(message.text)}</span>
+                                {message.attachmentCount ? <span className="flex shrink-0 items-center gap-1 text-xs" aria-label={`${message.attachmentCount} attachments`}><Paperclip className="h-3.5 w-3.5" />{message.attachmentCount}</span> : null}
+                                <button type="button" disabled={Boolean(queueActionId) || message.state !== 'pending'}
+                                    onClick={() => onSteerQueued?.(message.id)}
+                                    className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-sm transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] disabled:opacity-40"
+                                    aria-label="Steer queued message"><CornerDownRight className="h-4 w-4" />Steer</button>
+                                <button type="button" disabled={Boolean(queueActionId) || message.state !== 'pending'}
+                                    onClick={() => onDeleteQueued?.(message.id)}
+                                    className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-40"
+                                    aria-label="Delete queued message"><Trash2 className="h-4 w-4" /></button>
+                                <button type="button" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition-colors hover:bg-[var(--surface-hover)]"
+                                    onClick={() => setExpandedQueuedId(current => current === message.id ? null : message.id)}
+                                    aria-label="Expand queued message"><Ellipsis className="h-4 w-4" /></button>
+                            </div>
+                        ))}
+                    </div>
+                ) : null}
+                {queueError ? <p role="alert" className="px-4 pb-2 text-xs text-[var(--destructive)]">{filterPathsForDisplay(queueError)}</p> : null}
                 {(
                     <div className="min-w-0" data-testid="beegame-chat-composer">
                         {attachments.length > 0 ? (
@@ -379,12 +423,14 @@ export const ChatPanel = memo(({
                                     onValueChange={onChatInputChange}
                                     onSubmit={() => onSend()}
                                     loading={isLoading}
+                                    allowSubmitWhileLoading
+                                    stopDisabled={isStopping}
                                     onStop={() => void onStop?.()}
                                     submitLabel="Send message"
                                     stopLabel={isStopping ? 'Stopping task' : 'Stop task'}
                                     allowEmptySubmit={attachments.length > 0}
-                                    disabled={isStopping || (!isLoading && isComposerDisabled)}
-                                    readOnly={isComposerLocked || isLoading}
+                                    disabled={isStopping || isComposerDisabled}
+                                    readOnly={isComposerLocked}
                                     placeholder={effectiveComposerPlaceholder}
                                     aria-label={text.chatPlaceholder || 'Chat message'}
                                     data-testid="beegame-chat-input"
@@ -396,6 +442,7 @@ export const ChatPanel = memo(({
                                     }}
                                     onCompositionStart={() => setIsComposing(true)}
                                     onCompositionEnd={() => setIsComposing(false)}
+                                    textClassName="type-chat-body"
                                     className="border-[var(--border-strong)] bg-[var(--surface-2)] [&_textarea]:transition-opacity [&_textarea:read-only]:opacity-50"
                                     leadingAction={(
                                         <div className="flex items-center gap-1" data-testid="beegame-chat-toolbar">
@@ -412,19 +459,6 @@ export const ChatPanel = memo(({
                                             >
                                                 <Plus className="h-4 w-4" aria-hidden="true" />
                                             </Button>
-                                            {editingMessageId ? (
-                                                <button
-                                                    type="button"
-                                                    aria-label="Cancel edit"
-                                                    disabled={isComposerDisabled}
-                                                    title="Cancel edit"
-                                                    onClick={onCancelEdit}
-                                                    className="flex h-8 w-8 items-center justify-center rounded-md text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
-                                                    data-testid="beegame-cancel-edit-button"
-                                                >
-                                                    <X className="h-4 w-4" aria-hidden="true" />
-                                                </button>
-                                            ) : null}
                                         </div>
                                     )}
                                 />

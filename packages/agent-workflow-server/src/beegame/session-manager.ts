@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { nativeSessionTemporaryPath } from './native-runtime-process-path'
 import {
   readCanonicalProjectArtifactConsistently,
   type ProjectArtifactIdentity,
@@ -48,10 +47,10 @@ import { createNativeCliProcessRunner } from './native-cli-process-runner'
 import { createNativeSubagentChatEnricher, isNativeTaskLifecycle } from './native-subagent-chat'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
-import { createRunStore } from './delivery-workflow/run-store'
 import { createStageChatProjector } from './stage-chat-events'
 import { ChatJsonlReader } from './chat-jsonl-reader'
 import { answeredQuestionInput } from './user-question'
+import { sanitizePath } from '../../../../src/utils/sessionStoragePortable'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -175,6 +174,32 @@ export type BeeGameEvent = {
   createdAt: Date
 }
 
+/** Keep the immutable audit log, but project only the live branch into agent context. */
+export function liveProjectConversationEvents<T extends Pick<BeeGameEvent, 'id' | 'type' | 'turnId' | 'payload'>>(
+  events: readonly T[],
+): T[] {
+  const live: T[] = []
+  for (const event of events) {
+    if (event.type === 'user.message' && typeof event.payload?.supersedesMessageId === 'string') {
+      const target = event.payload.supersedesMessageId
+      const targetIndex = live.findIndex(candidate => candidate.type === 'user.message' &&
+        (candidate.payload?.clientMessageId === target || `beegame-event-${candidate.id}` === target))
+      if (targetIndex >= 0) {
+        const precedingTurnStart = live.findLast(candidate => candidate.type === 'turn.started' &&
+          candidate.turnId === event.turnId)
+        const targetTurnId = live[targetIndex]?.turnId
+        const startIndex = targetTurnId
+          ? live.findIndex(candidate => candidate.type === 'turn.started' && candidate.turnId === targetTurnId)
+          : targetIndex
+        live.splice(startIndex >= 0 ? startIndex : targetIndex)
+        if (precedingTurnStart) live.push(precedingTurnStart)
+      }
+    }
+    live.push(event)
+  }
+  return live
+}
+
 const WORKFLOW_WORKER_CHAT_EVENTS = new Set<BeeGameEventType>([
   'assistant.message',
   'assistant.partial',
@@ -290,7 +315,6 @@ export type BeeGameSessionRunnerStartInput = {
   workflowWorker?: boolean
   workflowWorkerType?: string
   workflowDispatchId?: string
-  workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
   language?: BeeGameSessionLanguage
   /** Native background tasks may outlive the foreground turn that spawned them. */
@@ -422,8 +446,15 @@ type SessionRecord = {
   workflowRunId?: string
   workflowDispatchId?: string
   workflowWorkerType?: string
-  workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
+  activeWorkflowContext?: {
+    runId: string
+    dispatchId: string
+    workerType: string
+    phase: string
+    protectedPaths?: string[]
+  }
+  currentTurnUsageExternallyAccounted?: boolean
   runtime: RuntimeModelConfig | undefined
   userId: string
   authToken?: string
@@ -439,6 +470,8 @@ type SessionRecord = {
   runner: BeeGameSessionRuntime | null
   abortController: AbortController | null
   pendingPermissions: Map<string, PendingPermission>
+  /** User-approved network hosts for this live session only. */
+  approvedNetworkHosts: Set<string>
   toolUses: Map<string, { toolName: string; input?: unknown }>
   /** Attribution only; the native runner owns task lifecycle and turn draining. */
   nativeTaskTurnIds: Map<string, string | undefined>
@@ -457,11 +490,6 @@ type SessionRecord = {
   currentTurnId: string | null
   /** Provider-cumulative usage captured before the active turn starts. */
   currentTurnStartingUsage?: BeeGameRuntimeSnapshot['usage']
-  /** Usage already committed to the durable workflow run ledger. */
-  workflowUsageCommitted: BeeGameRuntimeSnapshot['usage']
-  /** Serializes workflow usage writes without blocking the SDK callback. */
-  workflowUsageWriteTail: Promise<void>
-  workflowUsageWriteError?: Error
   /** The complete active model turn, including final event/usage callbacks. */
   activeTurn?: Promise<void>
   /** Serializes usage billing events without blocking the SDK callback. */
@@ -490,7 +518,6 @@ export type StartBeeGameSessionInput = {
   workflowRunId?: string
   workflowDispatchId?: string
   workflowWorkerType?: string
-  workflowAllowedPaths?: string[]
   workflowProtectedPaths?: string[]
 }
 
@@ -658,9 +685,6 @@ export class BeeGameSessionManager {
       ...(input.workflowWorkerType
         ? { workflowWorkerType: input.workflowWorkerType }
         : {}),
-      ...(input.workflowAllowedPaths
-        ? { workflowAllowedPaths: [...input.workflowAllowedPaths] }
-        : {}),
       ...(input.workflowProtectedPaths
         ? { workflowProtectedPaths: [...input.workflowProtectedPaths] }
         : {}),
@@ -682,6 +706,7 @@ export class BeeGameSessionManager {
       runner: null,
       abortController: null,
       pendingPermissions: new Map(),
+      approvedNetworkHosts: new Set(),
       toolUses: new Map(),
       nativeTaskTurnIds: new Map(),
       assistantPartialTextByMessage: new Map(),
@@ -698,8 +723,6 @@ export class BeeGameSessionManager {
         ? getNextTurnIndex(session.id, recoveredTranscript.events)
         : 1,
       currentTurnId: null,
-      workflowUsageCommitted: emptyRuntimeUsage(),
-      workflowUsageWriteTail: Promise.resolve(),
       usageWriteTail: Promise.resolve(),
       usageFailureReported: false,
       resumeEventPending: Boolean(recoveredTranscript),
@@ -810,48 +833,6 @@ export class BeeGameSessionManager {
     )
   }
 
-  resolveProjectPermission(
-    userId: string,
-    projectId: string,
-    workspacePath: string,
-    toolUseID: string,
-    decision: DashboardPermissionDecision & { remember?: boolean; answers?: unknown },
-  ): { resolved: boolean; sessionId?: string } {
-    const root = resolve(workspacePath)
-    const candidates = [...this.sessions.values()].filter(
-      record =>
-        record.userId === userId &&
-        record.projectId === projectId &&
-        resolve(record.session.cwd) === root &&
-        record.pendingPermissions.has(toolUseID),
-    )
-    if (candidates.length !== 1) return { resolved: false }
-    const record = candidates[0]
-    return {
-      ...this.resolvePermission(record.session.id, toolUseID, decision),
-      sessionId: record.session.id,
-    }
-  }
-
-  workflowUsage(workflowRunId: string): BeeGameRuntimeSnapshot['usage'] {
-    const total = emptyRuntimeUsage()
-    for (const record of this.sessions.values()) {
-      if (!record.workflowWorker || record.workflowRunId !== workflowRunId)
-        continue
-      // The durable run already contains every delta whose write completed.
-      // Expose only the uncommitted live delta so the API can add it without
-      // double-counting active workers.
-      addRuntimeUsage(
-        total,
-        subtractRuntimeUsage(
-          this.deriveRuntimeSnapshot(record).usage,
-          record.workflowUsageCommitted,
-        ),
-      )
-    }
-    return total
-  }
-
   get(sessionId: string): BeeGameSession | undefined {
     const record = this.sessions.get(sessionId)
     return record ? cloneSession(record.session) : undefined
@@ -890,6 +871,46 @@ export class BeeGameSessionManager {
       createdAt: record.session.createdAt,
       updatedAt: record.session.updatedAt,
     }
+  }
+
+  /** The native transcript is separate from BGS Chat history; both must rewind together. */
+  async projectEditCheckpointInfo(sessionId: string): Promise<{
+    nativeSessionId?: string
+    nativeTranscriptPath?: string
+  }> {
+    const record = this.sessions.get(sessionId)
+    if (!record || record.workflowWorker) throw new Error('Project session not found')
+    if (record.session.turnStatus !== 'idle' || record.activeTurn || record.preparingTurn)
+      throw new Error('Wait for the current agent turn before editing a message')
+    const nativeSessionId = record.nativeSessionId
+    if (!nativeSessionId) return {}
+    const runtimeEnvironment = buildRuntimeEnv(mergeRuntimeEnv(record.runtime,
+      await this.loadAdditionalRuntimeEnv(record)))
+    const configRoot = runtimeEnvironment.BEEGAME_CONFIG_DIR || join(homedir(), '.claude')
+    return { nativeSessionId,
+      nativeTranscriptPath: join(configRoot, 'projects', sanitizePath(record.session.cwd), `${nativeSessionId}.jsonl`) }
+  }
+
+  async restoreProjectEditCheckpoint(sessionId: string, nativeSessionId?: string): Promise<void> {
+    const record = this.sessions.get(sessionId)
+    if (!record || record.workflowWorker) throw new Error('Project session not found')
+    if (record.session.turnStatus !== 'idle' || record.activeTurn || record.preparingTurn)
+      throw new Error('Wait for the current agent turn before editing a message')
+    await this.disposeRunner(record.runner)
+    record.runner = null
+    record.nativeSessionId = nativeSessionId
+    record.systemContext = undefined
+    this.persistRuntimeSnapshot(record)
+  }
+
+  /** The one chat session that owns a project's native conversation. */
+  projectConversationSessionId(userId: string, projectId: string, workspacePath: string): string | undefined {
+    const root = resolve(workspacePath)
+    return [...this.sessions.values()]
+      .filter(record => !record.workflowWorker && record.userId === userId &&
+        record.projectId === projectId && resolve(record.session.cwd) === root)
+      .sort((left, right) => right.session.updatedAt.getTime() - left.session.updatedAt.getTime())[0]
+      ?.session.id
   }
 
   runtimeSnapshot(
@@ -1059,7 +1080,7 @@ export class BeeGameSessionManager {
   }> {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
-    return record.events
+    return liveProjectConversationEvents(record.events)
       .filter(event => !isThinkingProtocolControlEvent(event))
       .map(event => formatBeeGameEventForDisplay(event, record.language))
       .map(event => ({
@@ -1101,12 +1122,21 @@ export class BeeGameSessionManager {
       getValidAuthToken?: SessionRecord['getValidAuthToken']
       clientMessageId?: string
       supersedesMessageId?: string
+      rewindAvailable?: boolean
       language?: BeeGameSessionLanguage
       attachments?: BeeGameAttachment[]
       confirmedBriefContext?: string
       onTurnAccepted?: () => void
       prepareTurn?: () => Promise<{ systemContext?: string; close?: () => Promise<void> }>
       onTurnSettled?: () => Promise<void>
+      workflowContext?: {
+        runId: string
+        dispatchId: string
+        workerType: string
+        phase: string
+        protectedPaths?: string[]
+      }
+      usageExternallyAccounted?: boolean
     },
   ): Promise<BeeGameSession> {
     const record = this.sessions.get(sessionId)
@@ -1125,6 +1155,13 @@ export class BeeGameSessionManager {
     // other; without this claim they can start the same logical turn twice.
     record.session.turnStatus = 'running'
     record.preparingTurn = true
+    record.currentTurnUsageExternallyAccounted = display?.usageExternallyAccounted === true
+    if (display?.workflowContext) record.activeWorkflowContext = {
+      ...display.workflowContext,
+      ...(display.workflowContext.protectedPaths
+        ? { protectedPaths: [...display.workflowContext.protectedPaths] }
+        : {}),
+    }
     let turnAccepted = false
     let close: (() => Promise<void>) | undefined
     try {
@@ -1200,6 +1237,7 @@ export class BeeGameSessionManager {
         ...(display?.supersedesMessageId
           ? { supersedesMessageId: display.supersedesMessageId }
           : {}),
+        ...(display?.rewindAvailable ? { rewindAvailable: true } : {}),
       })
 
       let activeTurn!: Promise<void>
@@ -1220,6 +1258,8 @@ export class BeeGameSessionManager {
       if (!turnAccepted) {
         try { await close?.() }
         finally {
+          record.activeWorkflowContext = undefined
+          record.currentTurnUsageExternallyAccounted = undefined
           record.currentTurnId = null
           record.abortController = null
           record.session.turnStatus = 'idle'
@@ -1244,10 +1284,33 @@ export class BeeGameSessionManager {
         source: 'policy',
         message: 'Session stopped before permission was resolved',
       })
+      record.approvedNetworkHosts.clear()
       record.session.turnStatus = 'idle'
       record.session.updatedAt = new Date()
       this.closeOpenThinkingLifecycle(record, 'session_stopped')
       this.append(record, 'session.stopped', 'BeeGame session stopped', { type: 'session.stopped', reason })
+    }
+    return cloneSession(record.session)
+  }
+
+  /** Cancel one workflow turn without ending the project's conversation. */
+  interruptTurn(sessionId: string, reason = 'turn_interrupted'): BeeGameSession {
+    const record = this.sessions.get(sessionId)
+    if (!record) throw new Error('Session not found')
+    if (record.session.turnStatus === 'running' || record.preparingTurn) {
+      record.abortController?.abort(reason)
+      void this.disposeRunner(record.runner)
+      record.runner = null
+      this.resolveAllPendingPermissions(record, {
+        behavior: 'deny',
+        source: 'policy',
+        message: 'Current production stage was interrupted.',
+      })
+      record.approvedNetworkHosts.clear()
+      this.closeOpenThinkingLifecycle(record, 'turn_interrupted')
+      record.session.turnStatus = 'idle'
+      record.session.updatedAt = new Date()
+      record.activeWorkflowContext = undefined
     }
     return cloneSession(record.session)
   }
@@ -1299,43 +1362,6 @@ export class BeeGameSessionManager {
     this.eventSubscribers.delete(sessionId)
   }
 
-  async flushWorkflowUsage(sessionId: string): Promise<void> {
-    const record = this.sessions.get(sessionId)
-    if (!record?.workflowWorker) return
-    await record.workflowUsageWriteTail
-    if (record.workflowUsageWriteError) {
-      throw record.workflowUsageWriteError
-    }
-    const usage = this.deriveRuntimeSnapshot(record).usage
-    const delta = subtractRuntimeUsage(usage, record.workflowUsageCommitted)
-    if (
-      delta.total_tokens <= 0 &&
-      delta.prompt_tokens <= 0 &&
-      delta.completion_tokens <= 0 &&
-      delta.cache_read_tokens <= 0 &&
-      delta.cache_creation_tokens <= 0
-    )
-      return
-    const dispatchId = record.workflowDispatchId
-    if (!record.workflowRunId || !dispatchId)
-      throw new Error('workflow usage event is missing its dispatch identity')
-    const persisted = await createRunStore(
-      record.session.cwd,
-      record.userId,
-    ).addWorkflowUsage(
-      record.workflowRunId,
-      {
-        input_tokens: delta.prompt_tokens,
-        cache_read_tokens: delta.cache_read_tokens,
-        cache_creation_tokens: delta.cache_creation_tokens,
-        completion_tokens: delta.completion_tokens,
-        total_tokens: delta.total_tokens,
-      },
-      dispatchId,
-    )
-    if (persisted) addRuntimeUsage(record.workflowUsageCommitted, delta)
-  }
-
   async rebindWorkflowWorker(
     sessionId: string,
     binding: { runId: string; dispatchId: string; workerType: string },
@@ -1356,10 +1382,21 @@ export class BeeGameSessionManager {
     await record.activeTurn
   }
 
+  /** Wait until a stopped project turn has fully unwound before resuming its
+   * existing transcript/native session. This prevents a stop/resume race from
+   * admitting a second turn while the first runner is still disposing. */
+  async waitForSessionIdle(sessionId: string): Promise<void> {
+    const record = this.sessions.get(sessionId)
+    if (!record) return
+    while (record.preparingTurn) await new Promise(resolve => setTimeout(resolve, 10))
+    await record.activeTurn?.catch(() => undefined)
+    await Promise.all([...this.runnerDisposals])
+  }
+
   async dispose(): Promise<void> {
     for (const follower of this.stageChatFollowers.values()) clearInterval(follower.timer)
     this.stageChatFollowers.clear()
-    const workflowDrains: Promise<void>[] = []
+    const activeTurnDrains: Promise<void>[] = []
     for (const record of this.sessions.values()) {
       // Mark the session stopped before the transport can flush any more
       // messages. Aborting a runner while leaving the record "running" lets
@@ -1375,23 +1412,10 @@ export class BeeGameSessionManager {
           source: 'policy',
         })
       }
-      if (record.workflowWorker || record.activeTurn) {
-        workflowDrains.push(
-          (async () => {
-            await record.activeTurn?.catch(() => undefined)
-            await record.workflowUsageWriteTail.catch(() => undefined)
-            if (record.workflowUsageWriteError) {
-              console.error('[BeeGame] Failed to flush workflow token usage', {
-                runId: record.workflowRunId,
-                dispatchId: record.workflowDispatchId,
-                cause: record.workflowUsageWriteError.message,
-              })
-            }
-          })(),
-        )
-      }
+      if (record.activeTurn)
+        activeTurnDrains.push(record.activeTurn.catch(() => undefined))
     }
-    await Promise.all(workflowDrains)
+    await Promise.all(activeTurnDrains)
     await Promise.all(this.runnerDisposals)
     this.eventSubscribers.clear()
   }
@@ -1534,9 +1558,6 @@ export class BeeGameSessionManager {
           ...(record.workflowDispatchId
             ? { workflowDispatchId: record.workflowDispatchId }
             : {}),
-          ...(record.workflowAllowedPaths
-            ? { workflowAllowedPaths: [...record.workflowAllowedPaths] }
-            : {}),
           ...(record.workflowProtectedPaths
             ? { workflowProtectedPaths: [...record.workflowProtectedPaths] }
             : {}),
@@ -1599,22 +1620,7 @@ export class BeeGameSessionManager {
         this.append(record, 'system.status', `Request cleanup failed: ${toErrorMessage(error)}`)
       }
       const terminalTurnId = record.currentTurnId
-      if (record.workflowWorker) {
-        // Workflow usage is accounting telemetry. Persist it once per turn,
-        // but never put that storage lane between the native result and the
-        // dispatch terminal commit.
-        const usageFlush = this.flushWorkflowUsage(record.session.id)
-        record.workflowUsageWriteTail = usageFlush.catch(error => {
-          record.workflowUsageWriteError =
-            error instanceof Error ? error : new Error(String(error))
-          console.error('[BeeGame] Failed to persist workflow token usage', {
-            runId: record.workflowRunId,
-            dispatchId: record.workflowDispatchId,
-            cause: record.workflowUsageWriteError.message,
-          })
-        })
-      }
-      if (terminalTurnId) {
+      if (terminalTurnId && !record.currentTurnUsageExternallyAccounted) {
         // Remote billing is accounting, not worker lifecycle authority. A
         // slow or unavailable billing service must not keep a completed native
         // turn (and therefore the whole workflow) in the running state.
@@ -1634,6 +1640,8 @@ export class BeeGameSessionManager {
       record.visibleThinkingBlockIds.clear()
       record.thinkingBlockStartedAt.clear()
       record.abortController = null
+      record.activeWorkflowContext = undefined
+      record.currentTurnUsageExternallyAccounted = undefined
       record.session.updatedAt = new Date()
     }
   }
@@ -1965,6 +1973,10 @@ export class BeeGameSessionManager {
       }
     }
     record.pendingPermissions.delete(toolUseID)
+    if (decision.behavior === 'allow' && decision.scope === 'session' && pending.toolName === 'SandboxNetworkAccess') {
+      const host = typeof pending.input.host === 'string' ? pending.input.host.trim().toLowerCase() : ''
+      if (host) record.approvedNetworkHosts.add(host)
+    }
     const resolvedDecision =
       decision.behavior === 'allow' &&
       decision.scope === 'session' &&
@@ -1997,6 +2009,25 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision> {
+    // Native permission callbacks can arrive while a stopped runner drains.
+    // Its original tool call is no longer resumable, so never publish a new
+    // approval gate after the turn has been aborted.
+    if (record.session.status !== 'running' || record.session.turnStatus !== 'running' ||
+        !record.abortController || record.abortController.signal.aborted) {
+      return { behavior: 'deny', source: 'policy',
+        message: 'Session stopped before permission was resolved' }
+    }
+    if (request.toolName === 'SandboxNetworkAccess') {
+      const host = typeof request.input.host === 'string' ? request.input.host.trim().toLowerCase() : ''
+      if (host && record.approvedNetworkHosts.has(host)) {
+        this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
+          type: 'permission.resolved', toolUseID: request.toolUseID,
+          toolName: request.toolName, decision: 'allow', scope: 'session',
+          autoApproved: true, reason: 'session_network_host_approval',
+        })
+        return { behavior: 'allow', source: 'user', scope: 'session' }
+      }
+    }
     const workflowMutation = workflowFileMutationAuthority(record, request)
     if (workflowMutation) {
       this.append(
@@ -2142,6 +2173,15 @@ export class BeeGameSessionManager {
         }
       }
       if (status === 'ended') record.thinkingBlockStartedAt.delete(thinkingKey)
+    }
+    if (record.activeWorkflowContext) {
+      eventPayload = {
+        ...(eventPayload ?? { type }),
+        workflowRunId: record.activeWorkflowContext.runId,
+        workflowDispatchId: record.activeWorkflowContext.dispatchId,
+        workflowWorkerType: record.activeWorkflowContext.workerType,
+        workflowStage: record.activeWorkflowContext.phase,
+      }
     }
     const event: BeeGameEvent = {
       id: record.nextEventId,
@@ -4098,9 +4138,8 @@ function projectWorkspaceFileAccessAuthority(
 type WorkflowFileMutationAuthority = {
   behavior: 'allow' | 'deny'
   reason:
-    | 'workflow_allowed_path'
+    | 'workflow_workspace_file_access'
     | 'workflow_protected_path'
-    | 'workflow_path_not_allowed'
     | 'workflow_workspace_boundary'
     | 'workflow_mutation_target_invalid'
   message?: string
@@ -4110,7 +4149,7 @@ function workflowFileMutationAuthority(
   record: SessionRecord,
   request: DashboardPermissionRequest,
 ): WorkflowFileMutationAuthority | undefined {
-  if (record.workflowWorker !== true || !isFileMutationTool(request.toolName))
+  if ((record.workflowWorker !== true && !record.activeWorkflowContext) || !isFileMutationTool(request.toolName))
     return undefined
   const artifactPath = getMutationArtifactPath(request.input)
   if (!artifactPath)
@@ -4133,7 +4172,7 @@ function workflowFileMutationAuthority(
       message:
         'Workflow workers may not mutate files outside the project workspace.',
     }
-  const protectedPath = (record.workflowProtectedPaths ?? []).find(entry =>
+  const protectedPath = (record.activeWorkflowContext?.protectedPaths ?? record.workflowProtectedPaths ?? []).find(entry =>
     pathMatchesConfiguredScope(record.session.cwd, targetPath, entry),
   )
   if (protectedPath)
@@ -4142,17 +4181,10 @@ function workflowFileMutationAuthority(
       reason: 'workflow_protected_path',
       message: `Workflow workers may not mutate protected project authority: ${protectedPath}.`,
     }
-  const scratchPath = nativeSessionTemporaryPath(workspaceRoot, record.session.id)
-  const allowed = pathMatchesConfiguredScope(workspaceRoot, targetPath, `${scratchPath}/`) || (record.workflowAllowedPaths ?? []).some(entry => {
-    return pathMatchesConfiguredScope(record.session.cwd, targetPath, entry)
-  })
-  return allowed
-    ? { behavior: 'allow', reason: 'workflow_allowed_path' }
-    : {
-        behavior: 'deny',
-        reason: 'workflow_path_not_allowed',
-        message: 'Workflow workers may mutate only their assigned project paths.',
-      }
+  // Stage paths describe the primary deliverable; they are not a sandbox.
+  // Keep the actual project boundary and explicit protected artifacts, while
+  // allowing the Agent to make supporting changes anywhere in the workspace.
+  return { behavior: 'allow', reason: 'workflow_workspace_file_access' }
 }
 
 function pathMatchesConfiguredScope(

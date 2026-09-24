@@ -13,6 +13,9 @@ function hasCloudSession(): boolean {
 }
 
 interface ChatMessageSemantic {
+  clientMessageId?: string;
+  supersedesMessageId?: string;
+  rewindAvailable?: boolean;
   attachments?: Message['attachments'];
   contentMode?: 'delta' | 'snapshot';
   sequence?: number;
@@ -124,11 +127,15 @@ function findMessageIndex(messages: Message[], candidate: Message): number {
 }
 
 function mergeMessages(existing: Message, incoming: Message): Message {
+  const isCompaction = existing.taskKind === 'context_compaction' || incoming.taskKind === 'context_compaction';
+  const compactionAlreadyFinished = isCompaction &&
+    existing.streamStatus === 'complete' && incoming.streamStatus === 'streaming';
   return withDerivedIdentity({
     ...existing,
     ...incoming,
     id: incoming.messageId || incoming.clientMessageId || existing.id,
-    content: incoming.content || existing.content,
+    content: compactionAlreadyFinished ? existing.content : incoming.content || existing.content,
+    streamStatus: compactionAlreadyFinished ? existing.streamStatus : incoming.streamStatus ?? existing.streamStatus,
     attachments: incoming.attachments || existing.attachments,
     thought: incoming.thought ?? existing.thought,
     completionReason: Object.prototype.hasOwnProperty.call(incoming, 'completionReason') ||
@@ -139,8 +146,9 @@ function mergeMessages(existing: Message, incoming: Message): Message {
     subagentOutput: incoming.subagentOutput ?? existing.subagentOutput,
     subagentTrace: incoming.subagentTrace ?? existing.subagentTrace,
     subagentActivity: incoming.subagentActivity ?? existing.subagentActivity,
-    timestamp: existing.timestamp || incoming.timestamp,
-    sequence: existing.sequence ?? incoming.sequence,
+    timestamp: isCompaction ? Math.min(existing.timestamp, incoming.timestamp) : existing.timestamp || incoming.timestamp,
+    sequence: isCompaction && existing.sequence !== undefined && incoming.sequence !== undefined
+      ? Math.min(existing.sequence, incoming.sequence) : existing.sequence ?? incoming.sequence,
     type: incoming.type || existing.type,
     isDocument: incoming.isDocument !== undefined ? incoming.isDocument : existing.isDocument,
     artifactId: incoming.artifactId || existing.artifactId,
@@ -391,6 +399,9 @@ export const useChatStore = create<ChatState>()(
             artifactId,
             documentTitle,
             attachments: semantic?.attachments,
+            clientMessageId: semantic?.clientMessageId,
+            supersedesMessageId: semantic?.supersedesMessageId,
+            rewindAvailable: semantic?.rewindAvailable,
             renderHint: semantic?.renderHint,
             artifactType: semantic?.artifactType,
             taskKind: semantic?.taskKind,

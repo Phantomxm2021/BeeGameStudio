@@ -32,6 +32,8 @@ export interface StreamingResponseProps {
   status?: StreamingResponseStatus;
   /** Plain-text value copied by the built-in copy action. */
   copyText?: string;
+  /** Optional local time displayed in the response footer. */
+  timeLabel?: string;
   /** Overrides the built-in clipboard action. */
   onCopy?: () => void | Promise<void>;
   /** Optional sources shown as a compact footer disclosure after streaming. */
@@ -81,6 +83,7 @@ export function StreamingResponse({
   children,
   status = "streaming",
   copyText,
+  timeLabel,
   onCopy,
   sources = [],
   sourcesOpen,
@@ -105,6 +108,7 @@ export function StreamingResponse({
   const hasSources = sources.length > 0;
   const shouldShowActions =
     showActions && !streaming && (canCopy || hasSources);
+  const shouldShowFooter = Boolean(timeLabel) || shouldShowActions;
   const sourcesContentId = `${baseId}-sources`;
   const resolvedSourcePrefix =
     sourceIdPrefix ?? `response-source-${baseId.replace(/:/g, "")}`;
@@ -150,15 +154,16 @@ export function StreamingResponse({
       </div>
 
       <AnimatePresence initial={false}>
-        {shouldShowActions ? (
+        {shouldShowFooter ? (
           <motion.div
             initial={reduce ? { opacity: 0 } : { opacity: 0, y: 4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: reduce ? 0.12 : 0.22, ease: EASE_OUT }}
-            className="mt-3"
+            className="mt-2"
           >
-            <div className={cn("flex items-center gap-0.5", actionsClassName)}>
+            <div className="flex items-center gap-1.5">
+              {shouldShowActions ? <div className={cn("flex items-center gap-0.5", actionsClassName)}>
               {canCopy ? (
                 <ResponseAction
                   label={copied ? "Copied" : "Copy response"}
@@ -193,6 +198,8 @@ export function StreamingResponse({
                   </motion.span>
                 </button>
               ) : null}
+              </div> : null}
+              {timeLabel ? <time className="type-caption-2 tabular-nums text-muted-foreground">{timeLabel}</time> : null}
             </div>
 
             {hasSources ? (

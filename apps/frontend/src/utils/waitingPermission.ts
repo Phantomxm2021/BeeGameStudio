@@ -1,7 +1,7 @@
 import type { PendingToolPermissionItem } from '../services/api';
-import { getWorkflowControlState, type ProjectRuntimeDisplayModel, type PermissionDisplayModel } from '../viewModels/displayModels';
+import type { PermissionDisplayModel } from '../viewModels/displayModels';
 
-export type WaitingPermissionKind = 'none' | 'permission' | 'workflow';
+export type WaitingPermissionKind = 'none' | 'permission';
 
 export interface WaitingPermissionState {
   kind: WaitingPermissionKind;
@@ -21,14 +21,11 @@ const DEFAULT_STATE: WaitingPermissionState = {
 
 const normalize = (value: unknown): string => String(value ?? '').trim();
 
-type ProjectStatusLike = ProjectRuntimeDisplayModel | null | undefined;
-
 type PendingPermissionLike =
   | PendingToolPermissionItem
   | PermissionDisplayModel;
 
 export const getWaitingPermissionState = (
-  projectStatus?: ProjectStatusLike,
   pendingPermissions: PendingPermissionLike[] = [],
 ): WaitingPermissionState => {
   if (pendingPermissions.some(permission => normalize(permission?.type) === 'BEEGAME_PERMISSION')) {
@@ -38,28 +35,6 @@ export const getWaitingPermissionState = (
       isBlockingChat: true,
       message: 'BeeGame 正在等待工具权限决定。',
       placeholder: '请先处理当前权限请求...',
-    };
-  }
-
-  const workflow = getWorkflowControlState(projectStatus);
-  if (workflow?.status === 'failed') {
-    if (workflow.block?.message) {
-      return {
-        kind: 'none',
-        isWaitingStatus: false,
-        isBlockingChat: false,
-        message: workflow.block.message,
-        placeholder: '输入修复要求或继续任务...',
-      };
-    }
-  }
-  if (workflow?.status === 'blocked' && workflow.block?.message) {
-    return {
-      kind: 'workflow',
-      isWaitingStatus: false,
-      isBlockingChat: false,
-      message: workflow.block.message,
-      placeholder: '说明接下来要做什么，或发送“继续”...',
     };
   }
 

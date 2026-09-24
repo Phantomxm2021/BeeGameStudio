@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Clock, CopyPlus, LoaderCircle, MoreHorizontal, Trash2, X } from 'lucide-react';
+import { Clock, LoaderCircle, MoreHorizontal, Trash2 } from 'lucide-react';
 import { useShallow } from 'zustand/react/shallow';
 import type { Language } from '../AgentsConfig';
 import { useBeeGameText, useCommonText } from '../../../i18n/useBeeGameTranslations';
@@ -8,6 +8,7 @@ import { useProjectStore } from '../../../store/projectStore';
 import { getCreditSummary, type BeeGameUsageSummary } from '../../../services/creditsApi';
 import { Skeleton } from '../../ui/skeleton';
 import { Button } from '../../beui/project-button';
+import { CloseIconButton } from '../../ui/CloseIconButton';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../ui/dialog';
 import { DevProjectPurgePanel } from './DevProjectPurgePanel';
 import { getProjectDisplayName } from '../../../utils/projectDisplayName';
@@ -32,12 +33,11 @@ const CREDIT_SUMMARY_BATCH_SIZE = 4;
 const CREDIT_SUMMARY_CACHE_MS = 30_000;
 
 export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: ProjectHistoryModalProps) {
-  const { projects, isLoading, deleteProject, createReviewCopy, loadProjects } = useProjectStore(
+  const { projects, isLoading, deleteProject, loadProjects } = useProjectStore(
     useShallow(state => ({
       projects: state.projects,
       isLoading: state.isLoading,
       deleteProject: state.deleteProject,
-      createReviewCopy: state.createReviewCopy,
       loadProjects: state.loadProjects,
     })),
   );
@@ -45,7 +45,6 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
-  const [creatingReviewCopyId, setCreatingReviewCopyId] = useState<string | null>(null);
   const [creditSummaries, setCreditSummaries] = useState<Record<string, BeeGameUsageSummary>>({});
   const creditSummariesRef = useRef<Record<string, BeeGameUsageSummary>>({});
   const creditSummaryLoadedAtRef = useRef<Record<string, number>>({});
@@ -78,23 +77,6 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
       return;
     }
     setConfirmingDeleteId(id);
-  };
-
-  const handleCreateReviewCopy = async (event: React.MouseEvent, id: string) => {
-    event.stopPropagation();
-    if (creatingReviewCopyId || deletingProjectId) return;
-    setCreatingReviewCopyId(id);
-    closeMenu();
-    try {
-      const project = await createReviewCopy(id);
-      onSelectProject(project.id);
-      onClose();
-    } catch {
-      // The source row remains available; the shared API error toast retains
-      // the backend's original failure reason.
-    } finally {
-      setCreatingReviewCopyId(current => (current === id ? null : current));
-    }
   };
 
   const toggleMenu = (event: React.MouseEvent<HTMLButtonElement>, id: string) => {
@@ -194,18 +176,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
               )}
             </DialogDescription>
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={text.close}
-            onClick={() => {
-              closeMenu();
-              onClose();
-            }}
-          >
-            <X className="h-5 w-5" />
-          </Button>
+          <CloseIconButton label={text.close} onClick={() => { closeMenu(); onClose(); }} />
         </div>
 
         <div className="relative z-10 min-h-0 flex-1 space-y-3 overflow-y-auto px-1 pt-3 scrollbar-premium">
@@ -224,8 +195,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
               const displayName = getProjectDisplayName(project, text.untitledProject);
               const creditSummary = creditSummaries[project.id];
               const isDeleting = deletingProjectId === project.id;
-              const isCreatingReviewCopy = creatingReviewCopyId === project.id;
-              const isPending = isDeleting || isCreatingReviewCopy;
+              const isPending = isDeleting;
               return (
                 <div key={project.id} className="relative" aria-busy={isPending || undefined}>
                   <div
@@ -268,7 +238,7 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
                     {isPending ? (
                       <span
                         role="status"
-                        aria-label={isDeleting ? text.deletingProject : text.creatingReviewCopy}
+                        aria-label={text.deletingProject}
                         className="flex h-9 w-9 shrink-0 items-center justify-center text-foreground"
                       >
                         <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -301,14 +271,6 @@ export function ProjectHistoryModal({ isOpen, lang, onClose, onSelectProject }: 
               onPointerDown={event => event.stopPropagation()}
               className="bg-background fixed z-[260] min-w-[150px] overflow-hidden rounded-lg p-1.5 text-foreground shadow-lg"
             >
-              <button
-                type="button"
-                onClick={event => handleCreateReviewCopy(event, activeProject.id)}
-                className="type-footnote flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left text-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <CopyPlus className="h-3.5 w-3.5" />
-                {text.createReviewCopy}
-              </button>
               <button
                 type="button"
                 onClick={event => handleDelete(event, activeProject.id)}

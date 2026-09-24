@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { X } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '../ui/dialog'
 import { Button } from '../beui/project-button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../beui/motion/tabs'
@@ -102,7 +103,7 @@ export function CurationWorkbench({ packId, api, onClose }: { packId: string; ap
       <section className="flex h-full max-h-[calc(100dvh-1.5rem)] min-h-0 w-full min-w-0 flex-col overflow-hidden bg-background text-foreground sm:max-h-[82vh]">
       <header className="flex shrink-0 items-start justify-between gap-4 border-b border-border p-5">
         <div><p className="text-xs font-medium text-muted-foreground">资源库</p><DialogTitle className="mt-1 text-lg">资源整理</DialogTitle><p className="mt-1 text-sm text-muted-foreground">AI 分析完成后自动写入用途标签。</p></div>
-        <Button type="button" variant="outline" size="icon" aria-label="关闭资源整理" onClick={onClose}>×</Button>
+        <Button type="button" variant="ghost" size="icon" aria-label="关闭资源整理" onClick={onClose} className="rounded-full"><X className="size-4" aria-hidden="true" /></Button>
       </header>
       <Tabs value={activeTab} onValueChange={value => setActiveTab(value as 'curation' | 'ai')} className="min-h-0 flex-1">
       <TabsList aria-label="资源整理视图" className="shrink-0 px-5">

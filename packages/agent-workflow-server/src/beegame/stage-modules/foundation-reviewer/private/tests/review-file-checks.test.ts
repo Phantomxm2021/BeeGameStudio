@@ -40,9 +40,9 @@ test('code, plain-text filenames and unused definitions do not become invented l
 
 test('Reviewer prompt uses a compact direct-review instruction', () => {
   const prompt = fileReviewPrompt()
-  expect(prompt).toContain('directly correct only implementation-affecting contradictions or omissions')
-  expect(prompt).toContain('make the needed edits promptly')
-  expect(prompt).toContain('Do not narrate or enumerate an audit checklist')
+  expect(prompt).toContain('Review all eight documents')
+  expect(prompt).toContain('substantive omissions, contradictions')
+  expect(prompt).toContain('Choose the investigation and editing approach yourself')
   expect(prompt).not.toContain('severity')
   expect(prompt).not.toContain('blocker')
   for (const label of ['BLOCKER', 'HIGH', 'MEDIUM', 'LOW']) expect(prompt).not.toContain(label)

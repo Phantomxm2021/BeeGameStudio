@@ -47,6 +47,20 @@ describe('chatStore Performance & Cap', () => {
     expect(state.messageIndexMap['msg-2']).toBe(1);
   });
 
+  it('keeps a finished compaction marker when an older history page supplies its start', () => {
+    const { addMessage, loadHistory } = useChatStore.getState();
+    addMessage({ id: 'compaction-1', messageId: 'compaction-1', sender: 'system',
+      content: 'compacted', taskKind: 'context_compaction', type: 'system_status',
+      streamStatus: 'complete', timestamp: 2000, sequence: 20 });
+    loadHistory([{ id: 'compaction-1', messageId: 'compaction-1', sender: 'system',
+      content: 'compacting', taskKind: 'context_compaction', type: 'system_status',
+      streamStatus: 'streaming', timestamp: 1000, sequence: 10 }]);
+    expect(useChatStore.getState().messages).toHaveLength(1);
+    expect(useChatStore.getState().messages[0]).toMatchObject({
+      content: 'compacted', streamStatus: 'complete', timestamp: 1000, sequence: 10,
+    });
+  });
+
   it('stops unfinished messages but accepts a later authoritative final receipt', () => {
     const { updateMessage, settleActivity, finalizeMessage } = useChatStore.getState();
     updateMessage('run', 'Partial', 'beegame', 'text', false, undefined, undefined, {}, 100, 'm');

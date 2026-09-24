@@ -177,7 +177,9 @@ export function createR2DeploymentPublisher(options: {
       await options.driver.putObject(locator, input.bytes, input.contentType, {
         'beegame-object-id': id,
         'beegame-sha256': input.checksum,
-      })
+      }, input.objectKind === 'deployment_file'
+        ? { cacheControl: 'public, max-age=31536000, immutable' }
+        : undefined)
       const head = await options.driver.headObject(locator)
       if (!head || head.byteSize !== input.bytes.byteLength) {
         throw new Error('R2 deployment object verification failed')

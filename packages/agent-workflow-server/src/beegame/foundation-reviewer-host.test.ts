@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
 import { createFoundationReviewerHost, type FoundationReviewerHostOptions } from './foundation-reviewer-host'
+import type { FileAgentInput, FileAgentResult } from '@bee-game-studio/agent-workflow/native-file-agent'
 
 // Assembly-only checks: no stage start, worker, service or billing call.
 function fixture() {
@@ -10,6 +11,11 @@ function fixture() {
     command: ['must-not-run'], getCredential: unexpected,
     getRuntimeEnv: async () => unexpected(),
     billingClient: { recordUsage: async () => unexpected(), debitRealTimeUsage: async () => unexpected() },
+    execute: async (_input: FileAgentInput): Promise<FileAgentResult> => ({
+      failure: 'offline fixture',
+      completion: { scope: 'direct-child', pid: null, exitCode: 1, signalCode: null,
+        stdoutDrained: true, termination: 'none' },
+    }),
   }
   return { options, accesses: () => accesses }
 }

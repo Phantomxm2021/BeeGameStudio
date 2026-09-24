@@ -177,7 +177,10 @@ describe('BeeGameDeploymentManager', () => {
 
     expect(await manager.readPublicFile(`/deployments/${deployment.id}/assets/missing.glb`)).toBeUndefined()
     expect(await manager.readPublicFile(`/deployments/${deployment.id}/game-route`)).toEqual(
-      expect.objectContaining({ contentType: 'text/html; charset=utf-8' }),
+      expect.objectContaining({
+        contentType: 'text/html; charset=utf-8',
+        cacheControl: 'public, max-age=31536000, immutable',
+      }),
     )
   })
 
@@ -239,6 +242,7 @@ describe('BeeGameDeploymentManager', () => {
       authorization: string | null
       apikey: string | null
       contentType: string | null
+      cacheControl: string | null
       body: string
     }> = []
     const runner: BeeGameDeploymentRunner = async (_command, options) => {
@@ -272,6 +276,9 @@ describe('BeeGameDeploymentManager', () => {
             contentType: init?.headers instanceof Headers
               ? init.headers.get('content-type')
               : (init?.headers as Record<string, string>)['content-type'],
+            cacheControl: init?.headers instanceof Headers
+              ? init.headers.get('cache-control')
+              : (init?.headers as Record<string, string>)['cache-control'],
             body: await new Response(init?.body as BodyInit).text(),
           })
           return new Response('{}', { status: 200 })
@@ -298,12 +305,14 @@ describe('BeeGameDeploymentManager', () => {
         authorization: 'Bearer user-jwt',
         apikey: 'anon-key',
         contentType: 'text/javascript; charset=utf-8',
+        cacheControl: 'max-age=31536000',
         body: 'console.log("storage")',
       }),
       expect.objectContaining({
         authorization: 'Bearer user-jwt',
         apikey: 'anon-key',
         contentType: 'text/html; charset=utf-8',
+        cacheControl: 'max-age=31536000',
         body: '<main>Storage game</main>',
       }),
     ])

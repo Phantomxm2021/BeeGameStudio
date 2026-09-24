@@ -7,11 +7,8 @@ import { readChatAttachment } from './beegame/chat-attachments'
 import { materializeBeeGameAttachments } from './beegame/session-manager'
 import { appendProjectChatTimeline, projectChatEventsAfter } from './beegame/project-chat-timeline'
 import { runtimeActivity } from './beegame/runtime-activity'
-import { projectFoundationReviewDisplay } from './beegame/delivery-workflow/foundation-review-display'
-import { foundationResultBinding, foundationPublicDigest } from './beegame/delivery-workflow/foundation-public-handoff'
 import { z } from 'zod/v4'
 import { registerDevProjectPurgeRoutes } from './dev-project-purge'
-import { retiredFoundationRunningDispatches } from './beegame/delivery-workflow/retired-foundation-review'
 import {
   readCanonicalProjectArtifactConsistently as readProjectArtifactConsistently,
   type ProjectArtifactIdentity,
@@ -20,7 +17,7 @@ import { cors } from 'hono/cors'
 import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync, realpathSync } from 'node:fs'
 import { mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises'
-import { extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import {
   listModelConfigs,
   mapModelConfigToRuntime,
@@ -44,6 +41,7 @@ import {
   formatBeeGameEventForDisplay,
   deleteSessionArtifactsFromTranscript,
   getLatestRuntimeUsage,
+  liveProjectConversationEvents,
   readSessionTranscriptFromDisk,
   readWorkflowWorkerChatHistoryFromDisk,
   recoverLatestProjectSessionFromDisk,
@@ -104,7 +102,6 @@ import {
 } from './model-config-store'
 import { type BeeGameProjectMetadata } from './project-metadata-store'
 import { createR2ProjectAssetStorageFromEnv } from './r2-project-asset-storage'
-import { createReviewProjectCopy } from './beegame/review-project-copy'
 import { syncRuntimeSettingsToDedicatedRuntimeConfig } from './runtime-settings-store'
 import { imageConfigPatchSchema, imageProviderSchema, publicImageConfig } from './image-generation/config'
 import { ImageAttemptStore } from './image-generation/attempt'
@@ -145,7 +142,6 @@ import {
 import {
   registerBeeGameSessionRoutes as registerHttpOnlySessionRoutes,
   resolveValidRequestAccessToken,
-  type BeeGameSessionCredential,
 } from './auth/session-routes'
 import {
   DashboardRepository,
@@ -200,62 +196,174 @@ import {
   loadBeeGameIntakeJob,
   saveBeeGameIntakeJob,
 } from './beegame/intake-job-store'
-import {
-  createRunStore,
-  WorkflowStoreError,
-} from './beegame/delivery-workflow/run-store'
-import {
-  recoverAndResumeRun,
-  reconcileRunOnStartup,
-  resumeRun,
-  retryRun,
-  stopRun,
-} from './beegame/delivery-workflow/recovery'
-import { createInitialDeliveryRun } from './beegame/delivery-workflow/run-store'
-import { transitionDeliveryRun } from './beegame/delivery-workflow/transition'
-import { createDeliveryWorkflowController } from './beegame/delivery-workflow/controller'
-import { createBeeGameDeliveryWorkerPort } from './beegame/delivery-worker-session-port'
 import { sendProjectConversation, isProjectConversation, type ProjectConversationOptions } from './beegame/project-conversation'
 import { openResourceLibraryAccess } from './beegame/resource-library-access'
-import {
-  createFoundationAuthoringHost,
-  type FoundationAuthoringHost,
-  type FoundationAuthoringHostOptions,
-} from './beegame/foundation-authoring-host'
-import { createFoundationReviewerHost, type FoundationReviewerHostOptions, type FoundationReviewerHost } from './beegame/foundation-reviewer-host'
-import { isPublicStageActive } from './beegame/delivery-workflow/public-stage-routing'
+import { beginProjectDelivery, captureProjectDeliveryAcceptance, evaluateProjectDeliveryGate, nativeContentAuthority, pauseProjectDelivery, projectDeliveryStatePath, readProjectDelivery, resumeProjectDelivery } from './beegame/project-delivery'
+import { projectWorkflowDisplayReason } from './beegame/delivery-workflow/workflow-display-message'
+import { createDeliveryWorkflowController } from './beegame/delivery-workflow/controller'
+import { createBeeGameDeliveryWorkerPort } from './beegame/delivery-worker-session-port'
+import { createFoundationAuthoringHost, type FoundationAuthoringHostOptions } from './beegame/foundation-authoring-host'
+import { createFoundationReviewerHost } from './beegame/foundation-reviewer-host'
+import { autonomousAuthorFinishPrompt, autonomousAuthorPrompt, type AutonomousNativeExecutor, type AutonomousNativeInput } from './beegame/stage-modules/foundation-authoring/private/autonomous-native'
+import type { FileAgentInput, FileAgentResult } from '@bee-game-studio/agent-workflow/native-file-agent'
 import { resolveNativeRuntimeCommand } from './beegame/native-runtime-process-path'
-import { evaluateWorkflowDeliveryGate } from './beegame/delivery-workflow/delivery-gate'
-import type { RuntimeAcceptance } from './beegame/delivery-workflow/runtime-acceptance'
-import { beginProjectDelivery, evaluateProjectDeliveryGate, importProjectDeliveryAcceptance, nativeContentAuthority, pauseProjectDelivery, readProjectDelivery, resumeProjectDelivery } from './beegame/project-delivery'
-import type {
-  DeliveryRun,
-  DispatchRecord,
-  ResourceProductionTask,
-  WorkflowEvent,
-} from './beegame/delivery-workflow/types'
-import { projectDeliveryProgress } from './beegame/delivery-workflow/display-progress'
-import {
-  isWorkflowStageCardSnapshot,
-  projectWorkflowStageCardHistory,
-  type WorkflowStageCardSnapshot,
-} from './beegame/delivery-workflow/workflow-stage-card-history'
-import {
-  projectAssetDisplayTasks,
-  projectDocumentDisplayTasks,
-} from './beegame/delivery-workflow/document-display-tasks'
-import { projectPublicAuthorDisplay, projectPublicAuthorResultDisplay, projectPublicAuthorTiming } from './beegame/delivery-workflow/public-author-display'
-import {
-  projectWorkflowCurrentMessage,
-  projectWorkflowDisplayReason,
-  sanitizeWorkflowDisplayMessage,
-} from './beegame/delivery-workflow/workflow-display-message'
-import { authorStageLinkSchema, workflowUnitAcceptedEventSchema } from './beegame/delivery-workflow/schema'
+import { createProjectProductionCoordinator, isIncompleteProjectProductionRun, isPendingProjectProductionReview, readProjectProductionRun } from './beegame/project-production-coordinator'
+import { createProjectMessageQueue } from './beegame/project-message-queue'
+import { createProjectTurnCheckpointStore } from './beegame/project-turn-checkpoint'
+import type { BeeGameSessionCredential } from './auth/session-routes'
 
 type JsonObject = Record<string, unknown>
 
 const RESOURCE_SEMANTIC_MODEL_MIN_OUTPUT_TOKENS = 4_096
 const RESOURCE_SEMANTIC_MODEL_OUTPUT_TOKENS_PER_ITEM = 1_024
+
+function createProjectSessionAuthorExecutor(input: {
+  sessions: BeeGameSessionManager
+  userId: string
+  projectId: string
+  workspacePath: string
+  language?: BeeGameSessionLanguage
+  getAuthToken(options?: { forceRefresh?: boolean }): Promise<string | undefined>
+}): AutonomousNativeExecutor {
+  return async (task: AutonomousNativeInput) => {
+    const sessionId = input.sessions.projectConversationSessionId(
+      input.userId, input.projectId, input.workspacePath,
+    )
+    const session = sessionId ? input.sessions.get(sessionId) : undefined
+    if (!sessionId || !session || session.status !== 'running')
+      return { failure: 'project_conversation_unavailable' }
+    const token = await input.getAuthToken()
+    input.sessions.updateAuthToken(sessionId, token)
+    const before = input.sessions.runtimeSnapshot(sessionId, input.workspacePath).usage
+    const beforeEventIds = new Set(input.sessions.events(sessionId).map(event => event.id))
+    const productionRun = await readProjectProductionRun(input.workspacePath, input.userId)
+    const relativeStageRoot = relative(input.workspacePath, task.workspacePath).split(sep).join('/')
+    const prompt = [
+      `Use the existing project conversation for this document-authoring turn. The stage's working copy is ${relativeStageRoot}; paths such as requirements.md and docs/ in the assignment are relative to that directory. Keep the authored documents in this working copy so the document package can be validated and applied after the turn.`,
+      'This is a normal CLI conversation turn. Native tools, reasoning, permissions, and completion behavior remain unchanged; use native capabilities as needed.',
+      task.finishOnly
+        ? 'Continue the document assignment in this same session. Preserve useful drafts and decide what still needs work.'
+        : '',
+      task.finishOnly ? autonomousAuthorFinishPrompt(input.language) : autonomousAuthorPrompt(input.language),
+    ].filter(Boolean).join('\n\n')
+    const abort = () => input.sessions.interruptTurn(sessionId, 'foundation_author_stopped')
+    if (task.signal.aborted) return { failure: 'stopped' }
+    task.signal.addEventListener('abort', abort, { once: true })
+    try {
+      await input.sessions.sendWithDisplay(sessionId, prompt, {
+        taskType: 'edit_turn',
+        displayKind: 'workflow_worker',
+        ...(token ? { authToken: token } : {}),
+        ...(input.language ? { language: input.language } : {}),
+        usageExternallyAccounted: true,
+        workflowContext: {
+          runId: productionRun?.runId ?? input.projectId,
+          dispatchId: `foundation-author-${randomUUID()}`,
+          workerType: 'document-author',
+          phase: 'DOCUMENT_DRAFTING',
+        },
+      })
+      await input.sessions.waitForSessionIdle(sessionId)
+      const events = input.sessions.events(sessionId).filter(event => !beforeEventIds.has(event.id))
+      const after = input.sessions.runtimeSnapshot(sessionId, input.workspacePath).usage
+      const usage = {
+        prompt_tokens: Math.max(0, after.prompt_tokens - before.prompt_tokens),
+        completion_tokens: Math.max(0, after.completion_tokens - before.completion_tokens),
+        cache_read_tokens: Math.max(0, after.cache_read_tokens - before.cache_read_tokens),
+        cache_creation_tokens: Math.max(0, after.cache_creation_tokens - before.cache_creation_tokens),
+        total_tokens: 0,
+      }
+      usage.total_tokens = usage.prompt_tokens + usage.completion_tokens +
+        usage.cache_read_tokens + usage.cache_creation_tokens
+      await task.onUsage(usage)
+      if (task.signal.aborted) return { failure: 'stopped', usage }
+      const failed = [...events].reverse().find(event => event.type === 'turn.failed')
+      if (failed) return { failure: 'native_turn_failed', usage }
+      const summary = [...events].reverse().find(event => event.type === 'assistant.message')?.text.trim()
+      await task.onProgress({ modelResponses: events.filter(event => event.type === 'assistant.message').length,
+        message: 'Foundation documents authored in the shared project conversation.' })
+      return { report: { status: 'completed', summary: summary?.slice(0, 16_000) || 'Document drafting completed.' }, usage }
+    } catch {
+      return { failure: task.signal.aborted ? 'stopped' : 'native_turn_failed' }
+    } finally {
+      task.signal.removeEventListener('abort', abort)
+    }
+  }
+}
+
+function createProjectSessionFileAgentExecutor(input: {
+  sessions: BeeGameSessionManager
+  userId: string
+  projectId: string
+  workspacePath: string
+  language?: BeeGameSessionLanguage
+  getAuthToken(options?: { forceRefresh?: boolean }): Promise<string | undefined>
+}): (task: FileAgentInput) => Promise<FileAgentResult> {
+  return async task => {
+    const sessionId = input.sessions.projectConversationSessionId(
+      input.userId, input.projectId, input.workspacePath,
+    )
+    const session = sessionId ? input.sessions.get(sessionId) : undefined
+    const completion: FileAgentResult['completion'] = {
+      scope: 'direct-child', pid: null, exitCode: 0, signalCode: null,
+      stdoutDrained: true, termination: 'none',
+    }
+    if (!sessionId || !session || session.status !== 'running')
+      return { failure: 'project_conversation_unavailable', completion }
+    if (task.signal?.aborted) return { failure: 'stopped', completion }
+    const token = await input.getAuthToken()
+    input.sessions.updateAuthToken(sessionId, token)
+    const before = input.sessions.runtimeSnapshot(sessionId, input.workspacePath).usage
+    const beforeEventIds = new Set(input.sessions.events(sessionId).map(event => event.id))
+    const productionRun = await readProjectProductionRun(input.workspacePath, input.userId)
+    const relativeStageRoot = relative(input.workspacePath, task.workspacePath).split(sep).join('/')
+    const prompt = [
+      `Continue the existing project conversation for this review turn. The reviewer's staging copy is ${relativeStageRoot}; documents and requirements named in the assignment are under that directory. Apply any justified corrections to that staging copy only, leaving project documents untouched until review admission.`,
+      'This is a normal CLI conversation turn. Native tools, reasoning, permissions, and completion behavior remain unchanged; use native capabilities as needed.',
+      task.prompt,
+      'Finish with a concise natural-language summary. The edited files are the review result; no special response format is required.',
+    ].join('\n\n')
+    const abort = () => input.sessions.interruptTurn(sessionId, 'foundation_review_stopped')
+    task.signal?.addEventListener('abort', abort, { once: true })
+    try {
+      await input.sessions.sendWithDisplay(sessionId, prompt, {
+        taskType: 'edit_turn', displayKind: 'workflow_worker',
+        ...(token ? { authToken: token } : {}),
+        ...(input.language ? { language: input.language } : {}),
+        usageExternallyAccounted: true,
+        workflowContext: {
+          runId: productionRun?.runId ?? input.projectId,
+          dispatchId: `foundation-review-${randomUUID()}`,
+          workerType: 'foundation-reviewer', phase: 'DOCUMENT_REVIEW',
+        },
+      })
+      await input.sessions.waitForSessionIdle(sessionId)
+      const events = input.sessions.events(sessionId).filter(event => !beforeEventIds.has(event.id))
+      const text = [...events].reverse().find(event => event.type === 'assistant.message')?.text.trim() ?? ''
+      const after = input.sessions.runtimeSnapshot(sessionId, input.workspacePath).usage
+      const usage = {
+        inputTokens: Math.max(0, after.prompt_tokens - before.prompt_tokens),
+        outputTokens: Math.max(0, after.completion_tokens - before.completion_tokens),
+        cacheReadInputTokens: Math.max(0, after.cache_read_tokens - before.cache_read_tokens),
+        cacheCreationInputTokens: Math.max(0, after.cache_creation_tokens - before.cache_creation_tokens),
+      }
+      const hasUsage = Object.values(usage).some(value => value > 0)
+      if (hasUsage) await task.onMessage?.({ type: 'result', modelUsage: { native: usage },
+        result: { result: text } })
+      if (task.signal?.aborted) return { failure: 'stopped', completion: { ...completion, signalCode: 'SIGTERM', exitCode: null } }
+      const failed = [...events].reverse().find(event => event.type === 'turn.failed')
+      if (failed) return { failure: 'native_turn_failed', completion: { ...completion, exitCode: 1 } }
+      await task.onProgress?.({ modelResponses: events.filter(event => event.type === 'assistant.message').length,
+        message: 'Foundation review completed in the shared project conversation.' })
+      return { result: { result: text }, completion }
+    } catch {
+      return { failure: task.signal?.aborted ? 'stopped' : 'native_turn_failed',
+        completion: { ...completion, exitCode: 1 } }
+    } finally {
+      task.signal?.removeEventListener('abort', abort)
+    }
+  }
+}
 
 function getResourceSemanticModelOutputTokens(itemCount: number): number {
   return Math.max(
@@ -437,11 +545,6 @@ export type AgentWorkflowAppOptions = {
   resourceSelectionRuntimeConfig?: ResourceSelectionRuntimeConfig
   invitationService?: InvitationService | false
   registerCleanup?: (cleanup: () => void) => void
-  /** Offline/test hosts may provide a public authoring port directly. */
-  foundationAuthoringHostFactory?: (
-    options: FoundationAuthoringHostOptions,
-  ) => FoundationAuthoringHost
-  foundationReviewerHostFactory?: (options: FoundationReviewerHostOptions) => FoundationReviewerHost
 }
 
 export const ROUTE_PERMISSION = {
@@ -458,41 +561,6 @@ export const ROUTE_PERMISSION = {
   projectExport: 'project.export',
   assetIntegration: 'assets.integrate',
 } as const satisfies Record<string, BeeGamePermission>
-
-export async function stopWorkflowDispatchById(input: {
-  dispatchId: string
-  reason: string
-  disposeWorkflowDispatch: (dispatchId: string) => Promise<number>
-  fallbackStop: (dispatchId: string, reason: string) => Promise<unknown>
-}): Promise<void> {
-  const disposed = await input.disposeWorkflowDispatch(input.dispatchId)
-  if (disposed === 0) await input.fallbackStop(input.dispatchId, input.reason)
-}
-
-export function createWorkflowDispatchStopBridge(input: {
-  isManagedDispatchOpen: (dispatchId: string) => boolean
-  disposeManagedDispatch: (dispatchId: string) => Promise<number>
-  fallbackIsOpen: (dispatchId: string) => Promise<boolean>
-  fallbackStop: (dispatchId: string, reason: string) => Promise<unknown>
-}) {
-  return {
-    sessionIsOpen: async (dispatch: { dispatchId: string }) => {
-      if (input.isManagedDispatchOpen(dispatch.dispatchId)) return true
-      try {
-        return await input.fallbackIsOpen(dispatch.dispatchId)
-      } catch {
-        return false
-      }
-    },
-    stopDispatch: (dispatchId: string, reason: string) =>
-      stopWorkflowDispatchById({
-        dispatchId,
-        reason,
-        disposeWorkflowDispatch: input.disposeManagedDispatch,
-        fallbackStop: input.fallbackStop,
-      }),
-  }
-}
 
 export function createAgentWorkflowApp(
   options: AgentWorkflowAppOptions = {},
@@ -659,24 +727,6 @@ export function createAgentWorkflowApp(
     billingConfig,
     serviceFetch,
   )
-  // Authoring uses the same remote usage authority as regular model sessions.
-  // Keep a callable disabled adapter in local/offline mode so host assembly
-  // remains lazy and route construction does not require billing credentials.
-  const foundationAuthoringBilling =
-    remoteUsageBilling ?? {
-      recordUsage: async () => {
-        throw new BeeGameUsageBillingError(
-          'Foundation authoring usage billing is unavailable',
-          false,
-        )
-      },
-      debitRealTimeUsage: async () => {
-        throw new BeeGameUsageBillingError(
-          'Foundation authoring usage billing is unavailable',
-          false,
-        )
-      },
-    }
   const dashboardRepository = new DashboardRepository({
     dashboardDataRoot,
     supabaseStore,
@@ -718,16 +768,35 @@ export function createAgentWorkflowApp(
     dashboardRepository.createSessionUsageBillingBackend(),
     Boolean(supabaseRuntimeEnvClient),
   )
-  const deliveryControllers = new Map<
-    string,
-    {
-      controller: ReturnType<typeof createDeliveryWorkflowController>
-      authContext: { credential?: BeeGameSessionCredential }
-      ownerId: string
-      workspacePath: string
-    }
-  >()
+  const beeGamePreviews = new BeeGamePreviewManager(
+    options.previewRunner,
+    undefined,
+    options.previewPortAllocator,
+    options.previewReadinessProbe,
+    process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL,
+  )
+  const projectProductions = new Map<string, ReturnType<typeof createProjectProductionCoordinator>>()
+  const productionKey = (ownerId: string, projectId: string, workspacePath: string) =>
+    `${ownerId}:${projectId}:${normalizeResolvedPath(workspacePath)}`
+  const productionAuthContexts = new Map<string, { credential?: BeeGameSessionCredential }>()
+  options.registerCleanup?.(async () => {
+    await Promise.all([...projectProductions.values()].map(production => production.dispose()))
+    projectProductions.clear()
+    productionAuthContexts.clear()
+  })
+  options.registerCleanup?.(async () => {
+    beeGamePreviews.dispose()
+    await beeGameSessions.dispose()
+  })
   const projectOperationQueues = new Map<string, Promise<void>>()
+  const projectMessageQueue = createProjectMessageQueue(dashboardDataRoot)
+  const projectTurnCheckpoints = createProjectTurnCheckpointStore(dashboardDataRoot)
+  const queuePollers = new Map<string, ReturnType<typeof setInterval>>()
+  const queueDraining = new Set<string>()
+  options.registerCleanup?.(() => {
+    for (const timer of queuePollers.values()) clearInterval(timer)
+    queuePollers.clear()
+  })
   async function projectOperation<T>(ownerId: string, workspacePath: string, operation: () => Promise<T>): Promise<T> {
     const key = `${ownerId}:${normalizeResolvedPath(workspacePath)}`
     const queued = (projectOperationQueues.get(key) ?? Promise.resolve()).catch(() => undefined).then(operation)
@@ -735,6 +804,186 @@ export function createAgentWorkflowApp(
     projectOperationQueues.set(key, marker)
     try { return await queued }
     finally { if (projectOperationQueues.get(key) === marker) projectOperationQueues.delete(key) }
+  }
+  const getProjectProductionCoordinator = (input: {
+    request: Request
+    user: BeeGameUserContext
+    projectId: string
+    workspacePath: string
+    confirmedBriefContext: string
+    modelConfigId?: string
+    language?: BeeGameSessionLanguage
+  }) => {
+    const workspacePath = normalizeResolvedPath(input.workspacePath)
+    const key = productionKey(input.user.id, input.projectId, workspacePath)
+    const existing = projectProductions.get(key)
+    if (existing) {
+      const credential = sessionAuth?.getCredential?.(input.request)
+      if (credential) productionAuthContexts.get(key)!.credential = credential
+      return existing
+    }
+
+    const authContext: { credential?: BeeGameSessionCredential } = {}
+    const credential = sessionAuth?.getCredential?.(input.request)
+    if (credential) authContext.credential = credential
+    productionAuthContexts.set(key, authContext)
+    const workerPort = createBeeGameDeliveryWorkerPort({
+      sessions: beeGameSessions,
+      resourceLibraryBaseUrl: options.resourceSelectionRuntimeConfig?.baseUrl,
+      openImageAccess: projectId => openImageGenerationAccess({
+        userId: input.user.id,
+        projectId,
+        workspacePath,
+        service: imageGeneration,
+        loadConfig: () => loadRuntimeImageConfig(dashboardDataRoot,
+          { remote: Boolean(supabaseStore), billing: billingConfig }, (url, init) => serviceFetch(url, init)),
+      }),
+      userId: input.user.id,
+      getAuthToken: async requestOptions => {
+        if (!supabaseRuntimeEnvClient) return undefined
+        const token = await authContext.credential?.getValidAccessToken(requestOptions)
+        if (token) return token
+        throw new Error('Project production requires an authenticated session. Please sign in again.')
+      },
+      userDataRoot: getCurrentUserDataRoot(input.request),
+      ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
+      ...(input.language ? { language: input.language } : {}),
+      confirmedBriefContext: input.confirmedBriefContext,
+      getConfirmedBriefContext: async () => input.confirmedBriefContext,
+      getPreviewContext: () => {
+        const preview = beeGamePreviews.runningForWorkspace(workspacePath)
+        return preview ? { status: preview.status, sessionId: preview.sessionId,
+          url: previewCapabilities.issueUrl(new URL(preview.url, input.request.url).href,
+            preview.sessionId, input.user.id) } : { status: 'not-running' }
+      },
+      openPreviewAccess: context => openProjectPreviewAccess({
+        ...input,
+        ...context,
+        workspacePath,
+      }),
+    })
+    const billingClient = remoteUsageBilling ?? {
+      recordUsage: async () => { throw new BeeGameUsageBillingError('Project production billing is unavailable', false) },
+      debitRealTimeUsage: async () => { throw new BeeGameUsageBillingError('Project production billing is unavailable', false) },
+    }
+    const hostOptions: FoundationAuthoringHostOptions = {
+      ownerId: input.user.id,
+      workspacePath,
+      dataDir: getCurrentUserDataRoot(input.request),
+      ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
+      ...(input.language ? { language: input.language } : {}),
+      getCommand: () => resolveNativeRuntimeCommand(),
+      getCredential: () => authContext.credential,
+      getRuntimeEnv: (dataDir, ownerId, authToken, modelConfigId) =>
+        dashboardRepository.getRuntimeEnv(dataDir, ownerId, authToken, modelConfigId),
+      billingClient,
+      execute: createProjectSessionAuthorExecutor({
+        sessions: beeGameSessions,
+        userId: input.user.id,
+        projectId: input.projectId,
+        workspacePath,
+        language: input.language,
+        getAuthToken: async requestOptions => {
+          if (!supabaseRuntimeEnvClient) return undefined
+          const token = await authContext.credential?.getValidAccessToken(requestOptions)
+          if (token) return token
+          throw new Error('Project production requires an authenticated session. Please sign in again.')
+        },
+      }),
+    }
+    const controller = createDeliveryWorkflowController({
+      workspacePath,
+      ownerId: input.user.id,
+      stateDirectory: '.beegame/delivery/production',
+      preserveRunOnDispose: true,
+      assertWorkspaceIdle: () => assertProjectConversationIdle(
+        beeGameSessions, input.user.id, input.projectId, workspacePath,
+      ),
+      workerPort,
+      author: createFoundationAuthoringHost(hostOptions),
+      reviewer: createFoundationReviewerHost({
+        ...hostOptions,
+        execute: createProjectSessionFileAgentExecutor({
+          sessions: beeGameSessions,
+          userId: input.user.id,
+          projectId: input.projectId,
+          workspacePath,
+          language: input.language,
+          getAuthToken: async requestOptions => {
+            if (!supabaseRuntimeEnvClient) return undefined
+            const token = await authContext.credential?.getValidAccessToken(requestOptions)
+            if (token) return token
+            throw new Error('Project production requires an authenticated session. Please sign in again.')
+          },
+        }),
+      }),
+    })
+    beeGameSessions.followWorkflowStageChat({
+      userId: input.user.id,
+      projectId: input.projectId,
+      workspacePath,
+    })
+    const coordinator = createProjectProductionCoordinator({
+      workspacePath,
+      ownerId: input.user.id,
+      projectId: input.projectId,
+      confirmedBriefContext: input.confirmedBriefContext,
+      controller,
+    })
+    projectProductions.set(key, coordinator)
+    return coordinator
+  }
+  const projectProductionForSession = async (input: {
+    request: Request
+    user: BeeGameUserContext
+    projectId: string
+    workspacePath: string
+    sessionId: string
+  }) => {
+    const run = await readProjectProductionRun(input.workspacePath, input.user.id)
+    if (!run || run.projectId !== input.projectId || !isIncompleteProjectProductionRun(run)) return undefined
+    const session = beeGameSessions.get(input.sessionId)
+    const production = getProjectProductionCoordinator({
+      ...input,
+      confirmedBriefContext: run.confirmedBriefContext,
+      ...(session?.modelConfigId ? { modelConfigId: session.modelConfigId } : {}),
+      ...(beeGameSessions.language(input.sessionId)
+        ? { language: beeGameSessions.language(input.sessionId) } : {}),
+    })
+    return production
+  }
+  const resumeProjectProduction = async (input: {
+    request: Request
+    user: BeeGameUserContext
+    projectId: string
+    workspacePath: string
+    sessionId: string
+  }) => {
+    const hadController = projectProductions.has(productionKey(input.user.id, input.projectId, input.workspacePath))
+    const production = await projectProductionForSession(input)
+    if (!production) return undefined
+    if (!hadController) {
+      const run = await readProjectProductionRun(input.workspacePath, input.user.id)
+      if (run?.projectId === input.projectId && run.status === 'running')
+        await production.stop('service_shutdown')
+    }
+    const resumed = await production.resume()
+    await resumeProjectDelivery(input.workspacePath, dashboardDataRoot)
+    if ((await projectMessageQueue.list(input.user.id, input.workspacePath)).length)
+      armProjectMessageQueue(input)
+    return resumed
+  }
+  const stopProjectProduction = async (input: {
+    request: Request
+    user: BeeGameUserContext
+    projectId: string
+    workspacePath: string
+    sessionId: string
+    reason?: string
+  }) => {
+    const production = await projectProductionForSession(input)
+    if (!production) return undefined
+    return production.stop(input.reason ?? 'user_stop')
   }
   const openProjectPreviewAccess = (input: { request: Request; user: BeeGameUserContext; workspacePath: string; sessionId: string; keepProjectPreview?: boolean }) => {
     const { workspacePath, sessionId } = input
@@ -760,491 +1009,12 @@ export function createAgentWorkflowApp(
       },
       status: snapshot,
       stop: () => {
-        // A conversational session is also the user's Preview owner. Closing
-        // its test browser must not stop that shared, user-visible service.
         if (input.keepProjectPreview) return
         beeGamePreviews.stop(sessionId, workspacePath)
         previewCapabilities.revokeSession(sessionId)
       },
     })
   }
-  const getDeliveryController = (input: {
-    request: Request
-    user: BeeGameUserContext
-    projectId: string
-    workspacePath: string
-    briefContext?: string
-    modelConfigId?: string
-    language?: BeeGameSessionLanguage
-  }) => {
-    const workspaceKey = normalizeResolvedPath(input.workspacePath)
-    const key = `${input.user.id}:${workspaceKey}:${input.modelConfigId ?? 'default'}:${input.language ?? 'default'}`
-    const requestCredential = sessionAuth?.getCredential?.(input.request)
-    const existing = deliveryControllers.get(key)
-    if (existing) {
-      if (requestCredential) existing.authContext.credential = requestCredential
-      return existing.controller
-    }
-    const deliveryAuthContext: { credential?: BeeGameSessionCredential } = {
-      ...(requestCredential ? { credential: requestCredential } : {}),
-    }
-    const workerPort = createBeeGameDeliveryWorkerPort({
-      sessions: beeGameSessions,
-      resourceLibraryBaseUrl: options.resourceSelectionRuntimeConfig?.baseUrl,
-      openImageAccess: projectId => openImageGenerationAccess({
-        userId: input.user.id, projectId, workspacePath: input.workspacePath, service: imageGeneration,
-        loadConfig: () => loadRuntimeImageConfig(dashboardDataRoot,
-          { remote: Boolean(supabaseStore), billing: billingConfig }, (url, init) => serviceFetch(url, init)),
-      }),
-      userId: input.user.id,
-      getAuthToken: async options => {
-        if (!supabaseRuntimeEnvClient) return undefined
-        const token =
-          await deliveryAuthContext.credential?.getValidAccessToken(options)
-        if (token) return token
-        throw new Error(
-          'Workflow requires a refreshable authenticated session. Please sign in again.',
-        )
-      },
-      userDataRoot: getCurrentUserDataRoot(input.request),
-      ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
-      ...(input.language ? { language: input.language } : {}),
-      ...(input.briefContext
-        ? { confirmedBriefContext: input.briefContext }
-        : {}),
-      getConfirmedBriefContext: async () =>
-        (await createRunStore(workspaceKey, input.user.id).load())
-          ?.confirmedBriefContext,
-      getPreviewContext: () => {
-        const preview = beeGamePreviews.runningForWorkspace(workspaceKey)
-        return preview
-          ? { status: preview.status, sessionId: preview.sessionId,
-              url: previewCapabilities.issueUrl(
-                new URL(preview.url, input.request.url).href, preview.sessionId, input.user.id,
-              ) }
-          : { status: 'not-running' }
-      },
-      openPreviewAccess: context => openProjectPreviewAccess({ ...input, ...context }),
-    })
-    const authoringHostOptions: FoundationAuthoringHostOptions = {
-      ownerId: input.user.id,
-      workspacePath: workspaceKey,
-      dataDir: getCurrentUserDataRoot(input.request),
-      ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
-      ...(input.language ? { language: input.language } : {}),
-      getCommand: () => resolveNativeRuntimeCommand(),
-      getCredential: () => deliveryAuthContext.credential,
-      getRuntimeEnv: (dataDir, ownerId, authToken, modelConfigId) =>
-        dashboardRepository.getRuntimeEnv(
-          dataDir,
-          ownerId,
-          authToken,
-          modelConfigId,
-        ),
-      billingClient: foundationAuthoringBilling,
-    }
-    const author = (
-      options.foundationAuthoringHostFactory ?? createFoundationAuthoringHost
-    )(authoringHostOptions)
-    const reviewer = (options.foundationReviewerHostFactory ?? createFoundationReviewerHost)(authoringHostOptions)
-    const controller = createDeliveryWorkflowController({
-      workspacePath: workspaceKey,
-      ownerId: input.user.id,
-      assertWorkspaceIdle: () => assertProjectConversationIdle(beeGameSessions, input.user.id, input.projectId, workspaceKey),
-      workerPort,
-      author,
-      reviewer,
-    })
-    beeGameSessions.followWorkflowStageChat({
-      userId: input.user.id,
-      projectId: input.projectId,
-      workspacePath: workspaceKey,
-    })
-    deliveryControllers.set(key, {
-      controller,
-      authContext: deliveryAuthContext,
-      ownerId: input.user.id,
-      workspacePath: workspaceKey,
-    })
-    return controller
-  }
-  const scheduleDeliveryResume = (input: {
-    controller: ReturnType<typeof getDeliveryController>
-    store: ReturnType<typeof createRunStore>
-    run: DeliveryRun
-  }): void => {
-    queueMicrotask(() => {
-      void input.controller.resume(input.run).catch(async error => {
-        const reason = toErrorMessage(error)
-        try {
-          const current = await input.store.load()
-          if (
-            current?.runId === input.run.runId &&
-            current.status === 'running' &&
-            current.activeDispatch?.status !== 'running'
-          ) {
-            await input.store.commit(
-              {
-                ...current,
-                status: 'needs_action',
-                blockedReason: reason,
-                thinking: 'idle',
-              },
-              {
-                runId: current.runId,
-                type: 'workflow.resume_failed',
-                phase: current.phase,
-                status: 'needs_action',
-                revision: current.revision,
-                reason,
-              },
-            )
-          }
-        } catch (persistError) {
-          console.warn('[BeeGame] Failed to persist workflow resume error:', {
-            runId: input.run.runId,
-            error: toErrorMessage(persistError),
-          })
-        }
-      })
-    })
-  }
-  const stopWorkspaceWorkflowWorkers = async (input: {
-    workspacePath: string
-    userId: string
-    controller: ReturnType<typeof getDeliveryController>
-  }): Promise<void> => {
-    const workspacePath = normalizeResolvedPath(input.workspacePath)
-    const workerIds = new Set<string>()
-    const controllers = new Set([
-      input.controller,
-      ...[...deliveryControllers.values()]
-        .filter(
-          entry =>
-            entry.ownerId === input.userId &&
-            normalizeResolvedPath(entry.workspacePath) === workspacePath,
-        )
-        .map(entry => entry.controller),
-    ])
-    let terminalDrainSettled = false
-    const terminalDrain = Promise.all(
-      [...controllers].map(controller =>
-        controller.dispatcher.waitForTerminalReconciliation(),
-      ),
-    ).finally(() => {
-      terminalDrainSettled = true
-    })
-    while (!terminalDrainSettled) {
-      const workers = beeGameSessions
-        .list(input.userId, { includeWorkflowWorkers: true })
-        .filter(
-          session =>
-            beeGameSessions.isWorkflowWorker(session.id) &&
-            normalizeResolvedPath(session.cwd) === workspacePath,
-        )
-      for (const worker of workers) {
-        workerIds.add(worker.id)
-        if (worker.status === 'running') beeGameSessions.stop(worker.id)
-      }
-      await Promise.all(
-        workers.map(worker =>
-          beeGameSessions.waitForWorkflowWorkerIdle(worker.id),
-        ),
-      )
-      if (!terminalDrainSettled)
-        await Promise.race([
-          terminalDrain.catch(() => undefined),
-          new Promise(resolve => setTimeout(resolve, 10)),
-        ])
-    }
-    await terminalDrain
-    await Promise.all(
-      [...workerIds].map(workerId =>
-        beeGameSessions.disposeWorkflowWorker(workerId),
-      ),
-    )
-  }
-  const continueBeeGameDeliveryWorkflowUnlocked = async (input: {
-    request: Request
-    user: BeeGameUserContext
-    projectId: string
-    workspacePath: string
-    mode: 'resume' | 'retry'
-    taskId?: string
-    confirmedBriefContext?: string
-    modelConfigId?: string
-    language?: BeeGameSessionLanguage
-  }): Promise<DeliveryRun | undefined> => {
-    if (await readProjectDelivery(input.workspacePath, dashboardDataRoot))
-      throw new Error('This project uses one native Agent; continue it in project chat')
-    const store = createRunStore(input.workspacePath, input.user.id)
-    let inspection
-    try {
-      inspection = await store.inspectWorkflowSnapshot()
-    } catch (error) {
-      if (error instanceof WorkflowStoreError && error.code === 'io') {
-        const missing = await store.load()
-        if (!missing) return undefined
-      }
-      throw error
-    }
-    const rawSnapshot =
-      inspection.parsedValue &&
-      typeof inspection.parsedValue === 'object' &&
-      !Array.isArray(inspection.parsedValue)
-        ? (inspection.parsedValue as Record<string, unknown>)
-        : undefined
-    const confirmedBriefContext =
-      input.confirmedBriefContext?.trim() ||
-      inspection.currentRun?.confirmedBriefContext ||
-      (typeof rawSnapshot?.confirmedBriefContext === 'string'
-        ? rawSnapshot.confirmedBriefContext
-        : undefined)
-    const controller = getDeliveryController({
-      request: input.request,
-      user: input.user,
-      projectId: input.projectId,
-      workspacePath: input.workspacePath,
-      ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
-      ...(input.language ? { language: input.language } : {}),
-    })
-    const sessionIsOpen = async (dispatch: DispatchRecord) => {
-      if (beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId)) return true
-      try {
-        return await controller.dispatcher.workerIsOpen(dispatch.dispatchId)
-      } catch {
-        return false
-      }
-    }
-    if (inspection.currentRun) {
-      if (inspection.currentRun.projectId !== input.projectId)
-        throw new WorkflowStoreError(
-          'workflow snapshot does not belong to the owned project',
-          'recovery_checkpoint_conflict',
-        )
-      // Foundation authoring is a public stage module. Its Continue and
-      // Retry routes must go through the controller so the module's opaque
-      // handle and durable control sequence remain authoritative.
-      if (isPublicStageActive(inspection.currentRun)) {
-        if (input.taskId)
-          throw new WorkflowStoreError(
-            'taskId is not supported for public foundation authoring',
-            'invalid',
-          )
-        if (inspection.currentRun.status === 'completed') return inspection.currentRun
-        await controller.resume(inspection.currentRun)
-        return (await store.load()) ?? inspection.currentRun
-      }
-      if (inspection.currentRun.phase === 'DOCUMENT_DRAFTING') {
-        const draft = inspection.currentRun.foundationDraftState
-        if (
-          draft.documents ||
-          draft.completedPaths.length > 0 ||
-          inspection.currentRun.activeDispatch
-        )
-          throw new WorkflowStoreError(
-            'Legacy document drafting checkpoint requires explicit migration',
-            'recovery_checkpoint_conflict',
-          )
-        if (input.taskId)
-          throw new WorkflowStoreError(
-            'taskId is not supported for public foundation authoring',
-            'invalid',
-          )
-        if (inspection.currentRun.status === 'completed') return inspection.currentRun
-        await controller.start(inspection.currentRun)
-        return (await store.load()) ?? inspection.currentRun
-      }
-      const current =
-        input.mode === 'retry'
-          ? await retryRun({
-              store,
-              runId: inspection.currentRun.runId,
-              workspacePath: input.workspacePath,
-              ...(input.taskId ? { taskId: input.taskId } : {}),
-              sessionIsOpen,
-            })
-          : inspection.currentRun.status === 'completed' ||
-              (inspection.currentRun.activeDispatch?.status === 'running' &&
-                (await sessionIsOpen(inspection.currentRun.activeDispatch)))
-            ? inspection.currentRun
-            : await resumeRun({
-                store,
-                runId: inspection.currentRun.runId,
-                workspacePath: input.workspacePath,
-                sessionIsOpen,
-              })
-      if (input.mode === 'retry') {
-        const durable = await store.load()
-        if (durable?.runId === current.runId) {
-          if (durable.status === 'completed') return durable
-          if (
-            durable.status === 'running' &&
-            durable.activeDispatch?.status === 'running' &&
-            durable.activeDispatch.dispatchId ===
-              current.activeDispatch?.dispatchId &&
-            (await sessionIsOpen(durable.activeDispatch))
-          )
-            return durable
-        }
-        scheduleDeliveryResume({ controller, store, run: current })
-        return current
-      }
-      if (
-        current.status === 'completed' ||
-        current.activeDispatch?.status === 'running'
-      )
-        return current
-      await controller.resume(current)
-      return (await store.load()) ?? current
-    }
-    if (!confirmedBriefContext)
-      throw new WorkflowStoreError(
-        'workflow recovery requires confirmed brief authority',
-        'recovery_checkpoint_missing',
-      )
-    return recoverAndResumeRun({
-      store,
-      workspacePath: input.workspacePath,
-      ownerId: input.user.id,
-      projectId: input.projectId,
-      confirmedBriefContext,
-      stopWorkspaceWorkers: async () =>
-        stopWorkspaceWorkflowWorkers({
-          workspacePath: input.workspacePath,
-          userId: input.user.id,
-          controller,
-        }),
-      resumeCurrentRun: run => controller.resume(run),
-    })
-  }
-  const continueBeeGameDeliveryWorkflow = async (
-    input: Parameters<typeof continueBeeGameDeliveryWorkflowUnlocked>[0],
-  ): Promise<DeliveryRun | undefined> => {
-    return projectOperation(input.user.id, input.workspacePath, async () => {
-      assertProjectConversationIdle(beeGameSessions, input.user.id, input.projectId, input.workspacePath)
-      return continueBeeGameDeliveryWorkflowUnlocked(input)
-    })
-  }
-  const startBeeGameDeliveryWorkflow = async (input: {
-    request: Request
-    user: BeeGameUserContext
-    projectId: string
-    workspacePath: string
-    briefContext: string
-    modelConfigId?: string
-    language?: BeeGameSessionLanguage
-  }) => {
-    return projectOperation(input.user.id, input.workspacePath, async () => {
-      assertProjectConversationIdle(beeGameSessions, input.user.id, input.projectId, input.workspacePath)
-      return startBeeGameDeliveryWorkflowUnlocked(input)
-    })
-  }
-
-  const startBeeGameDeliveryWorkflowUnlocked = async (input: {
-    request: Request
-    user: BeeGameUserContext
-    projectId: string
-    workspacePath: string
-    briefContext: string
-    modelConfigId?: string
-    language?: BeeGameSessionLanguage
-  }): Promise<{ runId: string; phase: string; status: string }> => {
-    if (await readProjectDelivery(input.workspacePath, dashboardDataRoot))
-      throw new Error('This project uses one native Agent; a second delivery workflow cannot be started')
-    const store = createRunStore(input.workspacePath, input.user.id)
-    const existing = await store.load()
-    if (existing) {
-      const requestedBriefDigest = createHash('sha256')
-        .update(input.briefContext)
-        .digest('hex')
-      if (existing.confirmedBriefDigest !== requestedBriefDigest) {
-        throw new Error(
-          'A delivery workflow already exists for this project with a different confirmed brief. Submit a structured change request instead.',
-        )
-      }
-      const controller = getDeliveryController(input)
-      const reconciled = isPublicStageActive(existing) || existing.phase === 'DOCUMENT_DRAFTING'
-        ? existing
-        : await reconcileRunOnStartup({
-        store,
-        sessionIsOpen: async dispatch => {
-          try {
-            return await controller.dispatcher.workerIsOpen(dispatch.dispatchId)
-          } catch {
-            return false
-          }
-        },
-      })
-      if (reconciled) {
-        if (isPublicStageActive(reconciled))
-          await controller.ensureProgress(reconciled)
-        else await controller.resume(reconciled)
-      }
-      const restored = await store.load()
-      if (!restored)
-        throw new Error(
-          'delivery workflow snapshot disappeared during recovery',
-        )
-      return restored
-    }
-    const confirmedBriefDigest = createHash('sha256')
-      .update(input.briefContext)
-      .digest('hex')
-    const initial = createInitialDeliveryRun({
-      projectId: input.projectId,
-      ownerId: input.user.id,
-      confirmedBriefDigest,
-      confirmedBriefContext: input.briefContext,
-      documentRevision: 'uncomputed',
-      workspaceRevision: 'uncomputed',
-    })
-    const savedInitial = await store.commit(initial, {
-      runId: initial.runId,
-      type: 'run.created',
-      phase: initial.phase,
-      status: initial.status,
-      revision: initial.revision,
-    })
-    const drafting = transitionDeliveryRun(savedInitial, {
-      type: 'documents_ready',
-    })
-    const savedDrafting = await store.commit(drafting, {
-      runId: drafting.runId,
-      type: 'phase.entered',
-      phase: drafting.phase,
-      status: drafting.status,
-      revision: drafting.revision,
-    })
-    const controller = getDeliveryController(input)
-    await controller.start(savedDrafting)
-    return (await store.load()) ?? savedDrafting
-  }
-  const beeGamePreviews = new BeeGamePreviewManager(
-    options.previewRunner,
-    undefined,
-    options.previewPortAllocator,
-    options.previewReadinessProbe,
-    process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL,
-  )
-  options.registerCleanup?.(async () => {
-    beeGamePreviews.dispose()
-    const controllerCleanup = await Promise.allSettled(
-      [...deliveryControllers.values()].map(entry => entry.controller.dispose()),
-    )
-    deliveryControllers.clear()
-    let sessionCleanupError: unknown
-    try {
-      await beeGameSessions.dispose()
-    } catch (error) {
-      sessionCleanupError = error
-    }
-    const rejectedController = controllerCleanup.find(
-      result => result.status === 'rejected',
-    )
-    if (rejectedController?.status === 'rejected') throw rejectedController.reason
-    if (sessionCleanupError) throw sessionCleanupError
-  })
   const beeGameDeployments = new BeeGameDeploymentManager({
     dataRoot: dashboardDataRoot,
     runner: options.deploymentRunner,
@@ -1260,7 +1030,10 @@ export function createAgentWorkflowApp(
       return c.text('Not found', 404)
     }
     return new Response(deployedFile.body, {
-      headers: { 'content-type': deployedFile.contentType },
+      headers: {
+        'content-type': deployedFile.contentType,
+        'cache-control': deployedFile.cacheControl,
+      },
     })
   })
   const handlePreviewProxy = async (c: Context) => {
@@ -2424,144 +2197,6 @@ export function createAgentWorkflowApp(
     }
   })
 
-  app.post('/api/projects/:id/review-copy', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const readForbidden = requirePermission(user, 'project.read')
-    if (readForbidden) return c.json(readForbidden, 403)
-    const createForbidden = requirePermission(user, 'project.create')
-    if (createForbidden) return c.json(createForbidden, 403)
-
-    let destinationWorkspacePath: string | undefined
-    let registeredProjectId: string | undefined
-    let copiedWorkspacePath: string | undefined
-    let executionRequested = false
-    try {
-      const body = await c.req.text()
-      const reviewOptions = z.object({}).strict()
-        .parse(body.trim() ? JSON.parse(body) : {})
-      const sourceProject = await getOwnedProjectMetadata(
-        c.req.raw,
-        user,
-        c.req.param('id'),
-        dashboardRepository,
-      )
-      if (!sourceProject?.root_path)
-        return c.json({ error: 'Project not found' }, 404)
-      const sourceWorkspacePath = await resolveSessionWorkspacePath(
-        sourceProject.root_path,
-        options.defaultWorkspacePath,
-      )
-      const snapshotPath = join(
-        sourceWorkspacePath,
-        '.beegame',
-        'workflow',
-        'run.json',
-      )
-      const snapshotMetadata = await stat(snapshotPath)
-      if (!snapshotMetadata.isFile() || snapshotMetadata.size > 2 * 1024 * 1024)
-        return c.json({ error: 'Confirmed brief snapshot is invalid' }, 400)
-      const rawSnapshot = JSON.parse(await readFile(snapshotPath, 'utf8')) as Record<string, unknown>
-      // Import only accepted public provenance. Old snapshots remain immutable
-      // archives: this is not a migration or a restoration of their execution.
-      if (!rawSnapshot || rawSnapshot.ownerId !== user.id || rawSnapshot.projectId !== sourceProject.id)
-        return c.json({ error: 'Source public Author ownership does not match project' }, 400)
-      const sourceAuthor = authorStageLinkSchema.parse(rawSnapshot.authorStage)
-      if (sourceAuthor.status !== 'completed' || !sourceAuthor.result)
-        return c.json({ error: 'Source project requires completed public Author artifacts' }, 400)
-      const confirmedBriefContext =
-        typeof rawSnapshot.confirmedBriefContext === 'string'
-          ? rawSnapshot.confirmedBriefContext
-          : ''
-      if (!confirmedBriefContext.trim())
-        return c.json(
-          { error: 'Source project has no durable confirmed brief context' },
-          400,
-        )
-      if (typeof rawSnapshot.confirmedBriefDigest !== 'string')
-        return c.json({ error: 'Source confirmed brief digest is missing' }, 400)
-
-      const projectId = randomUUID()
-      const modelConfigId = await resolveDefaultModelConfigId(
-        c.req.raw,
-        user,
-        undefined,
-        (request, requestUser, id) =>
-          dashboardRepository.modelConfigExists(request, requestUser, id),
-        (request, requestUser) =>
-          dashboardRepository.listModelConfigs(request, requestUser),
-      )
-      if (modelConfigId) await assertPermittedModelConfigRuntime(modelConfigId)
-      const defaultWorkspacePath = resolve(
-        await getDefaultWorkspacePath({
-          defaultWorkspacePath: options.defaultWorkspacePath,
-        }),
-      )
-      destinationWorkspacePath = join(
-        getUserDashboardDataRoot(defaultWorkspacePath, user.id),
-        `review-copy--${projectId}`,
-      )
-      const copy = await createReviewProjectCopy({
-        sourceWorkspacePath,
-        destinationWorkspacePath,
-        ownerId: user.id,
-        projectId,
-        confirmedBriefContext,
-        ...reviewOptions,
-        sourceRun: { ownerId: user.id, projectId: sourceProject.id,
-          confirmedBriefContext, confirmedBriefDigest: rawSnapshot.confirmedBriefDigest,
-          authorStage: sourceAuthor },
-      })
-      copiedWorkspacePath = copy.workspacePath
-      const project = await dashboardRepository.upsertProject(c.req.raw, user, {
-        id: projectId,
-        name: `${sourceProject.name} Review Copy`,
-        root_path: copy.workspacePath,
-        created_at: Date.now(),
-        runtime_snapshot: {
-          phase_name: copy.run.phase,
-          ...(modelConfigId ? { model_config_id: modelConfigId } : {}),
-          updated_at: Date.now(),
-        },
-      })
-      registeredProjectId = projectId
-      executionRequested = true
-      const workflow = await startBeeGameDeliveryWorkflow({
-        request: c.req.raw,
-        user,
-        projectId,
-        workspacePath: copy.workspacePath,
-        briefContext: confirmedBriefContext,
-        ...(modelConfigId ? { modelConfigId } : {}),
-      })
-      return c.json(
-        { project, runId: workflow.runId, phase: workflow.phase },
-        201,
-      )
-    } catch (error) {
-      // An ambiguous public start may own live work. Preserve its project and
-      // evidence; never delete a pre-existing destination after copy rejection.
-      if (registeredProjectId && !executionRequested)
-        await dashboardRepository
-          .deleteProject(c.req.raw, user, registeredProjectId)
-          .catch(() => undefined)
-      if (copiedWorkspacePath && !executionRequested)
-        await rm(copiedWorkspacePath, { recursive: true, force: true }).catch(
-          () => undefined,
-        )
-      if (error instanceof ProjectQuotaExceededError)
-        return c.json(
-          {
-            error: error.message,
-            code: 'PROJECT_QUOTA_EXCEEDED',
-            limit: error.limit,
-            projectCount: error.projectCount,
-          },
-          429,
-        )
-      return tracedRouteError(c, 'project.review-copy', error, 400)
-    }
-  })
-
   app.post('/api/projects/bootstrap', async c => {
     const user = getCurrentUser(c.req.raw)
     const projectForbidden = requirePermission(user, 'project.create')
@@ -2649,17 +2284,22 @@ export function createAgentWorkflowApp(
       const confirmedBriefPrompt = buildConfirmedBriefPrompt({ ...brief, referenceFiles: references }, language)
       const confirmedBriefContext = extractConfirmedBriefContext(confirmedBriefPrompt)
       await beginProjectDelivery(workspacePath, dashboardDataRoot, confirmedBriefContext)
-      await sendNativeProjectRequest({
+      beeGameSessions.appendUserMessage(session.id, confirmedBriefPrompt, {
+        type: 'user.message',
+        displayText: idea,
+        displayKind: 'confirmed_brief',
+        confirmedBriefContext,
+      })
+      const production = getProjectProductionCoordinator({
         request: c.req.raw,
         user,
         projectId,
         workspacePath,
-        sessionId: session.id,
-        message: confirmedBriefPrompt,
-        initialBrief: { displayText: idea, confirmedBriefContext },
-        options: { ...(language ? { language } : {}),
-          ...(getRequestAuthToken(c.req.raw) ? { authToken: getRequestAuthToken(c.req.raw) } : {}) },
+        confirmedBriefContext,
+        ...(modelConfigId ? { modelConfigId } : {}),
+        ...(language ? { language } : {}),
       })
+      await production.start()
 
       return c.json(
         {
@@ -2845,7 +2485,7 @@ export function createAgentWorkflowApp(
         dashboardDataRoot,
         beeGameSessions,
       })
-      const visibleEvents = compactTranscriptForChatHistory(timeline)
+      const visibleEvents = compactTranscriptForChatHistory(liveProjectConversationEvents(timeline))
       const todoEvents = findTodoWriteEvents(visibleEvents)
       const pagination = {
         limit: parseTranscriptPageLimit(c.req.query('limit')),
@@ -2997,6 +2637,8 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       )
       if (!project) return c.json({ error: 'Project not found' }, 404)
+      const previous = await resolveBeeGameProjectSessionReference({ request: c.req.raw, user, project,
+        defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository })
       const ensured = await ensureBeeGameProjectSession({
         request: c.req.raw,
         user,
@@ -3009,6 +2651,14 @@ export function createAgentWorkflowApp(
         assertPermittedModelConfigRuntime,
         authToken: getRequestAuthToken(c.req.raw),
       })
+      if ((previous?.live?.status ?? previous?.latest?.status) !== 'stopped' &&
+          (await projectMessageQueue.list(user.id, ensured.binding.workspacePath)).length) {
+        const context = { request: c.req.raw, user, projectId, workspacePath: ensured.binding.workspacePath,
+          sessionId: ensured.session.id }
+        armProjectMessageQueue(context)
+        void drainProjectMessageQueue(context).catch(error =>
+          console.error('[BeeGame] Project message queue recovery failed:', error))
+      }
       return c.json(ensured)
     } catch (err) {
       return tracedRouteError(c, 'project.session.ensure', err)
@@ -3027,49 +2677,6 @@ export function createAgentWorkflowApp(
         dashboardRepository,
       )
       if (!project) return c.json({ error: 'Project not found' }, 404)
-      if (project.root_path) await pauseProjectDelivery(project.root_path, dashboardDataRoot)
-      const workflowWorkspacePath = project.root_path
-      const workflowStore = workflowWorkspacePath
-        ? createRunStore(workflowWorkspacePath, user.id)
-        : undefined
-      const workflowRun = await workflowStore?.load()
-      let workflowStopResult: DeliveryRun | undefined
-      if (
-        workflowWorkspacePath &&
-        workflowStore &&
-        workflowRun &&
-        (isPublicStageActive(workflowRun) && workflowRun.status !== 'stopped' || workflowRun.status === 'running')
-      ) {
-        const controller = getDeliveryController({
-          request: c.req.raw,
-          user,
-          projectId: workflowRun.projectId,
-          workspacePath: workflowWorkspacePath,
-        })
-        if (isPublicStageActive(workflowRun)) {
-          workflowStopResult = await controller.stopFoundation(
-            workflowRun,
-            'user stopped workflow',
-          )
-        } else {
-          const stopBridge = createWorkflowDispatchStopBridge({
-            isManagedDispatchOpen: dispatchId =>
-              beeGameSessions.isWorkflowWorkerOpen(dispatchId),
-            disposeManagedDispatch: dispatchId =>
-              beeGameSessions.disposeWorkflowDispatch(dispatchId),
-            fallbackIsOpen: dispatchId =>
-              controller.dispatcher.workerIsOpen(dispatchId),
-            fallbackStop: (dispatchId, reason) =>
-              controller.dispatcher.stop(dispatchId, reason),
-          })
-          workflowStopResult = await stopRun({
-            store: workflowStore,
-            runId: workflowRun.runId,
-            reason: 'user stopped workflow',
-            ...stopBridge,
-          })
-        }
-      }
       const sessionRef = await resolveBeeGameProjectSessionReference({
         request: c.req.raw,
         user,
@@ -3078,30 +2685,24 @@ export function createAgentWorkflowApp(
         beeGameSessions,
         dashboardRepository,
       })
-      if (!sessionRef) {
-        if (workflowStopResult && workflowWorkspacePath) {
-          return c.json({
-            id: workflowStopResult.runId,
-            cwd: workflowWorkspacePath,
-            status: workflowStopResult.status,
-            turnStatus: 'idle',
-          })
-        }
-        if (workflowRun && workflowWorkspacePath && workflowRun.status === 'stopped') {
-          return c.json({
-            id: workflowRun.runId,
-            cwd: workflowWorkspacePath,
-            status: workflowRun.status,
-            turnStatus: 'idle',
-          })
-        }
+      if (!sessionRef)
         return c.json({ error: 'Session not found' }, 404)
+      if (sessionRef.workspacePath) {
+        clearQueuePoller(`${user.id}:${normalizeResolvedPath(sessionRef.workspacePath)}`)
+        await pauseProjectDelivery(sessionRef.workspacePath, dashboardDataRoot)
+        await stopProjectProduction({
+          request: c.req.raw,
+          user,
+          projectId: project.id,
+          workspacePath: sessionRef.workspacePath,
+          sessionId: sessionRef.sessionId,
+        })
       }
       if (!sessionRef.live) {
         return c.json({
           id: sessionRef.sessionId,
           cwd: sessionRef.workspacePath,
-          status: workflowStopResult?.status ?? 'stopped',
+          status: 'stopped',
           turnStatus: 'idle',
         })
       }
@@ -3111,10 +2712,81 @@ export function createAgentWorkflowApp(
         user,
         beeGameSessions.metadata(session.id),
       )
-      return c.json(workflowStopResult ? { ...session, status: workflowStopResult.status } : session)
+      return c.json(session)
     } catch (err) {
       return tracedRouteError(c, 'project.stop', err, 404)
     }
+  })
+
+  const queuedProjectContext = async (request: Request, user: BeeGameUserContext, projectId: string) => {
+    const project = await getOwnedProjectMetadata(request, user, projectId, dashboardRepository)
+    if (!project) return undefined
+    const session = await resolveBeeGameProjectSessionReference({ request, user, project,
+      defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository })
+    return session?.workspacePath ? { request, user, projectId, workspacePath: session.workspacePath,
+      sessionId: session.sessionId, project } : undefined
+  }
+  app.get('/api/projects/:id/queued-messages', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const context = await queuedProjectContext(c.req.raw, user, c.req.param('id'))
+      if (!context) return c.json({ error: 'Project session not found' }, 404)
+      const messages = await projectMessageQueue.list(user.id, context.workspacePath)
+      return c.json({ messages: messages.map(message => ({
+        id: message.id, text: message.text, state: message.state,
+        createdAt: message.createdAt, attachmentCount: message.attachments.length,
+      })) })
+    } catch (error) { return tracedRouteError(c, 'project.queue.list', error) }
+  })
+  app.delete('/api/projects/:id/queued-messages/:messageId', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const context = await queuedProjectContext(c.req.raw, user, c.req.param('id'))
+      if (!context) return c.json({ error: 'Project session not found' }, 404)
+      const removed = await projectMessageQueue.update(user.id, context.workspacePath,
+        c.req.param('messageId'), 'remove')
+      return removed ? c.json({ removed: true }) : c.json({ error: 'Queued message not found' }, 404)
+    } catch (error) { return tracedRouteError(c, 'project.queue.delete', error) }
+  })
+  app.post('/api/projects/:id/queued-messages/:messageId/steer', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'agent.cancel') ?? requirePermission(user, 'agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const context = await queuedProjectContext(c.req.raw, user, c.req.param('id'))
+      if (!context) return c.json({ error: 'Project session not found' }, 404)
+      const key = queueKey(context)
+      if (queueDraining.has(key)) return c.json({ error: 'Queued message is already being sent' }, 409)
+      queueDraining.add(key)
+      const item = await projectMessageQueue.update(user.id, context.workspacePath,
+        c.req.param('messageId'), 'claim')
+      if (!item) { queueDraining.delete(key); return c.json({ error: 'Queued message not found' }, 404) }
+      try {
+        await pauseProjectDelivery(context.workspacePath, dashboardDataRoot)
+        await stopProjectProduction(context)
+        const live = beeGameSessions.get(context.sessionId)
+        if (live?.status === 'running') beeGameSessions.stop(live.id)
+        await beeGameSessions.waitForSessionIdle(context.sessionId)
+        const ensured = await ensureBeeGameProjectSession({ request: c.req.raw, user,
+          project: context.project, body: {}, defaultWorkspacePath: options.defaultWorkspacePath,
+          beeGameSessions, dashboardRepository, getUserDataRoot: getCurrentUserDataRoot,
+          assertPermittedModelConfigRuntime, authToken: getRequestAuthToken(c.req.raw) })
+        if (ensured.session.id !== context.sessionId) throw new Error('Project session changed during Steer')
+        await sendNativeProjectRequest({ ...context, message: item.text,
+          options: { clientMessageId: item.clientMessageId, attachments: item.attachments,
+            ...(item.supersedesMessageId ? { supersedesMessageId: item.supersedesMessageId } : {}),
+            ...(item.language ? { language: item.language } : {}) } })
+        await projectMessageQueue.update(user.id, context.workspacePath, item.id, 'complete')
+        return c.json({ sessionId: context.sessionId, steered: true }, 202)
+      } catch (error) {
+        await projectMessageQueue.update(user.id, context.workspacePath, item.id, 'restore')
+        throw error
+      } finally { queueDraining.delete(key) }
+    } catch (error) { return tracedRouteError(c, 'project.queue.steer', error) }
   })
 
   app.get('/api/projects/:id/runtime-state', async c => {
@@ -3140,205 +2812,13 @@ export function createAgentWorkflowApp(
         beeGamePreviews,
         previewCapabilities,
         dashboardRepository,
+        productionControllerActive: workspacePath =>
+          projectProductions.has(productionKey(user.id, projectId, workspacePath)),
       })
       c.header('Cache-Control', 'no-store')
       return c.json(state)
     } catch (err) {
       return tracedRouteError(c, 'project.runtime-state', err)
-    }
-  })
-
-  app.get('/api/projects/:id/workflow', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'project.read')
-    if (forbidden) return c.json(forbidden, 403)
-    try {
-      const project = await getOwnedProjectMetadata(
-        c.req.raw,
-        user,
-        c.req.param('id'),
-        dashboardRepository,
-      )
-      if (!project) return c.json({ error: 'Project not found' }, 404)
-      const sessionRef = await resolveBeeGameProjectSessionReference({
-        request: c.req.raw,
-        user,
-        project,
-        defaultWorkspacePath: options.defaultWorkspacePath,
-        beeGameSessions,
-        dashboardRepository,
-      })
-      const workspacePath = sessionRef?.workspacePath ?? project.root_path
-      if (!workspacePath) return c.json({ workflow: null, events: [] })
-      if (await readProjectDelivery(workspacePath, dashboardDataRoot))
-        return c.json({ workflow: null, events: [] })
-      const store = createRunStore(workspacePath, user.id)
-      const run = await readBeeGameWorkflowSnapshot(
-        workspacePath,
-        user.id,
-        dispatch => beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
-      )
-      const events =
-        run && typeof run.runId === 'string' && !run.workflowStateError
-          ? (await store.readEvents()).filter(
-              event => event.runId === run.runId,
-            )
-          : []
-      const workflow = run
-        ? await createAgentWorkflowDisplayProjection({ run, workspacePath })
-        : null
-      return c.json({ workflow, events })
-    } catch (err) {
-      return tracedRouteError(c, 'project.workflow.read', err)
-    }
-  })
-
-  app.get('/api/projects/:id/workflow/events', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'project.read')
-    if (forbidden) return c.json(forbidden, 403)
-    try {
-      const project = await getOwnedProjectMetadata(
-        c.req.raw,
-        user,
-        c.req.param('id'),
-        dashboardRepository,
-      )
-      if (!project) return c.json({ error: 'Project not found' }, 404)
-      const sessionRef = await resolveBeeGameProjectSessionReference({
-        request: c.req.raw,
-        user,
-        project,
-        defaultWorkspacePath: options.defaultWorkspacePath,
-        beeGameSessions,
-        dashboardRepository,
-      })
-      const workspacePath = sessionRef?.workspacePath ?? project.root_path
-      if (!workspacePath) return c.json({ events: [] })
-      if (await readProjectDelivery(workspacePath, dashboardDataRoot))
-        return c.json({ events: [] })
-      const after = c.req.query('after') || undefined
-      const store = createRunStore(workspacePath, user.id)
-      const run = await readBeeGameWorkflowSnapshot(
-        workspacePath,
-        user.id,
-        dispatch => beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
-      )
-      const events =
-        run && typeof run.runId === 'string' && !run.workflowStateError
-          ? (await store.readEvents(after)).filter(
-              event => event.runId === run.runId,
-            )
-          : []
-      return c.json({ events })
-    } catch (err) {
-      return tracedRouteError(c, 'project.workflow.events', err)
-    }
-  })
-
-  app.post('/api/projects/:id/workflow/resume', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'agent.send_message')
-    if (forbidden) return c.json(forbidden, 403)
-    try {
-      const project = await getOwnedProjectMetadata(
-        c.req.raw,
-        user,
-        c.req.param('id'),
-        dashboardRepository,
-      )
-      if (!project) return c.json({ error: 'Project not found' }, 404)
-      const sessionRef = await resolveBeeGameProjectSessionReference({
-        request: c.req.raw,
-        user,
-        project,
-        defaultWorkspacePath: options.defaultWorkspacePath,
-        beeGameSessions,
-        dashboardRepository,
-      })
-      const workspacePath = sessionRef?.workspacePath ?? project.root_path
-      if (!workspacePath)
-        return c.json({ error: 'document_review_not_started' }, 409)
-      if (await readProjectDelivery(workspacePath, dashboardDataRoot))
-        return c.json({ error: 'Use project chat to continue this Agent', code: 'native_project_delivery' }, 409)
-      const body = await readOptionalJson(c.req.raw)
-      const runtimeBinding = await resolveProjectWorkflowRuntimeBinding({
-        request: c.req.raw,
-        user,
-        project,
-        requestedLanguage: body.language,
-        defaultWorkspacePath: options.defaultWorkspacePath,
-        beeGameSessions,
-        dashboardRepository,
-        assertPermittedModelConfigRuntime,
-      })
-      const resumed = await continueBeeGameDeliveryWorkflow({
-        request: c.req.raw,
-        user,
-        projectId: project.id,
-        workspacePath,
-        mode: 'resume',
-        ...runtimeBinding,
-      })
-      return resumed
-        ? c.json(resumed)
-        : c.json({ error: 'document_review_not_started' }, 409)
-    } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 409)
-    }
-  })
-
-  app.post('/api/projects/:id/workflow/retry', async c => {
-    const user = getCurrentUser(c.req.raw)
-    const forbidden = requirePermission(user, 'agent.send_message')
-    if (forbidden) return c.json(forbidden, 403)
-    try {
-      const project = await getOwnedProjectMetadata(
-        c.req.raw,
-        user,
-        c.req.param('id'),
-        dashboardRepository,
-      )
-      if (!project) return c.json({ error: 'Project not found' }, 404)
-      const sessionRef = await resolveBeeGameProjectSessionReference({
-        request: c.req.raw,
-        user,
-        project,
-        defaultWorkspacePath: options.defaultWorkspacePath,
-        beeGameSessions,
-        dashboardRepository,
-      })
-      const workspacePath = sessionRef?.workspacePath ?? project.root_path
-      if (!workspacePath)
-        return c.json({ error: 'document_review_not_started' }, 409)
-      if (await readProjectDelivery(workspacePath, dashboardDataRoot))
-        return c.json({ error: 'Use project chat to continue this Agent', code: 'native_project_delivery' }, 409)
-      const body = await readOptionalJson(c.req.raw)
-      const taskId = typeof body.taskId === 'string' ? body.taskId : undefined
-      const runtimeBinding = await resolveProjectWorkflowRuntimeBinding({
-        request: c.req.raw,
-        user,
-        project,
-        requestedLanguage: body.language,
-        defaultWorkspacePath: options.defaultWorkspacePath,
-        beeGameSessions,
-        dashboardRepository,
-        assertPermittedModelConfigRuntime,
-      })
-      const retried = await continueBeeGameDeliveryWorkflow({
-        request: c.req.raw,
-        user,
-        projectId: project.id,
-        workspacePath,
-        mode: 'retry',
-        ...(taskId ? { taskId } : {}),
-        ...runtimeBinding,
-      })
-      return retried
-        ? c.json(retried, 202)
-        : c.json({ error: 'document_review_not_started' }, 409)
-    } catch (err) {
-      return c.json({ error: toErrorMessage(err) }, 409)
     }
   })
 
@@ -3359,38 +2839,15 @@ export function createAgentWorkflowApp(
         project.root_path,
         options.defaultWorkspacePath,
       )
-      if (await readProjectDelivery(workspacePath, dashboardDataRoot)) {
-        if (!(await stat(join(workspacePath, 'content/index.json')).catch(() => undefined))?.isFile())
-          return c.json({ state: 'awaiting_content' })
-        const authority = nativeContentAuthority(workspacePath)
-        const snapshot = c.req.query('metadata') === '1'
-          ? loadBeeGameContentFileListForEditing(workspacePath, authority)
-          : loadBeeGameContentPackageForEditing(workspacePath, authority)
-        return c.json({ state: 'ready', ...snapshot })
-      }
-      const run = await createRunStore(workspacePath, user.id).load()
-      if (!run?.foundationReviewStage?.acceptedReview)
-        return c.json({ state: 'awaiting_documents' })
-      if (!run.revision.resource)
-        return c.json({ state: 'awaiting_assets' })
-      const controller = getDeliveryController({
-        request: c.req.raw,
-        user,
-        projectId: project.id,
-        workspacePath,
-      })
-      const metadataOnly = c.req.query('metadata') === '1'
-      const snapshot = metadataOnly
-        ? await controller.loadGameContentFileListForEditing()
-        : await controller.loadGameContentForEditing()
-      return c.json({
-        state:
-          run.gameContentReceipt && snapshot.contentRevision === run.revision.content
-            ? 'ready'
-            : 'draft',
-        acceptedContentRevision: run.revision.content,
-        ...snapshot,
-      })
+      if (!(await readProjectDelivery(workspacePath, dashboardDataRoot)))
+        return c.json({ error: 'This project must be continued in chat before editing its content.', code: 'project_delivery_required' }, 409)
+      if (!(await stat(join(workspacePath, 'content/index.json')).catch(() => undefined))?.isFile())
+        return c.json({ state: 'awaiting_content' })
+      const authority = nativeContentAuthority(workspacePath)
+      const snapshot = c.req.query('metadata') === '1'
+        ? loadBeeGameContentFileListForEditing(workspacePath, authority)
+        : loadBeeGameContentPackageForEditing(workspacePath, authority)
+      return c.json({ state: 'ready', ...snapshot })
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 409)
     }
@@ -3420,26 +2877,13 @@ export function createAgentWorkflowApp(
         project.root_path,
         options.defaultWorkspacePath,
       )
-      if (await readProjectDelivery(workspacePath, dashboardDataRoot)) {
-        assertProjectConversationIdle(beeGameSessions, user.id, project.id, workspacePath)
-        return c.json(saveBeeGameContentDocument({ workspacePath,
-          path: body.path, expectedRevision: body.expectedRevision,
-          document: parseBeeGameContentDocument(body.document),
-          authority: nativeContentAuthority(workspacePath) }))
-      }
-      const controller = getDeliveryController({
-        request: c.req.raw,
-        user,
-        projectId: project.id,
-        workspacePath,
-      })
-      return c.json(
-        await controller.saveGameContentEdit({
-          path: body.path,
-          expectedRevision: body.expectedRevision,
-          document: parseBeeGameContentDocument(body.document),
-        }),
-      )
+      if (!(await readProjectDelivery(workspacePath, dashboardDataRoot)))
+        return c.json({ error: 'This project must be continued in chat before editing its content.', code: 'project_delivery_required' }, 409)
+      assertProjectConversationIdle(beeGameSessions, user.id, project.id, workspacePath)
+      return c.json(saveBeeGameContentDocument({ workspacePath,
+        path: body.path, expectedRevision: body.expectedRevision,
+        document: parseBeeGameContentDocument(body.document),
+        authority: nativeContentAuthority(workspacePath) }))
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 409)
     }
@@ -3467,31 +2911,13 @@ export function createAgentWorkflowApp(
         project.root_path,
         options.defaultWorkspacePath,
       )
-      if (await readProjectDelivery(workspacePath, dashboardDataRoot)) {
-        assertProjectConversationIdle(beeGameSessions, user.id, project.id, workspacePath)
-        const receipt = acceptBeeGameContentPackage(workspacePath, nativeContentAuthority(workspacePath))
-        if (receipt.contentRevision !== body.contentRevision)
-          throw new Error('Scene/UI package revision changed before publish')
-        return c.json({ state: 'published', contentRevision: receipt.contentRevision }, 202)
-      }
-      const controller = getDeliveryController({
-        request: c.req.raw,
-        user,
-        projectId: project.id,
-        workspacePath,
-      })
-      const run = await controller.publishGameContentEdits(
-        body.contentRevision,
-      )
-      return c.json(
-        {
-          state: 'published',
-          contentRevision: run.revision.content,
-          workflowPhase: run.phase,
-          workflowStatus: run.status,
-        },
-        202,
-      )
+      if (!(await readProjectDelivery(workspacePath, dashboardDataRoot)))
+        return c.json({ error: 'This project must be continued in chat before editing its content.', code: 'project_delivery_required' }, 409)
+      assertProjectConversationIdle(beeGameSessions, user.id, project.id, workspacePath)
+      const receipt = acceptBeeGameContentPackage(workspacePath, nativeContentAuthority(workspacePath))
+      if (receipt.contentRevision !== body.contentRevision)
+        throw new Error('Scene/UI package revision changed before publish')
+      return c.json({ state: 'published', contentRevision: receipt.contentRevision }, 202)
     } catch (err) {
       return c.json({ error: toErrorMessage(err) }, 409)
     }
@@ -3535,7 +2961,6 @@ export function createAgentWorkflowApp(
       })
       if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
       let resolved: { resolved: boolean; stale?: boolean }
-      let resolvedSessionId = sessionRef.sessionId
       try {
         resolved = beeGameSessions.resolvePermission(
           sessionRef.sessionId,
@@ -3552,38 +2977,15 @@ export function createAgentWorkflowApp(
         )
       } catch (error) {
         const message = toErrorMessage(error)
-        if (
-          message !== 'Permission request not found' &&
-          message !== 'Session not found'
-        )
-          throw error
-        const workflowResolved = beeGameSessions.resolveProjectPermission(
-          user.id,
-          projectId,
-          sessionRef.workspacePath,
-          c.req.param('toolUseID'),
-          {
-            behavior: decision,
-            scope: permissionScope,
-            remember: false,
-            answers: body.answers,
-            ...(typeof body.message === 'string'
-              ? { message: body.message }
-              : {}),
-          },
-        )
-        resolved = workflowResolved.resolved
-          ? { resolved: true }
-          : { resolved: false, stale: true }
-        if (workflowResolved.sessionId)
-          resolvedSessionId = workflowResolved.sessionId
+        if (message !== 'Permission request not found' && message !== 'Session not found') throw error
+        resolved = { resolved: false, stale: true }
       }
       await appendAuditEventBestEffort('agent_permission.resolved', () =>
         dashboardRepository.appendAuditEvent(c.req.raw, user, {
           actorId: user.id,
           action: 'agent_permission.resolved',
           targetType: 'beegame_session',
-          targetId: resolvedSessionId,
+          targetId: sessionRef.sessionId,
           metadata: {
             projectId,
             toolUseID: c.req.param('toolUseID'),
@@ -3823,9 +3225,12 @@ export function createAgentWorkflowApp(
       if (!project) return c.json({ error: 'Project not found' }, 404)
       const sessionRef = await resolveBeeGameProjectSessionReference({ request: c.req.raw, user, project,
         defaultWorkspacePath: options.defaultWorkspacePath, beeGameSessions, dashboardRepository })
+      if (sessionRef) await restoreProjectDeliveryFromCurrentChat({
+        user, projectId: project.id, workspacePath: sessionRef.workspacePath, sessionId: sessionRef.sessionId,
+      })
       const gate = sessionRef
         ? await evaluateProjectDeliveryGate(sessionRef.workspacePath, dashboardDataRoot) ??
-          await evaluateWorkflowDeliveryGate({ workspacePath: sessionRef.workspacePath, ownerId: user.id })
+          { allowed: false, issues: ['Project delivery state is missing; the chat acceptance could not be linked to this workspace.'] }
         : { allowed: false, issues: ['Project session is not available.'] }
       return c.json({ ...gate, destination: beeGameDeployments.destination })
     } catch (err) { return tracedRouteError(c, 'project.deployment.readiness', err) }
@@ -3856,8 +3261,11 @@ export function createAgentWorkflowApp(
         authToken: getRequestAuthToken(c.req.raw),
       })
       assertProjectWorkspaceMutationIdle(ensured.session)
+      await restoreProjectDeliveryFromCurrentChat({
+        user, projectId: project.id, workspacePath: ensured.binding.workspacePath, sessionId: ensured.session.id,
+      })
       const deliveryGate = await evaluateProjectDeliveryGate(ensured.binding.workspacePath, dashboardDataRoot) ??
-        await evaluateWorkflowDeliveryGate({ workspacePath: ensured.binding.workspacePath, ownerId: user.id })
+        { allowed: false, issues: ['Project delivery state is missing; the chat acceptance could not be linked to this workspace.'] }
       if (!deliveryGate.allowed) {
         return c.json(
           {
@@ -4138,16 +3546,11 @@ export function createAgentWorkflowApp(
         manifest: toCanonicalBeeGameAssetManifest(result.manifest),
       })
     } catch (err) {
-      const message = toErrorMessage(err)
       return tracedRouteError(
         c,
         'project.assets.upload',
         err,
-        err instanceof RequestBodyLimitError
-          ? 413
-          : message.startsWith('Asset requirement not found')
-            ? 404
-            : 400,
+        err instanceof RequestBodyLimitError ? 413 : 400,
       )
     }
   })
@@ -4450,30 +3853,47 @@ export function createAgentWorkflowApp(
     user: BeeGameUserContext
     projectId: string
     workspacePath: string
+    sessionId: string
   }) => {
-    const store = createRunStore(input.workspacePath, input.user.id)
-    const run = await store.load()
     const existing = await readProjectDelivery(input.workspacePath, dashboardDataRoot)
-    if (!run || !run.confirmedBriefContext?.trim()) return existing
-    if (run.projectId !== input.projectId)
-      throw new Error('Historical delivery snapshot belongs to another project')
-    if (!existing && (run.status === 'running' || run.activeDispatch?.status === 'running'))
-      return undefined // The current worker owns this turn; do not interrupt it.
-    const accepted = !existing?.accepted
-      ? await evaluateWorkflowDeliveryGate({ workspacePath: input.workspacePath, ownerId: input.user.id })
-      : undefined
-    const state = existing ?? await beginProjectDelivery(input.workspacePath, dashboardDataRoot, run.confirmedBriefContext)
-    if (accepted?.allowed && run.evidence.acceptance?.path) {
-      const path = run.evidence.acceptance.path
-      const receipt = JSON.parse(await readFile(join(input.workspacePath, path), 'utf8')) as {
-        revision: string
-        runtimeReports: RuntimeAcceptance[]
-      }
-      await importProjectDeliveryAcceptance({ workspacePath: input.workspacePath,
-        dataRoot: dashboardDataRoot, revision: receipt.revision,
-        reportPath: path, reports: receipt.runtimeReports })
-    }
-    return state
+    if (existing) return existing
+    const events = await getProjectRuntimeEvents({
+      sessionId: input.sessionId,
+      workspacePath: input.workspacePath,
+      dashboardDataRoot,
+      beeGameSessions,
+    })
+    const brief = events.findLast(event =>
+      event.type === 'user.message' && event.payload?.displayKind === 'confirmed_brief' &&
+      typeof event.payload.confirmedBriefContext === 'string' && event.payload.confirmedBriefContext.trim())
+    if (!brief || typeof brief.payload?.confirmedBriefContext !== 'string') return undefined
+    // Reconstruct the native delivery objective from the user's transcript,
+    // never from the retired workflow snapshot or its acceptance verdict.
+    return beginProjectDelivery(input.workspacePath, dashboardDataRoot, brief.payload.confirmedBriefContext)
+  }
+
+  const restoreProjectDeliveryFromCurrentChat = async (input: {
+    user: BeeGameUserContext
+    projectId: string
+    workspacePath: string
+    sessionId: string
+  }) => {
+    const events = await getProjectRuntimeEvents({
+      sessionId: input.sessionId,
+      workspacePath: input.workspacePath,
+      dashboardDataRoot,
+      beeGameSessions,
+    })
+    const delivery = await migrateQuiescentProjectDelivery(input)
+    if (!delivery || delivery.status !== 'active') return delivery
+    if (beeGameSessions.get(input.sessionId)?.turnStatus === 'running') return delivery
+    const latestTurnStart = events.findLast(event => event.type === 'turn.started')
+    const turnStartedAt = latestTurnStart?.createdAt.getTime()
+    // A previous delivery report can be recovered only if it was written
+    // during the latest completed chat turn and its evidence still matches.
+    if (turnStartedAt && Number.isFinite(turnStartedAt))
+      await captureProjectDeliveryAcceptance(input.workspacePath, dashboardDataRoot, turnStartedAt)
+    return readProjectDelivery(input.workspacePath, dashboardDataRoot)
   }
 
   const sendNativeProjectRequest = (input: {
@@ -4489,26 +3909,87 @@ export function createAgentWorkflowApp(
   }) => projectOperation(input.user.id, input.workspacePath, async () => {
     if (beeGameDeployments.isPublishing(input.user.id, input.workspacePath))
       throw new Error('Publishing is in progress. Wait for publication before editing the project.')
+    const productionRun = await readProjectProductionRun(input.workspacePath, input.user.id)
+    if (!input.initialBrief && productionRun?.projectId === input.projectId &&
+        (productionRun.status === 'running' || productionRun.authorStage?.status === 'running' ||
+          isPendingProjectProductionReview(productionRun)))
+      throw new ProjectWorkspaceBusyError()
     if (!input.initialBrief) await migrateQuiescentProjectDelivery(input)
-    return sendProjectConversation({
+    let clientMessageId = input.options?.clientMessageId
+    let editCheckpoint: Awaited<ReturnType<typeof projectTurnCheckpoints.save>> | undefined
+    let replacedTurn: { archivePath: string; nativeSessionId?: string; nativeTranscriptPath?: string } | undefined
+    if (!input.autoContinuation && !input.initialBrief) {
+      clientMessageId ||= randomUUID()
+      if (input.options?.supersedesMessageId) {
+        const target = input.options.supersedesMessageId
+        const latest = beeGameSessions.transcript(input.sessionId).findLast(event =>
+          event.type === 'user.message' && event.payload?.displayKind !== 'delivery_continue' &&
+          event.payload?.displayKind !== 'workflow_worker')
+        if (!latest || (latest.payload?.clientMessageId !== target && `beegame-event-${latest.id}` !== target))
+          throw new Error('Only the latest user message can be edited')
+        if ((await projectMessageQueue.list(input.user.id, input.workspacePath)).length)
+          throw new Error('Wait for queued messages before editing the latest turn')
+        const preview = beeGamePreviews.runningForWorkspace(input.workspacePath)
+        if (preview) {
+          beeGamePreviews.stop(preview.sessionId, input.workspacePath)
+          previewCapabilities.revokeSession(preview.sessionId)
+        }
+        const productionKey = `${input.user.id}:${input.projectId}:${normalizeResolvedPath(input.workspacePath)}`
+        const cachedProduction = projectProductions.get(productionKey)
+        if (cachedProduction) {
+          await cachedProduction.dispose()
+          projectProductions.delete(productionKey)
+          productionAuthContexts.delete(productionKey)
+        }
+        const currentNative = await beeGameSessions.projectEditCheckpointInfo(input.sessionId)
+        await beeGameSessions.restoreProjectEditCheckpoint(input.sessionId, currentNative.nativeSessionId)
+        const restored = await projectTurnCheckpoints.restore({ ownerId: input.user.id,
+          workspacePath: input.workspacePath, clientMessageId: target,
+          sessionId: input.sessionId,
+          deliveryStatePath: projectDeliveryStatePath(input.workspacePath, dashboardDataRoot) })
+        replacedTurn = { archivePath: restored.archivePath,
+          nativeSessionId: currentNative.nativeSessionId,
+          nativeTranscriptPath: currentNative.nativeTranscriptPath }
+        await beeGameSessions.restoreProjectEditCheckpoint(input.sessionId, restored.nativeSessionId)
+      }
+      const native = await beeGameSessions.projectEditCheckpointInfo(input.sessionId)
+      editCheckpoint = await projectTurnCheckpoints.save({ ownerId: input.user.id, workspacePath: input.workspacePath,
+        clientMessageId, sessionId: input.sessionId,
+        ...native, deliveryStatePath: projectDeliveryStatePath(input.workspacePath, dashboardDataRoot) })
+    }
+    try {
+    // A user message after Stop is a new turn in the same project session.
+    // Keep delivery acceptance writable while that turn runs; the production
+    // checkpoint itself resumes only after the turn completes.
+    if (!input.initialBrief && !input.autoContinuation)
+      await resumeProjectDelivery(input.workspacePath, dashboardDataRoot)
+    const result = await sendProjectConversation({
       sessions: beeGameSessions, deliveryDataRoot: dashboardDataRoot,
       sessionId: input.sessionId, ownerId: input.user.id,
       message: input.message, initialBrief: input.initialBrief,
       autoContinuation: input.autoContinuation,
-      options: { ...input.options,
+      options: { ...input.options, ...(clientMessageId ? { clientMessageId } : {}),
+        ...(!input.autoContinuation && !input.initialBrief ? { rewindAvailable: true } : {}),
         getValidAuthToken: refresh => sessionAuth?.getCredential?.(input.request)?.getValidAccessToken(refresh) },
       ...(!input.initialBrief && !input.autoContinuation ? { afterTurnSettled: () => {
         void (async () => {
-          const state = await readProjectDelivery(input.workspacePath, dashboardDataRoot)
-          const session = beeGameSessions.get(input.sessionId)
-          if (!state || state.status !== 'active' || session?.status !== 'running' || session.turnStatus !== 'idle') return
-          if ((await evaluateProjectDeliveryGate(input.workspacePath, dashboardDataRoot))?.allowed) return
-          const language = input.options?.language ?? beeGameSessions.language(input.sessionId) ?? 'en'
-          await sendNativeProjectRequest({ ...input,
-            message: getServerOwnedContinuePrompt(language),
-            options: { language, authToken: input.options?.authToken },
-            autoContinuation: true,
-          })
+          const terminal = beeGameSessions.transcript(input.sessionId).findLast(event =>
+            event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.empty')
+          if (terminal?.type !== 'turn.completed') return
+          const productionRun = await readProjectProductionRun(input.workspacePath, input.user.id)
+          if (productionRun && isIncompleteProjectProductionRun(productionRun)) {
+            const production = await resumeProjectProduction({
+              request: input.request,
+              user: input.user,
+              projectId: input.projectId,
+              workspacePath: input.workspacePath,
+              sessionId: input.sessionId,
+            })
+            if (production) return
+          }
+          if (await drainProjectMessageQueue(input)) return
+          // Free-form turns do not manufacture another user message. Only an
+          // unfinished production checkpoint or an explicit Continue drives on.
         })().catch(error => console.error('[BeeGame] Failed to continue project delivery:', error))
       } } : {}),
       openCapabilities: () => {
@@ -4529,7 +4010,7 @@ export function createAgentWorkflowApp(
           try { preview = openProjectPreviewAccess({ ...input, keepProjectPreview: true }) }
           catch { /* Agent can still build and test with native tools. */ }
           return {
-            instruction: ['Project content format reference: .beegame/delivery/content-contract.json (native projects) or .beegame/workflow/content-authoring-contract.json (legacy projects); resource index: assets/asset-manifest.json. Read when relevant to the requested change.',
+            instruction: ['Project content format reference: .beegame/delivery/content-contract.json; resource index: assets/asset-manifest.json. Read when relevant to the requested change.',
               library?.instruction ?? 'Built-in resource library is unavailable.', image?.instruction ?? 'Image generation capability is unavailable.',
               preview?.instruction ?? 'Project preview capability is unavailable.'].join('\n\n'),
             close: async () => { library?.close(); image?.close(); await preview?.close() },
@@ -4537,7 +4018,68 @@ export function createAgentWorkflowApp(
         } catch (error) { library?.close(); image?.close(); throw error }
       },
     })
+    await editCheckpoint?.commit()
+    return result
+    } catch (error) {
+      await editCheckpoint?.rollback()
+      if (replacedTurn) {
+        await projectTurnCheckpoints.reapplyArchive({ workspacePath: input.workspacePath,
+          archivePath: replacedTurn.archivePath,
+          nativeTranscriptPath: replacedTurn.nativeTranscriptPath,
+          deliveryStatePath: projectDeliveryStatePath(input.workspacePath, dashboardDataRoot) })
+        await beeGameSessions.restoreProjectEditCheckpoint(input.sessionId, replacedTurn.nativeSessionId)
+      }
+      throw error
+    }
   })
+
+  type ProjectQueueContext = Pick<Parameters<typeof sendNativeProjectRequest>[0],
+    'request' | 'user' | 'projectId' | 'workspacePath' | 'sessionId'>
+  const queueKey = (input: ProjectQueueContext) => `${input.user.id}:${normalizeResolvedPath(input.workspacePath)}`
+  const clearQueuePoller = (key: string) => {
+    const timer = queuePollers.get(key)
+    if (timer) clearInterval(timer)
+    queuePollers.delete(key)
+  }
+  const drainProjectMessageQueue = async (input: ProjectQueueContext): Promise<boolean> => {
+    const key = queueKey(input)
+    if (queueDraining.has(key)) return false
+    const session = beeGameSessions.get(input.sessionId)
+    if (!session || session.status !== 'running' || session.turnStatus !== 'idle') return false
+    const production = await readProjectProductionRun(input.workspacePath, input.user.id)
+    // Queue is free conversation. It must not preempt any unfinished delivery,
+    // including a user-paused run. Only the explicit Steer route may do that.
+    if (production?.projectId === input.projectId && isIncompleteProjectProductionRun(production))
+      return false
+    queueDraining.add(key)
+    try {
+      const item = await projectMessageQueue.claimNext(input.user.id, input.workspacePath)
+      if (!item) { clearQueuePoller(key); return false }
+      try {
+        await sendNativeProjectRequest({ ...input, message: item.text,
+          options: { clientMessageId: item.clientMessageId, attachments: item.attachments,
+            ...(item.supersedesMessageId ? { supersedesMessageId: item.supersedesMessageId } : {}),
+            ...(item.language ? { language: item.language } : {}) } })
+        await projectMessageQueue.update(input.user.id, input.workspacePath, item.id, 'complete')
+        return true
+      } catch (error) {
+        await projectMessageQueue.update(input.user.id, input.workspacePath, item.id, 'restore')
+        clearQueuePoller(key)
+        console.error('[BeeGame] Queued project message could not start:', error)
+        return false
+      }
+    } finally { queueDraining.delete(key) }
+  }
+  const armProjectMessageQueue = (input: ProjectQueueContext) => {
+    const key = queueKey(input)
+    if (queuePollers.has(key)) return
+    const timer = setInterval(() => { void drainProjectMessageQueue(input).catch(error => {
+      clearQueuePoller(key)
+      console.error('[BeeGame] Project message queue check failed:', error)
+    }) }, 2000)
+    timer.unref()
+    queuePollers.set(key, timer)
+  }
 
   registerBeeGameSessionRoutes(
     app,
@@ -4600,12 +4142,55 @@ export function createAgentWorkflowApp(
         dashboardRepository.modelConfigExists(request, user, id),
       listModelConfigs: (request, user) =>
         dashboardRepository.listModelConfigs(request, user),
-      startDeliveryWorkflow: startBeeGameDeliveryWorkflow,
-      resumeDeliveryWorkflow: input =>
-        continueBeeGameDeliveryWorkflow({ ...input, mode: 'resume' }),
       sendProjectRequest: sendNativeProjectRequest,
+      queueProjectRequest: async input => {
+        // Editing replaces a completed turn; it is never a queued follow-up.
+        if (input.options?.supersedesMessageId) return undefined
+        const session = beeGameSessions.get(input.sessionId)
+        const run = await readProjectProductionRun(input.workspacePath, input.user.id)
+        // A durable running cursor outlives its process on restart. Once the
+        // user explicitly sends a new message, turn it into a stopped cursor
+        // before starting that message; its exact stage resumes after the turn.
+        if (session?.turnStatus !== 'running' && run?.projectId === input.projectId &&
+            run.status === 'running' &&
+            !projectProductions.has(productionKey(input.user.id, input.projectId, input.workspacePath))) {
+          await stopProjectProduction({ ...input, reason: 'service_shutdown' })
+          return undefined
+        }
+        // A stopped delivery is idle: the next user message is a native turn
+        // in the same session. Claude interprets it with the saved checkpoint,
+        // then the unfinished delivery resumes after that turn settles.
+        if (session?.turnStatus !== 'running' && run?.projectId === input.projectId && run.status === 'stopped')
+          return undefined
+        const existing = await projectMessageQueue.list(input.user.id, input.workspacePath)
+        if (session?.turnStatus !== 'running' &&
+            !(run?.projectId === input.projectId && isIncompleteProjectProductionRun(run)) &&
+            existing.length === 0) return undefined
+        const item = await projectMessageQueue.enqueue(input.user.id, input.workspacePath, {
+          text: input.message, attachments: input.options?.attachments ?? [],
+          clientMessageId: input.options?.clientMessageId,
+          supersedesMessageId: input.options?.supersedesMessageId,
+          language: input.options?.language,
+        })
+        armProjectMessageQueue(input)
+        return { id: item.id }
+      },
+      dispatchPendingProjectRequest: async input => {
+        if (!(await projectMessageQueue.list(input.user.id, input.workspacePath)).length) return false
+        const current = beeGameSessions.get(input.sessionId)
+        const production = await readProjectProductionRun(input.workspacePath, input.user.id)
+        if (production?.projectId === input.projectId && isIncompleteProjectProductionRun(production))
+          return false
+        if (current?.turnStatus === 'running' || queueDraining.has(queueKey(input))) return true
+        if (await drainProjectMessageQueue(input)) return true
+        throw new Error('Pending project message could not start; it remains queued')
+      },
+      resumeProjectProduction,
+      stopProjectProduction,
       migrateProjectDelivery: input => projectOperation(input.user.id, input.workspacePath,
         () => migrateQuiescentProjectDelivery(input)),
+      restoreProjectDelivery: input => projectOperation(input.user.id, input.workspacePath,
+        () => restoreProjectDeliveryFromCurrentChat(input)),
     },
   )
   return app
@@ -5848,7 +5433,7 @@ async function ensureBeeGameProjectSession(input: {
   }
 
   if (
-    live &&
+    live && live.status === 'running' &&
     normalizeResolvedPath(live.cwd) === normalizeResolvedPath(workspacePath)
   ) {
     const metadata = input.beeGameSessions.metadata(live.id)
@@ -5866,6 +5451,8 @@ async function ensureBeeGameProjectSession(input: {
       ),
     }
   }
+  if (live && normalizeResolvedPath(live.cwd) === normalizeResolvedPath(workspacePath))
+    await input.beeGameSessions.waitForSessionIdle(live.id)
 
   const readableConfigs = await input.dashboardRepository.listModelConfigs(
     input.request,
@@ -5889,7 +5476,9 @@ async function ensureBeeGameProjectSession(input: {
   const session = input.beeGameSessions.start({
     workspacePath,
     projectId: input.project.id,
-    ...(latest?.id ? { transcriptSessionId: latest.id } : {}),
+    ...((live && normalizeResolvedPath(live.cwd) === normalizeResolvedPath(workspacePath))
+      ? { transcriptSessionId: live.id }
+      : latest?.id ? { transcriptSessionId: latest.id } : {}),
     ...(modelConfigId ? { modelConfigId } : {}),
     ...(language ? { language } : {}),
     userId: input.user.id,
@@ -5916,19 +5505,6 @@ async function ensureBeeGameProjectSession(input: {
   }
 }
 
-export async function createAgentWorkflowDisplayProjection(input: {
-  run: JsonObject
-  workspacePath: string
-  usage?: JsonObject
-}): Promise<JsonObject> {
-  let workflow = workflowViewForDisplay(
-    input.run,
-    input.usage,
-    input.workspacePath,
-  )
-  return workflow
-}
-
 async function getBeeGameProjectRuntimeState(input: {
   request: Request
   user: BeeGameUserContext
@@ -5939,55 +5515,12 @@ async function getBeeGameProjectRuntimeState(input: {
   beeGamePreviews: BeeGamePreviewManager
   previewCapabilities: PreviewCapabilityManager
   dashboardRepository: DashboardRepository
+  productionControllerActive: (workspacePath: string) => boolean
 }): Promise<JsonObject> {
   const sessionRef = await resolveBeeGameProjectSessionReference(input)
   if (!sessionRef) {
-    const workflow = input.project.root_path
-      ? await readBeeGameWorkflowSnapshot(
-          input.project.root_path,
-          input.user.id,
-          dispatch =>
-            input.beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
-        )
-      : null
-    const usage = workflow
-      ? workflowUsageForView(
-          workflow,
-          input.beeGameSessions.workflowUsage(String(workflow.runId ?? '')),
-        )
-      : undefined
     const idle = createIdleProjectRuntimeState(input.project.id)
-    const workflowRuntime = applyWorkflowRuntimeStatus(
-      {
-        phase: 'idle',
-        nextAction: 'Ready for next request',
-        updatedAt: String(idle.updated_at),
-        activeAgents: [],
-        agentStatus: 'idle',
-      },
-      workflow,
-    )
-    return {
-      ...idle,
-      phase: workflowRuntime.phase,
-      blocked: isWorkflowTerminalFailure(workflow),
-      ...projectRuntimeBlockedReasonFields(
-        isWorkflowTerminalFailure(workflow)
-          ? workflowDisplayReason(workflow)
-          : undefined,
-      ),
-      active_agents: workflowRuntime.activeAgents,
-      updated_at: workflowRuntime.updatedAt,
-      next_action: workflowRuntime.nextAction,
-      ...(usage ? { context: { token_budget: usage } } : {}),
-      workflow: workflow
-        ? await createAgentWorkflowDisplayProjection({
-            run: workflow,
-            usage,
-            workspacePath: input.project.root_path!,
-          })
-        : null,
-    }
+    return idle
   }
   const events = await getProjectRuntimeEvents({
     sessionId: sessionRef.sessionId,
@@ -5995,17 +5528,7 @@ async function getBeeGameProjectRuntimeState(input: {
     dashboardDataRoot: input.dashboardDataRoot,
     beeGameSessions: input.beeGameSessions,
   })
-  // The native session is only the transport for a workflow worker. A
-  // project can therefore have a quiet/starting main session while the
-  // durable delivery run has already reached a terminal state. Read the
-  // workflow snapshot before deriving the public runtime status so a stale
-  // session cannot mask a blocked or completed run.
   const nativeDelivery = await readProjectDelivery(sessionRef.workspacePath, input.dashboardDataRoot)
-  const workflowSnapshot = nativeDelivery ? null : await readBeeGameWorkflowSnapshot(
-    sessionRef.workspacePath,
-    input.user.id,
-    dispatch => input.beeGameSessions.isWorkflowWorkerOpen(dispatch.dispatchId),
-  )
   const nativeGate = nativeDelivery?.accepted
     ? await evaluateProjectDeliveryGate(sessionRef.workspacePath, input.dashboardDataRoot)
     : undefined
@@ -6014,31 +5537,28 @@ async function getBeeGameProjectRuntimeState(input: {
     workspacePath: sessionRef.workspacePath,
     beeGameSessions: input.beeGameSessions,
   })
-  const historicalPending = getPendingBeeGamePermissionEvents(events)
   const livePending = input.beeGameSessions.pendingPermissionsForProject(
     input.user.id,
     input.project.id,
     sessionRef.workspacePath,
   )
-  const pending = [
-    ...historicalPending,
-    ...livePending.map(pendingBeeGamePermissionToEvent),
-  ].filter((event, index, all) => {
-    const toolUseID = getBeeGamePayloadString(event, 'toolUseID')
-    return (
-      all.findIndex(
-        candidate =>
-          getBeeGamePayloadString(candidate, 'toolUseID') === toolUseID,
-      ) === index
-    )
-  })
+  // A transcript records what was requested, but its native approval callback
+  // dies with the process. Only requests held by this session manager can be
+  // approved after a restart.
+  const pending = livePending.map(pendingBeeGamePermissionToEvent)
   const nativeRuntime = deriveBeeGameRuntimeStatus(
     events,
     pending,
     snapshot?.phaseStatus === 'recovered',
   )
-  const conversation = isProjectConversation(events) && workflowSnapshot?.status !== 'running'
-  const runtime = conversation ? nativeRuntime : applyWorkflowRuntimeStatus(nativeRuntime, workflowSnapshot)
+  const production = await readProjectProductionRun(sessionRef.workspacePath, input.user.id)
+  const runtime = nativeRuntime.phase === 'idle' &&
+    production?.projectId === input.project.id && production.status === 'running'
+    ? input.productionControllerActive(sessionRef.workspacePath)
+      ? { ...nativeRuntime, phase: 'running', nextAction: 'BeeGame Studio is processing',
+          activeAgents: ['beegame-agent'], agentStatus: 'working' }
+      : { ...nativeRuntime, phase: 'paused', nextAction: 'Project delivery can resume from its saved stage' }
+    : nativeRuntime
   const preview = getProjectPreviewSnapshot({
     sessionId: sessionRef.sessionId,
     workspacePath: sessionRef.workspacePath,
@@ -6054,36 +5574,8 @@ async function getBeeGameProjectRuntimeState(input: {
   }))
   const acceptance = nativeDelivery
     ? { status: nativeGate?.allowed ? 'passed' : nativeDelivery.accepted ? 'stale' : 'not_run' }
-    : workflowSnapshot
-      ? toProjectAcceptanceStateFromWorkflow(workflowSnapshot)
-      : { status: 'not_run' }
-  const workflowUsage = workflowSnapshot
-    ? workflowUsageForView(
-        workflowSnapshot,
-        input.beeGameSessions.workflowUsage(
-          String(workflowSnapshot.runId ?? ''),
-        ),
-      )
-    : undefined
-  const workflow = workflowSnapshot
-    ? await createAgentWorkflowDisplayProjection({
-        run: workflowSnapshot,
-        usage: workflowUsage,
-        workspacePath: sessionRef.workspacePath,
-      })
-    : null
+    : { status: 'not_run' }
   const context = deriveBeeGameContextVisibility(events, snapshot) ?? {}
-  if (!conversation && workflowUsage && workflowUsage.total_tokens > 0) {
-    // A managed project uses the workflow run ledger as its token authority;
-    // the native session is only the transport for workflow workers. Do not
-    // merge a second session snapshot into the same project total.
-    context.token_budget = {
-      ...workflowUsage,
-    }
-  }
-  const workflowReason = !conversation && isWorkflowTerminalFailure(workflowSnapshot)
-    ? workflowDisplayReason(workflowSnapshot)
-    : undefined
   const runtimeFailureReason =
     runtime.agentStatus === 'failed'
       ? projectWorkflowDisplayReason(runtime.nextAction)
@@ -6091,18 +5583,13 @@ async function getBeeGameProjectRuntimeState(input: {
   return {
     project_id: input.project.id,
     phase: runtime.phase,
-    blocked:
-      pending.length > 0 ||
-      runtime.agentStatus === 'failed' ||
-      (!conversation && isWorkflowTerminalFailure(workflowSnapshot)),
-    ...(workflowReason
-      ? projectRuntimeBlockedReasonFields(workflowReason)
-      : runtimeFailureReason
+    blocked: pending.length > 0 || runtime.agentStatus === 'failed',
+    ...(runtimeFailureReason
         ? projectRuntimeBlockedReasonFields(runtimeFailureReason)
         : { blocked_reason: pending[0]?.text ?? null }),
     active_agents: runtime.activeAgents,
     updated_at: runtime.updatedAt,
-    activity: runtimeActivity(events, workflowSnapshot?.updatedAt),
+    activity: runtimeActivity(events),
     next_action: runtime.nextAction,
     context,
     project_target: assetManifest.project_target ?? null,
@@ -6117,210 +5604,17 @@ async function getBeeGameProjectRuntimeState(input: {
         })
       : null,
     acceptance,
-    workflow,
     model_config_id:
       sessionRef.live?.modelConfigId ??
       sessionRef.latest?.modelConfigId ??
       snapshot?.modelConfigId ??
       null,
-    pending_permissions: [
-      ...historicalPending.map(pendingBeeGamePermissionToJson),
-      ...livePending.map(pendingBeeGamePermissionRequestToJson),
-    ].filter(
-      (permission, index, all) =>
-        all.findIndex(candidate => candidate.id === permission.id) === index,
-    ),
+    pending_permissions: livePending.map(pendingBeeGamePermissionRequestToJson),
   }
 }
 
-async function readBeeGameWorkflowSnapshot(
-  workspacePath: string,
-  ownerId: string,
-  sessionIsOpen: (dispatch: DispatchRecord) => Promise<boolean> | boolean,
-): Promise<JsonObject | null> {
-  try {
-    const store = createRunStore(workspacePath, ownerId)
-    let inspection
-    try {
-      inspection = await store.inspectWorkflowSnapshot()
-    } catch (error) {
-      if (error instanceof WorkflowStoreError && error.code === 'io') {
-        try {
-          await stat(store.paths.snapshot)
-        } catch (cause) {
-          if (
-            cause &&
-            typeof cause === 'object' &&
-            'code' in cause &&
-            cause.code === 'ENOENT'
-          )
-            return null
-        }
-      }
-      throw error
-    }
-    if (!inspection.currentRun)
-      return createWorkflowStateErrorView(
-        inspection.error ??
-          new WorkflowStoreError('workflow snapshot is invalid', 'invalid'),
-        lastProvenWorkflowSummary(await store.readEvents()),
-      )
-    let currentRun = inspection.currentRun
-    // Capture this before reconciling a stale top-level dispatch: that
-    // reconciliation also repairs nested foundation tasks, so checking only
-    // the post-reconcile snapshot would lose the reconnect signal.
-    let resumeOnReconnect = await publicStageResumeOnReconnectRequired(
-      currentRun,
-      sessionIsOpen,
-    )
-    const activeDispatch = currentRun.activeDispatch
-    if (
-      activeDispatch?.status === 'running' &&
-      !(await sessionIsOpen(activeDispatch))
-    ) {
-      const reconciled = await store.reconcile(async () => false)
-      if (reconciled) currentRun = reconciled
-    }
-    // Foundation revision/recheck workers are stored inside the single
-    // foundation task collection, not in the top-level activeDispatch. After
-    // a server restart that task can still say `running` while its transport
-    // is gone. Ask the session manager whether any of those dispatches are
-    // actually live; the projection, rather than the task list, is the
-    // reconnect authority consumed by the dashboard.
-    if (!resumeOnReconnect) {
-      resumeOnReconnect = await publicStageResumeOnReconnectRequired(
-        currentRun,
-        sessionIsOpen,
-      )
-    }
-    if (resumeOnReconnect && !activeDispatch) {
-      const reconciled = await store.reconcile(dispatch =>
-        Promise.resolve(sessionIsOpen(dispatch)),
-      )
-      if (reconciled) currentRun = reconciled
-    }
-    const events = await store.readEvents()
-    const { pendingEvents: _pendingEvents, ...run } = currentRun
-    const deliveryRun = run as DeliveryRun
-    const timing = workflowElapsedTiming(events, deliveryRun)
-    const stageSnapshots = projectWorkflowStageCardHistory({
-      run: deliveryRun,
-      events,
-      workspacePath,
-      now: new Date().toISOString(),
-    })
-    return {
-      ...(run as unknown as JsonObject),
-      ...timing,
-      ...(resumeOnReconnect ? { resumeOnReconnect: true } : {}),
-      stageSnapshots,
-    }
-  } catch (error) {
-    return createWorkflowStateErrorView(error)
-  }
-}
-
-async function publicStageResumeOnReconnectRequired(
-  run: DeliveryRun,
-  sessionIsOpen: (dispatch: DispatchRecord) => Promise<boolean> | boolean,
-): Promise<boolean> {
-  if (
-    run.status !== 'running' ||
-    run.phase !== 'DOCUMENT_REVIEW' ||
-    run.documentStep !== 'FOUNDATION_REVIEW' ||
-    !run.foundationAuditState
-  )
-    return false
-  // Safety recognition only: inspect every old task, never schedule or repair it.
-  const runningDispatches = retiredFoundationRunningDispatches(run)
-  if (!runningDispatches.length) return false
-  const liveWorker = (
-    await Promise.all(
-      runningDispatches.map(dispatch => Promise.resolve(sessionIsOpen(dispatch))),
-    )
-  ).some(Boolean)
-  return !liveWorker
-}
-
-function workflowElapsedTiming(
-  events: WorkflowEvent[],
-  run: DeliveryRun,
-): { elapsedMs: number; activeSince?: string } {
-  const runEvents = events.filter(event => event.runId === run.runId)
-  let elapsedMs = 0
-  let activeSinceMs: number | undefined
-  for (const event of runEvents) {
-    const eventAt = Date.parse(event.createdAt)
-    if (!Number.isFinite(eventAt)) continue
-    if (event.status === 'running') {
-      activeSinceMs ??= eventAt
-      continue
-    }
-    if (activeSinceMs !== undefined) {
-      elapsedMs += Math.max(0, eventAt - activeSinceMs)
-      activeSinceMs = undefined
-    }
-  }
-
-  const createdAt = Date.parse(run.createdAt)
-  const updatedAt = Date.parse(run.updatedAt)
-  if (run.status === 'running') {
-    activeSinceMs ??= Number.isFinite(createdAt) ? createdAt : updatedAt
-  } else if (activeSinceMs !== undefined) {
-    const stoppedAt = Number.isFinite(updatedAt) ? updatedAt : activeSinceMs
-    elapsedMs += Math.max(0, stoppedAt - activeSinceMs)
-    activeSinceMs = undefined
-  } else if (runEvents.length === 0 && Number.isFinite(createdAt)) {
-    elapsedMs = Math.max(
-      0,
-      (Number.isFinite(updatedAt) ? updatedAt : createdAt) - createdAt,
-    )
-  }
-
-  return {
-    elapsedMs,
-    ...(activeSinceMs !== undefined
-      ? { activeSince: new Date(activeSinceMs).toISOString() }
-      : {}),
-  }
-}
 
 type BeeGameRuntimeStatus = ReturnType<typeof deriveBeeGameRuntimeStatus>
-
-function workflowStatus(workflow: JsonObject | null): string {
-  return typeof workflow?.status === 'string' ? workflow.status : ''
-}
-
-function workflowBlockedReason(workflow: JsonObject | null): string | null {
-  if (!workflow) return null
-  const reason =
-    workflow.blockedReason ??
-    (isObject(workflow.activeDispatch)
-      ? workflow.activeDispatch.failureReason
-      : undefined)
-  const normalized = String(reason ?? '').trim()
-  return normalized || null
-}
-
-function workflowDisplayReason(workflow: JsonObject | null) {
-  if (!workflow) return undefined
-  const dispatch = isObject(workflow.activeDispatch)
-    ? workflow.activeDispatch
-    : undefined
-  const documentPath =
-    typeof workflow.currentItemId === 'string' &&
-    workflow.currentItemId.startsWith('docs/')
-      ? workflow.currentItemId
-      : undefined
-  return projectWorkflowDisplayReason(workflowBlockedReason(workflow), {
-    ...(typeof workflow.phase === 'string' ? { stage: workflow.phase } : {}),
-    ...(typeof dispatch?.taskId === 'string'
-      ? { taskId: dispatch.taskId }
-      : {}),
-    ...(documentPath ? { documentPath } : {}),
-    retryable: workflow.status !== 'stopped',
-  })
-}
 
 function projectRuntimeBlockedReasonFields(
   reason: ReturnType<typeof projectWorkflowDisplayReason>,
@@ -6332,100 +5626,6 @@ function projectRuntimeBlockedReasonFields(
         blocked_reason_diagnostic_id: reason.diagnosticId,
       }
     : { blocked_reason: null }
-}
-
-function projectWorkflowDisplayTasks(
-  tasks: readonly JsonObject[],
-): JsonObject[] {
-  return tasks.map(task => {
-    const documentPath =
-      typeof task.title === 'string' && task.title.startsWith('docs/')
-        ? task.title
-        : undefined
-    const reason = projectWorkflowDisplayReason(
-      typeof task.failureReason === 'string' &&
-      typeof task.failureCode === 'string' &&
-      typeof task.diagnosticId === 'string'
-        ? {
-            message: task.failureReason,
-            code: task.failureCode,
-            diagnosticId: task.diagnosticId,
-          }
-        : task.failureReason,
-      {
-        ...(typeof task.id === 'string' ? { taskId: task.id } : {}),
-        ...(documentPath ? { documentPath } : {}),
-        retryable: task.status !== 'stopped',
-      },
-    )
-    const { failureReason: _rawFailureReason, ...safeTask } = task
-    return {
-      ...safeTask,
-      ...(reason
-        ? {
-            failureReason: reason.message,
-            failureCode: reason.code,
-            diagnosticId: reason.diagnosticId,
-          }
-        : {}),
-    }
-  })
-}
-
-function isWorkflowTerminalFailure(workflow: JsonObject | null): boolean {
-  return ['needs_action', 'blocked', 'failed', 'stopped'].includes(
-    workflowStatus(workflow),
-  )
-}
-
-function applyWorkflowRuntimeStatus(
-  nativeRuntime: BeeGameRuntimeStatus,
-  workflow: JsonObject | null,
-): BeeGameRuntimeStatus {
-  const status = workflowStatus(workflow)
-  if (!workflow || status === 'unmanaged') return nativeRuntime
-
-  const dispatch = isObject(workflow.activeDispatch)
-    ? workflow.activeDispatch
-    : undefined
-  const worker =
-    typeof dispatch?.workerType === 'string'
-      ? dispatch.workerType
-      : 'delivery-workflow'
-  if (status === 'running') {
-    if (nativeRuntime.phase === 'waiting_approval') return nativeRuntime
-    return {
-      phase: 'running',
-      nextAction: `${worker} is processing`,
-      updatedAt: Date.parse(nativeRuntime.updatedAt) >= Date.parse(String(workflow.updatedAt ?? ''))
-        ? nativeRuntime.updatedAt : String(workflow.updatedAt ?? nativeRuntime.updatedAt),
-      activeAgents: [...new Set([worker, ...nativeRuntime.activeAgents])],
-      agentStatus: nativeRuntime.agentStatus === 'idle' ? 'waiting' : nativeRuntime.agentStatus,
-    }
-  }
-  if (status === 'completed') {
-    const acceptance = toProjectAcceptanceStateFromWorkflow(workflow)
-    return {
-      phase: 'finished',
-      nextAction: acceptance.status === 'passed'
-        ? 'Delivery workflow completed'
-        : 'Project artifacts are ready; runtime acceptance has not been established.',
-      updatedAt: String(workflow.updatedAt ?? nativeRuntime.updatedAt),
-      activeAgents: [],
-      agentStatus: 'idle',
-    }
-  }
-  if (isWorkflowTerminalFailure(workflow)) {
-    const reason = workflowDisplayReason(workflow)
-    return {
-      phase: 'paused',
-      nextAction: reason?.message ?? 'Delivery workflow is blocked',
-      updatedAt: String(workflow.updatedAt ?? nativeRuntime.updatedAt),
-      activeAgents: [],
-      agentStatus: 'failed',
-    }
-  }
-  return nativeRuntime
 }
 
 async function getLatestProjectSessionMetadata(input: {
@@ -6470,53 +5670,6 @@ async function getLatestProjectSessionMetadata(input: {
     : undefined
 }
 
-async function resolveProjectWorkflowRuntimeBinding(input: {
-  request: Request
-  user: BeeGameUserContext
-  project: BeeGameProjectMetadata
-  requestedLanguage: unknown
-  defaultWorkspacePath?: string
-  beeGameSessions: BeeGameSessionManager
-  dashboardRepository: DashboardRepository
-  assertPermittedModelConfigRuntime: (modelConfigId: string) => Promise<void>
-}): Promise<{
-  modelConfigId?: string
-  language?: BeeGameSessionLanguage
-}> {
-  const sessionRef = await resolveBeeGameProjectSessionReference({
-    request: input.request,
-    user: input.user,
-    project: input.project,
-    defaultWorkspacePath: input.defaultWorkspacePath,
-    beeGameSessions: input.beeGameSessions,
-    dashboardRepository: input.dashboardRepository,
-  })
-  const modelConfigId =
-    sessionRef?.live?.modelConfigId ??
-    sessionRef?.latest?.modelConfigId ??
-    input.project.runtime_snapshot?.model_config_id
-  if (
-    modelConfigId &&
-    !(await input.dashboardRepository.modelConfigExists(
-      input.request,
-      input.user,
-      modelConfigId,
-    ))
-  ) {
-    throw new Error('Selected project model configuration is unavailable')
-  }
-  if (modelConfigId)
-    await input.assertPermittedModelConfigRuntime(modelConfigId)
-  const language = isBeeGameSessionLanguage(input.requestedLanguage)
-    ? input.requestedLanguage
-    : sessionRef?.live
-      ? input.beeGameSessions.language(sessionRef.live.id)
-      : undefined
-  return {
-    ...(modelConfigId ? { modelConfigId } : {}),
-    ...(language ? { language } : {}),
-  }
-}
 
 function findLiveProjectSession(
   beeGameSessions: BeeGameSessionManager,
@@ -6525,9 +5678,13 @@ function findLiveProjectSession(
 ): BeeGameSession | undefined {
   return beeGameSessions
     .list(userId)
-    .find(
+    .filter(
       session => beeGameSessions.metadata(session.id)?.projectId === projectId,
     )
+    .sort((left, right) => {
+      if (left.status !== right.status) return left.status === 'running' ? -1 : 1
+      return right.updatedAt.getTime() - left.updatedAt.getTime()
+    })[0]
 }
 
 function createProjectSessionBinding(
@@ -6859,643 +6016,12 @@ function createIdleProjectRuntimeState(projectId: string): JsonObject {
     project_target: null,
     build_report: null,
     acceptance: { status: 'not_run' },
-    workflow: null,
     model_config_id: null,
     pending_permissions: [],
   }
 }
 
-const WORKFLOW_STATE_ERROR_TRACE_LIMIT = 100
-const workflowStateErrorTraceByDetail = new Map<string, string>()
 
-type LastProvenWorkflowSummary = {
-  lastProvenPhase: string
-  lastProvenUnitId: string
-  lastProvenUnitKind:
-    | 'document'
-    | 'resource-delivery'
-    | 'game-content'
-    | 'implementation-task'
-    | 'acceptance'
-  lastProvenItemId?: string
-}
-
-function lastProvenWorkflowSummary(
-  events: WorkflowEvent[],
-): LastProvenWorkflowSummary | undefined {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index]
-    const parsed = workflowUnitAcceptedEventSchema.safeParse(event)
-    if (!parsed.success || parsed.data.unit.phase !== parsed.data.phase)
-      continue
-    const { unit } = parsed.data
-    const itemId =
-      unit.kind === 'document'
-        ? (unit.payload as { path: string }).path
-        : undefined
-    return {
-      lastProvenPhase: unit.phase,
-      lastProvenUnitId: unit.unitId,
-      lastProvenUnitKind: unit.kind,
-      ...(itemId ? { lastProvenItemId: itemId } : {}),
-    }
-  }
-  return undefined
-}
-
-function createWorkflowStateErrorView(
-  error: unknown,
-  lastProven?: LastProvenWorkflowSummary,
-): JsonObject {
-  const detail = error instanceof Error ? error.message : String(error)
-  let traceId = workflowStateErrorTraceByDetail.get(detail)
-  if (!traceId) {
-    traceId = randomUUID()
-    if (
-      workflowStateErrorTraceByDetail.size >= WORKFLOW_STATE_ERROR_TRACE_LIMIT
-    ) {
-      const oldestDetail = workflowStateErrorTraceByDetail.keys().next().value
-      if (typeof oldestDetail === 'string') {
-        workflowStateErrorTraceByDetail.delete(oldestDetail)
-      }
-    }
-    workflowStateErrorTraceByDetail.set(detail, traceId)
-    console.warn('[BeeGame] workflow state rejected', {
-      traceId,
-      cause: error instanceof Error ? error.name : 'unknown_error',
-      detail,
-    })
-  }
-  const recoverable =
-    error instanceof WorkflowStoreError && error.code === 'invalid'
-  const now = new Date().toISOString()
-  return {
-    runId: 'workflow-state-error',
-    status: 'needs_action',
-    phase: 'BRIEF_CONFIRMED',
-    tasks: [],
-    evidence: {},
-    workflowStateError: true,
-    ...(recoverable ? { recoverable: true } : {}),
-    ...(recoverable && lastProven ? lastProven : {}),
-    blockedReason: recoverable
-      ? `工作流需要恢复。请点击继续以从已验证的检查点恢复。诊断编号：${traceId}`
-      : `当前项目的工作流状态无效，无法安全继续。诊断编号：${traceId}`,
-    // Detailed schema diagnostics stay in the server log. The user-facing
-    // workflow card must never render internal JSON validation output.
-    message: '',
-    messageKey: 'workflow.blocked',
-    thinking: 'idle',
-    completedTaskCount: 0,
-    totalTaskCount: 0,
-    createdAt: now,
-    updatedAt: now,
-  }
-}
-
-function workflowThinkingStatus(
-  workflow: JsonObject,
-): 'working' | 'waiting' | 'idle' {
-  if (workflowStatus(workflow) !== 'running') return 'idle'
-  if (isObject(workflow.authorStage) && ['starting', 'running'].includes(String(workflow.authorStage.status))) return 'working'
-  if (isObject(workflow.foundationReviewStage)) {
-    const invocation = isObject(workflow.foundationReviewStage.invocation)
-      ? workflow.foundationReviewStage.invocation : undefined
-    const outcome = invocation && isObject(invocation.outcome) ? invocation.outcome : undefined
-    if (outcome?.status === 'running') return 'working'
-  }
-  const dispatch = isObject(workflow.activeDispatch)
-    ? workflow.activeDispatch
-    : undefined
-  return dispatch?.status === 'running' ? 'working' : 'waiting'
-}
-
-function workflowMessageKey(workflow: JsonObject): string {
-  const publicAuthor = projectPublicAuthorDisplay(workflow.authorStage)
-  if (publicAuthor?.completed && !workflow.foundationReviewStage) return 'workflow.documentReview'
-  const status = workflowStatus(workflow)
-  if (status === 'stopped') return 'workflow.stopped'
-  if (status === 'blocked' || status === 'needs_action')
-    return 'workflow.blocked'
-  if (status === 'failed') return 'workflow.failed'
-  if (status === 'completed') return 'workflow.completed'
-  if (status === 'unmanaged') return 'workflow.unmanaged'
-  switch (String(workflow.phase ?? '')) {
-    case 'BRIEF_CONFIRMED':
-      return 'workflow.briefConfirmed'
-    case 'DOCUMENT_DRAFTING':
-      return 'workflow.documentDrafting'
-    case 'DOCUMENT_REVIEW':
-      return 'workflow.documentReview'
-    case 'RESOURCE_PREPARATION':
-      return 'workflow.resourcePreparation'
-    case 'GAME_CONTENT':
-      return 'workflow.gameContent'
-    case 'IMPLEMENTATION':
-      return 'workflow.implementation'
-    case 'ACCEPTANCE':
-      return 'workflow.acceptance'
-    case 'DELIVERY':
-      return 'workflow.delivery'
-    default:
-      return 'workflow.processing'
-  }
-}
-
-function workflowNextAction(
-  workflow: JsonObject,
-): 'resume' | 'retry' | undefined {
-  const publicAuthor = projectPublicAuthorDisplay(workflow.authorStage)
-  if (publicAuthor?.completed && !workflow.foundationReviewStage)
-    return workflowStatus(workflow) === 'stopped' ? 'resume' : undefined
-  const foundation = workflow.documentStep === 'FOUNDATION_REVIEW'
-    ? projectFoundationReviewDisplay(workflow.foundationReviewStage, workflow.status) : undefined
-  if (foundation?.resumeAvailable) return 'resume'
-  if (foundation?.terminal) return undefined
-  if (workflow.workflowStateError === true)
-    return workflow.recoverable === true ? 'resume' : undefined
-  const status = workflowStatus(workflow)
-  if (status === 'stopped') return 'resume'
-  if (status === 'needs_action' || status === 'blocked' || status === 'failed')
-    return 'retry'
-  return undefined
-}
-
-function workflowViewForDisplay(
-  workflow: JsonObject,
-  usage?: JsonObject,
-  workspacePath?: string,
-): JsonObject {
-  const messageKey = workflowMessageKey(workflow)
-  const nextAction = workflowNextAction(workflow)
-  const publicAuthor = projectPublicAuthorDisplay(workflow.authorStage)
-  const completedAuthor = publicAuthor?.completed ? publicAuthor :
-    isObject(workflow.foundationReviewStage)
-      ? projectPublicAuthorResultDisplay(workflow.foundationReviewStage.importedAuthorResult) : undefined
-  const tasks = Array.isArray(workflow.tasks) ? workflow.tasks : []
-  const displayDocumentStep =
-    typeof workflow.documentStep === 'string'
-      ? workflow.documentStep
-      : undefined
-  const currentMessage = projectWorkflowCurrentMessage({
-    value: workflow.currentMessage,
-    phase: workflow.phase,
-    documentStep: displayDocumentStep,
-  })
-  const foundationDisplay = workflow.documentStep === 'FOUNDATION_REVIEW'
-    ? projectFoundationReviewDisplay(workflow.foundationReviewStage, workflow.status) : undefined
-  const reviewReport = isObject(workflow.foundationReviewStage)
-    ? displayFoundationReviewReport(workflow.foundationReviewStage.acceptedReview)
-    : undefined
-  const authorTiming = !workflow.foundationReviewStage && projectDeliveryProgress(workflow)?.stageId === 'DOCUMENT_DRAFTING'
-    ? projectPublicAuthorTiming(workflow.authorStage) : undefined
-  const foundationTiming = workflow.documentStep === 'FOUNDATION_REVIEW' && isObject(workflow.foundationReviewStage) &&
-    Number.isFinite(Number(workflow.elapsedMs)) && Number(workflow.elapsedMs) >= 0
-    ? { elapsedMs: Number(workflow.elapsedMs), scope: 'merged_foundation_stage_elapsed',
-        includesModelNetworkWait: true, includesToolAndSubtaskWait: true,
-        ...(Number.isFinite(Number(workflow.foundationReviewStage.currentCallElapsedMs)) && Number(workflow.foundationReviewStage.currentCallElapsedMs) >= 0
-          ? { currentCallElapsedMs: Number(workflow.foundationReviewStage.currentCallElapsedMs), currentCallScope: 'workflow_public_invocation_observed' }
-          : {}),
-        ...(Number.isFinite(Number(workflow.foundationReviewStage.historicalElapsedMs)) && Number(workflow.foundationReviewStage.historicalElapsedMs) >= 0
-          ? { historicalElapsedMs: Number(workflow.foundationReviewStage.historicalElapsedMs), historicalScope: 'workflow_public_invocation_completed_sum' }
-          : {}),
-        ...(typeof workflow.updatedAt === 'string' ? { observedAt: workflow.updatedAt } : {}) }
-    : undefined
-  const blockedReason = foundationDisplay?.block ?? (publicAuthor?.completed && !workflow.foundationReviewStage
-    ? {
-        message:
-          typeof workflow.currentMessage === 'string' &&
-          workflow.currentMessage.trim()
-            ? workflow.currentMessage
-            : 'Foundation authoring is ready for review acceptance.',
-        code: 'public_author_handoff',
-        diagnosticId: 'public-author-handoff',
-      }
-    : workflowDisplayReason(workflow))
-  const atomicDisplayTasks = tasks.flatMap(task => {
-    if (!isObject(task) || typeof task.id !== 'string') return []
-    return [
-      {
-        id: task.id,
-        title: typeof task.title === 'string' ? task.title : task.id,
-        status: typeof task.status === 'string' ? task.status : 'pending',
-        ...(Number.isFinite(Number(task.attempt))
-          ? { attempt: Number(task.attempt) }
-          : {}),
-        ...(typeof task.failureReason === 'string' && task.failureReason.trim()
-          ? { failureReason: task.failureReason.trim() }
-          : {}),
-      },
-    ]
-  })
-  const documentPhase =
-    workflow.phase === 'DOCUMENT_DRAFTING' ||
-    workflow.phase === 'DOCUMENT_REVIEW'
-  const assetPhase = workflow.phase === 'RESOURCE_PREPARATION'
-  const displayTaskSource = workflow.phase === 'GAME_CONTENT'
-    ? [{ id: 'scene-ui-content', title: 'Scene / UI Content', status: workflow.status, attempt: 0, operation: 'produce' }]
-    : foundationDisplay
-    ? [{ id: 'foundation-public-stage', title: 'Foundation Reviewer',
-        status: foundationDisplay!.taskStatus,
-        attempt: 0, operation: 'review' }]
-    : publicAuthor && (workflow.phase === 'DOCUMENT_DRAFTING' || !workflow.foundationReviewStage)
-    ? publicAuthor.tasks
-    : documentPhase && workspacePath
-      ? projectDocumentDisplayTasks({
-          workspacePath,
-          currentItemId:
-            typeof workflow.currentItemId === 'string'
-              ? workflow.currentItemId
-              : undefined,
-          foundationDraftCompletedPaths:
-            isObject(workflow.foundationDraftState) &&
-            Array.isArray(workflow.foundationDraftState.completedPaths)
-              ? workflow.foundationDraftState.completedPaths.flatMap(path =>
-                  typeof path === 'string' ? [path] : [],
-                )
-              : undefined,
-          foundationDocuments:
-            isObject(workflow.foundationDraftState) &&
-            Array.isArray(workflow.foundationDraftState.documents)
-              ? workflow.foundationDraftState.documents.flatMap(document => {
-                  if (
-                    !isObject(document) ||
-                    typeof document.path !== 'string' ||
-                    ![
-                      'pending',
-                      'drafting',
-                      'committed',
-                      'needs_action',
-                    ].includes(String(document.status))
-                  )
-                    return []
-                  return [
-                    {
-                      path: document.path,
-                      status: document.status as
-                        | 'pending'
-                        | 'drafting'
-                        | 'committed'
-                        | 'needs_action',
-                    },
-                  ]
-                })
-              : undefined,
-          documentStep:
-            typeof displayDocumentStep === 'string'
-              ? (displayDocumentStep as Parameters<
-                  typeof projectDocumentDisplayTasks
-                >[0]['documentStep'])
-              : undefined,
-          workflowStatus: workflowStatus(workflow),
-          thinking: workflowThinkingStatus(workflow),
-        })
-      : assetPhase && workspacePath
-        ? projectAssetDisplayTasks({
-            workspacePath,
-            phase: 'RESOURCE_PREPARATION',
-            workflowStatus: workflowStatus(workflow),
-            thinking: workflowThinkingStatus(workflow),
-            activeDispatch: workflow.activeDispatch,
-            resourceProductionTask: resourceProductionTaskForDisplay(workflow),
-          })
-        : atomicDisplayTasks
-  const displayTasks = projectWorkflowDisplayTasks(
-    displayTaskSource as JsonObject[],
-  )
-  const completedTaskCount = displayTasks.filter(
-    task => isObject(task) && task.status === 'completed',
-  ).length
-  const progress = projectDeliveryProgress(workflow)
-  const activeDispatch = isObject(workflow.activeDispatch)
-    ? {
-        ...(typeof workflow.activeDispatch.workerType === 'string'
-          ? { workerType: workflow.activeDispatch.workerType }
-          : {}),
-        ...(typeof workflow.activeDispatch.status === 'string'
-          ? { status: workflow.activeDispatch.status }
-          : {}),
-        ...(typeof workflow.activeDispatch.taskId === 'string'
-          ? { taskId: workflow.activeDispatch.taskId }
-          : {}),
-        ...(typeof workflow.activeDispatch.startedAt === 'string'
-          ? { startedAt: workflow.activeDispatch.startedAt }
-          : {}),
-      }
-    : undefined
-  const evidence = isObject(workflow.evidence)
-    ? Object.fromEntries(
-        ['resourcePreparation', 'gameContent', 'acceptance'].flatMap(
-          key => {
-            const value = (workflow.evidence as Record<string, unknown>)[key]
-            if (!isObject(value) || typeof value.status !== 'string') return []
-            return [[key, { status: value.status }]]
-          },
-        ),
-      )
-    : {}
-  const stageSnapshots = workflowStageSnapshotsForDisplay(
-    workflow,
-    displayTasks,
-  )
-  return {
-    ...(typeof workflow.runId === 'string' ? { runId: workflow.runId } : {}),
-    status: workflowStatus(workflow) || 'unknown',
-    phase: typeof workflow.phase === 'string' ? workflow.phase : 'unknown',
-    ...(progress ?? {}),
-    ...(typeof displayDocumentStep === 'string'
-      ? { documentStep: displayDocumentStep }
-      : {}),
-    tasks: displayTasks,
-    // Completed author artifacts remain visible when current-stage tasks switch
-    // to Reviewer/Revision. This is a public-result projection, not stage state.
-    ...(completedAuthor?.completed
-      ? { foundationDocuments: completedAuthor.tasks.map(task => ({ path: task.title, status: 'ready' })) }
-      : {}),
-    evidence,
-    ...(typeof workflow.activeTaskId === 'string'
-      ? { activeTaskId: workflow.activeTaskId }
-      : {}),
-    ...(typeof workflow.currentItemId === 'string'
-      ? { currentItemId: workflow.currentItemId }
-      : {}),
-    ...(activeDispatch && Object.keys(activeDispatch).length > 0
-      ? { activeDispatch }
-      : {}),
-    ...(blockedReason
-      ? { block: { ...blockedReason, ...(nextAction ? { nextAction } : {}) } }
-      : {}),
-    ...(reviewReport ? { reviewReport } : {}),
-    ...(foundationTiming ? { foundationTiming } : {}),
-    ...(typeof workflow.workflowStateError === 'boolean'
-      ? { workflowStateError: workflow.workflowStateError }
-      : {}),
-    ...(workflow.recoverable === true ? { recoverable: true } : {}),
-    ...(typeof workflow.lastProvenPhase === 'string'
-      ? { lastProvenPhase: workflow.lastProvenPhase }
-      : {}),
-    ...(typeof workflow.lastProvenUnitId === 'string'
-      ? { lastProvenUnitId: workflow.lastProvenUnitId }
-      : {}),
-    ...(typeof workflow.lastProvenUnitKind === 'string'
-      ? { lastProvenUnitKind: workflow.lastProvenUnitKind }
-      : {}),
-    ...(typeof workflow.lastProvenItemId === 'string'
-      ? { lastProvenItemId: workflow.lastProvenItemId }
-      : {}),
-    ...(typeof workflow.createdAt === 'string'
-      ? { createdAt: workflow.createdAt }
-      : {}),
-    ...(typeof workflow.completedAt === 'string'
-      ? { completedAt: workflow.completedAt }
-      : {}),
-    ...(typeof workflow.updatedAt === 'string'
-      ? { updatedAt: workflow.updatedAt }
-      : {}),
-    ...(Number.isFinite(Number(workflow.elapsedMs))
-      ? { elapsedMs: Number(workflow.elapsedMs) }
-      : {}),
-    ...(typeof workflow.activeSince === 'string'
-      ? { activeSince: workflow.activeSince }
-      : {}),
-    ...(authorTiming ?? {}),
-    ...(workflow.documentStep === 'FOUNDATION_REVIEW' && isObject(workflow.foundationReviewStage) && Number.isFinite(Number(workflow.foundationReviewStage.currentCallElapsedMs)) && Number(workflow.foundationReviewStage.currentCallElapsedMs) >= 0
-      ? { currentCallElapsedMs: Number(workflow.foundationReviewStage.currentCallElapsedMs) }
-      : {}),
-    ...(workflow.documentStep === 'FOUNDATION_REVIEW' && isObject(workflow.foundationReviewStage) && Number.isFinite(Number(workflow.foundationReviewStage.historicalElapsedMs)) && Number(workflow.foundationReviewStage.historicalElapsedMs) >= 0
-      ? { historicalElapsedMs: Number(workflow.foundationReviewStage.historicalElapsedMs) }
-      : {}),
-    ...(workflow.resumeOnReconnect === true
-      ? { resumeOnReconnect: true }
-      : {}),
-    ...(usage ? { usage } : {}),
-    // Only a persisted worker response is allowed to override the localized
-    // phase/status copy. Do not synthesize an English stage message here.
-    message: currentMessage,
-    messageKey,
-    thinking: workflowThinkingStatus(workflow),
-    completedTaskCount,
-    totalTaskCount: displayTasks.length,
-    ...(nextAction ? { nextAction } : {}),
-    ...(stageSnapshots ? { stageSnapshots } : {}),
-  }
-}
-
-function nonnegativeFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0
-}
-
-function displayIssueSummary(value: unknown): JsonObject | undefined {
-  if (!isObject(value)) return undefined
-  const keys = ['total', 'blocker', 'high', 'medium', 'low'] as const
-  const values = keys.map(key => value[key])
-  if (!values.every(entry => Number.isInteger(entry) && (entry as number) >= 0))
-    return undefined
-  const [total, blocker, high, medium, low] = values as number[]
-  if (
-    total !== blocker + high + medium + low
-  )
-    return undefined
-  return { total, blocker, high, medium, low }
-}
-
-function displayFoundationReviewReport(value: unknown): JsonObject | undefined {
-  if (!isObject(value) || value.producer !== 'foundation-reviewer' || typeof value.resultId !== 'string' ||
-      value.protocolVersion !== 6 || typeof value.documentSetDigest !== 'string') return undefined
-  return { resultId: value.resultId, resultDigest: foundationPublicDigest(value), documentSetDigest: value.documentSetDigest,
-    ...(isObject(value.audit) && typeof value.audit.summary === 'string' ? { summary: value.audit.summary } : {}) }
-}
-
-function displayUsage(value: unknown): JsonObject | undefined {
-  if (!isObject(value)) return undefined
-  const keys = [
-    'input_tokens',
-    'cache_read_tokens',
-    'cache_creation_tokens',
-    'completion_tokens',
-    'total_tokens',
-  ] as const
-  if (!keys.every(key => nonnegativeFiniteNumber(value[key]))) return undefined
-  return Object.fromEntries(keys.map(key => [key, value[key]]))
-}
-
-function projectWorkflowStageCardTaskForDisplay(task: JsonObject): JsonObject {
-  const issueSummary = displayIssueSummary(task.issueSummary)
-  const usage = displayUsage(task.usage)
-  return {
-    id: task.id,
-    title: task.title,
-    status: task.status,
-    ...(task.operation ? { operation: task.operation } : {}),
-    ...(Number.isFinite(Number(task.attempt))
-      ? { attempt: Number(task.attempt) }
-      : {}),
-    ...(typeof task.round === 'number' &&
-    Number.isSafeInteger(task.round) &&
-    task.round > 0
-      ? { round: task.round }
-      : {}),
-    ...(issueSummary ? { issueSummary } : {}),
-    ...(usage ? { usage } : {}),
-    ...(nonnegativeFiniteNumber(task.durationMs)
-      ? { durationMs: task.durationMs }
-      : {}),
-    ...(typeof task.failureReason === 'string' && task.failureReason.trim()
-      ? { failureReason: task.failureReason.trim() }
-      : {}),
-    ...(typeof task.failureCode === 'string'
-      ? { failureCode: task.failureCode }
-      : {}),
-    ...(typeof task.diagnosticId === 'string'
-      ? { diagnosticId: task.diagnosticId }
-      : {}),
-  }
-}
-
-export function workflowStageSnapshotsForDisplay(
-  workflow: JsonObject,
-  liveTasks: JsonObject[],
-): JsonObject[] | undefined {
-  if (!Array.isArray(workflow.stageSnapshots)) return undefined
-  const currentProgress = projectDeliveryProgress(workflow)
-  let reached = workflow.stageSnapshots.filter(
-    (value): value is WorkflowStageCardSnapshot =>
-      isWorkflowStageCardSnapshot(value) &&
-      currentProgress !== undefined &&
-      value.phaseIndex <= currentProgress.phaseIndex,
-  )
-  if (reached.length === 0) return undefined
-  return reached.map((snapshot, index) => {
-    const isLive =
-      currentProgress !== undefined &&
-      index === reached.length - 1 &&
-      snapshot.stageId === currentProgress.stageId &&
-      snapshot.phaseIndex === currentProgress.phaseIndex
-    const taskSource = isLive ? liveTasks : snapshot.tasks
-    const tasks = projectWorkflowDisplayTasks(
-      taskSource.map(projectWorkflowStageCardTaskForDisplay),
-    )
-    const blockReason = snapshot.block
-      ? projectWorkflowDisplayReason(snapshot.block)
-      : undefined
-    const foundationDisplay = isLive && workflow.documentStep === 'FOUNDATION_REVIEW'
-      ? projectFoundationReviewDisplay(workflow.foundationReviewStage, workflow.status) : undefined
-    const block = foundationDisplay?.block ?? (blockReason
-      ? {
-          ...blockReason,
-          ...(snapshot.block?.code ? { code: snapshot.block.code } : {}),
-          ...(snapshot.block?.diagnosticId
-            ? { diagnosticId: snapshot.block.diagnosticId }
-            : {}),
-          ...(isLive &&
-          (snapshot.block?.nextAction === 'resume' ||
-            snapshot.block?.nextAction === 'retry')
-            ? { nextAction: snapshot.block.nextAction }
-            : {}),
-        }
-      : undefined)
-    return {
-      stageId: snapshot.stageId,
-      phaseIndex: snapshot.phaseIndex,
-      phaseCount: snapshot.phaseCount,
-      status: snapshot.status,
-      currentPhase: snapshot.currentPhase,
-      ...(snapshot.substage ? { substage: snapshot.substage } : {}),
-      ...(snapshot.documentStep ? { documentStep: snapshot.documentStep } : {}),
-      ...(snapshot.thinking ? { thinking: snapshot.thinking } : {}),
-      ...(snapshot.worker ? { worker: snapshot.worker } : {}),
-      ...(snapshot.message
-        ? { message: sanitizeWorkflowDisplayMessage(snapshot.message) }
-        : {}),
-      ...(snapshot.executionStatus
-        ? { executionStatus: snapshot.executionStatus }
-        : {}),
-      ...(snapshot.currentItemId
-        ? { currentItemId: snapshot.currentItemId }
-        : {}),
-      tasks,
-      completedTaskCount: tasks.filter(task => task.status === 'completed')
-        .length,
-      totalTaskCount: tasks.length,
-      createdAt: snapshot.createdAt,
-      updatedAt: snapshot.updatedAt,
-      ...(snapshot.completedAt ? { completedAt: snapshot.completedAt } : {}),
-      elapsedMs: snapshot.elapsedMs,
-      ...(snapshot.stageId === 'DOCUMENT_DRAFTING' ? projectPublicAuthorTiming(workflow.authorStage) ?? {} : {}),
-      ...(snapshot.activeSince ? { activeSince: snapshot.activeSince } : {}),
-      ...(block ? { block } : {}),
-    }
-  })
-}
-
-function resourceProductionTaskForDisplay(
-  workflow: JsonObject,
-): ResourceProductionTask {
-  const value = isObject(workflow.resourceProductionState)
-    ? workflow.resourceProductionState.currentTask
-    : undefined
-  switch (value) {
-    case 'RESOURCE_DELIVERY':
-    case 'RESOURCE_DELIVERED':
-      return value
-    default:
-      throw new Error('resource workflow is missing its canonical task cursor')
-  }
-}
-
-function workflowUsageForView(
-  workflow: JsonObject,
-  live: BeeGameRuntimeSnapshot['usage'],
-): BeeGameRuntimeSnapshot['usage'] {
-  const persisted = isObject(workflow.usage) ? workflow.usage : undefined
-  const persistedUsage = {
-    prompt_tokens:
-      Number(persisted?.prompt_tokens ?? persisted?.input_tokens ?? 0) || 0,
-    completion_tokens:
-      Number(persisted?.completion_tokens ?? persisted?.output_tokens ?? 0) ||
-      0,
-    cache_read_tokens: Number(persisted?.cache_read_tokens ?? 0) || 0,
-    cache_creation_tokens: Number(persisted?.cache_creation_tokens ?? 0) || 0,
-    total_tokens: Number(persisted?.total_tokens ?? 0) || 0,
-  }
-  return {
-    prompt_tokens: persistedUsage.prompt_tokens + live.prompt_tokens,
-    completion_tokens:
-      persistedUsage.completion_tokens + live.completion_tokens,
-    cache_read_tokens:
-      persistedUsage.cache_read_tokens + live.cache_read_tokens,
-    cache_creation_tokens:
-      persistedUsage.cache_creation_tokens + live.cache_creation_tokens,
-    total_tokens: persistedUsage.total_tokens + live.total_tokens,
-  }
-}
-
-function toProjectAcceptanceStateFromWorkflow(
-  workflow: JsonObject,
-): JsonObject {
-  const evidence = isObject(workflow.evidence) ? workflow.evidence : {}
-  const acceptance = isObject(evidence.acceptance)
-    ? evidence.acceptance
-    : undefined
-  const status =
-    typeof acceptance?.status === 'string' && acceptance.status === 'passed'
-      ? 'passed'
-      : typeof acceptance?.status === 'string' && acceptance.status === 'failed'
-        ? 'failed'
-        : typeof acceptance?.status === 'string' &&
-            acceptance.status === 'blocked'
-          ? 'blocked'
-          : 'not_run'
-  return {
-    status,
-    ...(typeof acceptance?.path === 'string'
-      ? { summary: acceptance.path }
-      : {}),
-    ...(status !== 'not_run' && typeof acceptance?.observedAt === 'string'
-      ? { validated_at: acceptance.observedAt }
-      : {}),
-  }
-}
 
 async function resolveBeeGameProjectSessionReference(input: {
   request: Request
@@ -7633,60 +6159,6 @@ async function resolveOwnedProjectArtifactWorkspace(
   return canonicalWorkspacePath
 }
 
-function getPendingBeeGamePermissionEvents(
-  events: BeeGameEvent[],
-): BeeGameEvent[] {
-  const resolved = new Set(
-    events
-      .filter(event => event.type === 'permission.resolved')
-      .map(event => getBeeGamePayloadString(event, 'toolUseID'))
-      .filter(Boolean),
-  )
-  const closedTurns = new Set(
-    events
-      .filter(
-        event =>
-          event.type === 'turn.completed' ||
-          event.type === 'turn.empty' ||
-          event.type === 'turn.failed' ||
-          event.type === 'session.stopped' ||
-          event.type === 'session.failed',
-      )
-      .map(event => event.turnId)
-      .filter((turnId): turnId is string => Boolean(turnId)),
-  )
-  return events
-    .filter(event => event.type === 'permission.requested')
-    .filter(event => {
-      const toolUseID = getBeeGamePayloadString(event, 'toolUseID')
-      return (
-        toolUseID &&
-        !resolved.has(toolUseID) &&
-        (!event.turnId || !closedTurns.has(event.turnId))
-      )
-    })
-}
-
-function pendingBeeGamePermissionToJson(event: BeeGameEvent): JsonObject {
-  const toolUseID =
-    getBeeGamePayloadString(event, 'toolUseID') || event.id.toString()
-  const toolName = getBeeGamePayloadString(event, 'toolName') || ''
-  return {
-    id: toolUseID,
-    session_id: event.sessionId,
-    event_id: event.id,
-    tool_name: toolName,
-    message: event.text,
-    created_at: normalizeBeeGameCreatedAt(event.createdAt),
-    input:
-      event.payload &&
-      typeof event.payload === 'object' &&
-      !Array.isArray(event.payload)
-        ? ((event.payload as Record<string, unknown>).input ?? null)
-        : null,
-  }
-}
-
 function pendingBeeGamePermissionToEvent(
   permission: BeeGamePendingPermission,
 ): BeeGameEvent {
@@ -7773,18 +6245,6 @@ function deriveBeeGameRuntimeStatus(
       agentStatus: 'failed',
     }
   }
-  if (
-    events.some(event => event.type === 'session.started') &&
-    !events.some(event => event.type === 'turn.started')
-  ) {
-    return {
-      phase: 'starting',
-      nextAction: 'BeeGame Studio session is starting',
-      updatedAt,
-      activeAgents: ['beegame-agent'],
-      agentStatus: 'starting',
-    }
-  }
   return {
     phase: 'idle',
     nextAction: 'Ready for next request',
@@ -7810,6 +6270,10 @@ function getActiveBeeGameTurn(events: BeeGameEvent[]): string {
   )
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
+    // Session-level termination closes every open turn, even when the stop
+    // event itself has no turnId. A later turn.started can still become active.
+    if (event?.type === 'session.stopped' || event?.type === 'session.failed')
+      return ''
     if (
       event?.type === 'turn.started' &&
       event.turnId &&
@@ -8004,24 +6468,6 @@ function registerBeeGameSessionRoutes(
       request: Request,
       user: BeeGameUserContext,
     ) => Promise<Array<{ id: string; isDefault?: boolean }>>
-    startDeliveryWorkflow?: (input: {
-      request: Request
-      user: BeeGameUserContext
-      projectId: string
-      workspacePath: string
-      briefContext: string
-      modelConfigId?: string
-      language?: BeeGameSessionLanguage
-    }) => Promise<{ runId: string; phase: string; status: string }>
-    resumeDeliveryWorkflow?: (input: {
-      request: Request
-      user: BeeGameUserContext
-      projectId: string
-      workspacePath: string
-      confirmedBriefContext?: string
-      modelConfigId?: string
-      language?: BeeGameSessionLanguage
-    }) => Promise<unknown>
     sendProjectRequest?: (input: {
       request: Request
       user: BeeGameUserContext
@@ -8032,7 +6478,38 @@ function registerBeeGameSessionRoutes(
       options?: ProjectConversationOptions
       initialBrief?: { displayText: string; confirmedBriefContext: string }
     }) => Promise<unknown>
-    migrateProjectDelivery?: (input: { user: BeeGameUserContext; projectId: string; workspacePath: string }) => Promise<unknown>
+    queueProjectRequest?: (input: {
+      request: Request
+      user: BeeGameUserContext
+      projectId: string
+      workspacePath: string
+      sessionId: string
+      message: string
+      options?: ProjectConversationOptions
+    }) => Promise<{ id: string } | undefined>
+    dispatchPendingProjectRequest?: (input: {
+      request: Request
+      user: BeeGameUserContext
+      projectId: string
+      workspacePath: string
+      sessionId: string
+    }) => Promise<boolean>
+    resumeProjectProduction?: (input: {
+      request: Request
+      user: BeeGameUserContext
+      projectId: string
+      workspacePath: string
+      sessionId: string
+    }) => Promise<unknown>
+    stopProjectProduction?: (input: {
+      request: Request
+      user: BeeGameUserContext
+      projectId: string
+      workspacePath: string
+      sessionId: string
+    }) => Promise<unknown>
+    migrateProjectDelivery?: (input: { user: BeeGameUserContext; projectId: string; workspacePath: string; sessionId: string }) => Promise<unknown>
+    restoreProjectDelivery?: (input: { user: BeeGameUserContext; projectId: string; workspacePath: string; sessionId: string }) => Promise<unknown>
   },
 ): void {
   const defaultWorkspacePath = options.defaultWorkspacePath
@@ -8433,8 +6910,14 @@ function registerBeeGameSessionRoutes(
         )
         const metadata = beeGameSessions.metadata(c.req.param('id'))
         const currentUser = options.getCurrentUser(c.req.raw)
+        await options.restoreProjectDelivery?.({
+          user: currentUser,
+          projectId: metadata?.projectId ?? c.req.param('id'),
+          workspacePath,
+          sessionId: c.req.param('id'),
+        })
         const deliveryGate = await evaluateProjectDeliveryGate(workspacePath, options.deliveryDataRoot) ??
-          await evaluateWorkflowDeliveryGate({ workspacePath, ownerId: currentUser.id })
+          { allowed: false, issues: ['Project delivery state is missing; the chat acceptance could not be linked to this workspace.'] }
         if (!deliveryGate.allowed) {
           return c.json(
             {
@@ -8531,18 +7014,21 @@ function registerBeeGameSessionRoutes(
         ? beeGameSessions.metadata(session.id)
         : undefined
       if (session && metadata?.projectId) {
+        const request = {
+          request: c.req.raw,
+          user: options.getCurrentUser(c.req.raw),
+          projectId: metadata.projectId,
+          workspacePath: session.cwd,
+          sessionId: session.id,
+          message: inputText,
+          options: { clientMessageId, supersedesMessageId, attachments,
+            ...(isBeeGameSessionLanguage(body.language) ? { language: body.language } : {}),
+            authToken: options.getAuthToken(c.req.raw) },
+        }
+        const queued = await options.queueProjectRequest?.(request)
+        if (queued) return c.json({ ...session, queued: true, queueId: queued.id }, 202)
         if (options.sendProjectRequest) {
-          const result = await options.sendProjectRequest({
-            request: c.req.raw,
-            user: options.getCurrentUser(c.req.raw),
-            projectId: metadata.projectId,
-            workspacePath: session.cwd,
-            sessionId: session.id,
-            message: inputText,
-            options: { clientMessageId, supersedesMessageId, attachments,
-              ...(isBeeGameSessionLanguage(body.language) ? { language: body.language } : {}),
-              authToken: options.getAuthToken(c.req.raw) },
-          })
+          const result = await options.sendProjectRequest(request)
           return c.json(result, 202)
         }
         return c.json({ error: 'Project conversation is unavailable' }, 503)
@@ -8621,12 +7107,50 @@ function registerBeeGameSessionRoutes(
       const language = isBeeGameSessionLanguage(body.language)
         ? body.language
         : (beeGameSessions.language(c.req.param('id')) ?? 'en')
-      const session = beeGameSessions.get(c.req.param('id'))
+      let session = beeGameSessions.get(c.req.param('id'))
       if (session) {
         const metadata = beeGameSessions.metadata(session.id)
         if (metadata?.projectId) {
-          await options.migrateProjectDelivery?.({ user: options.getCurrentUser(c.req.raw),
-            projectId: metadata.projectId, workspacePath: session.cwd })
+          const currentUser = options.getCurrentUser(c.req.raw)
+          if (session.status !== 'running') {
+            await beeGameSessions.waitForSessionIdle(session.id)
+            session = beeGameSessions.start({
+              workspacePath: session.cwd,
+              projectId: metadata.projectId,
+              userId: currentUser.id,
+              transcriptSessionId: session.id,
+              ...(session.modelConfigId ? { modelConfigId: session.modelConfigId } : {}),
+              language,
+              ...(options.getAuthToken(c.req.raw)
+                ? { authToken: options.getAuthToken(c.req.raw) } : {}),
+            })
+            await options.persistSessionMetadata(
+              c.req.raw,
+              beeGameSessions.metadata(session.id),
+            )
+          }
+          const production = await options.resumeProjectProduction?.({
+            request: c.req.raw,
+            user: currentUser,
+            projectId: metadata.projectId,
+            workspacePath: session.cwd,
+            sessionId: session.id,
+          })
+          if (production) {
+            const state = production as { phase?: string; status?: string }
+            if (state.status !== 'completed')
+              return c.json({ status: state.status ?? 'running', phase: state.phase }, 202)
+          }
+          if (await options.dispatchPendingProjectRequest?.({
+            request: c.req.raw,
+            user: currentUser,
+            projectId: metadata.projectId,
+            workspacePath: session.cwd,
+            sessionId: session.id,
+          })) return c.json({ status: 'running', sessionId: session.id }, 202)
+          if (production) return c.json({ status: 'completed', sessionId: session.id })
+          await options.migrateProjectDelivery?.({ user: currentUser,
+            projectId: metadata.projectId, workspacePath: session.cwd, sessionId: session.id })
           const delivery = await readProjectDelivery(session.cwd, options.deliveryDataRoot)
           if (delivery) {
             const gate = await evaluateProjectDeliveryGate(session.cwd, options.deliveryDataRoot)
@@ -8634,15 +7158,6 @@ function registerBeeGameSessionRoutes(
             if (!options.sendProjectRequest)
               return c.json({ error: 'Project Agent is unavailable' }, 503)
             if (session.turnStatus === 'running') return c.json(session, 202)
-            if (session.status !== 'running') {
-              beeGameSessions.start({ workspacePath: session.cwd,
-                projectId: metadata.projectId, userId: options.getCurrentUser(c.req.raw).id,
-                transcriptSessionId: session.id,
-                ...(session.modelConfigId ? { modelConfigId: session.modelConfigId } : {}),
-                language,
-                ...(options.getAuthToken(c.req.raw) ? { authToken: options.getAuthToken(c.req.raw) } : {}),
-              })
-            }
             await resumeProjectDelivery(session.cwd, options.deliveryDataRoot)
             try {
               return c.json(await options.sendProjectRequest({
@@ -8673,37 +7188,10 @@ function registerBeeGameSessionRoutes(
               options: { displayText: continuation, language, authToken: options.getAuthToken(c.req.raw) },
             }), 202)
           }
-          if (options.resumeDeliveryWorkflow) {
-            const user = options.getCurrentUser(c.req.raw)
-            const confirmedBriefContext = beeGameSessions
-              .transcript(session.id)
-              .toReversed()
-              .find(
-                event =>
-                  isObject(event.payload) &&
-                  event.payload.displayKind === 'confirmed_brief' &&
-                  typeof event.payload.confirmedBriefContext === 'string',
-              )?.payload?.confirmedBriefContext
-            const resumed = await options.resumeDeliveryWorkflow({
-              request: c.req.raw,
-              user,
-              projectId: metadata.projectId,
-              workspacePath: session.cwd,
-              ...(typeof confirmedBriefContext === 'string'
-                ? { confirmedBriefContext }
-                : {}),
-              ...(session.modelConfigId
-                ? { modelConfigId: session.modelConfigId }
-                : {}),
-              ...(language ? { language } : {}),
-            })
-            if (resumed !== undefined) return c.json(resumed)
-          }
           return c.json(
             {
-              error:
-                'Project is unmanaged; start a new delivery workflow before continuing',
-              code: 'workflow_unmanaged',
+              error: 'This project has no native delivery objective. Send a project request to continue in chat.',
+              code: 'project_delivery_missing',
             },
             409,
           )
@@ -8749,16 +7237,10 @@ function registerBeeGameSessionRoutes(
           )
         }
         const metadata = beeGameSessions.metadata(session.id)
-        const run = metadata?.projectId
-          ? await createRunStore(
-              session.cwd,
-              options.getCurrentUser(c.req.raw).id,
-            ).load()
-          : null
         const projectId = metadata?.projectId
-        if (!run || !projectId)
+        if (!projectId || !(await readProjectDelivery(session.cwd, options.deliveryDataRoot)))
           return c.json(
-            { error: 'Project has no managed delivery workflow' },
+            { error: 'Project delivery is not initialized; continue the project in chat first.', code: 'project_delivery_required' },
             409,
           )
         if (!options.sendProjectRequest)
@@ -8801,15 +7283,10 @@ function registerBeeGameSessionRoutes(
           return c.json({ error: 'No failed deployment is available' }, 409)
         }
         const metadata = beeGameSessions.metadata(session.id)
-        const store = createRunStore(
-          session.cwd,
-          options.getCurrentUser(c.req.raw).id,
-        )
-        const run = metadata?.projectId ? await store.load() : null
         const projectId = metadata?.projectId
-        if (!run || !projectId)
+        if (!projectId || !(await readProjectDelivery(session.cwd, options.deliveryDataRoot)))
           return c.json(
-            { error: 'Project has no managed delivery workflow' },
+            { error: 'Project delivery is not initialized; continue the project in chat first.', code: 'project_delivery_required' },
             409,
           )
         if (!options.sendProjectRequest)
@@ -8905,6 +7382,12 @@ function registerBeeGameSessionRoutes(
     const sessionForbidden = checkSession(c.req.raw, c.req.param('id'))
     if (sessionForbidden) return c.json(sessionForbidden, 404)
     try {
+      const metadata = beeGameSessions.metadata(c.req.param('id'))
+      if (metadata?.projectId) {
+        await options.stopProjectProduction?.({ request: c.req.raw,
+          user: options.getCurrentUser(c.req.raw), projectId: metadata.projectId,
+          workspacePath: metadata.workspacePath, sessionId: metadata.id })
+      }
       const session = beeGameSessions.stop(c.req.param('id'))
       await options.persistSessionMetadata(
         c.req.raw,
@@ -9117,7 +7600,8 @@ export function compactTranscriptForChatHistory<
   for (const event of events) {
     const payload: NonNullable<BeeGameEvent['payload']> = event.payload ?? { type: event.type }
     if (event.type === 'system.status' &&
-      !['task_started', 'task_progress', 'task_notification'].includes(String(payload.subtype))) continue
+      !['task_started', 'task_progress', 'task_notification', 'compact_boundary'].includes(String(payload.subtype)) &&
+      !(payload.subtype === 'status' && payload.status === 'compacting')) continue
     const scope = `${payload.workflowStageStreamId ?? payload.workflowSourceSessionId ?? payload.projectSourceSessionId ?? event.sessionId}:${payload.parentToolUseID ?? payload.parent_tool_use_id ?? ''}`
     const body = payload.message as { id?: string } | undefined
     const messageId = payload.assistantBlockId ?? payload.messageId ?? body?.id

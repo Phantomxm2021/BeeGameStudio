@@ -61,6 +61,12 @@ export function auditResourceDeliveryReadiness(input: {
   const libraryResourceCount = resources.filter(
     item => item.source.type === 'resource-library',
   ).length
+  const boundLibraryResourceIds = new Set(contract.bindings
+    .flatMap(binding => binding.resourceIds))
+  const adoptedLibraryResourceCount = resources.filter(item =>
+    item.source.type === 'resource-library' && item.status === 'verified' &&
+    !item.provisional && boundLibraryResourceIds.has(item.id),
+  ).length
   const authoredResourceCount = resources.filter(
     item => item.source.type === 'agent-authored',
   ).length
@@ -87,9 +93,9 @@ export function auditResourceDeliveryReadiness(input: {
     readinessIssues.push(`${failedResourceCount} resources are failed.`)
 
   const effectivePolicy = input.confirmedPolicy ?? policy
-  if (effectivePolicy === 'required' && libraryResourceCount === 0)
+  if (effectivePolicy === 'required' && adoptedLibraryResourceCount === 0)
     readinessIssues.push(
-      'Required Resource Library usage has no verified library resource.',
+      'Required Resource Library usage has no verified library resource bound to a game asset need.',
     )
   return {
     valid: issues.length === 0,

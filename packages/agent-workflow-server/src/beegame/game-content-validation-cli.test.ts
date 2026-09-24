@@ -2,7 +2,9 @@ import { afterEach, expect, test } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { inspectGameContent, runGameContentCommand } from './game-content-validation-cli'
+import { inspectGameContent, runGameContentCommand, summarizeContentLoadFootprint } from './game-content-validation-cli'
+import { parseBeeGameContentIndex, type BeeGameContentPackage } from './game-content-package'
+import type { BeeGameAssetManifest } from './asset-contracts'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -67,6 +69,36 @@ test('validation feedback never claims runtime or playability verification', () 
   const result = runGameContentCommand(root)
   expect(result).toMatchObject({
     valid: false, scope: 'content-contract-and-references', runtimeVerified: false,
+  })
+})
+
+test('load footprint separates startup files and deduplicates assets shared with deferred documents', () => {
+  const index = parseBeeGameContentIndex({
+    schema: 'beegame-content-package.v2', id: 'game', dimension: '2d',
+    documentRevision: 'a'.repeat(64), assetManifestRevision: 'b'.repeat(64),
+    entryScene: 'level', files: ['scenes/level.json', 'ui/menu.json', 'vfx/spark.json'],
+    sceneModel: 'game-object-v2', documents: [
+      { id: 'level', path: 'scenes/level.json', kind: 'scene-2d', loadPhase: 'startup' },
+      { id: 'menu', path: 'ui/menu.json', kind: 'ui-screen', loadPhase: 'startup' },
+      { id: 'spark', path: 'vfx/spark.json', kind: 'vfx', loadPhase: 'on-demand' },
+    ],
+  })
+  const content = { documents: [
+    { id: 'level', assetRefs: ['terrain', 'shared'] },
+    { id: 'menu', assetRefs: ['shared'] },
+    { id: 'spark', assetRefs: ['shared', 'spark'] },
+  ] } as unknown as BeeGameContentPackage
+  const manifest = { resources: [
+    { id: 'terrain', file_paths: ['terrain.webp'] },
+    { id: 'shared', file_paths: ['shared.webp'] },
+    { id: 'spark', file_paths: ['spark.webp'] },
+  ] } as BeeGameAssetManifest
+  const sizes = new Map([['terrain.webp', 100], ['shared.webp', 20], ['spark.webp', 40]])
+
+  expect(summarizeContentLoadFootprint(index, content, manifest, path => sizes.get(path) ?? 0)).toEqual({
+    basis: 'static manifest-file estimate; deferredOnly excludes startup assets/files; raw bytes, not transfer size or runtime proof',
+    startup: { documentCount: 2, assetCount: 2, fileCount: 2, rawBytes: 120 },
+    deferredOnly: { documentCount: 1, assetCount: 1, fileCount: 1, rawBytes: 40 },
   })
 })
 

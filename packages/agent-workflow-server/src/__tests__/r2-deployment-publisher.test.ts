@@ -67,13 +67,13 @@ describe('R2 deployment publisher', () => {
 
   test('publishes immutable files and makes the deployment manifest the final object', async () => {
     const metadataEvents: Array<Record<string, unknown>> = []
-    const uploads: Array<{ locator: StorageObjectLocator; bytes: Uint8Array }> =
+    const uploads: Array<{ locator: StorageObjectLocator; bytes: Uint8Array; cacheControl?: string }> =
       []
     const sizes = new Map<string, number>()
     const driver: ProjectStorageDriver = {
       provider: 'r2',
-      putObject: async (locator, bytes) => {
-        uploads.push({ locator, bytes })
+      putObject: async (locator, bytes, _contentType, _metadata, httpMetadata) => {
+        uploads.push({ locator, bytes, ...(httpMetadata?.cacheControl ? { cacheControl: httpMetadata.cacheControl } : {}) })
         sizes.set(locator.objectKey, bytes.byteLength)
       },
       getObject: async () => undefined,
@@ -127,6 +127,11 @@ describe('R2 deployment publisher', () => {
       'deployments/deploy-1/files/assets/game.js',
       'deployments/deploy-1/manifest.json',
     ])
+    expect(uploads.slice(0, 2).map(file => file.cacheControl)).toEqual([
+      'public, max-age=31536000, immutable',
+      'public, max-age=31536000, immutable',
+    ])
+    expect(uploads[2]?.cacheControl).toBeUndefined()
     expect(result).toEqual(
       expect.objectContaining({
         url: 'https://games.test/deployments/deploy-1/files/index.html',

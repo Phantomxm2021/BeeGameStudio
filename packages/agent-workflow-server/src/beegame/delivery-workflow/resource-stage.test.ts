@@ -81,6 +81,24 @@ describe('resource delivery', () => {
     expect(prompt).toContain('autonomously obtain or make the runtime assets')
     expect(prompt).toContain('Asset Manifest authoring contract at contract.contractPath')
     expect(prompt).toContain('contract.validationCommand runs the same read-only interface check as the host')
+    expect(prompt).toContain('Choose independently whether to delegate independent resource groups or verification')
+    expect(prompt).not.toContain('No separate verification agent is required')
     expect(prompt).not.toContain('resource-validation-cli')
+  })
+
+  test('preserves the confirmed resource-library priority without dictating substitute methods', () => {
+    const base = {
+      runId: 'run', ownerId: 'owner', projectId: 'project', workspacePath: '/workspace',
+      workerType: 'resource-planner' as const, phase: 'RESOURCE_PREPARATION' as const,
+      revision: 'revision', contract: {},
+    }
+    const optional = buildWorkerPrompt({ ...base, contract: { resourceLibraryUsage: 'optional' } })
+    const preferred = buildWorkerPrompt({ ...base, contract: { resourceLibraryUsage: 'preferred' } })
+    const required = buildWorkerPrompt({ ...base, contract: { resourceLibraryUsage: 'required' } })
+    expect(optional).toContain('Resource Library usage is optional')
+    expect(preferred).toContain('inspect suitable published Packs before creating or sourcing substitutes')
+    expect(required).toContain('integrate suitable verified library assets into the delivered game')
+    for (const prompt of [optional, preferred, required])
+      expect(prompt).toContain('not a mandatory search ladder')
   })
 })

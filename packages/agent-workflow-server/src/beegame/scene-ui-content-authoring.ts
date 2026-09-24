@@ -18,7 +18,7 @@ import {
 
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 
-export const CONTENT_AUTHORING_CONTRACT_PATH = '.beegame/workflow/content-authoring-contract.json'
+export const CONTENT_AUTHORING_CONTRACT_PATH = '.beegame/delivery/content-contract.json'
 export const GAME_CONTENT_VALIDATION_COMMAND = {
   executable: process.execPath,
   args: [new URL('./game-content-validation-cli.ts', import.meta.url).pathname],
@@ -113,6 +113,11 @@ export function buildSceneUiContentAuthoringAuthority(
           entryScene: '<scene-document-id>',
           sceneModel: BEEGAME_SCENE_MODEL,
           files: ['scenes/<name>.json', 'ui/<name>.json', 'vfx/<name>.json'],
+          documents: [
+            { id: '<scene-document-id>', path: 'scenes/<name>.json', kind: 'scene-2d', loadPhase: 'startup' },
+            { id: '<initial-screen-id>', path: 'ui/<name>.json', kind: 'ui-screen', loadPhase: 'startup' },
+            { id: '<other-document-id>', path: 'vfx/<name>.json', kind: 'vfx', loadPhase: 'on-demand' },
+          ],
         },
         sceneDocument: {
           schema: BEEGAME_CONTENT_DOCUMENT_SCHEMA,
@@ -273,6 +278,7 @@ export function buildSceneUiContentAuthoringAuthority(
         rules: [
           'The shown index, document, data and node keys are the complete allowed keys; omit optional placeholder fields instead of adding alternatives.',
           'Every file path in index.files is relative to content/.',
+          'Index documents is the runtime load registry: list every index.files entry exactly once with its canonical id, path, kind and loadPhase. Mark entryScene and only the UI documents needed for the first interactive frame as startup; mark other screens, scenes and VFX on-demand. Fetch startup documents first and fetch on-demand documents only when the game enters or needs them.',
           'Every used assetRef is listed once in the document assetRefs and resolves to a verified Manifest resource.',
           `The index must declare sceneModel "${BEEGAME_SCENE_MODEL}". Every scene node is a GameObject; node.kind is forbidden.`,
           'Use the GameObject/Component structure for both dimensions, with coordinate semantics defined by format.coordinates, not inferred from an engine name. Transform has three components; 2D uses the XY plane and an orthographic Camera. In a 3D scene replace the 2D coordinateSystem example with {origin:"world",units:"meters"}.',

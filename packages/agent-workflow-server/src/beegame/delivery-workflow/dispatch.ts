@@ -447,7 +447,7 @@ export function createDeliveryDispatcher(options: {
         try {
             result = parseWorkerTerminalResult(terminalValue);
             if (result.workerType === 'implementation-worker') {
-                const evidencePath = `.beegame/workflow/evidence/implementation-${dispatchId}.json`;
+                const evidencePath = `.beegame/delivery/evidence/implementation-${dispatchId}.json`;
                 result = {
                     ...result,
                     evidencePath,
@@ -824,8 +824,16 @@ export function createDeliveryDispatcher(options: {
     async function workerIsOpen(dispatchId: string): Promise<boolean> {
         if (startingDispatches.has(dispatchId))
             return true;
-        const worker = await options.workerPort.status(dispatchId);
-        return worker.status === 'running';
+        try {
+            const worker = await options.workerPort.status(dispatchId);
+            return worker.status === 'running';
+        } catch (error) {
+            // The restarted process has no transport registration for a
+            // worker recorded by the prior process. It is not still running.
+            if (error instanceof Error && error.message === 'worker session is not registered')
+                return false;
+            throw error;
+        }
     }
     return {
         dispatch,

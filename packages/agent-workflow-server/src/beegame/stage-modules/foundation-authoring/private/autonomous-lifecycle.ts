@@ -103,8 +103,8 @@ export function createAutonomousAuthorLifecycle(configuration: AuthorConfigurati
     } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
   }
 
-  /** Explicit resume may use the short finishing prompt only when a prior
-   * attempt left every canonical candidate as a safe, non-empty draft. */
+  /** An explicit resume may preserve a complete draft set; the Agent still
+   * decides what writing or revision remains before handoff. */
   async function hasCompleteCandidate(reg: Registration, state: State): Promise<boolean> {
     if (!state.candidateReady || !state.attempt) return false
     const candidate = candidatePath(reg.handle.id)
@@ -234,7 +234,7 @@ export function createAutonomousAuthorLifecycle(configuration: AuthorConfigurati
         attemptStartedAt,
         onUsage: value => journal.observe(attemptId, value),
         onProgress: async progress => { state.progress = { modelResponses: progress.modelResponses,
-          message: (finishOnly ? '受限收尾：' : '') + progress.message.slice(0, finishOnly ? 1994 : 2000) }; await save() } })
+          message: (finishOnly ? '继续文档：' : '') + progress.message.slice(0, finishOnly ? 1994 : 2000) }; await save() } })
       if (poll) { clearInterval(poll); poll = undefined }
       await checks
       await journal.observe(attemptId, outcome.usage, true)
@@ -253,9 +253,15 @@ export function createAutonomousAuthorLifecycle(configuration: AuthorConfigurati
         const budgetReasons: Record<string, string> = {
           document_progress_unavailable: 'Author document progress could not be safely inspected.',
         }
+        const missingResult = outcome.failure
+          ? ` Native execution ended with ${outcome.failure}.`
+          : !outcome.report
+            ? ' The native CLI ended without a usable completion summary.'
+            : ' Native usage could not be recorded.'
         state.status = 'needs_action'; state.reason =
           (budgetReasons[outcome.failure ?? ''] ?? 'Author did not produce a complete metered result.') +
-          (finishOnly ? ' This was limited to a bounded finishing pass; drafts are retained.' : '') +
+          missingResult +
+          (finishOnly ? ' Preserved drafts are retained for the next explicit continuation.' : '') +
           ' Working files and usage are preserved. Explicit resume starts a new budgeted attempt; no automatic retry will occur.'
         await save(); return
       }

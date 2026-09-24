@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { createTestDeliveryRun } from '../../__tests__/delivery-workflow-test-helpers'
 import type { DeliveryRun, WorkflowEvent } from './types'
 import { transitionDeliveryRun } from './transition'
-import { DELIVERY_PROGRESS_STAGES } from './display-progress'
+import { DELIVERY_PROGRESS_STAGES, projectDeliveryProgress } from './display-progress'
 import {
   activeElapsedWithinStage,
   freezePreviousStageCard,
@@ -17,6 +17,12 @@ import { CANONICAL_FOUNDATION_DOCUMENTS } from './types'
 const workspacePath = process.cwd()
 
 describe('workflow stage card history', () => {
+  test('shows review and revision as distinct substages before resources', () => {
+    expect(projectDeliveryProgress({ phase: 'DOCUMENT_REVIEW', documentStep: 'FOUNDATION_REVIEW',
+      foundationReviewStage: {} })?.substage).toBe('INITIAL_REVIEW')
+    expect(projectDeliveryProgress({ phase: 'DOCUMENT_REVIEW', documentStep: 'FOUNDATION_REVISION',
+      foundationReviewStage: {} })?.substage).toBe('REPAIRING')
+  })
   test('uses the public author result before legacy document state', () => {
     const base = createTestDeliveryRun({
       projectId: 'project-public-author-display',
@@ -184,8 +190,8 @@ describe('workflow stage card history', () => {
     expect(card?.elapsedMs).toBe(0)
     expect(card?.activeSince).toBe('2026-08-06T00:00:00.000Z')
     expect(card?.block).toMatchObject({
-      message: 'Workflow dispatch failed.',
-      code: 'dispatch_failed',
+      message: 'Workflow is blocked and needs attention.',
+      code: 'workflow_blocked',
       diagnosticId: expect.stringMatching(/^workflow-[0-9a-f]{12}$/),
       nextAction: 'retry',
     })
@@ -213,8 +219,8 @@ describe('workflow stage card history', () => {
 
     expect(card?.message).toBeUndefined()
     expect(card?.block).toMatchObject({
-      message: 'Workflow stopped by user.',
-      code: 'user_stopped',
+      message: 'Workflow is blocked and needs attention.',
+      code: 'workflow_blocked',
       diagnosticId: expect.stringMatching(/^workflow-[0-9a-f]{12}$/),
     })
   })

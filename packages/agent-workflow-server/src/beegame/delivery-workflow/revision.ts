@@ -163,6 +163,28 @@ export async function computeWorkspaceRevision(
   return digestFiles(root, files, '<missing>')
 }
 
+/** Latest authored-file mtime, excluding generated/runtime data just like the workspace revision. */
+export async function latestWorkspaceModificationAt(
+  workspacePath: string,
+): Promise<number> {
+  const root = resolve(workspacePath)
+  const files: string[] = []
+  try {
+    await collectFiles(root, root, files)
+  } catch {
+    return 0
+  }
+  let latest = 0
+  for (const path of files) {
+    try {
+      latest = Math.max(latest, (await stat(join(root, path))).mtimeMs)
+    } catch {
+      // A file disappearing during the scan is not a post-acceptance edit.
+    }
+  }
+  return latest
+}
+
 export async function fileExists(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isFile()

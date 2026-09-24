@@ -85,10 +85,6 @@ export function implementationCompletionIssue(input: {
   >
 }): string | undefined {
   if (input.terminal.status !== 'completed') return input.terminal.status
-  const allowedPaths = input.task.allowedPaths
-  const outOfScope = input.terminal.changedPaths.filter(
-    path => !pathAllowed(path, allowedPaths),
-  )
   const missingEvidence =
     input.workspacePath &&
     !isWorkflowEvidenceFile(input.workspacePath, input.terminal.evidencePath)
@@ -101,7 +97,6 @@ export function implementationCompletionIssue(input: {
     input.terminal.evidencePath,
   ])
   const issues = [
-    ...(outOfScope.length ? [`out of scope: ${outOfScope.join(',')}`] : []),
     ...(missingEvidence ? ['missing evidence file'] : []),
     ...(invalidEvidenceRefs.length
       ? [`invalid evidence refs: ${invalidEvidenceRefs.join(',')}`]
@@ -111,7 +106,7 @@ export function implementationCompletionIssue(input: {
       : []),
   ]
   return issues.length
-    ? `implementation scope/evidence mismatch; ${issues.join('; ')}`
+    ? `implementation evidence mismatch; ${issues.join('; ')}`
     : undefined
 }
 
@@ -201,30 +196,6 @@ export async function startNextImplementationTask(input: {
   return { run: started, dispatch: await input.dispatcher.dispatch(request) }
 }
 
-function pathAllowed(path: string, allowedPaths: string[]): boolean {
-  const normalized = stripDotSlash(path.replaceAll('\\', '/'))
-  if (normalized.split('/').includes('..') || normalized.startsWith('/'))
-    return false
-  return allowedPaths.some(allowed => {
-    const scope = stripTrailingSlash(
-      stripDotSlash(allowed.replaceAll('\\', '/')),
-    )
-    if (scope === '.' || scope === '') return true
-    return normalized === scope || normalized.startsWith(`${scope}/`)
-  })
-}
-
-function stripDotSlash(value: string): string {
-  let result = value
-  while (result.startsWith('./')) result = result.slice(2)
-  return result
-}
-
-function stripTrailingSlash(value: string): string {
-  let result = value
-  while (result.endsWith('/')) result = result.slice(0, -1)
-  return result
-}
 
 export function completeImplementationTask(input: {
   run: DeliveryRun

@@ -30,7 +30,8 @@ test('preview capability exposes only its owned preview and revokes browser acce
     const refreshed = await (await fetch(access.baseUrl + '/status')).json() as any
     expect(refreshed.hostUrl).toBe(result.hostUrl)
     expect(refreshed.environment.sandbox).toBe(PREVIEW_IFRAME_SANDBOX)
-    expect(access.instruction).toContain('Read hostUrl/endpoint from JSON')
+    expect(access.instruction).toContain('Read returned URLs from JSON')
+    expect(access.instruction).toContain('avoids shell sandbox escape approvals')
     const html = await (await fetch(result.hostUrl)).text()
     expect(html).toContain(`sandbox="${PREVIEW_IFRAME_SANDBOX}"`)
     expect(html).not.toContain('allow-same-origin')

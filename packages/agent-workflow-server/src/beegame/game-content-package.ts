@@ -648,6 +648,7 @@ export function auditBeeGameContentPackage(
       `${BEEGAME_CONTENT_INDEX}: assetManifestRevision does not match authority.`,
     )
   const documents: BeeGameContentDocument[] = []
+  const documentPathById = new Map<string, string>()
   const documentPaths = new Set(index.files)
   const actualPaths = existsSync(root)
     ? listJsonFiles(root).filter(path => path !== 'index.json')
@@ -689,6 +690,7 @@ export function auditBeeGameContentPackage(
       authority,
       issues,
     })
+    documentPathById.set(document.id, path)
     if (document.kind === 'scene-2d' || document.kind === 'scene-3d') {
       for (const node of document.data.nodes) for (const component of node.components ?? []) {
         if (component.type !== 'tilemap' || !component.assetRef) continue
@@ -707,6 +709,32 @@ export function auditBeeGameContentPackage(
   for (const document of documents) {
     if (ids.has(document.id)) issues.push(`Duplicate content id: ${document.id}.`)
     ids.add(document.id)
+  }
+  if (index.documents) {
+    const registryIds = new Set<string>()
+    const registryPaths = new Set<string>()
+    for (const entry of index.documents) {
+      if (registryIds.has(entry.id)) issues.push(`${BEEGAME_CONTENT_INDEX}: duplicate document registry id ${entry.id}.`)
+      if (registryPaths.has(entry.path)) issues.push(`${BEEGAME_CONTENT_INDEX}: duplicate document registry path ${entry.path}.`)
+      registryIds.add(entry.id)
+      registryPaths.add(entry.path)
+      if (!index.files.includes(entry.path))
+        issues.push(`${BEEGAME_CONTENT_INDEX}: document registry path is not listed in files: ${entry.path}.`)
+      const document = documents.find(value => value.id === entry.id)
+      if (!document) issues.push(`${BEEGAME_CONTENT_INDEX}: document registry id does not resolve: ${entry.id}.`)
+      else {
+        if (document.kind !== entry.kind)
+          issues.push(`${BEEGAME_CONTENT_INDEX}: document registry kind mismatch for ${entry.id}.`)
+        const actualPath = documentPathById.get(entry.id)
+        if (actualPath !== entry.path)
+          issues.push(`${BEEGAME_CONTENT_INDEX}: document registry path mismatch for ${entry.id}.`)
+      }
+    }
+    for (const path of index.files)
+      if (!registryPaths.has(path)) issues.push(`${BEEGAME_CONTENT_INDEX}: file is missing from document registry: ${path}.`)
+    const entryScene = index.documents.find(value => value.id === index.entryScene)
+    if (entryScene && entryScene.loadPhase !== 'startup')
+      issues.push(`${BEEGAME_CONTENT_INDEX}: entryScene must use startup loadPhase.`)
   }
   const entry = documents.find(document => document.id === index.entryScene)
   if (!entry) issues.push(`Entry scene does not resolve: ${index.entryScene}.`)

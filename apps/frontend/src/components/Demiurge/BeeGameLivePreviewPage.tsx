@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, ChevronDown, ExternalLink, LoaderCircle, Play, RefreshCw, Square, Upload } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ExternalLink, LoaderCircle, Play, Square, Upload } from 'lucide-react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { Button } from '../beui/project-button';
@@ -24,13 +24,14 @@ import { WorkspaceDeploymentDialog } from '../Workspace/WorkspaceDeploymentDialo
 import { ThemeToggle } from '../beui/motion/theme-toggle';
 import { AccountActionsMenu } from './Landing/AccountActionsMenu';
 import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from '../beui/registry/components/motion/popover-morph';
+import { AnimatedBadge } from '../beui/registry/components/motion/animated-badge';
 
 const ResourceLibraryPage = lazy(async () => {
   const module = await import('../ResourceLibrary/ResourceLibraryView');
   return { default: module.ResourceLibraryPage };
 });
 
-export type DashboardStatus = 'running' | 'paused' | 'waiting_approval' | 'stopped' | 'finished' | 'idle' | 'offline';
+export type DashboardStatus = 'starting' | 'running' | 'paused' | 'waiting_approval' | 'stopped' | 'finished' | 'idle' | 'offline';
 type PreviewState = 'starting' | 'live' | 'failed' | 'stopped' | 'idle';
 type PreviewConsoleEntry = {
   level: string;
@@ -305,7 +306,7 @@ export function BeeGameLivePreviewPage({
             onClick={onBack}
             className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-transparent bg-transparent text-[var(--text-secondary)] transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:border-[var(--border-strong)] focus-visible:bg-[var(--surface-hover)] focus-visible:text-[var(--text-primary)] focus-visible:outline-none sm:h-10 sm:w-10"
           >
-            <ArrowLeft className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
+            <ChevronLeft className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
           </button>
           <MorphPopover open={isProjectMenuOpen} onOpenChange={setProjectMenuOpen} className="min-w-0 max-w-[min(52vw,28rem)]">
             <MorphPopoverTrigger>
@@ -328,14 +329,16 @@ export function BeeGameLivePreviewPage({
               </div>
             </MorphPopoverContent>
           </MorphPopover>
-          {isSyncing ? (
-            <div
+          {isSyncing || status === 'starting' ? (
+            <AnimatedBadge
+              status="loading"
+              size="md"
+              contentKey={labels.syncing}
               data-testid="beegame-sync-status"
-              className="type-footnote flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 text-[var(--text-secondary)] max-[899px]:hidden"
+              className="max-[899px]:hidden"
             >
-              <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-              <span>{labels.syncing}</span>
-            </div>
+              {labels.syncing}
+            </AnimatedBadge>
           ) : null}
           {handoffNotice ? (
             <div

@@ -32,7 +32,7 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({
     
     const displayTitle = title || extractedTitle || 'Document Artifact';
     const normalizedArtifactType = String(artifactType || '').trim().toUpperCase();
-    const isGDD = normalizedArtifactType === 'GDD' || /GDD/i.test(displayTitle) || /游戏设计文档/i.test(content);
+    const isGDD = normalizedArtifactType === 'GDD';
 
     return (
         <div

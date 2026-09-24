@@ -17,7 +17,7 @@ const redactVisible = createResponseRedactor({})
 /** Passive projection only: never starts, waits for, or controls a native task. */
 export function createNativeSubagentChatEnricher() {
   const inputs = new Map<string, Record<string, unknown>>()
-  const launches = new Map<string, { toolUseID: string; outputFile?: string }>()
+  const launches = new Map<string, { toolUseID: string; outputFile?: string; toolName: 'Agent' | 'Task' }>()
   return <T extends ChatEvent>(event: T, readOutput = true): T => {
     const p = event.payload
     if (!p) return event
@@ -26,8 +26,21 @@ export function createNativeSubagentChatEnricher() {
       if (p.input) inputs.set(toolUseID, record(p.input))
       const launch = parseNativeBackgroundTaskLaunch(str(p.output))
       if (launch) {
-        launches.set(launch.taskId, { toolUseID, outputFile: launch.outputFile })
+        launches.set(launch.taskId, { toolUseID, outputFile: launch.outputFile, toolName: 'Agent' })
         return { ...event, payload: { ...p, nativeBackgroundTask: launch } }
+      }
+    }
+    if (str(p.toolName) === 'TaskOutput' && event.type === 'tool.completed') {
+      const result = record(p.nativeTaskResult)
+      const taskId = str(result.taskId)
+      const launch = launches.get(taskId)
+      if (launch && ['completed', 'failed', 'stopped', 'killed'].includes(str(result.status))) {
+        const activity = readOutput && launch.outputFile ? readVisibleSubagentActivity(launch.outputFile) : undefined
+        return { ...event, payload: { ...p, nativeBackgroundTaskResult: {
+          toolUseID: launch.toolUseID, toolName: launch.toolName, status: result.status,
+          ...(str(result.result) ? { result: result.result } : {}),
+        }, backgroundAgentInput: inputs.get(launch.toolUseID) ?? {},
+          ...(activity ? { subagentActivity: activity } : {}) } }
       }
     }
     if (!isNativeTaskLifecycle(p)) return event
@@ -36,14 +49,15 @@ export function createNativeSubagentChatEnricher() {
     const id = str(p.tool_use_id) || cached?.toolUseID || taskId
     if (!id) return event
     const outputFile = str(p.output_file) || cached?.outputFile
-    launches.set(taskId, { toolUseID: id, outputFile })
+    const toolName = str(p.task_type) === 'local_bash' ? 'Task' : cached?.toolName ?? 'Agent'
+    launches.set(taskId, { toolUseID: id, outputFile, toolName })
     const input = inputs.get(id) ?? (p.input ? record(p.input) : {
       ...(p.description ? { description: p.description } : {}),
       ...(p.prompt ? { prompt: p.prompt } : {}),
     })
     inputs.set(id, input)
     const activity = readOutput && outputFile ? readVisibleSubagentActivity(outputFile) : undefined
-    return { ...event, payload: { ...p, toolUseID: id, toolName: 'Agent', input,
+    return { ...event, payload: { ...p, toolUseID: id, toolName, input,
       ...(activity ? { subagentActivity: activity } : {}) } }
   }
 }

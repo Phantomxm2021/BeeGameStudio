@@ -5,11 +5,12 @@ import { tmpdir } from 'node:os'
 import { readRuntimeAcceptance, runtimeAcceptancePath, runtimeEvidenceIsCurrent } from './runtime-acceptance'
 import { persistImplementationEvidence } from './evidence'
 import { buildWorkerPrompt } from './worker-prompts'
+import { implementationCompletionIssue } from './implementation-stage'
 
 test('runtime results need explicit observations and current, workspace-contained evidence', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-runtime-record-'))
   try {
-    await mkdir(join(root, '.beegame/workflow/evidence'), { recursive: true })
+    await mkdir(join(root, '.beegame/delivery/evidence'), { recursive: true })
     const path = join(root, runtimeAcceptancePath('dispatch-a'))
     expect(await readRuntimeAcceptance(root, 'dispatch-a')).toBeUndefined()
     const report = { status: 'passed', summary: 'Title and pause observed in the real iframe',
@@ -58,9 +59,9 @@ test('runtime results need explicit observations and current, workspace-containe
     }
     await writeFile(path, JSON.stringify(report))
     await persistImplementationEvidence({workspacePath:root,dispatchId:'dispatch-a',
-      evidencePath:'.beegame/workflow/evidence/implementation-a.json',taskId:'task',revision:'revision',
+      evidencePath:'.beegame/delivery/evidence/implementation-a.json',taskId:'task',revision:'revision',
       verifiedArtifacts:[],summary:'Normal final response',verificationResults:[]})
-    const saved = JSON.parse(await readFile(join(root,'.beegame/workflow/evidence/implementation-a.json'),'utf8'))
+    const saved = JSON.parse(await readFile(join(root,'.beegame/delivery/evidence/implementation-a.json'),'utf8'))
     expect(saved.runtimeAcceptance.summary).toBe(report.summary)
     expect(saved.summary).toBe('Normal final response')
     expect(await readRuntimeAcceptance(root, 'dispatch-b')).toBeUndefined()
@@ -73,14 +74,32 @@ test('implementation prompt requests only a dispatch-scoped result, not an audit
     revision:'revision',allowedPaths:['./'],contract:{changeRequest:'修复按钮'}})
   expect(prompt).toContain(runtimeAcceptancePath('fresh-dispatch'))
   expect(prompt).toContain('Choose your own verification methods')
+  expect(prompt).not.toContain('no additional audit Agent')
   expect(prompt).toContain('including the host iframe')
   expect(prompt).toContain('修复按钮')
+  expect(prompt).toContain('not a filesystem sandbox')
+})
+
+test('implementation completion accepts necessary project edits outside the primary output hint', () => {
+  const issue = implementationCompletionIssue({
+    task: { id: 'bugfix', title: 'Fix UI', checklistIds: [], resourceIds: [], contentIds: [],
+      allowedPaths: [], status: 'running', attempt: 1, evidenceRefs: [] },
+    terminal: {
+      workerType: 'implementation-worker', taskId: 'bugfix', status: 'completed', revision: 'revision',
+      changedPaths: ['src/ui/Button.tsx', 'tests/ui/Button.test.tsx'], verifiedArtifacts: [],
+      summary: 'Fixed and verified the UI bug', verificationResults: [{ verificationIndex: 0,
+        status: 'passed', observations: ['The affected UI test passed'] }],
+      evidenceRefs: ['.beegame/delivery/evidence/bugfix.json'],
+      evidencePath: '.beegame/delivery/evidence/bugfix.json',
+    },
+  })
+  expect(issue).toBeUndefined()
 })
 
 test('deliverable directories bind nested file contents and names, without following escaping or cyclic links', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-artifact-directory-'))
   try {
-    await mkdir(join(root, '.beegame/workflow/evidence'), { recursive: true })
+    await mkdir(join(root, '.beegame/delivery/evidence'), { recursive: true })
     await mkdir(join(root, 'dist/assets/runtime'), { recursive: true })
     await writeFile(join(root, 'observations.txt'), 'Observed gameplay')
     const asset = join(root, 'dist/assets/runtime/a.txt')

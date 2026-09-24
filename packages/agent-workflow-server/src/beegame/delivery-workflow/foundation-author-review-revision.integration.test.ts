@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, realpath } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
@@ -11,6 +11,7 @@ import { reviewFixtureDocuments } from '../stage-modules/foundation-reviewer/pri
 import { offlineReviewerBilling } from '../stage-modules/foundation-reviewer/private/test-fixtures/offline-billing'
 import { createFoundationReviewer } from '../stage-modules/foundation-reviewer/public'
 import { createDeliveryWorkflowController } from './controller'
+import { FOUNDATION_AUTHOR_REVIEW_HANDOFF_REASON } from './foundation-authoring-link'
 import { createInitialDeliveryRun, createRunStore } from './run-store'
 import type { DeliveryRun } from './types'
 
@@ -46,18 +47,18 @@ function billingWithCallCount(ownerId: string, calls: { count: number }) {
 async function waitForAccepted(controller: ReturnType<typeof createDeliveryWorkflowController>, store: ReturnType<typeof createRunStore>, run: DeliveryRun) {
   for (let attempt = 0; attempt < 3_000; attempt++) {
     try { await controller.ensureProgress(run) } catch (error) {
-      // Handoff may be performed by this call or by the background observer.
-      // Both must leave the same deliberately failed resource boundary.
       const failed = await store.load()
       if (error instanceof Error && error.message === 'resource execution intentionally unavailable in foundation-only fixture' &&
-          failed?.phase === 'RESOURCE_PREPARATION' && failed.status === 'failed' &&
+          failed?.phase === 'DOCUMENT_REVIEW' && failed.documentStep === 'CHECKLIST_DRAFTING' && failed.status === 'failed' &&
           failed.foundationReviewStage?.acceptedReview) return failed
       throw error
     }
     const current = await store.load()
-    if (current?.foundationReviewStage?.acceptedReview && current.phase === 'RESOURCE_PREPARATION' && current.status === 'failed') return current
+    if (current?.foundationReviewStage?.acceptedReview && current.phase === 'DOCUMENT_REVIEW' &&
+        current.documentStep === 'CHECKLIST_DRAFTING' && current.status === 'failed') return current
     if (current?.foundationReviewStage?.acceptedReview) { await pause(20); continue }
-    if (current?.foundationReviewStage && ['needs_action', 'failed', 'stopped'].includes(current.status))
+    if (current?.foundationReviewStage && current.blockedReason !== FOUNDATION_AUTHOR_REVIEW_HANDOFF_REASON &&
+        ['needs_action', 'failed', 'stopped'].includes(current.status))
       throw new Error(JSON.stringify({ reason: current.blockedReason, outcome: current.foundationReviewStage.invocation.outcome }))
     await pause(20)
   }
@@ -65,7 +66,7 @@ async function waitForAccepted(controller: ReturnType<typeof createDeliveryWorkf
 }
 
 for (const rounds of [0, 1, 2])
-test(`agentic document passes correct ${rounds} changed document(s) without a separate repair agent`, async () => {
+test(`plain-text review applies ${rounds} revision(s), bumps changed versions, and auto-continues`, async () => {
   const workspacePath = await realpath(await mkdtemp(join(tmpdir(), 'public-foundation-chain-')))
   const ownerId = 'public-chain-owner'
   const projectId = 'public-chain-project'
@@ -94,7 +95,7 @@ test(`agentic document passes correct ${rounds} changed document(s) without a se
   const reviewerBilling = billingWithCallCount(ownerId, reviewerBillingCalls)
   const reviewer = createFoundationReviewer({ workspacePath }, {
     runtimeConfiguration: runtimeConfiguration({ ownerId, dataDir: workspacePath,
-      command: [process.execPath, fileURLToPath(new URL('../stage-modules/foundation-reviewer/private/test-fixtures/native-file-review.ts', import.meta.url)), 'repair-flow'],
+      command: [process.execPath, fileURLToPath(new URL('../stage-modules/foundation-reviewer/private/test-fixtures/native-file-review.ts', import.meta.url)), 'repair-flow-plain-result'],
       env: { BEEGAME_MODEL_TYPE: 'openai', OPENAI_DEFAULT_HAIKU_MODEL: 'fixture-fast',
         OPENAI_DEFAULT_SONNET_MODEL: 'fixture-balanced', OPENAI_DEFAULT_OPUS_MODEL: 'fixture-strong' }, calls: reviewerRuntimeCalls }),
     billing: reviewerBilling.client,
@@ -151,13 +152,22 @@ test(`agentic document passes correct ${rounds} changed document(s) without a se
     for (const artifact of authorResult.documents) {
       expect(digest(await readFile(join(workspacePath, artifact.artifactPath), 'utf8'))).toBe(artifact.digest)
     }
-    // Accepted documents now hand off directly to resources; a publication
-    // snapshot can be observed before that asynchronous handoff has settled.
+    // Accepted documents hand off to Checklist before resource delivery.
     expect(current.status).toBe('failed')
-    expect(current.phase).toBe('RESOURCE_PREPARATION')
+    expect(current.phase).toBe('DOCUMENT_REVIEW')
+    expect(current.documentStep).toBe('CHECKLIST_DRAFTING')
     expect(current.blockedReason).toBe('resource execution intentionally unavailable in foundation-only fixture')
-    expect(current.documentStep).toBeUndefined()
-    expect(current.activeDispatch).toMatchObject({ workerType: 'resource-planner', status: 'failed' })
+    expect(current.activeDispatch).toMatchObject({ workerType: 'document-author', status: 'failed' })
+    const milestones = (await readFile(join(workspacePath, '.beegame/workflow/events.jsonl'), 'utf8'))
+      .trim().split('\n').map(line => JSON.parse(line) as { type: string; phase: string; documentStep?: string })
+    const authorDone = milestones.findIndex(event => event.type === 'foundation.authoring.public_result' && event.phase === 'DOCUMENT_REVIEW')
+    const reviewStarted = milestones.findIndex(event => event.type === 'foundation.public_review.requested' && event.documentStep === 'FOUNDATION_REVIEW')
+    const revisionApplied = milestones.findIndex(event => event.type === 'foundation.public_review.observed' && event.documentStep === 'FOUNDATION_REVISION')
+    const checklistStarted = milestones.findIndex(event => event.type === 'phase.entered' && event.documentStep === 'CHECKLIST_DRAFTING')
+    expect(authorDone).toBeGreaterThanOrEqual(0)
+    expect(reviewStarted).toBeGreaterThan(authorDone)
+    expect(revisionApplied).toBeGreaterThan(reviewStarted)
+    expect(checklistStarted).toBeGreaterThan(revisionApplied)
 
     const snapshot = structuredClone(current)
     const currentPointerPath = join(workspacePath, '.beegame/artifacts/current.json')
@@ -166,7 +176,8 @@ test(`agentic document passes correct ${rounds} changed document(s) without a se
       reviewerBillingCalls.count]
     const settledCounts = counts()
     for (let i = 0; i < 3; i++) await controller.ensureProgress(run)
-    await controller.resume(current)
+    // Explicit Continue retries Checklist, never Author or Reviewer.
+    await expect(controller.resume(current)).rejects.toThrow('resource execution intentionally unavailable in foundation-only fixture')
     const repeated = (await store.load())!
     expect(counts()).toEqual(settledCounts)
     expect(repeated.foundationReviewStage?.acceptedReview?.resultId).toBe(snapshot.foundationReviewStage?.acceptedReview?.resultId)
@@ -175,7 +186,7 @@ test(`agentic document passes correct ${rounds} changed document(s) without a se
     const recovered = createDeliveryWorkflowController(ports)
     try {
       await recovered.ensureProgress(run)
-      await recovered.resume(current)
+      await expect(recovered.resume(current)).rejects.toThrow('resource execution intentionally unavailable in foundation-only fixture')
       expect((await store.load())!.foundationReviewStage!.acceptedReview).toEqual(link.acceptedReview)
       expect((await store.load())!.revision).toEqual(snapshot.revision)
       expect(counts()).toEqual(settledCounts)
@@ -185,6 +196,27 @@ test(`agentic document passes correct ${rounds} changed document(s) without a se
     expect(authorBillingCalls.count).toBe(1)
     expect(reviewerRuntimeCalls.count).toBe(1)
     expect(reviewerBillingCalls.count).toBe(1)
+    if (rounds === 0) {
+      const changedGdd = `${publishedGdd}\nLate design correction\n`
+      await writeFile(join(workspacePath, 'docs/GDD.md'), changedGdd)
+      await store.save({ ...current, phase: 'RESOURCE_PREPARATION', documentStep: undefined,
+        status: 'running', activeDispatch: undefined, blockedReason: undefined })
+      const recheckController = createDeliveryWorkflowController(ports)
+      try {
+        await recheckController.ensureProgress(run)
+        const rechecking = (await store.load())!
+        expect(rechecking.phase).toBe('DOCUMENT_REVIEW')
+        expect(rechecking.foundationReviewStage?.canonicalRecheck).toBe(true)
+        expect(rechecking.foundationReviewStage?.invocation.request.input.documents.find(
+          document => document.path === 'docs/GDD.md')?.content).toBe(changedGdd)
+        expect(authorRuntimeCalls.count).toBe(1)
+        const reviewedAgain = await waitForAccepted(recheckController, store, run)
+        expect(reviewedAgain.foundationReviewStage?.acceptedReview).toBeDefined()
+        expect(await readFile(join(workspacePath, 'docs/GDD.md'), 'utf8')).toContain('Late design correction')
+        expect(authorRuntimeCalls.count).toBe(1)
+        expect(reviewerRuntimeCalls.count).toBe(2)
+      } finally { await recheckController.dispose() }
+    }
   } finally {
     await controller.dispose()
   }

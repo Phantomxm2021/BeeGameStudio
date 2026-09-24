@@ -12,7 +12,6 @@ let projectList = [
 ];
 let projectStoreLoading = false;
 let deleteProject = vi.fn();
-let createReviewCopy = vi.fn();
 const { getCreditSummary } = vi.hoisted(() => ({
   getCreditSummary: vi.fn(),
 }));
@@ -22,7 +21,6 @@ vi.mock('../../../store/projectStore', () => ({
     projects: projectList,
     isLoading: projectStoreLoading,
     deleteProject,
-    createReviewCopy,
   }),
 }));
 
@@ -47,7 +45,6 @@ describe('ProjectHistoryModal permissions', () => {
     ];
     projectStoreLoading = false;
     deleteProject = vi.fn();
-    createReviewCopy = vi.fn();
     getCreditSummary.mockReset();
     getCreditSummary.mockResolvedValue({
       entriesCount: 3,
@@ -71,7 +68,7 @@ describe('ProjectHistoryModal permissions', () => {
     fireEvent.click(screen.getByLabelText('More actions Snake Game'));
 
     expect(screen.getByRole('button', { name: 'Delete Project' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Create Review Copy' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create Review Copy' })).not.toBeInTheDocument();
   });
 
   it('renders the project action menu above the dialog backdrop', () => {
@@ -119,36 +116,6 @@ describe('ProjectHistoryModal permissions', () => {
 
     const emptyState = screen.getByText('No projects for this account yet').parentElement;
     expect(emptyState).toHaveClass('h-full', 'items-center', 'justify-center');
-  });
-
-  it('creates and selects one review copy while preventing duplicate requests', async () => {
-    let resolveCopy: ((project: any) => void) | undefined;
-    createReviewCopy = vi.fn(() => new Promise(resolve => {
-      resolveCopy = resolve;
-    }));
-    const onSelectProject = vi.fn();
-    const onClose = vi.fn();
-
-    render(
-      <ProjectHistoryModal
-        isOpen
-        lang="en"
-        onClose={onClose}
-        onSelectProject={onSelectProject}
-      />,
-    );
-
-    fireEvent.click(screen.getByLabelText('More actions Snake Game'));
-    fireEvent.click(screen.getByRole('button', { name: 'Create Review Copy' }));
-    expect(createReviewCopy).toHaveBeenCalledTimes(1);
-    expect(createReviewCopy).toHaveBeenCalledWith('project-1');
-    expect(screen.getByRole('status', { name: 'Creating review copy' })).toBeInTheDocument();
-
-    resolveCopy?.({ id: 'copy-1', name: 'Snake Game Review Copy', created_at: 2 });
-    await waitFor(() => {
-      expect(onSelectProject).toHaveBeenCalledWith('copy-1');
-      expect(onClose).toHaveBeenCalledTimes(1);
-    });
   });
 
   it('does not hide delete action behind administrator permissions', () => {

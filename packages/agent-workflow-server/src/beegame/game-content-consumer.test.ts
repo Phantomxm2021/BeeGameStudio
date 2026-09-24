@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { readSceneData, readUiData, parseSpriteSheet, spriteSheetSelection, compose2d, affine2d, point2d, uiPaintOrder, UI_PAINT_CONFORMANCE_FIXTURE } from './game-content-consumer'
+import { readSceneData, readUiData, contentDocumentsForLoad, contentDocumentPath, fetchContentDocument, fetchStartupContentDocuments, parseSpriteSheet, spriteSheetSelection, compose2d, affine2d, point2d, uiPaintOrder, UI_PAINT_CONFORMANCE_FIXTURE } from './game-content-consumer'
 import { parseBeeGameContentDocument } from './game-content-package'
 import { bundleContentConsumer } from './game-content-consumer-cli'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
@@ -8,6 +8,18 @@ import { tmpdir } from 'node:os'
 
 const scene = { schema: 'beegame-content.v1', id: 'level', kind: 'scene-2d', assetRefs: [],
   data: { nodes: [{ id: 'root', transform: { position: [10, 20, 0] } }], settings: { width: 1280 } } }
+const contentIndex = {
+  schema: 'beegame-content-package.v2', id: 'game', dimension: '2d',
+  documentRevision: 'a'.repeat(64), assetManifestRevision: 'b'.repeat(64),
+  entryScene: 'level', files: ['scenes/level.json', 'ui/title.json', 'vfx/spark.json', 'scenes/bonus.json'],
+  sceneModel: 'game-object-v2',
+  documents: [
+    { id: 'level', path: 'scenes/level.json', kind: 'scene-2d', loadPhase: 'startup' },
+    { id: 'title', path: 'ui/title.json', kind: 'ui-screen', loadPhase: 'startup' },
+    { id: 'spark', path: 'vfx/spark.json', kind: 'vfx', loadPhase: 'on-demand' },
+    { id: 'bonus', path: 'scenes/bonus.json', kind: 'scene-2d', loadPhase: 'on-demand' },
+  ],
+}
 
 test('consumer and host use the same contract; no silent flat-envelope fallback', () => {
   expect(readSceneData(scene)).toEqual(parseBeeGameContentDocument(scene).data)
@@ -23,6 +35,63 @@ test('consumer and host use the same contract; no silent flat-envelope fallback'
     .toEqual([...UI_PAINT_CONFORMANCE_FIXTURE.expected])
 })
 
+test('document registry separates first-frame documents from deferred content', () => {
+  expect(contentDocumentsForLoad(contentIndex, 'startup').map(document => document.id))
+    .toEqual(['level', 'title'])
+  expect(contentDocumentsForLoad(contentIndex, 'on-demand').map(document => document.id))
+    .toEqual(['spark', 'bonus'])
+  expect(contentDocumentPath(contentIndex, 'spark')).toBe('vfx/spark.json')
+  expect(() => contentDocumentPath(contentIndex, 'missing')).toThrow('not registered: missing')
+
+  const legacyIndex = { ...contentIndex, documents: undefined }
+  expect(() => contentDocumentsForLoad(legacyIndex, 'startup')).toThrow('no document load registry')
+})
+
+test('staged fetch requests only the chosen phase and verifies document identity', async () => {
+  const requested: string[] = []
+  const payloads: Record<string, unknown> = {
+    'https://games.test/demo/content/scenes/level.json': scene,
+    'https://games.test/demo/content/ui/title.json': {
+      schema: 'beegame-content.v1', id: 'title', kind: 'ui-screen', assetRefs: [],
+      data: { rootId: 'root', nodes: [{ id: 'root', role: 'screen-root' }] },
+    },
+    'https://games.test/demo/content/vfx/spark.json': {
+      schema: 'beegame-content.v1', id: 'spark', kind: 'vfx', assetRefs: [], data: { nodes: [] },
+    },
+  }
+  const fetcher = async (input: RequestInfo | URL) => {
+    const url = String(input)
+    requested.push(url)
+    return new Response(JSON.stringify(payloads[url]), { status: 200 })
+  }
+  const loaded = await fetchStartupContentDocuments(contentIndex,
+    'https://games.test/demo/content/index.json', fetcher)
+
+  expect(loaded.map(document => document.id)).toEqual(['level', 'title'])
+  expect(requested).toEqual([
+    'https://games.test/demo/content/scenes/level.json',
+    'https://games.test/demo/content/ui/title.json',
+  ])
+  const deferredRequests: string[] = []
+  await expect(fetchContentDocument(contentIndex, 'spark',
+    'https://games.test/demo/content/index.json', async input => {
+      deferredRequests.push(String(input))
+      return new Response(JSON.stringify({ ...scene, id: 'wrong' }))
+    })).rejects.toThrow('does not match registry: spark')
+  expect(deferredRequests).toEqual(['https://games.test/demo/content/vfx/spark.json'])
+  await expect(fetchContentDocument(contentIndex, 'title',
+    'https://games.test/demo/content/index.json', async () => new Response('{}')))
+    .rejects.toThrow('is not on-demand: title')
+  await expect(fetchStartupContentDocuments(contentIndex,
+    'https://games.test/demo/content/index.json', async () => new Response('', { status: 404 })))
+    .rejects.toThrow('HTTP 404')
+  const unsafeIndex = { ...contentIndex, documents: contentIndex.documents.map((entry, index) =>
+    index === 0 ? { ...entry, path: '../outside.json' } : entry) }
+  await expect(fetchStartupContentDocuments(unsafeIndex,
+    'https://games.test/demo/content/index.json', async () => new Response('{}')))
+    .rejects.toThrow('Unsafe content document path')
+})
+
 test('portable ESM runs without BGS filesystem, Three.js or package dependencies', async () => {
   const source = await bundleContentConsumer()
   expect(source).not.toContain('node:fs')
@@ -34,6 +103,31 @@ test('portable ESM runs without BGS filesystem, Three.js or package dependencies
     await writeFile(file, source)
     const module = await import(file)
     expect(module.readSceneData(scene).nodes[0].id).toBe('root')
+    expect(module.contentDocumentsForLoad(contentIndex, 'startup').map((document: { id: string }) => document.id))
+      .toEqual(['level', 'title'])
+    expect(module.contentDocumentPath(contentIndex, 'spark')).toBe('vfx/spark.json')
+    expect(typeof module.fetchContentDocument).toBe('function')
+    const fetched: string[] = []
+    const staged = await module.fetchStartupContentDocuments(contentIndex,
+      'https://games.test/content/index.json', async (input: RequestInfo | URL) => {
+        const url = String(input)
+        fetched.push(url)
+        const document = url.endsWith('/ui/title.json') ? {
+          schema: 'beegame-content.v1', id: 'title', kind: 'ui-screen', assetRefs: [],
+          data: { rootId: 'root', nodes: [{ id: 'root', role: 'screen-root' }] },
+        } : scene
+        return new Response(JSON.stringify(document), { status: 200 })
+      })
+    expect(staged.map((document: { id: string }) => document.id)).toEqual(['level', 'title'])
+    expect(fetched).toEqual([
+      'https://games.test/content/scenes/level.json',
+      'https://games.test/content/ui/title.json',
+    ])
+    const deferred = await module.fetchContentDocument(contentIndex, 'spark',
+      'https://games.test/content/index.json', async () => new Response(JSON.stringify({
+        schema: 'beegame-content.v1', id: 'spark', kind: 'vfx', assetRefs: [], data: { nodes: [{ id: 'spark-emitter', type: 'particle-system' }] },
+      })))
+    expect(deferred.id).toBe('spark')
     expect(module.uiPaintOrder(module.UI_PAINT_CONFORMANCE_FIXTURE.nodes, 'root'))
       .toEqual(module.UI_PAINT_CONFORMANCE_FIXTURE.expected)
   } finally { await rm(directory, { recursive: true, force: true }) }

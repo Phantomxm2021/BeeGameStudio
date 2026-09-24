@@ -56,7 +56,7 @@ export function projectDocumentDisplayTasks(
 ): DocumentDisplayTask[] {
   // Public document-review links are projected by the public stage-card path.
   // No legacy task list is reconstructed from old project checkpoints.
-  if (input.documentStep === 'FOUNDATION_REVIEW')
+  if (input.documentStep === 'FOUNDATION_REVIEW' || input.documentStep === 'FOUNDATION_REVISION')
     return []
   const workspace = resolve(input.workspacePath)
   const canonicalReviewArtifacts = [

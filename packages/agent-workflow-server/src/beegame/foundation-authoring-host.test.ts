@@ -7,6 +7,7 @@ import type { BeeGameUsageBillingClient } from '@bee-game-studio/beegame-billing
 import type { BeeGameSessionCredential } from '../auth/session-routes'
 import { authorDigest } from './stage-modules/foundation-authoring/private/contract'
 import { createFoundationAuthoringHost } from './foundation-authoring-host'
+import type { AutonomousNativeExecutor } from './stage-modules/foundation-authoring/private/autonomous-native'
 
 const billingClient = {
   async recordUsage() { throw new Error('billing should not be reached in this fixture') },
@@ -38,6 +39,7 @@ function hostOptions(overrides: Record<string, unknown> = {}) {
     getCredential: () => undefined as BeeGameSessionCredential | undefined,
     getRuntimeEnv: async () => ({}),
     billingClient,
+    execute: (async () => ({ failure: 'offline fixture' })) as AutonomousNativeExecutor,
     ...overrides,
   }
   return base

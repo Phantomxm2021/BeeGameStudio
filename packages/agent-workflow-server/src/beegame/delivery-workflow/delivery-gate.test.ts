@@ -23,14 +23,14 @@ test('stale acceptance exposes its actual reason without promoting a conversatio
 test('publishing requires explicit current runtime evidence, not merely passed in run.json', async () => {
   const workspacePath = await mkdtemp(join(tmpdir(), 'bgs-publish-evidence-'))
   try {
-    await mkdir(join(workspacePath,'.beegame/workflow/evidence'),{recursive:true})
+    await mkdir(join(workspacePath,'.beegame/delivery/evidence'),{recursive:true})
     await writeFile(join(workspacePath,'game.js'),'initial implementation')
     await mkdir(join(workspacePath,'dist'))
     await writeFile(join(workspacePath,'dist/game.js'),'tested build')
     const report = {status:'passed',summary:'Observed gameplay in Preview',environment:'Web Preview iframe',
       verification: { target: 'deployment', knownIssues: [], unverified: [] },
       artifactPaths: ['dist/game.js'],
-      evidencePaths:['.beegame/workflow/evidence/browser.txt']}
+      evidencePaths:['.beegame/delivery/evidence/browser.txt']}
     await writeFile(join(workspacePath,report.evidencePaths[0]!), 'observed result')
     await writeFile(join(workspacePath,runtimeAcceptancePath('dispatch')),JSON.stringify(report))
     const runtimeReport = await readRuntimeAcceptance(workspacePath,'dispatch')
@@ -38,7 +38,7 @@ test('publishing requires explicit current runtime evidence, not merely passed i
     const content = 'c'.repeat(64)
     const revision = await computeWorkspaceRevision(workspacePath)
     const resource = await computeResourceRevision(workspacePath,base.revision.document)
-    const acceptancePath = '.beegame/workflow/evidence/accepted.json'
+    const acceptancePath = '.beegame/delivery/evidence/accepted.json'
     const receipt = {revision,status:'passed',runtimeVerification:'agent-reported',runtimeReports:[runtimeReport]}
     await writeFile(join(workspacePath,acceptancePath),JSON.stringify(receipt))
     const store = createRunStore(workspacePath,'owner')

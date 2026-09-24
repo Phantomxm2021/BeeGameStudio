@@ -3,13 +3,10 @@ import { hasActiveSubagents, isProjectExecutionActive, settleChatActivity } from
 import { transcriptEventsToHistory } from '../services/beeGameAdapter';
 
 describe('terminal Chat activity', () => {
-  it('keeps native follow-ups busy independently of historical delivery verdicts', () => {
-    for (const status of ['completed', 'failed', 'stopped', 'blocked', undefined]) {
-      expect(isProjectExecutionActive({ phase: 'running', workflow: { status } })).toBe(true);
-      expect(isProjectExecutionActive({ phase: 'idle', workflow: { status } })).toBe(false);
-    }
+  it('derives active execution only from the native runtime phase', () => {
+    expect(isProjectExecutionActive({ phase: 'running' })).toBe(true);
     expect(isProjectExecutionActive({ phase: 'waiting_approval' })).toBe(true);
-    expect(isProjectExecutionActive({ phase: 'idle', workflow: { status: 'running' } })).toBe(true);
+    expect(isProjectExecutionActive({ phase: 'idle' })).toBe(false);
     expect(isProjectExecutionActive({ phase: 'paused' })).toBe(false);
     expect(isProjectExecutionActive(null)).toBe(false);
   });

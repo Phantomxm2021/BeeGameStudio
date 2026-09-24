@@ -41,6 +41,7 @@ export const resourcePlannerTerminalSchema = base
     workerType: z.literal('resource-planner'),
     status: z.literal('completed'),
     writtenPaths: z.array(z.string().min(1)),
+    catalogObserved: z.boolean().optional(),
   })
   .strict()
 
@@ -78,6 +79,12 @@ export const implementationWorkerTerminalSchema = base
   })
   .strict()
 
+export const acceptanceValidatorTerminalSchema = base.extend({
+  workerType: z.literal('acceptance-validator'),
+  status: z.literal('completed'),
+  evidencePath: z.string().min(1),
+}).strict()
+
 export const changeImpactTerminalSchema = z
   .object({
     workerType: z.literal('change-impact-analyzer'),
@@ -106,6 +113,7 @@ export const workerTerminalSchema = z.discriminatedUnion('workerType', [
   resourcePlannerTerminalSchema,
   contentAuthorTerminalSchema,
   implementationWorkerTerminalSchema,
+  acceptanceValidatorTerminalSchema,
   changeImpactTerminalSchema,
   questionAnswerTerminalSchema,
 ])

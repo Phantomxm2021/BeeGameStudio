@@ -22,7 +22,7 @@ it('sends answers through the permission endpoint and does not treat stale reque
   expect(JSON.parse(request?.body as string)).toEqual({ decision: 'allow', scope: 'once', remember: false, answers })
   authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ resolved: false, stale: true })))
   await expect(beeGameAdapter.resolveToolPermission({ project_id: 'project', gate_id: 'question', decision: 'allow', answers }))
-    .rejects.toThrow('no longer pending')
+    .rejects.toMatchObject({ code: 'permission_not_pending', message: expect.stringContaining('no longer pending') })
 })
 
 const transcriptResponse = (overrides: Record<string, unknown> = {}) => new Response(JSON.stringify({
@@ -93,6 +93,25 @@ describe('transcriptEventsToHistory', () => {
     expect(history.map(m => m.clientMessageId)).toEqual(['client-1', 'client-2'])
     expect(history[1].supersedesMessageId).toBe('previous-edit')
   })
+  it('projects a replacement user turn without the superseded assistant and tool output', () => {
+    const event = (id: number, type: string, text: string, turnId: string, payload: Record<string, unknown> = {}) => ({
+      id, type, text, turnId, sessionId: 's', createdAt: new Date(id * 1000).toISOString(), payload,
+    })
+    const events = [
+      event(1, 'turn.started', '', 'one'),
+      event(2, 'user.message', 'Before', 'one', { clientMessageId: 'before' }),
+      event(3, 'assistant.message', 'First reply', 'one'),
+      event(4, 'turn.started', '', 'two'),
+      event(5, 'user.message', 'Original', 'two', { clientMessageId: 'original' }),
+      event(6, 'tool.completed', 'Old tool result', 'two', { toolName: 'Bash', toolUseID: 'old-tool' }),
+      event(7, 'assistant.message', 'Old reply', 'two'),
+      event(8, 'turn.started', '', 'replacement'),
+      event(9, 'user.message', 'Edited', 'replacement', { clientMessageId: 'edited', supersedesMessageId: 'original' }),
+      event(10, 'assistant.message', 'New reply', 'replacement'),
+    ]
+    const history = transcriptEventsToHistory('p', events)
+    expect(history.map(item => item.content).filter(Boolean)).toEqual(['Before', 'First reply', 'Edited', 'New reply'])
+  })
   it('restores attachment-only turns through every display projection without merging repeated text', () => {
     const attachments = [{ type: 'image', filename: 'scene.png', mediaType: 'image/png',
       storageId: '00000000-0000-0000-0000-000000000000-image.png' }]
@@ -105,6 +124,36 @@ describe('transcriptEventsToHistory', () => {
   })
   const nativeEvent = (id: number, type: string, payload: Record<string, unknown>, sessionId = 'worker-1') => ({
     id, type, payload, sessionId, turnId: 'turn-1', text: 'system', createdAt: `2026-09-19T00:00:0${id}.000Z`,
+  })
+  it('projects native compaction start and boundary as one history marker', () => {
+    const start = nativeEvent(1, 'system.status', { type: 'system', subtype: 'status', status: 'compacting' })
+    const end = nativeEvent(2, 'system.status', { type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto' } })
+    const startOnly = transcriptEventsToHistory('p', [start]) as Record<string, unknown>[]
+    expect(startOnly).toHaveLength(1)
+    expect(startOnly[0]).toMatchObject({ type: 'system_status', taskKind: 'context_compaction', streamStatus: 'streaming' })
+
+    const history = transcriptEventsToHistory('p', [start, end]) as Record<string, unknown>[]
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ id: startOnly[0].id, type: 'system_status', taskKind: 'context_compaction',
+      content: 'compacted', streamStatus: 'complete', timestamp: Date.parse(start.createdAt) })
+  })
+
+  it('streams the same compaction marker identity on start and completion', async () => {
+    const events = [
+      nativeEvent(1, 'system.status', { type: 'system', subtype: 'status', status: 'compacting' }),
+      nativeEvent(2, 'system.status', { type: 'system', subtype: 'compact_boundary' }),
+    ]
+    const body = new ReadableStream<Uint8Array>({ start(controller) {
+      for (const event of events) controller.enqueue(new TextEncoder().encode(`id: ${event.id}\ndata: ${JSON.stringify({ events: [event] })}\n\n`))
+      controller.close()
+    } })
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(body))
+    const onMessage = vi.fn()
+    await beeGameAdapter.streamMessages('compaction-test', 0, { onMessage, onCursor: vi.fn() }, new AbortController().signal)
+    const markers = onMessage.mock.calls.map(([message]) => message).filter(message => message.type === 'context_compaction')
+    expect(markers).toHaveLength(2)
+    expect(markers.map(message => message.status)).toEqual(['running', 'finished'])
+    expect(new Set(markers.map(message => message.message_id)).size).toBe(1)
   })
   const launchEvents = () => [
     nativeEvent(1, 'tool.started', { toolName: 'Agent', toolUseID: 'agent-1', input: { description: 'Audit assets', prompt: 'Check manifest' } }),
@@ -143,6 +192,43 @@ describe('transcriptEventsToHistory', () => {
     expect(card?.subagentActivity).toEqual(subagentActivity)
     const displayed = toChatDisplayMessages(normalizeChatHistory(history))
     expect(displayed.find(message => message.isSubagentTool)?.subagentActivity).toEqual(subagentActivity)
+  })
+
+  it('uses a structured TaskOutput terminal result when the native task notification is missing', () => {
+    const events = [...launchEvents(),
+      nativeEvent(3, 'system.status', { type: 'system', subtype: 'task_started', task_id: 'task-1',
+        toolUseID: 'agent-1', input: { prompt: 'Check manifest' } }),
+      nativeEvent(4, 'tool.completed', { toolName: 'TaskOutput', toolUseID: 'wait-1',
+        input: { task_id: 'task-1' }, nativeBackgroundTaskResult: {
+          toolUseID: 'agent-1', status: 'failed', result: 'Test failed',
+        }, backgroundAgentInput: { prompt: 'Check manifest' } }),
+    ]
+    const history = transcriptEventsToHistory('project-1', events) as Record<string, unknown>[]
+    expect(history.filter(message => message.isSubagentTool)).toHaveLength(1)
+    expect(history.find(message => message.isSubagentTool)).toMatchObject({
+      toolStatus: 'failed', subagentPrompt: 'Check manifest', subagentOutput: 'Test failed',
+    })
+  })
+
+  it('recovers a historical background Bash task result without labeling it an Agent', () => {
+    const history = transcriptEventsToHistory('project-1', [
+      nativeEvent(1, 'system.status', { type: 'system', subtype: 'task_started', task_id: 'task-1',
+        task_type: 'local_bash', toolUseID: 'bash-call-1', input: { description: 'Run tests' } }),
+      nativeEvent(2, 'tool.completed', { toolName: 'TaskOutput', toolUseID: 'wait-1',
+        input: { task_id: 'task-1' }, nativeTaskResult: { taskId: 'task-1', status: 'failed', result: 'Tests failed' } }),
+    ]) as Record<string, unknown>[]
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ toolStatus: 'failed', toolName: 'Task',
+      subagentOutput: 'Tests failed', isSubagentTool: true })
+  })
+
+  it('does not resurrect a background task from a late start event after session Stop', () => {
+    const history = transcriptEventsToHistory('project-1', [
+      nativeEvent(1, 'session.stopped', {}),
+      nativeEvent(2, 'system.status', { type: 'system', subtype: 'task_started', task_id: 'late-task',
+        task_type: 'local_bash', toolUseID: 'late-call' }),
+    ]) as Record<string, unknown>[]
+    expect(history.some(message => message.isSubagentTool)).toBe(false)
   })
 
   it.each(['failed', 'stopped', 'killed'])('retains %s background task outcomes after foreground completion', status => {
@@ -190,6 +276,32 @@ describe('transcriptEventsToHistory', () => {
     expect(onMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'token', content: '中文\n', message_id: 'beegame-assistant-s-native-message' }))
     expect(onCursor).toHaveBeenLastCalledWith(1)
     expect(onMessage.mock.invocationCallOrder[0]).toBeLessThan(onCursor.mock.invocationCallOrder[0])
+  })
+
+  it('shows a queued user message on the live stream without requiring a page refresh', async () => {
+    const event = { id: 7, sessionId: 's', turnId: 'turn-2', type: 'user.message', text: '继续',
+      createdAt: '2026-09-20T00:00:00Z', payload: { type: 'user.message', clientMessageId: 'client-7' } }
+    const body = new ReadableStream<Uint8Array>({ start(controller) {
+      controller.enqueue(new TextEncoder().encode(`id: 7\ndata: ${JSON.stringify({ events: [event] })}\n\n`))
+      controller.close()
+    } })
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(body))
+    const onMessage = vi.fn()
+    await beeGameAdapter.streamMessages('live-user-test', 6, { onMessage }, new AbortController().signal)
+    expect(onMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      type: 'agent_message', sender: 'user', content: '继续',
+      message_id: 'client-7', client_message_id: 'client-7',
+    }))
+  })
+
+  it('shows the same user message when live updates fall back to polling', async () => {
+    const event = { id: 8, sessionId: 's', turnId: 'turn-3', type: 'user.message', text: '修复按钮',
+      createdAt: '2026-09-20T00:00:00Z', payload: { type: 'user.message', clientMessageId: 'client-8' } }
+    authenticatedFetchMock.mockResolvedValueOnce(Response.json({ events: [event], workspacePath: '' }))
+    const result = await beeGameAdapter.pollMessages('live-poll-user-test', 7)
+    expect(result.messages).toEqual([expect.objectContaining({
+      type: 'agent_message', sender: 'user', content: '修复按钮', message_id: 'client-8',
+    })])
   })
 
   it('breaks a silent SSE socket after the heartbeat deadline so the hook can reconnect', async () => {

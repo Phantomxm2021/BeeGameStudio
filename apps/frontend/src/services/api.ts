@@ -58,8 +58,6 @@ export interface ProjectBaselineStatusPayload {
   context?: ContextVisibilityPayload | null
   build_report?: BuildReportPayload | null
   project_target?: BeeGameAssetManifestPayload['project_target'] | null
-  /** Untrusted backend workflow payload; normalize before it reaches display models. */
-  workflow?: unknown
   model_config_id?: string | null
 }
 
@@ -152,7 +150,6 @@ export interface BeeGameDeploymentPayload {
 export interface BeeGameDeploymentReadiness {
   allowed: boolean
   issues: string[]
-  workflow?: { phase: string; status: string; blockedReason?: string }
   destination: 'remote' | 'local'
 }
 
@@ -395,10 +392,6 @@ export const normalizeProjectBaselineStatusPayload = (
       project_target: null,
     }
   }
-  const workflow =
-    normalizedPayload.workflow && typeof normalizedPayload.workflow === 'object'
-      ? normalizedPayload.workflow
-      : undefined
   return {
     project_id: String(normalizedPayload.project_id ?? '').trim(),
     phase: String(normalizedPayload.phase ?? '').trim(),
@@ -424,7 +417,6 @@ export const normalizeProjectBaselineStatusPayload = (
       typeof normalizedPayload.project_target === 'object'
         ? (normalizedPayload.project_target as ProjectBaselineStatusPayload['project_target'])
         : null,
-    workflow,
   }
 }
 
@@ -462,9 +454,6 @@ export const api = {
    */
   continueTask: (data: { project_id: string; task_id?: string }) =>
     beeGameAdapter.continueTask(data),
-
-  resumeWorkflow: (projectId: string) =>
-    beeGameAdapter.resumeWorkflow(projectId),
 
   requestProjectAction: (data: {
     project_id: string
@@ -536,9 +525,6 @@ export const api = {
   ): Promise<ProjectRuntimeStatePayload> =>
     beeGameAdapter.getProjectRuntimeState(projectId),
 
-  getWorkflowPhases: async (projectId: string) =>
-    (await beeGameAdapter.getProjectRuntimeState(projectId)).status,
-
   getProjectTokenUsage: async (projectId: string) =>
     (await beeGameAdapter.getProjectRuntimeState(projectId)).status.context
       ?.token_budget ?? {},
@@ -549,8 +535,6 @@ export const api = {
    * @returns 返回操作状态
    */
   deleteProject: (projectId: string) => beeGameAdapter.deleteProject(projectId),
-
-  createReviewCopy: (projectId: string) => beeGameAdapter.createReviewCopy(projectId),
 
   getCurrentUser: (): Promise<BeeGameCurrentUser> => getBeeGameCurrentUser(),
 

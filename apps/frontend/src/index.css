@@ -91,6 +91,12 @@
   .scrollbar-hide { scrollbar-width: none; }
   .scrollbar-hide::-webkit-scrollbar { display: none; }
   .bg-grid-pattern { background-image: linear-gradient(to right, var(--border-subtle) 1px, transparent 1px), linear-gradient(to bottom, var(--border-subtle) 1px, transparent 1px); background-size: 20px 20px; }
+  .workspace-loading-beam { animation: workspace-loading-sweep 1.8s ease-in-out infinite; }
+}
+
+@keyframes workspace-loading-sweep {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(310%); }
 }
 
 @media (prefers-reduced-motion: reduce) {

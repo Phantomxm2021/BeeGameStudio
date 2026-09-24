@@ -269,7 +269,9 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
     if (message.type === 'result') {
       lastActivityAt = new Date().toISOString()
       await log('result', { subtype: message.subtype, isError: message.is_error,
-        usage: message.usage, modelUsage: message.modelUsage })
+        usage: message.usage, modelUsage: message.modelUsage,
+        hasStructuredOutput: message.structured_output !== undefined,
+        resultTextBytes: typeof message.result === 'string' ? Buffer.byteLength(message.result) : undefined })
       if (!failure && !result) {
         if (message.is_error === true || message.subtype !== 'success') failure = 'model_failed'
         else result = message

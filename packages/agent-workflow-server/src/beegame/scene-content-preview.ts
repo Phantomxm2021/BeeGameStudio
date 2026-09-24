@@ -151,10 +151,9 @@ export async function transformedOverlay(bytes: Buffer, pose: Affine2D, size: { 
 }
 
 function visibleInDefaultState(node: SceneNode): boolean {
-  if (node.enabled === false) return false
-  const condition = text(record(node.data)?.visibleWhen)
-    ?? node.components?.map(item => text(record(item.data)?.visibleWhen)).find(Boolean)
-  return !condition || condition === 'state != caught' || condition.endsWith('.notCollected')
+  // A static preview has no gameplay state. Never guess a condition's result
+  // from its spelling; only the authored enabled flag has a known value here.
+  return node.enabled !== false
 }
 
 function visibleInHierarchy(node: SceneNode, nodes: Map<string, SceneNode>): boolean {
@@ -272,12 +271,12 @@ async function particleImage(bytes: Buffer, size: number, tint: string, alpha: n
 
 export async function renderSceneContentPreviews(workspacePath: string): Promise<string[]> {
   const manifest = readBeeGameAssetManifestSync(workspacePath)
-  const run = JSON.parse(await readFile(resolve(workspacePath, '.beegame/workflow/run.json'), 'utf8')) as RecordValue
-  const revision = record(run.revision)
-  const documentRevision = text(revision?.document)
-  const assetManifestRevision = text(revision?.resource)
+  const indexPath = resolve(workspacePath, 'content/index.json')
+  const index = JSON.parse(await readFile(indexPath, 'utf8')) as RecordValue
+  const documentRevision = text(index.documentRevision)
+  const assetManifestRevision = text(index.assetManifestRevision)
   if (!documentRevision || !assetManifestRevision)
-    throw new Error('Scene preview requires accepted document and Asset Manifest revisions.')
+    throw new Error('Scene preview requires document and Asset Manifest revisions in content/index.json.')
   const audit = auditBeeGameContentPackage(workspacePath, {
     documentRevision,
     assetManifestRevision,
