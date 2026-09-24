@@ -56,7 +56,8 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
     permissions: {
       // Explicit ask rules also apply to normally auto-approved file reads and
       // sub-agent acceptEdits mode. No --tools/--disallowedTools filtering.
-      ask: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'NotebookEdit', 'LSP', 'Agent', 'Bash', 'WebSearch', 'WebFetch'],
+      ask: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'NotebookEdit', 'LSP',
+        'Agent', 'Task', 'TaskOutput', 'TaskStop', 'Bash', 'WebSearch', 'WebFetch'],
     },
     sandbox: {
       enabled: true,
@@ -100,10 +101,12 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
       // sandbox cannot start, and native execution enforces the same restriction.
       return allow({ ...args, dangerouslyDisableSandbox: false })
     }
-    if (name === 'Agent') {
+    if (name === 'Agent' || name === 'Task') {
       // Delegation is available, but cannot elevate the child's permission mode.
-      return allow({ ...args, mode: 'default' })
+      const { mode: _requestedMode, ...taskInput } = args
+      return allow(name === 'Agent' ? { ...taskInput, mode: 'default' } : taskInput)
     }
+    if (name === 'TaskOutput' || name === 'TaskStop') return allow(args)
     // Research is a normal read-only CLI capability. Keep local/private URLs
     // unavailable without selecting sources or directing the Agent's research.
     if (name === 'WebSearch') return allow(args)

@@ -9,8 +9,14 @@ test('native file tasks can use public read-only research tools without opening 
   const workspace = await realpath(await mkdtemp(join(tmpdir(), 'native-research-')))
   try {
     const access = await createNativeTaskAccess({ workspacePath: workspace })
+    expect(access.settings.permissions.ask).toContain('Task')
     expect(access.settings.permissions.ask).toContain('WebSearch')
     expect(access.settings.permissions.ask).toContain('WebFetch')
+    expect(await access.permission({ tool_name: 'Task', input: { description: 'Inspect design', prompt: 'Review geometry',
+      subagent_type: 'general-purpose', mode: 'bypassPermissions' } })).toEqual({ behavior: 'allow',
+      updatedInput: { description: 'Inspect design', prompt: 'Review geometry', subagent_type: 'general-purpose' } })
+    expect((await access.permission({ tool_name: 'TaskOutput', input: { task_id: 'child-1' } })).behavior).toBe('allow')
+    expect((await access.permission({ tool_name: 'TaskStop', input: { task_id: 'child-1' } })).behavior).toBe('allow')
     expect((await access.permission({ tool_name: 'WebSearch', input: { query: 'XR interaction design' } })).behavior).toBe('allow')
     expect((await access.permission({ tool_name: 'WebFetch', input: { url: 'https://docs.example.org/xr' } })).behavior).toBe('allow')
     for (const url of ['http://docs.example.org/xr', 'https://127.0.0.1/private',
