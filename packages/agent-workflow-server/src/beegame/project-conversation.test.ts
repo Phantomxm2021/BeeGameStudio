@@ -413,6 +413,71 @@ test('restart restores the native UUID and request identity without delivery rec
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
+test('a user message resumes an interrupted delivery milestone after restart without repeating it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-interrupted-delivery-resume-'))
+  const workspace = join(root, 'project')
+  const base = { workspacePath: workspace, userId: 'owner', projectId: 'project' }
+  let interrupted = true
+  const starts: BeeGameSessionRunnerStartInput[] = []
+  const runner = { async start(start: BeeGameSessionRunnerStartInput) {
+    starts.push(start)
+    start.onNativeSessionId?.('a28f9e61-96d5-4e38-981b-5acd25076508')
+    return { stop() {}, async submit(turn: Parameters<import('./session-manager').BeeGameSessionRuntime['submit']>[0]) {
+      if (interrupted) throw new Error('Fixture: previous server process exited mid-turn')
+      await turn.onMessage({ type: 'result', subtype: 'success', result: 'Review finished' })
+    } }
+  } }
+  let manager = new BeeGameSessionManager(runner, root)
+  try {
+    await mkdir(workspace)
+    await beginProjectDelivery(workspace, root, 'Build a game')
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({
+      ...(await readProjectDelivery(workspace, root)), phase: 'review',
+    }))
+    const session = manager.start(base)
+    await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id,
+      ownerId: 'owner', message: 'Review the documents', autoContinuation: true })
+    await idle(manager, session.id)
+    expect(manager.transcript(session.id).findLast(event => event.type === 'turn.failed')).toBeTruthy()
+    expect((await readProjectDelivery(workspace, root))?.phase).toBe('review')
+
+    await manager.dispose()
+    interrupted = false
+    manager = new BeeGameSessionManager(runner, root)
+    const restored = manager.start({ ...base, transcriptSessionId: session.id })
+    expect(restored.id).toBe(session.id)
+    await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: restored.id,
+      ownerId: 'owner', message: '继续' })
+    await idle(manager, restored.id)
+    expect((await readProjectDelivery(workspace, root))?.phase).toBe('resources')
+    expect(starts[1]?.resumeSessionId).toBe('a28f9e61-96d5-4e38-981b-5acd25076508')
+    expect(manager.transcript(restored.id).filter(event => event.type === 'user.message').at(-1)?.text).toBe('继续')
+    expect(manager.transcript(restored.id).filter(event => event.type === 'turn.completed')).toHaveLength(1)
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test('an ordinary user answer during review does not advance an uninterrupted milestone', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-review-user-answer-'))
+  const workspace = join(root, 'project')
+  const manager = new BeeGameSessionManager({ async start() {
+    return { stop() {}, async submit(turn) {
+      await turn.onMessage({ type: 'result', subtype: 'success', result: 'Answered the question' })
+    } }
+  } }, root)
+  try {
+    await mkdir(workspace)
+    await beginProjectDelivery(workspace, root, 'Build a game')
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({
+      ...(await readProjectDelivery(workspace, root)), phase: 'review',
+    }))
+    const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+    await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id,
+      ownerId: 'owner', message: 'What is being reviewed?' })
+    await idle(manager, session.id)
+    expect((await readProjectDelivery(workspace, root))?.phase).toBe('review')
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
 test('stopping and continuing reuses the same project session and native context', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-conversation-stop-resume-'))
   const starts: BeeGameSessionRunnerStartInput[] = []

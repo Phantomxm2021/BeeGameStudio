@@ -114,7 +114,10 @@ it('project chat handles the user request, then resumes the delivery milestone',
     const continuation = await post(`/api/beegame-sessions/${session.id}/continue`, { language: 'zh' })
     expect(continuation.status).toBe(202)
     expect(requestText(prompts[0]!)).toBe('按钮没字，请修复')
-    expect(JSON.stringify(prompts[1])).toContain('Current delivery milestone: author.')
+    // The user turn already received the full assignment; the same-session
+    // continuation keeps the milestone without repeating that long handoff.
+    expect(JSON.stringify(prompts[1])).toContain('milestone: author')
+    expect(JSON.stringify(prompts[1])).not.toContain('Current delivery milestone: author.')
     // A second turn reuses the same native process/session.
     expect(starts).toBe(1)
     release?.()

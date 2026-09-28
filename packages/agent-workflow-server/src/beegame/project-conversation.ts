@@ -48,6 +48,12 @@ export async function sendProjectConversation(input: {
   let turnStartedAt = 0
   let progress: Awaited<ReturnType<typeof advanceProjectDeliveryAfterTurn>>
   let readyToContinue = false
+  // A server restart closes the interrupted native turn as turn.failed. The
+  // user's next message resumes that same milestone, even though it is still
+  // displayed as an ordinary user message rather than an automatic handoff.
+  const recoveringInterruptedTurn = !input.initialBrief && !input.autoContinuation &&
+    input.sessions.transcript(input.sessionId).findLast(event =>
+      event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.empty')?.type === 'turn.failed'
   const path = join(session.cwd, '.beegame', 'tmp', input.sessionId, 'context.md')
   const assetCommandPath = join(session.cwd, '.beegame', 'tmp', input.sessionId, 'assets.mjs')
   const contentHelperPath = join(session.cwd, '.beegame', 'tmp', input.sessionId, 'content-consumer.mjs')
@@ -160,7 +166,7 @@ export async function sendProjectConversation(input: {
         const delivery = await readProjectDelivery(session.cwd, input.deliveryDataRoot)
         if (delivery && ['acceptance', 'complete'].includes(projectDeliveryPhase(delivery)))
           await captureProjectDeliveryAcceptance(session.cwd, input.deliveryDataRoot, turnStartedAt)
-        if (delivery?.status === 'active' && !input.initialBrief && !input.autoContinuation) {
+        if (delivery?.status === 'active' && !input.initialBrief && !input.autoContinuation && !recoveringInterruptedTurn) {
           const phase = projectDeliveryPhase(delivery)
           progress = { phase, shouldContinue: phase !== 'complete', issues: [] }
         } else progress = await advanceProjectDeliveryAfterTurn(session.cwd, input.deliveryDataRoot)
