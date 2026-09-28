@@ -50,7 +50,7 @@ export function openImageGenerationAccess(input: {
           }
           const available = Boolean(quality && config.apiKey && config.billing && (config.provider !== 'cloudflare' || quotedCreditsMicro !== null))
           return Response.json({ available,
-            provider: config.provider, model: config.model, quality: input.requiredQuality ?? config.quality, size: config.size,
+            provider: config.provider, model: config.model, quality: requestedQuality, size,
             referenceImageSupported: config.provider === 'cloudflare',
             ...(config.provider === 'cloudflare' ? { availableSizes: ['1024x1024', '1024x1536', '1536x1024'] } : {}),
             ...(config.provider === 'cloudflare' ? { quotedCreditsMicro,

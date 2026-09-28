@@ -194,17 +194,28 @@ const componentSceneNodeSchema = strictObject({
     data: sceneNodeDataSchema.optional(),
   })
 
-const uiLayoutSchema = strictObject({
+const uiLayoutFieldsSchema = strictObject({
     anchor: enumeration(Object.keys(UI_ANCHORS) as [keyof typeof UI_ANCHORS, ...(keyof typeof UI_ANCHORS)[]]).optional(),
+    anchorMin: tuple([finiteNumber.min(0).max(1), finiteNumber.min(0).max(1)]).optional(),
+    anchorMax: tuple([finiteNumber.min(0).max(1), finiteNumber.min(0).max(1)]).optional(),
+    sizeDelta: tuple([finiteNumber, finiteNumber]).optional(),
     position: tuple([finiteNumber, finiteNumber]).optional(),
     size: tuple([finiteNumber.nonnegative(), finiteNumber.nonnegative()]).optional(),
     rotation: finiteNumber.optional(),
     scale: tuple([finiteNumber, finiteNumber]).optional(),
   })
+const uiLayoutSchema = uiLayoutFieldsSchema.refine(layout => Boolean(layout.anchorMin) === Boolean(layout.anchorMax), {
+    message: 'anchorMin and anchorMax must be provided together',
+  }).refine(layout => !layout.sizeDelta || Boolean(layout.anchorMin), {
+    message: 'sizeDelta requires anchorMin and anchorMax',
+  }).refine(layout => !layout.anchorMin || !layout.anchorMax ||
+    layout.anchorMin.every((value, index) => value <= layout.anchorMax![index]), {
+    message: 'anchorMin must not exceed anchorMax',
+  })
 
 const uiResponsiveOverrideSchema = strictObject({
     enabled: boolean().optional(),
-    layout: uiLayoutSchema.optional(),
+    layout: uiLayoutFieldsSchema.optional(),
     style: record(string(), unknown()).optional(),
   })
 

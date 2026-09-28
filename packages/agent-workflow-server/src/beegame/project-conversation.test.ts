@@ -132,7 +132,7 @@ test('raw project turns reuse native context; language change resumes, not a new
     await send('Make the player faster', 'en', 'three'); await idle(manager, session.id)
     expect(starts).toHaveLength(2)
     expect(starts[1]?.resumeSessionId).toBe('a28f9e61-96d5-4e38-981b-5acd25076508')
-    expect(prompts.map(prompt => (prompt as Array<{ text: string }>)[0]?.text))
+    expect(prompts.map(prompt => (prompt as Array<{ text: string }>).at(-1)?.text))
       .toEqual(['UI 有问题，先只诊断', '只修复按钮文字', 'Make the player faster'])
     expect(JSON.stringify(prompts)).toContain("Previous turns' temporary localhost capability URLs have expired")
     expect(JSON.stringify(prompts)).toContain('isolated muted browser and records console/network/screenshot evidence')
@@ -144,6 +144,35 @@ test('raw project turns reuse native context; language change resumes, not a new
     expect(closed).toBe(3)
     expect(manager.events(session.id).filter(e => e.type === 'user.message').map(e => e.payload?.clientMessageId)).toEqual(['one', 'two', 'three'])
     expect(isProjectConversation(manager.events(session.id))).toBe(true)
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test('platform context precedes the natural user request in a confirmed project turn', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-natural-project-request-'))
+  const workspace = join(root, 'project')
+  let prompt: unknown
+  const manager = new BeeGameSessionManager({ async start() {
+    return { stop() {}, async submit(turn) {
+      prompt = turn.prompt
+      await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
+    } }
+  } }, root)
+  try {
+    await mkdir(workspace)
+    await beginProjectDelivery(workspace, root, '我想做一个贪吃蛇游戏')
+    const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+    await sendProjectConversation({ sessions: manager, deliveryDataRoot: root,
+      sessionId: session.id, ownerId: 'owner', message: 'Confirmed brief and delivery instructions',
+      initialBrief: { displayText: '我想做一个贪吃蛇游戏', confirmedBriefContext: JSON.stringify({
+        kind: 'confirmed_build_brief', resource_library_usage: 'optional',
+        document_language: 'zh', game_user_visible_language: 'zh', agent_response_language: 'zh',
+      }) } })
+    await idle(manager, session.id)
+    const blocks = prompt as Array<{ type: string; text: string }>
+    expect(blocks[0]?.text).toContain('Confirmed brief and delivery instructions')
+    expect(blocks.at(-1)?.text).toBe('我想做一个贪吃蛇游戏')
+    expect(manager.events(session.id).find(event => event.type === 'user.message')?.text)
+      .toBe('我想做一个贪吃蛇游戏')
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 

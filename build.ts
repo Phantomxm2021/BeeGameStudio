@@ -95,6 +95,10 @@ const ripgrepDir = join(outdir, 'vendor', 'ripgrep')
 await cp('src/utils/vendor/ripgrep', ripgrepDir, { recursive: true })
 console.log(`Copied src/utils/vendor/ripgrep/ → ${ripgrepDir}/`)
 
+const builtinSkillsDir = join(outdir, 'skills', 'builtinskills')
+await cp('.beegame/skills/builtinskills', builtinSkillsDir, { recursive: true })
+console.log(`Copied .beegame/skills/builtinskills/ → ${builtinSkillsDir}/`)
+
 // Step 5: Generate cli-bun and cli-node executable entry points
 const cliBun = join(outdir, 'cli-bun.js')
 const cliNode = join(outdir, 'cli-node.js')

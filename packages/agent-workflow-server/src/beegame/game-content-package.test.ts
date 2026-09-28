@@ -64,7 +64,7 @@ describe('Unity-style Game Content scene contract', () => {
     const menu = (position: number) => ({
       schema: 'beegame-content.v1', id: 'menu', kind: 'ui-screen', assetRefs: [],
       data: { rootId: 'root', nodes: [
-        { id: 'root', role: 'screen-root', layout: { size: [960, 540] }, data: { referenceResolution: [960, 540] } },
+        { id: 'root', role: 'screen-root', layout: { size: [960, 540] }, data: { referenceResolution: [960, 540], targetViewports: [[390, 844]] } },
         { id: 'play', parentId: 'root', role: 'button', layout: { anchor: 'top-center', position: [position, 278], size: [240, 52] } },
       ] },
     })

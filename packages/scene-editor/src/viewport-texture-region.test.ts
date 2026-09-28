@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { applyTextureRegion, rendererSize, rendererOffset, rendererOrder, textRasterMetrics } from './viewport'
-import { identityTransform, type SceneNode } from './model'
+import { applyTextureRegion, rendererSize, rendererOffset, textRasterMetrics } from './viewport'
+import { identityTransform, rendererOrder, type SceneNode } from './model'
 
 describe('sprite atlas texture regions', () => {
   it('respects explicit 2D renderer order including zero and negative layers', () => {
@@ -14,6 +14,12 @@ describe('sprite atlas texture regions', () => {
     expect(rendererOrder(node)).toBe(0)
     if (node.components[0].type === 'sprite-renderer') node.components[0].properties.sortingOrder = -5
     expect(rendererOrder(node)).toBe(-5)
+    node.renderLayerRank = 1
+    expect(rendererOrder(node)).toBeGreaterThan(1)
+    if (node.components[0].type === 'sprite-renderer') {
+      node.components[0].properties.sortingOrder = 10_000
+      expect(rendererOrder({ ...node, renderLayerRank: 0 })).toBeLessThan(rendererOrder({ ...node, renderLayerRank: 1 }))
+    }
   })
   it('maps a top-left pixel rectangle to Three texture coordinates', () => {
     const texture = new THREE.Texture()

@@ -33,6 +33,44 @@ const uiDocument = {
 };
 
 describe('UiEditorOverlay', () => {
+  it('previews authored stretch anchors at an arbitrary host size', async () => {
+    const doc = { schema: 'beegame-content.v1' as const, id: 'stretch', kind: 'ui-screen' as const, assetRefs: [], data: {
+      rootId: 'root', nodes: [
+        { id: 'root', role: 'screen-root', layout: { size: [960, 540] as [number, number] } },
+        { id: 'panel', parentId: 'root', role: 'container', layout: {
+          anchorMin: [0, 0] as [number, number], anchorMax: [1, 0] as [number, number],
+          sizeDelta: [-40, 80] as [number, number], position: [20, 12] as [number, number],
+        } },
+      ],
+    } };
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{ path: 'content/ui/stretch.json', revision: 'a'.repeat(64), document: doc }] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 1, requirements: [], resources: [] });
+    const { container } = render(<UiEditorOverlay projectId="stretch-preview" onClose={vi.fn()} />);
+    await screen.findByLabelText('UI hierarchy');
+    selectEditorOption('Preview viewport', 'Custom');
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Preview width' }), { target: { value: '800' } });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Preview height' }), { target: { value: '600' } });
+    expect(container.querySelector('.ui-editor-stage')).toHaveStyle({ width: '800px', height: '600px' });
+    expect(container.querySelector('[data-role="container"]')).toHaveStyle({ width: '760px', height: '80px' });
+    expect(doc.data.nodes[1]?.layout).not.toHaveProperty('size');
+  });
+
+  it('edits stretch anchors as content data rather than editor-only styling', async () => {
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{ path: 'content/ui/title.json', revision: 'a'.repeat(64), document: uiDocument }] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 1, requirements: [], resources: [] });
+    const save = vi.spyOn(beeGameAdapter, 'saveProjectGameContentDocument').mockResolvedValue({ revision: 'b'.repeat(64), contentRevision: 'c'.repeat(64) });
+    render(<UiEditorOverlay projectId="stretch-edit" onClose={vi.fn()} />);
+    const hierarchy = await screen.findByLabelText('UI hierarchy');
+    fireEvent.click(within(hierarchy).getByText('Settings layout').closest('.ui-editor-tree-row')!);
+    fireEvent.click(screen.getByRole('switch', { name: 'Stretch anchors' }));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'anchorMax X' }), { target: { value: '1' } });
+    fireEvent.keyDown(window, { key: 's', metaKey: true });
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    const layout = save.mock.calls[0][1].document.data.nodes.find(node => node.id === 'layout')?.layout;
+    expect(layout).toMatchObject({ anchorMin: [0, 0], anchorMax: [1, 0], sizeDelta: [300, 80] });
+    expect(layout).not.toHaveProperty('size');
+  });
+
   it('previews compact and portrait UI data without changing the base layout', async () => {
     const doc = { schema: 'beegame-content.v1' as const, id: 'responsive', kind: 'ui-screen' as const, assetRefs: [], data: {
       rootId: 'root', nodes: [

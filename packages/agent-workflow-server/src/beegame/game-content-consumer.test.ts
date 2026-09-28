@@ -77,6 +77,25 @@ test('responsive adaptation preserves authored geometry rather than substituting
   expect(bounds(1280, 720)).toEqual({ position: [520, 120], size: [240, 52] })
 })
 
+test('stretch layout is validated and resolved through the public content consumer', () => {
+  const document = { schema: 'beegame-content.v1', id: 'hud', kind: 'ui-hud', assetRefs: [], data: {
+    rootId: 'root', nodes: [
+      { id: 'root', role: 'hud-root', layout: { size: [960, 540] } },
+      { id: 'bar', parentId: 'root', role: 'container', layout: {
+        anchorMin: [0, 0], anchorMax: [1, 0], sizeDelta: [-40, 48], position: [20, 12],
+      }, responsive: { compact: { layout: { sizeDelta: [-20, 48] } } } },
+    ],
+  } }
+  const data = readUiData(document)
+  expect(resolveUiNodesForViewport(data.nodes, data.rootId, { width: 800, height: 600 })[1]?.layout)
+    .toMatchObject({ position: [20, 12], size: [760, 48] })
+  expect(resolveUiNodesForViewport(data.nodes, data.rootId, { width: 390, height: 844 })[1]?.layout)
+    .toMatchObject({ position: [20, 12], size: [370, 48] })
+  expect(() => readUiData({ ...document, data: { ...document.data, nodes: [
+    document.data.nodes[0], { ...document.data.nodes[1], layout: { anchorMin: [0, 0], sizeDelta: [0, 48] } },
+  ] } })).toThrow()
+})
+
 test('tile geometry is parsed with the same engine-neutral contract as Scene Editor', () => {
   const grid = parseGridData({ schema: 'grid.v1', cellSize: [32, 32], cellGap: [2, 2] })
   const map = parseTilemapData({ schema: 'tilemap.v1', gridNodeId: 'grid',

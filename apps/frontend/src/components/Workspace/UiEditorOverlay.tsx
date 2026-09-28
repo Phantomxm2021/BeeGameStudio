@@ -77,8 +77,8 @@ type UiAssetOption = {
   font: boolean;
 };
 
-type ViewportMode = 'base' | 'phone-portrait' | 'phone-landscape' | 'tablet-portrait';
-const PREVIEW_VIEWPORTS: Record<Exclude<ViewportMode, 'base'>, [number, number]> = {
+type ViewportMode = 'base' | 'custom' | 'phone-portrait' | 'phone-landscape' | 'tablet-portrait';
+const PREVIEW_VIEWPORTS: Record<Exclude<ViewportMode, 'base' | 'custom'>, [number, number]> = {
   'phone-portrait': [390, 844],
   'phone-landscape': [844, 390],
   'tablet-portrait': [768, 1024],
@@ -137,6 +137,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
   const [current, setCurrent] = useState<UiSnapshot>();
   const [selectedId, setSelectedId] = useState('');
   const [viewportMode, setViewportMode] = useState<ViewportMode>('base');
+  const [customViewport, setCustomViewport] = useState<[number, number]>([960, 540]);
   const [assetUrls, setAssetUrls] = useState<Record<string, string>>({});
   const [assetOptions, setAssetOptions] = useState<UiAssetOption[]>([]);
   const [fontFamilies, setFontFamilies] = useState<Record<string, string>>({});
@@ -430,10 +431,11 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
 
   const nodesById = useMemo(() => new Map(current?.document.data.nodes.map(node => [node.id, node]) ?? []), [current]);
   const selected = nodesById.get(selectedId);
-  const previewSize = viewportMode === 'base' ? canvasSize(current?.document) : PREVIEW_VIEWPORTS[viewportMode];
+  const rootCompactBreakpoint = current?.document.data.nodes.find(node => node.id === current.document.data.rootId)?.data?.compactMaxWidth;
+  const previewSize = viewportMode === 'base' ? canvasSize(current?.document)
+    : viewportMode === 'custom' ? customViewport : PREVIEW_VIEWPORTS[viewportMode];
   const previewNodes = useMemo(() => current
-    ? viewportMode === 'base' ? current.document.data.nodes
-      : resolveUiNodesForViewport(current.document.data.nodes, current.document.data.rootId, { width: previewSize[0], height: previewSize[1] })
+    ? resolveUiNodesForViewport(current.document.data.nodes, current.document.data.rootId, { width: previewSize[0], height: previewSize[1] })
     : [], [current, viewportMode, previewSize[0], previewSize[1]]);
   const previewSelected = previewNodes.find(node => node.id === selectedId);
   const children = useMemo(() => childIds(current?.document.data.nodes ?? []), [current]);
@@ -570,11 +572,12 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
     applyCurrent(next);
   };
 
-  const updateLayout = (field: 'position' | 'size', index: number, value: number) => {
+  const updateLayout = (field: 'position' | 'size' | 'sizeDelta' | 'anchorMin' | 'anchorMax', index: number, value: number) => {
     updateSelected(node => {
       const layout = node.layout ?? {};
       const pair = [...(layout[field] ?? (field === 'size' ? [160, 48] : [0, 0]))] as [number, number];
-      pair[index] = value;
+      pair[index] = field === 'anchorMin' ? Math.min(value, layout.anchorMax?.[index] ?? 1)
+        : field === 'anchorMax' ? Math.max(value, layout.anchorMin?.[index] ?? 0) : value;
       node.layout = { ...layout, [field]: pair };
     });
   };
@@ -1137,7 +1140,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
                 title={`${node.name ?? node.id} · ${node.role}`}
                 onPointerDown={event => { if (event.button === 0) { event.stopPropagation(); setSelectedId(node.id); } }}
               >{roleIcon(node.role)}</button>) : null}
-            {current && viewportMode === 'base' && selected && isTransformNode(selectedKind) && isNodeVisible(selected, current.document.data.nodes, hiddenIds) && selected.id !== current.document.data.rootId && showGizmos && !hiddenIds.has(selected.id) && !unpickableIds.has(selected.id) ? <SelectionGizmo node={selected} nodes={current.document.data.nodes} mode={gizmoMode} onBegin={beginTransform} /> : null}
+            {current && viewportMode === 'base' && selected && !selected.layout?.anchorMin && isTransformNode(selectedKind) && isNodeVisible(selected, current.document.data.nodes, hiddenIds) && selected.id !== current.document.data.rootId && showGizmos && !hiddenIds.has(selected.id) && !unpickableIds.has(selected.id) ? <SelectionGizmo node={selected} nodes={current.document.data.nodes} mode={gizmoMode} onBegin={beginTransform} /> : null}
           </div>
         </section>
         <div className="ui-editor-floating-toolbar" role="toolbar" aria-label="UI editor tools">
@@ -1163,7 +1166,8 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
             </EditorMenuPopup>
           </MenuPrimitive.Root>
           <span className="ui-editor-toolbar-divider" />
-          <EditorSelect label="Viewport" ariaLabel="Preview viewport" value={viewportMode} onValueChange={value => setViewportMode(value as ViewportMode)} options={[[ 'base', 'Base' ], [ 'phone-portrait', 'Phone · portrait' ], [ 'phone-landscape', 'Phone · landscape' ], [ 'tablet-portrait', 'Tablet · portrait' ]]} />
+          <EditorSelect label="Viewport" ariaLabel="Preview viewport" value={viewportMode} onValueChange={value => setViewportMode(value as ViewportMode)} options={[[ 'base', 'Base' ], [ 'custom', 'Custom' ], [ 'phone-portrait', 'Phone · portrait' ], [ 'phone-landscape', 'Phone · landscape' ], [ 'tablet-portrait', 'Tablet · portrait' ]]} />
+          {viewportMode === 'custom' ? <div className="ui-editor-viewport-size"><EditorInput aria-label="Preview width" type="number" min="1" value={customViewport[0]} onChange={event => setCustomViewport(([_, height]) => [Math.max(1, Number(event.target.value)), height])} /><span>×</span><EditorInput aria-label="Preview height" type="number" min="1" value={customViewport[1]} onChange={event => setCustomViewport(([width]) => [width, Math.max(1, Number(event.target.value))])} /></div> : null}
           <span className="ui-editor-toolbar-divider" />
           <Button variant="ghost" size="sm" type="button" aria-pressed={gizmoMode === 'hand'} className={gizmoMode === 'hand' ? 'active' : ''} aria-label="Hand tool" title="Hand / Pan (Q)" onClick={() => setGizmoMode('hand')}><Hand size={16} /></Button>
           <Button variant="ghost" size="sm" type="button" disabled={viewportMode !== 'base'} aria-pressed={gizmoMode === 'move' && viewportMode === 'base'} className={gizmoMode === 'move' && viewportMode === 'base' ? 'active' : ''} aria-label="Move tool" title="Move (W)" onClick={() => setGizmoMode('move')}><Move size={16} /></Button>
@@ -1203,6 +1207,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
                   const coordinate = node.data?.coordinateSystem;
                   if (coordinate && typeof coordinate === 'object') node.data = { ...node.data, coordinateSystem: { ...coordinate, width: size[0], height: size[1] } };
                 })} />)}</div>
+                <label>Compact max width<EditorInput aria-label="Compact max width" type="number" min="1" value={typeof selected.data?.compactMaxWidth === 'number' ? selected.data.compactMaxWidth : 600} onChange={event => updateData('compactMaxWidth', Math.max(1, Number(event.target.value)))} /></label>
                 <label>Background<input aria-label="Canvas background" type="color" value={String((selected.data?.background as { color?: string } | undefined)?.color ?? '#000000')} onChange={event => updateData('background', { ...(selected.data?.background as object ?? {}), color: event.target.value })} /></label>
               </div></details> : null}
               {selectedKind !== 'flow' && selectedKind !== 'flow-screen' && selectedKind !== 'canvas' ? <details className="ui-editor-inspector-component ui-editor-component-transform" open><summary><ChevronRight size={12} className="ui-editor-component-chevron" /><Move size={14} /><span>Rect Transform</span></summary><div className="ui-editor-section">
@@ -1210,7 +1215,26 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
                 <div className="ui-editor-anchor-field"><span>Anchors</span><div className="ui-editor-anchor-presets" role="radiogroup" aria-label="Anchor preset">{ANCHOR_PRESETS.map(anchor => <button key={anchor} type="button" role="radio" aria-label={anchor} aria-checked={nodeAnchor(selected).join(',') === nodeAnchor({ ...selected, layout: { ...selected.layout, anchor } }).join(',')} className={nodeAnchor(selected).join(',') === nodeAnchor({ ...selected, layout: { ...selected.layout, anchor } }).join(',') ? 'active' : ''} onClick={() => updateSelected(node => { node.layout = { ...node.layout, anchor }; })}><i /></button>)}</div></div>
                 <div className="ui-editor-pair"><span>Position</span>{[0, 1].map(index => <EditorInput key={index} aria-label={`Position ${index === 0 ? 'X' : 'Y'}`} type="number" value={selected.layout?.position?.[index] ?? 0} onChange={event => updateLayout('position', index, Number(event.target.value))} />)}</div>
                 {selected.data?.space === 'world' ? <label>Position Z<EditorInput aria-label="Position Z" type="number" value={typeof selected.data?.positionZ === 'number' ? selected.data.positionZ : 0} onChange={event => updateData('positionZ', Number(event.target.value))} /></label> : null}
-                <div className="ui-editor-pair"><span>Size</span>{[0, 1].map(index => <EditorInput key={index} aria-label={`Size ${index === 0 ? 'X' : 'Y'}`} type="number" min="0" value={selected.layout?.size?.[index] ?? (index === 0 ? 160 : 48)} onChange={event => updateLayout('size', index, Math.max(0, Number(event.target.value)))} />)}</div>
+                {selected.data?.space !== 'world' ? <div className="ui-editor-check-field"><span>Stretch anchors</span><Switch size="sm" aria-label="Stretch anchors" checked={!!selected.layout?.anchorMin} onCheckedChange={checked => updateSelected(node => {
+                  const layout = { ...node.layout };
+                  if (checked) {
+                    const anchor = uiAnchor(layout.anchor);
+                    layout.anchorMin = [...anchor] as [number, number];
+                    layout.anchorMax = [...anchor] as [number, number];
+                    layout.sizeDelta = layout.size ?? [160, 48];
+                    delete layout.size;
+                  } else {
+                    layout.size = previewSelected?.layout?.size ?? layout.sizeDelta ?? [160, 48];
+                    layout.position = previewSelected?.layout?.position ?? layout.position;
+                    delete layout.anchorMin; delete layout.anchorMax; delete layout.sizeDelta;
+                  }
+                  node.layout = layout;
+                })} /></div> : null}
+                {selected.layout?.anchorMin && selected.layout.anchorMax ? <>
+                  {(['anchorMin', 'anchorMax'] as const).map(field => <div className="ui-editor-pair" key={field}><span>{field === 'anchorMin' ? 'Anchor Min' : 'Anchor Max'}</span>{[0, 1].map(index => <EditorInput key={index} aria-label={`${field} ${index === 0 ? 'X' : 'Y'}`} type="number" min="0" max="1" step="0.05" value={selected.layout?.[field]?.[index] ?? 0} onChange={event => updateLayout(field, index, Math.max(0, Math.min(1, Number(event.target.value))))} />)}</div>)}
+                  <small>Equal anchors keep a fixed size; separate them to stretch with the parent.</small>
+                </> : null}
+                <div className="ui-editor-pair"><span>{selected.layout?.anchorMin ? 'Size Δ' : 'Size'}</span>{[0, 1].map(index => <EditorInput key={index} aria-label={`${selected.layout?.anchorMin ? 'Size delta' : 'Size'} ${index === 0 ? 'X' : 'Y'}`} type="number" min={selected.layout?.anchorMin ? undefined : '0'} value={selected.layout?.anchorMin ? selected.layout.sizeDelta?.[index] ?? 0 : selected.layout?.size?.[index] ?? (index === 0 ? 160 : 48)} onChange={event => updateLayout(selected.layout?.anchorMin ? 'sizeDelta' : 'size', index, selected.layout?.anchorMin ? Number(event.target.value) : Math.max(0, Number(event.target.value)))} />)}</div>
                 {selected.data?.space === 'world' ? <div className="ui-editor-triplet"><span>Rotation</span>{['X', 'Y', 'Z'].map((axis, index) => {
                   const rotation = Array.isArray(selected.data?.rotation3D) ? selected.data.rotation3D : [0, 0, Math.round((selected.layout?.rotation ?? 0) * 180 / Math.PI * 100) / 100];
                   return <EditorInput key={axis} aria-label={`Rotation ${axis}`} title={axis} type="number" step={snap ? 15 : 1} value={Number(rotation[index]) || 0} onChange={event => updateRotation3D(index, Number(event.target.value))} />;
@@ -1219,7 +1243,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
                 {selected.data?.space === 'world' ? <label>Scale Z<EditorInput aria-label="Scale Z" type="number" step="0.1" value={typeof selected.data?.scaleZ === 'number' ? selected.data.scaleZ : 1} onChange={event => updateData('scaleZ', Number(event.target.value))} /></label> : null}
               </div></details> : null}
               {selectedKind !== 'flow' && selectedKind !== 'flow-screen' && selectedKind !== 'canvas' && selected.data?.space !== 'world' ? <details className="ui-editor-inspector-component"><summary><ChevronRight size={12} className="ui-editor-component-chevron" /><PanelsTopLeft size={14} /><span>Responsive</span></summary><div className="ui-editor-section">
-                <small>Base layout is unchanged. Compact applies to short viewport sides ≤600px; portrait refines it when height exceeds width.</small>
+                <small>Base layout is unchanged. Compact applies at width ≤{typeof rootCompactBreakpoint === 'number' ? rootCompactBreakpoint : 600}px; portrait refines it when height exceeds width.</small>
                 {(['compact', 'portrait'] as const).map(profile => {
                   const variant = selected.responsive?.[profile];
                   const label = profile === 'compact' ? 'Compact' : 'Portrait';

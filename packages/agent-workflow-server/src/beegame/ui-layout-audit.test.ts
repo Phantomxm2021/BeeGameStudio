@@ -6,7 +6,7 @@ function screen(nodes: Array<Record<string, unknown>>) {
   const document = parseBeeGameContentDocument({
     schema: 'beegame-content.v1', id: 'menu', kind: 'ui-screen', assetRefs: [],
     data: { rootId: 'root', nodes: [
-      { id: 'root', role: 'screen-root', data: { referenceResolution: [960, 540] }, layout: { size: [960, 540] } },
+      { id: 'root', role: 'screen-root', data: { referenceResolution: [960, 540], targetViewports: [[390, 844], [844, 390]] }, layout: { size: [960, 540] } },
       ...nodes,
     ] },
   })
@@ -77,5 +77,41 @@ describe('screen UI content geometry handoff', () => {
       layout: { anchor: 'top-center', position: [-120, 278], size: [240, 52] } }])
     document.data.nodes[0]!.data = { space: 'world' }
     expect(auditUiInteractiveBounds(document)).toEqual([])
+  })
+
+  test('does not require phone layout when only desktop containers are targeted', () => {
+    const document = screen([{ id: 'play', parentId: 'root', role: 'button',
+      layout: { anchor: 'top-center', position: [0, 278], size: [500, 52] } }])
+    document.data.nodes[0]!.data = { referenceResolution: [960, 540] }
+    expect(auditUiInteractiveBounds(document)).toEqual([])
+  })
+
+  test('checks controls inside stretched parent panels at the actual container size', () => {
+    const document = screen([
+      { id: 'panel', parentId: 'root', role: 'container', layout: {
+        anchorMin: [0, 0], anchorMax: [1, 1], sizeDelta: [-40, -40], position: [20, 20],
+      } },
+      { id: 'next', parentId: 'panel', role: 'button', layout: {
+        anchor: 'bottom-right', position: [-16, -16], size: [160, 40],
+      } },
+    ])
+    document.data.nodes[0]!.data = { referenceResolution: [960, 540] }
+    expect(auditUiInteractiveBounds(document)).toEqual([])
+  })
+
+  test('rejects a stretched control that collapses at a supported width', () => {
+    const document = screen([{ id: 'play', parentId: 'root', role: 'button', layout: {
+      anchorMin: [0, 0], anchorMax: [1, 0], sizeDelta: [-1000, 52], position: [20, 20],
+    } }])
+    document.data.nodes[0]!.data = { referenceResolution: [960, 540] }
+    expect(auditUiInteractiveBounds(document).join(' ')).toContain('non-positive bounds')
+  })
+
+  test('reports invalid authored viewport settings rather than silently ignoring them', () => {
+    const document = screen([])
+    document.data.nodes[0]!.data = { compactMaxWidth: 'phone' }
+    expect(auditUiInteractiveBounds(document).join(' ')).toContain('compactMaxWidth')
+    document.data.nodes[0]!.data = { targetViewports: [] }
+    expect(auditUiInteractiveBounds(document).join(' ')).toContain('targetViewports')
   })
 })

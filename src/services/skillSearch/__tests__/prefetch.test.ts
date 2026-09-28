@@ -15,6 +15,8 @@ import { getTurnZeroSkillDiscovery, startSkillDiscoveryPrefetch } from '../prefe
 import { clearSkillIndexCache, getSkillIndex, searchSkills } from '../localSearch.js'
 import { clearSkillCaches, getSkillDirCommands } from '../../../skills/loadSkillsDir.js'
 import { getAllowedSettingSources, setAllowedSettingSources } from '../../../bootstrap/state.js'
+import { filterToInitiallyListedSkills, getSkillListingAttachments, resetSentSkillNames } from '../../../utils/attachments.js'
+import { SkillTool } from '@bee-game-studio/builtin-tools/tools/SkillTool/SkillTool.js'
 
 let root: string
 let previousCwd: string
@@ -119,6 +121,12 @@ describe('skill search prefetch', () => {
     setAllowedSettingSources([])
     try {
       const modelInvocableSkills = await getSkillToolCommands(root)
+      const initialNames = filterToInitiallyListedSkills(
+        modelInvocableSkills,
+      ).map(skill => skill.name)
+      expect(initialNames).toContain('game-creative-director-expert')
+      expect(initialNames).toContain('game-ui-ux-designer')
+      expect(initialNames).toContain('game-content-pipeline-engineer')
       const names = modelInvocableSkills.map(skill => skill.name)
       expect(names).toContain('game-creative-director-expert')
       expect(names).toContain('game-level-designer-expert')
@@ -230,6 +238,63 @@ describe('skill search prefetch', () => {
         .toBe('game-content-pipeline-engineer')
     } finally {
       setAllowedSettingSources(previousSources)
+    }
+  })
+
+  test('sends shipped Skills in the initial runtime attachment', async () => {
+    process.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR = fileURLToPath(new URL(
+      '../../../../.beegame/skills/builtinskills/', import.meta.url,
+    ))
+    const previousSources = getAllowedSettingSources()
+    const previousNodeEnv = process.env.NODE_ENV
+    setAllowedSettingSources([])
+    process.env.NODE_ENV = 'development'
+    resetSentSkillNames()
+    try {
+      const context = {
+        options: { tools: [SkillTool], mainLoopModel: 'ark-code-latest' },
+        getAppState: () => ({ mcp: { commands: [] } }),
+      } as unknown as ToolUseContext
+      const attachments = await getSkillListingAttachments(context)
+      expect(attachments).toHaveLength(1)
+      expect(attachments[0]?.type).toBe('skill_listing')
+      if (attachments[0]?.type !== 'skill_listing') throw new Error('Skill listing was not sent')
+      expect(attachments[0].content).toContain('game-creative-director-expert')
+      expect(attachments[0].content).toContain('game-ui-ux-designer')
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv
+      setAllowedSettingSources(previousSources)
+      resetSentSkillNames()
+    }
+  })
+
+  test('keeps the shipped Skill catalog visible with Skill Search disabled', async () => {
+    process.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR = fileURLToPath(new URL(
+      '../../../../.beegame/skills/builtinskills/', import.meta.url,
+    ))
+    const previousSources = getAllowedSettingSources()
+    const previousNodeEnv = process.env.NODE_ENV
+    const previousSearchEnabled = process.env.SKILL_SEARCH_ENABLED
+    setAllowedSettingSources([])
+    process.env.NODE_ENV = 'development'
+    process.env.SKILL_SEARCH_ENABLED = '0'
+    resetSentSkillNames()
+    try {
+      const context = {
+        options: { tools: [SkillTool], mainLoopModel: 'ark-code-latest' },
+        getAppState: () => ({ mcp: { commands: [] } }),
+      } as unknown as ToolUseContext
+      const attachments = await getSkillListingAttachments(context)
+      expect(attachments).toHaveLength(1)
+      expect(attachments[0]?.type).toBe('skill_listing')
+      if (attachments[0]?.type !== 'skill_listing') throw new Error('Skill listing was not sent')
+      expect(attachments[0].content).toContain('game-creative-director-expert')
+      expect(attachments[0].content).toContain('game-ui-ux-designer')
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv
+      process.env.SKILL_SEARCH_ENABLED = previousSearchEnabled
+      setAllowedSettingSources(previousSources)
+      resetSentSkillNames()
     }
   })
 

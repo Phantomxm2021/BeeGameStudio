@@ -191,6 +191,7 @@ export function buildSceneUiContentAuthoringAuthority(
         },
         sceneVocabulary: {
           model: BEEGAME_SCENE_MODEL,
+          viewportAdaptation: 'Scene coordinates and the authored Camera viewport describe a reference frame, not the browser canvas size. At runtime the game applies its documented camera framing choice (for example preserve vertical span, preserve horizontal span or intentional letterbox) against the actual host container; do not resize world transforms or bake a second layout into code. Keep screen UI adaptation separate from world-camera framing. This format does not implement a game engine.',
           componentTypes: BEEGAME_SCENE_COMPONENT_TYPES,
           assetComponentTypes: BEEGAME_SCENE_ASSET_COMPONENT_TYPES,
           requiredData: {
@@ -240,6 +241,9 @@ export function buildSceneUiContentAuthoringAuthority(
                 assetRef: '<optional-declared-asset-id>',
                 layout: {
                   anchor: '<optional-anchor>',
+                  anchorMin: ['<optional-number-0-to-1>', '<optional-number-0-to-1>'],
+                  anchorMax: ['<optional-number-0-to-1>', '<optional-number-0-to-1>'],
+                  sizeDelta: ['<optional-number>', '<optional-number>'],
                   position: [0, 0],
                   size: [0, 0],
                   rotation: 0,
@@ -255,9 +259,11 @@ export function buildSceneUiContentAuthoringAuthority(
         },
         uiLayoutContract: {
           anchors: UI_ANCHORS,
-          referenceResolution: 'Root data.referenceResolution is [width, height] in logical pixels. Root layout.size, if present, must match it.',
-          responsive: 'The base layout is the reference composition. Optional node.responsive.compact and node.responsive.portrait may override enabled, layout fields and style fields. Compact applies when the shorter viewport side is <=600 logical pixels; portrait applies when height>width, after compact. Unspecified fields inherit. For screen-space UI, use the actual viewport as root size; world-space UI keeps its authored root size. Keep essential controls readable and inside the device safe area. Do not stretch the whole composition to a different aspect ratio.',
+          referenceResolution: 'Root data.referenceResolution is [width, height] in logical pixels: a design reference, not a fixed browser or iframe size. Root layout.size, if present, must match it. Screen-space root resolves to the actual viewport; world-space UI retains its authored root size.',
+          targetViewports: 'Root data.targetViewports optionally lists the required host [width,height] pairs for layout bounds checks; the reference size is always included. Without it, checks use representative desktop window/iframe sizes, not an unrequested phone target. Include mobile sizes only when mobile is a confirmed target.',
+          responsive: 'The base layout is the reference composition. Optional node.responsive.compact and node.responsive.portrait may override enabled, layout fields and style fields. Compact applies when viewport width <= root data.compactMaxWidth (default 600 logical pixels); portrait applies when height>width, after compact. Set a larger compactMaxWidth only if a supported mobile landscape viewport requires it. Unspecified fields inherit. Keep essential controls readable and inside the target safe area; do not stretch the entire composition indiscriminately.',
           anchor: 'top/middle/bottom-left/center/right. Position is an offset from that anchor on the parent rectangle. The child pivot defaults to the same anchor, not [0,0]; data.anchor {x,y} may override only the child pivot. Example: a 300px-wide button centered in a 390px portrait viewport uses top-center, position [0,y], size [300,h] and renders from x=45; position [-150,y] would clip it. A middle-center panel at position [0,0] is centered; position [-width/2,-height/2] offsets it twice and can clip it.',
+          stretch: 'For resizable panels, strips and HUD regions, use paired layout.anchorMin and layout.anchorMax in [0,1] parent coordinates and layout.sizeDelta in logical pixels; omit all three for ordinary fixed-size controls. Equal anchors retain fixed size; separated anchors stretch with the parent. layout.position remains a pivot offset. Keep fixed-size controls where intentional; do not encode the entire screen as one fixed-size panel.',
           textStyle: 'Use style.fontSize, style.color, style.align, style.verticalAlign and style.lineHeight. For an actual font file use data.font.assetRef; do not invent font asset aliases.',
           textFit: 'After loading the actual font file, measure HUD values and labels at their authored font size (including the largest expected score/time/count and each supported language). Size text bounds and spacing to fit those measurements, not character-count estimates. Keep numeric counters intact; do not rely on arbitrary character wrapping, runtime shrinking, or editor-specific layout overrides to hide undersized bounds. Check both the generated UI and target runtime before reporting visual acceptance.',
           image: 'Use assetRef + optional data.member for the image file, data.frame for an exact case-sensitive atlas frame name (without extension). Inspect the delivered atlas; never guess names.',

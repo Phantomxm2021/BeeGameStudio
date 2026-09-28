@@ -43,7 +43,8 @@ import {
   getConditionalRulesForCwdLevelDirectory,
   type MemoryFileInfo,
 } from './claudemd.js'
-import { dirname, parse, relative, resolve } from 'path'
+import { dirname, isAbsolute, parse, relative, resolve, sep } from 'path'
+import { getNativeBuiltinSkillsDirectory } from '../skills/builtinSkillsDirectory.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { getViewedTeammateTask } from '../state/selectors.js'
 import { logError } from './log.js'
@@ -2666,7 +2667,7 @@ async function getDynamicSkillAttachments(
 // Track which skills have been sent to avoid re-sending. Keyed by agentId
 // (empty string = main thread) so subagents get their own turn-0 listing —
 // without per-agent scoping, the main thread populating this Set would cause
-// every subagent's filterToBundledAndMcp result to dedup to empty.
+// every subagent's initial Skill listing to dedup to empty.
 const sentSkillNames = new Map<string, Set<string>>()
 
 // Called when the skill set genuinely changes (plugin reload, skill file
@@ -2690,30 +2691,42 @@ export function suppressNextSkillListing(): void {
 }
 let suppressNext = false
 
-// When skill-search is enabled and the filtered (bundled + MCP) listing exceeds
-// this count, fall back to bundled-only. Protects MCP-heavy users (100+ servers)
-// from truncation while keeping the turn-0 guarantee for typical setups.
+// Keep the initial listing bounded when many MCP skills are connected.
 const FILTERED_LISTING_MAX = 30
 
 /**
- * Filter skills to bundled (Anthropic-curated) + MCP (user-connected) only.
- * Used when skill-search is enabled to resolve the turn-0 gap for subagents:
- * these sources are small, intent-signaled, and won't hit the truncation budget.
- * User/project/plugin skills (the long tail — 200+) go through discovery instead.
- *
- * Falls back to bundled-only if bundled+mcp exceeds FILTERED_LISTING_MAX.
+ * Keep the shipped BeeGameStudio catalog visible even when Skill Search is on.
+ * Generic game requests have no reliable lexical match; hiding this catalog
+ * makes the skills available to the tool but invisible in its initial listing.
+ * The long tail of user/project/plugin skills still goes through discovery.
  */
-export function filterToBundledAndMcp(commands: Command[]): Command[] {
+export function filterToInitiallyListedSkills(commands: Command[]): Command[] {
+  const builtinDir = getNativeBuiltinSkillsDirectory()
+  const isShippedSkill = (cmd: Command): boolean => {
+    if (!builtinDir || cmd.type !== 'prompt' || !cmd.skillRoot) return false
+    const path = relative(builtinDir, cmd.skillRoot)
+    return (
+      path !== '' &&
+      path !== '..' &&
+      !path.startsWith(`..${sep}`) &&
+      !isAbsolute(path)
+    )
+  }
   const filtered = commands.filter(
-    cmd => cmd.loadedFrom === 'bundled' || cmd.loadedFrom === 'mcp',
+    cmd =>
+      cmd.loadedFrom === 'bundled' ||
+      cmd.loadedFrom === 'mcp' ||
+      isShippedSkill(cmd),
   )
   if (filtered.length > FILTERED_LISTING_MAX) {
-    return filtered.filter(cmd => cmd.loadedFrom === 'bundled')
+    return filtered.filter(
+      cmd => cmd.loadedFrom === 'bundled' || isShippedSkill(cmd),
+    )
   }
   return filtered
 }
 
-async function getSkillListingAttachments(
+export async function getSkillListingAttachments(
   toolUseContext: ToolUseContext,
 ): Promise<Attachment[]> {
   if (process.env.NODE_ENV === 'test') {
@@ -2737,18 +2750,14 @@ async function getSkillListingAttachments(
       ? uniqBy([...localCommands, ...mcpSkills], 'name')
       : localCommands
 
-  // When skill search is active, filter to bundled + MCP instead of full
-  // suppression. Resolves the turn-0 gap: main thread gets turn-0 discovery
-  // via getTurnZeroSkillDiscovery (blocking), but subagents use the async
-  // subagent_spawn signal (collected post-tools, visible turn 1). Bundled +
-  // MCP are small and intent-signaled; user/project/plugin skills go through
-  // discovery. feature() first for DCE — the property-access string leaks
-  // otherwise even with ?. on null.
+  // With Skill Search active, retain the shipped game catalog in the initial
+  // listing; generic game requests do not reliably match search keywords.
+  // Other user/project/plugin skills remain discoverable on demand.
   if (
     feature('EXPERIMENTAL_SKILL_SEARCH') &&
     skillSearchModules?.featureCheck.isSkillSearchEnabled()
   ) {
-    allCommands = filterToBundledAndMcp(allCommands)
+    allCommands = filterToInitiallyListedSkills(allCommands)
   }
 
   const agentKey = toolUseContext.agentId ?? ''

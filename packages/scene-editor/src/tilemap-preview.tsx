@@ -1,7 +1,7 @@
 /** Scene Editor preview only. Generated games do not import this module. */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { componentOf, type SceneAsset, type SceneDocument, type SceneNode } from './model'
+import { componentOf, rendererOrder, type SceneAsset, type SceneDocument, type SceneNode } from './model'
 import { parseGridData, parseTilemapData, tileRect, type GridData, type TilemapData, type TileDefinition } from './tilemap-data'
 import { atlasFrameName } from './sprite-sheet'
 import { useTilemapBrush,type TileBrush } from './tilemap-brush'
@@ -116,7 +116,7 @@ export function TilemapPreview({ node, document, diagnose, showGizmos,brush }: {
   useEffect(()=>()=>collision.dispose(),[collision])
   if(!mapComponent.enabled || !renderer?.enabled || !gridComponent?.enabled) return null
   return <group ref={group}>
-    {result.batches.map((batch,i)=><mesh key={i} geometry={batch.geometry} renderOrder={Number(renderer.properties.sortingOrder ?? node.order ?? 0)}>
+    {result.batches.map((batch,i)=><mesh key={i} geometry={batch.geometry} renderOrder={rendererOrder(node)}>
       <meshBasicMaterial map={textures.get(batch.imageId)} transparent depthWrite={false} depthTest={false} side={THREE.DoubleSide} toneMapped={false}/>
     </mesh>)}
     {showGizmos && map.collisionEnabled && <lineSegments geometry={collision} renderOrder={1000000} raycast={()=>{}}><lineBasicMaterial color="#6ee7b7" depthTest={false}/></lineSegments>}

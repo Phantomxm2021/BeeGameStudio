@@ -53,7 +53,7 @@ export type Collider2DComponent = BoxCollider2DComponent | CircleCollider2DCompo
 export type Collider3DComponent = BoxColliderComponent | SphereColliderComponent | CapsuleColliderComponent | MeshColliderComponent
 export type SceneComponent = SpriteRendererComponent | MeshFilterComponent | MeshRendererComponent | SkinnedMeshRendererComponent | GridComponent | TilemapComponent | TilemapRendererComponent | AnimatorComponent | Collider2DComponent | Rigidbody2DComponent | Collider3DComponent | RigidbodyComponent | AudioSourceComponent | AudioListenerComponent | ParticleSystemComponent | ParticleSystemRendererComponent | Light2DComponent | LightComponent | CameraComponent | CanvasComponent | CanvasRendererComponent | RectTransformComponent | ImageComponent | TextComponent
 
-export interface SceneGameObject { id: string; name: string; parentId: string | null; children: string[]; active: boolean; locked: boolean; editable?: boolean; transform: Transform; layer?: string; order?: number; tags: string[]; components: SceneComponent[]; metadata?: Record<string, unknown>; source?: { irId?: string; occurrenceId?: string } }
+export interface SceneGameObject { id: string; name: string; parentId: string | null; children: string[]; active: boolean; locked: boolean; editable?: boolean; transform: Transform; layer?: string; order?: number; /** Derived editor-only rank; never written to Scene JSON. */ renderLayerRank?: number; tags: string[]; components: SceneComponent[]; metadata?: Record<string, unknown>; source?: { irId?: string; occurrenceId?: string } }
 export type SceneNode = SceneGameObject
 export type SpriteSheet = { frames: Record<string, { x: number; y: number; width: number; height: number }> } | { frameWidth: number; frameHeight: number; framesPerFacing?: number; facings?: string[]; states?: string[]; frameDurationMs?: number[] }
 export interface SceneAsset { resourceId?: string; tileSet?: import('./tilemap-data').TileSetData; spriteSheet?: SpriteSheet; id: string; name: string; mimeType: string; path: string; bytes?: string; uri?: string; dependencies?: string[]; diagnostics?: string[] }
@@ -84,6 +84,14 @@ export const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.strin
 export const identityTransform = (): Transform => ({ position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] })
 export const newId = (prefix = 'game-object') => `${prefix}-${crypto.randomUUID()}`
 export const componentOf = <T extends SceneComponent['type']>(node: SceneGameObject, type: T): Extract<SceneComponent, { type: T }> | undefined => node.components.find(component => component.type === type) as Extract<SceneComponent, { type: T }> | undefined
+export function rendererOrder(node: SceneNode): number {
+  const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image')
+    ?? componentOf(node, 'tilemap-renderer') ?? componentOf(node, 'particle-system-renderer')
+  const value = renderer?.properties.sortingOrder ?? node.order ?? 0
+  const local = typeof value === 'number' && Number.isFinite(value) ? value : 0
+  // Keep source layer priority above any finite order within that layer.
+  return node.renderLayerRank === undefined ? local : node.renderLayerRank * 2 + Math.atan(local) * 2 / Math.PI
+}
 export const componentById = (node: SceneGameObject, id: string): SceneComponent | undefined => node.components.find(component => component.id === id)
 export const primaryComponentType = (node: SceneGameObject): SceneComponent['type'] | 'transform' => ['camera', 'particle-system', 'sprite-renderer', 'skinned-mesh-renderer', 'mesh-renderer', 'tilemap-renderer', 'image', 'light-2d', 'light', 'audio-source', 'box-collider-2d', 'circle-collider-2d', 'box-collider', 'sphere-collider', 'rigidbody-2d', 'rigidbody', 'animator'].find(type => node.components.some(component => component.type === type)) as SceneComponent['type'] | undefined ?? 'transform'
 

@@ -1087,9 +1087,11 @@ export class BeeGameSessionManager {
       activeTurn = this.runDirectTurn(
         record,
         context?.turnContext ? [
+          // Keep platform facts before the user's text. The native CLI uses
+          // the final text block as the intent signal for Skill discovery.
+          { type: 'text' as const, text: context.turnContext },
           ...(typeof preparedPrompt.prompt === 'string'
             ? [{ type: 'text' as const, text: preparedPrompt.prompt }] : preparedPrompt.prompt),
-          { type: 'text' as const, text: context.turnContext },
         ] : preparedPrompt.prompt,
         async () => {
           try { await display?.onTurnSettled?.() }

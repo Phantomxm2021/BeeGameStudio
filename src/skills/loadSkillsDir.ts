@@ -63,6 +63,7 @@ import { isRestrictedToPluginOnly } from '../utils/settings/pluginOnlyPolicy.js'
 import { HooksSchema, type HooksSettings } from '../utils/settings/types.js'
 import { createSignal } from '../utils/signal.js'
 import { registerMCPSkillBuilders } from './mcpSkillBuilders.js'
+import { getNativeBuiltinSkillsDirectory } from './builtinSkillsDirectory.js'
 
 export type LoadedFrom =
   | 'commands_DEPRECATED'
@@ -641,7 +642,7 @@ export const getSkillDirCommands = memoize(
     // Isolated BeeGame tasks load only the user-selected skill files. Their
     // other user/project settings remain disabled by --setting-sources ''.
     const nativeSkillsDir = process.env.BEEGAME_NATIVE_SKILLS_DIR
-    const nativeBuiltinSkillsDir = process.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR
+    const nativeBuiltinSkillsDir = getNativeBuiltinSkillsDirectory()
     const managedSkillsDir = join(getManagedFilePath(), '.claude', 'skills')
     const projectSkillsDirs = getProjectDirsUpToHome('skills', cwd)
 

@@ -10,10 +10,9 @@ type Viewport = { width: number; height: number }
 
 const identity: Affine2D = [1, 0, 0, 1, 0, 0]
 const interactiveRoles = new Set(['button', 'slider', 'toggle', 'dropdown', 'tab'])
-const deviceViewports: Viewport[] = [
-  { width: 1280, height: 720 },
-  { width: 390, height: 844 },
-  { width: 844, height: 390 },
+const desktopContainerViewports: Viewport[] = [
+  { width: 960, height: 540 },
+  { width: 960, height: 720 },
 ]
 
 function pivot(node: UiNode, fallback: readonly [number, number]): readonly [number, number] {
@@ -31,8 +30,17 @@ export function auditUiInteractiveBounds(document: UiDocument): string[] {
   if (document.kind === 'ui-flow') return []
   const root = document.data.nodes.find(node => node.id === document.data.rootId)
   if (!root || root.data?.space === 'world') return []
+  const compactMaxWidth = root.data?.compactMaxWidth
+  if (compactMaxWidth !== undefined && (typeof compactMaxWidth !== 'number' || !Number.isFinite(compactMaxWidth) || compactMaxWidth <= 0))
+    return ['root: compactMaxWidth must be a positive number.']
   const reference = root.data?.referenceResolution ?? root.layout?.size
-  const viewports = [...deviceViewports]
+  const targets = root.data?.targetViewports
+  if (targets !== undefined && (!Array.isArray(targets) || targets.length === 0 || targets.some(size =>
+    !Array.isArray(size) || size.length !== 2 || size.some(value =>
+      typeof value !== 'number' || !Number.isFinite(value) || value <= 0))))
+    return ['root: targetViewports must contain positive [width, height] pairs.']
+  const viewports = targets === undefined ? [...desktopContainerViewports]
+    : (targets as number[][]).map(([width, height]) => ({ width, height }))
   if (Array.isArray(reference) && reference.length === 2 &&
     reference.every(value => typeof value === 'number' && Number.isFinite(value) && value > 0))
     viewports.unshift({ width: reference[0] as number, height: reference[1] as number })
@@ -68,6 +76,11 @@ export function auditUiInteractiveBounds(document: UiDocument): string[] {
       ))
       const interactive = interactiveRoles.has(node.role) || Object.keys(node.actions ?? {}).length > 0
       const containingPanel = node.role === 'container' && hasInteractiveDescendant(node.id)
+      if ((interactive || containingPanel) && (size[0] <= 0 || size[1] <= 0)) {
+        const list = failures.get(node.id) ?? []
+        list.push(`${viewport.width}x${viewport.height} has non-positive bounds [${Math.round(size[0])},${Math.round(size[1])}]`)
+        failures.set(node.id, list)
+      }
       if ((interactive || containingPanel) && size[0] > 0 && size[1] > 0) {
         const corners = [point2d(matrix, 0, 0), point2d(matrix, size[0], 0),
           point2d(matrix, 0, size[1]), point2d(matrix, size[0], size[1])]

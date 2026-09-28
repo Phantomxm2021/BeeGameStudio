@@ -7,7 +7,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
 import type { ModelSelection } from './model-structure'
-import { componentOf, DEFAULT_SCENE_SETTINGS } from './model'
+import { componentOf, DEFAULT_SCENE_SETTINGS, rendererOrder } from './model'
 import { colliderOutline } from './collider-outline'
 import { TilemapPreview } from './tilemap-preview'
 import type { TileBrush } from './tilemap-brush'
@@ -497,13 +497,6 @@ function spriteFrameAt(sprite: NonNullable<Preview2D['sprite']>, elapsedMs: numb
     cursor -= durations[index]
   }
   return 0
-}
-
-export function rendererOrder(node: SceneNode): number {
-  const renderer = componentOf(node, 'sprite-renderer') ?? componentOf(node, 'image')
-    ?? componentOf(node, 'tilemap-renderer') ?? componentOf(node, 'particle-system-renderer')
-  const order = renderer?.properties.sortingOrder ?? node.order ?? 0
-  return typeof order === 'number' && Number.isFinite(order) ? order : 0
 }
 
 function NodeAnimation({ group, node, nodes, preview, pixelsPerUnit, paused }: {

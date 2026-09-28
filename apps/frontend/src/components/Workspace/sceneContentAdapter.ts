@@ -25,7 +25,7 @@ function canvasMetrics(settings?: Record<string, unknown>): CanvasMetrics {
 
 function layerOrders(settings?: Record<string, unknown>): Map<string, number> {
   if (!Array.isArray(settings?.layers)) return new Map();
-  return new Map(settings.layers.flatMap((item, index) => { const layer = record(item); return typeof layer?.id === 'string' ? [[layer.id, finite(layer.order, index + 1)] as const] : []; }));
+  return new Map(settings.layers.flatMap((item, index) => { const layer = record(item); return typeof layer?.id === 'string' ? [[layer.id, finite(layer.order, index)] as const] : []; }));
 }
 
 function editorTransform(node: BeeGameContentNode, dimension: '2d' | '3d', layers: Map<string, number>, metrics: CanvasMetrics): Transform {
@@ -189,7 +189,8 @@ export function sceneContentToEditorDocument(input: { document: BeeGameSceneCont
     validateTilemapGrid(input.document.data.nodes, node, parseTilemapData(component.data));
   }
   const dimension = input.document.kind === 'scene-3d' ? '3d' : '2d'; const layers = layerOrders(input.document.data.settings); const metrics = canvasMetrics(input.document.data.settings); const children = childrenByParent(input.document.data.nodes);
-  const nodes = Object.fromEntries(input.document.data.nodes.map(node => [node.id, { id: node.id, name: node.name ?? node.id, parentId: node.parentId ?? null, children: children.get(node.id) ?? [], active: node.enabled !== false, locked: false, transform: editorTransform(node, dimension, layers, metrics), ...(node.layer ? { layer: node.layer } : {}), ...(node.zIndex === undefined ? {} : { order: node.zIndex }), tags: [...(node.semantic ?? [])], metadata: structuredClone(node.data ?? {}), components: (node.components ?? []).map(component => toEditorComponent({ node, component, dimension, metrics, members: input.assetMembers, assets: input.assets })) } satisfies SceneNode]));
+  const layerValues = [...new Set([0, ...layers.values()])].sort((a, b) => a - b);
+  const nodes = Object.fromEntries(input.document.data.nodes.map(node => [node.id, { id: node.id, name: node.name ?? node.id, parentId: node.parentId ?? null, children: children.get(node.id) ?? [], active: node.enabled !== false, locked: false, transform: editorTransform(node, dimension, layers, metrics), ...(node.layer ? { layer: node.layer } : {}), ...(node.zIndex === undefined ? {} : { order: node.zIndex }), ...(dimension === '2d' && layerValues.length > 1 ? { renderLayerRank: layerValues.indexOf(node.layer ? layers.get(node.layer) ?? 0 : 0) } : {}), tags: [...(node.semantic ?? [])], metadata: structuredClone(node.data ?? {}), components: (node.components ?? []).map(component => toEditorComponent({ node, component, dimension, metrics, members: input.assetMembers, assets: input.assets })) } satisfies SceneNode]));
   // Opening an editor must not infer and persist rotations from gameplay labels.
   return { schemaVersion: 'scene-game-object.v2', pixelsPerUnit: dimension === '2d' ? metrics.pixelsPerUnit : 1, dimension, id: input.document.id, name: input.document.id, revision: 0, settings: { background: '#181a20', showGrid: true, ambientColor: '#ffffff', ambientIntensity: 1, exposure: 1, fogEnabled: false, fogColor: '#181a20', fogNear: 10, fogFar: 60 }, source: { source: { kind: 'content-package', publicationId: input.document.id, candidateDigest: input.foundationDocumentRevision, sourceInputDigest: input.assetManifestRevision }, contentDigest: input.documentRevision, contentRevision: input.documentRevision, contentSchemaVersion: input.document.schema, adapterId: 'unity-game-object-components', adapterVersion: '2.0.0' }, rootIds: input.document.data.nodes.filter(node => !node.parentId).map(node => node.id), nodes, assets: input.assets ?? {}, diagnostics: [] };
 }

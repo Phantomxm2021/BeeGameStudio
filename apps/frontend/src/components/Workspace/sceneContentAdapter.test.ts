@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalJson, type SceneAsset } from '@beegame/scene-editor';
+import { canonicalJson, rendererOrder, type SceneAsset } from '@beegame/scene-editor';
 import type { BeeGameSceneContentDocument } from '../../services/beeGameAdapter';
 import { editorDocumentToSceneContent, sceneContentToEditorDocument } from './sceneContentAdapter';
 
@@ -25,6 +25,19 @@ function scene(): BeeGameSceneContentDocument {
 }
 
 describe('Unity-style scene adapter', () => {
+  it('keeps independent scene layers ordered in the editor without rewriting source order', () => {
+    const input = scene();
+    input.data.settings = { layers: [{ id: 'far', order: -2 }, { id: 'near', order: 3 }] };
+    input.data.nodes.push(
+      { id: 'far', layer: 'far', zIndex: 0, components: [{ id: 'far-sprite', type: 'sprite-renderer', assetRef: 'RES-FOX' }] },
+      { id: 'near', layer: 'near', zIndex: 0, components: [{ id: 'near-sprite', type: 'sprite-renderer', assetRef: 'RES-FOX' }] },
+    );
+    const editor = sceneContentToEditorDocument({ document: input, documentRevision: HASH, foundationDocumentRevision: HASH, assetManifestRevision: HASH });
+    expect(rendererOrder(editor.nodes.far)).toBeLessThan(rendererOrder(editor.nodes.near));
+    const saved = editorDocumentToSceneContent(editor, input);
+    expect(saved.data.nodes.slice(-2).map(node => [node.layer, node.zIndex])).toEqual([['far', 0], ['near', 0]]);
+  });
+
   it('round-trips versioned Tilemap cells and parent transforms without scaling cell data', () => {
     const input:BeeGameSceneContentDocument={schema:'beegame-content.v1',id:'tile-scene',kind:'scene-2d',assetRefs:['RES-TILES'],data:{
       settings:{coordinateSystem:{origin:'top-left',units:'logical-pixels',width:320,height:180,pixelsPerUnit:32}},

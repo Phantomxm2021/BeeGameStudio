@@ -60,7 +60,8 @@ export async function sendProjectConversation(input: {
   const acceptanceCheckPath = join(session.cwd, '.beegame', 'tmp', input.sessionId, 'check-acceptance.mjs')
   const assetCommand = `bun .beegame/tmp/${input.sessionId}/assets.mjs`
   const acceptanceCheck = `bun .beegame/tmp/${input.sessionId}/check-acceptance.mjs`
-  return input.sessions.sendWithDisplay(input.sessionId, input.message, {
+  const userMessage = input.initialBrief?.displayText ?? input.message
+  return input.sessions.sendWithDisplay(input.sessionId, userMessage, {
     ...input.options,
     displayKind: input.initialBrief ? 'confirmed_brief' : input.autoContinuation ? 'delivery_continue' : 'project_request',
     taskType: input.initialBrief ? 'delivery_turn' : 'edit_turn',
@@ -129,6 +130,7 @@ export async function sendProjectConversation(input: {
         // or a file whose updated contents may never enter the model context.
         turnContext: delivery || access ? [
           'BGS project state (platform context, not additional user instructions):',
+          ...(input.initialBrief ? [input.message] : []),
           ...(input.initialBrief ? ['You may use available subagents for independent work when useful; decide whether delegation is worthwhile. Keep integration and final verification in this project conversation.'] : []),
           ...(milestone && !repeatMilestone ? [milestone] : []),
           ...(delivery ? [`Project status: ${delivery.status}; milestone: ${projectDeliveryPhase(delivery)}. Recovery context: ${path}.`] : []),

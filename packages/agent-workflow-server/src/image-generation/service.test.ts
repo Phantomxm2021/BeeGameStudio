@@ -388,6 +388,9 @@ test('Cloudflare reference request reads only a project image before billing', a
       provider: 'cloudflare',
       available: true, quotedCreditsMicro: 8_000_000,
       availableSizes: ['1024x1024', '1024x1536', '1536x1024'] })
+    expect(await (await fetch(access.endpoint + '?quality=low&size=1536x1024')).json()).toMatchObject({
+      available: true, quality: 'low', size: '1536x1024', quotedCreditsMicro: 4_000_000,
+    })
     expect(await (await fetch(access.endpoint + '?quality=high')).json()).toMatchObject({
       available: false, quotedCreditsMicro: null,
     })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveUiNodesForViewport } from './ui-responsive'
+import { resolveUiNodesForViewport, type UiResponsiveNode } from './ui-responsive'
 
 const nodes = [
   { id: 'root', layout: { size: [1280, 720] as [number, number] } },
@@ -17,7 +17,7 @@ describe('UI viewport projection', () => {
     expect(phone[1]).toMatchObject({ layout: { position: [0, 100], size: [320, 56] }, style: { fontSize: 26, color: '#fff' } })
     expect(nodes[1]?.layout?.position).toEqual([640, 80])
     const landscape = resolveUiNodesForViewport(nodes, 'root', { width: 844, height: 390 })
-    expect(landscape[1]?.layout?.position).toEqual([0, 60])
+    expect(landscape[1]?.layout?.position).toEqual([640, 80])
     const desktop = resolveUiNodesForViewport(nodes, 'root', { width: 1280, height: 720 })
     expect(desktop[1]?.layout?.position).toEqual([640, 80])
   })
@@ -25,5 +25,23 @@ describe('UI viewport projection', () => {
   it('preserves world-space root size and rejects invalid viewports', () => {
     expect(resolveUiNodesForViewport([{ id: 'world', data: { space: 'world' }, layout: { size: [3, 2] as [number, number] } }], 'world', { width: 390, height: 844 })[0]?.layout?.size).toEqual([3, 2])
     expect(() => resolveUiNodesForViewport(nodes, 'root', { width: 0, height: 100 })).toThrow('positive finite')
+  })
+
+  it('resolves nested stretch anchors from the actual parent size without mutating authored layout', () => {
+    const layoutNodes = [
+      { id: 'root', layout: { size: [960, 540] as [number, number] } },
+      { id: 'panel', parentId: 'root', layout: { anchorMin: [0, 0] as [number, number], anchorMax: [1, 1] as [number, number], sizeDelta: [-40, -60] as [number, number], position: [0, 0] as [number, number] } },
+      { id: 'bar', parentId: 'panel', layout: { anchorMin: [0, 0] as [number, number], anchorMax: [1, 0] as [number, number], sizeDelta: [0, 40] as [number, number] } },
+    ]
+    const resolved = resolveUiNodesForViewport(layoutNodes, 'root', { width: 800, height: 600 })
+    expect(resolved[1]?.layout).toMatchObject({ size: [760, 540], position: [0, 0] })
+    expect(resolved[2]?.layout).toMatchObject({ size: [760, 40], position: [0, 0] })
+    expect(layoutNodes[1]?.layout).not.toHaveProperty('size')
+  })
+
+  it('uses an authored compact breakpoint for mobile landscape without classifying a short desktop iframe as mobile', () => {
+    const authored: UiResponsiveNode[] = [{ id: 'root', data: { compactMaxWidth: 900 } }, ...nodes.slice(1)]
+    expect(resolveUiNodesForViewport(authored, 'root', { width: 844, height: 390 })[1]?.layout?.position).toEqual([0, 60])
+    expect(resolveUiNodesForViewport(authored, 'root', { width: 960, height: 540 })[1]?.layout?.position).toEqual([640, 80])
   })
 })

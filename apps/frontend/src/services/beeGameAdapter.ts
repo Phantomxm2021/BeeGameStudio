@@ -360,6 +360,9 @@ export type BeeGameUiContentNode = {
   assetRef?: string
   layout?: {
     anchor?: string
+    anchorMin?: [number, number]
+    anchorMax?: [number, number]
+    sizeDelta?: [number, number]
     position?: [number, number]
     size?: [number, number]
     rotation?: number
