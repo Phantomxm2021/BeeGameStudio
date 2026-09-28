@@ -1,4 +1,5 @@
 import { responseLanguageInstruction } from './response-language'
+import { BEEGAME_USER_RESPONSE_SCOPE } from './user-response-scope'
 import type {
   BeeGamePromptInput,
   DashboardSDKMessage,
@@ -12,9 +13,11 @@ import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { parseNativeTerminalTaskNotification } from './native-task-notification'
 import { resolveNativeRuntimeCommand, nativeSessionTemporaryPath } from './native-runtime-process-path'
 import { getSafeRuntimeProcessEnvironment } from './runtime-process-environment'
-import { createNativeTaskAccess, nativeTaskToolEnvironment } from '@bee-game-studio/agent-workflow/native-task-access'
+import { createNativeTaskAccess } from '@bee-game-studio/agent-workflow/native-task-access'
 import { mkdir, realpath } from 'node:fs/promises'
+import { basename, resolve } from 'node:path'
 import { closeSessionTestBrowsers } from './native-test-browser-cleanup'
+import { projectExecutionAccess } from './project-execution-access'
 import {
   createRuntimeObservability,
   type RuntimeObservability,
@@ -66,9 +69,8 @@ export function nativeRuntimeCommand(
     '--include-partial-messages',
     '--replay-user-messages',
     '--permission-prompt-tool=stdio',
-    ...([input.language ? responseLanguageInstruction(input.language) : '', input.systemContext].filter(Boolean).length
-      ? ['--append-system-prompt', [input.language ? responseLanguageInstruction(input.language) : '', input.systemContext].filter(Boolean).join('\n\n')]
-      : []),
+    '--append-system-prompt',
+    [BEEGAME_USER_RESPONSE_SCOPE, input.language ? responseLanguageInstruction(input.language) : '', input.systemContext].filter(Boolean).join('\n\n'),
     ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : []),
   ]
 }
@@ -81,6 +83,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     reject(error: Error): void
     abort(reason?: unknown): void
     tasks: Map<string, { toolUseId?: string; running: boolean }>
+    taskOutputs: Map<string, { taskId: string; activationToolUseId?: string }>
     awaitingParentResult: boolean
   } | null = null
   private disposed = false
@@ -95,6 +98,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     private readonly observability: RuntimeObservability,
     private readonly scratchPath: string,
     private readonly taskAccess?: Awaited<ReturnType<typeof createNativeTaskAccess>>,
+    private readonly projectAccess?: Awaited<ReturnType<typeof projectExecutionAccess>>,
   ) {
     this.nativeSessionId = sessionInput.resumeSessionId
   }
@@ -114,12 +118,18 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       throw new Error('Bee Game Studio native runtime command is required')
     const taskAccess = input.isolatedTask ? await createNativeTaskAccess({
       ...input.isolatedTask, allowWorkingFiles: true,
+      ...(input.env.BEEGAME_CONFIG_DIR
+        ? { skillsDirectory: resolve(input.env.BEEGAME_CONFIG_DIR, 'skills') } : {}),
+      ...(input.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR
+        ? { builtinSkillsDirectory: input.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR } : {}),
     }) : undefined
-    const temporary = taskAccess ? undefined : await prepareNativeSessionTemporaryDirectory(input.cwd, input.sessionId)
-    const child = Bun.spawn([...command, ...(taskAccess?.flags ?? [])], {
-      cwd: taskAccess?.root ?? input.cwd,
+    const projectAccess = taskAccess ? undefined : await projectExecutionAccess({
+      workspacePath: input.cwd, sessionId: input.sessionId, environment: input.env,
+    })
+    const child = Bun.spawn([...command, ...(taskAccess?.flags ?? projectAccess!.flags)], {
+      cwd: taskAccess?.root ?? projectAccess!.root,
       env: { ...nativeRuntimeEnvironment(input.env),
-        ...(taskAccess?.environment ?? nativeTaskToolEnvironment(temporary!)) },
+        ...(taskAccess?.environment ?? projectAccess!.environment) },
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -135,8 +145,9 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
           ? { launchContract: input.runtimeLaunchContract }
           : {}),
       }),
-      taskAccess?.environment.TMPDIR ?? temporary!,
+      taskAccess?.environment.TMPDIR ?? projectAccess!.temporary,
       taskAccess,
+      projectAccess,
     )
     void runtime.consumeStdout()
     void runtime.consumeStderr()
@@ -178,6 +189,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         },
         abort,
         tasks: new Map(),
+        taskOutputs: new Map(),
         awaitingParentResult: false,
       }
       this.observability.beginTurn({ requestId })
@@ -192,7 +204,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         parent_tool_use_id: null,
         message: {
           role: 'user',
-          content: nativePromptContent(input.prompt, input.language),
+          content: nativePromptContent(input.prompt),
         },
       })
     })
@@ -290,6 +302,31 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         }
       }
     }
+    // TaskOutput is a native terminal observation too. Some resumed agents
+    // return a completed TaskOutput without a matching task_notification;
+    // waiting only for that notification would strand an otherwise final turn.
+    for (const block of nativeContentBlocks(message)) {
+      if (message.type === 'assistant' && stringField(block, 'type') === 'tool_use' &&
+          stringField(block, 'name') === 'TaskOutput') {
+        const toolUseId = stringField(block, 'id')
+        const taskId = stringField(objectField(block, 'input') ?? {}, 'task_id')
+        const task = turn.tasks.get(taskId)
+        if (toolUseId && taskId && task)
+          turn.taskOutputs.set(toolUseId, { taskId, activationToolUseId: task.toolUseId })
+      }
+      if (message.type !== 'user' || stringField(block, 'type') !== 'tool_result') continue
+      const toolUseId = stringField(block, 'tool_use_id')
+      const observed = turn.taskOutputs.get(toolUseId)
+      if (!observed) continue
+      turn.taskOutputs.delete(toolUseId)
+      const result = objectField(message, 'tool_use_result')
+      const completed = objectField(result ?? {}, 'task')
+      if (stringField(result ?? {}, 'retrieval_status') !== 'success' ||
+          stringField(completed ?? {}, 'task_id') !== observed.taskId ||
+          !['completed', 'failed', 'stopped', 'killed'].includes(stringField(completed ?? {}, 'status'))) continue
+      const task = turn.tasks.get(observed.taskId)
+      if (task && task.toolUseId === observed.activationToolUseId) task.running = false
+    }
     this.observability.observeMessage(message)
     await turn.input.onMessage(message as DashboardSDKMessage)
     if (message.type === 'system' && message.subtype === 'session_state_changed' &&
@@ -332,6 +369,19 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     const toolInput = objectField(request, 'input') ?? {}
     const decisionReason = stringField(request, 'decision_reason')
     const blockedPath = stringField(request, 'blocked_path')
+    if (await this.projectAccess?.isReferenceRead(toolName, toolInput)) {
+      this.write(permissionResponse(requestId, toolUseID, toolInput,
+        { behavior: 'allow', source: 'policy' }))
+      return
+    }
+    if (!this.taskAccess && toolName === 'SandboxNetworkAccess' &&
+        typeof toolInput.host === 'string' && toolInput.host.trim()) {
+      // Filesystem isolation is not a resource-source policy. Keep the native
+      // network proxy available without introducing per-domain approval gates.
+      this.write(permissionResponse(requestId, toolUseID, toolInput,
+        { behavior: 'allow', source: 'policy' }))
+      return
+    }
     // Questions need a human response, not a filesystem policy decision.
     if (this.taskAccess && toolName !== 'AskUserQuestion') {
       const decision = await this.taskAccess.permission(request)
@@ -352,7 +402,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       ? await requestPermission({
           toolUseID,
           toolName,
-          message: decisionReason || `${toolName} requires permission.`,
+          message: publicArtifactApprovalMessage(toolName, toolInput, this.sessionInput.env.BEEGAME_ARTIFACTS_URL)
+            ?? decisionReason ?? `${toolName} requires permission.`,
           input: toolInput,
           ...(decisionReason ? { decisionReason } : {}),
           ...(blockedPath ? { blockedPath } : {}),
@@ -406,6 +457,18 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     this.child.stdin.write(`${JSON.stringify(message)}\n`)
     this.child.stdin.flush()
   }
+}
+
+export function publicArtifactApprovalMessage(toolName: string, toolInput: Record<string, unknown>, destination?: string): string | undefined {
+  if (toolName !== 'ExecuteExtraTool' || toolInput.tool_name !== 'artifact') return undefined
+  const params = toolInput.params
+  const input = params && typeof params === 'object' && !Array.isArray(params)
+    ? params as Record<string, unknown> : {}
+  const filename = typeof input.file_path === 'string' ? basename(input.file_path) : 'selected file'
+  const lifetime = input.ttl === 30 ? 30 : 7
+  let host = 'unconfigured Bee Game Studio artifact service'
+  try { if (destination) host = new URL(destination).host } catch { /* The tool will reject invalid configuration. */ }
+  return `Publish ${filename} as a publicly accessible HTML page at ${host} for ${lifetime} days?`
 }
 
 /** Bash, file tools and image processors share a project-local scratch root.
@@ -495,7 +558,7 @@ function permissionResponse(
   }
 }
 
-export function nativePromptContent(prompt: BeeGamePromptInput, language?: string): unknown {
+export function nativePromptContent(prompt: BeeGamePromptInput): unknown {
   // Language and capability discovery belong to system context, never to a
   // fabricated second user message. Language changes restart/resume the CLI.
   return typeof prompt === 'string' ? [{ type: 'text', text: prompt }] : prompt
@@ -507,6 +570,8 @@ export function nativeRuntimeEnvironment(
   return {
     ...getSafeRuntimeProcessEnvironment(),
     ...selectedModelEnvironment,
+    // The native process needs provider credentials; its Bash/MCP/LSP children do not.
+    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
     // This host can present permission requests from background agents.
     // Route them to the same authority instead of silently auto-denying them.
     BEEGAME_NATIVE_BACKGROUND_PERMISSIONS: '1',
@@ -557,6 +622,14 @@ function objectField(
   return field && typeof field === 'object' && !Array.isArray(field)
     ? (field as Record<string, unknown>)
     : undefined
+}
+
+function nativeContentBlocks(message: Record<string, unknown>): Record<string, unknown>[] {
+  const content = objectField(message, 'message')?.content
+  return Array.isArray(content)
+    ? content.filter((block): block is Record<string, unknown> =>
+        Boolean(block) && typeof block === 'object' && !Array.isArray(block))
+    : []
 }
 
 function stringField(value: Record<string, unknown>, key: string): string {

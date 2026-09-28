@@ -48,6 +48,36 @@ const logicalCameraData = {
 }
 
 describe('Unity-style Game Content scene contract', () => {
+  it('rejects offscreen interactive UI before implementation while accepting corrected authored layout', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'beegame-ui-bounds-')); workspaces.push(workspace)
+    mkdirSync(join(workspace, 'content/scenes'), { recursive: true })
+    mkdirSync(join(workspace, 'content/ui'), { recursive: true })
+    writeFileSync(join(workspace, 'content/index.json'), JSON.stringify({
+      schema: 'beegame-content-package.v2', id: 'test', dimension: '2d',
+      documentRevision: HASH, assetManifestRevision: HASH, entryScene: 'scene',
+      files: ['scenes/scene.json', 'ui/menu.json'], sceneModel: BEEGAME_SCENE_MODEL,
+    }))
+    writeFileSync(join(workspace, 'content/scenes/scene.json'), JSON.stringify({
+      schema: 'beegame-content.v1', id: 'scene', kind: 'scene-2d', assetRefs: [],
+      data: { settings: { coordinateSystem: { origin: 'top-left', units: 'logical-pixels', width: 960, height: 540, pixelsPerUnit: 1 } }, nodes: [{ id: 'root' }] },
+    }))
+    const menu = (position: number) => ({
+      schema: 'beegame-content.v1', id: 'menu', kind: 'ui-screen', assetRefs: [],
+      data: { rootId: 'root', nodes: [
+        { id: 'root', role: 'screen-root', layout: { size: [960, 540] }, data: { referenceResolution: [960, 540] } },
+        { id: 'play', parentId: 'root', role: 'button', layout: { anchor: 'top-center', position: [position, 278], size: [240, 52] } },
+      ] },
+    })
+    const menuPath = join(workspace, 'content/ui/menu.json')
+    writeFileSync(menuPath, JSON.stringify(menu(-120)))
+    const authority = { documentRevision: HASH, assetManifestRevision: HASH, manifest }
+    const broken = auditBeeGameContentPackage(workspace, authority)
+    expect(broken.valid).toBe(false)
+    expect(broken.issues.join('\n')).toContain('content/ui/menu.json: play: enabled control or its containing panel is outside the viewport')
+    writeFileSync(menuPath, JSON.stringify(menu(0)))
+    expect(auditBeeGameContentPackage(workspace, authority).valid).toBe(true)
+  })
+
   it('validates an optional per-document load registry against the canonical files and kinds', () => {
     const document = { schema: 'beegame-content.v1', id: 'scene', kind: 'scene-2d', assetRefs: [], data: { nodes: [{ id: 'root' }] } }
     const valid = audit(document, '2d', manifest, { documents: [

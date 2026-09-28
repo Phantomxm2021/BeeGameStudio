@@ -22,8 +22,9 @@ export class CloudflareImageProvider implements ImageGenerationProvider {
         method: 'POST',
         headers: { authorization: 'Bearer ' + config.apiKey, 'content-type': 'application/json' },
         body: JSON.stringify({ model, input: {
-          prompt: input.prompt, quality: config.quality, size: config.size,
+          prompt: input.prompt, quality: input.quality ?? config.quality, size: input.size ?? config.size,
           output_format: 'png', background: input.background ?? 'auto',
+          ...(input.referenceImage ? { images: [`data:image/png;base64,${Buffer.from(input.referenceImage.bytes).toString('base64')}`] } : {}),
         } }),
         signal: input.signal, redirect: 'error',
       })
@@ -70,6 +71,7 @@ export class CloudflareImageProvider implements ImageGenerationProvider {
       throw new ImageProviderError('Cloudflare image result is not a PNG', 'unknown', response.status, 'image-not-png')
     return { bytes, mimeType: 'image/png', model: config.model,
       ...(response.headers.get('x-request-id') ? { providerRequestId: response.headers.get('x-request-id')! } : {}),
-      usage: body.gatewayMetadata ?? envelope.gatewayMetadata ?? null }
+      // gatewayMetadata.keySource is routing metadata, not billable token usage.
+      usage: body.usage ?? envelope.usage ?? null }
   }
 }

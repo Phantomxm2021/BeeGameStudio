@@ -8,25 +8,11 @@ export type ProjectTodo = {
     title: string;
     status: ProjectTodoStatus;
     scope?: string;
-    stage?: string;
 };
 
 const isTodoTool = (name: unknown): boolean => {
     const normalized = String(name || '').trim().toLowerCase();
     return normalized === 'todowrite' || normalized === 'todo_write';
-};
-
-const messageToolName = (message: ChatDisplayMessage): string => {
-    if (message.toolName) return message.toolName;
-    const lines = String(message.content || '').split('\n').map(line => line.trim()).filter(Boolean);
-    const structuredName = lines.find(line => line.startsWith('Tool:'))?.slice('Tool:'.length).trim();
-    if (structuredName) return structuredName;
-    const firstLine = lines[0] || '';
-    if (firstLine.startsWith('Running ')) return firstLine.slice('Running '.length).trim();
-    for (const suffix of [' completed', ' failed']) {
-        if (firstLine.endsWith(suffix)) return firstLine.slice(0, -suffix.length).trim();
-    }
-    return '';
 };
 
 const normalizeStatus = (status: unknown): ProjectTodoStatus => {
@@ -66,13 +52,12 @@ export const deriveCurrentProjectTodos = (messages: ChatDisplayMessage[]): Proje
     const mergeSnapshot = (snapshot: TodoRecord[], scope: string, message: ChatDisplayMessage) => {
         scopes.set(scope, snapshot.map(item => ({ id: item.id, title: item.title, status: item.status,
                 ...(message.todoScope ? { scope: message.todoScope } : {}),
-                ...(message.taskKind?.startsWith('workflow_stage:') ? { stage: message.taskKind.slice('workflow_stage:'.length) } : {}),
             })));
     };
     for (const message of [...messages].sort((a, b) =>
         a.sequence !== undefined && b.sequence !== undefined ? a.sequence - b.sequence : a.timestamp - b.timestamp)) {
         const scope = message.todoScope || JSON.stringify([message.taskId || '', message.taskKind || '', message.turnId || '']);
-        if (isTodoTool(messageToolName(message))) {
+        if (isTodoTool(message.toolName)) {
             const snapshot = parseSnapshot(message.toolInput, message.id);
             if (snapshot) mergeSnapshot(snapshot, scope, message);
         }

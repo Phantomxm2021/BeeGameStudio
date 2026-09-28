@@ -266,6 +266,7 @@ export const ChatPanel = memo(({
                 viewportRef={scrollContainerRef}
                 navigation="rail"
                 smooth={false}
+                pauseAutoFollow={isLoadingOlderHistory}
                 navigationLabel="Message navigation"
                 busy={isLoading}
                 viewportClassName="min-h-0 w-full min-w-0 overflow-x-hidden"
@@ -300,7 +301,7 @@ export const ChatPanel = memo(({
                             type="button"
                             onClick={() => void onLoadOlderHistory?.()}
                             disabled={isLoadingOlderHistory}
-                            className="type-caption-1 rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] disabled:cursor-wait disabled:opacity-60"
+                            className="type-caption-1 rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] disabled:cursor-wait disabled:opacity-60"
                         >
                             {isLoadingOlderHistory ? text.loadingEarlierMessages : text.loadEarlierMessages}
                         </button>

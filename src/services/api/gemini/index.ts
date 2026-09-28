@@ -12,6 +12,7 @@ import type {
 import { type Tools } from '../../../Tool.js'
 import { toolToAPISchema } from '../../../utils/api.js'
 import { logForDebugging } from '../../../utils/debug.js'
+import { sanitizeInvalidImagesForAPI } from '../../../utils/imageValidation.js'
 import {
   createAssistantAPIErrorMessage,
   normalizeContentFromAPI,
@@ -50,7 +51,7 @@ export async function* queryModelGemini(
 > {
   try {
     const geminiModel = resolveGeminiModel(options.model)
-    const messagesForAPI = normalizeMessagesForAPI(messages, tools)
+    const messagesForAPI = await sanitizeInvalidImagesForAPI(normalizeMessagesForAPI(messages, tools))
 
     const toolSchemas = await Promise.all(
       tools.map(tool =>

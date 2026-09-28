@@ -3,7 +3,6 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createNativeSubagentChatEnricher, readVisibleSubagentActivity } from './native-subagent-chat'
-import { createStageChatProjector, type StageChatEvent } from './stage-chat-events'
 
 describe('native subagent chat observation', () => {
   test('correlates task events with the original prompt and visible child transcript', () => {
@@ -89,23 +88,5 @@ describe('native subagent chat observation', () => {
         id: 'unknown', kind: 'tool', toolName: '', status: 'completed', output: '<div>Hello</div>',
       })
     } finally { rmSync(dir, { recursive: true, force: true }) }
-  })
-
-  test('all document stage projectors retain lifecycle and distinguish child streams', async () => {
-    for (const stage of ['author', 'content', 'reviewer', 'revision'] as const) {
-      const events: StageChatEvent[] = []
-      const project = createStageChatProjector({ stage, sink: event => { events.push(event) } })
-      await project({ queryId: 'query-1', type: 'system', subtype: 'task_started', task_id: 'task-1', tool_use_id: 'agent-1', prompt: 'Review' })
-      await project({ queryId: 'query-1', type: 'system', subtype: 'task_progress', task_id: 'task-1', tool_use_id: 'agent-1', usage: { tool_uses: 2 } })
-      await project({ queryId: 'query-1', type: 'system', subtype: 'task_notification', task_id: 'task-1', tool_use_id: 'agent-1', status: 'completed', summary: 'Done' })
-      await project({ queryId: 'query-1', type: 'assistant', parent_tool_use_id: 'agent-1', message: { id: 'msg-child', content: [{ type: 'text', text: 'Child reply' }] } })
-      expect(events.slice(0, 3).map(e => e.payload?.subtype)).toEqual(['task_started', 'task_progress', 'task_notification'])
-      expect(events[0]?.payload?.input).toMatchObject({ prompt: 'Review' })
-      expect(events[3]?.payload?.parentToolUseID).toBe('agent-1')
-      expect(events[3]?.turnId).toBe(`workflow-stage:${stage}:query-1:subagent:agent-1`)
-      await project({ queryId: 'query-2', type: 'assistant', parentToolUseId: 'agent-1', agentId: 'child-1',
-        message: { id: 'trace-child', content: [{ type: 'text', text: 'Child transcript reply' }] } })
-      expect(events[4]?.payload).toMatchObject({ parentToolUseID: 'agent-1', nativeAgentId: 'child-1' })
-    }
   })
 })

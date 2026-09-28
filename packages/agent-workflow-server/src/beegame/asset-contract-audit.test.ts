@@ -24,6 +24,27 @@ test('rejects editor-incompatible atlas rectangles and actual PNG overflow at re
   await writeFile(sidecar, JSON.stringify({ frames: { idle: { frame: { x: 1, y: 1, w: 24, h: 52 } } } }))
   expect(auditAssetContract(workspace).valid).toBe(true)
 })
+
+test('rejects a PNG with a valid header but broken pixel stream', async () => {
+  const value = manifest()
+  value.resources[0]!.file_paths.push('assets/runtime/model.png')
+  const workspace = await writeFixture(value)
+  const pngPath = join(workspace, 'assets/runtime/model.png')
+  const png = await sharp({ create: {
+    width: 16, height: 16, channels: 4, background: '#fff',
+  } }).png().toBuffer()
+  await writeFile(pngPath, png)
+  expect(auditAssetContract(workspace).valid).toBe(true)
+
+  const broken = Buffer.from(png)
+  const idat = broken.indexOf(Buffer.from('IDAT'))
+  expect(idat).toBeGreaterThan(0)
+  broken.fill(0, idat + 4, idat + 8)
+  await writeFile(pngPath, broken)
+  const audit = auditAssetContract(workspace)
+  expect(audit.valid).toBe(false)
+  expect(audit.issues.join('\n')).toContain('PNG pixel stream cannot be decoded')
+})
 import {
   parseCanonicalBeeGameAssetManifest,
   writeBeeGameAssetManifest,

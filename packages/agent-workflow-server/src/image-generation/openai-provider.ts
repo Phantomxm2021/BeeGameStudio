@@ -14,7 +14,7 @@ export class OpenAIImageProvider implements ImageGenerationProvider {
   }
   protected body(config: ImageGenerationConfig, input: ImageRequest) {
     return { model: config.model, prompt: input.prompt, n: 1, output_format: 'png',
-      size: config.size, quality: config.quality, background: input.background ?? 'auto' }
+      size: input.size ?? config.size, quality: input.quality ?? config.quality, background: input.background ?? 'auto' }
   }
 
   async generate(rawConfig: ImageGenerationConfig, input: ImageRequest): Promise<ImageResult> {
@@ -22,6 +22,8 @@ export class OpenAIImageProvider implements ImageGenerationProvider {
     if (!config.apiKey) throw new ImageProviderError('Image provider API key is not configured', 'rejected')
     if (!input.prompt.trim() || input.prompt.length > 32000)
       throw new ImageProviderError('Image prompt must contain 1–32000 characters', 'rejected')
+    if (input.referenceImage)
+      throw new ImageProviderError('Reference-image editing is available only with Cloudflare', 'rejected', undefined, 'edit-unavailable')
     const endpoint = this.endpoint(config)
     const started = Date.now()
     const redact = (text: string) => {

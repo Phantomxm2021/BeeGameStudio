@@ -204,6 +204,9 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
       contentBlocks,
       attachments,
       timestamp,
+      ...(typeof record.turnCompletedAt === 'number' && Number.isFinite(record.turnCompletedAt)
+        ? { turnCompletedAt: record.turnCompletedAt }
+        : {}),
       sequence: typeof record.sequence === 'number' ? record.sequence : undefined,
       streamStatus: record.streamStatus === 'streaming' ? 'streaming' : record.streamStatus === 'complete' ? 'complete' : undefined,
       completionReason: record.completionReason === 'stopped' || record.completionReason === 'failed' || record.completionReason === 'incomplete' ? record.completionReason : undefined,
@@ -262,9 +265,9 @@ export const normalizeChatHistory = (history: unknown): Message[] => {
   }
 
   return normalized.sort((a, b) => {
+    if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
     if (a.sequence !== undefined && b.sequence !== undefined) return a.sequence - b.sequence;
     if (a.turnId && a.turnId === b.turnId) return (a.sourceIndex ?? 0) - (b.sourceIndex ?? 0);
-    if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
     return a.id.localeCompare(b.id);
   });
 };

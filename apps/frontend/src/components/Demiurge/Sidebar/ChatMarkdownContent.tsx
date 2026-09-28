@@ -91,7 +91,7 @@ export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble =
     // Stable renderers preserve image load state while subsequent text streams in.
     const markdownComponents = useMemo<Components>(() => ({
         img: ({ src, alt }) => <ChatImage key={typeof src === 'string' ? src : ''} src={typeof src === 'string' ? src : undefined}
-            alt={alt || (lang === 'zh' ? '图片' : 'Image')} lang={lang} />,
+            alt={alt || (lang === 'zh' ? '图片' : 'Image')} lang={lang} animateReveal={!bubble} />,
         p: ({ node, ...props }) => node?.children.some(child => child.type === 'element' && child.tagName === 'img') &&
             node.children.every(child => child.type === 'text' ? !child.value.trim() : child.type === 'element' && ['img', 'br'].includes(child.tagName))
             ? <div className="chat-image-gallery" {...props} /> : (

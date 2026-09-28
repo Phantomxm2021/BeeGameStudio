@@ -5,7 +5,7 @@ test('exposes existing semantic facets as read-only queries without permitting m
   const bodies: string[] = []
   const access = openResourceLibraryAccess({ baseUrl: 'https://library.test', getAuthToken: () => 'test',
     fetchImpl: async (_url, init) => { bodies.push(String(init.body)); return Response.json({ items: [], facets: { usageTags: ['terrain'] } }) } })
-  const base = access.instruction.match(/Base URL: (\S+)/)![1]!
+  const base = access.baseUrl
   try {
     expect(access.catalogObserved()).toBe(false)
     const body = JSON.stringify({ filters: { usageTags: ['terrain'], formats: ['png'] } })
@@ -30,10 +30,11 @@ test('native HTTP access reuses user auth, supports metadata/download and forbid
       return Response.json({ url: 'https://cdn.test/asset.png' })
     }),
   })
-  const base = access.instruction.match(/Base URL: (\S+)/)![1]!
+  const base = access.baseUrl
   try {
     expect(access.catalogObserved()).toBe(false)
     expect(access.instruction).not.toContain(token)
+    expect(access.instruction).not.toContain(base)
     expect((await fetch(base + '/api/resource-search?status=published')).status).toBe(200)
     token = 'refreshed-user-token'
     const download = await fetch(base + '/api/resource-packs/pack-1/elements/element-1/resource-url')
@@ -58,7 +59,7 @@ test('unavailable auth and upstream errors are not empty search results', async 
     getAuthToken: () => authenticated ? 'secret' : undefined,
     fetchImpl: async () => { throw new Error('secret upstream error') },
   })
-  const base = access.instruction.match(/Base URL: (\S+)/)![1]!
+  const base = access.baseUrl
   try {
     const noAuth = await fetch(base + '/api/resource-search')
     expect(noAuth.status).toBe(503)

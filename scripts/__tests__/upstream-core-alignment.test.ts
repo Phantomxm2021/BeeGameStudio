@@ -79,7 +79,7 @@ describe('upstream core audit', () => {
     const root = await mkdtemp(join(tmpdir(), 'core-alignment-branding-'))
     const upstreamRoot = join(root, 'upstream')
     const localRoot = join(root, 'local')
-    const url = 'https://remote-control.claude-code-best.win/'
+    const url = 'https://remote-control.example.test/'
     await writeFixture(
       upstreamRoot,
       'src/runtime.ts',

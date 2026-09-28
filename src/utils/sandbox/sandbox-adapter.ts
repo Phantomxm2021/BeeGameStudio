@@ -356,6 +356,14 @@ export function convertToSandboxRuntimeConfig(
     argv0,
   }
 
+  // The host supplies a project boundary at launch. Session cwd changes,
+  // additionalDirectories and a .git worktree pointer must not widen it.
+  const projectFilesystem = process.env.BEEGAME_PROJECT_EXECUTION === '1'
+    ? getSettingsForSource('flagSettings')?.sandbox?.filesystem : undefined
+  if (process.env.BEEGAME_PROJECT_EXECUTION === '1' &&
+      (!projectFilesystem?.allowRead?.length || !projectFilesystem.allowWrite?.length))
+    throw new Error('Missing project execution filesystem boundary')
+
   return {
     network: {
       allowedDomains,
@@ -367,10 +375,11 @@ export function convertToSandboxRuntimeConfig(
       socksProxyPort: settings.sandbox?.network?.socksProxyPort,
     },
     filesystem: {
-      denyRead,
-      allowRead,
-      allowWrite,
+      denyRead: projectFilesystem ? ['/'] : denyRead,
+      allowRead: projectFilesystem?.allowRead ?? allowRead,
+      allowWrite: projectFilesystem?.allowWrite ?? allowWrite,
       denyWrite,
+      allowGitConfig: settings.sandbox?.filesystem?.allowGitConfig,
     },
     ignoreViolations: settings.sandbox?.ignoreViolations,
     enableWeakerNestedSandbox: settings.sandbox?.enableWeakerNestedSandbox,
@@ -457,6 +466,7 @@ const checkDependencies = memoize((): SandboxDependencyCheck => {
 })
 
 function getSandboxEnabledSetting(): boolean {
+  if (process.env.BEEGAME_PROJECT_EXECUTION === '1') return true
   try {
     const settings = getSettings_DEPRECATED()
     return settings?.sandbox?.enabled ?? false
@@ -472,11 +482,13 @@ function isAutoAllowBashIfSandboxedEnabled(): boolean {
 }
 
 function areUnsandboxedCommandsAllowed(): boolean {
+  if (process.env.BEEGAME_PROJECT_EXECUTION === '1') return false
   const settings = getSettings_DEPRECATED()
   return settings?.sandbox?.allowUnsandboxedCommands ?? true
 }
 
 function isSandboxRequired(): boolean {
+  if (process.env.BEEGAME_PROJECT_EXECUTION === '1') return true
   const settings = getSettings_DEPRECATED()
   return (
     getSandboxEnabledSetting() &&
@@ -583,7 +595,7 @@ function getSandboxUnavailableReason(): string | undefined {
     const platform = getPlatform()
     const hint =
       platform === 'macos'
-        ? 'run /sandbox or /doctor for details'
+        ? 'run /sandbox for details'
         : 'install missing tools (e.g. apt install bubblewrap socat) or run /sandbox for details'
     return `sandbox.enabled is set but dependencies are missing: ${deps.errors.join(', ')} · ${hint}`
   }
@@ -694,6 +706,7 @@ async function setSandboxSettings(options: {
  * Get excluded commands (commands that should not be sandboxed)
  */
 function getExcludedCommands(): string[] {
+  if (process.env.BEEGAME_PROJECT_EXECUTION === '1') return []
   const settings = getSettings_DEPRECATED()
   return settings?.sandbox?.excludedCommands ?? []
 }
@@ -790,6 +803,7 @@ async function initialize(
 
       // Log error but don't throw - let sandboxing fail gracefully
       logForDebugging(`Failed to initialize sandbox: ${errorMessage(error)}`)
+      if (isSandboxRequired()) throw error
     }
   })()
 

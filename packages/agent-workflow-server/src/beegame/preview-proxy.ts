@@ -75,7 +75,7 @@ export async function proxyBeeGamePreviewRequest(
       cleanup()
       for (const name of ['content-length', 'etag', 'content-md5']) responseHeaders.delete(name)
       return new Response(
-        injectBeeGamePreviewConsoleBridge(stripViteClientScript(html, `${prefix}/`), sessionId),
+        injectBeeGamePreviewLifecycleBridge(stripViteClientScript(html, `${prefix}/`), sessionId),
         { status: upstream.status, statusText: upstream.statusText, headers: responseHeaders },
       )
     }
@@ -125,53 +125,48 @@ function withPreviewCorsHeaders(headers: Headers): Headers {
   return headers
 }
 
-function injectBeeGamePreviewConsoleBridge(
+function injectBeeGamePreviewLifecycleBridge(
   html: string,
   sessionId: string,
 ): string {
-  const bridge = `<script data-beegame-preview-console-bridge>
+  const bridge = `<script data-beegame-preview-lifecycle-bridge>
 (() => {
-  if (window.__beegamePreviewConsoleBridgeInstalled) return;
-  window.__beegamePreviewConsoleBridgeInstalled = true;
+  if (window.__beegamePreviewLifecycleBridgeInstalled) return;
+  window.__beegamePreviewLifecycleBridgeInstalled = true;
   const sessionId = ${JSON.stringify(sessionId)};
-  const serialize = (value) => {
-    if (value instanceof Error) return value.stack || value.message || String(value);
-    if (typeof value === 'string') return value;
-    try { return JSON.stringify(value); } catch { return String(value); }
-  };
-  const emit = (level, values) => {
-    const message = values.map(serialize).filter(Boolean).join(' ');
-    if (!message) return;
-    window.parent?.postMessage({
-      type: 'beegame.preview.console',
-      sessionId,
-      level,
-      message,
-      createdAt: new Date().toISOString(),
-    }, '*');
-  };
   // The sandbox has an opaque origin and referrer-policy is no-referrer.
   // Address the embedding window; the host validates event.source and sessionId.
   const lifecycle = (status) => window.parent?.postMessage({
     type: 'beegame.preview.lifecycle', sessionId, status,
   }, '*');
+  const sendConsole = (level, args) => {
+    const message = args.slice(0, 8).map(value => {
+      if (typeof value === 'string') return value;
+      if (value instanceof Error) return value.stack || value.message;
+      try { return JSON.stringify(value) ?? String(value); }
+      catch { return String(value); }
+    }).join(' ').slice(0, 2000);
+    window.parent?.postMessage({ type: 'beegame.preview.console', sessionId, level, message }, '*');
+  };
+  for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
+    const original = console[level].bind(console);
+    console[level] = (...args) => {
+      try { sendConsole(level, args); } catch { /* Logging must not break the game. */ }
+      return original(...args);
+    };
+  }
   window.addEventListener('DOMContentLoaded', () => lifecycle('loaded'), { once: true });
   window.addEventListener('error', event => {
     if (event.target?.tagName === 'SCRIPT') lifecycle('failed');
   }, true);
-  for (const level of ['error', 'warn']) {
-    const original = console[level];
-    console[level] = (...args) => {
-      emit(level, args);
-      original.apply(console, args);
-    };
-  }
   window.addEventListener('error', event => {
-    if (event.error || event.message) lifecycle('failed');
-    emit('error', [event.error || event.message || 'Unhandled preview error']);
+    if (event.error || event.message) {
+      sendConsole('error', [event.error || event.message]);
+      lifecycle('failed');
+    }
   });
   window.addEventListener('unhandledrejection', event => {
-    emit('error', [event.reason || 'Unhandled preview promise rejection']);
+    sendConsole('error', [event.reason]);
   });
 })();
 </script>`

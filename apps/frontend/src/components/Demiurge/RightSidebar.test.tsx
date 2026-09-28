@@ -100,28 +100,16 @@ describe('RightSidebar tabs', () => {
         expect(screen.queryByRole('button', { name: 'Edit message' })).not.toBeInTheDocument();
     });
 
-    it('shows Stop while a child runs, then replaces it with Send for queued input', async () => {
-        const onSendMessage = vi.fn().mockResolvedValue(true);
-        const onStopTask = vi.fn();
+    it('does not treat a historical running child record as a live Agent', () => {
         const child = { id: 'active-child', sender: 'beegame', type: 'tool' as const, timestamp: Date.now(),
             content: 'Inspecting', toolName: 'Agent', toolStatus: 'running' as const, isSubagentTool: true };
-        const props = { projectId: 'child-running', lang: 'en' as const, progress: 0, messages: [child],
-            onSendMessage, onStopTask, isLoading: false, waitingPermission: getWaitingPermissionState() };
-        const { rerender } = render(<RightSidebar {...props} />);
+        render(<RightSidebar projectId="child-history" lang="en" progress={0} messages={[child]}
+            onSendMessage={vi.fn().mockResolvedValue(true)} onStopTask={vi.fn()}
+            isLoading={false} waitingPermission={getWaitingPermissionState()} />);
         expect(getChatInput()).not.toHaveAttribute('readonly');
         expect(screen.getByTestId('beegame-chat-attach-button')).toBeEnabled();
-        expect(screen.getByRole('button', { name: 'Stop task' })).toBeEnabled();
-        expect(screen.queryByRole('button', { name: 'Send message' })).not.toBeInTheDocument();
-        fireEvent.change(getChatInput(), { target: { value: 'Please queue this' } });
         expect(screen.queryByRole('button', { name: 'Stop task' })).not.toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
-        expect(onSendMessage).toHaveBeenCalledWith('Please queue this', [], undefined);
-        await waitFor(() => expect(getChatInput()).toHaveValue(''));
-        fireEvent.click(screen.getByRole('button', { name: 'Stop task' }));
-        expect(onStopTask).toHaveBeenCalledOnce();
-        rerender(<RightSidebar {...props} messages={[{ ...child, toolStatus: 'completed' }]} />);
-        await waitFor(() => expect(getChatInput()).not.toHaveAttribute('readonly'));
-        expect(getChatInput()).toBeEnabled();
+        expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument();
     });
 
     it('uses the runtime busy state for Stop even before chat streaming begins', () => {
@@ -315,6 +303,54 @@ describe('RightSidebar tabs', () => {
         await waitFor(() => expect(api.getOlderChatHistory).toHaveBeenCalledTimes(1));
     });
 
+    it('keeps the first visible message anchored when older history is prepended', async () => {
+        vi.mocked(api.getChatHistoryPaginationState).mockReturnValue({ initialized: true, hasMore: true });
+        const page = deferred<{ messages: Array<Record<string, unknown>>; hasMore: boolean }>();
+        vi.mocked(api.getOlderChatHistory).mockReturnValue(page.promise);
+        const earlierResponse = { id: 'earlier-response', sender: 'beegame' as const, type: 'text' as const, content: 'Earlier response', timestamp: 100, turnId: 'same-turn' };
+        const turnSeparator = { id: 'turn-separator', sender: 'user' as const, content: 'Follow-up', timestamp: 150 };
+        const latest = { id: 'latest-visible', sender: 'beegame' as const, type: 'text' as const, content: 'Latest visible response', timestamp: 200, turnId: 'same-turn' };
+        const older = { id: 'older-page-item', sender: 'user' as const, content: 'Older message', timestamp: 100 };
+        const view = render(<RightSidebar projectId="history-anchor" lang="en" progress={0}
+            messages={[earlierResponse, turnSeparator, latest]} onSendMessage={vi.fn()} isLoading={false}
+            waitingPermission={{ kind: 'none', isBlockingChat: false, isWaitingStatus: false, message: '', placeholder: 'Type...' }}
+        />);
+        const viewport = screen.getByRole('region', { name: 'Conversation' });
+        const visibleMessage = viewport.querySelector<HTMLElement>('[data-history-anchor-id="response:latest-visible"]');
+        if (!visibleMessage) throw new Error('Expected the latest message anchor');
+        expect(viewport.querySelectorAll('[data-message-id="same-turn"]')).toHaveLength(2);
+        expect(viewport.querySelectorAll('[data-history-anchor-id^="response:"]')).toHaveLength(2);
+        let hasPrepended = false;
+        viewport.getBoundingClientRect = () => ({ top: 0, bottom: 500, left: 0, right: 500, width: 500, height: 500, x: 0, y: 0, toJSON: () => ({}) });
+        visibleMessage.getBoundingClientRect = () => ({
+            top: hasPrepended ? 130 : 30, bottom: hasPrepended ? 190 : 90,
+            left: 0, right: 500, width: 500, height: 60, x: 0, y: hasPrepended ? 130 : 30, toJSON: () => ({}),
+        });
+        Object.defineProperty(viewport, 'scrollHeight', { configurable: true, get: () => hasPrepended ? 1200 : 1000 });
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)); });
+        viewport.scrollTop = 0;
+
+        fireEvent.wheel(viewport, { deltaY: -100 });
+        fireEvent.scroll(viewport, { target: { scrollTop: 0 } });
+        await waitFor(() => expect(api.getOlderChatHistory).toHaveBeenCalledTimes(1));
+        hasPrepended = true;
+        await act(async () => {
+            page.resolve({ messages: [older], hasMore: true });
+            await page.promise;
+        });
+        // The API response can arrive before the parent commits the external-store
+        // history update. Keep auto-follow paused until that DOM commit is anchored.
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+        expect(screen.getByRole('button', { name: /Loading earlier messages/i })).toBeDisabled();
+        await act(async () => {
+            view.rerender(<RightSidebar projectId="history-anchor" lang="en" progress={0}
+                messages={[older, earlierResponse, turnSeparator, latest]} onSendMessage={vi.fn()} isLoading={false}
+                waitingPermission={{ kind: 'none', isBlockingChat: false, isWaitingStatus: false, message: '', placeholder: 'Type...' }}
+            />);
+        });
+        await waitFor(() => expect(viewport.scrollTop).toBe(100));
+    });
+
     it('shows chat, todo, and artifacts tabs in canonical order', () => {
         render(
             <RightSidebar
@@ -351,7 +387,6 @@ describe('RightSidebar tabs', () => {
                 lang="en"
                 messages={[{
                     id: 'todo-1', sender: 'system', content: '', timestamp: 1, type: 'tool', toolName: 'TodoWrite',
-                    taskKind: 'workflow_stage:DOCUMENT_DRAFTING',
                     toolInput: { todos: [{ content: 'Build the scene', status: 'in_progress' }] },
                 }]}
                 progress={0}
@@ -368,16 +403,29 @@ describe('RightSidebar tabs', () => {
         expect(screen.queryByRole('region', { name: /Document delivery/ })).not.toBeInTheDocument();
     });
 
-    it('shows passive document progress during drafting when the Agent emits no TodoWrite', async () => {
-        render(<RightSidebar projectId="document-author" lang="zh" progress={0} isLoading
-            messages={[{ id: 'author-writing', sender: 'system', content: '', timestamp: 1,
-                taskKind: 'workflow_stage:DOCUMENT_DRAFTING', type: 'tool', toolName: 'Write' }]}
+    it('does not turn the author milestone into a second eight-document todo list', () => {
+        render(<RightSidebar projectId="document-author-phase" lang="zh" progress={0} isLoading
+            messages={[{ id: 'author-phase', sender: 'system', content: 'author', taskKind: 'delivery_phase', timestamp: 1 }]}
             onSendMessage={vi.fn()} waitingPermission={getWaitingPermissionState([])} />);
-
         fireEvent.click(screen.getByRole('tab', { name: 'Todo' }));
-        expect(screen.getByRole('region', { name: /文档交付进度/ })).toBeInTheDocument();
-        expect(screen.getByText('GDD')).toBeInTheDocument();
-        expect(screen.queryByTestId('beegame-todo-empty')).not.toBeInTheDocument();
+        expect(screen.queryByRole('region', { name: /文档交付进度/ })).not.toBeInTheDocument();
+        expect(screen.getByTestId('beegame-todo-empty')).toBeInTheDocument();
+    });
+
+    it('shows only the Agent todo when a document write and author milestone are also visible', () => {
+        render(<RightSidebar projectId="document-author-todo" lang="zh" progress={0} isLoading
+            messages={[
+                { id: 'author-phase', sender: 'system', content: 'author', taskKind: 'delivery_phase', timestamp: 1 },
+                { id: 'author-writing', sender: 'system', content: '', timestamp: 2, type: 'tool',
+                    toolName: 'Write', artifactPath: 'docs/GDD.md', toolStatus: 'running' },
+                { id: 'author-todo', sender: 'system', content: '', timestamp: 3, type: 'tool',
+                    toolName: 'TodoWrite', toolInput: { todos: [{ content: '编写 GDD.md 游戏设计文档', status: 'in_progress' }] } },
+            ]}
+            onSendMessage={vi.fn()} waitingPermission={getWaitingPermissionState([])} />);
+        fireEvent.click(screen.getByRole('tab', { name: 'Todo' }));
+        expect(screen.getByRole('region', { name: /^任务/ })).toBeInTheDocument();
+        expect(screen.getAllByText('编写 GDD.md 游戏设计文档')).toHaveLength(1);
+        expect(screen.queryByRole('region', { name: /文档交付进度/ })).not.toBeInTheDocument();
     });
 
     it.each(['scene', 'ui'] as const)('lists %s JSON files before opening the chosen file in a new tab', async kind => {
@@ -441,12 +489,11 @@ describe('RightSidebar tabs', () => {
             />
         );
 
-        // The fixture above intentionally uses non-canonical names to prove
-        // that unrelated workflow tasks do not inflate the document counter.
-        expect(screen.getByRole('tab', { name: /^Artifacts/ })).toHaveTextContent('3');
+        // The four visible categories do not count historical workflow tasks.
+        expect(screen.getByRole('tab', { name: /^Artifacts/ })).toHaveTextContent('4');
     });
 
-    it('refreshes artifacts when a Level or Balance document event arrives', async () => {
+    it('refreshes artifacts when a dynamically named project document event arrives', async () => {
         const first = deferred<any[]>();
         const second = deferred<any[]>();
         vi.mocked(api.getArtifacts)
@@ -480,7 +527,7 @@ describe('RightSidebar tabs', () => {
                 lang="zh"
                 messages={[{
                     id: 'level', sender: 'system', content: '', timestamp: 1, type: 'tool',
-                    artifactPath: 'docs/LEVEL_SCENE_DESIGN.md', toolStatus: 'completed',
+                    artifactPath: 'docs/README.md', toolStatus: 'completed',
                 }]}
                 progress={0}
                 onSendMessage={vi.fn()}

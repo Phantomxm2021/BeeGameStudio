@@ -6,7 +6,23 @@ import { toChatDisplayMessages } from '../../../viewModels/displayModels';
 import { normalizeChatHistory } from '../../../utils/chatHistory';
 import { sampleMessages } from '../../../test/fixtures/canonicalTranscript';
 
+vi.mock('img-fx', async () => {
+  const React = await import('react');
+  return { ImageGeneration: React.forwardRef(({ children }: { children: React.ReactNode }, ref) => {
+    React.useImperativeHandle(ref, () => ({ triggerReveal: () => undefined }), []);
+    return <div>{children}</div>;
+  }) };
+});
+
 const CHECKLIST_TURN_ID = 'beegame-turn-beegame_191b560f8a9046b18e1efed2fafa8f07-1';
+
+it('shows the actual platform handoff error instead of a generic context label', () => {
+  render(<BeeGameCollaborationFeed messages={[{
+    id: 'delivery-error', sender: 'system', taskKind: 'delivery_error',
+    content: '交付未能继续：测试清理失败', timestamp: Date.now(),
+  }]} lang="zh" />);
+  expect(screen.getByTestId('beegame-context-separator')).toHaveTextContent('交付未能继续：测试清理失败');
+});
 
 it('shows native context compaction as a live marker and then a completed separator', () => {
   const marker: ChatDisplayMessage = { id: 'compaction', sender: 'system', content: 'compacting',
@@ -17,6 +33,15 @@ it('shows native context compaction as a live marker and then a completed separa
   rerender(<BeeGameCollaborationFeed messages={[{ ...marker, content: 'compacted', streamStatus: 'complete' }]} lang="zh" />);
   expect(screen.getByTestId('beegame-compaction-marker')).toHaveTextContent('上下文已自动压缩');
   expect(screen.getByTestId('beegame-compaction-marker')).not.toHaveAttribute('role');
+});
+
+it('renders delivery milestone and stop markers as separators', () => {
+  render(<BeeGameCollaborationFeed lang="zh" messages={[
+    { id: 'phase-author', sender: 'system', content: 'author', taskKind: 'delivery_phase', timestamp: 1 },
+    { id: 'session-stop', sender: 'system', content: 'stopped', taskKind: 'session_lifecycle', timestamp: 2 },
+  ]} />);
+  expect(screen.getByText('编写项目文档')).toBeInTheDocument();
+  expect(screen.getByText('任务已停止')).toBeInTheDocument();
 });
 
 it('keeps distinct references after history conversion and renders them with the existing BeUI sources disclosure', () => {
@@ -43,6 +68,36 @@ it('shows attachment-only user messages without treating documents as images', (
   expect(screen.getAllByRole('img')).toHaveLength(1);
 });
 
+it('keeps a Bottts avatar stable for a subtask and falls back if the image cannot load', () => {
+  render(<BeeGameCollaborationFeed messages={[{ id: 'avatar-task', sender: 'beegame', type: 'tool',
+    content: 'Agent', timestamp: 100, toolName: 'Agent', toolStatus: 'running', isSubagentTool: true }]} lang="zh" />);
+  const badge = within(screen.getByTestId('beegame-subagent-disclosure-avatar-task')).getByRole('button');
+  const avatar = badge.querySelector('img')!;
+  expect(avatar).toHaveAttribute('width', '17');
+  expect(avatar).toHaveAttribute('height', '17');
+  expect(avatar.src).toMatch(/^https:\/\/api\.dicebear\.com\/10\.x\/bottts\/svg\?seed=bgs-/);
+  expect(avatar.src).not.toContain('avatar-task');
+  fireEvent.error(avatar);
+  expect(badge.querySelector('img')).toBeNull();
+  expect(badge.querySelector('.lucide-bot')).not.toBeNull();
+});
+
+it('lays out consecutive subagents in one wrapping horizontal row', () => {
+  render(<BeeGameCollaborationFeed messages={[
+    { id: 'first-subagent', sender: 'beegame', type: 'tool', content: 'Agent', timestamp: 100,
+      toolName: 'Agent', toolStatus: 'running', isSubagentTool: true },
+    { id: 'second-subagent', sender: 'beegame', type: 'tool', content: 'Agent', timestamp: 101,
+      toolName: 'Agent', toolStatus: 'completed', isSubagentTool: true },
+  ]} lang="zh" />);
+  const rows = screen.getAllByTestId('beegame-subagent-row');
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toHaveClass('flex', 'flex-wrap');
+  expect(within(rows[0]).getAllByRole('button')).toHaveLength(2);
+  expect(Array.from(rows[0].querySelectorAll('[data-testid^="beegame-subagent-disclosure-"]'))
+    .map(item => item.getAttribute('data-testid')))
+    .toEqual(['beegame-subagent-disclosure-first-subagent', 'beegame-subagent-disclosure-second-subagent']);
+});
+
 it('shows the latest assistant-response time below the Streaming Response content', () => {
   const { container } = render(<BeeGameCollaborationFeed messages={[
     { id: 'response-time', sender: 'beegame', content: 'A response with a time.', timestamp: Date.UTC(2026, 8, 23, 1, 42) },
@@ -50,7 +105,44 @@ it('shows the latest assistant-response time below the Streaming Response conten
   expect(container.querySelector('time')).toHaveTextContent('09:42');
 });
 
-it('shows a time only on the last text response, not on tool or thinking activity', () => {
+it('paces a live response without replaying completed history', () => {
+  const streaming = { id: 'smooth-response', sender: 'beegame', content: 'A complete streamed sentence.',
+    timestamp: Date.now(), streamStatus: 'streaming' as const };
+  const { rerender } = render(<BeeGameCollaborationFeed messages={[streaming]} streamingMessageId={streaming.id} />);
+  expect(screen.getByTestId('beegame-agent-message-smooth-response')).not.toHaveTextContent(streaming.content);
+  rerender(<BeeGameCollaborationFeed messages={[{ ...streaming, streamStatus: 'complete' }]} />);
+  expect(screen.getByRole('button', { name: 'Copy response' })).toBeInTheDocument();
+  rerender(<BeeGameCollaborationFeed messages={[{
+    id: 'historical-response', sender: 'beegame', content: 'Already complete.', timestamp: Date.now(), streamStatus: 'complete',
+  }]} />);
+  expect(screen.getByTestId('beegame-agent-message-historical-response')).toHaveTextContent('Already complete.');
+});
+
+it('keeps each completed turn footer when a paged transcript includes older responses', () => {
+  const messages = toChatDisplayMessages(normalizeChatHistory([
+    { id: 'latest-response', sender: 'beegame', content: 'Latest answer',
+      turnId: 'latest-turn', sequence: 500, timestamp: Date.UTC(2026, 8, 23, 9, 59) },
+    { id: 'recovered-older-response', sender: 'beegame', content: 'Older answer',
+      turnId: 'older-turn', sequence: 400, timestamp: Date.UTC(2026, 8, 23, 4, 55) },
+  ]));
+  const { container } = render(<BeeGameCollaborationFeed messages={messages} />);
+  expect(Array.from(container.querySelectorAll('time')).map(node => node.textContent)).toEqual(['12:55', '17:59']);
+  expect(container.querySelectorAll('[data-slot="message"]').item(container.querySelectorAll('[data-slot="message"]').length - 1))
+    .toHaveTextContent('Latest answer');
+});
+
+it('keeps a response anchor when an older page prepends activity in the same turn', () => {
+  const latest = { id: 'visible-tool', sender: 'beegame', type: 'tool' as const,
+    content: 'Read', toolName: 'Read', turnId: 'same-turn', timestamp: 200 };
+  const older = { id: 'older-thought', sender: 'beegame', type: 'thought' as const,
+    content: 'Checking', turnId: 'same-turn', timestamp: 100 };
+  const { container, rerender } = render(<BeeGameCollaborationFeed messages={[latest]} />);
+  const before = container.querySelector('[data-slot="message"]')?.getAttribute('data-history-anchor-id');
+  rerender(<BeeGameCollaborationFeed messages={[older, latest]} />);
+  expect(container.querySelector('[data-slot="message"]')).toHaveAttribute('data-history-anchor-id', before);
+});
+
+it('shows a time on each completed text turn, not on tool or thinking-only activity', () => {
   const { container } = render(<BeeGameCollaborationFeed messages={[
     { id: 'earlier', sender: 'beegame', content: 'I will inspect this.', turnId: 'turn-1', timestamp: Date.UTC(2026, 8, 23, 11, 22) },
     { id: 'tool', sender: 'system', type: 'tool', content: 'Read completed', toolName: 'Read', toolStatus: 'completed',
@@ -59,7 +151,38 @@ it('shows a time only on the last text response, not on tool or thinking activit
       timestamp: Date.UTC(2026, 8, 23, 11, 22, 45), streamStatus: 'complete' },
     { id: 'final', sender: 'beegame', content: 'Done.', turnId: 'turn-4', timestamp: Date.UTC(2026, 8, 23, 11, 23) },
   ]} lang="zh" />);
-  expect(Array.from(container.querySelectorAll('time')).map(node => node.textContent)).toEqual(['19:23']);
+  expect(Array.from(container.querySelectorAll('time')).map(node => node.textContent)).toEqual(['19:22', '19:23']);
+});
+
+it('keeps completed delivery-turn times when automatic continuation messages are hidden', () => {
+  const at = (hour: number, minute: number) => Date.UTC(2026, 8, 25, hour - 8, minute);
+  const { container } = render(<BeeGameCollaborationFeed lang="zh" messages={[
+    { id: 'request', sender: 'user', content: '做一个贪吃蛇游戏', timestamp: at(14, 36) },
+    { id: 'author-answer', sender: 'beegame', content: '文档完成', turnId: 'author', timestamp: at(14, 51) },
+    { id: 'review-phase', sender: 'system', content: 'review', taskKind: 'delivery_phase', timestamp: at(14, 51) },
+    { id: 'review-answer', sender: 'beegame', content: '评审完成', turnId: 'review', timestamp: at(14, 54) },
+    { id: 'revision-phase', sender: 'system', content: 'revision', taskKind: 'delivery_phase', timestamp: at(14, 54) },
+    { id: 'revision-answer', sender: 'beegame', content: '修订完成', turnId: 'revision', timestamp: at(15, 0) },
+    { id: 'resources-phase', sender: 'system', content: 'resources', taskKind: 'delivery_phase', timestamp: at(15, 0) },
+    { id: 'resources-working', sender: 'beegame', content: '正在准备资源', turnId: 'resources',
+      timestamp: at(15, 1), streamStatus: 'streaming' },
+  ]} />);
+  expect(screen.getAllByTestId(/^beegame-agent-turn-/)).toHaveLength(4);
+  expect(Array.from(container.querySelectorAll('time')).map(node => node.textContent)).toEqual([
+    '14:36', '14:51', '14:54', '15:00',
+  ]);
+  expect(screen.getAllByRole('button', { name: 'Copy response' })).toHaveLength(3);
+});
+
+it('keeps one footer when a context marker splits a response within the same turn', () => {
+  const { container } = render(<BeeGameCollaborationFeed lang="zh" messages={[
+    { id: 'before', sender: 'beegame', content: '第一段', turnId: 'same-turn', timestamp: Date.UTC(2026, 8, 25, 6, 51) },
+    { id: 'compaction', sender: 'system', content: 'compacted', taskKind: 'context_compaction', timestamp: Date.UTC(2026, 8, 25, 6, 52) },
+    { id: 'after', sender: 'beegame', content: '第二段', turnId: 'same-turn', timestamp: Date.UTC(2026, 8, 25, 6, 53) },
+  ]} />);
+  expect(container.querySelectorAll('time')).toHaveLength(1);
+  expect(container.querySelector('time')).toHaveTextContent('14:53');
+  expect(screen.getAllByRole('button', { name: 'Copy response' })).toHaveLength(1);
 });
 
 it('timestamps the completed Streaming Response footer even while the agent is still working', () => {
@@ -70,6 +193,14 @@ it('timestamps the completed Streaming Response footer even while the agent is s
   const copy = screen.getByRole('button', { name: 'Copy response' });
   expect(time).toHaveTextContent('19:22');
   expect(Boolean(copy.compareDocumentPosition(time) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+});
+
+it('uses the turn completion time for the response footer, not the first text block time', () => {
+  const { container } = render(<BeeGameCollaborationFeed lang="zh" messages={[
+    { id: 'answer', sender: 'beegame', content: '文档完成', turnId: 'author',
+      timestamp: Date.UTC(2026, 8, 25, 6, 50, 55), turnCompletedAt: Date.UTC(2026, 8, 25, 6, 51, 10) },
+  ]} />);
+  expect(container.querySelector('time')).toHaveTextContent('14:51');
 });
 
 it('places copy and edit actions below, not inside, the user-message bubble', () => {
@@ -147,12 +278,12 @@ it('immediately replaces the selected user bubble with the BeUI editor and submi
   expect(onCancelEdit).toHaveBeenCalledOnce();
 });
 const IMPLEMENTATION_TURN_ID = 'beegame-turn-beegame_0889307bbd6142f186543e33306e9b01-1';
-it('shows tool screenshots outside the collapsed tool activity', () => {
+it('shows tool screenshots outside the collapsed tool activity', async () => {
   render(<BeeGameCollaborationFeed messages={[{ id: 'screenshot', sender: 'beegame', content: 'Read', timestamp: Date.now(),
     type: 'tool', toolName: 'Read', toolUseId: 'read-image', toolStatus: 'completed',
     attachments: [{ type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'screenshot.png' }],
   }]} />);
-  expect(screen.getByRole('img', { name: 'screenshot.png' })).toBeVisible();
+  expect(await screen.findByRole('img', { name: 'screenshot.png' })).toBeVisible();
 });
 const FAILURE_TURN_ID = 'beegame-turn-beegame_bcc8df40769c4754895fac37064035d5-1';
 const CHECKLIST_MIXED_MESSAGE_ID = '021789434990692846a816464a9af9c0791e0f68a2ce03cbd3227';
@@ -204,18 +335,29 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
         toolStatus, completionReason, subagentPrompt: 'Inspect assets' };
       const { rerender } = render(<BeeGameCollaborationFeed messages={[message]} lang="zh" />);
       const pill = screen.getByTestId('beegame-subagent-disclosure-badge-task');
-      const badge = within(pill).getByRole('button', { name: `子任务 · ${zh}` });
+      const badge = within(pill).getByRole('button');
+      const name = badge.querySelector('.truncate')?.textContent;
+      expect(name).toBeTruthy();
+      expect(name).not.toMatch(/^(子任务|Subagent|Task)$/);
+      expect(badge).toHaveAccessibleName(`${name} · ${zh}`);
       expect(badge).toHaveAttribute('data-subagent-state', state);
       expect(badge).toHaveClass(color);
+      expect(badge.querySelector('.lucide-chevron-right')).toBeNull();
       expect(badge.querySelectorAll('[data-subagent-state]')).toHaveLength(0);
-      expect(within(badge).getByRole('status', { name: zh })).not.toHaveClass('border', 'rounded-full');
+      expect(badge).not.toHaveTextContent(zh);
+      expect(badge.querySelector('img')?.getAttribute('src')).toMatch(/^https:\/\/api\.dicebear\.com\/10\.x\/bottts\/svg\?seed=bgs-/);
+      if (state === 'running') expect(badge.querySelectorAll('[role="status"] .grid > span')).toHaveLength(9);
+      if (state === 'completed') expect(badge.querySelector('.lucide-circle-check')).not.toBeNull();
       // The badge must not introduce a second interactive control inside the pill.
       expect(within(pill).getAllByRole('button')).toHaveLength(1);
       fireEvent.click(within(pill).getByRole('button'));
       expect(within(screen.getByTestId('beegame-agent-run-detail')).getByRole('status', { name: zh }))
         .toHaveAttribute('data-subagent-state', state);
+      if (state === 'completed') expect(screen.getByTestId('beegame-agent-run-detail').querySelector('.lucide-circle-check')).not.toBeNull();
+      expect(within(screen.getByTestId('beegame-agent-run-detail')).getByRole('heading', { name, level: 2 }))
+        .toBeInTheDocument();
       rerender(<BeeGameCollaborationFeed messages={[message]} lang="en" />);
-      expect(within(pill).getByRole('button', { name: `Subagent · ${en}` })).toHaveAttribute('data-subagent-state', state);
+      expect(within(pill).getByRole('button', { name: `${name} · ${en}` })).toHaveAttribute('data-subagent-state', state);
     });
 
   it('labels cancelled tools as stopped rather than failed', () => {
@@ -227,14 +369,17 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
     expect(screen.queryByText(/1 failed/)).not.toBeInTheDocument();
   });
 
-  it('renders a native background shell task as a task, not a subagent', () => {
+  it('keeps a native background task name consistent between the pill and detail', () => {
     render(<BeeGameCollaborationFeed messages={[
       { id: 'shell-task', sender: 'beegame', type: 'tool', content: 'Task', timestamp: 100,
         toolName: 'Task', toolStatus: 'running', isSubagentTool: true, subagentPrompt: 'Check build' },
     ]} lang="en" />);
     const pill = screen.getByTestId('beegame-subagent-disclosure-shell-task');
-    fireEvent.click(within(pill).getByRole('button', { name: 'Task · Working' }));
-    expect(within(screen.getByTestId('beegame-agent-run-detail')).getByRole('heading', { name: 'Task', level: 2 }))
+    const badge = within(pill).getByRole('button');
+    const name = badge.querySelector('.truncate')?.textContent;
+    expect(badge).toHaveAccessibleName(`${name} · Working`);
+    fireEvent.click(badge);
+    expect(within(screen.getByTestId('beegame-agent-run-detail')).getByRole('heading', { name, level: 2 }))
       .toBeInTheDocument();
   });
 
@@ -275,18 +420,30 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
       type: 'tool', timestamp: Date.now(), toolName: 'Agent', toolStatus: 'running', isSubagentTool: true,
       subagentPrompt: 'Audit assets', subagentTrace: 'Read manifest.json', subagentOutput: 'Agent input streaming' };
     const { rerender } = render(<BeeGameCollaborationFeed messages={[message]} />);
-    expect(within(screen.getByTestId('beegame-subagent-disclosure-subagent-live')).getByRole('button', { name: /Working/ }))
-      .toHaveAttribute('data-subagent-state', 'running');
+    const badge = within(screen.getByTestId('beegame-subagent-disclosure-subagent-live')).getByRole('button', { name: /Working/ });
+    expect(badge).toHaveAttribute('data-subagent-state', 'running');
+    const avatar = badge.querySelector('img');
+    expect(avatar).not.toBeNull();
+    expect(badge.querySelectorAll('[role="status"] .grid > span')).toHaveLength(9);
+    const animatedDot = badge.querySelector('[role="status"] .grid > span');
+    expect(parseFloat((animatedDot as HTMLElement).style.width)).toBeCloseTo(2.88);
     fireEvent.click(within(screen.getByTestId('beegame-subagent-disclosure-subagent-live')).getByRole('button'));
     expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Read manifest.json');
     expect(screen.getByTestId('beegame-agent-run-detail')).not.toHaveTextContent('Agent input streaming');
+    rerender(<BeeGameCollaborationFeed messages={[{ ...message, subagentTrace: 'Checking hashes' }]} />);
+    expect(badge.querySelector('[role="status"] .grid > span')).toBe(animatedDot);
+    expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Checking hashes');
     rerender(<BeeGameCollaborationFeed messages={[{ ...message, toolStatus: 'completed',
       subagentTrace: 'Checked hashes and palette', subagentOutput: 'Audit passed' }]} />);
     expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Completed');
     expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Checked hashes and palette');
     expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Audit passed');
     expect(within(screen.getByTestId('beegame-subagent-disclosure-subagent-live')).getByRole('button', { name: /Completed/ }))
-      .toHaveAttribute('data-subagent-state', 'completed');
+      .toBe(badge);
+    expect(badge).toHaveAttribute('data-subagent-state', 'completed');
+    expect(badge.querySelector('img')).toBe(avatar);
+    expect(badge.querySelector('.lucide-circle-check')).not.toBeNull();
+    expect(badge).not.toHaveTextContent('Completed');
     expect(within(screen.getByTestId('beegame-agent-run-detail')).getByRole('status', { name: 'Completed' }))
       .toHaveAttribute('data-subagent-state', 'completed');
   });

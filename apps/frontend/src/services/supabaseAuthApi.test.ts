@@ -10,10 +10,12 @@ import {
   initializeSupabaseSession,
   isSupabaseAuthConfigured,
   refreshSupabaseSession,
+  resendSupabaseSignupCode,
   signInWithSupabaseOAuth,
   signInWithSupabasePassword,
   signUpWithSupabasePassword,
   uploadSupabaseAvatarImage,
+  verifySupabaseSignupCode,
 } from './supabaseAuthApi';
 
 describe('supabaseAuthApi', () => {
@@ -278,6 +280,26 @@ describe('supabaseAuthApi', () => {
         }),
       }),
     );
+  });
+
+  it('verifies a signup email code and stores the resulting session', async () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://project.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+    const fetchMock = vi.fn(async () => Response.json({
+      access_token: 'verified-access-token',
+      expires_in: 3600,
+      user: { id: 'user-2', email: 'new@example.com' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await verifySupabaseSignupCode(' new@example.com ', ' 123456 ');
+    expect(getSupabaseAccessToken()).toBe('verified-access-token');
+    expect(fetchMock).toHaveBeenCalledWith('https://project.supabase.co/auth/v1/verify',
+      expect.objectContaining({ body: JSON.stringify({ email: 'new@example.com', token: '123456', type: 'signup' }) }));
+
+    await resendSupabaseSignupCode(' new@example.com ');
+    expect(fetchMock).toHaveBeenCalledWith('https://project.supabase.co/auth/v1/resend',
+      expect.objectContaining({ body: JSON.stringify({ email: 'new@example.com', type: 'signup' }) }));
   });
 
   it('stores an invitation code in Supabase signup metadata', async () => {

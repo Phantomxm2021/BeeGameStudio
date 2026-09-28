@@ -54,6 +54,7 @@ export const SandboxFilesystemConfigSchema = lazySchema(() =>
           'Additional paths to allow writing within the sandbox. ' +
             'Merged with paths from Edit(...) allow permission rules.',
         ),
+      allowGitConfig: z.boolean().optional().describe('Allow project Git configuration writes; hooks remain protected.'),
       denyWrite: z
         .array(z.string())
         .optional()

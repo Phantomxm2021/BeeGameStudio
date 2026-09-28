@@ -42,10 +42,8 @@ describe('EditorLoadingView actions', () => {
 
     const retry = screen.getByRole('button', { name: 'Try again' });
     const close = screen.getByRole('button', { name: 'Close editor' });
-    expect(retry).toHaveClass('rounded-full', 'bg-primary', 'text-primary-foreground');
+    expect(retry).toHaveClass('rounded-full', 'border', 'border-border', 'bg-transparent', 'text-foreground');
     expect(close).toHaveClass('rounded-full', 'border', 'bg-transparent');
-    expect(retry).not.toHaveClass('bg-transparent');
-    expect(close).not.toHaveClass('bg-primary');
 
     fireEvent.click(retry);
     fireEvent.click(close);

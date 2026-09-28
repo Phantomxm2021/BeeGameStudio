@@ -1,154 +1,314 @@
 .form {
     position: relative;
-    width: 100%;
-    max-width: 872px;
-    min-width: 0;
-    margin-inline: auto;
-    color: #101828;
-}
-
-.beamPreview {
-    width: 100%;
-}
-
-.root {
-    --prompt-paper: #fff;
-    --prompt-toolbar: #f7f7f8;
-    --prompt-ink: #101828;
-    --prompt-muted: #667085;
-    --prompt-border: rgba(0, 0, 0, .06);
-    box-sizing: border-box;
-    width: 100%;
-    min-width: 0;
-    margin: 0;
-    padding: 8px;
-    border: 1px solid var(--prompt-border);
-    border-radius: 30px;
-    background: var(--prompt-paper);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, .06);
-}
-
-.surface {
-    overflow: visible;
-    min-width: 0;
-    border: 1px solid var(--prompt-border);
-    border-radius: 30px;
-    background: var(--prompt-toolbar);
-}
-
-.inputPanel {
+    z-index: 10;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    min-width: 0;
-    padding: 16px 20px 12px;
-    border-radius: inherit;
-    background: var(--prompt-paper);
-    color: var(--prompt-ink);
+    align-items: center;
+    width: 100%;
+    justify-content: center;
+    padding-inline: 16px;
 }
 
-.input {
-    box-sizing: border-box;
-    display: block;
-    flex: 1 0 auto;
+.morphShell {
+    display: inline-flex;
     width: 100%;
-    height: 50px;
-    min-height: 50px;
-    max-height: 50px;
+    height: 72px;
+    align-items: center;
+    margin-inline: auto;
+    overflow: hidden;
+}
+
+.morphShell[data-has-attachments="true"][data-confirming="false"] {
+    height: auto;
+    min-height: 72px;
+}
+
+.frostedSurface {
+    --composer-text: var(--foreground);
+    --composer-muted: var(--muted-foreground);
+    --composer-control: var(--surface-2);
+    --composer-control-hover: color-mix(in srgb, var(--foreground) 10%, transparent);
+    --composer-send: var(--foreground);
+    --composer-send-hover: color-mix(in srgb, var(--foreground) 88%, var(--background));
+    --composer-send-text: var(--background);
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 760px;
+    min-width: 0;
+    margin: 0;
+    padding: 0 4px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--composer-text);
+    background: var(--background);
+}
+
+:global(.dark) .frostedSurface {
+    border-color: oklch(1 0 0 / 24%);
+}
+
+.frostedSurface.morphShell {
+    margin-inline: auto;
+}
+
+.composerContent {
+    position: relative;
+    z-index: 3;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    flex: 0 0 100%;
     margin: 0;
     padding: 0;
     border: 0;
-    outline: none;
-    resize: none;
     background: transparent;
-    color: var(--prompt-ink);
-    font-family: inherit;
-    font-size: 17px;
-    font-weight: 400;
-    line-height: 25px;
-    overflow-y: auto;
+    color: inherit;
 }
-.input::placeholder { color: var(--prompt-muted); opacity: 1; }
-.inputActions, .toolbar, .toolGroup {
-    display: flex;
-    align-items: center;
-}
-.inputActions { justify-content: space-between; min-height: 40px; }
-.toolbar {
-    justify-content: space-between;
-    gap: 16px;
-    min-height: 48px;
-    padding: 8px 16px;
-    background: var(--prompt-toolbar);
-    border-radius: 0 0 30px 30px;
-}
-.toolGroup { min-width: 0; gap: 8px; }
 
-.addButton, .submitButton, .modeButton, .learnButton {
-    box-sizing: border-box;
-    display: inline-flex;
+.morphShell[data-confirming="true"] .composerContent {
+    position: absolute;
+    inset: 0;
+}
+
+.attachments {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 12px 16px 0;
+}
+
+.attachment {
+    display: flex;
     flex: 0 0 auto;
-    justify-content: center;
     align-items: center;
     gap: 8px;
-    margin: 0;
-    padding: 0;
-    border: 1px solid var(--prompt-border);
-    background: var(--prompt-paper);
-    color: var(--prompt-ink);
-    font-family: inherit;
-    font-size: 14px;
-    font-weight: 500;
-    line-height: 20px;
+    max-width: 240px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--composer-control);
+    color: var(--composer-text);
+    font-size: 12px;
+}
+
+.attachment img {
+    width: 32px;
+    height: 32px;
+    flex: 0 0 auto;
+    border-radius: 9px;
+    object-fit: cover;
+}
+
+.attachment > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.attachment > svg { width: 16px; height: 16px; flex: 0 0 auto; color: var(--composer-muted); }
+.attachment button { display: grid; flex: 0 0 auto; place-items: center; border: 0; padding: 2px; background: transparent; color: var(--composer-muted); cursor: pointer; }
+.attachment button:hover { color: var(--composer-text); }
+.attachment button svg { width: 14px; height: 14px; }
+
+.inputRow {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    min-width: 0;
+    height: 66px;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    border-radius: inherit;
+}
+
+.uploadButton {
+    display: inline-flex;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 999px;
+    background: var(--composer-control);
+    color: var(--composer-text);
+    cursor: pointer;
+    transition: background-color 160ms ease, color 160ms ease, transform 120ms ease;
+}
+
+.uploadButton:hover { background: var(--composer-control-hover); }
+.uploadButton:active { transform: scale(.95); }
+.uploadButton:focus-visible, .modeButton:focus-visible, .submitButton:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.uploadButton svg { width: 24px; height: 24px; }
+
+.input {
+    box-sizing: border-box;
+    width: auto;
+    min-width: 0;
+    height: 44px;
+    min-height: 0;
+    max-height: 52px;
+    flex: 1 1 auto;
+    margin: auto 0;
+    padding: 10px 0;
+    overflow-y: auto;
+    border: 0;
+    outline: 0;
+    resize: none;
+    background: transparent;
+    color: var(--composer-text);
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.5;
+}
+
+.input::placeholder { color: var(--composer-muted); opacity: 1; }
+.input:disabled { cursor: not-allowed; opacity: .6; }
+
+.modeButton {
+    display: inline-flex;
+    height: 44px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--composer-control);
+    color: var(--composer-text);
+    font: inherit;
+    font-size: 12px;
     white-space: nowrap;
     cursor: pointer;
-    box-shadow: 0 2px 5px rgba(16, 24, 40, .05);
-    transition: background-color 150ms, box-shadow 150ms;
+    transition: background-color 160ms ease, color 160ms ease;
 }
-.addButton, .submitButton { width: 40px; height: 40px; }
-.addButton { border: 0; background: transparent; box-shadow: none; color: var(--prompt-muted); }
-.addButton svg { width: 20px; height: 20px; stroke-width: 1.5; }
-.submitButton { border-radius: 50%; background: #000; color: #fff; border-color: #000; }
-.submitButton svg { width: 20px; height: 20px; }
-.modeButton, .learnButton { height: 32px; border-radius: 16px; padding-inline: 12px; }
-.learnButton { padding-inline: 18px; }
-.modeButton svg, .learnButton svg { width: 16px; height: 16px; stroke-width: 1.65; }
-.modeChevron { margin-left: 2px; }
-.popoverMenu { width: 176px; padding: 6px; color: var(--foreground); }
+
+.modeButton:hover { background: var(--composer-control-hover); }
+.modeButton svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.modeChevron { margin-left: 1px; color: var(--composer-muted); }
+
+.submitButton {
+    display: inline-flex;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: var(--composer-send);
+    color: var(--composer-send-text);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    transition: background-color 160ms ease, transform 120ms ease;
+}
+
+.submitButton:hover:not(:disabled) { background: var(--composer-send-hover); }
+.submitButton:active:not(:disabled) { transform: scale(.95); }
+.submitButton:disabled { cursor: not-allowed; }
+.submitButton svg { width: 20px; height: 20px; color: inherit; }
+.submitButton:disabled svg { opacity: .55; }
+.spinner { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.popoverMenu {
+    width: 176px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--popover);
+    color: var(--popover-foreground);
+    box-shadow: 0 16px 48px rgb(0 0 0 / 32%);
+    -webkit-backdrop-filter: blur(14px) saturate(120%);
+    backdrop-filter: blur(14px) saturate(120%);
+}
+
 .popoverItem { display: flex; width: 100%; align-items: center; gap: 10px; border: 0; border-radius: 10px; background: transparent; padding: 9px 10px; color: inherit; font-size: 14px; text-align: left; cursor: pointer; }
-.popoverItem:hover, .popoverItem:focus-visible { background: var(--muted); outline: none; }
+.popoverItem:hover, .popoverItem:focus-visible { background: var(--surface-hover); outline: none; }
 .popoverItem svg { width: 16px; height: 16px; flex: 0 0 auto; }
 .selectedIcon { margin-left: auto; }
-.root button:focus-visible { outline: 2px solid #3884ff; outline-offset: 3px; }
-.learnButton:focus-visible { outline: 2px solid #3884ff; outline-offset: 3px; }
-.root button:enabled:hover:not(.addButton) { box-shadow: 0 2px 8px rgba(16, 24, 40, .13); }
-.addButton:enabled:hover { color: var(--prompt-ink); }
-.root button:disabled { cursor: not-allowed; }
-.root:disabled .inputPanel, .root:disabled .toolbar { opacity: .45; }
-.spinner { animation: prompt-spin 1s linear infinite; }
-@keyframes prompt-spin { to { transform: rotate(360deg); } }
 
-.attachments { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
-.attachment { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--prompt-border); border-radius: 10px; background: var(--prompt-toolbar); font-size: 12px; }
-.attachment img { width: 28px; height: 28px; object-fit: cover; border-radius: 6px; }
-.attachment span { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.attachment svg { width: 16px; height: 16px; }
-.attachment button { display: grid; place-items: center; border: 0; padding: 4px; background: transparent; color: inherit; cursor: pointer; }
-.error { margin: 8px 12px 0; padding: 8px; border-radius: 8px; background: #fff; color: #b42318; font-size: 13px; }
+.error { margin: 8px 12px 0; padding: 8px; border: 1px solid rgb(248 113 113 / 24%); border-radius: 8px; background: rgb(62 19 19 / 90%); color: #fda29b; font-size: 13px; }
 
-:global(.dark) .root {
-    --prompt-paper: #17181b;
-    --prompt-toolbar: #222328;
-    --prompt-ink: #f4f4f5;
-    --prompt-muted: #a1a1aa;
-    --prompt-border: rgba(255,255,255,.09);
+.confirmationContent {
+    position: absolute;
+    z-index: 3;
+    inset: 0;
+    box-sizing: border-box;
+    display: flex;
+    width: 100%;
+    height: 72px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px 0 20px;
 }
+
+.confirmationSizer {
+    box-sizing: border-box;
+    display: flex;
+    width: max-content;
+    height: 72px;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px 0 20px;
+    visibility: hidden;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.confirmationSizer > span:first-child { font-size: 14px; font-weight: 500; }
+.confirmationSizerButton { box-sizing: border-box; display: inline-flex; min-height: 36px; align-items: center; border: 1px solid transparent; border-radius: 999px; padding: 0 14px; font-size: 13px; font-weight: 500; }
+
+.confirmationSummary {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    font-size: 14px;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.confirmationActions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.confirmationActions button { min-height: 36px; padding: 0 14px; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.confirmationCancel { border: 1px solid transparent; background: var(--composer-control); color: var(--composer-text); }
+.confirmationCancel:hover { background: var(--composer-control-hover); }
+.confirmationConfirm { border: 1px solid transparent; background: var(--composer-send); color: var(--composer-send-text); }
+.confirmationConfirm:hover { background: var(--composer-send-hover); }
+.confirmationActions button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+@media (min-width: 640px) {
+    .inputRow { height: 72px; }
+}
+
 @media (max-width: 560px) {
-    .inputPanel { padding: 16px; }
-    .toolbar { padding-inline: 8px; gap: 8px; }
-    .modeButton { padding-inline: 10px; }
-    .learnButton { padding-inline: 12px; }
+    .form { padding-inline: 12px; }
+    .inputRow { gap: 4px; padding-inline: 8px; }
+    .uploadButton { width: 40px; height: 40px; }
+    .submitButton { width: 40px; height: 40px; }
+    .modeButton { height: 40px; gap: 4px; padding-inline: 8px; font-size: 11px; }
+    .modeButton svg { width: 13px; height: 13px; }
+    .input { font-size: 14px; }
+    .confirmationContent { padding-left: 14px; }
+    .confirmationSummary { font-size: 12px; }
+    .confirmationSizer { padding-left: 14px; }
+    .confirmationSizer > span:first-child { font-size: 12px; }
+    .confirmationSizerButton { padding-inline: 8px; font-size: 12px; }
+    .confirmationActions { gap: 2px; }
+    .confirmationActions button { padding-inline: 8px; font-size: 12px; }
 }
+
 @media (prefers-reduced-motion: reduce) {
-    .root *, .root *::before, .root *::after { animation: none; transition: none; }
+    .frostedSurface *, .frostedSurface *::before, .frostedSurface *::after { animation: none; transition: none; }
 }

@@ -1,4 +1,10 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test'
+import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import * as bootstrap from '../src/bootstrap/state'
+import { runWithCwdOverride } from '../src/utils/cwd'
 import type { ToolPermissionContext, ToolUseContext } from '../src/Tool'
 import { getMacroDefines } from './defines'
 
@@ -58,6 +64,34 @@ test('plan mode does not inherit sandbox auto-allow', async () => {
 
 test('critical directory removal is never sandbox-auto-approved', async () => {
   expect((await bashToolHasPermission({ command: 'rm -rf /' }, context())).behavior).not.toBe('allow')
+  expect((await bashToolHasPermission({ command: 'rm -rf .' }, context())).behavior).not.toBe('allow')
+})
+
+test('project scratch cleanup is auto-approved with a pinned argument; explicit rules still win', async () => {
+  const root = realpathSync(await mkdtemp(join(tmpdir(), 'bgs-scratch-permission-')))
+  const scratch = join(root, '.beegame/tmp/session')
+  await mkdir(scratch, { recursive: true })
+  const previous = { TMPDIR: process.env.TMPDIR, BEEGAME_PROJECT_EXECUTION: process.env.BEEGAME_PROJECT_EXECUTION }
+  const original = spyOn(bootstrap, 'getOriginalCwd').mockReturnValue(root)
+  process.env.TMPDIR = scratch
+  process.env.BEEGAME_PROJECT_EXECUTION = '1'
+  try {
+    const command = 'rm -f "$TMPDIR/check_atlas.py" "$TMPDIR/check_wav.py"; echo cleaned'
+    const result = await runWithCwdOverride(root, () => bashToolHasPermission({ command }, context()))
+    expect(result).toMatchObject({ behavior: 'allow' })
+    if (result.behavior === 'allow') expect(result.updatedInput).toMatchObject({
+      command: `rm -f '${scratch}/check_atlas.py' '${scratch}/check_wav.py'; echo cleaned`,
+    })
+    expect((await bashToolHasPermission({ command }, context({ alwaysDenyRules: { localSettings: ['Bash(rm:*)'] } }))).behavior).toBe('deny')
+    expect((await bashToolHasPermission({ command }, context({ alwaysAskRules: { localSettings: ['Bash(rm:*)'] } }))).behavior).toBe('ask')
+  } finally {
+    original.mockRestore()
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('regular sandbox permissions remain opt-in, not silently auto-approved', async () => {

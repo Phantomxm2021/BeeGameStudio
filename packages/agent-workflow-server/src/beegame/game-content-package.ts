@@ -11,6 +11,7 @@ import {
 import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { BeeGameAssetManifest } from './asset-contracts'
 import { auditAssetContract } from './asset-contract-audit'
+import { auditUiInteractiveBounds } from './ui-layout-audit'
 import { parseTilemapData, validateTilemapGrid } from '../../../scene-editor/src/tilemap-data'
 import { readTileSetResource } from './tilemap-contract'
 
@@ -301,27 +302,6 @@ function validateAssetMembers(
     validateAssetMembers(path, item, manifest, issues, [...trail, key])
 }
 
-function hasUsableSpriteFrame(
-  resource: BeeGameAssetManifest['resources'][number],
-  frameRef: string,
-): boolean {
-  const profile = resource.content_profile
-  if (!isRecord(profile) || !Array.isArray(profile.components)) return false
-  return profile.components.some(component => {
-    if (!isRecord(component) || component.id !== frameRef) return false
-    if (component.kind !== 'sprite-frame' && component.kind !== 'atlas-region')
-      return false
-    if (!isRecord(component.specs)) return false
-    const { x, y, width, height } = component.specs
-    return (
-      typeof x === 'number' && Number.isFinite(x) && x >= 0 &&
-      typeof y === 'number' && Number.isFinite(y) && y >= 0 &&
-      typeof width === 'number' && Number.isFinite(width) && width > 0 &&
-      typeof height === 'number' && Number.isFinite(height) && height > 0
-    )
-  })
-}
-
 function validateUiVocabulary(input: {
   path: string
   document: Extract<BeeGameContentDocument, { kind: 'ui-screen' | 'ui-hud' | 'ui-flow' }>
@@ -593,12 +573,15 @@ function validateDocument(input: {
     input.document.kind === 'ui-screen' ||
     input.document.kind === 'ui-hud' ||
     input.document.kind === 'ui-flow'
-  )
+  ) {
     validateUiVocabulary({
       path: input.path,
       document: input.document,
       issues: input.issues,
     })
+    for (const issue of auditUiInteractiveBounds(input.document))
+      input.issues.push(`${input.path}: ${issue}`)
+  }
   if (input.document.kind === 'scene-2d' || input.document.kind === 'scene-3d') {
     const cameraNodeId = input.document.data.cameraNodeId
     if (

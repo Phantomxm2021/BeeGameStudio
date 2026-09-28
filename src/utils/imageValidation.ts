@@ -1,6 +1,86 @@
 import { API_IMAGE_MAX_BASE64_SIZE } from '../constants/apiLimits.js'
 import { logEvent } from '../services/analytics/index.js'
+import type { AssistantMessage, UserMessage } from '../types/message.js'
+import { getImageProcessor } from '@bee-game-studio/builtin-tools/tools/FileReadTool/imageProcessor.js'
+import { createHash } from 'node:crypto'
 import { formatFileSize } from './format.js'
+
+const decodedImageCache = new Map<string, boolean>()
+const INVALID_IMAGE_TEXT =
+  'The image in this earlier message is invalid and could not be decoded. Read or regenerate the source image before using it.'
+
+/**
+ * An invalid image in persisted tool output otherwise poisons every resumed
+ * request. Keep the native transcript intact, but replace only that image in
+ * the outgoing API projection so the same session can recover.
+ */
+export async function sanitizeInvalidImagesForAPI(
+  messages: (UserMessage | AssistantMessage)[],
+): Promise<(UserMessage | AssistantMessage)[]> {
+  let processor: Awaited<ReturnType<typeof getImageProcessor>> | undefined
+  async function decodable(data: string): Promise<boolean> {
+    const digest = createHash('sha256').update(data).digest('hex')
+    const cached = decodedImageCache.get(digest)
+    if (cached !== undefined) return cached
+    processor ??= await getImageProcessor()
+    let valid = false
+    try {
+      const image = processor(Buffer.from(data, 'base64'))
+      await image.metadata()
+      // Metadata alone can accept truncated pixel data. Force a full decode.
+      await image.png().toBuffer()
+      valid = true
+    } catch {
+      console.warn('[image] Invalid historical image omitted from API request')
+    }
+    if (decodedImageCache.size >= 128) decodedImageCache.clear()
+    decodedImageCache.set(digest, valid)
+    return valid
+  }
+
+  const result: (UserMessage | AssistantMessage)[] = []
+  for (const message of messages) {
+    if (message.type !== 'user' || !Array.isArray(message.message.content)) {
+      result.push(message)
+      continue
+    }
+    let changed = false
+    const content = []
+    for (const block of message.message.content) {
+      if (isBase64ImageBlock(block) && !(await decodable(block.source.data))) {
+        content.push({ type: 'text' as const, text: INVALID_IMAGE_TEXT })
+        changed = true
+      } else if (block.type === 'tool_result' && Array.isArray(block.content)) {
+        let toolChanged = false
+        const toolContent = []
+        for (const item of block.content) {
+          if (
+            isBase64ImageBlock(item) &&
+            !(await decodable(item.source.data))
+          ) {
+            toolContent.push({
+              type: 'text' as const,
+              text: INVALID_IMAGE_TEXT,
+            })
+            toolChanged = true
+          } else {
+            toolContent.push(item)
+          }
+        }
+        content.push(toolChanged ? { ...block, content: toolContent } : block)
+        changed ||= toolChanged
+      } else {
+        content.push(block)
+      }
+    }
+    result.push(
+      changed
+        ? { ...message, message: { ...message.message, content } }
+        : message,
+    )
+  }
+  return result
+}
 
 /**
  * Information about an oversized image.

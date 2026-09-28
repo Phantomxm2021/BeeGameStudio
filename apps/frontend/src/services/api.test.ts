@@ -37,6 +37,7 @@ describe('API normalization', () => {
       phase: ' IMPLEMENTATION ',
       blocked: false,
       active_agents: [' worker '],
+      active_subagents: [' agent-use-1 '],
       acceptance: { status: 'not_run' },
       workflow: { runId: 'run-1', status: 'running' },
     } as never)).toMatchObject({
@@ -44,6 +45,7 @@ describe('API normalization', () => {
       phase: 'IMPLEMENTATION',
       blocked: false,
       active_agents: ['worker'],
+      active_subagents: ['agent-use-1'],
       acceptance: { status: 'not_run' },
     })
     expect(normalizeProjectBaselineStatusPayload({ workflow: { status: 'running' } } as never))

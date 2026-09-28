@@ -4,5 +4,5 @@ export interface DiscoverySignal {
   startedAt: number
   durationMs: number
   indexSize: number
-  method: 'tfidf' | 'keyword'
+  method: 'tfidf' | 'keyword' | 'catalog'
 }

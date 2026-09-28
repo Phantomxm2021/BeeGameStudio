@@ -43,7 +43,7 @@ export function EditorLoadingView({
             <div className="scene-loading-copy"><strong>{state.label}</strong></div>
             <span className="scene-loading-detail error-detail">{state.detail}</span>
             <div className="scene-loading-actions">
-              {onRetry ? <Button type="button" variant="default" size="sm" className="scene-loading-action rounded-full" onClick={onRetry}>Try again</Button> : null}
+              {onRetry ? <Button type="button" variant="outline" size="sm" className="scene-loading-action rounded-full" onClick={onRetry}>Try again</Button> : null}
               {onExit ? <Button type="button" variant="outline" size="sm" className="scene-loading-action rounded-full" onClick={onExit}>Close editor</Button> : null}
             </div>
           </>

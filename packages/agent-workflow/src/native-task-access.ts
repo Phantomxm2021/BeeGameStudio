@@ -9,6 +9,10 @@ const within = (root: string, path: string) => {
 
 export type NativeTaskAccessInput = {
   workspacePath: string
+  /** Enabled user skills projected by BeeGameStudio into its isolated runtime config. */
+  skillsDirectory?: string
+  /** Shared read-only built-in Skill catalog. */
+  builtinSkillsDirectory?: string
   readOnlyPaths?: readonly string[]
   writablePaths?: readonly string[]
   allowWorkingFiles?: boolean
@@ -34,6 +38,21 @@ export function nativeTaskToolEnvironment(temporaryPath: string) {
  * effects are enforced by the native OS sandbox, and delegates inherit both. */
 export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
   const root = await realpath(input.workspacePath)
+  if (input.skillsDirectory && !isAbsolute(input.skillsDirectory))
+    throw new Error('Invalid native task skills directory')
+  if (input.builtinSkillsDirectory && !isAbsolute(input.builtinSkillsDirectory))
+    throw new Error('Invalid native task built-in skills directory')
+  const skillsDirectory = input.skillsDirectory
+    ? await realpath(input.skillsDirectory).catch(() => undefined) : undefined
+  const builtinSkillsDirectory = input.builtinSkillsDirectory
+    ? await realpath(input.builtinSkillsDirectory).catch(() => undefined) : undefined
+  if (skillsDirectory && (skillsDirectory !== resolve(input.skillsDirectory!) ||
+      !(await lstat(skillsDirectory)).isDirectory()))
+    throw new Error('Invalid native task skills directory')
+  if (input.builtinSkillsDirectory && (!builtinSkillsDirectory ||
+      builtinSkillsDirectory !== resolve(input.builtinSkillsDirectory) ||
+      !(await lstat(builtinSkillsDirectory)).isDirectory()))
+    throw new Error('Invalid native task built-in skills directory')
   const temporaryPath = resolve(root, '.native-tmp')
   await mkdir(temporaryPath, { recursive: true, mode: 0o700 })
   if (await realpath(temporaryPath) !== temporaryPath) throw new Error('Invalid native task temporary directory')
@@ -57,7 +76,8 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
       // Explicit ask rules also apply to normally auto-approved file reads and
       // sub-agent acceptEdits mode. No --tools/--disallowedTools filtering.
       ask: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'NotebookEdit', 'LSP',
-        'Agent', 'Task', 'TaskOutput', 'TaskStop', 'Bash', 'WebSearch', 'WebFetch'],
+        'Agent', 'Task', 'TaskOutput', 'TaskStop', 'Bash', 'WebSearch', 'WebFetch',
+        'DiscoverSkills', 'Skill'],
     },
     sandbox: {
       enabled: true,
@@ -67,7 +87,9 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
       excludedCommands: [],
       network: { allowedDomains: [], allowAllUnixSockets: false, allowLocalBinding: false },
       filesystem: {
-        denyRead: ['/'], allowRead: [root, ...systemReadPaths],
+        denyRead: ['/'], allowRead: [root, ...systemReadPaths,
+          ...(skillsDirectory ? [skillsDirectory] : []),
+          ...(builtinSkillsDirectory ? [builtinSkillsDirectory] : [])],
         allowWrite: [root], denyWrite: [...protectedPaths, ...(!input.allowWorkingFiles ? [root] : [])],
       },
     },
@@ -107,6 +129,12 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
       return allow(name === 'Agent' ? { ...taskInput, mode: 'default' } : taskInput)
     }
     if (name === 'TaskOutput' || name === 'TaskStop') return allow(args)
+    if (name === 'DiscoverSkills')
+      return typeof args.description === 'string' && args.description.trim()
+        ? allow(args) : deny('DiscoverSkills requires a task description.')
+    if (name === 'Skill')
+      return typeof args.skill === 'string' && args.skill.trim()
+        ? allow(args) : deny('Skill requires a skill name.')
     // Research is a normal read-only CLI capability. Keep local/private URLs
     // unavailable without selecting sources or directing the Agent's research.
     if (name === 'WebSearch') return allow(args)
@@ -128,11 +156,13 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
     if ((fileKey !== 'path' && typeof args[fileKey] !== 'string') ||
         (args[fileKey] !== undefined && typeof args[fileKey] !== 'string'))
       return deny(`Invalid ${fileKey}: expected a file path string.`)
+    const writing = ['Write', 'Edit', 'NotebookEdit'].includes(name)
     const path = resolve(root, args[fileKey] ?? '.')
-    if (!within(root, path)) return deny(`Path ${JSON.stringify(path)} is outside this task workspace. Check the path against the working directory; no file was changed.`)
+    if (!within(root, path) && (writing || ![skillsDirectory, builtinSkillsDirectory]
+      .some(directory => directory && within(directory, path))))
+      return deny(`Path ${JSON.stringify(path)} is outside this task workspace. Check the path against the working directory; no file was changed.`)
     if (name === 'Glob' && (typeof args.pattern !== 'string' || isAbsolute(args.pattern) ||
         args.pattern.split(/[\\/]/).includes('..'))) return deny('Glob pattern must be relative and cannot traverse parent directories.')
-    const writing = ['Write', 'Edit', 'NotebookEdit'].includes(name)
     if (writing && protectedPaths.some(protectedPath => within(protectedPath, path)))
       return deny(`Path ${JSON.stringify(path)} is read-only for this task.`)
     if (writing && !input.allowWorkingFiles && !writable.includes(path))
@@ -144,10 +174,12 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
 
   return {
     root, settings, permission,
-    flags: ['--permission-mode', 'default', '--setting-sources', '', '--strict-mcp-config',
-      '--settings', JSON.stringify(settings)],
+    flags: ['--permission-mode', 'default', '--setting-sources', '',
+      '--strict-mcp-config', '--settings', JSON.stringify(settings)],
     // Shell/MCP/LSP children do not need the parent model's credentials.
     environment: { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', ...nativeTaskToolEnvironment(temporaryPath),
+      ...(skillsDirectory ? { BEEGAME_NATIVE_SKILLS_DIR: skillsDirectory } : {}),
+      ...(builtinSkillsDirectory ? { BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: builtinSkillsDirectory } : {}),
       BEEGAME_NATIVE_BACKGROUND_PERMISSIONS: '1',
       BEEGAME_NATIVE_TOOL_RESULTS_DIR: toolResultsPath,
     },

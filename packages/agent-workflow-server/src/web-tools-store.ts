@@ -163,7 +163,10 @@ export function syncWebToolsToRuntimeConfig(
     'webSearchAdapter', 'webFetchAdapter', 'tavilyEndpointUrl',
     'braveApiKey', 'exaApiKey', 'exaEndpointUrl', 'webFetchHttpTimeoutMs',
   ]) delete previous[key]
-  const next = { ...previous, ...normalizeWebToolsConfig(config) }
+  const { braveApiKey: _braveApiKey, exaApiKey: _exaApiKey, ...publicSettings } = normalizeWebToolsConfig(config)
+  // Search credentials belong to the native process environment, not an
+  // agent-readable settings file. Existing plaintext fields were removed above.
+  const next = { ...previous, ...publicSettings }
   const tempPath = `${filePath}.web-${crypto.randomUUID()}.tmp`
   writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 })
   renameSync(tempPath, filePath)

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import App from './App';
+import i18n from './i18n';
 
 const { applyThemeToDocument } = vi.hoisted(() => ({
   applyThemeToDocument: vi.fn(),
@@ -15,12 +16,15 @@ const loadCurrentUser = vi.fn().mockResolvedValue({
   role: 'owner',
   permissions: ['project.read'],
 });
+let activeLoadProjects = loadProjects;
+let activeLoadCurrentUser = loadCurrentUser;
 const setAuthenticationStatus = vi.fn();
 let mockedAuthenticationStatus: 'initializing' | 'authenticated' | 'anonymous' = 'authenticated';
 let mockedIsDark = true;
 const bootstrapProject = vi.fn().mockResolvedValue('proj_1');
 const setToastCallbacks = vi.fn();
 const loadHistory = vi.fn();
+let activeLoadHistory = loadHistory;
 const { getChatHistory } = vi.hoisted(() => ({
   getChatHistory: vi.fn().mockResolvedValue([]),
 }));
@@ -35,7 +39,7 @@ const mockedProjects = [
 
 vi.mock('./store/projectStore', () => {
   const projectState = () => ({
-    loadProjects,
+    loadProjects: activeLoadProjects,
     projects: mockedProjects,
     activeProjectId: mockedActiveProjectId,
     hasLoadedProjects: mockedHasLoadedProjects,
@@ -57,7 +61,7 @@ vi.mock('./store/systemStore', () => ({
     loadStatus,
     loadAgents,
     loadActivities,
-    loadCurrentUser,
+    loadCurrentUser: activeLoadCurrentUser,
     authenticationStatus: mockedAuthenticationStatus,
     setAuthenticationStatus,
     currentUser: mockedAuthenticationStatus === 'authenticated'
@@ -74,7 +78,7 @@ vi.mock('./store/systemStore', () => ({
 vi.mock('./store/chatStore', () => ({
   useChatStore: Object.assign((selector?: (state: { loadHistory: typeof loadHistory; messages: never[] }) => unknown) => {
     const state = {
-    loadHistory,
+    loadHistory: activeLoadHistory,
     messages: [],
     };
     return selector ? selector(state) : state;
@@ -116,12 +120,17 @@ vi.mock('./components/Demiurge/LandingView', () => ({
 }));
 
 vi.mock('./components/Demiurge/DashboardView', () => ({
-  DashboardView: () => <div data-testid="dashboard-view" />,
+  DashboardView: ({ lang, onSetLang }: { lang: string; onSetLang: (language: 'en') => void }) => (
+    <div data-testid="dashboard-view" data-language={lang}>
+      <button onClick={() => onSetLang('en')}>Switch to English</button>
+    </div>
+  ),
 }));
 
 describe('App view routing', () => {
-  afterEach(() => {
+  afterEach(async () => {
     vi.useRealTimers();
+    await i18n.changeLanguage('zh');
     localStorage.clear();
     vi.clearAllMocks();
     vi.unstubAllEnvs();
@@ -135,6 +144,9 @@ describe('App view routing', () => {
     mockedIsDark = true;
     mockedActiveProjectId = 'proj_1';
     mockedHasLoadedProjects = true;
+    activeLoadProjects = loadProjects;
+    activeLoadCurrentUser = loadCurrentUser;
+    activeLoadHistory = loadHistory;
     getChatHistory.mockReset().mockResolvedValue([]);
     window.history.pushState({}, '', '/');
   });
@@ -171,6 +183,47 @@ describe('App view routing', () => {
     expect(screen.getByLabelText('Restoring project workspace')).toBeInTheDocument();
     expect(screen.queryByLabelText('Initializing BeeGame')).not.toBeInTheDocument();
     expect(applyThemeToDocument).toHaveBeenLastCalledWith(true);
+  });
+
+  it('restarts authentication when its store action is replaced by hot reload', async () => {
+    mockedAuthenticationStatus = 'initializing';
+    vi.stubEnv('VITE_BEEGAME_HTTPONLY_SESSIONS', '1');
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ authenticated: true, user: { id: 'owner-user' } })));
+    const { rerender } = render(<App />);
+    await waitFor(() => expect(loadCurrentUser).toHaveBeenCalledTimes(1));
+
+    const replacement = vi.fn().mockResolvedValue({ id: 'owner-user' });
+    activeLoadCurrentUser = replacement;
+    rerender(<App />);
+
+    await waitFor(() => expect(replacement).toHaveBeenCalledTimes(1));
+  });
+
+  it('reloads projects when hot reload replaces the project store', async () => {
+    mockedActiveProjectId = null;
+    mockedHasLoadedProjects = false;
+    window.history.pushState({}, '', '/?project=proj_1');
+    const { rerender } = render(<App />);
+    await waitFor(() => expect(loadProjects).toHaveBeenCalledTimes(1));
+
+    const replacement = vi.fn().mockResolvedValue(undefined);
+    activeLoadProjects = replacement;
+    rerender(<App />);
+
+    await waitFor(() => expect(replacement).toHaveBeenCalledTimes(1));
+    expect(screen.getByLabelText('Restoring project workspace')).toBeInTheDocument();
+  });
+
+  it('reloads the active project transcript when hot reload replaces the chat store', async () => {
+    const { rerender } = render(<App />);
+    await waitFor(() => expect(getChatHistory).toHaveBeenCalledTimes(1));
+
+    const replacement = vi.fn();
+    activeLoadHistory = replacement;
+    rerender(<App />);
+
+    await waitFor(() => expect(getChatHistory).toHaveBeenCalledTimes(2));
+    expect(replacement).toHaveBeenCalledWith([]);
   });
 
   it('shows a recovery state and retries a temporarily unavailable authentication service', async () => {
@@ -222,6 +275,18 @@ describe('App view routing', () => {
     expect(applyThemeToDocument).toHaveBeenLastCalledWith(true);
   });
 
+  it('keeps the selected dashboard language after remounting', async () => {
+    const { unmount } = render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Switch to English' }));
+
+    await waitFor(() => expect(localStorage.getItem('i18nextLng')).toBe('en'));
+    expect(await screen.findByTestId('dashboard-view')).toHaveAttribute('data-language', 'en');
+
+    unmount();
+    render(<App />);
+    expect(await screen.findByTestId('dashboard-view')).toHaveAttribute('data-language', 'en');
+  });
+
   it('does not flash Idea Home while restoring a project route', () => {
     mockedActiveProjectId = null;
     mockedHasLoadedProjects = false;
@@ -242,17 +307,17 @@ describe('App view routing', () => {
     window.history.pushState({}, '', '/?resourceLibrary=1');
     render(<App />);
     expect(screen.getByTestId('landing-view')).toBeInTheDocument();
-    expect(applyThemeToDocument).toHaveBeenLastCalledWith(false);
+    expect(applyThemeToDocument).toHaveBeenLastCalledWith(true);
   });
 
-  it('keeps the landing page light when the persisted dashboard theme is dark', () => {
+  it('keeps the persisted dark theme on the landing page', () => {
     mockedActiveProjectId = null;
     mockedIsDark = true;
 
     render(<App />);
 
     expect(screen.getByTestId('landing-view')).toBeInTheDocument();
-    expect(applyThemeToDocument).toHaveBeenLastCalledWith(false);
+    expect(applyThemeToDocument).toHaveBeenLastCalledWith(true);
   });
 
   it('does not load protected dashboard data when no user is signed in', async () => {

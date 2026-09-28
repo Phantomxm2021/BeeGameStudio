@@ -17,7 +17,6 @@ import config from './commands/config/index.js'
 import { context, contextNonInteractive } from './commands/context/index.js'
 // cost/index.ts re-exports usage — /cost is now an alias of /usage
 import diff from './commands/diff/index.js'
-import doctor from './commands/doctor/index.js'
 import memory from './commands/memory/index.js'
 import mode from './commands/mode/index.js'
 import help from './commands/help/index.js'
@@ -324,7 +323,6 @@ const COMMANDS = memoize((): Command[] => [
   context,
   contextNonInteractive,
   diff,
-  doctor,
   effort,
   exit,
   fast,

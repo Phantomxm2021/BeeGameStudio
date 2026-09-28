@@ -3,11 +3,9 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createAgentWorkflowApp } from '../app'
-import { createRunStore } from '../beegame/delivery-workflow/run-store'
-import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
 
 describe('project stop route', () => {
-  test('does not stop or mutate an archived workflow when no Agent session exists', async () => {
+  test('returns 404 when no Agent session exists', async () => {
     const root = await mkdtemp(join(tmpdir(), 'beegame-project-stop-'))
     const projectsRoot = join(root, 'projects')
     const ownerId = 'project-stop-owner'
@@ -35,24 +33,11 @@ describe('project stop route', () => {
       })
       expect(projectResponse.status).toBe(200)
 
-      const store = createRunStore(workspace, ownerId)
-      await store.save(
-        createTestDeliveryRun({
-          runId: 'run-project-stop',
-          projectId,
-          ownerId,
-          confirmedBriefDigest: 'brief-project-stop',
-        }),
-      )
-
       const response = await app.request(`/api/projects/${projectId}/stop`, {
         method: 'POST',
       })
 
       expect(response.status).toBe(404)
-      expect(await store.load()).toMatchObject({
-        status: 'running',
-      })
     } finally {
       await rm(root, { recursive: true, force: true })
     }

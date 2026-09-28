@@ -24,7 +24,7 @@ export function useSettingsErrors(): ValidationError[] {
   useEffect(() => {
     if (getIsRemoteMode()) return;
     if (errors.length > 0) {
-      const message = `Found ${errors.length} settings ${errors.length === 1 ? 'issue' : 'issues'} · /doctor for details`;
+      const message = `Found ${errors.length} settings ${errors.length === 1 ? 'issue' : 'issues'}`;
       addNotification({
         key: SETTINGS_ERRORS_NOTIFICATION_KEY,
         text: message,

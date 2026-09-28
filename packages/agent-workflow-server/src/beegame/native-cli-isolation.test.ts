@@ -3,8 +3,9 @@ import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createNativeCliProcessRunner } from './native-cli-process-runner'
+import { nativeSessionTemporaryPath } from './native-runtime-process-path'
 
-test('real CLI retains Bash and delegation while isolated file tasks protect source and project files', async () => {
+for (const isolated of [true, false]) test(`real CLI protects host files with native delegation (${isolated ? 'document' : 'project'})`, async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'native-cli-isolation-')))
   const workspace = join(root, 'task')
   await mkdir(workspace)
@@ -51,8 +52,8 @@ fs.writeFileSync('checklist.md','- [ ] AC-1 Goal works\\n');fs.writeFileSync('pr
   let runtime: Awaited<ReturnType<ReturnType<typeof createNativeCliProcessRunner>['start']>> | undefined
   const timer = setTimeout(() => abort.abort(), 35000)
   try {
-    runtime = await createNativeCliProcessRunner().start({ sessionId: 'offline-isolation', cwd: root,
-      isolatedTask: { workspacePath: workspace, readOnlyPaths: ['authority.md'] },
+    runtime = await createNativeCliProcessRunner().start({ sessionId: 'offline-isolation', cwd: workspace,
+      ...(isolated ? { isolatedTask: { workspacePath: workspace, readOnlyPaths: ['authority.md'] } } : {}),
       env: { BEEGAME_CONFIG_DIR: join(root, 'config'), BEEGAME_MODEL_TYPE: 'anthropic', ANTHROPIC_API_KEY: 'offline',
         ANTHROPIC_BASE_URL: `http://127.0.0.1:${server.port}`, ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-6',
         ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-sonnet-4-6', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
@@ -60,25 +61,27 @@ fs.writeFileSync('checklist.md','- [ ] AC-1 Goal works\\n');fs.writeFileSync('pr
     })
     const received: any[] = []
     await runtime.submit({ prompt: 'Run the offline isolated task fixture', signal: abort.signal,
-      onMessage: message => { received.push(message) }, requestPermission: async () => { callbacks++; return { behavior: 'deny' } } })
-    expect(callbacks).toBe(0)
+      onMessage: message => { received.push(message) }, requestPermission: async () => {
+        callbacks++; return { behavior: isolated ? 'deny' : 'allow', source: 'policy' }
+      } })
+    if (isolated) expect(callbacks).toBe(0)
     expect(requests[0].tools.map((tool: any) => tool.name)).toEqual(expect.arrayContaining(['Read', 'Write', 'Bash', 'Agent']))
     const probeResult = await readFile(join(workspace, 'probe.json'), 'utf8').catch(error => {
       console.error(JSON.stringify(requests.flatMap(request => request.messages.flatMap((m: any) =>
         Array.isArray(m.content) ? m.content.filter((b: any) => b.type === 'tool_result' && b.is_error) : []))))
       throw error
     })
-    expect(JSON.parse(probeResult)).toEqual({ cwd: workspace, outsideBlocked: true, sourceProtected: true,
-      cache: join(workspace, '.native-tmp/npm-cache') })
-    expect(await readFile(join(workspace, '.native-tmp/npm-cache/probe'), 'utf8')).toBe('CACHE_OK')
-    expect(await readFile(join(workspace, 'authority.md'), 'utf8')).toBe('Frozen authority')
+    const cache = join(isolated ? join(workspace, '.native-tmp') : nativeSessionTemporaryPath(workspace, 'offline-isolation'), 'npm-cache')
+    expect(JSON.parse(probeResult)).toEqual({ cwd: workspace, outsideBlocked: true, sourceProtected: isolated, cache })
+    expect(await readFile(join(cache, 'probe'), 'utf8')).toBe('CACHE_OK')
+    expect(await readFile(join(workspace, 'authority.md'), 'utf8')).toBe(isolated ? 'Frozen authority' : 'BAD')
     expect(await readFile(outside, 'utf8')).toBe('PROJECT_PRIVATE')
     expect(await readFile(join(workspace, 'checklist.md'), 'utf8')).toContain('AC-1')
     expect(await readFile(join(workspace, 'child.md'), 'utf8')).toBe('Child completed')
     expect(childCount).toBe(3)
     expect(received.at(-1)).toMatchObject({ type: 'result', subtype: 'success' })
   } finally {
-    clearTimeout(timer); runtime?.dispose?.(); server.stop(true)
+    clearTimeout(timer); await runtime?.dispose?.(); server.stop(true)
     await rm(root, { recursive: true, force: true })
   }
 }, 40000)

@@ -91,6 +91,44 @@ for await (const chunk of Bun.stdin.stream()) {
       continue
     }
     if (content === 'eof') process.exit(0)
+    if (content === 'completed-task-output-without-notification') {
+      const emit = (event: Record<string, unknown>) => process.stdout.write(`${JSON.stringify(event)}\n`)
+      const task = { type: 'system', task_id: 'review-agent', task_type: 'local_agent' }
+      emit({ ...task, subtype: 'task_started', tool_use_id: 'first-activation' })
+      emit({ ...task, subtype: 'task_notification', tool_use_id: 'first-activation', status: 'completed' })
+      emit({ ...task, subtype: 'task_started', tool_use_id: 'second-activation' })
+      emit({ ...task, subtype: 'task_notification', tool_use_id: 'second-activation', status: 'completed' })
+      emit({ ...task, subtype: 'task_started', tool_use_id: 'third-activation' })
+      emit({ ...task, subtype: 'task_notification', tool_use_id: 'second-activation', status: 'completed' })
+      emit({ type: 'assistant', message: { role: 'assistant', content: [{
+        type: 'tool_use', name: 'TaskOutput', id: 'task-output-third', input: { task_id: 'review-agent' },
+      }] } })
+      emit({ type: 'user', message: { role: 'user', content: [{
+        type: 'tool_result', tool_use_id: 'task-output-third', content: '<status>completed</status>',
+      }] }, tool_use_result: { retrieval_status: 'success', task: { task_id: 'review-agent', status: 'completed' } } })
+      // The native runtime can omit the third task_notification after a
+      // completed TaskOutput. The parent result must still finish this turn.
+      emit({ type: 'result', subtype: 'success', result: 'Review finished', stop_reason: 'end_turn' })
+      continue
+    }
+    if (content === 'stale-task-output-before-reactivation') {
+      const emit = (event: Record<string, unknown>) => process.stdout.write(`${JSON.stringify(event)}\n`)
+      const task = { type: 'system', task_id: 'review-agent', task_type: 'local_agent' }
+      emit({ ...task, subtype: 'task_started', tool_use_id: 'first-activation' })
+      emit({ type: 'assistant', message: { role: 'assistant', content: [{
+        type: 'tool_use', name: 'TaskOutput', id: 'old-task-output', input: { task_id: 'review-agent' },
+      }] } })
+      emit({ ...task, subtype: 'task_started', tool_use_id: 'second-activation' })
+      emit({ type: 'user', message: { role: 'user', content: [{
+        type: 'tool_result', tool_use_id: 'old-task-output', content: '<status>completed</status>',
+      }] }, tool_use_result: { retrieval_status: 'success', task: { task_id: 'review-agent', status: 'completed' } } })
+      emit({ type: 'result', subtype: 'success', result: 'Old result only' })
+      setTimeout(() => {
+        emit({ ...task, subtype: 'task_notification', tool_use_id: 'second-activation', status: 'completed' })
+        emit({ type: 'result', subtype: 'success', result: 'Resumed review finished' })
+      }, 20)
+      continue
+    }
     if (typeof content === 'string' && content.startsWith('agent-lifecycle:')) {
       const emit = (event: Record<string, unknown>) => process.stdout.write(`${JSON.stringify(event)}\n`)
       const task = { type: 'system', task_id: 'reused-agent', tool_use_id: 'first-launch' }

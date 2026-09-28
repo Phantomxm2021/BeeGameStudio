@@ -487,19 +487,6 @@ async function* queryLoop(
       turnCount,
     } = state
 
-    // Skill discovery prefetch — per-iteration (uses findWritePivot guard
-    // that returns early on non-write iterations). Discovery runs while the
-    // model streams and tools execute; awaited post-tools alongside the
-    // memory prefetch consume. Replaces the blocking assistant_turn path
-    // that ran inside getAttachmentMessages (97% of those calls found
-    // nothing in prod). Turn-0 user-input discovery still blocks in
-    // userInputAttachments — that's the one signal where there's no prior
-    // work to hide under.
-    const pendingSkillPrefetch = skillPrefetch?.startSkillDiscoveryPrefetch(
-      null,
-      messages,
-      toolUseContext,
-    )
     const pendingToolPrefetch =
       searchExtraToolsPrefetch?.startSearchExtraToolsPrefetch(
         toolUseContext.options.tools ?? [],
@@ -537,6 +524,21 @@ async function* queryLoop(
     const captureBoundary = evidenceContextCheckpoint('compact_boundary', messages)
     let messagesForQuery = getMessagesAfterCompactBoundary(messages)
     captureBoundary(messagesForQuery)
+
+    // Local skill search is cheap. Surface the current subtask's results
+    // before this model request, not after it has already chosen a tool.
+    if (skillPrefetch) {
+      const skillAttachments = await skillPrefetch.startSkillDiscoveryPrefetch(
+        null,
+        messages,
+        toolUseContext,
+      )
+      for (const attachment of skillAttachments) {
+        const message = createAttachmentMessage(attachment)
+        yield message
+        messagesForQuery = messagesForQuery.concat(message)
+      }
+    }
 
     // Release toolUseResult payloads from previous turns — the next API call
     // only needs message.message.content (tool_result blocks), not the raw
@@ -1976,19 +1978,6 @@ async function* queryLoop(
         toolResults.push(msg)
       }
       pendingMemoryPrefetch.consumedOnIteration = turnCount - 1
-    }
-
-    // Inject prefetched skill discovery. collectSkillDiscoveryPrefetch emits
-    // hidden_by_main_turn — true when the prefetch resolved before this point
-    // (should be >98% at AKI@250ms / Haiku@573ms vs turn durations of 2-30s).
-    if (skillPrefetch && pendingSkillPrefetch) {
-      const skillAttachments =
-        await skillPrefetch.collectSkillDiscoveryPrefetch(pendingSkillPrefetch)
-      for (const att of skillAttachments) {
-        const msg = createAttachmentMessage(att)
-        yield msg
-        toolResults.push(msg)
-      }
     }
 
     // Inject prefetched tool discovery.

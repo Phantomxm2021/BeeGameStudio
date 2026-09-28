@@ -87,7 +87,8 @@ export const ArtifactTool = buildTool({
 
   renderToolUseMessage(input: Partial<ArtifactInput>) {
     const hashPart = input.hash ? ` (hash=${input.hash})` : ''
-    return `Upload artifact: ${input.file_path ?? '...'}${hashPart}`
+    const name = input.file_path?.split(/[\\/]/).at(-1) ?? 'selected file'
+    return `Publish ${name} as a public HTML artifact for ${input.ttl ?? 7} days${hashPart}`
   },
 
   mapToolResultToToolResultBlockParam(

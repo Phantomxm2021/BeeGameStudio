@@ -39,6 +39,7 @@ describe('component operations', () => {
     expect(next).not.toHaveProperty('member')
     expect(next).not.toHaveProperty('frame')
     expect(next).not.toHaveProperty('animation')
+    if (next.type !== 'sprite-renderer') throw new Error('Expected SpriteRenderer component')
     expect(next.material).not.toHaveProperty('textureRegion')
     expect(() => canonicalJson(next)).not.toThrow()
   })

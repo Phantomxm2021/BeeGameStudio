@@ -137,6 +137,11 @@ test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1')('managed dev and buil
       expect(finished.gameplayVerdict).toBe('not-evaluated')
       expect(finished.preview.mode).toBe(mode)
       expect(finished.conditions.source).toBe('agent-declared')
+      expect(finished.observedEnvironment).toMatchObject({
+        status: 'observed', viewport: { width: 800, height: 600 },
+      })
+      expect(typeof finished.observedEnvironment.coarsePointer).toBe('boolean')
+      expect(typeof finished.observedEnvironment.maxTouchPoints).toBe('number')
       expect(finished.screenshotAvailable).toBe(true)
       expect(JSON.stringify(finished)).not.toContain('__beegame_preview_capability')
       expect(JSON.stringify(finished)).not.toContain('private=value')

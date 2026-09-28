@@ -77,6 +77,8 @@ function getMessagePreview(
 export interface MessageScrollerProps extends ComponentPropsWithRef<"div"> {
   /** Keep streamed output pinned while the reader remains near the end. */
   followOutput?: boolean;
+  /** Temporarily suppress auto-follow while older history is prepended. */
+  pauseAutoFollow?: boolean;
   /** Distance from the end that still counts as following the output. */
   followThreshold?: number;
   /** Smoothly follow growing content. */
@@ -107,6 +109,7 @@ export interface MessageScrollerProps extends ComponentPropsWithRef<"div"> {
 
 export function MessageScroller({
   followOutput = true,
+  pauseAutoFollow = false,
   followThreshold = 56,
   smooth = true,
   onFollowChange,
@@ -128,6 +131,8 @@ export function MessageScroller({
   const viewportRef = useRef<HTMLElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(followOutput);
+  const pauseAutoFollowRef = useRef(pauseAutoFollow);
+  pauseAutoFollowRef.current = pauseAutoFollow;
   const programmaticScrollRef = useRef(false);
   const scrollTimerRef = useRef<number | undefined>(undefined);
   const frameRef = useRef<number | undefined>(undefined);
@@ -295,7 +300,8 @@ export function MessageScroller({
 
   const leaveLiveEdge = useCallback(() => {
     programmaticScrollRef.current = false;
-  }, []);
+    setFollowing(false);
+  }, [setFollowing]);
 
   useLayoutEffect(() => {
     followingRef.current = followOutput;
@@ -313,7 +319,7 @@ export function MessageScroller({
 
     const observer = new ResizeObserver(() => {
       scheduleRailSync();
-      if (!followOutput || !followingRef.current) return;
+      if (pauseAutoFollowRef.current || !followOutput || !followingRef.current) return;
       scrollToEnd(reduce || !smooth ? "auto" : "smooth");
     });
     observer.observe(content);
@@ -408,7 +414,7 @@ export function MessageScroller({
         onViewportScroll?.(event);
       }}
       onWheel={(event) => {
-        leaveLiveEdge();
+        if (event.deltaY < 0) leaveLiveEdge();
         onViewportWheel?.(event);
       }}
       onTouchStart={(event) => {

@@ -106,7 +106,7 @@ async function handleUpload(
 
   const expiresAt = new Date(Date.now() + ttl * 24 * 60 * 60 * 1000)
   return json(
-    { id, url: `${env.PUBLIC_URL}/${key}`, expiresAt: expiresAt.toISOString() },
+    { id, url: `${env.PUBLIC_URL?.trim() || url.origin}/${key}`, expiresAt: expiresAt.toISOString() },
     200,
   )
 }

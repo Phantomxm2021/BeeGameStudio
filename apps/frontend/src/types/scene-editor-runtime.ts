@@ -31,3 +31,4 @@ export declare const SceneEditor: ComponentType<SceneEditorProps>;
 
 export { spriteSheetSelection, parseSpriteSheet, atlasFrameName } from '../../../../packages/scene-editor/src/sprite-sheet';
 export { uiAnchor, uiLocalMatrix, uiPaintOrder } from '../../../../packages/scene-editor/src/content-coordinates';
+export { resolveUiNodesForViewport } from '../../../../packages/scene-editor/src/ui-responsive';

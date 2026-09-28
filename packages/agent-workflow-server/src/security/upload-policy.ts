@@ -1,5 +1,4 @@
 import type {
-  BeeGameAttachment,
   BeeGameFileAttachment,
   BeeGameImageAttachment,
 } from '../beegame/session-manager'

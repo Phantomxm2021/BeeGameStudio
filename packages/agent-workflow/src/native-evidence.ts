@@ -1,8 +1,8 @@
 /** CLI-side capture only. The portable writer is owned by isolated Reviewer. */
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { createEvidenceWriter as createReviewEvidenceWriter, evidenceSecrets, type EvidenceIds, type RequestIds } from '../../agent-workflow-server/src/beegame/native-review-evidence'
+import { createEvidenceWriter as createReviewEvidenceWriter, evidenceSecrets, type EvidenceIds, type RequestIds } from './native-evidence-writer'
 import { emitNativeDiagnostic } from './native-diagnostics'
-export { redactEvidence, evidenceSecrets } from '../../agent-workflow-server/src/beegame/native-review-evidence'
+export { redactEvidence, evidenceSecrets } from './native-evidence-writer'
 
 const requestScope = new AsyncLocalStorage<RequestIds>()
 export const withEvidenceRequest = <T>(ids: RequestIds, run: () => T): T => requestScope.run(ids, run)

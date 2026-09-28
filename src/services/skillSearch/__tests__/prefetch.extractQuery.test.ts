@@ -21,18 +21,21 @@ function userToolResult(id: string): Message {
 }
 
 function assistantText(text: string): Message {
-  return { type: 'assistant', content: text } as unknown as Message
+  return {
+    type: 'assistant',
+    message: { content: [{ type: 'text', text }] },
+  } as unknown as Message
 }
 
-describe('extractQueryFromMessages — inter-turn穿透逻辑', () => {
-  test('null input + messages末尾是tool_result → 穿透到真实user文本', () => {
+describe('extractQueryFromMessages — inter-turn任务信号', () => {
+  test('null input + messages末尾是tool_result → 使用最近的assistant可见文本', () => {
     const messages: Message[] = [
       userText('研究当前代码'),
       assistantText('调用工具'),
       userToolResult('tool_01'),
     ]
     const query = extractQueryFromMessages(null, messages)
-    expect(query).toBe('研究当前代码')
+    expect(query).toBe('调用工具')
   })
 
   test('null input + messages末尾是text block形式的user → 正确提取', () => {
@@ -42,10 +45,31 @@ describe('extractQueryFromMessages — inter-turn穿透逻辑', () => {
       userToolResult('tool_02'),
     ]
     const query = extractQueryFromMessages(null, messages)
-    expect(query).toBe('refactor the auth module')
+    expect(query).toBe('thinking...')
   })
 
-  test('null input + 连续多轮tool_result → 继续向前找到最早的user文本', () => {
+  test('自动续跑同时检索用户文本和当前阶段任务', () => {
+    const messages: Message[] = [
+      {
+        type: 'user',
+        content: [
+          {
+            type: 'text',
+            text: 'Continue the current project delivery milestone.',
+          },
+          {
+            type: 'text',
+            text: 'Current delivery milestone: resources. Prepare tilemap atlases and the asset manifest.',
+          },
+        ],
+      } as unknown as Message,
+    ]
+    const query = extractQueryFromMessages(null, messages)
+    expect(query).toContain('Continue the current project delivery milestone')
+    expect(query).toContain('resources. Prepare tilemap atlases')
+  })
+
+  test('null input + 连续多轮tool_result → 使用最新的assistant可见文本', () => {
     const messages: Message[] = [
       userText('研究当前代码'),
       assistantText('第一次调用'),
@@ -56,7 +80,23 @@ describe('extractQueryFromMessages — inter-turn穿透逻辑', () => {
       userToolResult('tool_c'),
     ]
     const query = extractQueryFromMessages(null, messages)
-    expect(query).toBe('研究当前代码')
+    expect(query).toBe('第三次调用')
+  })
+
+  test('长回合使用最近的可见任务，不读取工具输出或私有思考', () => {
+    const messages: Message[] = [
+      userText('制作塔防游戏'),
+      {
+        type: 'assistant',
+        message: { content: [
+          { type: 'thinking', thinking: 'private text' },
+          { type: 'text', text: '现在写 UI/UX 规格，逐屏确定布局。' },
+          { type: 'tool_use', name: 'Write', input: { content: 'tool arguments' } },
+        ] },
+      } as unknown as Message,
+      userToolResult('tool_ui'),
+    ]
+    expect(extractQueryFromMessages(null, messages)).toBe('现在写 UI/UX 规格，逐屏确定布局。')
   })
 
   test('null input + 空messages → 空串', () => {

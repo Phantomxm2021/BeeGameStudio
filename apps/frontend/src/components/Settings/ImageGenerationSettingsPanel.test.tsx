@@ -19,7 +19,9 @@ async function choose(name: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getImageGenerationSettings).mockImplementation(async provider => provider && provider !== 'openai'
-    ? { ...config, provider, model: provider + '-model', baseUrl: 'https://' + provider + '.example/v1', hasApiKey: false }
+    ? { ...config, provider, model: provider + '-model', baseUrl: 'https://' + provider + '.example/v1', hasApiKey: false,
+      ...(provider === 'cloudflare' ? { fixedPricePresets: { 'low:1024x1024': 3, 'low:1024x1536': 4,
+        'low:1536x1024': 4, 'medium:1024x1024': 8, 'medium:1024x1536': 10, 'medium:1536x1024': 10 } } : {}) }
     : config);
   vi.mocked(saveImageGenerationSettings).mockImplementation(async input => ({ ...input, hasApiKey: Boolean(input.apiKey) || config.hasApiKey }));
 });
@@ -39,6 +41,7 @@ describe('image settings', () => {
     await choose('Vercel AI Gateway');
     await screen.findByDisplayValue('vercel-model');
     expect(screen.getByLabelText('API Key')).toHaveValue('');
+    expect(screen.queryByLabelText('清除已保存 Key')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Base URL')).toHaveValue('https://vercel.example/v1');
     await userEvent.type(screen.getByLabelText('API Key'), 'vercel-draft-key');
     await choose('Cloudflare AI Gateway');
@@ -53,14 +56,35 @@ describe('image settings', () => {
     await waitFor(() => expect(saveImageGenerationSettings).toHaveBeenCalledWith(expect.objectContaining({ provider: 'vercel', apiKey: 'vercel-draft-key' })));
     expect(screen.getByLabelText('API Key')).toHaveValue('');
   });
-  it('uses actual USD cost only for OpenRouter, hiding unrelated token fields', async () => {
+  it('configures independent USD-per-million image token rates', async () => {
     render(<Harness />);
     await screen.findByDisplayValue(config.model);
     await choose('OpenRouter');
     await screen.findByDisplayValue('openrouter-model');
     await userEvent.click(screen.getByRole('switch', { name: '配置图片计费（未配置时不允许提交生成）' }));
-    expect(screen.getByLabelText('Credits / USD')).toHaveValue(100);
-    expect(screen.queryByLabelText('图片输出费率')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('文本输入')).toHaveValue(5);
+    expect(screen.getByLabelText('缓存文本输入')).toHaveValue(1.25);
+    expect(screen.getByLabelText('图片输入')).toHaveValue(8);
+    expect(screen.getByLabelText('缓存图片输入')).toHaveValue(3);
+    expect(screen.getByLabelText('图片输出')).toHaveValue(30);
+    expect(screen.getByLabelText('模型价格倍率')).toHaveValue(1.5);
+    expect(screen.queryByLabelText('Credits / USD')).not.toBeInTheDocument();
+  });
+  it('shows editable Cloudflare fixed Credit prices instead of token rates', async () => {
+    render(<Harness />);
+    await screen.findByDisplayValue(config.model);
+    await choose('Cloudflare AI Gateway');
+    await screen.findByDisplayValue('cloudflare-model');
+    await userEvent.click(screen.getByRole('switch', { name: '配置图片计费（未配置时不允许提交生成）' }));
+    expect(screen.getByLabelText('medium:1024x1024 Credits')).toHaveValue(8);
+    expect(screen.getByLabelText('low:1024x1536 Credits')).toHaveValue(4);
+    expect(screen.queryByLabelText('图片输出')).not.toBeInTheDocument();
+    await userEvent.clear(screen.getByLabelText('medium:1024x1024 Credits'));
+    await userEvent.type(screen.getByLabelText('medium:1024x1024 Credits'), '9');
+    await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+    await waitFor(() => expect(saveImageGenerationSettings).toHaveBeenCalledWith(expect.objectContaining({
+      billing: expect.objectContaining({ fixedCreditsByVariant: expect.objectContaining({ 'medium:1024x1024': 9 }) }),
+    })));
   });
   it('keeps the form open and uses the global destructive status style on failure', async () => {
     vi.mocked(saveImageGenerationSettings).mockRejectedValue(new Error('not shown raw'));

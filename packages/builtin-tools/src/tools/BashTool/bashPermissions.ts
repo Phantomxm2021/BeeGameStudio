@@ -26,6 +26,8 @@ import {
 import { parseCommandRaw } from 'src/utils/bash/parser.js'
 import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js'
 import { getCwd } from 'src/utils/cwd.js'
+import { getOriginalCwd } from 'src/bootstrap/state.js'
+import { pinSandboxScratchCleanup } from './sandboxScratchCleanup.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { AbortError } from 'src/utils/errors.js'
@@ -1346,12 +1348,23 @@ function checkSandboxAutoAllow(
       },
     }
   }
+  // Resolve known project scratch paths only after checking the original
+  // request's rules. Recheck the pinned command too, and execute that same input.
+  const pinned = process.env.BEEGAME_PROJECT_EXECUTION === '1'
+    ? pinSandboxScratchCleanup(command, getOriginalCwd(), process.env.TMPDIR) : undefined
+  if (pinned) return checkSandboxAutoAllow({ ...input, command: pinned }, toolPermissionContext)
+
   // No explicit rules, so auto-allow with sandbox
   // Keep destructive path checks even in auto-allow mode. Isolation is not
   // user authorization to remove a critical directory.
   for (const sub of subcommands) {
     if (/^(?:\S*\/)?(?:rm|rmdir)(?:\s|$)/.test(sub.trim())) {
-      const removal = checkPathConstraints({ ...input, command: sub }, getCwd(), toolPermissionContext)
+      // Auto-allow is already the user's write authorization inside isolation.
+      // Validate destructive targets, not a second generic edit-mode approval.
+      // Explicit deny/ask rules were checked above; critical paths remain blocked.
+      const removal = checkPathConstraints({ ...input, command: sub }, getCwd(), {
+        ...toolPermissionContext, mode: 'acceptEdits',
+      })
       if (removal.behavior !== 'passthrough') return removal
     }
   }

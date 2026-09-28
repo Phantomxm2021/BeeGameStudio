@@ -17,7 +17,7 @@ import { asSystemPrompt } from 'src/utils/systemPromptType.js'
 import { isPreapprovedHost } from './preapproved.js'
 import { makeSecondaryModelPrompt } from './prompt.js'
 
-const DEFAULT_TAVILY_EXTRACT_URL = 'https://tavily.claude-code-best.win/extract'
+const DEFAULT_TAVILY_EXTRACT_URL = 'https://api.tavily.com/extract'
 
 // Custom error class for egress proxy blocks
 class EgressBlockedError extends Error {
@@ -489,6 +489,10 @@ export async function fetchContentWithTavily(
     : baseUrl.endsWith('/extract')
       ? baseUrl
       : `${baseUrl.replace(/\/$/, '')}/extract`
+  const apiKey = process.env.TAVILY_API_KEY?.trim()
+  const officialEndpoint = new URL(extractUrl).host === 'api.tavily.com'
+  if (officialEndpoint && !apiKey)
+    throw new Error('TAVILY_API_KEY is required for the official Tavily API.')
 
   const response = await axios.post<{ url: string; raw_content: string }>(
     extractUrl,
@@ -498,7 +502,7 @@ export async function fetchContentWithTavily(
     {
       signal: abortSignal,
       timeout: getFetchTimeoutMs(),
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(officialEndpoint ? { Authorization: `Bearer ${apiKey}` } : {}) },
     },
   )
 

@@ -8,7 +8,6 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
-  renameSync,
   writeFileSync,
 } from 'node:fs'
 import {
@@ -20,7 +19,6 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import {
   basename,
   dirname,
@@ -33,6 +31,7 @@ import {
   mapModelConfigToRuntime,
   type RuntimeModelConfig,
 } from '@bee-game-studio/agent-workflow'
+import { createResponseRedactor } from '@bee-game-studio/agent-workflow/native-response-trace'
 import type {
   BeeGameUsageBillingRecordResult as RecordUsageResult,
   BeeGameUsageBillingUsage as Usage,
@@ -47,7 +46,6 @@ import { createNativeCliProcessRunner } from './native-cli-process-runner'
 import { createNativeSubagentChatEnricher, isNativeTaskLifecycle } from './native-subagent-chat'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
-import { createStageChatProjector } from './stage-chat-events'
 import { ChatJsonlReader } from './chat-jsonl-reader'
 import { answeredQuestionInput } from './user-question'
 import { sanitizePath } from '../../../../src/utils/sessionStoragePortable'
@@ -200,28 +198,7 @@ export function liveProjectConversationEvents<T extends Pick<BeeGameEvent, 'id' 
   return live
 }
 
-const WORKFLOW_WORKER_CHAT_EVENTS = new Set<BeeGameEventType>([
-  'assistant.message',
-  'assistant.partial',
-  'assistant.thinking',
-  'tool.started',
-  'tool.completed',
-  'tool.failed',
-  'tool.progress',
-  'system.status',
-  'turn.completed',
-  'turn.empty',
-  'turn.failed',
-  'session.stopped',
-  'session.failed',
-])
-
 export type BeeGameEventSubscriber = (event: BeeGameEvent) => void
-
-function isWorkerChatEvent(event: Pick<BeeGameEvent, 'type' | 'payload'>): boolean {
-  return WORKFLOW_WORKER_CHAT_EVENTS.has(event.type) &&
-    (event.type !== 'system.status' || isNativeTaskLifecycle(event.payload))
-}
 
 type ProjectEventSubscription = {
   userId: string
@@ -248,6 +225,8 @@ export type BeeGameRuntimeSnapshot = {
   modelConfigId?: string
   phaseName: string
   phaseStatus: string
+  /** Current-process child work; never reconstructed from transcript history. */
+  activeSubagentToolUseIds: string[]
   updatedAt: string
   usage: {
     prompt_tokens: number
@@ -311,11 +290,6 @@ export type BeeGameSessionRunnerStartInput = {
   env: Record<string, string>
   /** Sanitized evidence of the selected versus forwarded launch settings. */
   runtimeLaunchContract?: RuntimeLaunchContract
-  /** Workflow identity is propagated into the native permission boundary. */
-  workflowWorker?: boolean
-  workflowWorkerType?: string
-  workflowDispatchId?: string
-  workflowProtectedPaths?: string[]
   language?: BeeGameSessionLanguage
   /** Native background tasks may outlive the foreground turn that spawned them. */
   onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
@@ -334,6 +308,13 @@ export type RuntimeLaunchContract = {
 
 const RUNTIME_MODEL_ENV_KEYS = new Set([
   'BEEGAME_CONFIG_DIR',
+  'BEEGAME_NATIVE_BUILTIN_SKILLS_DIR',
+  'BEEGAME_ARTIFACTS_URL',
+  'BEEGAME_ARTIFACTS_TOKEN',
+  'TAVILY_API_KEY',
+  'BRAVE_SEARCH_API_KEY',
+  'EXA_API_KEY',
+  'SKILL_SEARCH_ENABLED',
   'BEEGAME_MODEL_TYPE',
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_AUTH_TOKEN',
@@ -428,32 +409,18 @@ type PendingPermission = DashboardPermissionRequest & {
 export type BeeGamePendingPermission = DashboardPermissionRequest & {
   sessionId: string
   projectId?: string
-  workflowWorker?: boolean
-  workflowRunId?: string
-  workflowDispatchId?: string
   requestedAt: Date
 }
 
 type SessionRecord = {
+  /** Redact runtime credentials from persisted and streamed Chat events only. */
+  redactVisible?: ReturnType<typeof createResponseRedactor>
   systemContext?: string
   preparingTurn?: boolean
   session: BeeGameSession
   isolatedTask?: { workspacePath: string; readOnlyPaths: string[] }
   /** Native runtime UUID, distinct from session.id (the BGS routing key). */
   nativeSessionId?: string
-  /** Workflow workers have isolated transcripts and may share a workspace lease with the chat surface. */
-  workflowWorker?: boolean
-  workflowRunId?: string
-  workflowDispatchId?: string
-  workflowWorkerType?: string
-  workflowProtectedPaths?: string[]
-  activeWorkflowContext?: {
-    runId: string
-    dispatchId: string
-    workerType: string
-    phase: string
-    protectedPaths?: string[]
-  }
   currentTurnUsageExternallyAccounted?: boolean
   runtime: RuntimeModelConfig | undefined
   userId: string
@@ -475,6 +442,8 @@ type SessionRecord = {
   toolUses: Map<string, { toolName: string; input?: unknown }>
   /** Attribution only; the native runner owns task lifecycle and turn draining. */
   nativeTaskTurnIds: Map<string, string | undefined>
+  /** Active native background tasks from live lifecycle notifications. */
+  activeNativeTaskToolUseIds: Map<string, string>
   /** Tool-use blocks observed before their streamed JSON input is complete. */
   assistantPartialTextByMessage: Map<string, string>
   activeAssistantMessageId: string | null
@@ -514,11 +483,6 @@ export type StartBeeGameSessionInput = {
   }) => Promise<string | undefined> | string | undefined
   userDataRoot?: string
   language?: BeeGameSessionLanguage
-  workflowWorker?: boolean
-  workflowRunId?: string
-  workflowDispatchId?: string
-  workflowWorkerType?: string
-  workflowProtectedPaths?: string[]
 }
 
 export type BeeGameSessionInternalMetadata = {
@@ -574,11 +538,6 @@ export class BeeGameSessionManager {
   >()
   private readonly projectEventSubscribers = new Set<ProjectEventSubscription>()
   private readonly dashboardDataRoot: string
-  private readonly stageChatFollowers = new Map<string, {
-    timer: ReturnType<typeof setInterval>
-    syncing: boolean
-    seen: Set<string>
-  }>()
 
   constructor(
     private readonly runner: BeeGameSessionRunner = createNativeCliProcessRunner(),
@@ -603,23 +562,12 @@ export class BeeGameSessionManager {
   }
 
   start(input: StartBeeGameSessionInput): BeeGameSession {
-    if (
-      'workflowMarkdownStreamContract' in input ||
-      'workflowRevisionContract' in input ||
-      'workflowRevisionMarkdownStreamContract' in input ||
-      input.workflowWorkerType === 'foundation-document-reviser'
-    )
-      throw new Error('Legacy document revision and Markdown sessions are retired')
     if (!isAbsolute(input.workspacePath)) {
       throw new Error('Workspace path must be absolute')
     }
     const cwd = resolve(input.workspacePath)
-    const existingLease = [...this.sessions.values()].find(
-      record =>
-        record.session.cwd === cwd &&
-        record.session.status === 'running' &&
-        !input.workflowWorker &&
-        !record.workflowWorker,
+    const existingLease = [...this.sessions.values()].find(record =>
+      record.session.cwd === cwd && record.session.status === 'running',
     )
     if (existingLease) {
       if (
@@ -633,7 +581,7 @@ export class BeeGameSessionManager {
         `Workspace is already leased by active BeeGame session ${existingLease.session.id}`,
       )
     }
-    if (!input.workflowWorker && input.projectId && this.hasActiveProjectTurn(input.userId, input.projectId, cwd))
+    if (input.projectId && this.hasActiveProjectTurn(input.userId, input.projectId, cwd))
       throw new Error('Previous project request is still stopping')
     mkdirSync(cwd, { recursive: true })
     const runtime = input.modelConfigId
@@ -677,17 +625,6 @@ export class BeeGameSessionManager {
         resolveExistingPath(cwd)
         ? { nativeSessionId: persistedRuntime.nativeSessionId }
         : {}),
-      ...(input.workflowWorker ? { workflowWorker: true } : {}),
-      ...(input.workflowRunId ? { workflowRunId: input.workflowRunId } : {}),
-      ...(input.workflowDispatchId
-        ? { workflowDispatchId: input.workflowDispatchId }
-        : {}),
-      ...(input.workflowWorkerType
-        ? { workflowWorkerType: input.workflowWorkerType }
-        : {}),
-      ...(input.workflowProtectedPaths
-        ? { workflowProtectedPaths: [...input.workflowProtectedPaths] }
-        : {}),
       runtime,
       userId: input.userId,
       ...(input.authToken ? { authToken: input.authToken } : {}),
@@ -709,6 +646,7 @@ export class BeeGameSessionManager {
       approvedNetworkHosts: new Set(),
       toolUses: new Map(),
       nativeTaskTurnIds: new Map(),
+      activeNativeTaskToolUseIds: new Map(),
       assistantPartialTextByMessage: new Map(),
       activeAssistantMessageId: null,
       emittedAssistantMessageIds: new Set(),
@@ -746,12 +684,6 @@ export class BeeGameSessionManager {
         {
           type: 'session.started',
           ...(record.language ? { language: record.language } : {}),
-          ...(record.workflowWorker ? {
-            workflowWorker: true,
-            workflowWorkerType: record.workflowWorkerType,
-            workflowRunId: record.workflowRunId,
-            workflowDispatchId: record.workflowDispatchId,
-          } : {}),
         },
       )
     }
@@ -759,44 +691,10 @@ export class BeeGameSessionManager {
     return cloneSession(record.session)
   }
 
-  list(
-    userId?: string,
-    options?: { includeWorkflowWorkers?: boolean },
-  ): BeeGameSession[] {
+  list(userId?: string): BeeGameSession[] {
     return [...this.sessions.values()]
       .filter(record => !userId || record.userId === userId)
-      .filter(
-        record =>
-          options?.includeWorkflowWorkers === true || !record.workflowWorker,
-      )
       .map(record => cloneSession(record.session))
-  }
-
-  isWorkflowWorker(sessionId: string): boolean {
-    return this.sessions.get(sessionId)?.workflowWorker === true
-  }
-
-  isWorkflowWorkerOpen(dispatchId: string): boolean {
-    return [...this.sessions.values()].some(
-      record =>
-        record.workflowWorker === true &&
-        record.workflowDispatchId === dispatchId &&
-        record.session.status === 'running',
-    )
-  }
-
-  /** Dispose the one transport owned by a durable dispatch identity. */
-  async disposeWorkflowDispatch(workflowDispatchId: string): Promise<number> {
-    const sessionIds = [...this.sessions.values()]
-      .filter(
-        record =>
-          record.workflowWorker === true &&
-          record.workflowDispatchId === workflowDispatchId,
-      )
-      .map(record => record.session.id)
-    for (const sessionId of sessionIds)
-      await this.disposeWorkflowWorker(sessionId)
-    return sessionIds.length
   }
 
   pendingPermissionsForProject(
@@ -818,13 +716,6 @@ export class BeeGameSessionManager {
           ...request,
           sessionId: record.session.id,
           ...(record.projectId ? { projectId: record.projectId } : {}),
-          ...(record.workflowWorker ? { workflowWorker: true } : {}),
-          ...(record.workflowRunId
-            ? { workflowRunId: record.workflowRunId }
-            : {}),
-          ...(record.workflowDispatchId
-            ? { workflowDispatchId: record.workflowDispatchId }
-            : {}),
         })
       }
     }
@@ -839,7 +730,7 @@ export class BeeGameSessionManager {
   }
 
   hasActiveProjectTurn(userId: string, projectId: string, workspacePath: string, exceptSessionId?: string): boolean {
-    return [...this.sessions.values()].some(record => !record.workflowWorker &&
+    return [...this.sessions.values()].some(record =>
       record.userId === userId && record.projectId === projectId &&
       resolve(record.session.cwd) === resolve(workspacePath) && record.session.id !== exceptSessionId &&
       (record.session.turnStatus !== 'idle' || Boolean(record.activeTurn) || Boolean(record.preparingTurn)))
@@ -879,21 +770,22 @@ export class BeeGameSessionManager {
     nativeTranscriptPath?: string
   }> {
     const record = this.sessions.get(sessionId)
-    if (!record || record.workflowWorker) throw new Error('Project session not found')
+    if (!record) throw new Error('Project session not found')
     if (record.session.turnStatus !== 'idle' || record.activeTurn || record.preparingTurn)
       throw new Error('Wait for the current agent turn before editing a message')
     const nativeSessionId = record.nativeSessionId
     if (!nativeSessionId) return {}
     const runtimeEnvironment = buildRuntimeEnv(mergeRuntimeEnv(record.runtime,
       await this.loadAdditionalRuntimeEnv(record)))
-    const configRoot = runtimeEnvironment.BEEGAME_CONFIG_DIR || join(homedir(), '.claude')
+    const configRoot = runtimeEnvironment.BEEGAME_CONFIG_DIR
+    if (!configRoot) throw new Error('BeeGameStudio runtime config directory is unavailable')
     return { nativeSessionId,
       nativeTranscriptPath: join(configRoot, 'projects', sanitizePath(record.session.cwd), `${nativeSessionId}.jsonl`) }
   }
 
   async restoreProjectEditCheckpoint(sessionId: string, nativeSessionId?: string): Promise<void> {
     const record = this.sessions.get(sessionId)
-    if (!record || record.workflowWorker) throw new Error('Project session not found')
+    if (!record) throw new Error('Project session not found')
     if (record.session.turnStatus !== 'idle' || record.activeTurn || record.preparingTurn)
       throw new Error('Wait for the current agent turn before editing a message')
     await this.disposeRunner(record.runner)
@@ -907,7 +799,7 @@ export class BeeGameSessionManager {
   projectConversationSessionId(userId: string, projectId: string, workspacePath: string): string | undefined {
     const root = resolve(workspacePath)
     return [...this.sessions.values()]
-      .filter(record => !record.workflowWorker && record.userId === userId &&
+      .filter(record => record.userId === userId &&
         record.projectId === projectId && resolve(record.session.cwd) === root)
       .sort((left, right) => right.session.updatedAt.getTime() - left.session.updatedAt.getTime())[0]
       ?.session.id
@@ -942,7 +834,14 @@ export class BeeGameSessionManager {
         resolveExistingPath(workspacePath) ===
           resolveExistingPath(persisted.workspacePath)
       ) {
-        return persisted
+        // A persisted snapshot is evidence from a previous server process,
+        // not proof that its turn or child processes are still alive.
+        return {
+          ...persisted,
+          phaseName: 'idle',
+          phaseStatus: 'recovered',
+          activeSubagentToolUseIds: [],
+        }
       }
     }
     if (workspacePath) {
@@ -966,69 +865,6 @@ export class BeeGameSessionManager {
         event => event.id > after && !isThinkingProtocolControlEvent(event),
       )
       .map(event => formatBeeGameEventForDisplay(event, record.language))
-  }
-
-  appendProjectChatEvent(input: {
-    userId: string
-    projectId: string
-    workspacePath: string
-    type: BeeGameEventType
-    text: string
-    turnId?: string
-    payload?: DashboardSDKMessage
-  }): boolean {
-    const workspacePath = resolve(input.workspacePath)
-    const record = [...this.sessions.values()]
-      .filter(candidate =>
-        !candidate.workflowWorker &&
-        candidate.userId === input.userId &&
-        candidate.projectId === input.projectId &&
-        resolve(candidate.session.cwd) === workspacePath)
-      .sort((left, right) =>
-        right.session.updatedAt.getTime() - left.session.updatedAt.getTime())[0]
-    if (!record) return false
-    const nativeKey = getDashboardPayloadString(input.payload, 'workflowStageNativeKey')
-    if (nativeKey && record.events.some(event =>
-      getDashboardPayloadString(event.payload, 'workflowStageNativeKey') === nativeKey)) return true
-    this.append(record, input.type, input.text, input.payload, input.turnId)
-    return true
-  }
-
-  followWorkflowStageChat(input: {
-    userId: string
-    projectId: string
-    workspacePath: string
-  }): void {
-    const workspacePath = resolve(input.workspacePath)
-    const key = `${input.userId}:${input.projectId}:${workspacePath}`
-    if (this.stageChatFollowers.has(key)) return
-    const follower = {
-      timer: undefined as unknown as ReturnType<typeof setInterval>,
-      syncing: false,
-      seen: new Set<string>(),
-    }
-    const sync = async () => {
-      if (follower.syncing) return
-      follower.syncing = true
-      try {
-        for (const event of await readStageChatHistory(workspacePath)) {
-          const key = String(event.payload?.workflowStageNativeKey ?? `${event.sessionId}:${event.id}`)
-          if (follower.seen.has(key)) continue
-          if (this.appendProjectChatEvent({ ...input, workspacePath, type: event.type,
-            text: event.text, ...(event.turnId ? { turnId: event.turnId } : {}),
-            ...(event.payload ? { payload: event.payload } : {}) })) follower.seen.add(key)
-        }
-      } catch (error) {
-        console.warn('[BeeGame] Failed to follow workflow Chat output', {
-          workspacePath,
-          cause: error instanceof Error ? error.message : String(error),
-        })
-      } finally { follower.syncing = false }
-    }
-    follower.timer = setInterval(() => { void sync() }, 750)
-    follower.timer.unref?.()
-    this.stageChatFollowers.set(key, follower)
-    void sync()
   }
 
   subscribeEvents(
@@ -1093,6 +929,24 @@ export class BeeGameSessionManager {
       }))
   }
 
+  /** Display-only, durable milestone boundary; never changes the native Agent turn. */
+  recordDeliveryPhase(sessionId: string, phase: string): void {
+    const record = this.sessions.get(sessionId)
+    if (!record) throw new Error('Session not found')
+    const lastPhase = record.events.findLast(event => event.type === 'system.status' && event.payload?.subtype === 'delivery_phase')
+    if (lastPhase?.payload?.phase === phase) return
+    this.append(record, 'system.status', phase, { type: 'system.status', subtype: 'delivery_phase', phase })
+  }
+
+  /** A host handoff failure is not a failed Agent answer or a completed delivery. */
+  recordDeliveryError(sessionId: string, detail: string): void {
+    const record = this.sessions.get(sessionId)
+    if (!record) return
+    const prefix = record.language === 'zh' ? '交付未能继续：' : 'Delivery could not continue: '
+    this.append(record, 'system.status', formatRuntimeErrorForDisplay(prefix + detail, record.language),
+      { type: 'system.status', subtype: 'delivery_error' })
+  }
+
   /** Persist a user message for the chat surface without starting a model turn. */
   appendUserMessage(
     sessionId: string,
@@ -1127,15 +981,9 @@ export class BeeGameSessionManager {
       attachments?: BeeGameAttachment[]
       confirmedBriefContext?: string
       onTurnAccepted?: () => void
-      prepareTurn?: () => Promise<{ systemContext?: string; close?: () => Promise<void> }>
+      prepareTurn?: () => Promise<{ systemContext?: string; turnContext?: string; close?: () => Promise<void> }>
       onTurnSettled?: () => Promise<void>
-      workflowContext?: {
-        runId: string
-        dispatchId: string
-        workerType: string
-        phase: string
-        protectedPaths?: string[]
-      }
+      onTurnReady?: () => void | Promise<void>
       usageExternallyAccounted?: boolean
     },
   ): Promise<BeeGameSession> {
@@ -1147,7 +995,7 @@ export class BeeGameSessionManager {
     if (record.session.turnStatus !== 'idle' || record.preparingTurn || record.activeTurn) {
       throw new Error('Session is already processing a prompt')
     }
-    if (record.projectId && !record.workflowWorker && this.hasActiveProjectTurn(
+    if (record.projectId && this.hasActiveProjectTurn(
       record.userId, record.projectId, record.session.cwd, sessionId,
     )) throw new Error('Previous project request is still stopping')
     // Claim the turn synchronously before any preparation, hooks, or remote
@@ -1156,12 +1004,6 @@ export class BeeGameSessionManager {
     record.session.turnStatus = 'running'
     record.preparingTurn = true
     record.currentTurnUsageExternallyAccounted = display?.usageExternallyAccounted === true
-    if (display?.workflowContext) record.activeWorkflowContext = {
-      ...display.workflowContext,
-      ...(display.workflowContext.protectedPaths
-        ? { protectedPaths: [...display.workflowContext.protectedPaths] }
-        : {}),
-    }
     let turnAccepted = false
     let close: (() => Promise<void>) | undefined
     try {
@@ -1241,24 +1083,34 @@ export class BeeGameSessionManager {
       })
 
       let activeTurn!: Promise<void>
+      let settlementSucceeded = false
       activeTurn = this.runDirectTurn(
         record,
-        preparedPrompt.prompt,
+        context?.turnContext ? [
+          ...(typeof preparedPrompt.prompt === 'string'
+            ? [{ type: 'text' as const, text: preparedPrompt.prompt }] : preparedPrompt.prompt),
+          { type: 'text' as const, text: context.turnContext },
+        ] : preparedPrompt.prompt,
         async () => {
           try { await display?.onTurnSettled?.() }
           finally { await close?.() }
+          settlementSucceeded = true
         },
       ).finally(() => {
         if (record.activeTurn === activeTurn) record.activeTurn = undefined
       })
       record.activeTurn = activeTurn
-      void activeTurn.catch(() => undefined)
+      // Only hand off after settlement, capability cleanup and releasing the
+      // active-turn guard. A timer inside settlement can race any awaited cleanup.
+      void activeTurn.then(async () => {
+        if (settlementSucceeded && record.session.status === 'running' && record.session.turnStatus === 'idle' && !record.activeTurn)
+          await display?.onTurnReady?.()
+      }).catch(error => this.recordDeliveryError(sessionId, toErrorMessage(error)))
       return cloneSession(record.session)
     } catch (error) {
       if (!turnAccepted) {
         try { await close?.() }
         finally {
-          record.activeWorkflowContext = undefined
           record.currentTurnUsageExternallyAccounted = undefined
           record.currentTurnId = null
           record.abortController = null
@@ -1279,6 +1131,7 @@ export class BeeGameSessionManager {
       record.abortController?.abort(reason)
       void this.disposeRunner(record.runner)
       record.runner = null
+      record.activeNativeTaskToolUseIds.clear()
       this.resolveAllPendingPermissions(record, {
         behavior: 'deny',
         source: 'policy',
@@ -1310,7 +1163,6 @@ export class BeeGameSessionManager {
       this.closeOpenThinkingLifecycle(record, 'turn_interrupted')
       record.session.turnStatus = 'idle'
       record.session.updatedAt = new Date()
-      record.activeWorkflowContext = undefined
     }
     return cloneSession(record.session)
   }
@@ -1348,40 +1200,6 @@ export class BeeGameSessionManager {
     return { deleted: true, deletedArtifactPaths }
   }
 
-  /**
-   * Workflow workers are disposable transports, but their transcript and
-   * native-session snapshot are delivery evidence. Retention is handled by
-   * the project log policy, not by terminal cleanup.
-   */
-  async disposeWorkflowWorker(sessionId: string): Promise<void> {
-    const record = this.sessions.get(sessionId)
-    if (!record?.workflowWorker) return
-    if (record.session.status === 'running') this.stop(sessionId, 'worker_disposed')
-    await this.waitForWorkflowWorkerIdle(sessionId)
-    this.sessions.delete(sessionId)
-    this.eventSubscribers.delete(sessionId)
-  }
-
-  async rebindWorkflowWorker(
-    sessionId: string,
-    binding: { runId: string; dispatchId: string; workerType: string },
-  ): Promise<void> {
-    const record = this.sessions.get(sessionId)
-    if (!record?.workflowWorker)
-      throw new Error('workflow worker session is unavailable')
-    await this.waitForWorkflowWorkerIdle(sessionId)
-    record.workflowRunId = binding.runId
-    record.workflowDispatchId = binding.dispatchId
-    record.workflowWorkerType = binding.workerType
-    this.persistRuntimeSnapshot(record)
-  }
-
-  async waitForWorkflowWorkerIdle(sessionId: string): Promise<void> {
-    const record = this.sessions.get(sessionId)
-    if (!record?.workflowWorker) return
-    await record.activeTurn
-  }
-
   /** Wait until a stopped project turn has fully unwound before resuming its
    * existing transcript/native session. This prevents a stop/resume race from
    * admitting a second turn while the first runner is still disposing. */
@@ -1394,8 +1212,6 @@ export class BeeGameSessionManager {
   }
 
   async dispose(): Promise<void> {
-    for (const follower of this.stageChatFollowers.values()) clearInterval(follower.timer)
-    this.stageChatFollowers.clear()
     const activeTurnDrains: Promise<void>[] = []
     for (const record of this.sessions.values()) {
       // Mark the session stopped before the transport can flush any more
@@ -1515,6 +1331,7 @@ export class BeeGameSessionManager {
       const env: Record<string, string> = {
         ...buildRuntimeEnv(selectedEnvironment),
       }
+      record.redactVisible = createResponseRedactor(env)
       if (signal.aborted || record.session.status !== 'running') return
       const runner =
         record.runner ??
@@ -1532,9 +1349,22 @@ export class BeeGameSessionManager {
           },
           onNativeTaskNotification: notification => {
             const message = notification.message ?? notification.backgroundMessage
-            const startedId = message && getStringField(message, 'task_id')
-            if (message?.subtype === 'task_started' && startedId)
-              record.nativeTaskTurnIds.set(startedId, record.currentTurnId ?? undefined)
+            const taskId = message && getStringField(message, 'task_id')
+            const toolUseId = message && (getStringField(message, 'tool_use_id') || getStringField(message, 'toolUseID'))
+            if (taskId && ['task_started', 'task_progress'].includes(String(message?.subtype))) {
+              record.nativeTaskTurnIds.set(taskId, record.currentTurnId ?? undefined)
+              record.activeNativeTaskToolUseIds.set(taskId,
+                toolUseId || record.activeNativeTaskToolUseIds.get(taskId) || taskId)
+            } else if (taskId && message?.subtype === 'task_notification' &&
+              ['completed', 'failed', 'stopped', 'killed'].includes(getStringField(message, 'status'))) {
+              record.activeNativeTaskToolUseIds.delete(taskId)
+              if (toolUseId) {
+                for (const [activeTaskId, activeToolUseId] of record.activeNativeTaskToolUseIds) {
+                  if (activeToolUseId === toolUseId) record.activeNativeTaskToolUseIds.delete(activeTaskId)
+                }
+              }
+            }
+            this.persistRuntimeSnapshot(record)
             // Foreground messages already go through onMessage. Background
             // notifications must remain visible after that turn has returned.
             if (notification.backgroundMessage) {
@@ -1551,16 +1381,6 @@ export class BeeGameSessionManager {
             env,
           ),
           ...(record.language ? { language: record.language } : {}),
-          ...(record.workflowWorker ? { workflowWorker: true } : {}),
-          ...(record.workflowWorkerType
-            ? { workflowWorkerType: record.workflowWorkerType }
-            : {}),
-          ...(record.workflowDispatchId
-            ? { workflowDispatchId: record.workflowDispatchId }
-            : {}),
-          ...(record.workflowProtectedPaths
-            ? { workflowProtectedPaths: [...record.workflowProtectedPaths] }
-            : {}),
           requestPermission: request => this.requestPermission(record, request),
         }))
       record.runner = runner
@@ -1617,7 +1437,7 @@ export class BeeGameSessionManager {
     } finally {
       try { await settle?.() }
       catch (error) {
-        this.append(record, 'system.status', `Request cleanup failed: ${toErrorMessage(error)}`)
+        this.recordDeliveryError(record.session.id, `Request cleanup failed: ${toErrorMessage(error)}`)
       }
       const terminalTurnId = record.currentTurnId
       if (terminalTurnId && !record.currentTurnUsageExternallyAccounted) {
@@ -1640,7 +1460,6 @@ export class BeeGameSessionManager {
       record.visibleThinkingBlockIds.clear()
       record.thinkingBlockStartedAt.clear()
       record.abortController = null
-      record.activeWorkflowContext = undefined
       record.currentTurnUsageExternallyAccounted = undefined
       record.session.updatedAt = new Date()
     }
@@ -1801,11 +1620,11 @@ export class BeeGameSessionManager {
         turnDeltaUsage,
       }))
       .digest('hex')
-    const billingAuthority = record.workflowRunId && record.workflowDispatchId
-      ? `${record.workflowRunId}:${record.workflowDispatchId}`
-      : `${record.session.id}:${turnId}`
+    const billingAuthority = `${record.session.id}:${turnId}`
     const idempotencyKey = `usage-terminal:${billingAuthority}:${terminalDigest}`
     if (idempotencyKey === record.usageLastCommittedKey) return
+    const deliveryPhase = record.events.findLast(event =>
+      event.type === 'system.status' && event.payload?.subtype === 'delivery_phase')?.payload?.phase
     const write = {
       turnId,
       sourceMessageType: terminalEvent?.type ?? 'turn_terminal',
@@ -1816,6 +1635,7 @@ export class BeeGameSessionManager {
         turnDeltaUsage,
         billableFinalUsage: turnDeltaUsage,
         terminalDigest,
+        ...(typeof deliveryPhase === 'string' ? { deliveryPhase } : {}),
       },
     }
     const previousWrite = record.usageWriteTail
@@ -1873,7 +1693,6 @@ export class BeeGameSessionManager {
       metadata: {
         sourceMessageType: write.sourceMessageType,
         modelConfigId: record.session.modelConfigId,
-        workflowWorker: Boolean(record.workflowWorker),
         ...write.metadata,
       },
       ...(record.authToken ? { authToken: record.authToken } : {}),
@@ -2028,32 +1847,6 @@ export class BeeGameSessionManager {
         return { behavior: 'allow', source: 'user', scope: 'session' }
       }
     }
-    const workflowMutation = workflowFileMutationAuthority(record, request)
-    if (workflowMutation) {
-      this.append(
-        record,
-        'permission.resolved',
-        `${request.toolName}: ${workflowMutation.behavior}`,
-        {
-          type: 'permission.resolved',
-          toolUseID: request.toolUseID,
-          toolName: request.toolName,
-          decision: workflowMutation.behavior,
-          scope: 'once',
-          autoApproved: workflowMutation.behavior === 'allow',
-          autoDenied: workflowMutation.behavior === 'deny',
-          reason: workflowMutation.reason,
-        },
-      )
-      return Promise.resolve({
-        behavior: workflowMutation.behavior,
-        source: 'policy',
-        scope: 'once',
-        ...(workflowMutation.message
-          ? { message: workflowMutation.message }
-          : {}),
-      })
-    }
     if (authorizeProjectWorkspaceFileMutation(record, request)) {
       this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
         type: 'permission.resolved',
@@ -2157,6 +1950,21 @@ export class BeeGameSessionManager {
       this.subagentChat.set(record, enrich)
     }
     let eventPayload = enrich({ type, payload }).payload as DashboardSDKMessage | undefined
+    if (type === 'tool.completed' && eventPayload?.nativeBackgroundTask) {
+      const launch = eventPayload.nativeBackgroundTask as Record<string, unknown>
+      const taskId = typeof launch.taskId === 'string' ? launch.taskId : ''
+      const toolUseId = getDashboardPayloadString(eventPayload, 'toolUseID')
+      if (taskId) record.activeNativeTaskToolUseIds.set(taskId, toolUseId || taskId)
+    }
+    if (type === 'tool.completed' && eventPayload?.nativeBackgroundTaskResult) {
+      const result = eventPayload.nativeBackgroundTaskResult as Record<string, unknown>
+      const toolUseId = typeof result.toolUseID === 'string' ? result.toolUseID : ''
+      if (toolUseId) {
+        for (const [taskId, activeToolUseId] of record.activeNativeTaskToolUseIds) {
+          if (activeToolUseId === toolUseId) record.activeNativeTaskToolUseIds.delete(taskId)
+        }
+      }
+    }
     if (type === 'assistant.thinking') {
       const thinkingBlockId = getDashboardPayloadString(payload, 'thinkingBlockId') || 'default'
       const thinkingKey = `${effectiveTurnId ?? record.session.id}:${thinkingBlockId}`
@@ -2174,14 +1982,9 @@ export class BeeGameSessionManager {
       }
       if (status === 'ended') record.thinkingBlockStartedAt.delete(thinkingKey)
     }
-    if (record.activeWorkflowContext) {
-      eventPayload = {
-        ...(eventPayload ?? { type }),
-        workflowRunId: record.activeWorkflowContext.runId,
-        workflowDispatchId: record.activeWorkflowContext.dispatchId,
-        workflowWorkerType: record.activeWorkflowContext.workerType,
-        workflowStage: record.activeWorkflowContext.phase,
-      }
+    if (record.redactVisible && type !== 'user.message') {
+      text = record.redactVisible(text) as string
+      if (eventPayload) eventPayload = record.redactVisible(eventPayload) as DashboardSDKMessage
     }
     const event: BeeGameEvent = {
       id: record.nextEventId,
@@ -2207,7 +2010,7 @@ export class BeeGameSessionManager {
         })
       }
     }
-    if (record.projectId && (!record.workflowWorker || isWorkerChatEvent(event))) {
+    if (record.projectId) {
       for (const subscription of this.projectEventSubscribers) {
         if (
           subscription.userId !== record.userId ||
@@ -2220,60 +2023,13 @@ export class BeeGameSessionManager {
             event,
             record.language,
           )
-          subscription.subscriber(
-            record.workflowWorker
-              ? {
-                  ...displayEvent,
-                  payload: {
-                    ...(displayEvent.payload ?? { type: displayEvent.type }),
-                    workflowRunId: record.workflowRunId,
-                    workflowDispatchId: record.workflowDispatchId,
-                    workflowWorkerType: record.workflowWorkerType,
-                    ...(workflowStageForWorkerType(record.workflowWorkerType)
-                      ? { workflowStage: workflowStageForWorkerType(record.workflowWorkerType) }
-                      : {}),
-                  },
-                }
-              : displayEvent,
-          )
+          subscription.subscriber(displayEvent)
         } catch (error) {
           console.warn('[BeeGame] Project event subscriber failed', {
             projectId: record.projectId,
             cause: error instanceof Error ? error.message : String(error),
           })
         }
-      }
-    }
-    if (
-      record.workflowWorker &&
-      record.projectId &&
-      isWorkerChatEvent(event)
-    ) {
-      const chatRecord = [...this.sessions.values()]
-        .filter(
-          candidate =>
-            !candidate.workflowWorker &&
-            candidate.userId === record.userId &&
-            candidate.projectId === record.projectId &&
-            resolve(candidate.session.cwd) === resolve(record.session.cwd),
-        )
-        .sort(
-          (left, right) =>
-            right.session.updatedAt.getTime() - left.session.updatedAt.getTime(),
-        )[0]
-      if (chatRecord) {
-        this.append(chatRecord, event.type, event.text, {
-          ...(event.payload ?? { type: event.type }),
-          workflowRunId: record.workflowRunId,
-          workflowDispatchId: record.workflowDispatchId,
-          workflowWorkerType: record.workflowWorkerType,
-          ...(workflowStageForWorkerType(record.workflowWorkerType)
-            ? { workflowStage: workflowStageForWorkerType(record.workflowWorkerType) }
-            : {}),
-          workflowSourceSessionId: event.sessionId,
-          workflowSourceEventId: event.id,
-          ...(event.turnId ? { workflowSourceTurnId: event.turnId } : {}),
-        })
       }
     }
     record.nextEventId += 1
@@ -2293,13 +2049,16 @@ export class BeeGameSessionManager {
   }
 
   private deriveRuntimeSnapshot(record: SessionRecord): BeeGameRuntimeSnapshot {
-    return deriveRuntimeSnapshotFromEvents(
-      record.session.id,
-      record.session.cwd,
-      record.events,
-      record.session.modelConfigId,
-      { nativeSessionId: record.nativeSessionId },
-    )
+    return {
+      ...deriveRuntimeSnapshotFromEvents(
+        record.session.id,
+        record.session.cwd,
+        record.events,
+        record.session.modelConfigId,
+        { nativeSessionId: record.nativeSessionId },
+      ),
+      activeSubagentToolUseIds: [...record.activeNativeTaskToolUseIds.values()],
+    }
   }
 
   private readPersistedRuntimeSnapshot(
@@ -2357,12 +2116,10 @@ async function deleteSessionWorkspaceRoot(
 export async function deleteSessionArtifactsFromTranscript(
   sessionId: string,
   cwd: string,
-  dashboardDataRoot?: string,
 ): Promise<string[]> {
   const events = await readSessionTranscriptFromDisk(
     sessionId,
     cwd,
-    dashboardDataRoot,
   )
   const roots = getSessionArtifactRootPathsForEvents(cwd, events)
   const deleted: string[] = []
@@ -2398,7 +2155,6 @@ function readTranscriptIncrementally(path: string): Promise<DiskTranscriptEvent[
 export async function readSessionTranscriptFromDisk(
   sessionId: string,
   cwd: string,
-  dashboardDataRoot?: string,
 ): Promise<
   Array<{
     id: number
@@ -2513,252 +2269,6 @@ export async function recoverLatestProjectSessionFromDisk(
     }
   }
   return undefined
-}
-
-/**
- * Recover visible chat activity from a workflow worker transcript left behind
- * by an interrupted process. Normal live worker activity is mirrored into the
- * project chat; the source identity prevents this fallback from duplicating it.
- */
-export async function readWorkflowWorkerChatHistoryFromDisk(
-  workspacePath: string,
-  mainSessionId: string,
-  mainEvents: readonly BeeGameEvent[],
-): Promise<BeeGameEvent[]> {
-  const transcriptDir = dirname(
-    getSessionTranscriptPath(mainSessionId, workspacePath),
-  )
-  const mirrored = new Set(
-    mainEvents.flatMap(event => {
-      const sourceSessionId = getDashboardPayloadString(
-        event.payload,
-        'workflowSourceSessionId',
-      )
-      const sourceEventId = event.payload?.workflowSourceEventId
-      return sourceSessionId && typeof sourceEventId === 'number'
-        ? [`${sourceSessionId}:${sourceEventId}`]
-        : []
-    }),
-  )
-  let fileNames: string[]
-  try {
-    fileNames = await readdir(transcriptDir)
-  } catch {
-    fileNames = []
-  }
-
-  const recovered: BeeGameEvent[] = []
-  for (const fileName of fileNames.sort()) {
-    if (!fileName.endsWith('.jsonl')) continue
-    let events: BeeGameEvent[]
-    try {
-      events = (await readTranscriptIncrementally(join(transcriptDir, fileName)))
-        .map(event => ({ ...event, createdAt: new Date(event.createdAt) }))
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
-      throw error
-    }
-    const sourceSessionId = events.find(event => event.sessionId)?.sessionId
-    if (!sourceSessionId || sourceSessionId === mainSessionId) continue
-    const workerMetadata = events.find(event =>
-      event.type === 'session.started' && event.payload?.workflowWorker === true,
-    )
-    // Older transcripts predate explicit worker metadata.
-    const workerStart = events.find(
-      event =>
-        event.type === 'turn.started' &&
-        event.text.includes('BeeGame delivery worker:'),
-    )
-    if (!workerMetadata && !workerStart) continue
-    const workflowWorkerType = getDashboardPayloadString(workerMetadata?.payload, 'workflowWorkerType')
-      ?? workerStart?.text.match(/BeeGame delivery worker:\s*([^\s]+)/)?.[1]
-    const enrich = createNativeSubagentChatEnricher()
-    const latestNativeTask = new Map<string, number>()
-    for (const event of events) {
-      if (isNativeTaskLifecycle(event.payload)) latestNativeTask.set(String(event.payload?.task_id), event.id)
-    }
-    for (const rawEvent of events) {
-      const event = enrich(rawEvent, latestNativeTask.get(String(rawEvent.payload?.task_id)) === rawEvent.id)
-      if (!isWorkerChatEvent(event)) continue
-      if (mirrored.has(`${event.sessionId}:${event.id}`)) continue
-      recovered.push({
-        ...event,
-        ...(workflowWorkerType
-          ? {
-              payload: {
-                ...(event.payload ?? { type: event.type }),
-                workflowWorkerType,
-                ...(workflowStageForWorkerType(workflowWorkerType)
-                  ? { workflowStage: workflowStageForWorkerType(workflowWorkerType) }
-                  : {}),
-              },
-            }
-          : {}),
-      })
-    }
-  }
-
-  const stageNativeKeys = new Set(mainEvents.flatMap(event => {
-    // Old projections discarded block boundaries. Rebuild those scopes from
-    // native evidence; the timeline excludes their old display-only copies.
-    if (event.payload?.chatSchemaVersion !== 2) return []
-    const key = getDashboardPayloadString(event.payload, 'workflowStageNativeKey')
-    return key ? [key] : []
-  }))
-  for (const event of await readStageChatHistory(workspacePath)) {
-    const key = getDashboardPayloadString(event.payload, 'workflowStageNativeKey')
-    if (key && stageNativeKeys.has(key)) continue
-    if (key) stageNativeKeys.add(key)
-    recovered.push(event)
-  }
-  return recovered.sort((left, right) => {
-    const time = left.createdAt.getTime() - right.createdAt.getTime()
-    if (time !== 0) return time
-    const session = left.sessionId.localeCompare(right.sessionId)
-    return session !== 0 ? session : left.id - right.id
-  })
-}
-
-function workflowStageForWorkerType(workerType?: string): string | undefined {
-  const stages: Record<string, string> = {
-    'document-author': 'author',
-    'content-author': 'content',
-    'foundation-reviewer': 'reviewer',
-    'foundation-document-reviser': 'revision',
-    'resource-planner': 'resources',
-    'implementation-worker': 'implementation',
-  }
-  return workerType ? stages[workerType] : undefined
-}
-
-type StageChatRow = { at?: unknown; event?: unknown; data?: unknown }
-type StageChatFile = {
-  reader: ChatJsonlReader<StageChatRow>
-  events: BeeGameEvent[]
-  projector: ReturnType<typeof createStageChatProjector>
-  createdAt: Date
-}
-const stageChatReaders = new Map<string, {
-  files: Map<string, StageChatFile>
-  pending?: Promise<BeeGameEvent[]>
-}>()
-
-/** Shared by the live follower and reconnect/history. Only newly appended
- * records are projected, including when several browser tabs are connected. */
-export function readStageChatHistory(workspacePath: string): Promise<BeeGameEvent[]> {
-  const root = resolve(workspacePath)
-  let state = stageChatReaders.get(root)
-  if (!state) { state = { files: new Map() }; stageChatReaders.set(root, state) }
-  if (state.pending) return state.pending
-  const current = state
-  const makeFile = (stage: NonNullable<ReturnType<typeof stageFromNativeLogPath>>): StageChatFile => {
-    const file: StageChatFile = { reader: new ChatJsonlReader(), events: [], createdAt: new Date(0),
-      projector: createStageChatProjector({ stage, sink: event => {
-        file.events.push({ ...event, id: file.events.length + 1, sessionId: `workflow-stage:${stage}`,
-          createdAt: typeof event.payload?.occurredAt === 'string' ? new Date(event.payload.occurredAt) : file.createdAt })
-      } }) }
-    return file
-  }
-  current.pending = (async () => {
-    const paths = await listStageNativeEventLogs(join(root, '.beegame', 'workflow'))
-    const events: BeeGameEvent[] = []
-    for (const path of paths) {
-      const stage = stageFromNativeLogPath(path)
-      if (!stage) continue
-      let file = current.files.get(path)
-      if (!file) { file = makeFile(stage); current.files.set(path, file) }
-      try {
-        const batch = await file.reader.read(path)
-        if (batch.reset) {
-          const reader = file.reader
-          file = makeFile(stage)
-          file.reader = reader
-          current.files.set(path, file)
-        }
-        for (const row of batch.rows) {
-          const message = stageChatMessageFromTrace(row)
-          if (!message) continue
-          file.createdAt = typeof row.at === 'string' ? new Date(row.at) : new Date(0)
-          await file.projector(message)
-        }
-        events.push(...file.events)
-      } catch (error) {
-        // Retrying after projection/read failure must replay the file, not
-        // advance past records the UI never received.
-        current.files.delete(path)
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      }
-    }
-    for (const path of current.files.keys()) if (!paths.includes(path)) current.files.delete(path)
-    return events
-  })().finally(() => { current.pending = undefined })
-  return current.pending
-}
-
-function stageFromNativeLogPath(path: string): 'author' | 'content' | 'reviewer' | 'revision' | undefined {
-  const normalized = path.split('\\').join('/')
-  if (normalized.includes('/foundation-authoring/')) return 'author'
-  if (normalized.includes('/content-authoring/')) return 'content'
-  if (normalized.includes('/foundation-reviewer/')) return 'reviewer'
-  if (normalized.includes('/foundation-revision/')) return 'revision'
-  return undefined
-}
-
-/** Converts persisted, redacted trace rows into the native shape understood by
- * the stage Chat projector. */
-export function stageChatMessageFromTrace(
-  entry: { at?: unknown; event?: unknown; data?: unknown },
-): Record<string, unknown> | undefined {
-  if (!entry.data || typeof entry.data !== 'object') return undefined
-  const data = entry.data as Record<string, unknown>
-  const source = { queryId: data.queryId, messageId: data.messageId, parentToolUseId: data.parentToolUseId,
-    agentId: data.agentId, occurredAt: data.occurredAt ?? entry.at, startedAt: data.startedAt }
-  if (entry.event === 'response.message' || entry.event === 'native.task_lifecycle')
-    return { ...source, ...data }
-  if (entry.event === 'response.query_end') return { ...source, type: 'thinking_end', status: data.status }
-  if (entry.event === 'response.content_start') return { ...source, type: 'stream_event', event: {
-    type: 'content_block_start', index: data.index,
-    content_block: { type: data.type, name: data.tool, id: data.toolId, input: {} },
-  } }
-  if (entry.event === 'response.content_end' || entry.event === 'response.message_stop')
-    return { ...source, type: 'stream_event', event: {
-      type: entry.event === 'response.content_end' ? 'content_block_stop' : 'message_stop', index: data.index,
-    } }
-  if (entry.event === 'response.content_snapshot') {
-    if (!['text', 'thinking'].includes(String(data.type)) || typeof data.content !== 'string' || !data.content) return undefined
-    // Redaction can change earlier characters. A checkpoint is a replacement,
-    // not a delta inferred from string length (nor scoped merely by query).
-    return { ...source, type: 'stream_event', contentMode: 'snapshot',
-      workflowStageNativeKey: `${data.type}:${data.queryId}:${data.messageId}:${data.index}:${data.receivedBytes}`,
-      event: { type: 'content_block_delta', index: data.index, delta: data.type === 'thinking'
-        ? { type: 'thinking_delta', thinking: data.content } : { type: 'text_delta', text: data.content } } }
-  }
-  if (entry.event !== 'response.reasoning_snapshot' || typeof data.content !== 'string' || !data.content) return undefined
-  return { ...source, type: 'stream_event',
-    ...(typeof data.queryId === 'string' && typeof data.receivedBytes === 'number'
-      ? { workflowStageNativeKey: `thinking:${data.queryId}:${data.receivedBytes}` }
-      : {}),
-    event: { type: 'content_block_delta', index: -1, delta: { type: 'thinking_delta', thinking: data.content } } }
-}
-
-async function listStageNativeEventLogs(root: string): Promise<string[]> {
-  const found: string[] = []
-  async function visit(directory: string): Promise<void> {
-    let entries
-    try { entries = await readdir(directory, { withFileTypes: true }) }
-    catch { return }
-    for (const entry of entries) {
-      const path = join(directory, entry.name)
-      if (entry.isDirectory()) await visit(path)
-      else if (entry.isFile() && (entry.name.endsWith('native-events.jsonl') || entry.name.endsWith('chat-events.jsonl'))) found.push(path)
-    }
-  }
-  await visit(root)
-  const paths = new Set(found)
-  // A new run has exactly one content source. Diagnostics are a read-only
-  // fallback for historical runs that predate the dedicated Chat file.
-  return found.filter(path => !path.endsWith('native-events.jsonl') ||
-    !paths.has(path.slice(0, -'native-events.jsonl'.length) + 'chat-events.jsonl')).sort()
 }
 
 function readExistingTranscriptForResume(
@@ -3312,6 +2822,7 @@ function deriveRuntimeSnapshotFromEvents(
     ...(modelConfigId ? { modelConfigId } : {}),
     phaseName: deriveSnapshotPhaseName(events, options),
     phaseStatus: deriveSnapshotPhaseStatus(events, options),
+    activeSubagentToolUseIds: [],
     updatedAt: latest?.createdAt.toISOString() ?? new Date().toISOString(),
     usage,
     roleTokens: deriveObservedRoleTokens(events),
@@ -3347,7 +2858,7 @@ function deriveSnapshotPhaseStatus(
 ): string {
   const latest = events.at(-1)
   if (!latest) return 'idle'
-  if (options.recoveredFromTranscript) return 'idle'
+  if (options.recoveredFromTranscript) return 'recovered'
   if (latest.type === 'permission.requested') return 'waiting_approval'
   if (latest.type === 'turn.failed' || latest.type === 'session.failed')
     return 'failed'
@@ -3874,6 +3385,8 @@ function normalizeRuntimeSnapshot(value: unknown): BeeGameRuntimeSnapshot {
       : {}),
     phaseName: String(record.phaseName || 'idle'),
     phaseStatus: String(record.phaseStatus || 'idle'),
+    // This snapshot may survive a service restart, but live child processes do not.
+    activeSubagentToolUseIds: [],
     updatedAt: String(record.updatedAt || new Date().toISOString()),
     usage: {
       prompt_tokens: Number(usage.prompt_tokens ?? 0),
@@ -4135,72 +3648,6 @@ function projectWorkspaceFileAccessAuthority(
   }
 }
 
-type WorkflowFileMutationAuthority = {
-  behavior: 'allow' | 'deny'
-  reason:
-    | 'workflow_workspace_file_access'
-    | 'workflow_protected_path'
-    | 'workflow_workspace_boundary'
-    | 'workflow_mutation_target_invalid'
-  message?: string
-}
-
-function workflowFileMutationAuthority(
-  record: SessionRecord,
-  request: DashboardPermissionRequest,
-): WorkflowFileMutationAuthority | undefined {
-  if ((record.workflowWorker !== true && !record.activeWorkflowContext) || !isFileMutationTool(request.toolName))
-    return undefined
-  const artifactPath = getMutationArtifactPath(request.input)
-  if (!artifactPath)
-    return {
-      behavior: 'deny',
-      reason: 'workflow_mutation_target_invalid',
-      message: 'Workflow file mutations require one explicit target path.',
-    }
-  const workspaceRoot = resolveExistingPath(record.session.cwd)
-  const targetPath = resolveProspectivePath(record.session.cwd, artifactPath)
-  const workspaceRelative = relative(workspaceRoot, targetPath)
-  if (
-    workspaceRelative === '' ||
-    workspaceRelative.startsWith('..') ||
-    isAbsolute(workspaceRelative)
-  )
-    return {
-      behavior: 'deny',
-      reason: 'workflow_workspace_boundary',
-      message:
-        'Workflow workers may not mutate files outside the project workspace.',
-    }
-  const protectedPath = (record.activeWorkflowContext?.protectedPaths ?? record.workflowProtectedPaths ?? []).find(entry =>
-    pathMatchesConfiguredScope(record.session.cwd, targetPath, entry),
-  )
-  if (protectedPath)
-    return {
-      behavior: 'deny',
-      reason: 'workflow_protected_path',
-      message: `Workflow workers may not mutate protected project authority: ${protectedPath}.`,
-    }
-  // Stage paths describe the primary deliverable; they are not a sandbox.
-  // Keep the actual project boundary and explicit protected artifacts, while
-  // allowing the Agent to make supporting changes anywhere in the workspace.
-  return { behavior: 'allow', reason: 'workflow_workspace_file_access' }
-}
-
-function pathMatchesConfiguredScope(
-  cwd: string,
-  targetPath: string,
-  entry: string,
-): boolean {
-  const configuredPath = entry.trim()
-  if (!configuredPath) return false
-  const directoryScope = /[\\/]$/u.test(configuredPath)
-  const scopedPath = resolveProspectivePath(cwd, configuredPath)
-  if (!directoryScope) return targetPath === scopedPath
-  const child = relative(scopedPath, targetPath)
-  return child !== '' && !child.startsWith('..') && !isAbsolute(child)
-}
-
 function resolveProspectivePath(cwd: string, artifactPath: string): string {
   const targetPath = isAbsolute(artifactPath)
     ? resolve(artifactPath)
@@ -4214,26 +3661,6 @@ function resolveProspectivePath(cwd: string, artifactPath: string): string {
     existingAncestor = parent
   }
   return resolve(resolveExistingPath(existingAncestor), ...missingSegments)
-}
-
-function hasCompletedTool(
-  record: SessionRecord,
-  expectedToolName: string,
-): boolean {
-  const started = new Set<string>()
-  for (const event of record.events) {
-    const toolUseID = getDashboardPayloadString(event.payload, 'toolUseID')
-    if (!toolUseID) continue
-    if (
-      event.type === 'tool.started' &&
-      getDashboardPayloadString(event.payload, 'toolName') === expectedToolName
-    ) {
-      started.add(toolUseID)
-      continue
-    }
-    if (event.type === 'tool.completed' && started.has(toolUseID)) return true
-  }
-  return false
 }
 
 function archiveInterruptedRecoveredTurn(record: SessionRecord): void {
@@ -4280,19 +3707,6 @@ function getMutationArtifactPath(input: Record<string, unknown>): string {
   ).trim()
 }
 
-function getWorkspaceRelativeMutationPath(
-  cwd: string,
-  allowedRoot: string,
-  artifactPath: string,
-): string {
-  const targetPath = isAbsolute(artifactPath)
-    ? resolve(artifactPath)
-    : resolve(cwd, artifactPath)
-  const rel = relative(resolve(allowedRoot), targetPath)
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) return ''
-  return rel.split('\\').join('/')
-}
-
 function getTopLevelWorkspacePath(cwd: string, artifactPath: string): string {
   const targetPath = isAbsolute(artifactPath)
     ? resolve(artifactPath)
@@ -4310,13 +3724,6 @@ function getDashboardPayloadString(
 ): string {
   const value = payload?.[field]
   return typeof value === 'string' ? value : ''
-}
-
-function getDashboardPayloadBoolean(
-  payload: DashboardSDKMessage | undefined,
-  field: string,
-): boolean {
-  return payload?.[field] === true
 }
 
 function getDashboardPayloadRecord(
@@ -4368,13 +3775,7 @@ function updateProjectTranscriptIndex(record: SessionRecord): void {
   const workspacePath = record.session.cwd
   const logsDir = getProjectLogsDirForRecord(record)
   mkdirSync(logsDir, { recursive: true })
-  const scopedIndexPath =
-    record.workflowWorker && record.workflowRunId
-      ? resolve(logsDir, 'index.json')
-      : getProjectLogIndexPath(workspacePath)
-  const indexPaths = record.workflowWorker
-    ? [scopedIndexPath, getProjectLogIndexPath(workspacePath)]
-    : [scopedIndexPath]
+  const indexPaths = [getProjectLogIndexPath(workspacePath)]
   const now = new Date().toISOString()
   for (const indexPath of new Set(indexPaths)) {
     mkdirSync(dirname(indexPath), { recursive: true })
@@ -4431,15 +3832,6 @@ function getProjectLogsDir(workspacePath: string): string {
 }
 
 function getProjectLogsDirForRecord(record: SessionRecord): string {
-  if (record.workflowWorker && record.workflowRunId) {
-    return resolve(
-      record.session.cwd,
-      '.beegame',
-      'workflow',
-      'logs',
-      record.workflowRunId,
-    )
-  }
   return getProjectLogsDir(record.session.cwd)
 }
 
@@ -4448,17 +3840,6 @@ function getProjectLogIndexPath(workspacePath: string): string {
 }
 
 function getProjectRuntimeDiagnosticPath(record: SessionRecord): string {
-  if (record.workflowWorker && record.workflowRunId) {
-    return resolve(
-      record.session.cwd,
-      '.beegame',
-      'workflow',
-      'logs',
-      record.workflowRunId,
-      record.workflowDispatchId ?? record.session.id,
-      'runtime-diagnostics.jsonl',
-    )
-  }
   return resolve(getProjectLogsDir(record.session.cwd), 'runtime-diagnostics.jsonl')
 }
 

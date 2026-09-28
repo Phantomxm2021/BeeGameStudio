@@ -30,6 +30,7 @@ import {
 } from '@bee-game-studio/beegame-skills-core/config'
 import {
   clearRuntimeBuiltinSkills,
+  getBuiltinSkillsDirectory,
   materializeUserSkills,
 } from '@bee-game-studio/beegame-skills-core/store'
 import {
@@ -53,7 +54,6 @@ import {
 } from './runtime-settings-store'
 import {
   getBearerToken,
-  hasBeeGamePermission,
   type BeeGameUserContext,
 } from './auth/user-context'
 import {
@@ -73,7 +73,6 @@ import {
   toPublicWebToolsConfig,
   type WebToolsConfig,
 } from './web-tools-store'
-import { getUserDashboardDataRoot } from './local-runtime-service'
 import type {
   BeeGameUsageBillingClient,
   BeeGameUsageBillingRecordInput,
@@ -153,6 +152,7 @@ type CreditGrantInput = {
   credits: number
   metadata?: Record<string, unknown>
 }
+
 export type {
   BeeGameBillingCreditPack,
   BeeGameBillingCreditPackInput,
@@ -499,7 +499,7 @@ export class DashboardRepository {
 
   async loadRuntimeSettings(
     request: Request,
-    user: BeeGameUserContext,
+    _user: BeeGameUserContext,
   ): Promise<RuntimeSettingsConfig> {
     const supabase = this.supabaseForRequest(request)
     return supabase
@@ -524,7 +524,7 @@ export class DashboardRepository {
 
   async saveRuntimeSettings(
     request: Request,
-    user: BeeGameUserContext,
+    _user: BeeGameUserContext,
     input: RuntimeSettingsConfig,
   ): Promise<RuntimeSettingsConfig> {
     const supabase = this.supabaseForRequest(request)
@@ -644,38 +644,38 @@ export class DashboardRepository {
   }
 
   async grantCredits(
-    request: Request,
-    targetUserId: string,
-    input: CreditGrantInput,
+    _request: Request,
+    _targetUserId: string,
+    _input: CreditGrantInput,
   ): Promise<BeeGameCreditGrant> {
     throw billingServiceOnlyError()
   }
 
   async grantPaymentProviderCredits(
-    request: Request,
-    targetUserId: string,
-    input: CreditGrantInput,
+    _request: Request,
+    _targetUserId: string,
+    _input: CreditGrantInput,
   ): Promise<BeeGameCreditGrant> {
     throw billingServiceOnlyError()
   }
 
   async listBillingCreditPacks(
     _request?: Request,
-    options: { enabledOnly?: boolean } = {},
+    _options: { enabledOnly?: boolean } = {},
   ): Promise<BeeGameBillingCreditPack[]> {
     throw billingServiceOnlyError()
   }
 
   async upsertBillingCreditPack(
     _request: Request,
-    input: BeeGameBillingCreditPackInput,
+    _input: BeeGameBillingCreditPackInput,
   ): Promise<BeeGameBillingCreditPack> {
     throw billingServiceOnlyError()
   }
 
   async appendBillingEvent(
     _request: Request | undefined,
-    input: BeeGameBillingEventInput,
+    _input: BeeGameBillingEventInput,
   ): Promise<void> {
     throw billingServiceOnlyError()
   }
@@ -774,7 +774,12 @@ export class DashboardRepository {
     modelConfigId?: string,
   ): Promise<Record<string, string>> {
     const dataDir = userDataRoot ?? this.options.dashboardDataRoot
+    const hostToolEnv = Object.fromEntries(
+      ['BEEGAME_ARTIFACTS_URL', 'BEEGAME_ARTIFACTS_TOKEN', 'TAVILY_API_KEY']
+        .flatMap(key => process.env[key] ? [[key, process.env[key]!]] : []),
+    )
     clearRuntimeBuiltinSkills({ dataDir })
+    const builtinSkillsDir = getBuiltinSkillsDirectory()
     if (this.supabaseStore && userId) {
       const client = this.options.supabaseRuntimeEnvClient
       if (!client) {
@@ -803,7 +808,7 @@ export class DashboardRepository {
             throw error
           })
         : {}
-      this.syncRuntimeSettingsFromRuntimeEnv(env, dataDir)
+      const runtimeSettings = this.syncRuntimeSettingsFromRuntimeEnv(env, dataDir)
       const webTools = await this.supabaseForAuthToken(authToken).loadWebTools(userId).catch(error => {
         console.error('[BeeGame runtime dependency]', JSON.stringify({
           timestamp: new Date().toISOString(), step: 'web_tools_config', ...safeErrorFacts(error),
@@ -820,7 +825,11 @@ export class DashboardRepository {
         ...env,
         ...modelEnv,
         ...mapWebToolsConfigToRuntimeEnv(webTools),
+        ...hostToolEnv,
+        ...(runtimeSettings.skillSearchEnabled !== undefined
+          ? { SKILL_SEARCH_ENABLED: runtimeSettings.skillSearchEnabled ? '1' : '0' } : {}),
         BEEGAME_CONFIG_DIR: hostIsolationEnv.BEEGAME_CONFIG_DIR,
+        BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: builtinSkillsDir,
         NPM_CONFIG_CACHE: hostIsolationEnv.NPM_CONFIG_CACHE,
         npm_config_cache: hostIsolationEnv.npm_config_cache,
         NPM_CONFIG_USERCONFIG: hostIsolationEnv.NPM_CONFIG_USERCONFIG,
@@ -833,7 +842,9 @@ export class DashboardRepository {
     syncWebToolsToRuntimeConfig(webTools, { dataDir })
     return {
       ...mapWebToolsConfigToRuntimeEnv(webTools),
+      ...hostToolEnv,
       ...platformEnv,
+      BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: builtinSkillsDir,
     }
   }
 
@@ -890,7 +901,7 @@ export class DashboardRepository {
   private syncRuntimeSettingsFromRuntimeEnv(
     env: Record<string, string>,
     dataDir: string,
-  ): void {
+  ): RuntimeSettingsConfig {
     const raw = env[RUNTIME_SETTINGS_ENV_KEY]
     delete env[RUNTIME_SETTINGS_ENV_KEY]
     const settings: RuntimeSettingsConfig = {}
@@ -903,6 +914,7 @@ export class DashboardRepository {
     // Host-owned isolation must be materialized even when Supabase has no
     // optional runtime feature row for this user.
     syncRuntimeSettingsToDedicatedRuntimeConfig(settings, { dataDir })
+    return settings
   }
 
   private persistLocalModelConfigs(): void {

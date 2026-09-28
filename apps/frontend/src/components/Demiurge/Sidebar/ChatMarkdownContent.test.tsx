@@ -1,5 +1,13 @@
-import { describe, expect, it } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+
+vi.mock('img-fx', async () => {
+  const React = await import('react');
+  return {
+    ImageGeneration: ({ children, images, autoReveal }: { children: React.ReactNode; images: string[]; autoReveal: boolean }) =>
+      <div data-image-source={images[0]} data-auto-reveal={String(Boolean(autoReveal))}>{children}</div>,
+  };
+});
 import { MarkdownRenderer } from './ChatMarkdownContent';
 
 describe('MarkdownRenderer structured output', () => {
@@ -8,25 +16,23 @@ describe('MarkdownRenderer structured output', () => {
     expect(document.querySelector('pre code')?.textContent).toBe('const wp_1 = "a\\nb";\n');
   });
 
-  it('renders markdown images lazily within the chat width', () => {
+  it('renders markdown images with the image effect within the chat width', async () => {
     render(<MarkdownRenderer content="![Scene preview](https://example.com/scene.png)" />);
-    expect(screen.getByRole('img', { name: 'Scene preview' })).toHaveAttribute('loading', 'lazy');
-    expect(screen.getByRole('img')).toHaveClass('max-w-full', 'object-contain');
+    const image = await screen.findByRole('img', { name: 'Scene preview' });
+    expect(image.parentElement).toHaveAttribute('data-image-source', 'https://example.com/scene.png');
+    expect(image.parentElement).toHaveAttribute('data-auto-reveal', 'false');
   });
-  it('groups consecutive Markdown images into a horizontal gallery', () => {
+  it('groups consecutive Markdown images into a horizontal gallery', async () => {
     const { container } = render(<MarkdownRenderer content={'![AI asset](https://example.com/a.png)\n![Drawn asset](https://example.com/b.png)'} />);
-    expect(container.querySelector('.chat-image-gallery')?.querySelectorAll('img')).toHaveLength(2);
-    expect(screen.getAllByRole('status')).toHaveLength(2);
+    expect(await screen.findAllByRole('img')).toHaveLength(2);
+    expect(container.querySelector('.chat-image-gallery')?.querySelectorAll('[data-image-source]')).toHaveLength(2);
   });
-  it('preserves decoded images when the rest of a response streams in', () => {
+  it('preserves image effects when the rest of a response streams in', async () => {
     const content = '![Preview](https://example.com/a.png)\n\nResult:';
     const { rerender } = render(<MarkdownRenderer content={content} />);
-    const image = screen.getByRole('img');
-    fireEvent.load(image);
-    expect(screen.queryByRole('status')).toBeNull();
+    const image = await screen.findByRole('img');
     rerender(<MarkdownRenderer content={content + ' ready'} />);
     expect(screen.getByRole('img')).toBe(image);
-    expect(screen.queryByRole('status')).toBeNull();
   });
   it('retains the entire JSON response instead of picking fields by name', () => {
     const content = JSON.stringify({

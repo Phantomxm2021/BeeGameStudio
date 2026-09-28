@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test'
-import { readSceneData, readUiData, contentDocumentsForLoad, contentDocumentPath, fetchContentDocument, fetchStartupContentDocuments, parseSpriteSheet, spriteSheetSelection, compose2d, affine2d, point2d, uiPaintOrder, UI_PAINT_CONFORMANCE_FIXTURE } from './game-content-consumer'
+import { readSceneData, readUiData, contentDocumentsForLoad, contentDocumentPath, fetchContentDocument, fetchStartupContentDocuments, parseSpriteSheet, spriteSheetSelection, compose2d, affine2d, point2d, uiPaintOrder, UI_PAINT_CONFORMANCE_FIXTURE, parseGridData, parseTilemapData, parseTileSet, tileRect, resolveUiNodesForViewport } from './game-content-consumer'
 import { parseBeeGameContentDocument } from './game-content-package'
 import { bundleContentConsumer } from './game-content-consumer-cli'
+import { uiAnchor, uiLocalMatrix } from './game-content-consumer'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -33,6 +34,61 @@ test('consumer and host use the same contract; no silent flat-envelope fallback'
   expect(() => spriteSheetSelection(atlas, { frame: 'missing' })).toThrow()
   expect(uiPaintOrder(UI_PAINT_CONFORMANCE_FIXTURE.nodes, UI_PAINT_CONFORMANCE_FIXTURE.rootId))
     .toEqual([...UI_PAINT_CONFORMANCE_FIXTURE.expected])
+  expect(uiPaintOrder([
+    { id: 'root' }, { id: 'hidden', parentId: 'root', enabled: false },
+    { id: 'hidden-label', parentId: 'hidden' }, { id: 'visible', parentId: 'root' },
+  ], 'root').map(step => step.nodeId)).toEqual(['root', 'root', 'visible', 'visible'])
+})
+
+test('responsive UI overrides validate and resolve through the same public consumer', () => {
+  const data = readUiData({ schema: 'beegame-content.v1', id: 'hud', kind: 'ui-hud', assetRefs: [], data: {
+    rootId: 'root', nodes: [
+      { id: 'root', role: 'hud-root', layout: { size: [1280, 720] } },
+      { id: 'score', parentId: 'root', role: 'text', layout: { position: [20, 20] }, responsive: {
+        compact: { layout: { position: [10, 10] }, style: { fontSize: 18 } },
+      } },
+    ],
+  } })
+  expect(resolveUiNodesForViewport(data.nodes, data.rootId, { width: 390, height: 844 })[1]).toMatchObject({
+    layout: { position: [10, 10] }, style: { fontSize: 18 },
+  })
+  expect(() => readUiData({ schema: 'beegame-content.v1', id: 'hud', kind: 'ui-hud', assetRefs: [], data: {
+    rootId: 'root', nodes: [{ id: 'root', role: 'hud-root', responsive: { compact: { layout: { size: [-1, 4] } } } }],
+  } })).toThrow()
+})
+
+test('responsive adaptation preserves authored geometry rather than substituting a fixed CSS layout', () => {
+  const data = readUiData({ schema: 'beegame-content.v1', id: 'menu', kind: 'ui-screen', assetRefs: [], data: {
+    rootId: 'root', nodes: [
+      { id: 'root', role: 'screen-root', layout: { size: [960, 540] } },
+      { id: 'play', parentId: 'root', role: 'button', layout: { anchor: 'top-center', position: [0, 120], size: [240, 52] },
+        responsive: { portrait: { layout: { position: [0, 200], size: [180, 64] } } } },
+    ],
+  } })
+  const bounds = (width: number, height: number) => {
+    const [root, button] = resolveUiNodesForViewport(data.nodes, data.rootId, { width, height })
+    const layout = button!.layout!
+    return { position: point2d(uiLocalMatrix(root!.layout!.size!, layout.size!, uiAnchor(layout.anchor), layout.position!), 0, 0), size: layout.size }
+  }
+  expect(bounds(1280, 720)).toEqual({ position: [520, 120], size: [240, 52] })
+  expect(bounds(390, 844)).toEqual({ position: [105, 200], size: [180, 64] })
+  data.nodes[1]!.responsive!.portrait!.layout = { position: [20, 250], size: [120, 80] }
+  expect(bounds(390, 844)).toEqual({ position: [155, 250], size: [120, 80] })
+  expect(bounds(1280, 720)).toEqual({ position: [520, 120], size: [240, 52] })
+})
+
+test('tile geometry is parsed with the same engine-neutral contract as Scene Editor', () => {
+  const grid = parseGridData({ schema: 'grid.v1', cellSize: [32, 32], cellGap: [2, 2] })
+  const map = parseTilemapData({ schema: 'tilemap.v1', gridNodeId: 'grid',
+    cells: [{ x: 2, y: 1, tileId: 'ground' }] })
+  const tiles = parseTileSet({ schema: 'beegame-tileset.v1', tiles: {
+    ground: { sprite: { assetRef: 'ground', member: 'ground.png' }, size: [32, 32] },
+  } })
+  expect(tileRect(grid, map, map.cells[0]!, tiles.tiles.ground!)).toMatchObject({
+    x: 68, y: 34, width: 32, height: 32,
+  })
+  expect(() => parseTilemapData({ ...map, cells: [...map.cells, map.cells[0]] }))
+    .toThrow('duplicate cell')
 })
 
 test('document registry separates first-frame documents from deferred content', () => {
@@ -130,5 +186,9 @@ test('portable ESM runs without BGS filesystem, Three.js or package dependencies
     expect(deferred.id).toBe('spark')
     expect(module.uiPaintOrder(module.UI_PAINT_CONFORMANCE_FIXTURE.nodes, 'root'))
       .toEqual(module.UI_PAINT_CONFORMANCE_FIXTURE.expected)
+    expect(module.tileRect({ schema: 'grid.v1', cellSize: [32, 32] },
+      { schema: 'tilemap.v1', gridNodeId: 'grid', cells: [] },
+      { x: 1, y: 0, tileId: 'ground' },
+      { sprite: { assetRef: 'ground', member: 'ground.png' }, size: [32, 32] }).x).toBe(32)
   } finally { await rm(directory, { recursive: true, force: true }) }
 })

@@ -2,7 +2,10 @@ import type { ImageGenerationConfig } from './config'
 
 export type ImageRequest = {
   prompt: string
+  quality?: 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   background?: 'auto' | 'opaque' | 'transparent'
+  size?: '1024x1024' | '1024x1536' | '1536x1024'
+  referenceImage?: { bytes: Uint8Array; sha256: string; mimeType: 'image/png' }
   signal?: AbortSignal
 }
 export type ImageResult = {

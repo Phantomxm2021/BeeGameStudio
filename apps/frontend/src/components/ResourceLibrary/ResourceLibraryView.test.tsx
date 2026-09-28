@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { ReactElement } from 'react'
@@ -7,6 +7,7 @@ import { buildSafePublishFix, ResourceLibraryView } from './ResourceLibraryView'
 import { closeResourcePackRoute } from './resourceLibraryRoute'
 import { ResourceLibraryApiError, type ResourceElement, type ResourcePackSummary } from '../../services/resourceLibraryApi'
 import { ToastProvider } from '../../contexts/ToastContext'
+import i18n from '../../i18n'
 
 const pack: ResourcePackSummary = { id: 'pack-1', name: 'Example Pack',
   styles: ['Stylized'], gameTypes: ['adventure'], dimension: '2D', primaryCategory: 'world-scene', categories: ['models'], version: '1.0.0', status: 'published', elementCount: 1 }
@@ -24,6 +25,18 @@ function renderResourceLibrary(view: ReactElement) {
 
 describe('ResourceLibraryView workspace', () => {
   afterEach(() => { cleanup(); closeResourcePackRoute() })
+
+  test('shows the loading page instead of a partial resource-pack list', async () => {
+    let resolvePacks!: (packs: ResourcePackSummary[]) => void
+    const pendingPacks = new Promise<ResourcePackSummary[]>(resolve => { resolvePacks = resolve })
+    renderResourceLibrary(<ResourceLibraryView apiClient={{ ...api, listPacks: () => pendingPacks }} />)
+
+    expect(screen.getByRole('status', { name: i18n.t('resourceLibrary:list.loading') })).toBeInTheDocument()
+    expect(screen.queryByText(i18n.t('resourceLibrary:list.all'))).not.toBeInTheDocument()
+
+    await act(async () => { resolvePacks([pack]) })
+    expect(screen.getByRole('button', { name: 'Example Pack' })).toBeInTheDocument()
+  })
 
   test('mounts the Pack workspace with the explorer and no obsolete recursive rows', async () => {
     const user = userEvent.setup()
@@ -77,7 +90,7 @@ describe('ResourceLibraryView workspace', () => {
     expect(await screen.findByRole('status')).toBeInTheDocument()
     completeJob()
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument(), { timeout: 2_000 })
-    expect(screen.getByRole('alert')).toHaveTextContent(/(资源分析完成，共处理 1 个元素|Resource analysis complete\. 1 elements processed)/)
+    expect(await screen.findByText(/(资源分析完成，共处理 1 个元素|Resource analysis complete\. 1 elements processed)/)).toBeInTheDocument()
   })
 
   test('offers re-publishing for archived Packs', async () => {
@@ -215,5 +228,26 @@ describe('ResourceLibraryView workspace', () => {
       dependencies: ['texture-1'],
     })
     expect(buildSafePublishFix(model, [model, { ...texture, path: 'unrelated/stone.png' }])).toBeUndefined()
+  })
+
+  test('localizes the list and places an icon-only back control beside its title', async () => {
+    await i18n.changeLanguage('en')
+    try {
+      const user = userEvent.setup()
+      renderResourceLibrary(<ResourceLibraryView apiClient={api} onBack={() => undefined} />)
+      const back = await screen.findByRole('button', { name: 'Back to workspace' })
+      expect(back).toHaveTextContent('')
+      expect(back.parentElement).toHaveTextContent('All resource packs')
+      const packButton = await screen.findByRole('button', { name: 'Example Pack' })
+      expect(packButton).toHaveTextContent('1 element')
+      await user.click(packButton)
+      expect(screen.getByRole('button', { name: 'Edit pack' })).toBeInTheDocument()
+      await user.click(screen.getByRole('treeitem', { name: 'Environments & props' }))
+      await user.click(screen.getByRole('treeitem', { name: 'knight.png' }))
+      await user.click(await screen.findByRole('button', { name: 'Show element info' }))
+      expect(screen.getByRole('tab', { name: 'Element info' })).toBeInTheDocument()
+    } finally {
+      await i18n.changeLanguage('zh')
+    }
   })
 })

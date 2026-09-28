@@ -14,6 +14,16 @@ import zhTW from './locales/zh-TW.json'
 
 export const supportedI18nLanguages = ['en', 'zh', 'zh-TW', 'ja', 'ko', 'fr', 'de', 'es', 'it', 'pt'] as const
 
+export function getInitialUiLanguage(): (typeof supportedI18nLanguages)[number] {
+  if (typeof window === 'undefined') return 'zh'
+  try {
+    const saved = window.localStorage.getItem('i18nextLng')
+    return supportedI18nLanguages.find(language => language === saved) ?? 'zh'
+  } catch {
+    return 'zh'
+  }
+}
+
 const resources = {
   en,
   zh,
@@ -32,7 +42,8 @@ void i18n
   .use(initReactI18next)
   .init({
     resources,
-    ns: ['landing', 'settings', 'common', 'beegame'],
+    lng: getInitialUiLanguage(),
+    ns: ['landing', 'settings', 'common', 'beegame', 'resourceLibrary'],
     defaultNS: 'landing',
     fallbackLng: 'en',
     supportedLngs: supportedI18nLanguages,

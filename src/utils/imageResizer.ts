@@ -406,10 +406,6 @@ export async function maybeResizeAndDownsampleImageBuffer(
       error_message_hash: hashString(errorMsg),
     })
 
-    // Detect actual format from magic bytes instead of trusting extension
-    const detected = detectImageFormatFromBuffer(imageBuffer)
-    const normalizedExt = detected.slice(6) // Remove 'image/' prefix
-
     // Calculate the base64 size (API limit is on base64-encoded length)
     const base64Size = Math.ceil((originalSize * 4) / 3)
 
@@ -425,14 +421,13 @@ export async function maybeResizeAndDownsampleImageBuffer(
       (imageBuffer.readUInt32BE(16) > maxWidth ||
         imageBuffer.readUInt32BE(20) > maxHeight)
 
-    // If original image's base64 encoding is within API limit, allow it through uncompressed
+    // A small byte buffer is not necessarily a valid image. Passing a failed
+    // decode through as-is makes the model API reject the entire turn.
     if (base64Size <= maxBase64Size && !overDim) {
-      logEvent('tengu_image_resize_fallback', {
-        original_size_bytes: originalSize,
-        base64_size_bytes: base64Size,
-        error_type: errorType,
-      })
-      return { buffer: imageBuffer, mediaType: normalizedExt }
+      throw new ImageResizeError(
+        'Unable to read image: the local image decoder could not verify this file. ' +
+          'Re-encode it as a valid PNG or JPEG before reading it.',
+      )
     }
 
     // Image is too large and we failed to compress it - fail with user-friendly error

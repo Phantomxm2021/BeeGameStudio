@@ -7,6 +7,7 @@ import {
   CURRENT_ASSET_MANIFEST_VERSION,
   BEEGAME_RESOURCE_STATUSES,
   type BeeGameAssetManifest,
+  type BeeGameProjectResourceSource,
 } from './asset-contracts'
 import { RESOURCE_DIMENSIONS, RESOURCE_ASSET_KINDS, RESOURCE_SOURCE_KINDS, RESOURCE_LIBRARY_USAGE } from '@bee-game-studio/beegame-resource-core'
 
@@ -19,6 +20,26 @@ export const ASSET_MANIFEST_AUTHORING_CONTRACT_PATH =
   'assets/manifest/CONTRACT.md' as const
 export const ASSET_MANIFEST_VALIDATION_COMMAND = 'bun assets/manifest/check.mjs' as const
 let checkerBundle: Promise<string> | undefined
+
+export const assetSourceAuthoringExamples = {
+  'resource-library': {
+    type: 'resource-library', pack_id: 'pack-example', pack_version: '1',
+    element_id: 'element-example', element_path: 'sprites/example.png',
+  },
+  web: {
+    type: 'web', source_url: 'https://example.com/assets/example.png',
+    page_url: 'https://example.com/assets', license: 'Example licence',
+    retrieved_at: '2026-01-01T00:00:00.000Z',
+  },
+  'agent-authored': {
+    type: 'agent-authored', created_at: '2026-01-01T00:00:00.000Z',
+    reason: 'Example only.',
+  },
+  'user-provided': {
+    type: 'user-provided', created_at: '2026-01-01T00:00:00.000Z',
+    filename: 'example.png',
+  },
+} satisfies Record<BeeGameProjectResourceSource['type'], BeeGameProjectResourceSource>
 
 function bundledResourceChecker(): Promise<string> {
   return checkerBundle ??= Bun.build({
@@ -42,7 +63,7 @@ export function assetManifestAuthoringExamples(): {
       platform: 'web',
       runtime: 'example-runtime',
       asset_format_capabilities: ['json'],
-      resource_library_usage: 'preferred',
+      resource_library_usage: 'optional',
       runtime_asset_root: BEEGAME_RESOURCE_ROOTS.runtime,
       generated_asset_root: BEEGAME_RESOURCE_ROOTS.generated,
     },
@@ -65,11 +86,7 @@ export function assetManifestAuthoringExamples(): {
       {
         id: 'EXAMPLE-RUNTIME-DATA-01',
         fulfills: ['EXAMPLE-RUNTIME-DATA'],
-        source: {
-          type: 'agent-authored',
-          created_at: '2026-01-01T00:00:00.000Z',
-          reason: 'Example only.',
-        },
+        source: assetSourceAuthoringExamples['agent-authored'],
         root_path: 'assets/runtime/example/resource.json',
         file_paths: ['assets/runtime/example/resource.json'],
         provisional: false,
@@ -104,7 +121,8 @@ export async function materializeAssetManifestAuthoringContract(
   await mkdir(dirname(path), { recursive: true })
   // Bundle the existing host checker, not a second implementation. The agent
   // runs a project-local command without access to BGS source directories.
-  await writeFile(join(dirname(path), 'check.mjs'), await bundledResourceChecker(), 'utf8')
+  await writeFile(join(dirname(path), 'check.mjs'),
+    `// Generated validator: run this file; authoring rules are in CONTRACT.md.\n${await bundledResourceChecker()}`, 'utf8')
   await writeFile(path, renderAssetManifestAuthoringContract(), 'utf8')
   return ASSET_MANIFEST_AUTHORING_CONTRACT_PATH
 }
@@ -172,6 +190,16 @@ ${json(examples.resourceModule)}
 
 - dimensions: ${json(RESOURCE_DIMENSIONS)}
 - source types: ${json(RESOURCE_SOURCE_KINDS)}
+- source fields (examples; replace placeholder values with actual provenance):
+
+\`\`\`json
+${json(assetSourceAuthoringExamples)}
+\`\`\`
+
+  Web sources require the original asset URL, page URL, licence and retrieval
+  time. Library sources require the pack and selected element identity. Keep
+  source details attached to each registered resource; these examples do not
+  prescribe which source to use.
 - resource-library usage: ${json(RESOURCE_LIBRARY_USAGE)}
 - requirement asset kinds: ${json(RESOURCE_ASSET_KINDS)}
 - resource status: ${json(BEEGAME_RESOURCE_STATUSES)}
@@ -182,7 +210,9 @@ ${json(examples.resourceModule)}
 ## Check the actual delivery interface
 
 From the project root, run \`${ASSET_MANIFEST_VALIDATION_COMMAND}\` when useful.
-This is the host's own read-only checker, bundled into the project. Exit 0 means
+The generated \`check.mjs\` is executable code, not an authoring document; use
+this CONTRACT.md for the format instead of reading the bundled checker. This
+is the host's own read-only checker, bundled into the project. Exit 0 means
 the resource interface passes; exit 1 returns specific issues. It checks registry
 readability, required bindings, files, hashes and the confirmed sourcing policy.
 It does not certify artistic or gameplay quality and does not require another

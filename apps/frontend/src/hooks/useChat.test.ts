@@ -105,27 +105,36 @@ import { useChat } from './useChat';
 import { settleChatActivity } from '../utils/chatActivity';
 
 describe('useChat clarification gate handling', () => {
-  it('keeps detached child work busy after parent completion and queues a new send', async () => {
+  it('retains the actual live delivery handoff error without replacing the Agent result', () => {
+    renderHook(() => useChat({ projectId: 'proj_1' }));
+    act(() => latestWebSocketOptions.onMessage?.({
+      type: 'context_update', project_id: 'proj_1', task_id: 'main', message_id: 'handoff-error',
+      task_kind: 'delivery_error', content: '交付未能继续：测试接续失败', timestamp: 200,
+    }));
+    expect(chatStoreState.addMessage).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'handoff-error', sender: 'system', type: 'system_status', taskKind: 'delivery_error',
+      content: '交付未能继续：测试接续失败',
+    }));
+    expect(chatStoreState.settleActivity).not.toHaveBeenCalled();
+  });
+  it('does not restore an active Agent state from transcript-only child history', async () => {
     const child = { id: 'child', sender: 'beegame', type: 'tool', taskId: 'parent-task',
       timestamp: 100, isSubagentTool: true, toolStatus: 'running' };
     chatStoreState.messages = [child];
-    const { result, rerender } = renderHook(() => useChat({ projectId: 'p' }));
-    act(() => latestWebSocketOptions.onMessage?.({ type: 'status', status: 'finished', task_id: 'parent-task' }));
-    expect(result.current.isLoading).toBe(true);
-    const calls = vi.mocked(api.sendMessage).mock.calls.length;
-    vi.mocked(api.sendMessage).mockResolvedValueOnce({ task_id: 'parent-task', state: 'queued' } as never);
-    await act(async () => { expect(await result.current.sendMessage('new request')).toBe(true); });
-    expect(api.sendMessage).toHaveBeenCalledTimes(calls + 1);
-    expect(chatStoreState.addMessage).not.toHaveBeenCalledWith(expect.objectContaining({ sender: 'user', content: 'new request' }));
-    expect(chatStoreState.removeMessage).not.toHaveBeenCalled();
-    await act(async () => { await result.current.continueTask(); });
-    expect(api.continueTask).not.toHaveBeenCalled();
-    chatStoreState.messages = [{ ...child, toolStatus: 'completed' }];
-    rerender();
-    expect(result.current.isLoading).toBe(true);
+    const { result } = renderHook(() => useChat({ projectId: 'p' }));
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it('locks chat from the live runtime child-task snapshot', async () => {
+    projectStoreState.projectStatus = {
+      project_id: 'p', phase: 'running', active_subagents: ['agent-use-1'],
+    };
+    const { result } = renderHook(() => useChat({ projectId: 'p' }));
+    await waitFor(() => expect(result.current.isLoading).toBe(true));
   });
 
   it.each(['stopped', 'failed'] as const)('retains live child task scope so %s unlocks the composer', async (status) => {
+    projectStoreState.projectStatus = { project_id: 'p', phase: 'running', active_subagents: ['child'] };
     const { result, rerender } = renderHook(() => useChat({ projectId: 'p' }));
     act(() => latestWebSocketOptions.onMessage?.({
       type: 'tool_start', task_id: 'parent', turn_id: 'turn',
@@ -139,9 +148,10 @@ describe('useChat clarification gate handling', () => {
     act(() => latestWebSocketOptions.onMessage?.({
       type: 'status', task_id: 'parent', turn_id: 'turn', status, timestamp: 200,
     }));
-    expect(chatStoreState.settleActivity).toHaveBeenLastCalledWith('parent', 'turn', status, 200);
+    expect(chatStoreState.settleActivity).toHaveBeenLastCalledWith('parent', 'turn', status, 200, undefined);
     chatStoreState.messages = settleChatActivity(chatStoreState.messages,
       { taskId: 'parent', turnId: 'turn', reason: status, at: 200 });
+    projectStoreState.projectStatus = { project_id: 'p', phase: 'idle', active_subagents: [] };
     rerender();
     expect(result.current.isLoading).toBe(false);
   });
@@ -174,26 +184,6 @@ describe('useChat clarification gate handling', () => {
         value.mockClear();
       }
     });
-  });
-
-  it('worker terminals settle their activity without stopping the project composer', async () => {
-    const onTaskComplete = vi.fn();
-    const { result } = renderHook(() => useChat({ projectId: 'proj_1', onTaskComplete }));
-    act(() => latestWebSocketOptions.onMessage?.({ type: 'status', status: 'running', task_id: 'main' }));
-    expect(result.current.isLoading).toBe(true);
-    for (const message of [
-      { type: 'status', status: 'idle' },
-      { type: 'status', status: 'stopped' },
-      { type: 'error', content: 'Worker failed' },
-    ]) {
-      act(() => latestWebSocketOptions.onMessage?.({ ...message, task_id: 'worker',
-        turnId: 'worker-turn', task_kind: 'workflow_stage:implementation', timestamp: 1234 }));
-      expect(result.current.isLoading).toBe(true);
-    }
-    expect(chatStoreState.settleActivity).toHaveBeenCalledWith('worker', 'worker-turn', 'failed', 1234);
-    expect(onTaskComplete).not.toHaveBeenCalled();
-    act(() => latestWebSocketOptions.onMessage?.({ type: 'status', status: 'stopped', task_id: 'main' }));
-    expect(result.current.isLoading).toBe(false);
   });
 
   it('coalesces duplicate stop requests while waiting for backend confirmation', async () => {

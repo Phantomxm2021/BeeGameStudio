@@ -43,11 +43,13 @@ export interface StopTaskResponse {
 export interface ProjectBaselineStatusPayload {
   project_id: string
   phase: string
+  delivery_phase?: string
   blocked: boolean
   blocked_reason?: string | null
   blocked_reason_code?: string | null
   blocked_reason_diagnostic_id?: string | null
   active_agents?: string[]
+  active_subagents?: string[]
   updated_at?: string
   next_action?: string
   acceptance?: {
@@ -405,6 +407,9 @@ export const normalizeProjectBaselineStatusPayload = (
           .map(item => String(item).trim())
           .filter(Boolean)
       : [],
+    active_subagents: Array.isArray(normalizedPayload.active_subagents)
+      ? normalizedPayload.active_subagents.map(item => String(item).trim()).filter(Boolean)
+      : [],
     updated_at: String(normalizedPayload.updated_at ?? '').trim(),
     next_action: String(normalizedPayload.next_action ?? '').trim(),
     model_config_id: normalizedPayload.model_config_id,
@@ -457,7 +462,7 @@ export const api = {
 
   requestProjectAction: (data: {
     project_id: string
-    kind: 'build_error_repair' | 'deployment_failure_repair'
+    kind: 'deployment_failure_repair'
   }) => beeGameAdapter.requestProjectAction(data),
 
   /**

@@ -51,19 +51,4 @@ describe('deriveCurrentProjectTodos', () => {
         ]);
     });
 
-    it('recognizes a historical TodoWrite event whose structured tool name was omitted', () => {
-        const messages: ChatDisplayMessage[] = [
-            {
-                id: 'historical', sender: 'system', content: 'TodoWrite completed', timestamp: 1, type: 'tool',
-                toolInput: { todos: [{ content: 'Old task', status: 'pending' }] },
-            },
-            {
-                id: 'structured', sender: 'system', content: 'Tool: TodoWrite\nStatus: completed', timestamp: 2, type: 'tool',
-                toolInput: { todos: [{ content: 'Recovered task', status: 'pending' }] },
-            },
-        ];
-        expect(deriveCurrentProjectTodos(messages)).toEqual([
-            { id: 'structured-0', title: 'Recovered task', status: 'pending' },
-        ]);
-    });
 });

@@ -135,7 +135,7 @@ export function AnimatedBadge({
   className,
   ...rest
 }: AnimatedBadgeProps) {
-  const reduce = useReducedMotion();
+  const reduce = useReducedMotion() ?? false;
   const Icon = ICONS[status];
   const resolvedContentKey =
     contentKey ??
@@ -145,8 +145,8 @@ export function AnimatedBadge({
 
   return (
     <motion.span
-      layout
-      transition={{ type: "spring", stiffness: 420, damping: 30, mass: 0.7 }}
+      layout={!reduce}
+      transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 420, damping: 30, mass: 0.7 }}
       className={cn(
         "relative inline-flex shrink-0 items-center overflow-hidden whitespace-nowrap rounded-full border font-medium tabular-nums",
         "transition-colors duration-300",
@@ -212,4 +212,3 @@ export function AnimatedBadge({
     </motion.span>
   );
 }
-

@@ -46,4 +46,16 @@ describe('stripe-payments', () => {
       credits: 500,
     })
   })
+
+  test('uses the signed checkout-time grant after a credit pack changes', () => {
+    const event = {
+      id: 'evt_old_checkout', type: 'checkout.session.completed',
+      data: { object: { id: 'cs_old_checkout', payment_status: 'paid', metadata: {
+        beeGameUserId: 'user-a', beeGamePriceId: 'price_500', beeGameCredits: '500',
+      } } },
+    }
+    expect(extractStripeCheckoutCreditGrant(event, { price_500: 900 })).toMatchObject({
+      priceId: 'price_500', credits: 500,
+    })
+  })
 })

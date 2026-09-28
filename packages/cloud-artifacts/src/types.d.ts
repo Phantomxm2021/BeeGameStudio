@@ -100,5 +100,5 @@ interface Env {
   TOKEN: string
   MAX_BYTES: string
   DEFAULT_TTL_DAYS: string
-  PUBLIC_URL: string
+  PUBLIC_URL?: string
 }

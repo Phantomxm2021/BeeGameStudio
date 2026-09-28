@@ -25,6 +25,7 @@ import {
   resolveGrokModel,
 } from '@ant/model-provider'
 import { normalizeMessagesForAPI } from '../../../utils/messages.js'
+import { sanitizeInvalidImagesForAPI } from '../../../utils/imageValidation.js'
 import type { SDKAssistantMessageError } from '../../../entrypoints/agentSdkTypes.js'
 import { toolToAPISchema } from '../../../utils/api.js'
 import { logForDebugging } from '../../../utils/debug.js'
@@ -60,7 +61,7 @@ export async function* queryModelGrok(
 > {
   try {
     const grokModel = resolveGrokModel(options.model)
-    const messagesForAPI = normalizeMessagesForAPI(messages, tools)
+    const messagesForAPI = await sanitizeInvalidImagesForAPI(normalizeMessagesForAPI(messages, tools))
 
     const toolSchemas = await Promise.all(
       tools.map(tool =>

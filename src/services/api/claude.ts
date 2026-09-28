@@ -74,6 +74,7 @@ import {
 import { resolveAppliedEffort } from '../../utils/effort.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { errorMessage } from '../../utils/errors.js'
+import { sanitizeInvalidImagesForAPI } from '../../utils/imageValidation.js'
 import { captureAPIRequest, logError } from '../../utils/log.js'
 import {
   createAssistantAPIErrorMessage,
@@ -1298,7 +1299,9 @@ async function* queryModel(
   })
 
   queryCheckpoint('query_message_normalization_start')
-  let messagesForAPI = normalizeMessagesForAPI(messages, filteredTools)
+  let messagesForAPI = await sanitizeInvalidImagesForAPI(
+    normalizeMessagesForAPI(messages, filteredTools),
+  )
   queryCheckpoint('query_message_normalization_end')
 
   // Model-specific post-processing: strip tool-search-specific fields if the

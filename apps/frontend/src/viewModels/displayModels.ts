@@ -17,7 +17,7 @@ export type ChatDisplaySource = {
 export type ChatDisplayMessage = Pick<
   Message,
   | 'id' | 'messageId' | 'clientMessageId' | 'supersedesMessageId' | 'rewindAvailable' | 'dedupeKey'
-  | 'sender' | 'content' | 'attachments' | 'timestamp' | 'sequence' | 'type'
+  | 'sender' | 'content' | 'attachments' | 'timestamp' | 'turnCompletedAt' | 'sequence' | 'type'
   | 'isDocument' | 'documentTitle' | 'thought' | 'thinkingDurationMs'
   | 'streamStatus' | 'completionReason' | 'contentBlocks' | 'taskId' | 'todoScope'
   | 'turnId' | 'turn_id' | 'artifactId' | 'artifactPath' | 'renderHint'
@@ -70,6 +70,8 @@ export interface PermissionDisplayModel {
 export interface ProjectRuntimeDisplayModel {
   project_id: string
   phase?: string
+  delivery_phase?: string
+  active_subagents?: string[]
   blocked?: boolean
   blocked_reason?: string | null
   blocked_reason_code?: string | null
@@ -144,6 +146,7 @@ export const toChatDisplayMessage = (message: Message): ChatDisplayMessage => ({
   content: message.content,
   attachments: message.attachments,
   timestamp: message.timestamp,
+  turnCompletedAt: message.turnCompletedAt,
   sequence: message.sequence,
   type: message.type,
   isDocument: message.isDocument,
@@ -217,6 +220,10 @@ export const toProjectRuntimeDisplayModel = (
   return {
     project_id: trimString(payload.project_id),
     phase: trimString(payload.phase) || undefined,
+    delivery_phase: trimString(payload.delivery_phase) || undefined,
+    active_subagents: Array.isArray(payload.active_subagents)
+      ? payload.active_subagents.map(trimString).filter(Boolean)
+      : [],
     blocked: Boolean(payload.blocked),
     blocked_reason: payload.blocked_reason ?? null,
     blocked_reason_code: trimString(payload.blocked_reason_code) || undefined,

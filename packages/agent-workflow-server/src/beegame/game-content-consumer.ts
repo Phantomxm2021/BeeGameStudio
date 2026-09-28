@@ -3,6 +3,11 @@
  * workflow, networking, physics or gameplay policy belongs in this module. */
 export * from './game-content-schema'
 export * from '../../../scene-editor/src/content-coordinates'
+export { resolveUiNodesForViewport } from '../../../scene-editor/src/ui-responsive'
+export {
+  parseGridData, parseTilemapData, parseTilemapRendererData,
+  parseTileSet, validateTilemapGrid, tileRect,
+} from '../../../scene-editor/src/tilemap-data'
 export { parseSpriteSheet, spriteSheetSelection, validateSpriteSheetBounds, atlasFrameName } from '../../../scene-editor/src/sprite-sheet'
 import { parseBeeGameContentDocument, parseBeeGameContentIndex } from './game-content-schema'
 

@@ -25,7 +25,15 @@ function ensureViewTransitionStyle() {
   document.head.appendChild(style);
 }
 
-export function ThemeToggle({ className }: { className?: string }) {
+export function ThemeToggle({
+  className,
+  darkModeLabel = 'Switch to dark mode',
+  lightModeLabel = 'Switch to light mode',
+}: {
+  className?: string;
+  darkModeLabel?: string;
+  lightModeLabel?: string;
+}) {
   const isDark = useSystemStore((state) => state.isDark);
   const setTheme = useSystemStore((state) => state.setTheme);
   const reducedMotion = useReducedMotion() ?? false;
@@ -64,12 +72,13 @@ export function ThemeToggle({ className }: { className?: string }) {
     };
     void transition.finished.then(cleanup, cleanup);
   }, [isDark, reducedMotion, setTheme]);
+  const label = isDark ? lightModeLabel : darkModeLabel;
 
   return (
     <button
       type="button"
-      aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-      title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+      aria-label={label}
+      title={label}
       onClick={handleToggle}
       className={cn('inline-flex size-8 items-center justify-center rounded-md text-[var(--text-secondary)] transition-colors duration-[var(--motion-hover)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]', className)}
       data-testid="beui-theme-toggle"

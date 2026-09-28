@@ -40,7 +40,7 @@ test('extracts DOCX paragraphs and XLSX sheet/cell contents', async () => {
   expect(textOf(parts)).toContain('jump\t12')
 })
 
-test('extracts PDF text and rejects legacy binary documents explicitly', async () => {
+test('extracts PDF text and rejects invalid legacy binary documents', async () => {
   const stream = 'BT /F1 12 Tf 20 40 Td (Game rules) Tj ET'
   const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
     '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
@@ -50,7 +50,20 @@ test('extracts PDF text and rejects legacy binary documents explicitly', async (
   const xref = pdf.length
   pdf += `xref\n0 6\n0000000000 65535 f \n${offsets.slice(1).map(n => String(n).padStart(10, '0') + ' 00000 n ').join('\n')}\ntrailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`
   expect(textOf(await intakeReferenceParts([file('design.pdf', 'application/pdf', Buffer.from(pdf))]))).toContain('Game rules')
-  await expect(intakeReferenceParts([file('old.doc', 'application/msword', Buffer.from('binary'))])).rejects.toThrow('Convert legacy')
+  await expect(intakeReferenceParts([file('old.doc', 'application/msword', Buffer.from('binary'))])).rejects.toThrow()
+})
+
+test.skipIf(!Bun.which('textutil'))('extracts text from a legacy DOC reference', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-legacy-word-test-'))
+  try {
+    const path = join(root, 'reference.doc')
+    execFileSync(Bun.which('textutil')!, ['-convert', 'doc', '-output', path, '-stdin'], {
+      input: 'Preserve puzzle mechanics in the new game.', timeout: 15_000,
+    })
+    const upload = file('reference.doc', 'application/msword', await readFile(path))
+    expect(validateBeeGameAttachments([upload])).toHaveLength(1)
+    expect(textOf(await intakeReferenceParts([upload]))).toContain('Preserve puzzle mechanics')
+  } finally { await rm(root, { recursive: true, force: true }) }
 })
 
 test.skipIf(!Bun.which('ffmpeg') || !Bun.which('ffprobe'))('samples real video frames with timestamps and no audio playback', async () => {

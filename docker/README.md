@@ -310,9 +310,10 @@ Generated projects are stored in the `beegame-projects` Docker volume at
 Runtime config is stored in the `beegame-config` Docker volume at
 `/home/bun/.beegame`.
 
-BeeGame does not inject a built-in skill catalog into Claude Code. Uploaded
-user skills are explicit user configuration managed by the skills service under
-`.beegame/skills/<user_id>`.
+The runtime image includes the read-only built-in Skill catalog at
+`/app/.beegame/skills/builtinskills`. The native Agent discovers it separately
+from uploaded user Skills, which remain explicit per-user configuration managed
+by the skills service under `.beegame/skills/<user_id>`.
 
 ## Current Scope
 

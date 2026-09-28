@@ -80,8 +80,12 @@ export function extractStripeCheckoutCreditGrant(
   if (!userId || !priceId) {
     throw new StripeWebhookError(400, 'Stripe checkout session is missing BeeGame user or price metadata')
   }
-  const credits = priceCredits[priceId]
-  if (!Number.isInteger(credits) || credits <= 0) {
+  // Checkout creation records the granted amount in Stripe metadata. A pack
+  // edit must not change a checkout that was already opened before the edit.
+  const checkoutCredits = numberField(metadata.beeGameCredits)
+  const credits = Number.isSafeInteger(checkoutCredits) && checkoutCredits > 0
+    ? checkoutCredits : priceCredits[priceId]
+  if (!Number.isSafeInteger(credits) || credits <= 0) {
     throw new StripeWebhookError(400, 'Stripe price is not mapped to credits')
   }
   return {

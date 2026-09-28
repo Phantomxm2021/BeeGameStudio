@@ -7,6 +7,9 @@ export default {
   ],
   theme: {
     extend: {
+      boxShadow: {
+        raised: 'var(--shadow-raised)',
+      },
       // Product typography is explicit so the root remains 16px and the
       // spacing scale keeps its 4px rhythm across browser and desktop.
       fontSize: {

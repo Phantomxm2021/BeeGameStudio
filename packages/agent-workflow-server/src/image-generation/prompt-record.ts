@@ -5,7 +5,7 @@ import type { ImageGenerationConfig } from './config'
 
 /** Human-readable observations only. Never read by billing, recovery or asset loading. */
 export function createImagePromptRecord(workspacePath: string, capabilityPath: string) {
-  return (request: { requestId: string; prompt: string; background?: string },
+  return (request: { requestId: string; prompt: string; quality?: string; background?: string; size?: string; referenceImagePath?: string },
     config: ImageGenerationConfig | undefined, observation: Record<string, unknown>): boolean => {
     try {
       const root = realpathSync(workspacePath)
@@ -23,8 +23,10 @@ export function createImagePromptRecord(workspacePath: string, capabilityPath: s
       // Whitelist config fields; never serialize keys, endpoint, billing or raw upstream errors.
       const snapshot = { requestId: request.requestId, prompt: request.prompt,
         background: request.background ?? 'auto',
+        size: request.size ?? config?.size ?? 'unknown',
+        ...(request.referenceImagePath ? { referenceImagePath: request.referenceImagePath } : {}),
         provider: config?.provider ?? 'unknown', model: config?.model ?? 'unknown',
-        size: config?.size ?? 'unknown', quality: config?.quality ?? 'unknown' }
+        quality: request.quality ?? config?.quality ?? 'unknown' }
       const safeJson = (value: unknown) => {
         let text = JSON.stringify(value, null, 2)
         for (const secret of [config?.apiKey, config?.upstreamApiKey, capabilityPath].filter(Boolean) as string[])

@@ -50,8 +50,8 @@ export class ImageAttemptStore {
     const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
     const identity = hash([input.ownerId, input.projectId, input.requestId])
     // Never persist secrets, prompt text, or user identifiers in this receipt.
-    const digest = hash([config.provider, config.baseUrl, config.model, config.quality, config.size,
-      input.request.prompt, input.request.background ?? 'auto'])
+    const digest = hash([config.provider, config.baseUrl, config.model, input.request.quality ?? config.quality, input.request.size ?? config.size,
+      input.request.prompt, input.request.background ?? 'auto', input.request.referenceImage?.sha256 ?? null])
     mkdirSync(this.root, { recursive: true, mode: 0o700 })
     const directory = join(this.root, identity)
     const target = join(directory, 'receipt.json')

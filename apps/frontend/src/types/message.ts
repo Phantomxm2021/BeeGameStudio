@@ -87,6 +87,9 @@ export interface Message {
   /** Timestamp when the message was created (Unix timestamp in milliseconds) */
   timestamp: number
 
+  /** Actual completion time of the turn, distinct from this content block's creation time. */
+  turnCompletedAt?: number
+
   /** Type of the message (optional, defaults to 'normal') */
   type?: MessageType
 

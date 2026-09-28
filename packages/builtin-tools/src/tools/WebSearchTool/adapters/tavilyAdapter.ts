@@ -1,6 +1,6 @@
 /**
  * Tavily-based search adapter — calls the Tavily Search API
- * (https://tavily.claude-code-best.win) and maps results to
+ * (the official API or a configured endpoint) and maps results to
  * the unified SearchResult format.
  */
 
@@ -9,7 +9,7 @@ import { AbortError } from 'src/utils/errors.js'
 import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
 import type { SearchResult, SearchOptions, WebSearchAdapter } from './types.js'
 
-const DEFAULT_TAVILY_SEARCH_URL = 'https://tavily.claude-code-best.win/search'
+const DEFAULT_TAVILY_SEARCH_URL = 'https://api.tavily.com/search'
 const FETCH_TIMEOUT_MS = 30_000
 
 interface TavilySearchHit {
@@ -48,6 +48,10 @@ export class TavilySearchAdapter implements WebSearchAdapter {
     const searchUrl = baseUrl.endsWith('/search')
       ? baseUrl
       : `${baseUrl.replace(/\/$/, '')}/search`
+    const apiKey = process.env.TAVILY_API_KEY?.trim()
+    const officialEndpoint = new URL(searchUrl).host === 'api.tavily.com'
+    if (officialEndpoint && !apiKey)
+      throw new Error('TAVILY_API_KEY is required for the official Tavily API.')
 
     try {
       const response = await axios.post<{
@@ -65,7 +69,7 @@ export class TavilySearchAdapter implements WebSearchAdapter {
         {
           signal: abortController.signal,
           timeout: FETCH_TIMEOUT_MS,
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(officialEndpoint ? { Authorization: `Bearer ${apiKey}` } : {}) },
         },
       )
 

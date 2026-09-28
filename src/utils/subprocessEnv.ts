@@ -24,6 +24,10 @@ const GHA_SUBPROCESS_SCRUB = [
   'GEMINI_API_KEY',
   'GOOGLE_API_KEY',
   'GROK_API_KEY',
+  'BEEGAME_ARTIFACTS_TOKEN',
+  'TAVILY_API_KEY',
+  'BRAVE_SEARCH_API_KEY',
+  'EXA_API_KEY',
   'AWS_ACCESS_KEY_ID',
   'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE',
 
@@ -83,19 +87,20 @@ export function registerUpstreamProxyEnvFn(
   _getUpstreamProxyEnv = fn
 }
 
-export function subprocessEnv(): NodeJS.ProcessEnv {
+export function subprocessEnv(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   // CCR upstreamproxy: inject HTTPS_PROXY + CA bundle vars so curl/gh/python
   // in agent subprocesses route through the local relay. Returns {} when the
   // proxy is disabled or not registered (non-CCR), so this is a no-op outside
   // CCR containers.
   const proxyEnv = _getUpstreamProxyEnv?.() ?? {}
+  const inherited = overrides ? { ...process.env, ...overrides } : process.env
 
   if (!isEnvTruthy(process.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)) {
     return Object.keys(proxyEnv).length > 0
-      ? { ...process.env, ...proxyEnv }
-      : process.env
+      ? { ...inherited, ...proxyEnv }
+      : inherited
   }
-  const env = { ...process.env, ...proxyEnv }
+  const env = { ...inherited, ...proxyEnv }
   for (const k of GHA_SUBPROCESS_SCRUB) {
     delete env[k]
     // GitHub Actions auto-creates INPUT_<NAME> for `with:` inputs, duplicating

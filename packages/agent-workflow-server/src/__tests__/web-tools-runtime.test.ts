@@ -2,7 +2,7 @@ import { test, expect } from 'bun:test'
 import { mkdtempSync, readFileSync, statSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { syncWebToolsToRuntimeConfig } from '../web-tools-store'
+import { mapWebToolsConfigToRuntimeEnv, syncWebToolsToRuntimeConfig } from '../web-tools-store'
 import { mapRuntimeSettingsToEnv, syncRuntimeSettingsToDedicatedRuntimeConfig } from '../runtime-settings-store'
 
 test('materializes native web settings, preserves platform fields and clears stale credentials', () => {
@@ -17,7 +17,18 @@ test('materializes native web settings, preserves platform fields and clears sta
       webFetchHttpTimeoutMs: 15000,
     }
     syncWebToolsToRuntimeConfig(config, { dataDir })
-    expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ ...config, skillSearchEnabled: true })
+    const runtimeSettings = JSON.parse(readFileSync(path, 'utf8'))
+    expect(runtimeSettings).toMatchObject({
+      webSearchAdapter: 'exa', webFetchAdapter: 'http',
+      exaEndpointUrl: 'https://example.test/mcp',
+      tavilyEndpointUrl: 'https://example.test',
+      webFetchHttpTimeoutMs: 15000, skillSearchEnabled: true,
+    })
+    expect(runtimeSettings).not.toHaveProperty('braveApiKey')
+    expect(runtimeSettings).not.toHaveProperty('exaApiKey')
+    expect(mapWebToolsConfigToRuntimeEnv(config)).toMatchObject({
+      BRAVE_SEARCH_API_KEY: 'test-brave', EXA_API_KEY: 'test-secret',
+    })
     expect(statSync(path).mode & 0o777).toBe(0o600)
     syncWebToolsToRuntimeConfig({ webSearchAdapter: 'bing' }, { dataDir })
     const next = JSON.parse(readFileSync(path, 'utf8'))

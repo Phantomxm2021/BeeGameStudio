@@ -20,6 +20,8 @@ describe('filterPathsForDisplay', () => {
     it('does not rewrite URLs or ordinary slash-separated prose', () => {
         expect(filterPathsForDisplay('See https://example.com/docs and natural/intentional/alive.'))
             .toBe('See https://example.com/docs and natural/intentional/alive.');
+        expect(filterPathsForDisplay('Uploaded https://cloud-artifacts.example.test/30d/GJ_mwC9MNOB.html from /Users/alice/report.md'))
+            .toBe('Uploaded https://cloud-artifacts.example.test/30d/GJ_mwC9MNOB.html from report.md');
         expect(filterPathsForDisplay('Request /api/projects/current')).toBe('Request /api/projects/current');
     });
 });

@@ -3,18 +3,14 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createAgentWorkflowApp } from '../app'
-import { createRunStore } from '../beegame/delivery-workflow/run-store'
-import { computeWorkspaceRevision, computeResourceRevision } from '../beegame/delivery-workflow/revision'
-import { readRuntimeAcceptance, runtimeAcceptancePath } from '../beegame/delivery-workflow/runtime-acceptance'
-import { beginProjectDelivery, captureProjectDeliveryAcceptance, PROJECT_DELIVERY_REPORT_PATH } from '../beegame/project-delivery'
-import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
+import { advanceProjectDeliveryAfterTurn, beginProjectDelivery, captureProjectDeliveryAcceptance,
+  projectDeliveryStatePath, readProjectDelivery, PROJECT_DELIVERY_REPORT_PATH } from '../beegame/project-delivery'
 
 test('project publishing is gated, returns 202, and exposes progress without a model or real upload', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-publish-route-')))
   const owner = 'publish-owner', project = 'publish-project'
   const projects = join(root, 'projects'), workspace = join(projects, 'users', owner, project)
-  await mkdir(join(workspace, '.beegame/workflow/evidence'), { recursive: true })
-  await mkdir(join(workspace, 'dist'))
+  await mkdir(join(workspace, 'dist'), { recursive: true })
   await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
   await writeFile(join(workspace, 'dist/index.html'), '<main>Published</main>')
   let release!: () => void, builds = 0, uploads = 0
@@ -42,40 +38,20 @@ test('project publishing is gated, returns 202, and exposes progress without a m
     expect((await (await app.request(`/api/projects/${project}/deployment-readiness`)).json()).allowed).toBe(false)
     expect((await post(`/api/projects/${project}/deployments`)).status).toBe(409)
     expect(builds).toBe(0)
-    const report = { status: 'passed', summary: 'Fixture observations', environment: 'Test preview',
-      verification: { target: 'deployment', knownIssues: [], unverified: [] },
-      artifactPaths: ['dist/index.html'], evidencePaths: ['.beegame/workflow/evidence/browser.txt'] }
-    await writeFile(join(workspace, report.evidencePaths[0]!), 'Observed')
-    await writeFile(join(workspace, runtimeAcceptancePath('test')), JSON.stringify(report))
-    const base = createTestDeliveryRun({ ownerId: owner, projectId: project, documentRevision: 'a'.repeat(64) })
-    const revision = await computeWorkspaceRevision(workspace)
-    const resource = await computeResourceRevision(workspace, base.revision.document), content = 'c'.repeat(64)
-    const accepted = '.beegame/workflow/evidence/accepted.json'
-    await writeFile(join(workspace, accepted), JSON.stringify({ revision, status: 'passed', runtimeVerification: 'agent-reported',
-      runtimeReports: [await readRuntimeAcceptance(workspace, 'test')] }))
-    const observedAt = new Date().toISOString()
-    await createRunStore(workspace, owner).save({ ...base, status: 'completed', phase: 'DELIVERY',
-      revision: { ...base.revision, workspace: revision, implementation: revision, resource, content },
-      gameContentReceipt: { schemaVersion: 'game-content-ready.v2', documentRevision: base.revision.document,
-        assetManifestRevision: resource, contentRevision: content, indexPath: 'content/index.json', contentIds: ['scene'] },
-      evidence: { acceptance: { path: accepted, kind: 'acceptance', status: 'passed', revision, observedAt },
-        gameContent: { path: 'content/index.json', kind: 'game_content', status: 'passed', revision: content, observedAt },
-        resourcePreparation: { path: 'assets/asset-manifest.json', kind: 'resource_preparation', status: 'passed', revision: resource, observedAt } } })
-    // A legacy workflow snapshot is historical only. It must not authorize publication.
-    expect(await (await app.request(`/api/projects/${project}/deployment-readiness`)).json()).toMatchObject({ allowed: false })
-    expect((await post(`/api/projects/${project}/deployments`)).status).toBe(409)
-    expect(builds).toBe(0)
-
     // The replacement project-delivery acceptance remains the sole publish authority.
     await beginProjectDelivery(workspace, join(root, 'dashboard'), 'Publish test game')
+    const dataRoot = join(root, 'dashboard')
+    const state = await readProjectDelivery(workspace, dataRoot)
+    await writeFile(projectDeliveryStatePath(workspace, dataRoot), JSON.stringify({ ...state, phase: 'acceptance' }))
     await mkdir(join(workspace, '.beegame/delivery'), { recursive: true })
     await writeFile(join(workspace, '.beegame/delivery/browser.txt'), 'Current build verified in browser')
     const projectReport = { scope: 'delivery', status: 'passed', summary: 'Current build verified',
       environment: 'Test preview', evidencePaths: ['.beegame/delivery/browser.txt'],
       artifactPaths: ['dist/index.html'],
-      verification: { target: 'deployment', knownIssues: [], unverified: [] } }
+      verification: { target: 'deployment', observation: 'target-runtime', knownIssues: [], unverified: [] } }
     await writeFile(join(workspace, PROJECT_DELIVERY_REPORT_PATH), JSON.stringify(projectReport))
-    await captureProjectDeliveryAcceptance(workspace, join(root, 'dashboard'), Date.now() - 5000)
+    await captureProjectDeliveryAcceptance(workspace, dataRoot, Date.now() - 5000)
+    await advanceProjectDeliveryAfterTurn(workspace, dataRoot)
     expect(await (await app.request(`/api/projects/${project}/deployment-readiness`)).json()).toMatchObject({ allowed: true, destination: 'remote' })
     const response = await post(`/api/projects/${project}/deployments`)
     expect(response.status).toBe(202)

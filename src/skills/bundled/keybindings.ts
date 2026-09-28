@@ -228,10 +228,8 @@ const SECTION_BEHAVIORAL_RULES = [
   '5. To fully replace a default binding, unbind the old key AND add the new one',
 ].join('\n')
 
-const SECTION_DOCTOR = [
-  '## Validation with /doctor',
-  '',
-  'The `/doctor` command includes a "Keybinding Configuration Issues" section that validates `~/.claude/keybindings.json`.',
+const SECTION_VALIDATION = [
+  '## Common configuration issues',
   '',
   '### Common Issues and Fixes',
   '',
@@ -276,16 +274,6 @@ const SECTION_DOCTOR = [
     ],
   ),
   '',
-  '### Example /doctor Output',
-  '',
-  '```',
-  'Keybinding Configuration Issues',
-  'Location: ~/.claude/keybindings.json',
-  '  └ [Error] Unknown context "chat"',
-  '    → Valid contexts: Global, Chat, Autocomplete, ...',
-  '  └ [Warning] "ctrl+c" may not work: Terminal interrupt (SIGINT)',
-  '```',
-  '',
   '**Errors** prevent bindings from working and must be fixed. **Warnings** indicate potential conflicts but the binding may still work.',
 ].join('\n')
 
@@ -311,7 +299,7 @@ export function registerKeybindingsSkill(): void {
         SECTION_INTERACTION,
         SECTION_COMMON_PATTERNS,
         SECTION_BEHAVIORAL_RULES,
-        SECTION_DOCTOR,
+        SECTION_VALIDATION,
         `## Reserved Shortcuts\n\n${reservedShortcuts}`,
         `## Available Contexts\n\n${contextsTable}`,
         `## Available Actions\n\n${actionsTable}`,

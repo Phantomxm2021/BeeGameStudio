@@ -35,6 +35,7 @@ import {
   type ResponsesReasoningEffort,
 } from './responsesAdapter.js'
 import { normalizeMessagesForAPI } from '../../../utils/messages.js'
+import { sanitizeInvalidImagesForAPI } from '../../../utils/imageValidation.js'
 import { toolToAPISchema } from '../../../utils/api.js'
 import {
   getEmptyToolPermissionContext,
@@ -232,7 +233,7 @@ export async function* queryModelOpenAI(
     const openaiModel = resolveOpenAIModel(options.model)
 
     // 2. Normalize messages using shared preprocessing
-    const messagesForAPI = normalizeMessagesForAPI(messages, tools)
+    const messagesForAPI = await sanitizeInvalidImagesForAPI(normalizeMessagesForAPI(messages, tools))
 
     // 3. Check if tool search is enabled (similar to Anthropic path)
     const useSearchExtraTools = await isSearchExtraToolsEnabled(

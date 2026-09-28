@@ -75,6 +75,18 @@ describe('tokenize — CJK bi-gram + ASCII', () => {
     expect(tokens).toContain('优化')
     expect(tokens).toContain('fast')
   })
+
+  test('Japanese kana, Korean Hangul and accented Latin words remain searchable', () => {
+    expect(tokenize('ゲーム画面を設計する')).toEqual(
+      expect.arrayContaining(['ゲー', 'ーム', '画面']),
+    )
+    expect(tokenize('게임 화면을 디자인해줘')).toEqual(
+      expect.arrayContaining(['게임', '화면', '디자']),
+    )
+    expect(tokenize('diseñar interfaz')).toContain('diseñar')
+    expect(tokenize('设计游戏UI和响应式布局')).toContain('ui')
+    expect(tokenize('设计游戏UI和响应式布局')).toContain('响应')
+  })
 })
 
 describe('tokenizeAndStem — CJK passes through, ASCII stemmed', () => {
@@ -94,6 +106,25 @@ describe('tokenizeAndStem — CJK passes through, ASCII stemmed', () => {
 })
 
 describe('searchSkills — CJK query against skill index', () => {
+  test('Japanese and Korean queries match skills with metadata in those languages', () => {
+    const index: SkillIndexEntry[] = [
+      makeEntry({
+        name: 'ui-layout',
+        tokens: tokenizeAndStem('ゲーム画面 レイアウト メニュー'),
+      }),
+      makeEntry({
+        name: 'level-layout',
+        tokens: tokenizeAndStem('레벨 디자인 맵 화면 배치'),
+      }),
+    ]
+    expect(searchSkills('ゲーム画面のレイアウト', index)[0]?.name).toBe(
+      'ui-layout',
+    )
+    expect(searchSkills('레벨 맵 화면 배치', index)[0]?.name).toBe(
+      'level-layout',
+    )
+  })
+
   test('Chinese query against Chinese-metadata skill produces positive score', () => {
     const chineseSkillTokens = tokenizeAndStem(
       'refactor-cleaner 清理 重构 流程 的工具',
@@ -217,5 +248,23 @@ describe('searchSkills — CJK query against skill index', () => {
 
     expect(results[0]?.name).toBe('code-review')
     expect(results[0]!.score).toBeGreaterThanOrEqual(0.75)
+  })
+
+  test('a name embedded inside another word does not get the exact-name boost', () => {
+    const index = [
+      makeEntry({
+        name: 'review',
+        tokens: tokenizeAndStem('review documents'),
+      }),
+    ]
+    expect(searchSkills('unreviewed', index)).toEqual([])
+  })
+
+  test('a single available skill can still match its description', () => {
+    const tokens = tokenizeAndStem('spatial level design')
+    const index = [makeEntry({ name: 'level-design', tokens })]
+    expect(searchSkills('spatial level design', index)[0]?.name).toBe(
+      'level-design',
+    )
   })
 })

@@ -550,6 +550,7 @@ export type Attachment =
       }[]
       signal: DiscoverySignal
       source: 'native' | 'aki' | 'both'
+      catalogFallback?: boolean
       gap?: {
         key: string
         status: 'pending' | 'draft' | 'active'
@@ -830,10 +831,6 @@ export async function getAttachments(
         !options?.skipSkillDiscovery
           ? [
               maybe('skill_discovery', async () => {
-                if (suppressNextDiscovery) {
-                  suppressNextDiscovery = false
-                  return []
-                }
                 const result =
                   await skillSearchModules.prefetch.getTurnZeroSkillDiscovery(
                     input,
@@ -851,9 +848,6 @@ export async function getAttachments(
         !options?.skipSkillDiscovery
           ? [
               maybe('tool_discovery', async () => {
-                if (suppressNextDiscovery) {
-                  return []
-                }
                 const result =
                   await searchExtraToolsModules.prefetch.getTurnZeroSearchExtraToolsPrefetch(
                     input,
@@ -2681,7 +2675,6 @@ const sentSkillNames = new Map<string, Set<string>>()
 export function resetSentSkillNames(): void {
   sentSkillNames.clear()
   suppressNext = false
-  suppressNextDiscovery = false
 }
 
 /**
@@ -2689,33 +2682,13 @@ export function resetSentSkillNames(): void {
  * on --resume when a skill_listing attachment already exists in the
  * transcript.
  *
- * `sentSkillNames` is module-scope — process-local. Each `claude -p` spawn
- * starts with an empty Map, so without this every resume re-injects the
- * full ~600-token listing even though it's already in the conversation from
- * the prior process. Shows up on every --resume; particularly loud for
- * daemons that respawn frequently.
- *
- * Trade-off: skills added between sessions won't be announced until the
- * next non-resume session. Acceptable — skill_listing was never meant to
- * cover cross-process deltas, and the agent can still call them (they're
- * in the Skill tool's runtime registry regardless).
+ * Only use when that attachment is actually present in recovered messages.
+ * Ordinary project transcripts omit attachments and need a fresh listing.
  */
 export function suppressNextSkillListing(): void {
   suppressNext = true
 }
 let suppressNext = false
-
-/**
- * Suppress the next skill-discovery injection on resume. Same rationale as
- * suppressNextSkillListing: skill_discovery attachments are not persisted to
- * transcript for non-ant users, so the prior process's discovery result is
- * already in the conversation history the model sees. Re-generating it would
- * inject duplicate content and bust the prompt cache prefix.
- */
-export function suppressNextSkillDiscovery(): void {
-  suppressNextDiscovery = true
-}
-let suppressNextDiscovery = false
 
 // When skill-search is enabled and the filtered (bundled + MCP) listing exceeds
 // this count, fall back to bundled-only. Protects MCP-heavy users (100+ servers)

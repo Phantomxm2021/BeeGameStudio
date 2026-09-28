@@ -43,6 +43,17 @@ describe('terminal Chat activity', () => {
     expect(result[2]).toBe(messages[2]);
   });
 
+  it('records completion time on finished text without changing its creation time', () => {
+    const messages = [
+      { taskId: 'p', turnId: 'first', timestamp: 100, streamStatus: 'complete', content: 'Done' },
+      { taskId: 'p', turnId: 'second', timestamp: 150, streamStatus: 'complete', content: 'Later' },
+    ];
+    const result = settleChatActivity(messages, { taskId: 'p', turnId: 'first', at: 200,
+      completedAt: 200, reason: 'incomplete' });
+    expect(result[0]).toMatchObject({ timestamp: 100, turnCompletedAt: 200, streamStatus: 'complete' });
+    expect(result[1]).toBe(messages[1]);
+  });
+
   it('does not infer detached child completion from a parent result', () => {
     const messages = [{ taskId: 'p', timestamp: 100, toolStatus: 'running', isSubagentTool: true }];
     expect(settleChatActivity(messages, { taskId: 'p', at: 200, reason: 'incomplete' })[0]).toBe(messages[0]);

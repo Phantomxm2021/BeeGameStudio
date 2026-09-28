@@ -231,7 +231,7 @@ export const CANONICAL_ASSET_MANIFEST_EXAMPLE = {
   version: CURRENT_ASSET_MANIFEST_VERSION,
   project_target: {
     asset_format_capabilities: ['<actual-target-supported-format>'],
-    resource_library_usage: 'preferred',
+    resource_library_usage: 'optional',
     runtime_asset_root: BEEGAME_RESOURCE_ROOTS.runtime,
     generated_asset_root: BEEGAME_RESOURCE_ROOTS.generated,
   },
@@ -1485,12 +1485,6 @@ function nonEmptyStringArray(value: unknown): value is string[] {
     value.length > 0 &&
     value.every(item => Boolean(trimmedString(item)))
   )
-}
-
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.flatMap(item => (trimmedString(item) ? [String(item)] : []))
-    : []
 }
 
 function uniqueStrings(values: readonly string[]): string[] {

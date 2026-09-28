@@ -10,7 +10,7 @@ import { NATIVE_DIAGNOSTIC_PREFIX, parseNativeDiagnostic } from './native-diagno
 const SAFE_INHERITED = ['HOME', 'LANG', 'LC_ALL', 'LOGNAME', 'PATH', 'SHELL', 'TMPDIR', 'USER', 'CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING']
 const CONFIG_KEYS = new Set([
   'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'DISABLE_TELEMETRY', 'DISABLE_ERROR_REPORTING',
-  'BEEGAME_MODEL', 'BEEGAME_MODEL_TYPE', 'BEEGAME_CONFIG_DIR', 'NPM_CONFIG_CACHE', 'npm_config_cache', 'NPM_CONFIG_USERCONFIG', 'npm_config_userconfig',
+  'BEEGAME_MODEL', 'BEEGAME_MODEL_TYPE', 'BEEGAME_CONFIG_DIR', 'BEEGAME_NATIVE_BUILTIN_SKILLS_DIR', 'SKILL_SEARCH_ENABLED', 'NPM_CONFIG_CACHE', 'npm_config_cache', 'NPM_CONFIG_USERCONFIG', 'npm_config_userconfig',
   'ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
   'CLAUDE_CODE_USE_OPENAI', 'OPENAI_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_DEFAULT_HAIKU_MODEL', 'OPENAI_DEFAULT_SONNET_MODEL', 'OPENAI_DEFAULT_OPUS_MODEL',
   'CLAUDE_CODE_USE_GEMINI', 'GEMINI_BASE_URL', 'GEMINI_API_KEY', 'GEMINI_DEFAULT_HAIKU_MODEL', 'GEMINI_DEFAULT_SONNET_MODEL', 'GEMINI_DEFAULT_OPUS_MODEL',
@@ -76,7 +76,12 @@ export function nativeChatEventsPath(logPath: string): string {
 
 /** Native file tools with a workspace permission boundary. */
 export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAgentResult> {
-  const access = await createNativeTaskAccess(input)
+  const access = await createNativeTaskAccess({ ...input,
+    ...(input.env.BEEGAME_CONFIG_DIR
+      ? { skillsDirectory: resolve(input.env.BEEGAME_CONFIG_DIR, 'skills') } : {}),
+    ...(input.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR
+      ? { builtinSkillsDirectory: input.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR } : {}),
+  })
   const root = access.root
   if (!isAbsolute(input.logPath) || within(root, input.logPath) || !input.command.length)
     throw new Error('Invalid native file agent boundary')

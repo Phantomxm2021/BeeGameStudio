@@ -49,8 +49,9 @@ export class ExaSearchAdapter implements WebSearchAdapter {
       'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream',
     }
-    if (settings.exaApiKey) {
-      headers['Authorization'] = `Bearer ${settings.exaApiKey}`
+    const exaApiKey = process.env.EXA_API_KEY || settings.exaApiKey
+    if (exaApiKey) {
+      headers['Authorization'] = `Bearer ${exaApiKey}`
     }
 
     let responseText: string

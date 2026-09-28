@@ -25,6 +25,7 @@ import { normalizeI18nLanguage } from '../../i18n/useBeeGameTranslations';
 import { countPendingToolPermissions, usePermissionTabAttention } from '../../hooks/usePermissionTabAttention';
 import { getProjectDisplayName } from '../../utils/projectDisplayName';
 import { isProjectExecutionActive } from '../../utils/chatActivity';
+import { filterPathsForDisplay } from '../../utils/chatPathDisplay';
 
 interface DashboardViewProps {
   chatHistoryReady?: boolean;
@@ -74,6 +75,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
   const [isDeployingProject, setDeployingProject] = useState(false);
   const [previewRefreshNonce, setPreviewRefreshNonce] = useState(0);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const usageRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousBeeGameStatusRef = useRef<string | null>(null);
   const { i18n } = useTranslation('beegame');
   const translateBeeGame = useMemo(() => i18n.getFixedT(normalizeI18nLanguage(lang), 'beegame'), [i18n, lang]);
@@ -100,7 +102,7 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
   const { messages } = useChatStore(useShallow(state => ({ messages: state.messages })));
   const { showSuccess, showError, showWarning } = useToastContext();
 
-  const { creditBalance, creditSummary, refreshCredits } = useCredits(
+  const { creditBalance, creditSummary } = useCredits(
     projectId, authenticationStatus === 'authenticated', currentUser?.id,
   );
 
@@ -144,7 +146,19 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     // Trigger data refreshes on significant task events
     onTaskEvent: type => {
       if (type === 'usage') {
-        void refreshCredits();
+        // The billing summary is committed at turn end. Runtime usage is
+        // available during the turn, so refresh that snapshot at a bounded
+        // cadence instead of repeatedly requesting unchanged billing data.
+        if (!usageRefreshTimerRef.current) {
+          usageRefreshTimerRef.current = setTimeout(() => {
+            usageRefreshTimerRef.current = null;
+            if (authenticationStatus === 'authenticated') {
+              loadProjectRuntimeState(projectId).catch(error => {
+                logDashboardReadError('Failed to refresh project usage:', error);
+              });
+            }
+          }, 2500);
+        }
       }
       if (
         type === 'status_finished' ||
@@ -169,6 +183,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
     },
   });
 
+  useEffect(() => () => {
+    if (usageRefreshTimerRef.current) clearTimeout(usageRefreshTimerRef.current);
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+  }, [projectId]);
+
   useEffect(() => {
     // Deployment summaries belong to the selected project.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -189,19 +208,31 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
   const permissionDisplayModels = useMemo(() => toPermissionDisplayModels(pendingPermissions), [pendingPermissions]);
   const projectRuntimeDisplay = useMemo(() => toProjectRuntimeDisplayModel(projectStatus), [projectStatus]);
   const projectTokenUsage = useMemo(() => {
-    return creditSummary
-      ? {
-          prompt_tokens: creditSummary.inputTokens,
-          input_tokens: creditSummary.inputTokens,
-          cached_input_tokens: creditSummary.cacheReadTokens + creditSummary.cacheCreationTokens,
-          cache_read_tokens: creditSummary.cacheReadTokens,
-          cache_creation_tokens: creditSummary.cacheCreationTokens,
-          completion_tokens: creditSummary.outputTokens,
-          output_tokens: creditSummary.outputTokens,
-          total_tokens: creditSummary.totalTokens,
-        }
-      : null;
-  }, [creditSummary]);
+    const live = projectStatus?.project_id === projectId ? projectStatus.context?.token_budget : null;
+    // A runtime snapshot includes the in-flight turn. Once billing catches
+    // up, its persisted project total becomes authoritative again.
+    if (live && Number(live.total_tokens) > Number(creditSummary?.totalTokens ?? 0)) {
+      return {
+        prompt_tokens: Number(live.input_tokens) || 0,
+        input_tokens: Number(live.input_tokens) || 0,
+        cached_input_tokens: Number(live.cached_input_tokens) || 0,
+        cache_read_tokens: Number(live.cached_input_tokens) || 0,
+        completion_tokens: Number(live.output_tokens) || 0,
+        output_tokens: Number(live.output_tokens) || 0,
+        total_tokens: Number(live.total_tokens) || 0,
+      };
+    }
+    return creditSummary ? {
+      prompt_tokens: creditSummary.inputTokens,
+      input_tokens: creditSummary.inputTokens,
+      cached_input_tokens: creditSummary.cacheReadTokens + creditSummary.cacheCreationTokens,
+      cache_read_tokens: creditSummary.cacheReadTokens,
+      cache_creation_tokens: creditSummary.cacheCreationTokens,
+      completion_tokens: creditSummary.outputTokens,
+      output_tokens: creditSummary.outputTokens,
+      total_tokens: creditSummary.totalTokens,
+    } : null;
+  }, [creditSummary, projectStatus, projectId]);
   const activeProject = useMemo(() => projects.find(project => project.id === projectId), [projectId, projects]);
   const isProjectStarting =
     // A persisted project-list snapshot is stale by definition. Do
@@ -220,7 +251,8 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
   ).trim();
 
   const isExecutionBusy = isLoading || isStopping ||
-    (hasCurrentRuntimeSnapshot && isProjectExecutionActive(projectRuntimeDisplay)) || hasPendingToolPermission;
+    (hasCurrentRuntimeSnapshot && (isProjectExecutionActive(projectRuntimeDisplay) ||
+      Boolean(projectRuntimeDisplay?.active_subagents?.length))) || hasPendingToolPermission;
   const isProjectWorkspaceMutationLocked = isProjectInteractionLocked || isProjectStarting || isExecutionBusy || deploymentInProgress;
   const canSendMessage = hasPermission('agent.send_message') && !isProjectInteractionLocked &&
     !isProjectStarting && !isStopping && !hasPendingToolPermission && !deploymentInProgress;
@@ -431,28 +463,17 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
         isSyncing={isSyncing}
         isInteractionLocked={isProjectInteractionLocked}
         isWorkspaceBusy={isProjectWorkspaceMutationLocked}
+        isAgentWorking={isExecutionBusy}
         buildReport={projectStatus?.build_report || null}
         projectTarget={projectTargetLabel}
         tokenUsage={projectTokenUsage}
+        projectCreatedAt={activeProject?.created_at}
         deployments={deploymentHistory}
         previewRefreshNonce={previewRefreshNonce}
         onStartPreview={canManagePreview ? handleStartPreview : undefined}
         onStopPreview={canManagePreview ? handleStopPreview : undefined}
         onDeployProject={canManageDeployment ? handleDeployProject : undefined}
         onRollbackDeployment={canManageDeployment ? handleRollbackDeployment : undefined}
-        onFixBuildErrors={
-          canSendMessage
-            ? () => {
-                if (isProjectWorkspaceMutationLocked) return Promise.resolve();
-                return api
-                  .requestProjectAction({
-                    project_id: projectId,
-                    kind: 'build_error_repair',
-                  })
-                  .then(() => undefined);
-              }
-            : undefined
-        }
         onFixDeploymentFailure={
           canSendMessage
             ? () => {
@@ -466,6 +487,11 @@ export function DashboardView({ projectId, projectName, lang, onSetLang, onBack,
               }
             : undefined
         }
+        onFixConsoleError={canSendMessage ? message => {
+          const safeMessage = filterPathsForDisplay(message);
+          const prompt = translateBeeGame('livePreview.fixConsoleEntryPrompt', { consoleLog: safeMessage });
+          return sendMessage(prompt);
+        } : undefined}
         isDeploying={isDeployingProject || deploymentInProgress}
         onOpenExternal={url => window.open(url, '_blank', 'noopener,noreferrer')}
         onBack={onBack}

@@ -57,15 +57,10 @@ export function openResourceLibraryAccess(input: {
   })
   const base = 'http://127.0.0.1:' + server.port + prefix
   return {
+    baseUrl: base,
     instruction: [
-      'Built-in resource library: use native Bash/curl against this temporary read-only endpoint (no deferred resource tool is needed).',
-      'Base URL: ' + base,
-      'GET /api/resource-search?status=published lists packs. Optional filters: dimension=2D or 3D, primaryCategory, tag, gameType; tag/gameType can be repeated. Pack responses include tags and category metadata. These are filters, not free-text search; omit an uncertain filter rather than interpret an empty intersection as an empty library.',
-      'For semantic browsing, POST /api/resource-catalog/packs with {"filters":{}} returns items and available facets. POST /api/resource-catalog/packs/{packId}/elements with {"filters":{"usageTags":["terrain"],"formats":["png"]}} filters files within your chosen pack. Select filter values from returned facets; these POST endpoints are read-only queries, not generation or automatic resource selection.',
-      'GET /api/resource-packs/{packId} reads pack/license/version metadata; GET /api/resource-packs/{packId}/elements lists files and dependency metadata.',
-      'GET /api/resource-packs/{packId}/elements/{elementId}/resource-url returns a download URL. Inspect dependencies and obtain the required files, not just the preview image.',
-      'Download selected files with native tools into assets/, retain source/license/pack/version and register actual hashes in Manifest. Keep this temporary endpoint out of project artifacts.',
-      '401/403/503 are access failures, not evidence that the library has no suitable assets. Internet sourcing remains available independently through native search/browser or Bash HTTP tools.',
+      'Built-in resource library is available. Its catalog exposes pack/element facets, previews, license and dependency metadata; access failures are not empty search results.',
+      'Use the optional project asset command described in the current project context for catalog browsing and selected-file download. Native WebSearch/WebFetch and other sourcing methods remain available independently.',
     ].join('\n'),
     catalogObserved() { return catalogObserved },
     close() { server.stop(true) },

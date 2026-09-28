@@ -31,4 +31,9 @@ describe('vite production build config', () => {
     expect(configSource).not.toContain("inline: ['@shadcn/react']");
   });
 
+  it('prebundles the lazy chat image effect before its first render', () => {
+    const configSource = readFileSync(configPath, 'utf8');
+    expect(configSource).toContain("'img-fx',");
+  });
+
 });

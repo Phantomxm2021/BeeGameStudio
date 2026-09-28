@@ -49,12 +49,13 @@ export function HeroIntro({ title, connector, subtitle, rotatingWords, isTransit
                             text={activeWord}
                             duration={560}
                             glyphs={usesHanCharacters ? '创意灵感游戏世界光影梦想' : undefined}
+                            stableGlyphPositions={!usesHanCharacters}
                             className="col-start-1 row-start-1 text-white"
                         />
                     </span>
                 </h1>
             </div>
-            <p className="type-body-lg mt-3 max-w-[34ch] text-pretty text-white/90 [text-shadow:0_2px_18px_rgba(0,0,0,0.38)] sm:mt-4">
+            <p className="type-body-lg mt-3 max-w-full text-white/90 [text-shadow:0_2px_18px_rgba(0,0,0,0.38)] sm:mt-4 md:whitespace-nowrap">
                 {subtitle}
             </p>
         </motion.section>

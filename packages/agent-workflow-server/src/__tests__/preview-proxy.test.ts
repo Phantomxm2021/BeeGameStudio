@@ -61,6 +61,10 @@ test('opaque sandbox bridge targets its parent and exposes document load failure
     expect(html).toContain("}, '*')")
     expect(html).not.toContain('document.referrer')
     expect(html).toContain("lifecycle('failed')")
+    expect(html).toContain("type: 'beegame.preview.console'")
+    const bridge = html.match(/<script data-beegame-preview-lifecycle-bridge>([\s\S]*?)<\/script>/)?.[1]
+    expect(bridge).toBeDefined()
+    expect(() => new Function(bridge)).not.toThrow()
   } finally { upstream.stop(true) }
 })
 
@@ -102,7 +106,10 @@ test('compressed HTML, JavaScript and binary assets survive the HTTP proxy witho
       expect(response.headers.has('etag')).toBe(false)
       const body = Buffer.from(await response.arrayBuffer())
       if (file.type === 'text/html') {
-        expect(body.toString()).toContain('data-beegame-preview-console-bridge')
+        expect(body.toString()).toContain('data-beegame-preview-lifecycle-bridge')
+        expect(body.toString()).toContain('beegame.preview.lifecycle')
+        expect(body.toString()).toContain('beegame.preview.console')
+        expect(body.toString()).toContain("['log', 'info', 'warn', 'error', 'debug']")
         expect(body.toString()).toContain('<body>Hello</body>')
       } else expect(body).toEqual(file.body)
     }

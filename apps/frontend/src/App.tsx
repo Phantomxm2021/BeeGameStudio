@@ -7,6 +7,7 @@
 import { lazy, Suspense, useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import ErrorBoundary from './components/Common/ErrorBoundary';
+import { WorkspaceLoadingPage } from './components/Common/WorkspaceLoadingPage';
 import { useProjectStore } from './store/projectStore';
 import { applyThemeToDocument, useSystemStore } from './store/systemStore';
 import { useChatStore } from './store/chatStore';
@@ -29,6 +30,7 @@ import {
 // New Demiurge Views
 import { LandingView } from './components/Demiurge/LandingView';
 import type { Language } from './components/Demiurge/AgentsConfig';
+import i18n, { getInitialUiLanguage } from './i18n';
 import { isResourceLibraryRoute } from './components/ResourceLibrary/resourceLibraryRoute';
 import { getProjectRouteId, WORKSPACE_ROUTE_CHANGE_EVENT } from './navigation/workspaceRoute';
 
@@ -38,24 +40,6 @@ const DashboardView = lazy(async () => {
   const module = await loadDashboardView();
   return { default: module.DashboardView };
 });
-
-function WorkspaceLoadingPage() {
-  return (
-    <div
-      className="flex min-h-screen items-center justify-center bg-background px-6 text-foreground"
-      role="status"
-      aria-label="Restoring project workspace"
-    >
-      <div className="flex w-full max-w-sm flex-col items-center text-center">
-        <h1 className="text-xl font-semibold tracking-[-0.025em]">正在恢复项目工作区</h1>
-        <p className="mt-2 text-sm text-muted-foreground">正在准备你的项目</p>
-        <div aria-hidden="true" className="mt-7 h-0.5 w-40 overflow-hidden rounded-full bg-foreground/10">
-          <span className="workspace-loading-beam block h-full w-1/3 rounded-full bg-foreground/70" />
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function App() {
   const {
@@ -93,15 +77,19 @@ function App() {
   const loadHistory = useChatStore((state) => state.loadHistory);
   const { showError, showSuccess } = useToastContext();
 
-  const [lang, setLang] = useState<Language>('zh');
+  const [lang, setLang] = useState<Language>(getInitialUiLanguage);
+  const handleSetLang = (language: Language) => {
+    setLang(language);
+    void i18n.changeLanguage(language);
+  };
   const [isResourceRoute, setIsResourceRoute] = useState(() => isResourceLibraryRoute());
   const [authenticationRetryVersion, setAuthenticationRetryVersion] = useState(0);
   const [authenticationInitializationError, setAuthenticationInitializationError] = useState('');
-  const loadedHistoryProjectRef = useRef<string | null>(null);
+  const loadedHistoryProjectRef = useRef<{ projectId: string; loadHistory: typeof loadHistory } | null>(null);
   const [historyReadyProjectId, setHistoryReadyProjectId] = useState<string | null>(null);
-  const authenticationInitializationStartedRef = useRef(false);
+  const authenticationInitializationStartedRef = useRef<typeof loadCurrentUser | null>(null);
   const authenticationRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const loadedProtectedDataUserRef = useRef<string | null>(null);
+  const loadedProtectedDataUserRef = useRef<{ userId: string; loadProjects: typeof loadProjects } | null>(null);
   const activeProject = projects.find(p => p.id === activeProjectId);
   const requestedProjectId = getProjectRouteId();
   const isProjectRouteRestoring = Boolean(
@@ -130,12 +118,10 @@ function App() {
     void loadDashboardView().catch(() => undefined);
   }, [activeProjectId, authenticationStatus, requestedProjectId]);
 
-  // A project route keeps its theme while the workspace is being restored.
-  // Landing and resource surfaces remain light.
+  // Keep the persisted theme across Idea Home, the project workspace, and the resource library.
   useLayoutEffect(() => {
-    const initializingProjectRoute = authenticationStatus === 'initializing' && Boolean(requestedProjectId) && !isResourceRoute;
-    applyThemeToDocument((isDashboardVisible || isProjectRouteRestoring || initializingProjectRoute) && isDark);
-  }, [authenticationStatus, isDashboardVisible, isDark, isProjectRouteRestoring, isResourceRoute, requestedProjectId]);
+    applyThemeToDocument(isDark);
+  }, [isDark]);
 
   // Initialize toast callbacks
   useEffect(() => {
@@ -160,8 +146,8 @@ function App() {
 
   // Initialize app data on mount
   useEffect(() => {
-    if (authenticationInitializationStartedRef.current) return;
-    authenticationInitializationStartedRef.current = true;
+    if (authenticationInitializationStartedRef.current === loadCurrentUser) return;
+    authenticationInitializationStartedRef.current = loadCurrentUser;
     const initializeApp = async () => {
       try {
         setAuthenticationInitializationError('');
@@ -175,7 +161,9 @@ function App() {
       } catch (error) {
         if (isAuthenticationServiceUnavailable(error)) {
           setAuthenticationInitializationError('认证服务暂时不可用，正在重新连接…');
-          authenticationInitializationStartedRef.current = false;
+          if (authenticationInitializationStartedRef.current === loadCurrentUser) {
+            authenticationInitializationStartedRef.current = null;
+          }
           if (authenticationRetryTimerRef.current) {
             clearTimeout(authenticationRetryTimerRef.current);
           }
@@ -204,10 +192,12 @@ function App() {
       if (authenticationStatus === 'anonymous') loadedProtectedDataUserRef.current = null;
       return;
     }
-    if (loadedProtectedDataUserRef.current === currentUser.id) return;
-    loadedProtectedDataUserRef.current = currentUser.id;
+    if (loadedProtectedDataUserRef.current?.userId === currentUser.id &&
+        loadedProtectedDataUserRef.current.loadProjects === loadProjects) return;
+    const load = { userId: currentUser.id, loadProjects };
+    loadedProtectedDataUserRef.current = load;
     loadProjects().catch((error) => {
-      loadedProtectedDataUserRef.current = null;
+      if (loadedProtectedDataUserRef.current === load) loadedProtectedDataUserRef.current = null;
       console.error('Failed to load authenticated app data:', error);
       showError(error instanceof Error ? error.message : '登录数据加载失败');
     });
@@ -222,7 +212,8 @@ function App() {
         setHistoryReadyProjectId(null);
         return;
       }
-      if (loadedHistoryProjectRef.current === activeProjectId) return;
+      if (loadedHistoryProjectRef.current?.projectId === activeProjectId &&
+          loadedHistoryProjectRef.current.loadHistory === loadHistory) return;
       const requestProjectId = activeProjectId;
 
       try {
@@ -240,7 +231,7 @@ function App() {
         if (!hasStreamingMessages && (normalized.length > 0 || currentMessages.length === 0)) {
           loadHistory(normalized);
         }
-        loadedHistoryProjectRef.current = requestProjectId;
+        loadedHistoryProjectRef.current = { projectId: requestProjectId, loadHistory };
         setHistoryReadyProjectId(requestProjectId);
       } catch (error) {
         if (!cancelled) console.error('[App] Failed to load chat history:', error);
@@ -273,18 +264,11 @@ function App() {
       return <WorkspaceLoadingPage />;
     }
     return (
-      <div
-        className="flex min-h-screen items-center justify-center bg-background px-6 text-center text-foreground"
-        role="status"
-        aria-label="Initializing BeeGame"
-      >
-        <div className="flex max-w-sm flex-col items-center gap-4">
-          <span className="size-7 animate-spin rounded-full border-2 border-border/20 border-t-ring" aria-hidden="true" />
-          <p className="text-sm font-medium tracking-[-0.01em] text-foreground">
-            {authenticationInitializationError || '正在恢复登录状态…'}
-          </p>
-        </div>
-      </div>
+      <WorkspaceLoadingPage
+        title={authenticationInitializationError || '正在恢复登录状态…'}
+        description=""
+        ariaLabel="Initializing BeeGame"
+      />
     );
   }
 
@@ -302,7 +286,7 @@ function App() {
             projectId={activeProjectId!}
             projectName={activeProject?.name || 'Untitled Project'}
             lang={lang}
-            onSetLang={setLang}
+            onSetLang={handleSetLang}
             onBack={clearActiveProject}
           />
         </Suspense>
@@ -310,7 +294,7 @@ function App() {
         /* Otherwise, render the Landing View */
         <LandingView
           lang={lang}
-          onSetLang={setLang}
+          onSetLang={handleSetLang}
           onStart={handleStartProject}
         />
       )}

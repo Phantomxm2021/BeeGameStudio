@@ -18,28 +18,76 @@ const props = {
 const live = { status: 'passed', build_url: '/previews/session/game/' };
 
 describe('dashboard header', () => {
+  it('shows agent activity and standby without calling either preview preparation', () => {
+    const { rerender } = render(<BeeGameLivePreviewPage {...props} status="running" isAgentWorking />);
+    expect(screen.getByText('Bee Game Studio工作中')).toBeInTheDocument();
+    expect(screen.queryByText('正在准备预览')).not.toBeInTheDocument();
+
+    rerender(<BeeGameLivePreviewPage {...props} status="idle" isAgentWorking={false} />);
+    expect(screen.getByText('Bee Game Studio正在候命')).toBeInTheDocument();
+  });
+
+  it('shows preview preparation only after the preview action is requested', async () => {
+    let finish!: () => void;
+    const onStartPreview = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    render(<BeeGameLivePreviewPage {...props} onStartPreview={onStartPreview} />);
+    fireEvent.click(screen.getByRole('button', { name: '播放预览' }));
+    expect(screen.getByText('正在准备预览')).toBeInTheDocument();
+    await act(async () => finish());
+    expect(screen.getByText('Bee Game Studio正在候命')).toBeInTheDocument();
+  });
+
+  it('keeps agent-working text and ghost state when preview is requested during agent work', async () => {
+    let finish!: () => void;
+    const onStartPreview = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    render(<BeeGameLivePreviewPage {...props} status="running" isAgentWorking onStartPreview={onStartPreview} />);
+    expect(screen.getByText('Bee Game Studio工作中')).toBeInTheDocument();
+    const avatar = screen.getByRole('img');
+    expect(avatar).toHaveAttribute('data-state', 'working');
+    fireEvent.click(screen.getByRole('button', { name: '播放预览' }));
+    expect(screen.getByText('Bee Game Studio工作中')).toBeInTheDocument();
+    expect(screen.queryByText('正在准备预览')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('beegame-preview-surface'));
+    expect(avatar).toHaveAttribute('data-state', 'working');
+    await act(async () => finish());
+  });
+
   it('shows an inline loading badge while the project is starting', () => {
     render(<BeeGameLivePreviewPage {...props} status="starting" />);
     expect(screen.getByTestId('beegame-sync-status')).toHaveTextContent('同步中');
   });
 
-  it('locks preview, external window and publishing while the workspace is busy, then unlocks', () => {
+  it('transitions the same sync badge from loading to success, then hides it', async () => {
+    const { rerender } = render(<BeeGameLivePreviewPage {...props} isSyncing />);
+    const badge = screen.getByTestId('beegame-sync-status');
+    expect(badge).toHaveTextContent('同步中');
+    expect(badge.querySelector('.lucide-loader-circle')).not.toBeNull();
+
+    rerender(<BeeGameLivePreviewPage {...props} isSyncing={false} />);
+    expect(screen.getByTestId('beegame-sync-status')).toBe(badge);
+    expect(badge).toHaveTextContent('已同步');
+    expect(badge.querySelector('.lucide-check')).not.toBeNull();
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 900)); });
+    expect(badge).toBeVisible();
+    await waitFor(() => expect(screen.queryByTestId('beegame-sync-status')).not.toBeInTheDocument(), { timeout: 1_000 });
+  });
+
+  it('locks preview and publishing while the workspace is busy, then unlocks', () => {
     const onStartPreview = vi.fn(), onStopPreview = vi.fn(), onDeployProject = vi.fn(), onOpenExternal = vi.fn();
     const actions = { onStartPreview, onStopPreview, onDeployProject, onOpenExternal };
     const { rerender } = render(<BeeGameLivePreviewPage {...props} {...actions} isWorkspaceBusy />);
     expect(screen.getByRole('button', { name: '播放预览' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '发布游戏' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '部署' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '播放预览' }));
-    fireEvent.click(screen.getByRole('button', { name: '发布游戏' }));
+    fireEvent.click(screen.getByRole('button', { name: '部署' }));
     expect(onStartPreview).not.toHaveBeenCalled();
     expect(onDeployProject).not.toHaveBeenCalled();
     rerender(<BeeGameLivePreviewPage {...props} {...actions} buildReport={live} isWorkspaceBusy />);
     expect(screen.getByRole('button', { name: '停止预览' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '独立窗口预览' })).toBeDisabled();
+    expect(within(screen.getByTestId('beegame-preview-deploy-control')).getByRole('button', { name: '部署' })).toBeDisabled();
     rerender(<BeeGameLivePreviewPage {...props} {...actions} buildReport={live} isWorkspaceBusy={false} />);
     expect(screen.getByRole('button', { name: '停止预览' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '独立窗口预览' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: '发布游戏' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '部署' })).toBeEnabled();
   });
   it('changes the main preview action from play to stop and back', async () => {
     const onStartPreview = vi.fn().mockResolvedValue(undefined);
@@ -76,18 +124,18 @@ describe('dashboard header', () => {
   it.each([['zh', '预览'], ['en', 'Preview'], ['ja', 'プレビュー']] as const)(
     'localizes the preview label for %s', (lang, label) => {
       render(<BeeGameLivePreviewPage {...props} lang={lang} />);
-      expect(within(screen.getByTestId('beegame-preview-split-control')).getByText(label)).toBeInTheDocument();
+      expect(within(screen.getByTestId('beegame-preview-deploy-control')).getByText(label)).toBeInTheDocument();
     },
   );
 
   it('opens project usage in the BeUI popover with separate token categories', () => {
-    render(<BeeGameLivePreviewPage {...props} credits={{ consumedCredits: 1.25 }} tokenUsage={{ prompt_tokens: 123, input_tokens: 100, cache_read_tokens: 200, cached_input_tokens: 250, completion_tokens: 300, total_tokens: 600 }} />);
+    render(<BeeGameLivePreviewPage {...props} projectCreatedAt={Date.now() - 2 * 60 * 60_000} credits={{ consumedCredits: 1.25 }} tokenUsage={{ prompt_tokens: 123, input_tokens: 100, cache_read_tokens: 200, cached_input_tokens: 250, completion_tokens: 300, total_tokens: 600 }} />);
     const trigger = screen.getByTestId('beegame-project-info-trigger');
     expect(trigger).toHaveAttribute('aria-haspopup', 'dialog');
     fireEvent.click(trigger);
     const panel = within(screen.getByTestId('beegame-project-hint'));
-    for (const label of ['已消耗 Credit', '输入 Tokens', '缓存输入 Tokens', '输出']) expect(panel.getByText(label)).toBeInTheDocument();
-    for (const value of ['1.25', '100', '200', '300']) expect(panel.getByText(value)).toBeInTheDocument();
+    for (const label of ['项目运行时间', '已消耗 Credit', '输入 Tokens', '缓存输入 Tokens', '输出']) expect(panel.getByText(label)).toBeInTheDocument();
+    for (const value of ['2小时 0分钟', '1.25', '100', '200', '300']) expect(panel.getByText(value)).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
   });
@@ -95,23 +143,36 @@ describe('dashboard header', () => {
   it('does not turn unavailable usage into zero', () => {
     render(<BeeGameLivePreviewPage {...props} />);
     fireEvent.click(screen.getByTestId('beegame-project-info-trigger'));
-    expect(within(screen.getByTestId('beegame-project-hint')).getAllByText('—')).toHaveLength(4);
+    expect(within(screen.getByTestId('beegame-project-hint')).getAllByText('—')).toHaveLength(5);
   });
 
-  it('labels the external preview separately from a deployed live site', async () => {
-    const onOpenExternal = vi.fn();
-    render(<BeeGameLivePreviewPage {...props} buildReport={live} onOpenExternal={onOpenExternal} />);
-    const button = screen.getByRole('button', { name: '独立窗口预览' });
-    expect(button.textContent).toBe('');
-    expect(button.querySelector('.lucide-external-link')).not.toBeNull();
-    expect(screen.queryByRole('button', { name: '预览操作' })).not.toBeInTheDocument();
-    fireEvent.click(button);
-    expect(onOpenExternal).toHaveBeenCalledWith(expect.stringContaining('/previews/session/game/'));
+  it('copies the displayed project name from the project info popover', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    try {
+      render(<BeeGameLivePreviewPage {...props} />);
+      fireEvent.click(screen.getByTestId('beegame-project-info-trigger'));
+      fireEvent.click(within(screen.getByTestId('beegame-project-hint')).getByRole('button', { name: '复制项目名称' }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith('游戏项目'));
+      expect(screen.getByRole('button', { name: '已复制项目名称' })).toBeInTheDocument();
+    } finally {
+      if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
   });
 
-  it('disables the independent-window button until a preview is available', () => {
-    render(<BeeGameLivePreviewPage {...props} onOpenExternal={vi.fn()} />);
-    expect(screen.getByRole('button', { name: '独立窗口预览' })).toBeDisabled();
+  it('groups preview and deploy actions in one segmented control', () => {
+    render(<BeeGameLivePreviewPage {...props} buildReport={live} onStopPreview={vi.fn()} onDeployProject={vi.fn()} />);
+    const control = within(screen.getByTestId('beegame-preview-deploy-control'));
+    expect(control.getByRole('button', { name: '停止预览' })).toBeEnabled();
+    expect(control.getByRole('button', { name: '部署' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '独立窗口预览' })).not.toBeInTheDocument();
+  });
+
+  it('disables deploy in the segmented control when publishing is unavailable', () => {
+    render(<BeeGameLivePreviewPage {...props} />);
+    expect(within(screen.getByTestId('beegame-preview-deploy-control')).getByRole('button', { name: '部署' })).toBeDisabled();
   });
 
   it('uses a chevron-left icon for dashboard back navigation', () => {

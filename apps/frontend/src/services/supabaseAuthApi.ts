@@ -173,6 +173,33 @@ export async function signUpWithSupabasePassword(
   return session;
 }
 
+export async function verifySupabaseSignupCode(email: string, code: string): Promise<BeeGameSupabaseSession> {
+  const supabaseUrl = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+  if (!supabaseUrl || !anonKey) throw new Error('Supabase Auth is not configured.');
+  const response = await fetch(`${trimTrailingSlash(supabaseUrl)}/auth/v1/verify`, {
+    method: 'POST',
+    headers: { apikey: anonKey, 'content-type': 'application/json' },
+    body: JSON.stringify({ email: email.trim(), token: code.trim(), type: 'signup' }),
+  });
+  if (!response.ok) throw await readSupabaseAuthError(response);
+  const session = toSupabaseSession(await response.json());
+  await persistSupabaseSession(session);
+  return session;
+}
+
+export async function resendSupabaseSignupCode(email: string): Promise<void> {
+  const supabaseUrl = getSupabaseUrl();
+  const anonKey = getSupabaseAnonKey();
+  if (!supabaseUrl || !anonKey) throw new Error('Supabase Auth is not configured.');
+  const response = await fetch(`${trimTrailingSlash(supabaseUrl)}/auth/v1/resend`, {
+    method: 'POST',
+    headers: { apikey: anonKey, 'content-type': 'application/json' },
+    body: JSON.stringify({ email: email.trim(), type: 'signup' }),
+  });
+  if (!response.ok) throw await readSupabaseAuthError(response);
+}
+
 export async function sendSupabasePasswordReset(email: string): Promise<void> {
   const supabaseUrl = getSupabaseUrl();
   const anonKey = getSupabaseAnonKey();

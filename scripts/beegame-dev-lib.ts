@@ -141,9 +141,6 @@ export function buildBeeGameDevPlan(
       },
       {
         name: 'runtime',
-        // The runtime writes durable workflow state under the workspace. A
-        // repository-wide watcher would treat those writes as source changes
-        // and restart the runtime during an active workflow dispatch.
         command: [bunExecutable, 'scripts/dashboard-server-dev.ts'],
         cwd: input.cwd,
         env: buildRuntimeEnv({
@@ -154,12 +151,7 @@ export function buildBeeGameDevPlan(
       },
       {
         name: 'resources',
-        // Start the workflow runtime before the resource worker so durable
-        // semantic-curation jobs can resume through the shared model bridge.
-        // The resource worker still owns the queue; it does not own a second
-        // model provider or configuration path.
-        // Do not use a repository-wide watcher here either: resource job
-        // receipts and previews are durable files written by this process.
+        // The resource worker owns its queue and uses the runtime model bridge.
         command: [bunExecutable, 'packages/beegame-resource-server/src/index.ts'],
         cwd: input.cwd,
         env: buildResourceEnv(input.env, ports),

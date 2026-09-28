@@ -4,6 +4,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useId, useState } from "react";
 import { EASE_IN_OUT } from "../../lib/ease";
 import { cn } from "../../lib/utils";
+import "./loader.css";
 
 export type LoaderVariant =
   | "spinner"
@@ -540,7 +541,7 @@ function Bars({ size, speed, reduce }: PartProps) {
   );
 }
 
-function DotMatrix({ size, speed, reduce }: PartProps) {
+function DotMatrix({ size, speed }: PartProps) {
   const n = 3;
   const gap = size * 0.14;
   const dot = (size - gap * (n - 1)) / n;
@@ -559,21 +560,10 @@ function DotMatrix({ size, speed, reduce }: PartProps) {
         // Diagonal wave: cells light in order of their distance from the corner.
         const delay = ((x + y) / (2 * (n - 1))) * speed;
         return (
-          <motion.span
+          <span
             key={idx}
-            className="rounded-full bg-current"
-            style={{ width: dot, height: dot }}
-            animate={
-              reduce
-                ? { opacity: [0.3, 1, 0.3] }
-                : { opacity: [0.2, 1, 0.2], scale: [0.7, 1, 0.7] }
-            }
-            transition={{
-              duration: speed,
-              ease: EASE_IN_OUT,
-              repeat: Infinity,
-              delay,
-            }}
+            className="beui-dot-matrix-cell rounded-full bg-current"
+            style={{ width: dot, height: dot, animationDuration: `${speed}s`, animationDelay: `${delay}s` }}
           />
         );
       })}

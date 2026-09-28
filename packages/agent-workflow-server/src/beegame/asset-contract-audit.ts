@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, statSync, realpathSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { inflateSync } from 'node:zlib'
 import { parseSpriteSheet, validateSpriteSheetBounds } from '../../../scene-editor/src/sprite-sheet'
 import { readTileSetResource } from './tilemap-contract'
 import {
@@ -34,6 +35,26 @@ export type AssetContractAudit = {
   resources: AssetResourceAudit[]
   bindings: Array<{ requirementId: string; resourceIds: string[] }>
   issues: string[]
+}
+
+/** PNG headers and dimensions can be valid while the image stream is broken. */
+function assertPngPixelStream(bytes: Buffer): void {
+  if (bytes.length < 33 || !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])))
+    throw new Error('Invalid PNG signature')
+  const compressed: Buffer[] = []
+  let offset = 8
+  let ended = false
+  while (offset + 12 <= bytes.length) {
+    const size = bytes.readUInt32BE(offset)
+    if (size > bytes.length - offset - 12) throw new Error('Truncated PNG chunk')
+    const kind = bytes.toString('ascii', offset + 4, offset + 8)
+    if (kind === 'IDAT') compressed.push(bytes.subarray(offset + 8, offset + 8 + size))
+    offset += size + 12
+    if (kind === 'IEND') { ended = true; break }
+  }
+  if (!ended || !compressed.length) throw new Error('Missing PNG image data or end marker')
+  try { inflateSync(Buffer.concat(compressed), { maxOutputLength: 256 * 1024 * 1024 }) }
+  catch { throw new Error('PNG pixel stream cannot be decoded') }
 }
 
 export function auditAssetContract(workspacePath: string): AssetContractAudit {
@@ -98,6 +119,10 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
         const stats = statSync(absolute)
         if (!stats.isFile()) issues.push(`Path is not a file: ${filePath}`)
         else if (!stats.size) issues.push(`File is empty: ${filePath}`)
+        else if (filePath.toLowerCase().endsWith('.png')) {
+          try { assertPngPixelStream(readFileSync(absolute)) }
+          catch (error) { issues.push(`${filePath}: ${error instanceof Error ? error.message : String(error)}`) }
+        }
         else if (filePath.toLowerCase().endsWith('.json')) {
           try {
             const value = JSON.parse(readFileSync(absolute, 'utf8'))

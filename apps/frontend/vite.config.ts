@@ -162,6 +162,9 @@ export default defineConfig(({ mode }) => {
         'axios',
         'react-markdown',
         'motion',
+        // ChatImage imports this lazily; prebundle it at startup so showing the
+        // first generated image does not invalidate already-served dep URLs.
+        'img-fx',
       ],
     },
 

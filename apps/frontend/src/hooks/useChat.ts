@@ -22,7 +22,7 @@ import {
 } from '../services/api'
 import type { ContinueTaskResponse, SendMessageResponse } from '../services/api'
 import type { ProjectEventMessage } from '../types/message'
-import { hasActiveSubagents, isProjectExecutionActive } from '../utils/chatActivity'
+import { isProjectExecutionActive } from '../utils/chatActivity'
 import type { ProjectEventPollingState } from './useProjectEventPolling'
 import { normalizeChatHistory } from '../utils/chatHistory'
 import { normalizeProjectEventSemanticType } from '../utils/messageSemantics'
@@ -203,7 +203,6 @@ export const useChat = ({
     setCurrentSender,
     setIsStreaming,
     loadHistory,
-    hasRunningSubagents,
   } = useChatStore(
     useShallow(state => ({
       addMessage: state.addMessage,
@@ -214,7 +213,6 @@ export const useChat = ({
       setCurrentSender: state.setCurrentSender,
       setIsStreaming: state.setIsStreaming,
       loadHistory: state.loadHistory,
-      hasRunningSubagents: hasActiveSubagents(state.messages),
     })),
   )
   const { pendingPermissions, projectStatus } = useProjectStore(
@@ -495,11 +493,10 @@ export const useChat = ({
           if (['finished', 'stopped', 'idle', 'failed'].includes(message.status || '')) {
             useChatStore.getState().settleActivity(message.task_id, message.turnId || message.turn_id,
               message.status === 'stopped' ? 'stopped' : message.status === 'failed' ? 'failed' : 'incomplete',
-              message.timestamp || Date.now())
+              message.timestamp || Date.now(),
+              message.status === 'idle' && (message.turnId || message.turn_id)
+                ? message.timestamp || Date.now() : undefined)
           }
-          // A worker terminal settles only that worker's activity. The
-          // workflow/project status owns the composer and project lifecycle.
-          if (message.task_kind?.startsWith('workflow_stage:')) break
           // Task status update
           // Requirements: 6.2
           if (
@@ -618,6 +615,15 @@ export const useChat = ({
           break
 
         case 'context_update': {
+          if (message.task_kind === 'delivery_error' && message.content &&
+              (!message.project_id || message.project_id === refs.projectId)) {
+            addMessage({
+              id: message.message_id || `delivery-error-${message.task_id}-${message.timestamp}`,
+              sender: 'system', content: message.content, timestamp: message.timestamp || Date.now(),
+              type: 'system_status', taskKind: 'delivery_error',
+            })
+            break
+          }
           const context = message.context
           if (
             !context ||
@@ -686,7 +692,6 @@ export const useChat = ({
             taskKind: 'runtime_error',
             errorDetails: message.error || message.message || message.code,
           })
-          if (message.task_kind?.startsWith('workflow_stage:')) break
           setIsLoading(false)
           setPermissionState(prev => {
             if (
@@ -980,8 +985,8 @@ export const useChat = ({
         lifecycleRef.current.projectId === requestProjectId &&
         lifecycleRef.current.generation === requestGeneration
       const runtime = useProjectStore.getState().projectStatus
-      const wasBusy = isLoading || hasActiveSubagents(useChatStore.getState().messages) ||
-        (runtime?.project_id === projectId && isProjectExecutionActive(runtime))
+      const wasBusy = isLoading || (runtime?.project_id === projectId &&
+        (isProjectExecutionActive(runtime) || Boolean(runtime.active_subagents?.length)))
       try {
         setIsLoading(true)
         setCanContinue(false)
@@ -1078,9 +1083,9 @@ export const useChat = ({
    * Requirements: 6.4
    */
   const continueTask = useCallback(async () => {
-    if (hasActiveSubagents(useChatStore.getState().messages)) return
     const runtime = useProjectStore.getState().projectStatus
-    if (runtime?.project_id === projectId && isProjectExecutionActive(runtime)) return
+    if (runtime?.project_id === projectId &&
+      (isProjectExecutionActive(runtime) || Boolean(runtime.active_subagents?.length))) return
     if (waitingPermission.isBlockingChat) {
       emitWaitingPermissionBlock(waitingPermission.message)
       return
@@ -1273,10 +1278,10 @@ export const useChat = ({
     stopTask,
     resolveToolPermission,
     permissionState,
-    isLoading: isLoading || hasRunningSubagents,
+    isLoading,
     isStopping,
     currentTaskId,
-    canContinue: canContinue && !hasRunningSubagents,
+    canContinue,
     wsState,
   }
 }

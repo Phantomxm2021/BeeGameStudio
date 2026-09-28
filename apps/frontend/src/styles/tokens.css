@@ -53,6 +53,10 @@
   --border-subtle: color-mix(in srgb, #181a1f 6%, transparent);
   --border: color-mix(in srgb, #181a1f 9%, transparent);
   --border-strong: color-mix(in srgb, #181a1f 14%, transparent);
+  --shadow-raised:
+    0 0 0 1px oklch(0 0 0 / 6%),
+    0 1px 2px oklch(0 0 0 / 6%),
+    0 6px 16px -6px oklch(0 0 0 / 12%);
   --destructive: #c4312d;
   --destructive-foreground: #ffffff;
   --success: #1f7a35;
@@ -108,6 +112,10 @@
   --border-subtle: color-mix(in srgb, #ffffff 6%, transparent);
   --border: color-mix(in srgb, #ffffff 9%, transparent);
   --border-strong: color-mix(in srgb, #ffffff 14%, transparent);
+  --shadow-raised:
+    0 0 0 1px oklch(1 0 0 / 8%),
+    0 1px 2px oklch(0 0 0 / 40%),
+    0 6px 16px -6px oklch(0 0 0 / 60%);
   --destructive: #f85149;
   --destructive-foreground: #090a0c;
   --success: #3fb950;

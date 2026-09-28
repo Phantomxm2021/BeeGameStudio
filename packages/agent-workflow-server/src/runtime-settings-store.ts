@@ -116,6 +116,9 @@ export function mapRuntimeSettingsToEnv(
   if (config.autoMemoryEnabled !== undefined) {
     env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = config.autoMemoryEnabled ? '0' : '1'
   }
+  if (config.skillSearchEnabled !== undefined) {
+    env.SKILL_SEARCH_ENABLED = config.skillSearchEnabled ? '1' : '0'
+  }
   if (config.treeSitterBashEnabled !== undefined) {
     env.FEATURE_TREE_SITTER_BASH = config.treeSitterBashEnabled ? '1' : '0'
   }

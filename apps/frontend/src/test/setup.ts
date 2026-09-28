@@ -71,6 +71,19 @@ beforeAll(() => {
     });
   }
 
+  if (!globalThis.ResizeObserver) {
+    class ResizeObserverMock implements ResizeObserver {
+      disconnect() {}
+      observe() {}
+      unobserve() {}
+    }
+    Object.defineProperty(globalThis, 'ResizeObserver', {
+      value: ResizeObserverMock,
+      writable: true,
+      configurable: true,
+    });
+  }
+
   // JSDOM does not implement media queries. Visual libraries may use this to
   // select a palette even when their theme is explicitly set.
   if (!window.matchMedia) {

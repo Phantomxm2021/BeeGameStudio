@@ -1,5 +1,7 @@
 # 独立图片 Provider 与平台设置
 
+> 本文是 2026-09-20 的实施记录，所述固定每图价、`usage.cost` 换算和旧 Credits/token 费率已退出当前计费规则。现行商店与生图价格口径见 [Credits 与生图计费口径](./credits-and-image-pricing-2026-09-27.md)。
+
 ## 当前状态（2026-09-20 后续接通）
 
 以下“本批”和“后续增量”保留实施记录，当前状态以本节为准。
@@ -42,7 +44,7 @@ Agent 无须抄写日志、维护该文档或提交额外用途/路径字段。�
 
 新增显式 `openrouter` 选项，与 `openai` 并列。所有 Provider 使用管理员填写的完整 endpoint，不探测路径、不回退重发，不替换管理员的 URL、模型或 Key。
 
-OpenRouter 按响应 `usage.cost` 的美元实际费用和管理员配置的 `creditsPerUsd` 结算；本次批准比例为 $1 = 100 Credits，不加价。缺失费用不按零处理，也不回退猜测 token 费用。单次预留不等于供应商侧的硬费用上限。代码回归使用模拟响应；真实图片生成验收尚未完成。
+此段历史实现已废弃；现行计费不读取 `usage.cost` 作为结算依据。现行价格与限制以 [Credits 与生图计费口径](./credits-and-image-pricing-2026-09-27.md) 为准。
 
 ### 本次真实单请求验收（2026-09-20）
 
@@ -65,6 +67,7 @@ OpenRouter 按响应 `usage.cost` 的美元实际费用和管理员配置的 `cr
 - 宿主通过 Provider 模块生成图片，持久化后完整解码。原始 usage 和 request ID 保存在私有 receipt 中，不在 Manifest 伪造来源；Agent 使用现有 Manifest 契约登记文件、hash、尺寸及 AI 来源。
 - 新增管理员图片费率字段，单位为 Credits / 百万 tokens；另配置单次预留与项目总预算。费率默认未配置，不自行决定商业收费。模型不匹配、计费未配置、预留失败时不会调用供应商。
 - 图片预留/结算/释放复用现有钱包，通过服务鉴权与 PostgreSQL 事务执行。重复请求不重复扣费；已有账单但本地结果丢失时禁止重新生成。结算使用预留时的费率快照。
+- Cloudflare 原生 `/ai/run` 的 GPT Image 2.5 Flare 成功响应只有图片 URL 和 `gatewayMetadata.keySource`，没有可结算的 token 用量；不能把后者当 usage，也不能把预留金额当费用。Cloudflare 必须由管理员显式配置每张图片的 BGS 固定售价（Credits，且不高于预留），生成前冻结，成功后按此结算；这不声称等于 Cloudflare 实际账单。未配置时不发送付费请求。已生成、按旧配置预留但未结算的请求维持待核对状态，不因新费率自动扣款或重新生成。
 - 图片未知结果、缺失/不支持的 usage、解码失败、费用超预留：保留结果/预留并报告失败，需人工核对，不自动退费或新建请求。**尚无自动对账/管理员处置界面**，不应把这类请求当作生成成功交付。
 - 同时修复充值先读后写覆盖并发消费的问题，改为事务内增加额度，不修改原有充值金额规则。
 - 分阶段日志记录 reserve、generate-or-recover、price-usage、settle/release 的开始/结束、耗时和脱敏失败分类；不输出 Key 或 prompt 原文。

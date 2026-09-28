@@ -5,9 +5,12 @@
  * causing API errors. The fix detects the actual format from magic bytes.
  */
 import { describe, expect, test } from 'bun:test'
+import sharp from 'sharp'
 import {
   detectImageFormatFromBase64,
   detectImageFormatFromBuffer,
+  ImageResizeError,
+  maybeResizeAndDownsampleImageBuffer,
 } from '../imageResizer.js'
 
 // ── Magic byte helpers ────────────────────────────────────────────────────────
@@ -106,4 +109,15 @@ describe('detectImageFormatFromBase64', () => {
     expect(result).not.toBe('image/jpeg')
     expect(result).toBe('image/png')
   })
+})
+
+test('a small corrupt PNG is rejected locally instead of forwarded to the model', async () => {
+  const valid = await sharp({ create: { width: 2, height: 2, channels: 4,
+    background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer()
+  const corrupt = Buffer.from(valid)
+  corrupt[24] = 6 // Invalid PNG bit depth; the signature and file size still look normal.
+  await expect(maybeResizeAndDownsampleImageBuffer(corrupt, corrupt.length, 'png'))
+    .rejects.toBeInstanceOf(ImageResizeError)
+  const decoded = await maybeResizeAndDownsampleImageBuffer(valid, valid.length, 'png')
+  expect(decoded.mediaType).toBe('png')
 })

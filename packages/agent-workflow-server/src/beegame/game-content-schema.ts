@@ -202,6 +202,12 @@ const uiLayoutSchema = strictObject({
     scale: tuple([finiteNumber, finiteNumber]).optional(),
   })
 
+const uiResponsiveOverrideSchema = strictObject({
+    enabled: boolean().optional(),
+    layout: uiLayoutSchema.optional(),
+    style: record(string(), unknown()).optional(),
+  })
+
 const uiNodeSchema = strictObject({
     id: identifier,
     parentId: identifier.optional(),
@@ -211,6 +217,10 @@ const uiNodeSchema = strictObject({
     text: string().optional(),
     assetRef: identifier.optional(),
     layout: uiLayoutSchema.optional(),
+    responsive: strictObject({
+      compact: uiResponsiveOverrideSchema.optional(),
+      portrait: uiResponsiveOverrideSchema.optional(),
+    }).optional(),
     bindings: record(string(), string()).optional(),
     actions: record(string(), identifier).optional(),
     style: record(string(), unknown()).optional(),

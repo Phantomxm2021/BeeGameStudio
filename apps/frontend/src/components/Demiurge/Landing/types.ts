@@ -1,7 +1,7 @@
 import type { BeeGameIntakeSettings } from '../../../services/beeGameAdapter';
 
 export type Translate = (key: string, options?: Record<string, unknown>) => string;
-export type AuthMode = 'login' | 'register' | 'resetPassword';
+export type AuthMode = 'login' | 'register' | 'resetPassword' | 'verifyEmail';
 
 export type IntakeCopy = {
   modal: { chooseOption: string; productionSettings: string; confirmBuildBrief: string; startBuild: string; close: string };

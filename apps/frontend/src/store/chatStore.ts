@@ -73,7 +73,7 @@ interface ChatState {
   ) => void;
   setCurrentSender: (sender: string | null) => void;
   setIsStreaming: (isStreaming: boolean) => void;
-  settleActivity: (taskId: string, turnId: string | undefined, reason: 'stopped' | 'failed' | 'incomplete', at: number) => void;
+  settleActivity: (taskId: string, turnId: string | undefined, reason: 'stopped' | 'failed' | 'incomplete', at: number, completedAt?: number) => void;
   clearMessages: () => void;
   loadHistory: (messages: Message[]) => void;
   setDocumentExpanded: (messageId: string, expanded: boolean) => void;
@@ -128,20 +128,20 @@ function findMessageIndex(messages: Message[], candidate: Message): number {
 
 function mergeMessages(existing: Message, incoming: Message): Message {
   const isCompaction = existing.taskKind === 'context_compaction' || incoming.taskKind === 'context_compaction';
-  const compactionAlreadyFinished = isCompaction &&
-    existing.streamStatus === 'complete' && incoming.streamStatus === 'streaming';
+  const olderStreamCannotReopen = existing.streamStatus === 'complete' && incoming.streamStatus === 'streaming';
   return withDerivedIdentity({
     ...existing,
     ...incoming,
     id: incoming.messageId || incoming.clientMessageId || existing.id,
-    content: compactionAlreadyFinished ? existing.content : incoming.content || existing.content,
-    streamStatus: compactionAlreadyFinished ? existing.streamStatus : incoming.streamStatus ?? existing.streamStatus,
+    content: olderStreamCannotReopen ? existing.content : incoming.content || existing.content,
+    streamStatus: olderStreamCannotReopen ? existing.streamStatus : incoming.streamStatus ?? existing.streamStatus,
     attachments: incoming.attachments || existing.attachments,
     thought: incoming.thought ?? existing.thought,
     completionReason: Object.prototype.hasOwnProperty.call(incoming, 'completionReason') ||
       (incoming.toolStatus && incoming.toolStatus !== 'running')
       ? incoming.completionReason : incoming.completionReason ?? existing.completionReason,
     thinkingDurationMs: incoming.thinkingDurationMs ?? existing.thinkingDurationMs,
+    turnCompletedAt: incoming.turnCompletedAt ?? existing.turnCompletedAt,
     subagentPrompt: incoming.subagentPrompt ?? existing.subagentPrompt,
     subagentOutput: incoming.subagentOutput ?? existing.subagentOutput,
     subagentTrace: incoming.subagentTrace ?? existing.subagentTrace,
@@ -199,11 +199,11 @@ function reconcileHistory(current: Message[], incoming: Message[]): Message[] {
     remember(merged[index], index);
   }
   return merged.sort((a, b) => {
+    if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
     if (a.sequence !== undefined && b.sequence !== undefined) return a.sequence - b.sequence;
     if (a.turnId && a.turnId === b.turnId) {
       return (a.sourceIndex ?? 0) - (b.sourceIndex ?? 0);
     }
-    if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
     return a.id.localeCompare(b.id);
   });
 }
@@ -432,8 +432,8 @@ export const useChatStore = create<ChatState>()(
         }),
 
       setCurrentSender: (sender) => set({ currentSender: sender }),
-      settleActivity: (taskId, turnId, reason, at) => set(state => {
-        const messages = settleChatActivity(state.messages, { taskId, turnId, reason, at });
+      settleActivity: (taskId, turnId, reason, at, completedAt) => set(state => {
+        const messages = settleChatActivity(state.messages, { taskId, turnId, reason, at, completedAt });
         const streaming = messages.filter(message => message.streamStatus === 'streaming');
         const ids = new Set(streaming.map(message => message.id));
         return { messages, streamingMessageId: streaming.at(-1)?.id ?? null, isStreaming: streaming.length > 0,

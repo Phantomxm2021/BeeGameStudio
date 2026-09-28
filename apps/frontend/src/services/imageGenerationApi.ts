@@ -4,11 +4,13 @@ export interface ImageGenerationSettings {
   billing?: {
     model: string;
     version: string;
-    creditsPerUsd?: number;
-    textInputCreditsPerMillion: number;
-    imageInputCreditsPerMillion: number;
-    textOutputCreditsPerMillion: number;
-    imageOutputCreditsPerMillion: number;
+    markupMultiplier: number;
+    textInputUsdPerMillion: number;
+    cachedTextInputUsdPerMillion: number;
+    imageInputUsdPerMillion: number;
+    cachedImageInputUsdPerMillion: number;
+    imageOutputUsdPerMillion: number;
+    fixedCreditsByVariant?: Partial<Record<`${'low' | 'medium' | 'high' | 'xhigh' | 'max'}:${'1024x1024' | '1024x1536' | '1536x1024'}`, number>>;
     maxRequestCredits: number;
     projectBudgetCredits: number;
   } | null;
@@ -19,6 +21,7 @@ export interface ImageGenerationSettings {
   size: string;
   hasApiKey: boolean;
   hasUpstreamApiKey?: boolean;
+  fixedPricePresets?: Record<string, number>;
 }
 export const getImageGenerationSettings = (provider?: ImageGenerationSettings['provider']): Promise<ImageGenerationSettings> =>
   apiClient.get('/api/image-generation/settings' + (provider ? '?provider=' + provider : ''));

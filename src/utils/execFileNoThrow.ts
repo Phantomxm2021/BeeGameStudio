@@ -5,6 +5,8 @@
 import { type ExecaError, execa } from 'execa'
 import { getCwd } from '../utils/cwd.js'
 import { logError } from './log.js'
+import { basename } from 'node:path'
+import { subprocessEnv } from './subprocessEnv.js'
 
 export { execSyncWithDefaults_DEPRECATED } from './execFileNoThrowPortable.js'
 
@@ -106,18 +108,36 @@ export function execFileNoThrowWithCwd(
   },
 ): Promise<{ stdout: string; stderr: string; code: number; error?: string }> {
   return new Promise(resolve => {
-    // Use execa for cross-platform .bat/.cmd compatibility on Windows
-    execa(file, args, {
-      maxBuffer,
-      cancelSignal: abortSignal,
-      timeout: finalTimeout,
-      cwd: finalCwd,
-      env: finalEnv,
-      shell,
-      stdin: finalStdin,
-      input: finalInput,
-      reject: false, // Don't throw on non-zero exit codes
-    })
+    // Git also runs implicitly (status/diffs), outside the Bash tool. Repository
+    // config can execute filters/fsmonitor, so it must inherit project isolation.
+    // Match a structured executable, never parse or rewrite an Agent's command.
+    const isolatedGit = process.env.BEEGAME_PROJECT_EXECUTION === '1' &&
+      ['git', 'git.exe'].includes(basename(file).toLowerCase())
+    void (async () => {
+      if (isolatedGit) {
+        const { SandboxManager } = await import('./sandbox/sandbox-adapter.js')
+        if (!SandboxManager.isSandboxingEnabled()) throw new Error('Project Git requires an active execution sandbox')
+        const quote = (part: string) => "'" + part.replaceAll("'", "'\"'\"'") + "'"
+        const command = await SandboxManager.wrapWithSandbox([file, ...args].map(quote).join(' '), '/bin/bash', undefined, abortSignal)
+        return execa('/bin/bash', ['-c', command], {
+          maxBuffer, cancelSignal: abortSignal, timeout: finalTimeout, cwd: finalCwd,
+          env: subprocessEnv(finalEnv), extendEnv: false,
+          stdin: finalStdin, input: finalInput, reject: false,
+        })
+      }
+      // Use execa for cross-platform .bat/.cmd compatibility on Windows
+      return execa(file, args, {
+        maxBuffer,
+        cancelSignal: abortSignal,
+        timeout: finalTimeout,
+        cwd: finalCwd,
+        env: finalEnv,
+        shell,
+        stdin: finalStdin,
+        input: finalInput,
+        reject: false, // Don't throw on non-zero exit codes
+      })
+    })()
       .then(result => {
         if (result.failed) {
           if (finalPreserveOutput) {

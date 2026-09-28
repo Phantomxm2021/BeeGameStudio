@@ -3,7 +3,7 @@
 const contexts: Array<{buffers:Set<unknown>;textures:Set<unknown>}>=[]
 const original=HTMLCanvasElement.prototype.getContext
 const seen=new WeakSet<object>()
-HTMLCanvasElement.prototype.getContext=function(...args:any[]){
+HTMLCanvasElement.prototype.getContext=function(this: HTMLCanvasElement,...args:any[]){
   const gl=(original as any).apply(this,args)
   if(gl && /^webgl2?$/.test(args[0]) && !seen.has(gl)){
     seen.add(gl)

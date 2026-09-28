@@ -23,6 +23,27 @@ afterAll(() => {
 })
 
 describe('DashboardRepository Supabase boundaries', () => {
+  test('forwards only explicitly configured host artifact credentials', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-artifact-env-'))
+    const previousUrl = process.env.BEEGAME_ARTIFACTS_URL
+    const previousToken = process.env.BEEGAME_ARTIFACTS_TOKEN
+    const repository = new DashboardRepository({
+      dashboardDataRoot: dataRoot, getUserDataRoot: () => dataRoot, skillsConfig: false,
+    })
+    try {
+      process.env.BEEGAME_ARTIFACTS_URL = 'https://artifacts.example.test'
+      process.env.BEEGAME_ARTIFACTS_TOKEN = 'configured-test-token'
+      const env = await repository.getRuntimeEnv(dataRoot)
+      expect(env.BEEGAME_ARTIFACTS_URL).toBe('https://artifacts.example.test')
+      expect(env.BEEGAME_ARTIFACTS_TOKEN).toBe('configured-test-token')
+    } finally {
+      if (previousUrl === undefined) delete process.env.BEEGAME_ARTIFACTS_URL
+      else process.env.BEEGAME_ARTIFACTS_URL = previousUrl
+      if (previousToken === undefined) delete process.env.BEEGAME_ARTIFACTS_TOKEN
+      else process.env.BEEGAME_ARTIFACTS_TOKEN = previousToken
+      await rm(dataRoot, { recursive: true, force: true })
+    }
+  })
   test('does not treat user runtime settings as platform runtime capabilities', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     const userRoot = join(dataRoot, 'users', 'owner-user')
@@ -51,7 +72,7 @@ describe('DashboardRepository Supabase boundaries', () => {
     }
   })
 
-  test('maps platform runtime settings without injecting BeeGame skills', async () => {
+  test('exposes the shared built-in Skill catalog without mixing user configuration', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'beegame-repository-'))
     const userARoot = join(dataRoot, 'users', 'owner-a')
     const userBRoot = join(dataRoot, 'users', 'owner-b')
@@ -73,16 +94,17 @@ describe('DashboardRepository Supabase boundaries', () => {
       const ownerAEnv = await repository.getRuntimeEnv(userARoot, 'owner-a')
       const ownerBEnv = await repository.getRuntimeEnv(userBRoot, 'owner-b')
 
-      expect(ownerAEnv).not.toHaveProperty('SKILL_SEARCH_ENABLED')
-      expect(ownerBEnv).not.toHaveProperty('SKILL_SEARCH_ENABLED')
+      expect(ownerAEnv.SKILL_SEARCH_ENABLED).toBe('1')
+      expect(ownerBEnv.SKILL_SEARCH_ENABLED).toBe('1')
       expect(ownerAEnv.FEATURE_MCP_SKILLS).toBe('0')
       expect(ownerBEnv.FEATURE_MCP_SKILLS).toBe('0')
       expect(ownerAEnv.BEEGAME_CONFIG_DIR).not.toBe(ownerBEnv.BEEGAME_CONFIG_DIR)
-      expect(existsSync(join(
-        ownerBEnv.BEEGAME_CONFIG_DIR,
-        'skills',
-        'game-art-director-expert',
-      ))).toBe(false)
+      expect(ownerAEnv.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR)
+        .toBe(ownerBEnv.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR)
+      expect(existsSync(join(ownerBEnv.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR,
+        'game-art-director-expert', 'SKILL.md'))).toBe(true)
+      expect(existsSync(join(ownerBEnv.BEEGAME_CONFIG_DIR,
+        'skills', 'game-art-director-expert'))).toBe(false)
       await expect(
         readFile(join(ownerAEnv.BEEGAME_CONFIG_DIR, 'settings.json'), 'utf8'),
       ).resolves.toContain('"skillSearchEnabled": true')
@@ -132,6 +154,7 @@ describe('DashboardRepository Supabase boundaries', () => {
             env: {
               OPENAI_BASE_URL: 'https://provider.test/v1',
               FEATURE_MCP_SKILLS: '0',
+              BEEGAME_RUNTIME_SETTINGS_JSON: JSON.stringify({ skillSearchEnabled: true }),
               BEEGAME_CONFIG_DIR: '/forged/other-user',
               NPM_CONFIG_CACHE: '/forged/other-user/npm-cache',
               NPM_CONFIG_USERCONFIG: '/forged/other-user/npmrc',
@@ -160,6 +183,7 @@ describe('DashboardRepository Supabase boundaries', () => {
         exaEndpointUrl: 'https://search.test/mcp', webFetchHttpTimeoutMs: 12000,
       })
       expect(env.FEATURE_MCP_SKILLS).toBe('0')
+      expect(env.SKILL_SEARCH_ENABLED).toBe('1')
       expect(env.BEEGAME_CONFIG_DIR).toBe(join(userRoot, '.runtime', 'app'))
       expect(env).not.toHaveProperty('CLAUDE_CONFIG_DIR')
       expect(env).not.toHaveProperty('BEEGAME_PROJECT_CONFIG_DIR_NAME')

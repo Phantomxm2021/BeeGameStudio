@@ -2,7 +2,9 @@ import { z } from 'zod/v4'
 import { TILEMAP_AUTHORING_CONTRACT } from './tilemap-authoring-contract'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { CONTENT_COORDINATE_CONTRACT, UI_ANCHORS, UI_PAINT_PHASES } from '../../../scene-editor/src/content-coordinates'
+import { CONTENT_RUNTIME_CONTRACT } from './content-runtime-contract'
 import type { BeeGameAssetManifest } from './asset-contracts'
 import {
   BEEGAME_CONTENT_DOCUMENT_SCHEMA,
@@ -19,15 +21,8 @@ import {
 const digest = z.string().regex(/^[a-f0-9]{64}$/)
 
 export const CONTENT_AUTHORING_CONTRACT_PATH = '.beegame/delivery/content-contract.json'
-export const GAME_CONTENT_VALIDATION_COMMAND = {
-  executable: process.execPath,
-  args: [new URL('./game-content-validation-cli.ts', import.meta.url).pathname],
-} as const
-export const GAME_CONTENT_INSPECTION_COMMAND = {
-  executable: process.execPath,
-  args: [...GAME_CONTENT_VALIDATION_COMMAND.args, '.', '--inspect'],
-  usage: 'Run in the project workspace. Lists registered files; append a content-relative file path for its node index, then --node <id> for the exact authored node.',
-} as const
+export const CONTENT_FORMAT_PATH = '.beegame/delivery/content-format.json'
+export const CONTENT_CHECKER_PATH = '.beegame/delivery/check-content.mjs'
 
 const inputSchema = z
   .strictObject({
@@ -42,22 +37,57 @@ export type SceneUiContentAuthoringInput = Readonly<{
   manifest: BeeGameAssetManifest
 }>
 
+let checkerBundle: Promise<string> | undefined
+function bundledContentChecker(): Promise<string> {
+  // Repeated in-process builds in our Bun 1.3 regression fixture report wrong
+  // source paths/read failures. Keep compilation out of the long-lived runtime.
+  return checkerBundle ??= (async () => {
+    const child = Bun.spawn([process.execPath, 'build',
+      fileURLToPath(new URL('./game-content-validation-cli.ts', import.meta.url)),
+      '--target=bun', '--minify'], { stdout: 'pipe', stderr: 'pipe' })
+    const [code, source, error] = await Promise.all([
+      child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+    ])
+    if (code !== 0 || !source) throw new Error(`Cannot publish content checker: ${error}`)
+    return source
+  })().catch(error => { checkerBundle = undefined; throw error })
+}
+
+/** Design-time format is not the later project-specific authority snapshot. */
+export async function materializeSceneUiFormat(workspacePath: string) {
+  const format = structuredClone(buildSceneUiContentAuthoringAuthority({
+    documentRevision: '0'.repeat(64), assetManifestRevision: '0'.repeat(64),
+    manifest: {} as BeeGameAssetManifest,
+  }).contract.output.format) as Record<string, any>
+  delete format.index.documentRevision
+  delete format.index.assetManifestRevision
+  format.revisionFields = 'documentRevision and assetManifestRevision are required BGS-supplied metadata, not Agent-defined hashes. Their actual values are supplied in content-contract.json when content authoring begins; none are available at design time.'
+  await mkdir(dirname(join(workspacePath, CONTENT_FORMAT_PATH)), { recursive: true })
+  await writeFile(join(workspacePath, CONTENT_FORMAT_PATH), JSON.stringify(format, null, 2) + '\n')
+}
+
 /** Keep large reference material in a readable file, not in every model request. */
 export async function materializeSceneUiAuthoringContract(workspacePath: string, task: SceneUiContentAuthoringAuthority) {
   const authoringContractPath = CONTENT_AUTHORING_CONTRACT_PATH
   const target = join(workspacePath, authoringContractPath)
   await mkdir(dirname(target), { recursive: true })
-  await writeFile(target, JSON.stringify(task.contract.output.format, null, 2) + '\n')
-  const { assetManifest: _manifest, output, ...shared } = task.contract
-  const { format: _format, ...outputIndex } = output
-  return { ...shared, output: outputIndex, authoringContractPath,
-    inspectionCommand: GAME_CONTENT_INSPECTION_COMMAND,
-    assetManifestPath: 'assets/asset-manifest.json' }
+  const inputs = {
+    documentRevision: task.contract.documentRevision,
+    assetManifestRevision: task.contract.assetManifestRevision,
+    authoringContractPath,
+    assetManifestPath: 'assets/asset-manifest.json',
+    validationCommand: `bun ${CONTENT_CHECKER_PATH}`,
+    authorityCommand: `bun ${CONTENT_CHECKER_PATH} --authority`,
+    inspectionCommand: `bun ${CONTENT_CHECKER_PATH} --inspect [content-relative-file [--node id]]`,
+    revisionUsage: 'Copy these BGS-supplied values into content/index.json; they are not hash algorithms to design. If docs/resources change during this turn, --authority reads their current values locally. The checker is read-only and uses the same implementation as BGS.',
+  }
+  await writeFile(join(workspacePath, CONTENT_CHECKER_PATH), await bundledContentChecker(), 'utf8')
+  await materializeSceneUiFormat(workspacePath)
+  await writeFile(target, JSON.stringify({ ...task.contract.output.format, inputs }, null, 2) + '\n')
+  return inputs
 }
 
 export type SceneUiContentAuthoringAuthority = Readonly<{
-  task: 'GAME_CONTENT'
-  allowedPaths: readonly ['content/']
   contract: Readonly<{
     documentRevision: string
     assetManifestRevision: string
@@ -69,15 +99,6 @@ export type SceneUiContentAuthoringAuthority = Readonly<{
       documentSchema: typeof BEEGAME_CONTENT_DOCUMENT_SCHEMA
       kinds: readonly ['scene-2d', 'scene-3d', 'ui-screen', 'ui-hud', 'ui-flow', 'vfx']
       format: Readonly<Record<string, unknown>>
-    }>
-    validationCommand: Readonly<{
-      executable: string
-      args: readonly string[]
-    }>
-    previewCommand: Readonly<{
-      executable: string
-      args: readonly string[]
-      outputRoot: 'content/previews/'
     }>
   }>
 }>
@@ -103,6 +124,7 @@ export function buildSceneUiContentAuthoringAuthority(
       format: {
         strict: true,
         coordinates: CONTENT_COORDINATE_CONTRACT,
+        runtimeConsumption: CONTENT_RUNTIME_CONTRACT,
         tilemap: TILEMAP_AUTHORING_CONTRACT,
         index: {
           schema: BEEGAME_CONTENT_PACKAGE_SCHEMA,
@@ -174,7 +196,7 @@ export function buildSceneUiContentAuthoringAuthority(
           requiredData: {
             camera: {
               orthographic: '<boolean>',
-              orthographicSize: '<positive-number when orthographic>',
+              orthographicSize: '<positive-number; for scene-2d must equal settings.coordinateSystem.height / (2 * settings.coordinateSystem.pixelsPerUnit)>',
               fieldOfView: '<number in (0,180) when perspective>',
               coordinateSpace: '<logical-pixels|world-units>',
               viewport: { width: '<positive-number>', height: '<positive-number>' },
@@ -234,7 +256,8 @@ export function buildSceneUiContentAuthoringAuthority(
         uiLayoutContract: {
           anchors: UI_ANCHORS,
           referenceResolution: 'Root data.referenceResolution is [width, height] in logical pixels. Root layout.size, if present, must match it.',
-          anchor: 'top/middle/bottom-left/center/right. Position is an offset from that anchor on the parent rectangle; the same point on the child is its pivot. data.anchor {x,y} may override only the child pivot.',
+          responsive: 'The base layout is the reference composition. Optional node.responsive.compact and node.responsive.portrait may override enabled, layout fields and style fields. Compact applies when the shorter viewport side is <=600 logical pixels; portrait applies when height>width, after compact. Unspecified fields inherit. For screen-space UI, use the actual viewport as root size; world-space UI keeps its authored root size. Keep essential controls readable and inside the device safe area. Do not stretch the whole composition to a different aspect ratio.',
+          anchor: 'top/middle/bottom-left/center/right. Position is an offset from that anchor on the parent rectangle. The child pivot defaults to the same anchor, not [0,0]; data.anchor {x,y} may override only the child pivot. Example: a 300px-wide button centered in a 390px portrait viewport uses top-center, position [0,y], size [300,h] and renders from x=45; position [-150,y] would clip it. A middle-center panel at position [0,0] is centered; position [-width/2,-height/2] offsets it twice and can clip it.',
           textStyle: 'Use style.fontSize, style.color, style.align, style.verticalAlign and style.lineHeight. For an actual font file use data.font.assetRef; do not invent font asset aliases.',
           textFit: 'After loading the actual font file, measure HUD values and labels at their authored font size (including the largest expected score/time/count and each supported language). Size text bounds and spacing to fit those measurements, not character-count estimates. Keep numeric counters intact; do not rely on arbitrary character wrapping, runtime shrinking, or editor-specific layout overrides to hide undersized bounds. Check both the generated UI and target runtime before reporting visual acceptance.',
           image: 'Use assetRef + optional data.member for the image file, data.frame for an exact case-sensitive atlas frame name (without extension). Inspect the delivered atlas; never guess names.',
@@ -276,6 +299,10 @@ export function buildSceneUiContentAuthoringAuthority(
           },
         },
         rules: [
+          'Content is the editable source of Scene/UI layout, not a placeholder for layout to be recreated in runtime source. Cover each planned screen and authored level through registered documents; shared scenes and procedural behavior configs are valid only when they actually express the intended variations using the declared format. Do not invent an unregistered level-file kind.',
+          'This registry accepts Scene, UI and VFX documents only. Shared gameplay tuning or other project-specific data may live in one project-owned JSON file outside content/ and be loaded by the game; do not duplicate shared values in every scene or claim an unsupported content document kind.',
+          'Runtime code implements asset loading, data parsing and gameplay behavior in the chosen framework/engine. It consumes node IDs/hierarchy, transforms, text/images, layout, Tilemap cells and bindings from these documents; it does not maintain a second hand-authored copy. Compiled or cached artifacts are derived, not editable authority.',
+          'Verify data consumption by changing a relevant source layout/text/image/cell in a temporary copy and checking the target runtime result without editing its layout code. Compare coverage and composition against the design; this format checker only verifies structure/references, not game-design quality or playability.',
           'The shown index, document, data and node keys are the complete allowed keys; omit optional placeholder fields instead of adding alternatives.',
           'Every file path in index.files is relative to content/.',
           'Index documents is the runtime load registry: list every index.files entry exactly once with its canonical id, path, kind and loadPhase. Mark entryScene and only the UI documents needed for the first interactive frame as startup; mark other screens, scenes and VFX on-demand. Fetch startup documents first and fetch on-demand documents only when the game enters or needs them.',
@@ -289,7 +316,7 @@ export function buildSceneUiContentAuthoringAuthority(
           'ParticleSystem owns simulation modules; ParticleSystemRenderer owns its material/texture and must share the GameObject. MeshRenderer requires MeshFilter. TilemapRenderer requires Tilemap. Never mix Rigidbody with Rigidbody2D on one GameObject.',
           'Put scene-wide world, camera and layer settings in scene data.settings or on a camera component/node. Do not encode settings as a world-config node.',
           'UI node role is a closed vocabulary: use exactly one value from format.uiVocabulary.roles. Never invent a role from a visual name, business label, control variant or implementation class.',
-          'A UI role describes the authored object purpose, not an asset kind. Only format.uiVocabulary.assetBackedRoles may own node.assetRef; structural, control, procedural and behavior roles must keep node.assetRef absent and place any referenced image or texture in their existing nested data/style reference.',
+          'A UI role describes the authored object purpose, not an asset kind. Every node with an assetBackedRole (image, sprite, nineSlicePanel) requires node.assetRef; a nested data.image.assetRef is not a substitute. Other roles must keep node.assetRef absent and place any referenced image or texture in their existing nested data/style reference.',
           'Use the exact root role in format.uiVocabulary.rootByDocumentKind. A ui-flow document contains only its flow-root plus flow-screen children; visual UI belongs in ui-screen or ui-hud documents.',
           'For a multi-file visual resource, set data.member (or the equivalent nested texture/sprite action member) whenever the node needs a file other than the resource root; do not rely on filename guessing.',
           'Visible authored world graphics must use a real renderer plus a verified asset. A scene Image may omit assetRef only when it is an intentionally solid-color Unity UI graphic on a Canvas; encode its color/opacity in data. Collider and trigger components are non-visual. A nine-slice panel that uses an image remains an asset-backed UI node and must reference its verified image resource and member.',
@@ -299,19 +326,8 @@ export function buildSceneUiContentAuthoringAuthority(
         ],
       },
     },
-    validationCommand: GAME_CONTENT_VALIDATION_COMMAND,
-    previewCommand: {
-      executable: process.execPath,
-      args: [
-        new URL('./scene-content-preview-cli.ts', import.meta.url).pathname,
-        '.',
-      ],
-      outputRoot: 'content/previews/' as const,
-    },
   } as const
   return Object.freeze({
-    task: 'GAME_CONTENT',
-    allowedPaths: ['content/'] as const,
     contract,
   })
 }

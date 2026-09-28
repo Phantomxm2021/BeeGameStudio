@@ -280,14 +280,6 @@ function compareCandidateSelections(
   return compareText(leftKey, rightKey)
 }
 
-function hasImmutableContentHash(element: ResourceElement): boolean {
-  const value = element.specs.contentHash
-  if (typeof value !== 'string' || value.length !== 64) return false
-  for (const character of value.toLocaleLowerCase())
-    if (!'0123456789abcdef'.includes(character)) return false
-  return true
-}
-
 function packMatches(pack: ResourcePack, elements: readonly ResourceElement[], filters?: ResourceCatalogFilter): boolean {
   if (!filters) return true
   if (filters.packIds?.length && !filters.packIds.includes(pack.id)) return false

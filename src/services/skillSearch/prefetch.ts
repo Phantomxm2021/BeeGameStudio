@@ -7,27 +7,24 @@ import {
   getSkillIndex,
   searchSkills,
   type SearchResult,
+  type SkillIndexEntry,
 } from './localSearch.js'
-import { normalizeQueryIntent } from './intentNormalize.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseFrontmatter } from '../../utils/frontmatterParser.js'
 
 /**
- * Per-session memoization to avoid re-emitting the same skill discovery /
- * gap signal twice. Each Set is bounded to keep long-running sessions from
- * monotonically accumulating skill names and signal keys forever (which
- * was the original session-scoped-but-unbounded design).
+ * Discovery dedup uses context.discoveredSkillNames, which belongs to the
+ * current session. Gap-signal dedup remains process-local and bounded.
  *
  * FIFO eviction by insertion order — once the cap is hit, the oldest
- * entries roll off and may be re-recorded if rediscovered, which is the
- * correct degraded behaviour: at worst we re-emit a duplicate signal,
+ * entries roll off and may be re-recorded, which is the correct degraded
+ * behaviour: at worst we re-emit a duplicate gap signal,
  * never silently drop a real one.
  */
 const SESSION_TRACKING_MAX = 1000
 const SESSION_TRACKING_TRIM_TO = 750
-const discoveredThisSession = new Set<string>()
 const recordedGapSignals = new Set<string>()
 
 function addBoundedSessionEntry(set: Set<string>, value: string): void {
@@ -59,32 +56,34 @@ export function extractQueryFromMessages(
 
   if (input) parts.push(input)
 
-  // Walk backward. In inter-turn prefetch the most recent 'user' message is
-  // typically a tool_result (no text block), so we must keep walking until we
-  // find a real user utterance with string content or a text block.
+  // Within a long turn, the agent's latest visible progress is more specific
+  // than the original user request. Tool results and thinking are not intent.
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i] as Record<string, unknown>
-    if (msg.type !== 'user') continue
-    const content = msg.content
+    if (msg.type !== 'user' && (input || msg.type !== 'assistant')) continue
+    const content =
+      msg.type === 'assistant'
+        ? (msg.message as Record<string, unknown> | undefined)?.content
+        : msg.content
     if (typeof content === 'string') {
-      parts.push(content.slice(0, 500))
-      break
+      if (content.trim()) {
+        parts.push(content.slice(0, 500))
+        break
+      }
     }
     if (Array.isArray(content)) {
-      let foundText = false
+      const textBlocks: string[] = []
       for (const block of content) {
         const entry = block as Record<string, unknown>
-        // Skip tool_result and other non-text blocks — they carry no discovery
-        // signal and would return undefined here regardless.
+        // Never search tool output, tool arguments, or private thinking.
         if (entry.type && entry.type !== 'text') continue
-        const text = entry.text
-        if (typeof text === 'string' && text.trim()) {
-          parts.push(text.slice(0, 500))
-          foundText = true
-          break
-        }
+        if (typeof entry.text === 'string' && entry.text.trim())
+          textBlocks.push(entry.text.slice(0, 500))
       }
-      if (foundText) break
+      if (textBlocks.length > 0) {
+        parts.push(textBlocks.join(' ').slice(0, 1000))
+        break
+      }
     }
   }
 
@@ -95,6 +94,7 @@ function buildDiscoveryAttachment(
   skills: SkillDiscoveryResult[],
   signal: DiscoverySignal,
   gap?: SkillDiscoveryGap,
+  catalogFallback = false,
 ): Attachment {
   return {
     type: 'skill_discovery',
@@ -102,7 +102,40 @@ function buildDiscoveryAttachment(
     signal,
     source: 'native',
     gap,
+    catalogFallback,
   } as Attachment
+}
+
+function selectSkillDiscovery(
+  query: string,
+  index: SkillIndexEntry[],
+): { results: SearchResult[]; catalogFallback: boolean } {
+  const direct = searchSkills(query, index)
+  // A relevant recommendation need not be confident enough to auto-load.
+  // The agent remains free to invoke it or ignore it.
+  if (index.length > 0 && direct.length === 0) {
+    return { results: [], catalogFallback: true }
+  }
+  return { results: direct, catalogFallback: false }
+}
+
+const CATALOG_MAX_CHARS = 8_000
+const CATALOG_MAX_DESCRIPTION_CHARS = 160
+
+function catalogCandidates(index: SkillIndexEntry[]): SkillDiscoveryResult[] {
+  const namesLength = index.reduce((length, skill) => length + skill.name.length + 4, 0)
+  const descriptionLength = Math.max(0, Math.min(
+    CATALOG_MAX_DESCRIPTION_CHARS,
+    Math.floor((CATALOG_MAX_CHARS - namesLength) / index.length),
+  ))
+  return index.map(skill => ({
+    name: skill.name,
+    description: skill.description.replace(/\s+/g, ' ').slice(0, descriptionLength),
+  }))
+}
+
+function catalogKey(index: SkillIndexEntry[]): string {
+  return `\u0000skill-catalog:${index.map(skill => skill.name).join('\u001f')}`
 }
 
 type SkillDiscoveryResult = {
@@ -262,13 +295,28 @@ export async function startSkillDiscoveryPrefetch(
       ((toolUseContext as Record<string, unknown>).cwd as string) ??
       process.cwd()
     const index = await getSkillIndex(cwd)
-    const results = searchSkills(queryText, index)
+    const { results, catalogFallback } = selectSkillDiscovery(queryText, index)
 
-    const newResults = results.filter(r => !discoveredThisSession.has(r.name))
+    if (catalogFallback) {
+      const key = catalogKey(index)
+      if (toolUseContext.discoveredSkillNames?.has(key)) return []
+      toolUseContext.discoveredSkillNames?.add(key)
+      const signal: DiscoverySignal = {
+        trigger: 'assistant_turn',
+        queryText: queryText.slice(0, 200),
+        startedAt,
+        durationMs: Date.now() - startedAt,
+        indexSize: index.length,
+        method: 'catalog',
+      }
+      return [buildDiscoveryAttachment(catalogCandidates(index), signal, undefined, true)]
+    }
+
+    const newResults = results.filter(r => !toolUseContext.discoveredSkillNames?.has(r.name))
     if (newResults.length === 0) return []
 
     for (const r of newResults)
-      addBoundedSessionEntry(discoveredThisSession, r.name)
+      toolUseContext.discoveredSkillNames?.add(r.name)
 
     const signal: DiscoverySignal = {
       trigger: 'assistant_turn',
@@ -295,16 +343,6 @@ export async function startSkillDiscoveryPrefetch(
   }
 }
 
-export async function collectSkillDiscoveryPrefetch(
-  pending: Promise<Attachment[]>,
-): Promise<Attachment[]> {
-  try {
-    return await pending
-  } catch {
-    return []
-  }
-}
-
 export async function getTurnZeroSkillDiscovery(
   input: string,
   _messages: Message[],
@@ -319,21 +357,20 @@ export async function getTurnZeroSkillDiscovery(
     const cwd =
       ((context as Record<string, unknown>).cwd as string) ?? process.cwd()
     const index = await getSkillIndex(cwd)
-    // Intent normalization (feature-flagged, ASCII-only fast path, graceful
-    // fallback to original). Turn-zero is the one blocking entry — acceptable
-    // to add a Haiku call here since a bad match here pollutes the LLM's
-    // context for the entire session.
-    const searchQuery = await normalizeQueryIntent(input)
-    const results = searchSkills(searchQuery, index)
-    const enriched = await enrichResultsForAutoLoad(results, context)
-    const gap = enriched.some(result => result.autoLoaded)
+    const { results, catalogFallback } = selectSkillDiscovery(input, index)
+    const key = catalogFallback ? catalogKey(index) : undefined
+    if (key && context.discoveredSkillNames?.has(key)) return null
+    const enriched = catalogFallback
+      ? catalogCandidates(index)
+      : await enrichResultsForAutoLoad(results, context)
+    const gap = catalogFallback || enriched.some(result => result.autoLoaded)
       ? undefined
       : await maybeRecordSkillGap(input, results, context, 'user_input')
 
-    if (results.length === 0 && !gap) return null
+    if (enriched.length === 0 && !gap) return null
 
-    for (const r of results)
-      addBoundedSessionEntry(discoveredThisSession, r.name)
+    if (key) context.discoveredSkillNames?.add(key)
+    else for (const r of results) context.discoveredSkillNames?.add(r.name)
 
     const signal: DiscoverySignal = {
       trigger: 'user_input',
@@ -341,14 +378,14 @@ export async function getTurnZeroSkillDiscovery(
       startedAt,
       durationMs: Date.now() - startedAt,
       indexSize: index.length,
-      method: 'tfidf',
+      method: catalogFallback ? 'catalog' : 'tfidf',
     }
 
     logForDebugging(
-      `[skill-search] turn-zero found ${results.length} skills in ${signal.durationMs}ms`,
+      `[skill-search] turn-zero surfaced ${enriched.length} skills in ${signal.durationMs}ms`,
     )
 
-    return buildDiscoveryAttachment(enriched, signal, gap)
+    return buildDiscoveryAttachment(enriched, signal, gap, catalogFallback)
   } catch (error) {
     logForDebugging(`[skill-search] turn-zero error: ${error}`)
     return null

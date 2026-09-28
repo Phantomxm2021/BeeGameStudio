@@ -1,2 +1,5 @@
-# ACP_RCS_URL=http://localhost:3000 ACP_RCS_TOKEN=test-my-key acp-link ccb-bun -- --acp
-ACP_RCS_URL=https://remote-control.claude-code-best.win/ ACP_RCS_TOKEN=test-my-key acp-link ccb-bun -- --acp
+#!/usr/bin/env bash
+set -euo pipefail
+: "${ACP_RCS_URL:?Set ACP_RCS_URL to your Bee Game Studio remote-control server}"
+: "${ACP_RCS_TOKEN:?Set ACP_RCS_TOKEN to its access token}"
+exec acp-link ccb-bun -- --acp

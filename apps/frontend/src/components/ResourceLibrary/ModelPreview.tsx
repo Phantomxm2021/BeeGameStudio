@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import * as THREE from 'three'
 import { Palette, Pause, Play, Repeat2, Sun } from 'lucide-react'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -640,6 +641,7 @@ export function modelAnimations(object: THREE.Object3D): THREE.AnimationClip[] {
 }
 
 export function ModelPreview({ url, sourcePath, extension, materialTextureBindings = {}, textureUrls = {}, externalResourceUrls = {}, externalReferences = [], onMetrics, onMetricsError }: ModelPreviewProps) {
+  const { t } = useTranslation('resourceLibrary')
   const host = useRef<HTMLDivElement>(null)
   const onMetricsRef = useRef(onMetrics)
   const onMetricsErrorRef = useRef(onMetricsError)
@@ -830,7 +832,7 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
         if (onMetricsRef.current) {
           void persistModelMetrics(onMetricsRef.current, calculateModelMetrics(loaded.object, [...unresolvedTextures], loaded.animations)).then(metricsError => {
             if (!metricsError || !active) return
-            setError('模型信息保存失败，请重试。')
+            setError(t('modelPreview.saveFailed'))
             onMetricsErrorRef.current?.(metricsError)
           })
         }
@@ -902,11 +904,11 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
   return <div className="relative h-full min-h-64 w-full">
     <div ref={host} className="h-full min-h-64 w-full" />
     <div className="absolute left-1/2 top-3 z-10 inline-flex -translate-x-1/2 rounded-lg border border-border bg-background/95 p-1 shadow-lg">
-      <button type="button" aria-label="Albedo preview" title="原色预览" onClick={() => setPreviewMode('albedo')} className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition ${previewMode === 'albedo' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-        <Palette className="h-3.5 w-3.5" />原色
+      <button type="button" aria-label={t('modelPreview.albedo')} title={t('modelPreview.albedo')} onClick={() => setPreviewMode('albedo')} className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition ${previewMode === 'albedo' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+        <Palette className="h-3.5 w-3.5" />{t('modelPreview.albedo')}
       </button>
-      <button type="button" aria-label="Studio lighting preview" title="工作室光照" onClick={() => setPreviewMode('lit')} className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition ${previewMode === 'lit' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-        <Sun className="h-3.5 w-3.5" />光照
+      <button type="button" aria-label={t('modelPreview.lighting')} title={t('modelPreview.lighting')} onClick={() => setPreviewMode('lit')} className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition ${previewMode === 'lit' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+        <Sun className="h-3.5 w-3.5" />{t('modelPreview.lighting')}
       </button>
     </div>
     {animations.length > 0 ? (

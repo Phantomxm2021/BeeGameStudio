@@ -83,8 +83,8 @@ export const DEFAULT_BUILD_FEATURES = [
   // slash-command toggle or env vars (SKILL_SEARCH_ENABLED=1,
   // SKILL_LEARNING_ENABLED=1). Rationale: bounded caches added on
   // this branch (see docs/agent/sur-skill-overflow-bugs.md) close the
-  // overflow risk, but Haiku-on-first-Chinese-query and disk-side
-  // observation accumulation remain operator-discretion concerns.
+  // overflow risk, but disk-side observation accumulation remains an
+  // operator-discretion concern.
   'EXPERIMENTAL_SKILL_SEARCH', // 技能搜索（bounded caches 已修复 overflow，内存问题已解决）
   'EXPERIMENTAL_SEARCH_EXTRA_TOOLS', // 工具搜索预取管道（TF-IDF 索引 + inter-turn 异步预取）
   // 'SKILL_LEARNING',

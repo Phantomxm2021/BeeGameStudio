@@ -11,6 +11,7 @@ import type { Language } from '../AgentsConfig';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 import { Skeleton } from '../../ui/skeleton';
 import { Button } from '../../beui/project-button';
+import { ArtifactEmptyCard } from './ArtifactEmptyCard';
 
 interface AssetsPanelProps {
     manifest: BeeGameAssetManifestPayload | null;
@@ -38,22 +39,9 @@ export const AssetsPanel = memo(({
     const text = useBeeGameText(lang).assets as AssetsPanelText;
     const requirements = manifest?.requirements ?? [];
     const resources = manifest?.resources ?? [];
-    const hasContract = manifest?.contract_state === 'ready'
-        || requirements.length > 0
-        ||
-      resources.length > 0;
+    const hasResources = requirements.length > 0 || resources.length > 0;
 
-    if (isLoading && !hasContract) return <AssetsPanelSkeleton text={text} />;
-    if (!hasContract) {
-        return (
-            <div className="flex h-full flex-col items-center justify-center gap-3 px-6 py-16 text-center text-[var(--text-muted)]">
-                {onBack ? <Button type="button" variant="ghost" size="sm" onClick={onBack} className="self-start gap-2"><ArrowLeft className="h-4 w-4" aria-hidden="true" />{text.back || 'Back to artifacts'}</Button> : null}
-                <Box className="h-11 w-11" />
-                <div className="type-callout max-w-sm">{text.empty}</div>
-            </div>
-        );
-    }
-
+    if (isLoading && !hasResources) return <AssetsPanelSkeleton text={text} />;
     return (
         <div className="h-full overflow-y-auto px-4 pb-7 pt-4 sm:px-5">
             <header className="mb-4 flex items-start justify-between gap-3 border-b border-[var(--border)] pb-3">
@@ -63,15 +51,17 @@ export const AssetsPanel = memo(({
                     <div className="type-body-sm mt-1 truncate text-[var(--text-secondary)]">
                         {manifest?.project_target?.runtime || manifest?.project_target?.platform || 'Project'}
                     </div>
-                    <div className="type-caption-2 mt-1.5 text-[var(--text-muted)]">
+                    {hasResources ? <div className="type-caption-2 mt-1.5 text-[var(--text-muted)]">
                         {resources.length} {text.libraryBinding} · {requirements.length} {text.required}
-                    </div>
+                    </div> : null}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
                     <AcceptancePill acceptance={acceptance} text={text} />
             {onUpload ? <ResourceUploadButton text={text} disabled={isUploadingResource} onUpload={onUpload} /> : null}
           </div>
             </header>
+
+            {!hasResources ? <ArtifactEmptyCard icon={Box} message={text.empty} /> : null}
 
             {resources.length > 0 ? (
                 <AssetSection title={text.libraryBinding}>

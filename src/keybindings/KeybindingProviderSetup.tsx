@@ -64,7 +64,6 @@ export function KeybindingSetup({ children }: Props): React.ReactNode {
       } else {
         message = `Found ${warnCount} keybinding ${plural(warnCount, 'warning')}`;
       }
-      message += ' · /doctor for details';
 
       addNotification({
         key: notificationKey,

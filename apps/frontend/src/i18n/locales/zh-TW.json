@@ -1,6 +1,24 @@
 {
   "landing": {
     "intake": {
+      "starting": {
+        "title": "正在啟動專案",
+        "description": "正在建立獨立工作區並連接製作階段。"
+      },
+      "prompt": {
+        "uploadAttachment": "新增參考檔案",
+        "creativeMode": "創意模式",
+        "blueprintMode": "藍圖模式",
+        "unsupportedFileTypes": "請上傳 JPG、PNG、DOC、MD、PDF 或 MP4 檔案。",
+        "videoSizeLimit": "影片檔案不得超過 10 MB。",
+        "fileSizeLimit": "{{name}} 不得超過 {{size}} MB。",
+        "fileTypeMismatch": "檔案內容與副檔名不符，請更換檔案。",
+        "videoDurationLimit": "影片長度不得超過 10 秒。",
+        "videoDurationReadFailed": "無法讀取影片長度，請更換檔案。",
+        "attachmentCountLimit": "最多新增 8 個檔案，總大小不超過 32 MB。",
+        "unsupportedOrTooLarge": "檔案類型不受支援，或檔案過大。",
+        "attachmentReadFailed": "無法讀取檔案，請再試一次。"
+      },
       "devProjectPurge": {"button":"開發測試：清空全部專案","confirm":"將永久刪除目前帳號的 {{count}} 個專案及可清理的工作區，無法復原。不會刪除帳號或資源庫。","delete":"永久刪除全部專案","cancel":"取消","pending":"處理中，請勿重複提交…","result":"已刪除 {{deleted}} 個專案，失敗 {{failed}} 個。請檢查剩餘清單。","changed":"專案清單已變更，請重新檢視清單後確認。","failed":"無法確認清理結果。請重新整理專案清單後檢查；不要直接重複提交。"},
       "modal": {
         "chooseOption": "選擇方案",
@@ -58,6 +76,7 @@
         "missingEmailPassword": "請輸入信箱和密碼。",
         "missingDisplayName": "請設定暱稱。",
         "termsRequired": "請先閱讀並同意使用者協議。",
+        "missingProductionSettings": "請選擇製作設定。",
         "intakeFailed": "方案生成失敗，請重試。",
         "loginFailed": "登入失敗，請重試。",
         "invalidCredentials": "信箱或密碼不正確，請檢查後重試。",
@@ -67,6 +86,8 @@
         "resetEmailRequired": "請輸入信箱，我們會寄送密碼重置郵件。",
         "resetEmailSent": "重置密碼郵件已寄出，請檢查信箱。",
         "resetEmailFailed": "重置密碼郵件寄送失敗。",
+        "verificationCodeRequired": "請輸入郵件中的驗證碼。",
+        "verificationFailed": "驗證碼無效或已過期，請重試。",
         "profileImageRequired": "請選擇圖片檔案。",
         "profileImageTooLarge": "頭像圖片不能超過 2MB。",
         "profileAvatarSelected": "頭像已選擇，點擊完成後保存。",
@@ -124,6 +145,11 @@
         "signInAndContinue": "登入並繼續",
         "oauthFailed": "第三方登入啟動失敗。",
         "forgotPassword": "忘記密碼？",
+        "showPassword": "顯示密碼",
+        "hidePassword": "隱藏密碼",
+        "verifyEmail": "驗證信箱並繼續",
+        "resendCode": "重新發送郵件",
+        "verificationResent": "驗證郵件已重新發送，請檢查信箱。",
         "acceptTermsAria": "同意使用者協議",
         "acceptTermsPrefix": "我已閱讀並同意 BeeGame",
         "termsLabel": "使用者協議",
@@ -135,12 +161,14 @@
         "title": {
           "resetPassword": "找回通往創作的鑰匙",
           "register": "擁有自己的遊戲工作室",
-          "login": "歡迎回來"
+          "login": "歡迎回來",
+          "verifyEmail": "驗證信箱"
         },
         "description": {
           "resetPassword": "輸入信箱，我們會幫你重新連接到這裡。",
           "register": "讓每個想法，都從這裡開始。",
-          "login": "你的靈感與專案，正在這裡等待繼續。"
+          "login": "你的靈感與專案，正在這裡等待繼續。",
+          "verifyEmail": "輸入驗證郵件中的數字驗證碼，或點擊郵件裡的確認連結。"
         },
         "tabs": {
           "login": "登入",
@@ -160,7 +188,9 @@
           "invitationCodeAria": "邀请码",
           "oauthInvitationCode": "第三方授权邀请码",
           "oauthInvitationCodeAria": "第三方授权邀请码",
-          "invitationCodePlaceholder": "输入邀请码"
+          "invitationCodePlaceholder": "输入邀请码",
+          "verificationCode": "信箱驗證碼",
+          "verificationCodePlaceholder": "輸入驗證碼"
         },
         "legalClose": "關閉法律文件",
         "legalUpdated": "更新於 {{date}}",
@@ -202,6 +232,7 @@
       },
       "realtimeBillingNotice": "本次生成将按实际 Token 使用实时扣除 Credit，不会预扣；生成失败不会产生扣费。",
       "realtimeBillingTitle": "实时 Credit 扣除提示",
+      "realtimeBillingSummary": "按 Token 用量扣 Credit",
       "realtimeBillingConfirm": "继续生成"
     },
     "legal": {
@@ -481,11 +512,12 @@
     "tasks": "任務看板",
     "projectLibrary": "專案庫",
     "historyProjects": "歷史專案",
+    "resourceLibrary": "資源庫",
     "recentProjects": "最近專案",
     "open": "開啟",
     "landingTitle": "從一個想法開始",
-    "landingSubtitle": "給它一點靈感，剩下的交給我們。",
-    "ideaPlaceholder": "想做什麼遊戲？例如：手機上玩的解謎闖關。",
+    "landingSubtitle": "讓想像化作可玩的遊戲。",
+    "ideaPlaceholder": "你想做什麼樣的遊戲？",
     "generate": "生成",
     "assets": "資源",
     "userMenu": "使用者選單",
@@ -656,6 +688,11 @@
       "openStandalone": "獨立視窗預覽",
       "stopping": "正在停止預覽",
       "consumedCredits": "已消耗 Credit",
+      "projectRunTime": "專案執行時間",
+      "projectRunTimeDetail": "自專案建立以來的時間，包含暫停時間",
+      "copyProjectName": "複製專案名稱",
+      "projectNameCopied": "已複製專案名稱",
+      "projectNameCopyFailed": "複製失敗，請重試",
       "title": "即時遊戲畫面",
       "starting": "正在準備預覽",
       "waiting": "等待可執行畫面",
@@ -752,5 +789,88 @@
   },
   "livePreview": {
     "rollback": "回滾"
+  },
+  "resourceLibrary": {
+    "metadata": {
+      "description": "描述",
+      "tags": "標籤",
+      "version": "版本",
+      "license": "授權",
+      "author": "作者",
+      "source": "來源",
+      "licenseEvidence": "授權證明",
+      "compatibleTargets": "相容平台"
+    },
+    "name": "名稱",
+    "dimension": "維度",
+    "category": "主要分類",
+    "mixed": "混合",
+    "selectResourceType": "選擇資源類型",
+    "style": "風格",
+    "gameTypes": "適用遊戲類型",
+    "multiSelect": "可多選",
+    "add": "新增",
+    "customStyle": "新增自訂風格",
+    "customGameType": "新增自訂類型",
+    "create": "建立資源包",
+    "creating": "建立中…",
+    "createRequired": "請填寫資源包名稱、風格和遊戲類型，並選擇主要分類。",
+    "update": "儲存資源包",
+    "updating": "儲存中…",
+    "updateRequired": "請填寫資源包名稱、風格和遊戲類型。",
+    "cover": "封面",
+    "coverOptional": "選填；儲存前上傳。",
+    "uploadCover": "上傳封面",
+    "editDescription": "更新資源包資訊與封面。",
+    "close": "關閉",
+    "archive": "封存資源包",
+    "archived": "已封存",
+    "editPack": "編輯資源包",
+    "publish": "發佈",
+    "deletePack": "刪除資源包",
+    "nameExample": "例如：手繪森林",
+    "primaryCategories": {
+      "2d-art": "2D 美術包",
+      "3d-assets": "3D 資產包",
+      "animation-rig": "動畫與骨架包",
+      "ui-kit": "UI 套件",
+      "vfx": "特效包",
+      "audio": "音效包",
+      "fonts": "字型包",
+      "world-scene": "世界與場景包",
+      "mixed": "綜合資源包"
+    },
+    "library": "資源庫",
+    "list": {
+      "all": "所有資源包",
+      "search": "搜尋資源包",
+      "empty": "尚無資源包",
+      "emptyHint": "建立資源包，集中管理遊戲素材。",
+      "previous": "上一頁",
+      "next": "下一頁",
+      "allDimensions": "所有維度",
+      "allStatuses": "所有狀態",
+      "allGameTypes": "所有遊戲類型",
+      "allTags": "所有標籤",
+      "draft": "草稿",
+      "published": "已發佈",
+      "archived": "已封存",
+      "loading": "正在載入資源包…",
+      "backToWorkspace": "返回工作區",
+      "elements": "{{count}} 個元素",
+      "unlicensed": "未標註授權",
+      "backToPacks": "返回資源包",
+      "editPack": "編輯資源包",
+      "republish": "重新發佈",
+      "publish": "發佈",
+      "curation": "整理資源",
+      "archivePack": "封存資源包",
+      "selectFiles": "選擇要新增的檔案",
+      "selectFolder": "選擇要新增的資料夾",
+      "retryPreview": "重新載入預覽",
+      "retry": "重試",
+      "loadingPreview": "正在載入預覽…",
+      "loadingWorkspace": "正在載入…"
+    }
   }
 }

@@ -61,6 +61,22 @@ describe('chatStore Performance & Cap', () => {
     });
   });
 
+  it('keeps a complete answer at the live edge when an older page crosses its stream', () => {
+    const { loadHistory } = useChatStore.getState();
+    loadHistory([{ id: 'latest', messageId: 'latest', sender: 'beegame', content: '17:59 final',
+      streamStatus: 'complete', timestamp: 2000, sequence: 500, turnId: 'latest-turn' }]);
+    loadHistory([
+      { id: 'older', messageId: 'older', sender: 'beegame', content: '17:42 answer',
+        streamStatus: 'complete', timestamp: 1000, sequence: 400, turnId: 'older-turn' },
+      { id: 'latest', messageId: 'latest', sender: 'beegame', content: 'old partial',
+        streamStatus: 'streaming', timestamp: 1500, sequence: 90, turnId: 'latest-turn' },
+    ]);
+    expect(useChatStore.getState().messages.map(message => message.id)).toEqual(['older', 'latest']);
+    expect(useChatStore.getState().messages.at(-1)).toMatchObject({
+      content: '17:59 final', streamStatus: 'complete', timestamp: 2000,
+    });
+  });
+
   it('stops unfinished messages but accepts a later authoritative final receipt', () => {
     const { updateMessage, settleActivity, finalizeMessage } = useChatStore.getState();
     updateMessage('run', 'Partial', 'beegame', 'text', false, undefined, undefined, {}, 100, 'm');

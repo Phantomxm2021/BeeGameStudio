@@ -1,24 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
-import { createHash, randomUUID } from 'node:crypto'
-import type { createFoundationAuthoring } from '../beegame/stage-modules/foundation-authoring/public'
 import {
   appendFile,
   mkdir,
   mkdtemp,
   realpath,
-  readFile,
   rm,
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
 import { createAgentWorkflowApp } from '../app'
-import { DashboardRepository } from '../dashboard-repository'
-import {
-  getBeeGameProjectDatabasePath,
-  BeeGameProjectMetadataStore,
-} from '../project-metadata-store'
-import { getUserDashboardDataRoot } from '../local-runtime-service'
 import {
   registerBeeGameSessionRoutes,
   resolveValidRequestAccessToken,
@@ -26,29 +17,23 @@ import {
 } from '../auth/session-routes'
 import { encryptSecret } from '../security/secret-crypto'
 import { BeeGameAuthUnavailableError } from '../auth/user-context'
-import type { BeeGameSessionRunner, BeeGameSessionRunnerStartInput } from '../beegame/session-manager'
+import type { BeeGamePromptInput, BeeGameSessionRunnerStartInput } from '../beegame/session-manager'
 import { recoverLatestProjectSessionFromDisk } from '../beegame/session-manager'
-import { createInitialDeliveryRun, createRunStore } from '../beegame/delivery-workflow/run-store'
-import { transitionDeliveryRun } from '../beegame/delivery-workflow/transition'
 import { beginProjectDelivery, readProjectDelivery } from '../beegame/project-delivery'
-import { DELIVERY_PROGRESS_STAGES } from '../beegame/delivery-workflow/display-progress'
-import {
-  computeDocumentRevision,
-  computeWorkspaceRevision,
-} from '../beegame/delivery-workflow/revision'
-import { createTestDeliveryRun } from './delivery-workflow-test-helpers'
-import {
-  CANONICAL_FOUNDATION_DOCUMENTS,
-  CANONICAL_PROJECT_DOCUMENT_IDS,
-  type DeliveryRun,
-  type WorkflowEvent,
-} from '../beegame/delivery-workflow/types'
-import * as deliveryControllerModule from '../beegame/delivery-workflow/controller'
 
 const originalFlag = process.env.BEEGAME_HTTPONLY_SESSIONS
 const originalKey = process.env.BEEGAME_CONFIG_ENCRYPTION_KEY
 const originalDataDir = process.env.AGENT_WORKFLOW_DATA_DIR
 const temporaryDirectories: string[] = []
+
+// The original request and host context are distinct native input blocks.
+// Assert the actual user text, not String(blocks) ("[object Object]").
+function requestText(prompt: BeeGamePromptInput): string {
+  if (typeof prompt === 'string') return prompt
+  const first = prompt[0]
+  expect(first?.type).toBe('text')
+  return first?.type === 'text' ? first.text : ''
+}
 
 it('runtime returns recoverable 503 rather than 401 when token resolution is unavailable', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-auth-unavailable-'))
@@ -67,7 +52,7 @@ it('runtime returns recoverable 503 rather than 401 when token resolution is una
   } finally { cleanups.forEach(cleanup => cleanup()) }
 })
 
-it('project chat forwards one raw request, preserves context, and continue does not dispatch delivery', async () => {
+it('project chat handles the user request, then resumes the delivery milestone', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-project-chat-route-')))
   temporaryDirectories.push(root)
   const ownerId = 'conversation-owner'
@@ -75,7 +60,7 @@ it('project chat forwards one raw request, preserves context, and continue does 
   const projectsRoot = join(root, 'projects')
   const workspace = join(projectsRoot, 'users', ownerId, projectId)
   await mkdir(workspace, { recursive: true })
-  const prompts: unknown[] = []
+  const prompts: BeeGamePromptInput[] = []
   let starts = 0
   let release: (() => void) | undefined
   const cleanups: Array<() => void> = []
@@ -85,7 +70,6 @@ it('project chat forwards one raw request, preserves context, and continue does 
     registerCleanup: cleanup => cleanups.push(cleanup),
     sessionRunner: { start: async input => {
       starts++
-      expect(input.workflowWorker).toBeUndefined()
       expect(input.cwd).toBe(workspace)
       return { stop() { release?.() }, submit: async turn => {
         prompts.push(turn.prompt)
@@ -102,11 +86,6 @@ it('project chat forwards one raw request, preserves context, and continue does 
     const ensured = await post(`/api/projects/${projectId}/session/ensure`, { language: 'zh' })
     expect(ensured.status).toBe(200)
     const { session } = await ensured.json() as { session: { id: string } }
-    // A stopped delivery must not make a native follow-up appear stopped.
-    const store = createRunStore(workspace, ownerId)
-    const run = { ...createTestDeliveryRun({ ownerId, projectId }), phase: 'IMPLEMENTATION' as const, status: 'stopped' as const }
-    await store.commit(run, { runId: run.runId, type: 'run.stopped', phase: run.phase, status: run.status, revision: run.revision })
-    const before = await readFile(store.paths.snapshot, 'utf8')
     await beginProjectDelivery(workspace, join(root, 'dashboard'), 'Build the original game')
     expect((await post(`/api/projects/${projectId}/stop`, {})).status).toBe(200)
     expect((await readProjectDelivery(workspace, join(root, 'dashboard')))?.status).toBe('paused')
@@ -120,7 +99,8 @@ it('project chat forwards one raw request, preserves context, and continue does 
       const transcript = await (await app.request(`/api/beegame-sessions/${session.id}/transcript`)).json() as Array<{ type: string; text: string }>
       expect(transcript.filter(e => e.type === 'turn.failed').map(e => e.text)).toEqual([])
     }
-    expect(prompts).toEqual(['按钮没字，请修复'])
+    expect(prompts.map(requestText)).toEqual(['按钮没字，请修复'])
+    expect(JSON.stringify(prompts[0])).toContain('BGS project state')
     const state = await (await app.request(`/api/projects/${projectId}/runtime-state`)).json() as Record<string, unknown>
     expect(state.phase).toBe('running')
     expect(state.blocked).toBe(false)
@@ -133,9 +113,10 @@ it('project chat forwards one raw request, preserves context, and continue does 
     // manual Continue observes that turn instead of submitting another one.
     const continuation = await post(`/api/beegame-sessions/${session.id}/continue`, { language: 'zh' })
     expect(continuation.status).toBe(202)
-    expect(prompts).toEqual(['按钮没字，请修复', '继续任务'])
+    expect(requestText(prompts[0]!)).toBe('按钮没字，请修复')
+    expect(JSON.stringify(prompts[1])).toContain('Current delivery milestone: author.')
+    // A second turn reuses the same native process/session.
     expect(starts).toBe(1)
-    expect(await readFile(store.paths.snapshot, 'utf8')).toBe(before)
     release?.()
   } finally { release?.(); for (const cleanup of cleanups) await cleanup() }
 })
@@ -190,17 +171,19 @@ it('does not offer a stopped native permission as actionable after service resta
     // part of the transcript, but can never be answered by the new process.
     const recovered = await recoverLatestProjectSessionFromDisk(workspace)
     expect(recovered?.transcriptPath).toBeTruthy()
-    await appendFile(join(workspace, recovered!.transcriptPath), `${JSON.stringify({ id: 999_999,
+    await appendFile(join(workspace, recovered!.transcriptPath), `${JSON.stringify({ id: 999_998, sessionId: session.id, type: 'system.status',
+      text: 'task_started', createdAt: new Date().toISOString(),
+      payload: { type: 'system', subtype: 'task_started', task_id: 'orphaned-child',
+        tool_use_id: 'orphaned-child-use' },
+    })}\n${JSON.stringify({ id: 999_999,
       sessionId: session.id, type: 'permission.requested',
       text: 'Network access requires permission.', createdAt: new Date().toISOString(),
       payload: { type: 'permission.requested', toolUseID: 'late-permission',
         toolName: 'SandboxNetworkAccess', input: { host: 'registry.npmjs.org' } },
+    })}\n${JSON.stringify({ id: 1_000_000, sessionId: session.id, turnId: 'crashed-turn',
+      type: 'turn.started', text: 'Turn started before service crash', createdAt: new Date().toISOString(),
+      payload: { type: 'turn.started' },
     })}\n`)
-    const store = createRunStore(workspace, ownerId, { stateDirectory: '.beegame/delivery/production' })
-    const production = createInitialDeliveryRun({ ownerId, projectId,
-      confirmedBriefDigest: createHash('sha256').update('fixture').digest('hex'), confirmedBriefContext: 'fixture' })
-    await store.commit(production, { runId: production.runId, type: 'run.created',
-      phase: production.phase, status: production.status, revision: production.revision })
 
     let runnerStarts = 0
     let receivedPrompt = ''
@@ -209,7 +192,7 @@ it('does not offer a stopped native permission as actionable after service resta
       sessionRunner: { start: async () => {
         runnerStarts++
         return { stop() { releaseTurn?.() }, submit: async turn => {
-          receivedPrompt = String(turn.prompt)
+          receivedPrompt = requestText(turn.prompt)
           await new Promise<void>(resolve => {
             releaseTurn = resolve
             turn.signal.addEventListener('abort', () => resolve(), { once: true })
@@ -218,9 +201,10 @@ it('does not offer a stopped native permission as actionable after service resta
       } },
     })
     const state = await (await restarted.request(`/api/projects/${projectId}/runtime-state`)).json() as {
-      phase: string; blocked: boolean; pending_permissions: unknown[]
+      phase: string; blocked: boolean; pending_permissions: unknown[]; active_subagents: string[]
     }
-    expect(state).toMatchObject({ phase: 'paused', blocked: false, pending_permissions: [] })
+    // The recovered open turn is closed as paused, never mistaken for a live turn.
+    expect(state).toMatchObject({ phase: 'paused', blocked: true, pending_permissions: [], active_subagents: [] })
     expect(runnerStarts).toBe(0)
     const stale = await post(restarted, `/api/projects/${projectId}/permissions/late-permission`, { decision: 'allow' })
     expect(await stale.json()).toMatchObject({ resolved: false, stale: true })
@@ -233,9 +217,60 @@ it('does not offer a stopped native permission as actionable after service resta
     for (let i = 0; i < 200 && !receivedPrompt; i++) await Bun.sleep(5)
     expect(receivedPrompt).toBe('Continue my project')
     expect(runnerStarts).toBe(1)
-    expect((await store.load())?.status).toBe('stopped')
     releaseTurn?.()
   } finally { for (const cleanup of cleanups.splice(0)) await cleanup() }
+})
+
+it('reports only live native child tasks as runtime activity', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-live-subagent-status-')))
+  temporaryDirectories.push(root)
+  const ownerId = 'subagent-status-owner'
+  const projectId = 'subagent-status-project'
+  const projectsRoot = join(root, 'projects')
+  const workspace = join(projectsRoot, 'users', ownerId, projectId)
+  await mkdir(workspace, { recursive: true })
+  const cleanups: Array<() => void | Promise<void>> = []
+  let nativeTaskNotification: BeeGameSessionRunnerStartInput['onNativeTaskNotification']
+  const app = createAgentWorkflowApp({ currentUser: { id: ownerId, role: 'owner' },
+    dashboardDataRoot: join(root, 'dashboard'), defaultWorkspacePath: projectsRoot,
+    modelConfigStore: false, skillsConfig: false, registerCleanup: cleanup => cleanups.push(cleanup),
+    sessionRunner: { start: async input => {
+      nativeTaskNotification = input.onNativeTaskNotification
+      return { stop() {}, submit: async turn => {
+        nativeTaskNotification?.({ value: '', message: { type: 'system', subtype: 'task_started',
+          task_id: 'native-child', tool_use_id: 'agent-use-1' } })
+        await turn.onMessage({ type: 'result', subtype: 'success', result: 'Parent turn finished' })
+      } }
+    } },
+  })
+  const post = (url: string, body: unknown) => app.request(url, { method: 'POST',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  try {
+    expect((await post('/api/projects', { id: projectId, name: 'Subagent status test', root_path: workspace,
+      created_at: Date.now() })).status).toBe(200)
+    expect((await post('/api/model-configs', { name: 'Offline', provider: 'openai-compatible', apiKey: 'fake',
+      models: { balanced: 'fake' }, isDefault: true })).status).toBe(200)
+    const ensured = await post(`/api/projects/${projectId}/session/ensure`, {})
+    const { session } = await ensured.json() as { session: { id: string } }
+    expect((await post(`/api/beegame-sessions/${session.id}/input`, {
+      text: 'Run one child task', clientMessageId: 'subagent-status-request',
+    })).status).toBe(202)
+    let state: Record<string, unknown> = {}
+    for (let i = 0; i < 200; i++) {
+      state = await (await app.request(`/api/projects/${projectId}/runtime-state`)).json() as Record<string, unknown>
+      if (Array.isArray(state.active_subagents) && state.active_subagents.length > 0) break
+      await Bun.sleep(5)
+    }
+    expect(state).toMatchObject({ phase: 'running', active_subagents: ['agent-use-1'] })
+    nativeTaskNotification?.({ value: '', message: { type: 'system', subtype: 'task_notification',
+      task_id: 'native-child', tool_use_id: 'agent-use-1', status: 'completed' } })
+    for (let i = 0; i < 200; i++) {
+      state = await (await app.request(`/api/projects/${projectId}/runtime-state`)).json() as Record<string, unknown>
+      if (state.phase === 'idle') break
+      await Bun.sleep(5)
+    }
+    expect(state).toMatchObject({ phase: 'idle', active_subagents: [] })
+  } finally { for (const cleanup of cleanups) await cleanup() }
 })
 
 it('running project input queues in order; only Steer interrupts the active turn in the same session', async () => {
@@ -256,7 +291,7 @@ it('running project input queues in order; only Steer interrupts the active turn
       starts.push(input)
       input.onNativeSessionId?.('a28f9e61-96d5-4e38-981b-5acd25076508')
       return { stop() { releases.shift()?.() }, async submit(turn) {
-        prompts.push(String(turn.prompt))
+        prompts.push(requestText(turn.prompt))
         await new Promise<void>(resolve => { releases.push(resolve); turn.signal.addEventListener('abort', () => resolve(), { once: true }) })
         if (!turn.signal.aborted) await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
       } }
@@ -313,44 +348,19 @@ it('running project input queues in order; only Steer interrupts the active turn
     expect((await app.request(`/api/projects/${projectId}/stop`, { method: 'POST' })).status).toBe(200)
     const stoppedState = await (await app.request(`/api/projects/${projectId}/runtime-state`)).json() as { phase: string }
     expect(stoppedState.phase).toBe('idle')
-    const productionStore = createRunStore(workspace, ownerId, {
-      stateDirectory: '.beegame/delivery/production',
-    })
-    const confirmedBriefContext = '{"kind":"test"}'
-    const initialProduction = createInitialDeliveryRun({ ownerId, projectId,
-      confirmedBriefDigest: createHash('sha256').update(confirmedBriefContext).digest('hex'),
-      confirmedBriefContext,
-    })
-    const productionRun = await productionStore.commit(initialProduction, {
-      runId: initialProduction.runId, type: 'run.created', phase: initialProduction.phase,
-      status: initialProduction.status, revision: initialProduction.revision,
-    })
-    expect((await (await app.request(`/api/projects/${projectId}/runtime-state`)).json() as { phase: string }).phase).toBe('paused')
-    // Queue waits for the current project task, not merely a stage boundary.
-    await Bun.sleep(2100)
-    expect(prompts).toEqual(['First', 'Second', 'Urgent', 'Normal'])
-    expect((await list()).messages.map(item => item.text)).toEqual(['After stop', 'After stop two'])
-    const waitingProduction = await productionStore.commit({ ...productionRun, status: 'needs_action',
-      blockedReason: 'Review is awaiting recovery' }, { runId: productionRun.runId,
-      type: 'run.needs_action', phase: productionRun.phase, status: 'needs_action', revision: productionRun.revision })
-    await Bun.sleep(2100)
-    expect(prompts).toEqual(['First', 'Second', 'Urgent', 'Normal'])
-    const stoppedProduction = transitionDeliveryRun(waitingProduction, { type: 'stop', reason: 'user_stop' })
-    await productionStore.commit(stoppedProduction, { runId: stoppedProduction.runId, type: 'run.stopped',
-      phase: stoppedProduction.phase, status: stoppedProduction.status,
-      revision: stoppedProduction.revision, reason: 'user_stop',
-    })
     expect((await (await app.request(`/api/projects/${projectId}/runtime-state`)).json() as { phase: string }).phase).toBe('idle')
     expect((await post(`/api/projects/${projectId}/session/ensure`, {})).status).toBe(200)
     await Bun.sleep(30)
     expect(prompts).toEqual(['First', 'Second', 'Urgent', 'Normal'])
     expect((await list()).messages.map(item => item.text)).toEqual(['After stop', 'After stop two'])
     expect((await post(`/api/beegame-sessions/${session.id}/continue`, {})).status).toBe(202)
-    // Continue belongs to the unfinished delivery. Queued free conversation
-    // must stay pending even after the user resumes that delivery.
-    await Bun.sleep(2100)
-    expect(prompts).toEqual(['First', 'Second', 'Urgent', 'Normal'])
-    expect((await list()).messages.map(item => item.text)).toEqual(['After stop', 'After stop two'])
+    for (let i = 0; i < 100 && prompts.length < 5; i++) await Bun.sleep(5)
+    expect(prompts).toEqual(['First', 'Second', 'Urgent', 'Normal', 'After stop'])
+    for (let i = 0; i < 100 && releases.length === 0; i++) await Bun.sleep(5)
+    expect(releases.length).toBeGreaterThan(0)
+    releases.shift()?.()
+    for (let i = 0; i < 100 && prompts.length < 6; i++) await Bun.sleep(5)
+    expect(prompts).toEqual(['First', 'Second', 'Urgent', 'Normal', 'After stop', 'After stop two'])
   } finally {
     for (const release of releases) release()
     for (const cleanup of cleanups.reverse()) await cleanup()
@@ -993,409 +1003,28 @@ describe('HttpOnly session routes', () => {
   })
 })
 
-// Routes exercise orchestration without launching the independent native runtime.
-function runningAuthorFixture(onStart: () => void = () => undefined): ReturnType<typeof createFoundationAuthoring> {
-  const handle = { protocolVersion: 1 as const, producer: 'foundation-authoring' as const, id: randomUUID() }
-  return {
-    async start() { onStart(); return handle },
-    async resume() { return handle },
-    async stop() { return { status: 'stopped', handle } },
-    async getResult() { return { status: 'running', handle } },
-  }
-}
-
-describe('removed delivery workflow URLs', () => {
-  it('resume and retry URLs are absent and do not launch legacy workers', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'beegame-session-workspace-'))
-    temporaryDirectories.push(root)
-    const projectsRoot = join(root, 'projects')
-    const ownerId = 'session-workspace-owner'
-    const projectId = 'session-workspace-project'
-    const projectRoot = join(projectsRoot, 'users', ownerId, projectId)
-    const sessionWorkspace = join(
-      projectsRoot,
-      'users',
-      ownerId,
-      `${projectId}-review-copy`,
-    )
-    await mkdir(projectRoot, { recursive: true })
-    await mkdir(sessionWorkspace, { recursive: true })
-    const controllerWorkspaces: string[] = []
-    const createDeliveryController =
-      deliveryControllerModule.createDeliveryWorkflowController
-    const controllerFactory = spyOn(
-      deliveryControllerModule,
-      'createDeliveryWorkflowController',
-    ).mockImplementation(input => {
-      controllerWorkspaces.push(input.workspacePath)
-      return createDeliveryController({ ...input, author: runningAuthorFixture() })
-    })
-    const runner: BeeGameSessionRunner = {
-      start: async () => ({
-        submit: async ({ signal }) =>
-          new Promise<void>(resolve => {
-            signal.addEventListener('abort', () => resolve(), { once: true })
-          }),
-        stop: () => undefined,
-      }),
-    }
-    const cleanups: Array<() => void> = []
-    const app = createAgentWorkflowApp({
-      currentUser: { id: ownerId, role: 'owner' },
-      dashboardDataRoot: join(root, 'dashboard'),
-      defaultWorkspacePath: projectsRoot,
-      modelConfigStore: false,
-      skillsConfig: false,
-      sessionRunner: runner,
-      registerCleanup: cleanup => cleanups.push(cleanup),
-    })
-
-    try {
-      const projectResponse = await app.request('/api/projects', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          id: projectId,
-          name: 'Session workspace fixture',
-          root_path: sessionWorkspace,
-          created_at: Date.now(),
-        }),
-      })
-      expect(projectResponse.status).toBe(200)
-      const project = (await projectResponse.json()) as {
-        id: string
-        name: string
-        root_path?: string
-        created_at: number
-      }
-      const sessionResponse = await app.request(
-        `/api/projects/${projectId}/session/ensure`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-        },
-      )
-      expect(sessionResponse.status).toBe(200)
-
-      new BeeGameProjectMetadataStore(
-        getBeeGameProjectDatabasePath(
-          getUserDashboardDataRoot(join(root, 'dashboard'), ownerId),
-        ),
-      ).upsertProject({ ...project, root_path: projectRoot })
-
-      const brief = JSON.stringify({
-        kind: 'confirmed_build_brief',
-        resource_library_usage: 'optional',
-        document_language: 'English',
-        game_user_visible_language: 'English',
-        agent_response_language: 'English',
-      })
-      const confirmedBriefDigest = createHash('sha256')
-        .update(brief)
-        .digest('hex')
-      const [documentRevision, workspaceRevision] = await Promise.all([
-        computeDocumentRevision(sessionWorkspace, confirmedBriefDigest),
-        computeWorkspaceRevision(sessionWorkspace),
-      ])
-      const run = createTestDeliveryRun({
-        runId: 'session-workspace-run',
-        projectId,
-        ownerId,
-        confirmedBriefContext: brief,
-        foundationDraftComplete: false,
-      })
-      const store = createRunStore(sessionWorkspace, ownerId)
-      const stoppedRun = {
-        ...run,
-        phase: 'DOCUMENT_DRAFTING' as const,
-        documentStep: 'FOUNDATION_DRAFTING' as const,
-        currentItemId: CANONICAL_FOUNDATION_DOCUMENTS[0],
-        status: 'stopped' as const,
-        blockedReason: 'Synthetic interrupted turn.',
-        revision: {
-          document: documentRevision,
-          workspace: workspaceRevision,
-        },
-      }
-      await store.commit(stoppedRun, {
-        runId: stoppedRun.runId,
-        type: 'run.created',
-        phase: stoppedRun.phase,
-        status: stoppedRun.status,
-        revision: stoppedRun.revision,
-        createdAt: stoppedRun.createdAt,
-      })
-
-      const resumeResponse = await app.request(
-        `/api/projects/${projectId}/workflow/resume`,
-        { method: 'POST' },
-      )
-      expect(resumeResponse.status).toBe(404)
-      const retryResponse = await app.request(
-        `/api/projects/${projectId}/workflow/retry`,
-        { method: 'POST' },
-      )
-      expect(retryResponse.status).toBe(404)
-      expect(controllerFactory).not.toHaveBeenCalled()
-      expect(controllerWorkspaces).toEqual([])
-      expect(await store.load()).toMatchObject({
-        runId: 'session-workspace-run',
-        projectId,
-        status: 'stopped',
-      })
-      expect(
-        await Bun.file(join(projectRoot, '.beegame/workflow/run.json')).exists(),
-      ).toBe(false)
-    } finally {
-      controllerFactory.mockRestore()
-      for (const cleanup of cleanups) await cleanup()
-    }
+it('retired workflow URLs return 404 without starting a worker', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-removed-workflow-routes-')))
+  temporaryDirectories.push(root)
+  let starts = 0
+  const cleanups: Array<() => void | Promise<void>> = []
+  const app = createAgentWorkflowApp({
+    currentUser: { id: 'owner', role: 'owner' }, dashboardDataRoot: join(root, 'dashboard'),
+    defaultWorkspacePath: join(root, 'projects'), modelConfigStore: false, skillsConfig: false,
+    registerCleanup: cleanup => cleanups.push(cleanup),
+    sessionRunner: { start: async () => { starts++; throw new Error('must not start') } },
   })
-
-  it('absent workflow URLs do not resolve session workspaces or resume archived runs', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'beegame-persisted-session-'))
-    temporaryDirectories.push(root)
-    const projectsRoot = join(root, 'projects')
-    const ownerId = 'persisted-session-owner'
-    const projectId = 'persisted-session-project'
-    const projectRoot = join(projectsRoot, 'users', ownerId, projectId)
-    const sessionWorkspace = join(
-      projectsRoot,
-      'users',
-      ownerId,
-      `${projectId}-review-copy`,
-    )
-    await mkdir(projectRoot, { recursive: true })
-    await mkdir(sessionWorkspace, { recursive: true })
-    const controllerWorkspaces: string[] = []
-    const createDeliveryController =
-      deliveryControllerModule.createDeliveryWorkflowController
-    const controllerFactory = spyOn(
-      deliveryControllerModule,
-      'createDeliveryWorkflowController',
-    ).mockImplementation(input => {
-      controllerWorkspaces.push(input.workspacePath)
-      return createDeliveryController({ ...input, author: runningAuthorFixture() })
-    })
-    const persistedSessions = spyOn(
-      DashboardRepository.prototype,
-      'listProjectSessions',
-    ).mockImplementation(async (_request, _user, requestedProjectId) =>
-      requestedProjectId === projectId
-        ? [
-            {
-              id: 'persisted-copy-session',
-              projectId,
-              workspacePath: await realpath(sessionWorkspace),
-              status: 'stopped',
-              transcriptPath: join(
-                sessionWorkspace,
-                'transcripts',
-                'persisted-copy-session.jsonl',
-              ),
-              createdAt: new Date('2026-08-26T00:00:00.000Z'),
-              updatedAt: new Date('2026-08-26T00:01:00.000Z'),
-            },
-          ]
-        : [],
-    )
-    const runner: BeeGameSessionRunner = {
-      start: async () => ({
-        submit: async ({ signal }) =>
-          new Promise<void>(resolve => {
-            signal.addEventListener('abort', () => resolve(), { once: true })
-          }),
-        stop: () => undefined,
-      }),
-    }
-    const cleanups: Array<() => void> = []
-    const app = createAgentWorkflowApp({
-      currentUser: { id: ownerId, role: 'owner' },
-      dashboardDataRoot: join(root, 'dashboard'),
-      defaultWorkspacePath: projectsRoot,
-      modelConfigStore: false,
-      skillsConfig: false,
-      sessionRunner: runner,
-      registerCleanup: cleanup => cleanups.push(cleanup),
-    })
-
-    try {
-      const projectResponse = await app.request('/api/projects', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          id: projectId,
-          name: 'Persisted session fixture',
-          root_path: projectRoot,
-          created_at: Date.now(),
-        }),
-      })
-      expect(projectResponse.status).toBe(200)
-
-      const brief = JSON.stringify({
-        kind: 'confirmed_build_brief',
-        resource_library_usage: 'optional',
-        document_language: 'English',
-        game_user_visible_language: 'English',
-        agent_response_language: 'English',
-      })
-      const confirmedBriefDigest = createHash('sha256')
-        .update(brief)
-        .digest('hex')
-      const [documentRevision, workspaceRevision] = await Promise.all([
-        computeDocumentRevision(sessionWorkspace, confirmedBriefDigest),
-        computeWorkspaceRevision(sessionWorkspace),
-      ])
-      const run = createTestDeliveryRun({
-        runId: 'persisted-session-run',
-        projectId,
-        ownerId,
-        confirmedBriefContext: brief,
-        foundationDraftComplete: false,
-      })
-      const store = createRunStore(sessionWorkspace, ownerId)
-      const stoppedRun = {
-        ...run,
-        phase: 'DOCUMENT_DRAFTING' as const,
-        documentStep: 'FOUNDATION_DRAFTING' as const,
-        currentItemId: CANONICAL_FOUNDATION_DOCUMENTS[0],
-        status: 'stopped' as const,
-        blockedReason: 'Synthetic interrupted turn.',
-        revision: {
-          document: documentRevision,
-          workspace: workspaceRevision,
-        },
-      }
-      await store.commit(stoppedRun, {
-        runId: stoppedRun.runId,
-        type: 'run.created',
-        phase: stoppedRun.phase,
-        status: stoppedRun.status,
-        revision: stoppedRun.revision,
-        createdAt: stoppedRun.createdAt,
-      })
-
-      const resumeResponse = await app.request(
-        `/api/projects/${projectId}/workflow/resume`,
-        { method: 'POST' },
-      )
-      const retryResponse = await app.request(
-        `/api/projects/${projectId}/workflow/retry`,
-        { method: 'POST' },
-      )
-      expect(resumeResponse.status).toBe(404)
-      expect(retryResponse.status).toBe(404)
-      expect(persistedSessions).not.toHaveBeenCalled()
-      expect(controllerFactory).not.toHaveBeenCalled()
-      expect(controllerWorkspaces).toEqual([])
-      expect(await store.load()).toMatchObject({
-        runId: 'persisted-session-run',
-        status: 'stopped',
-      })
-      expect(
-        await Bun.file(join(projectRoot, '.beegame/workflow/run.json')).exists(),
-      ).toBe(false)
-    } finally {
-      controllerFactory.mockRestore()
-      persistedSessions.mockRestore()
-      for (const cleanup of cleanups) await cleanup()
-    }
-  })
-
-  it('runtime APIs do not read or reconcile legacy workflow snapshots', async () => {
-    const root = await mkdtemp(
-      join(tmpdir(), 'beegame-orphaned-workflow-read-'),
-    )
-    temporaryDirectories.push(root)
-    const projectsRoot = join(root, 'projects')
-    const ownerId = 'orphaned-workflow-owner'
-    const projectId = 'orphaned-workflow-project'
-    const workspace = join(projectsRoot, 'users', ownerId, projectId)
+  try {
+    const workspace = join(root, 'projects/users/owner/project')
     await mkdir(workspace, { recursive: true })
-    const app = createAgentWorkflowApp({
-      currentUser: { id: ownerId, role: 'owner' },
-      dashboardDataRoot: join(root, 'dashboard'),
-      defaultWorkspacePath: projectsRoot,
-      modelConfigStore: false,
-      skillsConfig: false,
-    })
-
-    const projectResponse = await app.request('/api/projects', {
-      method: 'POST',
+    expect((await app.request('/api/projects', { method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        id: projectId,
-        name: 'Orphaned workflow fixture',
-        root_path: workspace,
-        created_at: Date.now(),
-      }),
-    })
-    expect(projectResponse.status).toBe(200)
-
-    const ownerBrief = JSON.stringify({
-      kind: 'confirmed_build_brief',
-      resource_library_usage: 'optional',
-    })
-    const run = createTestDeliveryRun({
-      runId: 'orphaned-workflow-run',
-      projectId,
-      ownerId,
-      confirmedBriefContext: ownerBrief,
-      foundationDraftComplete: true,
-    })
-    const store = createRunStore(workspace, ownerId)
-    await store.save({
-      ...run,
-      phase: 'BRIEF_CONFIRMED',
-      activeDispatch: {
-        dispatchId: 'orphaned-author-dispatch',
-        workerType: 'question-answerer',
-        phase: 'BRIEF_CONFIRMED',
-        revision: run.revision.document,
-        status: 'running',
-        startedAt: run.updatedAt,
-      },
-    })
-
-    const response = await app.request(`/api/projects/${projectId}/workflow`)
-    expect(response.status).toBe(404)
-    expect(await store.load()).toMatchObject({
-      status: 'running',
-      activeDispatch: { status: 'running' },
-    })
-  })
-
+      body: JSON.stringify({ id: 'project', name: 'Test', root_path: workspace, created_at: Date.now() }),
+    })).status).toBe(200)
+    for (const path of ['/workflow', '/workflow/resume', '/workflow/retry']) {
+      const response = await app.request(`/api/projects/project${path}`, { method: 'POST' })
+      expect(response.status).toBe(404)
+    }
+    expect(starts).toBe(0)
+  } finally { for (const cleanup of cleanups) await cleanup() }
 })
-
-function frozenStageEvent(
-  run: DeliveryRun,
-  phaseIndex: 1 | 2,
-  phase: 'BRIEF_CONFIRMED' | 'DOCUMENT_DRAFTING',
-): WorkflowEvent {
-  const createdAt = `2026-08-06T00:00:0${phaseIndex}.000Z`
-  return {
-    eventId: `stage-history-event-${phaseIndex}`,
-    runId: run.runId,
-    type: 'phase.entered',
-    phase,
-    status: 'running',
-    revision: run.revision,
-    createdAt,
-    stageSnapshot: {
-      stageId: phase,
-      phaseIndex,
-      phaseCount: DELIVERY_PROGRESS_STAGES.length,
-      status: 'completed',
-      currentPhase: phase,
-      message: 'frozen stage status',
-      tasks: [],
-      completedTaskCount: 0,
-      totalTaskCount: 0,
-      createdAt,
-      updatedAt: createdAt,
-      completedAt: createdAt,
-      elapsedMs: 1000,
-      block: { message: 'frozen recovery detail', nextAction: 'retry' },
-    },
-  }
-}

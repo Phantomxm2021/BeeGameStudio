@@ -2,17 +2,14 @@ import { createReadStream } from 'node:fs'
 import { mkdir, open, truncate } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import type { BeeGameEvent } from './session-manager'
-import { createChatTextIdentity } from './chat-text-identity'
 
 /** A project cursor is an append position, never an index in a re-sorted list. */
 export class ProjectChatTimeline {
-  // Keep only cursor/byte offsets and recovered legacy text identities resident.
-  // Tool output and streaming payloads stay in the existing journal.
-  private records: Array<{ id: number; offset: number; end: number; textId?: string }> = []
+  // Keep only cursor/byte offsets resident. Tool output and streaming payloads stay in the journal.
+  private records: Array<{ id: number; offset: number; end: number }> = []
   private keys = new Set<string>()
   private pending: Promise<unknown> = Promise.resolve()
   private readonly ready: Promise<void>
-  private readonly identifyText = createChatTextIdentity()
 
   constructor(private readonly path: string) {
     this.ready = this.load()
@@ -39,10 +36,7 @@ export class ProjectChatTimeline {
   }
 
   private index(event: BeeGameEvent, offset: number, end: number) {
-    const normalized = this.identifyText(canonicalSource(event))
-    const textId = normalized.payload?.assistantBlockId
-    this.records.push({ id: event.id, offset, end,
-      ...(typeof textId === 'string' && textId !== event.payload?.assistantBlockId ? { textId } : {}) })
+    this.records.push({ id: event.id, offset, end })
   }
 
   private async readAfter(after: number): Promise<BeeGameEvent[]> {
@@ -57,13 +51,9 @@ export class ProjectChatTimeline {
     const events: BeeGameEvent[] = []
     for await (const { line } of journalLines(this.path, first.offset, this.records.at(-1)!.end - 1)) {
       if (!line.trim()) continue
-      const event = canonicalSource(JSON.parse(line))
+      const event: BeeGameEvent = JSON.parse(line)
       event.createdAt = new Date(event.createdAt)
-      const { textId } = this.records[low++]!
-      if (textId) event.payload = { ...event.payload!, assistantBlockId: textId }
-      // Old live subscriptions admitted internal worker prompts. Keep journal
-      // offsets/cursors intact, but never expose them as a user's utterance.
-      if (!(event.type === 'user.message' && event.payload?.displayKind === 'workflow_worker')) events.push(event)
+      events.push(event)
     }
     return events
   }
@@ -74,7 +64,6 @@ export class ProjectChatTimeline {
       const batch: BeeGameEvent[] = []
       const batchKeys = new Set<string>()
       for (const event of incoming) {
-        if (event.type === 'user.message' && event.payload?.displayKind === 'workflow_worker') continue
         const key = sourceKey(event)
         if (this.keys.has(key) || batchKeys.has(key)) continue
         batchKeys.add(key)
@@ -150,17 +139,7 @@ export function projectChatEventsAfter(events: readonly BeeGameEvent[], after: n
 function sourceKey(event: BeeGameEvent): string {
   const payload = event.payload
   if (typeof payload?.projectSourceKey === 'string') return payload.projectSourceKey
-  if (typeof payload?.workflowStageNativeKey === 'string') return `native:${payload.workflowStageNativeKey}`
-  return `${payload?.workflowSourceSessionId ?? payload?.projectSourceSessionId ?? event.sessionId}:${payload?.workflowSourceEventId ?? payload?.projectSourceEventId ?? event.id}`
-}
-
-// Mirrored and direct worker records are the same stream, regardless of which
-// transport wins the append race. Preserve journal cursors and source receipts.
-function canonicalSource(event: BeeGameEvent): BeeGameEvent {
-  const source = event.payload?.workflowSourceSessionId ?? event.payload?.projectSourceSessionId
-  const turn = event.payload?.workflowSourceTurnId
-  return { ...event, ...(typeof source === 'string' ? { sessionId: source } : {}),
-    ...(typeof turn === 'string' ? { turnId: turn } : {}) }
+  return `${payload?.projectSourceSessionId ?? event.sessionId}:${payload?.projectSourceEventId ?? event.id}`
 }
 
 const timelines = new Map<string, ProjectChatTimeline>()

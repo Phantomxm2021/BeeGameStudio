@@ -1,9 +1,9 @@
-import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
-import { readBeeGameAssetManifestSync, type BeeGameAssetManifest } from './asset-contracts'
+import type { BeeGameAssetManifest } from './asset-contracts'
 import { auditBeeGameContentPackage, parseBeeGameContentIndex, type BeeGameContentPackage } from './game-content-package'
 import type { BeeGameContentIndex } from './game-content-schema'
-import { PROJECT_CONTENT_CONTRACT_PATH } from './project-delivery'
+import { projectContentAuthority } from './project-content-authority'
 
 /** Read-only entry point to the exact host validation used after Content authoring. */
 const validationScope = {
@@ -46,32 +46,27 @@ export function summarizeContentLoadFootprint(
 
 export function validateGameContent(workspacePath: string) {
   const started = performance.now()
-  const nativeIndexPath = resolve(workspacePath, 'content/index.json')
-  const nativeIndex = existsSync(resolve(workspacePath, PROJECT_CONTENT_CONTRACT_PATH)) && existsSync(nativeIndexPath)
-    ? parseBeeGameContentIndex(JSON.parse(readFileSync(nativeIndexPath, 'utf8')))
-    : undefined
-  const assetManifestRevision = nativeIndex?.assetManifestRevision
-  if (!assetManifestRevision)
-    return {
-      ...validationScope,
-      valid: false,
-      issues: ['An accepted Asset Manifest revision is required.'],
-      contentCount: 0,
-      elapsedMs: Math.round(performance.now() - started),
-    }
-  const audit = auditBeeGameContentPackage(workspacePath, {
-    documentRevision: nativeIndex.documentRevision,
-    assetManifestRevision,
-    manifest: readBeeGameAssetManifestSync(workspacePath),
-  })
+  let authority
+  try { authority = projectContentAuthority(workspacePath) }
+  catch (error) {
+    return { ...validationScope, valid: false,
+      issues: [`Current documents or Asset Manifest are unavailable: ${error instanceof Error ? error.message : String(error)}`],
+      contentCount: 0, elapsedMs: Math.round(performance.now() - started) }
+  }
+  const audit = auditBeeGameContentPackage(workspacePath, authority)
+  // The host audit diagnoses missing/malformed indexes. Do not replace its
+  // error with an unrelated "accepted manifest required" precondition.
+  const nativeIndex = audit.valid
+    ? parseBeeGameContentIndex(JSON.parse(readFileSync(resolve(workspacePath, 'content/index.json'), 'utf8'))) : undefined
   const loadFootprint = audit.package && nativeIndex?.documents
-    ? summarizeContentLoadFootprint(nativeIndex, audit.package, readBeeGameAssetManifestSync(workspacePath),
+    ? summarizeContentLoadFootprint(nativeIndex, audit.package, authority.manifest,
       path => statSync(resolve(workspacePath, path)).size)
     : undefined
   return {
     ...validationScope,
     valid: audit.valid,
     issues: audit.issues,
+    authority: { documentRevision: authority.documentRevision, assetManifestRevision: authority.assetManifestRevision },
     contentCount: audit.package?.documents.length ?? 0,
     ...(loadFootprint ? { loadFootprint } : {}),
     elapsedMs: Math.round(performance.now() - started),
@@ -116,17 +111,23 @@ export function inspectGameContent(workspacePath: string, path?: string, nodeId?
 }
 
 export function runGameContentCommand(workspacePath: string, args: string[] = []) {
+  if (args.length === 1 && args[0] === '--authority') {
+    const { manifest: _manifest, ...authority } = projectContentAuthority(workspacePath)
+    return { ok: true, scope: 'content-authority', ...authority }
+  }
   if (args.length === 0) return validateGameContent(workspacePath)
   if (args[0] !== '--inspect' ||
       !(args.length === 1 || args.length === 2 ||
         (args.length === 4 && args[2] === '--node' && args[3] && !args[1]?.startsWith('--'))))
-    throw new Error('Usage: <workspace> [--inspect [content-relative-file [--node id]]]')
+    throw new Error('Usage: [workspace] [--authority | --inspect [content-relative-file [--node id]]]')
   return inspectGameContent(workspacePath, args[1], args[3])
 }
 
 if (import.meta.main) {
   try {
-    const result = runGameContentCommand(resolve(process.argv[2] ?? process.cwd()), process.argv.slice(3))
+    const args = process.argv.slice(2)
+    const workspace = args[0] && !args[0].startsWith('--') ? args.shift()! : process.cwd()
+    const result = runGameContentCommand(resolve(workspace), args)
     console.log(JSON.stringify(result, null, 2))
     process.exitCode = ('valid' in result ? result.valid : result.ok) ? 0 : 1
   } catch (error) {

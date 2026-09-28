@@ -7,10 +7,8 @@ import { getIsNonInteractiveSession } from '../bootstrap/state.js'
 import { getCurrentWorktreeSession } from '../utils/worktree.js'
 import { getSessionStartDate } from './common.js'
 import { getInitialSettings } from '../utils/settings/settings.js'
-import { isPoorModeActive } from '../commands/poor/poorMode.js'
 import {
   AGENT_TOOL_NAME,
-  VERIFICATION_AGENT_TYPE,
 } from '@bee-game-studio/builtin-tools/tools/AgentTool/constants.js'
 import { FILE_WRITE_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileWriteTool/prompt.js'
 import { FILE_READ_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileReadTool/prompt.js'
@@ -319,7 +317,7 @@ function getDiscoverSkillsGuidance(): string | null {
     feature('EXPERIMENTAL_SKILL_SEARCH') &&
     DISCOVER_SKILLS_TOOL_NAME !== null
   ) {
-    return `Relevant skills are automatically surfaced each turn as "Skills relevant to your task:" reminders. If you're about to do something those don't cover — a mid-task pivot, an unusual workflow, a multi-step plan — call ${DISCOVER_SKILLS_TOOL_NAME} with a specific description of what you're doing. Skills already visible or loaded are filtered automatically. Skip this if the surfaced skills already cover your next action.`
+    return `Relevant skills may be surfaced as "Skills relevant to your task:" reminders. For a new subtask, you can use ${DISCOVER_SKILLS_TOOL_NAME} to look for a useful skill; choose whether to use it. Skills already visible or loaded are filtered automatically.`
   }
   return null
 }
@@ -368,17 +366,9 @@ function getSessionSpecificGuidanceSection(
       : null,
     DISCOVER_SKILLS_TOOL_NAME !== null &&
     hasSkills &&
+    skillSearchFeatureCheck?.isSkillSearchEnabled() &&
     enabledTools.has(DISCOVER_SKILLS_TOOL_NAME)
       ? getDiscoverSkillsGuidance()
-      : null,
-    hasAgentTool &&
-    process.env.BEEGAME_EXTERNAL_REVIEW !== '1' &&
-    feature('VERIFICATION_AGENT') &&
-    // 3P default: false — verification agent is ant-only A/B
-    getFeatureValue_CACHED_MAY_BE_STALE('tengu_hive_evidence', false) &&
-    // Poor mode: skip verification agent to save tokens
-    !isPoorModeActive()
-      ? `The contract: when non-trivial implementation happens on your turn, independent adversarial verification must happen before you report completion \u2014 regardless of who did the implementing (you directly, a fork you spawned, or a subagent). You are the one reporting to the user; you own the gate. Non-trivial means: 3+ file edits, backend/API changes, or infrastructure changes. Spawn the ${AGENT_TOOL_NAME} tool with subagent_type="${VERIFICATION_AGENT_TYPE}". Your own checks, caveats, and a fork's self-checks do NOT substitute \u2014 only the verifier assigns a verdict; you cannot self-assign PARTIAL. Pass the original user request, all files changed (by anyone), the approach, and the plan file path if applicable. Flag concerns if you have them but do NOT share test results or claim things work. On FAIL: fix, resume the verifier with its findings plus your fix, repeat until PASS. On PASS: spot-check it \u2014 re-run 2-3 commands from its report, confirm every PASS has a Command run block with output that matches your re-run. If any PASS lacks a command block or diverges, resume the verifier with the specifics. On PARTIAL (from the verifier): report what passed and what could not be verified.`
       : null,
   ].filter(item => item !== null)
 

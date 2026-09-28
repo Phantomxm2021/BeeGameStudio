@@ -47,6 +47,8 @@ export async function intakeReferenceParts(attachments: BeeGameAttachment[]): Pr
     } else if (extension === '.docx') {
       const mammoth = await import('mammoth')
       text = (await mammoth.extractRawText({ buffer: bytes })).value
+    } else if (extension === '.doc') {
+      text = await legacyWordText(bytes)
     } else if (extension === '.xlsx') {
       const { Workbook } = await import('exceljs')
       const workbook = new Workbook()
@@ -71,6 +73,25 @@ export async function intakeReferenceParts(attachments: BeeGameAttachment[]): Pr
     parts.push({ type: 'text', text })
   }
   return parts
+}
+
+async function legacyWordText(bytes: Buffer): Promise<string> {
+  if (!bytes.subarray(0, 8).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]))) {
+    throw new Error('Invalid DOC reference.')
+  }
+  const antiword = Bun.which('antiword')
+  const textutil = Bun.which('textutil')
+  if (!antiword && !textutil) throw new Error('DOC references require a document text extractor on the runtime server.')
+  const directory = await mkdtemp(join(tmpdir(), 'bgs-word-reference-'))
+  try {
+    const source = join(directory, 'reference.doc')
+    await writeFile(source, bytes)
+    const command = antiword || textutil!
+    const args = antiword ? ['-m', 'UTF-8.txt', '-t', source] : ['-convert', 'txt', '-stdout', '-encoding', 'UTF-8', source]
+    const { stdout } = await runFile(command, args, { timeout: 15_000, maxBuffer: 2 * 1024 * 1024 })
+    if (!stdout.trim()) throw new Error('DOC reference has no readable text.')
+    return stdout
+  } finally { await rm(directory, { recursive: true, force: true }) }
 }
 
 async function videoFrames(bytes: Buffer, extension: string): Promise<Part[]> {

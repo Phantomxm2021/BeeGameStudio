@@ -4,6 +4,22 @@ import { join } from 'node:path'
 
 type Event = { at: string; type: string; targetId: string; detail: unknown }
 type Start = { targetId: string; label: string; conditions: string; preview: unknown }
+type ObservedEnvironment = { status: 'observed'; viewport: { width: number; height: number };
+  devicePixelRatio: number; maxTouchPoints: number; coarsePointer: boolean; hover: boolean }
+
+export function pageEnvironmentFromCdp(value: unknown): ObservedEnvironment | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const page = value as Record<string, unknown>
+  if (typeof page.width !== 'number' || !Number.isFinite(page.width) || page.width <= 0 ||
+      typeof page.height !== 'number' || !Number.isFinite(page.height) || page.height <= 0 ||
+      typeof page.devicePixelRatio !== 'number' || !Number.isFinite(page.devicePixelRatio) || page.devicePixelRatio <= 0 ||
+      typeof page.maxTouchPoints !== 'number' || !Number.isSafeInteger(page.maxTouchPoints) || page.maxTouchPoints < 0 ||
+      typeof page.coarsePointer !== 'boolean' || typeof page.hover !== 'boolean') return undefined
+  return { status: 'observed',
+    viewport: { width: page.width, height: page.height },
+    devicePixelRatio: page.devicePixelRatio, maxTouchPoints: page.maxTouchPoints,
+    coarsePointer: page.coarsePointer, hover: page.hover }
+}
 
 /** One passive CDP observer for one Agent-selected page and its child frames.
  * No navigation, input, interception, cache changes, retries or pass verdict. */
@@ -19,6 +35,7 @@ export async function startPreviewRecording(endpoint: string, input: Start, outp
   let droppedEvents = 0
   let truncatedEvents = 0
   let screenshot: Buffer | undefined
+  let observedEnvironment: ObservedEnvironment | { status: 'unavailable' } | undefined
   let files: { report: string; screenshot?: string } | undefined
   let finishing: Promise<unknown> | undefined
   const events: Event[] = []
@@ -112,6 +129,7 @@ export async function startPreviewRecording(endpoint: string, input: Start, outp
 
   const report = () => ({
     id, label: input.label, conditions: { source: 'agent-declared', text: input.conditions }, preview: input.preview,
+    ...(observedEnvironment ? { observedEnvironment } : {}),
     targetId: input.targetId, startedAt, endedAt, durationMs: durationMs ?? Math.round(performance.now() - started),
     status: endedAt ? 'finished' : 'recording', endReason,
     observationStatus: endedAt ? 'finished' : socket.readyState === WebSocket.OPEN ? 'connected' : 'disconnected',
@@ -124,6 +142,17 @@ export async function startPreviewRecording(endpoint: string, input: Start, outp
     id, report, screenshot: async () => screenshot ?? (files?.screenshot ? await readFile(files.screenshot) : undefined),
     finish(reason = 'agent-finished', capture = true): Promise<unknown> {
       return finishing ??= (async () => {
+        // Read the actual page environment. A narrow viewport alone does not
+        // establish touch input; this observation never drives the page.
+        try {
+          const result = await command('Runtime.evaluate', {
+            expression: '({width:innerWidth,height:innerHeight,devicePixelRatio:devicePixelRatio,maxTouchPoints:navigator.maxTouchPoints,coarsePointer:matchMedia("(pointer: coarse)").matches,hover:matchMedia("(hover: hover)").matches})',
+            returnByValue: true,
+          }, page)
+          if (result.exceptionDetails) throw new Error('Page environment could not be observed')
+          observedEnvironment = pageEnvironmentFromCdp(result.result?.value)
+            ?? { status: 'unavailable' }
+        } catch { observedEnvironment = { status: 'unavailable' } }
         if (capture) {
           try {
             const result = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }, page)

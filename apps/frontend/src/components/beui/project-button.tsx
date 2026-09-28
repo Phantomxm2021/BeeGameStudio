@@ -27,10 +27,10 @@ const sizeClass: Record<ProjectSize, string> = {
   xs: 'h-7 gap-1 rounded-md px-2 text-xs',
   sm: 'h-8 gap-1 rounded-md px-2.5 text-sm',
   lg: 'h-10 gap-1.5 px-3 text-sm',
-  icon: 'size-8 rounded-md',
-  'icon-xs': 'size-7 rounded-md',
-  'icon-sm': 'size-8 rounded-md',
-  'icon-lg': 'size-10 rounded-md',
+  icon: 'size-8 rounded-full',
+  'icon-xs': 'size-7 rounded-full',
+  'icon-sm': 'size-8 rounded-full',
+  'icon-lg': 'size-10 rounded-full',
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(

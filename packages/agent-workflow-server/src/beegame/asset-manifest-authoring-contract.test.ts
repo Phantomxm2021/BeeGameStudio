@@ -6,6 +6,7 @@ import { readBeeGameAssetManifestSync, writeBeeGameAssetManifest } from './asset
 import { validateResourceDelivery } from './resource-validation-cli'
 import {
   assetManifestAuthoringExamples,
+  assetSourceAuthoringExamples,
   materializeAssetManifestAuthoringContract,
 } from './asset-manifest-authoring-contract'
 
@@ -45,6 +46,24 @@ test('materialized contract describes the same modular interface', async () => {
   expect(text).toContain('local_file_hashes')
   expect(text).toContain('loadable entry **file**')
   expect(text).toContain('bun assets/manifest/check.mjs')
+  expect(text).toContain('not an authoring document')
+  expect(text).toContain('"pack_version": "1"')
+  expect(text).toContain('"retrieved_at": "2026-01-01T00:00:00.000Z"')
+  expect((await Bun.file(join(workspace, 'assets/manifest/check.mjs')).text()).startsWith('// Generated validator: run this file')).toBe(true)
+})
+
+test('every documented source example passes the host source validation', async () => {
+  workspace = await mkdtemp(join(tmpdir(), 'asset-source-examples-'))
+  const example = assetManifestAuthoringExamples()
+  await mkdir(join(workspace, 'assets/manifest/requirements'), { recursive: true })
+  await mkdir(join(workspace, 'assets/manifest/resources'), { recursive: true })
+  await writeFile(join(workspace, 'assets/asset-manifest.json'), JSON.stringify(example.index))
+  await writeFile(join(workspace, 'assets/manifest/requirements/example.json'), JSON.stringify(example.requirementsModule))
+  for (const source of Object.values(assetSourceAuthoringExamples)) {
+    await writeFile(join(workspace, 'assets/manifest/resources/example-runtime-data.json'),
+      JSON.stringify({ ...example.resourceModule, source }))
+    expect(readBeeGameAssetManifestSync(workspace).resources[0]?.source).toEqual(source)
+  }
 })
 
 test('project-local checker matches the host on pass and actionable failure without rewriting assets', async () => {

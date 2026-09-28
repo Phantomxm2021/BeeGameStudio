@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { compactTranscriptForChatHistory, findTodoWriteEvents } from '../app'
+import { compactTranscriptForChatHistory, findTodoWriteEvents, paginateTranscriptEvents } from '../app'
 import type { BeeGameEvent } from '../beegame/session-manager'
 
 const thinkingEvent = (
@@ -23,16 +23,27 @@ const thinkingEvent = (
 })
 
 describe('chat transcript compaction', () => {
-  test('stage thinking and tool receipts keep native ownership across live mirroring and disk recovery', () => {
+  test('pages by full event time even when project-journal append IDs differ', () => {
+    const events = [
+      { id: 1, createdAt: new Date('2026-09-24T17:59:00Z') },
+      { id: 2, createdAt: new Date('2026-09-23T17:42:00Z') },
+      { id: 3, createdAt: new Date('2026-09-24T17:59:00Z') },
+      { id: 4, createdAt: new Date('2026-09-22T17:00:00Z') },
+    ]
+    const latest = paginateTranscriptEvents(events, { limit: 2 })
+    expect(latest.events.map(event => event.id)).toEqual([1, 3])
+    expect(latest.page.nextBeforeId).toBe(1)
+    expect(paginateTranscriptEvents(events, { limit: 2, beforeId: 1 }).events.map(event => event.id))
+      .toEqual([4, 2])
+  })
+  test('native thinking snapshots keep their block identity and child scope', () => {
     const events = [
       thinkingEvent(1, 'Thinking', 'started', '2026-09-17T00:00:00.000Z'),
       thinkingEvent(2, 'First', 'streaming', '2026-09-17T00:00:02.000Z'),
       thinkingEvent(3, 'First and second', 'streaming', '2026-09-17T00:00:04.000Z'),
       thinkingEvent(4, 'Thinking', 'ended', '2026-09-17T00:00:07.000Z'),
-    ].map((event, i) => ({ ...event,
-      sessionId: i % 2 ? 'workflow-stage:author' : 'main',
-      payload: { ...event.payload!, workflowStageStreamId: 'workflow-stage:author:query-1',
-        projectSourceSessionId: i % 2 ? 'workflow-stage:author' : 'main', contentMode: 'snapshot' },
+    ].map(event => ({ ...event,
+      payload: { ...event.payload!, contentMode: 'snapshot' },
     }))
     const compact = compactTranscriptForChatHistory(events)
     expect(compact).toHaveLength(1)
@@ -41,9 +52,9 @@ describe('chat transcript compaction', () => {
     const child = events.map(e => ({ ...e, payload: { ...e.payload, parentToolUseID: 'child' } }))
     expect(compactTranscriptForChatHistory([...events, ...child])).toHaveLength(2)
   })
-  test('returns Todo snapshots across all stages instead of just the last one', () => {
-    const todos: BeeGameEvent[] = ['author', 'resources', 'content'].map((stage, id) => ({
-      id, sessionId: stage, type: 'tool.completed', text: 'TodoWrite', createdAt: new Date(id),
+  test('returns Todo snapshots across all sessions instead of just the last one', () => {
+    const todos: BeeGameEvent[] = ['session-a', 'session-b', 'session-c'].map((sessionId, id) => ({
+      id, sessionId, type: 'tool.completed', text: 'TodoWrite', createdAt: new Date(id),
       payload: { type: 'tool.completed', toolName: 'TodoWrite',
         input: { todos: [{ content: 'Review', status: 'completed' }] } },
     }))
@@ -91,6 +102,17 @@ describe('chat transcript compaction', () => {
         compact_metadata: { trigger: 'auto', pre_tokens: 167212 } } },
     ] as BeeGameEvent[]
     expect(compactTranscriptForChatHistory(events).map(event => event.id)).toEqual([1, 2])
+  })
+  test('retains delivery milestones and handoff errors after a completed turn', () => {
+    const base = { sessionId: 's', turnId: 'turn', createdAt: new Date() }
+    const events: BeeGameEvent[] = [
+      { ...base, id: 1, type: 'turn.completed', text: 'Done' },
+      { ...base, id: 2, type: 'system.status', text: 'acceptance',
+        payload: { type: 'system.status', subtype: 'delivery_phase', phase: 'acceptance' } },
+      { ...base, id: 3, type: 'system.status', text: 'Delivery could not continue: fixture failure',
+        payload: { type: 'system.status', subtype: 'delivery_error' } },
+    ]
+    expect(compactTranscriptForChatHistory(events)).toMatchObject(events)
   })
   test('preserves one completed Thinking lifecycle with its full duration', () => {
     const compacted = compactTranscriptForChatHistory([

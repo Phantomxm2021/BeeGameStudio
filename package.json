@@ -1,7 +1,7 @@
 {
   "name": "bee-game-studio",
   "version": "2.8.4",
-  "description": "Reverse-engineered Anthropic Claude Code CLI — interactive AI coding assistant in the terminal",
+  "description": "BeeGameStudio interactive game-building assistant and runtime",
   "type": "module",
   "author": "bee-game-studio <bee-game-studio@proton.me>",
   "repository": {
@@ -13,7 +13,7 @@
     "url": "https://github.com/bee-game-studio/claude-code/issues"
   },
   "keywords": [
-    "claude",
+    "beegamestudio",
     "anthropic",
     "cli",
     "ai",

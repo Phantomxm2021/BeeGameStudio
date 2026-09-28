@@ -15,12 +15,13 @@ Remote Control Server 是 Claude Code 的远程控制后端，允许你通过浏
 ### Docker 部署（推荐）
 
 ```bash
+docker build -f packages/remote-control-server/Dockerfile -t bee-game-studio-remote-control:local .
 docker run -d \
   --name rcs \
   -p 3000:3000 \
   -e RCS_API_KEYS=your-api-key-here \
   -v rcs-data:/app/data \
-  ghcr.io/claude-code-best/remote-control-server:latest
+  bee-game-studio-remote-control:local
 ```
 
 ## 环境变量

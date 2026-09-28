@@ -680,7 +680,7 @@ export const SettingsSchema = lazySchema(() =>
         .string()
         .optional()
         .describe(
-          'Custom Tavily API endpoint URL. Defaults to https://tavily.claude-code-best.win. ' +
+          'Custom Tavily API endpoint URL. Defaults to https://api.tavily.com and requires TAVILY_API_KEY. ' +
             'Used by both WebSearch and WebFetch when tavily adapter is selected.',
         ),
       braveApiKey: z

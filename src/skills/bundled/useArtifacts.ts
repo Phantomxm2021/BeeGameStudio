@@ -2,7 +2,7 @@ import { registerBundledSkill } from '../bundledSkills.js'
 
 const USE_ARTIFACTS_PROMPT = `# Using Artifacts
 
-Artifacts are public HTML pages you upload to a hosting service. They have stable URLs that you can share with the user or open in a browser. Use them to surface work-in-progress, summaries, and reports.
+Artifacts are public HTML pages uploaded to the configured Bee Game Studio artifact service. Anyone with the link can read them. This is not the local project Artifacts panel, the resource manifest, or game publishing. Upload only when the user asks to share a public page and approves the destination and file.
 
 ## When to use artifacts
 
@@ -19,16 +19,15 @@ Artifacts are public HTML pages you upload to a hosting service. They have stabl
 - Internal debug logs — keep them in chat
 - Large data dumps — link to source files instead
 
-## Cadence — when to upload
+## Before uploading
 
-- **Task start**: if the task is complex (multi-step, research, deliverable), upload a skeleton artifact first as scaffolding (placeholder sections).
-- **Milestones**: when you complete a phase (research done / implementation done / tests pass), update the artifact.
-- **User asks**: upload immediately.
-- **Task end**: ship the final artifact as the deliverable.
+- Confirm the user requested public sharing; a local delivery error is not such a request.
+- State the source filename, configured destination domain, public visibility, and 7/30-day lifetime for approval.
+- If the Bee Game Studio artifact endpoint is not configured, do not substitute another hosting service.
 
 **Do NOT upload:**
-- After every tool call (noise)
-- Mid-step with no meaningful change (e.g. fixed a typo)
+- At task start or a delivery milestone without a sharing request
+- To work around local file, asset-manifest, or validation errors
 
 ## How to invoke (deferred tool)
 
@@ -114,7 +113,7 @@ export function registerUseArtifactsSkill(): void {
     description:
       'Teach the agent when and how to use the artifact tool: what content belongs in artifacts, when to upload/update, and the SearchExtraTools + ExecuteExtraTool invocation flow for the deferred artifact tool.',
     whenToUse:
-      'Use this skill at the start of any complex task that would benefit from a living progress document or a deliverable HTML report.',
+      'Use when the user explicitly requests a public, shareable HTML or Markdown artifact.',
     userInvocable: true,
     argumentHint: '[optional focus note]',
     async getPromptForCommand(args) {

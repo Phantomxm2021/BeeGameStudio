@@ -3,6 +3,78 @@ import { describe, expect, it, vi } from "vitest";
 import { Message, MessageScroller } from "./message";
 
 describe("MessageScroller PreviewRail", () => {
+  it("stops following immediately when the reader scrolls upward, before a scroll event", async () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let notifyResize: (() => void) | undefined;
+    globalThis.ResizeObserver = class {
+      constructor(callback: ResizeObserverCallback) {
+        notifyResize = () => callback([], this as unknown as ResizeObserver);
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    } as unknown as typeof ResizeObserver;
+    try {
+      let viewport: HTMLElement | null = null;
+      render(<MessageScroller viewportRef={(node) => { viewport = node; }}>
+        <Message from="assistant">Latest response</Message>
+      </MessageScroller>);
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)); });
+      if (!viewport) throw new Error("Expected a message viewport");
+      const scrollTo = vi.fn();
+      viewport.scrollTo = scrollTo;
+      fireEvent.wheel(viewport, { deltaY: -120 });
+      act(() => notifyResize?.());
+      expect(scrollTo).not.toHaveBeenCalled();
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  it("does not auto-follow content changes while older history is loading", async () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let notifyResize: (() => void) | undefined;
+    globalThis.ResizeObserver = class {
+      constructor(callback: ResizeObserverCallback) {
+        notifyResize = () => callback([], this as unknown as ResizeObserver);
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      let viewport: HTMLElement | null = null;
+      render(
+        <MessageScroller
+          pauseAutoFollow
+          viewportRef={(node) => {
+            viewport = node;
+            if (node) {
+              Object.defineProperty(node, "scrollHeight", { configurable: true, value: 480 });
+              Object.defineProperty(node, "clientHeight", { configurable: true, value: 120 });
+            }
+          }}
+        >
+          <Message from="assistant">Existing response</Message>
+        </MessageScroller>,
+      );
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      });
+      if (!viewport) throw new Error("Expected a message viewport");
+      const scrollTo = vi.fn();
+      viewport.scrollTo = scrollTo;
+      scrollTo.mockClear();
+
+      act(() => notifyResize?.());
+      expect(scrollTo).not.toHaveBeenCalled();
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
   it("shows readable anchors after overflow and scrolls to the selected message", async () => {
     let viewport: HTMLElement | null = null;
     render(

@@ -8,19 +8,6 @@ afterAll(() => {
   setupAxiosMock()
 })
 
-const _abortMock = () => ({
-  AbortError: class AbortError extends Error {
-    constructor(message?: string) {
-      super(message)
-      this.name = 'AbortError'
-    }
-  },
-  isAbortError: (e: unknown) =>
-    e instanceof Error && (e as Error).name === 'AbortError',
-})
-mock.module('src/utils/errors.js', _abortMock)
-mock.module('src/utils/errors', _abortMock)
-
 describe('ExaSearchAdapter.search', () => {
   const createAdapter = async () => {
     const { ExaSearchAdapter } = await import('../adapters/exaAdapter')
@@ -71,6 +58,22 @@ describe('ExaSearchAdapter.search', () => {
       url: 'https://example.com/page2',
       snippet: 'This is the content snippet for page 2.',
     })
+  })
+
+  test('uses the parent-process Exa credential without requiring a settings-file copy', async () => {
+    const previous = process.env.EXA_API_KEY
+    const post = mock(() => Promise.resolve({ data: buildSseResponse(STRUCTURED_TEXT) }))
+    mock.module('axios', () => ({ default: { post, isCancel: () => false } }))
+    try {
+      process.env.EXA_API_KEY = 'env-exa-fixture'
+      const adapter = await createAdapter()
+      await adapter.search('test query', {})
+      expect(post).toHaveBeenCalledWith(expect.any(String), expect.any(Object),
+        expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer env-exa-fixture' }) }))
+    } finally {
+      if (previous === undefined) delete process.env.EXA_API_KEY
+      else process.env.EXA_API_KEY = previous
+    }
   })
 
   test('parses markdown link fallback when no structured blocks', async () => {

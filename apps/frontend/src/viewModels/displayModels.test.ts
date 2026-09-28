@@ -7,6 +7,7 @@ describe('displayModels', () => {
       project_id: ' project-1 ',
       phase: ' running ',
       blocked: false,
+      active_subagents: [' agent-use-1 '],
       acceptance: { status: 'passed', summary: 'Verified' },
       build_report: {
         status: 'passed',
@@ -20,6 +21,7 @@ describe('displayModels', () => {
     expect(display).toMatchObject({
       project_id: 'project-1',
       phase: 'running',
+      active_subagents: ['agent-use-1'],
       acceptance: { status: 'passed', summary: 'Verified' },
       build_report: {
         status: 'passed',

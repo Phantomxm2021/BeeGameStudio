@@ -12,6 +12,18 @@ import { deriveCurrentProjectTodos } from '../utils/projectTodos'
 
 const authenticatedFetchMock = vi.mocked(authenticatedFetch)
 
+it('keeps delivery handoff failures visible after the successful Agent turn', () => {
+  const history = transcriptEventsToHistory('project', [
+    { id: 1, sessionId: 'session', turnId: 'turn', type: 'turn.completed', text: '',
+      createdAt: '2026-09-25T14:20:14Z', payload: { type: 'turn.completed' } },
+    { id: 2, sessionId: 'session', turnId: 'turn', type: 'system.status', text: '交付未能继续：测试清理失败',
+      createdAt: '2026-09-25T14:20:15Z', payload: { type: 'system.status', subtype: 'delivery_error' } },
+  ])
+  expect(history).toContainEqual(expect.objectContaining({
+    sender: 'system', content: '交付未能继续：测试清理失败', taskKind: 'delivery_error',
+  }))
+})
+
 it('sends answers through the permission endpoint and does not treat stale requests as submitted', async () => {
   authenticatedFetchMock.mockReset()
   authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ resolved: true })))
@@ -34,8 +46,33 @@ const transcriptResponse = (overrides: Record<string, unknown> = {}) => new Resp
 }))
 
 describe('transcriptEventsToHistory', () => {
-  it('omits internal worker envelopes but keeps two genuine identical user requests', () => {
-    const events = ['project_request', 'workflow_worker', 'delivery_continue', 'project_request'].map((displayKind, index) => ({
+  it('keeps the turn completion time separate from the first assistant block timestamp', () => {
+    const events = [
+      { id: 1, sessionId: 'session-1', turnId: 'turn-1', type: 'assistant.message', text: 'Done',
+        createdAt: '2026-09-25T06:50:55.000Z', payload: { type: 'assistant.message', assistantBlockId: 'answer-1' } },
+      { id: 2, sessionId: 'session-1', turnId: 'turn-1', type: 'turn.completed', text: '',
+        createdAt: '2026-09-25T06:51:10.920Z', payload: { type: 'turn.completed' } },
+    ]
+    const [answer] = toChatDisplayMessages(normalizeChatHistory(transcriptEventsToHistory('project', events)))
+    expect(answer.timestamp).toBe(Date.parse('2026-09-25T06:50:55.000Z'))
+    expect(answer.turnCompletedAt).toBe(Date.parse('2026-09-25T06:51:10.920Z'))
+  })
+
+  it('uses full timestamps across history pages when source sequences restart', () => {
+    const event = (id: number, sourceSequence: number, text: string) => ({
+      id, sessionId: 'session-1', turnId: `turn-${id}`, type: 'assistant.message' as const,
+      text, createdAt: new Date(1_790_000_000_000 + id).toISOString(),
+      payload: { type: 'assistant.message', assistantBlockId: `block-${id}`, sourceSequence },
+    })
+    const initial = normalizeChatHistory(transcriptEventsToHistory('project', [event(500, 1, 'latest reply')]))
+    const older = normalizeChatHistory(transcriptEventsToHistory('project', [event(400, 400, 'older reply')]))
+    expect(initial[0].sequence).toBe(1)
+    expect(normalizeChatHistory([...initial, ...older]).map(message => message.content))
+      .toEqual(['older reply', 'latest reply'])
+  })
+
+  it('omits automatic delivery continuation but keeps two genuine identical user requests', () => {
+    const events = ['project_request', 'delivery_continue', 'project_request'].map((displayKind, index) => ({
       id: index + 1, sessionId: 'main', type: 'user.message', text: '修复按钮',
       createdAt: new Date(1000 + index).toISOString(), payload: { type: 'user.message', displayKind, clientMessageId: `client-${index}` },
     }))
@@ -43,45 +80,43 @@ describe('transcriptEventsToHistory', () => {
     expect(history).toHaveLength(2)
     expect(history.map(message => message.content)).toEqual(['修复按钮', '修复按钮'])
   })
-  const stageThinking = (id: number, status: string, text: string, transport: string) => ({
-    id, sessionId: transport, turnId: 'workflow-stage:author:query-1',
+  const nativeThinking = (id: number, status: string, text: string) => ({
+    id, sessionId: 'native-session', turnId: 'native-turn',
     type: 'assistant.thinking' as const, text,
     createdAt: new Date(1000 + id * 1000).toISOString(),
     payload: { type: 'assistant.thinking', status, contentMode: 'snapshot',
-      workflowStage: 'author', workflowStageStreamId: 'workflow-stage:author:query-1',
-      workflowStageNativeKey: `native-${id}`, projectSourceSessionId: transport,
       thinkingBlockId: 'query-1:message-1:0', thinkingStartedAt: new Date(2000).toISOString() },
   })
 
-  it('joins thinking start, snapshots and end by native block identity, not the transport session', () => {
-    const events = [stageThinking(1, 'started', 'Thinking', 'main'),
-      stageThinking(2, 'streaming', 'First', 'workflow-stage:author'),
-      stageThinking(3, 'streaming', 'First and second', 'main'),
-      stageThinking(4, 'ended', 'Thinking', 'workflow-stage:author')]
+  it('joins native thinking start, snapshots and end by block identity', () => {
+    const events = [nativeThinking(1, 'started', 'Thinking'),
+      nativeThinking(2, 'streaming', 'First'),
+      nativeThinking(3, 'streaming', 'First and second'),
+      nativeThinking(4, 'ended', 'Thinking')]
     const history = transcriptEventsToHistory('p', events) as Record<string, unknown>[]
     expect(history).toHaveLength(1)
     expect(history[0]).toMatchObject({ content: 'First and second', streamStatus: 'complete', thinkingDurationMs: 3000 })
     const child = events.map(e => ({ ...e, id: e.id + 10,
-      payload: { ...e.payload, parentToolUseID: 'child-1', workflowStageStreamId: 'workflow-stage:author:query-1:subagent:child-1' } }))
+      payload: { ...e.payload, parentToolUseID: 'child-1' } }))
     expect(transcriptEventsToHistory('p', [...events, ...child])).toHaveLength(2)
   })
 
   it('uses the same thinking identity across separate SSE batches and history replay', async () => {
-    const events = [stageThinking(1, 'started', 'Thinking', 'main'),
-      stageThinking(2, 'streaming', 'Content', 'workflow-stage:author'),
-      stageThinking(3, 'ended', 'Thinking', 'main')]
+    const events = [nativeThinking(1, 'started', 'Thinking'),
+      nativeThinking(2, 'streaming', 'Content'),
+      nativeThinking(3, 'ended', 'Thinking')]
     const body = new ReadableStream<Uint8Array>({ start(controller) {
       for (const event of events) controller.enqueue(new TextEncoder().encode(`id: ${event.id}\ndata: ${JSON.stringify({ events: [event] })}\n\n`))
       controller.close()
     } })
     authenticatedFetchMock.mockResolvedValueOnce(new Response(body))
     const onMessage = vi.fn()
-    await beeGameAdapter.streamMessages('stage-thinking-test', 0, { onMessage, onCursor: vi.fn() }, new AbortController().signal)
+    await beeGameAdapter.streamMessages('native-thinking-test', 0, { onMessage, onCursor: vi.fn() }, new AbortController().signal)
     const projected = onMessage.mock.calls.map(([message]) => message)
     expect(projected.map(m => m.type)).toEqual(['think_start', 'thought', 'think_end'])
     expect(new Set(projected.map(m => m.message_id)).size).toBe(1)
     expect(projected.at(-1)).toMatchObject({ thinking_duration_ms: 2000 })
-    expect((transcriptEventsToHistory('stage-thinking-test', events)[0] as { id: string }).id).toBe(projected[0].message_id)
+    expect((transcriptEventsToHistory('native-thinking-test', events)[0] as { id: string }).id).toBe(projected[0].message_id)
   })
 
   it('preserves client acknowledgements through history without collapsing repeated user text', () => {
@@ -138,6 +173,19 @@ describe('transcriptEventsToHistory', () => {
       content: 'compacted', streamStatus: 'complete', timestamp: Date.parse(start.createdAt) })
   })
 
+  it('keeps delivery and session boundaries without turning tool progress into markers', () => {
+    const history = transcriptEventsToHistory('p', [
+      nativeEvent(1, 'system.status', { type: 'system.status', subtype: 'delivery_phase', phase: 'author' }),
+      nativeEvent(2, 'system.status', { type: 'system.status', subtype: 'task_progress', status: 'running' }),
+      nativeEvent(3, 'session.stopped', { type: 'session.stopped' }),
+      nativeEvent(4, 'session.resumed', { type: 'session.resumed' }),
+      nativeEvent(5, 'system.status', { type: 'system.status', subtype: 'delivery_phase', phase: 'review' }),
+    ]) as Record<string, unknown>[]
+    const markers = history.filter(message => message.taskKind === 'delivery_phase' || message.taskKind === 'session_lifecycle')
+    expect(markers.map(message => message.content)).toEqual(['author', 'stopped', 'resumed', 'review'])
+    expect(markers.every(message => message.type === 'normal')).toBe(true)
+  })
+
   it('streams the same compaction marker identity on start and completion', async () => {
     const events = [
       nativeEvent(1, 'system.status', { type: 'system', subtype: 'status', status: 'compacting' }),
@@ -168,13 +216,13 @@ describe('transcriptEventsToHistory', () => {
     expect(history[0]?.subagentOutput).toBeUndefined()
   })
 
-  it('reconciles mirrored lifecycle, native progress, trace and terminal result into the same subagent card', () => {
+  it('reconciles native progress, trace and terminal result into the same subagent card', () => {
     const subagentActivity = { entries: [{ id: 'read-1', kind: 'tool', toolName: 'Read',
       filePath: 'manifest.json', status: 'completed', output: '{}' }], truncated: false }
     const events = [...launchEvents(),
       nativeEvent(3, 'system.status', { type: 'system', subtype: 'task_progress', task_id: 'task-1', tool_use_id: 'agent-1',
-        workflowSourceSessionId: 'worker-1', description: 'Reading manifest', last_tool_name: 'Read',
-        usage: { tool_uses: 45, duration_ms: 1083052, total_tokens: 156415 }, subagentTrace: '[read-1] Read manifest.json', subagentActivity }, 'main-chat'),
+        description: 'Reading manifest', last_tool_name: 'Read',
+        usage: { tool_uses: 45, duration_ms: 1083052, total_tokens: 156415 }, subagentTrace: '[read-1] Read manifest.json', subagentActivity }),
     ]
     const progress = transcriptEventsToHistory('project-1', events) as Record<string, unknown>[]
     expect(progress).toHaveLength(1)
@@ -247,12 +295,11 @@ describe('transcriptEventsToHistory', () => {
     }
   })
 
-  it('correlates stage lifecycle recovered from disk with the tool invocation already mirrored into chat', () => {
+  it('correlates a native task notification with its tool invocation', () => {
     const history = transcriptEventsToHistory('project-1', [
-      nativeEvent(1, 'tool.started', { toolName: 'Agent', toolUseID: 'agent-1', input: { prompt: 'Review' },
-        workflowStage: 'reviewer', workflowStageNativeKey: 'reviewer:tool-start:agent-1' }, 'main-chat'),
+      nativeEvent(1, 'tool.started', { toolName: 'Agent', toolUseID: 'agent-1', input: { prompt: 'Review' } }),
       nativeEvent(2, 'system.status', { type: 'system', subtype: 'task_notification', tool_use_id: 'agent-1',
-        status: 'completed', summary: 'Checked', workflowStage: 'reviewer', workflowStageNativeKey: 'reviewer:notification-1' }, 'workflow-stage:reviewer'),
+        status: 'completed', summary: 'Checked' }),
     ]) as Record<string, unknown>[]
     expect(history).toHaveLength(1)
     expect(history[0]).toMatchObject({ toolStatus: 'completed', subagentPrompt: 'Review', subagentOutput: 'Checked' })
@@ -302,6 +349,25 @@ describe('transcriptEventsToHistory', () => {
     expect(result.messages).toEqual([expect.objectContaining({
       type: 'agent_message', sender: 'user', content: '修复按钮', message_id: 'client-8',
     })])
+  })
+
+  it('forwards in-flight native usage from the live event stream', async () => {
+    const event = { id: 9, sessionId: 's', turnId: 'turn-3', type: 'usage', text: '',
+      createdAt: '2026-09-20T00:00:03Z', payload: { type: 'stream_event', event: {
+        type: 'message_delta', usage: { input_tokens: 100, output_tokens: 20,
+          cache_read_input_tokens: 300, cache_creation_input_tokens: 10 },
+      } } }
+    const body = new ReadableStream<Uint8Array>({ start(controller) {
+      controller.enqueue(new TextEncoder().encode(`id: 9\ndata: ${JSON.stringify({ events: [event] })}\n\n`))
+      controller.close()
+    } })
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(body))
+    const onMessage = vi.fn()
+    await beeGameAdapter.streamMessages('live-usage-test', 8, { onMessage }, new AbortController().signal)
+    expect(onMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      type: 'usage', usage: { prompt_tokens: 100, completion_tokens: 20,
+        cache_read_tokens: 300, cache_creation_tokens: 10, total_tokens: 430 },
+    }))
   })
 
   it('breaks a silent SSE socket after the heartbeat deadline so the hook can reconnect', async () => {
@@ -446,14 +512,14 @@ describe('transcriptEventsToHistory', () => {
     })
   })
 
-  it('loads Todo snapshots from earlier stages independently of the latest chat page', async () => {
-    const todo = (id: number, stage: string) => nativeEvent(id, 'tool.completed', {
-      toolName: 'TodoWrite', toolUseID: 'todo-' + id, workflowStage: stage,
+  it('loads Todo snapshots from earlier turns independently of the latest chat page', async () => {
+    const todo = (id: number, turnId: string) => ({ ...nativeEvent(id, 'tool.completed', {
+      toolName: 'TodoWrite', toolUseID: 'todo-' + id,
       input: { todos: [{ content: 'Review', status: 'completed' }] },
-    })
+    }), turnId })
     authenticatedFetchMock.mockResolvedValueOnce(transcriptResponse({
       events: [nativeEvent(8, 'assistant.message', { message: { id: 'latest' } })],
-      todoEvents: [todo(1, 'author'), todo(2, 'reviewer')],
+      todoEvents: [todo(1, 'turn-1'), todo(2, 'turn-2')],
     }))
     const history = await beeGameAdapter.getChatHistory('all-todos') as Record<string, unknown>[]
     const todos = history.filter(m => m.toolName === 'TodoWrite')
@@ -462,13 +528,12 @@ describe('transcriptEventsToHistory', () => {
     expect(beeGameAdapter.getChatHistoryPaginationState('all-todos').hasMore).toBe(true)
   })
 
-  it('keeps resumed stage Todo snapshots in one scope while separating child agents', () => {
-    const todo = (id: number, session: string, parent?: string) => nativeEvent(id, 'tool.completed', {
-      toolName: 'TodoWrite', toolUseID: 'todo-' + id, workflowStage: 'implementation', ...(id > 1 ? { workflowRunId: 'run-1' } : {}),
-      workflowSourceSessionId: session, parentToolUseID: parent,
+  it('keeps native Todo snapshots in one turn scope while separating child agents', () => {
+    const todo = (id: number, parent?: string) => nativeEvent(id, 'tool.completed', {
+      toolName: 'TodoWrite', toolUseID: 'todo-' + id, parentToolUseID: parent,
       input: { todos: [{ content: 'Verify', status: 'completed' }] },
     })
-    const messages = transcriptEventsToHistory('todo-resume', [todo(1, 'old'), todo(2, 'new'), todo(3, 'new', 'child')])
+    const messages = transcriptEventsToHistory('todo-resume', [todo(1), todo(2), todo(3, 'child')])
       .filter(message => message.toolName === 'TodoWrite')
     expect(messages).toHaveLength(3)
     expect(messages[0].todoScope).toBe(messages[1].todoScope)

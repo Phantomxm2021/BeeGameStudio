@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Matrix4 } from 'three';
-import { uiAnchor, uiLocalMatrix, uiPaintOrder } from '@beegame/scene-editor';
+import { resolveUiNodesForViewport, uiAnchor, uiLocalMatrix, uiPaintOrder } from '@beegame/scene-editor';
 import { uiAtlasImages, uiImageKey, resolveUiImage } from './uiAtlas';
 import { mapEditorAssets } from './editorAssetLoading';
 import { currentKeyboardLabels, resolveUnityNavigationAction, wheelPixels } from '@beegame/scene-editor/platform';
@@ -77,6 +77,13 @@ type UiAssetOption = {
   font: boolean;
 };
 
+type ViewportMode = 'base' | 'phone-portrait' | 'phone-landscape' | 'tablet-portrait';
+const PREVIEW_VIEWPORTS: Record<Exclude<ViewportMode, 'base'>, [number, number]> = {
+  'phone-portrait': [390, 844],
+  'phone-landscape': [844, 390],
+  'tablet-portrait': [768, 1024],
+};
+
 const UI_IMAGE = /\.(?:png|jpe?g|webp|gif|avif|bmp|svg)$/i;
 const UI_FONT = /\.(?:woff2?|ttf|otf)$/i;
 const INITIAL_UI_LOAD_STATE: EditorLoadState = {
@@ -129,6 +136,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
   const [documents, setDocuments] = useState<UiSnapshot[]>([]);
   const [current, setCurrent] = useState<UiSnapshot>();
   const [selectedId, setSelectedId] = useState('');
+  const [viewportMode, setViewportMode] = useState<ViewportMode>('base');
   const [assetUrls, setAssetUrls] = useState<Record<string, string>>({});
   const [assetOptions, setAssetOptions] = useState<UiAssetOption[]>([]);
   const [fontFamilies, setFontFamilies] = useState<Record<string, string>>({});
@@ -422,10 +430,16 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
 
   const nodesById = useMemo(() => new Map(current?.document.data.nodes.map(node => [node.id, node]) ?? []), [current]);
   const selected = nodesById.get(selectedId);
+  const previewSize = viewportMode === 'base' ? canvasSize(current?.document) : PREVIEW_VIEWPORTS[viewportMode];
+  const previewNodes = useMemo(() => current
+    ? viewportMode === 'base' ? current.document.data.nodes
+      : resolveUiNodesForViewport(current.document.data.nodes, current.document.data.rootId, { width: previewSize[0], height: previewSize[1] })
+    : [], [current, viewportMode, previewSize[0], previewSize[1]]);
+  const previewSelected = previewNodes.find(node => node.id === selectedId);
   const children = useMemo(() => childIds(current?.document.data.nodes ?? []), [current]);
   const paintChildren = useMemo(() => current
-    ? uiPaintChildren(current.document.data.nodes, current.document.data.rootId)
-    : new Map<string, string[]>(), [current]);
+    ? uiPaintChildren(previewNodes, current.document.data.rootId)
+    : new Map<string, string[]>(), [current, previewNodes]);
   const imageAssets = assetOptions.filter(option => !option.font && option.members.length);
   const fontAssets = assetOptions.filter(option => option.font);
   const selectedFont = typeof selected?.data?.font === 'object' && selected.data.font !== null
@@ -592,6 +606,14 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
 
   const updateStyle = (key: string, value: unknown) => {
     updateSelected(node => { node.style = { ...node.style, [key]: value }; });
+  };
+
+  const updateResponsive = (profile: 'compact' | 'portrait', update: (variant: NonNullable<NonNullable<BeeGameUiContentNode['responsive']>['compact']>) => void) => {
+    updateSelected(node => {
+      const variant = { ...node.responsive?.[profile], layout: { ...node.responsive?.[profile]?.layout }, style: { ...node.responsive?.[profile]?.style } };
+      update(variant);
+      node.responsive = { ...node.responsive, [profile]: variant };
+    });
   };
 
   const updateData = (key: string, value: unknown) => {
@@ -773,7 +795,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
 
   const resetView = () => {
     const viewport = stageRef.current?.parentElement;
-    const [width, height] = canvasSize(current?.document);
+    const [width, height] = previewSize;
     const availableWidth = viewport ? viewport.clientWidth - (collapsedPanels.hierarchy ? 32 : 300) - (collapsedPanels.inspector ? 32 : 300) : width;
     setZoom(Math.min(1, Math.max(.1, Math.min(availableWidth / width, ((viewport?.clientHeight ?? height) - 160) / height))));
     setPan({ x: 0, y: 0 });
@@ -781,9 +803,9 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
 
   const frameSelection = () => {
     const viewport = viewportRef.current;
-    if (!viewport || !selected || !current || selected.id === current.document.data.rootId) { resetView(); return; }
-    const [width, height] = nodeSize(selected);
-    const m = parentTransform(selected, current.document.data.nodes).multiply(localTransform(selected, current.document.data.nodes)).elements;
+    if (!viewport || !previewSelected || !current || previewSelected.id === current.document.data.rootId) { resetView(); return; }
+    const [width, height] = nodeSize(previewSelected);
+    const m = parentTransform(previewSelected, previewNodes).multiply(localTransform(previewSelected, previewNodes)).elements;
     const centerX = m[12] + (m[0] * width + m[4] * height) / 2;
     const centerY = m[13] + (m[1] * width + m[5] * height) / 2;
     const left = collapsedPanels.hierarchy ? 32 : 300;
@@ -792,7 +814,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
       Math.max(1, viewport.clientWidth - left - right - 80) / Math.max(1, Math.abs(m[0] * width) + Math.abs(m[4] * height)),
       Math.max(1, viewport.clientHeight - 160) / Math.max(1, Math.abs(m[1] * width) + Math.abs(m[5] * height)),
     ));
-    const [canvasWidth, canvasHeight] = canvasSize(current.document);
+    const [canvasWidth, canvasHeight] = previewSize;
     setZoom(nextZoom);
     setPan({ x: (canvasWidth / 2 - centerX) * nextZoom + (left - right) / 2, y: (canvasHeight / 2 - centerY) * nextZoom });
   };
@@ -801,7 +823,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
     if (loadState.status === 'ready' && stageRef.current?.parentElement?.clientWidth) resetView();
     // Fit only on document entry, not on every inspector edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadState.status, current?.path]);
+  }, [loadState.status, current?.path, viewportMode]);
 
   const closeEditor = () => {
     finishInspectorEdit();
@@ -1102,20 +1124,20 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
           onPointerUp={event => { if (panRef.current?.pointerId === event.pointerId) { panRef.current = undefined; setPanning(false); if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); } }}
           onPointerCancel={() => { panRef.current = undefined; setPanning(false); }}
         >
-          <div ref={stageRef} className="ui-editor-stage" aria-label="UI preview" style={{ width: canvasSize(current?.document)[0], height: canvasSize(current?.document)[1], transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
-            {current ? renderUiNode(current.document.data.rootId, current.document.data.nodes, paintChildren, assetUrls, fontFamilies, selectedId, setSelectedId, hiddenIds, unpickableIds, true) : null}
-            {current && showGizmos ? current.document.data.nodes
-              .filter(node => node.id !== current.document.data.rootId && isTransformNode(uiNodeKind(node.role)) && isNodeVisible(node, current.document.data.nodes, hiddenIds) && !unpickableIds.has(node.id))
+          <div ref={stageRef} className="ui-editor-stage" aria-label="UI preview" style={{ width: previewSize[0], height: previewSize[1], transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
+            {current ? renderUiNode(current.document.data.rootId, previewNodes, paintChildren, assetUrls, fontFamilies, selectedId, setSelectedId, hiddenIds, unpickableIds, true) : null}
+            {current && showGizmos ? previewNodes
+              .filter(node => node.id !== current.document.data.rootId && isTransformNode(uiNodeKind(node.role)) && isNodeVisible(node, previewNodes, hiddenIds) && !unpickableIds.has(node.id))
               .map(node => <button
                 key={`gizmo-${node.id}`}
                 type="button"
                 className={`ui-editor-component-gizmo${node.id === selectedId ? ' selected' : ''}`}
-                style={componentGizmoStyle(node, current.document.data.nodes)}
+                style={componentGizmoStyle(node, previewNodes)}
                 aria-label={`Select ${node.name ?? node.id}`}
                 title={`${node.name ?? node.id} · ${node.role}`}
                 onPointerDown={event => { if (event.button === 0) { event.stopPropagation(); setSelectedId(node.id); } }}
               >{roleIcon(node.role)}</button>) : null}
-            {current && selected && isTransformNode(selectedKind) && isNodeVisible(selected, current.document.data.nodes, hiddenIds) && selected.id !== current.document.data.rootId && showGizmos && !hiddenIds.has(selected.id) && !unpickableIds.has(selected.id) ? <SelectionGizmo node={selected} nodes={current.document.data.nodes} mode={gizmoMode} onBegin={beginTransform} /> : null}
+            {current && viewportMode === 'base' && selected && isTransformNode(selectedKind) && isNodeVisible(selected, current.document.data.nodes, hiddenIds) && selected.id !== current.document.data.rootId && showGizmos && !hiddenIds.has(selected.id) && !unpickableIds.has(selected.id) ? <SelectionGizmo node={selected} nodes={current.document.data.nodes} mode={gizmoMode} onBegin={beginTransform} /> : null}
           </div>
         </section>
         <div className="ui-editor-floating-toolbar" role="toolbar" aria-label="UI editor tools">
@@ -1141,10 +1163,12 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
             </EditorMenuPopup>
           </MenuPrimitive.Root>
           <span className="ui-editor-toolbar-divider" />
+          <EditorSelect label="Viewport" ariaLabel="Preview viewport" value={viewportMode} onValueChange={value => setViewportMode(value as ViewportMode)} options={[[ 'base', 'Base' ], [ 'phone-portrait', 'Phone · portrait' ], [ 'phone-landscape', 'Phone · landscape' ], [ 'tablet-portrait', 'Tablet · portrait' ]]} />
+          <span className="ui-editor-toolbar-divider" />
           <Button variant="ghost" size="sm" type="button" aria-pressed={gizmoMode === 'hand'} className={gizmoMode === 'hand' ? 'active' : ''} aria-label="Hand tool" title="Hand / Pan (Q)" onClick={() => setGizmoMode('hand')}><Hand size={16} /></Button>
-          <Button variant="ghost" size="sm" type="button" aria-pressed={gizmoMode === 'move'} className={gizmoMode === 'move' ? 'active' : ''} aria-label="Move tool" title="Move (W)" onClick={() => setGizmoMode('move')}><Move size={16} /></Button>
-          <Button variant="ghost" size="sm" type="button" aria-pressed={gizmoMode === 'rotate'} className={gizmoMode === 'rotate' ? 'active' : ''} aria-label="Rotate tool" title="Rotate (E)" onClick={() => setGizmoMode('rotate')}><RotateCw size={16} /></Button>
-          <Button variant="ghost" size="sm" type="button" aria-pressed={gizmoMode === 'scale'} className={gizmoMode === 'scale' ? 'active' : ''} aria-label="Scale tool" title="Scale (R)" onClick={() => setGizmoMode('scale')}><Scaling size={16} /></Button>
+          <Button variant="ghost" size="sm" type="button" disabled={viewportMode !== 'base'} aria-pressed={gizmoMode === 'move' && viewportMode === 'base'} className={gizmoMode === 'move' && viewportMode === 'base' ? 'active' : ''} aria-label="Move tool" title="Move (W)" onClick={() => setGizmoMode('move')}><Move size={16} /></Button>
+          <Button variant="ghost" size="sm" type="button" disabled={viewportMode !== 'base'} aria-pressed={gizmoMode === 'rotate' && viewportMode === 'base'} className={gizmoMode === 'rotate' && viewportMode === 'base' ? 'active' : ''} aria-label="Rotate tool" title="Rotate (E)" onClick={() => setGizmoMode('rotate')}><RotateCw size={16} /></Button>
+          <Button variant="ghost" size="sm" type="button" disabled={viewportMode !== 'base'} aria-pressed={gizmoMode === 'scale' && viewportMode === 'base'} className={gizmoMode === 'scale' && viewportMode === 'base' ? 'active' : ''} aria-label="Scale tool" title="Scale (R)" onClick={() => setGizmoMode('scale')}><Scaling size={16} /></Button>
           <span className="ui-editor-toolbar-divider" />
           <Button variant="ghost" size="sm" type="button" className={showGizmos ? 'active' : ''} aria-pressed={showGizmos} aria-label="Toggle gizmos" title="Show component gizmos" onClick={() => setShowGizmos(value => !value)}><BoxSelect size={16} /></Button>
           <Button variant="ghost" size="sm" type="button" className={snap ? 'active' : ''} aria-pressed={snap} aria-label="Snap" title="Snap to 8px / 15°" onClick={() => setSnap(value => !value)}><Magnet size={16} /><span>Snap</span></Button>
@@ -1193,6 +1217,27 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
                 })}</div> : <label>Rotation<EditorInput aria-label="Rotation" type="number" step={snap ? 15 : 1} value={Math.round((selected.layout?.rotation ?? 0) * 180 / Math.PI * 100) / 100} onChange={event => updateRotation(Number(event.target.value))} /></label>}
                 <div className="ui-editor-pair ui-editor-scale-pair"><span>Scale</span>{[0, 1].map(index => <EditorInput key={index} aria-label={`Scale ${index === 0 ? 'X' : 'Y'}`} type="number" step="0.1" value={selected.layout?.scale?.[index] ?? 1} onChange={event => updateScale(index, Number(event.target.value))} />)}</div>
                 {selected.data?.space === 'world' ? <label>Scale Z<EditorInput aria-label="Scale Z" type="number" step="0.1" value={typeof selected.data?.scaleZ === 'number' ? selected.data.scaleZ : 1} onChange={event => updateData('scaleZ', Number(event.target.value))} /></label> : null}
+              </div></details> : null}
+              {selectedKind !== 'flow' && selectedKind !== 'flow-screen' && selectedKind !== 'canvas' && selected.data?.space !== 'world' ? <details className="ui-editor-inspector-component"><summary><ChevronRight size={12} className="ui-editor-component-chevron" /><PanelsTopLeft size={14} /><span>Responsive</span></summary><div className="ui-editor-section">
+                <small>Base layout is unchanged. Compact applies to short viewport sides ≤600px; portrait refines it when height exceeds width.</small>
+                {(['compact', 'portrait'] as const).map(profile => {
+                  const variant = selected.responsive?.[profile];
+                  const label = profile === 'compact' ? 'Compact' : 'Portrait';
+                  return <div key={profile} className="ui-editor-responsive-profile">
+                    <div className="ui-editor-check-field"><span>{label} override</span><Switch size="sm" aria-label={`${label} override`} checked={!!variant} onCheckedChange={checked => updateSelected(node => {
+                      node.responsive = { ...node.responsive, [profile]: checked ? {} : undefined };
+                    })} /></div>
+                    {variant ? <>
+                      <div className="ui-editor-check-field"><span>Visible</span><Switch size="sm" aria-label={`${label} visible`} checked={variant.enabled !== false} onCheckedChange={checked => updateResponsive(profile, next => { next.enabled = checked; })} /></div>
+                      {(['position', 'size'] as const).map(field => <div className="ui-editor-pair" key={field}><span>{field === 'position' ? 'Position' : 'Size'}</span>{[0, 1].map(index => <EditorInput key={index} aria-label={`${label} ${field} ${index === 0 ? 'X' : 'Y'}`} type="number" min={field === 'size' ? '0' : undefined} value={variant.layout?.[field]?.[index] ?? selected.layout?.[field]?.[index] ?? 0} onChange={event => updateResponsive(profile, next => {
+                        const pair = [...(next.layout?.[field] ?? selected.layout?.[field] ?? [0, 0])] as [number, number];
+                        pair[index] = field === 'size' ? Math.max(0, Number(event.target.value)) : Number(event.target.value);
+                        next.layout = { ...next.layout, [field]: pair };
+                      })} />)}</div>)}
+                      {textCapable ? <label>Font size<EditorInput aria-label={`${label} font size`} type="number" min="1" value={typeof variant.style?.fontSize === 'number' ? variant.style.fontSize : uiFontSize(selected)} onChange={event => updateResponsive(profile, next => { next.style = { ...next.style, fontSize: Math.max(1, Number(event.target.value)) }; })} /></label> : null}
+                    </> : null}
+                  </div>;
+                })}
               </div></details> : null}
               {textCapable || imageCapable ? <details className="ui-editor-inspector-component ui-editor-component-content" open><summary><ChevronRight size={12} className="ui-editor-component-chevron" />{imageCapable ? <ImageIcon size={14} /> : <Type size={14} />}<span>{imageCapable ? 'Image' : 'Text'}</span></summary><div className="ui-editor-section">
                 {textCapable ? <label>Text<EditorInput value={uiNodeText(selected)} onChange={event => updateText(event.target.value)} /></label> : null}

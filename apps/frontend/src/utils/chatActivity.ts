@@ -1,6 +1,7 @@
 type Activity = {
   taskId?: string; task_id?: string; turnId?: string; timestamp: number;
   streamStatus?: string; toolStatus?: string; isSubagentTool?: boolean;
+  turnCompletedAt?: number;
   completionReason?: 'stopped' | 'failed' | 'incomplete';
 };
 
@@ -22,6 +23,7 @@ export function hasActiveSubagents(messages: ReadonlyArray<Pick<Activity, 'isSub
  * parent turn does not imply a detached subagent has completed. */
 export function settleChatActivity<T extends Activity>(messages: T[], scope: {
   taskId: string; turnId?: string; at: number; reason: NonNullable<Activity['completionReason']>;
+  completedAt?: number;
 }): T[] {
   return messages.map(message => {
     if ((message.taskId ?? message.task_id) !== scope.taskId ||
@@ -29,8 +31,10 @@ export function settleChatActivity<T extends Activity>(messages: T[], scope: {
       (scope.reason === 'incomplete' && message.isSubagentTool)) return message;
     const streaming = message.streamStatus === 'streaming';
     const runningTool = message.toolStatus === 'running';
-    if (!streaming && !runningTool) return message;
-    return { ...message, completionReason: scope.reason,
+    if (!streaming && !runningTool && scope.completedAt === undefined) return message;
+    return { ...message,
+      ...(streaming || runningTool ? { completionReason: scope.reason } : {}),
+      ...(scope.completedAt !== undefined ? { turnCompletedAt: scope.completedAt } : {}),
       ...(streaming ? { streamStatus: 'complete' } : {}),
       ...(runningTool ? { toolStatus: 'failed' } : {}) };
   });

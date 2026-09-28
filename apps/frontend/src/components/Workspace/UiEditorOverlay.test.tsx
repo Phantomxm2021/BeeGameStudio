@@ -33,6 +33,39 @@ const uiDocument = {
 };
 
 describe('UiEditorOverlay', () => {
+  it('previews compact and portrait UI data without changing the base layout', async () => {
+    const doc = { schema: 'beegame-content.v1' as const, id: 'responsive', kind: 'ui-screen' as const, assetRefs: [], data: {
+      rootId: 'root', nodes: [
+        { id: 'root', role: 'screen-root', layout: { size: [1280, 720] as [number, number] } },
+        { id: 'title', parentId: 'root', role: 'text', text: 'Title', layout: { position: [100, 80] as [number, number], size: [300, 70] as [number, number] }, style: { fontSize: 40 }, responsive: {
+          compact: { layout: { position: [20, 30] as [number, number] }, style: { fontSize: 25 } },
+          portrait: { layout: { position: [10, 60] as [number, number] } },
+        } },
+      ],
+    } };
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{ path: 'content/ui/responsive.json', revision: 'a'.repeat(64), document: doc }] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 1, requirements: [], resources: [] });
+    const save = vi.spyOn(beeGameAdapter, 'saveProjectGameContentDocument').mockResolvedValue({ revision: 'b'.repeat(64), contentRevision: 'c'.repeat(64) });
+    render(<UiEditorOverlay projectId="responsive-preview" onClose={vi.fn()} />);
+    await screen.findByRole('treeitem', { name: 'title' });
+    const stage = screen.getByLabelText('UI preview');
+    expect(stage).toHaveStyle({ width: '1280px', height: '720px' });
+    selectEditorOption('Preview viewport', 'Phone · portrait');
+    expect(stage).toHaveStyle({ width: '390px', height: '844px' });
+    expect(stage.querySelector('[data-role="text"]')).toHaveStyle({ fontSize: '25px' });
+    selectEditorOption('Preview viewport', 'Base');
+    expect(stage.querySelector('[data-role="text"]')).toHaveStyle({ fontSize: '40px' });
+    expect(doc.data.nodes[1]?.layout?.position).toEqual([100, 80]);
+    fireEvent.click((screen.getByRole('treeitem', { name: 'title' })).querySelector('.ui-editor-tree-row')!);
+    fireEvent.click(screen.getByText('Responsive'));
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Portrait position X' }), { target: { value: '44' } });
+    fireEvent.keyDown(window, { key: 's', metaKey: true });
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][1].document.data.nodes.find(node => node.id === 'title')).toMatchObject({
+      layout: { position: [100, 80] }, responsive: { portrait: { layout: { position: [44, 60] } } },
+    });
+  });
+
   it('edits container backgrounds without losing background settings or children, with undo/redo and save', async () => {
     const doc = structuredClone(uiDocument);
     const layout = doc.data.nodes.find(node => node.id === 'layout')!;

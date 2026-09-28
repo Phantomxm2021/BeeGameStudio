@@ -12,7 +12,7 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { extname, isAbsolute, join, relative, resolve } from 'node:path'
-import { computeWorkspaceRevision } from './delivery-workflow/revision'
+import { computeWorkspaceRevision } from './workspace-revision'
 
 export type BeeGameDeploymentStatus =
   | 'queued'

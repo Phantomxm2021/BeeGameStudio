@@ -1,16 +1,14 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { api, type BeeGameAssetManifestPayload } from '../../services/api';
 import type { ChatAttachmentPayload } from '../../services/api';
 import { beeGameAdapter, isBeeGameProjectPackageArtifactId, type BeeGameQueuedMessage } from '../../services/beeGameAdapter';
 import { artifactProcessor } from '../../utils/artifactProcessor';
-import { deriveDocumentProgress, isBaselineDocumentPath } from '../../utils/documentProgress';
 import { isBeeGamePermission } from './Sidebar/SidebarUtils';
 import type { WaitingPermissionState } from '../../utils/waitingPermission';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, PermissionDisplayModel } from '../../viewModels/displayModels';
 import { useChatStore } from '../../store/chatStore';
-import { hasActiveSubagents } from '../../utils/chatActivity';
 import { normalizeChatHistory } from '../../utils/chatHistory';
 
 // Modular Panels
@@ -18,7 +16,7 @@ import { ChatPanel } from './Sidebar/ChatPanel';
 import { ArtifactsPanel, type ArtifactEditorFile } from './Sidebar/ArtifactsPanel';
 import { AssetsPanel } from './Sidebar/AssetsPanel';
 import { ArtifactPreviewModal } from './Sidebar/ArtifactPreviewModal';
-import { buildArtifactViewModel, type ArtifactEditorKind } from './Sidebar/artifactViewModel';
+import { buildArtifactViewModel, isProjectDocumentPath, type ArtifactEditorKind } from './Sidebar/artifactViewModel';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../beui/motion/tabs';
 import { SceneEditorOverlay } from '../Workspace/SceneEditorOverlay';
 import { UiEditorOverlay } from '../Workspace/UiEditorOverlay';
@@ -161,9 +159,20 @@ export function RightSidebar({
     
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const messagesRef = useRef(messages);
+    messagesRef.current = messages;
     const activeProjectRef = useRef(projectId);
     const queueRequestRef = useRef(0);
     const historyRequestRef = useRef(0);
+    const stopHistoryAnchorTrackingRef = useRef<(() => void) | null>(null);
+    const pendingHistoryScrollRestoreRef = useRef<{
+        projectId: string;
+        requestId: number;
+        messagesBefore: ChatDisplayMessage[];
+        previousHeight: number;
+        previousTop: number;
+        anchors: Array<{ anchorId: string; offsetTop: number }>;
+    } | null>(null);
     const artifactRequestRef = useRef(0);
     const artifactContentRequestRef = useRef(0);
     const assetLoadRequestRef = useRef(0);
@@ -191,6 +200,8 @@ export function RightSidebar({
         activeProjectRef.current = projectId;
         queueRequestRef.current += 1;
         historyRequestRef.current += 1;
+        stopHistoryAnchorTrackingRef.current?.();
+        pendingHistoryScrollRestoreRef.current = null;
         artifactRequestRef.current += 1;
         artifactContentRequestRef.current += 1;
         assetLoadRequestRef.current += 1;
@@ -230,11 +241,71 @@ export function RightSidebar({
         }
     }, [messages, projectId]);
 
+    useLayoutEffect(() => {
+        const pending = pendingHistoryScrollRestoreRef.current;
+        if (!pending || pending.projectId !== projectId || messages === pending.messagesBefore) return;
+
+        const viewport = scrollContainerRef.current;
+        if (viewport) {
+            const restoreAnchor = () => {
+                const viewportTop = viewport.getBoundingClientRect().top;
+                const rendered = new Map(Array.from(viewport.querySelectorAll<HTMLElement>('[data-slot="message"][data-history-anchor-id]'))
+                    .map(element => [element.dataset.historyAnchorId, element]));
+                const surviving = pending.anchors
+                    .map(anchor => ({ anchor, element: rendered.get(anchor.anchorId) }))
+                    .find(candidate => candidate.element);
+                if (surviving?.element) {
+                    const currentOffset = surviving.element.getBoundingClientRect().top - viewportTop;
+                    viewport.scrollTop += currentOffset - surviving.anchor.offsetTop;
+                } else {
+                    viewport.scrollTop = pending.previousTop + Math.max(0, viewport.scrollHeight - pending.previousHeight);
+                }
+            };
+            stopHistoryAnchorTrackingRef.current?.();
+            restoreAnchor();
+            // Collapsed activity and media can settle after the first commit.
+            // Keep the same visible row fixed while those heights change.
+            if (typeof ResizeObserver !== 'undefined' && pending.anchors.length) {
+                const observer = new ResizeObserver(restoreAnchor);
+                const content = viewport.querySelector<HTMLElement>('[role="log"]');
+                if (content) observer.observe(content);
+                const cancelTracking = () => stopHistoryAnchorTrackingRef.current?.();
+                viewport.addEventListener('wheel', cancelTracking, { once: true });
+                viewport.addEventListener('touchstart', cancelTracking, { once: true });
+                viewport.addEventListener('keydown', cancelTracking, { once: true });
+                const timeout = window.setTimeout(cancelTracking, 1200);
+                stopHistoryAnchorTrackingRef.current = () => {
+                    window.clearTimeout(timeout);
+                    observer.disconnect();
+                    viewport.removeEventListener('wheel', cancelTracking);
+                    viewport.removeEventListener('touchstart', cancelTracking);
+                    viewport.removeEventListener('keydown', cancelTracking);
+                    stopHistoryAnchorTrackingRef.current = null;
+                };
+            }
+        }
+
+        pendingHistoryScrollRestoreRef.current = null;
+        if (activeProjectRef.current === pending.projectId && historyRequestRef.current === pending.requestId) {
+            setIsLoadingOlderHistory(false);
+        }
+    }, [messages, projectId]);
+
+    useEffect(() => () => stopHistoryAnchorTrackingRef.current?.(), []);
+
     const handleLoadOlderHistory = useCallback(async () => {
         if (isLoadingOlderHistory || !hasOlderHistory || messages.length === 0) return;
         const viewport = scrollContainerRef.current;
         const previousHeight = viewport?.scrollHeight ?? 0;
         const previousTop = viewport?.scrollTop ?? 0;
+        const viewportTop = viewport?.getBoundingClientRect().top ?? 0;
+        const anchors = viewport
+            ? Array.from(viewport.querySelectorAll<HTMLElement>('[data-slot="message"][data-history-anchor-id]'))
+                .map(element => ({ element, rect: element.getBoundingClientRect() }))
+                .filter(({ rect }) => rect.bottom > viewportTop && rect.top < viewportTop + (viewport.clientHeight || viewport.getBoundingClientRect().height || Number.POSITIVE_INFINITY))
+                .flatMap(({ element, rect }) => element.dataset.historyAnchorId
+                    ? [{ anchorId: element.dataset.historyAnchorId, offsetTop: rect.top - viewportTop }] : [])
+            : [];
         const requestProjectId = projectId;
         const requestId = ++historyRequestRef.current;
         setIsLoadingOlderHistory(true);
@@ -242,22 +313,33 @@ export function RightSidebar({
             const page = await api.getOlderChatHistory(requestProjectId);
             if (activeProjectRef.current !== requestProjectId || historyRequestRef.current !== requestId) return;
             const olderMessages = normalizeChatHistory(page.messages);
-            if (olderMessages.length > 0) loadHistory(olderMessages);
-            setHasOlderHistory(page.hasMore);
-            if (viewport && olderMessages.length > 0) {
-                requestAnimationFrame(() => {
-                    viewport.scrollTop = previousTop + Math.max(0, viewport.scrollHeight - previousHeight);
-                });
+            if (olderMessages.length > 0) {
+                pendingHistoryScrollRestoreRef.current = {
+                    projectId: requestProjectId,
+                    requestId,
+                    messagesBefore: messagesRef.current,
+                    previousHeight,
+                    previousTop,
+                    anchors,
+                };
+                loadHistory(olderMessages);
             }
+            setHasOlderHistory(page.hasMore);
+            if (olderMessages.length === 0) setIsLoadingOlderHistory(false);
         } catch (error) {
             console.error('[RightSidebar] Failed to load older chat history:', error);
+            if (pendingHistoryScrollRestoreRef.current?.requestId === requestId) {
+                pendingHistoryScrollRestoreRef.current = null;
+            }
         } finally {
-            if (activeProjectRef.current === requestProjectId && historyRequestRef.current === requestId) {
+            if (pendingHistoryScrollRestoreRef.current?.requestId !== requestId && activeProjectRef.current === requestProjectId && historyRequestRef.current === requestId) {
                 setIsLoadingOlderHistory(false);
             }
         }
     }, [hasOlderHistory, isLoadingOlderHistory, loadHistory, messages.length, projectId]);
-    const isAgentWorking = isLoading || isRuntimeBusy || hasActiveSubagents(messages);
+    // Transcript messages are display history, not proof that a child process
+    // is still alive. Runtime state carries the live child-task snapshot.
+    const isAgentWorking = isLoading || isRuntimeBusy;
     const isComposerLocked = isSubmittingMessage;
     const refreshQueuedMessages = useCallback(async () => {
         const requestedProjectId = projectId;
@@ -293,21 +375,15 @@ export function RightSidebar({
         }
     };
     const canMutateAssets = canUploadAssets && !isRuntimeBusy;
-    const documentProgress = useMemo(
-        () => deriveDocumentProgress(messages, artifacts),
-        [artifacts, messages],
-    );
     const artifactView = useMemo(
-        () => buildArtifactViewModel(artifacts, documentProgress),
-        [artifacts, documentProgress],
+        () => buildArtifactViewModel(artifacts),
+        [artifacts],
     );
     const currentTodos = useMemo(() => deriveCurrentProjectTodos(messages), [messages]);
-    const latestStageMessage = [...messages].reverse().find(message => message.taskKind?.startsWith('workflow_stage:'));
-    const isDocumentDrafting = latestStageMessage?.taskKind === 'workflow_stage:DOCUMENT_DRAFTING';
     const documentEventRevision = useMemo(
         () => [
             ...messages
-                .filter(message => isBaselineDocumentPath(message.artifactPath))
+                .filter(message => isProjectDocumentPath(message.artifactPath))
                 .map(message => `${message.id}:${message.toolStatus || ''}:${message.timestamp}`),
         ].join('|'),
         [messages],
@@ -681,7 +757,7 @@ export function RightSidebar({
                             />
                     </TabsContent>
                     <TabsContent value="todo" className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-                            <TodoPanel items={currentTodos} documentProgress={isDocumentDrafting && currentTodos.length === 0 ? documentProgress : undefined} lang={lang} />
+                            <TodoPanel items={currentTodos} lang={lang} />
                     </TabsContent>
                     <TabsContent value="artifacts" className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
                             <div className="h-full min-h-0">
@@ -703,7 +779,6 @@ export function RightSidebar({
                                         onPreview={handlePreviewArtifact}
                                         onDownload={handleDownloadArtifact}
                                         canExportProject={canExportProject}
-                                        documentProgress={documentProgress}
                                         onOpenEditor={handleOpenEditor}
                                         editorFiles={editorFiles}
                                         isEditorFilesLoading={isEditorFilesLoading}

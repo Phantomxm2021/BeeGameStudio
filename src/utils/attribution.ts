@@ -22,7 +22,6 @@ import {
 import { logForDebugging } from './debug.js'
 import { parseJSONL } from './json.js'
 import { logError } from './log.js'
-import { getAttributionEmail } from './attributionEmail.js'
 import { getRealModelName } from './attributionModel.js'
 import { isMemoryFileAccess } from './sessionFileAccessHooks.js'
 import { getTranscriptPath } from './sessionStorage.js'
@@ -39,7 +38,6 @@ export type AttributionTexts = {
  * Returns attribution text for commits and PRs based on user settings.
  * Handles:
  * - Dynamic model name via getRealModelName()
- * - Auto email mapping via getAttributionEmail()
  * - Custom attribution settings (settings.attribution.commit/pr)
  * - Backward compatibility with deprecated includeCoAuthoredBy setting
  * - Remote mode: returns session URL for attribution
@@ -62,10 +60,9 @@ export function getAttributionTexts(): AttributionTexts {
     return { commit: '', pr: '' }
   }
 
-  const modelName = getRealModelName()
-  const email = getAttributionEmail(modelName)
   const defaultAttribution = `🤖 Generated with [Bee Game Studio](${PRODUCT_URL})`
-  const defaultCommit = `Co-Authored-By: ${modelName} <${email}>`
+  // Do not fabricate a provider-owned email address for Git co-authorship.
+  const defaultCommit = ''
 
   const settings = getInitialSettings()
 

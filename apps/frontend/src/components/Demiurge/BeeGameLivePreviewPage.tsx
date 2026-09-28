@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ChevronDown, ChevronLeft, ExternalLink, LoaderCircle, Play, Square, Upload } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, Copy, LoaderCircle, Play, Square, Upload } from 'lucide-react';
+import { AnimatePresence, useReducedMotion } from 'motion/react';
 import type { Language } from './AgentsConfig';
 import { useBeeGameText } from '../../i18n/useBeeGameTranslations';
 import { Button } from '../beui/project-button';
@@ -33,11 +34,6 @@ const ResourceLibraryPage = lazy(async () => {
 
 export type DashboardStatus = 'starting' | 'running' | 'paused' | 'waiting_approval' | 'stopped' | 'finished' | 'idle' | 'offline';
 type PreviewState = 'starting' | 'live' | 'failed' | 'stopped' | 'idle';
-type PreviewConsoleEntry = {
-  level: string;
-  message: string;
-  createdAt?: string;
-};
 
 interface BeeGameLivePreviewPageProps {
   projectId: string;
@@ -57,17 +53,19 @@ interface BeeGameLivePreviewPageProps {
   isSyncing: boolean;
   isInteractionLocked?: boolean;
   isWorkspaceBusy?: boolean;
+  isAgentWorking?: boolean;
   buildReport?: BuildReportPayload | null;
   projectTarget?: string;
   tokenUsage?: TokenUsage | null;
+  projectCreatedAt?: number;
   deployments?: BeeGameDeploymentPayload[];
   previewRefreshNonce?: number;
   onStartPreview?: () => void | Promise<void>;
   onStopPreview?: () => void | Promise<void>;
   onDeployProject?: () => void | Promise<void>;
   onRollbackDeployment?: (deploymentId: string) => void | Promise<void>;
-  onFixBuildErrors?: () => void | Promise<void>;
   onFixDeploymentFailure?: () => void | Promise<void>;
+  onFixConsoleError?: (message: string) => Promise<boolean | void>;
   onOpenExternal?: (url: string) => void;
   isDeploying?: boolean;
   onBack?: () => void;
@@ -81,48 +79,50 @@ const normalizeUrl = (url?: string): string => {
   return value.startsWith('/') ? buildApiUrl(value) : value;
 };
 
-const getPreviewSessionId = (url?: string): string => {
-  const value = normalizeUrl(url);
-  if (!value || typeof window === 'undefined') return '';
-  try {
-    const parsed = new URL(value, window.location.origin);
-    const parts = parsed.pathname.split('/').filter(Boolean);
-    if (parts[0] !== 'previews') return '';
-    return decodeURIComponent(parts[1] || '');
-  } catch {
-    return '';
-  }
-};
-
 const getPreviewState = (status: DashboardStatus, buildReport?: BuildReportPayload | null): PreviewState => {
   const reportStatus = String(buildReport?.status || '').toLowerCase();
   const url = normalizeUrl(buildReport?.build_url);
 
   if (reportStatus === 'failed' || reportStatus === 'error') return 'failed';
   if (url) return 'live';
-  if (status === 'running' || status === 'waiting_approval') return 'starting';
   if (status === 'paused' || status === 'stopped' || status === 'offline') return 'stopped';
   return 'idle';
 };
 
-const collectBuildErrorLogs = (buildReport?: BuildReportPayload | null): string[] => {
-  const reportStatus = String(buildReport?.status || '').toLowerCase();
-  const isFailedReport = reportStatus === 'failed' || reportStatus === 'error';
-  const logs = new Set<string>();
-  const failureReason = String(buildReport?.failure_reason || '').trim();
-  if (failureReason) logs.add(failureReason);
-
-  for (const check of buildReport?.checks || []) {
-    const checkStatus = String(check.status || '').toLowerCase();
-    const isFailedCheck = checkStatus === 'failed' || checkStatus === 'error';
-    const detail = String(check.detail || '').trim();
-    if (!detail || (!isFailedReport && !isFailedCheck)) continue;
-    const name = String(check.name || '').trim();
-    logs.add(name ? `${name}: ${detail}` : detail);
+function ProjectSyncBadge({ active, syncingLabel, syncedLabel }: {
+  active: boolean;
+  syncingLabel: string;
+  syncedLabel: string;
+}) {
+  const reduceMotion = useReducedMotion();
+  const [state, setState] = useState({ active, showCompletion: false });
+  if (state.active !== active) {
+    setState({ active, showCompletion: !active });
   }
 
-  return Array.from(logs);
-};
+  useEffect(() => {
+    if (!state.showCompletion) return;
+    const timer = window.setTimeout(() => setState(current => ({ ...current, showCompletion: false })), 1_000);
+    return () => window.clearTimeout(timer);
+  }, [state.showCompletion]);
+
+  return <AnimatePresence initial={false}>
+    {active || state.showCompletion ? <AnimatedBadge
+      key="project-sync"
+      status={active ? 'loading' : 'success'}
+      size="md"
+      contentKey={active ? 'syncing' : 'synced'}
+      data-testid="beegame-sync-status"
+      className="max-[899px]:hidden"
+      aria-live="polite"
+      exit={reduceMotion ? { opacity: 0, transition: { duration: 0 } } : {
+        opacity: 0, y: -4, scale: 0.96, transition: { duration: 0.2 },
+      }}
+    >
+      {active ? syncingLabel : syncedLabel}
+    </AnimatedBadge> : null}
+  </AnimatePresence>;
+}
 
 export function BeeGameLivePreviewPage({
   projectId,
@@ -133,9 +133,11 @@ export function BeeGameLivePreviewPage({
   credits,
   accountCreditBalance,
   tokenUsage,
+  projectCreatedAt,
   isSyncing,
   isInteractionLocked = false,
   isWorkspaceBusy = false,
+  isAgentWorking = false,
   buildReport,
   deployments = [],
   previewRefreshNonce = 0,
@@ -143,8 +145,8 @@ export function BeeGameLivePreviewPage({
   onStopPreview,
   onDeployProject,
   onRollbackDeployment,
-  onFixBuildErrors,
   onFixDeploymentFailure,
+  onFixConsoleError,
   onOpenExternal,
   isDeploying = false,
   onBack,
@@ -166,7 +168,6 @@ export function BeeGameLivePreviewPage({
   const [stoppedPreviewUrl, setStoppedPreviewUrl] = useState('');
   const [isStartingPreview, setStartingPreview] = useState(false);
   const [isStoppingPreview, setStoppingPreview] = useState(false);
-  const [previewConsoleEntries, setPreviewConsoleEntries] = useState<PreviewConsoleEntry[]>([]);
   const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
   const uiText = useBeeGameText(lang);
   const labels = uiText.livePreview as Record<string, string>;
@@ -200,21 +201,17 @@ export function BeeGameLivePreviewPage({
     !isWorkspaceBusy;
   const canStopPreview = Boolean(onStopPreview) && canShowPreview && !isStoppingPreview && !isInteractionLocked && !isWorkspaceBusy;
   const canDeploy = Boolean(onDeployProject) && !isDeploying && !isInteractionLocked && !isWorkspaceBusy;
-  const buildErrorLogs = collectBuildErrorLogs(buildReport);
-  const runtimeErrorLogs = previewConsoleEntries
-    .filter(entry => entry.level === 'error' || entry.level === 'warn')
-    .map(entry => `[preview ${entry.level}] ${entry.message}`);
-  const buildErrorLog = [...buildErrorLogs, ...runtimeErrorLogs].join('\n\n');
+  const showsAgentWorkingStatus = isAgentWorking && !canShowPreview;
   const statusText =
-    previewState === 'live'
-      ? labels.live
-      : previewState === 'failed'
-        ? labels.failed
-        : previewState === 'stopped'
-          ? labels.stopped
-          : previewState === 'starting'
-            ? labels.starting
-            : labels.waiting;
+    showsAgentWorkingStatus
+      ? labels.agentWorking
+      : isStartingPreview
+        ? labels.starting
+        : previewState === 'failed'
+          ? labels.failed
+          : previewState === 'live'
+            ? labels.live
+            : labels.standby;
   const previewDetailText =
     previewState === 'failed' ? buildReport?.failure_reason || buildReport?.summary || labels.noPreview : '';
   const handleStop = async () => {
@@ -259,38 +256,10 @@ export function BeeGameLivePreviewPage({
     onBack?.();
   };
   useEffect(() => {
-    // These local overlays must clear as soon as the preview identity changes.
+    // A new preview identity must not inherit the locally stopped state.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setStoppedPreviewUrl('');
-    setPreviewConsoleEntries([]);
   }, [previewRefreshNonce, previewUrl]);
-
-  useEffect(() => {
-    const handlePreviewConsoleMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin && event.origin !== 'null') return;
-      if (event.source !== previewFrameRef.current?.contentWindow) return;
-      const data = event.data;
-      if (!data || typeof data !== 'object') return;
-      if ((data as { type?: unknown }).type !== 'beegame.preview.console') return;
-      const expectedSessionId = getPreviewSessionId(previewUrl);
-      const sessionId = String((data as { sessionId?: unknown }).sessionId || '').trim();
-      if (expectedSessionId && sessionId !== expectedSessionId) return;
-      const level = String((data as { level?: unknown }).level || '').trim();
-      const message = String((data as { message?: unknown }).message || '').trim();
-      if (!level || !message) return;
-      setPreviewConsoleEntries(entries => [
-        ...entries.slice(-9),
-        {
-          level,
-          message,
-          createdAt: String((data as { createdAt?: unknown }).createdAt || '').trim(),
-        },
-      ]);
-    };
-
-    window.addEventListener('message', handlePreviewConsoleMessage);
-    return () => window.removeEventListener('message', handlePreviewConsoleMessage);
-  }, [previewUrl]);
 
   const workspaceHeader = (
     <div className="workspace-header flex min-w-0 items-center">
@@ -304,7 +273,7 @@ export function BeeGameLivePreviewPage({
             aria-label={backHomeLabel}
             title={backHomeLabel}
             onClick={onBack}
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-transparent bg-transparent text-[var(--text-secondary)] transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:border-[var(--border-strong)] focus-visible:bg-[var(--surface-hover)] focus-visible:text-[var(--text-primary)] focus-visible:outline-none sm:h-10 sm:w-10"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-transparent bg-transparent text-[var(--text-secondary)] transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:border-[var(--border-strong)] focus-visible:bg-[var(--surface-hover)] focus-visible:text-[var(--text-primary)] focus-visible:outline-none sm:h-10 sm:w-10"
           >
             <ChevronLeft className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
           </button>
@@ -319,8 +288,9 @@ export function BeeGameLivePreviewPage({
             </MorphPopoverTrigger>
             <MorphPopoverContent align="start" radius={16} className="w-[min(20rem,calc(100vw-1rem))] bg-popover text-popover-foreground">
               <div id="beegame-project-hint" data-testid="beegame-project-hint" className="px-4 py-3">
-                <div className="type-footnote truncate text-[var(--text-primary)]">{projectName}</div>
+                <ProjectNameCopy name={projectName} copyLabel={labels.copyProjectName} copiedLabel={labels.projectNameCopied} failedLabel={labels.projectNameCopyFailed} />
                 <div className="mt-2">
+                  <ProjectElapsedRow startedAt={projectCreatedAt} label={labels.projectRunTime} detail={labels.projectRunTimeDetail} lang={lang} />
                   <ProjectHintRow label={labels.consumedCredits} value={formatCreditAmount(credits?.consumedCredits)} />
                   <ProjectHintRow label={labels.inputTokens} value={formatUsage(tokenUsage?.input_tokens ?? tokenUsage?.prompt_tokens)} />
                   <ProjectHintRow label={labels.cachedInputTokens} value={formatUsage(tokenUsage?.cache_read_tokens ?? tokenUsage?.cached_input_tokens)} />
@@ -329,17 +299,7 @@ export function BeeGameLivePreviewPage({
               </div>
             </MorphPopoverContent>
           </MorphPopover>
-          {isSyncing || status === 'starting' ? (
-            <AnimatedBadge
-              status="loading"
-              size="md"
-              contentKey={labels.syncing}
-              data-testid="beegame-sync-status"
-              className="max-[899px]:hidden"
-            >
-              {labels.syncing}
-            </AnimatedBadge>
-          ) : null}
+          <ProjectSyncBadge active={isSyncing || status === 'starting'} syncingLabel={labels.syncing} syncedLabel={labels.synced} />
           {handoffNotice ? (
             <div
               data-testid="beegame-foundation-handoff-notice"
@@ -351,7 +311,7 @@ export function BeeGameLivePreviewPage({
         </div>
         <div className="workspace-header-actions ml-1 flex shrink-0 items-center gap-2 sm:ml-auto sm:gap-3">
           <ThemeToggle />
-          <div data-testid="beegame-preview-split-control" className="flex h-10 min-w-10 shrink-0 items-stretch overflow-hidden rounded-full border border-[var(--border)] bg-[var(--surface-2)] min-[900px]:min-w-[148px]">
+          <div data-testid="beegame-preview-deploy-control" className="flex h-10 min-w-10 shrink-0 items-stretch overflow-hidden rounded-full border border-[var(--border)] bg-[var(--surface-2)] min-[900px]:min-w-[204px]">
             <Button
               type="button"
               variant="ghost"
@@ -367,29 +327,17 @@ export function BeeGameLivePreviewPage({
             </Button>
             <Button
               type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={labels.openStandalone}
-              title={labels.openStandalone}
-              disabled={!canShowPreview || !onOpenExternal || isInteractionLocked || isWorkspaceBusy || isStoppingPreview}
-              onClick={() => !isInteractionLocked && !isWorkspaceBusy && previewUrl && onOpenExternal?.(previewUrl)}
-              className="h-full w-11 shrink-0 rounded-none border-0 border-l border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
+              variant="default"
+              size="sm"
+              aria-label={isDeploying ? labels.deploying : labels.deploy}
+              disabled={!canDeploy}
+              onClick={() => { if (canDeploy) setDeploymentDialogOpen(true); }}
+              className="h-full min-w-10 shrink-0 rounded-none border-0 border-l border-[var(--border)] px-3 min-[900px]:w-[84px] min-[900px]:min-w-[84px]"
             >
-              <ExternalLink className="h-4 w-4" aria-hidden="true" />
+              <Upload className="h-3.5 w-3.5 min-[900px]:hidden" />
+              <span className="max-[899px]:hidden">{isDeploying ? labels.deploying : labels.deploy}</span>
             </Button>
           </div>
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            aria-label={isDeploying ? labels.deploying : labels.deploy}
-            disabled={!canDeploy}
-            onClick={() => { if (canDeploy) setDeploymentDialogOpen(true); }}
-            className="h-10 min-w-10 rounded-full min-[900px]:min-w-[112px]"
-          >
-            <Upload className="h-3.5 w-3.5 min-[900px]:hidden" />
-            <span className="max-[899px]:hidden">{isDeploying ? labels.deploying : labels.deploy}</span>
-          </Button>
           <AccountActionsMenu
             lang={lang}
             isSettingsOpen={isSettingsOpen}
@@ -425,10 +373,11 @@ export function BeeGameLivePreviewPage({
       previewState={previewState}
       statusText={statusText}
       previewDetailText={previewDetailText}
-      buildErrorLog={buildErrorLog}
       previewFrameRef={previewFrameRef}
       canShowPreview={canShowPreview}
-      onFixBuildErrors={onFixBuildErrors}
+      isAgentWorking={showsAgentWorkingStatus}
+      onOpenExternal={onOpenExternal}
+      onFixConsoleError={onFixConsoleError}
     />
   );
 
@@ -504,6 +453,66 @@ function formatCreditAmount(value?: number): string {
 
 function formatUsage(value?: number): string {
   return value === undefined ? '—' : Math.max(0, value).toLocaleString();
+}
+
+function ProjectNameCopy({ name, copyLabel, copiedLabel, failedLabel }: {
+  name: string;
+  copyLabel: string;
+  copiedLabel: string;
+  failedLabel: string;
+}) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  useEffect(() => {
+    if (copyState === 'idle') return;
+    const timer = window.setTimeout(() => setCopyState('idle'), 2_000);
+    return () => window.clearTimeout(timer);
+  }, [copyState]);
+  const buttonLabel = copyState === 'copied' ? copiedLabel : copyState === 'failed' ? failedLabel : copyLabel;
+
+  return <div className="flex min-w-0 items-center justify-between gap-2">
+    <span className="type-footnote min-w-0 truncate text-[var(--text-primary)]" title={name}>{name}</span>
+    <button
+      type="button"
+      aria-label={buttonLabel}
+      title={buttonLabel}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(name);
+          setCopyState('copied');
+        } catch {
+          setCopyState('failed');
+        }
+      }}
+      className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-[var(--text-muted)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+    >
+      {copyState === 'copied' ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
+    </button>
+  </div>;
+}
+
+function ProjectElapsedRow({ startedAt, label, detail, lang }: {
+  startedAt?: number;
+  label: string;
+  detail: string;
+  lang: Language;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  if (!Number.isFinite(startedAt) || !startedAt || startedAt > now) {
+    return <ProjectHintRow label={label} value="—" detail={detail} />;
+  }
+  const totalMinutes = Math.floor((now - startedAt) / 60_000);
+  const days = Math.floor(totalMinutes / 1_440);
+  const hours = Math.floor((totalMinutes % 1_440) / 60);
+  const minutes = totalMinutes % 60;
+  const value = lang.startsWith('zh')
+    ? [days && `${days}天`, (days || hours) && `${hours}小时`, `${minutes}分钟`].filter(Boolean).join(' ')
+    : [days && `${days}d`, (days || hours) && `${hours}h`, `${minutes}m`].filter(Boolean).join(' ');
+  return <ProjectHintRow label={label} value={value} detail={detail} />;
 }
 
 function ProjectHintRow({ label, value, detail }: { label: string; value: string; detail?: string }) {

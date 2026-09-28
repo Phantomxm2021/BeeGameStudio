@@ -26,13 +26,20 @@ function pathFileName(value: string): string {
  * Hides filesystem paths from Chat presentation only.
  * The underlying transcript and tool payloads remain unchanged.
  */
-export const filterPathsForDisplay = (value: string): string => value
+const HTTP_URL = /(https?:\/\/[^\s"'`<>()\[\]{}]+)/gi;
+
+const filterPathSegment = (value: string): string => value
     .replace(FILE_URL_PATH, pathFileName)
     .replace(WINDOWS_ABSOLUTE_PATH, pathFileName)
     .replace(UNIX_ABSOLUTE_PATH, pathFileName)
     .replace(HOME_PATH, pathFileName)
     .replace(INTERNAL_WORKFLOW_PATH, pathFileName)
     .replace(RELATIVE_PATH_TOKEN, token => isRelativeFilePath(token) ? pathFileName(token) : token);
+
+export const filterPathsForDisplay = (value: string): string => value
+    .split(HTTP_URL)
+    .map(segment => /^https?:\/\//i.test(segment) ? segment : filterPathSegment(segment))
+    .join('');
 
 /** @deprecated Prefer the explicit filter name; retained for existing Chat call sites. */
 export const shortenAbsolutePathsForDisplay = filterPathsForDisplay;

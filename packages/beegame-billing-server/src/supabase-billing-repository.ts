@@ -452,7 +452,6 @@ class MissingSupabaseBillingRepository
   }
 }
 
-const DEFAULT_FREE_CREDITS = 300
 const CREDIT_UNIT_WEIGHTED_TOKENS = 10_000
 
 function toCreditBalance(row: SupabaseUsageWalletRow): BeeGameCreditBalance {
@@ -650,10 +649,6 @@ function missingSupabaseError(): Error {
   return new Error(
     'BEEGAME_SUPABASE_URL and BEEGAME_SUPABASE_SERVICE_ROLE_KEY are required for BeeGame billing server',
   )
-}
-
-function q(value: string): string {
-  return encodeURIComponent(value)
 }
 
 function removeTrailingSlashes(value: string): string {

@@ -142,7 +142,10 @@ const STOP_WORDS = new Set([
   'used',
 ])
 
-const CJK_RANGE = /[\u4e00-\u9fff\u3400-\u4dbf]/
+const CJK_RANGE =
+  /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\u30fc]/u
+const WORD_START = /[\p{L}\p{N}]/u
+const WORD_PART = /[\p{L}\p{M}\p{N}_-]/u
 
 function isCjk(ch: string): boolean {
   return CJK_RANGE.test(ch)
@@ -163,9 +166,13 @@ export function tokenize(text: string): string[] {
       for (let j = 0; j < cjkRun.length - 1; j++) {
         tokens.push(cjkRun.slice(j, j + 2))
       }
-    } else if (/[a-z0-9]/.test(lower[i]!)) {
+    } else if (WORD_START.test(lower[i]!)) {
       let word = ''
-      while (i < lower.length && /[a-z0-9\-_]/.test(lower[i]!)) {
+      while (
+        i < lower.length &&
+        WORD_PART.test(lower[i]!) &&
+        !isCjk(lower[i]!)
+      ) {
         word += lower[i]
         i++
       }
@@ -241,7 +248,9 @@ export function computeIdf(index: { tokens: string[] }[]): Map<string, number> {
   const N = index.length
   const idf = new Map<string, number>()
   for (const [term, count] of df) {
-    idf.set(term, Math.log(N / count))
+    // A one-skill index still needs to be searchable. Without this floor,
+    // log(1 / 1) erases every term and yields no results at all.
+    idf.set(term, N === 1 ? 1 : Math.log(N / count))
   }
   return idf
 }
@@ -281,7 +290,7 @@ function splitHyphenatedName(name: string): string[] {
   return name
     .toLowerCase()
     .split(/[-_]/)
-    .filter(p => p.length >= 3)
+    .filter(p => p.length >= 2)
 }
 
 let cachedIndex: SkillIndexEntry[] | null = null
@@ -298,8 +307,8 @@ export function clearSkillIndexCache(): void {
 export async function getSkillIndex(cwd: string): Promise<SkillIndexEntry[]> {
   if (cachedIndex && cachedCwd === cwd) return cachedIndex
 
-  const { getCommands } = await import('../../commands.js')
-  const commands = await getCommands(cwd)
+  const { getSkillToolCommands } = await import('../../commands.js')
+  const commands = await getSkillToolCommands(cwd)
 
   const entries: SkillIndexEntry[] = []
   for (const cmd of commands) {
@@ -405,14 +414,30 @@ export function searchSkills(
 
   const queryCjkTokens = queryTokens.filter(t => isCjk(t[0] ?? ''))
   const queryAsciiTokens = queryTokens.filter(t => !isCjk(t[0] ?? ''))
+  const uniqueQueryTokens = [...new Set(queryTokens)]
   const queryLower = query.toLowerCase().replace(/[-_]/g, ' ')
 
   const results: SearchResult[] = []
   for (const entry of index) {
     let score = cosineSimilarity(queryTfIdf, entry.tfVector)
+    const matchedTerms = uniqueQueryTokens.filter(t => entry.tfVector.has(t))
+    const matchingCjk = queryCjkTokens.filter(t => entry.tfVector.has(t))
+    const specificNameMatch = splitHyphenatedName(entry.name).some(
+      part =>
+        uniqueQueryTokens.includes(stem(part)) &&
+        (idf.get(stem(part)) ?? 0) >= 1,
+    )
+    // Cosine similarity dilutes a short task against a long skill description.
+    // Coverage helps only when several terms agree with the skill's domain.
+    // Generic words in an unrelated description must not outrank its owner.
+    if (
+      matchedTerms.length >= 3 &&
+      (matchingCjk.length >= 3 || specificNameMatch)
+    ) {
+      score = Math.max(score, matchedTerms.length / uniqueQueryTokens.length)
+    }
 
     if (queryCjkTokens.length > 0 && score > 0) {
-      const matchingCjk = queryCjkTokens.filter(t => entry.tfVector.has(t))
       if (matchingCjk.length < CJK_MIN_BIGRAM_MATCHES) {
         const hasAsciiMatch = queryAsciiTokens.some(t => entry.tfVector.has(t))
         if (!hasAsciiMatch) score = 0
@@ -420,9 +445,15 @@ export function searchSkills(
     }
 
     if (entry.name.length >= NAME_MATCH_MIN_LENGTH) {
-      if (queryLower.includes(entry.normalizedName)) {
-        score = Math.max(score, 0.75)
-      }
+      const escapedName = entry.normalizedName.replace(
+        /[.*+?^${}()|[\]\\]/g,
+        '\\$&',
+      )
+      const exactName = new RegExp(
+        `(^|[^\\p{L}\\p{N}])${escapedName}(?=$|[^\\p{L}\\p{N}])`,
+        'iu',
+      )
+      if (exactName.test(queryLower)) score = Math.max(score, 0.75)
     }
 
     if (score >= DISPLAY_MIN_SCORE) {

@@ -177,15 +177,24 @@ describe('normalizeChatHistory semantic metadata', () => {
         expect(messages[0].dedupeKey).toBeTruthy();
     });
 
-    it('preserves source order inside a turn when replay timestamps are reversed', () => {
+    it('orders by timestamp when replay timestamps are reversed', () => {
         const messages = normalizeChatHistory([
             { id: 'thought-1', sender: 'beegame', content: 'Thinking', type: 'thought', turnId: 'turn-replay', timestamp: 300 },
             { id: 'tool-1', sender: 'system', content: 'Read completed', type: 'tool', turnId: 'turn-replay', timestamp: 100 },
             { id: 'agent-1', sender: 'agent', content: 'Final response', turnId: 'turn-replay', timestamp: 200 },
         ]);
 
-        expect(messages.map((message) => message.id)).toEqual(['thought-1', 'tool-1', 'agent-1']);
+        expect(messages.map((message) => message.id)).toEqual(['tool-1', 'agent-1', 'thought-1']);
         expect(messages.every((message) => message.turnId === 'turn-replay')).toBe(true);
+    });
+
+    it('uses full timestamps ahead of journal append IDs across transcript pages', () => {
+        const messages = normalizeChatHistory([
+            { id: 'latest', sender: 'agent', content: '17:59 final', turnId: 'latest-turn', timestamp: 1000, sequence: 500 },
+            { id: 'older-thought', sender: 'beegame', content: 'Thinking', type: 'thought', turnId: 'older-turn', timestamp: 3000, sequence: 400 },
+            { id: 'older-final', sender: 'agent', content: '17:42 final', turnId: 'older-turn', timestamp: 4000, sequence: 401 },
+        ]);
+        expect(messages.map(message => message.id)).toEqual(['latest', 'older-thought', 'older-final']);
     });
 
     it('preserves the persisted thinking duration for the Chat activity', () => {

@@ -11,11 +11,12 @@ export interface TextScrambleProps {
   text: string;
   duration?: number;
   glyphs?: string;
+  stableGlyphPositions?: boolean;
   className?: string;
   style?: CSSProperties;
 }
 
-export function TextScramble({ text, duration, glyphs = DEFAULT_GLYPHS, className, style }: TextScrambleProps) {
+export function TextScramble({ text, duration, glyphs = DEFAULT_GLYPHS, stableGlyphPositions = false, className, style }: TextScrambleProps) {
   const reduce = useReducedMotion() ?? false;
   const [display, setDisplay] = useState(text);
   const mounted = useRef(false);
@@ -49,5 +50,16 @@ export function TextScramble({ text, duration, glyphs = DEFAULT_GLYPHS, classNam
     return () => cancelAnimationFrame(frame);
   }, [duration, glyphs, reduce, text]);
 
-  return <span className={cn("inline-block whitespace-pre", className)} style={style}><span className="sr-only">{text}</span><span aria-hidden="true">{reduce ? text : display}</span></span>;
+  const visible = reduce ? text : display;
+  return <span className={cn("inline-block whitespace-pre", className)} style={style}>
+    <span className="sr-only">{text}</span>
+    <span aria-hidden="true">{stableGlyphPositions
+      ? Array.from(text).map((character, index) => (
+        <span key={index} className="relative inline-block">
+          <span className="invisible">{character === " " ? "\u00a0" : character}</span>
+          <span className="absolute inset-0 text-center">{visible[index] ?? ""}</span>
+        </span>
+      ))
+      : visible}</span>
+  </span>;
 }

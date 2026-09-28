@@ -11,6 +11,10 @@
 .ui-editor-tree-chevron { width: 18px; height: 20px; display: grid; place-items: center; padding: 2px !important; border: 0 !important; color: #71717a; }
 .ui-editor-row-actions button { width: 21px; height: 21px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 3px; background: transparent; color: #b7c3d2; }
 .ui-editor-floating-toolbar { position: absolute; top: 16px; left: calc(var(--ui-panel-width) + 32px); right: calc(var(--ui-panel-width) + 32px); z-index: 12; width: max-content; max-width: calc(100% - (var(--ui-panel-width) + 32px) * 2); margin: 0 auto; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; padding: 6px 8px; border: 1px solid #ffffff18; border-radius: 11px; background: linear-gradient(135deg, #ffffff0d, #ffffff02), #19191fb8; box-shadow: inset 0 1px #ffffff16, 0 5px 18px #0003, 0 1px 2px #0003; backdrop-filter: blur(24px) saturate(125%); -webkit-backdrop-filter: blur(24px) saturate(125%); }
+.ui-editor-floating-toolbar .ui-editor-select-field { display: flex; align-items: center; gap: 6px; white-space: nowrap; color: #a7a7b1; }
+.ui-editor-floating-toolbar .ui-editor-select-trigger { min-width: 118px; height: 30px; border-radius: 7px; }
+.ui-editor-responsive-profile { display: grid; gap: 7px; padding-top: 10px; border-top: 1px solid #ffffff12; }
+.ui-editor-section > small { color: #9ca0ac; line-height: 1.45; }
 .ui-editor-panel-toggle { position: absolute; top: 26px; z-index: 15; width: 24px; height: 26px; display: grid; place-items: center; padding: 3px; border: 0; color: #a9b1bf; transition: left .24s ease, right .24s ease; }
 .ui-editor-anchor-presets { width: 72px; height: 72px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 5px; border: 1px solid #ffffff10; border-radius: 4px; background: #111318; }
 .ui-editor-anchor-presets button { position: relative; min-width: 0; min-height: 0; padding: 0; border: 1px solid #ffffff12; border-radius: 2px; background: #ffffff05; }

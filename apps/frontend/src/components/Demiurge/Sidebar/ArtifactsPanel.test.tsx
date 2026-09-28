@@ -1,109 +1,88 @@
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { ArtifactsPanel } from './ArtifactsPanel';
-import { BEEGAME_DOCUMENT_BASELINE } from '../../../utils/documentProgress';
 
-const callbacks = () => ({ onPreview: vi.fn(), onDownload: vi.fn(), onOpenEditor: vi.fn(), onLoadEditorFiles: vi.fn() });
+const callbacks = () => ({ onPreview: vi.fn(), onDownload: vi.fn(), onOpenEditor: vi.fn(), onLoadEditorFiles: vi.fn(), onOpenAssets: vi.fn() });
 
 describe('ArtifactsPanel', () => {
-    it('opens categories first, then the exact JSON file, and returns without opening an editor', () => {
+    it('puts resources beside Scene, UI and project documents', () => {
         const actions = callbacks();
         render(<ArtifactsPanel artifacts={[]} isLoading={false} {...actions} editorFiles={[
             { kind: 'scene', id: 'scene.a', path: 'scenes/a.json' },
-            { kind: 'scene', id: 'scene.b', path: 'scenes/nested/b.json' },
             { kind: 'ui', id: 'menu', path: 'ui/menu.json' },
         ]} />);
-        expect(screen.queryByText('a.json')).not.toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Scene', exact: true }));
-        expect(actions.onLoadEditorFiles).toHaveBeenCalledTimes(1);
-        expect(actions.onOpenEditor).not.toHaveBeenCalled();
-        expect(screen.getByText('a.json')).toBeInTheDocument();
-        expect(screen.queryByText('menu.json')).not.toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: /b.json/ }));
-        expect(actions.onOpenEditor).toHaveBeenCalledWith('scene', 'scenes/nested/b.json');
+        const list = screen.getByRole('region', { name: 'Artifacts' });
+        expect(within(list).getAllByRole('button').map(button => button.textContent)).toEqual(['Scene', 'UI', 'Project documents', 'Assets']);
+        fireEvent.click(within(list).getByRole('button', { name: 'Assets' }));
+        expect(actions.onOpenAssets).toHaveBeenCalledOnce();
+        fireEvent.click(within(list).getByRole('button', { name: 'Scene' }));
+        expect(actions.onLoadEditorFiles).toHaveBeenCalledOnce();
+        fireEvent.click(screen.getByRole('button', { name: /a.json/ }));
+        expect(actions.onOpenEditor).toHaveBeenCalledWith('scene', 'scenes/a.json');
         fireEvent.click(screen.getByRole('button', { name: 'Back to artifacts' }));
-        fireEvent.click(screen.getByRole('button', { name: 'UI', exact: true }));
+        fireEvent.click(within(screen.getByRole('region', { name: 'Artifacts' })).getByRole('button', { name: 'UI' }));
         fireEvent.click(screen.getByRole('button', { name: /menu.json/ }));
         expect(actions.onOpenEditor).toHaveBeenLastCalledWith('ui', 'ui/menu.json');
-        expect(screen.queryByText('a.json')).not.toBeInTheDocument();
     });
 
-    it('groups all project documents with pending statuses and preview by artifact_id', () => {
+    it('shows only discovered documents with one View action each', () => {
         const actions = callbacks();
         render(<ArtifactsPanel artifacts={[
             { id: 'old-id', artifact_id: 'gdd', path: 'docs/GDD.md', name: 'GDD.md' },
             { id: 'review', path: 'docs/review/notes.md', name: 'Review notes.md' },
-        ]} isLoading={false} {...actions} />);
-        expect(screen.queryByText('GDD')).not.toBeInTheDocument();
-        expect(screen.queryByText('Review notes.md')).not.toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: /Project documents/ }));
-        const docs = screen.getByRole('region', { name: 'Project documents' });
-        expect(docs.querySelectorAll('[data-status]')).toHaveLength(9);
-        expect(docs.querySelectorAll('[data-status="pending"]')).toHaveLength(7);
-        const gdd = within(docs).getByText('GDD', { exact: true }).closest('button')!;
-        expect(gdd).toBeEnabled();
-        fireEvent.click(gdd);
-        expect(actions.onPreview).toHaveBeenCalledWith('gdd', 'GDD.md');
-        expect(screen.queryByRole('button', { name: 'Download GDD.md' })).not.toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Preview GDD.md' }));
-        expect(actions.onPreview).toHaveBeenLastCalledWith('gdd', 'GDD.md');
-        fireEvent.click(within(docs).getByText('Review notes.md', { exact: true }).closest('button')!);
-        expect(actions.onPreview).toHaveBeenLastCalledWith('review', 'Review notes.md');
-        expect(within(docs).getByRole('button', { name: /Balance Design/ })).toBeDisabled();
-        fireEvent.click(screen.getByRole('button', { name: 'Back to artifacts' }));
-        expect(screen.queryByText('docs/GDD.md')).not.toBeInTheDocument();
-    });
-
-    it('keeps the eight canonical pending documents in their dependency order', () => {
-        render(<ArtifactsPanel artifacts={[]} isLoading={false} {...callbacks()} documentProgress={BEEGAME_DOCUMENT_BASELINE.map(document => ({ ...document, status: 'pending' }))} />);
-        expect(screen.getByText('0/8')).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: /Project documents/ }));
-        const rows = screen.getByRole('region', { name: 'Project documents' }).querySelectorAll('[data-status="pending"]');
-        expect(rows).toHaveLength(8);
-        expect([...rows].map(row => row.querySelector('.type-footnote')?.textContent)).toEqual(BEEGAME_DOCUMENT_BASELINE.map(doc => doc.name));
-    });
-
-    it('never displays manifest files on either level', () => {
-        render(<ArtifactsPanel artifacts={[
             { id: 'manifest', path: 'assets/asset-manifest.json', name: 'asset-manifest.json' },
-        ]} isLoading={false} {...callbacks()} />);
-        expect(screen.queryByText('asset-manifest.json')).not.toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: /Project documents/ }));
-        expect(screen.queryByText('asset-manifest.json')).not.toBeInTheDocument();
+        ]} isLoading={false} {...actions} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Project documents' }));
+        const docs = screen.getByRole('region', { name: 'Project documents' });
+        expect(within(docs).getAllByRole('button')).toHaveLength(2);
+        expect(within(docs).getByText('docs/GDD.md')).toBeInTheDocument();
+        expect(within(docs).queryByText('asset-manifest.json')).not.toBeInTheDocument();
+        expect(within(docs).queryByText('Ready')).not.toBeInTheDocument();
+        fireEvent.click(within(docs).getByRole('button', { name: 'View GDD.md' }));
+        expect(actions.onPreview).toHaveBeenCalledWith('gdd', 'GDD.md');
+        fireEvent.click(within(docs).getByRole('button', { name: 'View Review notes.md' }));
+        expect(actions.onPreview).toHaveBeenLastCalledWith('review', 'Review notes.md');
     });
 
-    it('distinguishes loading, failure and empty file lists and supports refreshing', () => {
+    it.each(['Scene', 'UI', 'Project documents'])('shows the shared empty card in %s', category => {
+        render(<ArtifactsPanel artifacts={[]} isLoading={false} {...callbacks()} />);
+        fireEvent.click(screen.getByRole('button', { name: category }));
+        expect(screen.getByTestId('artifact-empty-card')).toBeInTheDocument();
+    });
+
+    it('distinguishes loading, failure and empty editor file lists', () => {
         const actions = callbacks();
         const props = { artifacts: [], isLoading: false, ...actions };
         const { rerender } = render(<ArtifactsPanel {...props} isEditorFilesLoading />);
-        fireEvent.click(screen.getByRole('button', { name: 'Scene', exact: true }));
+        fireEvent.click(screen.getByRole('button', { name: 'Scene' }));
         expect(screen.getByLabelText('Loading files')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Refresh files' })).toBeDisabled();
-        expect(screen.queryByText('No editable JSON files yet')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('artifact-empty-card')).not.toBeInTheDocument();
         rerender(<ArtifactsPanel {...props} editorFilesError="Network unavailable" />);
         expect(screen.getByRole('alert')).toHaveTextContent('Network unavailable');
-        expect(screen.queryByText('No editable JSON files yet')).not.toBeInTheDocument();
+        expect(screen.queryByTestId('artifact-empty-card')).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'Refresh files' }));
         expect(actions.onLoadEditorFiles).toHaveBeenCalledTimes(2);
         rerender(<ArtifactsPanel {...props} />);
-        expect(screen.getByText('No editable JSON files yet')).toBeInTheDocument();
+        expect(screen.getByTestId('artifact-empty-card')).toHaveTextContent('No editable JSON files yet');
     });
 
-    it('shows initial skeletons and artifact fetch errors', () => {
+    it('shows fixed categories immediately while artifacts load and retains fetch errors', () => {
         render(<ArtifactsPanel artifacts={[]} isLoading error="Unable to load deliverables" {...callbacks()} />);
-        expect(screen.getByLabelText('Loading artifacts...')).toBeInTheDocument();
-        expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
+        const list = screen.getByRole('region', { name: 'Artifacts' });
+        expect(within(list).getAllByRole('button').map(button => button.textContent)).toEqual(['Scene', 'UI', 'Project documents', 'Assets']);
+        expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0);
         expect(screen.getByRole('alert')).toHaveTextContent('Unable to load deliverables');
     });
 
-    it.each([true, false])('keeps project packages download-only, respecting export permission (%s)', canExportProject => {
+    it.each([true, false])('moves project package download to Export (%s)', canExportProject => {
         const actions = callbacks();
         render(<ArtifactsPanel artifacts={[{ id: 'package', name: 'game.zip', package_download: true }]} isLoading={false} {...actions} canExportProject={canExportProject} />);
-        expect(screen.getByRole('button', { name: 'game.zip', exact: true })).toBeDisabled();
+        expect(screen.queryByText('Other deliverables')).not.toBeInTheDocument();
+        expect(screen.queryByText('game.zip')).not.toBeInTheDocument();
         if (canExportProject) {
-            fireEvent.click(screen.getByRole('button', { name: 'Download game.zip' }));
+            fireEvent.click(screen.getByRole('button', { name: 'Export' }));
             expect(actions.onDownload).toHaveBeenCalledWith('package', 'game.zip');
-        } else expect(screen.queryByRole('button', { name: 'Download game.zip' })).not.toBeInTheDocument();
+        } else expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument();
         expect(actions.onPreview).not.toHaveBeenCalled();
     });
 });

@@ -2,6 +2,7 @@ import { homedir } from 'os'
 import { isAbsolute, resolve } from 'path'
 import type { z } from 'zod/v4'
 import type { ToolPermissionContext } from 'src/Tool.js'
+import { getOriginalCwd } from 'src/bootstrap/state.js'
 import type { Redirect, SimpleCommand } from 'src/utils/bash/ast.js'
 import {
   extractOutputRedirections,
@@ -86,7 +87,8 @@ function checkDangerousRemovalPaths(
       : resolve(cwd, cleanPath)
 
     // Check if this is a dangerous path (using the non-symlink-resolved path)
-    if (isDangerousRemovalPath(absolutePath)) {
+    if (isDangerousRemovalPath(absolutePath) ||
+        absolutePath === resolve(cwd) || absolutePath === resolve(getOriginalCwd())) {
       return {
         behavior: 'ask',
         message: `Dangerous ${command} operation detected: '${absolutePath}'\n\nThis command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.`,

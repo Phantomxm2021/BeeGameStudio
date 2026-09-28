@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,6 +6,7 @@ import { describe, expect, test, afterEach } from 'bun:test'
 import { zipSync, strToU8 } from 'fflate'
 import {
   clearRuntimeBuiltinSkills,
+  getBuiltinSkillsDirectory,
   importUserSkill,
   listUserSkills,
   materializeUserSkills,
@@ -23,6 +24,31 @@ afterEach(async () => {
 })
 
 describe('BeeGame skills store', () => {
+  test('loads the packaged BeeGameStudio built-in Skill catalog', async () => {
+    const directory = getBuiltinSkillsDirectory()
+    const names = readdirSync(directory, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && existsSync(join(directory, entry.name, 'SKILL.md')))
+      .map(entry => entry.name).sort()
+    expect(names).toEqual([
+      'beegame-interaction-contracts',
+      'evidence-before-completion',
+      'game-art-director-expert',
+      'game-audio-designer',
+      'game-balance-designer-expert',
+      'game-content-pipeline-engineer',
+      'game-creative-director-expert',
+      'game-implementation-planning',
+      'game-level-designer-expert',
+      'game-plan-execution',
+      'game-playtest-performance',
+      'game-systems-designer-expert',
+      'game-ui-ux-designer',
+      'root-cause-debugging',
+      'spatial-computing-game-expert',
+      'spatial-computing-ux-designer-expert',
+    ])
+  })
+
   test('imports zip skill packages and materializes enabled skills', async () => {
     dataDir = await mkdtemp(join(tmpdir(), 'beegame-skills-core-'))
     const files = parseSkillZipPackage(createSkillZip({

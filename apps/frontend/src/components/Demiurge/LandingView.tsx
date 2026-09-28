@@ -1,7 +1,9 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, Check, LoaderCircle, X } from 'lucide-react';
+import { ArrowLeft, Check, X } from 'lucide-react';
+import { WorkspaceLoadingPage } from '../Common/WorkspaceLoadingPage';
+import { Button as BeUiButton } from '../beui/project-button';
 import type { Language } from './AgentsConfig';
 import { normalizeI18nLanguage, useCommonText } from '../../i18n/useBeeGameTranslations';
 import { useProjectStore } from '../../store/projectStore';
@@ -10,6 +12,7 @@ import { HeroIntro } from './Landing/HeroIntro';
 import { IdeaPromptForm, type CreationMode } from './Landing/IdeaPromptForm';
 import { BeeGameLogo } from '../BeeGameLogo';
 import { AccountActionsMenu } from './Landing/AccountActionsMenu';
+import { ThemeToggle } from '../beui/motion/theme-toggle';
 import { LandingImageBackground } from './Landing/LandingImageBackground';
 import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
@@ -37,13 +40,16 @@ import {
 } from '../../services/beeGameAdapter';
 
 import { useCredits } from '../../hooks/useCredits';
+import { useToastContext } from '../../contexts/ToastContext';
 import {
   clearSupabaseSession,
   isSupabaseAuthConfigured,
+  resendSupabaseSignupCode,
   sendSupabasePasswordReset,
   signInWithSupabaseOAuth,
   signInWithSupabasePassword,
   signUpWithSupabasePassword,
+  verifySupabaseSignupCode,
   SupabaseAuthApiError,
   type SupabaseOAuthProvider,
 } from '../../services/supabaseAuthApi';
@@ -154,7 +160,7 @@ export type IntakeCopy = {
 
 export type Translate = (key: string, options?: Record<string, unknown>) => string;
 
-export type AuthMode = 'login' | 'register' | 'resetPassword';
+export type AuthMode = 'login' | 'register' | 'resetPassword' | 'verifyEmail';
 
 const createLandingIntakeCopy = (translate: Translate): IntakeCopy => ({
   modal: {
@@ -293,7 +299,7 @@ const settingsFromOption = (option: BeeGameIntakeOption): BeeGameIntakeSettings 
     .filter(Boolean),
   scope: option.scope || 'Prototype',
   notes: '',
-  resourceLibraryUsage: 'preferred',
+  resourceLibraryUsage: 'optional',
 });
 
 function pickConfiguredProductionValue(value: string | undefined, options: string[]): string {
@@ -582,6 +588,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const { t: translate, i18n } = useTranslation();
+  const { showError } = useToastContext();
   const [restoredIntakeFlow] = useState<PendingIntakeFlowState | null>(() => readPendingIntakeFlowState());
   const [restoredIdeaDraft] = useState<PendingIdeaDraftState | null>(() => readPendingIdeaDraftState());
   const [restoredRealtimeBillingIdea] = useState(() => readPendingRealtimeBillingIdea());
@@ -595,6 +602,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isCreditStoreOpen, setIsCreditStoreOpen] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [isLoadingProject, setIsLoadingProject] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
   useEffect(() => {
     const syncResourceRoute = () => setIsResourceLibraryOpen(isResourceLibraryRoute());
@@ -631,6 +639,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const [authFeedbackDialog, setAuthFeedbackDialog] = useState<AuthFeedbackDialog | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>('login');
+  const [emailVerificationCode, setEmailVerificationCode] = useState('');
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [activeLegalDocument, setActiveLegalDocument] = useState<LegalDocumentKind | null>(null);
   const [pendingIdeaAfterLogin, setPendingIdeaAfterLogin] = useState('');
@@ -685,7 +694,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const intakeTranslate: Translate = (key, options) => translate(`intake.${key}`, options);
   const intakeText = createLandingIntakeCopy(intakeTranslate);
   // Login, billing consent and local UI transitions are not Agent thinking.
-  const isIdeaAgentThinking = intakePhase === 'generating_options';
   const showAuthError = (message: string) => {
     setLoginError(message);
     setAuthFeedbackDialog({
@@ -895,7 +903,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
       setIsPreparing(false);
       setIntakePhase('idle');
       setIsTransitioning(false);
-      setIntakeError(error instanceof Error ? error.message : translate('intake.errors.intakeFailed'));
+      showError(error instanceof Error ? error.message : translate('intake.errors.intakeFailed'));
       console.error('Failed to generate intake options:', error);
     }
   };
@@ -952,10 +960,36 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     setIsRealtimeBillingNoticeOpen(false);
   };
 
+  const finishAuthentication = async () => {
+    await loadCurrentUser();
+    setAuthFeedbackDialog(null);
+    setIsLoginPromptOpen(false);
+    setLoginPassword('');
+    setEmailVerificationCode('');
+    setRegisterDisplayName('');
+    setInvitationCode('');
+    setHasAcceptedTerms(false);
+    const nextIdea = pendingIdeaAfterLogin.trim();
+    setPendingIdeaAfterLogin('');
+    clearPendingAuthIdeaState();
+    if (nextIdea) {
+      setProjectName(nextIdea);
+      const canGenerate = await ensureGenerationAccess();
+      if (canGenerate) {
+        if (creationMode === 'blueprint') openBlueprintSettings(nextIdea);
+        else requestIntakeStart(nextIdea);
+      }
+    }
+  };
+
   const handleLoginSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (authMode === 'resetPassword') {
       await handleSendPasswordReset();
+      return;
+    }
+    if (authMode === 'verifyEmail') {
+      await handleVerifyEmail();
       return;
     }
     if (isSigningIn) return;
@@ -987,37 +1021,55 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     setIsSigningIn(true);
     try {
       if (authMode === 'register') {
-        await signUpWithSupabasePassword({
+        const session = await signUpWithSupabasePassword({
           email,
           password: loginPassword,
           displayName: registerDisplayName,
           ...(isInvitationRequired ? { invitationCode } : {}),
         });
+        if (!session) {
+          setEmailVerificationCode('');
+          setAuthMode('verifyEmail');
+          return;
+        }
         showAuthSuccess(intakeText.auth.registerSuccess);
       } else {
         await signInWithSupabasePassword({ email, password: loginPassword });
         showAuthSuccess(intakeText.auth.loginSuccess);
       }
-      await loadCurrentUser();
-      setAuthFeedbackDialog(null);
-      setIsLoginPromptOpen(false);
-      setLoginPassword('');
-      setRegisterDisplayName('');
-      setInvitationCode('');
-      setHasAcceptedTerms(false);
-      const nextIdea = pendingIdeaAfterLogin.trim();
-      setPendingIdeaAfterLogin('');
-      clearPendingAuthIdeaState();
-      if (nextIdea) {
-        setProjectName(nextIdea);
-        const canGenerate = await ensureGenerationAccess();
-        if (canGenerate) {
-          if (creationMode === 'blueprint') openBlueprintSettings(nextIdea);
-          else requestIntakeStart(nextIdea);
-        }
-      }
+      await finishAuthentication();
     } catch (error) {
       showAuthError(localizeAuthError(error, translate('intake.errors.loginFailed')));
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleVerifyEmail = async () => {
+    if (isSigningIn) return;
+    if (!emailVerificationCode.trim()) {
+      showAuthError(translate('intake.errors.verificationCodeRequired'));
+      return;
+    }
+    setIsSigningIn(true);
+    try {
+      await verifySupabaseSignupCode(loginEmail.trim(), emailVerificationCode);
+      await finishAuthentication();
+    } catch (error) {
+      showAuthError(localizeAuthError(error, translate('intake.errors.verificationFailed')));
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleResendEmailCode = async () => {
+    if (isSigningIn) return;
+    setIsSigningIn(true);
+    try {
+      await resendSupabaseSignupCode(loginEmail.trim());
+      showAuthSuccess(translate('intake.auth.verificationResent'));
+    } catch (error) {
+      showAuthError(localizeAuthError(error, translate('intake.errors.verificationFailed')));
     } finally {
       setIsSigningIn(false);
     }
@@ -1218,15 +1270,29 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   };
 
   const handleSelectProject = async (id: string) => {
-    setIsTransitioning(true);
+    // Replace the landing page immediately so the account avatar and home UI
+    // do not fade away while the project-opening request is still pending.
+    setIsLoadingProject(true);
     setIsHistoryOpen(false);
     try {
       await setActiveProject(id);
     } catch (error) {
-      setIsTransitioning(false);
+      setIsLoadingProject(false);
       console.error('Failed to select project:', error);
     }
   };
+
+  if (isLoadingProject) {
+    return (
+      <WorkspaceLoadingPage
+        title={lang.startsWith('zh') ? '正在打开项目' : 'Opening project'}
+        description={lang.startsWith('zh') ? '正在加载项目工作区' : 'Loading project workspace'}
+        ariaLabel="Opening project workspace"
+        className="fixed inset-0 z-[300]"
+      />
+    );
+  }
+
   return (
     <div
       key="landing"
@@ -1240,6 +1306,11 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         </div>
         <div className="relative z-20 flex items-center gap-2">
           <LandingSiteMenu language={lang} onNavigate={navigateLandingPage} onOpenLegal={setActiveLegalDocument} />
+          <ThemeToggle
+            darkModeLabel={t.darkMode}
+            lightModeLabel={t.lightMode}
+            className="text-white hover:bg-white/15 hover:text-white focus-visible:ring-white/70"
+          />
           <AccountActionsMenu
             lang={lang}
             isTransitioning={isTransitioning}
@@ -1351,6 +1422,9 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
           onLoginPasswordChange={setLoginPassword}
           onRegisterDisplayNameChange={setRegisterDisplayName}
           onInvitationCodeChange={setInvitationCode}
+          emailVerificationCode={emailVerificationCode}
+          onEmailVerificationCodeChange={setEmailVerificationCode}
+          onResendEmailCode={handleResendEmailCode}
           onTermsChange={setHasAcceptedTerms}
           onOpenLegalDocument={setActiveLegalDocument}
           onOAuthSignIn={handleOAuthSignIn}
@@ -1358,23 +1432,23 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
 
       {authFeedbackDialog ? (
         <Dialog open onOpenChange={open => !open && setAuthFeedbackDialog(null)}>
-          <DialogContent aria-label={authFeedbackDialog.title} className="max-w-md">
+          <DialogContent aria-label={authFeedbackDialog.title} className="max-w-[420px] rounded-2xl border-border bg-popover p-6 sm:p-7">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <DialogTitle>{authFeedbackDialog.title}</DialogTitle>
-                <p className="mt-3 text-sm text-muted-foreground">{authFeedbackDialog.message}</p>
+                <DialogTitle className="text-xl font-semibold">{authFeedbackDialog.title}</DialogTitle>
+                <p className="mt-3 text-sm leading-6 text-muted-foreground">{authFeedbackDialog.message}</p>
               </div>
               <DialogClose
                 aria-label={intakeText.auth.feedbackClose}
-                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition hover:bg-accent"
+                className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border text-muted-foreground transition hover:bg-accent"
               >
                 <X className="h-4 w-4" />
               </DialogClose>
             </div>
-            <div className="mt-6 flex justify-end border-t border-border pt-4">
-              <button type="button" onClick={() => setAuthFeedbackDialog(null)} className="h-9 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition hover:opacity-90">
+            <div className="mt-6">
+              <BeUiButton type="button" size="lg" onClick={() => setAuthFeedbackDialog(null)} className="h-11 w-full rounded-xl text-sm">
                 {intakeText.auth.feedbackClose}
-              </button>
+              </BeUiButton>
             </div>
           </DialogContent>
         </Dialog>
@@ -1440,9 +1514,17 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
             placeholder={t.ideaPlaceholder}
             generateLabel={t.generate}
             isTransitioning={isTransitioning || isPreparing}
-            isThinking={isIdeaAgentThinking}
             onChange={handleProjectNameChange}
             onSubmit={handleStart}
+            billingConfirmation={isRealtimeBillingNoticeOpen ? {
+              title: translate('intake.realtimeBillingTitle'),
+              summary: translate('intake.realtimeBillingSummary'),
+              notice: translate('intake.realtimeBillingNotice'),
+              confirmLabel: translate('intake.realtimeBillingConfirm'),
+              cancelLabel: intakeText.actions.cancel,
+              onConfirm: handleConfirmRealtimeBilling,
+              onCancel: handleCancelRealtimeBilling,
+            } : undefined}
             attachments={attachmentBuildAttachments}
             onAttachmentsChange={files => {
               setAttachmentBuildAttachments(files);
@@ -1527,33 +1609,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         </div>
       ) : null}
 
-      {isRealtimeBillingNoticeOpen ? (
-        <Dialog open onOpenChange={open => !open && handleCancelRealtimeBilling()}>
-          <DialogContent aria-label={translate('intake.realtimeBillingTitle')} className="max-w-[520px] p-5 text-left text-foreground sm:p-6">
-            <DialogTitle>
-              {translate('intake.realtimeBillingTitle')}
-            </DialogTitle>
-            <p className="mt-4 text-sm text-muted-foreground">{translate('intake.realtimeBillingNotice')}</p>
-            <div className="mt-6 flex flex-col-reverse gap-3 border-t border-border pt-4 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={handleCancelRealtimeBilling}
-                className="h-9 rounded-lg border border-border px-4 text-sm font-medium text-foreground transition hover:bg-accent"
-              >
-                {intakeText.actions.cancel}
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmRealtimeBilling}
-                className="h-9 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition hover:opacity-90"
-              >
-                {translate('intake.realtimeBillingConfirm')}
-              </button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      ) : null}
-
       {isInputMenuOpen && settings && inputMenuPosition && typeof document !== 'undefined'
         ? createPortal(
             <div
@@ -1592,20 +1647,12 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         : null}
 
       {intakePhase === 'starting_build' ? (
-        <div
-          className="fixed inset-0 z-[300] flex items-center justify-center overflow-hidden bg-background px-6"
-          role="status"
-          aria-live="polite"
-          aria-label={intakeText.starting.title}
-        >
-          <div className="relative flex max-w-md flex-col items-center text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-border bg-muted">
-              <LoaderCircle className="h-5 w-5 animate-spin text-primary" aria-hidden="true" />
-            </div>
-            <h2 className="mt-6 text-xl font-semibold">{intakeText.starting.title}</h2>
-            <p className="mt-3 max-w-sm text-sm text-muted-foreground">{intakeText.starting.description}</p>
-          </div>
-        </div>
+        <WorkspaceLoadingPage
+          title={intakeText.starting.title}
+          description={intakeText.starting.description}
+          ariaLabel={intakeText.starting.title}
+          className="fixed inset-0 z-[300] overflow-hidden"
+        />
       ) : null}
 
       {intakeError ? (
@@ -1613,6 +1660,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
           {intakeError}
         </div>
       ) : null}
+
     </div>
   );
 }
