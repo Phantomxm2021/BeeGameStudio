@@ -161,6 +161,20 @@ it('uses camera world span and units, diagnosing framing overflow even inside th
   expect(result.find(node => node.id === 'prompt')!.bounds.bottom - result.find(node => node.id === 'prompt')!.bounds.top).toBeCloseTo(37.44)
 })
 
+it('keeps the camera reference capability informational instead of projecting interactive controls and hit regions', () => {
+  const options = { camera: { nodeId: 'game', input: camera } }
+  for (const role of ['button', 'slider', 'toggle', 'dropdown', 'tab']) {
+    const source = cameraUi()
+    source.push({ id: 'control', role, parentId: 'world-ui', layout: { size: [48, 48] } })
+    const before = JSON.stringify(source)
+    expect(() => inspectUiLayout(source, 'root', { width: 320, height: 480 }, options)).toThrow('non-interactive information only')
+    expect(JSON.stringify(source)).toBe(before)
+  }
+  const source = [...cameraUi(), { id: 'action-label', role: 'text', parentId: 'world-ui',
+    actions: { click: 'serve' }, text: '发球', layout: { size: [48, 48] } }]
+  expect(() => inspectUiLayout(source, 'root', { width: 390, height: 844 }, options)).toThrow('action-label')
+})
+
 it('rejects missing or incompatible camera reference inputs rather than treating world coordinates as screen pixels', () => {
   const source = cameraUi(), viewport = { width: 390, height: 844 }
   expect(() => inspectUiLayout(source, 'root', viewport)).toThrow('connected game-view')

@@ -1,0 +1,141 @@
+{
+  "schema": "beegame-content.v1",
+  "kind": "ui-screen",
+  "id": "ui-error",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "data": {
+          "referenceResolution": [
+            480,
+            672
+          ],
+          "compactMaxWidth": 600
+        }
+      },
+      {
+        "id": "dim",
+        "role": "shape",
+        "parentId": "root",
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "style": {
+          "color": "#05030f",
+          "opacity": 0.72
+        }
+      },
+      {
+        "id": "error-panel",
+        "role": "container",
+        "parentId": "root",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            300,
+            196
+          ],
+          "minSize": [
+            300,
+            196
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 14,
+            "padding": [
+              24,
+              24,
+              24,
+              24
+            ],
+            "align": "center",
+            "justify": "start"
+          }
+        }
+      },
+      {
+        "id": "error-title",
+        "role": "text",
+        "text": "加载失败",
+        "layout": {
+          "size": [
+            252,
+            32
+          ]
+        },
+        "style": {
+          "fontSize": 24,
+          "align": "center"
+        },
+        "parentId": "error-panel"
+      },
+      {
+        "id": "error-message",
+        "role": "text",
+        "text": "游戏数据读取失败，请检查网络后重试。",
+        "layout": {
+          "size": [
+            252,
+            40
+          ]
+        },
+        "style": {
+          "fontSize": 14,
+          "align": "center",
+          "lineHeight": 20
+        },
+        "parentId": "error-panel"
+      },
+      {
+        "id": "btn-retry",
+        "role": "button",
+        "text": "重试",
+        "layout": {
+          "size": [
+            252,
+            48
+          ],
+          "minSize": [
+            252,
+            48
+          ]
+        },
+        "parentId": "error-panel"
+      }
+    ]
+  }
+}

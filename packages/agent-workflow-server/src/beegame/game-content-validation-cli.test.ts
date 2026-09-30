@@ -65,6 +65,15 @@ test('one connected UI source projects world text with screen controls for draft
   expect(readFileSync(join(root, 'draft.json'), 'utf8')).toBe(source)
   expect(readFileSync(join(root, 'content/ui/combined.json'), 'utf8')).toBe(source)
   expect(readFileSync(join(root, 'camera.json'), 'utf8')).toBe(cameraSource)
+  const interactive = structuredClone(ui)
+  interactive.data.nodes.push({ id: 'projected-control', role: 'button', parentId: 'world-ui', layout: { position: [0, 0], size: [48, 48] } })
+  const unsupported = JSON.stringify(interactive)
+  writeFileSync(join(root, 'draft.json'), unsupported)
+  writeFileSync(join(root, 'content/ui/combined.json'), unsupported)
+  for (const args of [['--layout-draft', 'draft.json'], ['--layout', 'ui/combined.json']])
+    expect(() => runGameContentCommand(root, [...args, '320', '480', '--game-view', 'game', '--camera', 'camera.json'])).toThrow('non-interactive information only')
+  expect(readFileSync(join(root, 'draft.json'), 'utf8')).toBe(unsupported)
+  expect(readFileSync(join(root, 'content/ui/combined.json'), 'utf8')).toBe(unsupported)
 })
 
 test('draft and registered UI inspections expose text/control overlaps without turning candidates into a failed gate', () => {

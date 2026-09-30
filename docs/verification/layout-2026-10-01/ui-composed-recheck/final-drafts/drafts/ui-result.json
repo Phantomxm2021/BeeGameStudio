@@ -1,0 +1,172 @@
+{
+  "schema": "beegame-content.v1",
+  "kind": "ui-screen",
+  "id": "ui-result",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "data": {
+          "referenceResolution": [
+            480,
+            672
+          ],
+          "compactMaxWidth": 600
+        }
+      },
+      {
+        "id": "dim",
+        "role": "shape",
+        "parentId": "root",
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "style": {
+          "color": "#05030f",
+          "opacity": 0.72
+        }
+      },
+      {
+        "id": "result-panel",
+        "role": "container",
+        "parentId": "root",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            300,
+            292
+          ],
+          "minSize": [
+            300,
+            292
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 14,
+            "padding": [
+              24,
+              24,
+              24,
+              24
+            ],
+            "align": "center",
+            "justify": "start"
+          }
+        }
+      },
+      {
+        "id": "result-title",
+        "role": "text",
+        "text": "通关成功",
+        "layout": {
+          "size": [
+            252,
+            36
+          ]
+        },
+        "style": {
+          "fontSize": 28,
+          "align": "center"
+        },
+        "parentId": "result-panel"
+      },
+      {
+        "id": "result-score-label",
+        "role": "text",
+        "text": "最终得分",
+        "layout": {
+          "size": [
+            252,
+            18
+          ]
+        },
+        "style": {
+          "fontSize": 13,
+          "align": "center"
+        },
+        "parentId": "result-panel"
+      },
+      {
+        "id": "result-score",
+        "role": "text",
+        "text": "4000",
+        "layout": {
+          "size": [
+            252,
+            40
+          ]
+        },
+        "style": {
+          "fontSize": 32,
+          "align": "center"
+        },
+        "parentId": "result-panel"
+      },
+      {
+        "id": "btn-restart",
+        "role": "button",
+        "text": "再来一局",
+        "layout": {
+          "size": [
+            252,
+            48
+          ],
+          "minSize": [
+            252,
+            48
+          ]
+        },
+        "parentId": "result-panel"
+      },
+      {
+        "id": "btn-exit",
+        "role": "button",
+        "text": "退出",
+        "layout": {
+          "size": [
+            252,
+            44
+          ],
+          "minSize": [
+            252,
+            44
+          ]
+        },
+        "parentId": "result-panel"
+      }
+    ]
+  }
+}

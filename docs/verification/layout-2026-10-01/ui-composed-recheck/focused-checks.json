@@ -1,0 +1,1435 @@
+{
+  "implementationCommit": "3bd16414",
+  "geometryCases": 48,
+  "projections": [
+    {
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "expected": {
+        "left": 387.4285714285714,
+        "top": 433.5428571428571,
+        "right": 572.5714285714284,
+        "bottom": 452.0571428571428
+      },
+      "actual": {
+        "left": 387.4285714285714,
+        "top": 433.5428571428571,
+        "right": 572.5714285714284,
+        "bottom": 452.0571428571428
+      },
+      "maximumError": 0
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "expected": {
+        "left": 101.39999999999999,
+        "top": 587.3599999999999,
+        "right": 288.59999999999997,
+        "bottom": 606.0799999999999
+      },
+      "actual": {
+        "left": 101.39999999999999,
+        "top": 587.3599999999999,
+        "right": 288.59999999999997,
+        "bottom": 606.0799999999999
+      },
+      "maximumError": 0
+    },
+    {
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "expected": {
+        "left": 83.2,
+        "top": 375.68,
+        "right": 236.8,
+        "bottom": 391.03999999999996
+      },
+      "actual": {
+        "left": 83.2,
+        "top": 375.68,
+        "right": 236.8,
+        "bottom": 391.04
+      },
+      "maximumError": 5.684341886080802e-14
+    },
+    {
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "expected": {
+        "left": 83.2,
+        "top": 419.68,
+        "right": 236.8,
+        "bottom": 435.03999999999996
+      },
+      "actual": {
+        "left": 83.2,
+        "top": 419.68,
+        "right": 236.8,
+        "bottom": 435.04
+      },
+      "maximumError": 5.684341886080802e-14
+    },
+    {
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "expected": {
+        "left": 162.85714285714286,
+        "top": 642.2857142857142,
+        "right": 437.1428571428571,
+        "bottom": 669.7142857142857
+      },
+      "actual": {
+        "left": 162.85714285714286,
+        "top": 642.2857142857142,
+        "right": 437.1428571428571,
+        "bottom": 669.7142857142857
+      },
+      "maximumError": 0
+    },
+    {
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "expected": {
+        "left": 163.35714285714283,
+        "top": 642.2857142857142,
+        "right": 437.64285714285705,
+        "bottom": 669.7142857142857
+      },
+      "actual": {
+        "left": 163.35714285714283,
+        "top": 642.2857142857142,
+        "right": 437.6428571428571,
+        "bottom": 669.7142857142857
+      },
+      "maximumError": 5.684341886080802e-14
+    },
+    {
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "expected": {
+        "left": 264.2857142857143,
+        "top": 401.42857142857144,
+        "right": 435.7142857142857,
+        "bottom": 418.57142857142856
+      },
+      "actual": {
+        "left": 264.2857142857143,
+        "top": 401.42857142857144,
+        "right": 435.7142857142857,
+        "bottom": 418.5714285714286
+      },
+      "maximumError": 5.684341886080802e-14
+    },
+    {
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "expected": {
+        "left": 251.2142857142857,
+        "top": 385.3714285714285,
+        "right": 415.7857142857142,
+        "bottom": 401.82857142857137
+      },
+      "actual": {
+        "left": 251.2142857142857,
+        "top": 385.3714285714285,
+        "right": 415.7857142857142,
+        "bottom": 401.82857142857137
+      },
+      "maximumError": 0
+    }
+  ],
+  "controls": [
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "btn-resume",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "toggle-mute",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "btn-quit-run",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "btn-resume",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "toggle-mute",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "btn-quit-run",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "btn-resume",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "toggle-mute",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "btn-quit-run",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "btn-resume",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "toggle-mute",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "btn-quit-run",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "btn-resume",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "toggle-mute",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "btn-quit-run",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "btn-resume",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "toggle-mute",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "btn-quit-run",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "btn-resume",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "toggle-mute",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "btn-quit-run",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "btn-resume",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "toggle-mute",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-pause.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "btn-quit-run",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "btn-start",
+      "localSize": [
+        200,
+        48
+      ],
+      "projectedSize": [
+        154.28571428571428,
+        37.02857142857141
+      ],
+      "belowDocument44pxHeight": true
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "btn-mute-start",
+      "localSize": [
+        64,
+        40
+      ],
+      "projectedSize": [
+        49.37142857142862,
+        30.857142857142854
+      ],
+      "belowDocument44pxHeight": true
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "btn-start",
+      "localSize": [
+        200,
+        48
+      ],
+      "projectedSize": [
+        155.99999999999994,
+        37.44
+      ],
+      "belowDocument44pxHeight": true
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "btn-mute-start",
+      "localSize": [
+        64,
+        40
+      ],
+      "projectedSize": [
+        49.920000000000016,
+        31.19999999999999
+      ],
+      "belowDocument44pxHeight": true
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "btn-start",
+      "localSize": [
+        200,
+        48
+      ],
+      "projectedSize": [
+        127.99999999999999,
+        30.71999999999997
+      ],
+      "belowDocument44pxHeight": true
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "btn-mute-start",
+      "localSize": [
+        64,
+        40
+      ],
+      "projectedSize": [
+        40.95999999999998,
+        25.6
+      ],
+      "belowDocument44pxHeight": true
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "btn-start",
+      "localSize": [
+        200,
+        48
+      ],
+      "projectedSize": [
+        127.99999999999999,
+        30.71999999999997
+      ],
+      "belowDocument44pxHeight": true
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "btn-mute-start",
+      "localSize": [
+        64,
+        40
+      ],
+      "projectedSize": [
+        40.95999999999998,
+        25.599999999999994
+      ],
+      "belowDocument44pxHeight": true
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "btn-start",
+      "localSize": [
+        200,
+        48
+      ],
+      "projectedSize": [
+        228.57142857142856,
+        54.85714285714289
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "btn-mute-start",
+      "localSize": [
+        64,
+        40
+      ],
+      "projectedSize": [
+        73.14285714285717,
+        45.7142857142857
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "btn-start",
+      "localSize": [
+        200,
+        48
+      ],
+      "projectedSize": [
+        228.57142857142853,
+        54.85714285714289
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "btn-mute-start",
+      "localSize": [
+        64,
+        40
+      ],
+      "projectedSize": [
+        73.14285714285711,
+        45.7142857142857
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "btn-start",
+      "localSize": [
+        200,
+        48
+      ],
+      "projectedSize": [
+        142.8571428571429,
+        34.28571428571428
+      ],
+      "belowDocument44pxHeight": true
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "btn-mute-start",
+      "localSize": [
+        64,
+        40
+      ],
+      "projectedSize": [
+        45.714285714285666,
+        28.57142857142857
+      ],
+      "belowDocument44pxHeight": true
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "btn-start",
+      "localSize": [
+        200,
+        48
+      ],
+      "projectedSize": [
+        137.1428571428571,
+        32.91428571428571
+      ],
+      "belowDocument44pxHeight": true
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-start.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "btn-mute-start",
+      "localSize": [
+        64,
+        40
+      ],
+      "projectedSize": [
+        43.8857142857143,
+        27.428571428571423
+      ],
+      "belowDocument44pxHeight": true
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-gameplay.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "pause-btn",
+      "localSize": [
+        62,
+        62
+      ],
+      "projectedSize": [
+        47.82857142857142,
+        47.82857142857142
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-gameplay.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "pause-btn",
+      "localSize": [
+        62,
+        62
+      ],
+      "projectedSize": [
+        48.359999999999985,
+        48.359999999999985
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-gameplay.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "pause-btn",
+      "localSize": [
+        62,
+        62
+      ],
+      "projectedSize": [
+        39.68000000000001,
+        39.68
+      ],
+      "belowDocument44pxHeight": true
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-gameplay.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "pause-btn",
+      "localSize": [
+        62,
+        62
+      ],
+      "projectedSize": [
+        39.68000000000001,
+        39.68000000000001
+      ],
+      "belowDocument44pxHeight": true
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-gameplay.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "pause-btn",
+      "localSize": [
+        62,
+        62
+      ],
+      "projectedSize": [
+        70.85714285714283,
+        70.85714285714285
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-gameplay.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "pause-btn",
+      "localSize": [
+        62,
+        62
+      ],
+      "projectedSize": [
+        70.85714285714283,
+        70.85714285714285
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-gameplay.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "pause-btn",
+      "localSize": [
+        62,
+        62
+      ],
+      "projectedSize": [
+        44.28571428571428,
+        44.285714285714285
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-gameplay.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "pause-btn",
+      "localSize": [
+        62,
+        62
+      ],
+      "projectedSize": [
+        42.514285714285734,
+        42.514285714285705
+      ],
+      "belowDocument44pxHeight": true
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "btn-restart",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "btn-exit",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "btn-restart",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "btn-exit",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "btn-restart",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "btn-exit",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "btn-restart",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "btn-exit",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "btn-restart",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "btn-exit",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "btn-restart",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "btn-exit",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "btn-restart",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "btn-exit",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "btn-restart",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-result.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "btn-exit",
+      "localSize": [
+        252,
+        44
+      ],
+      "projectedSize": [
+        252,
+        44
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-error.json",
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "id": "btn-retry",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-error.json",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "id": "btn-retry",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-error.json",
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "id": "btn-retry",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-error.json",
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "id": "btn-retry",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-error.json",
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "id": "btn-retry",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-error.json",
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "id": "btn-retry",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-error.json",
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "id": "btn-retry",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    },
+    {
+      "source": ".beegame/tmp/drafts/ui-error.json",
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "id": "btn-retry",
+      "localSize": [
+        252,
+        48
+      ],
+      "projectedSize": [
+        252,
+        48
+      ],
+      "belowDocument44pxHeight": false
+    }
+  ],
+  "documentChanges": [
+    {
+      "name": "BALANCE_DESIGN.md",
+      "changedDuringReview": false,
+      "beforeSha256": "68f439b41af75730c40d32547b7d8bd03e582ad452f4786f6177e03c77ab3c31",
+      "afterSha256": "68f439b41af75730c40d32547b7d8bd03e582ad452f4786f6177e03c77ab3c31"
+    },
+    {
+      "name": "UI_UX_SPEC.md",
+      "changedDuringReview": true,
+      "beforeSha256": "cb1dc61b91aeb483bea124e5d53e695f06c8a2df285cc1c4bb59af5379fe1129",
+      "afterSha256": "6d99dda15cf85e50281cd66c1bde69fd1b849b9a85b9ac20b2b6b9bf480e0649"
+    },
+    {
+      "name": "LEVEL_SCENE_DESIGN.md",
+      "changedDuringReview": true,
+      "beforeSha256": "3416a08ac8ea1eec98b866d276aa39f4324e578c58ba96dc3349463234820eab",
+      "afterSha256": "84308c797e98568e347a859809d59b7d1a150ad8eab62b39c4723c479c73eb7f"
+    },
+    {
+      "name": "ART_DIRECTION.md",
+      "changedDuringReview": true,
+      "beforeSha256": "965d39ac2afc8ee0e45b276869201361967edc2f96c3268e1c69b5da22b81559",
+      "afterSha256": "8baec9e958b0207cbf4d78a030d9ad148a3caccb262ca80f5a38a59a5086cea9"
+    },
+    {
+      "name": "GDD.md",
+      "changedDuringReview": true,
+      "beforeSha256": "db2cdb2afb21920051019d7713a8d077bbe44d6bc6e654bf305e0448174dd26f",
+      "afterSha256": "04fc8e43c19f5f23d8b1474c58d5f7dbd28747dc740fb4efcee26f942e6b71bb"
+    },
+    {
+      "name": "ASSET_PLAN.md",
+      "changedDuringReview": true,
+      "beforeSha256": "dd92a843da95976cbabfd86f86ada6b4c85fdcf547ea3c98126bda112c31f7c7",
+      "afterSha256": "23812eedc9e2492e34c3342ed517eef85140806ed61cec828478328df577c0e9"
+    },
+    {
+      "name": "AUDIO_DESIGN.md",
+      "changedDuringReview": true,
+      "beforeSha256": "3166db378defa55fd0aeea73d32ee7db0367c9a81941de7b2522ee29bef0196e",
+      "afterSha256": "42be4f3e8d80d9fa40f94513250b72a460c44c38eebbc3c83d193d1c5fb18671"
+    },
+    {
+      "name": "TECHNICAL_DESIGN.md",
+      "changedDuringReview": true,
+      "beforeSha256": "df3070203b6c6aa9c42c2ab5d2656c137be6a748543080723d10b785c824114c",
+      "afterSha256": "b81587a7aa44a182eab4cdd546caf1d908d9623e0d4b391a698e7e7aa4fda0b5"
+    }
+  ],
+  "note": "44px is the final UI document promise, not a universal hard-coded platform rule. No explicit independent hit-region input was supplied. The native pause exception is recorded separately in audit.json."
+}

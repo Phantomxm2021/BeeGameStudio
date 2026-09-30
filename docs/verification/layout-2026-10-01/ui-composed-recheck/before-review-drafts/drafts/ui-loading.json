@@ -1,0 +1,94 @@
+{
+  "schema": "beegame-content.v1",
+  "kind": "ui-screen",
+  "id": "ui-loading",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "data": {
+          "referenceResolution": [
+            480,
+            672
+          ],
+          "compactMaxWidth": 600
+        }
+      },
+      {
+        "id": "loading-group",
+        "role": "container",
+        "parentId": "root",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            160,
+            88
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 16,
+            "padding": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "loading-spinner",
+        "role": "shape",
+        "layout": {
+          "size": [
+            40,
+            40
+          ]
+        },
+        "style": {
+          "shape": "circle"
+        },
+        "parentId": "loading-group"
+      },
+      {
+        "id": "loading-text",
+        "role": "text",
+        "text": "加载中…",
+        "layout": {
+          "size": [
+            120,
+            20
+          ]
+        },
+        "style": {
+          "fontSize": 14,
+          "align": "center"
+        },
+        "parentId": "loading-group"
+      }
+    ]
+  }
+}

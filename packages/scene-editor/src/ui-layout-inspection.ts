@@ -76,6 +76,10 @@ export function inspectUiLayout(nodes: readonly UiResponsiveNode[], rootId: stri
       cameraMatrices.set(node.id, compose2d(cameraMatrices.get(parent.id)!, local))
       worldRoots.set(node.id, worldRoots.get(parent.id)!)
     }
+    const interaction = node as UiResponsiveNode & { role?: string; actions?: Record<string, unknown> }
+    if (cameraMatrices.has(node.id) && ((interaction.role !== 'text' && overlapRoles.has(interaction.role ?? '')) ||
+      Object.keys(interaction.actions ?? {}).length > 0))
+      throw new Error(`camera-reference-2d supports non-interactive information only; keep control ${node.id} in screen space`)
     matrices.set(node.id, matrix)
     active.set(node.id, node.enabled !== false && (!parent || active.get(parent.id) === true))
     visiting.delete(node.id)

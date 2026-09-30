@@ -1,0 +1,4838 @@
+{
+  "source": ".beegame/tmp/drafts/ui-gameplay.json",
+  "connection": [
+    "--game-view",
+    "game-view",
+    "--camera",
+    ".beegame/tmp/camera-draft.json"
+  ],
+  "authoredSha256": "43c5294e12c7620f1a5c91537f881fc6ee6759ab0ca2a6f757e78edb80f4d023",
+  "inputPreserved": true,
+  "scope": "Rectangle calculations and independent intersections of resolved boxes, not font, occlusion or runtime acceptance",
+  "cases": [
+    {
+      "viewport": {
+        "width": 960,
+        "height": 540
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 960,
+          "height": 540
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": [],
+          "outsideCameraView": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                960,
+                540
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                960,
+                0
+              ],
+              [
+                960,
+                540
+              ],
+              [
+                0,
+                540
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 960,
+              "bottom": 540
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "game-view",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0.02,
+                0.02
+              ],
+              "anchorMax": [
+                0.98,
+                0.98
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                921.5999999999999,
+                518.4
+              ],
+              "position": [
+                19.2,
+                10.8
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                19.2,
+                10.8
+              ],
+              [
+                940.8,
+                10.8
+              ],
+              [
+                940.8,
+                529.1999999999999
+              ],
+              [
+                19.2,
+                529.1999999999999
+              ]
+            ],
+            "bounds": {
+              "left": 19.2,
+              "top": 10.8,
+              "right": 940.8,
+              "bottom": 529.1999999999999
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-plane",
+            "parentId": "game-view",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                480,
+                672
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                294.85714285714283,
+                10.8
+              ],
+              [
+                665.1428571428571,
+                10.8
+              ],
+              [
+                665.1428571428571,
+                529.1999999999999
+              ],
+              [
+                294.85714285714283,
+                529.1999999999999
+              ]
+            ],
+            "bounds": {
+              "left": 294.85714285714283,
+              "top": 10.8,
+              "right": 665.1428571428571,
+              "bottom": 529.1999999999999
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-score",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-left",
+              "position": [
+                12,
+                14
+              ],
+              "size": [
+                96,
+                28
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                304.1142857142857,
+                21.6
+              ],
+              [
+                378.1714285714286,
+                21.6
+              ],
+              [
+                378.1714285714286,
+                43.2
+              ],
+              [
+                304.1142857142857,
+                43.2
+              ]
+            ],
+            "bounds": {
+              "left": 304.1142857142857,
+              "top": 21.6,
+              "right": 378.1714285714286,
+              "bottom": 43.2
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "pause-btn",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                1
+              ],
+              "size": [
+                62,
+                62
+              ],
+              "minSize": [
+                62,
+                62
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                456.08571428571423,
+                11.571428571428573
+              ],
+              [
+                503.91428571428565,
+                11.571428571428573
+              ],
+              [
+                503.91428571428565,
+                59.39999999999999
+              ],
+              [
+                456.08571428571423,
+                59.39999999999999
+              ]
+            ],
+            "bounds": {
+              "left": 456.08571428571423,
+              "top": 11.571428571428573,
+              "right": 503.91428571428565,
+              "bottom": 59.39999999999999
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-lives",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-right",
+              "position": [
+                -12,
+                14
+              ],
+              "size": [
+                88,
+                28
+              ],
+              "container": {
+                "direction": "row",
+                "gap": 8,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "justify": "end"
+              },
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 0
+            },
+            "corners": [
+              [
+                588,
+                21.6
+              ],
+              [
+                655.8857142857142,
+                21.6
+              ],
+              [
+                655.8857142857142,
+                43.2
+              ],
+              [
+                588,
+                43.2
+              ]
+            ],
+            "bounds": {
+              "left": 588,
+              "top": 21.6,
+              "right": 655.8857142857142,
+              "bottom": 43.2
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-0",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                12,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                597.2571428571429,
+                21.6
+              ],
+              [
+                612.6857142857143,
+                21.6
+              ],
+              [
+                612.6857142857143,
+                37.028571428571425
+              ],
+              [
+                597.2571428571429,
+                37.028571428571425
+              ]
+            ],
+            "bounds": {
+              "left": 597.2571428571429,
+              "top": 21.6,
+              "right": 612.6857142857143,
+              "bottom": 37.028571428571425
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-1",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                40,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                618.8571428571429,
+                21.6
+              ],
+              [
+                634.2857142857143,
+                21.6
+              ],
+              [
+                634.2857142857143,
+                37.028571428571425
+              ],
+              [
+                618.8571428571429,
+                37.028571428571425
+              ]
+            ],
+            "bounds": {
+              "left": 618.8571428571429,
+              "top": 21.6,
+              "right": 634.2857142857143,
+              "bottom": 37.028571428571425
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-2",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                68,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                640.4571428571428,
+                21.6
+              ],
+              [
+                655.8857142857142,
+                21.6
+              ],
+              [
+                655.8857142857142,
+                37.028571428571425
+              ],
+              [
+                640.4571428571428,
+                37.028571428571425
+              ]
+            ],
+            "bounds": {
+              "left": 640.4571428571428,
+              "top": 21.6,
+              "right": 655.8857142857142,
+              "bottom": 37.028571428571425
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "serve-prompt",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                548
+              ],
+              "size": [
+                240,
+                24
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                387.4285714285714,
+                433.5428571428571
+              ],
+              [
+                572.5714285714284,
+                433.5428571428571
+              ],
+              [
+                572.5714285714284,
+                452.0571428571428
+              ],
+              [
+                387.4285714285714,
+                452.0571428571428
+              ]
+            ],
+            "bounds": {
+              "left": 387.4285714285714,
+              "top": 433.5428571428571,
+              "right": 572.5714285714284,
+              "bottom": 452.0571428571428
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ],
+        "gameView": {
+          "nodeId": "game-view",
+          "bounds": {
+            "left": 19.2,
+            "top": 10.8,
+            "right": 940.8,
+            "bottom": 529.1999999999999
+          },
+          "viewport": {
+            "width": 921.5999999999999,
+            "height": 518.4
+          }
+        },
+        "cameraView": {
+          "projection": "orthographic",
+          "framing": "letterbox",
+          "rect": {
+            "x": 275.65714285714284,
+            "y": 0,
+            "width": 370.2857142857142,
+            "height": 518.4
+          },
+          "aspect": 0.7142857142857143,
+          "halfHeight": 3.36,
+          "halfWidth": 2.4
+        }
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": [],
+          "outsideCameraView": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                390,
+                844
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                390,
+                0
+              ],
+              [
+                390,
+                844
+              ],
+              [
+                0,
+                844
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 390,
+              "bottom": 844
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "game-view",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0.02,
+                0.02
+              ],
+              "anchorMax": [
+                0.98,
+                0.98
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                374.4,
+                810.24
+              ],
+              "position": [
+                7.8,
+                16.88
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                7.8,
+                16.88
+              ],
+              [
+                382.2,
+                16.88
+              ],
+              [
+                382.2,
+                827.12
+              ],
+              [
+                7.8,
+                827.12
+              ]
+            ],
+            "bounds": {
+              "left": 7.8,
+              "top": 16.88,
+              "right": 382.2,
+              "bottom": 827.12
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-plane",
+            "parentId": "game-view",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                480,
+                672
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                7.8,
+                159.92000000000002
+              ],
+              [
+                382.2,
+                159.92000000000002
+              ],
+              [
+                382.2,
+                684.0799999999999
+              ],
+              [
+                7.8,
+                684.0799999999999
+              ]
+            ],
+            "bounds": {
+              "left": 7.8,
+              "top": 159.92000000000002,
+              "right": 382.2,
+              "bottom": 684.0799999999999
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-score",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-left",
+              "position": [
+                12,
+                14
+              ],
+              "size": [
+                96,
+                28
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                17.16,
+                170.84
+              ],
+              [
+                92.03999999999999,
+                170.84
+              ],
+              [
+                92.03999999999999,
+                192.68
+              ],
+              [
+                17.16,
+                192.68
+              ]
+            ],
+            "bounds": {
+              "left": 17.16,
+              "top": 170.84,
+              "right": 92.03999999999999,
+              "bottom": 192.68
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "pause-btn",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                1
+              ],
+              "size": [
+                62,
+                62
+              ],
+              "minSize": [
+                62,
+                62
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                170.82,
+                160.70000000000002
+              ],
+              [
+                219.17999999999998,
+                160.70000000000002
+              ],
+              [
+                219.17999999999998,
+                209.06
+              ],
+              [
+                170.82,
+                209.06
+              ]
+            ],
+            "bounds": {
+              "left": 170.82,
+              "top": 160.70000000000002,
+              "right": 219.17999999999998,
+              "bottom": 209.06
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-lives",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-right",
+              "position": [
+                -12,
+                14
+              ],
+              "size": [
+                88,
+                28
+              ],
+              "container": {
+                "direction": "row",
+                "gap": 8,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "justify": "end"
+              },
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 0
+            },
+            "corners": [
+              [
+                304.2,
+                170.84
+              ],
+              [
+                372.84,
+                170.84
+              ],
+              [
+                372.84,
+                192.68
+              ],
+              [
+                304.2,
+                192.68
+              ]
+            ],
+            "bounds": {
+              "left": 304.2,
+              "top": 170.84,
+              "right": 372.84,
+              "bottom": 192.68
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-0",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                12,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                313.56,
+                170.84
+              ],
+              [
+                329.16,
+                170.84
+              ],
+              [
+                329.16,
+                186.44
+              ],
+              [
+                313.56,
+                186.44
+              ]
+            ],
+            "bounds": {
+              "left": 313.56,
+              "top": 170.84,
+              "right": 329.16,
+              "bottom": 186.44
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-1",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                40,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                335.4,
+                170.84
+              ],
+              [
+                351,
+                170.84
+              ],
+              [
+                351,
+                186.44
+              ],
+              [
+                335.4,
+                186.44
+              ]
+            ],
+            "bounds": {
+              "left": 335.4,
+              "top": 170.84,
+              "right": 351,
+              "bottom": 186.44
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-2",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                68,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                357.24,
+                170.84
+              ],
+              [
+                372.84000000000003,
+                170.84
+              ],
+              [
+                372.84000000000003,
+                186.44
+              ],
+              [
+                357.24,
+                186.44
+              ]
+            ],
+            "bounds": {
+              "left": 357.24,
+              "top": 170.84,
+              "right": 372.84000000000003,
+              "bottom": 186.44
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "serve-prompt",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                548
+              ],
+              "size": [
+                240,
+                24
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                101.39999999999999,
+                587.3599999999999
+              ],
+              [
+                288.59999999999997,
+                587.3599999999999
+              ],
+              [
+                288.59999999999997,
+                606.0799999999999
+              ],
+              [
+                101.39999999999999,
+                606.0799999999999
+              ]
+            ],
+            "bounds": {
+              "left": 101.39999999999999,
+              "top": 587.3599999999999,
+              "right": 288.59999999999997,
+              "bottom": 606.0799999999999
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ],
+        "gameView": {
+          "nodeId": "game-view",
+          "bounds": {
+            "left": 7.8,
+            "top": 16.88,
+            "right": 382.2,
+            "bottom": 827.12
+          },
+          "viewport": {
+            "width": 374.4,
+            "height": 810.24
+          }
+        },
+        "cameraView": {
+          "projection": "orthographic",
+          "framing": "letterbox",
+          "rect": {
+            "x": 0,
+            "y": 143.04000000000002,
+            "width": 374.4,
+            "height": 524.16
+          },
+          "aspect": 0.7142857142857143,
+          "halfHeight": 3.36,
+          "halfWidth": 2.4
+        }
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 320,
+        "height": 480
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 320,
+          "height": 480
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": [],
+          "outsideCameraView": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                320,
+                480
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                320,
+                0
+              ],
+              [
+                320,
+                480
+              ],
+              [
+                0,
+                480
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 320,
+              "bottom": 480
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "game-view",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0.02,
+                0.02
+              ],
+              "anchorMax": [
+                0.98,
+                0.98
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                307.2,
+                460.79999999999995
+              ],
+              "position": [
+                6.4,
+                9.6
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                6.4,
+                9.6
+              ],
+              [
+                313.59999999999997,
+                9.6
+              ],
+              [
+                313.59999999999997,
+                470.4
+              ],
+              [
+                6.4,
+                470.4
+              ]
+            ],
+            "bounds": {
+              "left": 6.4,
+              "top": 9.6,
+              "right": 313.59999999999997,
+              "bottom": 470.4
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-plane",
+            "parentId": "game-view",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                480,
+                672
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                6.4,
+                24.959999999999987
+              ],
+              [
+                313.59999999999997,
+                24.959999999999987
+              ],
+              [
+                313.59999999999997,
+                455.03999999999996
+              ],
+              [
+                6.4,
+                455.03999999999996
+              ]
+            ],
+            "bounds": {
+              "left": 6.4,
+              "top": 24.959999999999987,
+              "right": 313.59999999999997,
+              "bottom": 455.03999999999996
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-score",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-left",
+              "position": [
+                12,
+                14
+              ],
+              "size": [
+                96,
+                28
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                14.08,
+                33.91999999999999
+              ],
+              [
+                75.52,
+                33.91999999999999
+              ],
+              [
+                75.52,
+                51.83999999999999
+              ],
+              [
+                14.08,
+                51.83999999999999
+              ]
+            ],
+            "bounds": {
+              "left": 14.08,
+              "top": 33.91999999999999,
+              "right": 75.52,
+              "bottom": 51.83999999999999
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "pause-btn",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                1
+              ],
+              "size": [
+                62,
+                62
+              ],
+              "minSize": [
+                62,
+                62
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                140.16,
+                25.599999999999987
+              ],
+              [
+                179.84,
+                25.599999999999987
+              ],
+              [
+                179.84,
+                65.27999999999999
+              ],
+              [
+                140.16,
+                65.27999999999999
+              ]
+            ],
+            "bounds": {
+              "left": 140.16,
+              "top": 25.599999999999987,
+              "right": 179.84,
+              "bottom": 65.27999999999999
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-lives",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-right",
+              "position": [
+                -12,
+                14
+              ],
+              "size": [
+                88,
+                28
+              ],
+              "container": {
+                "direction": "row",
+                "gap": 8,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "justify": "end"
+              },
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 0
+            },
+            "corners": [
+              [
+                249.60000000000002,
+                33.91999999999999
+              ],
+              [
+                305.92,
+                33.91999999999999
+              ],
+              [
+                305.92,
+                51.83999999999999
+              ],
+              [
+                249.60000000000002,
+                51.83999999999999
+              ]
+            ],
+            "bounds": {
+              "left": 249.60000000000002,
+              "top": 33.91999999999999,
+              "right": 305.92,
+              "bottom": 51.83999999999999
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-0",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                12,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                257.28000000000003,
+                33.91999999999999
+              ],
+              [
+                270.08000000000004,
+                33.91999999999999
+              ],
+              [
+                270.08000000000004,
+                46.719999999999985
+              ],
+              [
+                257.28000000000003,
+                46.719999999999985
+              ]
+            ],
+            "bounds": {
+              "left": 257.28000000000003,
+              "top": 33.91999999999999,
+              "right": 270.08000000000004,
+              "bottom": 46.719999999999985
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-1",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                40,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                275.20000000000005,
+                33.91999999999999
+              ],
+              [
+                288.00000000000006,
+                33.91999999999999
+              ],
+              [
+                288.00000000000006,
+                46.719999999999985
+              ],
+              [
+                275.20000000000005,
+                46.719999999999985
+              ]
+            ],
+            "bounds": {
+              "left": 275.20000000000005,
+              "top": 33.91999999999999,
+              "right": 288.00000000000006,
+              "bottom": 46.719999999999985
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-2",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                68,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                293.12,
+                33.91999999999999
+              ],
+              [
+                305.92,
+                33.91999999999999
+              ],
+              [
+                305.92,
+                46.719999999999985
+              ],
+              [
+                293.12,
+                46.719999999999985
+              ]
+            ],
+            "bounds": {
+              "left": 293.12,
+              "top": 33.91999999999999,
+              "right": 305.92,
+              "bottom": 46.719999999999985
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "serve-prompt",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                548
+              ],
+              "size": [
+                240,
+                24
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                83.2,
+                375.68
+              ],
+              [
+                236.8,
+                375.68
+              ],
+              [
+                236.8,
+                391.04
+              ],
+              [
+                83.2,
+                391.04
+              ]
+            ],
+            "bounds": {
+              "left": 83.2,
+              "top": 375.68,
+              "right": 236.8,
+              "bottom": 391.04
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ],
+        "gameView": {
+          "nodeId": "game-view",
+          "bounds": {
+            "left": 6.4,
+            "top": 9.6,
+            "right": 313.59999999999997,
+            "bottom": 470.4
+          },
+          "viewport": {
+            "width": 307.2,
+            "height": 460.79999999999995
+          }
+        },
+        "cameraView": {
+          "projection": "orthographic",
+          "framing": "letterbox",
+          "rect": {
+            "x": 0,
+            "y": 15.359999999999985,
+            "width": 307.2,
+            "height": 430.08
+          },
+          "aspect": 0.7142857142857143,
+          "halfHeight": 3.36,
+          "halfWidth": 2.4
+        }
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 320,
+        "height": 568
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 320,
+          "height": 568
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": [],
+          "outsideCameraView": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                320,
+                568
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                320,
+                0
+              ],
+              [
+                320,
+                568
+              ],
+              [
+                0,
+                568
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 320,
+              "bottom": 568
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "game-view",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0.02,
+                0.02
+              ],
+              "anchorMax": [
+                0.98,
+                0.98
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                307.2,
+                545.28
+              ],
+              "position": [
+                6.4,
+                11.36
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                6.4,
+                11.36
+              ],
+              [
+                313.59999999999997,
+                11.36
+              ],
+              [
+                313.59999999999997,
+                556.64
+              ],
+              [
+                6.4,
+                556.64
+              ]
+            ],
+            "bounds": {
+              "left": 6.4,
+              "top": 11.36,
+              "right": 313.59999999999997,
+              "bottom": 556.64
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-plane",
+            "parentId": "game-view",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                480,
+                672
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                6.4,
+                68.96
+              ],
+              [
+                313.59999999999997,
+                68.96
+              ],
+              [
+                313.59999999999997,
+                499.03999999999996
+              ],
+              [
+                6.4,
+                499.03999999999996
+              ]
+            ],
+            "bounds": {
+              "left": 6.4,
+              "top": 68.96,
+              "right": 313.59999999999997,
+              "bottom": 499.03999999999996
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-score",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-left",
+              "position": [
+                12,
+                14
+              ],
+              "size": [
+                96,
+                28
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                14.08,
+                77.91999999999999
+              ],
+              [
+                75.52,
+                77.91999999999999
+              ],
+              [
+                75.52,
+                95.83999999999999
+              ],
+              [
+                14.08,
+                95.83999999999999
+              ]
+            ],
+            "bounds": {
+              "left": 14.08,
+              "top": 77.91999999999999,
+              "right": 75.52,
+              "bottom": 95.83999999999999
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "pause-btn",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                1
+              ],
+              "size": [
+                62,
+                62
+              ],
+              "minSize": [
+                62,
+                62
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                140.16,
+                69.6
+              ],
+              [
+                179.84,
+                69.6
+              ],
+              [
+                179.84,
+                109.28
+              ],
+              [
+                140.16,
+                109.28
+              ]
+            ],
+            "bounds": {
+              "left": 140.16,
+              "top": 69.6,
+              "right": 179.84,
+              "bottom": 109.28
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-lives",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-right",
+              "position": [
+                -12,
+                14
+              ],
+              "size": [
+                88,
+                28
+              ],
+              "container": {
+                "direction": "row",
+                "gap": 8,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "justify": "end"
+              },
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 0
+            },
+            "corners": [
+              [
+                249.60000000000002,
+                77.91999999999999
+              ],
+              [
+                305.92,
+                77.91999999999999
+              ],
+              [
+                305.92,
+                95.83999999999999
+              ],
+              [
+                249.60000000000002,
+                95.83999999999999
+              ]
+            ],
+            "bounds": {
+              "left": 249.60000000000002,
+              "top": 77.91999999999999,
+              "right": 305.92,
+              "bottom": 95.83999999999999
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-0",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                12,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                257.28000000000003,
+                77.91999999999999
+              ],
+              [
+                270.08000000000004,
+                77.91999999999999
+              ],
+              [
+                270.08000000000004,
+                90.71999999999998
+              ],
+              [
+                257.28000000000003,
+                90.71999999999998
+              ]
+            ],
+            "bounds": {
+              "left": 257.28000000000003,
+              "top": 77.91999999999999,
+              "right": 270.08000000000004,
+              "bottom": 90.71999999999998
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-1",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                40,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                275.20000000000005,
+                77.91999999999999
+              ],
+              [
+                288.00000000000006,
+                77.91999999999999
+              ],
+              [
+                288.00000000000006,
+                90.71999999999998
+              ],
+              [
+                275.20000000000005,
+                90.71999999999998
+              ]
+            ],
+            "bounds": {
+              "left": 275.20000000000005,
+              "top": 77.91999999999999,
+              "right": 288.00000000000006,
+              "bottom": 90.71999999999998
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-2",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                68,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                293.12,
+                77.91999999999999
+              ],
+              [
+                305.92,
+                77.91999999999999
+              ],
+              [
+                305.92,
+                90.71999999999998
+              ],
+              [
+                293.12,
+                90.71999999999998
+              ]
+            ],
+            "bounds": {
+              "left": 293.12,
+              "top": 77.91999999999999,
+              "right": 305.92,
+              "bottom": 90.71999999999998
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "serve-prompt",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                548
+              ],
+              "size": [
+                240,
+                24
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                83.2,
+                419.68
+              ],
+              [
+                236.8,
+                419.68
+              ],
+              [
+                236.8,
+                435.04
+              ],
+              [
+                83.2,
+                435.04
+              ]
+            ],
+            "bounds": {
+              "left": 83.2,
+              "top": 419.68,
+              "right": 236.8,
+              "bottom": 435.04
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ],
+        "gameView": {
+          "nodeId": "game-view",
+          "bounds": {
+            "left": 6.4,
+            "top": 11.36,
+            "right": 313.59999999999997,
+            "bottom": 556.64
+          },
+          "viewport": {
+            "width": 307.2,
+            "height": 545.28
+          }
+        },
+        "cameraView": {
+          "projection": "orthographic",
+          "framing": "letterbox",
+          "rect": {
+            "x": 0,
+            "y": 57.599999999999994,
+            "width": 307.2,
+            "height": 430.08
+          },
+          "aspect": 0.7142857142857143,
+          "halfHeight": 3.36,
+          "halfWidth": 2.4
+        }
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 600,
+        "height": 800
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 600,
+          "height": 800
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": [],
+          "outsideCameraView": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                600,
+                800
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                600,
+                0
+              ],
+              [
+                600,
+                800
+              ],
+              [
+                0,
+                800
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 600,
+              "bottom": 800
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "game-view",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0.02,
+                0.02
+              ],
+              "anchorMax": [
+                0.98,
+                0.98
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                576,
+                768
+              ],
+              "position": [
+                12,
+                16
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                12,
+                16
+              ],
+              [
+                588,
+                16
+              ],
+              [
+                588,
+                784
+              ],
+              [
+                12,
+                784
+              ]
+            ],
+            "bounds": {
+              "left": 12,
+              "top": 16,
+              "right": 588,
+              "bottom": 784
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-plane",
+            "parentId": "game-view",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                480,
+                672
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                25.714285714285722,
+                16
+              ],
+              [
+                574.2857142857142,
+                16
+              ],
+              [
+                574.2857142857142,
+                784
+              ],
+              [
+                25.714285714285722,
+                784
+              ]
+            ],
+            "bounds": {
+              "left": 25.714285714285722,
+              "top": 16,
+              "right": 574.2857142857142,
+              "bottom": 784
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-score",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-left",
+              "position": [
+                12,
+                14
+              ],
+              "size": [
+                96,
+                28
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                39.42857142857144,
+                32
+              ],
+              [
+                149.14285714285714,
+                32
+              ],
+              [
+                149.14285714285714,
+                64
+              ],
+              [
+                39.42857142857144,
+                64
+              ]
+            ],
+            "bounds": {
+              "left": 39.42857142857144,
+              "top": 32,
+              "right": 149.14285714285714,
+              "bottom": 64
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "pause-btn",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                1
+              ],
+              "size": [
+                62,
+                62
+              ],
+              "minSize": [
+                62,
+                62
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                264.57142857142856,
+                17.142857142857142
+              ],
+              [
+                335.4285714285714,
+                17.142857142857142
+              ],
+              [
+                335.4285714285714,
+                87.99999999999999
+              ],
+              [
+                264.57142857142856,
+                87.99999999999999
+              ]
+            ],
+            "bounds": {
+              "left": 264.57142857142856,
+              "top": 17.142857142857142,
+              "right": 335.4285714285714,
+              "bottom": 87.99999999999999
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-lives",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-right",
+              "position": [
+                -12,
+                14
+              ],
+              "size": [
+                88,
+                28
+              ],
+              "container": {
+                "direction": "row",
+                "gap": 8,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "justify": "end"
+              },
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 0
+            },
+            "corners": [
+              [
+                460,
+                32
+              ],
+              [
+                560.5714285714286,
+                32
+              ],
+              [
+                560.5714285714286,
+                64
+              ],
+              [
+                460,
+                64
+              ]
+            ],
+            "bounds": {
+              "left": 460,
+              "top": 32,
+              "right": 560.5714285714286,
+              "bottom": 64
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-0",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                12,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                473.7142857142857,
+                32
+              ],
+              [
+                496.57142857142856,
+                32
+              ],
+              [
+                496.57142857142856,
+                54.857142857142854
+              ],
+              [
+                473.7142857142857,
+                54.857142857142854
+              ]
+            ],
+            "bounds": {
+              "left": 473.7142857142857,
+              "top": 32,
+              "right": 496.57142857142856,
+              "bottom": 54.857142857142854
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-1",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                40,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                505.7142857142857,
+                32
+              ],
+              [
+                528.5714285714286,
+                32
+              ],
+              [
+                528.5714285714286,
+                54.857142857142854
+              ],
+              [
+                505.7142857142857,
+                54.857142857142854
+              ]
+            ],
+            "bounds": {
+              "left": 505.7142857142857,
+              "top": 32,
+              "right": 528.5714285714286,
+              "bottom": 54.857142857142854
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-2",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                68,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                537.7142857142857,
+                32
+              ],
+              [
+                560.5714285714286,
+                32
+              ],
+              [
+                560.5714285714286,
+                54.857142857142854
+              ],
+              [
+                537.7142857142857,
+                54.857142857142854
+              ]
+            ],
+            "bounds": {
+              "left": 537.7142857142857,
+              "top": 32,
+              "right": 560.5714285714286,
+              "bottom": 54.857142857142854
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "serve-prompt",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                548
+              ],
+              "size": [
+                240,
+                24
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                162.85714285714286,
+                642.2857142857142
+              ],
+              [
+                437.1428571428571,
+                642.2857142857142
+              ],
+              [
+                437.1428571428571,
+                669.7142857142857
+              ],
+              [
+                162.85714285714286,
+                669.7142857142857
+              ]
+            ],
+            "bounds": {
+              "left": 162.85714285714286,
+              "top": 642.2857142857142,
+              "right": 437.1428571428571,
+              "bottom": 669.7142857142857
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ],
+        "gameView": {
+          "nodeId": "game-view",
+          "bounds": {
+            "left": 12,
+            "top": 16,
+            "right": 588,
+            "bottom": 784
+          },
+          "viewport": {
+            "width": 576,
+            "height": 768
+          }
+        },
+        "cameraView": {
+          "projection": "orthographic",
+          "framing": "letterbox",
+          "rect": {
+            "x": 13.714285714285722,
+            "y": 0,
+            "width": 548.5714285714286,
+            "height": 768
+          },
+          "aspect": 0.7142857142857143,
+          "halfHeight": 3.36,
+          "halfWidth": 2.4
+        }
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 601,
+        "height": 800
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 601,
+          "height": 800
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": [],
+          "outsideCameraView": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                601,
+                800
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                601,
+                0
+              ],
+              [
+                601,
+                800
+              ],
+              [
+                0,
+                800
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 601,
+              "bottom": 800
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "game-view",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0.02,
+                0.02
+              ],
+              "anchorMax": [
+                0.98,
+                0.98
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                576.9599999999999,
+                768
+              ],
+              "position": [
+                12.02,
+                16
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                12.02,
+                16
+              ],
+              [
+                588.9799999999999,
+                16
+              ],
+              [
+                588.9799999999999,
+                784
+              ],
+              [
+                12.02,
+                784
+              ]
+            ],
+            "bounds": {
+              "left": 12.02,
+              "top": 16,
+              "right": 588.9799999999999,
+              "bottom": 784
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-plane",
+            "parentId": "game-view",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                480,
+                672
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                26.214285714285683,
+                16
+              ],
+              [
+                574.7857142857142,
+                16
+              ],
+              [
+                574.7857142857142,
+                784
+              ],
+              [
+                26.214285714285683,
+                784
+              ]
+            ],
+            "bounds": {
+              "left": 26.214285714285683,
+              "top": 16,
+              "right": 574.7857142857142,
+              "bottom": 784
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-score",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-left",
+              "position": [
+                12,
+                14
+              ],
+              "size": [
+                96,
+                28
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                39.928571428571395,
+                32
+              ],
+              [
+                149.6428571428571,
+                32
+              ],
+              [
+                149.6428571428571,
+                64
+              ],
+              [
+                39.928571428571395,
+                64
+              ]
+            ],
+            "bounds": {
+              "left": 39.928571428571395,
+              "top": 32,
+              "right": 149.6428571428571,
+              "bottom": 64
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "pause-btn",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                1
+              ],
+              "size": [
+                62,
+                62
+              ],
+              "minSize": [
+                62,
+                62
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                265.0714285714285,
+                17.142857142857142
+              ],
+              [
+                335.92857142857133,
+                17.142857142857142
+              ],
+              [
+                335.92857142857133,
+                87.99999999999999
+              ],
+              [
+                265.0714285714285,
+                87.99999999999999
+              ]
+            ],
+            "bounds": {
+              "left": 265.0714285714285,
+              "top": 17.142857142857142,
+              "right": 335.92857142857133,
+              "bottom": 87.99999999999999
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-lives",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-right",
+              "position": [
+                -12,
+                14
+              ],
+              "size": [
+                88,
+                28
+              ],
+              "container": {
+                "direction": "row",
+                "gap": 8,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "justify": "end"
+              },
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 0
+            },
+            "corners": [
+              [
+                460.49999999999994,
+                32
+              ],
+              [
+                561.0714285714286,
+                32
+              ],
+              [
+                561.0714285714286,
+                64
+              ],
+              [
+                460.49999999999994,
+                64
+              ]
+            ],
+            "bounds": {
+              "left": 460.49999999999994,
+              "top": 32,
+              "right": 561.0714285714286,
+              "bottom": 64
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-0",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                12,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                474.21428571428567,
+                32
+              ],
+              [
+                497.0714285714285,
+                32
+              ],
+              [
+                497.0714285714285,
+                54.857142857142854
+              ],
+              [
+                474.21428571428567,
+                54.857142857142854
+              ]
+            ],
+            "bounds": {
+              "left": 474.21428571428567,
+              "top": 32,
+              "right": 497.0714285714285,
+              "bottom": 54.857142857142854
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-1",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                40,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                506.21428571428567,
+                32
+              ],
+              [
+                529.0714285714286,
+                32
+              ],
+              [
+                529.0714285714286,
+                54.857142857142854
+              ],
+              [
+                506.21428571428567,
+                54.857142857142854
+              ]
+            ],
+            "bounds": {
+              "left": 506.21428571428567,
+              "top": 32,
+              "right": 529.0714285714286,
+              "bottom": 54.857142857142854
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-2",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                68,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                538.2142857142857,
+                32
+              ],
+              [
+                561.0714285714286,
+                32
+              ],
+              [
+                561.0714285714286,
+                54.857142857142854
+              ],
+              [
+                538.2142857142857,
+                54.857142857142854
+              ]
+            ],
+            "bounds": {
+              "left": 538.2142857142857,
+              "top": 32,
+              "right": 561.0714285714286,
+              "bottom": 54.857142857142854
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "serve-prompt",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                548
+              ],
+              "size": [
+                240,
+                24
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                163.35714285714283,
+                642.2857142857142
+              ],
+              [
+                437.6428571428571,
+                642.2857142857142
+              ],
+              [
+                437.6428571428571,
+                669.7142857142857
+              ],
+              [
+                163.35714285714283,
+                669.7142857142857
+              ]
+            ],
+            "bounds": {
+              "left": 163.35714285714283,
+              "top": 642.2857142857142,
+              "right": 437.6428571428571,
+              "bottom": 669.7142857142857
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ],
+        "gameView": {
+          "nodeId": "game-view",
+          "bounds": {
+            "left": 12.02,
+            "top": 16,
+            "right": 588.9799999999999,
+            "bottom": 784
+          },
+          "viewport": {
+            "width": 576.9599999999999,
+            "height": 768
+          }
+        },
+        "cameraView": {
+          "projection": "orthographic",
+          "framing": "letterbox",
+          "rect": {
+            "x": 14.194285714285684,
+            "y": 0,
+            "width": 548.5714285714286,
+            "height": 768
+          },
+          "aspect": 0.7142857142857143,
+          "halfHeight": 3.36,
+          "halfWidth": 2.4
+        }
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 700,
+        "height": 500
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 700,
+          "height": 500
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": [],
+          "outsideCameraView": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                700,
+                500
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                700,
+                0
+              ],
+              [
+                700,
+                500
+              ],
+              [
+                0,
+                500
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 700,
+              "bottom": 500
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "game-view",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0.02,
+                0.02
+              ],
+              "anchorMax": [
+                0.98,
+                0.98
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                672,
+                480
+              ],
+              "position": [
+                14,
+                10
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                14,
+                10
+              ],
+              [
+                686,
+                10
+              ],
+              [
+                686,
+                490
+              ],
+              [
+                14,
+                490
+              ]
+            ],
+            "bounds": {
+              "left": 14,
+              "top": 10,
+              "right": 686,
+              "bottom": 490
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-plane",
+            "parentId": "game-view",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                480,
+                672
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                178.57142857142856,
+                10
+              ],
+              [
+                521.4285714285714,
+                10
+              ],
+              [
+                521.4285714285714,
+                490
+              ],
+              [
+                178.57142857142856,
+                490
+              ]
+            ],
+            "bounds": {
+              "left": 178.57142857142856,
+              "top": 10,
+              "right": 521.4285714285714,
+              "bottom": 490
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-score",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-left",
+              "position": [
+                12,
+                14
+              ],
+              "size": [
+                96,
+                28
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                187.14285714285714,
+                20
+              ],
+              [
+                255.71428571428572,
+                20
+              ],
+              [
+                255.71428571428572,
+                40
+              ],
+              [
+                187.14285714285714,
+                40
+              ]
+            ],
+            "bounds": {
+              "left": 187.14285714285714,
+              "top": 20,
+              "right": 255.71428571428572,
+              "bottom": 40
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "pause-btn",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                1
+              ],
+              "size": [
+                62,
+                62
+              ],
+              "minSize": [
+                62,
+                62
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                327.85714285714283,
+                10.714285714285714
+              ],
+              [
+                372.1428571428571,
+                10.714285714285714
+              ],
+              [
+                372.1428571428571,
+                55
+              ],
+              [
+                327.85714285714283,
+                55
+              ]
+            ],
+            "bounds": {
+              "left": 327.85714285714283,
+              "top": 10.714285714285714,
+              "right": 372.1428571428571,
+              "bottom": 55
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-lives",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-right",
+              "position": [
+                -12,
+                14
+              ],
+              "size": [
+                88,
+                28
+              ],
+              "container": {
+                "direction": "row",
+                "gap": 8,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "justify": "end"
+              },
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 0
+            },
+            "corners": [
+              [
+                450,
+                20
+              ],
+              [
+                512.8571428571429,
+                20
+              ],
+              [
+                512.8571428571429,
+                40
+              ],
+              [
+                450,
+                40
+              ]
+            ],
+            "bounds": {
+              "left": 450,
+              "top": 20,
+              "right": 512.8571428571429,
+              "bottom": 40
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-0",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                12,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                458.57142857142856,
+                20
+              ],
+              [
+                472.85714285714283,
+                20
+              ],
+              [
+                472.85714285714283,
+                34.285714285714285
+              ],
+              [
+                458.57142857142856,
+                34.285714285714285
+              ]
+            ],
+            "bounds": {
+              "left": 458.57142857142856,
+              "top": 20,
+              "right": 472.85714285714283,
+              "bottom": 34.285714285714285
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-1",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                40,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                478.57142857142856,
+                20
+              ],
+              [
+                492.85714285714283,
+                20
+              ],
+              [
+                492.85714285714283,
+                34.285714285714285
+              ],
+              [
+                478.57142857142856,
+                34.285714285714285
+              ]
+            ],
+            "bounds": {
+              "left": 478.57142857142856,
+              "top": 20,
+              "right": 492.85714285714283,
+              "bottom": 34.285714285714285
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-2",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                68,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                498.57142857142856,
+                20
+              ],
+              [
+                512.8571428571429,
+                20
+              ],
+              [
+                512.8571428571429,
+                34.285714285714285
+              ],
+              [
+                498.57142857142856,
+                34.285714285714285
+              ]
+            ],
+            "bounds": {
+              "left": 498.57142857142856,
+              "top": 20,
+              "right": 512.8571428571429,
+              "bottom": 34.285714285714285
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "serve-prompt",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                548
+              ],
+              "size": [
+                240,
+                24
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                264.2857142857143,
+                401.42857142857144
+              ],
+              [
+                435.7142857142857,
+                401.42857142857144
+              ],
+              [
+                435.7142857142857,
+                418.5714285714286
+              ],
+              [
+                264.2857142857143,
+                418.5714285714286
+              ]
+            ],
+            "bounds": {
+              "left": 264.2857142857143,
+              "top": 401.42857142857144,
+              "right": 435.7142857142857,
+              "bottom": 418.5714285714286
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ],
+        "gameView": {
+          "nodeId": "game-view",
+          "bounds": {
+            "left": 14,
+            "top": 10,
+            "right": 686,
+            "bottom": 490
+          },
+          "viewport": {
+            "width": 672,
+            "height": 480
+          }
+        },
+        "cameraView": {
+          "projection": "orthographic",
+          "framing": "letterbox",
+          "rect": {
+            "x": 164.57142857142856,
+            "y": 0,
+            "width": 342.8571428571429,
+            "height": 480
+          },
+          "aspect": 0.7142857142857143,
+          "halfHeight": 3.36,
+          "halfWidth": 2.4
+        }
+      },
+      "independentIntersections": []
+    },
+    {
+      "viewport": {
+        "width": 667,
+        "height": 480
+      },
+      "result": {
+        "ok": true,
+        "scope": "layout-draft-inspection",
+        "runtimeVerified": false,
+        "viewport": {
+          "width": 667,
+          "height": 480
+        },
+        "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+        "diagnostics": {
+          "outsideViewport": [],
+          "outsideParent": [],
+          "outsideContentArea": [],
+          "overlapCandidates": [],
+          "outsideCameraView": []
+        },
+        "boundaryChecks": [],
+        "nodes": [
+          {
+            "id": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0,
+                0
+              ],
+              "anchorMax": [
+                1,
+                1
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                667,
+                480
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                0,
+                0
+              ],
+              [
+                667,
+                0
+              ],
+              [
+                667,
+                480
+              ],
+              [
+                0,
+                480
+              ]
+            ],
+            "bounds": {
+              "left": 0,
+              "top": 0,
+              "right": 667,
+              "bottom": 480
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "game-view",
+            "parentId": "root",
+            "active": true,
+            "layout": {
+              "anchorMin": [
+                0.02,
+                0.02
+              ],
+              "anchorMax": [
+                0.98,
+                0.98
+              ],
+              "sizeDelta": [
+                0,
+                0
+              ],
+              "size": [
+                640.3199999999999,
+                460.79999999999995
+              ],
+              "position": [
+                13.34,
+                9.6
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                13.34,
+                9.6
+              ],
+              [
+                653.66,
+                9.6
+              ],
+              [
+                653.66,
+                470.4
+              ],
+              [
+                13.34,
+                470.4
+              ]
+            ],
+            "bounds": {
+              "left": 13.34,
+              "top": 9.6,
+              "right": 653.66,
+              "bottom": 470.4
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-plane",
+            "parentId": "game-view",
+            "active": true,
+            "layout": {
+              "anchor": "middle-center",
+              "position": [
+                0,
+                0
+              ],
+              "size": [
+                480,
+                672
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "corners": [
+              [
+                168.92857142857142,
+                9.6
+              ],
+              [
+                498.07142857142856,
+                9.6
+              ],
+              [
+                498.07142857142856,
+                470.4
+              ],
+              [
+                168.92857142857142,
+                470.4
+              ]
+            ],
+            "bounds": {
+              "left": 168.92857142857142,
+              "top": 9.6,
+              "right": 498.07142857142856,
+              "bottom": 470.4
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-score",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-left",
+              "position": [
+                12,
+                14
+              ],
+              "size": [
+                96,
+                28
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                177.15714285714284,
+                19.199999999999996
+              ],
+              [
+                242.98571428571427,
+                19.199999999999996
+              ],
+              [
+                242.98571428571427,
+                38.39999999999999
+              ],
+              [
+                177.15714285714284,
+                38.39999999999999
+              ]
+            ],
+            "bounds": {
+              "left": 177.15714285714284,
+              "top": 19.199999999999996,
+              "right": 242.98571428571427,
+              "bottom": 38.39999999999999
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "pause-btn",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                1
+              ],
+              "size": [
+                62,
+                62
+              ],
+              "minSize": [
+                62,
+                62
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                312.24285714285713,
+                10.285714285714285
+              ],
+              [
+                354.75714285714287,
+                10.285714285714285
+              ],
+              [
+                354.75714285714287,
+                52.79999999999999
+              ],
+              [
+                312.24285714285713,
+                52.79999999999999
+              ]
+            ],
+            "bounds": {
+              "left": 312.24285714285713,
+              "top": 10.285714285714285,
+              "right": 354.75714285714287,
+              "bottom": 52.79999999999999
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "hud-lives",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-right",
+              "position": [
+                -12,
+                14
+              ],
+              "size": [
+                88,
+                28
+              ],
+              "container": {
+                "direction": "row",
+                "gap": 8,
+                "padding": [
+                  0,
+                  0,
+                  0,
+                  0
+                ],
+                "justify": "end"
+              },
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 1,
+              "y": 0
+            },
+            "corners": [
+              [
+                429.5,
+                19.199999999999996
+              ],
+              [
+                489.84285714285716,
+                19.199999999999996
+              ],
+              [
+                489.84285714285716,
+                38.39999999999999
+              ],
+              [
+                429.5,
+                38.39999999999999
+              ]
+            ],
+            "bounds": {
+              "left": 429.5,
+              "top": 19.199999999999996,
+              "right": 489.84285714285716,
+              "bottom": 38.39999999999999
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-0",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                12,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                437.7285714285714,
+                19.199999999999996
+              ],
+              [
+                451.4428571428571,
+                19.199999999999996
+              ],
+              [
+                451.4428571428571,
+                32.91428571428571
+              ],
+              [
+                437.7285714285714,
+                32.91428571428571
+              ]
+            ],
+            "bounds": {
+              "left": 437.7285714285714,
+              "top": 19.199999999999996,
+              "right": 451.4428571428571,
+              "bottom": 32.91428571428571
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-1",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                40,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                456.92857142857144,
+                19.199999999999996
+              ],
+              [
+                470.64285714285717,
+                19.199999999999996
+              ],
+              [
+                470.64285714285717,
+                32.91428571428571
+              ],
+              [
+                456.92857142857144,
+                32.91428571428571
+              ]
+            ],
+            "bounds": {
+              "left": 456.92857142857144,
+              "top": 19.199999999999996,
+              "right": 470.64285714285717,
+              "bottom": 32.91428571428571
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "life-icon-2",
+            "parentId": "hud-lives",
+            "active": true,
+            "layout": {
+              "size": [
+                20,
+                20
+              ],
+              "position": [
+                68,
+                0
+              ]
+            },
+            "pivot": {
+              "x": 0,
+              "y": 0
+            },
+            "corners": [
+              [
+                476.12857142857143,
+                19.199999999999996
+              ],
+              [
+                489.84285714285716,
+                19.199999999999996
+              ],
+              [
+                489.84285714285716,
+                32.91428571428571
+              ],
+              [
+                476.12857142857143,
+                32.91428571428571
+              ]
+            ],
+            "bounds": {
+              "left": 476.12857142857143,
+              "top": 19.199999999999996,
+              "right": 489.84285714285716,
+              "bottom": 32.91428571428571
+            },
+            "textFit": "not-applicable",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          },
+          {
+            "id": "serve-prompt",
+            "parentId": "hud-plane",
+            "active": true,
+            "layout": {
+              "anchor": "top-center",
+              "position": [
+                0,
+                548
+              ],
+              "size": [
+                240,
+                24
+              ],
+              "item": {
+                "absolute": true
+              }
+            },
+            "pivot": {
+              "x": 0.5,
+              "y": 0
+            },
+            "corners": [
+              [
+                251.2142857142857,
+                385.3714285714285
+              ],
+              [
+                415.7857142857142,
+                385.3714285714285
+              ],
+              [
+                415.7857142857142,
+                401.82857142857137
+              ],
+              [
+                251.2142857142857,
+                401.82857142857137
+              ]
+            ],
+            "bounds": {
+              "left": 251.2142857142857,
+              "top": 385.3714285714285,
+              "right": 415.7857142857142,
+              "bottom": 401.82857142857137
+            },
+            "textFit": "unmeasured",
+            "outsideViewport": false,
+            "worldRootId": "hud-plane",
+            "outsideCameraView": false,
+            "outsideParent": false,
+            "outsideContentArea": false,
+            "overlapCandidates": []
+          }
+        ],
+        "gameView": {
+          "nodeId": "game-view",
+          "bounds": {
+            "left": 13.34,
+            "top": 9.6,
+            "right": 653.66,
+            "bottom": 470.4
+          },
+          "viewport": {
+            "width": 640.3199999999999,
+            "height": 460.79999999999995
+          }
+        },
+        "cameraView": {
+          "projection": "orthographic",
+          "framing": "letterbox",
+          "rect": {
+            "x": 155.5885714285714,
+            "y": 0,
+            "width": 329.1428571428571,
+            "height": 460.79999999999995
+          },
+          "aspect": 0.7142857142857143,
+          "halfHeight": 3.36,
+          "halfWidth": 2.4
+        }
+      },
+      "independentIntersections": []
+    }
+  ]
+}
