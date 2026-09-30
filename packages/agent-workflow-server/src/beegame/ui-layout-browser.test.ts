@@ -106,6 +106,47 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('portable menu/HUD layouts a
           '源布局数据未被改写',
         ]})
     }
+    // One unchanged reference-plane input, compared with independent native CSS
+    // percentage placement and scaling, not per-device projected coordinates.
+    for (const [width, height] of [[960, 540], [390, 844], [320, 480], [320, 568]]) {
+      await page.setViewportSize({ width, height })
+      const result = await page.evaluate(async ({ width, height }: { width: number; height: number }) => {
+        const consumerUrl = '/consumer.mjs'
+        const lib = await import(consumerUrl)
+        const camera = { orthographic: true, orthographicSize: 3.36, pixelsPerUnit: 100,
+          viewport: { width: 480, height: 672 }, framing: 'letterbox' }
+        const nodes = [
+          { id: 'root', role: 'screen-root' },
+          { id: 'game', role: 'container', parentId: 'root', layout: { anchorMin: [.02, .02], anchorMax: [.98, .98] } },
+          { id: 'plane', role: 'container', parentId: 'game', data: { space: 'camera-reference-2d' }, layout: { size: [480, 672], item: { absolute: true } } },
+          { id: 'prompt', role: 'text', parentId: 'plane', text: '发球', layout: { position: [120, 568], size: [240, 24] } },
+        ]
+        const before = JSON.stringify(nodes)
+        const computed = lib.inspectUiLayout(nodes, 'root', { width, height }, { camera: { nodeId: 'game', input: camera } })
+        document.body.replaceChildren()
+        const game = document.createElement('div')
+        game.style.cssText = 'position:absolute;left:2%;top:2%;width:96%;height:96%'
+        document.body.append(game)
+        const host = game.getBoundingClientRect()
+        const frameHeight = Math.min(host.width / camera.viewport.width, host.height / camera.viewport.height) * camera.viewport.height
+        const scale = frameHeight / (2 * camera.orthographicSize * camera.pixelsPerUnit)
+        const plane = document.createElement('div')
+        plane.style.cssText = `position:absolute;left:50%;top:50%;width:480px;height:672px;transform:translate(-50%,-50%) scale(${scale})`
+        game.append(plane)
+        const prompt = document.createElement('div')
+        prompt.style.cssText = 'position:absolute;left:120px;top:568px;width:240px;height:24px;font:24px Arial'
+        prompt.textContent = '发球'
+        plane.append(prompt)
+        const actual = prompt.getBoundingClientRect(), expected = computed.find((node: any) => node.id === 'prompt')
+        return { sourcePreserved: before === JSON.stringify(nodes),
+          difference: Math.max(...(['left', 'top', 'right', 'bottom'] as const).map(side => Math.abs(actual[side] - expected.bounds[side]))),
+          outsideCameraView: expected.outsideCameraView, outsideViewport: expected.outsideViewport }
+      }, { width, height })
+      expect(result.sourcePreserved).toBe(true)
+      expect(result.difference).toBeLessThan(.1)
+      expect(result.outsideCameraView).toBe(false)
+      expect(result.outsideViewport).toBe(false)
+    }
     expect(errors).toEqual([])
     await saveLayoutBrowserReport('ui-layout','UI 布局实测',
       '菜单、HUD、等宽网格、暂停与结算弹窗在五种浏览器尺寸下的计算／原生 CSS 对照。截图是全新计算验证夹具，不是私人游戏、UI Editor 完整验收或视觉设计稿，也不证明任意源布局均能自适应。',evidence)

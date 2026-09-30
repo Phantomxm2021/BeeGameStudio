@@ -7,6 +7,7 @@ export type SceneCameraInput = {
   fieldOfView?: number // vertical degrees at the reference aspect
   viewport: SceneViewportSize // reference composition, never the fixed host size
   framing?: SceneFraming
+  pixelsPerUnit?: number // required when projecting logical-pixel UI in the 2D camera reference plane
 }
 export const SCENE_FRAMING_OPTIONS: readonly SceneFraming[] = ['keep-height', 'keep-width', 'expand', 'letterbox']
 function positive(value: unknown, name: string): asserts value is number {

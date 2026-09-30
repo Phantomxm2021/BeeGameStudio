@@ -1,0 +1,79 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "loading-error-capability-fixture",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "layout": {
+          "container": {
+            "direction": "column",
+            "justify": "center",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "error-column",
+        "role": "container",
+        "parentId": "root",
+        "layout": {
+          "container": {
+            "direction": "column",
+            "gap": 12,
+            "padding": [
+              16,
+              16,
+              16,
+              16
+            ]
+          }
+        }
+      },
+      {
+        "id": "error-title",
+        "role": "text",
+        "parentId": "error-column",
+        "text": "加载失败",
+        "layout": {
+          "size": [
+            248,
+            32
+          ]
+        }
+      },
+      {
+        "id": "error-message",
+        "role": "text",
+        "parentId": "error-column",
+        "text": "暂时无法加载，请重试",
+        "layout": {
+          "size": [
+            248,
+            48
+          ]
+        }
+      },
+      {
+        "id": "retry",
+        "role": "button",
+        "parentId": "error-column",
+        "text": "重试",
+        "layout": {
+          "size": [
+            248,
+            44
+          ],
+          "minSize": [
+            248,
+            44
+          ]
+        }
+      }
+    ]
+  }
+}

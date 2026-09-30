@@ -29,6 +29,44 @@ function fixture() {
   return { root, doc, index }
 }
 
+test('one connected UI source projects world text with screen controls for drafts, registered content and boundary probes', () => {
+  const { root, index } = fixture()
+  const ui = { schema: 'beegame-content.v1', kind: 'ui-screen', id: 'combined', assetRefs: [], data: {
+    rootId: 'root', nodes: [
+      { id: 'root', role: 'screen-root' },
+      { id: 'game', role: 'container', parentId: 'root', layout: { anchorMin: [.02, .02], anchorMax: [.98, .98] },
+        responsive: { compact: { layout: { anchorMin: [.3, .1], anchorMax: [.7, .9] } } } },
+      { id: 'world-ui', role: 'container', parentId: 'game', data: { space: 'camera-reference-2d' },
+        layout: { size: [480, 672], item: { absolute: true } } },
+      { id: 'prompt', role: 'text', parentId: 'world-ui', text: '发球', layout: { position: [120, 568], size: [240, 24] } },
+      { id: 'screen-btn', role: 'button', parentId: 'root', layout: { position: [160, 700], size: [200, 25] } },
+    ],
+  } }
+  const camera = { orthographic: true, orthographicSize: 3.36, pixelsPerUnit: 100,
+    viewport: { width: 480, height: 672 }, framing: 'letterbox' }
+  const source = JSON.stringify(ui), cameraSource = JSON.stringify(camera)
+  writeFileSync(join(root, 'draft.json'), source)
+  writeFileSync(join(root, 'camera.json'), cameraSource)
+  mkdirSync(join(root, 'content/ui'))
+  writeFileSync(join(root, 'content/ui/combined.json'), source)
+  index.files.push('ui/combined.json')
+  writeFileSync(join(root, 'content/index.json'), JSON.stringify(index))
+  for (const args of [['--layout-draft', 'draft.json'], ['--layout', 'ui/combined.json']]) {
+    expect(runGameContentCommand(root, [...args, '390', '844', '--game-view', 'game', '--camera', 'camera.json'])).toMatchObject({
+      ok: true, runtimeVerified: false, diagnostics: { outsideCameraView: [], overlapCandidates: [] },
+      nodes: [{ id: 'root' }, { id: 'game' }, { id: 'world-ui', worldRootId: 'world-ui', outsideParent: false },
+        { id: 'prompt', worldRootId: 'world-ui', outsideCameraView: false }, { id: 'screen-btn' }],
+      boundaryChecks: [
+        { viewport: { width: 600, height: 844 }, diagnostics: { overlapCandidates: [], outsideCameraView: [] } },
+        { viewport: { width: 601, height: 844 }, diagnostics: { overlapCandidates: [['prompt', 'screen-btn']], outsideCameraView: [] } },
+      ],
+    })
+  }
+  expect(readFileSync(join(root, 'draft.json'), 'utf8')).toBe(source)
+  expect(readFileSync(join(root, 'content/ui/combined.json'), 'utf8')).toBe(source)
+  expect(readFileSync(join(root, 'camera.json'), 'utf8')).toBe(cameraSource)
+})
+
 test('draft and registered UI inspections expose text/control overlaps without turning candidates into a failed gate', () => {
   const { root, index } = fixture()
   const ui = { schema: 'beegame-content.v1', kind: 'ui-screen', id: 'hud', assetRefs: [], data: {

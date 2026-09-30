@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest'
 import { inspectUiLayout, inspectUiLayoutBoundaries } from './ui-layout-inspection'
 import type { UiResponsiveNode } from './ui-responsive'
+import type { SceneCameraInput } from './scene-camera'
 
 const root: UiResponsiveNode = { id: 'root', layout: { size: [960, 540] } }
 it('exposes double anchor compensation without changing data', () => {
@@ -110,4 +111,64 @@ it('checks default compact and portrait boundaries only when those variants are 
   ])
   expect(checks[2].diagnostics.outsideViewport).toEqual([])
   expect(checks[3].diagnostics.outsideViewport).toEqual(['label'])
+})
+
+const camera: SceneCameraInput = { orthographic: true, orthographicSize: 3.36, pixelsPerUnit: 100,
+  viewport: { width: 480, height: 672 }, framing: 'letterbox' }
+function cameraUi(): (UiResponsiveNode & { role?: string })[] {
+  return [root,
+    { id: 'game', role: 'container', parentId: 'root', layout: { anchorMin: [.02, .02], anchorMax: [.98, .98] } },
+    { id: 'world-ui', role: 'container', parentId: 'game', data: { space: 'camera-reference-2d' },
+      layout: { size: [480, 672], item: { absolute: true } } },
+    { id: 'prompt', role: 'text', parentId: 'world-ui', text: '发球', layout: { position: [120, 568], size: [240, 24] } },
+  ]
+}
+
+it.each([
+  [960, 540, 387.428571, 448.971429, 185.142857, 18.514286],
+  [390, 844, 101.4, 602.96, 187.2, 18.72],
+  [320, 480, 83.2, 388.48, 153.6, 15.36],
+  [320, 568, 83.2, 432.48, 153.6, 15.36],
+])('projects one unchanged world prompt at %s x %s including game-view and letterbox offsets', (width, height, left, top, w, h) => {
+  const source = cameraUi(), before = JSON.stringify(source)
+  const result = inspectUiLayout(source, 'root', { width, height }, { camera: { nodeId: 'game', input: camera } })
+  const prompt = result.find(node => node.id === 'prompt')!
+  expect(prompt.bounds.left).toBeCloseTo(left, 4)
+  expect(prompt.bounds.top).toBeCloseTo(top, 4)
+  expect(prompt.bounds.right - prompt.bounds.left).toBeCloseTo(w, 4)
+  expect(prompt.bounds.bottom - prompt.bounds.top).toBeCloseTo(h, 4)
+  expect(prompt).toMatchObject({ worldRootId: 'world-ui', outsideViewport: false, outsideParent: false, outsideCameraView: false })
+  expect(result.find(node => node.id === 'world-ui')?.outsideParent).toBe(false)
+  expect(JSON.stringify(source)).toBe(before)
+})
+
+it('reports projected world/screen foreground overlaps across containers, but not backgrounds or hidden planes', () => {
+  const source = cameraUi()
+  source.push({ id: 'screen-panel', role: 'container', parentId: 'root', layout: { size: [390, 844] } },
+    { id: 'button', role: 'button', parentId: 'screen-panel', layout: { position: [101.4, 602.96], size: [187.2, 18.72] } },
+    { id: 'background', role: 'image', parentId: 'screen-panel', layout: { size: [390, 844] } })
+  const options = { camera: { nodeId: 'game', input: camera } }
+  expect(inspectUiLayout(source, 'root', { width: 390, height: 844 }, options).find(node => node.id === 'prompt')?.overlapCandidates).toEqual(['button'])
+  source.find(node => node.id === 'world-ui')!.enabled = false
+  expect(inspectUiLayout(source, 'root', { width: 390, height: 844 }, options).every(node => !node.overlapCandidates.length)).toBe(true)
+})
+
+it('uses camera world span and units, diagnosing framing overflow even inside the host viewport', () => {
+  const result = inspectUiLayout(cameraUi(), 'root', { width: 390, height: 844 }, {
+    camera: { nodeId: 'game', input: { ...camera, orthographicSize: 1.68 } },
+  })
+  expect(result.find(node => node.id === 'prompt')).toMatchObject({ outsideViewport: false, outsideCameraView: true })
+  expect(result.find(node => node.id === 'prompt')!.bounds.bottom - result.find(node => node.id === 'prompt')!.bounds.top).toBeCloseTo(37.44)
+})
+
+it('rejects missing or incompatible camera reference inputs rather than treating world coordinates as screen pixels', () => {
+  const source = cameraUi(), viewport = { width: 390, height: 844 }
+  expect(() => inspectUiLayout(source, 'root', viewport)).toThrow('connected game-view')
+  expect(() => inspectUiLayout(source, 'root', viewport, { camera: { nodeId: 'game', input: { ...camera, pixelsPerUnit: undefined } } })).toThrow('pixelsPerUnit')
+  expect(() => inspectUiLayout(source, 'root', viewport, { camera: { nodeId: 'game', input: { ...camera, orthographic: false, fieldOfView: 60 } } })).toThrow('orthographic')
+  source[2].data!.space = 'world'
+  expect(() => inspectUiLayout(source, 'root', viewport, { camera: { nodeId: 'game', input: camera } })).toThrow('Scene/runtime projection')
+  source[2].data!.space = 'camera-reference-2d'
+  source[2].layout!.size = [240, 336]
+  expect(() => inspectUiLayout(source, 'root', viewport, { camera: { nodeId: 'game', input: camera } })).toThrow('reference size')
 })

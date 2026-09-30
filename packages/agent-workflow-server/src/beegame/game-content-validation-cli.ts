@@ -9,9 +9,20 @@ import { auditBeeGameContentPackage, parseBeeGameContentIndex, type BeeGameConte
 import type { BeeGameContentIndex } from './game-content-schema'
 import { parseBeeGameContentDocument } from './game-content-schema'
 import { projectContentAuthority } from './project-content-authority'
-import { inspectUiLayout, inspectUiLayoutBoundaries, summarizeUiLayoutInspection } from '../../../scene-editor/src/ui-layout-inspection'
+import { inspectUiLayout, inspectUiLayoutBoundaries, summarizeUiLayoutInspection, type UiLayoutInspectionOptions } from '../../../scene-editor/src/ui-layout-inspection'
 import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
-import type { UiViewport } from '../../../scene-editor/src/ui-responsive'
+import type { UiResponsiveNode, UiViewport } from '../../../scene-editor/src/ui-responsive'
+
+function inspectUiGeometry(data: { nodes: readonly UiResponsiveNode[]; rootId: string }, viewport: UiViewport, options: UiLayoutInspectionOptions) {
+  const nodes = inspectUiLayout(data.nodes, data.rootId, viewport, options)
+  const game = options.camera ? nodes.find(node => node.id === options.camera!.nodeId) : undefined
+  if (options.camera && (!game || !game.active)) throw new Error('Game-view node must exist and be active in the resolved UI layout.')
+  const gameView = game ? { nodeId: game.id, bounds: game.bounds,
+    viewport: { width: game.layout!.size![0], height: game.layout!.size![1] } } : undefined
+  return { diagnostics: summarizeUiLayoutInspection(nodes),
+    boundaryChecks: inspectUiLayoutBoundaries(data.nodes, data.rootId, viewport, options), nodes,
+    ...(gameView ? { gameView, cameraView: resolveSceneCameraView(options.camera!.input, gameView.viewport) } : {}) }
+}
 
 /** Read-only entry point to the exact host validation used after Content authoring. */
 const validationScope = {
@@ -82,7 +93,7 @@ export function validateGameContent(workspacePath: string) {
 }
 
 /** Inspect only the requested content file, preserving authored values verbatim. */
-export function inspectGameContent(workspacePath: string, path?: string, nodeId?: string, viewport?: UiViewport) {
+export function inspectGameContent(workspacePath: string, path?: string, nodeId?: string, viewport?: UiViewport, options: UiLayoutInspectionOptions = {}) {
   const workspace = realpathSync(workspacePath)
   const root = realpathSync(resolve(workspace, 'content'))
   const inside = (parent: string, child: string) => {
@@ -117,11 +128,9 @@ export function inspectGameContent(workspacePath: string, path?: string, nodeId?
         }) }
     }
     if (!['ui-screen', 'ui-hud'].includes(document.kind)) throw new Error('--layout requires a UI screen or HUD')
-    const nodes = inspectUiLayout(document.data.nodes, document.data.rootId, viewport)
     return { ok: true, scope: 'layout-inspection', runtimeVerified: false, viewport,
-      note: 'Resolved geometry only; ok means inspection ran, not that the layout passed. Overlap candidates include sibling text/control boxes, exclude backgrounds and parent-child composition, and may be intentional. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics, clipping, occlusion and appearance require visual inspection. No files are changed.',
-      diagnostics: summarizeUiLayoutInspection(nodes),
-      boundaryChecks: inspectUiLayoutBoundaries(document.data.nodes, document.data.rootId, viewport), nodes }
+      note: 'Resolved geometry only; ok means inspection ran, not that the layout passed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics and appearance require visual inspection. No files are changed.',
+      ...inspectUiGeometry(document.data, viewport, options) }
   }
   const nodes: Record<string, unknown>[] = Array.isArray(document.data?.nodes)
     ? document.data.nodes : []
@@ -164,22 +173,20 @@ export function runGameContentCommand(workspacePath: string, args: string[] = []
     if (document.kind === 'scene-2d' && !connected) return { ok: true, scope: 'scene-layout-draft-inspection', runtimeVerified: false, viewport,
       ...inspectSceneLayout2d(document.data, viewport) }
     if (document.kind !== 'ui-screen' && document.kind !== 'ui-hud') throw new Error('Layout draft requires a UI screen, HUD or 2D scene')
-    const nodes = inspectUiLayout(document.data.nodes, document.data.rootId, viewport)
-    const game = connected ? nodes.find(node => node.id === args[5]) : undefined
-    if (connected && (!game || !game.active)) throw new Error('Game-view node must exist and be active in the resolved UI layout.')
-    const gameView = game ? { nodeId: game.id, bounds: game.bounds,
-      viewport: { width: game.bounds.right - game.bounds.left, height: game.bounds.bottom - game.bounds.top } } : undefined
+    const options: UiLayoutInspectionOptions = connected ? {
+      camera: { nodeId: args[5], input: readWorkspaceDraft(workspacePath, args[7]) as SceneCameraInput },
+    } : {}
     return { ok: true, scope: 'layout-draft-inspection', runtimeVerified: false, viewport,
-      note: 'Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling text/control boxes, exclude backgrounds and parent-child composition, and may be intentional. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.',
-      diagnostics: summarizeUiLayoutInspection(nodes),
-      boundaryChecks: inspectUiLayoutBoundaries(document.data.nodes, document.data.rootId, viewport),
-      nodes,
-      ...(gameView ? { gameView,
-        cameraView: resolveSceneCameraView(readWorkspaceDraft(workspacePath, args[7]) as SceneCameraInput, gameView.viewport) } : {}) }
+      note: 'Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.',
+      ...inspectUiGeometry(document.data, viewport, options) }
   }
   if (args[0] === '--layout') {
-    if (args.length !== 4 || !args[1]) throw new Error('Usage: --layout content-relative-file width height')
-    return inspectGameContent(workspacePath, args[1], undefined, { width: Number(args[2]), height: Number(args[3]) })
+    const connected = args.length === 8 && args[4] === '--game-view' && Boolean(args[5]) && args[6] === '--camera' && Boolean(args[7])
+    if ((!connected && args.length !== 4) || !args[1]) throw new Error('Usage: --layout content-relative-file width height [--game-view node-id --camera workspace-relative-camera-file]')
+    const options: UiLayoutInspectionOptions = connected ? {
+      camera: { nodeId: args[5], input: readWorkspaceDraft(workspacePath, args[7]) as SceneCameraInput },
+    } : {}
+    return inspectGameContent(workspacePath, args[1], undefined, { width: Number(args[2]), height: Number(args[3]) }, options)
   }
   if (args.length === 1 && args[0] === '--authority') {
     const { manifest: _manifest, ...authority } = projectContentAuthority(workspacePath)
