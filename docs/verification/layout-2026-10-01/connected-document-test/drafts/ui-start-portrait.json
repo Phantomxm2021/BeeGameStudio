@@ -1,0 +1,110 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "start-portrait-draft",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "start-root",
+    "nodes": [
+      {
+        "id": "start-root",
+        "role": "screen-root",
+        "layout": {
+          "size": [
+            390,
+            844
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 32,
+            "padding": [
+              120,
+              24,
+              120,
+              24
+            ],
+            "justify": "center",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "title",
+        "role": "text",
+        "parentId": "start-root",
+        "text": "贪吃蛇",
+        "layout": {
+          "size": [
+            342,
+            80
+          ],
+          "item": {
+            "shrink": 0
+          }
+        },
+        "style": {
+          "fontSize": 56,
+          "color": "#EAF0F8",
+          "align": "center",
+          "verticalAlign": "middle"
+        }
+      },
+      {
+        "id": "motif",
+        "role": "shape",
+        "parentId": "start-root",
+        "layout": {
+          "size": [
+            140,
+            140
+          ],
+          "item": {
+            "shrink": 0
+          }
+        }
+      },
+      {
+        "id": "start-btn",
+        "role": "button",
+        "parentId": "start-root",
+        "text": "开始游戏",
+        "layout": {
+          "size": [
+            240,
+            64
+          ],
+          "item": {
+            "shrink": 0
+          }
+        },
+        "style": {
+          "fontSize": 24,
+          "cornerRadius": 12
+        }
+      },
+      {
+        "id": "mute-btn",
+        "role": "button",
+        "parentId": "start-root",
+        "layout": {
+          "anchor": "top-right",
+          "size": [
+            56,
+            40
+          ],
+          "position": [
+            -12,
+            12
+          ],
+          "item": {
+            "absolute": true,
+            "shrink": 0
+          }
+        },
+        "style": {
+          "cornerRadius": 8
+        }
+      }
+    ]
+  }
+}

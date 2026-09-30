@@ -25,6 +25,18 @@ function scene(): BeeGameSceneContentDocument {
 }
 
 describe('Unity-style scene adapter', () => {
+  it('preserves authored camera identity, reference aspect and framing independently of the map size', () => {
+    const input=scene();input.data.cameraNodeId='camera'
+    input.data.settings={coordinateSystem:{origin:'top-left',units:'logical-pixels',width:2400,height:1600,pixelsPerUnit:100}}
+    input.data.nodes.push({id:'camera',transform:{position:[1200,800,1000]},components:[{id:'cam',type:'camera',data:{orthographic:true,
+      orthographicSize:2.7,coordinateSpace:'logical-pixels',viewport:{width:960,height:540},framing:'keep-width'}}]})
+    const editor=sceneContentToEditorDocument({document:input,documentRevision:HASH,foundationDocumentRevision:HASH,assetManifestRevision:HASH})
+    expect(editor.cameraNodeId).toBe('camera')
+    expect(editor.nodes.camera.components[0]).toMatchObject({orthographicSize:2.7,properties:{framing:'keep-width',viewport:{width:960,height:540}}})
+    const saved=editorDocumentToSceneContent(editor,input)
+    expect(saved.data.cameraNodeId).toBe('camera')
+    expect(saved.data.nodes.at(-1)!.components).toEqual(input.data.nodes.at(-1)!.components)
+  })
   it('keeps independent scene layers ordered in the editor without rewriting source order', () => {
     const input = scene();
     input.data.settings = { layers: [{ id: 'far', order: -2 }, { id: 'near', order: 3 }] };

@@ -1,0 +1,134 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-start-draft",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 20,
+            "padding": [
+              48,
+              24,
+              48,
+              24
+            ],
+            "justify": "center",
+            "align": "center"
+          }
+        },
+        "data": {
+          "compactMaxWidth": 680
+        }
+      },
+      {
+        "id": "title",
+        "parentId": "root",
+        "role": "text",
+        "enabled": true,
+        "layout": {
+          "size": [
+            340,
+            72
+          ],
+          "minSize": [
+            260,
+            56
+          ],
+          "item": {
+            "shrink": 1
+          }
+        },
+        "text": "打砖块",
+        "data": {}
+      },
+      {
+        "id": "hero-wall",
+        "parentId": "root",
+        "role": "image",
+        "assetRef": "RES-HERO",
+        "enabled": true,
+        "layout": {
+          "size": [
+            340,
+            150
+          ],
+          "minSize": [
+            240,
+            100
+          ],
+          "item": {
+            "shrink": 1
+          }
+        },
+        "data": {},
+        "responsive": {
+          "compact": {
+            "enabled": false
+          }
+        }
+      },
+      {
+        "id": "instructions",
+        "parentId": "root",
+        "role": "text",
+        "enabled": true,
+        "layout": {
+          "size": [
+            340,
+            48
+          ],
+          "minSize": [
+            260,
+            64
+          ],
+          "item": {
+            "shrink": 1
+          }
+        },
+        "text": "移动挡板反弹小球，击碎全部砖块即可获胜",
+        "data": {}
+      },
+      {
+        "id": "start-btn",
+        "parentId": "root",
+        "role": "button",
+        "enabled": true,
+        "layout": {
+          "size": [
+            220,
+            56
+          ],
+          "minSize": [
+            180,
+            48
+          ]
+        },
+        "text": "开始游戏",
+        "actions": {
+          "onActivate": "START"
+        },
+        "data": {}
+      }
+    ]
+  }
+}

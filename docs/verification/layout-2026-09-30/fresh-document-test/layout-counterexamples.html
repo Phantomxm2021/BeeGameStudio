@@ -1,0 +1,13 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>文档布局复算</title><style>
+body{margin:24px;background:#10131a;color:#edf0f7;font:16px/1.6 system-ui}main{display:flex;flex-wrap:wrap;gap:24px}section{max-width:100%;border:1px solid #404756;border-radius:12px;padding:16px;box-sizing:border-box}h1,h2{line-height:1.3}.host{background:#1b2230;position:relative;max-width:100%;display:grid;place-items:center;border:1px solid #64748b}.board{position:relative;background-color:#203227;background-image:linear-gradient(#4a6355 1px,transparent 1px),linear-gradient(90deg,#4a6355 1px,transparent 1px);border:1px solid #6fc888;box-sizing:border-box}.overlay{position:absolute;right:0;top:0;border:2px solid #fb7185;background:#9f123966;color:white;padding:2px;font-size:12px}strong{color:#fda4af}p{max-width:900px}a{color:#93c5fd}
+</style><h1>最终文档的布局复算</h1><p>这里只展示 UI_UX_SPEC 的区域公式，不是游戏画面或审美验收。HUD 的精确子节点矩形未定义；红框仅示意文档选择的悬浮关系，不能当作实际截图。</p><p>1200×900 同时满足“横向重排”与“不重排”规则。320×160 在声明范围内，却无法达到每格13.5的下限。对应源文件及复算记录均已留存。</p><main><section><h2>720 × 960 · 正常布局</h2><p>棋盘 672；每格 32.00 du <strong>达到13.5下限</strong></p>
+    <div class="host" style="width:540px;height:720px">
+    <div class="board" style="width:504px;height:504px;background-size:24px 24px"></div></div></section><section><h2>320 × 568 · 棋盘优先</h2><p>棋盘 288；每格 13.71 du <strong>达到13.5下限</strong></p>
+    <div class="host" style="width:320px;height:568px">
+    <div class="board" style="width:288px;height:288px;background-size:13.714285714285714px 13.714285714285714px"></div></div></section><section><h2>568 × 320 · 全悬浮</h2><p>棋盘 296；每格 14.10 du <strong>达到13.5下限</strong></p>
+    <div class="host" style="width:540px;height:304.22535211267603px">
+    <div class="board" style="width:281.40845070422534px;height:281.40845070422534px;background-size:13.400402414486921px 13.400402414486921px"><span class="overlay">HUD 悬浮示意</span></div></div></section><section><h2>667 × 375 · 全悬浮</h2><p>棋盘 351；每格 16.71 du <strong>达到13.5下限</strong></p>
+    <div class="host" style="width:540px;height:303.5982008995502px">
+    <div class="board" style="width:284.16791604197897px;height:284.16791604197897px;background-size:13.531805525808522px 13.531805525808522px"><span class="overlay">HUD 悬浮示意</span></div></div></section><section><h2>320 × 160 · 全悬浮</h2><p>棋盘 136；每格 6.48 du <strong>低于13.5下限</strong></p>
+    <div class="host" style="width:320px;height:160px">
+    <div class="board" style="width:136px;height:136px;background-size:6.476190476190476px 6.476190476190476px"><span class="overlay">HUD 悬浮示意</span></div></div></section></main></html>

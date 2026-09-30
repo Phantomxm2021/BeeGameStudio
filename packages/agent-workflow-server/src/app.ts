@@ -2908,6 +2908,7 @@ export function createAgentWorkflowApp(
             error: 'Current project version has not passed delivery acceptance',
             code: 'delivery_not_ready',
             issues: deliveryGate.issues,
+            layer: 'layer' in deliveryGate ? deliveryGate.layer : 'acceptance-record',
           },
           409,
         )
@@ -7235,14 +7236,14 @@ function buildConfirmedBriefPrompt(
     2,
   )
   return [
-    'Start the confirmed game project below. In this first turn, deliver a complete, internally consistent, implementable set of project documents in docs/, then finish the turn. Include version, author, and date in each document header. BGS will hand off document review, visual-direction approval, resources, Scene/UI content, implementation, and acceptance in subsequent turns of this same session. Choose your own planning, tools, self-checks and delegation.',
+    'Start the confirmed game project below. The current milestone and its deliverables are supplied in the project state for this turn. When that milestone is ready, finish the turn; the next milestone will be handed to this same session.',
     '',
     `Write all human-readable project documentation in ${getDocumentLanguageName(documentLanguage)}.`,
     `Write all player-visible game text in ${getDocumentLanguageName(gameUserVisibleLanguage)}.`,
     `Respond to the user in ${getDocumentLanguageName(agentResponseLanguage)}.`,
     'Treat response language, document language, and player-visible game language as separate confirmed requirements even when they have the same value. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.',
     '',
-    'Use the confirmed brief as the source of truth and preserve its explicit choices and constraints. Across the delivery, the eventual playable project must have documentation, assets, implementation, tests, and player-visible behavior that agree with one another. This first turn establishes the implementable and testable documentation baseline. Changes to intended behavior or presentation require the affected project documents and acceptance expectations to remain current.',
+    'Use the confirmed brief as the source of truth. Keep the project documents and resulting game consistent with its explicit choices and constraints.',
     'Use default_first_release_scope for content breadth the user did not specify. Preserve explicit user requirements; a model-suggested option or scope does not by itself authorize an expansive first release.',
     '',
     'Confirmed brief:',

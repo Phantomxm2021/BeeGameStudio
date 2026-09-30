@@ -27,6 +27,10 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from 'src/services/analytics/index.js'
 import { ImageSizeError } from './utils/imageValidation.js'
+import {
+  enqueueSdkEvent,
+  parseTaskNotificationSdkEvent,
+} from './utils/sdkEventQueue.js'
 import { ImageResizeError } from './utils/imageResizer.js'
 import { findToolByName, type ToolUseContext } from './Tool.js'
 import { asSystemPrompt, type SystemPrompt } from './utils/systemPromptType.js'
@@ -1952,6 +1956,16 @@ async function* queryLoop(
       messagesForQuery.concat(assistantMessages, toolResults),
       querySource,
     )) {
+      if (
+        attachment.type === 'attachment' &&
+        attachment.attachment.type === 'queued_command' &&
+        attachment.attachment.commandMode === 'task-notification'
+      ) {
+        const event = parseTaskNotificationSdkEvent(
+          attachment.attachment.prompt,
+        )
+        if (event) enqueueSdkEvent(event)
+      }
       yield attachment
       toolResults.push(attachment)
     }

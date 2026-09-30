@@ -203,6 +203,24 @@ const uiLayoutFieldsSchema = strictObject({
     size: tuple([finiteNumber.nonnegative(), finiteNumber.nonnegative()]).optional(),
     rotation: finiteNumber.optional(),
     scale: tuple([finiteNumber, finiteNumber]).optional(),
+    minSize: tuple([finiteNumber.nonnegative(), finiteNumber.nonnegative()]).optional(),
+    maxSize: tuple([finiteNumber.nonnegative(), finiteNumber.nonnegative()]).optional(),
+    container: strictObject({
+      direction: enumeration(['row', 'column', 'grid']),
+      gap: finiteNumber.nonnegative().optional(),
+      padding: tuple([finiteNumber.nonnegative(), finiteNumber.nonnegative(), finiteNumber.nonnegative(), finiteNumber.nonnegative()]).optional(),
+      wrap: boolean().optional(),
+      columns: finiteNumber.int().positive().optional(),
+      justify: enumeration(['start', 'center', 'end', 'space-between']).optional(),
+      align: enumeration(['start', 'center', 'end', 'stretch']).optional(),
+    }).refine(container => container.direction !== 'grid' || container.columns !== undefined,
+      { message: 'grid container requires columns' }).optional(),
+    item: strictObject({
+      grow: finiteNumber.nonnegative().optional(),
+      shrink: finiteNumber.nonnegative().optional(),
+      basis: finiteNumber.nonnegative().optional(),
+      absolute: boolean().optional(),
+    }).optional(),
   })
 const uiLayoutSchema = uiLayoutFieldsSchema.refine(layout => Boolean(layout.anchorMin) === Boolean(layout.anchorMax), {
     message: 'anchorMin and anchorMax must be provided together',
@@ -211,6 +229,8 @@ const uiLayoutSchema = uiLayoutFieldsSchema.refine(layout => Boolean(layout.anch
   }).refine(layout => !layout.anchorMin || !layout.anchorMax ||
     layout.anchorMin.every((value, index) => value <= layout.anchorMax![index]), {
     message: 'anchorMin must not exceed anchorMax',
+  }).refine(layout => !layout.minSize || !layout.maxSize || layout.minSize.every((value, axis) => value <= layout.maxSize![axis]), {
+    message: 'minSize must not exceed maxSize',
   })
 
 const uiResponsiveOverrideSchema = strictObject({

@@ -63,7 +63,7 @@ test('opaque sandbox bridge targets its parent and exposes document load failure
     expect(html).toContain("lifecycle('failed')")
     expect(html).toContain("type: 'beegame.preview.console'")
     const bridge = html.match(/<script data-beegame-preview-lifecycle-bridge>([\s\S]*?)<\/script>/)?.[1]
-    expect(bridge).toBeDefined()
+    if (bridge === undefined) throw new Error('Preview lifecycle bridge was not injected')
     expect(() => new Function(bridge)).not.toThrow()
   } finally { upstream.stop(true) }
 })

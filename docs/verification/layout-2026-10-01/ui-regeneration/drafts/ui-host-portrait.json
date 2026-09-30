@@ -1,0 +1,87 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "host-portrait-draft",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "host-root",
+    "nodes": [
+      {
+        "id": "host-root",
+        "role": "screen-root",
+        "layout": {
+          "size": [390, 844],
+          "container": { "direction": "column", "gap": 0, "padding": [0, 0, 0, 0], "justify": "start", "align": "stretch" }
+        }
+      },
+      {
+        "id": "hud",
+        "role": "container",
+        "parentId": "host-root",
+        "layout": {
+          "size": [390, 60],
+          "item": { "shrink": 0 },
+          "container": { "direction": "row", "gap": 8, "padding": [10, 12, 10, 12], "justify": "space-between", "align": "center" }
+        }
+      },
+      {
+        "id": "score",
+        "role": "text",
+        "parentId": "hud",
+        "text": "分数 3970",
+        "layout": { "size": [116, 40], "item": { "shrink": 0 } },
+        "style": { "fontSize": 21, "color": "#EAF0F8", "align": "left", "verticalAlign": "middle" }
+      },
+      {
+        "id": "hiscore",
+        "role": "text",
+        "parentId": "hud",
+        "text": "高 3970",
+        "layout": { "size": [92, 40], "item": { "shrink": 0 } },
+        "style": { "fontSize": 16, "color": "#93A3BC", "align": "center", "verticalAlign": "middle" }
+      },
+      {
+        "id": "mute-btn",
+        "role": "button",
+        "parentId": "hud",
+        "layout": { "size": [48, 40], "item": { "shrink": 0 } },
+        "style": { "cornerRadius": 8 }
+      },
+      {
+        "id": "pause-btn",
+        "role": "button",
+        "parentId": "hud",
+        "layout": { "size": [48, 40], "item": { "shrink": 0 } },
+        "style": { "cornerRadius": 8 }
+      },
+      {
+        "id": "game-view",
+        "role": "container",
+        "parentId": "host-root",
+        "layout": {
+          "size": [390, 390],
+          "item": { "shrink": 0 }
+        }
+      },
+      {
+        "id": "dpad",
+        "role": "container",
+        "parentId": "host-root",
+        "layout": {
+          "size": [390, 394],
+          "item": { "grow": 1, "shrink": 1 },
+          "container": { "direction": "grid", "columns": 3, "gap": 8, "padding": [16, 16, 24, 16], "justify": "center", "align": "center" }
+        }
+      },
+      { "id": "c00", "role": "shape", "parentId": "dpad", "layout": { "size": [114, 104] }, "style": { "opacity": 0 } },
+      { "id": "pad-up", "role": "button", "parentId": "dpad", "layout": { "size": [114, 104], "item": { "shrink": 0 } }, "style": { "cornerRadius": 10 } },
+      { "id": "c02", "role": "shape", "parentId": "dpad", "layout": { "size": [114, 104] }, "style": { "opacity": 0 } },
+      { "id": "pad-left", "role": "button", "parentId": "dpad", "layout": { "size": [114, 104], "item": { "shrink": 0 } }, "style": { "cornerRadius": 10 } },
+      { "id": "pad-center", "role": "shape", "parentId": "dpad", "layout": { "size": [114, 104] }, "style": { "opacity": 0 } },
+      { "id": "pad-right", "role": "button", "parentId": "dpad", "layout": { "size": [114, 104], "item": { "shrink": 0 } }, "style": { "cornerRadius": 10 } },
+      { "id": "c20", "role": "shape", "parentId": "dpad", "layout": { "size": [114, 104] }, "style": { "opacity": 0 } },
+      { "id": "pad-down", "role": "button", "parentId": "dpad", "layout": { "size": [114, 104], "item": { "shrink": 0 } }, "style": { "cornerRadius": 10 } },
+      { "id": "c22", "role": "shape", "parentId": "dpad", "layout": { "size": [114, 104] }, "style": { "opacity": 0 } }
+    ]
+  }
+}

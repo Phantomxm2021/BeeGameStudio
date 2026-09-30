@@ -1,28 +1,24 @@
 ---
 name: evidence-before-completion
-description: Verification before completion of a game task, bug fix, or delivery using current evidence. 中文：完成前验证、验收证据、构建测试、运行检查。
+description: Verify game design claims, calculations, assumptions and revisions against original requirements. Use for design review and completion evidence, not for planning the design. 中文：设计评审、原文核查、数值推导、布局复核、修订验证、验收证据。
 ---
 
 # Evidence Before Completion
 
-Use immediately before saying a requested fix, feature, or game delivery is complete. Match evidence to the actual claim; do not treat a green command or an Agent summary as proof of something it did not exercise.
+Use when assessing a design-review conclusion or claiming that a requested revision, fix or delivery is complete. This Skill checks the basis of a conclusion; it does not plan the project or define its design requirements.
 
-## Claim-to-evidence check
+## Evidence and scope
 
-1. Write down the claim you are about to make: “the parser handles atlas frames,” “the UI is responsive,” or “the game is playable.” Each requires different evidence.
-2. Choose the smallest current check that could falsify it. A parser needs representative authored input and exact expected output; a layout needs a running view at relevant sizes; gameplay needs the requested player path. A build proves compilation, not scene parity or completion.
-3. Run the check after the final relevant change. Read its output, exit status, and observed runtime behavior. Verify that it exercises the changed code or data, rather than a stale build or unrelated test.
-4. Compare the observation with the source requirement. If it fails, say what failed and return to diagnosis. If a check cannot run, state why and narrow the completion claim accordingly.
+- Match the check to the claim and its source requirement. A build establishes compilation, not correct layout or playable behavior; file existence and a delegate's summary are not proof of their contents.
+- Establish the source facts and modeled situation before calculating. For design claims, check that the proposed action or state is allowed by the rules, and that timing, units and spatial relationships follow their definitions. A calculation on an impossible situation is not a valid counterexample.
+- Base a revision conclusion on the final source and affected behavior, including claims introduced by the correction; reuse unchanged evidence rather than repeating the whole review. For BGS UI/Scene geometry, use the project's supplied spatial calculator and the same shared space-allocation definitions instead of a second handwritten model.
+- State only the supported scope. Distinguish observed results, assumptions, untested behavior and blockers; an unavailable check is not a pass or proof of a game defect.
+- Keep the basis traceable through source sections, existing notes or test output. Report consequential findings and remaining gaps concisely, without imposing a separate report format.
 
-## Proportionate evidence by scope
+Choose methods, tools and delegation proportional to the actual claim. Preserve the requested scope; this Skill does not require extra design decisions, target devices, audit agents or approval stages.
 
-| Claim | Useful evidence | Not sufficient alone |
-| --- | --- | --- |
-| Local bug fixed | Original reproduction now passes; nearby regression checked | Code diff or Agent's assertion |
-| Feature implemented | Focused test plus representative interaction or rendered state | Typecheck or build only |
-| Authored Scene/UI consumed correctly | Real project document and resource render in the player with expected IDs, transforms, atlas frames, text, and layout | Editor screenshot alone |
-| Game delivery ready | Build, core playable path, required content and target-device checks; unresolved failures listed | One successful task or one bot run |
+Document authoring does not require a separate self-review record or a dedicated checking subagent. Formal review/revision remains part of the project assignment; this Skill does not add another review pass or prescribe a separation of agents.
 
-Inspect delegated work and generated artifacts instead of accepting a subagent's “done” message as evidence. Separate project-code, authored-content, editor, preview, service, and environment failures. Report passed checks, failed checks, untested scope, and blockers in plain language. Publishing remains a distinct user action.
+## Read only what applies
 
-For detailed gameplay or performance measurement, use `game-playtest-performance`. This Skill is an Agent-side quality habit, not a BeeGameStudio phase or a demand to run the full test suite for every small edit.
+- For detailed playable-path or runtime-performance measurement, use `game-playtest-performance` if that work is part of the request.

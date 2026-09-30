@@ -53,6 +53,48 @@ type TaskNotificationSdkEvent = {
   }
 }
 
+/** Both between-turn and mid-turn consumers must report terminal notifications. */
+export function parseTaskNotificationSdkEvent(
+  value: unknown,
+): TaskNotificationSdkEvent | undefined {
+  if (typeof value !== 'string') return undefined
+  // Read envelope metadata only: result text may itself contain XML examples.
+  const metadata = value.split('<result>')[0]!
+  const read = (tag: string) =>
+    metadata.match(new RegExp(`<${tag}>([^<]*)</${tag}>`))?.[1]
+  const taskId = read('task-id')
+  const rawStatus = read('status')
+  if (
+    !taskId ||
+    !['completed', 'failed', 'stopped', 'killed'].includes(rawStatus ?? '')
+  )
+    return undefined
+  const usage = value.match(/<usage>([\s\S]*?)<\/usage>/)?.[1] ?? ''
+  const totalTokens = usage.match(/<total_tokens>(\d+)<\/total_tokens>/)?.[1]
+  const toolUses = usage.match(/<tool_uses>(\d+)<\/tool_uses>/)?.[1]
+  const durationMs = usage.match(/<duration_ms>(\d+)<\/duration_ms>/)?.[1]
+  return {
+    type: 'system',
+    subtype: 'task_notification',
+    task_id: taskId,
+    tool_use_id: read('tool-use-id'),
+    status:
+      rawStatus === 'killed'
+        ? 'stopped'
+        : (rawStatus as 'completed' | 'failed' | 'stopped'),
+    output_file: read('output-file') ?? '',
+    summary: read('summary') ?? '',
+    usage:
+      totalTokens && toolUses
+        ? {
+            total_tokens: Number(totalTokens),
+            tool_uses: Number(toolUses),
+            duration_ms: Number(durationMs ?? 0),
+          }
+        : undefined,
+  }
+}
+
 // Mirrors notifySessionStateChanged. The CCR bridge already receives this
 // via its own listener; SDK consumers (scmuxd, VS Code) need the same signal
 // to know when the main turn's generator is idle vs actively producing.

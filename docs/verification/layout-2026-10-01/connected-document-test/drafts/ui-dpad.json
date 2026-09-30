@@ -1,0 +1,172 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "dpad-draft",
+  "kind": "ui-hud",
+  "assetRefs": [],
+  "data": {
+    "rootId": "dpad-root",
+    "nodes": [
+      {
+        "id": "dpad-root",
+        "role": "hud-root",
+        "layout": {
+          "size": [
+            390,
+            394
+          ],
+          "container": {
+            "direction": "grid",
+            "columns": 3,
+            "gap": 8,
+            "padding": [
+              16,
+              16,
+              24,
+              16
+            ],
+            "justify": "center",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "c00",
+        "role": "shape",
+        "parentId": "dpad-root",
+        "layout": {
+          "size": [
+            114,
+            104
+          ]
+        },
+        "style": {
+          "opacity": 0
+        }
+      },
+      {
+        "id": "pad-up",
+        "role": "button",
+        "parentId": "dpad-root",
+        "layout": {
+          "size": [
+            114,
+            104
+          ],
+          "item": {
+            "shrink": 0
+          }
+        },
+        "style": {
+          "cornerRadius": 10
+        }
+      },
+      {
+        "id": "c02",
+        "role": "shape",
+        "parentId": "dpad-root",
+        "layout": {
+          "size": [
+            114,
+            104
+          ]
+        },
+        "style": {
+          "opacity": 0
+        }
+      },
+      {
+        "id": "pad-left",
+        "role": "button",
+        "parentId": "dpad-root",
+        "layout": {
+          "size": [
+            114,
+            104
+          ],
+          "item": {
+            "shrink": 0
+          }
+        },
+        "style": {
+          "cornerRadius": 10
+        }
+      },
+      {
+        "id": "pad-center",
+        "role": "shape",
+        "parentId": "dpad-root",
+        "layout": {
+          "size": [
+            114,
+            104
+          ]
+        },
+        "style": {
+          "opacity": 0
+        }
+      },
+      {
+        "id": "pad-right",
+        "role": "button",
+        "parentId": "dpad-root",
+        "layout": {
+          "size": [
+            114,
+            104
+          ],
+          "item": {
+            "shrink": 0
+          }
+        },
+        "style": {
+          "cornerRadius": 10
+        }
+      },
+      {
+        "id": "c20",
+        "role": "shape",
+        "parentId": "dpad-root",
+        "layout": {
+          "size": [
+            114,
+            104
+          ]
+        },
+        "style": {
+          "opacity": 0
+        }
+      },
+      {
+        "id": "pad-down",
+        "role": "button",
+        "parentId": "dpad-root",
+        "layout": {
+          "size": [
+            114,
+            104
+          ],
+          "item": {
+            "shrink": 0
+          }
+        },
+        "style": {
+          "cornerRadius": 10
+        }
+      },
+      {
+        "id": "c22",
+        "role": "shape",
+        "parentId": "dpad-root",
+        "layout": {
+          "size": [
+            114,
+            104
+          ]
+        },
+        "style": {
+          "opacity": 0
+        }
+      }
+    ]
+  }
+}

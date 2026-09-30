@@ -524,22 +524,28 @@ describe('transcriptEventsToHistory', () => {
     const history = await beeGameAdapter.getChatHistory('all-todos') as Record<string, unknown>[]
     const todos = history.filter(m => m.toolName === 'TodoWrite')
     expect(todos).toHaveLength(2)
-    expect(todos[0].todoScope).not.toBe(todos[1].todoScope)
+    expect(todos[0].todoScope).toBe(todos[1].todoScope)
+    expect(deriveCurrentProjectTodos(toChatDisplayMessages(normalizeChatHistory(history)))).toHaveLength(1)
     expect(beeGameAdapter.getChatHistoryPaginationState('all-todos').hasMore).toBe(true)
   })
 
-  it('keeps native Todo snapshots in one turn scope while separating child agents', () => {
+  it('replaces native Todo snapshots across turns while separating child agents and sessions', () => {
     const todo = (id: number, parent?: string) => nativeEvent(id, 'tool.completed', {
       toolName: 'TodoWrite', toolUseID: 'todo-' + id, parentToolUseID: parent,
       input: { todos: [{ content: 'Verify', status: 'completed' }] },
     })
-    const messages = transcriptEventsToHistory('todo-resume', [todo(1), todo(2), todo(3, 'child')])
+    const messages = transcriptEventsToHistory('todo-resume', [
+      { ...todo(1), turnId: 'turn-6' }, { ...todo(2), turnId: 'turn-7' },
+      { ...todo(3, 'child'), turnId: 'turn-7' },
+      { ...todo(4), sessionId: 'another-session', turnId: 'turn-7' },
+    ])
       .filter(message => message.toolName === 'TodoWrite')
-    expect(messages).toHaveLength(3)
+    expect(messages).toHaveLength(4)
     expect(messages[0].todoScope).toBe(messages[1].todoScope)
     expect(messages[2].todoScope).not.toBe(messages[1].todoScope)
+    expect(messages[3].todoScope).not.toBe(messages[1].todoScope)
     const current = deriveCurrentProjectTodos(toChatDisplayMessages(normalizeChatHistory(messages)))
-    expect(current).toHaveLength(2)
+    expect(current).toHaveLength(3)
   })
 
   it('keeps one Think lifecycle at its start while applying its terminal duration', () => {

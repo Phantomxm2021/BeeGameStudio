@@ -1,9 +1,17 @@
 import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import type { BeeGameAssetManifest } from './asset-contracts'
+import { readBeeGameAssetManifestSync } from './asset-contracts'
+import { readTileSetResource } from './tilemap-contract'
+import { inspectSceneLayout2d } from '../../../scene-editor/src/scene-layout-inspection'
+import { resolveSceneCameraView, type SceneCameraInput } from '../../../scene-editor/src/scene-camera'
 import { auditBeeGameContentPackage, parseBeeGameContentIndex, type BeeGameContentPackage } from './game-content-package'
 import type { BeeGameContentIndex } from './game-content-schema'
+import { parseBeeGameContentDocument } from './game-content-schema'
 import { projectContentAuthority } from './project-content-authority'
+import { inspectUiLayout, inspectUiLayoutBoundaries, summarizeUiLayoutInspection } from '../../../scene-editor/src/ui-layout-inspection'
+import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
+import type { UiViewport } from '../../../scene-editor/src/ui-responsive'
 
 /** Read-only entry point to the exact host validation used after Content authoring. */
 const validationScope = {
@@ -74,7 +82,7 @@ export function validateGameContent(workspacePath: string) {
 }
 
 /** Inspect only the requested content file, preserving authored values verbatim. */
-export function inspectGameContent(workspacePath: string, path?: string, nodeId?: string) {
+export function inspectGameContent(workspacePath: string, path?: string, nodeId?: string, viewport?: UiViewport) {
   const workspace = realpathSync(workspacePath)
   const root = realpathSync(resolve(workspace, 'content'))
   const inside = (parent: string, child: string) => {
@@ -95,6 +103,26 @@ export function inspectGameContent(workspacePath: string, path?: string, nodeId?
   if (isAbsolute(path) || !index.files.includes(path))
     throw new Error('Requested file must be registered in content/index.json.')
   const document = read(path)
+  if (viewport) {
+    if (document.kind === 'scene-2d') {
+      const parsed = parseBeeGameContentDocument(document)
+      if (parsed.kind !== 'scene-2d') throw new Error('Expected 2D scene')
+      const manifest = readBeeGameAssetManifestSync(workspace)
+      const cache = new Map<string, ReturnType<typeof readTileSetResource>>()
+      return { ok: true, scope: 'scene-layout-inspection', runtimeVerified: false, viewport,
+        ...inspectSceneLayout2d(parsed.data, viewport, (id, member) => {
+          const key = JSON.stringify([id, member])
+          if (!cache.has(key)) cache.set(key, readTileSetResource(workspace, manifest, id, member))
+          return cache.get(key)
+        }) }
+    }
+    if (!['ui-screen', 'ui-hud'].includes(document.kind)) throw new Error('--layout requires a UI screen or HUD')
+    const nodes = inspectUiLayout(document.data.nodes, document.data.rootId, viewport)
+    return { ok: true, scope: 'layout-inspection', runtimeVerified: false, viewport,
+      note: 'Resolved geometry only; ok means inspection ran, not that the layout passed. Overlap candidates include sibling text/control boxes, exclude backgrounds and parent-child composition, and may be intentional. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics, clipping, occlusion and appearance require visual inspection. No files are changed.',
+      diagnostics: summarizeUiLayoutInspection(nodes),
+      boundaryChecks: inspectUiLayoutBoundaries(document.data.nodes, document.data.rootId, viewport), nodes }
+  }
   const nodes: Record<string, unknown>[] = Array.isArray(document.data?.nodes)
     ? document.data.nodes : []
   if (nodeId) {
@@ -110,7 +138,49 @@ export function inspectGameContent(workspacePath: string, path?: string, nodeId?
   }
 }
 
+function readWorkspaceDraft(workspacePath: string, path: string) {
+  const workspace = realpathSync(workspacePath)
+  const file = realpathSync(resolve(workspace, path))
+  const rel = relative(workspace, file)
+  if (isAbsolute(path) || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+    throw new Error('Layout draft must be inside the project workspace.')
+  return JSON.parse(readFileSync(file, 'utf8'))
+}
+
 export function runGameContentCommand(workspacePath: string, args: string[] = []) {
+  if (args[0] === '--layout-draft' || args[0] === '--camera-draft') {
+    const connected = args[0] === '--layout-draft' && args.length === 8 &&
+      args[4] === '--game-view' && Boolean(args[5]) && args[6] === '--camera' && Boolean(args[7])
+    if ((!connected && args.length !== 4) || !args[1])
+      throw new Error(`Usage: ${args[0]} workspace-relative-file width height${args[0] === '--layout-draft' ? ' [--game-view node-id --camera workspace-relative-camera-file]' : ''}`)
+    const source = readWorkspaceDraft(workspacePath, args[1])
+    const viewport = { width: Number(args[2]), height: Number(args[3]) }
+    if (args[0] === '--camera-draft') return {
+      ok: true, scope: 'camera-framing-draft-inspection', runtimeVerified: false, viewport,
+      note: 'Camera framing only; does not project objects, verify gameplay occlusion or establish XR comfort.',
+      view: resolveSceneCameraView(source as SceneCameraInput, viewport),
+    }
+    const document = parseBeeGameContentDocument(source)
+    if (document.kind === 'scene-2d' && !connected) return { ok: true, scope: 'scene-layout-draft-inspection', runtimeVerified: false, viewport,
+      ...inspectSceneLayout2d(document.data, viewport) }
+    if (document.kind !== 'ui-screen' && document.kind !== 'ui-hud') throw new Error('Layout draft requires a UI screen, HUD or 2D scene')
+    const nodes = inspectUiLayout(document.data.nodes, document.data.rootId, viewport)
+    const game = connected ? nodes.find(node => node.id === args[5]) : undefined
+    if (connected && (!game || !game.active)) throw new Error('Game-view node must exist and be active in the resolved UI layout.')
+    const gameView = game ? { nodeId: game.id, bounds: game.bounds,
+      viewport: { width: game.bounds.right - game.bounds.left, height: game.bounds.bottom - game.bounds.top } } : undefined
+    return { ok: true, scope: 'layout-draft-inspection', runtimeVerified: false, viewport,
+      note: 'Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling text/control boxes, exclude backgrounds and parent-child composition, and may be intentional. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.',
+      diagnostics: summarizeUiLayoutInspection(nodes),
+      boundaryChecks: inspectUiLayoutBoundaries(document.data.nodes, document.data.rootId, viewport),
+      nodes,
+      ...(gameView ? { gameView,
+        cameraView: resolveSceneCameraView(readWorkspaceDraft(workspacePath, args[7]) as SceneCameraInput, gameView.viewport) } : {}) }
+  }
+  if (args[0] === '--layout') {
+    if (args.length !== 4 || !args[1]) throw new Error('Usage: --layout content-relative-file width height')
+    return inspectGameContent(workspacePath, args[1], undefined, { width: Number(args[2]), height: Number(args[3]) })
+  }
   if (args.length === 1 && args[0] === '--authority') {
     const { manifest: _manifest, ...authority } = projectContentAuthority(workspacePath)
     return { ok: true, scope: 'content-authority', ...authority }
@@ -119,7 +189,7 @@ export function runGameContentCommand(workspacePath: string, args: string[] = []
   if (args[0] !== '--inspect' ||
       !(args.length === 1 || args.length === 2 ||
         (args.length === 4 && args[2] === '--node' && args[3] && !args[1]?.startsWith('--'))))
-    throw new Error('Usage: [workspace] [--authority | --inspect [content-relative-file [--node id]]]')
+    throw new Error('Usage: [workspace] [--authority | --inspect [content-relative-file [--node id]] | --layout file width height | --layout-draft file width height [--game-view node-id --camera camera-file] | --camera-draft file width height]')
   return inspectGameContent(workspacePath, args[1], args[3])
 }
 
@@ -127,6 +197,7 @@ if (import.meta.main) {
   try {
     const args = process.argv.slice(2)
     const workspace = args[0] && !args[0].startsWith('--') ? args.shift()! : process.cwd()
+    if (args[0] === '--layout' || args[0] === '--layout-draft') await initializeUiLayout()
     const result = runGameContentCommand(resolve(workspace), args)
     console.log(JSON.stringify(result, null, 2))
     process.exitCode = ('valid' in result ? result.valid : result.ok) ? 0 : 1

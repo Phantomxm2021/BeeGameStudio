@@ -1,0 +1,31 @@
+# UI layout calculation
+
+Use containers for menu/action groups and HUD regions; anchors suit overlays and independently attached indicators. Describe ordering, allocation, alignment, spacing, size limits and the selected space-constrained behavior. Reference dimensions are not a fixed runtime window. No particular game engine is required.
+
+In BGS UI JSON, `layout.container` supports row/column flow or a grid with equal-width `columns`. `gap` and `padding: [top,right,bottom,left]` are logical lengths. Children use `layout.size` as preferred size, `minSize`/`maxSize` as limits and `item.grow`/`shrink`/`basis` as allocation choices. Shrink defaults to zero. Enabled children participate in document order; `item.absolute: true` leaves an anchored overlay out of flow. Flow owns child position; do not also give a flow child stretch anchors. Grid owns cell width; don't override it with grow/basis. Responsive variants can change the arrangement.
+
+For planning and review/revision in BGS, use a temporary UI document with the same schema, without a resource Manifest or content index. The project supplies `.beegame/delivery/check-content.mjs`; run:
+
+```sh
+bun .beegame/delivery/check-content.mjs --layout-draft .beegame/tmp/ui-layout.json 960 540
+```
+
+The draft uses `schema: "beegame-content.v1"`, `kind: "ui-screen"` (or `"ui-hud"`), an `id`, `assetRefs: []`, and `data: {rootId, nodes}`. Each node has an `id`, canonical `role`, optional `parentId`, and `layout`. For example, a root column container with centered alignment/justification can contain a title and another column container holding the action buttons; its preferred child sizes and gaps determine the group's bounds without authored button positions. Use the project's supplied content format for exact fields. Keep the input reference and concise result in the relevant design section; no separate audit report is needed. If the supplied entry is unavailable, report that gap rather than searching host source or inventing a passing result.
+
+UI_UX_SPEC defines the layout selection and screen-space allocation once. Layouts may differ by available space or aspect ratio; a side HUD need not be a compressed copy of a portrait top HUD. Do not introduce a second condition table in Scene design. Use a full-host draft containing the shared regions, game-view node and their child contents. Partial HUD/button checks do not establish that the combined arrangement fits. For camera-backed content, connect that same draft to framing:
+
+```sh
+bun .beegame/delivery/check-content.mjs --layout-draft .beegame/tmp/ui-layout.json 960 540 --game-view game-view --camera .beegame/tmp/camera.json
+```
+
+The game-view node is an ordinary UI container; its resolved bounds supply camera width/height and host offset. Its camera file contains the project's existing framing fields, not a second UI allocation. Use the same calculation inputs as the design specification. UI owns allocation; Scene owns world scale, required visibility and permitted overlays; technical design explains consumption and coordinate conversion, referencing these inputs/results rather than duplicating screen rectangles or expected camera offsets. A temporarily empty cell or a camera margin that disappears at another aspect ratio is not reserved overlay space.
+
+Declare constraints, not manually calculated outcomes: child `minSize`, gaps, padding and arrangement belong in the draft. To calculate required container space, let a nested flow container size itself from its contents instead of assigning it a guessed height. For a minimum-size calculation, use the children's declared minimum dimensions as their preferred sizes in that calculation input; keep it explicitly distinct from the preferred/reference composition. The same layout engine then derives the container extent, including gaps and padding. A result for one reference allocation does not establish the minimum required allocation.
+
+Every planned menu, HUD and modal needs a corresponding input or a referenced shared composition, including its children; only camera-backed layouts need the connected camera command. Calculate each composition at its reference and smallest supported container and on the relevant sides of layout changes. Document the chosen relationships, input reference and concise result, not another hand-maintained coordinate table. When revising a decision, change the corresponding draft and recompute affected cases before updating the document's conclusion. Reuse genuinely identical compositions rather than creating one file for every possible device or state.
+
+For registered content, use `--layout ui/menu.json width height`. Both inspections are read-only. `outsideViewport`, `outsideParent`, `outsideContentArea` and `overlapCandidates` identify places to investigate, not automatic design failures: overlays and rotated bounds may be intentional. `outsideContentArea` means a flow child intrudes into its parent's declared padding, even if it remains inside the outer border; absolute overlays opt out. Unmeasured text is not proof of fitting. If necessary controls cannot fit at their minimum sizes, choose a different arrangement; do not silently shrink everything.
+
+The portable browser helper exports `initializeUiLayout`, `resolveUiNodesForViewport`, `inspectUiLayout` and `createUiTextMeasurer`. Await initialization once before using containers. For automatic text size, supply a measurement callback after loading the actual font. Canvas intrinsic metrics measure unwrapped text and explicit newlines; browser/engine wrapping, shaping and clipping still need actual rendering checks. Do not infer font size from character counts or call a geometry-only result visual acceptance.
+
+The target runtime may consume the projected rectangles or map these relationships to native containers. It must retain the authored hierarchy and responsive rules, not invent a second layout. Check actual rendered rectangles against the data at the same container size.

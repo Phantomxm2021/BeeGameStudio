@@ -13,9 +13,11 @@
   "scripts": {
     "dev": "bun ../../scripts/dashboard-server-dev.ts",
     "test": "bun test src/__tests__",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:browser:install": "playwright-core install chromium --only-shell"
   },
   "dependencies": {
+    "playwright-core": "1.63.0",
     "mammoth": "^1.11.0",
     "pdfjs-dist": "^5.4.0",
     "exceljs": "^4.4.0",

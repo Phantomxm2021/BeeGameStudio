@@ -1,0 +1,61 @@
+{
+  "status": "partial-pass-not-closed",
+  "scope": "Seven retained documents, fresh UI authoring, one native Review/Revision, independent read-only calculations. Not a full eight-document authoring test or a game/runtime test.",
+  "nativeReportedReviewComplete": true,
+  "elapsedSeconds": 1437.214,
+  "authoringSeconds": 882.347,
+  "reviewSeconds": 554.399,
+  "model": "ark-code-latest",
+  "usage": {
+    "inputTokens": 344626,
+    "cachedInputTokens": 10664704,
+    "outputTokens": 49875,
+    "note": "Observed provider token usage, not account Credit settlement. Initial failed provider request has unknown usage."
+  },
+  "passed": [
+    "Seven retained documents stayed byte-identical during UI authoring (upstream-preservation.json). Review then revised UI, Scene, Technical, Art and Asset Plan; GDD, Balance and Audio remained unchanged.",
+    "Native authoring used the supplied layout calculator, observed errors, repaired the menu compact layout and recomputed. Native Review detected and revised the original prompt/paddle placement conflict.",
+    "Independent calculations of menu and game/HUD/modal compositions at eight host sizes found no viewport, parent or padded-content overflow and no active foreground sibling rectangle intersections (geometry.json).",
+    "Menu compact transition at widths 600 and 601 passed at each sampled height (geometry.json boundaryChecks).",
+    "Four retained prompt projection samples match the actual camera-derived world rectangle within 0.001 screen pixels; the gap to paddle top is 28 world pixels (prompt-projections.json)."
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "category": "incomplete-composition-evidence",
+      "summary": "The revised prompt is absent from the reusable full-host game draft. Review instead produced four fixed-host probe drafts containing manually copied frame and projected prompt rectangles.",
+      "evidence": ["drafts/ui-game.json", "drafts/ui-prompt-check.json", "drafts/ui-prompt-390.json", "drafts/ui-prompt-minland.json", "drafts/ui-prompt-portrait.json", "final/UI_UX_SPEC.md:130", "calculation-trace.json"],
+      "impact": "The four sample projections are numerically correct, but the claim that game-view, HUD, prompt and overlays were calculated together against the final authored relationships is not established. The prose world-coordinate formula has not become one reusable complete calculation input. This is an evidence/input gap, not proof that the intended projection formula is wrong."
+    },
+    {
+      "id": "F2",
+      "category": "missing-planned-layout-input",
+      "summary": "S6 loading-error UI is planned but has no corresponding draft or calculated reference/minimum composition.",
+      "evidence": ["final/UI_UX_SPEC.md:202", "final/UI_UX_SPEC.md:256", "drafts", "calculation-trace.json"],
+      "impact": "The independent geometry pass covers the supplied menu, game/HUD/modals and four prompt samples, not all planned player-visible screens."
+    },
+    {
+      "id": "F3",
+      "category": "cross-document-conflict",
+      "summary": "Art Direction reserves letterbox margins for HUD/serve-prompt text without animation, while UI specifies serve-prompt inside the projected world rectangle and with breathing animation.",
+      "evidence": ["final/ART_DIRECTION.md:169", "final/UI_UX_SPEC.md:128", "final/UI_UX_SPEC.md:161", "drafts/ui-prompt-check.json"],
+      "impact": "The documents still disagree on prompt placement and animation despite the native claim that the cross-document conflict was closed."
+    }
+  ],
+  "unverified": [
+    "Actual font measurement, shaping, wrapping, clipping and appearance.",
+    "Gameplay occlusion, interactions, focus, touch target behavior and real-device readability. In particular, the pause visual rectangle is 72x32 while prose requires a 44x44 hit box; no separate hit-region geometry was calculated.",
+    "Resource production, resource binding, game implementation and runtime acceptance.",
+    "All possible viewport sizes; declared boundary probes and finite samples are diagnostic evidence only."
+  ],
+  "actions": {
+    "extraModelRepairTurns": 0,
+    "resourceTurns": 0,
+    "implementationTurns": 0,
+    "codexEditedAgentDesignInputs": false,
+    "productionSourceEditsThisTest": false,
+    "privateProjectEdits": false,
+    "originalFailedTestEvidenceOverwritten": false
+  },
+  "conclusion": "The calculator and these sampled layouts work. The complete UI authoring/review calculation loop is still incomplete; do not promote native completion to full independent design acceptance. Stop here rather than silently adding paid repair turns or modifying the Agent's evidence."
+}

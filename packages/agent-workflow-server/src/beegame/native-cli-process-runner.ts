@@ -79,6 +79,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   private activeTurn: {
     input: BeeGameSessionSubmitInput
     requestId: string
+    acknowledged: boolean
+    pendingMessages: Record<string, unknown>[]
     resolve(): void
     reject(error: Error): void
     abort(reason?: unknown): void
@@ -179,6 +181,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       this.activeTurn = {
         input,
         requestId,
+        acknowledged: false,
+        pendingMessages: [],
         resolve: () => {
           input.signal.removeEventListener('abort', onAbort)
           resolve()
@@ -268,7 +272,12 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       }
     }
     if (message.type === 'control_request') {
-      await this.resolvePermissionRequest(message)
+      // An approval may wait for a human while other native tasks keep working.
+      // Do not hold the ordered stdout consumer behind that decision.
+      const turn = this.activeTurn
+      void this.resolvePermissionRequest(message).catch(error => {
+        if (!this.disposed && this.activeTurn === turn) this.failActiveTurn(toError(error))
+      })
       return
     }
     if (
@@ -285,6 +294,38 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     }
     const turn = this.activeTurn
     if (!turn) return
+    if (!turn.acknowledged) {
+      // A persistent CLI may still be draining an older task notification when
+      // we submit. Only its replay of OUR UUID establishes the new turn. Stream
+      // deltas can precede that replay; retain them until their owner is known.
+      const acknowledged = message.type === 'user' && message.isReplay === true &&
+        message.uuid === turn.requestId && message.parent_tool_use_id == null
+      // A provider/local error can terminate before the first assistant message
+      // (and thus before replay). The CLI tags such results with the command UUID.
+      const ownResult = message.type === 'result' && message.request_id === turn.requestId
+      if (!acknowledged && !ownResult) {
+        if (message.type === 'result') turn.pendingMessages = []
+        else turn.pendingMessages.push(message)
+        return
+      }
+      turn.acknowledged = true
+      const pending = turn.pendingMessages
+      turn.pendingMessages = []
+      for (const buffered of pending) {
+        if (this.activeTurn !== turn) return
+        await this.deliverTurnMessage(buffered)
+      }
+      // The replay is a transport receipt, not a second user chat message.
+      if (acknowledged) return
+    }
+    await this.deliverTurnMessage(message)
+  }
+
+  private async deliverTurnMessage(message: Record<string, unknown>): Promise<void> {
+    const turn = this.activeTurn
+    if (!turn) return
+    // A child result is not the parent request's terminal result.
+    if (message.type === 'result' && message.parent_tool_use_id != null) return
     if (message.type === 'system') {
       const taskId = stringField(message, 'task_id')
       if (message.subtype === 'task_started' && taskId &&
@@ -329,6 +370,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     }
     this.observability.observeMessage(message)
     await turn.input.onMessage(message as DashboardSDKMessage)
+    if (this.activeTurn !== turn) return // The callback may have stopped this turn.
     if (message.type === 'system' && message.subtype === 'session_state_changed' &&
         message.state === 'idle' && turn.awaitingParentResult) {
       this.failActiveTurn(new Error('Native session became idle before the parent completed its pending agent work'))
@@ -362,32 +404,36 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     const request = objectField(message, 'request')
     if (!requestId || request?.subtype !== 'can_use_tool') return
     const turn = this.activeTurn
+    const toolUseID = stringField(request, 'tool_use_id')
+    const respond = (toolInput: Record<string, unknown>, decision: DashboardPermissionDecision) => {
+      // A stopped/completed turn cannot send a late approval into its successor.
+      if (this.disposed || this.child.exitCode !== null || this.activeTurn !== turn) return
+      this.write(permissionResponse(requestId, toolUseID, toolInput, decision))
+    }
     const requestPermission =
       this.sessionInput.requestPermission ?? turn?.input.requestPermission
-    const toolUseID = stringField(request, 'tool_use_id')
     const toolName = stringField(request, 'tool_name')
     const toolInput = objectField(request, 'input') ?? {}
     const decisionReason = stringField(request, 'decision_reason')
     const blockedPath = stringField(request, 'blocked_path')
     if (await this.projectAccess?.isReferenceRead(toolName, toolInput)) {
-      this.write(permissionResponse(requestId, toolUseID, toolInput,
-        { behavior: 'allow', source: 'policy' }))
+      respond(toolInput, { behavior: 'allow', source: 'policy' })
       return
     }
+    if (this.disposed || this.activeTurn !== turn) return
     if (!this.taskAccess && toolName === 'SandboxNetworkAccess' &&
         typeof toolInput.host === 'string' && toolInput.host.trim()) {
       // Filesystem isolation is not a resource-source policy. Keep the native
       // network proxy available without introducing per-domain approval gates.
-      this.write(permissionResponse(requestId, toolUseID, toolInput,
-        { behavior: 'allow', source: 'policy' }))
+      respond(toolInput, { behavior: 'allow', source: 'policy' })
       return
     }
     // Questions need a human response, not a filesystem policy decision.
     if (this.taskAccess && toolName !== 'AskUserQuestion') {
       const decision = await this.taskAccess.permission(request)
-      this.write(permissionResponse(requestId, toolUseID,
+      respond(
         decision.behavior === 'allow' ? decision.updatedInput : toolInput,
-        { ...decision, source: 'policy' }))
+        { ...decision, source: 'policy' })
       return
     }
     const permissionSuggestions = Array.isArray(request.permission_suggestions)
@@ -410,7 +456,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
           ...(permissionSuggestions ? { permissionSuggestions } : {}),
         })
       : ({ behavior: 'deny', message: 'Permission authority is unavailable.' } as const)
-    this.write(permissionResponse(requestId, toolUseID, toolInput, decision))
+    respond(toolInput, decision)
   }
 
   private onExit(code: number): void {
@@ -611,7 +657,7 @@ function nativeErrorDetail(message: Record<string, unknown>): string {
     )
     if (errors.length) return errors.join('\n')
   }
-  return stringField(message, 'error') || 'Bee Game Studio native turn failed'
+  return stringField(message, 'error') || stringField(message, 'result') || 'Bee Game Studio native turn failed'
 }
 
 function objectField(

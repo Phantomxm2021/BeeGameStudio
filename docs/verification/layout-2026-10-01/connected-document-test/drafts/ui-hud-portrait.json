@@ -1,0 +1,49 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "hud-portrait-draft",
+  "kind": "ui-hud",
+  "assetRefs": [],
+  "data": {
+    "rootId": "hud-root",
+    "nodes": [
+      {
+        "id": "hud-root",
+        "role": "hud-root",
+        "layout": {
+          "size": [390, 60],
+          "container": { "direction": "row", "gap": 8, "padding": [10, 12, 10, 12], "justify": "space-between", "align": "center" }
+        }
+      },
+      {
+        "id": "score",
+        "role": "text",
+        "parentId": "hud-root",
+        "text": "分数 3970",
+        "layout": { "size": [116, 40], "minSize": [100, 40], "item": { "shrink": 0 } },
+        "style": { "fontSize": 21, "color": "#EAF0F8", "align": "left", "verticalAlign": "middle" }
+      },
+      {
+        "id": "hiscore",
+        "role": "text",
+        "parentId": "hud-root",
+        "text": "高 3970",
+        "layout": { "size": [92, 40], "minSize": [84, 40], "item": { "shrink": 0 } },
+        "style": { "fontSize": 16, "color": "#93A3BC", "align": "center", "verticalAlign": "middle" }
+      },
+      {
+        "id": "mute-btn",
+        "role": "button",
+        "parentId": "hud-root",
+        "layout": { "size": [48, 40], "item": { "shrink": 0 } },
+        "style": { "cornerRadius": 8 }
+      },
+      {
+        "id": "pause-btn",
+        "role": "button",
+        "parentId": "hud-root",
+        "layout": { "size": [48, 40], "item": { "shrink": 0 } },
+        "style": { "cornerRadius": 8 }
+      }
+    ]
+  }
+}

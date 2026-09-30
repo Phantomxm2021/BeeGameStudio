@@ -11,6 +11,22 @@ const nodes = [
 ]
 
 describe('UI viewport projection', () => {
+  it.each([[720, 640], [390, 844], [1280, 720]])('preserves a stretched screen root at %s × %s', (width, height) => {
+    const authored: UiResponsiveNode[] = [
+      { id: 'root', layout: { anchorMin: [0, 0], anchorMax: [1, 1], sizeDelta: [0, 0] } },
+      { id: 'panel', parentId: 'root', layout: { anchorMin: [0, 0], anchorMax: [1, 1], sizeDelta: [-40, -60] } },
+    ]
+    const result = resolveUiNodesForViewport(authored, 'root', { width, height })
+    expect(result[0]?.layout?.size).toEqual([width, height])
+    expect(result[1]?.layout?.size).toEqual([width - 40, height - 60])
+    expect(authored[0]?.layout?.size).toBeUndefined()
+  })
+
+  it('does not collapse a world root with stretch metadata', () => {
+    expect(resolveUiNodesForViewport([{ id: 'root', data: { space: 'world' }, layout: {
+      size: [3, 2], anchorMin: [0, 0], anchorMax: [1, 1], sizeDelta: [0, 0],
+    } }], 'root', { width: 720, height: 640 })[0]?.layout?.size).toEqual([3, 2])
+  })
   it('keeps base data untouched and applies compact before portrait', () => {
     const phone = resolveUiNodesForViewport(nodes, 'root', { width: 390, height: 844 })
     expect(phone[0]?.layout?.size).toEqual([390, 844])

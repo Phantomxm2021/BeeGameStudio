@@ -24,6 +24,11 @@ export const CONTENT_AUTHORING_CONTRACT_PATH = '.beegame/delivery/content-contra
 export const CONTENT_FORMAT_PATH = '.beegame/delivery/content-format.json'
 export const CONTENT_CHECKER_PATH = '.beegame/delivery/check-content.mjs'
 
+/** One calculation handoff shared by design, review and content; not a new stage or gate. */
+export const SPATIAL_CALCULATION_INSTRUCTION = `Spatial calculation entry (run from the project root): read ${CONTENT_FORMAT_PATH} for the supported fields and coordinates. Use \`bun ${CONTENT_CHECKER_PATH} --layout-draft workspace-relative-file width height\` for a temporary UI or 2D Scene draft, without a Manifest or content index. Registered content uses \`--layout content-relative-file width height\`. For camera framing, including perspective 3D, use \`--camera-draft workspace-relative-camera-file width height\` on the same command; that file contains the camera's orthographic, orthographicSize or fieldOfView, reference viewport and framing fields.
+Connect design decisions to calculation: UI_UX_SPEC owns layout selection and screen-space allocation; LEVEL_SCENE_DESIGN owns world/framing and required visibility; TECHNICAL_DESIGN explains consumption/conversion without duplicating screen rectangles or camera offsets. Declare relationships, padding and control size limits in layout inputs for every planned screen/overlay, reusing shared compositions where identical. Container layout derives resulting positions and required space from its contents, rather than hand-maintained coordinate/minimum-size tables. Calculate final inputs at reference, smallest supported and relevant transition sizes; inspect outsideViewport, outsideParent and outsideContentArea (flow children intruding into reserved padding). For camera-backed game views, \`bun ${CONTENT_CHECKER_PATH} --layout-draft ui-file host-width host-height --game-view node-id --camera camera-file\` calculates framing from the resolved game-view, retaining its host offset. Different screen shapes may use different compositions. In author/review, revise infeasible decisions and their inputs, rerun affected cases and cite inputs/results in the relevant document; no separate audit report. Prose edits or camera-only checks do not validate a changed menu/control layout. In content/implementation, preserve reviewed inputs and decisions: correct data/parsing defects or report design contradictions, not another layout or rewritten baseline.
+These read-only commands do not create resources, approve a design or implement the game. Unmeasured text, gameplay occlusion, 3D object visibility and XR comfort are not verified by rectangle or camera-framing calculations. XR device projection is not replaced by flat-window fitting. State those limits instead of treating command success as a quality PASS.`
+
 const inputSchema = z
   .strictObject({
     documentRevision: digest,
@@ -62,8 +67,13 @@ export async function materializeSceneUiFormat(workspacePath: string) {
   delete format.index.documentRevision
   delete format.index.assetManifestRevision
   format.revisionFields = 'documentRevision and assetManifestRevision are required BGS-supplied metadata, not Agent-defined hashes. Their actual values are supplied in content-contract.json when content authoring begins; none are available at design time.'
+  format.layoutDraftInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --layout-draft workspace-relative-file width height`
+  format.cameraDraftInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --camera-draft workspace-relative-camera-file width height`
+  format.layoutCameraInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --layout-draft workspace-relative-ui-file host-width host-height --game-view node-id --camera workspace-relative-camera-file`
   await mkdir(dirname(join(workspacePath, CONTENT_FORMAT_PATH)), { recursive: true })
   await writeFile(join(workspacePath, CONTENT_FORMAT_PATH), JSON.stringify(format, null, 2) + '\n')
+  // Optional design geometry tool; does not require a Manifest/index or dispatch an Agent turn.
+  await writeFile(join(workspacePath, CONTENT_CHECKER_PATH), await bundledContentChecker(), 'utf8')
 }
 
 /** Keep large reference material in a readable file, not in every model request. */
@@ -79,9 +89,9 @@ export async function materializeSceneUiAuthoringContract(workspacePath: string,
     validationCommand: `bun ${CONTENT_CHECKER_PATH}`,
     authorityCommand: `bun ${CONTENT_CHECKER_PATH} --authority`,
     inspectionCommand: `bun ${CONTENT_CHECKER_PATH} --inspect [content-relative-file [--node id]]`,
+    layoutInspectionCommand: `bun ${CONTENT_CHECKER_PATH} --layout content-relative-file width height`,
     revisionUsage: 'Copy these BGS-supplied values into content/index.json; they are not hash algorithms to design. If docs/resources change during this turn, --authority reads their current values locally. The checker is read-only and uses the same implementation as BGS.',
   }
-  await writeFile(join(workspacePath, CONTENT_CHECKER_PATH), await bundledContentChecker(), 'utf8')
   await materializeSceneUiFormat(workspacePath)
   await writeFile(target, JSON.stringify({ ...task.contract.output.format, inputs }, null, 2) + '\n')
   return inputs
@@ -197,10 +207,13 @@ export function buildSceneUiContentAuthoringAuthority(
           requiredData: {
             camera: {
               orthographic: '<boolean>',
-              orthographicSize: '<positive-number; for scene-2d must equal settings.coordinateSystem.height / (2 * settings.coordinateSystem.pixelsPerUnit)>',
+              orthographicSize: '<positive half-height in world units; independent of map/reference size; logical-pixel visible height = 2 * orthographicSize * pixelsPerUnit>',
               fieldOfView: '<number in (0,180) when perspective>',
               coordinateSpace: '<logical-pixels|world-units>',
               viewport: { width: '<positive-number>', height: '<positive-number>' },
+              framing: '<keep-height|keep-width|expand|letterbox; omitted means keep-height>',
+              nearClip: '<optional positive world-unit depth>',
+              farClip: '<optional world-unit depth greater than nearClip>',
             },
             'rect-transform': {
               anchorMin: ['<number>', '<number>'],
@@ -248,6 +261,12 @@ export function buildSceneUiContentAuthoringAuthority(
                   size: [0, 0],
                   rotation: 0,
                   scale: [1, 1],
+                  minSize: ['<optional-min-width>', '<optional-min-height>'],
+                  maxSize: ['<optional-max-width>', '<optional-max-height>'],
+                  container: { direction: '<row|column|grid>', gap: '<optional-logical-pixels>',
+                    padding: ['<top>', '<right>', '<bottom>', '<left>'], columns: '<required-positive-integer-for-grid>',
+                    wrap: '<optional-boolean>', justify: '<start|center|end|space-between>', align: '<start|center|end|stretch>' },
+                  item: { grow: '<optional-nonnegative>', shrink: '<optional-nonnegative>', basis: '<optional-logical-pixels>', absolute: '<optional-boolean>' },
                 },
                 bindings: {},
                 actions: {},
@@ -264,7 +283,10 @@ export function buildSceneUiContentAuthoringAuthority(
           responsive: 'The base layout is the reference composition. Optional node.responsive.compact and node.responsive.portrait may override enabled, layout fields and style fields. Compact applies when viewport width <= root data.compactMaxWidth (default 600 logical pixels); portrait applies when height>width, after compact. Set a larger compactMaxWidth only if a supported mobile landscape viewport requires it. Unspecified fields inherit. Keep essential controls readable and inside the target safe area; do not stretch the entire composition indiscriminately.',
           anchor: 'top/middle/bottom-left/center/right. Position is an offset from that anchor on the parent rectangle. The child pivot defaults to the same anchor, not [0,0]; data.anchor {x,y} may override only the child pivot. Example: a 300px-wide button centered in a 390px portrait viewport uses top-center, position [0,y], size [300,h] and renders from x=45; position [-150,y] would clip it. A middle-center panel at position [0,0] is centered; position [-width/2,-height/2] offsets it twice and can clip it.',
           stretch: 'For resizable panels, strips and HUD regions, use paired layout.anchorMin and layout.anchorMax in [0,1] parent coordinates and layout.sizeDelta in logical pixels; omit all three for ordinary fixed-size controls. Equal anchors retain fixed size; separated anchors stretch with the parent. layout.position remains a pivot offset. Keep fixed-size controls where intentional; do not encode the entire screen as one fixed-size panel.',
-          textStyle: 'Use style.fontSize, style.color, style.align, style.verticalAlign and style.lineHeight. For an actual font file use data.font.assetRef; do not invent font asset aliases.',
+          containers: 'Optional layout.container allocates enabled children in document order: row, column, or an equal-width grid with columns. gap and padding [top,right,bottom,left] are logical pixels; justify and align describe placement, wrap allows row/column wrapping. Child layout.item supports grow, shrink (default 0: do not silently shrink controls), basis, or absolute:true to opt out as an anchored overlay. Flow owns child position/size; do not combine flow children with stretch anchors. minSize/maxSize constrain allocation. Responsive variants may change container direction/columns. Text auto-sizing requires actual-font measurements; fixed text bounds still need font-fit checks. Unsupported scroll/clipping behavior remains an explicit runtime responsibility, not an automatic layout fallback.',
+          layoutDiagnostics: 'Layout inspection returns computed rectangles and compact diagnostics for outsideViewport, outsideParent, outsideContentArea and sibling text/control overlapCandidates. Backgrounds and parent-child composition are excluded from overlap candidates; intentional overlaps require design interpretation. outsideContentArea checks flow children against the parent content area after padding; absolute overlays opt out. boundaryChecks probes both sides of declared compact/portrait transitions while preserving the other axis; these probes are not supported-size guarantees. An auto-sized nested container derives its extent from children, gaps and padding; use minimum child dimensions in a distinct calculation input to determine required minimum space. ok means inspection ran, not that layout, text or visuals passed.',
+          containerConsumer: 'The optional portable helper exports initializeUiLayout(), resolveUiNodesForViewport() and inspectUiLayout(). Await initializeUiLayout once before using containers, then resolve at actual host dimensions; anchors-only layouts remain synchronous without initialization. Supply measureText for intrinsic auto-sized text. Target engines may instead map the same declared relationships to native layout groups; compare actual rectangles, not just JSON loading. This is optional layout math, not a required game engine.',
+          textStyle: 'Use style.fontSize, style.color, style.align, style.verticalAlign and style.lineHeight. Explicit fontSize and lineHeight are logical-pixel lengths, not unitless CSS multipliers; convert lineHeight to a CSS px string in DOM renderers. An omitted lineHeight uses the renderer default. For an actual font file use data.font.assetRef; do not invent font asset aliases.',
           textFit: 'After loading the actual font file, measure HUD values and labels at their authored font size (including the largest expected score/time/count and each supported language). Size text bounds and spacing to fit those measurements, not character-count estimates. Keep numeric counters intact; do not rely on arbitrary character wrapping, runtime shrinking, or editor-specific layout overrides to hide undersized bounds. Check both the generated UI and target runtime before reporting visual acceptance.',
           image: 'Use assetRef + optional data.member for the image file, data.frame for an exact case-sensitive atlas frame name (without extension). Inspect the delivered atlas; never guess names.',
           nineSlice: 'Use data.image.type=sliced and data.nineSlice.border=[left,right,top,bottom]. data.frame may name an explicit meta.nine_slice composite made from tl,tr,bl,br,h,v,c frames, or a single packed frame. Never invent a panel frame absent from both tables.',
@@ -318,7 +340,7 @@ export function buildSceneUiContentAuthoringAuthority(
           'Put gameplay identity such as player, enemy, tree, anchor or checkpoint in node.semantic. Put renderer, physics, audio, animation, lighting and camera capabilities in components using exactly format.sceneVocabulary.componentTypes. Every component requires a stable unique id that is independent of array order. An empty GameObject has no renderer. Gameplay behavior metadata belongs in node.data.behaviors as entries with stable id, kind and config; do not add script or MonoBehaviour components.',
           'Every visible object must retain a real renderer: use sprite-renderer for authored 2D graphics, tilemap + tilemap-renderer for grid environments when appropriate (format.tilemap), world-space canvas + canvas-renderer + image/text for solid-color meters and labels, Light2D spot data for a 2D vision cone, and particle-system + particle-system-renderer for particles.',
           'Scene nodes never own assetRef or frameRef directly. Only component types listed in format.sceneVocabulary.assetComponentTypes may own component.assetRef. SpriteRenderer, MeshFilter, SkinnedMeshRenderer and Tilemap require a verified component.assetRef; a textured Image requires one, while an intentionally solid-color Image does not. Select a specific multi-file member in component.data.member.',
-          'Use only the declared component vocabulary. Visible shapes require SpriteRenderer with an asset or a Canvas Image graphic, collision requires a concrete 2D or 3D Collider, and Camera serves both dimensions. A 2D Camera must be orthographic and declare coordinateSpace, orthographicSize and viewport; the scene settings coordinateSystem is the single authority for logical-pixels width, height and pixelsPerUnit. Script components and scriptId fields do not belong in scene documents.',
+          'Use only the declared component vocabulary. Visible shapes require SpriteRenderer with an asset or a Canvas Image graphic, collision requires a concrete 2D or 3D Collider, and Camera serves both dimensions. A 2D Camera must be orthographic and declare coordinateSpace, orthographicSize and viewport. coordinateSystem width/height describe the authoring reference, not the map boundary or fixed host size; pixelsPerUnit converts logical pixels to world units. Camera position/rotation determines the view; orthographicSize determines its reference half-height, not map height. Camera viewport describes the reference aspect. framing preserves height, preserves width, expands without cropping the reference view, or intentionally letterboxes. World transforms/collisions stay unchanged. The optional resolveSceneCameraView helper computes projection only; the target engine owns rendering and dynamic camera behavior. inspectSceneLayout2d reports static geometric bounds, not playability or occlusion. XR uses device projection, not this flat-host fitting helper. Script components and scriptId fields do not belong in scene documents.',
           'ParticleSystem owns simulation modules; ParticleSystemRenderer owns its material/texture and must share the GameObject. MeshRenderer requires MeshFilter. TilemapRenderer requires Tilemap. Never mix Rigidbody with Rigidbody2D on one GameObject.',
           'Put scene-wide world, camera and layer settings in scene data.settings or on a camera component/node. Do not encode settings as a world-config node.',
           'UI node role is a closed vocabulary: use exactly one value from format.uiVocabulary.roles. Never invent a role from a visual name, business label, control variant or implementation class.',

@@ -1,23 +1,20 @@
 import { describe, expect, test } from 'bun:test'
 import { extractQueryFromMessages } from '../prefetch.js'
 import type { Message } from '../../../types/message.js'
+import { createUserMessage } from '../../../utils/messages.js'
 
 function userText(text: string): Message {
-  return { type: 'user', content: text } as unknown as Message
+  return createUserMessage({ content: text })
 }
 
 function userTextBlocks(text: string): Message {
-  return {
-    type: 'user',
-    content: [{ type: 'text', text }],
-  } as unknown as Message
+  return createUserMessage({ content: [{ type: 'text', text }] })
 }
 
 function userToolResult(id: string): Message {
-  return {
-    type: 'user',
+  return createUserMessage({
     content: [{ type: 'tool_result', tool_use_id: id, content: 'output' }],
-  } as unknown as Message
+  })
 }
 
 function assistantText(text: string): Message {
@@ -28,6 +25,12 @@ function assistantText(text: string): Message {
 }
 
 describe('extractQueryFromMessages — inter-turn任务信号', () => {
+  test('子任务首次请求使用原生用户消息里的任务文本', () => {
+    const task = 'Review game design evidence before completion.'
+    expect(extractQueryFromMessages(null, [userText(task)])).toBe(task)
+    expect(extractQueryFromMessages(null, [userTextBlocks(task)])).toBe(task)
+  })
+
   test('null input + messages末尾是tool_result → 使用最近的assistant可见文本', () => {
     const messages: Message[] = [
       userText('研究当前代码'),
@@ -50,8 +53,7 @@ describe('extractQueryFromMessages — inter-turn任务信号', () => {
 
   test('自动续跑同时检索用户文本和当前阶段任务', () => {
     const messages: Message[] = [
-      {
-        type: 'user',
+      createUserMessage({
         content: [
           {
             type: 'text',
@@ -62,7 +64,7 @@ describe('extractQueryFromMessages — inter-turn任务信号', () => {
             text: 'Current delivery milestone: resources. Prepare tilemap atlases and the asset manifest.',
           },
         ],
-      } as unknown as Message,
+      }),
     ]
     const query = extractQueryFromMessages(null, messages)
     expect(query).toContain('Continue the current project delivery milestone')
@@ -125,25 +127,37 @@ describe('extractQueryFromMessages — inter-turn任务信号', () => {
     expect(query).toContain('previous query')
   })
 
-  test('超长user文本被截断到500字', () => {
-    const longText = 'a'.repeat(1000)
+  test('保留长任务末尾的核查目标，而不是仅截取开头的源资料', () => {
+    const longText = 'source reference '.repeat(100) + 'Review design evidence and revisions.'
     const messages: Message[] = [userText(longText)]
     const query = extractQueryFromMessages(null, messages)
-    expect(query.length).toBe(500)
+    expect(query).toBe(longText)
+    expect(extractQueryFromMessages(null, [userTextBlocks(longText)])).toBe(longText)
+  })
+
+  test('多个长文本块中的任务目标均可检索，不混入工具结果', () => {
+    const source = 'source '.repeat(200)
+    const goal = 'Check the assumptions behind the current revision.'
+    const message = createUserMessage({ content: [
+      { type: 'text', text: source }, { type: 'text', text: goal },
+      { type: 'tool_result', tool_use_id: 'ignored', content: 'private output' },
+    ] })
+    expect(extractQueryFromMessages(null, [message])).toBe(source + ' ' + goal)
   })
 
   test('tool_result里含text字段 (但type=tool_result) → 必须跳过，不能误用', () => {
     const messages: Message[] = [
       userText('real query'),
-      {
-        type: 'user',
+      createUserMessage({
         content: [
           {
             type: 'tool_result',
-            text: 'this is tool output masquerading as text',
+            tool_use_id: 'tool_a',
+            content: 'output',
+            ...{ text: 'this is tool output masquerading as text' },
           },
         ],
-      } as unknown as Message,
+      }),
     ]
     const query = extractQueryFromMessages(null, messages)
     expect(query).toBe('real query')
@@ -152,10 +166,9 @@ describe('extractQueryFromMessages — inter-turn任务信号', () => {
   test('user content数组里text为空串 → 跳过空text继续找', () => {
     const messages: Message[] = [
       userText('real query'),
-      {
-        type: 'user',
+      createUserMessage({
         content: [{ type: 'text', text: '   ' }],
-      } as unknown as Message,
+      }),
     ]
     const query = extractQueryFromMessages(null, messages)
     expect(query).toBe('real query')

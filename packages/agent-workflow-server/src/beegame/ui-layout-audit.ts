@@ -2,9 +2,11 @@ import {
   compose2d, point2d, uiAnchor, uiLocalMatrix, type Affine2D,
 } from '../../../scene-editor/src/content-coordinates'
 import { resolveUiNodesForViewport } from '../../../scene-editor/src/ui-responsive'
+import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
 import type { BeeGameContentDocument } from './game-content-schema'
 
 type UiDocument = Extract<BeeGameContentDocument, { kind: 'ui-screen' | 'ui-hud' | 'ui-flow' }>
+await initializeUiLayout()
 type UiNode = UiDocument['data']['nodes'][number]
 type Viewport = { width: number; height: number }
 

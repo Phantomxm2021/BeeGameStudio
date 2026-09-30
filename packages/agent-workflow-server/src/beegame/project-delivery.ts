@@ -4,15 +4,17 @@ import { mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/prom
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { computeWorkspaceRevision, resolveWorkspaceRelativePath } from './workspace-revision'
 import { PROJECT_DOCUMENTS, projectContentAuthority } from './project-content-authority'
+import { AUTHOR_BATCHES, authorBatchInstruction } from './project-author'
 export { PROJECT_DOCUMENTS, projectContentAuthority } from './project-content-authority'
 import { auditBeeGameContentPackage, type BeeGameContentAuthority } from './game-content-package'
 import { buildSceneUiContentAuthoringAuthority, materializeSceneUiAuthoringContract, materializeSceneUiFormat } from './scene-ui-content-authoring'
 import { validateResourceDelivery } from './resource-validation-cli'
-import { ASSET_MANIFEST_AUTHORING_CONTRACT_PATH, ASSET_MANIFEST_VALIDATION_COMMAND, materializeAssetManifestAuthoringContract } from './asset-manifest-authoring-contract'
+import { ASSET_MANIFEST_AUTHORING_CONTRACT_PATH, materializeAssetManifestAuthoringContract } from './asset-manifest-authoring-contract'
 import {
   readRuntimeAcceptanceReport,
   runtimeEvidenceIsCurrent,
   type RuntimeAcceptance,
+  type AcceptanceDiagnostic,
 } from './runtime-acceptance'
 
 export const PROJECT_DELIVERY_REPORT_PATH = '.beegame/delivery/acceptance.json'
@@ -31,14 +33,115 @@ export function projectDeliveryPhase(state: ProjectDeliveryState): ProjectDelive
 }
 
 /** Deliverables and platform interfaces, not a script for the Agent's work. */
-export function projectDeliveryPhaseInstruction(phase: ProjectDeliveryPhase): string {
+export function projectDeliveryPhaseInstruction(phase: ProjectDeliveryPhase, authorBatch = 0): string {
   switch (phase) {
-    case 'author': return `Current delivery milestone: author. Write the eight implementable design documents in docs/ from the confirmed requirements: ${PROJECT_DOCUMENTS.join(', ')}. Preserve useful drafts. Include version, author and date. Cover every planned screen and level, layout/size rules, interactions and device constraints appropriate to the chosen 2D, 3D or XR target; editable Scene/UI layouts belong in content data. For each planned UI screen, specify all visible and interactive elements, their parent-relative geometry, visual and interaction states, and relevant responsive changes; equivalent screens may share a pattern. Screen UI uses top-left logical pixels (+X right, +Y down); the child pivot defaults to its anchor. A middle-center panel at position [0,0] is centered; subtracting half its size again moves it off center. Treat reference dimensions as design coordinates, not a fixed browser or iframe size. Specify how screen UI anchors or stretches in the actual host container, and how the world camera frames changing aspect ratios; keep intentional letterboxing only where the design calls for it. Do not require phone controls unless the confirmed target includes mobile. Make the visual composition implementable before coding: show how the play area, controls, HUD, backgrounds and focal elements share space at the target view and relevant aspect ratios, and how each planned level's spatial arrangement supports gameplay and visual readability. Use sketches, diagrams, relative proportions or coordinates as useful; a coordinate list alone need not communicate the intended composition. Keep art direction tied to the actual screens and scenes, including intentional empty space and, where needed, which visual parts must remain independent layers as the camera or viewport changes. Give each gameplay rule and completion condition one authoritative definition across the documents. For the core player path, show why the planned abilities, space, timing and opposition permit progress; use a calculation, a small prototype or another suitable check when a claim is uncertain, and identify assumptions that remain unverified instead of presenting them as proven. State the evidence conditions and limits of strong design claims, such as a mechanic being necessary or an ordinary player succeeding; a simplified simulation does not establish real-player difficulty. Keep runtime-dependent questions identifiable in the relevant document for later acceptance. Describe observable outcomes for the agreed release scope so implementation and acceptance can use the same baseline. Shared gameplay tunables need one project-owned data source; the Scene/UI/VFX package does not register arbitrary gameplay configuration files. For unusually costly bespoke assets, establish a feasible source or fallback; if feasibility is uncertain, validate one representative sample before committing to full production. Planning, self-checks and delegation are yours. Format references: .beegame/delivery/content-format.json; ${ASSET_MANIFEST_AUTHORING_CONTRACT_PATH}.`
-    case 'review': return 'Current delivery milestone: review. Review the authored documents for feasibility, contradictions and missing decisions across all planned screens and levels, including whether the planned UI and scene compositions remain readable without unintended overlap, occlusion or unused space at the target view and relevant aspect ratios. Check the critical path from player action to completion against the planned abilities, geometry, timing and opposition; check that rules repeated across documents have one consistent meaning. Challenge strong design claims against their stated evidence: if a result contradicts a claim, correct the claim or its basis now rather than calling it closed. Distinguish a demonstrated route from an unverified design assumption; keep questions requiring the playable runtime in the documents for acceptance, separate from document findings. Revise the documents to resolve findings within this milestone; for each changed document update its header version, author and date. Report any unresolved document findings or an explicit no-findings result, and separately name runtime-dependent questions that remain; no document findings does not mean those questions are verified. Review methods and delegation are yours.'
-    case 'resources': return `Current delivery milestone: resources. Read the reviewed ART_DIRECTION.md, UI_UX_SPEC.md, LEVEL_SCENE_DESIGN.md and ASSET_PLAN.md. Create the artwork those documents call for directly in this stage: use the available AI image capability for suitable UI graphics, cover illustrations and, when needed, 2D characters or effects. There is no separate visual-board or user-approval prerequisite. Select other library, licensed web or procedural assets when they better serve the game; there is no mandatory source order. Choose the assets, methods and image count yourself. Deliver only usable files and assets/asset-manifest.json with source/license facts and atlas/TileSet metadata where appropriate. For reusable UI artwork, an image can contain distinct, non-overlapping elements in one sheet. Choose transparent, opaque or automatic background according to the artwork's actual use; the image model generates the image, not cuts, packaging or frame coordinates. If using a sheet, keep the generated image intact. After generation, inspect the actual image and record each element's name and rectangle in the same-basename JSON sidecar; the editor and game then render subrectangles from that image. The project asset command's atlas operation copies the source PNG unchanged and writes the frame sidecar, without cutting or repacking. Keep large background or cover illustrations separate from reusable UI sheets. Where background planes, foregrounds or effects need independent crop, movement or parallax, deliver separate images and bind them to separate authored scene nodes with the existing render order; a flat image is fine when no independent behavior is needed. Use 1024x1024 and low quality by default for Cloudflare generation, changing size only for a concrete asset need. Decorative title lettering may be artwork when its exact wording and legibility can be checked; keep functional text, state, interactions and responsive layout in UI data rather than baking a whole screen into a texture. If the chosen title or cover source differs from the reviewed plan, update the affected design documents. The host records actual generation prompts at assets/ai-generation-prompts.md; do not duplicate that record. Registry interface: ${ASSET_MANIFEST_AUTHORING_CONTRACT_PATH}. Run the local format checker with ${ASSET_MANIFEST_VALIDATION_COMMAND}; its generated code is not an authoring reference.`
-    case 'content': return `Current delivery milestone: content. Deliver Scene/UI/VFX data and content/index.json covering every planned screen and level: hierarchy, transforms, layout, text/images, placements and interaction bindings. Preserve the reviewed spatial composition in the authored data, including the play-area placement relative to UI; do not silently replace planned visual layers or responsive layouts with an empty background or runtime-only positions. UI layout.position offsets the parent anchor and the child pivot defaults to that anchor; middle-center [0,0] centers a panel, while [-width/2,-height/2] does not. Shared scenes and procedural levels keep their layouts or generation parameters in registered content. The Scene/UI/VFX registry does not accept standalone gameplay tuning documents; keep project-owned configuration outside this package. A Tilemap includes cells and registered TileSet metadata; a Grid or behavior name alone is not a populated map. Choose representations suited to the project's 2D, 3D or XR target. Schemas and ready-to-use document/resource revisions: ${PROJECT_CONTENT_CONTRACT_PATH}. These are platform inputs, not algorithms to reverse-engineer.`
-    case 'implementation': return `Current delivery milestone: implementation. Read the reviewed eight documents in docs/ as the intended behavior, presentation and release scope before implementing; content-format files define data syntax, not gameplay design. Deliver a playable project that consumes content/index.json, its registered Scene/UI/VFX documents and assets/asset-manifest.json. Data semantics and runtimeConsumption are in .beegame/delivery/content-format.json. Content remains the editable source for hierarchy, transforms, layout, responsive variants, Tilemap cells and resource bindings; runtime code loads these and implements gameplay. Reading text/style while replacing node geometry with hand-written CSS or engine positions is not data-driven rendering. If responsive requirements and authored layout conflict, resolve the source data rather than silently ignoring it. If a documented rule proves infeasible or must change, update the affected documents and content with the implementation rather than silently substituting a different game. Framework, parser, compilation/caching, tests and delegation are yours. All planned screens and levels must work in the production build. Check the core rules and completion path against the documents; a successful build or one partial playthrough does not establish the full agreed scope. Verify representative layout, scene and resource changes in the target runtime; text-only changes and a green build do not establish these bindings. If a binding is ignored, fix it before claiming implementation complete. Distinguish game defects from unavailable browser environments or faulty test drivers; disclose what remains unverified.`
-    case 'acceptance': return `Current delivery milestone: acceptance. Derive the acceptance checks from the confirmed scope and reviewed eight documents, including the actual completion conditions and runtime-dependent questions left open in those documents; do not substitute a generic test route for their requirements. Verify the current playable version in its actual target runtime, address defects and disclose unresolved or unverified areas. Do not treat a document-stage simulation or review conclusion as runtime evidence; record any still-unverified release requirement in the acceptance result. Use deterministic checks where they establish rules more directly than a long autonomous playthrough; retain target-runtime evidence for the player-facing result. For a visual game, inspect the player-facing composition of representative screens and gameplay scenes at the target view and relevant aspect ratios, including background crop, separate layer order and title legibility when used; element presence and successful navigation alone do not establish visual quality. Check that active controls and overlays are fully within the actual viewport or safe area; a screenshot count or DOM isVisible result is not a bounds check. Keep visual captures or equivalent target-device evidence with the delivery result, and state any view that could not be inspected. Distinguish observed product failures from browser/environment failures and inconclusive test-driver behavior in the result and its evidence; do not count a bot's inability to navigate as proof of a game defect or as proof that gameplay works. If target-runtime verification is unavailable, report blocked rather than passed; simulated checks remain useful diagnostics. Publish consumes the evidence-backed result at ${PROJECT_DELIVERY_REPORT_PATH}; verification methods and delegation are yours.`
+    case 'author': return authorBatchInstruction(authorBatch)
+    case 'review': return `Current delivery milestone: review. This stage includes review and revision.
+Review the current eight files in docs/ against the confirmed requirements and platform agreements. Establish findings from current source definitions and necessary dependencies: earlier authoring summaries, completion labels and your own previous conclusions are claims to check, not evidence that the design is correct.
+Determine whether a developer can implement the agreed experience and an acceptance reviewer can verify it from these documents, without inventing missing product decisions. Cover the whole design:
+- Gameplay, states and content: objectives, legal actions, outcomes, interactions, transitions and recovery fit together and cover the agreed release.
+- Rules and quantities: important conclusions follow from the authoritative rules and actual content. Check the modeled situation as well as arithmetic; use legal actions to support feasibility and distinguish examples, bounds and playtest hypotheses.
+- UI and scene: every planned screen/state is represented by its layout input or a referenced shared composition, including menus and modal contents, not only HUD/game-view regions. Check that declared adaptation and minimum control sizes are actually in these inputs. Use the supplied spatial calculator on final inputs at the reference, smallest supported and layout-transition sizes. Investigate child containment, reserved padding and unreadable or unmeasured content; calculate required container space from child constraints rather than accepting a prose minimum. Calculate UI allocation first and use its game-view rectangle for scene framing, not the whole host window. Different screen shapes may select different compositions; check each against gameplay visibility and permitted overlay regions. UI_UX_SPEC owns allocation and layout selection; LEVEL_SCENE_DESIGN owns world/framing requirements and references that allocation. TECHNICAL_DESIGN explains consumption and coordinate conversion without duplicating final rectangles or camera offsets. Examples and verification expectations reference these same inputs/results rather than establishing another layout baseline.
+- Art, audio, resources and technology: the intended presentation is preserved; required versus optional deliverables, triggers, loading, failure handling and lifecycle responsibilities agree across their producers and consumers.
+Establish concrete findings from the files before revising: identify the source requirement, the contradictory or unsupported claim, and the affected dependencies. Follow dependencies rather than limiting the review to items already labelled unresolved. Use applicable Skills; methods, tools and subagent collaboration are yours to choose.
+The review conclusion must match the requirements actually checked and the observed results; a passing subset of calculations or a subagent's agreement does not establish a whole-design pass. Keep concise working evidence so the basis and limits of consequential conclusions can be rechecked.
+Correct the affected documents directly, then verify each correction against its source requirements and affected consumers, including new claims and layout selection conditions. When layout decisions change, update their calculation inputs and rerun affected compositions/sizes; updating prose or a camera result alone does not verify controls and overlays. Reconcile document references to the final inputs/results and remove superseded duplicate layout values. Keep findings and verification concise and traceable to source sections; no separate report, author self-review or independent checker is required.
+Preserve the confirmed scope and technical implementation freedom. If a correction requires changing the confirmed gameplay promise or delivery scope, explain the issue and leave that decision to the user. Resolve decisions needed for development here. Record concrete runtime checks for visual quality, feel and other assumptions that require a running game; do not defer contradictions or invalid calculations as playtest questions.
+Pass only when no development blockers remain and the corrected design has been rechecked. Update version information in revised documents and mark the design as the implementation and acceptance baseline; do not rewrite unchanged documents merely to synchronize version numbers. Briefly report the outcome, important findings and their verification, unresolved issues and runtime checks; do not claim checks you did not perform.`
+    case 'resources': return `Current delivery milestone: resources.
+Using the reviewed ASSET_PLAN.md together with the art, audio, UI, scene and technical documents, complete the required resources for this delivery. Optional resources do not block completion.
+Inspect existing resources, reuse those that meet the requirements and fill the gaps. Each required resource must correspond to a usable file or reproducible procedural output, with its intended use and usage explained.
+For a planned generated file or reusable procedural resource, deliver the usable output or executable generator with its inputs and usage; a promise to create it later is not resource completion. Simple shapes or effects intentionally expressed by content parameters and runtime behavior need not become separate asset files or generator frameworks. Identify those design references and remaining content/runtime integration briefly in the handoff; do not claim that integration is already tested.
+Choose built-in library assets, web assets, AI generation or procedural creation according to actual needs. First meet the design requirements, visual consistency and target-platform constraints, then compare time and cost. Approved fallbacks in the documents are valid; do not lower requirements on your own.
+Preserve the planned delivery structure and required variants as well as appearance: changing the production source does not silently cancel an atlas, animation or TileSet. Prefer compatible small 2D sprites with shared loading lifetime in atlases; keep large backgrounds, fonts, audio and models separate as appropriate. For AI-sourced small sprites or UI elements of one style that fit at usable detail, prefer one generation request for a shared sheet, not one request per element followed by optional packing. Request distinguishable, separated elements with useful spacing; choose transparency for their use. Split generation only for a concrete composition, detail or independent-use need and briefly explain it; a planned atlas is not optional merely because its source images were generated separately. The image model produces pixels, not authoritative frame coordinates: inspect the actual sheet and register named, in-bounds regions with logical display sizes, pivots and applicable padding/nine-slice metadata. Elements that vary independently must remain independently addressable. Functional text, interactions and layout belong in subsequent content data.
+AI image generation defaults to 1024x1024 and low quality. Choose transparency, image count and organization for the intended use; change size only for a concrete need. Consult the available capability instructions for tool usage and registration formats. Resource registration interface: ${ASSET_MANIFEST_AUTHORING_CONTRACT_PATH}.
+Atlas priority applies regardless of source: AI, retrieved images and procedurally drawn static sprites. For procedural sprites, prefer drawing directly into a shared sheet and emitting exact frame metadata from those drawing coordinates; existing separate sprites may be packed without regenerating their art. Group by concurrent use and compatible filtering, not source, and avoid loading unrelated content in a giant atlas. Keep dynamic text, live bars and simple parameter-driven geometry as runtime drawing where designed. Preserve source files when useful, but register runtime atlas/member bindings rather than loading both packed and source images for the same use.
+Check resource quality and import requirements, including the visual, audio and technical properties relevant to its type. Building a complete game is not a prerequisite for resource checks. Successful generation, file existence or valid format alone does not establish design compliance.
+Deliver the selected files and assets/asset-manifest.json, recording origins and necessary usage metadata. Check licenses for third-party assets; downloaded fonts remain third-party resources, not procedural creations. Accurately record generation origins for AI and procedural assets. Verify image/font decoding in the target browser where applicable, not just extensions or file existence. The content stage handles scene and UI layout and bindings.
+When a required resource cannot be delivered, report the missing item, reason and feasible options. Do not edit the reviewed design documents or mark missing resources complete.
+Briefly report delivery results and unresolved issues. Check and invoke applicable Skills; use subagents in parallel for independent tasks with clear dependencies, choosing the task split yourself.`
+    case 'content': return `Current delivery milestone: content. Translate the reviewed design and delivered resources into editable Scene/UI/VFX data and content/index.json for the agreed game.
+
+Inputs and scope:
+Read the relevant reviewed design documents and resource handoff. Account for every planned screen and level, reusing shared components, scenes and procedural definitions where appropriate rather than duplicating files for every state or generated level. Preserve existing correct data.
+Use the schemas, coordinate semantics, supported components, resource references and BGS-supplied revision values in ${PROJECT_CONTENT_CONTRACT_PATH} and its referenced format guidance. These are platform inputs, not algorithms to reverse-engineer. Choose representations suited to the confirmed 2D, 3D or XR target; do not introduce components merely to satisfy an unrelated example.
+
+Design-to-data handoff:
+Preserve the reviewed spatial composition: scene hierarchy, transforms, camera/framing, visual layers, placements and applicable generation parameters. For UI, carry through each screen's elements, content, layout, adaptation and state/action bindings, including the play-area placement relative to UI. Use the actual delivered resources and their registered members/frames rather than inventing missing assets.
+Express static design and supported state configuration in the content format. Identify the existing node/action/state references that runtime code must connect for dynamic behavior and feedback. Data declaration is not executable gameplay; do not silently omit a requirement because it needs code, or invent unsupported fields to make it appear implemented. Keep standalone gameplay configuration outside the Scene/UI/VFX registry as the contract requires.
+
+Checks and completion:
+Derive concrete values from the reviewed layout rules; do not choose a new layout or interaction design. If a necessary design decision is missing, identify the requirement and affected content instead of silently deciding it here.
+Use the supplied --layout inspection at chosen viewport sizes using the Editor's shared coordinate functions. Keep the reviewed layout selection and space allocation; use resolved UI rectangles to determine the Scene viewport instead of independently sizing both against the whole window. Investigate anchors, stretch and containment; inspect actual Editor previews for text, visual hierarchy and intended overlaps. Geometry inspection does not certify appearance or gameplay. Preserve planned Tilemap/TileSet bindings; report an incompatible resource rather than silently replacing its representation.
+Compare the resulting data against the applicable document requirements, including space allocation and adaptation, and use the provided read-only content checker for format and reference errors. A valid schema alone does not establish design coverage or runtime correctness. Correct data omissions against explicit design requirements; report missing resources, contradictory design or requirements the format cannot express, without changing reviewed documents or silently simplifying the design.
+Briefly hand off the delivered content, the runtime behavior still to connect and any unresolved gaps, using existing files and references rather than creating a separate mandatory report. Building the full game is not required in this stage, and runtime verification remains to be completed after implementation. Tools, task order and subagent collaboration are yours to choose.`
+    case 'implementation': return `Current delivery milestone: implementation. Deliver the complete runnable game defined by the reviewed design and delivered content.
+
+Design and data inputs:
+Read the reviewed eight documents in docs/ for the agreed gameplay, presentation, interactions and first-release scope. Inspect existing code, resources and content; preserve correct work rather than rebuilding it.
+The documents define intended design. Consume content/index.json, its registered Scene/UI/VFX documents and assets/asset-manifest.json. Data semantics and runtimeConsumption are in .beegame/delivery/content-format.json; content-format files define data syntax, not gameplay design.
+Content remains the editable source for static hierarchy, transforms, layout, responsive variants, Tilemap cells and resource bindings. Runtime code parses these and implements gameplay and dynamic presentation; do not maintain a separate substitute layout.
+For atlas assets, share loading and decoded image/texture sources by resolved asset URL within their useful lifetime, including concurrent requests. Frames reference regions of that source; avoid per-frame fetch/decode or copied pixel buffers merely to select a region. Use the chosen engine's existing cache where available, release owned resources when no longer needed, and keep unrelated atlas groups on demand. Sharing a sheet does not by itself guarantee rendering batches.
+
+Implementation approach:
+Work incrementally in this same project session. Technology, tools and task granularity are yours to choose. The following are dependency-aware working steps, not additional delivery stages or approval gates; do not stop between them for BGS to dispatch another assignment.
+Reuse an existing valid plan, or form a concise checklist connecting required features, screens, scenes and key states to document/data references, implementation tasks and observable checks. Mark existing, missing and conflicting work; keep this plan current for interruption/resumption without separate step reports. Resume from unresolved work, not automatically from step one.
+
+1. Establish and verify data consumption before expanding presentation.
+Use representative real project UI and Scene data, including nested elements and resources where present. Verify rendered geometry, text, images/atlas regions, layering and enabled states against that data at the reference and constrained container sizes specified by the design. Use the supplied coordinate/format references or optional helpers; test actual rendering, not just parsed JSON. A representative temporary layout/resource change must affect the intended rendered element and be restored. Verify Tilemaps only where the project uses them.
+Completion: the foundation supports the representative content correctly, demonstrated in the target runtime. Fix discovered parsing/rendering errors before reusing that foundation across more screens; a hard-coded replacement or successful build does not close this step. Identify unsupported data or design conflicts and continue independent work where possible.
+
+2. Deliver a representative vertical slice that establishes the core experience.
+Connect loading, entry, a small portion of core play, its applicable end condition and restart using real content and the agreed rules. Integrate enough intended UI, art and feedback to verify the design and its technical feasibility, rather than leaving presentation entirely to the end. Target the documented quality, not open-ended polishing or new art direction. Non-blocking presentation refinements may remain on the existing checklist for completion before handoff; do not defer broken parsing, unreadable controls or feedback needed to understand play. Verify actual input and repeatability, including restart cleanup. For games without a conventional win/lose loop, use their documented equivalent.
+Completion: the representative experience works and dependencies needed for expansion are verified. An intermediate playable version is not final delivery; track all remaining scope explicitly.
+
+3. Expand through independently verifiable feature units.
+Split remaining scope by observable player outcomes and dependencies, not just files or disciplines such as "finish UI" then "finish gameplay". In the existing concise checklist, associate each unit with its document/data references, required behavior and relevant entry/exit or recovery paths, presentation/feedback, dependencies and a practical completion check. Shared rules may be referenced; do not create another set of design documents or prescribe a fixed task count.
+Complete the applicable rules, data bindings, interaction, presentation and verification together for each unit. Group work by a testable player behavior, not individual widgets or edits. Use deterministic tests for rules/calculations and target-runtime observation for presentation/input; batch related checks instead of launching a browser for every small task. Reuse checks shared by several units and recheck affected consumers when shared code changes. Cover the remaining agreed scope without silently substituting placeholders.
+Completion: every required item has an implementation and an observed check, or is explicitly unresolved. Optional enhancements do not block; required omissions are not optional polish. All planned screens and levels must work in the production build.
+
+4. Integrate and hand off the current build.
+Reconcile the checklist with the final build and existing evidence. Reuse evidence that remains valid for the current implementation; check remaining integration risks and results invalidated by final changes in the target environment, rather than repeating every earlier check. Preserve reusable tests and evidence, and clean up only test resources you started.
+Completion: required scope is implemented and checked for the handed-off version, or remaining gaps are explicitly reported. Implementation self-checks do not replace subsequent acceptance: that stage evaluates overall coverage and fills evidence gaps, not automatically rerunning the whole implementation test suite. Distinguish game defects from unavailable environments or faulty test drivers. Briefly hand off scope, actual results, evidence locations and unresolved issues; a successful build alone is not complete delivery.
+
+Parallel work:
+Use subagents for bounded feature units, independent modules or focused verification when useful. Establish the relevant shared state, data and interface agreements before parallelizing dependent work. Give each a bounded objective, relevant document/data references, owned files and completion checks. Avoid concurrent edits to the same parser or interface; the main Agent maintains the plan and integrates shared decisions in this project session. Do not split entire gameplay, UI and audio systems into disconnected efforts and postpone their integration until the end. Delegates do not each recreate the whole game or repeat full acceptance. Integrate and verify their combined result before claiming completion; a subagent's PASS alone is not integration evidence. You may adapt task order or combine steps for a small project whose slice covers most of its scope, but do not treat an unverified dependency as complete.
+
+Design consistency and issue handling:
+Implement the full agreed scope, including necessary elements, interaction states, feedback and adaptation, not only the normal play path.
+If code fails to implement the design or consume data correctly, fix the implementation. If content omits or contradicts an explicit document requirement, correct the data while preserving valid formats and references.
+The reviewed eight documents are the implementation baseline. Do not edit them during implementation. If they conflict, lack a necessary design decision or require something the current contract cannot express, report specific evidence, impact and a proposed resolution. Do not silently reduce scope or change the specification to fit the implementation. Continue unaffected work where possible, but do not mark the unresolved requirement complete.
+
+Keep verification proportional to project complexity and risk; unobserved work remains unverified.`
+    case 'acceptance': return `Current delivery milestone: acceptance. Determine whether the current game fully implements the reviewed design and is usable in the agreed runtime environment.
+
+Acceptance basis:
+Derive checks from the confirmed scope and reviewed eight documents, including completion conditions and runtime-dependent questions left open in those documents. Scene/UI and resource data describe the corresponding content; neither the existing implementation nor an Agent summary replaces the agreed requirements.
+Read the implementation handoff and existing evidence to identify remaining verification. Reuse results still valid for the current version; do not repeat the whole development process or write a separate long acceptance plan.
+
+Verification:
+Choose methods and order appropriate to the project, covering applicable requirements:
+- Complete experience: agreed gameplay, screens and levels, and the transitions through start, play, outcomes, retry and other key states.
+- Rules and boundaries: behavior, calculations and state transitions against the design, including important edge cases and abnormal operations.
+- Player-facing result: actual composition, framing, resources, text, interaction feedback and audio against the design under the agreed display conditions and input methods. Verify usable control bounds, not merely element presence or successful navigation. Keep visual captures or equivalent target-device evidence where relevant.
+- Data consumption: the corresponding Scene/UI and resource data actually drives runtime behavior rather than merely loading before an independent substitute implementation runs.
+Use deterministic tests for rules where useful, and observation in the actual target runtime for presentation and interaction. Match depth to project complexity and risk without expanding the agreed platform, device or content scope. Document-stage simulations and review conclusions are not runtime evidence.
+
+Evidence and judgments:
+Connect each conclusion to the requirement, the check performed and the observed outcome. A check establishes only what it directly covers; a similar visible effect is not proof of the required behavior.
+Select binding checks applicable to the registered documents and actual components. Do not claim Tilemap verification for a scene without a Tilemap component. Successful resource loading does not establish that changing a resource reference changes the rendered or played asset.
+For binding verification, change representative applicable data in a temporary copy or recoverable test setup and observe the corresponding runtime result. Restore test changes and keep them out of the delivered version.
+Distinguish product defects, unavailable environments and inconclusive test-driver behavior. Record unobserved requirements as unverified rather than inferring success or failure. Fill report fields from the actual data and evidence, not to populate unrelated check categories. A report-format check is not verification of the report's claims or runtime evidence.
+
+Defects and retesting:
+Fix implementation or content defects against explicit design requirements and retest affected behavior. Expand regression only as the impact requires; a local correction does not automatically require every check to run again.
+If documents conflict, necessary design decisions are missing or resolving the issue would change the confirmed scope, report evidence and impact. Do not edit the reviewed design or lower requirements to obtain a pass. Continue unaffected checks where useful.
+The final conclusion and saved evidence must apply to the delivered version. Revalidate results invalidated by fixes and record the actual tested deployment artifacts, not temporary test variants.
+
+Delivery result:
+Report passed only when the agreed scope is complete, required checks pass and no in-scope issues or unverified requirements remain. Record confirmed unresolved defects as failed; when necessary verification or a required decision is unavailable, report blocked and explain the limitation. Disclose all known issues and unverified requirements regardless of the overall status; never reclassify an in-scope gap as outsideScope to obtain a pass.
+Save the result and evidence using the existing report contract at ${PROJECT_DELIVERY_REPORT_PATH}, including evidencePaths and artifactPaths for the tested delivery. A conversational PASS does not replace this record. Briefly report the conclusion, major findings/fixes, verified scope and unresolved issues.
+Tools, verification methods and subagent delegation are yours to choose.`
     case 'complete': return 'The original project delivery is complete. Follow the current user request.'
   }
 }
@@ -56,6 +159,7 @@ type ProjectDeliveryState = {
   objective: string
   status: 'active' | 'paused'
   phase?: ProjectDeliveryPhase
+  authorBatch?: number
   lastValidationFailure?: string
   accepted?: ProjectDeliveryAcceptance
 }
@@ -164,10 +268,11 @@ export async function resumeProjectDelivery(workspacePath: string, dataRoot: str
 }
 
 /** Advance only after a successful native turn; validation issues keep the same milestone. */
-export async function advanceProjectDeliveryAfterTurn(workspacePath: string, dataRoot: string): Promise<{
+export async function advanceProjectDeliveryAfterTurn(workspacePath: string, dataRoot: string, conclusion?: import('./milestone-result').MilestoneResult): Promise<{
   phase: ProjectDeliveryPhase
   shouldContinue: boolean
   issues: string[]
+  diagnostic?: AcceptanceDiagnostic
 } | undefined> {
   return withStateMutation(workspacePath, dataRoot, async () => {
   const state = await readProjectDelivery(workspacePath, dataRoot)
@@ -175,8 +280,16 @@ export async function advanceProjectDeliveryAfterTurn(workspacePath: string, dat
   const phase = projectDeliveryPhase(state)
   if (phase === 'complete') return { phase, shouldContinue: false, issues: [] }
   const issues: string[] = []
-  if (phase === 'author') {
-    for (const name of PROJECT_DOCUMENTS) {
+  let diagnostic: AcceptanceDiagnostic | undefined
+  if (phase === 'review' || phase === 'implementation') {
+    if (conclusion?.phase !== phase || conclusion.status !== 'complete') {
+      return { phase, shouldContinue: false, issues: [conclusion?.phase === phase && conclusion.status === 'blocked'
+        ? conclusion.summary : `The ${phase} milestone has no explicit completion result from this turn.`] }
+    }
+  } else if (phase === 'author') {
+    const batch = state.authorBatch ?? 0
+    if (!AUTHOR_BATCHES[batch]) throw new Error('Invalid author batch')
+    for (const name of AUTHOR_BATCHES.slice(0, batch + 1).flat()) {
       const path = join(workspacePath, 'docs', name)
     try { const file = await stat(path); if (!file.isFile() || file.size === 0) issues.push(`docs/${name} is missing or empty`) }
       catch { issues.push(`docs/${name} is missing`) }
@@ -196,16 +309,18 @@ export async function advanceProjectDeliveryAfterTurn(workspacePath: string, dat
     catch (error) { issues.push(`Content validation failed: ${error instanceof Error ? error.message : String(error)}`) }
   } else if (phase === 'acceptance') {
     const report = await readRuntimeAcceptanceReport(workspacePath, PROJECT_DELIVERY_REPORT_PATH)
+    diagnostic = report?.diagnostic
     if (!report) issues.push(`${PROJECT_DELIVERY_REPORT_PATH} is missing`)
-    else if (report.status === 'blocked' && !report.invalidRecord) {
+    else if (diagnostic?.category === 'report-invalid') issues.push(diagnostic.message)
+    else if (report.status === 'blocked' || diagnostic?.category === 'verification-incomplete' || diagnostic?.category === 'product-failed') {
       await save(workspacePath, dataRoot, { ...state, phase, lastValidationFailure: JSON.stringify([phase, report.summary]) })
-      return { phase, shouldContinue: false, issues: [report.summary] }
-    } else if (report.invalidRecord) issues.push(report.summary)
-    else if (report.scope !== 'delivery') issues.push(`${PROJECT_DELIVERY_REPORT_PATH} must have scope "delivery"`)
+      return { phase, shouldContinue: false, issues: [report.summary], diagnostic }
+    } else if (report.scope !== 'delivery') issues.push(`${PROJECT_DELIVERY_REPORT_PATH} must have scope "delivery"`)
     else if (report.status === 'failed') issues.push(`${PROJECT_DELIVERY_REPORT_PATH} reports failed; address its recorded findings`)
     else {
       const gate = await evaluateProjectDeliveryGate(workspacePath, dataRoot, false)
-      if (!gate?.allowed) issues.push(...(gate?.issues ?? ['Current-version acceptance could not be verified']))
+      if (!gate?.allowed) issues.push(...(gate?.issues ?? ['Current-version acceptance could not be verified'])
+        .map(issue => `Publish readiness (${gate?.layer ?? 'acceptance-record'}): ${issue}`))
     }
   }
   if (issues.length) {
@@ -215,7 +330,13 @@ export async function advanceProjectDeliveryAfterTurn(workspacePath: string, dat
     // of progress and must not continually re-arm a paid automatic turn.
     // This deduplicates host dispatch, not the Agent's own repair attempts or
     // explicit user turns (which are always delivered).
-    return { phase, shouldContinue: state.lastValidationFailure !== failure, issues }
+    return { phase, shouldContinue: state.lastValidationFailure !== failure, issues, ...(diagnostic ? { diagnostic } : {}) }
+  }
+  if (phase === 'author' && (state.authorBatch ?? 0) < AUTHOR_BATCHES.length - 1) {
+    await save(workspacePath, dataRoot, {
+      ...state, authorBatch: (state.authorBatch ?? 0) + 1, lastValidationFailure: undefined,
+    })
+    return { phase, shouldContinue: true, issues: [] }
   }
   const next = NEXT_PHASE[phase]
   if (next === 'content') await refreshProjectContentContract(workspacePath)
@@ -291,24 +412,25 @@ export async function captureProjectDeliveryAcceptance(workspacePath: string, da
 export async function evaluateProjectDeliveryGate(workspacePath: string, dataRoot: string, requireComplete = true): Promise<{
   allowed: boolean
   issues: string[]
+  layer: 'report' | 'acceptance-record' | 'delivery' | 'revision' | 'ready'
 } | undefined> {
   const state = await readProjectDelivery(workspacePath, dataRoot)
   if (!state) return undefined
   if (!state.accepted) {
     const report = await readRuntimeAcceptanceReport(workspacePath, PROJECT_DELIVERY_REPORT_PATH)
-    return { allowed: false, issues: report?.status === 'blocked'
+    return { allowed: false, layer: report?.status === 'blocked' ? 'report' : 'acceptance-record', issues: report?.status === 'blocked'
       ? [report.summary] : ['Current project has no verified delivery acceptance.'] }
   }
   if (requireComplete && projectDeliveryPhase(state) !== 'complete')
-    return { allowed: false, issues: ['Project delivery is still in progress.'] }
+    return { allowed: false, layer: 'delivery', issues: ['Project delivery is still in progress.'] }
   const { accepted } = state
   if (accepted.revision !== await computeWorkspaceRevision(workspacePath))
-    return { allowed: false, issues: ['Workspace changed after acceptance; revalidation is required.'] }
+    return { allowed: false, layer: 'revision', issues: ['Workspace changed after acceptance; revalidation is required.'] }
   if (accepted.source !== 'report') {
-    return { allowed: false, issues: ['Current version requires a delivery acceptance report.'] }
+    return { allowed: false, layer: 'acceptance-record', issues: ['Current version requires a delivery acceptance report.'] }
   }
   if (accepted.reportPath !== PROJECT_DELIVERY_REPORT_PATH)
-    return { allowed: false, issues: ['Delivery evidence changed after acceptance; revalidation is required.'] }
+    return { allowed: false, layer: 'revision', issues: ['Delivery evidence changed after acceptance; revalidation is required.'] }
   let reportSha256: string
   try {
     const candidate = resolveWorkspaceRelativePath(workspacePath, accepted.reportPath)
@@ -321,16 +443,16 @@ export async function evaluateProjectDeliveryGate(workspacePath: string, dataRoo
       .update(await readFile(candidate))
       .digest('hex')
   } catch {
-    return { allowed: false, issues: ['Delivery acceptance report is missing.'] }
+    return { allowed: false, layer: 'report', issues: ['Delivery acceptance report is missing.'] }
   }
   const currentReport = await readRuntimeAcceptanceReport(workspacePath, PROJECT_DELIVERY_REPORT_PATH)
   if (currentReport?.scope !== 'delivery' || currentReport.status !== 'passed')
-    return { allowed: false, issues: currentReport?.status === 'blocked'
+    return { allowed: false, layer: 'report', issues: currentReport?.status === 'blocked'
       ? [currentReport.summary] : ['Delivery acceptance report is not a current delivery PASS.'] }
   if (reportSha256 !== accepted.reportSha256 ||
       !await runtimeEvidenceIsCurrent(workspacePath, accepted.reports))
-    return { allowed: false, issues: ['Delivery evidence changed after acceptance; revalidation is required.'] }
-  return { allowed: true, issues: [] }
+    return { allowed: false, layer: 'revision', issues: ['Delivery evidence changed after acceptance; revalidation is required.'] }
+  return { allowed: true, layer: 'ready', issues: [] }
 }
 
 /** Editor authority comes from the authored package, not a delivery phase snapshot. */

@@ -13,4 +13,6 @@ Use sound to communicate action, consequence, space, and mood. Start from the in
 - Consider silent play and hearing differences: critical information also needs a visual or haptic path when relevant. Respect user volume/mute settings and platform autoplay or gesture-to-start rules, especially on the web.
 - Check licenses and provenance before importing audio. Optimize format, duration, and loading only against the actual target platform and observed latency or memory issue.
 
+For AUDIO_DESIGN.md, map planned player/game events to audio intent, priority and timing, then describe music/ambience transitions, mix and mute or accessibility behavior as the project needs. Leave file sourcing to the asset plan and resource work.
+
 Verify with the game running, preferably through the ordinary player path. Automated or headless checks should remain muted unless audio output is itself the subject of the test. Do not impose a full audio pass on a focused request.

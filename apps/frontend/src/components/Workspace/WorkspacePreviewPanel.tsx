@@ -112,7 +112,10 @@ function PreviewFrame({ title, url, frameRef, labels, viewport, onViewportChange
   const [consoleFilter, setConsoleFilter] = useState<PreviewConsoleFilter>('all');
   const [selectedConsoleEntryId, setSelectedConsoleEntryId] = useState<number | null>(null);
   const [fixingConsoleEntryId, setFixingConsoleEntryId] = useState<number | null>(null);
-  const [hasUnreadConsole, setHasUnreadConsole] = useState(false);
+  const [unreadConsoleLevel, setUnreadConsoleLevel] = useState<Exclude<PreviewConsoleFilter, 'all'> | null>(null);
+  const hasUnreadConsole = unreadConsoleLevel !== null;
+  const unreadDotColor = unreadConsoleLevel === 'error' ? 'bg-[var(--destructive)]'
+    : unreadConsoleLevel === 'warn' ? 'bg-amber-400' : 'bg-blue-400';
   const consoleOpenRef = useRef(false);
   const nextConsoleEntryId = useRef(0);
   const [paused, setPaused] = useState(false);
@@ -159,7 +162,9 @@ function PreviewFrame({ title, url, frameRef, labels, viewport, onViewportChange
         setConsoleEntries(entries => [...entries.slice(-199), {
           id: nextConsoleEntryId.current++, level, message, createdAt: Date.now(),
         }]);
-        if (!consoleOpenRef.current) setHasUnreadConsole(true);
+        if (!consoleOpenRef.current) setUnreadConsoleLevel(current =>
+          current === 'error' || level === 'error' ? 'error'
+            : current === 'warn' || level === 'warn' ? 'warn' : 'info');
         return;
       }
       if (event.data.type !== 'beegame.preview.lifecycle') return;
@@ -272,18 +277,19 @@ function PreviewFrame({ title, url, frameRef, labels, viewport, onViewportChange
           </Button>
         </Liquid.Item>
         <Liquid.Item style={{ position: 'absolute', left: 0, bottom: 0 }} y={actionsExpanded ? -84 : 0} scale={actionsExpanded ? 1 : 0} transition="bouncy">
-          <Button type="button" variant="ghost" size="icon-sm" aria-label={labels.previewConsole || 'Console'} aria-description={hasUnreadConsole ? labels.newPreviewConsoleOutput || 'New console output' : undefined} title={labels.previewConsole || 'Console'} aria-hidden={!actionsExpanded} tabIndex={actionsExpanded ? 0 : -1} disabled={!actionsExpanded} onClick={() => { consoleOpenRef.current = true; setHasUnreadConsole(false); setActionsExpanded(false); setConsoleOpen(true); }} className="pointer-events-auto relative rounded-full !bg-transparent text-[var(--text-secondary)] hover:!bg-transparent">
+          <Button type="button" variant="ghost" size="icon-sm" aria-label={labels.previewConsole || 'Console'} aria-description={hasUnreadConsole ? labels.newPreviewConsoleOutput || 'New console output' : undefined} title={labels.previewConsole || 'Console'} aria-hidden={!actionsExpanded} tabIndex={actionsExpanded ? 0 : -1} disabled={!actionsExpanded} onClick={() => { consoleOpenRef.current = true; setUnreadConsoleLevel(null); setActionsExpanded(false); setConsoleOpen(true); }} className="pointer-events-auto relative rounded-full !bg-transparent text-[var(--text-secondary)] hover:!bg-transparent">
             <SquareTerminal className="size-4" aria-hidden="true" />
-            {hasUnreadConsole && actionsExpanded ? <span data-testid="beegame-console-unread-dot" aria-hidden="true" className="absolute right-0 top-0 size-2 rounded-full bg-[var(--destructive)] ring-2 ring-[var(--surface-1)]" /> : null}
           </Button>
         </Liquid.Item>
         <Liquid.Item style={{ position: 'absolute', left: 0, bottom: 0 }}>
           <Button type="button" variant="ghost" size="icon-sm" aria-label={actionsExpanded ? labels.closePreviewActions : labels.previewActions} aria-description={hasUnreadConsole ? labels.newPreviewConsoleOutput || 'New console output' : undefined} title={actionsExpanded ? labels.closePreviewActions : labels.previewActions} aria-expanded={actionsExpanded} onClick={() => setActionsExpanded(value => !value)} className="pointer-events-auto relative rounded-full !bg-transparent text-[var(--text-secondary)] hover:!bg-transparent">
             <Ellipsis className="size-4" aria-hidden="true" />
-            {hasUnreadConsole && !actionsExpanded ? <span data-testid="beegame-console-unread-dot" aria-hidden="true" className="absolute right-0 top-0 size-2 rounded-full bg-[var(--destructive)] ring-2 ring-[var(--surface-1)]" /> : null}
           </Button>
         </Liquid.Item>
       </Liquid>
+      {hasUnreadConsole ? <span data-testid="beegame-console-unread-dot" aria-hidden="true"
+        className={`pointer-events-none absolute bottom-6 left-6 size-2 rounded-full ${unreadDotColor} ring-2 ring-[var(--surface-1)]`}
+        style={{ transform: `translateY(${actionsExpanded ? -84 : 0}px)` }} /> : null}
     </div> : null}
     {viewportDialogOpen ? <PreviewViewportDialog onClose={() => setViewportDialogOpen(false)} viewport={viewport} onApply={onViewportChange} labels={labels} /> : null}
   </>;

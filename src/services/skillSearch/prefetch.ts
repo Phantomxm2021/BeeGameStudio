@@ -61,13 +61,12 @@ export function extractQueryFromMessages(
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i] as Record<string, unknown>
     if (msg.type !== 'user' && (input || msg.type !== 'assistant')) continue
-    const content =
-      msg.type === 'assistant'
-        ? (msg.message as Record<string, unknown> | undefined)?.content
-        : msg.content
+    // Native user messages, including initial subagent tasks, use the same
+    // message.content envelope as assistant messages.
+    const content = (msg.message as Record<string, unknown> | undefined)?.content
     if (typeof content === 'string') {
       if (content.trim()) {
-        parts.push(content.slice(0, 500))
+        parts.push(content)
         break
       }
     }
@@ -78,10 +77,13 @@ export function extractQueryFromMessages(
         // Never search tool output, tool arguments, or private thinking.
         if (entry.type && entry.type !== 'text') continue
         if (typeof entry.text === 'string' && entry.text.trim())
-          textBlocks.push(entry.text.slice(0, 500))
+          textBlocks.push(entry.text)
       }
       if (textBlocks.length > 0) {
-        parts.push(textBlocks.join(' ').slice(0, 1000))
+        // Search is local. Keep the visible task, including intent after long
+        // source references; truncating its prefix can erase the task itself.
+        // This does not inject the query into the model or load more Skills.
+        parts.push(textBlocks.join(' '))
         break
       }
     }

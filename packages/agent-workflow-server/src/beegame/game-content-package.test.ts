@@ -48,6 +48,17 @@ const logicalCameraData = {
 }
 
 describe('Unity-style Game Content scene contract', () => {
+  it('allows an intentional camera span independent of reference/map height and rejects invalid framing', () => {
+    const data={...logicalCameraData,orthographicSize:120,framing:'keep-width'}
+    const source={schema:'beegame-content.v1',id:'scene',kind:'scene-2d',assetRefs:[],data:{cameraNodeId:'camera',nodes:[
+      {id:'camera',components:[component('cam','camera',{data})]},
+    ]}}
+    expect(audit(source).valid).toBe(true)
+    data.framing='invented'
+    const failed=audit(source)
+    expect(failed.valid).toBe(false)
+    expect(failed.issues.join('\n')).toContain('Unknown camera framing')
+  })
   it('rejects offscreen interactive UI before implementation while accepting corrected authored layout', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'beegame-ui-bounds-')); workspaces.push(workspace)
     mkdirSync(join(workspace, 'content/scenes'), { recursive: true })

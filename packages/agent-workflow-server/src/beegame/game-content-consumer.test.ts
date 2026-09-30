@@ -22,6 +22,30 @@ const contentIndex = {
   ],
 }
 
+test('document failures identify the reference and distinguish transport, JSON and schema errors', async () => {
+  const url = 'https://example.test/previews/game/content/index.json'
+  await expect(fetchContentDocument(contentIndex, 'SPARK', url)).rejects.toThrow('not registered: SPARK')
+  await expect(fetchContentDocument(contentIndex, 'spark', url, async () => { throw new Error('offline') }))
+    .rejects.toThrow('Failed to fetch content document spark (vfx/spark.json): offline')
+  await expect(fetchContentDocument(contentIndex, 'spark', url, async () => new Response('<html>fallback</html>')))
+    .rejects.toThrow('Invalid JSON for content document spark (vfx/spark.json)')
+  await expect(fetchContentDocument(contentIndex, 'spark', url, async () => Response.json({})))
+    .rejects.toThrow('Invalid content document spark (vfx/spark.json)')
+  const abort = new DOMException('Aborted', 'AbortError')
+  await expect(fetchContentDocument(contentIndex, 'spark', url, async () => { throw abort })).rejects.toBe(abort)
+})
+
+test('registered loading preserves both root and nested deployment bases', async () => {
+  for (const base of ['https://example.test/', 'https://example.test/previews/game/']) {
+    const urls: string[] = []
+    await fetchContentDocument(contentIndex, 'bonus', base + 'content/index.json', async input => {
+      urls.push(String(input))
+      return Response.json({ ...scene, id: 'bonus' })
+    })
+    expect(urls).toEqual([base + 'content/scenes/bonus.json'])
+  }
+})
+
 test('consumer and host use the same contract; no silent flat-envelope fallback', () => {
   expect(readSceneData(scene)).toEqual(parseBeeGameContentDocument(scene).data)
   expect(() => readSceneData({ ...scene, data: undefined, nodes: scene.data.nodes })).toThrow()

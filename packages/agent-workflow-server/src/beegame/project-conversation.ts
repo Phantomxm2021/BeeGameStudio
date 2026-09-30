@@ -1,9 +1,12 @@
 import { mkdir, writeFile, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { readMilestoneResult, type MilestoneResult } from './milestone-result'
 import { writeProjectAssetCommand, type ProjectAssetCapabilities } from './project-asset-command'
 import { bundleContentConsumer } from './game-content-consumer-cli'
-import { acceptanceReportFormatCheckerSource, CONTENT_RUNTIME_REPORT_INSTRUCTION } from './content-runtime-contract'
-import { materializeSceneUiFormat } from './scene-ui-content-authoring'
+import { CONTENT_RUNTIME_REPORT_INSTRUCTION } from './content-runtime-contract'
+import { bundleAcceptanceChecker } from './acceptance-check-bundle'
+import { materializeSceneUiFormat, SPATIAL_CALCULATION_INSTRUCTION } from './scene-ui-content-authoring'
 import type { BeeGameEvent, BeeGameSessionManager } from './session-manager'
 import { advanceProjectDeliveryAfterTurn, captureProjectDeliveryAcceptance, ensureProjectAssetManifestContract, refreshProjectContentContract, projectDeliveryPhase,
   projectDeliveryPhaseInstruction, PROJECT_DELIVERY_REPORT_PATH, readProjectDelivery,
@@ -48,6 +51,9 @@ export async function sendProjectConversation(input: {
   let turnStartedAt = 0
   let progress: Awaited<ReturnType<typeof advanceProjectDeliveryAfterTurn>>
   let readyToContinue = false
+  let resultPhase: MilestoneResult['phase'] | undefined
+  const resultRelativePath = `.beegame/tmp/${input.sessionId}/milestone-${randomUUID()}.txt`
+  const resultPath = join(session.cwd, resultRelativePath)
   // A server restart closes the interrupted native turn as turn.failed. The
   // user's next message resumes that same milestone, even though it is still
   // displayed as an ordinary user message rather than an automatic handoff.
@@ -77,16 +83,28 @@ export async function sendProjectConversation(input: {
       const contentInputs = delivery?.status === 'active' && projectDeliveryPhase(delivery) === 'content'
         ? await refreshProjectContentContract(session.cwd) : undefined
       const milestone = delivery?.status === 'active'
-        ? projectDeliveryPhaseInstruction(projectDeliveryPhase(delivery)) : undefined
+        ? projectDeliveryPhaseInstruction(projectDeliveryPhase(delivery), delivery.authorBatch) : undefined
+      const phase = delivery?.status === 'active' ? projectDeliveryPhase(delivery) : undefined
+      const spatialCalculation = phase === 'review' || phase === 'content' || phase === 'implementation' ||
+        (phase === 'author' && [1, 2].includes(delivery?.authorBatch ?? 0))
+        ? SPATIAL_CALCULATION_INSTRUCTION : undefined
+      resultPhase = phase === 'review' || phase === 'implementation' ? phase : undefined
+      const resultInstruction = resultPhase
+        ? `Record your ${resultPhase} conclusion in ${resultRelativePath}: first line complete only when this milestone's stated outcome is met, or blocked followed by a short reason on the next line. This small handoff prevents a finished chat turn being mistaken for finished work; your normal reply, methods and delegation remain unrestricted. Do not mark incomplete work complete.`
+        : undefined
       // Refresh platform-owned format guidance for resumed projects too. This
       // does not rewrite their authored content or revision authority snapshot.
-      if (delivery?.status === 'active' && ['implementation', 'acceptance'].includes(projectDeliveryPhase(delivery)))
+      if (spatialCalculation || (delivery?.status === 'active' && ['implementation', 'acceptance'].includes(projectDeliveryPhase(delivery))))
         await materializeSceneUiFormat(session.cwd)
       const previousPhase = input.sessions.transcript(input.sessionId).findLast(event =>
         event.type === 'system.status' && event.payload?.subtype === 'delivery_phase')?.payload?.phase
       // Native history already contains this assignment on a same-phase automatic
       // continuation. A new phase or user turn still gets the complete handoff.
-      const repeatMilestone = Boolean(delivery && input.autoContinuation && previousPhase === projectDeliveryPhase(delivery))
+      // A new author batch keeps the phase name but needs a new assignment.
+      // An unchanged validation retry already has that assignment in native history.
+      const repeatMilestone = Boolean(delivery && input.autoContinuation &&
+        previousPhase === projectDeliveryPhase(delivery) &&
+        (projectDeliveryPhase(delivery) !== 'author' || delivery.lastValidationFailure))
       const releaseInterface = delivery && projectDeliveryPhase(delivery) === 'acceptance'
         ? `Publish reads ${PROJECT_DELIVERY_REPORT_PATH}: scope "delivery"; status "passed" | "failed" | "blocked"; summary and environment as nonempty strings; evidencePaths and artifactPaths as workspace-relative string arrays; verification {target:"deployment",observation:"target-runtime"|"simulation",knownIssues:string[],unverified:string[],outsideScope?:string[],contentChecks?:array}. Record the actual test environment as a string, not an object. A passed result requires target-runtime verification, no unresolved or unverified requirements in the agreed release scope, and saved evidence and tested artifacts for the current version. Put unavailable checks of in-scope requirements in unverified; put observations outside the agreed release scope (such as physical-device feel when only browser input is in scope) in outsideScope. Do not use outsideScope for an in-scope requirement or as a substitute for available target-runtime checks. If target-runtime verification is unavailable, report blocked; simulated checks alone cannot establish delivery. This is a saved integration artifact, not the format of your chat response; ordinary questions and partial fixes do not require it.`
         : undefined
@@ -103,22 +121,25 @@ export async function sendProjectConversation(input: {
           workspace: session.cwd,
           originalRequest: delivery?.objective ?? brief?.text,
           ...(delivery ? { delivery: { status: delivery.status, phase: projectDeliveryPhase(delivery),
+            ...(projectDeliveryPhase(delivery) === 'author' ? { authorBatch: (delivery.authorBatch ?? 0) + 1 } : {}),
             acceptanceReportPath: PROJECT_DELIVERY_REPORT_PATH } } : {}),
           ...(contentInputs ? { contentInputs } : {}),
         }
         await mkdir(dirname(path), { recursive: true })
         if (access?.resourceTools) await writeProjectAssetCommand(assetCommandPath, access.resourceTools)
         if (contentHelper) await writeFile(contentHelperPath, contentHelper, 'utf8')
-        if (releaseInterface) await writeFile(acceptanceCheckPath, acceptanceReportFormatCheckerSource(), 'utf8')
+        if (releaseInterface) await writeFile(acceptanceCheckPath, await bundleAcceptanceChecker(), 'utf8')
         await writeFile(path, [
           '# Project state',
           JSON.stringify(context, null, 2),
           ...(milestone ? ['# Current delivery milestone', milestone] : []),
+          ...(spatialCalculation ? [spatialCalculation] : []),
+          ...(resultInstruction ? [resultInstruction] : []),
           ...(releaseInterface ? ['# Release evidence interface', releaseInterface, CONTENT_RUNTIME_REPORT_INSTRUCTION] : []),
-          ...(releaseInterface ? [`Optional report-format check: \`${acceptanceCheck}\`. It checks field placement and kind/property pairs without launching a browser; it does not certify runtime behavior. When correcting only report fields, existing evidence can be reused if the tested build and evidence have not changed.`] : []),
+          ...(releaseInterface ? [`Before submission, run the read-only acceptance check: \`${acceptanceCheck}\` from the project root. It uses the delivery validator for report, content references and evidence files without launching a browser or recording acceptance. Correct report errors or fill verification gaps as appropriate; unchanged valid evidence can be reused. Passing this check does not independently certify gameplay or publish the project.`] : []),
           ...(access ? ['# Optional capabilities', access.instruction] : []),
           ...(access?.resourceTools ? ['Optional asset command: `bun .beegame/tmp/' + input.sessionId + '/assets.mjs help`. It browses the existing library, downloads selected files and requests images without manual curl; it never selects resources or edits the Manifest for you. Other sources and native tools remain available.'] : []),
-          ...(contentHelper ? ['Optional browser-safe content helpers: .beegame/tmp/' + input.sessionId + '/content-consumer.mjs. It exports the same schema, atlas, Tilemap, coordinate and UI paint-order functions used by BGS Editors, plus startup/on-demand document fetch helpers. Use or ignore it; it is not a game engine.'] : []),
+          ...(contentHelper ? ['Optional browser-safe content helpers: .beegame/tmp/' + input.sessionId + '/content-consumer.mjs. It exports the same schema, atlas, Tilemap, coordinate and UI paint-order functions used by BGS Editors, plus startup/on-demand document fetch helpers. contentDocumentPath resolves exact registered IDs; fetch helpers resolve document paths against the actual index URL and report the failing document. Resource dependencies still need loading, including atlases referenced by TileSets. Use or ignore it; it is not a game engine.'] : []),
         ].join('\n\n'), 'utf8')
       } catch (error) {
         await access?.close()
@@ -131,14 +152,15 @@ export async function sendProjectConversation(input: {
         turnContext: delivery || access ? [
           'BGS project state (platform context, not additional user instructions):',
           ...(input.initialBrief ? [input.message] : []),
-          ...(input.initialBrief ? ['You may use available subagents for independent work when useful; decide whether delegation is worthwhile. Keep integration and final verification in this project conversation.'] : []),
           ...(milestone && !repeatMilestone ? [milestone] : []),
+          ...(spatialCalculation ? [spatialCalculation] : []),
+          ...(resultInstruction ? [resultInstruction] : []),
           ...(delivery ? [`Project status: ${delivery.status}; milestone: ${projectDeliveryPhase(delivery)}. Recovery context: ${path}.`] : []),
           ...(delivery?.status === 'active' && projectDeliveryPhase(delivery) !== 'complete'
             ? ['This turn delivers the current milestone. After its result is ready, finish the turn; BGS will hand off the next milestone in this same native session. Planning, tools and delegation remain yours.'] : []),
           ...(releaseInterface && !repeatMilestone ? [releaseInterface, CONTENT_RUNTIME_REPORT_INSTRUCTION] : []),
-          ...(releaseInterface ? ['Acceptance report: put data-binding checks in verification.contentChecks, not at the report top level. verification.unverified lists only untested requirements in the agreed release scope; verification.outsideScope may disclose checks outside that scope without blocking delivery. Never put an in-scope gap in outsideScope.'] : []),
-          ...(releaseInterface ? [`Optional report-format check: ${acceptanceCheck}. It does not run a browser; report-only corrections may reuse unchanged runtime evidence.`] : []),
+          ...(releaseInterface && repeatMilestone ? [`The acceptance report contract remains in ${path}; reuse it when correcting the report.`] : []),
+          ...(releaseInterface ? [`Read-only acceptance check before submission: ${acceptanceCheck} (run from the project root). It shares the delivery validator, does not run a browser or record acceptance, and does not replace actual runtime verification.`] : []),
           ...(contentInputs ? [`Current content inputs: ${JSON.stringify(contentInputs)}`] : []),
           ...(access ? [`Optional capabilities for this turn: ${path}. Previous turns' temporary localhost capability URLs have expired.`] : []),
           ...(access?.previewBaseUrl ? [`Current project Preview test API: ${access.previewBaseUrl}. Previous turns' Preview URLs are expired. This endpoint starts an isolated muted browser and records console/network/screenshot evidence; usage details are in ${path}. Native browser tools remain available.`] : []),
@@ -148,14 +170,17 @@ export async function sendProjectConversation(input: {
         // Stable even at completion/pause: changing project facts belong to
         // the turn, not the runner configuration or an obligatory file read.
         systemContext: [
-          'Continue this project in the same session. Follow the user request and account for any unfinished delivery objective in the supplied project state. The current milestone is the outcome for this turn; it does not restrict your planning, tools, delegation or file edits.',
+          'Keep user-facing progress and final replies concise, in the user’s preferred language. Summarize the outcome, checks and unresolved issues; link to saved project artifacts for detailed reports instead of repeating them in chat. Do not omit failures or verification limits. This is a presentation preference, not a limit on investigation, deliverable detail, or an explicit request for explanation.',
+          'Continue this project in the same session. Follow the user request and account for any unfinished delivery objective in the supplied project state. The current milestone is the outcome for this turn; choose your planning, tools and delegation.',
+          'During initial delivery, the eight design documents may be drafted and revised in author and review. After review they are the implementation and acceptance baseline: absent an explicit user-requested design change, report design defects rather than editing the documents in resources, content, implementation or acceptance.',
           `Project workspace: ${session.cwd}. When prior task context is missing, read ${path}: it contains the original request and current project state. Do not infer a new task from an empty native history.`,
-          'Investigate and verify the affected behavior. When the user changes gameplay or requirements, keep the relevant project documents and implementation consistent; choose the necessary scope and order yourself.',
+          'Investigate and verify the affected behavior. For an explicit user-requested design change, revise the affected document baseline before implementing that change; choose the implementation methods, task breakdown and delegation yourself. A defect fix that restores the existing design does not require rewriting the documents.',
           'Project files are editable within the user-authorized scope. BGS platform defects should be reported, not worked around by changing valid game data.',
         ].join('\n'),
         close: async () => {
           try { await access?.close() }
           finally {
+            await unlink(resultPath).catch(() => undefined)
             await Promise.all([unlink(path).catch(() => undefined), unlink(assetCommandPath).catch(() => undefined), unlink(contentHelperPath).catch(() => undefined), unlink(acceptanceCheckPath).catch(() => undefined)])
           }
         },
@@ -166,15 +191,16 @@ export async function sendProjectConversation(input: {
         event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.empty')
       if (terminal?.type === 'turn.completed' && turnStartedAt && input.deliveryDataRoot) {
         const delivery = await readProjectDelivery(session.cwd, input.deliveryDataRoot)
+        const conclusion = resultPhase ? await readMilestoneResult(resultPath, resultPhase) : undefined
         if (delivery && ['acceptance', 'complete'].includes(projectDeliveryPhase(delivery)))
           await captureProjectDeliveryAcceptance(session.cwd, input.deliveryDataRoot, turnStartedAt)
-        if (delivery?.status === 'active' && !input.initialBrief && !input.autoContinuation && !recoveringInterruptedTurn) {
+        if (delivery?.status === 'active' && !input.initialBrief && !input.autoContinuation && !recoveringInterruptedTurn && !conclusion) {
           const phase = projectDeliveryPhase(delivery)
           progress = { phase, shouldContinue: phase !== 'complete', issues: [] }
-        } else progress = await advanceProjectDeliveryAfterTurn(session.cwd, input.deliveryDataRoot)
+        } else progress = await advanceProjectDeliveryAfterTurn(session.cwd, input.deliveryDataRoot, conclusion)
         if (progress?.phase === 'complete') input.sessions.recordDeliveryPhase(input.sessionId, 'complete')
         if (progress && !progress.shouldContinue && progress.issues.length)
-          input.sessions.recordDeliveryError(input.sessionId, progress.issues.join('; '))
+          input.sessions.recordDeliveryError(input.sessionId, progress.issues.join('; '), progress.diagnostic?.category)
       }
       readyToContinue = terminal?.type === 'turn.completed'
     },

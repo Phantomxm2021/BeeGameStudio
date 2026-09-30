@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Matrix4 } from 'three';
-import { resolveUiNodesForViewport, uiAnchor, uiLocalMatrix, uiPaintOrder } from '@beegame/scene-editor';
+import { resolveUiNodesForViewport, initializeUiLayout, createUiTextMeasurer, uiAnchor, uiLocalMatrix, uiPaintOrder } from '@beegame/scene-editor';
 import { uiAtlasImages, uiImageKey, resolveUiImage } from './uiAtlas';
 import { mapEditorAssets } from './editorAssetLoading';
 import { currentKeyboardLabels, resolveUnityNavigationAction, wheelPixels } from '@beegame/scene-editor/platform';
@@ -210,6 +210,8 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
       beeGameAdapter.getProjectGameContent(projectId, signal),
       beeGameAdapter.getProjectAssets(projectId, signal),
     ]).then(async ([snapshot, manifest]) => {
+      await initializeUiLayout();
+      if (!active) return;
       if (!active) return;
       if ((snapshot.state !== 'ready' && snapshot.state !== 'draft') || !snapshot.documents) {
         setLoadState({ status: 'error', progress: 20, label: 'UI unavailable', detail: `UI content is not available yet (${snapshot.state.replaceAll('_', ' ')}).` });
@@ -286,6 +288,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
           font: resource.file_paths.some(path => UI_FONT.test(path)) || /font/i.test(resource.asset_kind ?? resource.id),
         })));
         const requiredAssets = new Set(uiDocuments.flatMap(item => item.document.assetRefs));
+        const fontWarnings: string[] = [];
         const loadResources = async (resources: typeof manifest.resources, initial: boolean) => {
         const loadTargets = resources.flatMap(resource => resource.file_paths
           .filter(path => UI_IMAGE.test(path) || UI_FONT.test(path))
@@ -326,12 +329,19 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
           if (!path) return undefined;
           return beeGameAdapter.loadProjectAssetFile(projectId, resource.id, path, signal).then(async blob => {
             if (!active) return undefined;
-            const url = URL.createObjectURL(blob);
-            objectUrls.push(url);
             const family = `BGS-${resource.id.replace(/[^a-z0-9_-]/gi, '-')}`;
             if (typeof FontFace !== 'undefined') {
-              const face = new FontFace(family, `url(${url})`);
-              await face.load();
+              // The authenticated download already succeeded. Decode bytes directly:
+              // URL sources disguise invalid font data as a generic NetworkError.
+              const bytes = await blob.arrayBuffer();
+              if (!active) return undefined;
+              let face: FontFace;
+              try {
+                face = new FontFace(family, bytes);
+                await face.load();
+              } catch {
+                throw new Error('Font data could not be decoded by this browser');
+              }
               if (active) {
                 document.fonts.add(face);
                 loadedFontFaces.push(face);
@@ -340,7 +350,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
             return [resource.id, family] as const;
           }).catch(error => {
             if (isUiAbortError(error)) throw error;
-            failedAsset(resource.id, path, error);
+            fontWarnings.push(`${resource.id}/${path.split('/').at(-1)}: ${error instanceof Error ? error.message : String(error)}; using fallback font`);
             return undefined;
           }).finally(() => {
             if (!signal.aborted) markFileLoaded(resource.id, path);
@@ -393,7 +403,10 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
         }) })));
         if (active) setFontFamilies(previous => ({ ...previous, ...Object.fromEntries(fonts.filter((item): item is readonly [string, string] => Boolean(item))) }));
         if (failedFiles.length) throw new Error(`Failed to load ${failedFiles.length} assets: ${failedFiles.join(', ')}`);
-        if (active) setMessage(optionalFailures.length ? `Optional assets unavailable: ${optionalFailures.join(' · ')}` : '');
+        if (active) setMessage([
+          ...fontWarnings,
+          ...(optionalFailures.length ? [`Optional assets unavailable: ${optionalFailures.join(' · ')}`] : []),
+        ].join(' · '));
         };
         await loadResources(resources.filter(resource => requiredAssets.has(resource.id)), true);
         if (!active || signal.aborted) return;
@@ -431,15 +444,30 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
 
   const nodesById = useMemo(() => new Map(current?.document.data.nodes.map(node => [node.id, node]) ?? []), [current]);
   const selected = nodesById.get(selectedId);
+  const flowManaged = Boolean(selected?.parentId && nodesById.get(selected.parentId)?.layout?.container && !selected.layout?.item?.absolute);
   const rootCompactBreakpoint = current?.document.data.nodes.find(node => node.id === current.document.data.rootId)?.data?.compactMaxWidth;
   const previewSize = viewportMode === 'base' ? canvasSize(current?.document)
     : viewportMode === 'custom' ? customViewport : PREVIEW_VIEWPORTS[viewportMode];
-  const previewNodes = useMemo(() => current
-    ? resolveUiNodesForViewport(current.document.data.nodes, current.document.data.rootId, { width: previewSize[0], height: previewSize[1] })
-    : [], [current, viewportMode, previewSize[0], previewSize[1]]);
+  const previewLayout = useMemo(() => {
+    if (!current) return { nodes: [], error: '' };
+    const needsMeasurement = current.document.data.nodes.some(node => node.text !== undefined && !node.layout?.size &&
+      current.document.data.nodes.some(parent => parent.id === node.parentId && parent.layout?.container));
+    const context = needsMeasurement ? document.createElement('canvas').getContext('2d') : null;
+    const measureText = context ? createUiTextMeasurer(context, node => {
+      const font = node.data?.font as { assetRef?: string } | undefined;
+      return font?.assetRef && fontFamilies[font.assetRef] ? `"${fontFamilies[font.assetRef]}"` : 'sans-serif';
+    }) : undefined;
+    try {
+      return { nodes: resolveUiNodesForViewport(current.document.data.nodes, current.document.data.rootId,
+        { width: previewSize[0], height: previewSize[1] }, { measureText }), error: '' };
+    } catch (error) {
+      return { nodes: [], error: error instanceof Error ? error.message : String(error) };
+    }
+  }, [current, viewportMode, previewSize[0], previewSize[1], fontFamilies]);
+  const previewNodes = previewLayout.nodes;
   const previewSelected = previewNodes.find(node => node.id === selectedId);
   const children = useMemo(() => childIds(current?.document.data.nodes ?? []), [current]);
-  const paintChildren = useMemo(() => current
+  const paintChildren = useMemo(() => current && previewNodes.length
     ? uiPaintChildren(previewNodes, current.document.data.rootId)
     : new Map<string, string[]>(), [current, previewNodes]);
   const imageAssets = assetOptions.filter(option => !option.font && option.members.length);
@@ -572,7 +600,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
     applyCurrent(next);
   };
 
-  const updateLayout = (field: 'position' | 'size' | 'sizeDelta' | 'anchorMin' | 'anchorMax', index: number, value: number) => {
+  const updateLayout = (field: 'position' | 'size' | 'sizeDelta' | 'anchorMin' | 'anchorMax' | 'minSize' | 'maxSize', index: number, value: number) => {
     updateSelected(node => {
       const layout = node.layout ?? {};
       const pair = [...(layout[field] ?? (field === 'size' ? [160, 48] : [0, 0]))] as [number, number];
@@ -1075,6 +1103,27 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
     </div>;
   };
 
+  const containerControls = selected && ['container', 'screen-root', 'hud-root'].includes(selected.role) ? <>
+                  <EditorSelect label="Layout" ariaLabel="Container layout" value={selected.layout?.container?.direction ?? 'none'} options={[[ 'none', 'Anchors only' ], [ 'row', 'Row' ], [ 'column', 'Column' ], [ 'grid', 'Grid' ]]} onValueChange={value => updateSelected(node => {
+                    const layout = { ...node.layout };
+                    if (value === 'none') delete layout.container;
+                    else layout.container = { ...layout.container, direction: value as 'row' | 'column' | 'grid', ...(value === 'grid' ? { columns: layout.container?.columns ?? 2 } : {}) };
+                    node.layout = layout;
+                  })} />
+                  {selected.layout?.container ? <>
+                    <label>Gap<EditorInput aria-label="Container gap" type="number" min="0" value={selected.layout.container.gap ?? 0} onChange={event => updateSelected(node => { node.layout = { ...node.layout, container: { ...node.layout!.container!, gap: Math.max(0, Number(event.target.value)) } }; })} /></label>
+                    {selected.layout.container.direction === 'grid' ? <label>Columns<EditorInput aria-label="Grid columns" type="number" min="1" step="1" value={selected.layout.container.columns ?? 2} onChange={event => updateSelected(node => { node.layout = { ...node.layout, container: { ...node.layout!.container!, columns: Math.max(1, Math.floor(Number(event.target.value))) } }; })} /></label> : null}
+                    <EditorSelect label="Justify" ariaLabel="Container justify" value={selected.layout.container.justify ?? 'start'} options={[[ 'start', 'Start' ], [ 'center', 'Center' ], [ 'end', 'End' ], [ 'space-between', 'Space between' ]]} onValueChange={value => updateSelected(node => { node.layout = { ...node.layout, container: { ...node.layout!.container!, justify: value as 'start' | 'center' | 'end' | 'space-between' } }; })} />
+                    <EditorSelect label="Align" ariaLabel="Container align" value={selected.layout.container.align ?? 'stretch'} options={[[ 'start', 'Start' ], [ 'center', 'Center' ], [ 'end', 'End' ], [ 'stretch', 'Stretch' ]]} onValueChange={value => updateSelected(node => { node.layout = { ...node.layout, container: { ...node.layout!.container!, align: value as 'start' | 'center' | 'end' | 'stretch' } }; })} />
+                    <div className="ui-editor-check-field"><span>Wrap</span><Switch size="sm" aria-label="Container wrap" checked={selected.layout.container.wrap ?? false} onCheckedChange={wrap => updateSelected(node => { node.layout = { ...node.layout, container: { ...node.layout!.container!, wrap } }; })} /></div>
+                    {(['Top', 'Right', 'Bottom', 'Left'] as const).map((side, index) => <label key={side}>Padding {side}<EditorInput aria-label={`Container padding ${side}`} type="number" min="0" value={selected.layout?.container?.padding?.[index] ?? 0} onChange={event => updateSelected(node => {
+                      const padding = [...(node.layout?.container?.padding ?? [0, 0, 0, 0])] as [number, number, number, number];
+                      padding[index] = Math.max(0, Number(event.target.value));
+                      node.layout = { ...node.layout, container: { ...node.layout!.container!, padding } };
+                    })} /></label>)}
+                  </> : null}
+                </> : null;
+
   const isSaved = current
     ? savedContentRef.current[current.path] === JSON.stringify(current.document)
     : true;
@@ -1128,6 +1177,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
           onPointerCancel={() => { panRef.current = undefined; setPanning(false); }}
         >
           <div ref={stageRef} className="ui-editor-stage" aria-label="UI preview" style={{ width: previewSize[0], height: previewSize[1], transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}>
+            {previewLayout.error ? <p role="alert">Layout cannot be resolved: {previewLayout.error}</p> : null}
             {current ? renderUiNode(current.document.data.rootId, previewNodes, paintChildren, assetUrls, fontFamilies, selectedId, setSelectedId, hiddenIds, unpickableIds, true) : null}
             {current && showGizmos ? previewNodes
               .filter(node => node.id !== current.document.data.rootId && isTransformNode(uiNodeKind(node.role)) && isNodeVisible(node, previewNodes, hiddenIds) && !unpickableIds.has(node.id))
@@ -1140,7 +1190,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
                 title={`${node.name ?? node.id} · ${node.role}`}
                 onPointerDown={event => { if (event.button === 0) { event.stopPropagation(); setSelectedId(node.id); } }}
               >{roleIcon(node.role)}</button>) : null}
-            {current && viewportMode === 'base' && selected && !selected.layout?.anchorMin && isTransformNode(selectedKind) && isNodeVisible(selected, current.document.data.nodes, hiddenIds) && selected.id !== current.document.data.rootId && showGizmos && !hiddenIds.has(selected.id) && !unpickableIds.has(selected.id) ? <SelectionGizmo node={selected} nodes={current.document.data.nodes} mode={gizmoMode} onBegin={beginTransform} /> : null}
+            {current && viewportMode === 'base' && selected && !flowManaged && !selected.layout?.anchorMin && isTransformNode(selectedKind) && isNodeVisible(selected, current.document.data.nodes, hiddenIds) && selected.id !== current.document.data.rootId && showGizmos && !hiddenIds.has(selected.id) && !unpickableIds.has(selected.id) ? <SelectionGizmo node={selected} nodes={current.document.data.nodes} mode={gizmoMode} onBegin={beginTransform} /> : null}
           </div>
         </section>
         <div className="ui-editor-floating-toolbar" role="toolbar" aria-label="UI editor tools">
@@ -1208,14 +1258,30 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
                   if (coordinate && typeof coordinate === 'object') node.data = { ...node.data, coordinateSystem: { ...coordinate, width: size[0], height: size[1] } };
                 })} />)}</div>
                 <label>Compact max width<EditorInput aria-label="Compact max width" type="number" min="1" value={typeof selected.data?.compactMaxWidth === 'number' ? selected.data.compactMaxWidth : 600} onChange={event => updateData('compactMaxWidth', Math.max(1, Number(event.target.value)))} /></label>
+                {containerControls}
                 <label>Background<input aria-label="Canvas background" type="color" value={String((selected.data?.background as { color?: string } | undefined)?.color ?? '#000000')} onChange={event => updateData('background', { ...(selected.data?.background as object ?? {}), color: event.target.value })} /></label>
               </div></details> : null}
               {selectedKind !== 'flow' && selectedKind !== 'flow-screen' && selectedKind !== 'canvas' ? <details className="ui-editor-inspector-component ui-editor-component-transform" open><summary><ChevronRight size={12} className="ui-editor-component-chevron" /><Move size={14} /><span>Rect Transform</span></summary><div className="ui-editor-section">
                 <EditorSelect label="Space" ariaLabel="UI render space" value={selected.data?.space === 'world' ? 'world' : 'screen-2d'} onValueChange={value => updateData('space', value)} options={[[ 'screen-2d', 'Screen Space'], ['world', 'World Space (XR)']]} />
                 <div className="ui-editor-anchor-field"><span>Anchors</span><div className="ui-editor-anchor-presets" role="radiogroup" aria-label="Anchor preset">{ANCHOR_PRESETS.map(anchor => <button key={anchor} type="button" role="radio" aria-label={anchor} aria-checked={nodeAnchor(selected).join(',') === nodeAnchor({ ...selected, layout: { ...selected.layout, anchor } }).join(',')} className={nodeAnchor(selected).join(',') === nodeAnchor({ ...selected, layout: { ...selected.layout, anchor } }).join(',') ? 'active' : ''} onClick={() => updateSelected(node => { node.layout = { ...node.layout, anchor }; })}><i /></button>)}</div></div>
-                <div className="ui-editor-pair"><span>Position</span>{[0, 1].map(index => <EditorInput key={index} aria-label={`Position ${index === 0 ? 'X' : 'Y'}`} type="number" value={selected.layout?.position?.[index] ?? 0} onChange={event => updateLayout('position', index, Number(event.target.value))} />)}</div>
+                <div className="ui-editor-pair"><span>Position{flowManaged ? ' (container)' : ''}</span>{[0, 1].map(index => <EditorInput key={index} disabled={flowManaged} aria-label={`Position ${index === 0 ? 'X' : 'Y'}`} type="number" value={flowManaged ? previewSelected?.layout?.position?.[index] ?? 0 : selected.layout?.position?.[index] ?? 0} onChange={event => updateLayout('position', index, Number(event.target.value))} />)}</div>
+                {containerControls}
+                {selected.parentId && nodesById.get(selected.parentId)?.layout?.container ? <>
+                  <div className="ui-editor-check-field"><span>Anchored overlay</span><Switch size="sm" aria-label="Ignore parent flow" checked={selected.layout?.item?.absolute ?? false} onCheckedChange={absolute => updateSelected(node => { node.layout = { ...node.layout, item: { ...node.layout?.item, absolute } }; })} /></div>
+                  <label>Grow<EditorInput aria-label="Layout grow" disabled={nodesById.get(selected.parentId)?.layout?.container?.direction === 'grid'} type="number" min="0" value={selected.layout?.item?.grow ?? 0} onChange={event => updateSelected(node => { node.layout = { ...node.layout, item: { ...node.layout?.item, grow: Math.max(0, Number(event.target.value)) } }; })} /></label>
+                  <label>Shrink<EditorInput aria-label="Layout shrink" type="number" min="0" value={selected.layout?.item?.shrink ?? 0} onChange={event => updateSelected(node => { node.layout = { ...node.layout, item: { ...node.layout?.item, shrink: Math.max(0, Number(event.target.value)) } }; })} /></label>
+                </> : null}
+                {(['minSize', 'maxSize'] as const).map(field => <div key={field}>
+                  <div className="ui-editor-check-field"><span>{field === 'minSize' ? 'Minimum size' : 'Maximum size'}</span><Switch size="sm" aria-label={field === 'minSize' ? 'Use minimum size' : 'Use maximum size'} checked={!!selected.layout?.[field]} onCheckedChange={checked => updateSelected(node => {
+                    const layout = { ...node.layout };
+                    if (checked) layout[field] = field === 'minSize' ? [0, 0] : [...(previewSelected?.layout?.size ?? [160, 48])];
+                    else delete layout[field];
+                    node.layout = layout;
+                  })} /></div>
+                  {selected.layout?.[field] ? <div className="ui-editor-pair">{[0, 1].map(index => <EditorInput key={index} aria-label={`${field} ${index === 0 ? 'X' : 'Y'}`} type="number" min="0" value={selected.layout?.[field]?.[index] ?? 0} onChange={event => updateLayout(field, index, Math.max(0, Number(event.target.value)))} />)}</div> : null}
+                </div>)}
                 {selected.data?.space === 'world' ? <label>Position Z<EditorInput aria-label="Position Z" type="number" value={typeof selected.data?.positionZ === 'number' ? selected.data.positionZ : 0} onChange={event => updateData('positionZ', Number(event.target.value))} /></label> : null}
-                {selected.data?.space !== 'world' ? <div className="ui-editor-check-field"><span>Stretch anchors</span><Switch size="sm" aria-label="Stretch anchors" checked={!!selected.layout?.anchorMin} onCheckedChange={checked => updateSelected(node => {
+                {selected.data?.space !== 'world' ? <div className="ui-editor-check-field"><span>Stretch anchors</span><Switch size="sm" disabled={flowManaged} aria-label="Stretch anchors" checked={!!selected.layout?.anchorMin} onCheckedChange={checked => updateSelected(node => {
                   const layout = { ...node.layout };
                   if (checked) {
                     const anchor = uiAnchor(layout.anchor);
@@ -1242,7 +1308,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
                 <div className="ui-editor-pair ui-editor-scale-pair"><span>Scale</span>{[0, 1].map(index => <EditorInput key={index} aria-label={`Scale ${index === 0 ? 'X' : 'Y'}`} type="number" step="0.1" value={selected.layout?.scale?.[index] ?? 1} onChange={event => updateScale(index, Number(event.target.value))} />)}</div>
                 {selected.data?.space === 'world' ? <label>Scale Z<EditorInput aria-label="Scale Z" type="number" step="0.1" value={typeof selected.data?.scaleZ === 'number' ? selected.data.scaleZ : 1} onChange={event => updateData('scaleZ', Number(event.target.value))} /></label> : null}
               </div></details> : null}
-              {selectedKind !== 'flow' && selectedKind !== 'flow-screen' && selectedKind !== 'canvas' && selected.data?.space !== 'world' ? <details className="ui-editor-inspector-component"><summary><ChevronRight size={12} className="ui-editor-component-chevron" /><PanelsTopLeft size={14} /><span>Responsive</span></summary><div className="ui-editor-section">
+              {selectedKind !== 'flow' && selectedKind !== 'flow-screen' && selected.data?.space !== 'world' ? <details className="ui-editor-inspector-component"><summary><ChevronRight size={12} className="ui-editor-component-chevron" /><PanelsTopLeft size={14} /><span>Responsive</span></summary><div className="ui-editor-section">
                 <small>Base layout is unchanged. Compact applies at width ≤{typeof rootCompactBreakpoint === 'number' ? rootCompactBreakpoint : 600}px; portrait refines it when height exceeds width.</small>
                 {(['compact', 'portrait'] as const).map(profile => {
                   const variant = selected.responsive?.[profile];
@@ -1253,6 +1319,14 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
                     })} /></div>
                     {variant ? <>
                       <div className="ui-editor-check-field"><span>Visible</span><Switch size="sm" aria-label={`${label} visible`} checked={variant.enabled !== false} onCheckedChange={checked => updateResponsive(profile, next => { next.enabled = checked; })} /></div>
+                      {selected.layout?.container ? <>
+                        <EditorSelect label="Direction" ariaLabel={`${label} container direction`} value={variant.layout?.container?.direction ?? selected.layout.container.direction} options={[[ 'row', 'Row' ], [ 'column', 'Column' ], [ 'grid', 'Grid' ]]} onValueChange={value => updateResponsive(profile, next => {
+                          const container = { ...selected.layout?.container, ...next.layout?.container, direction: value as 'row' | 'column' | 'grid' };
+                          if (value === 'grid') container.columns ??= 2;
+                          next.layout = { ...next.layout, container };
+                        })} />
+                        {(variant.layout?.container?.direction ?? selected.layout.container.direction) === 'grid' ? <label>Columns<EditorInput aria-label={`${label} grid columns`} type="number" min="1" step="1" value={variant.layout?.container?.columns ?? selected.layout.container.columns ?? 2} onChange={event => updateResponsive(profile, next => { next.layout = { ...next.layout, container: { ...selected.layout!.container!, ...next.layout?.container, columns: Math.max(1, Math.floor(Number(event.target.value))) } }; })} /></label> : null}
+                      </> : null}
                       {(['position', 'size'] as const).map(field => <div className="ui-editor-pair" key={field}><span>{field === 'position' ? 'Position' : 'Size'}</span>{[0, 1].map(index => <EditorInput key={index} aria-label={`${label} ${field} ${index === 0 ? 'X' : 'Y'}`} type="number" min={field === 'size' ? '0' : undefined} value={variant.layout?.[field]?.[index] ?? selected.layout?.[field]?.[index] ?? 0} onChange={event => updateResponsive(profile, next => {
                         const pair = [...(next.layout?.[field] ?? selected.layout?.[field] ?? [0, 0])] as [number, number];
                         pair[index] = field === 'size' ? Math.max(0, Number(event.target.value)) : Number(event.target.value);
@@ -1869,7 +1943,7 @@ function uiNodeStyle(node: BeeGameUiContentNode, root: boolean, fontFamilies: Re
     letterSpacing: typeof style.letterSpacing === 'number' ? style.letterSpacing : 0,
     textTransform: 'none',
     opacity: dataAlpha,
-    lineHeight: typeof style.lineHeight === 'number' ? style.lineHeight : 1.35,
+    lineHeight: typeof style.lineHeight === 'number' ? `${style.lineHeight}px` : 1.35,
     textAlign: align === 'left' || align === 'right' || align === 'center' ? align : 'center',
     transformStyle: worldSpace ? 'preserve-3d' : undefined,
     transformOrigin: `${anchorX * 100}% ${anchorY * 100}%`,

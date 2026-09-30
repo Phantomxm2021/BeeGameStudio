@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { wrapCommandWithSandboxMacOS } from '@anthropic-ai/sandbox-runtime/dist/sandbox/macos-sandbox-utils.js'
 import { projectExecutionAccess } from './project-execution-access'
+import { sharedPlaywright } from './shared-playwright'
 
 test('native project temp environment resolves inside the project before Bash tools run', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'project-temp-env-')))
@@ -16,6 +17,10 @@ test('native project temp environment resolves inside the project before Bash to
     })
     expect(access.environment.TMPDIR).toBe(access.temporary)
     expect(access.environment.CLAUDE_CODE_TMPDIR).toBe(access.temporary)
+    const playwright = sharedPlaywright()
+    expect(access.environment.BEEGAME_PLAYWRIGHT_MODULE).toBe(playwright.moduleUrl)
+    expect(access.settings.sandbox.filesystem.allowRead).toContain(playwright.root)
+    expect(access.settings.sandbox.filesystem.allowWrite).not.toContain(playwright.root)
     const modulePath = fileURLToPath(new URL('../../../../src/utils/permissions/filesystem.ts', import.meta.url))
     const child = Bun.spawn([process.execPath, '-e',
       'import { getClaudeTempDir } from ' + JSON.stringify(modulePath) +
@@ -87,6 +92,14 @@ test.skipIf(process.platform !== 'darwin')('project shell supports Git and local
     const local = await run(`${JSON.stringify(process.execPath)} -e 'const s=Bun.serve({port:0,fetch:()=>new Response("ok")}); console.log(await (await fetch("http://127.0.0.1:"+s.port)).text()); s.stop();'`)
     expect(local.code, local.stderr).toBe(0)
     expect(local.stdout.trim()).toBe('ok')
+    const client = await run(`${JSON.stringify(process.execPath)} -e 'const {chromium}=await import(process.env.BEEGAME_PLAYWRIGHT_MODULE); console.log(typeof chromium.connectOverCDP)'`)
+    expect(client.code, client.stderr).toBe(0)
+    expect(client.stdout.trim()).toBe('function')
+    const node = Bun.which('node')
+    expect(node).not.toBeNull()
+    const nodeClient = await run(`${JSON.stringify(node)} --input-type=module -e 'const {chromium}=await import(process.env.BEEGAME_PLAYWRIGHT_MODULE); console.log(typeof chromium.connectOverCDP)'`)
+    expect(nodeClient.code, nodeClient.stderr).toBe(0)
+    expect(nodeClient.stdout.trim()).toBe('function')
     for (const command of ['cat ../host-source.ts', 'cat escape.ts',
       'printf bad > ../host-source.ts', 'printf bad > escape.ts',
       '/bin/bash -c "cat ../host-source.ts"']) {

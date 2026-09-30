@@ -10,15 +10,22 @@ import { pauseProjectDelivery, projectContentAuthority, readProjectDelivery, PRO
 import { writeBeeGameAssetManifest } from '../beegame/asset-contracts'
 import { assetManifestAuthoringExamples } from '../beegame/asset-manifest-authoring-contract'
 import { BEEGAME_SCENE_MODEL } from '../beegame/game-content-package'
+import { AUTHOR_BATCHES } from '../beegame/project-author'
 
 async function completeFixtureMilestone(input: BeeGameSessionRunnerStartInput, implementationEvidence = false): Promise<string> {
   const context = await readFile(join(input.cwd, '.beegame/tmp', input.sessionId, 'context.md'), 'utf8')
+  const conclusionPath = context.match(/\.beegame\/tmp\/[^\s]+\/milestone-[\w-]+\.txt/)?.[0]
+  if (conclusionPath) await writeFile(join(input.cwd, conclusionPath.replace(/:$/, '')), 'complete\n')
   const contentContractExists = await Bun.file(join(input.cwd, '.beegame/delivery/content-contract.json')).exists()
   if (/milestone: (author|review|revision|resources)\./.test(context)) expect(contentContractExists).toBe(false)
   if (context.includes('milestone: content.')) expect(contentContractExists).toBe(true)
   if (context.includes('milestone: author.')) {
     await mkdir(join(input.cwd, 'docs'), { recursive: true })
-    for (const document of PROJECT_DOCUMENTS) await writeFile(join(input.cwd, 'docs', document), '# Design\n')
+    const batch = Number(/Author batch (\d)\/4/.exec(context)?.[1]) - 1
+    expect(batch).toBeGreaterThanOrEqual(0)
+    for (const document of AUTHOR_BATCHES.slice(0, batch).flat())
+      expect(await Bun.file(join(input.cwd, 'docs', document)).exists()).toBe(true)
+    for (const document of AUTHOR_BATCHES[batch]!) await writeFile(join(input.cwd, 'docs', document), '# Design\n')
   } else if (context.includes('milestone: resources.')) {
     await mkdir(join(input.cwd, 'assets/runtime/example'), { recursive: true })
     await writeFile(join(input.cwd, 'assets/runtime/example/resource.json'), '{"original":true}')
@@ -117,8 +124,9 @@ test('new project bootstrap starts one native project conversation', async () =>
     for (let i = 0; i < 100 && prompts.length === 0; i++) await Bun.sleep(5)
     expect(prompts).toHaveLength(1)
     expect(String(prompts[0])).toContain('Make a small game')
-    expect(String(prompts[0])).toContain('In this first turn, deliver a complete, internally consistent, implementable set of project documents')
-    expect(String(prompts[0])).toContain('then finish the turn')
+    expect(String(prompts[0])).toContain('The current milestone and its deliverables are supplied in the project state')
+    expect(String(prompts[0])).toContain('Document responsibilities and decision dependencies')
+    expect(String(prompts[0])).not.toContain('visual-direction approval')
     expect(String(prompts[0])).toContain('default_first_release_scope')
     expect(String(prompts[0])).toContain('small complete playable version')
     expect(String(prompts[0])).toContain('one or two levels if levels apply')
@@ -126,7 +134,7 @@ test('new project bootstrap starts one native project conversation', async () =>
     const stored = await readProjectDelivery(starts[0]!.cwd, join(root, 'dashboard'))
     expect(stored?.objective).toContain('default_first_release_scope')
     expect(String(prompts[0])).not.toContain('audit the complete document set yourself')
-    expect(String(prompts[0])).toContain('Include version, author, and date in each document header')
+    expect(String(prompts[0])).toContain('Include version, author and date in each header')
     const readiness = await app.request('/api/projects/bootstrap-project/deployment-readiness')
     expect(await readiness.json()).toMatchObject({ allowed: false })
   } finally {
@@ -292,11 +300,11 @@ test.each([false, true])('one native project session completes delivery; impleme
     }
     expect(starts).toHaveLength(1)
     expect(contexts.map(context => /milestone: ([a-z-]+)\./.exec(context)?.[1])).toEqual([
-      'author', 'review', 'resources', 'content', 'implementation', 'acceptance',
+      'author', 'author', 'author', 'author', 'review', 'resources', 'content', 'implementation', 'acceptance',
     ])
-    expect(prompts).toHaveLength(6)
-    expect(contexts[1]).toContain('Review the authored documents')
-    expect(contexts[2]).toContain('AI image capability for suitable UI graphics, cover illustrations')
+    expect(prompts).toHaveLength(9)
+    expect(contexts[4]).toContain('Determine whether the design is ready for development')
+    expect(contexts[5]).toContain('Optional resources do not block completion')
     expect(prompts.slice(1).every(prompt => String(prompt).includes('Continue the current project delivery milestone'))).toBe(true)
     expect(starts[0]?.resumeSessionId).toBeUndefined()
     const milestoneEvents = await (await app.request(`/api/beegame-sessions/${session.id}/events`)).json() as Array<{
@@ -472,7 +480,9 @@ test('stopping a project does not preempt the next native request', async () => 
   const cleanups: Array<() => void | Promise<void>> = []
   const prompts: string[] = []
   const starts: BeeGameSessionRunnerStartInput[] = []
+  let releaseInitial: (() => void) | undefined
   let releaseFollowup: (() => void) | undefined
+  let releaseDelivery: (() => void) | undefined
   const app = createAgentWorkflowApp({ currentUser: { id: 'checkpoint-owner', role: 'owner' },
     dashboardDataRoot: join(root, 'dashboard'), defaultWorkspacePath: join(root, 'projects'),
     modelConfigStore: false, skillsConfig: false,
@@ -480,9 +490,13 @@ test('stopping a project does not preempt the next native request', async () => 
       starts.push(input)
       if (!input.resumeSessionId)
         input.onNativeSessionId?.('94429147-7294-4364-b363-d4097d11ae86')
-      return { stop() {}, async submit(turn) {
+      return { stop() { releaseInitial?.() }, async submit(turn) {
         prompts.push(JSON.stringify(turn.prompt))
+        // Keep the initial turn active until Stop; otherwise an automatic retry
+        // can occupy the follow-up slot before this test sends its user request.
+        if (prompts.length === 1) await new Promise<void>(resolve => { releaseInitial = resolve })
         if (prompts.length === 2) await new Promise<void>(resolve => { releaseFollowup = resolve })
+        if (prompts.length === 3) await new Promise<void>(resolve => { releaseDelivery = resolve })
         await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
       } }
     } }, registerCleanup: cleanup => cleanups.push(cleanup) })
@@ -526,6 +540,7 @@ test('stopping a project does not preempt the next native request', async () => 
       start.resumeSessionId === '94429147-7294-4364-b363-d4097d11ae86')).toBe(true)
   } finally {
     releaseFollowup?.()
+    releaseDelivery?.()
     for (const cleanup of cleanups.reverse()) await cleanup()
     await rm(root, { recursive: true, force: true })
   }

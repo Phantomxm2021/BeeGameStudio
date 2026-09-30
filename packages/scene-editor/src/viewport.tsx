@@ -9,6 +9,7 @@ import { OutlinePass } from 'three/examples/jsm/postprocessing/OutlinePass.js'
 import type { ModelSelection } from './model-structure'
 import { componentOf, DEFAULT_SCENE_SETTINGS, rendererOrder } from './model'
 import { colliderOutline } from './collider-outline'
+import { resolveGameCameraPreview } from './game-camera-preview'
 import { TilemapPreview } from './tilemap-preview'
 import type { TileBrush } from './tilemap-brush'
 import { acquireTextureSource } from './texture-cache'
@@ -21,6 +22,7 @@ import type { Collider2DComponent, Collider3DComponent, LightKind, MaterialOverr
 export type SceneViewportMode = 'select' | 'translate' | 'rotate' | 'scale' | 'hand'
 export type SceneViewMode = '2d' | '3d'
 export type SceneViewportProps = {
+  gameCamera?: boolean
   tileBrush?: TileBrush
   document: SceneDocument
   initialView?: { position: [number, number, number]; target: [number, number, number]; showGizmos?: boolean }
@@ -227,15 +229,16 @@ function worldPosition(document: SceneDocument, id: string) {
   while (current) { chain.unshift(current); current = current.parentId ? document.nodes[current.parentId] : undefined }
   const matrix = new THREE.Matrix4()
   for (const node of chain) {
-    const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(...node.transform.rotation))
+    const rotation = node.transform.quaternion ? new THREE.Quaternion(...node.transform.quaternion)
+      : new THREE.Quaternion().setFromEuler(new THREE.Euler(...node.transform.rotation))
     matrix.multiply(new THREE.Matrix4().compose(new THREE.Vector3(...rectTransform(node, document.nodes).position), rotation, new THREE.Vector3(...node.transform.scale)))
   }
   result.setFromMatrixPosition(matrix)
   return result
 }
 
-function CameraRig({ document, selected, modelSelection, focus, orbit }: { document: SceneDocument; selected: string; modelSelection?: ModelSelection | null; focus: number; orbit: MutableRefObject<any> }) {
-  const { camera, scene, size } = useThree()
+function CameraRig({ document, selected, modelSelection, focus, orbit, preview }: { document: SceneDocument; selected: string; modelSelection?: ModelSelection | null; focus: number; orbit: MutableRefObject<any>; preview?: ReturnType<typeof resolveGameCameraPreview> }) {
+  const { camera, scene, size, set } = useThree()
   const documentRef = useRef(document)
   const selectedRef = useRef(selected)
   const partRef = useRef(modelSelection)
@@ -245,15 +248,40 @@ function CameraRig({ document, selected, modelSelection, focus, orbit }: { docum
   const cameraNode = Object.values(document.nodes).find(node => componentOf(node, 'camera'))
   const cameraComponent = cameraNode ? componentOf(cameraNode, 'camera') : undefined
   const orthographicSize = cameraComponent?.orthographicSize ?? 3.6
+  // Keep the observer camera itself, so projection changes do not destroy its pose or zoom.
+  const observer = useRef(camera)
+  const wasPreviewing = useRef(false)
+  const previewCamera = useMemo(() => preview?.view.projection === 'orthographic'
+    ? new THREE.OrthographicCamera() : new THREE.PerspectiveCamera(), [preview?.view.projection])
   useEffect(() => {
-    if (!document.dimension || !(camera as THREE.OrthographicCamera).isOrthographicCamera) return
-    const orthographic = camera as THREE.OrthographicCamera
+    if (preview) {
+      if (preview.view.projection === 'orthographic') Object.assign(previewCamera, {
+        left: -preview.view.halfWidth!, right: preview.view.halfWidth!, top: preview.view.halfHeight!, bottom: -preview.view.halfHeight! })
+      else Object.assign(previewCamera, { fov: preview.view.verticalFieldOfView, aspect: preview.view.aspect })
+      Object.assign(previewCamera, { manual: true, zoom: 1, near: preview.near, far: preview.far })
+      previewCamera.position.fromArray(preview.position); previewCamera.quaternion.fromArray(preview.quaternion)
+      previewCamera.updateProjectionMatrix(); previewCamera.updateMatrixWorld(true)
+      set({ camera: previewCamera }); wasPreviewing.current = true
+      return
+    }
+    const free = observer.current
+    const orthographic = free as THREE.OrthographicCamera
+    if (wasPreviewing.current) {
+      // The frame may have resized while letterboxed; update projection, not observer pose.
+      if (orthographic.isOrthographicCamera) {
+        orthographic.left = -size.width / 2; orthographic.right = size.width / 2
+        orthographic.top = size.height / 2; orthographic.bottom = -size.height / 2
+      } else (free as THREE.PerspectiveCamera).aspect = size.width / size.height
+      free.updateProjectionMatrix(); set({ camera: free }); wasPreviewing.current = false
+      return
+    }
+    if (!orthographic.isOrthographicCamera) return
     orthographic.zoom = size.height / Math.max(.01, orthographicSize * 2)
     orthographic.updateProjectionMatrix()
-  }, [camera, document.dimension, orthographicSize, size.height])
+  }, [orthographicSize, size.width, size.height, preview, previewCamera, set])
   useEffect(() => {
     const id = selectedRef.current
-    if (!focus || !documentRef.current.nodes[id]) return
+    if (preview || !focus || !documentRef.current.nodes[id]) return
     scene.updateMatrixWorld(true)
     const object = selectedObject(scene, id, partRef.current)
     const bounds = object ? new THREE.Box3().setFromObject(object) : new THREE.Box3()
@@ -267,7 +295,7 @@ function CameraRig({ document, selected, modelSelection, focus, orbit }: { docum
     if (orthographic.isOrthographicCamera) { orthographic.zoom = Math.min(size.width, size.height) / (radius * 2.6); orthographic.updateProjectionMatrix() }
     orbit.current?.target.copy(target)
     orbit.current?.update()
-  }, [camera, focus, orbit, scene])
+  }, [camera, focus, orbit, scene, preview])
   return null
 }
 
@@ -991,7 +1019,7 @@ function NodeView({ id, document, selected, selectedIds, hiddenIds, unpickableId
     start.current = null; setDragging(false); if (orbit.current) orbit.current.enabled = true
   }
   const rectSize = editorRect(node, document.nodes)?.size
-  return <><group ref={group} name={node.id} position={rectTransform(node, document.nodes).position} rotation={node.transform.rotation as any} scale={node.transform.scale} onClick={event => { event.stopPropagation(); if (!tileBrush && !unpickableIds.includes(node.id) && mode !== 'hand' && !event.altKey) onSelect(node.id, { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey }) }}>
+  return <><group ref={group} name={node.id} position={rectTransform(node, document.nodes).position} rotation={node.transform.quaternion ? undefined : node.transform.rotation as any} quaternion={node.transform.quaternion} scale={node.transform.scale} onClick={event => { event.stopPropagation(); if (!tileBrush && !unpickableIds.includes(node.id) && mode !== 'hand' && !event.altKey) onSelect(node.id, { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey }) }}>
     {preview && (preview.motion || preview.patrol || preview.animation) ? <NodeAnimation group={group} node={node} nodes={document.nodes} preview={preview} pixelsPerUnit={pixelsPerUnit} paused={dragging || isSelected} /> : null}
     {componentOf(node, 'sprite-renderer') || componentOf(node, 'image') ? <Primitive node={node} flat2d={document.dimension === '2d'} rectSize={rectSize} pixelsPerUnit={pixelsPerUnit} assets={document.assets} diagnose={diagnose} /> : null}
     {componentOf(node, 'tilemap') ? <TilemapPreview node={node} document={document} diagnose={diagnose} showGizmos={showGizmos} brush={tileBrush?.nodeId===node.id && !node.locked && node.editable!==false && !unpickableIds.includes(node.id) ? tileBrush : undefined} /> : null}
@@ -1076,27 +1104,49 @@ function Light({ node, selected, gizmoColor, showIcon, dimension }: { node: Scen
   </group>
 }
 
-function SceneContents({ document, selected, selectedIds = [selected], modelSelection, hiddenIds = [], unpickableIds = [], onSelect, mode, space, snap, focus, onTransform, onDiagnostic, initialView, showGizmos = true, viewMode, tileBrush }: SceneViewportProps) {
+function SceneContents({ document, selected, selectedIds = [selected], modelSelection, hiddenIds = [], unpickableIds = [], onSelect, mode, space, snap, focus, onTransform, onDiagnostic, initialView, showGizmos = true, viewMode, tileBrush, gamePreview }: SceneViewportProps & { gamePreview?: ReturnType<typeof resolveGameCameraPreview> }) {
   const settings = document.settings ?? DEFAULT_SCENE_SETTINGS
-  const { gl } = useThree()
+  const { gl, camera } = useThree()
+  const observer = useRef(camera)
   useEffect(() => { gl.toneMappingExposure = settings.exposure }, [gl, settings.exposure])
   const orbit = useRef<any>(null)
   const [temporarySnap, setTemporarySnap] = useState(false)
   const diagnosticCallback = useRef(onDiagnostic)
   diagnosticCallback.current = onDiagnostic
   const diagnose = useMemo(() => reportOnce(message => diagnosticCallback.current?.(message)), [])
-  return <><color attach="background" args={[settings.background]} /><ambientLight color={settings.ambientColor} intensity={settings.ambientIntensity} />{settings.fogEnabled && <fog attach="fog" args={[settings.fogColor, settings.fogNear, settings.fogFar]} />}{settings.showGrid && <Grid position={viewMode === '2d' ? [0, 0, 2] : undefined} rotation={viewMode === '2d' ? [Math.PI / 2, 0, 0] : undefined} userData={{ editorHelper: true }} args={[40, 40]} cellSize={1} sectionSize={5} sectionColor="#747980" cellColor="#555a61" fadeDistance={35} infiniteGrid />}<NavigationController orbit={orbit} handMode={mode === 'hand'} viewMode={viewMode} onTemporarySnap={setTemporarySnap} /><OrbitControls ref={orbit} target={initialView?.target} makeDefault enableRotate={false} enableDamping={false} enablePan={false} enableZoom={false} mouseButtons={{ LEFT: -1 as any, MIDDLE: -1 as any, RIGHT: -1 as any }} /><CameraRig document={document} selected={selected} modelSelection={modelSelection} focus={focus} orbit={orbit} /><SelectionOutline selectedIds={selectedIds} modelSelection={modelSelection} color={settings.selectionColor ?? '#ffad46'} width={settings.selectionWidth ?? 3} />{showGizmos && <GizmoHelper renderPriority={2} alignment="bottom-center" margin={[0, 136]}><GizmoViewport axisColors={['#d87178', '#66a58b', '#6e8ec7']} labelColor="white" /></GizmoHelper>}{document.rootIds.map(id => <NodeView key={id} id={id} document={document} selected={selected} selectedIds={selectedIds} hiddenIds={hiddenIds} unpickableIds={unpickableIds} onSelect={onSelect} mode={modelSelection ? 'select' : mode} space={space} snap={snap || temporarySnap} onTransform={onTransform} orbit={orbit} diagnose={diagnose} showGizmos={showGizmos} viewMode={viewMode} tileBrush={tileBrush} />)}</>
+  return <><color attach="background" args={[settings.background]} /><ambientLight color={settings.ambientColor} intensity={settings.ambientIntensity} />{settings.fogEnabled && <fog attach="fog" args={[settings.fogColor, settings.fogNear, settings.fogFar]} />}{!gamePreview && settings.showGrid && <Grid position={viewMode === '2d' ? [0, 0, 2] : undefined} rotation={viewMode === '2d' ? [Math.PI / 2, 0, 0] : undefined} userData={{ editorHelper: true }} args={[40, 40]} cellSize={1} sectionSize={5} sectionColor="#747980" cellColor="#555a61" fadeDistance={35} infiniteGrid />}{!gamePreview && <NavigationController orbit={orbit} handMode={mode === 'hand'} viewMode={viewMode} onTemporarySnap={setTemporarySnap} />}{<OrbitControls ref={orbit} camera={observer.current} enabled={!gamePreview} target={initialView?.target} makeDefault enableRotate={false} enableDamping={false} enablePan={false} enableZoom={false} mouseButtons={{ LEFT: -1 as any, MIDDLE: -1 as any, RIGHT: -1 as any }} />}<CameraRig preview={gamePreview} document={document} selected={selected} modelSelection={modelSelection} focus={focus} orbit={orbit} /><SelectionOutline selectedIds={gamePreview ? [] : selectedIds} modelSelection={modelSelection} color={settings.selectionColor ?? '#ffad46'} width={settings.selectionWidth ?? 3} />{!gamePreview && showGizmos && <GizmoHelper renderPriority={2} alignment="bottom-center" margin={[0, 136]}><GizmoViewport axisColors={['#d87178', '#66a58b', '#6e8ec7']} labelColor="white" /></GizmoHelper>}{document.rootIds.map(id => <NodeView key={id} id={id} document={document} selected={gamePreview ? '' : selected} selectedIds={gamePreview ? [] : selectedIds} hiddenIds={gamePreview ? [] : hiddenIds} unpickableIds={unpickableIds} onSelect={gamePreview ? () => {} : onSelect} mode={gamePreview ? 'select' : modelSelection ? 'select' : mode} space={space} snap={snap || temporarySnap} onTransform={onTransform} orbit={orbit} diagnose={diagnose} showGizmos={!gamePreview && showGizmos} viewMode={viewMode} tileBrush={gamePreview ? undefined : tileBrush} />)}</>
 }
 
 /** Self-contained R3F viewport used by the independent scene editor. */
 export function SceneViewport(props: SceneViewportProps) {
+  const host = useRef<HTMLDivElement>(null)
+  const [hostSize, setHostSize] = useState({ width: 0, height: 0 })
+  useEffect(() => {
+    const element = host.current
+    if (!element) return
+    const update = () => { const rect = element.getBoundingClientRect(); setHostSize({ width: rect.width, height: rect.height }) }
+    update()
+    const observer = new ResizeObserver(update); observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  const game = useMemo(() => {
+    if (!props.gameCamera || !hostSize.width || !hostSize.height) return {}
+    try { return { preview: resolveGameCameraPreview(props.document, hostSize) } }
+    catch (error) { return { error: error instanceof Error ? error.message : String(error) } }
+  }, [props.gameCamera, props.document, hostSize])
   const effectiveOrtho = props.viewMode === '2d' || props.ortho
   const authoredViewMatchesMode = props.document.dimension === props.viewMode
   const position = authoredViewMatchesMode ? props.initialView?.position : undefined
   const camera = effectiveOrtho
     ? { position: position ?? (props.viewMode === '2d' ? [0, 0, 10] as const : [7, 6, 7] as const), zoom: 65 }
     : { position: position ?? [7, 5, 7] as [number, number, number], fov: 45 }
-  return <Canvas shadows events={viewportEvents} key={`${props.viewMode}-${effectiveOrtho ? 'orthographic' : 'perspective'}-${props.document.dimension}`} orthographic={effectiveOrtho} camera={camera} onPointerMissed={event => !props.tileBrush && props.onSelect('', { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey })} onCreated={({ gl }) => { gl.setClearColor('#3c3f43'); gl.domElement.tabIndex = 0; gl.domElement.setAttribute('aria-label', 'Scene viewport') }}><SceneContents {...props} /></Canvas>
+  const rect = game.preview?.view.rect
+  return <div ref={host} style={{ position: 'relative', width: '100%', height: '100%', background: '#000' }} data-testid="scene-camera-host">
+    {game.error ? <div role="alert" style={{ padding: 16 }}>{game.error}</div> : <div data-testid="scene-camera-frame" data-framing={game.preview?.view.framing}
+      style={{ position: 'absolute', left: rect?.x ?? 0, top: rect?.y ?? 0, width: rect?.width ?? '100%', height: rect?.height ?? '100%' }}>
+      <Canvas shadows events={viewportEvents} key={`${props.viewMode}-${effectiveOrtho ? 'orthographic' : 'perspective'}-${props.document.dimension}`} orthographic={effectiveOrtho} camera={camera} onPointerMissed={event => !props.gameCamera && !props.tileBrush && props.onSelect('', { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey })} onCreated={({ gl }) => { gl.setClearColor('#3c3f43'); gl.domElement.tabIndex = 0; gl.domElement.setAttribute('aria-label', 'Scene viewport') }}><SceneContents {...props} gamePreview={game.preview} /></Canvas>
+    </div>}
+  </div>
 }
 
 export default SceneViewport

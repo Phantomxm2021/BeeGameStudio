@@ -1,0 +1,70 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-modal-pause-draft",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": { "anchorMin": [0, 0], "anchorMax": [1, 1], "sizeDelta": [0, 0] },
+        "data": {}
+      },
+      {
+        "id": "scrim",
+        "parentId": "root",
+        "role": "shape",
+        "enabled": true,
+        "layout": { "anchorMin": [0, 0], "anchorMax": [1, 1], "sizeDelta": [0, 0], "item": { "absolute": true } },
+        "data": {}
+      },
+      {
+        "id": "panel",
+        "parentId": "root",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 0],
+          "size": [340, 264],
+          "minSize": [280, 248],
+          "item": { "absolute": true },
+          "container": { "direction": "column", "gap": 18, "padding": [28, 24, 28, 24], "justify": "center", "align": "center" }
+        },
+        "data": {}
+      },
+      {
+        "id": "panel-title",
+        "parentId": "panel",
+        "role": "text",
+        "enabled": true,
+        "layout": { "size": [240, 40], "minSize": [200, 36] },
+        "text": "已暂停",
+        "data": {}
+      },
+      {
+        "id": "resume-btn",
+        "parentId": "panel",
+        "role": "button",
+        "enabled": true,
+        "layout": { "size": [220, 52], "minSize": [180, 48] },
+        "text": "继续",
+        "actions": { "onActivate": "RESUME" },
+        "data": {}
+      },
+      {
+        "id": "quit-btn",
+        "parentId": "panel",
+        "role": "button",
+        "enabled": true,
+        "layout": { "size": [220, 52], "minSize": [180, 48] },
+        "text": "退出本局",
+        "actions": { "onActivate": "QUIT_RUN" },
+        "data": {}
+      }
+    ]
+  }
+}

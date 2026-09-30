@@ -944,6 +944,7 @@ function ResponseParts({
     onOpenSubagent,
     onOpenTool,
     onPreviewArtifact,
+    compactHistory = true,
 }: {
     parts: ResponsePart[];
     lang: Language;
@@ -951,7 +952,28 @@ function ResponseParts({
     onOpenSubagent: (tool: NormalizedTool) => void;
     onOpenTool: (tool: NormalizedTool) => void;
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
+    compactHistory?: boolean;
 }) {
+    const settled = !parts.some(part => part.kind === 'tool'
+        ? part.tool.status === 'running'
+        : matchesStreamingMessage(part.message, streamingMessageId));
+    const history = compactHistory && settled && parts.some(part => part.kind === 'agent')
+        ? parts.filter(part => (part.kind === 'thinking' && !part.message.completionReason) || (part.kind === 'tool'
+            && part.tool.status === 'completed' && !part.tool.completionReason
+            && !part.tool.attachments?.length)) : [];
+    if (history.length > 1) {
+        const props = { lang, streamingMessageId, onOpenSubagent, onOpenTool, onPreviewArtifact, compactHistory: false };
+        return <>
+            <ResponseParts {...props} parts={parts.filter(part => !history.includes(part))} />
+            <AgentActivity
+                className="w-full text-[var(--text-secondary)]"
+                status="complete"
+                defaultOpen={false}
+                summary={lang === 'zh' ? `执行记录 · ${history.length} 项` : `Execution details · ${history.length} items`}
+                items={[{ id: 'completed-history', type: 'text', content: <ResponseParts {...props} parts={history} /> }]}
+            />
+        </>;
+    }
     const rendered: ReactNode[] = [];
     for (let index = 0; index < parts.length; index += 1) {
         const part = parts[index];

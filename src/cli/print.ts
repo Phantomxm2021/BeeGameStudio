@@ -358,7 +358,10 @@ import { unassignTeammateTasks } from '../utils/tasks.js'
 import { getRunningTasks } from '../utils/task/framework.js'
 import { isBackgroundTask } from '../tasks/types.js'
 import { stopTask } from '../tasks/stopTask.js'
-import { drainSdkEvents } from '../utils/sdkEventQueue.js'
+import {
+  drainSdkEvents,
+  parseTaskNotificationSdkEvent,
+} from '../utils/sdkEventQueue.js'
 import { initializeGrowthBook } from '../services/analytics/growthbook.js'
 import { errorMessage, toError } from '../utils/errors.js'
 import { sleep } from '../utils/sleep.js'
@@ -1975,6 +1978,7 @@ function runHeadlessStreaming(
     // Defined outside the try block so it's accessible in the post-finally
     // queue re-checks at the bottom of run().
     const isMainThread = (cmd: QueuedCommand) => cmd.agentId === undefined
+    let executingRequestId: string | undefined
 
     try {
       let command: QueuedCommand | undefined
@@ -2020,6 +2024,7 @@ function runHeadlessStreaming(
             }
           }
           const batchUuids = batch.map(c => c.uuid).filter(u => u !== undefined)
+          executingRequestId = command.uuid
           setNativeEvidenceTurn(command.uuid)
 
           // QueryEngine will emit a replay for command.uuid (the last uuid in
@@ -2075,79 +2080,10 @@ function runHeadlessStreaming(
           // This matches TUI behavior where useQueueProcessor always feeds
           // notifications to the model regardless of coordinator mode.
           if (command.mode === 'task-notification') {
-            const notificationText =
-              typeof command.value === 'string' ? command.value : ''
-            // Parse the XML-formatted notification
-            const taskIdMatch = notificationText.match(
-              /<task-id>([^<]+)<\/task-id>/,
-            )
-            const toolUseIdMatch = notificationText.match(
-              /<tool-use-id>([^<]+)<\/tool-use-id>/,
-            )
-            const outputFileMatch = notificationText.match(
-              /<output-file>([^<]+)<\/output-file>/,
-            )
-            const statusMatch = notificationText.match(
-              /<status>([^<]+)<\/status>/,
-            )
-            const summaryMatch = notificationText.match(
-              /<summary>([^<]+)<\/summary>/,
-            )
-
-            const isValidStatus = (
-              s: string | undefined,
-            ): s is 'completed' | 'failed' | 'stopped' | 'killed' =>
-              s === 'completed' ||
-              s === 'failed' ||
-              s === 'stopped' ||
-              s === 'killed'
-            const rawStatus = statusMatch?.[1]
-            const status = isValidStatus(rawStatus)
-              ? rawStatus === 'killed'
-                ? 'stopped'
-                : rawStatus
-              : 'completed'
-
-            const usageMatch = notificationText.match(
-              /<usage>([\s\S]*?)<\/usage>/,
-            )
-            const usageContent = usageMatch?.[1] ?? ''
-            const totalTokensMatch = usageContent.match(
-              /<total_tokens>(\d+)<\/total_tokens>/,
-            )
-            const toolUsesMatch = usageContent.match(
-              /<tool_uses>(\d+)<\/tool_uses>/,
-            )
-            const durationMsMatch = usageContent.match(
-              /<duration_ms>(\d+)<\/duration_ms>/,
-            )
-
-            // Only emit a task_notification SDK event when a <status> tag is
-            // present — that means this is a terminal notification (completed/
-            // failed/stopped). Stream events from enqueueStreamEvent carry no
-            // <status> (they're progress pings); emitting them here would
-            // default to 'completed' and falsely close the task for SDK
-            // consumers. Terminal bookends are now emitted directly via
-            // emitTaskTerminatedSdk, so skipping statusless events is safe.
-            if (statusMatch) {
+            const event = parseTaskNotificationSdkEvent(command.value)
+            if (event) {
               output.enqueue({
-                type: 'system',
-                subtype: 'task_notification',
-                task_id: taskIdMatch?.[1] ?? '',
-                tool_use_id: toolUseIdMatch?.[1],
-                status,
-                output_file: outputFileMatch?.[1] ?? '',
-                summary: summaryMatch?.[1] ?? '',
-                usage:
-                  totalTokensMatch && toolUsesMatch
-                    ? {
-                        total_tokens: parseInt(totalTokensMatch[1]!, 10),
-                        tool_uses: parseInt(toolUsesMatch[1]!, 10),
-                        duration_ms: durationMsMatch
-                          ? parseInt(durationMsMatch[1]!, 10)
-                          : 0,
-                      }
-                    : undefined,
+                ...event,
                 session_id: getSessionId(),
                 uuid: randomUUID(),
               })
@@ -2283,6 +2219,12 @@ function runHeadlessStreaming(
                   forwardMessagesToBridge()
 
                   if (message.type === 'result') {
+                    // Correlate terminal results even when a provider/local
+                    // failure occurs before QueryEngine emits the user replay.
+                    const commandResult = {
+                      ...message,
+                      request_id: cmd.uuid,
+                    } as StdoutMessage
                     lastResultIsError = !!(message as Record<string, unknown>)
                       .is_error
                     // Flush pending SDK events so they appear before result on the stream.
@@ -2300,10 +2242,10 @@ function runHeadlessStreaming(
                           isBackgroundTask(t),
                       )
                     ) {
-                      heldBackResult = message as StdoutMessage
+                      heldBackResult = commandResult
                     } else {
                       heldBackResult = null
-                      output.enqueue(message as StdoutMessage)
+                      output.enqueue(commandResult)
                     }
                   } else {
                     // Flush SDK events (task_started, task_progress) so background
@@ -2541,6 +2483,7 @@ function runHeadlessStreaming(
       try {
         await structuredIO.write({
           type: 'result',
+          ...(executingRequestId ? { request_id: executingRequestId } : {}),
           subtype: 'error_during_execution',
           duration_ms: 0,
           duration_api_ms: 0,

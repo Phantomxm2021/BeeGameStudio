@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { mkdtemp, realpath, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { DashboardPermissionDecision } from './session-manager'
 import {
   createNativeCliProcessRunner,
   nativeRuntimeEnvironment,
@@ -35,6 +36,131 @@ function startRuntime() {
 }
 
 describe('native CLI process runner', () => {
+  test('delivers ordered progress while approvals wait and correlates independent decisions in reverse order', async () => {
+    const runtime = await startRuntime()
+    const decisions = new Map<string, (decision: DashboardPermissionDecision) => void>()
+    const messages: Record<string, unknown>[] = []
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort('test_timeout'), 3000)
+    let progressArrived!: () => void
+    const progress = new Promise<void>(resolve => { progressArrived = resolve })
+    let secondDecisionArrived!: () => void
+    const secondDecision = new Promise<void>(resolve => { secondDecisionArrived = resolve })
+    const submitted = runtime.submit({ prompt: 'concurrent-permissions', signal: controller.signal,
+      onMessage: message => {
+        messages.push(message)
+        if (message.type === 'system' && message.subtype === 'task_progress') progressArrived()
+        if (message.permissionResponse) secondDecisionArrived()
+      },
+      requestPermission: request => new Promise(resolve => { decisions.set(request.toolUseID, resolve) }),
+    })
+    // Consume rejection immediately, so the regression timeout is never unhandled.
+    const completed = submitted.then(() => undefined, error => error as Error)
+    try {
+      await Promise.race([progress, submitted])
+      expect(decisions.size).toBe(2)
+      expect(messages.map(message => message.type)).toEqual(['stream_event', 'system'])
+      decisions.get('parallel-permission-2')!({ behavior: 'deny', source: 'user', message: 'No' })
+      // Observe the second decision before resolving the first, without sleeps.
+      await Promise.race([secondDecision, submitted])
+      decisions.get('parallel-permission-1')!({ behavior: 'allow', source: 'user' })
+      expect(await completed).toBeUndefined()
+      const replies = messages.filter(message => message.permissionResponse).map(message => message.permissionResponse as {
+        response: { request_id: string; response: { behavior: string } }
+      })
+      expect(replies.map(reply => [reply.response.request_id, reply.response.response.behavior])).toEqual([
+        ['parallel-permission-2', 'deny'], ['parallel-permission-1', 'allow'],
+      ])
+    } finally { clearTimeout(timeout); await runtime.dispose?.() }
+  })
+
+  test('does not send an old approval or propagate its failure into a new turn', async () => {
+    for (const failDecision of [false, true]) {
+      const runtime = await startRuntime()
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort('test_timeout'), 3000)
+      let resolveOld!: (decision: DashboardPermissionDecision) => void
+      let rejectOld!: (error: Error) => void
+      const messages: Record<string, unknown>[] = []
+      try {
+        await runtime.submit({ prompt: 'permission-after-result', signal: controller.signal,
+          onMessage: message => { messages.push(message) },
+          requestPermission: () => new Promise((resolve, reject) => { resolveOld = resolve; rejectOld = reject }),
+        })
+        await runtime.submit({ prompt: 'permission', signal: controller.signal,
+          onMessage: message => { messages.push(message) },
+          requestPermission: async () => {
+            if (failDecision) rejectOld(new Error('Old authority failed'))
+            else resolveOld({ behavior: 'allow' })
+            return { behavior: 'deny' }
+          },
+        })
+        expect(messages.some(message => message.unexpectedLatePermissionResponse)).toBe(false)
+        expect(messages.filter(message => message.type === 'result')).toHaveLength(2)
+      } finally { clearTimeout(timeout); await runtime.dispose?.() }
+    }
+  })
+
+  test('stops pending approvals without letting their late decisions write to a closed process', async () => {
+    const runtime = await startRuntime()
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort('test_timeout'), 3000)
+    const decisions: ((decision: DashboardPermissionDecision) => void)[] = []
+    try {
+      const submitted = runtime.submit({ prompt: 'concurrent-permissions', signal: controller.signal,
+        onMessage: message => { if (message.type === 'system') runtime.stop?.() },
+        requestPermission: () => new Promise(resolve => { decisions.push(resolve) }),
+      })
+      await expect(submitted).rejects.toThrow('cancelled by user')
+      await runtime.dispose?.()
+      expect(decisions).toHaveLength(2)
+      for (const resolve of decisions) resolve({ behavior: 'allow' })
+      await Bun.sleep(0)
+    } finally { clearTimeout(timeout); await runtime.dispose?.() }
+  })
+
+  test('reports a current approval callback failure without an unhandled rejection', async () => {
+    const runtime = await startRuntime()
+    try {
+      await expect(runtime.submit({ prompt: 'permission', signal: new AbortController().signal,
+        onMessage: () => undefined,
+        requestPermission: async () => { throw new Error('Approval authority failed') },
+      })).rejects.toThrow('Approval authority failed')
+    } finally { await runtime.dispose?.() }
+  })
+
+  test('late notification results cannot settle a newly submitted request or discard its permission callback', async () => {
+    const runtime = await startRuntime()
+    const messages: Record<string, unknown>[] = []
+    let permissions = 0
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort('test_timeout'), 3000)
+    try {
+      for (let i = 0; i < 2; i++) {
+        await runtime.submit({ prompt: 'late-notification-before-ack', signal: controller.signal,
+          onMessage: message => { messages.push(message) },
+          requestPermission: async () => { permissions++; return { behavior: 'allow', source: 'policy' } },
+        })
+      }
+      expect(permissions).toBe(2)
+      expect(messages.filter(message => message.type === 'result').map(message => message.result))
+        .toEqual(['Review finished', 'Review finished'])
+      expect(messages.filter(message => message.type === 'stream_event')).toHaveLength(2)
+      expect(JSON.stringify(messages)).not.toContain('Old audio notification')
+      expect(messages.filter(message => message.type === 'user')).toHaveLength(0)
+    } finally { clearTimeout(timeout); await runtime.dispose?.() }
+  })
+
+  test('an explicitly correlated provider failure before replay rejects instead of hanging', async () => {
+    const runtime = await startRuntime()
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort('test_timeout'), 3000)
+    try {
+      await expect(runtime.submit({ prompt: 'error-before-ack', signal: controller.signal,
+        onMessage: () => undefined, requestPermission: async () => ({ behavior: 'deny' }),
+      })).rejects.toThrow('provider failed before replay')
+    } finally { clearTimeout(timeout); await runtime.dispose?.() }
+  })
   test('public artifact approval names the file, destination and lifetime without exposing its path', () => {
     const message = publicArtifactApprovalMessage('ExecuteExtraTool', {
       tool_name: 'artifact', params: { file_path: '/private/tmp/resource-delivery.md', ttl: 30 },

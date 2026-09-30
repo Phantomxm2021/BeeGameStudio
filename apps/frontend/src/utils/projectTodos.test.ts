@@ -3,6 +3,25 @@ import type { ChatDisplayMessage } from '../viewModels/displayModels';
 import { deriveCurrentProjectTodos } from './projectTodos';
 
 describe('deriveCurrentProjectTodos', () => {
+    it('replaces the main agent list across turns, including renames and an empty latest list', () => {
+        const snapshot = (id: string, turnId: string, timestamp: number, todos: unknown[]): ChatDisplayMessage => ({
+            id, taskId: 'session', turnId, timestamp, sender: 'system', content: '', toolName: 'TodoWrite',
+            toolInput: { todos },
+        });
+        const earlier = snapshot('initial', 'turn-6', 1, [
+            { content: 'Generate atlas', status: 'in_progress' },
+            { content: 'Get font or fallback', status: 'pending' },
+        ]);
+        const latest = snapshot('finished', 'turn-7', 2, [
+            { content: 'Generate atlas', status: 'completed' },
+            { content: 'Get font', status: 'completed' },
+        ]);
+        const items = deriveCurrentProjectTodos([latest, earlier]);
+        expect(items.map(item => [item.title, item.status])).toEqual([
+            ['Generate atlas', 'completed'], ['Get font', 'completed'],
+        ]);
+        expect(deriveCurrentProjectTodos([earlier, latest, snapshot('cleared', 'turn-8', 3, [])])).toEqual([]);
+    });
     it('keeps same-named tasks in separate execution scopes and compares paths before display shortening', () => {
         const make = (id: string, scope: string, timestamp: number, content: string, status: string): ChatDisplayMessage => ({
             id, todoScope: scope, sender: 'system', content: 'TodoWrite', timestamp, toolName: 'TodoWrite',

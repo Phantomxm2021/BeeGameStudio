@@ -33,6 +33,86 @@ const uiDocument = {
 };
 
 describe('UiEditorOverlay', () => {
+  it('previews and saves container relationships without baking calculated child positions', async () => {
+    const doc = { schema: 'beegame-content.v1' as const, id: 'hud', kind: 'ui-hud' as const, assetRefs: [], data: {
+      rootId: 'root', nodes: [
+        { id: 'root', role: 'hud-root', name: 'HUD', layout: { size: [960, 540] as [number, number], container: { direction: 'row' as const, gap: 12, align: 'start' as const, padding: [12, 12, 12, 12] as [number, number, number, number] } } },
+        { id: 'score', parentId: 'root', role: 'button', name: 'Score', layout: { size: [100, 44] as [number, number], item: { grow: 1 } } },
+        { id: 'pause', parentId: 'root', role: 'button', name: 'Pause', layout: { size: [44, 44] as [number, number] } },
+      ],
+    } };
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{ path: 'content/ui/hud.json', revision: 'a'.repeat(64), document: doc }] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 1, requirements: [], resources: [] });
+    const save = vi.spyOn(beeGameAdapter, 'saveProjectGameContentDocument').mockResolvedValue({ revision: 'b'.repeat(64), contentRevision: 'c'.repeat(64) });
+    const { container } = render(<UiEditorOverlay projectId="container-layout" onClose={vi.fn()} />);
+    const hierarchy = await screen.findByLabelText('UI hierarchy');
+    selectEditorOption('Preview viewport', 'Custom');
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Preview width' }), { target: { value: '390' } });
+    const buttons = container.querySelectorAll('[data-role="button"]');
+    expect(buttons[0]).toHaveStyle({ width: '310px', height: '44px', left: '12px' });
+    expect(buttons[1]).toHaveStyle({ left: '334px', width: '44px' });
+    fireEvent.click(within(hierarchy).getByText('Pause').closest('.ui-editor-tree-row')!);
+    expect(screen.getByRole('spinbutton', { name: 'Position X' })).toBeDisabled();
+    fireEvent.click(within(hierarchy).getByText('HUD').closest('.ui-editor-tree-row')!);
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Container gap' }), { target: { value: '20' } });
+    fireEvent.keyDown(window, { key: 's', metaKey: true });
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    const saved = save.mock.calls[0][1].document.data.nodes;
+    expect(saved[0].layout?.container?.gap).toBe(20);
+    expect(saved[1].layout).not.toHaveProperty('position');
+    expect(doc.data.nodes[0].layout?.container?.gap).toBe(12);
+  });
+
+  it('reports an incompatible flow/stretch arrangement without crashing the editor', async () => {
+    const doc = { schema: 'beegame-content.v1' as const, id: 'conflict', kind: 'ui-screen' as const, assetRefs: [], data: {
+      rootId: 'root', nodes: [
+        { id: 'root', role: 'screen-root', layout: { size: [960, 540] as [number, number], container: { direction: 'row' as const } } },
+        { id: 'panel', parentId: 'root', role: 'container', layout: { anchorMin: [0, 0] as [number, number], anchorMax: [1, 1] as [number, number] } },
+      ],
+    } };
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{ path: 'content/ui/conflict.json', revision: 'a'.repeat(64), document: doc }] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 1, requirements: [], resources: [] });
+    render(<UiEditorOverlay projectId="layout-conflict" onClose={vi.fn()} />);
+    expect(await screen.findByText(/Layout cannot be resolved: Flow child cannot also use stretch anchors/)).toHaveAttribute('role', 'alert');
+    expect(screen.getByLabelText('UI hierarchy')).toBeInTheDocument();
+  });
+
+  it('renders an explicit content line height in logical pixels rather than font multiples', async () => {
+    const doc = structuredClone(uiDocument);
+    doc.assetRefs = [];
+    doc.data.nodes = [doc.data.nodes[0], { id: 'instructions', parentId: 'root', role: 'text', text: 'Move\nBomb\nPause', layout: { size: [320, 108] }, style: { fontSize: 18, lineHeight: 32 } }] as typeof doc.data.nodes;
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{ path: 'content/ui/title.json', revision: 'a'.repeat(64), document: doc }] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 1, requirements: [], resources: [] });
+    const { container } = render(<UiEditorOverlay projectId="line-height" onClose={vi.fn()} />);
+    await screen.findByLabelText('UI preview');
+    expect(container.querySelector('[data-role="text"]')).toHaveStyle({ lineHeight: '32px' });
+  });
+
+  it.each(['decode', 'download'])('keeps the editor usable when a required font fails to %s', async failure => {
+    const doc = { ...uiDocument, assetRefs: ['RES-FONT'] };
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockResolvedValue({ state: 'ready', documents: [{ path: 'content/ui/title.json', revision: 'a'.repeat(64), document: doc }] });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockResolvedValue({ contract_state: 'ready', version: 1, requirements: [], resources: [
+      { id: 'RES-FONT', status: 'verified', root_path: 'assets/font.ttf', file_paths: ['assets/font.ttf'], source: { type: 'agent-authored' } },
+    ] });
+    const bytes = new ArrayBuffer(4);
+    const load = vi.spyOn(beeGameAdapter, 'loadProjectAssetFile');
+    if (failure === 'download') load.mockRejectedValue(new Error('403 Forbidden'));
+    else load.mockResolvedValue({ arrayBuffer: async () => bytes } as Blob);
+    const constructor = vi.fn();
+    vi.stubGlobal('FontFace', class {
+      constructor(family: string, source: unknown) { constructor(family, source); }
+      load() { return Promise.reject(new DOMException('Invalid font data', 'SyntaxError')); }
+    });
+    render(<UiEditorOverlay projectId="font-failure" onClose={vi.fn()} />);
+    await screen.findByText(/using fallback font/);
+    expect(screen.getByLabelText('UI preview')).toBeInTheDocument();
+    expect(screen.queryByText(/Failed to load 1 assets/)).not.toBeInTheDocument();
+    if (failure === 'decode') {
+      expect(constructor).toHaveBeenCalledWith('BGS-RES-FONT', bytes);
+      expect(screen.getByText(/Font data could not be decoded/)).toBeInTheDocument();
+    } else expect(screen.getByText(/403 Forbidden/)).toBeInTheDocument();
+  });
+
   it('previews authored stretch anchors at an arbitrary host size', async () => {
     const doc = { schema: 'beegame-content.v1' as const, id: 'stretch', kind: 'ui-screen' as const, assetRefs: [], data: {
       rootId: 'root', nodes: [

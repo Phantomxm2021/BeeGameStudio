@@ -27,13 +27,19 @@ const reportSchema = z.object({
 export type RuntimeAcceptance = {
   scope?: 'request' | 'delivery'
   status: 'passed' | 'failed' | 'blocked'
-  invalidRecord?: true
+  diagnostic?: AcceptanceDiagnostic
   summary: string
   environment: string
   verification?: z.infer<typeof verificationSchema>
   evidence: Array<{ path: string; sha256: string }>
   artifacts?: Array<{ path: string; sha256: string }>
 }
+
+export type AcceptanceDiagnostic = {
+  category: 'report-invalid' | 'verification-incomplete' | 'product-failed'
+  message: string
+}
+const diagnostic = (category: AcceptanceDiagnostic['category'], message: string): AcceptanceDiagnostic => ({ category, message })
 
 async function artifactDigest(workspace: string, path: string, allowDirectory = false): Promise<string> {
   if (isAbsolute(path) || path.replaceAll('\\', '/').split('/').includes('..'))
@@ -81,7 +87,7 @@ export async function readRuntimeAcceptanceReport(workspace: string, reportPath:
     let limitation = report.scope !== 'request' && report.status === 'passed'
       ? deliveryLimitation(report) : undefined
     if (report.scope !== 'request' && report.status === 'passed' && !report.artifactPaths?.length)
-      limitation ??= 'The tested deployment artifacts are not recorded.'
+      limitation ??= diagnostic('verification-incomplete', 'The tested deployment artifacts are not recorded.')
     if (report.scope !== 'request' && report.status === 'passed' && !limitation)
       limitation = await contentBindingLimitation(workspace, report.verification, report.evidencePaths)
     if (report.status === 'passed' && report.scope !== 'request' && !report.evidencePaths.length)
@@ -97,26 +103,28 @@ export async function readRuntimeAcceptanceReport(workspace: string, reportPath:
     return { ...(report.scope ? { scope: report.scope } : {}),
       ...(report.verification ? { verification: report.verification } : {}),
       status: limitation ? 'blocked' : report.status,
-      summary: limitation ?? report.summary,
+      diagnostic: limitation ?? (report.status === 'failed' ? diagnostic('product-failed', report.summary)
+        : report.status === 'blocked' ? diagnostic('verification-incomplete', report.summary) : undefined),
+      summary: limitation?.message ?? report.summary,
       environment: report.environment, evidence, artifacts }
   } catch (error) { return blocked(error) }
 }
 
-function deliveryLimitation(report: { verification?: z.infer<typeof verificationSchema> }): string | undefined {
+function deliveryLimitation(report: { verification?: z.infer<typeof verificationSchema> }): AcceptanceDiagnostic | undefined {
   const checked = verificationSchema.safeParse(report.verification)
-  if (!checked.success) return 'Delivery verification coverage is not recorded; this is not a full delivery pass.'
-  if (checked.data.target !== 'deployment') return 'Development verification does not establish deployment readiness.'
+  if (!checked.success) return diagnostic('verification-incomplete', 'Delivery verification coverage is not recorded; this is not a full delivery pass.')
+  if (checked.data.target !== 'deployment') return diagnostic('verification-incomplete', 'Development verification does not establish deployment readiness.')
   if (checked.data.observation !== 'target-runtime')
-    return 'Delivery requires verification in the actual target runtime; simulated checks alone are insufficient.'
+    return diagnostic('verification-incomplete', 'Delivery requires verification in the actual target runtime; simulated checks alone are insufficient.')
   if (checked.data.knownIssues.length)
-    return `Delivery still has known issues: ${checked.data.knownIssues.join('; ')}`
+    return diagnostic('product-failed', `Delivery still has known issues: ${checked.data.knownIssues.join('; ')}`)
   if (checked.data.unverified.length)
-    return `Delivery still has unverified requirements: ${checked.data.unverified.join('; ')}`
+    return diagnostic('verification-incomplete', `Delivery still has unverified requirements: ${checked.data.unverified.join('; ')}`)
 }
 
 /** Verify coverage and evidence identity, not source-code patterns or claimed
  * visual correctness. The Agent remains responsible for the observed result. */
-async function contentBindingLimitation(workspace: string, verification: z.infer<typeof verificationSchema> | undefined, evidencePaths: string[]): Promise<string | undefined> {
+async function contentBindingLimitation(workspace: string, verification: z.infer<typeof verificationSchema> | undefined, evidencePaths: string[]): Promise<AcceptanceDiagnostic | undefined> {
   const indexPath = 'content/index.json'
   try { await artifactDigest(workspace, indexPath) }
   catch (error) {
@@ -141,7 +149,7 @@ async function contentBindingLimitation(workspace: string, verification: z.infer
     if (document.kind === 'ui-screen' || document.kind === 'ui-hud') {
       const geometryIssues = auditUiInteractiveBounds(document)
       if (geometryIssues.length)
-        return `Authored UI controls or their panels are outside the viewport: ${path}: ${geometryIssues[0]}${geometryIssues.length > 1 ? ` (${geometryIssues.length - 1} more; run content validation)` : ''}`
+        return diagnostic('product-failed', `Authored UI controls or their panels are outside the viewport: ${path}: ${geometryIssues[0]}${geometryIssues.length > 1 ? ` (${geometryIssues.length - 1} more; run content validation)` : ''}`)
       add('ui-layout', path)
     }
     if (document.kind === 'scene-2d' || document.kind === 'scene-3d') {
@@ -153,26 +161,27 @@ async function contentBindingLimitation(workspace: string, verification: z.infer
   }
   const checks = verification?.contentChecks ?? []
   for (const check of checks) {
-    if (!required.get(check.kind)?.has(check.document)) return `Content binding check does not reference applicable registered content: ${check.kind}, ${check.document}.`
-    if (!nodeIds.get(check.document)?.has(check.nodeId)) return `Content binding check references an unknown node: ${check.document}, ${check.nodeId}.`
+    if (!required.get(check.kind)?.has(check.document)) return diagnostic('report-invalid', `Content binding check does not reference applicable registered content: ${check.kind}, ${check.document}.`)
+    if (!nodeIds.get(check.document)?.has(check.nodeId)) return diagnostic('report-invalid', `Content binding check references an unknown node: ${check.document}, ${check.nodeId}.`)
     if (check.property === 'tilemap' && !tilemapNodes.get(check.document)?.has(check.nodeId))
-      return `Content binding tilemap check references a node without a Tilemap: ${check.document}, ${check.nodeId}.`
-    if (check.status !== 'passed') return `Content binding ${check.kind} is ${check.status}: ${check.observed}`
+      return diagnostic('report-invalid', `Content binding tilemap check references a node without a Tilemap: ${check.document}, ${check.nodeId}.`)
+    if (check.status !== 'passed') return diagnostic(check.status === 'failed' ? 'product-failed' : 'verification-incomplete', `Content binding ${check.kind} is ${check.status}: ${check.observed}`)
     if (check.evidencePaths.some(path => !evidencePaths.includes(path)))
-      return `Content binding ${check.kind} evidence must be included in evidencePaths.`
+      return diagnostic('report-invalid', `Content binding ${check.kind} evidence must be included in evidencePaths.`)
   }
   const missing = [...required.keys()].filter(kind => !checks.some(check => check.kind === kind &&
     (kind !== 'scene-layout' || check.property === 'transform')))
   if (tilemapNodes.size && !checks.some(check => check.kind === 'scene-layout' && check.property === 'tilemap'))
     missing.push('scene-layout/tilemap')
-  if (missing.length) return `Content data consumption is unverified: ${missing.join(', ')}. Loading JSON or changing text alone does not verify layout/resource bindings.`
+  if (missing.length) return diagnostic('verification-incomplete', `Content data consumption is unverified: ${missing.join(', ')}. Loading JSON or changing text alone does not verify layout/resource bindings.`)
 }
 
 function blocked(error: unknown): RuntimeAcceptance {
   const detail = error instanceof z.ZodError
     ? error.issues.slice(0, 8).map(issue => `${issue.path.join('.') || 'report'}: ${issue.message}`).join('; ')
     : error instanceof Error ? error.message : String(error)
-  return { status: 'blocked', invalidRecord: true,
+  return { status: 'blocked',
+    diagnostic: diagnostic('report-invalid', detail),
     summary: `Invalid runtime acceptance record: ${detail}`,
     environment: 'not-established', evidence: [] }
 }

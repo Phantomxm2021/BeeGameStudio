@@ -22,6 +22,8 @@ const usage = `Usage: bun <this-file> <command> [arguments]
   generate <request.json> <assets/path>  Generate from {requestId,prompt,background?,quality?,size?,referenceImagePath?}
   atlas <assets/sheet.png> <assets/frames.json> <assets/runtime/name.png>
                                          Publish named rectangles as a PNG + same-basename atlas JSON
+For compatible small AI-generated elements, prefer one shared sheet request; use atlas to register inspected rectangles. generate returns an image, not frame metadata. atlas does not pack separate images. Split generation for a concrete visual/use need, preserving planned atlas delivery.
+The same atlas delivery applies to retrieved and procedural static sprites. Procedural drawing can write a shared PNG and exact rectangles directly. Dynamic text and live geometry need not become images.
 Commands are optional. You choose the source and asset design. No command updates the Manifest.`
 
 function id(value) {

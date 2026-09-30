@@ -1,0 +1,81 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-modal-result-draft",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": { "anchorMin": [0, 0], "anchorMax": [1, 1], "sizeDelta": [0, 0] },
+        "data": {}
+      },
+      {
+        "id": "scrim",
+        "parentId": "root",
+        "role": "shape",
+        "enabled": true,
+        "layout": { "anchorMin": [0, 0], "anchorMax": [1, 1], "sizeDelta": [0, 0], "item": { "absolute": true } },
+        "data": {}
+      },
+      {
+        "id": "panel",
+        "parentId": "root",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 0],
+          "size": [340, 300],
+          "minSize": [288, 276],
+          "item": { "absolute": true },
+          "container": { "direction": "column", "gap": 18, "padding": [28, 24, 28, 24], "justify": "center", "align": "center" }
+        },
+        "data": {}
+      },
+      {
+        "id": "result-title",
+        "parentId": "panel",
+        "role": "text",
+        "enabled": true,
+        "layout": { "size": [260, 44], "minSize": [200, 40] },
+        "text": "通关成功",
+        "bindings": { "text": "resultTitle" },
+        "data": {}
+      },
+      {
+        "id": "result-score",
+        "parentId": "panel",
+        "role": "text",
+        "enabled": true,
+        "layout": { "size": [240, 32], "minSize": [200, 30] },
+        "text": "最终分数 0000",
+        "bindings": { "text": "finalScore" },
+        "data": {}
+      },
+      {
+        "id": "restart-btn",
+        "parentId": "panel",
+        "role": "button",
+        "enabled": true,
+        "layout": { "size": [220, 52], "minSize": [180, 48] },
+        "text": "再来一局",
+        "actions": { "onActivate": "RESTART" },
+        "data": {}
+      },
+      {
+        "id": "exit-btn",
+        "parentId": "panel",
+        "role": "button",
+        "enabled": true,
+        "layout": { "size": [220, 52], "minSize": [180, 48] },
+        "text": "退出",
+        "actions": { "onActivate": "EXIT_TO_START" },
+        "data": {}
+      }
+    ]
+  }
+}

@@ -1,0 +1,113 @@
+import { expect, it } from 'vitest'
+import { inspectUiLayout, inspectUiLayoutBoundaries } from './ui-layout-inspection'
+import type { UiResponsiveNode } from './ui-responsive'
+
+const root: UiResponsiveNode = { id: 'root', layout: { size: [960, 540] } }
+it('exposes double anchor compensation without changing data', () => {
+  const nodes: UiResponsiveNode[] = [root,
+    { id: 'title', parentId: 'root', layout: { anchor: 'top-center', position: [-280, 96], size: [560, 80] } },
+  ]
+  const before = JSON.stringify(nodes)
+  const result = inspectUiLayout(nodes, 'root', { width: 640, height: 360 })
+  expect(result[1].bounds).toEqual({ left: -240, top: 96, right: 320, bottom: 176 })
+  expect(result[1].outsideViewport).toBe(true)
+  expect(JSON.stringify(nodes)).toBe(before)
+})
+it.each([[640, 360], [1280, 720]])('resolves stretch, centering and nested offsets at %s x %s', (width, height) => {
+  const result = inspectUiLayout([root,
+    { id: 'mask', parentId: 'root', layout: { anchorMin: [0, 0], anchorMax: [1, 1], sizeDelta: [0, 0] } },
+    { id: 'panel', parentId: 'root', layout: { anchor: 'middle-center', size: [200, 100] } },
+    { id: 'child', parentId: 'panel', layout: { position: [10, 20], size: [30, 40] } },
+  ], 'root', { width, height })
+  expect(result[1].bounds).toEqual({ left: 0, top: 0, right: width, bottom: height })
+  expect(result[3].bounds.left).toBe(width / 2 - 100 + 10)
+  expect(result[3].bounds.top).toBe(height / 2 - 50 + 20)
+})
+it('applies responsive, pivot, rotation and disabled ancestors', () => {
+  const result = inspectUiLayout([root,
+    { id: 'panel', parentId: 'root', enabled: false, layout: { position: [-200, 0], size: [100, 100] } },
+    { id: 'child', parentId: 'panel', layout: { size: [10, 10] } },
+    { id: 'turn', parentId: 'root', data: { anchor: { x: 0, y: 0 } }, layout: { anchor: 'middle-center', size: [20, 10], rotation: Math.PI / 2 }, responsive: { compact: { layout: { size: [40, 10] } } } },
+  ], 'root', { width: 400, height: 300 })
+  expect(result[2].active).toBe(false)
+  expect(result[2].outsideViewport).toBe(false)
+  expect(result[3].bounds.left).toBeCloseTo(190)
+  expect(result[3].bounds.bottom).toBeCloseTo(190)
+})
+it('rejects malformed geometry and hierarchy', () => {
+  const viewport = { width: 640, height: 360 }
+  expect(() => inspectUiLayout([root, root], 'root', viewport)).toThrow('Duplicate')
+  expect(() => inspectUiLayout([root, { id: 'orphan' }], 'root', viewport)).toThrow('parent')
+  expect(() => inspectUiLayout([root, { id: 'bad', parentId: 'root', layout: { size: [-1, 20] } }], 'root', viewport)).toThrow('Invalid')
+})
+
+it('reports text/text and text/control intersections even when all nodes fit inside the viewport', () => {
+  const nodes: UiResponsiveNode[] = [root,
+    { id: 'score', parentId: 'root', text: 'Score', layout: { position: [12, 10], size: [140, 28] } },
+    { id: 'lives', parentId: 'root', text: 'Lives', layout: { position: [90, 10], size: [140, 28] } },
+    { id: 'pause', parentId: 'root', text: 'Pause', layout: { position: [123, 8], size: [72, 32] } },
+  ]
+  const source = JSON.stringify(nodes)
+  const result = inspectUiLayout(nodes, 'root', { width: 390, height: 844 })
+  expect(result.every(node => !node.outsideViewport && !node.outsideParent)).toBe(true)
+  expect(result.find(node => node.id === 'score')?.overlapCandidates).toEqual(['lives', 'pause'])
+  expect(result.find(node => node.id === 'lives')?.overlapCandidates).toEqual(['score', 'pause'])
+  expect(result.find(node => node.id === 'pause')?.overlapCandidates).toEqual(['score', 'lives'])
+  expect(JSON.stringify(nodes)).toBe(source)
+})
+
+it('ignores disabled, zero-area, parent/child, and touching boxes, keeping backgrounds out of text candidates', () => {
+  const nodes = [root,
+    { id: 'background', role: 'image', text: 'Backdrop', parentId: 'root', layout: { size: [640, 360] } },
+    { id: 'button', role: 'button', parentId: 'root', layout: { size: [100, 50] } },
+    { id: 'label', role: 'text', parentId: 'button', text: 'Play', layout: { size: [100, 50] } },
+    { id: 'next', role: 'button', parentId: 'root', layout: { position: [100, 0], size: [100, 50] } },
+    { id: 'hidden', role: 'text', enabled: false, parentId: 'root', text: 'hidden', layout: { size: [100, 50] } },
+    { id: 'empty', role: 'text', parentId: 'root', text: '', layout: { position: [50, 25], size: [0, 0] } },
+  ]
+  expect(inspectUiLayout(nodes, 'root', { width: 640, height: 360 }).every(node => node.overlapCandidates.length === 0)).toBe(true)
+})
+
+it('keeps interactive/control overlap detection and applies responsive visibility before checking', () => {
+  const nodes = [root,
+    { id: 'pause', role: 'button', parentId: 'root', layout: { size: [100, 50] } },
+    { id: 'menu', role: 'dropdown', parentId: 'root', layout: { position: [20, 0], size: [100, 50] },
+      responsive: { compact: { enabled: false } } },
+  ]
+  expect(inspectUiLayout(nodes, 'root', { width: 960, height: 540 })[1].overlapCandidates).toEqual(['menu'])
+  expect(inspectUiLayout(nodes, 'root', { width: 390, height: 844 })[1].overlapCandidates).toEqual([])
+})
+
+it('checks the authored compact boundary and its next logical pixel without changing layout selection', () => {
+  const nodes: UiResponsiveNode[] = [
+    { id: 'root', data: { compactMaxWidth: 680 } },
+    { id: 'title', parentId: 'root', text: 'Title', layout: { position: [0, -10], size: [100, 50] },
+      responsive: { compact: { layout: { position: [0, 0] } } } },
+  ]
+  const source = JSON.stringify(nodes)
+  const checks = inspectUiLayoutBoundaries(nodes, 'root', { width: 667, height: 375 })
+  expect(checks).toEqual([
+    { trigger: 'compact', viewport: { width: 680, height: 375 }, diagnostics: {
+      outsideViewport: [], outsideParent: [], outsideContentArea: [], overlapCandidates: [],
+    } },
+    { trigger: 'compact', viewport: { width: 681, height: 375 }, diagnostics: {
+      outsideViewport: ['title'], outsideParent: ['title'], outsideContentArea: [], overlapCandidates: [],
+    } },
+  ])
+  expect(JSON.stringify(nodes)).toBe(source)
+})
+
+it('checks default compact and portrait boundaries only when those variants are declared', () => {
+  expect(inspectUiLayoutBoundaries([root], 'root', { width: 390, height: 844 })).toEqual([])
+  const nodes: UiResponsiveNode[] = [root,
+    { id: 'label', parentId: 'root', text: 'Text', layout: { size: [20, 20] },
+      responsive: { compact: { layout: { position: [0, 0] } }, portrait: { layout: { position: [-10, 0] } } } },
+  ]
+  const checks = inspectUiLayoutBoundaries(nodes, 'root', { width: 400, height: 399 })
+  expect(checks.map(check => check.viewport)).toEqual([
+    { width: 600, height: 399 }, { width: 601, height: 399 },
+    { width: 400, height: 400 }, { width: 400, height: 401 },
+  ])
+  expect(checks[2].diagnostics.outsideViewport).toEqual([])
+  expect(checks[3].diagnostics.outsideViewport).toEqual(['label'])
+})

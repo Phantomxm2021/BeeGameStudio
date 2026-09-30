@@ -1,0 +1,119 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-prompt-390",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "data": {
+          "referenceResolution": [
+            960,
+            540
+          ]
+        },
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "game-view",
+        "role": "container",
+        "parentId": "root",
+        "layout": {
+          "anchorMin": [
+            0.02,
+            0.02
+          ],
+          "anchorMax": [
+            0.98,
+            0.98
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "frame",
+        "role": "container",
+        "parentId": "game-view",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            0,
+            143.04
+          ],
+          "size": [
+            374.40000000000003,
+            524.16
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 0,
+            "padding": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        }
+      },
+      {
+        "id": "paddle-top-marker",
+        "role": "shape",
+        "parentId": "frame",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            0,
+            483.6
+          ],
+          "size": [
+            374.40000000000003,
+            2
+          ],
+          "item": {
+            "absolute": true
+          }
+        }
+      },
+      {
+        "id": "serve-prompt",
+        "role": "worldPrompt",
+        "parentId": "frame",
+        "text": "按 空格 / 点击 发球",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            93.60000000000001,
+            443.04
+          ],
+          "size": [
+            187.20000000000002,
+            18.72
+          ],
+          "item": {
+            "absolute": true
+          }
+        }
+      }
+    ]
+  }
+}

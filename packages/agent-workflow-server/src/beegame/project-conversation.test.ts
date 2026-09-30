@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BeeGameSessionManager, type BeeGameSessionRunnerStartInput } from './session-manager'
 import { sendProjectConversation, isProjectConversation } from './project-conversation'
+import { createNativeCliProcessRunner } from './native-cli-process-runner'
+import { fileURLToPath } from 'node:url'
 import { beginProjectDelivery, PROJECT_DOCUMENTS, projectDeliveryStatePath, readProjectDelivery } from './project-delivery'
 
 async function idle(manager: BeeGameSessionManager, id: string) {
@@ -11,6 +13,37 @@ async function idle(manager: BeeGameSessionManager, id: string) {
     await Bun.sleep(5)
   expect(manager.get(id)?.turnStatus).toBe('idle')
 }
+
+async function completeMilestone(workspace: string, prompt: unknown) {
+  const path = JSON.stringify(prompt).match(/\.beegame\/tmp\/[^\s]+\/milestone-[\w-]+\.txt/)?.[0]
+  if (path) await writeFile(join(workspace, path), 'complete\n')
+}
+
+test('real stdio handoff ignores the prior notification and keeps review context until its actual result', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-review-stdio-race-'))
+  const workspace = join(root, 'project')
+  const manager = new BeeGameSessionManager(createNativeCliProcessRunner({
+    command: [process.execPath, fileURLToPath(new URL('./fixtures/native-runtime-fixture.ts', import.meta.url))],
+  }), root)
+  let closes = 0
+  try {
+    await mkdir(workspace)
+    const state = await beginProjectDelivery(workspace, root, 'Fixture game')
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'review' }))
+    const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+    await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id,
+      ownerId: 'owner', message: 'fixture:review-race', autoContinuation: true,
+      openCapabilities: () => ({ instruction: 'Fixture', close: async () => { closes++ } }),
+    })
+    await idle(manager, session.id)
+    expect(closes).toBe(1)
+    expect((await readProjectDelivery(workspace, root))?.phase).toBe('resources')
+    const events = manager.transcript(session.id)
+    expect(events.filter(event => event.type === 'result').map(event => event.text)).toEqual(['Review finished'])
+    expect(events.some(event => event.payload?.subtype === 'delivery_error')).toBe(false)
+    expect(events.some(event => event.type === 'turn.failed')).toBe(false)
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
 
 test('resumed implementation receives current responsive semantics without rewriting authored content', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-runtime-contract-handoff-'))
@@ -21,7 +54,7 @@ test('resumed implementation receives current responsive semantics without rewri
       const format = JSON.parse(await readFile(join(workspace, '.beegame/delivery/content-format.json'), 'utf8'))
       expect(format.uiLayoutContract.responsive).toContain('portrait')
       expect(format.runtimeConsumption.checks['ui-layout'].properties).toEqual(['layout'])
-      expect(JSON.stringify(turn.prompt)).toContain('responsive requirements and authored layout conflict')
+      expect(JSON.stringify(turn.prompt)).toContain('correct the data while preserving valid formats and references')
       expect(await readFile(join(workspace, 'content/ui.json'), 'utf8')).toBe('authored content unchanged')
       expect(await readFile(join(workspace, '.beegame/delivery/content-contract.json'), 'utf8')).toBe('authority snapshot unchanged')
       observed = true
@@ -59,6 +92,7 @@ test.each(['continue', 'stop', 'cleanup-error', 'handoff-error'] as const)('deli
   const manager = new BeeGameSessionManager({ async start() {
     return { stop() {}, async submit(turn) {
       turns++
+      await completeMilestone(workspace, turn.prompt)
       await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
     } }
   } }, root)
@@ -139,7 +173,7 @@ test('raw project turns reuse native context; language change resumes, not a new
     expect(JSON.stringify(prompts[0])).toContain('http://127.0.0.1:50001/private-preview')
     expect(JSON.stringify(prompts[1])).toContain('http://127.0.0.1:50002/private-preview')
     expect(JSON.stringify(prompts[1])).not.toContain('http://127.0.0.1:50001/private-preview')
-    expect(starts[0]?.systemContext).toContain('relevant project documents')
+    expect(starts[0]?.systemContext).toContain('revise the affected document baseline')
     expect(starts[0]?.systemContext).not.toContain('UI 有问题')
     expect(closed).toBe(3)
     expect(manager.events(session.id).filter(e => e.type === 'user.message').map(e => e.payload?.clientMessageId)).toEqual(['one', 'two', 'three'])
@@ -209,6 +243,7 @@ test('delivery phase changes and completion preserve the native runner and stabl
     starts.push(start)
     return { stop() {}, async submit(turn) {
       observedPrompts.push(turn.prompt)
+      await completeMilestone(workspace, turn.prompt)
       observedMilestones.push(await readFile(join(workspace, '.beegame/tmp', start.sessionId, 'context.md'), 'utf8'))
       if (observedMilestones.length === 1) {
         await mkdir(join(workspace, 'docs'), { recursive: true })
@@ -221,7 +256,7 @@ test('delivery phase changes and completion preserve the native runner and stabl
     await mkdir(workspace)
     await beginProjectDelivery(workspace, root, 'Build a game')
     const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
-    for (const prompt of ['Start delivery', 'Continue review', 'Prepare resources']) {
+    for (const prompt of ['Start delivery', 'Author batch two', 'Author batch three', 'Author batch four', 'Continue review', 'Prepare resources']) {
       await sendProjectConversation({ sessions: manager, deliveryDataRoot: root,
         sessionId: session.id, ownerId: 'owner', message: prompt,
         initialBrief: prompt === 'Start delivery' ? { displayText: prompt, confirmedBriefContext: JSON.stringify({
@@ -232,11 +267,13 @@ test('delivery phase changes and completion preserve the native runner and stabl
       await idle(manager, session.id)
     }
     expect(observedMilestones.map(value => value.match(/Current delivery milestone: ([\w-]+)/)?.[1]))
-      .toEqual(['author', 'review', 'resources'])
+      .toEqual(['author', 'author', 'author', 'author', 'review', 'resources'])
     expect(observedMilestones[0]).toContain('Current delivery milestone: author')
-    expect(JSON.stringify(observedPrompts[0])).toContain('You may use available subagents for independent work when useful')
-    expect(JSON.stringify(observedPrompts[1])).not.toContain('You may use available subagents for independent work when useful')
-    expect(JSON.stringify(observedPrompts[2])).not.toContain('You may use available subagents for independent work when useful')
+    expect(JSON.stringify(observedPrompts[0]).split('Use available subagents to advance independent work').length - 1).toBe(1)
+    for (let batch = 0; batch < 4; batch++)
+      expect(JSON.stringify(observedPrompts[batch])).toContain(`Author batch ${batch + 1}/4`)
+    expect(JSON.stringify(observedPrompts[4])).not.toContain('Use available subagents to advance independent work')
+    expect(JSON.stringify(observedPrompts[5])).not.toContain('Use available subagents to advance independent work')
     expect(starts).toHaveLength(1)
     expect((await readProjectDelivery(workspace, root))?.phase).toBe('resources')
     const state = await readProjectDelivery(workspace, root)
@@ -247,7 +284,7 @@ test('delivery phase changes and completion preserve the native runner and stabl
     expect(starts).toHaveLength(1)
     expect(starts[0]?.systemContext).not.toContain('at the start of each turn')
     expect(starts[0]?.systemContext).not.toContain('within the current delivery milestone')
-    expect(observedMilestones[3]).toContain('"phase": "complete"')
+    expect(observedMilestones[6]).toContain('"phase": "complete"')
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
@@ -277,10 +314,10 @@ test('same-phase automatic continuation does not repeat the full milestone hando
     await send('Please continue', false)
     expect(starts).toHaveLength(1)
     expect(starts[0]?.systemContext).not.toContain('Publishing uses current-version evidence')
-    expect(prompts[0]).toContain('Write the eight implementable design documents')
+    expect(prompts[0]).toContain('Document responsibilities and decision dependencies')
     expect(prompts[1]).toContain('milestone: author')
-    expect(prompts[1]).not.toContain('Write the eight implementable design documents')
-    expect(prompts[2]).toContain('Write the eight implementable design documents')
+    expect(prompts[1]).not.toContain('Document responsibilities and decision dependencies')
+    expect(prompts[2]).toContain('Document responsibilities and decision dependencies')
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
@@ -337,6 +374,9 @@ test('release interface is precise and appears only when delivery can be accepte
     await idle(manager, session.id)
     expect(starts[0]?.systemContext).not.toContain('this turn must')
     expect(starts[0]?.systemContext).not.toContain('verification {')
+    expect(starts[0]?.systemContext).toContain('revise the affected document baseline before implementing that change')
+    expect(starts[0]?.systemContext).toContain('A defect fix that restores the existing design does not require rewriting the documents')
+    expect(starts[0]?.systemContext).not.toContain('choose the necessary scope and order yourself')
     expect(contexts[0]).not.toContain('scope "delivery"')
     const state = await readProjectDelivery(workspace, root)
     await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'acceptance' }))
@@ -348,18 +388,28 @@ test('release interface is precise and appears only when delivery can be accepte
     expect(contexts[1]).toContain('environment as nonempty strings')
     expect(contexts[1]).toContain('observation:"target-runtime"|"simulation"')
     expect(contexts[1]).toContain('verification.contentChecks')
-    expect(contexts[1]).toContain('report-format check')
+    expect(contexts[1]).toContain('read-only acceptance check')
     expect(JSON.stringify(prompts[1])).toContain('not at the report top level')
-    expect(JSON.stringify(prompts[1])).toContain('report-only corrections may reuse unchanged runtime evidence')
+    expect(JSON.stringify(prompts[1])).toContain('does not replace actual runtime verification')
     expect(JSON.stringify(prompts[1])).toContain('Failed or unverified bindings cannot be a delivery PASS')
     await sendProjectConversation({ sessions: manager, sessionId: session.id, ownerId: 'owner',
       message: 'Continue acceptance', deliveryDataRoot: root, autoContinuation: true })
     await idle(manager, session.id)
     expect(JSON.stringify(prompts[2])).toContain('milestone: acceptance')
-    expect(JSON.stringify(prompts[2])).toContain('verification.contentChecks')
+    expect(JSON.stringify(prompts[2])).toContain('acceptance report contract remains')
+    expect(JSON.stringify(prompts[2])).not.toContain('verification.contentChecks')
+    expect(contexts[2]).toContain('verification.contentChecks')
     expect(JSON.stringify(prompts[2])).not.toContain('evidencePaths')
     expect(contexts[2]).toContain('evidencePaths')
     expect(reportCheckers).toHaveLength(2)
+    for (const category of ['report-invalid', 'verification-incomplete', 'product-failed'] as const) {
+      manager.recordDeliveryError(session.id, 'diagnostic detail', category)
+      const event = manager.events(session.id).at(-1)!
+      expect(event.payload?.category).toBe(category)
+      expect(event.text).toContain('diagnostic detail')
+      expect(event.text).not.toContain('Delivery could not continue')
+      expect(event.text).not.toContain('交付未能继续')
+    }
     await expect(access(join(workspace, '.beegame/tmp', session.id, 'check-acceptance.mjs'))).rejects.toMatchObject({ code: 'ENOENT' })
     // A natural-language PASS still must not manufacture release evidence.
     expect((await readProjectDelivery(workspace, root))?.accepted).toBeUndefined()
@@ -453,6 +503,10 @@ test('a user message resumes an interrupted delivery milestone after restart wit
     start.onNativeSessionId?.('a28f9e61-96d5-4e38-981b-5acd25076508')
     return { stop() {}, async submit(turn: Parameters<import('./session-manager').BeeGameSessionRuntime['submit']>[0]) {
       if (interrupted) throw new Error('Fixture: previous server process exited mid-turn')
+      const context = typeof turn.prompt === 'string' ? turn.prompt : JSON.stringify(turn.prompt)
+      const resultPath = context.match(/\.beegame\/tmp\/[^\s]+\/milestone-[\w-]+\.txt/)?.[0]
+      expect(resultPath).toBeTruthy()
+      await writeFile(join(workspace, resultPath!), 'complete\n')
       await turn.onMessage({ type: 'result', subtype: 'success', result: 'Review finished' })
     } }
   } }

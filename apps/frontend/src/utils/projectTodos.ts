@@ -46,7 +46,7 @@ const parseSnapshot = (input: unknown, messageId: string): TodoRecord[] | null =
     });
 };
 
-/** TodoWrite replaces its execution's list; retain other executions, not stale snapshots. */
+/** TodoWrite replaces its owner's list across turns; retain independent agents. */
 export const deriveCurrentProjectTodos = (messages: ChatDisplayMessage[]): ProjectTodo[] => {
     const scopes = new Map<string, ProjectTodo[]>();
     const mergeSnapshot = (snapshot: TodoRecord[], scope: string, message: ChatDisplayMessage) => {
@@ -56,7 +56,7 @@ export const deriveCurrentProjectTodos = (messages: ChatDisplayMessage[]): Proje
     };
     for (const message of [...messages].sort((a, b) =>
         a.sequence !== undefined && b.sequence !== undefined ? a.sequence - b.sequence : a.timestamp - b.timestamp)) {
-        const scope = message.todoScope || JSON.stringify([message.taskId || '', message.taskKind || '', message.turnId || '']);
+        const scope = message.todoScope || JSON.stringify([message.taskId || '', message.taskKind || '']);
         if (isTodoTool(message.toolName)) {
             const snapshot = parseSnapshot(message.toolInput, message.id);
             if (snapshot) mergeSnapshot(snapshot, scope, message);

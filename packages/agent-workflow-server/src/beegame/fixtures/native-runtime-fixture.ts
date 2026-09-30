@@ -3,6 +3,8 @@ export {}
 const decoder = new TextDecoder()
 let buffer = ''
 let userMessageCount = 0
+let pendingReview: { path?: string; requestId: unknown } | undefined
+let concurrentPermissionReplies = new Set<string>()
 let markdownRecoveryMode: 'normal' | 'never' | 'twice' | 'empty_continuation' | 'malformed_once' | 'malformed_forever' = 'normal'
 
 const completeGddMarkdown = [
@@ -67,6 +69,25 @@ for await (const chunk of Bun.stdin.stream()) {
     if (!line) continue
     const message = JSON.parse(line) as Record<string, unknown>
     if (message.type === 'control_response') {
+      const responseId = (message.response as { request_id?: string }).request_id
+      if (responseId === 'finished-turn-permission') {
+        process.stdout.write(`${JSON.stringify({ type: 'assistant', unexpectedLatePermissionResponse: true })}\n`)
+        continue
+      }
+      if (responseId?.startsWith('parallel-permission-')) {
+        concurrentPermissionReplies.add(responseId)
+        process.stdout.write(`${JSON.stringify({ type: 'assistant', permissionResponse: message })}\n`)
+        if (concurrentPermissionReplies.size === 2)
+          process.stdout.write(`${JSON.stringify({ type: 'result', subtype: 'success', result: 'Both decisions received' })}\n`)
+        continue
+      }
+      if (pendingReview) {
+        if (pendingReview.path) await Bun.write(pendingReview.path, 'complete\n')
+        process.stdout.write(`${JSON.stringify({ type: 'result', subtype: 'success', result: 'Review finished',
+          request_id: pendingReview.requestId, permissionResponse: message })}\n`)
+        pendingReview = undefined
+        continue
+      }
       process.stdout.write(
         `${JSON.stringify({ type: 'result', subtype: 'success', permissionResponse: message })}\n`,
       )
@@ -84,6 +105,43 @@ for await (const chunk of Bun.stdin.stream()) {
             (block as { type?: string }).type === 'text',
         ) as { text?: unknown } | undefined)?.text
       : rawContent
+    const emit = (event: Record<string, unknown>) => process.stdout.write(`${JSON.stringify(event)}\n`)
+    const promptText = typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
+    const reviewRace = content === 'late-notification-before-ack' || promptText.includes('fixture:review-race')
+    if (reviewRace) {
+      emit({ type: 'user', uuid: 'previous-request', isReplay: true, parent_tool_use_id: null })
+      emit({ type: 'assistant', message: { content: [{ type: 'text', text: 'Old audio notification handled' }] } })
+      emit({ type: 'result', subtype: 'success', result: 'Waiting for review', request_id: 'previous-request' })
+      emit({ type: 'stream_event', event: { type: 'message_start' } })
+    }
+    if (content === 'error-before-ack') {
+      emit({ type: 'result', subtype: 'error_during_execution', is_error: true,
+        request_id: message.uuid, errors: ['provider failed before replay'] })
+      continue
+    }
+    emit({ type: 'user', uuid: message.uuid, isReplay: true, parent_tool_use_id: null, message: message.message })
+    if (content === 'concurrent-permissions' || content === 'permission-after-result') {
+      concurrentPermissionReplies = new Set()
+      const ids = content === 'concurrent-permissions'
+        ? ['parallel-permission-1', 'parallel-permission-2'] : ['finished-turn-permission']
+      for (const id of ids) emit({ type: 'control_request', request_id: id, request: {
+        subtype: 'can_use_tool', tool_name: 'Bash', tool_use_id: id, input: { command: id },
+      } })
+      emit({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Other work is still progressing' } } })
+      emit({ type: 'system', subtype: 'task_progress', task_id: 'independent-agent', description: 'Still working' })
+      if (content === 'permission-after-result')
+        emit({ type: 'result', subtype: 'success', result: 'Turn finished before permission decision' })
+      continue
+    }
+    if (reviewRace) {
+      emit({ type: 'result', subtype: 'success', parent_tool_use_id: 'child-audio', result: 'Child done' })
+      pendingReview = { requestId: message.uuid,
+        path: promptText.match(/\.beegame\/tmp\/[^\s]+\/milestone-[\w-]+\.txt/)?.[0] }
+      emit({ type: 'control_request', request_id: 'review-permission', request: {
+        subtype: 'can_use_tool', tool_name: 'Read', tool_use_id: 'review-read', input: { file_path: '/tmp/fixture.md' },
+      } })
+      continue
+    }
     if (content === 'error') {
       process.stdout.write(
         `${JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, session_id: '550e8400-e29b-41d4-a716-446655440000', errors: ['provider exploded'] })}\n`,

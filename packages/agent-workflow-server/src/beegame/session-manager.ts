@@ -939,12 +939,18 @@ export class BeeGameSessionManager {
   }
 
   /** A host handoff failure is not a failed Agent answer or a completed delivery. */
-  recordDeliveryError(sessionId: string, detail: string): void {
+  recordDeliveryError(sessionId: string, detail: string, category?: 'report-invalid' | 'verification-incomplete' | 'product-failed'): void {
     const record = this.sessions.get(sessionId)
     if (!record) return
-    const prefix = record.language === 'zh' ? '交付未能继续：' : 'Delivery could not continue: '
+    const labels = {
+      'report-invalid': ['验收报告无效：', 'Invalid acceptance report: '],
+      'verification-incomplete': ['验收验证不足：', 'Acceptance verification incomplete: '],
+      'product-failed': ['游戏验收未通过：', 'Game acceptance failed: '],
+    }
+    const prefix = category ? labels[category][record.language === 'zh' ? 0 : 1]
+      : record.language === 'zh' ? '交付未能继续：' : 'Delivery could not continue: '
     this.append(record, 'system.status', formatRuntimeErrorForDisplay(prefix + detail, record.language),
-      { type: 'system.status', subtype: 'delivery_error' })
+      { type: 'system.status', subtype: 'delivery_error', ...(category ? { category } : {}) })
   }
 
   /** Persist a user message for the chat surface without starting a model turn. */

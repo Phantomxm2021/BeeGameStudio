@@ -5,11 +5,14 @@ import {
   setCwdState,
   setOriginalCwd,
   setProjectRoot,
+  setIsInteractive,
 } from '../bootstrap/state'
 import { query } from '../query'
 import { getEmptyToolPermissionContext } from '../Tool'
 import type { AssistantMessage } from '../types/message'
 import { asSystemPrompt } from '../utils/systemPromptType'
+import { drainSdkEvents } from '../utils/sdkEventQueue'
+import { SLEEP_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/SleepTool/prompt.js'
 import {
   createAssistantAPIErrorMessage,
   createUserMessage,
@@ -34,6 +37,7 @@ beforeEach(async () => {
   tempDir = await createTempDir('query-autonomy-provider-boundary-')
   resetStateForTests()
   resetCommandQueue()
+  drainSdkEvents()
   setOriginalCwd(tempDir)
   setCwdState(tempDir)
   setProjectRoot(tempDir)
@@ -42,6 +46,7 @@ beforeEach(async () => {
 afterEach(async () => {
   resetStateForTests()
   resetCommandQueue()
+  drainSdkEvents()
   if (originalProcessCwd) {
     process.chdir(originalProcessCwd)
   }
@@ -63,7 +68,84 @@ afterEach(async () => {
   }
 })
 
-function createToolUseAssistantMessage(): AssistantMessage {
+test.each(['next', 'later'] as const)(
+  'mid-turn %s task attachment emits its terminal SDK event once without changing the model input',
+  async priority => {
+    setIsInteractive(false)
+    const previous = process.env.CLAUDE_CODE_DISABLE_ATTACHMENTS
+    process.env.CLAUDE_CODE_DISABLE_ATTACHMENTS = '1'
+    const notification =
+      '<task-notification><task-id>art-child</task-id>' +
+      '<tool-use-id>tool-art</tool-use-id><status>completed</status>' +
+      '<summary>Art task finished</summary></task-notification>'
+    enqueue({ mode: 'task-notification', value: notification, priority })
+    let calls = 0
+    try {
+      const emitted: any[] = []
+      for await (const message of query({
+        messages: [createUserMessage({ content: 'continue document work' })],
+        systemPrompt: asSystemPrompt([]),
+        userContext: {},
+        systemContext: {},
+        canUseTool: async (_tool, input) => ({
+          behavior: 'allow',
+          updatedInput: input,
+        }),
+        toolUseContext: createToolUseContext(),
+        querySource: 'sdk',
+        maxTurns: 3,
+        deps: {
+          uuid: () => 'notification-query',
+          microcompact: async (messages: unknown[]) => ({ messages }),
+          autocompact: async () => ({
+            compactionResult: undefined,
+            consecutiveFailures: 0,
+          }),
+          callModel: async function* () {
+            if (++calls === 1)
+              yield createToolUseAssistantMessage(
+                priority === 'later' ? SLEEP_TOOL_NAME : undefined,
+              )
+            else
+              yield createAssistantAPIErrorMessage({
+                content: 'API Error: mock provider unavailable',
+                apiError: 'api_error',
+                error: new Error('mock provider unavailable') as never,
+              })
+          },
+        } as never,
+      }))
+        emitted.push(message)
+      expect(
+        emitted.filter(
+          message =>
+            message.type === 'attachment' &&
+            message.attachment.type === 'queued_command' &&
+            message.attachment.prompt === notification,
+        ),
+      ).toHaveLength(1)
+      const terminal = drainSdkEvents().filter(
+        event => event.subtype === 'task_notification',
+      )
+      expect(terminal).toHaveLength(1)
+      expect(terminal[0]).toMatchObject({
+        task_id: 'art-child',
+        tool_use_id: 'tool-art',
+        status: 'completed',
+      })
+      expect(drainSdkEvents()).toEqual([])
+      expect(getCommandsByMaxPriority('later')).toHaveLength(0)
+    } finally {
+      if (previous === undefined)
+        delete process.env.CLAUDE_CODE_DISABLE_ATTACHMENTS
+      else process.env.CLAUDE_CODE_DISABLE_ATTACHMENTS = previous
+    }
+  },
+)
+
+function createToolUseAssistantMessage(
+  toolName = 'MissingBoundaryTool',
+): AssistantMessage {
   return {
     type: 'assistant',
     uuid: randomUUID(),
@@ -86,7 +168,7 @@ function createToolUseAssistantMessage(): AssistantMessage {
         {
           type: 'tool_use',
           id: 'toolu_provider_boundary',
-          name: 'MissingBoundaryTool',
+          name: toolName,
           input: {},
         },
       ],

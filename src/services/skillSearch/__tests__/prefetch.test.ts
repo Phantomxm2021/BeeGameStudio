@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
@@ -17,6 +18,8 @@ import { clearSkillCaches, getSkillDirCommands } from '../../../skills/loadSkill
 import { getAllowedSettingSources, setAllowedSettingSources } from '../../../bootstrap/state.js'
 import { filterToInitiallyListedSkills, getSkillListingAttachments, resetSentSkillNames } from '../../../utils/attachments.js'
 import { SkillTool } from '@bee-game-studio/builtin-tools/tools/SkillTool/SkillTool.js'
+import { createUserMessage } from '../../../utils/messages.js'
+import { parseFrontmatter } from '../../../utils/frontmatterParser.js'
 
 let root: string
 let previousCwd: string
@@ -58,6 +61,38 @@ afterEach(() => {
 })
 
 describe('skill search prefetch', () => {
+  test('discovers Skills from initial native subagent messages with independent discovery state', async () => {
+    const skillsDir = join(root, 'builtinskills')
+    const skillDir = join(skillsDir, 'review-evidence')
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(join(skillDir, 'SKILL.md'), [
+      '---',
+      'name: review-evidence',
+      'description: Review evidence',
+      '---',
+      'Verify the original source behind the claim.',
+    ].join('\n'))
+    process.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR = skillsDir
+    const messages = [createUserMessage({ content:
+      'Project source references and supporting material. '.repeat(30) + ' Review evidence',
+    })]
+    const context = (agentId: string) => ({
+      cwd: root, agentId, discoveredSkillNames: new Set<string>(),
+    } as unknown as ToolUseContext)
+    const parent = context('parent')
+    const child = context('child')
+    for (const active of [parent, child]) {
+      const attachments = await startSkillDiscoveryPrefetch(null, messages, active)
+      const discovery = attachments[0]
+      expect(discovery?.type).toBe('skill_discovery')
+      if (discovery?.type !== 'skill_discovery') throw new Error('initial task did not discover Skills')
+      expect(discovery.skills[0]?.name).toBe('review-evidence')
+      expect(discovery.skills[0]?.autoLoaded).toBe(true)
+      expect(discovery.skills[0]?.content).toContain('Verify the original source')
+      expect(await startSkillDiscoveryPrefetch(null, messages, active)).toEqual([])
+    }
+  })
+
   test('discovers and expands a projected native user skill with ordinary settings disabled', async () => {
     const skillsDir = join(root, 'native-skills')
     const skillDir = join(skillsDir, 'user-level-design')
@@ -172,8 +207,13 @@ describe('skill search prefetch', () => {
       }
       expect(JSON.stringify(await debugging.getPromptForCommand('', unusedContext)))
         .toContain('## 2. Test one explanation')
-      expect(JSON.stringify(await verification.getPromptForCommand('', unusedContext)))
-        .toContain('## Claim-to-evidence check')
+      if (!verification.skillRoot) throw new Error('verification Skill has no source root')
+      const sourceBody = parseFrontmatter(readFileSync(join(verification.skillRoot, 'SKILL.md'), 'utf8')).content
+      const expandedVerification = (await verification.getPromptForCommand('', unusedContext))
+        .filter(block => block.type === 'text').map(block => block.text).join('\n')
+      expect(expandedVerification).toContain(sourceBody)
+      expect(expandedVerification).not.toContain('design-review.md')
+      expect(expandedVerification).not.toContain('obtain an independent check')
       const index = await getSkillIndex(root)
       expect(index.every(skill => skill.source !== 'builtin')).toBe(true)
       expect(searchSkills('design game HUD buttons for gamepad focus', index).map(item => item.name))
@@ -185,9 +225,9 @@ describe('skill search prefetch', () => {
       const discovery = await startSkillDiscoveryPrefetch(
         null,
         [
-          { type: 'user', content: '制作一款塔防游戏' },
+          createUserMessage({ content: '制作一款塔防游戏' }),
           { type: 'assistant', message: { content: [{ type: 'text', text: uiTask }] } },
-          { type: 'user', content: [{ type: 'tool_result', tool_use_id: 'write_ui', content: 'done' }] },
+          createUserMessage({ content: [{ type: 'tool_result', tool_use_id: 'write_ui', content: 'done' }] }),
         ] as any,
         { cwd: root, discoveredSkillNames: new Set<string>() } as any,
       )

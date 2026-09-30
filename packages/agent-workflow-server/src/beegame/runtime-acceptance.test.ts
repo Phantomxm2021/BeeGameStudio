@@ -3,6 +3,8 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readRuntimeAcceptanceReport, runtimeEvidenceIsCurrent } from './runtime-acceptance'
+import { bundleAcceptanceChecker } from './acceptance-check-bundle'
+import { advanceProjectDeliveryAfterTurn, beginProjectDelivery, projectDeliveryStatePath, PROJECT_DELIVERY_REPORT_PATH } from './project-delivery'
 
 test('a delivery PASS requires actual target-runtime verification and no unresolved requirements', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'bgs-delivery-coverage-'))
@@ -98,7 +100,7 @@ test('a readable UI JSON and browser screenshot do not certify that its layout i
     const menuPath = join(workspace, 'content/ui/menu.json')
     const originalMenu = await readFile(menuPath, 'utf8')
     const invalidMenu = JSON.parse(originalMenu)
-    invalidMenu.data.nodes[1].layout = { anchor: 'top-center', position: [-120, 278], size: [240, 52] }
+    invalidMenu.data.nodes[1].layout = { anchor: 'top-center', position: [-120, -1000], size: [240, 52] }
     await writeFile(menuPath, JSON.stringify(invalidMenu))
     expect((await read([check]))?.summary).toContain('Authored UI controls or their panels are outside the viewport')
     await writeFile(menuPath, originalMenu)
@@ -150,7 +152,25 @@ test.each(['scene-2d', 'scene-3d'] as const)('%s resource and geometry verificat
       expect((await read([scene, map, resource]))?.status).toBe('passed')
     } else {
       expect((await read([scene, resource]))?.status).toBe('passed')
-      expect((await read([scene, map, resource]))?.summary).toContain('without a Tilemap')
+      const report = await read([scene, map, resource])
+      expect(report?.summary).toContain('without a Tilemap')
+      expect(report?.diagnostic?.category).toBe('report-invalid')
+      const script = join(workspace, 'check.mjs')
+      await writeFile(script, await bundleAcceptanceChecker())
+      const source = await readFile(join(workspace, 'content/world.json'), 'utf8')
+      const run = Bun.spawnSync([process.execPath, script, 'acceptance.json'], { cwd: workspace })
+      expect(run.exitCode).toBe(1)
+      expect(JSON.parse(run.stdout.toString())).toMatchObject({ diagnostic: report?.diagnostic,
+        check: 'report-content-evidence', publishReadiness: 'not-checked' })
+      expect(await readFile(join(workspace, 'content/world.json'), 'utf8')).toBe(source)
+      const host = join(workspace, 'host')
+      const state = await beginProjectDelivery(workspace, host, 'Fixture')
+      await writeFile(projectDeliveryStatePath(workspace, host), JSON.stringify({ ...state, phase: 'acceptance' }))
+      await writeFile(join(workspace, PROJECT_DELIVERY_REPORT_PATH), await readFile(join(workspace, 'acceptance.json')))
+      expect(await advanceProjectDeliveryAfterTurn(workspace, host)).toMatchObject({
+        phase: 'acceptance', shouldContinue: true, diagnostic: { category: 'report-invalid' },
+      })
+      expect((await advanceProjectDeliveryAfterTurn(workspace, host))?.shouldContinue).toBe(false)
     }
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })

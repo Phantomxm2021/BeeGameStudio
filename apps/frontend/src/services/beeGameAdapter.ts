@@ -13,6 +13,7 @@ import type {
   ChatAttachmentPayload,
 } from './api'
 import type { Project } from '../types/project'
+import type { UiLayoutOverride } from '../../../../packages/scene-editor/src/ui-responsive'
 import type { AssistantContentBlock, ProjectEventMessage } from '../types/message'
 import { authenticatedFetch } from './apiClient'
 import { readSubagentActivity } from '@bee-game-studio/agent-workflow/subagent-activity'
@@ -358,16 +359,7 @@ export type BeeGameUiContentNode = {
   name?: string
   text?: string
   assetRef?: string
-  layout?: {
-    anchor?: string
-    anchorMin?: [number, number]
-    anchorMax?: [number, number]
-    sizeDelta?: [number, number]
-    position?: [number, number]
-    size?: [number, number]
-    rotation?: number
-    scale?: [number, number]
-  }
+  layout?: UiLayoutOverride
   responsive?: {
     compact?: { enabled?: boolean; layout?: BeeGameUiContentNode['layout']; style?: Record<string, unknown> }
     portrait?: { enabled?: boolean; layout?: BeeGameUiContentNode['layout']; style?: Record<string, unknown> }
@@ -1583,7 +1575,9 @@ function eventToProjectEventMessages(
   )
   return messages.map(message => ({
     ...message,
-    todoScope: JSON.stringify([event.sessionId, event.turnId || '',
+    // TodoWrite replaces an agent's list across turns in the same session.
+    // A turn is an update boundary, not a new task owner.
+    todoScope: JSON.stringify([event.sessionId,
       getPayloadString(event, 'parentToolUseID') || getPayloadString(event, 'parent_tool_use_id')]),
     // Streaming blocks keep their first appearance order within a timestamp;
     // full createdAt remains the primary sort key across transcript files.

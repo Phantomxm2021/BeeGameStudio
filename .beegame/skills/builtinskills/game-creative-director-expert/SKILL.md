@@ -58,6 +58,8 @@ Avoid mechanics without thematic justification.
 
 Identify the player's promise, compare the current experience against it, and adjust only the decisions that materially affect that promise. A simple arcade game can have a strong identity without a narrative arc or retention system.
 
+For GDD.md, make the agreed first-release scope, core player loop, player actions, state changes, success/failure conditions and intended experience explicit. Do not expand the game with unrequested modes or long-term progression.
+
 Use only the relevant steps for the current request; do not require a full
 vision document for a focused question or change.
 

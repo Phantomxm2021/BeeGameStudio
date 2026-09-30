@@ -14,6 +14,7 @@ import { auditAssetContract } from './asset-contract-audit'
 import { auditUiInteractiveBounds } from './ui-layout-audit'
 import { parseTilemapData, validateTilemapGrid } from '../../../scene-editor/src/tilemap-data'
 import { readTileSetResource } from './tilemap-contract'
+import { resolveSceneCameraView, type SceneCameraInput } from '../../../scene-editor/src/scene-camera'
 
 export * from './game-content-schema'
 import { BEEGAME_CONTENT_ROOT, BEEGAME_CONTENT_INDEX, BEEGAME_UI_ASSET_BACKED_ROLES, BEEGAME_SCENE_COMPONENT_TYPES, BEEGAME_SCENE_ASSET_COMPONENT_TYPES, contentIndexSchema, contentDocumentSchema, type BeeGameContentIndex, type BeeGameContentDocument } from './game-content-schema'
@@ -432,6 +433,10 @@ function validateComponentScene(input: {
         )
       if (component.type === 'camera' && typeof data.orthographic !== 'boolean') issue(node.id, component.type, 'requires boolean data.orthographic')
       if (component.type === 'camera') {
+        if (data.framing !== undefined) {
+          try { resolveSceneCameraView(data as unknown as SceneCameraInput, { width: 960, height: 540 }) }
+          catch (error) { issue(node.id, component.type, error instanceof Error ? error.message : String(error)) }
+        }
         if (data.orthographic === true && !(typeof data.orthographicSize === 'number' && Number.isFinite(data.orthographicSize) && data.orthographicSize > 0))
           issue(node.id, component.type, 'requires positive data.orthographicSize for orthographic projection')
         if (data.orthographic === false && !(typeof data.fieldOfView === 'number' && Number.isFinite(data.fieldOfView) && data.fieldOfView > 0 && data.fieldOfView < 180))
@@ -503,19 +508,6 @@ function validateComponentScene(input: {
       for (const field of ['width', 'height', 'pixelsPerUnit'])
         if (!(typeof coordinateSystem[field] === 'number' && Number.isFinite(coordinateSystem[field]) && coordinateSystem[field] > 0))
           input.issues.push(`${input.path}: 2D coordinateSystem.${field} must be a positive number.`)
-      const expectedHeight = typeof coordinateSystem.height === 'number' && typeof coordinateSystem.pixelsPerUnit === 'number'
-        ? coordinateSystem.height / (2 * coordinateSystem.pixelsPerUnit)
-        : undefined
-      if (expectedHeight !== undefined) {
-        for (const node of input.document.data.nodes) {
-          for (const camera of node.components ?? []) {
-            if (camera.type !== 'camera' || camera.data?.orthographic !== true) continue
-            const actual = camera.data.orthographicSize
-            if (typeof actual === 'number' && Math.abs(actual - expectedHeight) > 0.0001)
-              input.issues.push(`${input.path}: orthographic camera ${node.id} data.orthographicSize must equal viewport height / (2 * pixelsPerUnit) (${expectedHeight}).`)
-          }
-        }
-      }
     }
   }
   if (input.document.data.cameraNodeId) {

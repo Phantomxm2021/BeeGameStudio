@@ -2,6 +2,7 @@ import { mkdir, realpath } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { nativeTaskToolEnvironment } from '@bee-game-studio/agent-workflow/native-task-access'
 import { nativeSessionTemporaryPath } from './native-runtime-process-path'
+import { sharedPlaywright } from './shared-playwright'
 
 /** Host-file boundary for a whole project, not the document-task policy.
  * Tools, delegation and public networking remain native capabilities. */
@@ -11,6 +12,7 @@ export async function projectExecutionAccess(input: {
   environment: Record<string, string>
 }) {
   const root = await realpath(input.workspacePath)
+  const playwright = sharedPlaywright()
   const temporary = nativeSessionTemporaryPath(root, input.sessionId)
   const templates = resolve(temporary, 'git-templates')
   await mkdir(templates, { recursive: true, mode: 0o700 })
@@ -27,10 +29,11 @@ export async function projectExecutionAccess(input: {
     NPM_CONFIG_USERCONFIG: '/dev/null',
     npm_config_userconfig: '/dev/null',
     PLAYWRIGHT_BROWSERS_PATH: resolve(temporary, 'browsers'),
+    BEEGAME_PLAYWRIGHT_MODULE: playwright.moduleUrl,
   }
   const readPaths = ['/bin', '/sbin', '/usr', '/lib', '/lib64', '/etc', '/private/etc',
     '/System', '/Library/Apple', '/Library/Developer', '/dev', '/opt/homebrew',
-    await realpath(process.execPath)]
+    await realpath(process.execPath), playwright.root]
   if (process.platform === 'darwin') {
     const developer = await realpath('/var/select/developer_dir').catch(() => undefined)
     if (developer) {
