@@ -1,0 +1,99 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "game-base-draft",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": { "anchorMin": [0, 0], "anchorMax": [1, 1], "sizeDelta": [0, 0] }
+      },
+      {
+        "id": "bg",
+        "parentId": "root",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0],
+          "item": { "absolute": true }
+        },
+        "style": { "background": { "color": "#0b0a1a" } }
+      },
+      {
+        "id": "game-view",
+        "parentId": "root",
+        "role": "container",
+        "enabled": true,
+        "layout": { "anchorMin": [0.02, 0.02], "anchorMax": [0.98, 0.98], "sizeDelta": [0, 0] }
+      },
+      {
+        "id": "hud",
+        "parentId": "game-view",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 0],
+          "sizeDelta": [-16, 30],
+          "position": [0, 4],
+          "item": { "absolute": true },
+          "container": { "direction": "row", "gap": 8, "padding": [0, 10, 0, 10], "justify": "space-between", "align": "center" }
+        }
+      },
+      {
+        "id": "hud-score",
+        "parentId": "hud",
+        "role": "text",
+        "enabled": true,
+        "text": "分数 0000",
+        "layout": { "size": [130, 26] },
+        "bindings": { "text": "score" },
+        "style": { "fontSize": 18, "color": "#ffe9a8" }
+      },
+      {
+        "id": "pause-btn",
+        "parentId": "hud",
+        "role": "button",
+        "enabled": true,
+        "text": "暂停",
+        "layout": { "size": [72, 28] },
+        "actions": { "onActivate": "PAUSE_TOGGLE" },
+        "style": { "fontSize": 15 }
+      },
+      {
+        "id": "hud-lives",
+        "parentId": "hud",
+        "role": "text",
+        "enabled": true,
+        "text": "♥ ♥ ♥",
+        "layout": { "size": [96, 26] },
+        "bindings": { "text": "lives" },
+        "style": { "fontSize": 18, "align": "right", "color": "#ff5fa2" }
+      },
+      {
+        "id": "camera-plane",
+        "parentId": "game-view",
+        "role": "container",
+        "enabled": true,
+        "data": { "space": "camera-reference-2d" },
+        "layout": { "size": [480, 672], "item": { "absolute": true } }
+      },
+      {
+        "id": "serve-prompt",
+        "parentId": "camera-plane",
+        "role": "worldPrompt",
+        "enabled": true,
+        "text": "按 空格 / 点击 发球",
+        "layout": { "anchor": "top-left", "position": [120, 568], "size": [240, 24] },
+        "bindings": { "visible": "phase==readyToServe" },
+        "style": { "fontSize": 15, "align": "center", "color": "#fff3c4" }
+      }
+    ]
+  }
+}

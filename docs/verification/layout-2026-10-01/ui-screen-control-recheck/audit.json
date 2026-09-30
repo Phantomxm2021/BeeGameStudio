@@ -1,0 +1,119 @@
+{
+  "status": "partial-pass-not-closed",
+  "implementationUnderTest": "ba2f3e5f",
+  "scope": "Seven baseline documents reused, fresh UI authoring and one native Review/Revision; independent read-only geometry resampling. Not eight-document authoring, resource/content/implementation execution or runtime acceptance.",
+  "model": "ark-code-latest",
+  "approvedProvider": "https://ark.cn-beijing.volces.com/api/coding",
+  "elapsedSeconds": 1497.136,
+  "authoringSeconds": 916.088,
+  "reviewSeconds": 580.567,
+  "nativeReportedReviewComplete": true,
+  "usage": {
+    "inputTokens": 280166,
+    "cachedInputTokens": 9921432,
+    "outputTokens": 55640,
+    "note": "Observed provider usage, not account Credit settlement. One initial 401 request has unknown usage; native transport recovered."
+  },
+  "passed": [
+    "Seven baseline documents remained byte-identical during UI authoring. Review changed six documents; Audio and Balance were unchanged.",
+    "Author and Review requests actually contained the new host-pixel minima and region synchronization instructions. The non-interactive-only format contract was read into native context before layout authoring.",
+    "All interactive controls in the selected final layouts use ordinary screen-space layout; no controls/actions are beneath a camera-reference-2d plane.",
+    "Seven reusable inputs were preserved and resampled at 18 host sizes: 126 raw cases. Applying the final document's A/B selection conditions yields 72 selected cases with empty rectangle-containment and foreground-intersection diagnostics.",
+    "Eighteen selected connected gameplay cases retain the hint in the same full-host input. Independent letterbox projection agrees within 5.684341886080802e-14 host pixels.",
+    "Start, gameplay, shared overlay and status inputs are present. Review restored the start hero-wall visual motif and changed mute controls to 64x44 text buttons."
+  ],
+  "remainingFindings": [
+    {
+      "id": "F4",
+      "status": "partially-closed",
+      "category": "host-control-usability",
+      "closedPart": "The previous projected interactive-menu/HUD mechanism is gone. Start, mute and column-HUD controls no longer shrink with camera projection.",
+      "remaining": "Final UI section 3 selects layouts by space alone and explicitly allows touch in every composition, yet the base pause button is 72x28 and base overlay secondary button 260x40. Both violate sections 2.2/7.2's 44x44 touch promise; there is no separate authored hit region. Calling the base layout mouse-only does not reconcile those conditions. Native conclusion incorrectly claims all key controls meet 44x44.",
+      "evidence": [
+        "final/UI_UX_SPEC.md:38",
+        "final/UI_UX_SPEC.md:69",
+        "final/UI_UX_SPEC.md:108",
+        "final/UI_UX_SPEC.md:148",
+        "final/UI_UX_SPEC.md:240",
+        "final-drafts/ui-game-base.json",
+        "final-drafts/ui-overlay-base.json",
+        "focused-checks.json",
+        "native-conclusion.json"
+      ]
+    },
+    {
+      "id": "F5",
+      "status": "open",
+      "category": "hud-permitted-region-and-art-source-sync",
+      "remaining": "Review changes ownership wording but retains Scene table, diagram and permission as world y0-48. At 800x400 the HUD spans equivalent world y7-59.5 (pause y8.75-57.75); staying above bricks at y64 does not meet the allowed band. Art section 4.4 still forbids information/animation in letterbox margins and requires HUD inside game-view. At 960x540 the projected world frame x294.857-665.143 excludes score x29.2-159.2 and lives x818.8-914.8, both in letterbox margins. Column HUD is outside game-view entirely. Source clauses were not reconciled despite the completion claim.",
+      "evidence": [
+        "final/LEVEL_SCENE_DESIGN.md:28",
+        "final/LEVEL_SCENE_DESIGN.md:37",
+        "final/LEVEL_SCENE_DESIGN.md:91",
+        "final/ART_DIRECTION.md:169",
+        "final/UI_UX_SPEC.md:99",
+        "geometry/ui-game-base.json",
+        "geometry/ui-game-compact.json",
+        "focused-checks.json",
+        "native-conclusion.json"
+      ]
+    },
+    {
+      "id": "F6",
+      "status": "open",
+      "category": "final-input-and-consumer-claims-diverge",
+      "remaining": "UI sections 3.2/9.2 promise column HUD/game-view auto-width (374 at 390x844), but the final calculated input fixes both at width300. A later uncalculated variant is not the final input. UI section 6.4 describes a screen-space hint fallback for game-view height<320 and projected hint height<12, but no such variant/input exists: at600x360 the connected input still projects a 10.571px hint. TECH sections 1.3/6.2 still declare every game-view as 0.02-0.98 stretched, contradicting the column composition, while section10 says it is synchronized.",
+      "evidence": [
+        "final/UI_UX_SPEC.md:85",
+        "final/UI_UX_SPEC.md:205",
+        "final/UI_UX_SPEC.md:309",
+        "final-drafts/ui-game-compact.json",
+        "final/TECHNICAL_DESIGN.md:26",
+        "final/TECHNICAL_DESIGN.md:246",
+        "final/TECHNICAL_DESIGN.md:362",
+        "focused-checks.json"
+      ]
+    }
+  ],
+  "instructionPresenceSupplement": {
+    "note": "test-record.json records the first successful request of each stage; this supplement checks subsequent requests after the content-format Read without publishing request payloads.",
+    "nonInteractiveOnly": {
+      "firstRequest": 9,
+      "stage": "ui-regeneration",
+      "matchingSuccessfulRequests": 78
+    },
+    "authorHostPixelMinima": {
+      "firstRequest": 2,
+      "matchingSuccessfulRequests": 85
+    },
+    "reviewHostPixelMinima": {
+      "firstRequest": 43,
+      "matchingSuccessfulRequests": 44
+    },
+    "regionSync": {
+      "firstRequest": 43,
+      "matchingSuccessfulRequests": 44
+    }
+  },
+  "limits": [
+    "Loading and error are called a shared composition, but ui-status.json is the error form (retry always enabled); no authored loading selector or toast input was found. Full state-specific layout coverage is not established by this one rectangle sample.",
+    "Shared overlay geometry contains result text and pause actions together; state-specific text/actions and hidden-body contraction were described, not independently executed.",
+    "Actual-font text measurement, shaping, reference-plane rendering, pointer handling, clipping, animation and gameplay occlusion were not tested.",
+    "Finite geometry samples do not establish all-viewport correctness.",
+    "Downstream resource/content/implementation Agents were not run."
+  ],
+  "actions": {
+    "mainSessions": 1,
+    "uiRegenerationTurns": 1,
+    "reviewTurns": 1,
+    "extraModelRepairTurns": 0,
+    "resourceTurns": 0,
+    "contentTurns": 0,
+    "implementationTurns": 0,
+    "injectedFindings": false,
+    "privateProjectEdits": false,
+    "originalFailedEvidenceOverwritten": false,
+    "agentDocumentsOrInputsRepairedByCodex": false
+  },
+  "conclusion": "The capability restriction worked: interactive controls stayed in screen space and informational projection math is correct. Overall acceptance remains partial because the native Review equates clean rectangle diagnostics and updated references with closed usability/source-consumer requirements. Preserve the failed evidence, do not hand this baseline to downstream Agents as accepted, and do not add further paid rounds or layers of rules in this run."
+}
