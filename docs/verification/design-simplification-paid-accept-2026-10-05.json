@@ -1,0 +1,340 @@
+{
+  "date": "2026-10-05",
+  "kind": "readonly-independent-paid-acceptance-observation",
+  "rawRun": "/private/tmp/bgs-simplified-paid-accept-20261005-cjIUzKpT",
+  "workspace": "/private/tmp/bgs-simplified-paid-accept-20261005-cjIUzKpT/projects/users/design-test/simplified-accept-fruit-20261005-cjIUzKpT",
+  "sessionId": "beegame_9a8462f962af4b959a7da0d6a77aacdc",
+  "model": "ark-code-latest",
+  "scope": "One fresh authorized native BGS delivery, stopped at first host stop. No additional paid runs.",
+  "outcome": "not-accepted-host-blocked",
+  "elapsedSeconds": 2772.69,
+  "manualProductEdits": false,
+  "injectedFindings": false,
+  "sourceChangesDuringRun": [],
+  "nativeStatus": {
+    "gdd": "Released after Inspect / Revise / Verify, v1.1",
+    "directions": "Released after Inspect / Revise / Verify; Audio v1.1, Art and Technical v1.0",
+    "sceneBalance": "Inspect finished; host stopped on deterministic failure",
+    "notReached": [
+      "UI_UX_SPEC",
+      "ASSET_PLAN",
+      "final technical completion",
+      "resources",
+      "content",
+      "implementation",
+      "runtime acceptance"
+    ]
+  },
+  "tokens": {
+    "basis": "Provider observations, not settled credits",
+    "total": 7181445,
+    "input": 657049,
+    "output": 153588,
+    "cacheRead": 6370808,
+    "cacheCreation": 0,
+    "modelRequests": 171,
+    "modelRequestsWithFinalUsage": 171,
+    "otherRequestsMissingUsage": [
+      1
+    ],
+    "creditAmount": null,
+    "billingBefore": "billing_observation_transport_failed",
+    "billingAfter": "billing_observation_transport_failed"
+  },
+  "stageUsage": [
+    {
+      "stage": "GDD writing",
+      "elapsedSeconds": 141.812,
+      "tokens": 374069,
+      "modelCalls": 8
+    },
+    {
+      "stage": "GDD Inspect",
+      "elapsedSeconds": 138.919,
+      "tokens": 111406,
+      "modelCalls": 5
+    },
+    {
+      "stage": "GDD Revise",
+      "elapsedSeconds": 135.801,
+      "tokens": 219561,
+      "modelCalls": 8
+    },
+    {
+      "stage": "GDD Verify",
+      "elapsedSeconds": 47.034,
+      "tokens": 79010,
+      "modelCalls": 4
+    },
+    {
+      "stage": "Three direction writers",
+      "elapsedSeconds": 401.301,
+      "tokens": 1242289,
+      "modelCalls": 46
+    },
+    {
+      "stage": "Directions Inspect",
+      "elapsedSeconds": 174.331,
+      "tokens": 294219,
+      "modelCalls": 7
+    },
+    {
+      "stage": "Directions Revise",
+      "elapsedSeconds": 189.624,
+      "tokens": 304759,
+      "modelCalls": 9
+    },
+    {
+      "stage": "Directions Verify",
+      "elapsedSeconds": 95.37,
+      "tokens": 194687,
+      "modelCalls": 7
+    },
+    {
+      "stage": "Scene then Balance writers",
+      "elapsedSeconds": 1272.421,
+      "tokens": 3812577,
+      "modelCalls": 67
+    },
+    {
+      "stage": "Scene / Balance Inspect",
+      "elapsedSeconds": 175.665,
+      "tokens": 548868,
+      "modelCalls": 10
+    }
+  ],
+  "writerUsage": [
+    {
+      "writer": "GDD",
+      "actor": "main",
+      "calls": 8,
+      "tokens": 374069,
+      "firstContext": 38377,
+      "lastContext": 50628
+    },
+    {
+      "writer": "Technical baseline",
+      "actor": "ac00bb3e9aaad9b84",
+      "calls": 24,
+      "tokens": 711932,
+      "firstContext": 9369,
+      "lastContext": 46959
+    },
+    {
+      "writer": "Art",
+      "actor": "addde942c4248b32a",
+      "calls": 11,
+      "tokens": 273090,
+      "firstContext": 9772,
+      "lastContext": 36530
+    },
+    {
+      "writer": "Audio",
+      "actor": "a76fff6067b3c43ec",
+      "calls": 11,
+      "tokens": 257267,
+      "firstContext": 8562,
+      "lastContext": 35189
+    },
+    {
+      "writer": "Scene",
+      "actor": "ae4d98be602516240",
+      "calls": 29,
+      "tokens": 1554780,
+      "firstContext": 10277,
+      "lastContext": 79329
+    },
+    {
+      "writer": "Balance",
+      "actor": "a6920b79175bd4688",
+      "calls": 38,
+      "tokens": 2257797,
+      "firstContext": 9535,
+      "lastContext": 91748
+    }
+  ],
+  "costAttributionMethod": "Request ID ranges are disjoint model requests aligned to the saved native assistant tool timestamps. Each total includes that request's complete billed-token categories, including cached input; these are workflow buckets, not token allocations to individual lines or proof that every token in a bucket was waste.",
+  "sceneCost": [
+    {
+      "activity": "Source preparation",
+      "firstRequest": 96,
+      "lastRequest": 102,
+      "tokens": 173600
+    },
+    {
+      "activity": "Format discovery and failed queries",
+      "firstRequest": 103,
+      "lastRequest": 109,
+      "tokens": 363004
+    },
+    {
+      "activity": "Write geometry input",
+      "firstRequest": 110,
+      "lastRequest": 110,
+      "tokens": 60086
+    },
+    {
+      "activity": "Two rejected batch attempts plus five viewport checks",
+      "firstRequest": 111,
+      "lastRequest": 117,
+      "tokens": 432806
+    },
+    {
+      "activity": "Write appendix / read GDD sidecar",
+      "firstRequest": 118,
+      "lastRequest": 119,
+      "tokens": 136883
+    },
+    {
+      "activity": "Write prose / sidecar, checks and handoff",
+      "firstRequest": 120,
+      "lastRequest": 124,
+      "tokens": 388401
+    }
+  ],
+  "balanceCost": [
+    {
+      "activity": "Read sources / prepare",
+      "firstRequest": 125,
+      "lastRequest": 132,
+      "tokens": 220113
+    },
+    {
+      "activity": "Write inputs and model",
+      "firstRequest": 133,
+      "lastRequest": 134,
+      "tokens": 109895
+    },
+    {
+      "activity": "Calculate / debug / revise model / read appendix",
+      "firstRequest": 135,
+      "lastRequest": 158,
+      "tokens": 1564181
+    },
+    {
+      "activity": "Write prose and sidecar / reference check / handoff",
+      "firstRequest": 159,
+      "lastRequest": 162,
+      "tokens": 363608
+    }
+  ],
+  "confirmedSystemObservations": [
+    {
+      "finding": "Fresh document-local native writers were actually used, including sequential Scene then Balance.",
+      "evidence": "Native Agent dispatch events, source context files and actor-tagged provider usage.",
+      "limit": "Isolation prevents inheritance between documents; it does not bound repeated model turns or growth inside one document."
+    },
+    {
+      "finding": "No delivered sidecar contains retired soundRequired. Audio is the delivered sound-event authority.",
+      "limit": "UI binding and final cross-document closure were not reached; full sound-authority acceptance remains unproven."
+    },
+    {
+      "finding": "Author permission guard falsely classifies valid checker invocations in semicolon / loop commands as checker-source probes.",
+      "classification": "agent implementation defect",
+      "evidence": "src/beegame/direction-authors.ts invokesChecker recognizes only ^ or && before bun; Scene requests 103,104,111,112 received source-scope denials.",
+      "limit": "Not all format-query failures share this cause: unsupported camera/scene2d names and a filtered --format call are separate author errors."
+    },
+    {
+      "finding": "Scene ran --design-handoff 3 before Balance existed.",
+      "classification": "author execution issue / remaining workflow-design exposure",
+      "evidence": "Native Scene tool result reports BALANCE_DESIGN.md ENOENT. No document rollback or extra writer retry occurred."
+    },
+    {
+      "finding": "Technical evidence gathering repeated malformed URL downloads.",
+      "classification": "LLM-generated shell error and unnecessary retries",
+      "evidence": "`${u%%:*}` applied to https URLs produces https; repeated downloads later replaced with official mdn/content source downloads.",
+      "limit": "Do not label all official-source acquisition as waste or claim these few commands explain the entire run."
+    }
+  ],
+  "stopRootCause": {
+    "author": "Balance writer placed UI-owned inputs in BALANCE_DESIGN.json, despite semantic movement requirements already being available in prose / outputs.",
+    "reviewer": "Inspect finding f6 acknowledges the exact deterministic error but marks it follow-up, neededBefore implementation, rather than a current release blocker.",
+    "host": "project-delivery.ts sends Inspect to Revise only when reviewer reports blockers. With only follow-ups, the deterministic release gate stops the run; the batch's available revision pass is never scheduled.",
+    "classification": "LLM author / reviewer execution mistakes plus a system orchestration design defect: deterministic repair routing depends on semantic severity classification.",
+    "positiveBoundary": "The host correctly did not release invalid input; no false gate pass and no automatic extra paid loop."
+  },
+  "independentSemanticFindings": [
+    {
+      "id": "OBS-BAL-1",
+      "nativeReviewerDetected": false,
+      "classification": "LLM reasoning / semantic-review miss",
+      "sources": [
+        {
+          "document": "BALANCE_DESIGN.md",
+          "line": 97
+        },
+        {
+          "document": "BALANCE_DESIGN.md",
+          "line": 123
+        },
+        {
+          "file": "docs/calc/balance-model.mjs",
+          "section": "basket traversal table and passed check"
+        }
+      ],
+      "finding": "spawnInterval/(1-clutterRatio) is an average-type interval, not a minimum spacing of consecutive randomly generated fruit. The claimed guarantee that alternating-edge fruits never force a miss is unsupported.",
+      "counterexample": {
+        "basis": "Independent arithmetic from saved scheduling formula and saved model's speed-at-spawn / 66 px horizontal contact rule; no product model execution or mutation.",
+        "spawnTimes": [
+          9.022320333420527,
+          10.169690131475573
+        ],
+        "allowedFruitX": [
+          40,
+          920
+        ],
+        "catchArrivalTimes": [
+          10.326246361482816,
+          11.452295196873022
+        ],
+        "arrivalGapSeconds": 1.1260488353902058,
+        "minTravelSecondsBetweenValidCatchCenters": 1.3357142857142856
+      },
+      "impact": "Downstream would consume a false deterministic fairness guarantee and an invalid acceptance expectation.",
+      "limit": "This does not prove the game is unwinnable; its allowance for missed fruit and a single seeded successful path are different claims."
+    },
+    {
+      "id": "OBS-ART-1",
+      "nativeReviewerDetected": false,
+      "classification": "LLM consistency-review miss",
+      "sources": [
+        {
+          "document": "ART_DIRECTION.md",
+          "line": 160
+        },
+        {
+          "document": "ART_DIRECTION.md",
+          "line": 192
+        }
+      ],
+      "finding": "Pause freezes active L7 effects, but acceptance says no effects / shake / stains / vignette remain after pause. Pausing during an active effect cannot satisfy both.",
+      "impact": "If UI includes pause, implementation and acceptance must guess whether to retain a frozen effect or clear it.",
+      "limit": "Pause is not yet selected by the UI owner; this is a conditional existing-contract conflict, not a demand to add pause."
+    },
+    {
+      "id": "OBS-TECH-1",
+      "nativeReviewerDetected": false,
+      "classification": "LLM precision / units-check miss",
+      "sources": [
+        {
+          "document": "TECHNICAL_DESIGN.md",
+          "line": 36
+        },
+        {
+          "document": "TECHNICAL_DESIGN.md",
+          "line": 37
+        }
+      ],
+      "finding": "rAF timestamps are declared milliseconds, dt is declared seconds, but the literal dt formula omits conversion by 1000 before comparing to the 0.1 second cap.",
+      "impact": "Literal implementation would cap a normal 16.7 ms frame at 0.1 s; the intended units are inferable but the written formula is not execution-safe.",
+      "limit": "Technical baseline is awaiting a final owner completion; this must be closed before implementation, not treated as a proven runtime bug."
+    }
+  ],
+  "conclusion": "Partial execution improvements, not successful overall acceptance or cost optimization. The run reached fewer documents than the previous paid benchmark; a smaller total is not evidence of savings. Repeated per-document tool turns remain expensive and semantic review misses persist.",
+  "nextSystemWorkProposal": [
+    "Separate known deterministic repair routing from LLM blocker/follow-up classification, reusing the existing one revision pass rather than adding another review stage.",
+    "Correct the demonstrated author permission false-positive for actual checker invocations; do not broaden into a generic shell parser or change product artifacts.",
+    "Reduce invalid format discovery and scattered unchanged checks with the smallest existing tool-interface improvement.",
+    "Re-examine why optional derivation claims grew into a long model-debugging task; require evidence proportionate to necessary downstream decisions, not universal fairness or extra simulations."
+  ]
+}

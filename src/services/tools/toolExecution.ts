@@ -105,8 +105,8 @@ import {
 } from '../../utils/toolErrors.js'
 import {
   processPreMappedToolResultBlock,
-  processToolResultBlock,
 } from '../../utils/toolResultStorage.js'
+import { platformFormatCommandIssue, platformFormatResultLimit } from '../../beegame/format-tool-result.js'
 import {
   extractDiscoveredToolNames,
   isSearchExtraToolsEnabledOptimistic,
@@ -722,7 +722,9 @@ async function checkPermissionsAndCallTool(
   }
 
   // Validate input values. Each tool has its own validation logic
-  const isValidCall = await tool.validateInput?.(
+  const formatCommandIssue = platformFormatCommandIssue(tool.name, parsedInput.data,
+    process.env.BEEGAME_MODEL_TYPE !== undefined)
+  const isValidCall = formatCommandIssue ? { result: false as const, message: formatCommandIssue, errorCode: 1 } : await tool.validateInput?.(
     parsedInput.data,
     toolUseContext,
   )
@@ -1481,13 +1483,11 @@ async function checkPermissionsAndCallTool(
     ) {
       // Use the pre-mapped block when available (non-MCP tools where hooks
       // don't modify the output), otherwise map from scratch.
-      const toolResultBlock = preMappedBlock
-        ? await processPreMappedToolResultBlock(
-            preMappedBlock,
-            tool.name,
-            tool.maxResultSizeChars,
-          )
-        : await processToolResultBlock(tool, toolUseResult, toolUseID)
+      const mappedBlock = preMappedBlock ?? tool.mapToolResultToToolResultBlockParam(toolUseResult, toolUseID)
+      const formatLimit = platformFormatResultLimit(tool.name, processedInput, mappedBlock,
+        process.env.BEEGAME_MODEL_TYPE !== undefined)
+      const toolResultBlock = await processPreMappedToolResultBlock(mappedBlock, tool.name,
+        formatLimit ?? tool.maxResultSizeChars)
 
       // Build content blocks - tool result first, then optional feedback
       const contentBlocks: ContentBlockParam[] = [toolResultBlock]

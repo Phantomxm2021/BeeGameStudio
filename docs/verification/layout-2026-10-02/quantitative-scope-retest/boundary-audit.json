@@ -1,0 +1,160 @@
+{
+  "frozenOldEvidence": {
+    "count": 135,
+    "changed": []
+  },
+  "originalFinalProducts": {
+    "count": 24,
+    "changed": []
+  },
+  "systemDuringRun": {
+    "count": 884,
+    "changed": []
+  },
+  "newProductsAfterReadOnlyAudits": {
+    "count": 35,
+    "changed": [],
+    "sources": [
+      {
+        "path": "assets/manifest/CONTRACT.md",
+        "sha256": "edb0fb01084e5364e39a473ee6bdeb20c558f18c38abe613e5088c1e1fd28794"
+      },
+      {
+        "path": "assets/manifest/check.mjs",
+        "sha256": "35d32f9644f7bf99eac7ea22103aab66f83d265a8dbf54b959f8aef21bf7395f"
+      },
+      {
+        "path": "docs/BALANCE_DESIGN.md",
+        "sha256": "76756a3cb1503b6dfa937d0f09c75b525bb3b89ebe69a68d9d46cb1d97d6373b"
+      },
+      {
+        "path": "docs/UI_UX_SPEC.md",
+        "sha256": "993e8ba0ce28f5bd86274343a61fd1d57725bdb36e78247a37689fce8dcf27f8"
+      },
+      {
+        "path": "docs/LEVEL_SCENE_DESIGN.md",
+        "sha256": "8b676add01479ee0beb8ccfa52005590caa1933a4499e8157de3b21e66ddb2a6"
+      },
+      {
+        "path": "docs/ART_DIRECTION.md",
+        "sha256": "1a29ab50acf62f1a6f72efdb541a92892966c5aa1e2360e40171f353e3a557fa"
+      },
+      {
+        "path": "docs/GDD.md",
+        "sha256": "9fcd2a207337f6024600015b004ef5e8efb19d2c9f6d0ae3ad112d7e20cf280c"
+      },
+      {
+        "path": "docs/ASSET_PLAN.md",
+        "sha256": "4f5a989c0ab8f47c75e339407b6a36ebdeb494405f89ce807f68b188a6ea8689"
+      },
+      {
+        "path": "docs/AUDIO_DESIGN.md",
+        "sha256": "565002909a80d078fce88bf12bdcc82c18a00f553f6088068263fb76f4dee2ff"
+      },
+      {
+        "path": "docs/TECHNICAL_DESIGN.md",
+        "sha256": "807bb5ad5b8d63566e2e7835f81cc523bc92d16762a6217484f3279add32d651"
+      },
+      {
+        "path": "docs/concept/breakout-concept.svg",
+        "sha256": "a5b48f951d5dfcaf6ed0404cdc91380d5d2b8b9038b9cc88cd2b7eddee699c08"
+      },
+      {
+        "path": "docs/draft/arena.scene.json",
+        "sha256": "59b71032e78609f5250e67ac54ed50c342812b6588e2ef7b6f50c6fc8b894a39"
+      },
+      {
+        "path": "docs/draft/balance.json",
+        "sha256": "3835a9d35cdde2ce76aca8512fccca609f21c03528a6b727311e2a3c8b4bb263"
+      },
+      {
+        "path": "docs/draft/ui-preview-start-1280.png",
+        "sha256": "1158125bf10b869be55578f81b7e6510595caba45ac264d74c56d32cdb7b8372"
+      },
+      {
+        "path": "docs/draft/ui-preview-start-960.png",
+        "sha256": "216eca1ee8130861a3f33d997dc791e7a140b0b2581440158a2641232f29b972"
+      },
+      {
+        "path": "docs/draft/ui-preview-pause-1280.png",
+        "sha256": "c4a78a4424a6c48bbd0b7443e887447004a029c972c5c543139868c6a2448d25"
+      },
+      {
+        "path": "docs/draft/ui-preview-error-1280.png",
+        "sha256": "c3f3ab6098b6a41b4e851f03f3bb93073a83db136d017e4fc3412f2c2289fdc1"
+      },
+      {
+        "path": "docs/draft/balance-model.mjs",
+        "sha256": "e1b97b6e3cb6965e4225bb3c777a0442332fb1e33552a2876ccb0b42cc7dbec7"
+      },
+      {
+        "path": "docs/draft/balance-verify.mjs",
+        "sha256": "23eb7247c6cfcec0b3277fee21eca5b489f13b3edb9b5b84b6a009f695067a4e"
+      },
+      {
+        "path": "docs/draft/ui-preview-victory-1280.png",
+        "sha256": "655db0b0d2f8c2393322d36beda4c41f6bd4e691bd09b4550b1d7c1ebffe7954"
+      },
+      {
+        "path": "docs/draft/ui-preview-hud-960.png",
+        "sha256": "d83773873c55616d750b45e3fca73119d449c645c7aa8342ab87a0ea8e547307"
+      },
+      {
+        "path": "docs/draft/ui-preview-loading-1280.png",
+        "sha256": "aa88db09996cda27a98ab8e06c62d1124bd4d251c5057eb709a965db17fc8dc2"
+      },
+      {
+        "path": "docs/draft/ui-preview-defeat-960.png",
+        "sha256": "7f88df4b0f81cc2e278e272c1a3832dcb34fd3e5e9e0ea8158341b32308e700a"
+      },
+      {
+        "path": "docs/draft/balance-appendix.md",
+        "sha256": "ca3c881c0fc44bfa284e477fa16159887b03a3bdfa4870edb592d6e5bc6d8581"
+      },
+      {
+        "path": "docs/draft/ui-text-measurements.json",
+        "sha256": "0e91fb672283d310e066eb11bca2df784a9cff8ea521d418f9b024b91f6efe9e"
+      },
+      {
+        "path": "docs/draft/ui-preview-rotate-1280.png",
+        "sha256": "a4bbda5050a4952627632404cfaf4af6fa7553e4d930365074148ba3aad8d5ad"
+      },
+      {
+        "path": "docs/draft/ui-preview-hud-1280.png",
+        "sha256": "4df722296c830baae8529ff1c6f1ba1545eb97450bc84d1b81239ff5765dcb6b"
+      },
+      {
+        "path": "content/ui/rotate-notice.json",
+        "sha256": "e5387afd014ada0c6f43b4abf0996a1c4ad076e9de65d1a9f6bc9dfbc4fe97be"
+      },
+      {
+        "path": "content/ui/error-screen.json",
+        "sha256": "2e2ea3183a7043e65fa48600d2d2c68a02f7a9542807740b8ffd6075d1383041"
+      },
+      {
+        "path": "content/ui/start-screen.json",
+        "sha256": "d3d9edaa80615bf2a8459fff897b01aacce49b3e6258df905ad2511196b17650"
+      },
+      {
+        "path": "content/ui/hud.json",
+        "sha256": "1dbf0d203438a9293ed936a0afe36445284e110a7477bb010304d7682cffcaa6"
+      },
+      {
+        "path": "content/ui/result-victory.json",
+        "sha256": "c96ff837db57053e772f384ffcb2e4e56df88315f3e486fc372e246962a5727d"
+      },
+      {
+        "path": "content/ui/result-defeat.json",
+        "sha256": "267dc36afe5e9c890c48710dc9368dc4b652fca36a25ae8b42d359d2c384d846"
+      },
+      {
+        "path": "content/ui/loading-screen.json",
+        "sha256": "321e1fd7ddf2d2a133b2bc57008c1bd681b53e0a0e109a8e11e4ab540062b267"
+      },
+      {
+        "path": "content/ui/pause-screen.json",
+        "sha256": "26f0bf16a2941113b5b8d4068c517b24feb242d0e6ab32214a255475e6851bb2"
+      }
+    ]
+  }
+}

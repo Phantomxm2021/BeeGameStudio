@@ -82,7 +82,7 @@ for await (const chunk of Bun.stdin.stream()) {
         continue
       }
       if (pendingReview) {
-        if (pendingReview.path) await Bun.write(pendingReview.path, 'complete\n')
+        if (pendingReview.path) await Bun.write(pendingReview.path, 'complete\n' + JSON.stringify({ step: 'inspect', findings: [], resolved: [] }))
         process.stdout.write(`${JSON.stringify({ type: 'result', subtype: 'success', result: 'Review finished',
           request_id: pendingReview.requestId, permissionResponse: message })}\n`)
         pendingReview = undefined
@@ -105,8 +105,24 @@ for await (const chunk of Bun.stdin.stream()) {
             (block as { type?: string }).type === 'text',
         ) as { text?: unknown } | undefined)?.text
       : rawContent
+    if (content === 'native-diagnostics') {
+      // Fragments, oversized noise, malformed frames and an unterminated final
+      // frame exercise stderr framing without any provider request.
+      process.stderr.write('x'.repeat(8_000) + '\nBEEGAME_NATIVE_DIAG')
+      await Bun.sleep(5)
+      process.stderr.write('NOSTIC {"event":"request_start","request":7,"prompt":"PRIVATE"}\n')
+      process.stderr.write('BEEGAME_NATIVE_DIAGNOSTIC invalid\n')
+      process.stderr.write('BEEGAME_NATIVE_DIAGNOSTIC {"event":"api_error","category":"timeout","attempt":2}')
+      process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', request_id: message.uuid }) + '\n')
+      process.exit(0)
+    }
     const emit = (event: Record<string, unknown>) => process.stdout.write(`${JSON.stringify(event)}\n`)
     const promptText = typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
+    if (content === 'direction-author-metadata') {
+      emit({ type: 'result', subtype: 'success', request_id: message.uuid,
+        directionAuthors: message.beegame_direction_authors ?? null })
+      continue
+    }
     const reviewRace = content === 'late-notification-before-ack' || promptText.includes('fixture:review-race')
     if (reviewRace) {
       emit({ type: 'user', uuid: 'previous-request', isReplay: true, parent_tool_use_id: null })

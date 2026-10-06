@@ -1,0 +1,281 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui.level-clear",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "name": "过关结算根",
+        "layout": {
+          "size": [1280, 720]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [1280, 720],
+          "targetViewports": [[1280, 720], [1024, 576], [960, 540]],
+          "minimumControlSize": [88, 44],
+          "compactMaxWidth": 1024
+        }
+      },
+      {
+        "id": "dim",
+        "parentId": "root",
+        "role": "container",
+        "name": "结算压暗底（过关时世界侧有绽放光效）",
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0]
+        },
+        "style": {
+          "background": { "color": "#060512", "opacity": 0.35 }
+        },
+        "data": {
+          "component": "overlay-dim",
+          "variant": "clear"
+        }
+      },
+      {
+        "id": "panel",
+        "parentId": "dim",
+        "role": "container",
+        "name": "过关面板",
+        "layout": {
+          "anchor": "middle-center",
+          "size": [440, 400],
+          "container": {
+            "direction": "column",
+            "gap": 16,
+            "padding": [28, 32, 28, 32],
+            "align": "center"
+          }
+        },
+        "style": {
+          "background": { "color": "#0C0A20", "opacity": 0.94 },
+          "border": { "width": 2, "color": "#2DE2FF", "radius": 8 },
+          "glow": { "color": "#2DE2FF", "radius": 8, "opacity": 0.35 }
+        },
+        "data": {
+          "component": "neon-panel",
+          "layoutRegion": "overlay-page"
+        },
+        "responsive": {
+          "compact": {
+            "layout": {
+              "size": [400, 400],
+              "container": { "direction": "column", "gap": 14, "padding": [24, 24, 24, 24] }
+            }
+          }
+        }
+      },
+      {
+        "id": "clear-title",
+        "parentId": "panel",
+        "role": "text",
+        "text": "过关！",
+        "layout": {
+          "size": [376, 40]
+        },
+        "style": {
+          "fontSize": 32,
+          "fontWeight": 800,
+          "color": "#E8F4FF",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 10,
+          "glow": { "color": "#2DE2FF", "radius": 8, "opacity": 0.55 }
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [352, 40] }
+          }
+        }
+      },
+      {
+        "id": "score-block",
+        "parentId": "panel",
+        "role": "container",
+        "name": "分数内容区",
+        "layout": {
+          "size": [376, 120],
+          "container": {
+            "direction": "column",
+            "gap": 6,
+            "align": "center"
+          }
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [352, 112] }
+          }
+        }
+      },
+      {
+        "id": "final-score-label",
+        "parentId": "score-block",
+        "role": "text",
+        "text": "本局得分",
+        "layout": {
+          "size": [200, 22]
+        },
+        "style": {
+          "fontSize": 14,
+          "fontWeight": 700,
+          "color": "#7B88B8",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 6
+        }
+      },
+      {
+        "id": "final-score-value",
+        "parentId": "score-block",
+        "role": "text",
+        "text": "02100",
+        "layout": {
+          "size": [260, 56]
+        },
+        "style": {
+          "fontSize": 40,
+          "fontWeight": 700,
+          "fontFamily": "monospace",
+          "color": "#E8F4FF",
+          "align": "center",
+          "verticalAlign": "middle",
+          "glow": { "color": "#2DE2FF", "radius": 8, "opacity": 0.5 }
+        },
+        "bindings": {
+          "source": "session.score",
+          "format": "00000",
+          "range": "[0,2100]",
+          "digits": "5"
+        },
+        "data": {
+          "component": "mono-numeric"
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [240, 50] },
+            "style": { "fontSize": 34 }
+          }
+        }
+      },
+      {
+        "id": "bricks-count",
+        "parentId": "score-block",
+        "role": "text",
+        "text": "击碎砖块 60 / 60",
+        "layout": {
+          "size": [240, 22]
+        },
+        "style": {
+          "fontSize": 14,
+          "color": "#7B88B8",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 2
+        },
+        "bindings": {
+          "source": "session.bricksBroken",
+          "format": "击碎砖块 {value} / 60"
+        }
+      },
+      {
+        "id": "result-button-group",
+        "parentId": "panel",
+        "role": "container",
+        "name": "按钮组（纵向）",
+        "layout": {
+          "size": [376, 106],
+          "container": {
+            "direction": "column",
+            "gap": 10,
+            "align": "center"
+          }
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [352, 106] }
+          }
+        }
+      },
+      {
+        "id": "btn-restart",
+        "parentId": "result-button-group",
+        "role": "button",
+        "text": "重新开始",
+        "layout": {
+          "size": [376, 48]
+        },
+        "style": {
+          "fontSize": 19,
+          "fontWeight": 700,
+          "color": "#E8F4FF",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 6,
+          "background": { "color": "#123244", "opacity": 0.9 },
+          "border": { "width": 2, "color": "#2DE2FF", "radius": 8 },
+          "glow": { "color": "#2DE2FF", "radius": 8, "opacity": 0.4 }
+        },
+        "actions": {
+          "action": "restart",
+          "audioEvent": "ui.click"
+        },
+        "bindings": {
+          "defaultFocus": "true",
+          "tabOrder": "1"
+        },
+        "data": {
+          "component": "neon-button",
+          "variant": "primary"
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [352, 48] }
+          }
+        }
+      },
+      {
+        "id": "btn-exit",
+        "parentId": "result-button-group",
+        "role": "button",
+        "text": "返回开始界面",
+        "layout": {
+          "size": [376, 48]
+        },
+        "style": {
+          "fontSize": 19,
+          "fontWeight": 700,
+          "color": "#B9C6E8",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 6,
+          "background": { "color": "#101830", "opacity": 0.85 },
+          "border": { "width": 2, "color": "#5E72A8", "radius": 8 },
+          "glow": { "color": "#2DE2FF", "radius": 4, "opacity": 0.2 }
+        },
+        "actions": {
+          "action": "exitToMenu",
+          "audioEvent": "ui.click"
+        },
+        "bindings": {
+          "tabOrder": "2"
+        },
+        "data": {
+          "component": "neon-button",
+          "variant": "secondary"
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [352, 48] }
+          }
+        }
+      }
+    ]
+  }
+}

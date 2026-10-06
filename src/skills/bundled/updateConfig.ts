@@ -285,19 +285,19 @@ Given an event, matcher, target file, and desired behavior, follow this flow. Ea
 
    Check exit code AND side effect (file actually formatted, test actually ran). If it fails you get a real error — fix (wrong package manager? tool not installed? jq path wrong?) and retest. Once it works, wrap with \`2>/dev/null || true\` (unless the user wants a blocking check).
 
-4. **Write the JSON.** Merge into the target file (schema shape in the "Hook Structure" section above). If this creates \`.claude/settings.local.json\` for the first time, add it to .gitignore — the Write tool doesn't auto-gitignore it.
+4. **Write the JSON.** Merge into the target file (schema shape in the "Hook Structure" section above). If a newly created local settings file is not ignored, explain the exposure risk and include an ignore change only within the authorized configuration scope.
 
-5. **Validate syntax + schema in one shot:**
+5. **Check JSON syntax and the matching command:**
 
    \`jq -e '.hooks.<event>[] | select(.matcher == "<matcher>") | .hooks[] | select(.type == "command") | .command' <target-file>\`
 
-   Exit 0 + prints your command = correct. Exit 4 = matcher doesn't match. Exit 5 = malformed JSON or wrong nesting. A broken settings.json silently disables ALL settings from that file — fix any pre-existing malformation too.
+   Exit 0 + prints your command = matching command extracted. Exit 4 = matcher doesn't match. Exit 5 = malformed JSON or wrong nesting. This extraction does not validate the entire schema. If a pre-existing malformation prevents the requested change, identify it and resolve it only within the authorized scope.
 
 6. **Prove the hook fires** — only for \`Pre|PostToolUse\` on a matcher you can trigger in-turn (\`Write|Edit\` via Edit, \`Bash\` via Bash). \`Stop\`/\`UserPromptSubmit\`/\`SessionStart\` fire outside this turn — skip to step 7.
 
-   For a **formatter** on \`PostToolUse\`/\`Write|Edit\`: introduce a detectable violation via Edit (two consecutive blank lines, bad indentation, missing semicolon — something this formatter corrects; NOT trailing whitespace, Edit strips that before writing), re-read, confirm the hook **fixed** it. For **anything else**: temporarily prefix the command in settings.json with \`echo "$(date) hook fired" >> /tmp/claude-hook-check.txt; \`, trigger the matching tool (Edit for \`Write|Edit\`, a harmless \`true\` for \`Bash\`), read the sentinel file.
+   For a **formatter**, use a disposable fixture compatible with the configured matcher rather than introducing a defect into an existing source file. For other hooks, inspect the actual relevant output or use a safe isolated probe. Run a live check only when its side effects are within the task; otherwise report that execution remains unverified.
 
-   **Always clean up** — revert the violation, strip the sentinel prefix — whether the proof passed or failed.
+   Clean up disposable probes and restore any temporary configuration used by the check, whether it passed or failed.
 
    **If proof fails but pipe-test passed and \`jq -e\` passed**: the settings watcher isn't watching \`.claude/\` — it only watches directories that had a settings file when this session started. The hook is written correctly. Tell the user to open \`/hooks\` once (reloads config) or restart — you can't do this yourself; \`/hooks\` is a user UI menu and opening it ends this turn.
 

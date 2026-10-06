@@ -1,0 +1,361 @@
+{
+  "date": "2026-10-05",
+  "kind": "new-idea-native-paid-acceptance-readonly-observation",
+  "idea": "浏览器回合制推箱子：两张小关卡，撤销一步、重开本关，键盘与触屏操作",
+  "selection": "Different gameplay from the fruit-catching regression idea; purposive new-case test, not a claim of statistically random sampling or generalization.",
+  "rawRun": "/private/tmp/bgs-newidea-sokoban-paid-20261005-3IpDYX73",
+  "workspace": "/private/tmp/bgs-newidea-sokoban-paid-20261005-3IpDYX73/projects/users/design-test/newidea-sokoban-20261005-3IpDYX73",
+  "sessionId": "beegame_7a102bec178c4ffeb66f97e93f2fb4bd",
+  "model": "ark-code-latest",
+  "authorization": "User requested offline verification of existing repairs, followed by paid testing if those checks passed.",
+  "preflight": {
+    "regression": {
+      "pass": 103,
+      "fail": 0,
+      "files": 4,
+      "elapsedSeconds": 4.45
+    },
+    "workflowServerTypecheck": "exit 0",
+    "scopedWhitespaceCheck": "exit 0",
+    "rebuiltCli": {
+      "outputs": 611
+    }
+  },
+  "scope": {
+    "paidRuns": 1,
+    "automaticExtraRuns": 0,
+    "manualProductEdits": false,
+    "seededDrafts": false,
+    "injectedFindings": false,
+    "sourceChangesDuringRun": []
+  },
+  "outcome": "host-blocked",
+  "elapsedSeconds": 1184.297,
+  "completedStages": [
+    {
+      "stage": "author-1-work-turn1",
+      "elapsedSeconds": 254.805,
+      "firstRequest": 1,
+      "lastRequest": 9,
+      "progress": {
+        "phase": "review",
+        "shouldContinue": true,
+        "issues": []
+      }
+    },
+    {
+      "stage": "review-1-inspect-turn2",
+      "elapsedSeconds": 114.405,
+      "firstRequest": 10,
+      "lastRequest": 13,
+      "progress": {
+        "phase": "author",
+        "shouldContinue": true,
+        "issues": []
+      }
+    },
+    {
+      "stage": "author-2-work-turn3",
+      "elapsedSeconds": 470.777,
+      "firstRequest": 14,
+      "lastRequest": 44,
+      "progress": {
+        "phase": "review",
+        "shouldContinue": true,
+        "issues": []
+      }
+    },
+    {
+      "stage": "review-2-inspect-turn4",
+      "elapsedSeconds": 190.401,
+      "firstRequest": 45,
+      "lastRequest": 55,
+      "progress": {
+        "phase": "review",
+        "shouldContinue": true,
+        "issues": []
+      }
+    },
+    {
+      "stage": "review-2-revise-turn5",
+      "elapsedSeconds": 153.495,
+      "firstRequest": 56,
+      "lastRequest": 71,
+      "progress": {
+        "phase": "review",
+        "shouldContinue": false,
+        "issues": [
+          "The one revision pass still fails deterministic checks: AUDIO_DESIGN.md: sound event EVT_CONFIRM needs an actual gameplay/interface source or its explicit pending producer; AUDIO_DESIGN.md: pending P_ART_ALIGN must be resolved by its owner",
+          "F1: owner TECHNICAL_DESIGN.md; handoff evidence E_FMT_ATLAS（kind=contract）只有 pointer /runtimeConsumption/atlasLoading，缺少 expected 值，主机 handoff 校验失败；PF_ATLAS_LOADING 平台事实无法按合同核对，下游（加载/图集消费的实现者）也无法确认该合同条目的可观察要求。; close: 在 .beegame/design-handoffs/TECHNICAL_DESIGN.json 的 E_FMT_ATLAS 上补 expected，值与 content-format.json（sha256 75b84bc5…b3cc6）/runtimeConsumption/atlasLoading 的合同文本一致：图集帧选择共享图源区域、按解析 URL 复用在途加载与解码缓存、消费者结束后释放自有来源、不预加载无关图集组；按合同同时升级文档版本头与 documentVersion。",
+          "F2: owner TECHNICAL_DESIGN.md; handoff evidence E_FMT_TILEMAP（kind=contract）只有 pointer /tilemap/scope，缺少 expected 值，主机 handoff 校验失败；PF_TILEMAP_OPTIONAL 所声称的 Tilemap 为可选（Rectangular orthogonal 2D only, the Agent decides）无法按合同核对。; close: 在 E_FMT_TILEMAP 上补 expected，值与 content-format.json /tilemap/scope 文本一致：仅矩形正交 2D；重复网格环境可考虑 Tilemap，由实现方决定；不规定引擎或工具选择；按合同升级文档版本头与 documentVersion。",
+          "F3: owner AUDIO_DESIGN.md; handoff.states 表按合同只属于 GDD 或 UI；音频本地子状态（A_WAITING_GESTURE/A_RUNNING/A_SUSPENDED_HIDDEN/A_MUTED）被错误登记为 states 表条目，主机校验失败。; close: 从 .beegame/design-handoffs/AUDIO_DESIGN.json 删除 states 表；音频子状态行为保留在 prose（'跨场景与生命周期行为'下的'音频子状态'表，含 A_MUTED 可叠加的说明）与 outputs 中对应 A_* 输出条目里（outputs 已含这些 ID，无需新增）；按合同升级文档版本头与 documentVersion。",
+          "F4: owner AUDIO_DESIGN.md; handoff.resources 表按合同属于 ASSET_PLAN；音频侧 R_SFX_MICRO/R_SFX_TARGET/R_STING_LEVEL/R_STING_GAME 的资源登记越表，主机校验失败，也会与后续 Asset Plan 的资源表产生双生产者风险。; close: 从 AUDIO_DESIGN.json 删除 resources 表；资源需求保留在 prose '制作需求与资源交接'（资源组、覆盖事件、变体/声道/时长规格、Web Audio 兜底）及 outputs 中已设 resourceRequired:true 的 R_* 输出条目里，由 ASSET_PLAN 在其批次正式汇总；按合同升级文档版本头与 documentVersion。",
+          "F5: owner AUDIO_DESIGN.md; platformFacts[0].evidence 按 schema 必须是单个 evidence ID 字符串，当前为数组 [\"E_CHROME_AUTOPLAY\",\"E_MDN_WEBAUDIO_BP\"]，主机 handoff 校验失败（expected string, received array），PF_WEB_AUTOPLAY 平台事实无法解析到证据。; close: 将 PF_WEB_AUTOPLAY.evidence 改为单个证据 ID（E_CHROME_AUTOPLAY 已覆盖'用户交互后允许有声自动播放、手势前 AudioContext suspended 需 resume'两点）；E_MDN_WEBAUDIO_BP 保留在 evidence 表中即可，无需删除；按合同升级文档版本头与 documentVersion。"
+        ]
+      }
+    }
+  ],
+  "notReached": [
+    "Directions Verify",
+    "Scene/Balance",
+    "UI",
+    "Asset Plan/final Technical",
+    "resources",
+    "content",
+    "implementation",
+    "runtime acceptance"
+  ],
+  "oldRepairAcceptance": {
+    "exactWriteList": "Observed native Revise task lists docs/TECHNICAL_DESIGN.md, docs/AUDIO_DESIGN.md and both sidecars; matches actual authorized scope.",
+    "versionIncrease": "Technical and Audio saved header versions and sidecar documentVersion both increased from 1.0 to 1.1, for sidecar corrections.",
+    "result": "Prior displayed-scope omission and sidecar-only version failure did not recur in this real revision. No broad scope grant or manual correction was used.",
+    "limits": [
+      "The new revisions did not reach Verify due to other failures.",
+      "The deterministic-only routing branch was not isolated: the native Reviewer labelled F1-F5 blockers.",
+      "Missing-calculation dispatch and author compound-checker false-positive were not exercised as fresh failures in this run."
+    ]
+  },
+  "nativeFindings": [
+    {
+      "id": "F1",
+      "severity": "blocker",
+      "action": "correct",
+      "owner": "TECHNICAL_DESIGN.md",
+      "documents": [
+        "TECHNICAL_DESIGN.md"
+      ],
+      "sources": [
+        {
+          "document": "TECHNICAL_DESIGN.md",
+          "section": "运行时与渲染基线"
+        }
+      ],
+      "impact": "handoff evidence E_FMT_ATLAS（kind=contract）只有 pointer /runtimeConsumption/atlasLoading，缺少 expected 值，主机 handoff 校验失败；PF_ATLAS_LOADING 平台事实无法按合同核对，下游（加载/图集消费的实现者）也无法确认该合同条目的可观察要求。",
+      "closeWhen": "在 .beegame/design-handoffs/TECHNICAL_DESIGN.json 的 E_FMT_ATLAS 上补 expected，值与 content-format.json（sha256 75b84bc5…b3cc6）/runtimeConsumption/atlasLoading 的合同文本一致：图集帧选择共享图源区域、按解析 URL 复用在途加载与解码缓存、消费者结束后释放自有来源、不预加载无关图集组；按合同同时升级文档版本头与 documentVersion。",
+      "neededBefore": "implementation"
+    },
+    {
+      "id": "F2",
+      "severity": "blocker",
+      "action": "correct",
+      "owner": "TECHNICAL_DESIGN.md",
+      "documents": [
+        "TECHNICAL_DESIGN.md"
+      ],
+      "sources": [
+        {
+          "document": "TECHNICAL_DESIGN.md",
+          "section": "坐标与数据契约"
+        }
+      ],
+      "impact": "handoff evidence E_FMT_TILEMAP（kind=contract）只有 pointer /tilemap/scope，缺少 expected 值，主机 handoff 校验失败；PF_TILEMAP_OPTIONAL 所声称的 Tilemap 为可选（Rectangular orthogonal 2D only, the Agent decides）无法按合同核对。",
+      "closeWhen": "在 E_FMT_TILEMAP 上补 expected，值与 content-format.json /tilemap/scope 文本一致：仅矩形正交 2D；重复网格环境可考虑 Tilemap，由实现方决定；不规定引擎或工具选择；按合同升级文档版本头与 documentVersion。",
+      "neededBefore": "implementation"
+    },
+    {
+      "id": "F3",
+      "severity": "blocker",
+      "action": "correct",
+      "owner": "AUDIO_DESIGN.md",
+      "documents": [
+        "AUDIO_DESIGN.md"
+      ],
+      "sources": [
+        {
+          "document": "AUDIO_DESIGN.md",
+          "section": "跨场景与生命周期行为"
+        }
+      ],
+      "impact": "handoff.states 表按合同只属于 GDD 或 UI；音频本地子状态（A_WAITING_GESTURE/A_RUNNING/A_SUSPENDED_HIDDEN/A_MUTED）被错误登记为 states 表条目，主机校验失败。",
+      "closeWhen": "从 .beegame/design-handoffs/AUDIO_DESIGN.json 删除 states 表；音频子状态行为保留在 prose（'跨场景与生命周期行为'下的'音频子状态'表，含 A_MUTED 可叠加的说明）与 outputs 中对应 A_* 输出条目里（outputs 已含这些 ID，无需新增）；按合同升级文档版本头与 documentVersion。",
+      "neededBefore": "implementation"
+    },
+    {
+      "id": "F4",
+      "severity": "blocker",
+      "action": "correct",
+      "owner": "AUDIO_DESIGN.md",
+      "documents": [
+        "AUDIO_DESIGN.md"
+      ],
+      "sources": [
+        {
+          "document": "AUDIO_DESIGN.md",
+          "section": "制作需求与资源交接"
+        }
+      ],
+      "impact": "handoff.resources 表按合同属于 ASSET_PLAN；音频侧 R_SFX_MICRO/R_SFX_TARGET/R_STING_LEVEL/R_STING_GAME 的资源登记越表，主机校验失败，也会与后续 Asset Plan 的资源表产生双生产者风险。",
+      "closeWhen": "从 AUDIO_DESIGN.json 删除 resources 表；资源需求保留在 prose '制作需求与资源交接'（资源组、覆盖事件、变体/声道/时长规格、Web Audio 兜底）及 outputs 中已设 resourceRequired:true 的 R_* 输出条目里，由 ASSET_PLAN 在其批次正式汇总；按合同升级文档版本头与 documentVersion。",
+      "neededBefore": "resources"
+    },
+    {
+      "id": "F5",
+      "severity": "blocker",
+      "action": "correct",
+      "owner": "AUDIO_DESIGN.md",
+      "documents": [
+        "AUDIO_DESIGN.md"
+      ],
+      "sources": [
+        {
+          "document": "AUDIO_DESIGN.md",
+          "section": "平台约束"
+        }
+      ],
+      "impact": "platformFacts[0].evidence 按 schema 必须是单个 evidence ID 字符串，当前为数组 [\"E_CHROME_AUTOPLAY\",\"E_MDN_WEBAUDIO_BP\"]，主机 handoff 校验失败（expected string, received array），PF_WEB_AUTOPLAY 平台事实无法解析到证据。",
+      "closeWhen": "将 PF_WEB_AUTOPLAY.evidence 改为单个证据 ID（E_CHROME_AUTOPLAY 已覆盖'用户交互后允许有声自动播放、手势前 AudioContext suspended 需 resume'两点）；E_MDN_WEBAUDIO_BP 保留在 evidence 表中即可，无需删除；按合同升级文档版本头与 documentVersion。",
+      "neededBefore": "implementation"
+    }
+  ],
+  "stopRoot": {
+    "hostReason": "The one revision pass still fails deterministic checks: AUDIO_DESIGN.md: sound event EVT_CONFIRM needs an actual gameplay/interface source or its explicit pending producer; AUDIO_DESIGN.md: pending P_ART_ALIGN must be resolved by its owner",
+    "remainingIssues": [
+      {
+        "issue": "EVT_CONFIRM has no source binding, while its pending producer includes a fallback.",
+        "existedBeforeRevision": true,
+        "evidence": "Before/after Audio sidecars both have EVT_CONFIRM without source and UI-owned pending EVT_CONFIRM with fallback to AUDIO_DESIGN.md#EVT_LEVEL_START.",
+        "meaning": "A substitute Audio event does not supply the real UI/gameplay trigger. Checker only recognizes an unresolved explicit pending producer without a resolution/fallback."
+      },
+      {
+        "issue": "P_ART_ALIGN is owned by Art but claims an Audio output as its resolution.",
+        "existedBeforeRevision": true,
+        "evidence": "Before/after Audio sidecars pending P_ART_ALIGN owner ART_DIRECTION.md, resolution AUDIO_DESIGN.md#EVT_PUSH.",
+        "meaning": "The decision owner and cited resolution producer disagree. This is not merely an unfinished Art document; Art was delivered and the Audio self-resolution is invalid."
+      }
+    ],
+    "diagnosticCause": "checkDesignHandoff calls handoffSchema.parse for the entire Audio sidecar before inserting it in handoffs. platformFacts[0].evidence being an array throws, so the subsequent sound-source and pending-owner checks never run for Audio in Inspect. After that type is corrected, those unchanged older errors become visible.",
+    "sourceLocations": [
+      "packages/agent-workflow-server/src/beegame/design-handoff.ts:196",
+      "packages/agent-workflow-server/src/beegame/design-handoff.ts:255",
+      "packages/agent-workflow-server/src/beegame/design-handoff.ts:263",
+      "packages/agent-workflow-server/src/beegame/design-handoff.ts:270"
+    ],
+    "classification": [
+      "Author/LLM execution errors: invalid sidecar field types, role tables and dependency bindings.",
+      "System diagnostic coverage/design flaw: one field's parse error masks independent deterministically checkable relations, while the existing single revision uses that initial issue list.",
+      "Review/Revision semantic miss: saved pending bindings were not recognized from the source, and revision corrected F1-F5 only. No final handoff checker was called by the reviser; the supplied assignment does not require that redundant call.",
+      "Host release gate correctly stopped. Removing the gate, silently accepting remaining errors or adding unbounded revision would not solve the cause."
+    ]
+  },
+  "qualityLimits": [
+    "GDD was released after one native Inspect with empty findings. No GDD correction/verification occurred.",
+    "Native Reviewer receipt is not an independent proof of semantic completeness; a full game and all eight documents were not produced.",
+    "Independent observation read the GDD and three direction prose documents; this does not establish runtime or comprehensive game-quality acceptance."
+  ],
+  "tokens": {
+    "usage": {
+      "input_tokens": 322782,
+      "output_tokens": 75763,
+      "cache_read_input_tokens": 1933136,
+      "cache_creation_input_tokens": 0
+    },
+    "totalObservedTokens": 2331681,
+    "startedRequests": 71,
+    "startedModelRequests": 70,
+    "runningRequestIds": [],
+    "partialUsageRequestIds": [],
+    "missingUsageRequestIds": [
+      1
+    ],
+    "usageComplete": false,
+    "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations."
+  },
+  "stageUsage": [
+    {
+      "stage": "author-1-work-turn1",
+      "actor": "main",
+      "owner": "GDD",
+      "modelCalls": 8,
+      "tokens": 409712,
+      "input": 55274,
+      "output": 10950,
+      "cacheRead": 343488,
+      "firstContext": 37294,
+      "lastContext": 56594
+    },
+    {
+      "stage": "review-1-inspect-turn2",
+      "actor": "ab28961cb9a0802c6",
+      "owner": "Review/Revision",
+      "modelCalls": 4,
+      "tokens": 84161,
+      "input": 24551,
+      "output": 4602,
+      "cacheRead": 55008,
+      "firstContext": 11245,
+      "lastContext": 27923
+    },
+    {
+      "stage": "author-2-work-turn3",
+      "actor": "a69f78074a1356a2e",
+      "owner": "Technical",
+      "modelCalls": 9,
+      "tokens": 201095,
+      "input": 29877,
+      "output": 11226,
+      "cacheRead": 159992,
+      "firstContext": 9763,
+      "lastContext": 32108
+    },
+    {
+      "stage": "author-2-work-turn3",
+      "actor": "ad8ddb4c0e6bed5d4",
+      "owner": "Audio",
+      "modelCalls": 12,
+      "tokens": 332002,
+      "input": 40104,
+      "output": 19866,
+      "cacheRead": 272032,
+      "firstContext": 8553,
+      "lastContext": 42589
+    },
+    {
+      "stage": "author-2-work-turn3",
+      "actor": "a4caacfa61fcf4669",
+      "owner": "Art",
+      "modelCalls": 10,
+      "tokens": 252986,
+      "input": 34934,
+      "output": 13204,
+      "cacheRead": 204848,
+      "firstContext": 9360,
+      "lastContext": 36774
+    },
+    {
+      "stage": "review-2-inspect-turn4",
+      "actor": "aa684e2c6f5ca10c4",
+      "owner": "Review/Revision",
+      "modelCalls": 11,
+      "tokens": 505607,
+      "input": 57758,
+      "output": 7681,
+      "cacheRead": 440168,
+      "firstContext": 11260,
+      "lastContext": 59348
+    },
+    {
+      "stage": "review-2-revise-turn5",
+      "actor": "abc0ea37dfba19c30",
+      "owner": "Review/Revision",
+      "modelCalls": 16,
+      "tokens": 546118,
+      "input": 80284,
+      "output": 8234,
+      "cacheRead": 457600,
+      "firstContext": 11711,
+      "lastContext": 52118
+    }
+  ],
+  "billing": {
+    "creditAmount": null,
+    "before": "billing_observation_transport_failed",
+    "after": "billing_observation_transport_failed"
+  },
+  "environmentLimits": [
+    "Image configuration preflight logged config-service-network; resources never reached.",
+    "Optional built-in resource library unavailable in the isolated integration harness.",
+    "Actual configured model was used; no provider or model substitution."
+  ],
+  "nextWorkRecommendation": "First reproduce masked independent diagnostics with a synthetic fixture, then make the smallest checker change that reports independent checks when their inputs can be parsed and explicitly reports unavailable coverage. Keep the existing bounded review and version/scope gates. Do not add case-specific rules or another paid retry as a substitute for diagnosing this.",
+  "changesAfterRun": "None to system source or products. Only this separate observer audit record was added."
+}

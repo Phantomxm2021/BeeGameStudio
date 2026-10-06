@@ -239,6 +239,26 @@ const uiResponsiveOverrideSchema = strictObject({
     style: record(string(), unknown()).optional(),
   })
 
+// Layout owns these fields. Arbitrary task metadata must not silently turn a
+// misspelled/misplaced layout into a different composition. data.anchor is the
+// existing normalized pivot override, not layout.anchor's named attachment.
+const uiLayoutFieldNames = Object.keys(uiLayoutFieldsSchema.shape).filter(key => key !== 'anchor')
+const uiPivotOverrideSchema = strictObject({ x: finiteNumber.optional(), y: finiteNumber.optional() })
+const uiLayoutOcclusionSchema = enumeration(['protected', 'occluder'])
+const uiNodeDataSchema = record(string(), unknown()).superRefine((data, context) => {
+  for (const key of uiLayoutFieldNames) {
+    if (Object.hasOwn(data, key)) context.addIssue({ code: 'custom', path: [key],
+      message: `UI layout field belongs in layout.${key}, not data.${key}; it would not be consumed there` })
+  }
+  if (data.anchor !== undefined && !uiPivotOverrideSchema.safeParse(data.anchor).success)
+    context.addIssue({ code: 'custom', path: ['anchor'], message: 'data.anchor must be a normalized pivot object with finite x/y; named anchors belong in layout.anchor' })
+  if (data.layoutOcclusion !== undefined && !uiLayoutOcclusionSchema.safeParse(data.layoutOcclusion).success)
+    context.addIssue({ code: 'custom', path: ['layoutOcclusion'], message: 'layoutOcclusion must be protected or occluder' })
+  if (data.layoutUnderlay !== undefined && !strictObject({ path: string().min(1),
+    clearance: enumeration(['preserve', 'allow-cover']) }).safeParse(data.layoutUnderlay).success)
+    context.addIssue({ code: 'custom', path: ['layoutUnderlay'], message: 'layoutUnderlay requires path and explicit clearance: preserve or allow-cover' })
+})
+
 const uiNodeSchema = strictObject({
     id: identifier,
     parentId: identifier.optional(),
@@ -255,7 +275,7 @@ const uiNodeSchema = strictObject({
     bindings: record(string(), string()).optional(),
     actions: record(string(), identifier).optional(),
     style: record(string(), unknown()).optional(),
-    data: record(string(), unknown()).optional(),
+    data: uiNodeDataSchema.optional(),
   })
 
 const vfxNodeSchema = strictObject({

@@ -1,0 +1,207 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-title-screen",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "title-root",
+    "nodes": [
+      {
+        "id": "title-root",
+        "role": "screen-root",
+        "enabled": true,
+        "name": "Title Screen Root",
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0],
+          "position": [0, 0]
+        },
+        "style": {
+          "gradient": ["#150C30", "#0A1226"]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [960, 540],
+          "targetViewports": [
+            [960, 540],
+            [800, 450],
+            [1024, 576]
+          ],
+          "minimumControlSize": [44, 44]
+        }
+      },
+      {
+        "id": "title-group",
+        "parentId": "title-root",
+        "role": "container",
+        "enabled": true,
+        "name": "Title Typography Group",
+        "layout": {
+          "anchor": "top-center",
+          "position": [0, 118],
+          "size": [560, 150],
+          "container": {
+            "direction": "column",
+            "gap": 10,
+            "padding": [0, 0, 0, 0],
+            "justify": "center",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "title-main",
+        "parentId": "title-group",
+        "role": "text",
+        "enabled": true,
+        "text": "打砖块",
+        "layout": {
+          "size": [560, 88]
+        },
+        "style": {
+          "fontSize": 64,
+          "color": "#EAF6FF",
+          "align": "center",
+          "fontWeight": 700
+        },
+        "data": {
+          "note": "霓虹灯管式发光描边标题；呈现辉光由素材/样式层实现"
+        }
+      },
+      {
+        "id": "title-sub",
+        "parentId": "title-group",
+        "role": "text",
+        "enabled": true,
+        "text": "B R E A K O U T",
+        "layout": {
+          "size": [560, 28]
+        },
+        "style": {
+          "fontSize": 20,
+          "color": "#2CE6E0",
+          "align": "center",
+          "letterSpacing": 6
+        }
+      },
+      {
+        "id": "start-button",
+        "parentId": "title-root",
+        "role": "button",
+        "enabled": true,
+        "text": "开始游戏",
+        "name": "Primary Start Button",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 52],
+          "size": [220, 52]
+        },
+        "style": {
+          "fontSize": 22,
+          "color": "#EAF6FF",
+          "background": { "color": "#0E1C38", "opacity": 0.82, "radius": 26 },
+          "border": { "width": 2, "color": "#2CE6E0", "radius": 26 },
+          "cornerRadius": 26
+        },
+        "actions": {
+          "click": "game:start"
+        }
+      },
+      {
+        "id": "title-highscore",
+        "parentId": "title-root",
+        "role": "container",
+        "enabled": true,
+        "name": "Best Score Readout",
+        "layout": {
+          "anchor": "top-left",
+          "position": [24, 22],
+          "size": [200, 24],
+          "container": {
+            "direction": "row",
+            "gap": 8,
+            "padding": [0, 0, 0, 0],
+            "justify": "start",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "title-highscore-label",
+        "parentId": "title-highscore",
+        "role": "text",
+        "enabled": true,
+        "text": "最高分",
+        "layout": {
+          "size": [48, 20]
+        },
+        "style": {
+          "fontSize": 14,
+          "color": "#7C89B0",
+          "align": "left"
+        }
+      },
+      {
+        "id": "title-highscore-value",
+        "parentId": "title-highscore",
+        "role": "text",
+        "enabled": true,
+        "text": "0000",
+        "layout": {
+          "size": [88, 24]
+        },
+        "style": {
+          "fontSize": 18,
+          "color": "#AAB6D8",
+          "align": "left",
+          "fontFamily": "monospace"
+        }
+      },
+      {
+        "id": "title-mute-toggle",
+        "parentId": "title-root",
+        "role": "toggle",
+        "enabled": true,
+        "name": "Mute Toggle",
+        "layout": {
+          "anchor": "top-right",
+          "position": [-24, 10],
+          "size": [44, 44]
+        },
+        "style": {
+          "background": { "color": "#0E1C38", "opacity": 0.6, "radius": 22 },
+          "border": { "width": 1, "color": "#3A4A78", "radius": 22 },
+          "cornerRadius": 22
+        },
+        "actions": {
+          "click": "audio:toggle-mute"
+        },
+        "data": {
+          "stateIcon": {
+            "on": "icon:sound-on",
+            "off": "icon:sound-off"
+          },
+          "note": "两态图标与实际音频状态严格一致；资源未生产，首版以字符/形状绘制"
+        }
+      },
+      {
+        "id": "title-mute-icon",
+        "parentId": "title-mute-toggle",
+        "role": "text",
+        "enabled": true,
+        "text": "♪",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 0],
+          "size": [24, 24]
+        },
+        "style": {
+          "fontSize": 18,
+          "color": "#AAB6D8",
+          "align": "center"
+        }
+      }
+    ]
+  }
+}

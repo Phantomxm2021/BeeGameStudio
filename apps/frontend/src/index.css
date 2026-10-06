@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./styles/tokens.css";
+@import "./components/beui/CommandBar.css";
 @source "../../../packages/scene-editor/src";
 @config "../tailwind.config.js";
 

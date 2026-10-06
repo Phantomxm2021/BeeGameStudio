@@ -1,0 +1,1066 @@
+[
+  {
+    "path": ".beegame/skills/builtinskills/.DS_Store",
+    "sha256": "00ba2e2911e033163493a61b062600e058f533a4cc265c98c826a819245ab4a4"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/README.md",
+    "sha256": "6fc69aeaa597048da144076d92714ab74ce019ed8df352d26261f73559d0d987"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/beegame-interaction-contracts/SKILL.md",
+    "sha256": "bdc0113e88ba3d8c74d3cd3b79872acdec28c12ab3eadfdb323a2176f980ec42"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/beegame-interaction-contracts/references/interaction-acceptance.md",
+    "sha256": "d386282b7c299436e1462550f7d2d29b6aa62e37c947316cc6e3fce14073dcc3"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/beegame-interaction-contracts/references/screen-controls.md",
+    "sha256": "a138e7253eb3ab443c3c6da09392c93ef270bd23ba0afab23d08088fabcde3ed"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/beegame-interaction-contracts/references/xr-locomotion.md",
+    "sha256": "9299ee9b8acb97497b70ea4d39fc6d7b33d8895d3130ae1f1ccef7246bdb899a"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/evidence-before-completion/SKILL.md",
+    "sha256": "5f723a41ce2b76d575e585ac3dae3d7ec038da7a66f64b5424e12bb89480ca30"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-art-director-expert/SKILL.md",
+    "sha256": "0393f621f25e33c42e196984208177e1898248a32113880033ed9fed3859bc85"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-art-director-expert/references/color-language-system.md",
+    "sha256": "4e28945ad944f68f7b9874e4f1200087b4980572163c9b5bc6f2d56b86cdbf15"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-art-director-expert/references/lighting-mood-framework.md",
+    "sha256": "95d44efd5fa4fc6be906f9a3c2420c8ac502aa8dfe03af6bfc61f85d0af6f0fe"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-art-director-expert/references/shape-language-framework.md",
+    "sha256": "79d4c087bac47255ffa5d99e984e7b3ec6f57970c71c03940bf67ad25c1fd190"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-art-director-expert/references/ui-visual-hierarchy.md",
+    "sha256": "39a2e1e60b17b382ee4e1053e5e85512cc842260969beb0d30b20613b40964ca"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-audio-designer/SKILL.md",
+    "sha256": "d22ce8b34b2329612110b561ecf28a9b578147cfe0d2389951579d7df623a4a9"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-balance-designer-expert/SKILL.md",
+    "sha256": "ee3b4aa82f151ced008ae2c2e3c6d209fea572501da04fe44fcf1a88a3c71516"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-balance-designer-expert/references/economy-balancing-spec.md",
+    "sha256": "2dca8f661c81d1ba3d9d0555adc071d749d298d0c37650028baaca14bf594349"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-balance-designer-expert/references/scaling-curve-models.md",
+    "sha256": "6a089e6bf41257001e4487b787a0508ea73db4f0159c3241a91397b151ceb43e"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-content-pipeline-engineer/SKILL.md",
+    "sha256": "a2719df2a2c9dcd6caa7ae0ff38b8983ed4d628e373bbf51e1d9e77025ae52e2"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-creative-director-expert/SKILL.md",
+    "sha256": "7f86f41c5d568b5a3d430e9d3679a5cf54911cb36c25234050222f26d0e2d2a9"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-creative-director-expert/references/emotional-arc-framework.md",
+    "sha256": "2faf59b28ca04514be702edc3518612a52238aa76ad4613e8a711b96aa903fa3"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-implementation-planning/SKILL.md",
+    "sha256": "2169059a09497129146aac322ae91170e9f1e05a4fe5b7c7e14b8eff780f9a94"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-level-designer-expert/SKILL.md",
+    "sha256": "015ea542dda14c336ba5df3e5f83cac403232b5919b4f4363f1dc3c564b6755e"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-level-designer-expert/references/encounter-design-patterns.md",
+    "sha256": "8fbb6f7daf6f70561982f430e0e0485cedef398aa33203c4e7a5c5161669780d"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-plan-execution/SKILL.md",
+    "sha256": "02f2a173fe784f0207248b00f4929055088a72c5ccccd3c58f047f842007874b"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-playtest-performance/SKILL.md",
+    "sha256": "6a76eaa20c82fb98f4c482fb30bb2007b4ec417214a14339d8773a85670ed3a7"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-systems-designer-expert/SKILL.md",
+    "sha256": "ea178943d6944ce79f19a1d4d6dfa203f525daf8d63c8b0c18698f901e5af37d"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-systems-designer-expert/references/core-loop-contract.md",
+    "sha256": "dfd2ae3332b3e29173c5add87534a300854c29faf092679942c94f384e988058"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-systems-designer-expert/references/parameter-boundary-model.md",
+    "sha256": "5ef0e5d7588408beb985499667a2aaeba36b4e22fc1d1f55d9ab9b05857b5155"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-systems-designer-expert/references/state-machine-rules-boundary.md",
+    "sha256": "5fc4d1de05df6449c7e0f06ced6c0d5c4cc46aab5bc0d60afeb8385df0f30e13"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-ui-ux-designer/SKILL.md",
+    "sha256": "a83fc1c30a04f1f0cb4dbc6245a4ee4d6a943672656ca7958e3efa132c961310"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/game-ui-ux-designer/references/layout-calculation.md",
+    "sha256": "64e4370c052a3acdfd35261688c7d53fd73ad60c6c3e6380add83c0c3aebbfa8"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/root-cause-debugging/SKILL.md",
+    "sha256": "88cba38bf0c364e0b083817755c04f130079b7af5117e8d7f7590a5199a3a5a6"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/spatial-computing-game-expert/SKILL.md",
+    "sha256": "dc93b2607c46be1f71af8541dabbbc70b9fc69cdfa845fcb4a692bb2585054ce"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/spatial-computing-game-expert/references/physical-safety-framework.md",
+    "sha256": "1759623511035ce3e4c47497d8aa2bd8c82824229939406fb21d55a45c07785c"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/spatial-computing-game-expert/references/spatial-interaction-principles.md",
+    "sha256": "2e5f571e27e2558ce4d511928f8cac69376221df54a905f63291119fbf103734"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/spatial-computing-game-expert/references/spatial-rule-architecture.md",
+    "sha256": "4832d73e4381af6b98d50ba3c3dfa8f41929af88de2c755c384b16b51046375c"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/spatial-computing-game-expert/references/spatial-session-pacing.md",
+    "sha256": "e89d1f9e6631c62e47d2cbd169b7ae1d2736ca7be27e4f3df3d5e31a689e7afc"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/spatial-computing-ux-designer-expert/SKILL.md",
+    "sha256": "f322dc629cf65a7203fce0811ccccc7acec23f09fef0bf9ebe49705b55bf20b5"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/spatial-computing-ux-designer-expert/references/depth-layering-framework.md",
+    "sha256": "71e97ef39199e9d9faa1317fa309f32e7146981589e55bbe4bb7fa917d3449f3"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/spatial-computing-ux-designer-expert/references/gesture-ergonomics-model.md",
+    "sha256": "6bcec9c68fb70abf7ffe2271c2df791b1539abd59fe5fbe7305861d9f2e9ad3f"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/spatial-computing-ux-designer-expert/references/spatial-cognitive-load-system.md",
+    "sha256": "48a914e768b9b7876a1cc7f17535d0e7a3c829846d4a52b7c7d92b891ba78037"
+  },
+  {
+    "path": ".beegame/skills/builtinskills/spatial-computing-ux-designer-expert/references/spatial-interaction-principles.md",
+    "sha256": "2e5f571e27e2558ce4d511928f8cac69376221df54a905f63291119fbf103734"
+  },
+  {
+    "path": "AGENTS.md",
+    "sha256": "8127d520de2852568c6eda08fb0b98aa4aaf3849aedb93c9327bc68da3cb333a"
+  },
+  {
+    "path": "dist/cli-bun.js",
+    "sha256": "c9b9732e4da5ddc9c2f3ddbc7488868cbdbc162795a4ab425b8d3b8ea64f5c70"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/acceptance-check-bundle.ts",
+    "sha256": "d57e842cdb48ee1b329cb98a55d55e6e2500399dd593ce055d02463ec4ddac13"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/acceptance-check-cli.ts",
+    "sha256": "675d480ea58e7c121abd55e0352a00d232b0486eaaaeb80b676bb2f3c1421636"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/asset-contract-audit.test.ts",
+    "sha256": "e4175e68547e965206d100a434236b265362a0d5eece30b9da932a408d8fb192"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/asset-contract-audit.ts",
+    "sha256": "02fd4c133f942d87f4e96195a09f0fb521613cf9920f80631a8e1f2bd67ca448"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/asset-contracts.ts",
+    "sha256": "2c8ff7a7ae5a83b739ebdc5e11e81e739d717566b132aeb9ab4ee64ac74c4627"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/asset-manifest-authoring-contract.test.ts",
+    "sha256": "223b48b5e1afe0ad096fa9d7635b0ae85394897542162a7831e3335429c714c0"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/asset-manifest-authoring-contract.ts",
+    "sha256": "04e46567e127fdcf6cd4dd65583cc08a59ea096b4e82867088eb8ebd15d9c9ef"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/attachment-build.test.ts",
+    "sha256": "3862b7170c329e81898d8523593f56c9b68931fc609439f9bdf7f19c0d7e27e3"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/attachment-build.ts",
+    "sha256": "6e87584b75c1dc522d9c0586c865286478ef36c0d352bfd49bb36854d91fb2ce"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/bounded-diagnostic-log.test.ts",
+    "sha256": "4e090e6ac5f12754509f38427b5afeeeefd5da67c3bd4221970adedfe8eb2d1b"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/bounded-diagnostic-log.ts",
+    "sha256": "49249a7a3e32fab992b7abb4a0e2bf3e4263ab891e7d5c2de6bc5ed58a0f520d"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/chat-attachments.ts",
+    "sha256": "8055dd3894a2df5a96f3dc0739d659139a2db919dd2d03faed5320d698a46a88"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/chat-jsonl-reader.test.ts",
+    "sha256": "5b9b6cc0421ab8d2a3208b1fccf83e5c08fe879200bf69dbb931bbe00dc9fa9a"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/chat-jsonl-reader.ts",
+    "sha256": "6b1064a176739c5a72fdfa25fb596b3e32f1c4742a80399ead0ef17c62f36271"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/confirmed-brief-evidence.test.ts",
+    "sha256": "63941ee59bf841fefa5dc745218d61b72274919aead5cfc1227f91b30359b585"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/confirmed-brief-evidence.ts",
+    "sha256": "1f28f3d45aa44a07517afa3050417646b6b73f1f21d71dd42a53b9fb5aa5e5ec"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/confirmed-reference-files.ts",
+    "sha256": "ed6c840512f01dc318697158ea052968fdfc2fa429caf01a4ea8bf061833a9b4"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/content-handoff.test.ts",
+    "sha256": "b9ce9b7810a027fa7bdd8902dbe6d9f4128f850b925869970ab847436939a41a"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/content-runtime-contract.test.ts",
+    "sha256": "a161b727fd9aabc96abf6d4a2fb139647e39212623de3228dd375ba275ff035c"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/content-runtime-contract.ts",
+    "sha256": "66af2f1f0caee4bcf5815aa1e7ba98e130f5c33d79dca814e9098286e890d2f9"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/delivery-phase-report.test.ts",
+    "sha256": "ec21fc5a22b32a1a61af446dedb67576790dc96c8edabe835fcf0853035ecee3"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/delivery-phase-report.ts",
+    "sha256": "12724041b4f55c1efe1bef6b8eb6934d56bc15d4eaa44876f309a651d8d44916"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/deployment-manager.ts",
+    "sha256": "55c7acb4ae42aaa4aa1f3b7c5cf158c6ba88f870423f71aa6447684681c142e7"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/design-layout-check.test.ts",
+    "sha256": "26e731310f1f9b72379cf0ad7ff5649a8579c347648963b21a2b77b438ba7f18"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/design-layout-check.ts",
+    "sha256": "bbf73db747e232a1da422080269617ea9fc19c904be8fa23403297444542fd83"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/document-runtime-boundary.test.ts",
+    "sha256": "6e4b14f8faf693338816b33eeebfdddc30028e53c93eed7c4270981ec4fd3a5f"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/fixed-service-ports.test.ts",
+    "sha256": "f198edd4b052b31e1fd792b186ea4fe6f01ed8278cf056983b0f1ce4d344046e"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/fixed-service-ports.ts",
+    "sha256": "fb8e4d58a51ad7412aa9fd15119d32b52b4d32581640402a67fdc48d87409966"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/fixtures/native-runtime-fixture.ts",
+    "sha256": "39f0aa4715efab0e539798e2ac8fe062d6e6da73dc9ef29cab136a364093dc3a"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/fixtures/review-layout-fixture.ts",
+    "sha256": "4a150ff313273911148c5b77f26b1890e76cb0e98ed510edb8508b1ba9858796"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/fixtures/stage2-authoring/GDD.md",
+    "sha256": "5905c2cf06063a88a505aaeea2b984573114f56ff01103a039445ae8e229dc72"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/fixtures/stage2-authoring/LEVEL_SCENE_DESIGN.md",
+    "sha256": "96a948847f026c5bba2b6639d33fcb1f52cf8ab9467fcf32cc6b2e9a58748789"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/game-content-consumer-cli.ts",
+    "sha256": "eb21aa96992e8c38857cd14ea02ced3f838f0c1abd7804670176a76a5e7e976d"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/game-content-consumer.test.ts",
+    "sha256": "0db7027ad0380d06c6a58b5e277d3376961fb06e1a02c42e066ec396841c7af7"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/game-content-consumer.ts",
+    "sha256": "bdd96d337223c19383d83277335f9eeb330aaed1043c677db07870f98fd1fe9a"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/game-content-package.test.ts",
+    "sha256": "8dd8cd630b60c16e65313f26520b0c9ec7e3e214a0e476ad9f04c27dd17549e3"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/game-content-package.ts",
+    "sha256": "b2bbf0c245db92826664094b2c818e54e894f537ee1a2ffd87c984e86de7925d"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/game-content-schema.test.ts",
+    "sha256": "072c911892bb00575e8767452f312945a40f121ad8a536a6fad85a44719aaaa0"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/game-content-schema.ts",
+    "sha256": "2268e717bc301622b72f1c10c9c806378aeaecf9da71e0b30a0f1680242cc90b"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/game-content-validation-cli.test.ts",
+    "sha256": "dde871cd9dcdb7afb6a0b0420980c451b850c874a43b697b092e60014af0618f"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts",
+    "sha256": "c6e1d750bdd7783b68c20ed61760b55a91d9b35baf0b3f97a4a446b99860701c"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/intake-job-store.ts",
+    "sha256": "7330521975f89f4bfd43988a8865635bf2259321b46a8791c759bcb64000eb5c"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/intake-references.test.ts",
+    "sha256": "6725879afd2eec0d334dba3ef1491c2bc7e271846afc0fce1f56f44ab737281f"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/intake-references.ts",
+    "sha256": "60226a639fe698843e589e9a34d6e0a4d7507c36ad2d2bb9cb840802187d9a01"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/layout-browser-report.ts",
+    "sha256": "5de670a453211a9421ed86dd45a161d64fb943ef56217fc822891c1193a49b93"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/milestone-result.test.ts",
+    "sha256": "299fa108263826934433f6bccaf740f66b925293e9e4c5f488b3208d1b7219cc"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/milestone-result.ts",
+    "sha256": "a4fd7ac071c72b33ecda79bf83f1ed6ab6f9e43878f58def1d38cb8d41e30bbf"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/model-runtime-host.ts",
+    "sha256": "88e4dd744684ed3390d4158946a5466d0d6616ce1081b041503eb93643b18d9c"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/model-runtime-network.ts",
+    "sha256": "e0dd4a6fc041e1292621bef3a349fd0f55431189a3bef0d7d560c12b47a44c13"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/model-runtime-worker.ts",
+    "sha256": "e120683955f77f14ca557db632f3c0f1b0d3187a8984993f2d36aa3c51848856"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/native-background-task-output.test.ts",
+    "sha256": "eaf1bb420c1f89a8bd175eb0afba811f8e251eabf683b94c56ccb98199381bdf"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/native-background-task-output.ts",
+    "sha256": "426fbe05af17a2443babd52c34f05ab6d40c526aa82d3518442682678b8f58b0"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/native-cli-isolation.test.ts",
+    "sha256": "8af758fa6f295233b9f5134d9dda902a57671c9b0286f4929d24af080f18f225"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/native-cli-process-runner.test.ts",
+    "sha256": "6fab2e639ae4be83d2cca0e0a70160aaf868bfe35c6dbe449c2000d9cc0aa89c"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts",
+    "sha256": "19b5f571253452768756b0b8f8709c1013fb6cdda28c89a43542f9b3bb1cbef0"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/native-runtime-process-path.ts",
+    "sha256": "24195e72116198ee2ecc87be704336f395c073ca33fe718f2a59afd65eb4ee51"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/native-subagent-chat.test.ts",
+    "sha256": "359e29c7ac50cfcf58ef69bb1d3a23067a8556147703b3dddc8542db0a723f62"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/native-subagent-chat.ts",
+    "sha256": "0347e6f1a2bb65f5880568880c07ca9d9ecb7565830d392cdab9032a6cd901da"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/native-task-notification.test.ts",
+    "sha256": "ba5418a19d69a69beb25019a707394eb6697b78e7fbc32424c49123419a05c49"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/native-task-notification.ts",
+    "sha256": "d5117dd75a53cc1aa31cefc12bec64b2ed6b3d1769be5aa93d4cbcbd2ed86246"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/native-test-browser-cleanup.test.ts",
+    "sha256": "df18f308085f947ad0e94270892b1d9748b6c1a1a909b1f8d6d911dba929edee"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/native-test-browser-cleanup.ts",
+    "sha256": "6d77082d56864db85157e7f9fc62d600805a9c495c1fc0bff728a6f01c6e86a6"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/preview-manager.ts",
+    "sha256": "7d678a34590be879108dfbc0c68e73d527654afe08c9f9ec82e4f1775d42ef0d"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/preview-proxy.ts",
+    "sha256": "d09dea8f468b4ce6db4a2c8081dac9d32992c5461ff0a544942149dcdfbdee05"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/preview-test-access.test.ts",
+    "sha256": "57831ec0b9b9b6c6fd0bf86eaa4aec0d7bbadb6a4152792d8db01fe985b575be"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/preview-test-access.ts",
+    "sha256": "ea8073d950dca8add669964e3c7eeab2ba449f638815f931ccc9177399bfd93d"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/preview-test-browser.test.ts",
+    "sha256": "222c58da2a9bd1df93ad7a5c54ebe010b3930151751b5f4722f544116de51914"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/preview-test-browser.ts",
+    "sha256": "48e3aaa6f0b2f9226ef85c78332950c521eab9ff6b3248dc607ed38fe99977ca"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/preview-test-integration.test.ts",
+    "sha256": "c5191165bb23e5933afcbfb5897ac5e51f1bf4da88afa875305aa2fbe9af7182"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/preview-test-recording.test.ts",
+    "sha256": "b03ee4eb803baac973fdff68e6aa1d32cf1c853adcf627a02dd2f975a574e679"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/preview-test-recording.ts",
+    "sha256": "227f464272865062cc24996eb466f0917fc570f4d23b7646b2006e0ac62e15ac"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/programmatic-audio-resource.test.ts",
+    "sha256": "b7b32d2ad69b09d9b89bc4f63b6c1e9d0d62a946f475fed1e1956674076806d7"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/programmatic-audio-resource.ts",
+    "sha256": "0fcaea3732bd6a5e6ce881bf6da200a3221f320471b4273bd99919294b8aa7c4"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-artifact-store.test.ts",
+    "sha256": "993427d0905e6247a9143a16d87055a7d65ad1baf77a73ebe76902b8733c776b"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-artifact-store.ts",
+    "sha256": "149298baba0d6ced027f2da0d7d6523df707d0437755fe1e9c681f981b5af889"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-asset-cli.mjs",
+    "sha256": "3641b42107be9362d4f6b2c45ccfe3987afe6ad7eff3fc612b04349ed648c723"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-asset-command.test.ts",
+    "sha256": "06115f583d007b59e6f83a87cf399ab7940ec06180bbc8150c67d5c90975de7d"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-asset-command.ts",
+    "sha256": "666b5da3f3b43a8d3266e260b70ac79285ea985a7d8e42e1a343e7160cc1dade"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-author.ts",
+    "sha256": "36ea3a9fadfeeb8b13cc45181a753860121c3f60a63078caee253176e79fda53"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-chat-timeline.test.ts",
+    "sha256": "018acea1a7f6a4004fb3b64e0c7352f56a6c73d9ae42a917cc647c11c574860c"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-chat-timeline.ts",
+    "sha256": "bd43a1e6c83791f5e8346720223aa1304c7401c8846cff188d2c2616c7a6a7b3"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-content-authority.ts",
+    "sha256": "5b94d1afc4595f33bc90310699058ea84827f2204a2af1c4bcf41f80c0b6b252"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-conversation.test.ts",
+    "sha256": "6c2daf38209cd6df6b9fab5cae91c853d3761774fb0985c5af0d2f77f342b85c"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-conversation.ts",
+    "sha256": "1dfbf42ebba1bb728a9f63b22cdd0aa83745e3442f9adf9b12661c07a65bb0ff"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-delivery.test.ts",
+    "sha256": "93b389245a6807a57dc2949081e87eac23d8c4adaff61d955774f2ec12b2ff26"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-delivery.ts",
+    "sha256": "cc3daf7421e2063cd8f5453385f05dec6a998f93bc396e470220433ca81e8485"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-execution-access.test.ts",
+    "sha256": "cce05f8bd2878f8a173250a4995199c3099d3c4bc7249d693700eab781abc9c7"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-execution-access.ts",
+    "sha256": "2f123a3e9141afd17dd0f728472baba2d0db6914e91c108db268bee72b0f29d9"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-message-queue.test.ts",
+    "sha256": "bcd7cb7e1e3a3a59a13d08bf8d7576e80d981822fb56c6efd368c62259101320"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-message-queue.ts",
+    "sha256": "474b1e1cc0205ab82ceac978deb182ce695570168dd29e5a3303c35eaa1ca72f"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-records.test.ts",
+    "sha256": "9085dc7901e5b2751f690385ca8dfa5ed9af2c7f0ce438a2202cabecd4b86338"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-records.ts",
+    "sha256": "3ce27035a28c965d306e631a88b9dd4c4af74952ffd37b1799d06647fa982ab4"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-runtime-display.test.ts",
+    "sha256": "de57d0494dc8a149f94590fcc32f95e88a0545f1bc577de6ccc6aec5745b2bd3"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-runtime-display.ts",
+    "sha256": "32ad270746ed4f72a697b20a0894c70e7aeb6a2ead1f5b2c432b18d608bf859f"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-turn-branch.test.ts",
+    "sha256": "e7f6a75db5056cb58c30ee6e7adf2b87d8ed09fe44ffd7bff7f51b52fbbe54ee"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-turn-checkpoint.test.ts",
+    "sha256": "ffe1668d2ba766e26c2ce83d581b199245dea48528a5fcf09aca9d0e2a639b71"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/project-turn-checkpoint.ts",
+    "sha256": "9778d40b158bf5ac0cc747beb03f1cc3829ae7637d7d54a9694b0a6e1dc648fe"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/r2-deployment-publisher.ts",
+    "sha256": "c2822bf875f3f8c8683f05398bab827b1cd07a62bcac1ef70cec45effbaed7f3"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/resource-delivery-readiness.test.ts",
+    "sha256": "b3714b5ed768753a82e55cc4fbdbecdf0953659c6a6f9c3d3e83c4cc7ef34125"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/resource-delivery-readiness.ts",
+    "sha256": "c62599f0f8002c4e5710ed559a85291be06af3258ae99ce65d7e787e761b12a6"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/resource-library-access.test.ts",
+    "sha256": "7610842abf05ff3c0e8d45e724593e2e015ae215e23dd65478fb3e29e88a5d89"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/resource-library-access.ts",
+    "sha256": "06fda591b70ab795d1a4137abdc532bedb54f11bdcbcad4f560756986a5a53f8"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/resource-selection-config.ts",
+    "sha256": "53f9a357738234d5978f0caff59a77c9ad019dfdd9b87309d5852db03f9170ef"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/resource-validation-cli.ts",
+    "sha256": "a43b0b8e6dc8a514309cc46226db6bc86ba9f33c182d26857ba0ff4687fbed75"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/response-language.ts",
+    "sha256": "19e8066ec9670dccf468ef7db2f39bba9c2488a4d6b1bac08b672ea67d31344f"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/runtime-acceptance.test.ts",
+    "sha256": "e4c66c4f16c2da9f2eb5e8620b4313a12f5896ef0d61dbb1a2b9dda6abe6f70a"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/runtime-acceptance.ts",
+    "sha256": "0443d700c8e2b2a885d764c9bf5d5f167ae3ede2977cb60c6d1445324c56f6aa"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/runtime-activity.test.ts",
+    "sha256": "d70d15daed451a0a937588a03ace475b367ba679f708a410197d556ac54b9b55"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/runtime-activity.ts",
+    "sha256": "fba78bfd4690fcdfd48fad7a49f49bc0bbab0104a6c66e69e1ddc66e1fff60c6"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/runtime-error-display.test.ts",
+    "sha256": "a6797165e931507594d1ee702aa6bd1fa7355a5f5e1e05689887b56df3b66bf2"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/runtime-model-provider.test.ts",
+    "sha256": "f024a8cff56e5a02a59dc19ff4dd2f6c75af9acc7ba9d46ef483a6bc6ceab38e"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/runtime-observability.test.ts",
+    "sha256": "bc8d3ea8599e5c4e3aef827d17fa2478f70bc0a9a15fba6921b834bbc9177f1d"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/runtime-observability.ts",
+    "sha256": "a8ed4f5d3dbb12680c563286789c3ac0455e9ba3a5b011e17581ce749c580b28"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/runtime-process-environment.test.ts",
+    "sha256": "b776f24612de2147d4b17b67b808d152bc8b9789383ea1facdfae130ba8668f0"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/runtime-process-environment.ts",
+    "sha256": "dcc7ff8258cbd0724fc3e27bbf5225656e73926898937e2873053bb7dce5ffb7"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/runtime-worker-error.ts",
+    "sha256": "7b6732638960544fd22607d75dda370d3dc0c82ebc392bdb8eebf214bf80d927"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/scene-content-coordinates.test.ts",
+    "sha256": "19052a0e3c0fce19dffb82d866b3ebeb25b6c8de8e7fdb33502405dd13b2eaad"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/scene-content-preview-cli.ts",
+    "sha256": "10495b024599ce8ceab8fe21d6ea3693a6ba7b6555641ac5fd20dffc8e61133a"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/scene-content-preview.ts",
+    "sha256": "78b260d40a05adb8178f38b1fa6e1795624c3072e6e59a083149e7554b68db6b"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/scene-layout-browser.test.ts",
+    "sha256": "912dc25d4b59eb2d1d870f16a6d42a371f8359af00ac36cde8c1e85917bf46b4"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/scene-ui-content-authoring.ts",
+    "sha256": "a8f85277e54f743e5e1120cca7fc9bce80370c9d484224f43e46de3750f8ad52"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/session-attachments.test.ts",
+    "sha256": "ab03f2be0176804791c5ece14e99df5f5d0280420f1e6f46495e34e5a87a696d"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/session-chat-blocks.test.ts",
+    "sha256": "64e850f3d926f145a9be4ba7a70dc1269b95b2217a43aae15a40d3b0ebb02790"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/session-manager-runtime-errors.test.ts",
+    "sha256": "431cd3993e6bdbb9a57a8f8128099f81a336ce190484b0bc7888a0ea70b8fe1d"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/session-manager.ts",
+    "sha256": "a5f48d3347b40de8527c3523084207e0c644994a63311a4a19ffc13c54533c58"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/session-network-permission.test.ts",
+    "sha256": "7d08d30be7ee1cb302d30bd2e396d6b79951d92af241db1be88fea319896d503"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/shared-playwright.test.ts",
+    "sha256": "f1e897583932bffd1803d687b9ee2b74725dd5cf5ce783635527bf3f0c581b17"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/shared-playwright.ts",
+    "sha256": "e74df1c43563668d3697341cfd8958776df0bab3cacdf73261df17687b34494f"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/tilemap-authoring-contract.ts",
+    "sha256": "cfcc02a354ac514b5122de56e798ec2fef234d42d8c1b6b7d07b7878c0f2027b"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/tilemap-content-preview.test.ts",
+    "sha256": "56a574ae3c56f63648ae3a29ce9167da9be705437cd2f84f40b9b8fbf2814166"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/tilemap-content-preview.ts",
+    "sha256": "66fa7387226624a341c493277affa070e25f2bf49ed0dd076f959c809b80123c"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/tilemap-contract.test.ts",
+    "sha256": "f0f29c5ba4b8c888f5196bb683b7fcbf8f866ab69af6353c9a6a5dcb180b4d5a"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/tilemap-contract.ts",
+    "sha256": "8809719a3683b439b421e8889685980bc0b005c1bf6215489be18af3f125fcef"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/ui-layout-audit.test.ts",
+    "sha256": "9d5ed2ad4d3951394e16d88290cb5420f5581f818e7209b64d0f8fe840ebbdff"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/ui-layout-audit.ts",
+    "sha256": "b3ebf7ce6a10aa6daa8e98eef1462fd9b71f1826ee30bf8e1d8d010012f0a128"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/ui-layout-browser.test.ts",
+    "sha256": "64bfcfcc2a6af83fce017e6a1226fe9f29fe5149169f92229459bcf9defc8dbe"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/user-question.test.ts",
+    "sha256": "f30a2eda115afc81e32be6ac43413b0dadf328e718b2ea96620c1e50632a8b9c"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/user-question.ts",
+    "sha256": "83deca0bdb75060ecf4665a3fbe219a0b8469cb1619d044458f107a2c5171efe"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/user-response-scope.ts",
+    "sha256": "5d0169659aa4fe88c0fa543fde1fa73eaf601cdcecc7593e4040e56976ceab9d"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/vite-preview-host.ts",
+    "sha256": "da274755ab68a554442578f29c66fceaf4d3a062c542b1c989e7385fead84058"
+  },
+  {
+    "path": "packages/agent-workflow-server/src/beegame/workspace-revision.ts",
+    "sha256": "3ee91d2b039e48659a033b2a9bba618d5a3af476ab87485af27b5e4e428c2d7a"
+  },
+  {
+    "path": "packages/scene-editor/src/asset-library-dialog.tsx",
+    "sha256": "9bdcbbdcf317a52cee774a282710d19618caef3b11d357e846c666242856a7b3"
+  },
+  {
+    "path": "packages/scene-editor/src/assets.ts",
+    "sha256": "c8b45cf3a73cc358be4e0988b748d0ad0983eb7c03ccbb98d6a9527e44156610"
+  },
+  {
+    "path": "packages/scene-editor/src/collider-outline.test.ts",
+    "sha256": "6b646e438311dd74478521c7bc71a33c3123effddfc243233e4e8502c4148253"
+  },
+  {
+    "path": "packages/scene-editor/src/collider-outline.ts",
+    "sha256": "7680468124150771dc24f76bcf1082c160bc75b58191fa17f4a87298364d8d4c"
+  },
+  {
+    "path": "packages/scene-editor/src/commands.ts",
+    "sha256": "0058a41172f09b07380305b998c314e48064e7da242d8a259cb22b9edd9611b8"
+  },
+  {
+    "path": "packages/scene-editor/src/components/motion/button.tsx",
+    "sha256": "cc10138201b2fc8f0dfbfd1f1d487c19e774465443c11624eb28aa8a902aebd0"
+  },
+  {
+    "path": "packages/scene-editor/src/components/motion/checkbox.tsx",
+    "sha256": "a3d50401f281b184dd330d3028b284e771cddc757f5f76bc446f11ea834616df"
+  },
+  {
+    "path": "packages/scene-editor/src/components/motion/context-menu.tsx",
+    "sha256": "bb4401266c788c535ba5a41bde24403858b0ab8ecc030fdc3a8070ba4b6dbef9"
+  },
+  {
+    "path": "packages/scene-editor/src/components/motion/input.tsx",
+    "sha256": "9b600eb0db0b062515e3676e65a369d92649948b33be0f71e12b32e69b914a90"
+  },
+  {
+    "path": "packages/scene-editor/src/components/motion/menu.tsx",
+    "sha256": "8f5c064ce233ddc76685429c369e8ef8bce0f34a489b2090132baffd94576263"
+  },
+  {
+    "path": "packages/scene-editor/src/components/motion/range-slider.tsx",
+    "sha256": "3d8158da12edcc39999e8340a679ae332c0cb5da7dba8d59962ebff906a1ab06"
+  },
+  {
+    "path": "packages/scene-editor/src/components/motion/select.tsx",
+    "sha256": "c37fdc47a866924d2b7d1cda689d5c00b0573140d066341191bf9612ea0f24c6"
+  },
+  {
+    "path": "packages/scene-editor/src/components/motion/switch.tsx",
+    "sha256": "cf0bb2914683d412896fcf227b81e1afc38883845a605b761fbcfa158741ce1c"
+  },
+  {
+    "path": "packages/scene-editor/src/components/motion/tabs.tsx",
+    "sha256": "0456e851dc038fa37c6e1091a310674d25520d64a42aff0fd2d6b65f3713e448"
+  },
+  {
+    "path": "packages/scene-editor/src/components/ui/LICENSE",
+    "sha256": "284b00a9ef229bfc85d30df4971d96d22107a06aaa3979e8d7c7d2f491841dc1"
+  },
+  {
+    "path": "packages/scene-editor/src/components/ui/dialog.tsx",
+    "sha256": "eef5c3f4fcfa0b5d224eaa1360b7536ace34a1b47681c9217c250089c61d5217"
+  },
+  {
+    "path": "packages/scene-editor/src/content-coordinates.test.ts",
+    "sha256": "87c8e3de2a25e30ae373816ccb76e5f1952a5e27a503fd473327742c410870d9"
+  },
+  {
+    "path": "packages/scene-editor/src/content-coordinates.ts",
+    "sha256": "2f706049402bfb6fec80218896b78b0dd37cff7711f9faf64d1dc5a890f5bac2"
+  },
+  {
+    "path": "packages/scene-editor/src/core.test.ts",
+    "sha256": "d6637fe65dc41538332344433d7250e6e43565324cd93c1f7c3f9f4dc1153959"
+  },
+  {
+    "path": "packages/scene-editor/src/editor.tsx",
+    "sha256": "95690ba124f79875ce4057d1262275eb211cd9010a4815235c1731bda2f04ba7"
+  },
+  {
+    "path": "packages/scene-editor/src/game-camera-preview.ts",
+    "sha256": "d8d25cd84c94f35f362b4886ed684cbc3884179b10a923807a257532b2341366"
+  },
+  {
+    "path": "packages/scene-editor/src/hierarchy.tsx",
+    "sha256": "30faf85eea81d784689e325c66bda46b726c04c78ba6ebbb607685eb58f320d9"
+  },
+  {
+    "path": "packages/scene-editor/src/history.ts",
+    "sha256": "6c5c7a5486655dd57902b6112b9e408f64150b92fdea4078e15228759e9d8086"
+  },
+  {
+    "path": "packages/scene-editor/src/index.ts",
+    "sha256": "f63b7da7615d3b6f018f1fe83fb1c706521059e2e707fbb48aa8757bbedea09a"
+  },
+  {
+    "path": "packages/scene-editor/src/inspector.tsx",
+    "sha256": "4aca58e76635cbf628af38e31ac3cb6ab255021837181dbda96d29f6fbfad948"
+  },
+  {
+    "path": "packages/scene-editor/src/keyboard.ts",
+    "sha256": "c66d1233538cdd689f23957ebb5f83fb1b30113e7cb8b3aee886811c12cdebfe"
+  },
+  {
+    "path": "packages/scene-editor/src/light-gizmo.tsx",
+    "sha256": "bd69514005781d7b49b451450db39bccd43462ee5947fbda5b0412484cdb0d6c"
+  },
+  {
+    "path": "packages/scene-editor/src/model-structure.ts",
+    "sha256": "d861fe27ff565f1461dacf95f3f69560c80e757c1855e168c11653249f4bd902"
+  },
+  {
+    "path": "packages/scene-editor/src/model.ts",
+    "sha256": "32bdb426089cd5df7a6a5696af0cca4c0acaf5dcf0a15d773ea47b82def85936"
+  },
+  {
+    "path": "packages/scene-editor/src/navigation.ts",
+    "sha256": "023f58d1a19dd1cbe56c815659b9e688738e198698f3df665e8d2f76365dc18c"
+  },
+  {
+    "path": "packages/scene-editor/src/persistence.ts",
+    "sha256": "d8b2b1fec864422f31f199ae5c421a13a1be26e0f6766ce2e708583a9077b99d"
+  },
+  {
+    "path": "packages/scene-editor/src/platform.ts",
+    "sha256": "b17071cd8bbc584afaea3658bf5bea473f2b6bcc2c55c0b98c4bc77478cf0a64"
+  },
+  {
+    "path": "packages/scene-editor/src/ports.ts",
+    "sha256": "1d24bda2f8685effc3f688f812fc26e1f848a08ad9d2fd0dfcebd184642d67f0"
+  },
+  {
+    "path": "packages/scene-editor/src/public.ts",
+    "sha256": "7af0746e88cfef6c45316d14f5ce88b2033ca609e7af4f9c1e04dd2faae264c8"
+  },
+  {
+    "path": "packages/scene-editor/src/rect-transform.ts",
+    "sha256": "4fe2ff601ef89260ea2506d3513a362224dd8b60b90a73ebf10d4604ab19b6e8"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/README.md",
+    "sha256": "613484fdabf6a62b2414ee340a1c01c71cc7a7469e7f6972975137333e1e403c"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/components/motion/button/base.tsx",
+    "sha256": "338822e15f486af7a9c2fbf444f10ccf3de98788556ab703d0136f80c2e65ae2"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/components/motion/context-menu.tsx",
+    "sha256": "baf95ce7137333e13e7ce6decdf73c4967bbb9cf125c695e308974b00b290220"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/components/motion/input.tsx",
+    "sha256": "bd67d535a933066df8fbc448ae1e3ebe85c85c24394b43c49a0916c76c6c6b87"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/components/motion/popover-morph.tsx",
+    "sha256": "45ead54df3009abb5197a798be1d8ee3067f11d9452f1b281a5515117ccea911"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/components/motion/popover-position.ts",
+    "sha256": "222aeb43af36b5469cacb932adb5266a5d3187553198e1f1475fc3b55557c393"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/components/motion/range-slider.tsx",
+    "sha256": "e1e9bbd5df33afff7bf35dd3f1ec75c7c632c16282c9dcd76886890dda4c1adf"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/components/motion/select.tsx",
+    "sha256": "3c02b126eb9e670ef514987a3b2521fc7b39171bccc33f893a506957dcecfbdd"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/components/motion/switch.tsx",
+    "sha256": "2baa52b5de3c5d3582b584b1e36bc21c981a59df44ea195824c551fb363d2af6"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/components/motion/tabs.tsx",
+    "sha256": "5aac378738e2eb8599fd019fe2d232ed1237344bfd3103ea064654683f398fd9"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/components/motion/tooltip-surface.tsx",
+    "sha256": "d961f36902fdf5df723a7cd39b5137f526fb1b3f143cf5ce6b7f09de9bcca9f8"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/components/motion/tooltip.tsx",
+    "sha256": "7f47565c866ebf0c1677de66313034fd984b6833dd9c97f886f4e9d4d2474b0e"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/lib/ease.ts",
+    "sha256": "61d3efcdee265f6fe9b06524d0544c952ab85d718089e24f87cfe5f14681e6ec"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/lib/hooks/use-dismiss.ts",
+    "sha256": "45be7ffd8f9724cfbce11ffc9a4caebbea3b7a672abdac9e70b16b458067e05a"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/lib/hooks/use-hover-capable.ts",
+    "sha256": "ded166a74dac5f795fcdee5d82ec65b80bcc25d87429df7fb0bef21fa73d10e1"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/lib/hooks/use-hover-gesture.ts",
+    "sha256": "74f32f90b07a2286939efa342fd865309af15b7068c3dfd306e37aa2d53fc26d"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/lib/hooks/use-slider.ts",
+    "sha256": "4fe9e0148495cb1dc6467c85d6fa7658adf03838fda277ffe4d99daac80822bd"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/lib/hooks/use-tap-gesture.ts",
+    "sha256": "e341b7d72a4d12e6849b0f145fb6639b24ca5079be1422803201e869b8a414b7"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/lib/touch.ts",
+    "sha256": "626390e373925555801b2521a96ee598aeef435cab20bdf3a0ac4ca47234e57a"
+  },
+  {
+    "path": "packages/scene-editor/src/registry/lib/utils.ts",
+    "sha256": "1693a74bfb50cae7077972a4a9aa9053f778b3908c3062324bb5ad2c7d260bd4"
+  },
+  {
+    "path": "packages/scene-editor/src/scene-camera.test.ts",
+    "sha256": "50c1b2a1e303275fc70c7298cfa0be51b20b4799750d10515587ff3681f04a41"
+  },
+  {
+    "path": "packages/scene-editor/src/scene-camera.ts",
+    "sha256": "967b9593fed1c0fea612c7ec5e952c4b26182f983ae8386c3af38320f35b0e32"
+  },
+  {
+    "path": "packages/scene-editor/src/scene-layout-inspection.ts",
+    "sha256": "c1339643c79c99f66b71153edc4a6fe9205f9bce1b3054a60f460321e50e04ce"
+  },
+  {
+    "path": "packages/scene-editor/src/scene-settings-dialog.tsx",
+    "sha256": "db0a0bdda07a0d725caacf2e9c83591bba6d3792cc8b4222a26397e17ec00e29"
+  },
+  {
+    "path": "packages/scene-editor/src/selection-transform.ts",
+    "sha256": "daa1a27ff66f993b5830125f4f612b638141df71623afd4d853c2031ac98456e"
+  },
+  {
+    "path": "packages/scene-editor/src/sprite-sheet.test.ts",
+    "sha256": "2e559e5e8972b9524caec730984f46b6c4b7e2ed1c19e4a8f2270ee06e498a23"
+  },
+  {
+    "path": "packages/scene-editor/src/sprite-sheet.ts",
+    "sha256": "3badea58d00bce4359e61c5e469264a83ba6e47ef52d6dfb5ea18d12caca6af5"
+  },
+  {
+    "path": "packages/scene-editor/src/styles.css",
+    "sha256": "d8f1bdd044b48c95a9935287258e65e45fa6b9c28e992e1ca138230dfaf3e052"
+  },
+  {
+    "path": "packages/scene-editor/src/texture-cache.test.ts",
+    "sha256": "8e532f45c5c9b0cedb38cca0bbc51bb9f3d82d74d146f2e922d8f2c79ab0dcc4"
+  },
+  {
+    "path": "packages/scene-editor/src/texture-cache.ts",
+    "sha256": "6b2e4270fabb99c1bd80ffdc9725540c3184c416527897d1ea523fab0c290242"
+  },
+  {
+    "path": "packages/scene-editor/src/tile-palette.tsx",
+    "sha256": "872008f0f2eb2b8dc449ba2c9c0981cd239b0c0ba8efb2ebe0c038f27c6f17cc"
+  },
+  {
+    "path": "packages/scene-editor/src/tilemap-brush.ts",
+    "sha256": "abb968c5bb924fa1a2d2ffa4b82a7e232c7908c13516445451acf2ee73aa7542"
+  },
+  {
+    "path": "packages/scene-editor/src/tilemap-data.ts",
+    "sha256": "75d3aea136e6911a3d7d3a987147f5395637fdfe1cff4444128f890282165d87"
+  },
+  {
+    "path": "packages/scene-editor/src/tilemap-paint.ts",
+    "sha256": "495645cfbd4fd6af729be763b1cd68620f98859594f80c000fd66970596ffa1e"
+  },
+  {
+    "path": "packages/scene-editor/src/tilemap-preview.tsx",
+    "sha256": "bee2a2eadcc1f1fd8cb9b80e57d55b53caabb30054c6cdd2d7a5980830bcf303"
+  },
+  {
+    "path": "packages/scene-editor/src/ui-container-layout.test.ts",
+    "sha256": "7814436a8fe66ae20a008d7fcde5cc847d6c25b492b79c0c7e9bd6d1c516d121"
+  },
+  {
+    "path": "packages/scene-editor/src/ui-container-layout.ts",
+    "sha256": "01bcf7ccb56762b8ef84be6b400224da91f3241ba90d01d0e45b46028a32b5dd"
+  },
+  {
+    "path": "packages/scene-editor/src/ui-layout-inspection.test.ts",
+    "sha256": "dca8a6fa2d259976b1a14511461a36f7f0040fd8328a6ee549993a00053e3644"
+  },
+  {
+    "path": "packages/scene-editor/src/ui-layout-inspection.ts",
+    "sha256": "a8f975a23c8dd7abe9bbbfd622b951c1d78f10d32d15ab13669b6bf9e4e6148f"
+  },
+  {
+    "path": "packages/scene-editor/src/ui-responsive.test.ts",
+    "sha256": "d1eb02ecc3340fc5b75a877465a1272938bc26a3f166d4a51036ebc9b9b68009"
+  },
+  {
+    "path": "packages/scene-editor/src/ui-responsive.ts",
+    "sha256": "e13655be65c7a61b1389b807b431c446215ae9008b5c0dabc737af1240e4b6c2"
+  },
+  {
+    "path": "packages/scene-editor/src/ui-text-measurement.ts",
+    "sha256": "17c0529a1a5f42b7ddc284f1de097269882f3bb152ac4652d9f0877c56267c64"
+  },
+  {
+    "path": "packages/scene-editor/src/validation.test.ts",
+    "sha256": "632aaa43fba6d80f8f1f361a68c734dc4b9b014dd71882029a1ce735370f4a86"
+  },
+  {
+    "path": "packages/scene-editor/src/validation.ts",
+    "sha256": "4f80c08b9d56147977ff9e894d3d8e492c8011c32fe8a114e55b7fbd8de822de"
+  },
+  {
+    "path": "packages/scene-editor/src/viewport-default-visibility.test.ts",
+    "sha256": "92bcfd1bbef8485f3bf38f1a9050d15ed5b83c8ffcdaacee8d58e6342e918310"
+  },
+  {
+    "path": "packages/scene-editor/src/viewport-texture-region.test.ts",
+    "sha256": "472e05c0bb323a75ed78a785a7581b822ef32d905c1399a0fa33e9417194d798"
+  },
+  {
+    "path": "packages/scene-editor/src/viewport.tsx",
+    "sha256": "a3091231f7860fe8902260fb15872403aa140596c9a3833ec7246ebb3fc350fb"
+  }
+]

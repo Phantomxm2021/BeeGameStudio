@@ -14,6 +14,7 @@ import { parseNativeTerminalTaskNotification } from './native-task-notification'
 import { resolveNativeRuntimeCommand, nativeSessionTemporaryPath } from './native-runtime-process-path'
 import { getSafeRuntimeProcessEnvironment } from './runtime-process-environment'
 import { createNativeTaskAccess } from '@bee-game-studio/agent-workflow/native-task-access'
+import { NATIVE_DIAGNOSTIC_PREFIX } from '@bee-game-studio/agent-workflow/native-diagnostics'
 import { mkdir, realpath } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { closeSessionTestBrowsers } from './native-test-browser-cleanup'
@@ -206,6 +207,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         // runtime itself.
         session_id: this.nativeSessionId ?? '',
         parent_tool_use_id: null,
+        ...(input.directionAuthors ? { beegame_direction_authors: input.directionAuthors } : {}),
+        ...(input.projectTurn ? { beegame_project_turn: input.projectTurn } : {}),
         message: {
           role: 'user',
           content: nativePromptContent(input.prompt),
@@ -256,11 +259,31 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
 
   private async consumeStderr(): Promise<void> {
     const decoder = new TextDecoder()
-    for await (const chunk of this.child.stderr) {
-      this.stderrTail = `${this.stderrTail}${decoder.decode(chunk, {
-        stream: true,
-      })}`.slice(-16_384)
+    let pending = ''
+    let discarding = false
+    const accept = (line: string) => {
+      if (!line.startsWith(NATIVE_DIAGNOSTIC_PREFIX)) return
+      try {
+        this.observability.observeDiagnostic(JSON.parse(line.slice(NATIVE_DIAGNOSTIC_PREFIX.length)))
+      } catch { /* Invalid diagnostics must not affect the runtime. */ }
     }
+    const consume = (text: string) => {
+      this.stderrTail = (this.stderrTail + text).slice(-16_384)
+      for (const part of text.split(/(?<=\n)/)) {
+        if (!discarding) pending += part
+        if (pending.length > 4_096) { pending = ''; discarding = true }
+        if (part.endsWith('\n')) {
+          if (!discarding) accept(pending.trimEnd())
+          pending = ''
+          discarding = false
+        }
+      }
+    }
+    for await (const chunk of this.child.stderr) {
+      consume(decoder.decode(chunk, { stream: true }))
+    }
+    consume(decoder.decode())
+    if (!discarding && pending) accept(pending)
   }
 
   private async onMessage(message: Record<string, unknown>): Promise<void> {
@@ -621,6 +644,8 @@ export function nativeRuntimeEnvironment(
     // This host can present permission requests from background agents.
     // Route them to the same authority instead of silently auto-denying them.
     BEEGAME_NATIVE_BACKGROUND_PERMISSIONS: '1',
+    // Reuse the metadata-only protocol; never enable full request/response capture.
+    BEEGAME_NATIVE_DIAGNOSTICS: '1',
   }
 }
 

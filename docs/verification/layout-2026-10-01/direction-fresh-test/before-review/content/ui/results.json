@@ -1,0 +1,209 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-results",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [
+            960,
+            540
+          ],
+          "targetViewports": [
+            [
+              960,
+              540
+            ],
+            [
+              1200,
+              540
+            ],
+            [
+              960,
+              600
+            ],
+            [
+              1280,
+              720
+            ]
+          ],
+          "minimumControlSize": [
+            44,
+            44
+          ]
+        }
+      },
+      {
+        "id": "dim",
+        "role": "shape",
+        "enabled": true,
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ]
+        },
+        "style": {
+          "shape": "rect",
+          "color": "#0A0820",
+          "opacity": 0.72
+        },
+        "parentId": "root"
+      },
+      {
+        "id": "panel",
+        "role": "container",
+        "enabled": true,
+        "layout": {
+          "anchor": "center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            380,
+            340
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#1B1840",
+            "opacity": 0.96,
+            "radius": 18
+          },
+          "border": {
+            "width": 2,
+            "color": "#3A3580",
+            "radius": 18
+          }
+        },
+        "data": {
+          "container": {
+            "direction": "column",
+            "gap": 18,
+            "justify": "center",
+            "align": "center",
+            "padding": [
+              32,
+              28,
+              32,
+              28
+            ]
+          }
+        },
+        "parentId": "root"
+      },
+      {
+        "id": "result-title",
+        "role": "text",
+        "enabled": true,
+        "parentId": "panel",
+        "layout": {
+          "size": [
+            300,
+            52
+          ]
+        },
+        "text": "通关",
+        "style": {
+          "fontSize": 40,
+          "color": "#29D3E0",
+          "align": "center",
+          "fontWeight": "bold"
+        },
+        "data": {
+          "boundText": "win=通关;lose=游戏结束"
+        }
+      },
+      {
+        "id": "result-score",
+        "role": "text",
+        "enabled": true,
+        "parentId": "panel",
+        "layout": {
+          "size": [
+            300,
+            34
+          ]
+        },
+        "text": "总分 0",
+        "style": {
+          "fontSize": 22,
+          "color": "#F4F2FF",
+          "align": "center"
+        }
+      },
+      {
+        "id": "retry-btn",
+        "role": "button",
+        "enabled": true,
+        "parentId": "panel",
+        "layout": {
+          "size": [
+            240,
+            56
+          ]
+        },
+        "text": "再玩一次",
+        "style": {
+          "background": {
+            "color": "#29D3E0",
+            "radius": 14
+          },
+          "color": "#0A1030",
+          "fontSize": 22,
+          "fontWeight": "bold"
+        }
+      },
+      {
+        "id": "to-menu-btn",
+        "role": "button",
+        "enabled": true,
+        "parentId": "panel",
+        "layout": {
+          "size": [
+            240,
+            48
+          ]
+        },
+        "text": "返回开始界面",
+        "style": {
+          "color": "#9E9AC8",
+          "fontSize": 17,
+          "background": {
+            "color": "transparent"
+          }
+        }
+      }
+    ]
+  }
+}

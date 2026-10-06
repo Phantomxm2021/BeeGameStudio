@@ -22,9 +22,13 @@ test('native project temp environment resolves inside the project before Bash to
     expect(access.settings.sandbox.filesystem.allowRead).toContain(playwright.root)
     expect(access.settings.sandbox.filesystem.allowWrite).not.toContain(playwright.root)
     const modulePath = fileURLToPath(new URL('../../../../src/utils/permissions/filesystem.ts', import.meta.url))
+    const promptPath = fileURLToPath(new URL('../../../../src/constants/prompts.ts', import.meta.url))
     const child = Bun.spawn([process.execPath, '-e',
       'import { getClaudeTempDir } from ' + JSON.stringify(modulePath) +
-      '; console.log(JSON.stringify({temp:process.env.TMPDIR, native:getClaudeTempDir()}))'], {
+      '; import { computeSimpleEnvInfo, enhanceSystemPromptWithEnvDetails } from ' + JSON.stringify(promptPath) +
+      '; const main=await computeSimpleEnvInfo("configured"); const agent=(await enhanceSystemPromptWithEnvDetails(["Independent Agent"],"configured")).join("\\n");' +
+      'delete process.env.BEEGAME_PROJECT_EXECUTION; const ordinary=await computeSimpleEnvInfo("configured");' +
+      'console.log(JSON.stringify({temp:process.env.TMPDIR,native:getClaudeTempDir(),main,agent,ordinary}))'], {
       cwd: workspace, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', ...access.environment },
       stdout: 'pipe', stderr: 'pipe',
     })
@@ -35,8 +39,15 @@ test('native project temp environment resolves inside the project before Bash to
     const actual = JSON.parse(output)
     expect(actual.temp).toBe(access.temporary)
     expect(actual.native.startsWith(access.temporary + '/')).toBe(true)
+    for (const prompt of [actual.main, actual.agent]) {
+      expect(prompt).toContain(JSON.stringify(access.temporary))
+      expect(prompt).toContain('File tools require literal paths')
+      expect(prompt).toContain("keep maintained tests in the project's normal test structure")
+      expect(prompt).not.toContain('/private/tmp/claude')
+    }
+    expect(actual.ordinary).not.toContain('Project temporary working directory')
   } finally { await rm(root, { recursive: true, force: true }) }
-})
+}, 20000)
 
 test('published skills stay readable without granting their enclosing runtime directory', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'project-skills-')))

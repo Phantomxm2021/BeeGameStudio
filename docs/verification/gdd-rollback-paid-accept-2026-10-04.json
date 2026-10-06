@@ -1,0 +1,250 @@
+{
+  "date": "2026-10-04",
+  "kind": "observer-audit-of-authorized-source-rollback-and-one-paid-run",
+  "rawEvidenceRoot": "/private/tmp/bgs-gdd-rollback-accept-20261004-DBRr3HMo",
+  "workspace": "/private/tmp/bgs-gdd-rollback-accept-20261004-DBRr3HMo/projects/users/design-test/gdd-rollback-museum-20261004-DBRr3HMo",
+  "model": "ark-code-latest",
+  "modelConfigId": "llm_ac40e5d1be394ffe925e3f2532dedd34",
+  "rollback": {
+    "scope": "Exactly the five optimizations recorded in gdd-cost-implementation-repair-2026-10-04.json: exact review paths, targeted Verify exposure, author heading-pointer checker extension, scoped GDD tools, terminal reviewer receipt handoff; matching tests reverted too.",
+    "method": "Reconstruct the agent's successful original apply_patch inputs, reverse them with apply_patch, verify all 21 affected source/test hashes against the recorded pre-optimization source snapshot.",
+    "files": [
+      {
+        "path": "src/QueryEngine.ts",
+        "beforeRollback": "06e31a98a1868d378f6ea407cd4be510291e1b376e34fc72a9befb61e551404f",
+        "afterRollback": "f72b41ffec795c8490745581c53ef33d7f19dfb5351f43638098cd4e7d046dff",
+        "expected": "f72b41ffec795c8490745581c53ef33d7f19dfb5351f43638098cd4e7d046dff"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/design-document-references.ts",
+        "beforeRollback": "5bc31d2af1cca456d92bec2bfdec917b5d96f191981bbbc0dc4300df6927ffeb",
+        "afterRollback": "e908464d35db20fb771a22233bc512db5167538f44d689128d6d15a8685ac911",
+        "expected": "e908464d35db20fb771a22233bc512db5167538f44d689128d6d15a8685ac911"
+      },
+      {
+        "path": "packages/agent-workflow/src/native-direction-authors.test.ts",
+        "beforeRollback": "7967f3e7a9b278ca8666f85d30d03c9f30ca0bf34b7214e3aa73dbcaf1d6fc2d",
+        "afterRollback": "e710e4a0681fd2a78176dec3b9a120c58d48aef5cbb7d7eb1406f8b2351b897b",
+        "expected": "e710e4a0681fd2a78176dec3b9a120c58d48aef5cbb7d7eb1406f8b2351b897b"
+      },
+      {
+        "path": "src/beegame/design-review.ts",
+        "beforeRollback": "b82a8df35a1434c7d060c5e62256cb7c0c2fa964421b33704768a3f9f22b49c8",
+        "afterRollback": "4adf1013079276b289ae840010a5508026f52957f7a5fe083be272ac4dc15ef6",
+        "expected": "4adf1013079276b289ae840010a5508026f52957f7a5fe083be272ac4dc15ef6"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/project-conversation.ts",
+        "beforeRollback": "b5057f99300dcf96e1d80dccfa1ff44db388bcc14ddb640260dec4ff2c583a9e",
+        "afterRollback": "7148eb8d7fc3059fa632c7f6530579ccb9e8b5151d94aeb0416b4e3895d13794",
+        "expected": "7148eb8d7fc3059fa632c7f6530579ccb9e8b5151d94aeb0416b4e3895d13794"
+      },
+      {
+        "path": "packages/agent-workflow-server/scripts/project-turn-native.test.ts",
+        "beforeRollback": "cf32dbcbae370e3fd1badec2938262bb79d3f3520a31a3ba01c2db6cc21cc741",
+        "afterRollback": "edee62b62870bf48cac5f929fc39d389a22cee2d14ec1a9e31e1fb84961084aa",
+        "expected": "edee62b62870bf48cac5f929fc39d389a22cee2d14ec1a9e31e1fb84961084aa"
+      },
+      {
+        "path": "src/beegame/design-review.test.ts",
+        "beforeRollback": "738a1e85adfd6758a5d24a6000dfdb585302361ac5bdcd704c524465d500f1f6",
+        "afterRollback": "5296f0c17d4d6ca7d1378821691b7b470d98576a26061ce0cafe6c90c2d26af0",
+        "expected": "5296f0c17d4d6ca7d1378821691b7b470d98576a26061ce0cafe6c90c2d26af0"
+      },
+      {
+        "path": "src/query/stopHooks.ts",
+        "beforeRollback": "edf35b64dce02ea35980c33de9f7b032e58cbc4411db2f3693c280cf8f608314",
+        "afterRollback": "dbead9a31a7abbef5421d74033d779898dfa3ae0996257e39471c5823d30754c",
+        "expected": "dbead9a31a7abbef5421d74033d779898dfa3ae0996257e39471c5823d30754c"
+      },
+      {
+        "path": "packages/agent-workflow/src/native-direction-authors.ts",
+        "beforeRollback": "ef959d52a6f0d802e8370a2204cee97ef143da5be0cd1dfd222a18b22c99e663",
+        "afterRollback": "d8a5b5f0830dfb1cf00f271e4e50cd607f9d3886830aa5553507c093980c011c",
+        "expected": "d8a5b5f0830dfb1cf00f271e4e50cd607f9d3886830aa5553507c093980c011c"
+      },
+      {
+        "path": "src/query.ts",
+        "beforeRollback": "d95b32a3678c7312ddc21f146ecc52364ef352e8a2cefa36e56ea575e714ef10",
+        "afterRollback": "6e2d8d2ebe1723571f0528c619bc1679a62a9edebbcdeb6a2c9cf2710cd0a7de",
+        "expected": "6e2d8d2ebe1723571f0528c619bc1679a62a9edebbcdeb6a2c9cf2710cd0a7de"
+      },
+      {
+        "path": "src/beegame/saved-draft-check.test.ts",
+        "beforeRollback": "4883a9034bd093a24337b4d1a46d6314a3e417dcf593f93b59480ecc37099080",
+        "afterRollback": "e53648ebdfa955417e2cfd1a2e54e4fe0a0e5ed51b3dd60dbd101d4c83cac34b",
+        "expected": "e53648ebdfa955417e2cfd1a2e54e4fe0a0e5ed51b3dd60dbd101d4c83cac34b"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/design-handoff.test.ts",
+        "beforeRollback": "57c76b0c90ae010e7fd2ac63e59c51a1e578b2d3c727e89800cdf07ded9aabfa",
+        "afterRollback": "3db311688a64f10e84a070fe8916fc50012375e1331725811745a28aff113390",
+        "expected": "3db311688a64f10e84a070fe8916fc50012375e1331725811745a28aff113390"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/design-document-references.test.ts",
+        "beforeRollback": "ea87386f356bec503ce42769b9e88faa2ab065f3d7c87149f70319abbfe8ef99",
+        "afterRollback": "660103fb20cd9075965d0b71feb17490c1956d07b0debe5f456d5a3982ccd113",
+        "expected": "660103fb20cd9075965d0b71feb17490c1956d07b0debe5f456d5a3982ccd113"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/design-handoff.ts",
+        "beforeRollback": "40e4ec066104e40960d9dfc024e3bfbfc308f3cc457eb50cce2ee62501977aa9",
+        "afterRollback": "04a363a409c8983626c86dd6137afcd4d481e95812a48f615a68f6b5302fd4d3",
+        "expected": "04a363a409c8983626c86dd6137afcd4d481e95812a48f615a68f6b5302fd4d3"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/project-conversation.test.ts",
+        "beforeRollback": "aa88384385b7f05f1d26f417fbebbc7e371e20bd260146471024bdd52c79100a",
+        "afterRollback": "3176569d71b713f285822fa802c1ab68054c11f23b72edbda1c7160417ac13bb",
+        "expected": "3176569d71b713f285822fa802c1ab68054c11f23b72edbda1c7160417ac13bb"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/project-delivery.ts",
+        "beforeRollback": "283b56c3109b938aad5ad15e349f7c69fe069efebe31c173cfbacc59f71d4815",
+        "afterRollback": "b3cc2b8bc88705d1cbdf2ac43020e49ebf4a2cccfb6696a94e107e343d348c2f",
+        "expected": "b3cc2b8bc88705d1cbdf2ac43020e49ebf4a2cccfb6696a94e107e343d348c2f"
+      },
+      {
+        "path": "src/Tool.ts",
+        "beforeRollback": "076bd49fecc6c4e3cd625668a00a5e65ca654f6d43fbf1ca8155b9e987355f85",
+        "afterRollback": "d6944ab4a84beae2ba55368ec33ccee90daec694adc4a3f321c2308f7a2daec1",
+        "expected": "d6944ab4a84beae2ba55368ec33ccee90daec694adc4a3f321c2308f7a2daec1"
+      },
+      {
+        "path": "src/utils/fileStateCache.ts",
+        "beforeRollback": "e9d97a9a54513e316e130a3cc74232449b80af65ef8546c7cd19b600f5d91252",
+        "afterRollback": "63ea1205a6c17dd309eecba3cb8d043f548cc5ee3d1be07d9fee817d98d026a7",
+        "expected": "63ea1205a6c17dd309eecba3cb8d043f548cc5ee3d1be07d9fee817d98d026a7"
+      },
+      {
+        "path": "packages/builtin-tools/src/tools/FileReadTool/FileReadTool.ts",
+        "beforeRollback": "0f4c8846c5e3fdf62ea869a88b4404495d5e8ca03438528396580631de77b17c",
+        "afterRollback": "b1bbfdf5bd9f312e9df5e2b22b361000b023d509bf5e3c1ae69afd0a94669ec5",
+        "expected": "b1bbfdf5bd9f312e9df5e2b22b361000b023d509bf5e3c1ae69afd0a94669ec5"
+      },
+      {
+        "path": "src/beegame/saved-draft-check.ts",
+        "beforeRollback": "64fde37ad25e94b9bd659adf1d0ef16dbc5578e633c1e625659ae9919fcf0800",
+        "afterRollback": "e9f959c1979483ec647718a418d000f0bac53f6c3bf7c44a182332c8385ce34a",
+        "expected": "e9f959c1979483ec647718a418d000f0bac53f6c3bf7c44a182332c8385ce34a"
+      },
+      {
+        "path": "packages/builtin-tools/src/tools/AgentTool/runAgent.ts",
+        "beforeRollback": "a10433834390edf78556391ac8b4b1259ff0d77b64787ad72650a2d2a22add74",
+        "afterRollback": "021e70f1acde65b6655cebfc1ae961a3384c93a4deb218329bc94cff0866c94a",
+        "expected": "021e70f1acde65b6655cebfc1ae961a3384c93a4deb218329bc94cff0866c94a"
+      }
+    ],
+    "otherSourcePreservation": "Read-only check of 3210 recorded source/skill/script files: no differences from the pre-optimization values (or latest values for previously absent files). No Git reset, whole-checkout rewrite or artifact edit.",
+    "retained": "Original bounded independent Review/Revision, checking Skill, professional responsibility prompts, source-exposure safeguards and other earlier fixes remain. Historical audit reports retained.",
+    "currentState": "Rollback remains applied; no automatic reapplication of optimizations after the test."
+  },
+  "offlineVerification": {
+    "testsPassed": 115,
+    "testsFailed": 0,
+    "testFiles": 7,
+    "packageTypechecks": [
+      "agent-workflow passed",
+      "agent-workflow-server passed"
+    ],
+    "freshCliBuildOutputs": 611
+  },
+  "paidRunsStarted": 1,
+  "manualProductEdits": false,
+  "reusedDrafts": false,
+  "injectedFindings": false,
+  "sameConfirmedBriefAsPrevious": true,
+  "systemSourcesUnchangedDuringRun": true,
+  "gddUnchangedBetweenAuthorAndInspect": true,
+  "gddSha256": "e561b1c578fe8fdc95564e3b832a2d632d95c44c7e5462c207d4fccba1d7e9ef",
+  "outcome": {
+    "host": "Released GDD baseline, authorBatch 1, before dispatching later writers. Handoff and 24 explicit reference checks valid.",
+    "nativeReviewer": "Fresh native bgs-design-review with actual game-design-check Skill preload; read original assignment, document-checks.md and complete saved GDD through EOF. Receipt findings=[]; no Revision or Verify.",
+    "observer": "One unresolved professional-boundary statement detected despite empty native findings. Workflow completion is not a semantic quality certificate."
+  },
+  "observerFindings": [
+    {
+      "id": "O1",
+      "classification": "professional-ownership/scope wording defect",
+      "document": "docs/GDD.md",
+      "lines": [
+        36,
+        43,
+        163
+      ],
+      "sourceA": "Under 首发版明确排除（不做）: 设置项（音量、键位自定义、辅助选项等偏好设置）——其内容与生命周期归 UI_UX_SPEC 等专业文档所有。",
+      "sourceB": "专业偏好设置（如音量、键位自定义等）是否持久化及其生命周期，不属于 GDD，待 UI_UX_SPEC.md 与 TECHNICAL_DESIGN.md 决定。",
+      "analysis": "The first clause places preferences among explicitly excluded first-release features while also attributing them to professional owners. Read literally, the scope exclusion prevents those owners from selecting preferences; it cannot simultaneously mean merely that GDD does not specify them. The original responsibility prompt leaves specialist preferences with their owners.",
+      "downstreamImpact": "UI/audio authors must decide whether professional preferences are forbidden or pending; that is a product-scope/ownership clarification, not optional prose polish.",
+      "closure": "Clarify whether this is a source-authorized release exclusion or merely a pending specialist decision, and make the corresponding scope and ownership clauses consistent. Do not supply the answer in this observer audit or hand-edit the product.",
+      "nativeReviewerDetected": false,
+      "observerProductCorrection": false
+    }
+  ],
+  "positiveObservations": [
+    "Previous movement-silence statement does not recur.",
+    "Simultaneous detection plus success and last pickup plus entering the exit are explicitly ordered (GDD lines 101-102).",
+    "UI dependency neededBefore=content remains consistent."
+  ],
+  "usage": {
+    "basis": "One final provider usage per actual model call, including cache reads; no native partial stream double count.",
+    "modelCalls": 12,
+    "allModelCallsFirstAttempt": true,
+    "allModelCallsFinalUsage": true,
+    "inputTokens": 69133,
+    "cacheReadTokens": 316264,
+    "outputTokens": 13015,
+    "cacheCreationTokens": 0,
+    "totalObservedModelTokens": 398412,
+    "elapsedSeconds": 323.624,
+    "stages": [
+      {
+        "stage": "author",
+        "calls": 7,
+        "input": 49381,
+        "cacheRead": 254800,
+        "output": 10551,
+        "total": 314732,
+        "elapsedSeconds": 262.563
+      },
+      {
+        "stage": "inspect",
+        "calls": 5,
+        "input": 19752,
+        "cacheRead": 61464,
+        "output": 2464,
+        "total": 83680,
+        "elapsedSeconds": 60.562
+      }
+    ],
+    "otherRequest": "One non-model authentication probe lacks usage; unknown, not zero spend.",
+    "settledCredits": "Unavailable: billing_observation_transport_failed."
+  },
+  "comparison": {
+    "previousRoot": "/private/tmp/bgs-gdd-repeat-accept-20261004-X0XaTAaq",
+    "previousModelCalls": 9,
+    "previousTokens": 255315,
+    "previousElapsedSeconds": 415.869,
+    "tokenIncreasePercent": 56.04723576758121,
+    "elapsedReductionPercent": 22.181263811440623,
+    "authorInitialInputContext": {
+      "beforeRollback": 22979,
+      "afterRollback": 36427
+    },
+    "directExecutionObservations": [
+      "Rollback restores broad GDD tool context.",
+      "Reviewer now uses Glob to locate GDD because exact saved paths are no longer supplied; no wrong-path failed Read in this sample.",
+      "Reviewer makes one post-receipt summary request (provider request 13), costing 23241 tokens.",
+      "Author creates docs with Bash and fixes its own Markdown-link typo with Edit before one reference check. That native fix is not an observer product edit."
+    ],
+    "causalLimit": "Different fresh generations and model reasoning vary. This is not a controlled proof that all token differences or elapsed changes come from the optimizations.",
+    "qualityConclusion": "A same-class professional-boundary omission remains after rollback; reverting the optimization did not remove semantic missed detections. This evidence does not establish that the optimization caused the prior findings, nor prove that every optimization is harmless."
+  },
+  "notEstablished": [
+    "Stable or defect-free GDD generation",
+    "Reliable semantic reviewer detection",
+    "Paid Revision/Verify behavior, since neither ran",
+    "Runtime quality or settled credit cost"
+  ]
+}

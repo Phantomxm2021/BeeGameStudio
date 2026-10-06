@@ -1,0 +1,106 @@
+{
+  "date": "2026-10-04",
+  "scope": "System source and offline regressions only; original generated project and paid-run evidence remain read-only",
+  "originalEvidence": "/private/tmp/bgs-direction-fixed-paid-20261004-U6f58A",
+  "roots": [
+    {
+      "problem": "Audio settings persistence conflict",
+      "category": "LLM boundary execution + underspecified staged handoff",
+      "evidence": [
+        "TECHNICAL_DESIGN.md:101",
+        "AUDIO_DESIGN.md:181",
+        "project-author.ts ownership prompt"
+      ],
+      "cause": "Audio already owns desired persistence behavior; Tech excluded an undelivered owner requirement, while Audio additionally selected localStorage. Persistence behavior itself is not an audio ownership violation.",
+      "change": "Clarified product behavior/lifetime vs technical implementation. An undelivered professional requirement is pending, not automatically excluded.",
+      "verified": "Responsibility construction and normal host phase tests; model semantic compliance not yet verified"
+    },
+    {
+      "problem": "Concurrent/residual source-state audio mapping incomplete",
+      "category": "LLM owned-decision omission and integration misjudgment",
+      "evidence": [
+        "GDD.md:103-104",
+        "AUDIO_DESIGN.md:85,89,95",
+        "execution-evidence.json:parentReplies"
+      ],
+      "cause": "Single audio ratio was not mapped to multiple gameplay sources and residual state. Pending numeric tuning cannot supply this missing sound behavior.",
+      "change": "Audio owner must define actual source state and concurrent/absent source mapping; no museum-specific aggregation answer supplied.",
+      "verified": "Prompt responsibility regression only; semantic quality remains model-dependent"
+    },
+    {
+      "problem": "Self-check claims lacked complete saved-draft inspection",
+      "category": "LLM instruction noncompliance + agent lacks execution evidence enforcement",
+      "evidence": [
+        "execution-evidence.json:workers",
+        "execution-evidence.json:parentReplies"
+      ],
+      "cause": "Instructions alone accepted Write, no reread or a tail excerpt. Parent did read the full new drafts and still missed semantics, so full exposure cannot certify quality.",
+      "change": "Existing native stop boundary checks assigned current saved-source Read cache, excludes Write/Edit, partial/stale/inherited reads, handles canonical path aliases. One corrective opportunity; still missing evidence fails the turn.",
+      "whySimplerNotEnough": "Paid run already demonstrates the existing complete-saved-draft instruction was not reliably executed.",
+      "verified": "Real isolated CLI: unsupported final claim triggers correction; complete current Read permits handoff; ignoring correction fails after two requests, no successful result"
+    },
+    {
+      "problem": "Format archive never triggered",
+      "category": "LLM tool misuse + missing source-retrieval input enforcement; not evidence of archive storage failure",
+      "evidence": [
+        "fix-evidence.json:formatResults",
+        "TECH Bash --format ... 2>&1 | head -200"
+      ],
+      "cause": "Shell pipeline discarded source bytes before archive selection; remaining JSON is incomplete and correctly not archived.",
+      "change": "Known direct platform --format Bash invocations reject pipelines before execution; existing first-emission archive retains full successful source and a readable path.",
+      "whySimplerNotEnough": "A downstream archive cannot restore stdout already removed by head.",
+      "verified": "Real isolated CLI rejects the observed pipeline and persists the complete standalone format JSON byte-for-byte"
+    },
+    {
+      "problem": "Main context grew to 77208 tokens",
+      "category": "Agent lifecycle/context retention design; semantic causality unproven",
+      "evidence": [
+        "acceptance.json:actors",
+        "acceptance.json:contextEvidence",
+        "QueryEngine.ts mutableMessages and native compaction boundary"
+      ],
+      "cause": "Completed milestone execution trace stayed in the same session until generic token threshold. Nothing retired irrelevant completed-stage tool/thinking history.",
+      "change": "Only successful new milestone auto-handoffs reuse native compact boundary to retire previous execution trace, preserve user inputs/attachments and labeled existing summaries, provide current original objective and saved source locations. Same-milestone retries and interrupted/user turns keep context. Raw durable transcripts remain intact.",
+      "whySimplerNotEnough": "Changing model prompt does not remove already retained execution history; no arbitrary global smaller threshold or new memory framework is introduced.",
+      "verified": "Real isolated CLI preserves original requirements, removes old assistant/tool history, keeps native UUID, and retains this behavior after process restart/resume"
+    }
+  ],
+  "validation": {
+    "unitAndHostRegressions": {
+      "passed": 120,
+      "failed": 0
+    },
+    "realCliLoopbackRegressions": {
+      "passed": 5,
+      "failed": 0,
+      "externalModelCalls": 0,
+      "includes": [
+        "source selfcheck correction and bounded failure",
+        "complete format archive",
+        "milestone reset and durable resume",
+        "native subagent thinking inheritance",
+        "streaming fallback/retry"
+      ]
+    },
+    "serviceTypecheck": "PASS",
+    "diffCheck": "PASS",
+    "fullRepositoryTypecheck": "BLOCKED by existing sceneContentAdapter module/type errors, branded SystemPrompt test expectations, sdkTaskNotification test typing; no reported errors in this turn's new code"
+  },
+  "limitations": [
+    "No new paid generation; no claim that old generated artifacts were repaired or semantic acceptance passed.",
+    "Complete saved-source Read evidence is necessary inspection evidence, not semantic correctness or proof of model attention.",
+    "The current read-evidence gate recognizes native complete Read entries; cumulative partial/Bash reads are not treated as equivalent. A too-large draft may require changing the evidence mechanism rather than automatic paid retries.",
+    "A draft's read may later leave active context via existing compaction; the gate does not guarantee full text remains attended at final sampling.",
+    "Context retirement applies between completed milestones, not a hard cap on growth inside one milestone. Actual model token/credit savings not measured.",
+    "The format command guard covers observed direct bun/node relative check-content --format invocation, not every possible shell equivalent.",
+    "Source changes are not deployed into the shared running CLI. Validation used a fresh isolated build."
+  ],
+  "designConstraints": [
+    "No independent review stage",
+    "No schema/ownership auditor framework",
+    "No museum-specific solution prefill",
+    "No signed old message editing",
+    "No shared dist overwrite",
+    "No paid rerun"
+  ]
+}

@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,12 +8,14 @@ import { assetManifestAuthoringExamples } from './asset-manifest-authoring-contr
 import { BEEGAME_SCENE_MODEL } from './game-content-package'
 import { readRuntimeAcceptanceReport } from './runtime-acceptance'
 import { AUTHOR_BATCHES } from './project-author'
+import { designDocumentFixture, designRequirementChecksFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture, writeUiLayoutFixture } from './fixtures/layout-fixture'
 import {
   advanceProjectDeliveryAfterTurn,
   beginProjectDelivery,
   captureProjectDeliveryAcceptance,
   evaluateProjectDeliveryGate,
   pauseProjectDelivery,
+  prepareProjectDesignReview,
   PROJECT_DOCUMENTS,
   PROJECT_DELIVERY_REPORT_PATH,
   projectDeliveryStatePath,
@@ -20,170 +23,210 @@ import {
   projectDeliveryPhaseInstruction,
   readProjectDelivery,
   resumeProjectDelivery,
+  refreshProjectContentContract,
 } from './project-delivery'
+
+async function completeReview(workspace: string, root: string) {
+  await prepareProjectDesignReview(workspace, root)
+  return advanceProjectDeliveryAfterTurn(workspace, root, { phase: 'review', status: 'complete', summary: '',
+    review: { step: 'inspect', findings: [], resolved: [] } })
+}
+
+async function enterContentFixture(workspace: string, dataRoot: string, height = 52) {
+  await writeDesignDocumentsFixture(workspace)
+  await mkdir(join(workspace, 'assets/runtime/example'), { recursive: true })
+  await writeFile(join(workspace, 'assets/runtime/example/resource.json'), '{}')
+  await writeBeeGameAssetManifest(workspace, assetManifestAuthoringExamples().canonical)
+  const state = await readProjectDelivery(workspace, dataRoot)
+  await writeFile(projectDeliveryStatePath(workspace, dataRoot), JSON.stringify({ ...state, phase: 'content' }))
+  await refreshProjectContentContract(workspace)
+  await writeUiLayoutFixture(workspace, height)
+  const authority = projectContentAuthority(workspace)
+  await mkdir(join(workspace, 'content/scenes'), { recursive: true })
+  await writeFile(join(workspace, 'content/index.json'), JSON.stringify({
+    schema: 'beegame-content-package.v2', id: 'game', dimension: '2d',
+    documentRevision: authority.documentRevision, assetManifestRevision: authority.assetManifestRevision,
+    entryScene: 'scene', sceneModel: BEEGAME_SCENE_MODEL, files: ['scenes/main.json', 'ui/menu.json'],
+  }))
+  await writeFile(join(workspace, 'content/scenes/main.json'), JSON.stringify({
+    schema: 'beegame-content.v1', id: 'scene', kind: 'scene-2d', assetRefs: [],
+    data: { settings: { coordinateSystem: { origin: 'top-left', units: 'logical-pixels',
+      width: 1280, height: 720, pixelsPerUnit: 1 } }, nodes: [{ id: 'root', components: [] }] },
+  }))
+}
 
 async function enterAcceptanceFixture(workspace: string, dataRoot: string): Promise<void> {
   const state = await readProjectDelivery(workspace, dataRoot)
   await writeFile(projectDeliveryStatePath(workspace, dataRoot), JSON.stringify({ ...state, phase: 'acceptance' }))
 }
 
-test.each(['review', 'implementation'] as const)('%s advances only on the Agent current milestone conclusion', async phase => {
+test.each(['author', 'review', 'implementation'] as const)('%s advances only on the Agent current milestone conclusion', async phase => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-milestone-conclusion-'))
   const workspace = join(root, 'project')
   try {
     await mkdir(workspace)
     const state = await beginProjectDelivery(workspace, root, 'Build a game')
     await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase }))
+    if (phase === 'author') {
+      await mkdir(join(workspace, 'docs'))
+      await writeFile(join(workspace, 'docs/GDD.md'), '# Existing draft is not a completion signal')
+    }
     expect(await advanceProjectDeliveryAfterTurn(workspace, root)).toMatchObject({ phase, shouldContinue: false })
     expect(await advanceProjectDeliveryAfterTurn(workspace, root, {
       phase, status: 'blocked', summary: 'Design decision unresolved',
-    })).toMatchObject({ phase, shouldContinue: false, issues: ['Design decision unresolved'] })
+    })).toMatchObject({ phase, shouldContinue: false, ...(phase === 'review' ? {} : { issues: ['Design decision unresolved'] }) })
     expect(await advanceProjectDeliveryAfterTurn(workspace, root, {
       phase: phase === 'review' ? 'implementation' : 'review', status: 'complete', summary: '',
     })).toMatchObject({ phase, shouldContinue: false })
-    expect(await advanceProjectDeliveryAfterTurn(workspace, root, { phase, status: 'complete', summary: '' }))
-      .toMatchObject({ phase: phase === 'review' ? 'resources' : 'acceptance', shouldContinue: true })
+    if (phase === 'review') {
+      expect((await advanceProjectDeliveryAfterTurn(workspace, root, { phase, status: 'complete', summary: '' }))?.issues)
+        .toContain('Review has no valid version-bound result for its current step.')
+      await writeDesignDocumentsFixture(workspace)
+    }
+    if (phase === 'author') await writeDesignDocumentFixture(workspace, 'GDD.md')
+    expect(phase === 'review' ? await completeReview(workspace, root) : await advanceProjectDeliveryAfterTurn(workspace, root, { phase, status: 'complete', summary: '' }))
+      .toMatchObject({ phase: phase === 'author' ? 'author' : phase === 'review' ? 'resources' : 'acceptance', shouldContinue: true })
+    expect(existsSync(join(workspace, 'content/index.json'))).toBe(false)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-test('delivery instructions specify data ownership without fixing agent counts or extra review stages', () => {
-  const author = AUTHOR_BATCHES.map((_, batch) => projectDeliveryPhaseInstruction('author', batch)).join('\n')
-  const gdd = projectDeliveryPhaseInstruction('author', 0)
-  expect(gdd).toContain('how simultaneous outcomes are resolved')
-  expect(gdd).toContain('what counts as an interaction during an ongoing action or transition')
-  expect(gdd).toContain('rather than prescribing implementation algorithms')
-  for (const document of PROJECT_DOCUMENTS) expect(author).toContain(`- ${document} —`)
-  expect(author).toContain('decision dependencies (not a required writing order within this batch)')
-  expect(author).toContain('For each planned level or reusable level type')
-  expect(author).toContain('Distinguish world extent from display extent')
-  expect(author).toContain('Use GDD, level, balance and art decisions')
-  expect(author).toContain('combined footprint of game view, HUD, overlays and controls')
-  expect(author).toContain('Consolidate level, UI, art, audio and technical decisions')
-  expect(author).toContain('For each batch, check the available Skills against its document responsibilities and invoke the applicable Skills')
-  expect(author).toContain('reuse guidance already loaded in this session where relevant')
-  expect(author).toContain('Use available subagents to advance independent work in parallel once its dependencies are clear')
-  expect(author).toContain('Choose the task split and roles yourself')
-  expect(author).toContain('2D, 3D or XR')
-  expect(author).toContain('container size, aspect ratio or content length changes')
-  expect(author).toContain('conditions that select each behavior')
-  expect(author).toContain('rather than a list of alternatives for the implementer to design')
-  expect(author).toContain('do not enumerate every possible screen size')
-  expect(author).toContain('who loads Scene/UI/resource data')
-  expect(author).toContain('including relevant actions, assumptions and boundaries')
-  expect(author).toContain('detail proportional to its scope')
-  expect(author).toContain('one document and reference it elsewhere')
-  expect(author).toContain('does not perform generation, extraction, packing or resource registration')
-  expect(author).not.toContain('iframe')
-  expect(author).not.toContain('Format references:')
-  expect(author).not.toContain('visual board')
-  expect(projectDeliveryPhaseInstruction('review')).toContain('against the confirmed requirements and platform agreements')
-  expect(projectDeliveryPhaseInstruction('review')).toContain('earlier authoring summaries, completion labels and your own previous conclusions are claims to check')
-  expect(projectDeliveryPhaseInstruction('review')).toContain('leave that decision to the user')
-  expect(projectDeliveryPhaseInstruction('review')).toContain('Pass only when no development blockers remain')
-  expect(projectDeliveryPhaseInstruction('review')).toContain('implementation and acceptance baseline')
-  expect(projectDeliveryPhaseInstruction('review')).toContain('every planned screen/state is represented by its layout input or a referenced shared composition')
-  expect(projectDeliveryPhaseInstruction('review')).toContain('verify each correction against its source requirements and affected consumers')
-  expect(projectDeliveryPhaseInstruction('review')).toContain('including new claims and layout selection conditions')
-  expect(projectDeliveryPhaseInstruction('review')).toContain('requirements actually checked and the observed results')
-  expect(projectDeliveryPhaseInstruction('review')).toContain('do not rewrite unchanged documents merely to synchronize version numbers')
+test('writing keeps real dependency groups and one independent review after all eight drafts', () => {
+  expect(AUTHOR_BATCHES).toEqual([
+    ['GDD.md'],
+    ['TECHNICAL_DESIGN.md', 'ART_DIRECTION.md', 'AUDIO_DESIGN.md'],
+    ['LEVEL_SCENE_DESIGN.md', 'BALANCE_DESIGN.md'],
+    ['UI_UX_SPEC.md'],
+    ['TECHNICAL_DESIGN.md', 'ASSET_PLAN.md'],
+  ])
+  expect([...new Set(AUTHOR_BATCHES.flat())].sort()).toEqual([...PROJECT_DOCUMENTS].sort())
+  const earlyTech = projectDeliveryPhaseInstruction('author', 1)
+  const finalTech = projectDeliveryPhaseInstruction('author', 4)
+  expect(earlyTech).toContain('saved prior drafts')
+  expect(earlyTech).toContain('not reviewed quality guarantees')
+  expect(earlyTech).toContain('technical baseline')
+  expect(earlyTech).not.toContain('including initialization, important transitions, restart and cleanup')
+  expect(finalTech).toContain('including initialization, important transitions, restart and cleanup')
+  for (const [batch, documents] of AUTHOR_BATCHES.entries()) {
+    const author = projectDeliveryPhaseInstruction('author', batch)
+    for (const document of documents) expect(author).toContain(document)
+    expect(author).toContain('no fixed review occurs between writing groups')
+    expect(author).toContain('one independent joint Review follows completion of all eight documents')
+  }
   const review = projectDeliveryPhaseInstruction('review')
-  expect(review).not.toContain('Arrange an independent check')
-  expect(review).not.toContain('the checker must not be the author')
-  expect(author).not.toContain('As a document becomes ready')
-  expect(author).not.toContain('source-linked evidence')
-  expect(review).not.toContain('author-stage checks')
-  expect(review).toContain('Use the supplied spatial calculator on final inputs')
-  expect(review).toContain('game-view rectangle for scene framing, not the whole host window')
-  expect(author).toContain('usability minima are final host logical pixels')
-  expect(review).toContain('final resolved control bounds meet the declared host-pixel usability minima')
-  expect(review).toContain('including the full HUD/control footprint')
-  expect(review).toContain('synchronize affected source and consumer region bounds and claims')
-  expect(review).toContain('Do not relax agreed usability minima merely to fit a chosen projection')
-  expect(author).toContain('Different aspect ratios or available space may use different compositions')
-  expect(author).toContain('UI_UX_SPEC owns final screen-space allocation and layout selection')
-  expect(review).not.toContain('Read them afresh')
-  const resources = projectDeliveryPhaseInstruction('resources')
-  expect(resources).toContain('reviewed ASSET_PLAN.md')
-  expect(resources).toContain('Optional resources do not block completion')
-  expect(resources).toContain('Approved fallbacks in the documents are valid')
-  expect(resources).toContain('The content stage handles scene and UI layout and bindings')
-  expect(resources).toContain('Do not edit the reviewed design documents')
-  expect(projectDeliveryPhaseInstruction('implementation')).toContain('Do not edit them during implementation')
-  expect(resources).toContain('1024x1024 and low quality')
-  expect(author).toContain('one generated sheet per suitable group')
-  expect(resources).toContain('prefer one generation request for a shared sheet')
-  expect(author).toContain('Atlas organization is source-independent')
-  expect(resources).toContain('For procedural sprites, prefer drawing directly into a shared sheet')
-  expect(resources).toContain('Keep dynamic text, live bars')
-  expect(projectDeliveryPhaseInstruction('implementation')).toContain('including concurrent requests')
-  expect(resources).toContain('Split generation only for a concrete')
-  expect(resources).toContain('a planned atlas is not optional')
-  expect(resources).toContain('not authoritative frame coordinates')
-  expect(resources).not.toContain('AI may produce sheets or separate images')
-  expect(resources).toContain('Building a complete game is not a prerequisite for resource checks')
-  expect(resources).toContain('deliver the usable output or executable generator')
-  expect(resources).toContain('need not become separate asset files or generator frameworks')
-  expect(projectDeliveryPhaseInstruction('content')).toContain('Use the schemas, coordinate semantics, supported components')
-  expect(projectDeliveryPhaseInstruction('content')).toContain('reviewed spatial composition')
-  expect(projectDeliveryPhaseInstruction('content')).toContain('runtime code must connect for dynamic behavior and feedback')
-  expect(projectDeliveryPhaseInstruction('content')).toContain('Keep standalone gameplay configuration outside the Scene/UI/VFX registry')
-  expect(projectDeliveryPhaseInstruction('content')).toContain('A valid schema alone does not establish design coverage')
-  expect(projectDeliveryPhaseInstruction('content')).toContain('Building the full game is not required in this stage')
-  expect(projectDeliveryPhaseInstruction('content')).toContain('Derive concrete values from the reviewed layout rules')
-  expect(projectDeliveryPhaseInstruction('content')).toContain('do not choose a new layout or interaction design')
-  expect(projectDeliveryPhaseInstruction('content')).not.toContain('Check the generated geometry at')
-  expect(projectDeliveryPhaseInstruction('implementation')).toContain('editable source')
-  expect(projectDeliveryPhaseInstruction('implementation')).toContain('Read the reviewed eight documents in docs/')
-  expect(projectDeliveryPhaseInstruction('implementation')).toContain('data syntax, not gameplay design')
-  expect(projectDeliveryPhaseInstruction('implementation')).toContain('do not maintain a separate substitute layout')
-  expect(projectDeliveryPhaseInstruction('implementation')).toContain('correct the data while preserving valid formats and references')
-  expect(projectDeliveryPhaseInstruction('implementation')).toContain('Reuse an existing valid plan')
-  expect(projectDeliveryPhaseInstruction('implementation')).toContain('not additional delivery stages or approval gates')
-  expect(projectDeliveryPhaseInstruction('implementation')).toContain('An intermediate playable version is not final delivery')
+  for (const document of PROJECT_DOCUMENTS) expect(review).toContain(document)
+  expect(review).toContain('fresh native bgs-design-review subagent')
+  expect(review).toContain('game-design-check Skill')
+  expect(review).toContain('Author reasoning, expected findings and expected verdicts are not review inputs')
+  expect(review).toContain('Remaining blockers after verify stop automatic work')
+})
+
+test('production keeps reviewed design authority and actual runtime acceptance', () => {
   const implementation = projectDeliveryPhaseInstruction('implementation')
-  const steps = ['1. Establish and verify data consumption', '2. Deliver a representative vertical slice', '3. Expand through independently verifiable feature units', '4. Integrate and hand off the current build']
-  for (let i = 0; i < steps.length; i++) {
-    expect(implementation).toContain(steps[i]!)
-    if (i > 0) expect(implementation.indexOf(steps[i]!)).toBeGreaterThan(implementation.indexOf(steps[i - 1]!))
-  }
-  expect(implementation).toContain('do not stop between them for BGS')
-  expect(implementation).toContain('Resume from unresolved work')
-  expect(implementation).toContain('Target the documented quality, not open-ended polishing')
-  expect(implementation).toContain('Non-blocking presentation refinements may remain on the existing checklist')
-  expect(implementation).toContain('do not defer broken parsing')
-  expect(implementation).toContain('batch related checks instead of launching a browser for every small task')
-  expect(implementation).toContain('not automatically rerunning the whole implementation test suite')
-  expect(implementation).not.toContain('Self-check and handoff:')
-  expect(implementation).toContain('observable player outcomes and dependencies')
-  expect(implementation).toContain('do not create another set of design documents')
-  expect(implementation).toContain('rules, data bindings, interaction, presentation and verification together')
-  expect(implementation).toContain('before parallelizing dependent work')
-  expect(implementation).toContain('test actual rendering, not just parsed JSON')
-  expect(implementation).toContain('be restored')
-  expect(implementation).toContain('Avoid concurrent edits to the same parser')
-  expect(implementation).toContain("a subagent's PASS alone is not integration evidence")
-  expect(projectDeliveryPhaseInstruction('implementation')).toContain('self-checks do not replace subsequent acceptance')
-  expect(projectDeliveryPhaseInstruction('implementation')).toContain('Reuse evidence that remains valid for the current implementation')
-  expect(projectDeliveryPhaseInstruction('implementation')).toContain('faulty test drivers')
+  expect(implementation).toContain('no fixed step sequence')
+  expect(implementation).toContain('do not maintain a separate substitute layout')
+  expect(implementation).toContain('Do not edit them during implementation')
+  expect(implementation).toContain('Implementation self-checks do not replace subsequent acceptance')
+  expect(implementation).toContain('target-runtime observation for rendering')
+  expect(projectDeliveryPhaseInstruction('content')).toContain('do not choose a new layout or interaction design')
   expect(projectDeliveryPhaseInstruction('acceptance')).toContain('actual target runtime')
-  expect(projectDeliveryPhaseInstruction('acceptance')).toContain('confirmed scope and reviewed eight documents')
-  expect(projectDeliveryPhaseInstruction('acceptance')).toContain('runtime-dependent questions left open in those documents')
-  expect(projectDeliveryPhaseInstruction('acceptance')).toContain('no in-scope issues or unverified requirements remain')
-  expect(projectDeliveryPhaseInstruction('acceptance')).toContain('visual captures or equivalent target-device evidence')
-  expect(projectDeliveryPhaseInstruction('acceptance')).toContain('actual composition, framing, resources, text, interaction feedback and audio')
-  expect(projectDeliveryPhaseInstruction('acceptance')).toContain('inconclusive test-driver behavior')
-  expect(projectDeliveryPhaseInstruction('acceptance')).toContain('Do not claim Tilemap verification for a scene without a Tilemap component')
-  expect(projectDeliveryPhaseInstruction('acceptance')).toContain('A report-format check is not verification')
-  expect(projectDeliveryPhaseInstruction('acceptance')).toContain('Revalidate results invalidated by fixes')
   expect(projectDeliveryPhaseInstruction('acceptance')).toContain('Do not edit the reviewed design')
-  expect(projectDeliveryPhaseInstruction('acceptance')).toContain('a local correction does not automatically require every check to run again')
-  for (const phase of ['author', 'review', 'resources', 'content', 'implementation', 'acceptance'] as const) {
-    const goal = projectDeliveryPhaseInstruction(phase)
-    expect(goal).not.toContain('Do not start')
-    expect(goal).not.toContain('StructuredOutput')
-    expect(goal).not.toContain('must delegate')
-  }
-  expect(resources).toContain('assets/manifest/CONTRACT.md')
+})
+
+test('Review diagnoses the actual UI data without creating a full package or modifying it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-review-documents-only-'))
+  const workspace = join(root, 'project')
+  try {
+    await mkdir(workspace)
+    const state = await beginProjectDelivery(workspace, root, 'Build a game')
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'review' }))
+    await writeDesignDocumentsFixture(workspace)
+    await writeUiLayoutFixture(workspace, 28)
+    const path = join(workspace, 'content/ui/menu.json')
+    const before = await readFile(path, 'utf8')
+    expect(await completeReview(workspace, root))
+      .toMatchObject({ phase: 'review', shouldContinue: true, issues: [] })
+    expect((await readProjectDelivery(workspace, root))?.designReview).toMatchObject({ step: 'revise', writableDocuments: ['UI_UX_SPEC.md'] })
+    expect(existsSync(join(workspace, 'content/index.json'))).toBe(false)
+    expect(await readFile(path, 'utf8')).toBe(before)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('Content cannot advance broken geometry and does not repeatedly dispatch an unchanged failure', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-content-geometry-gate-'))
+  const workspace = join(root, 'project')
+  try {
+    await mkdir(workspace)
+    await beginProjectDelivery(workspace, root, JSON.stringify({ settings: { orientation: 'Landscape' } }))
+    await enterContentFixture(workspace, root, 28)
+    for (let i = 0; i < 2; i++) {
+      const result = await advanceProjectDeliveryAfterTurn(workspace, root)
+      expect(result).toMatchObject({ phase: 'content', shouldContinue: i === 0 })
+      expect(result!.issues.join(' ')).toContain('minimumControlSize')
+    }
+    await writeUiLayoutFixture(workspace, 52)
+    expect(await advanceProjectDeliveryAfterTurn(workspace, root))
+      .toMatchObject({ phase: 'implementation', shouldContinue: true, issues: [] })
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('Content completion cannot bypass ignored layout fields or declared clearance violations', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-content-layout-contract-'))
+  const workspace = join(root, 'project')
+  try {
+    await mkdir(workspace)
+    await beginProjectDelivery(workspace, root, 'Build a game')
+    await enterContentFixture(workspace, root)
+    const path = join(workspace, 'content/ui/menu.json')
+    const ui = JSON.parse(await readFile(path, 'utf8'))
+    ui.data.nodes[0].data.container = { direction: 'column' }
+    await writeFile(path, JSON.stringify(ui))
+    let result = await advanceProjectDeliveryAfterTurn(workspace, root)
+    expect(result).toMatchObject({ phase: 'content' })
+    expect(result!.issues.join(' ')).toContain('layout.container')
+
+    delete ui.data.nodes[0].data.container
+    ui.data.nodes[1].data = { layoutOcclusion: 'occluder' }
+    ui.data.nodes.push({ id: 'clearance', role: 'container', parentId: 'root', data: { layoutOcclusion: 'protected' },
+      layout: { anchor: 'middle-center', size: [200, 100] } })
+    await writeFile(path, JSON.stringify(ui))
+    result = await advanceProjectDeliveryAfterTurn(workspace, root)
+    expect(result).toMatchObject({ phase: 'content' })
+    expect(result!.issues.join(' ')).toContain('declared occluders: play')
+    expect((await readProjectDelivery(workspace, root))!.phase).toBe('content')
+
+    ui.data.nodes[1].layout.position = [0, 150]
+    await writeFile(path, JSON.stringify(ui))
+    // This fixture has no reviewed baseline; baseline mutation is tested separately.
+    expect(await advanceProjectDeliveryAfterTurn(workspace, root))
+      .toMatchObject({ phase: 'implementation', shouldContinue: true, issues: [] })
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('Content requires declared supported sizes and the confirmed orientation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-content-supported-sizes-'))
+  const workspace = join(root, 'project')
+  try {
+    await mkdir(workspace)
+    await beginProjectDelivery(workspace, root, JSON.stringify({ settings: { orientation: 'Landscape' } }))
+    await enterContentFixture(workspace, root)
+    const path = join(workspace, 'content/ui/menu.json')
+    const ui = JSON.parse(await readFile(path, 'utf8'))
+    const data = ui.data.nodes[0].data
+    delete data.targetViewports
+    await writeFile(path, JSON.stringify(ui))
+    let result = await advanceProjectDeliveryAfterTurn(workspace, root)
+    expect(result?.phase).toBe('content')
+    expect(result?.issues.join(' ')).toContain('targetViewports')
+    data.targetViewports = [[600, 360]]
+    data.orientation = 'Portrait'
+    await writeFile(path, JSON.stringify(ui))
+    result = await advanceProjectDeliveryAfterTurn(workspace, root)
+    expect(result?.phase).toBe('content')
+    expect(result?.issues.join(' ')).toContain('differs from the confirmed brief')
+    data.orientation = 'Landscape'
+    await writeFile(path, JSON.stringify(ui))
+    expect((await advanceProjectDeliveryAfterTurn(workspace, root))?.phase).toBe('implementation')
+  } finally { await rm(root, { recursive: true, force: true }) }
 })
 
 test('unrelated writes cannot repeatedly dispatch an unchanged validation failure', async () => {
@@ -191,15 +234,17 @@ test('unrelated writes cannot repeatedly dispatch an unchanged validation failur
   const workspace = join(root, 'project')
   try {
     await mkdir(workspace)
-    await beginProjectDelivery(workspace, root, 'Build a game')
-    expect((await advanceProjectDeliveryAfterTurn(workspace, root))?.shouldContinue).toBe(true)
+    const state = await beginProjectDelivery(workspace, root, 'Build a game')
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, authorBatch: 1 }))
+    expect((await advanceProjectDeliveryAfterTurn(workspace, root))?.shouldContinue).toBe(false)
     await writeFile(join(workspace, 'notes.txt'), 'Still investigating')
     expect((await advanceProjectDeliveryAfterTurn(workspace, root))?.shouldContinue).toBe(false)
     await mkdir(join(workspace, 'docs'))
-    await writeFile(join(workspace, 'docs/GDD.md'), '# Game design')
-    // Completing the first batch advances within author, rather than requesting all eight files.
-    expect((await advanceProjectDeliveryAfterTurn(workspace, root))?.shouldContinue).toBe(true)
-    expect((await readProjectDelivery(workspace, root))?.authorBatch).toBe(1)
+    await writeDesignDocumentsFixture(workspace, AUTHOR_BATCHES.slice(0, 2).flat())
+    // Saved files and ordinary chat are not the scheduled authors' completion.
+    expect((await advanceProjectDeliveryAfterTurn(workspace, root))?.shouldContinue).toBe(false)
+    expect((await advanceProjectDeliveryAfterTurn(workspace, root, undefined, 1))?.shouldContinue).toBe(true)
+    expect(await readProjectDelivery(workspace, root)).toMatchObject({ phase: 'author', authorBatch: 2 })
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -301,25 +346,32 @@ test('one native project advances through author, review with revision, resource
     expect((await readFile(join(workspace, 'assets/manifest/check.mjs'), 'utf8')).length).toBeGreaterThan(0)
     expect((await readProjectDelivery(workspace, dataRoot))?.phase).toBe('author')
     expect(await Bun.file(join(workspace, '.beegame/delivery/content-contract.json')).exists()).toBe(false)
-    expect(await advanceProjectDeliveryAfterTurn(workspace, dataRoot)).toMatchObject({
-      phase: 'author', shouldContinue: true, issues: expect.arrayContaining(['docs/GDD.md is missing']),
+    expect(await advanceProjectDeliveryAfterTurn(workspace, dataRoot, { phase: 'author', status: 'complete', summary: '' })).toMatchObject({
+      phase: 'author', shouldContinue: false, issues: expect.arrayContaining(['docs/GDD.md is missing']),
     })
     expect(await advanceProjectDeliveryAfterTurn(workspace, dataRoot)).toMatchObject({
       phase: 'author', shouldContinue: false,
     })
     await mkdir(join(workspace, 'docs'))
     for (const [batch, documents] of AUTHOR_BATCHES.entries()) {
-      for (const document of documents) await writeFile(join(workspace, 'docs', document), '# Design\n')
+      for (const document of documents) await writeDesignDocumentFixture(workspace, document)
       if (batch === 1) {
         await pauseProjectDelivery(workspace, dataRoot)
         expect(await advanceProjectDeliveryAfterTurn(workspace, dataRoot)).toBeUndefined()
         expect((await resumeProjectDelivery(workspace, dataRoot))?.authorBatch).toBe(1)
       }
-      expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot))?.phase)
-        .toBe(batch === 3 ? 'review' : 'author')
+      expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot, batch === 0
+        ? { phase: 'author', status: 'complete', summary: '' } : undefined, batch || undefined))?.phase)
+        .toBe(batch === AUTHOR_BATCHES.length - 1 ? 'review' : 'author')
+      if (batch < AUTHOR_BATCHES.length - 1) {
+        expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot))?.shouldContinue).toBe(false)
+        expect((await readProjectDelivery(workspace, dataRoot))?.authorBatch).toBe(batch + 1)
+        expect((await readProjectDelivery(workspace, dataRoot))?.designBaseline).toBeUndefined()
+      }
     }
     for (const phase of ['resources'] as const) {
-      expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot, { phase: 'review', status: 'complete', summary: '' }))?.phase).toBe(phase)
+      expect(existsSync(join(workspace, 'content/index.json'))).toBe(false)
+      expect((await completeReview(workspace, dataRoot))?.phase).toBe(phase)
       expect(await Bun.file(join(workspace, '.beegame/delivery/content-contract.json')).exists()).toBe(false)
     }
     expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot))?.phase).toBe('resources')
@@ -336,6 +388,8 @@ test('one native project advances through author, review with revision, resource
     })
     expect(await resourceCheck.exited).toBe(0)
     expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot))?.phase).toBe('content')
+    expect(existsSync(join(workspace, 'content/index.json'))).toBe(false)
+    await writeUiLayoutFixture(workspace)
     const authority = projectContentAuthority(workspace)
     const contract = JSON.parse(await readFile(join(workspace, '.beegame/delivery/content-contract.json'), 'utf8'))
     expect(contract.index.documentRevision).toBe(authority.documentRevision)
@@ -344,18 +398,18 @@ test('one native project advances through author, review with revision, resource
     await writeFile(join(workspace, 'content/index.json'), JSON.stringify({
       schema: 'beegame-content-package.v2', id: 'game', dimension: '2d',
       documentRevision: authority.documentRevision, assetManifestRevision: authority.assetManifestRevision,
-      entryScene: 'scene', sceneModel: BEEGAME_SCENE_MODEL, files: ['scenes/main.json'],
+      entryScene: 'scene', sceneModel: BEEGAME_SCENE_MODEL, files: ['scenes/main.json', 'ui/menu.json'],
     }))
     await writeFile(join(workspace, 'content/scenes/main.json'), JSON.stringify({
       schema: 'beegame-content.v1', id: 'scene', kind: 'scene-2d', assetRefs: [],
       data: { settings: { coordinateSystem: { origin: 'top-left', units: 'logical-pixels',
         width: 1280, height: 720, pixelsPerUnit: 1 } }, nodes: [{ id: 'root', components: [] }] },
     }))
-    await writeFile(join(workspace, 'docs/GDD.md'), '# Revised design\n')
+    await writeFile(join(workspace, 'docs/GDD.md'), designDocumentFixture('GDD.md') + '\nUnreviewed change\n')
     expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot))?.issues).toContain(
-      'content/index.json: documentRevision does not match authority.',
+      'Reviewed design/evidence changed outside scheduled owner scope; request an affected design-resolution before dependent work.',
     )
-    await writeFile(join(workspace, 'docs/GDD.md'), '# Design\n')
+    await writeDesignDocumentFixture(workspace, 'GDD.md')
     expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot))?.phase).toBe('implementation')
     expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot, { phase: 'implementation', status: 'complete', summary: '' }))?.phase).toBe('acceptance')
     await mkdir(join(workspace, '.beegame/delivery'), { recursive: true })
@@ -367,10 +421,20 @@ test('one native project advances through author, review with revision, resource
       artifactPaths: ['game.ts'], verification: { target: 'deployment', observation: 'target-runtime', knownIssues: [], unverified: [],
         contentChecks: [{ kind: 'scene-layout', document: 'content/scenes/main.json', nodeId: 'root', property: 'transform',
           change: 'Translate root +20 on X in a test copy', expected: 'Scene moves 20 logical pixels',
-          observed: 'Before x=0; after x=20', status: 'passed', evidencePaths: ['.beegame/delivery/verification.txt'] }] },
+          observed: 'Before x=0; after x=20', status: 'passed', evidencePaths: ['.beegame/delivery/verification.txt'] },
+          { kind: 'ui-layout', document: 'content/ui/menu.json', nodeId: 'play', property: 'layout',
+            change: 'Move play in a test copy', expected: 'Button moves', observed: 'Button moved', status: 'passed',
+            evidencePaths: ['.beegame/delivery/verification.txt'] }] },
     }))
     await captureProjectDeliveryAcceptance(workspace, dataRoot, Date.now() - 2000)
     expect((await evaluateProjectDeliveryGate(workspace, dataRoot))?.allowed).toBe(false)
+    expect(await advanceProjectDeliveryAfterTurn(workspace, dataRoot)).toMatchObject({
+      phase: 'acceptance', diagnostic: { category: 'verification-incomplete', message: 'Design requirements are unverified: GDD.md#play.' },
+    })
+    const acceptance = JSON.parse(await readFile(join(workspace, PROJECT_DELIVERY_REPORT_PATH), 'utf8'))
+    acceptance.verification.requirementChecks = designRequirementChecksFixture(workspace, ['.beegame/delivery/verification.txt'])
+    await writeFile(join(workspace, PROJECT_DELIVERY_REPORT_PATH), JSON.stringify(acceptance))
+    await captureProjectDeliveryAcceptance(workspace, dataRoot, Date.now() - 2000)
     expect(await advanceProjectDeliveryAfterTurn(workspace, dataRoot)).toMatchObject({ phase: 'complete', shouldContinue: false })
     expect((await evaluateProjectDeliveryGate(workspace, dataRoot))?.allowed).toBe(true)
   } finally { await rm(root, { recursive: true, force: true }) }

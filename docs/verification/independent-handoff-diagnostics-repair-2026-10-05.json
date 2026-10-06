@@ -1,0 +1,54 @@
+{
+  "date": "2026-10-05",
+  "status": "system-repair-offline-verified-not-paid-flow-accepted",
+  "rootCause": "Whole-sidecar parsing and early metadata exceptions prevented independent deterministic checks from running. A bounded revision therefore received an incomplete initial issue list.",
+  "changes": [
+    "Keep the existing strict whole-handoff schema and strict runtime consumer parsing. For diagnostics only, reuse individual field schemas when whole-handoff parsing fails.",
+    "Continue checks on independently valid fields/tables; leave malformed tables unavailable and explicitly report checks requiring them as not run. Do not coerce data, fabricate empty valid registries or guess invalid row contents.",
+    "Report version/header, inline handoff and retained calculation failures without masking other independently readable sidecar checks.",
+    "Distinguish unavailable producer outputs from genuinely absent delivered outputs. Attribute uncheckable references to the producer, avoiding unsupported consumer repair grants.",
+    "Keep invalid documents blocked and retain the existing one grouped revision plus targeted verification. No additional automatic retries, roles, schemas or author prompt rules."
+  ],
+  "scope": [
+    "packages/agent-workflow-server/src/beegame/design-handoff.ts",
+    "packages/agent-workflow-server/src/beegame/design-handoff.test.ts",
+    "packages/agent-workflow-server/src/beegame/design-release.test.ts"
+  ],
+  "generalization": {
+    "caseSpecificProductionRules": false,
+    "fixtures": "Independent synthetic handoffs, not paid-project products or human-revised copies. New cases cover multiple document roles, metadata barriers, dependent tables and producer/consumer references.",
+    "granularity": "Whole field/table. Invalid tables explicitly require correction before their internal relationships can be checked; this is not a claim of exhaustive diagnostics over malformed rows."
+  },
+  "verification": {
+    "initialReproduction": "Six new synthetic diagnostic tests failed before the system change.",
+    "regression": {
+      "testFiles": 12,
+      "passed": 215,
+      "failed": 0,
+      "skipped": 1,
+      "newSyntheticCases": 12,
+      "elapsedSeconds": 5.05,
+      "skipReason": "Existing browser-dependent design inspection test; no real browser/runtime acceptance was performed."
+    },
+    "hostIntegration": [
+      "Multiple independent diagnostics are available together through the existing projectDesignReleaseDiagnostics consumed by Review/Revision.",
+      "A complete versioned synthetic correction advances inspect -> revise -> verify -> next author stage.",
+      "A format-only correction remains blocked after the single revision; no relaunch or baseline release.",
+      "An unparseable producer output registry does not grant edits to its otherwise valid consumer."
+    ],
+    "workflowServerTypecheck": "passed",
+    "readonlyPreviousPaidProductCheck": {
+      "workspace": "/private/tmp/bgs-newidea-sokoban-paid-20261005-3IpDYX73/projects/users/design-test/newidea-sokoban-20261005-3IpDYX73",
+      "valid": false,
+      "remainingIssues": 2,
+      "observation": "The unchanged saved v1.1 Audio product still has its missing event producer and wrong resolution owner. The system repair does not silently repair or release previous products.",
+      "paidRun": false
+    }
+  },
+  "boundaries": {
+    "paidProductsOrRawLogsEdited": false,
+    "paidTestStarted": false,
+    "semanticCompletenessEstablished": false,
+    "remainingAcceptance": "A separately authorized fresh-idea native paid run is needed to evaluate actual author/reviewer revision behavior. Passing offline checks does not establish full game/document delivery quality."
+  }
+}

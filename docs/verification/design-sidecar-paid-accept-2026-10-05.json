@@ -1,0 +1,410 @@
+{
+  "schemaVersion": 1,
+  "type": "observer-paid-acceptance-audit",
+  "recordedAt": "2026-10-05",
+  "conclusion": "FAIL: native UI Revision introduced three unmapped required sound sources; deterministic host gate stopped the run. External handoffs and observed revision version increments worked; overall semantic quality and token-control goals were not met.",
+  "provenance": {
+    "rawEvidenceRoot": "/private/tmp/bgs-sidecar-paid-accept-20261005-WKUA67x0",
+    "workspace": "/private/tmp/bgs-sidecar-paid-accept-20261005-WKUA67x0/projects/users/design-test/sidecar-accept-fruit-20261005-WKUA67x0",
+    "projectId": "sidecar-accept-fruit-20261005-WKUA67x0",
+    "sessionId": "beegame_63e1584171c84f498ed1784d130a06e1",
+    "model": "ark-code-latest",
+    "modelConfigId": "llm_ac40e5d1be394ffe925e3f2532dedd34",
+    "startedAt": "2026-10-05T00:13:17.237Z",
+    "finishedAt": "2026-10-05T00:52:34.354Z",
+    "elapsedSeconds": 2357.117,
+    "scope": "One fresh BGS paid run, stop at first host rejection. No additional retry or owner-resolution run.",
+    "manualProductEdits": false,
+    "injectedFindings": false,
+    "forcedVerdicts": false,
+    "systemFilesWatched": 3828,
+    "systemFilesChanged": []
+  },
+  "usage": {
+    "usage": {
+      "input_tokens": 734877,
+      "output_tokens": 144181,
+      "cache_read_input_tokens": 7337860,
+      "cache_creation_input_tokens": 0
+    },
+    "totalObservedTokens": 8216918,
+    "startedRequests": 168,
+    "startedModelRequests": 167,
+    "runningRequestIds": [],
+    "partialUsageRequestIds": [
+      132
+    ],
+    "missingUsageRequestIds": [
+      1
+    ],
+    "usageComplete": false,
+    "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+    "cacheReadShare": 0.8930185259241968,
+    "billingAvailable": false,
+    "billingFailure": "billing_observation_transport_failed",
+    "interpretation": "Observed total includes cached input, uncached input and output. It is a lower bound because provider request 132 has partial usage. Request 1 is a failed nonmodel metadata request. These token categories do not share the same price; settled credits/money cannot be inferred.",
+    "groups": [
+      {
+        "name": "GDD",
+        "tokens": 789978,
+        "elapsedSeconds": 415.166
+      },
+      {
+        "name": "技术／美术／音频",
+        "tokens": 1923997,
+        "elapsedSeconds": 568.424
+      },
+      {
+        "name": "关卡／数值",
+        "tokens": 2566836,
+        "elapsedSeconds": 595.647
+      },
+      {
+        "name": "UI／UX",
+        "tokens": 2936107,
+        "elapsedSeconds": 777.3839999999999
+      }
+    ],
+    "actors": [
+      {
+        "stage": "author-1-work-turn1",
+        "actor": "main",
+        "calls": 7,
+        "tokens": 313841,
+        "usageComplete": true,
+        "firstInputContext": 37959,
+        "lastInputContext": 47936
+      },
+      {
+        "stage": "review-1-inspect-turn2",
+        "actor": "a5f5f198b9869f52c",
+        "calls": 4,
+        "tokens": 78809,
+        "usageComplete": true,
+        "firstInputContext": 10834,
+        "lastInputContext": 25596
+      },
+      {
+        "stage": "review-1-revise-turn3",
+        "actor": "a2ed3ddd38e0ac2ad",
+        "calls": 11,
+        "tokens": 296498,
+        "usageComplete": true,
+        "firstInputContext": 11291,
+        "lastInputContext": 32959
+      },
+      {
+        "stage": "review-1-verify-turn4",
+        "actor": "a8ef5ca93dc596c08",
+        "calls": 5,
+        "tokens": 100830,
+        "usageComplete": true,
+        "firstInputContext": 10834,
+        "lastInputContext": 25579
+      },
+      {
+        "stage": "author-2-work-turn5",
+        "actor": "a1c8130adf3dc2a2d",
+        "calls": 7,
+        "tokens": 240536,
+        "usageComplete": true,
+        "firstInputContext": 18716,
+        "lastInputContext": 43716
+      },
+      {
+        "stage": "author-2-work-turn5",
+        "actor": "a5510f9b917923e8c",
+        "calls": 23,
+        "tokens": 998349,
+        "usageComplete": true,
+        "firstInputContext": 18159,
+        "lastInputContext": 63742
+      },
+      {
+        "stage": "author-2-work-turn5",
+        "actor": "af9e38d3d17388e46",
+        "calls": 8,
+        "tokens": 246335,
+        "usageComplete": true,
+        "firstInputContext": 17408,
+        "lastInputContext": 40324
+      },
+      {
+        "stage": "review-2-inspect-turn6",
+        "actor": "a00fe88bb6347f492",
+        "calls": 5,
+        "tokens": 162209,
+        "usageComplete": true,
+        "firstInputContext": 10849,
+        "lastInputContext": 48861
+      },
+      {
+        "stage": "review-2-revise-turn7",
+        "actor": "acfd0f15b312b79f2",
+        "calls": 7,
+        "tokens": 174824,
+        "usageComplete": true,
+        "firstInputContext": 11293,
+        "lastInputContext": 31147
+      },
+      {
+        "stage": "review-2-verify-turn8",
+        "actor": "a8fe4ca103a16d28b",
+        "calls": 5,
+        "tokens": 101744,
+        "usageComplete": true,
+        "firstInputContext": 10836,
+        "lastInputContext": 26415
+      },
+      {
+        "stage": "author-3-work-turn9",
+        "actor": "main",
+        "calls": 31,
+        "tokens": 2214064,
+        "usageComplete": true,
+        "firstInputContext": 38232,
+        "lastInputContext": 95619
+      },
+      {
+        "stage": "review-3-inspect-turn10",
+        "actor": "ac1d2e39e5dca1edd",
+        "calls": 10,
+        "tokens": 352772,
+        "usageComplete": true,
+        "firstInputContext": 10844,
+        "lastInputContext": 55928
+      },
+      {
+        "stage": "author-4-work-turn11",
+        "actor": "main",
+        "calls": 26,
+        "tokens": 2329939,
+        "usageComplete": false,
+        "firstInputContext": 37872,
+        "lastInputContext": 115558
+      },
+      {
+        "stage": "review-4-inspect-turn12",
+        "actor": "a6f4c8245f2ddb577",
+        "calls": 10,
+        "tokens": 381079,
+        "usageComplete": true,
+        "firstInputContext": 10837,
+        "lastInputContext": 62046
+      },
+      {
+        "stage": "review-4-revise-turn13",
+        "actor": "abeec6af8b60af81d",
+        "calls": 8,
+        "tokens": 225089,
+        "usageComplete": true,
+        "firstInputContext": 11294,
+        "lastInputContext": 35067
+      }
+    ],
+    "stageElapsed": [
+      {
+        "stage": "author-1-work-turn1",
+        "elapsedSeconds": 158.718
+      },
+      {
+        "stage": "review-1-inspect-turn2",
+        "elapsedSeconds": 72.84
+      },
+      {
+        "stage": "review-1-revise-turn3",
+        "elapsedSeconds": 127.171
+      },
+      {
+        "stage": "review-1-verify-turn4",
+        "elapsedSeconds": 56.437
+      },
+      {
+        "stage": "author-2-work-turn5",
+        "elapsedSeconds": 361.142
+      },
+      {
+        "stage": "review-2-inspect-turn6",
+        "elapsedSeconds": 82.864
+      },
+      {
+        "stage": "review-2-revise-turn7",
+        "elapsedSeconds": 76.939
+      },
+      {
+        "stage": "review-2-verify-turn8",
+        "elapsedSeconds": 47.479
+      },
+      {
+        "stage": "author-3-work-turn9",
+        "elapsedSeconds": 469.949
+      },
+      {
+        "stage": "review-3-inspect-turn10",
+        "elapsedSeconds": 125.698
+      },
+      {
+        "stage": "author-4-work-turn11",
+        "elapsedSeconds": 563.718
+      },
+      {
+        "stage": "review-4-inspect-turn12",
+        "elapsedSeconds": 121.411
+      },
+      {
+        "stage": "review-4-revise-turn13",
+        "elapsedSeconds": 92.255
+      }
+    ]
+  },
+  "exercised": [
+    {
+      "check": "Machine handoff externalized",
+      "result": "PASS for seven saved docs: no embedded bgs-handoff blocks; sidecars exist under .beegame/design-handoffs. Actual human-readable decisions remain in prose."
+    },
+    {
+      "check": "Document/sidecar version agreement",
+      "result": "PASS for all seven saved docs. GDD, Audio and UI changed from 1.0 to 1.1. Art, Tech, Scene and Balance remained 1.0. UI 1.1 was not released."
+    },
+    {
+      "check": "GDD native Inspect/Revise/Verify",
+      "result": "PASS: conflicting simultaneous scoring/fatal-penalty ordering was found and repaired in native workflow."
+    },
+    {
+      "check": "Audio native Inspect/Revise/Verify",
+      "result": "PASS for identified out-of-scope resources field; semantic completeness is not certified."
+    },
+    {
+      "check": "UI Revision deterministic recheck",
+      "result": "CORRECTLY BLOCKED: new soundRequired declarations lacked Audio mappings."
+    }
+  ],
+  "notExercised": [
+    "Numerical evidence Revision execution permissions: native Scene/Balance Inspect returned no findings, so no numerical revision ran.",
+    "Final scheduled technical-completion version increase: not reached.",
+    "Verify receipt impact-text update path: not triggered.",
+    "Content consumption / runtime acceptance record binding to external handoff SHA: not reached.",
+    "Asset plan, implementation, resources and playable game acceptance: not reached."
+  ],
+  "documents": [
+    {
+      "document": "GDD.md",
+      "version": "1.1",
+      "sidecarVersion": "1.1",
+      "embeddedMachineHandoff": false
+    },
+    {
+      "document": "TECHNICAL_DESIGN.md",
+      "version": "1.0",
+      "sidecarVersion": "1.0",
+      "embeddedMachineHandoff": false
+    },
+    {
+      "document": "ART_DIRECTION.md",
+      "version": "1.0",
+      "sidecarVersion": "1.0",
+      "embeddedMachineHandoff": false
+    },
+    {
+      "document": "AUDIO_DESIGN.md",
+      "version": "1.1",
+      "sidecarVersion": "1.1",
+      "embeddedMachineHandoff": false
+    },
+    {
+      "document": "LEVEL_SCENE_DESIGN.md",
+      "version": "1.0",
+      "sidecarVersion": "1.0",
+      "embeddedMachineHandoff": false
+    },
+    {
+      "document": "BALANCE_DESIGN.md",
+      "version": "1.0",
+      "sidecarVersion": "1.0",
+      "embeddedMachineHandoff": false
+    },
+    {
+      "document": "UI_UX_SPEC.md",
+      "version": "1.1",
+      "sidecarVersion": "1.1",
+      "embeddedMachineHandoff": false
+    }
+  ],
+  "nativeBlocker": {
+    "stage": "review-4-revise-turn13",
+    "finding": "f2",
+    "findingSeverity": "follow-up",
+    "reviewerRecommendation": "Set soundRequired:true on UI outputs ready/playing/gameover because UI prose references gameplay audio.",
+    "revision": "Followed that recommendation, creating three required UI sound sources without changing Audio mappings.",
+    "existingAudioSources": [
+      "GDD.md#loop",
+      "GDD.md#ready",
+      "GDD.md#gameover"
+    ],
+    "deterministicFailure": "The one revision pass still fails deterministic checks: UI_UX_SPEC.md: required sound source ready is not mapped by Audio events[].source ({document:\"UI_UX_SPEC.md\",id:\"ready\"}); adding consumes does not close sound coverage. Bind the actual existing sound trigger, not a guessed or unrelated source. If this flag duplicates a broad category rather than a concrete sound producer, its UI_UX_SPEC.md owner must correct the declaration without removing required sound behavior; UI_UX_SPEC.md: required sound source playing is not mapped by Audio events[].source ({document:\"UI_UX_SPEC.md\",id:\"playing\"}); adding consumes does not close sound coverage. Bind the actual existing sound trigger, not a guessed or unrelated source. If this flag duplicates a broad category rather than a concrete sound producer, its UI_UX_SPEC.md owner must correct the declaration without removing required sound behavior; UI_UX_SPEC.md: required sound source gameover is not mapped by Audio events[].source ({document:\"UI_UX_SPEC.md\",id:\"gameover\"}); adding consumes does not close sound coverage. Bind the actual existing sound trigger, not a guessed or unrelated source. If this flag duplicates a broad category rather than a concrete sound producer, its UI_UX_SPEC.md owner must correct the declaration without removing required sound behavior",
+    "releaseGate": {
+      "allowed": false,
+      "layer": "acceptance-record",
+      "issues": [
+        "Current project has no verified delivery acceptance."
+      ]
+    },
+    "classification": "Review semantic/contract-mapping error propagated by Revision; host coverage gate correctly prevented release. The observed stop is not an externalization/version-increment crash.",
+    "causalLimit": "This run proves the erroneous recommendation and resulting declarations, not that model capability alone or context length alone caused the mistake.",
+    "designConcern": "GDD and UI can describe the same gameplay event. Treating every referencing screen category as a new producer creates duplicated obligations and repair churn. Reconsider the minimum producer declaration needed rather than adding a new review loop."
+  },
+  "independentObserverFindings": [
+    {
+      "id": "O1",
+      "owner": "AUDIO_DESIGN.md",
+      "locations": [
+        54,
+        86
+      ],
+      "finding": "Penalty sounds may overlap gameover for 0–0.2 seconds, but a separate lifecycle rule prohibits any cross-state residual sound except gameover. The playing→gameover table also permits penalty tails.",
+      "downstreamImpact": "Implementation must choose whether to preserve or cut the same penalty tail.",
+      "nativeDetection": "Not found in Directions Review; still present in saved v1.1.",
+      "classification": "Author inconsistency and native semantic review miss."
+    },
+    {
+      "id": "O2",
+      "owner": "UI_UX_SPEC.md",
+      "locations": [
+        20,
+        34
+      ],
+      "finding": "unsupported overlay on orientation/size failure is claimed to naturally pause simulation through rAF invisibility. An in-page overlay does not establish background-tab/page-hidden conditions.",
+      "downstreamImpact": "The simulation/clock may keep advancing while input is disabled; stop/resume behavior has no justified technical contract.",
+      "nativeDetection": "Not found in UI Inspect.",
+      "classification": "Unsupported platform inference and semantic review miss.",
+      "primarySources": [
+        "https://developer.mozilla.org/en-US/docs/Web/API/Window/requestAnimationFrame",
+        "https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API"
+      ],
+      "sourceInterpretation": "MDN describes background-tab/hidden-frame rAF behavior and document visibility. Inferring an in-page orientation overlay from that behavior is unsupported."
+    },
+    {
+      "id": "O3",
+      "owner": "BALANCE_DESIGN.md",
+      "locations": [
+        84
+      ],
+      "evidence": "docs/calc/balance-model.mjs:35,154-175",
+      "finding": "Reported 60/120-second all-caught scenario scores are spawned-fruit counts multiplied by score per catch. The generation stream does not model fall completion, basket motion or catches at those timestamps.",
+      "downstreamImpact": "The evidence supports generated-fruit potential score, not the described at-time catch outcome. This is a claim/evidence mismatch, not demonstrated arithmetic failure.",
+      "nativeDetection": "Scene/Balance Inspect returned no findings.",
+      "classification": "Evidence scope overstated; native semantic review miss."
+    }
+  ],
+  "costDiagnosis": {
+    "observed": [
+      "Tech author: 23 calls / 998349 tokens; checker-source probes and fragmented official-HTML extraction alongside legitimate platform evidence collection.",
+      "Scene/Balance author: 31 calls / 2214064 tokens; repeated helper/format and raw-transcript searches, calculation reruns; input context 38232→95619.",
+      "UI author: 26 calls / observed 2329939 tokens; layout preparation/calculation plus retained history; input context 37872→115558.",
+      "Most tokens were replayed cached input, not final document text. One partial stream request cannot explain the multi-million total."
+    ],
+    "limits": "Necessary source reading, official evidence and layout calculation cannot all be labeled waste. No causal experiment isolated the effect of context length on semantic errors.",
+    "conclusion": "Cost-control objective not achieved. Avoid an additional paid loop; inspect and simplify redundant producer declarations and repeated tool/source discovery first."
+  },
+  "nextStep": "Report failure and evidence. No automatic new paid run and no manual product patching."
+}

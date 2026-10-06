@@ -1,0 +1,174 @@
+{
+  "date": "2026-10-05",
+  "kind": "readonly-independent-paid-acceptance-observation-with-post-run-system-repair",
+  "rawRun": "/private/tmp/bgs-flow-repair-paid-accept-20261005-CAeS4TNk",
+  "workspace": "/private/tmp/bgs-flow-repair-paid-accept-20261005-CAeS4TNk/projects/users/design-test/flow-repair-fruit-20261005-CAeS4TNk",
+  "sessionId": "beegame_76abb91c5bb8459aa64a915c4ab9e388",
+  "model": "ark-code-latest",
+  "outcome": "host-blocked",
+  "elapsedSeconds": 659.911,
+  "scope": "One authorized fresh native BGS delivery, stop on first host stop; no automatic extra paid run.",
+  "manualProductEdits": false,
+  "injectedFindings": false,
+  "sourceChangesDuringRun": [],
+  "tokens": {
+    "usage": {
+      "input_tokens": 128573,
+      "output_tokens": 30724,
+      "cache_read_input_tokens": 718656,
+      "cache_creation_input_tokens": 0
+    },
+    "totalObservedTokens": 877953,
+    "startedRequests": 26,
+    "startedModelRequests": 25,
+    "runningRequestIds": [],
+    "partialUsageRequestIds": [],
+    "missingUsageRequestIds": [
+      1
+    ],
+    "usageComplete": false,
+    "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations."
+  },
+  "stageUsage": [
+    {
+      "stage": "author-1-work-turn1",
+      "actor": "main",
+      "firstRequestId": 2,
+      "lastRequestId": 7,
+      "usage": {
+        "input_tokens": 54962,
+        "output_tokens": 9223,
+        "cache_read_input_tokens": 236568,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 300753,
+      "startedRequests": 6,
+      "startedModelRequests": 6,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 6,
+      "firstObservedInputContextTokens": 38349,
+      "lastObservedInputContextTokens": 53666,
+      "minObservedInputContextTokens": 38349,
+      "maxObservedInputContextTokens": 53666
+    },
+    {
+      "stage": "review-1-inspect-turn2",
+      "actor": "a36ff5a5d1cd08b63",
+      "firstRequestId": 8,
+      "lastRequestId": 19,
+      "usage": {
+        "input_tokens": 42264,
+        "output_tokens": 13298,
+        "cache_read_input_tokens": 331936,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 387498,
+      "startedRequests": 12,
+      "startedModelRequests": 12,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 12,
+      "firstObservedInputContextTokens": 11243,
+      "lastObservedInputContextTokens": 43702,
+      "minObservedInputContextTokens": 11243,
+      "maxObservedInputContextTokens": 43702
+    },
+    {
+      "stage": "review-1-revise-turn3",
+      "actor": "a6091aabab3924e5b",
+      "firstRequestId": 20,
+      "lastRequestId": 26,
+      "usage": {
+        "input_tokens": 31347,
+        "output_tokens": 8203,
+        "cache_read_input_tokens": 150152,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 189702,
+      "startedRequests": 7,
+      "startedModelRequests": 7,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 7,
+      "firstObservedInputContextTokens": 11700,
+      "lastObservedInputContextTokens": 33718,
+      "minObservedInputContextTokens": 11700,
+      "maxObservedInputContextTokens": 33718
+    }
+  ],
+  "billing": {
+    "creditAmount": null,
+    "before": "billing_observation_transport_failed",
+    "after": "billing_observation_transport_failed"
+  },
+  "nativeProgress": {
+    "completed": [
+      "GDD writing",
+      "GDD Inspect",
+      "GDD Revise"
+    ],
+    "notReached": [
+      "GDD Verify",
+      "all three professional direction authors",
+      "Scene/Balance",
+      "UI",
+      "Asset Plan/final Technical",
+      "resources",
+      "content",
+      "implementation",
+      "runtime acceptance"
+    ]
+  },
+  "stopReason": "The one revision pass still fails deterministic checks: GDD.md: revised document version must increase from 1.0",
+  "confirmedFacts": [
+    "The original GDD handoff omitted number/anchor text from its section pointers; host diagnostics and Reviewer F1/F2 found the mismatch.",
+    "Inspect used a fresh native review child and produced blockers; host scheduled the existing Revise. This run did not independently exercise a deterministic-only/follow-up routing branch.",
+    "Revise used a new native child. Its original context was actually read and included the requirement to increase versions.",
+    "Native write permissions authorized docs/GDD.md plus its sidecar, but the model-visible exact Authorized revision files list contained only .beegame/design-handoffs/GDD.json.",
+    "The reviser explicitly said GDD.md was not in the authorized file list. It fixed only sidecar pointers, kept documentVersion 1.0, and left the prose unchanged.",
+    "The local handoff checker returned valid because pointers and header/sidecar versions matched; it does not compare against the prior inspected version. Host release validation correctly stopped the unchanged version.",
+    "Inspect receipt validation rejected invalid source-heading attempts; Revise receipt validation rejected altered recorded finding text. The native agents corrected receipts in the same steps; the system did not fake completion or start another stage.",
+    "No target-runtime, eight-document quality or end-to-end game delivery result was established."
+  ],
+  "rootClassification": {
+    "primary": "System handoff implementation defect: the displayed exact write-target list omitted authorized Markdown documents, contradicting actual permissions and the required version update.",
+    "modelContribution": "The model treated an incomplete path list as complete authority and interpreted a passing local structural check as enough to keep the old version. This run cannot isolate model error from the contradictory system input.",
+    "gate": "Correct safety stop, not an incorrect rejection or a reason to waive versioning."
+  },
+  "postRunSystemRepair": {
+    "timing": "After the paid run had finished and source-after hashes were saved. No product changes and no paid retest.",
+    "changes": [
+      "project-conversation.ts: display Markdown write paths and sidecar/calculation write paths together in the existing exact authorized file list. Native permissions and write scope are unchanged.",
+      "project-author.ts: clarify the existing version contract: changes to prose, sidecar or retained calculation evidence require the document header and handoff version to increase, including sidecar-only corrections."
+    ],
+    "regression": {
+      "redBeforeFix": "Two dispatch regressions failed because the displayed list omitted docs/BALANCE_DESIGN.md.",
+      "afterFix": {
+        "pass": 103,
+        "fail": 0,
+        "files": 4,
+        "elapsedSeconds": 3.82
+      },
+      "typecheck": "workflow-server bun run typecheck: exit 0",
+      "whitespace": "scoped git diff --check: exit 0"
+    },
+    "limit": "These are offline system checks. The post-run correction has not undergone paid native acceptance."
+  },
+  "limits": [
+    "Image configuration preflight returned config-service-network; resource generation was never reached.",
+    "25 model requests have final usage; the other initial request lacks usage. Observed tokens are not settled credits.",
+    "Do not infer cost savings from an earlier stop or compare this GDD-only outcome to a longer prior run.",
+    "Previous paid-project semantic misses remain unresolved; this run did not reach their document stages."
+  ],
+  "nextStep": "Do not continue or rewrite this stopped project by hand. A new paid run or explicit native owner-resolution requires a separate authorization; no extra experiment was started."
+}

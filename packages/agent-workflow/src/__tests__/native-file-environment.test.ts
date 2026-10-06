@@ -24,6 +24,7 @@ test('platform NODE_ENV does not change dependency installation in file-agent ta
 })
 
 test('isolated file agents receive the selected Skill Search setting', () => {
+  expect(nativeFileAgentEnvironment({ BEEGAME_MODEL_OBSERVER_METADATA: '1' }).BEEGAME_MODEL_OBSERVER_METADATA).toBe('1')
   expect(nativeFileAgentEnvironment({ SKILL_SEARCH_ENABLED: '1' }).SKILL_SEARCH_ENABLED).toBe('1')
   expect(nativeFileAgentEnvironment({ BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: '/app/builtinskills' })
     .BEEGAME_NATIVE_BUILTIN_SKILLS_DIR).toBe('/app/builtinskills')

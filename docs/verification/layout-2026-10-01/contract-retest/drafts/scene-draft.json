@@ -1,0 +1,1960 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "breakout-level-1-draft",
+  "kind": "scene-2d",
+  "assetRefs": [],
+  "data": {
+    "settings": {
+      "coordinateSystem": {
+        "origin": "top-left",
+        "units": "logical-pixels",
+        "width": 1920,
+        "height": 1080,
+        "pixelsPerUnit": 100
+      }
+    },
+    "cameraNodeId": "main-camera",
+    "nodes": [
+      {
+        "id": "main-camera",
+        "name": "Main Camera",
+        "enabled": true,
+        "transform": {
+          "position": [
+            960,
+            540,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "components": [
+          {
+            "id": "cam-main",
+            "type": "camera",
+            "data": {
+              "orthographic": true,
+              "orthographicSize": 5.4,
+              "coordinateSpace": "logical-pixels",
+              "viewport": {
+                "width": 1920,
+                "height": 1080
+              },
+              "framing": "letterbox"
+            }
+          }
+        ]
+      },
+      {
+        "id": "wall-top",
+        "name": "Top Wall",
+        "enabled": true,
+        "transform": {
+          "position": [
+            960,
+            4,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "wall-top-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                1920,
+                8
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "wall-left",
+        "name": "Left Wall",
+        "enabled": true,
+        "transform": {
+          "position": [
+            4,
+            540,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "wall-left-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                8,
+                1080
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "wall-right",
+        "name": "Right Wall",
+        "enabled": true,
+        "transform": {
+          "position": [
+            1916,
+            540,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "wall-right-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                8,
+                1080
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "miss-line",
+        "name": "Miss Line",
+        "enabled": true,
+        "transform": {
+          "position": [
+            960,
+            1077,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "miss-line-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                1920,
+                6
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-grid",
+        "name": "Brick Grid",
+        "enabled": true,
+        "transform": {
+          "position": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "brick-r0-c0",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            204,
+            144,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r0-c0-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r0-c1",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            372,
+            144,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r0-c1-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r0-c2",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            540,
+            144,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r0-c2-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r0-c3",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            708,
+            144,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r0-c3-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r0-c4",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            876,
+            144,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r0-c4-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r0-c5",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1044,
+            144,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r0-c5-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r0-c6",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1212,
+            144,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r0-c6-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r0-c7",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1380,
+            144,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r0-c7-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r0-c8",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1548,
+            144,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r0-c8-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r0-c9",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1716,
+            144,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r0-c9-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r1-c0",
+        "parentId": "brick-grid",
+        "name": "Reinforced Brick",
+        "semantic": [
+          "brick-reinforced"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            204,
+            206,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r1-c0-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "reinforced"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r1-c1",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            372,
+            206,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r1-c1-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r1-c2",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            540,
+            206,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r1-c2-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r1-c3",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            708,
+            206,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r1-c3-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r1-c4",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            876,
+            206,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r1-c4-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r1-c5",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1044,
+            206,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r1-c5-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r1-c6",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1212,
+            206,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r1-c6-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r1-c7",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1380,
+            206,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r1-c7-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r1-c8",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1548,
+            206,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r1-c8-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r1-c9",
+        "parentId": "brick-grid",
+        "name": "Reinforced Brick",
+        "semantic": [
+          "brick-reinforced"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1716,
+            206,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r1-c9-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "reinforced"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r2-c0",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            204,
+            268,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r2-c0-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r2-c1",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            372,
+            268,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r2-c1-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r2-c2",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            540,
+            268,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r2-c2-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r2-c3",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            708,
+            268,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r2-c3-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r2-c4",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            876,
+            268,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r2-c4-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r2-c5",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1044,
+            268,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r2-c5-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r2-c6",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1212,
+            268,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r2-c6-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r2-c7",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1380,
+            268,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r2-c7-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r2-c8",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1548,
+            268,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r2-c8-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r2-c9",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1716,
+            268,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r2-c9-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r3-c0",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            204,
+            330,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r3-c0-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r3-c1",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            372,
+            330,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r3-c1-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r3-c2",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            540,
+            330,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r3-c2-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r3-c3",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            708,
+            330,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r3-c3-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r3-c4",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            876,
+            330,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r3-c4-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r3-c5",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1044,
+            330,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r3-c5-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r3-c6",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1212,
+            330,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r3-c6-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r3-c7",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1380,
+            330,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r3-c7-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r3-c8",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1548,
+            330,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r3-c8-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r3-c9",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1716,
+            330,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r3-c9-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r4-c0",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            204,
+            392,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r4-c0-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r4-c1",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            372,
+            392,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r4-c1-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r4-c2",
+        "parentId": "brick-grid",
+        "name": "Reinforced Brick",
+        "semantic": [
+          "brick-reinforced"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            540,
+            392,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r4-c2-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "reinforced"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r4-c3",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            708,
+            392,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r4-c3-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r4-c4",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            876,
+            392,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r4-c4-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r4-c5",
+        "parentId": "brick-grid",
+        "name": "Reinforced Brick",
+        "semantic": [
+          "brick-reinforced"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1044,
+            392,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r4-c5-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "reinforced"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r4-c6",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1212,
+            392,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r4-c6-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r4-c7",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1380,
+            392,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r4-c7-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r4-c8",
+        "parentId": "brick-grid",
+        "name": "Reinforced Brick",
+        "semantic": [
+          "brick-reinforced"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1548,
+            392,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r4-c8-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "reinforced"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r4-c9",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1716,
+            392,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r4-c9-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r5-c0",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            204,
+            454,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r5-c0-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r5-c1",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            372,
+            454,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r5-c1-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r5-c2",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            540,
+            454,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r5-c2-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r5-c3",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            708,
+            454,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r5-c3-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r5-c4",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            876,
+            454,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r5-c4-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r5-c5",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1044,
+            454,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r5-c5-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r5-c6",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1212,
+            454,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r5-c6-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r5-c7",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1380,
+            454,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r5-c7-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r5-c8",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1548,
+            454,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r5-c8-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "brick-r5-c9",
+        "parentId": "brick-grid",
+        "name": "Normal Brick",
+        "semantic": [
+          "brick-normal"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            1716,
+            454,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "brick-r5-c9-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                152,
+                48
+              ],
+              "brickType": "normal"
+            }
+          }
+        ]
+      },
+      {
+        "id": "paddle",
+        "name": "Paddle",
+        "semantic": [
+          "paddle"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            960,
+            960,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "paddle-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                220,
+                28
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "ball",
+        "name": "Ball",
+        "semantic": [
+          "ball"
+        ],
+        "enabled": true,
+        "transform": {
+          "position": [
+            960,
+            926,
+            0
+          ]
+        },
+        "components": [
+          {
+            "id": "ball-rend",
+            "type": "sprite-renderer",
+            "data": {
+              "size": [
+                28,
+                28
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

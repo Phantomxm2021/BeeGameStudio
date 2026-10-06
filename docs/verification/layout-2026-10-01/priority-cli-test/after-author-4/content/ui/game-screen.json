@@ -1,0 +1,409 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-game-screen",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "game-root",
+    "nodes": [
+      {
+        "id": "game-root",
+        "role": "screen-root",
+        "enabled": true,
+        "name": "Game Screen Full Host Root",
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0],
+          "position": [0, 0]
+        },
+        "style": {
+          "background": { "color": "#070B1C" }
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [960, 540],
+          "targetViewports": [
+            [960, 540],
+            [800, 450],
+            [1024, 576]
+          ],
+          "minimumControlSize": [44, 44],
+          "layoutCamera": {
+            "nodeId": "game-view",
+            "path": ".beegame/tmp/breakout-camera.json"
+          }
+        }
+      },
+      {
+        "id": "game-view",
+        "parentId": "game-root",
+        "role": "container",
+        "enabled": true,
+        "name": "Camera Game View (bounds = camera viewport)",
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0],
+          "position": [0, 0]
+        },
+        "style": {
+          "background": { "color": "#0B1026" }
+        }
+      },
+      {
+        "id": "world-overlay-plane",
+        "parentId": "game-view",
+        "role": "container",
+        "enabled": true,
+        "name": "Camera Reference 2D Plane",
+        "layout": {
+          "anchor": "top-left",
+          "position": [0, 0],
+          "size": [960, 540],
+          "item": {
+            "absolute": true
+          }
+        },
+        "data": {
+          "space": "camera-reference-2d"
+        }
+      },
+      {
+        "id": "ready-prompt",
+        "parentId": "world-overlay-plane",
+        "role": "container",
+        "enabled": true,
+        "name": "Ready/Serve Prompt (hidden after serve)",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, -40],
+          "size": [360, 120],
+          "container": {
+            "direction": "column",
+            "gap": 12,
+            "padding": [0, 0, 0, 0],
+            "justify": "center",
+            "align": "center"
+          }
+        },
+        "style": {
+          "background": { "color": "#0A1128", "opacity": 0.55, "radius": 12 },
+          "cornerRadius": 12
+        },
+        "data": {
+          "visibleStates": ["Ready"],
+          "note": "发球进入 Playing 后运行时置 enabled:false；漏接回 Ready 重新启用"
+        }
+      },
+      {
+        "id": "ready-prompt-text",
+        "parentId": "ready-prompt",
+        "role": "text",
+        "enabled": true,
+        "text": "点击 / 空格 发球",
+        "layout": {
+          "size": [360, 34]
+        },
+        "style": {
+          "fontSize": 24,
+          "color": "#EAF6FF",
+          "align": "center"
+        }
+      },
+      {
+        "id": "ready-prompt-keycap",
+        "parentId": "ready-prompt",
+        "role": "keycap",
+        "enabled": true,
+        "text": "SPACE",
+        "layout": {
+          "size": [96, 34]
+        },
+        "style": {
+          "fontSize": 15,
+          "color": "#9FE9E6",
+          "align": "center",
+          "fontFamily": "monospace",
+          "background": { "color": "#0E1C38", "opacity": 0.8, "radius": 6 },
+          "border": { "width": 1, "color": "#2CE6E0", "radius": 6 },
+          "cornerRadius": 6
+        }
+      },
+      {
+        "id": "hud",
+        "parentId": "game-root",
+        "role": "container",
+        "enabled": true,
+        "name": "HUD Top Strip y0-64",
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 0],
+          "sizeDelta": [0, 64],
+          "position": [0, 0],
+          "container": {
+            "direction": "row",
+            "gap": 16,
+            "padding": [10, 16, 10, 16],
+            "justify": "space-between",
+            "align": "center"
+          }
+        },
+        "style": {
+          "background": { "color": "#070B1C", "opacity": 0.72 }
+        }
+      },
+      {
+        "id": "hud-score",
+        "parentId": "hud",
+        "role": "container",
+        "enabled": true,
+        "name": "Score Readout",
+        "layout": {
+          "size": [158, 44],
+          "container": {
+            "direction": "row",
+            "gap": 8,
+            "padding": [0, 0, 0, 0],
+            "justify": "start",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "hud-score-label",
+        "parentId": "hud-score",
+        "role": "text",
+        "enabled": true,
+        "text": "SCORE",
+        "layout": {
+          "size": [54, 20]
+        },
+        "style": {
+          "fontSize": 14,
+          "color": "#7C89B0",
+          "align": "left"
+        }
+      },
+      {
+        "id": "hud-score-value",
+        "parentId": "hud-score",
+        "role": "text",
+        "enabled": true,
+        "text": "0000",
+        "layout": {
+          "size": [88, 28]
+        },
+        "style": {
+          "fontSize": 22,
+          "color": "#EAF6FF",
+          "align": "left",
+          "fontFamily": "monospace",
+          "fontWeight": 600
+        }
+      },
+      {
+        "id": "hud-lives",
+        "parentId": "hud",
+        "role": "container",
+        "enabled": true,
+        "name": "Life Icons x3",
+        "layout": {
+          "size": [94, 28],
+          "container": {
+            "direction": "row",
+            "gap": 10,
+            "padding": [0, 0, 0, 0],
+            "justify": "center",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "life-icon-1",
+        "parentId": "hud-lives",
+        "role": "shape",
+        "enabled": true,
+        "name": "Life 1",
+        "layout": {
+          "size": [22, 22]
+        },
+        "style": {
+          "shape": "circle",
+          "color": "#EAF6FF"
+        }
+      },
+      {
+        "id": "life-icon-2",
+        "parentId": "hud-lives",
+        "role": "shape",
+        "enabled": true,
+        "name": "Life 2",
+        "layout": {
+          "size": [22, 22]
+        },
+        "style": {
+          "shape": "circle",
+          "color": "#EAF6FF"
+        }
+      },
+      {
+        "id": "life-icon-3",
+        "parentId": "hud-lives",
+        "role": "shape",
+        "enabled": true,
+        "name": "Life 3",
+        "layout": {
+          "size": [22, 22]
+        },
+        "style": {
+          "shape": "circle",
+          "color": "#EAF6FF"
+        }
+      },
+      {
+        "id": "hud-right",
+        "parentId": "hud",
+        "role": "container",
+        "enabled": true,
+        "name": "Best Score + Pause + Mute",
+        "layout": {
+          "size": [268, 44],
+          "container": {
+            "direction": "row",
+            "gap": 10,
+            "padding": [0, 0, 0, 0],
+            "justify": "end",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "hud-highscore",
+        "parentId": "hud-right",
+        "role": "container",
+        "enabled": true,
+        "name": "Best Score Readout",
+        "layout": {
+          "size": [132, 28],
+          "container": {
+            "direction": "row",
+            "gap": 6,
+            "padding": [0, 0, 0, 0],
+            "justify": "start",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "hud-highscore-label",
+        "parentId": "hud-highscore",
+        "role": "text",
+        "enabled": true,
+        "text": "最高分",
+        "layout": {
+          "size": [40, 20]
+        },
+        "style": {
+          "fontSize": 13,
+          "color": "#7C89B0",
+          "align": "left"
+        }
+      },
+      {
+        "id": "hud-highscore-value",
+        "parentId": "hud-highscore",
+        "role": "text",
+        "enabled": true,
+        "text": "0000",
+        "layout": {
+          "size": [80, 24]
+        },
+        "style": {
+          "fontSize": 17,
+          "color": "#AAB6D8",
+          "align": "left",
+          "fontFamily": "monospace"
+        }
+      },
+      {
+        "id": "pause-button",
+        "parentId": "hud-right",
+        "role": "button",
+        "enabled": true,
+        "name": "Pause Button",
+        "layout": {
+          "size": [44, 44]
+        },
+        "style": {
+          "background": { "color": "#0E1C38", "opacity": 0.7, "radius": 22 },
+          "border": { "width": 1, "color": "#3A4A78", "radius": 22 },
+          "cornerRadius": 22
+        },
+        "actions": {
+          "click": "game:pause"
+        }
+      },
+      {
+        "id": "pause-button-icon",
+        "parentId": "pause-button",
+        "role": "text",
+        "enabled": true,
+        "text": "II",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 0],
+          "size": [24, 20]
+        },
+        "style": {
+          "fontSize": 15,
+          "color": "#9FE9E6",
+          "align": "center",
+          "fontFamily": "monospace",
+          "fontWeight": 700
+        }
+      },
+      {
+        "id": "hud-mute-toggle",
+        "parentId": "hud-right",
+        "role": "toggle",
+        "enabled": true,
+        "name": "HUD Mute Toggle",
+        "layout": {
+          "size": [44, 44]
+        },
+        "style": {
+          "background": { "color": "#0E1C38", "opacity": 0.7, "radius": 22 },
+          "border": { "width": 1, "color": "#3A4A78", "radius": 22 },
+          "cornerRadius": 22
+        },
+        "actions": {
+          "click": "audio:toggle-mute"
+        },
+        "data": {
+          "stateIcon": {
+            "on": "icon:sound-on",
+            "off": "icon:sound-off"
+          }
+        }
+      },
+      {
+        "id": "hud-mute-icon",
+        "parentId": "hud-mute-toggle",
+        "role": "text",
+        "enabled": true,
+        "text": "♪",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 0],
+          "size": [24, 24]
+        },
+        "style": {
+          "fontSize": 18,
+          "color": "#AAB6D8",
+          "align": "center"
+        }
+      }
+    ]
+  }
+}

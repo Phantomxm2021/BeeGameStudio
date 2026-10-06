@@ -1,0 +1,192 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "breakout-rotate",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "rotate-root",
+    "nodes": [
+      {
+        "id": "rotate-root",
+        "role": "screen-root",
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [
+            1920,
+            1080
+          ],
+          "targetViewports": [
+            [
+              960,
+              540
+            ],
+            [
+              1920,
+              1080
+            ],
+            [
+              2560,
+              1080
+            ]
+          ],
+          "minimumControlSize": [
+            44,
+            44
+          ]
+        }
+      },
+      {
+        "id": "rotate-bg",
+        "parentId": "rotate-root",
+        "role": "shape",
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ],
+          "position": [
+            0,
+            0
+          ]
+        },
+        "style": {
+          "gradient": [
+            "#1E1E42",
+            "#13132B"
+          ]
+        }
+      },
+      {
+        "id": "rotate-column",
+        "parentId": "rotate-root",
+        "role": "container",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            508,
+            280
+          ],
+          "container": {
+            "direction": "column",
+            "gap": 20,
+            "padding": [
+              24,
+              24,
+              24,
+              24
+            ],
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "rotate-icon",
+        "parentId": "rotate-column",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            206,
+            0
+          ],
+          "size": [
+            96,
+            96
+          ]
+        },
+        "style": {
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 48
+          }
+        }
+      },
+      {
+        "id": "rotate-icon-arrow",
+        "parentId": "rotate-icon",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            40,
+            10
+          ],
+          "size": [
+            20,
+            20
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#FFD166",
+            "radius": 4
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 4
+          }
+        }
+      },
+      {
+        "id": "rotate-title",
+        "parentId": "rotate-column",
+        "role": "text",
+        "text": "请旋转设备至横版",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            24,
+            0
+          ],
+          "size": [
+            460,
+            40
+          ]
+        },
+        "style": {
+          "fontSize": 30,
+          "color": "#F3F4FF",
+          "align": "center",
+          "lineHeight": 40
+        }
+      },
+      {
+        "id": "rotate-body",
+        "parentId": "rotate-column",
+        "role": "text",
+        "text": "也可请扩大窗口（至少 960×540）。恢复后将自动返回此前界面。",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            24,
+            0
+          ],
+          "size": [
+            460,
+            48
+          ]
+        },
+        "style": {
+          "fontSize": 18,
+          "color": "#9FA3C7",
+          "align": "center",
+          "lineHeight": 24
+        }
+      }
+    ]
+  }
+}

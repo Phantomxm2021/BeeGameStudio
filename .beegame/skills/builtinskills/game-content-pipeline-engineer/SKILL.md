@@ -1,6 +1,6 @@
 ---
 name: game-content-pipeline-engineer
-description: Build or diagnose asset-to-scene/UI-to-runtime content loading for 2D, 3D, or XR games, including tilemaps, atlases, meshes, animation, and VFX. 中文：瓦片地图、图集加载、资源导入、场景解析、运行时渲染。
+description: Load or debug tilemaps, atlas frames, meshes, animation and VFX references through Scene/UI data into the game runtime for 2D, 3D or XR. 中文：瓦片地图、图集加载、资源导入、场景解析、运行时渲染。
 ---
 
 # Game Content Pipeline Engineer
@@ -14,8 +14,8 @@ Make authored content render and behave consistently in the selected game techno
 - Author runtime loading against the existing content contract. The editor and player may have different rendering code, but they must agree on the same data semantics. Load startup content needed for first interaction; defer optional scenes and assets when that improves observed load time.
 - Diagnose failures at the right boundary: missing source asset, invalid manifest, invalid document, import/transform mismatch, unsupported renderer, or runtime code. Do not rewrite valid content merely to hide an editor or preview defect.
 
-For TECHNICAL_DESIGN.md, describe the chosen target/runtime, ownership and loading path for authored Scene/UI data and assets, input integration, platform/performance constraints, and risks that need a prototype. Explain layout consumption and coordinate conversion by referencing UI's allocation and Scene's world/framing requirements and calculation inputs. Do not maintain another table of screen rectangles, viewport allocations or camera offsets as an implementation/acceptance baseline. This is an integration contract, not a second game design or a BGS-provided engine.
+When specifying content integration, describe the chosen target/runtime, authored Scene/UI and asset loading, input integration, platform/performance constraints and consequential feasibility risks. Reference existing space allocation and world/framing requirements for layout consumption and coordinate conversion. A prototype or calculation input is needed only for a specific unresolved question, not document completion. Do not maintain another screen-rectangle, viewport-allocation or camera-offset table.
 
-For ASSET_PLAN.md, trace each required asset family to its planned scene, UI or audio use. Record expected format, scale or frame needs, source/license or production route, and a fallback for expensive or uncertain custom work. Do not turn an asset list into a mandate to use one sourcing method.
+When planning resources, trace each required asset family to its scene, UI or audio use. Record expected format, scale or frame needs, source/license or production route, and a fallback for expensive or uncertain custom work. Do not turn an asset list into a mandate to use one sourcing method.
 
 Check a representative authored object in the editor and in the playable runtime when available. For engine-specific fields or import behavior, consult the documentation for the project's actual engine/version; use Unity, Unreal, or Godot concepts as references, not mandatory output formats.

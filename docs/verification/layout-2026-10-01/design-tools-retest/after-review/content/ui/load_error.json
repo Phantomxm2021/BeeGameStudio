@@ -1,0 +1,181 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui.load-error",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "name": "加载失败/错误恢复视图根",
+        "layout": {
+          "size": [1280, 720]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [1280, 720],
+          "targetViewports": [[1280, 720], [1024, 576], [960, 540]],
+          "minimumControlSize": [88, 44],
+          "compactMaxWidth": 1024
+        }
+      },
+      {
+        "id": "bg",
+        "parentId": "root",
+        "role": "container",
+        "name": "全屏暗底",
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0]
+        },
+        "style": {
+          "background": { "color": "#060512", "opacity": 1 }
+        }
+      },
+      {
+        "id": "panel",
+        "parentId": "bg",
+        "role": "container",
+        "name": "错误恢复面板",
+        "layout": {
+          "anchor": "middle-center",
+          "size": [420, 280],
+          "container": {
+            "direction": "column",
+            "gap": 16,
+            "padding": [28, 32, 28, 32],
+            "align": "center"
+          }
+        },
+        "style": {
+          "background": { "color": "#0C0A20", "opacity": 0.96 },
+          "border": { "width": 2, "color": "#2DE2FF", "radius": 8 },
+          "glow": { "color": "#2DE2FF", "radius": 4, "opacity": 0.25 }
+        },
+        "data": {
+          "component": "neon-panel",
+          "layoutRegion": "overlay-page"
+        },
+        "responsive": {
+          "compact": {
+            "layout": {
+              "size": [380, 280],
+              "container": { "direction": "column", "gap": 14, "padding": [24, 24, 24, 24] }
+            }
+          }
+        }
+      },
+      {
+        "id": "error-title",
+        "parentId": "panel",
+        "role": "text",
+        "text": "加载失败",
+        "layout": {
+          "size": [356, 40]
+        },
+        "style": {
+          "fontSize": 28,
+          "fontWeight": 800,
+          "color": "#E8F4FF",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 8,
+          "glow": { "color": "#2DE2FF", "radius": 6, "opacity": 0.4 }
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [332, 40] }
+          }
+        }
+      },
+      {
+        "id": "error-message",
+        "parentId": "panel",
+        "role": "text",
+        "text": "资源加载未完成，请检查网络后重试。",
+        "layout": {
+          "size": [356, 48]
+        },
+        "style": {
+          "fontSize": 15,
+          "color": "#B9C6E8",
+          "align": "center",
+          "verticalAlign": "middle",
+          "lineHeight": 22
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [332, 48] }
+          }
+        }
+      },
+      {
+        "id": "retry-detail",
+        "parentId": "panel",
+        "role": "text",
+        "text": "重试失败，请再次尝试",
+        "enabled": false,
+        "layout": {
+          "size": [356, 24]
+        },
+        "style": {
+          "fontSize": 14,
+          "color": "#FF3B4D",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 2
+        },
+        "bindings": {
+          "enabledWhen": "lastRetryFailed===true",
+          "note": "错误文案出现时重试按钮同时给出危险色描边脉冲，形状加运动，ART 3.4"
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [332, 24] }
+          }
+        }
+      },
+      {
+        "id": "btn-retry",
+        "parentId": "panel",
+        "role": "button",
+        "text": "重试",
+        "layout": {
+          "size": [356, 52]
+        },
+        "style": {
+          "fontSize": 20,
+          "fontWeight": 700,
+          "color": "#E8F4FF",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 8,
+          "background": { "color": "#123244", "opacity": 0.9 },
+          "border": { "width": 2, "color": "#2DE2FF", "radius": 8 },
+          "glow": { "color": "#2DE2FF", "radius": 8, "opacity": 0.4 }
+        },
+        "actions": {
+          "action": "retryLoading",
+          "audioEvent": "ui.click"
+        },
+        "bindings": {
+          "defaultFocus": "true",
+          "tabOrder": "1"
+        },
+        "data": {
+          "component": "neon-button",
+          "variant": "primary",
+          "note": "恢复路径恒在：按钮永不移除"
+        },
+        "responsive": {
+          "compact": {
+            "layout": { "size": [332, 52] }
+          }
+        }
+      }
+    ]
+  }
+}

@@ -19,10 +19,10 @@ State a falsifiable hypothesis: “X causes Y because evidence Z; if true, check
 
 If several attempts fail or fixes create new symptoms, revisit the architecture and ownership boundary rather than adding another retry, exception, or compatibility track. When external state or timing prevents a conclusion, report the missing evidence explicitly.
 
-## 3. Fix and verify at the owner
+## 3. Apply and verify a requested fix
 
-- Change the source responsible for the failure, preserving unrelated behavior. Add a focused regression check where it can prevent recurrence; a visual or interaction defect may need a running-game observation instead of a unit test.
-- Rerun the original reproduction and a proportionate neighboring check. For performance, compare before and after in the same build, device, viewport, and scene.
-- Explain the verified cause, the change, the check result, and what remains uncertain. Do not call a symptom workaround a root-cause fix.
+- For a requested fix, change the source responsible for the failure within the current task's editing scope, preserving unrelated behavior. If the task is diagnosis only or the responsible source is outside that scope, report the verified cause, evidence and proposed correction instead. For an applied fix, add a focused regression check where it can prevent recurrence; a visual or interaction defect may need a running-game observation instead of a unit test.
+- After an applied fix, rerun the original reproduction and a proportionate neighboring check. For performance, compare before and after in the same build, device, viewport, and scene.
+- Explain the verified cause, any applied change, the check result, and what remains uncertain. Do not call a symptom workaround a root-cause fix.
 
 The Agent chooses investigation tools and depth. This Skill does not grant broader file or external-system authority than the user request.

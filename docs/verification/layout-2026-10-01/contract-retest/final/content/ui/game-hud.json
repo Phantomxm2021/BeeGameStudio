@@ -1,0 +1,434 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "breakout-game-hud",
+  "kind": "ui-hud",
+  "assetRefs": [],
+  "data": {
+    "rootId": "game-hud-root",
+    "nodes": [
+      {
+        "id": "game-hud-root",
+        "role": "hud-root",
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [
+            1920,
+            1080
+          ],
+          "targetViewports": [
+            [
+              960,
+              540
+            ],
+            [
+              1920,
+              1080
+            ],
+            [
+              2560,
+              1080
+            ]
+          ],
+          "minimumControlSize": [
+            44,
+            44
+          ],
+          "layoutCamera": {
+            "nodeId": "game-view",
+            "path": ".beegame/tmp/camera-draft.json"
+          }
+        }
+      },
+      {
+        "id": "game-view",
+        "parentId": "game-hud-root",
+        "role": "container",
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            1
+          ],
+          "sizeDelta": [
+            0,
+            0
+          ],
+          "position": [
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "camera-plane",
+        "parentId": "game-view",
+        "role": "container",
+        "data": {
+          "space": "camera-reference-2d"
+        },
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            0,
+            0
+          ],
+          "size": [
+            1920,
+            1080
+          ],
+          "item": {
+            "absolute": true
+          }
+        }
+      },
+      {
+        "id": "ready-prompt-primary",
+        "parentId": "camera-plane",
+        "role": "text",
+        "text": "按 空格 或点击屏幕 发球",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            620,
+            688
+          ],
+          "size": [
+            680,
+            48
+          ]
+        },
+        "style": {
+          "fontSize": 34,
+          "color": "#F3F4FF",
+          "align": "center",
+          "lineHeight": 48
+        }
+      },
+      {
+        "id": "ready-prompt-sub",
+        "parentId": "camera-plane",
+        "role": "text",
+        "text": "方向键 / A·D 移动挡板",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            620,
+            744
+          ],
+          "size": [
+            680,
+            32
+          ]
+        },
+        "style": {
+          "fontSize": 22,
+          "color": "#9FA3C7",
+          "align": "center",
+          "lineHeight": 32
+        }
+      },
+      {
+        "id": "hud-strip",
+        "parentId": "game-view",
+        "role": "container",
+        "layout": {
+          "anchorMin": [
+            0,
+            0
+          ],
+          "anchorMax": [
+            1,
+            0
+          ],
+          "sizeDelta": [
+            0,
+            52
+          ],
+          "position": [
+            0,
+            0
+          ]
+        }
+      },
+      {
+        "id": "score-box",
+        "parentId": "hud-strip",
+        "role": "container",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            24,
+            2
+          ],
+          "size": [
+            220,
+            48
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#1B1D3D",
+            "opacity": 0.85,
+            "radius": 10
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 10
+          }
+        }
+      },
+      {
+        "id": "score-label",
+        "parentId": "score-box",
+        "role": "text",
+        "text": "分数",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            14,
+            4
+          ],
+          "size": [
+            60,
+            16
+          ]
+        },
+        "style": {
+          "fontSize": 14,
+          "color": "#9FA3C7",
+          "lineHeight": 16
+        }
+      },
+      {
+        "id": "score-value",
+        "parentId": "score-box",
+        "role": "text",
+        "text": "0000",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            14,
+            23
+          ],
+          "size": [
+            192,
+            24
+          ]
+        },
+        "style": {
+          "fontSize": 24,
+          "color": "#F3F4FF",
+          "lineHeight": 26,
+          "fontVariant": "tabular-nums"
+        },
+        "bindings": {
+          "text": "hud.score"
+        }
+      },
+      {
+        "id": "lives-group",
+        "parentId": "hud-strip",
+        "role": "container",
+        "layout": {
+          "anchor": "top-center",
+          "position": [
+            0,
+            10
+          ],
+          "size": [
+            120,
+            32
+          ]
+        }
+      },
+      {
+        "id": "life-1",
+        "parentId": "lives-group",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            0,
+            2
+          ],
+          "size": [
+            28,
+            28
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#FFF6BF",
+            "radius": 14
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 14
+          }
+        }
+      },
+      {
+        "id": "life-2",
+        "parentId": "lives-group",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            46,
+            2
+          ],
+          "size": [
+            28,
+            28
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#FFF6BF",
+            "radius": 14
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 14
+          }
+        }
+      },
+      {
+        "id": "life-3",
+        "parentId": "lives-group",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            92,
+            2
+          ],
+          "size": [
+            28,
+            28
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#FFF6BF",
+            "radius": 14
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 14
+          }
+        }
+      },
+      {
+        "id": "pause-button",
+        "parentId": "hud-strip",
+        "role": "button",
+        "actions": {
+          "activate": "pause"
+        },
+        "layout": {
+          "anchor": "top-right",
+          "position": [
+            -24,
+            4
+          ],
+          "size": [
+            88,
+            44
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#1B1D3D",
+            "opacity": 0.85,
+            "radius": 10
+          },
+          "border": {
+            "width": 3,
+            "color": "#0F0F22",
+            "radius": 10
+          }
+        },
+        "data": {
+          "anchor": {
+            "x": 1,
+            "y": 0
+          }
+        }
+      },
+      {
+        "id": "pause-bar-1",
+        "parentId": "pause-button",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            24,
+            14
+          ],
+          "size": [
+            6,
+            16
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#F3F4FF",
+            "radius": 2
+          }
+        }
+      },
+      {
+        "id": "pause-bar-2",
+        "parentId": "pause-button",
+        "role": "shape",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            36,
+            14
+          ],
+          "size": [
+            6,
+            16
+          ]
+        },
+        "style": {
+          "background": {
+            "color": "#F3F4FF",
+            "radius": 2
+          }
+        }
+      },
+      {
+        "id": "pause-text",
+        "parentId": "pause-button",
+        "role": "text",
+        "text": "暂停",
+        "layout": {
+          "anchor": "top-left",
+          "position": [
+            50,
+            12
+          ],
+          "size": [
+            36,
+            20
+          ]
+        },
+        "style": {
+          "fontSize": 16,
+          "color": "#F3F4FF",
+          "lineHeight": 20
+        }
+      }
+    ]
+  }
+}

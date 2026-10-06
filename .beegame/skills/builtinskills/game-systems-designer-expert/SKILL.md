@@ -72,4 +72,4 @@ economy, meta-progression, or retention plan for a game that has none.
 Load only when the task needs extra detail:
 - `references/core-loop-contract.md` for loop contracts and player promise alignment.
 - `references/parameter-boundary-model.md` for tunable limits and risk boundaries.
-- `references/state-machine-rules-boundary.md` for state transitions and rules ownership.
+- `references/state-machine-rules-boundary.md` for gameplay transitions and outcome precedence.

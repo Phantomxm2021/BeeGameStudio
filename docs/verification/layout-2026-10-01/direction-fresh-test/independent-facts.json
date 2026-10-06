@@ -1,0 +1,133 @@
+{
+  "provenance": "Numbers read from frozen scene draft and final BALANCE release table; comparison claims from LEVEL §1/3.2 and BALANCE §1/4.1/4.3.",
+  "rowsFromTopToBottom": [
+    {
+      "centerY": 92,
+      "names": [
+        "brick-r0-c0",
+        "brick-r0-c1",
+        "brick-r0-c2",
+        "brick-r0-c3",
+        "brick-r0-c4",
+        "brick-r0-c5",
+        "brick-r0-c6",
+        "brick-r0-c7",
+        "brick-r0-c8",
+        "brick-r0-c9"
+      ],
+      "hp": [
+        1
+      ]
+    },
+    {
+      "centerY": 120,
+      "names": [
+        "brick-r1-c0",
+        "brick-r1-c1",
+        "brick-r1-c2",
+        "brick-r1-c3",
+        "brick-r1-c4",
+        "brick-r1-c5",
+        "brick-r1-c6",
+        "brick-r1-c7",
+        "brick-r1-c8",
+        "brick-r1-c9"
+      ],
+      "hp": [
+        1
+      ]
+    },
+    {
+      "centerY": 148,
+      "names": [
+        "brick-r2-c0",
+        "brick-r2-c1",
+        "brick-r2-c2",
+        "brick-r2-c3",
+        "brick-r2-c4",
+        "brick-r2-c5",
+        "brick-r2-c6",
+        "brick-r2-c7",
+        "brick-r2-c8",
+        "brick-r2-c9"
+      ],
+      "hp": [
+        1
+      ]
+    },
+    {
+      "centerY": 176,
+      "names": [
+        "brick-r3-c0",
+        "brick-r3-c1",
+        "brick-r3-c2",
+        "brick-r3-c3",
+        "brick-r3-c4",
+        "brick-r3-c5",
+        "brick-r3-c6",
+        "brick-r3-c7",
+        "brick-r3-c8",
+        "brick-r3-c9"
+      ],
+      "hp": [
+        1
+      ]
+    },
+    {
+      "centerY": 204,
+      "names": [
+        "brick-r4-c0",
+        "brick-r4-c1",
+        "brick-r4-c2",
+        "brick-r4-c3",
+        "brick-r4-c4",
+        "brick-r4-c5",
+        "brick-r4-c6",
+        "brick-r4-c7",
+        "brick-r4-c8",
+        "brick-r4-c9"
+      ],
+      "hp": [
+        2
+      ]
+    },
+    {
+      "centerY": 232,
+      "names": [
+        "brick-r5-c0",
+        "brick-r5-c1",
+        "brick-r5-c2",
+        "brick-r5-c3",
+        "brick-r5-c4",
+        "brick-r5-c5",
+        "brick-r5-c6",
+        "brick-r5-c7",
+        "brick-r5-c8",
+        "brick-r5-c9"
+      ],
+      "hp": [
+        2
+      ]
+    }
+  ],
+  "statedTopTwoRowsHp": 2,
+  "actualTopTwoRowsHp": [
+    1,
+    1
+  ],
+  "keyboardSpeed": 600,
+  "ballMaximumHorizontalSpeed": 363.7306695894642,
+  "statedKeyboardSlower": true,
+  "actualKeyboardSlower": false,
+  "contactWindowExample": {
+    "caveat": "Vertical unobstructed descent from the lowest brick bottom surface to paddle top; not all-angle or all-state fairness proof.",
+    "radius": 8,
+    "brickBottom": 244,
+    "brickExitCenterY": 252,
+    "paddleContactCenterY": 484,
+    "distance": 232,
+    "timeAtReleaseBallSpeed": 0.5523809523809524,
+    "documentedCenterlineTime": 0.6095238095238096,
+    "rescueExample200pxSeconds": 0.3333333333333333
+  }
+}

@@ -1,5 +1,56 @@
 {
   "landing": {
+    "avatar": {
+      "conversation": "創作夥伴的對話",
+      "companion": "你的遊戲創作夥伴",
+      "morning": "早上好，今天想怎麼開始？",
+      "afternoon": "下午好，今天想怎麼開始？",
+      "evening": "晚上好，今天想怎麼開始？",
+      "invitation": "可以是一句話、一張圖片、一段影片。",
+      "replyPlaceholder": "我想做一個…",
+      "send": "一起想想",
+      "thinkingTitle": "讓我想想，這個遊戲可以怎麼玩…",
+      "thinkingDescription": "我在梳理玩法、畫面和製作設定。",
+      "optionsTitle": "我想了幾個方向，選一個喜歡的吧。",
+      "optionsDescription": "選好之後，我們一起調整製作設定。",
+      "settingsDescription": "這個方向怎麼樣？把製作設定調整到你喜歡的樣子。",
+      "confirmDescription": "再看一眼我們的方案，確認後就開始製作。",
+      "errorTitle": "這次沒能完成，我們再試一次。",
+      "errorDescription": "你的想法還在這裡，可以調整後重新提交。",
+      "mood": {
+        "idle": "我在這裡，隨時開始。",
+        "listening": "嗯，我在認真看你的想法。",
+        "thinking": "讓我認真想一想。",
+        "ready": "你覺得這個方向怎麼樣？",
+        "error": "你的想法已保留。"
+      },
+      "chooseMode": "先選一種創作方式。",
+      "creativeModeHint": "有個靈感，一起展開",
+      "blueprintModeHint": "已有方案，直接製作",
+      "creativePrompt": "想做一個什麼樣的遊戲？",
+      "blueprintPrompt": "把遊戲藍圖交給我吧。",
+      "changeMode": "切換創作方式",
+      "nextStep": "下一步",
+      "muteSound": "關閉互動聲音",
+      "enableSound": "開啟互動聲音",
+      "back": "返回",
+      "closeFlow": "關閉創作流程",
+      "creditNotice": "生成方案會按實際 Token 用量扣 Credit。",
+      "settingsGroups": [
+        {
+          "title": "遊戲執行在哪裡？",
+          "description": "先選平台、引擎和畫面形式。"
+        },
+        {
+          "title": "怎麼玩，什麼風格？",
+          "description": "定下玩法、視覺風格、操作方式和資源庫使用方式。"
+        },
+        {
+          "title": "還有什麼補充？",
+          "description": "把你希望我注意的細節寫在這裡。"
+        }
+      ]
+    },
     "intake": {
       "starting": {
         "title": "正在啟動專案",
@@ -19,13 +70,22 @@
         "unsupportedOrTooLarge": "檔案類型不受支援，或檔案過大。",
         "attachmentReadFailed": "無法讀取檔案，請再試一次。"
       },
-      "devProjectPurge": {"button":"開發測試：清空全部專案","confirm":"將永久刪除目前帳號的 {{count}} 個專案及可清理的工作區，無法復原。不會刪除帳號或資源庫。","delete":"永久刪除全部專案","cancel":"取消","pending":"處理中，請勿重複提交…","result":"已刪除 {{deleted}} 個專案，失敗 {{failed}} 個。請檢查剩餘清單。","changed":"專案清單已變更，請重新檢視清單後確認。","failed":"無法確認清理結果。請重新整理專案清單後檢查；不要直接重複提交。"},
+      "devProjectPurge": {
+        "button": "開發測試：清空全部專案",
+        "confirm": "將永久刪除目前帳號的 {{count}} 個專案及可清理的工作區，無法復原。不會刪除帳號或資源庫。",
+        "delete": "永久刪除全部專案",
+        "cancel": "取消",
+        "pending": "處理中，請勿重複提交…",
+        "result": "已刪除 {{deleted}} 個專案，失敗 {{failed}} 個。請檢查剩餘清單。",
+        "changed": "專案清單已變更，請重新檢視清單後確認。",
+        "failed": "無法確認清理結果。請重新整理專案清單後檢查；不要直接重複提交。"
+      },
       "modal": {
         "chooseOption": "選擇方案",
         "productionSettings": "製作設定",
         "confirmBuildBrief": "確認構建方案",
         "startBuild": "啟動構建",
-        "close": "關閉方案視窗"
+        "close": "返回想法"
       },
       "optionCard": {
         "mode": "遊戲模式",
@@ -541,7 +601,9 @@
       "legacy": "此記錄為純文字，缺少來源資訊，按原文保留。",
       "recent": "僅顯示最近活動；較早記錄或過長輸出已省略。",
       "truncated": "此輸出已截斷，並非完整檔案或執行結果。",
-      "command": "命令", "output": "工具輸出", "file": "檔案內容"
+      "command": "命令",
+      "output": "工具輸出",
+      "file": "檔案內容"
     },
     "assistantName": "BeeGame",
     "previewTitle": "預覽",
@@ -598,11 +660,23 @@
     "clarificationDescription": "回答澄清問題，或選擇如何繼續目前簡報。",
     "aiProcessing": "AI 正在處理...",
     "attachmentBuild": {
-      "input": "輸入來源", "completeness": "完整度", "confirmedGdd": "確認後的 GDD",
-      "confirmedFacts": "已確認內容", "inferredDesign": "推斷設計", "missingInformation": "缺少資訊",
-      "conflicts": "待解決衝突", "useGdd": "使用 GDD 內容", "useImage": "使用圖片推斷", "useCustom": "使用自訂內容",
-      "resourceLibrary": "資源庫使用方式", "resourcePreferred": "優先使用資源庫", "resourceOptional": "適合時使用資源庫", "resourceRequired": "必須使用資源庫",
-      "retry": "重新分析", "preparing": "準備建構中…", "confirm": "確認並建構"
+      "input": "輸入來源",
+      "completeness": "完整度",
+      "confirmedGdd": "確認後的 GDD",
+      "confirmedFacts": "已確認內容",
+      "inferredDesign": "推斷設計",
+      "missingInformation": "缺少資訊",
+      "conflicts": "待解決衝突",
+      "useGdd": "使用 GDD 內容",
+      "useImage": "使用圖片推斷",
+      "useCustom": "使用自訂內容",
+      "resourceLibrary": "資源庫使用方式",
+      "resourcePreferred": "優先使用資源庫",
+      "resourceOptional": "適合時使用資源庫",
+      "resourceRequired": "必須使用資源庫",
+      "retry": "重新分析",
+      "preparing": "準備建構中…",
+      "confirm": "確認並建構"
     },
     "innerThought": "內部思考",
     "contextUpdate": "上下文更新",

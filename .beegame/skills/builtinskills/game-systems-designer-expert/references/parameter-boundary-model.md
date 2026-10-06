@@ -4,6 +4,8 @@
 
 Use this reference to make design parameters tunable and testable.
 
+Trace each value to its source definition. Distinguish confirmed requirements, design choices and estimates; do not promote an estimate into a confirmed requirement. Preserve explicitly supplied constraints.
+
 ## Required Outputs
 
 - Every implementation-facing number must include value, unit, scope, and rationale.

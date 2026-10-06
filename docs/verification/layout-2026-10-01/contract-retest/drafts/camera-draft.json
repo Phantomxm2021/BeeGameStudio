@@ -1,0 +1,11 @@
+{
+  "orthographic": true,
+  "orthographicSize": 5.4,
+  "coordinateSpace": "logical-pixels",
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "framing": "letterbox",
+  "pixelsPerUnit": 100
+}

@@ -14,7 +14,6 @@ import {
 import { getRemoteUrl } from '../../utils/git.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
-  createDefaultCloudEnvironment,
   type EnvironmentResource,
   fetchEnvironments,
 } from '../../utils/teleport/environments.js'
@@ -137,7 +136,6 @@ function buildPrompt(opts: {
   connectorsInfo: string
   gitRepoUrl: string | null
   environmentsInfo: string
-  createdEnvironment: EnvironmentResource | null
   setupNotes: string[]
   needsGitHubAccessReminder: boolean
   userArgs: string
@@ -147,7 +145,6 @@ function buildPrompt(opts: {
     connectorsInfo,
     gitRepoUrl,
     environmentsInfo,
-    createdEnvironment,
     setupNotes,
     needsGitHubAccessReminder,
     userArgs,
@@ -242,7 +239,6 @@ Every trigger requires an \`environment_id\` in the job config. This determines 
 ${environmentsInfo}
 
 Use the \`id\` value as the \`environment_id\` in \`job_config.ccr.environment_id\`.
-${createdEnvironment ? `\n**Note:** A new environment \`${createdEnvironment.name}\` (id: \`${createdEnvironment.environment_id}\`) was just created for the user because they had none. Use this id for \`job_config.ccr.environment_id\` and mention the creation when you confirm the trigger config.\n` : ''}
 
 ## API Field Reference
 
@@ -358,26 +354,6 @@ export function registerScheduleRemoteAgentsSkill(): void {
         ]
       }
 
-      let createdEnvironment: EnvironmentResource | null = null
-      if (environments.length === 0) {
-        try {
-          createdEnvironment = await createDefaultCloudEnvironment(
-            'claude-code-default',
-          )
-          environments = [createdEnvironment]
-        } catch (err) {
-          logForDebugging(`[schedule] Failed to create environment: ${err}`, {
-            level: 'warn',
-          })
-          return [
-            {
-              type: 'text',
-              text: 'No remote environments found, and we could not create one automatically. Visit https://claude.ai/code to set one up, then run /schedule again.',
-            },
-          ]
-        }
-      }
-
       // Soft setup checks — collected as upfront notes embedded in the initial
       // AskUserQuestion dialog. Never block — triggers don't require a git
       // source (e.g., Slack-only polls), and the trigger's sources may point
@@ -425,6 +401,11 @@ export function registerScheduleRemoteAgentsSkill(): void {
       const connectorsInfo = formatConnectorsInfo(connectors)
       const gitRepoUrl = await getCurrentRepoHttpsUrl()
       const lines = ['Available environments:']
+      if (environments.length === 0) {
+        lines.push(
+          'No remote environments found. Before creating a new trigger, set one up at https://claude.ai/code. Listing existing triggers does not require a new environment.',
+        )
+      }
       for (const env of environments) {
         lines.push(
           `- ${env.name} (id: ${env.environment_id}, kind: ${env.kind})`,
@@ -436,7 +417,6 @@ export function registerScheduleRemoteAgentsSkill(): void {
         connectorsInfo,
         gitRepoUrl,
         environmentsInfo,
-        createdEnvironment,
         setupNotes,
         needsGitHubAccessReminder,
         userArgs: args,

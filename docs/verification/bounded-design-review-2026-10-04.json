@@ -1,0 +1,32 @@
+{
+  "scope": "BGS eight-document delivery readiness and bounded Review/Revision",
+  "changes": [
+    "Shared author/review instructions define readiness by the next consumer's necessary decisions, not perfection.",
+    "Blockers require source evidence, downstream impact and an observable closure condition; deferred work needs an owner and needed-by point.",
+    "Platform facts require supplied contracts, authoritative documentation or proportional capability evidence; final feel, balance and rendering remain later validation.",
+    "Review instructions permit one semantic inspection, one grouped correction and targeted verification; unresolved blockers require evidence or owner/user direction.",
+    "Native reviewer uses existing maxTurns=32 and cannot invoke Agent to launch further reviewers. This is an execution ceiling, not a Token/Credit cap or proof of acceptance.",
+    "A user-triggered Review ending without a valid milestone conclusion no longer silently schedules another Review.",
+    "Existing reference checker also validates explicitly cited retained files under docs, including calculation inputs/scripts; missing, empty, external and transient evidence blocks handoff.",
+    "Existing formula and geometry tools remain in use. No whole-document schema, new decision registry, semantic regex gate or extra review stage was added.",
+    "Checking Skill describes evidence and finding methods; ownership and work limits remain in assignment prompts and native runtime configuration."
+  ],
+  "verification": {
+    "targetedTests": {"passed": 105, "failed": 0, "files": 6},
+    "agentWorkflowServerTypecheck": "passed",
+    "skillCreatorQuickValidation": "passed",
+    "gitDiffWhitespaceCheck": "passed",
+    "wholeRepositoryTypecheck": "failed; reported errors are in files not edited for this change, including sceneContentAdapter, project-turn-native.test, subagentSystemPrompt.test and sdkTaskNotification.test",
+    "previousRealRunReadOnlyReferenceCheck": {"valid": true, "checkedReferences": 94, "pendingReferences": 35, "issues": []},
+    "paidRuns": 0,
+    "generatedProjectArtifactsEdited": false
+  },
+  "limits": [
+    "The native turn ceiling bounds execution; counting semantic correction cycles remains an instruction, not a mechanical semantic classifier.",
+    "Reference/evidence-file validation does not prove the contents, platform facts, ownership or semantic agreement correct.",
+    "No automatic event-coverage/unit checker was invented for unconstrained prose; only existing supported formula/geometry checks and explicit sources are used.",
+    "Local tests do not establish that the model will detect all semantic issues. Real paid behavior remains unverified.",
+    "Previous generated documents remain unchanged and retain their independently reported semantic issues.",
+    "Existing dependency batches were preserved; this change does not broaden downstream edit authority or automatically accept a changed baseline."
+  ]
+}

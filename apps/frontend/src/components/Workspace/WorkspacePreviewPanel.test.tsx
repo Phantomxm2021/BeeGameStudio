@@ -2,6 +2,11 @@ import { act, fireEvent, render, screen, within, waitFor } from '@testing-librar
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { WorkspacePreviewPanel } from './WorkspacePreviewPanel';
+import { getDailyAvatar } from '../Demiurge/Landing/useDailyAvatar';
+
+vi.mock('../Demiurge/Landing/DotsAvatar', () => ({
+  DotsAvatar: ({ token, mood, label }: { token: string; mood: string; label: string }) => <div role="img" aria-label={label} data-dot-token={token} data-mood={mood} />,
+}));
 
 const props = {
   title: 'Preview',
@@ -69,35 +74,36 @@ describe('WorkspacePreviewPanel', () => {
     expect(surface).toHaveClass('bg-[var(--preview-well)]', 'rounded-xl');
     expect(surface).not.toHaveClass('border', 'shadow', 'shadow-lg');
   });
-  it('keeps the ghost working during preview startup and only wakes on click while idle', () => {
+  it('uses today’s home avatar, keeps it thinking during startup and only wakes on click while idle', () => {
     vi.useFakeTimers();
     const { rerender } = render(<WorkspacePreviewPanel {...props} previewState="starting" />);
     const avatar = screen.getByRole('img');
-    expect(avatar).toHaveAttribute('data-state', 'working');
+    expect(avatar).toHaveAttribute('data-dot-token', getDailyAvatar());
+    expect(avatar).toHaveAttribute('data-mood', 'thinking');
 
     fireEvent.click(screen.getByTestId('beegame-preview-surface'));
     act(() => { vi.advanceTimersByTime(3_000); });
-    expect(avatar).toHaveAttribute('data-state', 'working');
+    expect(avatar).toHaveAttribute('data-mood', 'thinking');
 
     rerender(<WorkspacePreviewPanel {...props} />);
-    expect(avatar).toHaveAttribute('data-state', 'sleeping');
+    expect(avatar).toHaveAttribute('data-mood', 'sleeping');
     fireEvent.click(screen.getByTestId('beegame-preview-surface'));
-    expect(avatar).toHaveAttribute('data-state', 'default');
+    expect(avatar).toHaveAttribute('data-mood', 'idle');
 
     act(() => { vi.advanceTimersByTime(3_000); });
-    expect(avatar).toHaveAttribute('data-state', 'sleeping');
+    expect(avatar).toHaveAttribute('data-mood', 'sleeping');
   });
   it('ignores preview clicks while the agent-working status is shown', () => {
     vi.useFakeTimers();
     const { rerender } = render(<WorkspacePreviewPanel {...props} isAgentWorking statusText="Bee Game Studio工作中" />);
     const avatar = screen.getByRole('img');
-    expect(avatar).toHaveAttribute('data-state', 'working');
+    expect(avatar).toHaveAttribute('data-mood', 'thinking');
     fireEvent.click(screen.getByTestId('beegame-preview-surface'));
-    expect(avatar).toHaveAttribute('data-state', 'working');
+    expect(avatar).toHaveAttribute('data-mood', 'thinking');
     rerender(<WorkspacePreviewPanel {...props} isAgentWorking previewState="starting" statusText="Bee Game Studio工作中" />);
     fireEvent.click(screen.getByTestId('beegame-preview-surface'));
     act(() => { vi.advanceTimersByTime(3_000); });
-    expect(avatar).toHaveAttribute('data-state', 'working');
+    expect(avatar).toHaveAttribute('data-mood', 'thinking');
   });
   it('reveals Gooey preview actions only after the preview has loaded', async () => {
     render(<WorkspacePreviewPanel {...live} />);

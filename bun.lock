@@ -341,6 +341,9 @@
     "packages/agent-workflow": {
       "name": "@bee-game-studio/agent-workflow",
       "version": "0.1.0",
+      "dependencies": {
+        "zod": "^4.3.6",
+      },
     },
     "packages/agent-workflow-server": {
       "name": "@bee-game-studio/agent-workflow-server",

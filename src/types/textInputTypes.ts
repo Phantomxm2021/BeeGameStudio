@@ -292,6 +292,9 @@ export type QueuePriority = 'now' | 'next' | 'later'
  * Queued command type
  */
 export type QueuedCommand = {
+  /** BGS stdin dispatch metadata, not a request inferred from message text. */
+  beegameDirectionAuthors?: import('@bee-game-studio/agent-workflow/native-direction-authors').NativeDirectionAuthorInput
+  beegameProjectTurn?: import('@bee-game-studio/agent-workflow/native-direction-authors').NativeProjectTurnInput
   value: string | Array<ContentBlockParam>
   mode: PromptInputMode
   /** Defaults to the priority implied by `mode` when enqueued. */

@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { appendRuntimeDiagnostic } from './project-records'
+import { parseNativeDiagnostic } from '@bee-game-studio/agent-workflow/native-diagnostics'
 
 const MAX_RUNTIME_DIAGNOSTIC_BYTES = 4 * 1024 * 1024
 const RUNTIME_DIAGNOSTIC_ARCHIVES = 3
@@ -99,6 +100,17 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
         }
       }
       lastStdoutChunkAtMs = nowMs
+    },
+    observeDiagnostic(value: unknown): void {
+      const diagnostic = parseNativeDiagnostic(value)
+      if (!diagnostic) return
+      enqueue({
+        type: 'native_diagnostic',
+        timestamp: clock().toISOString(),
+        sessionId: input.sessionId,
+        ...(turnActive ? { requestId } : {}),
+        diagnostic,
+      })
     },
     observeLine(line: string): void {
       byteCount += Buffer.byteLength(line)

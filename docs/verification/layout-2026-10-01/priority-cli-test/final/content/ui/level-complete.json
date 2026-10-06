@@ -1,0 +1,284 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-level-complete",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "complete-root",
+    "nodes": [
+      {
+        "id": "complete-root",
+        "role": "screen-root",
+        "enabled": true,
+        "name": "Level Complete Overlay Root",
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0],
+          "position": [0, 0]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [960, 540],
+          "targetViewports": [
+            [960, 540],
+            [800, 450],
+            [1024, 576]
+          ],
+          "minimumControlSize": [44, 44]
+        }
+      },
+      {
+        "id": "complete-scrim",
+        "parentId": "complete-root",
+        "role": "container",
+        "enabled": true,
+        "name": "Warm Scrim",
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0],
+          "position": [0, 0],
+          "item": {
+            "absolute": true
+          }
+        },
+        "style": {
+          "background": { "color": "#120A1E", "opacity": 0.72 }
+        }
+      },
+      {
+        "id": "complete-panel",
+        "parentId": "complete-root",
+        "role": "container",
+        "enabled": true,
+        "name": "Level Complete Panel",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 0],
+          "size": [400, 344],
+          "container": {
+            "direction": "column",
+            "gap": 14,
+            "padding": [28, 28, 28, 28],
+            "justify": "start",
+            "align": "stretch"
+          }
+        },
+        "style": {
+          "background": { "color": "#1A1226", "opacity": 0.95, "radius": 16 },
+          "border": { "width": 2, "color": "#FFC85A", "radius": 16 },
+          "cornerRadius": 16
+        }
+      },
+      {
+        "id": "complete-title",
+        "parentId": "complete-panel",
+        "role": "text",
+        "enabled": true,
+        "text": "关卡完成！",
+        "layout": {
+          "size": [344, 38]
+        },
+        "style": {
+          "fontSize": 30,
+          "color": "#FFC85A",
+          "align": "center",
+          "fontWeight": 700
+        }
+      },
+      {
+        "id": "new-record-badge",
+        "parentId": "complete-panel",
+        "role": "container",
+        "enabled": true,
+        "name": "New Record Badge (conditional)",
+        "layout": {
+          "size": [344, 28],
+          "container": {
+            "direction": "row",
+            "gap": 8,
+            "padding": [0, 0, 0, 0],
+            "justify": "center",
+            "align": "center"
+          }
+        },
+        "data": {
+          "visibleWhen": "sessionScore > storedBest",
+          "note": "条件性节点：未破纪录时运行时置 enabled:false，后续行上移由实现处理"
+        }
+      },
+      {
+        "id": "new-record-icon",
+        "parentId": "new-record-badge",
+        "role": "shape",
+        "enabled": true,
+        "name": "Star Icon",
+        "layout": {
+          "size": [18, 18]
+        },
+        "style": {
+          "shape": "star",
+          "color": "#FFC85A"
+        }
+      },
+      {
+        "id": "new-record-text",
+        "parentId": "new-record-badge",
+        "role": "text",
+        "enabled": true,
+        "text": "NEW RECORD",
+        "layout": {
+          "size": [140, 24]
+        },
+        "style": {
+          "fontSize": 16,
+          "color": "#FFC85A",
+          "align": "center",
+          "fontFamily": "monospace",
+          "fontWeight": 700
+        }
+      },
+      {
+        "id": "complete-score-row",
+        "parentId": "complete-panel",
+        "role": "container",
+        "enabled": true,
+        "name": "Session Score Row",
+        "layout": {
+          "size": [344, 28],
+          "container": {
+            "direction": "row",
+            "gap": 10,
+            "padding": [0, 0, 0, 0],
+            "justify": "center",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "complete-score-label",
+        "parentId": "complete-score-row",
+        "role": "text",
+        "enabled": true,
+        "text": "当局得分",
+        "layout": {
+          "size": [72, 22]
+        },
+        "style": {
+          "fontSize": 16,
+          "color": "#9AA5C8",
+          "align": "right"
+        }
+      },
+      {
+        "id": "complete-score-value",
+        "parentId": "complete-score-row",
+        "role": "text",
+        "enabled": true,
+        "text": "0000",
+        "layout": {
+          "size": [96, 28]
+        },
+        "style": {
+          "fontSize": 22,
+          "color": "#EAF6FF",
+          "align": "left",
+          "fontFamily": "monospace",
+          "fontWeight": 600
+        }
+      },
+      {
+        "id": "complete-best-row",
+        "parentId": "complete-panel",
+        "role": "container",
+        "enabled": true,
+        "name": "Best Score Row",
+        "layout": {
+          "size": [344, 28],
+          "container": {
+            "direction": "row",
+            "gap": 10,
+            "padding": [0, 0, 0, 0],
+            "justify": "center",
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "complete-best-label",
+        "parentId": "complete-best-row",
+        "role": "text",
+        "enabled": true,
+        "text": "最高分",
+        "layout": {
+          "size": [72, 22]
+        },
+        "style": {
+          "fontSize": 16,
+          "color": "#9AA5C8",
+          "align": "right"
+        }
+      },
+      {
+        "id": "complete-best-value",
+        "parentId": "complete-best-row",
+        "role": "text",
+        "enabled": true,
+        "text": "0000",
+        "layout": {
+          "size": [96, 28]
+        },
+        "style": {
+          "fontSize": 22,
+          "color": "#FFC85A",
+          "align": "left",
+          "fontFamily": "monospace",
+          "fontWeight": 600
+        }
+      },
+      {
+        "id": "complete-replay-button",
+        "parentId": "complete-panel",
+        "role": "button",
+        "enabled": true,
+        "text": "再来一局",
+        "name": "Play Again (Primary)",
+        "layout": {
+          "size": [344, 48]
+        },
+        "style": {
+          "fontSize": 20,
+          "color": "#1A1226",
+          "background": { "color": "#FFC85A", "opacity": 0.95, "radius": 24 },
+          "border": { "width": 2, "color": "#FFE0A0", "radius": 24 },
+          "cornerRadius": 24
+        },
+        "actions": {
+          "click": "game:restart"
+        }
+      },
+      {
+        "id": "complete-quit-button",
+        "parentId": "complete-panel",
+        "role": "button",
+        "enabled": true,
+        "text": "退出",
+        "name": "Quit to Title (Secondary)",
+        "layout": {
+          "size": [344, 48]
+        },
+        "style": {
+          "fontSize": 20,
+          "color": "#D8E2F8",
+          "background": { "color": "#0E1C38", "opacity": 0.72, "radius": 24 },
+          "border": { "width": 1, "color": "#5C6FA0", "radius": 24 },
+          "cornerRadius": 24
+        },
+        "actions": {
+          "click": "game:quit-to-title"
+        }
+      }
+    ]
+  }
+}

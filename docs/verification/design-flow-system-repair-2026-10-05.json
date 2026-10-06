@@ -1,0 +1,89 @@
+{
+  "date": "2026-10-05",
+  "kind": "system-flow-repair-regression",
+  "basis": "Trace the actual stopped native delivery, reproduce host and dispatch failures using synthetic fixtures, repair system routing without altering products or weakening release conditions.",
+  "paidEvidence": "design-simplification-paid-accept-2026-10-05.json",
+  "scope": {
+    "paidRuns": 0,
+    "tokenOptimization": false,
+    "manualProductEdits": false,
+    "injectedProductFindings": false,
+    "newReviewStages": 0,
+    "newAutomaticRetries": 0
+  },
+  "roots": [
+    {
+      "id": "FLOW-1",
+      "classification": "system orchestration defect",
+      "evidence": "Native state remained inspect/stopped. Finding f6 explicitly identified Balance's forbidden inputs table but labelled it follow-up. Host sent only semantic blockers into revise.",
+      "cause": "Known deterministic failures were release blockers, but their correction scheduling depended on the model's semantic severity judgment.",
+      "change": "Inspect now schedules the existing single revise for actual handoff/reference diagnostics too. Exact source documents determine write scope; recorded findings remain unchanged. Unmapped diagnostics and unavailable owner decisions stop rather than expanding scope.",
+      "location": "packages/agent-workflow-server/src/beegame/project-delivery.ts:415"
+    },
+    {
+      "id": "FLOW-2",
+      "classification": "dispatch implementation defect, independently reproduced during repair",
+      "evidence": "Synthetic missing calculation citation reached revise, then designCalculationFiles realpathSync threw ENOENT before the native submit was called.",
+      "cause": "Collecting existing authorized evidence paths treated a missing citation as a fatal dispatch exception, preventing correction of the document that cited it.",
+      "change": "Skip only ENOENT while collecting existing calculation write targets. Missing references still fail the release check. No grant to create missing calculation evidence; symlink and containment checks remain.",
+      "location": "packages/agent-workflow-server/src/beegame/design-handoff.ts:121"
+    },
+    {
+      "id": "FLOW-3",
+      "classification": "author permission heuristic defect",
+      "evidence": "Scene requests 103,104,111,112 falsely denied legitimate checker invocations in semicolon/loop commands. Prefix regex recognized only start-of-command or &&.",
+      "cause": "A Bash pathname substring was treated as proof of reading implementation source.",
+      "change": "Remove the ambiguous Bash checker-source inference; preserve direct-file source/log guards, child-dispatch restrictions and the native permission decision.",
+      "limitation": "BGS no longer separately rejects arbitrary shell reads of checker source by this heuristic. Native shell permissions adjudicate them; this author guard is not a general shell sandbox.",
+      "location": "src/beegame/direction-authors.ts:97"
+    }
+  ],
+  "unchangedContracts": [
+    "One inspect, at most one scoped revise, then read-only verify; remaining failures stop.",
+    "Changed documents, handoff sidecars and retained calculations require document version increase.",
+    "A completed review receipt is execution evidence, not release certification.",
+    "Unavailable necessary facts or owner/user decisions are blocked, not silently selected.",
+    "No directory-wide write grant, fabricated findings, relaxed reference checks or automatic second revision."
+  ],
+  "verification": {
+    "focusedFirstRun": {
+      "pass": 50,
+      "fail": 0
+    },
+    "dispatchReproduction": {
+      "beforeFix": "role-table passed; missing-calculation failed with ENOENT",
+      "afterFix": "both passed through inspect/revise/verify, narrow Balance scope, empty findings unchanged, released Balance version 1.1"
+    },
+    "regression": {
+      "files": 12,
+      "pass": 219,
+      "fail": 0,
+      "skip": 1,
+      "elapsedSeconds": 21.33,
+      "scope": "Host delivery, native task dispatch/permissions, design handoffs/references, calculation, document author/review contracts. Provider execution is synthetic, not a new paid acceptance.",
+      "skipped": "Browser-dependent published design inspector; no target-runtime browser acceptance established.",
+      "warning": "Native test browser cleanup logged sandbox EPERM for /bin/ps; test assertions passed."
+    },
+    "workflowServerTypecheck": "bun run typecheck: exit 0",
+    "scopedDiffWhitespaceCheck": "git diff --check: exit 0",
+    "readonlyPaidProductComparison": {
+      "snapshot": "/private/tmp/bgs-simplified-paid-accept-20261005-cjIUzKpT/after-review-3-inspect-turn10",
+      "filesCompared": 17,
+      "changed": []
+    }
+  },
+  "unresolved": [
+    "Real fresh BGS delivery has not yet reached all eight documents or runtime acceptance after these changes.",
+    "Semantic misses in the paid documents remain: an average interval was used as a universal fairness guarantee, conditional Art pause behavior conflicts, Technical dt units are inconsistent.",
+    "The existence or successful execution of a calculation proves neither the model's adequacy nor a universal claim. Structural checkers do not independently certify these semantics.",
+    "No case-specific prompt rules or new review framework added to pretend those misses are solved.",
+    "The paid project remains stopped and its products remain unchanged. Resuming or rerunning a paid acceptance needs separate authorization."
+  ],
+  "acceptanceForNextAuthorizedRun": [
+    "No manual product edits or seeded findings; use native BGS.",
+    "Deterministic errors enter the existing scoped revision regardless of reviewer severity.",
+    "Only actual corrected saved bytes, required evidence and increased versions can pass verification.",
+    "Reach all eight documents and dependent stages, or stop with a specific genuine unresolved decision/evidence issue rather than a dispatch exception.",
+    "Independently inspect real outputs; flow continuation is not semantic or game-quality acceptance."
+  ]
+}

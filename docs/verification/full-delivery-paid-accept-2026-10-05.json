@@ -1,0 +1,126 @@
+{
+  "date": "2026-10-05",
+  "kind": "read-only observer audit of one authorized paid BGS integration run",
+  "outcome": "host-blocked; full delivery acceptance not passed",
+  "root": "/private/tmp/bgs-full-delivery-accept-20261005-fqNuF4om",
+  "projectId": "full-accept-fruit-20261005-fqNuF4om",
+  "sessionId": "beegame_45035be7804c4994b6d79e5d17d0b1f0",
+  "model": "ark-code-latest",
+  "elapsedSeconds": 2378.64,
+  "scope": {
+    "freshBrief": "浏览器水果接篮小游戏，接水果、避杂物、可重开，键盘和触屏可操作",
+    "oldDraftsReused": false,
+    "observerFindingsInjected": false,
+    "manualProductEdits": false,
+    "paidRuns": 1,
+    "additionalRuns": 0,
+    "sourceHashFilesCompared": 3828,
+    "changedSourceHashPaths": [],
+    "notExecuted": ["联合定向复核", "后续四文档及技术最终批次", "资源生产", "Content", "实现", "目标运行时验收"],
+    "limitations": [
+      "集成脚本调用生产 session/conversation/delivery/preview/image 服务，不是 Dashboard UI 启动测试。",
+      "隔离脚本没有资源库；真实图片生成能力接入，但预检图片配置出现网络错误。尚未进入资源阶段，不能将其解释为本次阻断原因。",
+      "计费观察接口前后均返回 billing_observation_transport_failed，实际 Credit/金额未知。"
+    ]
+  },
+  "tokenAccounting": {
+    "basis": "provider-usage.json: final provider usage per messages request; input plus cache-read plus cache-creation plus output",
+    "modelCallsWithFinalUsage": 113,
+    "inputTokens": 431372,
+    "cacheReadInputTokens": 4176400,
+    "cacheCreationInputTokens": 0,
+    "outputTokens": 109553,
+    "totalObservedTokens": 4717325,
+    "nonModelRequestWithoutUsage": {"id": 1, "reason": "authentication HTTP 401; usage unavailable, not interpreted as zero spend"},
+    "runningRequestsAtEnd": [],
+    "partialUsageRequestsAtEnd": [],
+    "warning": "Observed tokens including repeated cached input are not new context length, not output size, and not settled credits."
+  },
+  "stages": [
+    {"stage": "GDD author", "nativeStage": "author-1-work-turn1", "seconds": 203.41, "calls": 5, "input": 43040, "cache": 164376, "output": 7071, "total": 214487},
+    {"stage": "GDD Inspect", "nativeStage": "review-1-inspect-turn2", "seconds": 209.704, "calls": 7, "input": 24327, "cache": 105608, "output": 7343, "total": 137278},
+    {"stage": "GDD Revise", "nativeStage": "review-1-revise-turn3", "seconds": 204.722, "calls": 13, "input": 36145, "cache": 282584, "output": 9550, "total": 328279},
+    {"stage": "GDD Verify", "nativeStage": "review-1-verify-turn4", "seconds": 61.286, "calls": 5, "input": 21701, "cache": 68120, "output": 2355, "total": 92176},
+    {
+      "stage": "Tech/Art/Audio parallel author",
+      "nativeStage": "author-2-work-turn5",
+      "seconds": 413.796,
+      "calls": 43, "input": 149556, "cache": 1482944, "output": 38030, "total": 1670530,
+      "authors": [
+        {"document": "TECHNICAL_DESIGN.md", "actor": "abb21b8ac25c2973e", "calls": 30, "total": 1265598},
+        {"document": "ART_DIRECTION.md", "actor": "a805c6398d961d7cd", "calls": 7, "total": 224175},
+        {"document": "AUDIO_DESIGN.md", "actor": "a1b603fb0bf265f3b", "calls": 6, "total": 180757}
+      ]
+    },
+    {"stage": "Joint Inspect", "nativeStage": "review-2-inspect-turn6", "seconds": 271.865, "calls": 8, "input": 55827, "cache": 222656, "output": 8424, "total": 286907},
+    {
+      "stage": "Joint Revise; stopped before Verify",
+      "nativeStage": "review-2-revise-turn7",
+      "seconds": 1013.284,
+      "calls": 32, "input": 100776, "cache": 1850112, "output": 36780, "total": 1987668,
+      "firstInputIncludingCache": 11165,
+      "lastInputIncludingCache": 98167,
+      "nativeToolCalls": {"Bash": 8, "Edit": 31, "Glob": 1, "Grep": 2, "Read": 11, "Write": 1},
+      "handoffCheckExecutions": 6,
+      "note": "A single bounded revision step still performed many internal edit/check cycles. Changed-input checks are not all redundant; several edits followed wrong hypotheses."
+    }
+  ],
+  "nativeResults": {
+    "GDD": "Inspect identified three issues, Revise saved corrections, Verify resolved the recorded issues; host released its baseline. This is not observer certification of defect-free prose or a qualified game.",
+    "jointReview": "Inspect recorded F1-F4; Revise saved corrections and returned original findings with resolved empty, as required for a revision receipt.",
+    "stop": "Host rejected the one revision pass because AUDIO_DESIGN.md still has seven required sound sources not mapped by Audio. No Verify or automatic second revision was started.",
+    "finalReleaseGate": {"allowed": false, "layer": "acceptance-record", "issue": "Current project has no verified delivery acceptance."}
+  },
+  "observerAttribution": [
+    {
+      "id": "O1",
+      "classification": "author/LLM execution error; misleading deterministic diagnostic is a system contributor",
+      "finding": "All seven Audio-owned EV outputs retain soundRequired:true after revision.",
+      "proof": "design-handoff.ts instructs GDD/UI producers to set soundRequired. It restricts event.source.document to GDD/UI, but the coverage loop scans soundRequired outputs in every document. An Audio#EV source therefore cannot be mapped without another validation error. The correct place to fix this misuse is the Audio output flag, not fabricated GDD event IDs.",
+      "observedRevision": "The native reviser tried guessed GDD#EV references and then restored valid GDD sources, but never removed the seven inappropriate flags.",
+      "minimalSystemFollowUp": "Use the existing contract to report the exact misused field and its GDD/UI-only applicability; do not describe an Audio-owned flag as a missing producer mapping or introduce a new taxonomy."
+    },
+    {
+      "id": "O2",
+      "classification": "review/revision semantic judgment error, not an absence-of-instructions proof",
+      "finding": "F1 asks to convert Art events.stop types, missing that the typed events table is sound-only. F2/F3 prescribe changes that do not close the actual field-scope errors.",
+      "proof": "Original Art events used boolean stop and visual parameters used the gameplay-only parameters table. Fixing boolean stop exposed the previously masked Art table ownership errors. Native revision transcript shows attempts at ownership declarations, guessed canonical IDs and empirical deletions. It later removed inappropriate tables and retained visual values in prose, but O1 remained.",
+      "instructionAudit": "The initial revision context does not inline DESIGN_HANDOFF_INSTRUCTION. Nevertheless the reviser explicitly invoked --design-handoff-help and received the complete role/table/source instructions. It is incorrect to claim the failure was caused solely by not receiving the contract.",
+      "minimalSystemFollowUp": "Keep one authoritative contract. Provide scoped diagnostics that identify the erroneous field and allowed role, then repair only that field and affected source requirements. Correct the incorrect recorded close conditions; adding reviewers or more prose rules is not justified by this run."
+    },
+    {
+      "id": "O3",
+      "classification": "unsupported reviewer blocker; observer inference from document-scoped contract",
+      "finding": "F4 treats differing Art/Audio settlement event names as necessarily conflicting.",
+      "proof": "Consumers use document+ID references; original prose maps both visual and audio settlement feedback to the same GDD clear/over states. Different specialist IDs alone do not establish conflicting execution requirements or a downstream need to guess. No actual shared global-ID consumer requirement was cited.",
+      "minimalSystemFollowUp": "Require the existing source/downstream-impact criterion to be met; do not automatically unify names across independent document namespaces."
+    },
+    {
+      "id": "O4",
+      "classification": "workflow efficiency/execution issue; no claim that cache causes semantic distortion",
+      "finding": "Joint Revise consumed 1,987,668 tokens, 32 model calls and 16m53s. Technical author consumed 1,265,598 tokens across 30 calls. Together they account for about 69% of the run.",
+      "proof": "Provider ledger attributes usage by stage and native actor. Technical transcript includes multiple official-document fetch/extraction steps, contract lookup, evidence writes and checks. Revision transcript includes 31 edits and six handoff checks, with wrong hypotheses preceding several edits. Repeated accumulated input dominates the cost; output is only 109,553 tokens for the whole run.",
+      "minimalSystemFollowUp": "First fix misleading diagnostics and source-backed correction targets. Then batch necessary evidence retrieval/extraction and related edits with complete retained results. A step-count cap alone does not prevent expensive internal loops; no extra paid comparison run was initiated."
+    },
+    {
+      "id": "O5",
+      "classification": "unverified downstream capability, not a failed runtime test",
+      "finding": "The newly implemented design-expectation-to-runtime-check path was not exercised by this run.",
+      "proof": "Host stopped at author batch 2 revision; no implementation or acceptance.json with actual requirementChecks was produced. Source hashes stayed unchanged during the run.",
+      "minimalSystemFollowUp": "Do not announce that the complete executable-design delivery scheme passed. Resolve the present system diagnostics/review closure defects before another authorized full acceptance."
+    }
+  ],
+  "auditEvidence": [
+    "summary.json",
+    "stages.json",
+    "provider-usage.json",
+    "source-before.json",
+    "source-after.json",
+    "after-author-2-work-turn5/docs/",
+    "after-review-2-revise-turn7/docs/",
+    "native subagent JSONL: abb21b8ac25c2973e, a47c92f4a9322e831",
+    "system source: packages/agent-workflow-server/src/beegame/design-handoff.ts",
+    "system source: packages/agent-workflow-server/src/beegame/project-author.ts"
+  ],
+  "changesByObserver": "Only this audit file was added to the system repository. No system behavior or generated product was changed during the acceptance run."
+}

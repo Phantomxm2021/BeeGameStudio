@@ -1,0 +1,201 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui-pause-menu",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "pause-root",
+    "nodes": [
+      {
+        "id": "pause-root",
+        "role": "screen-root",
+        "enabled": true,
+        "name": "Pause Overlay Root",
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0],
+          "position": [0, 0]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [960, 540],
+          "targetViewports": [
+            [960, 540],
+            [800, 450],
+            [1024, 576]
+          ],
+          "minimumControlSize": [44, 44]
+        }
+      },
+      {
+        "id": "pause-scrim",
+        "parentId": "pause-root",
+        "role": "container",
+        "enabled": true,
+        "name": "Dim/Desaturate Scrim",
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0],
+          "position": [0, 0],
+          "item": {
+            "absolute": true
+          }
+        },
+        "style": {
+          "background": { "color": "#050816", "opacity": 0.72 }
+        }
+      },
+      {
+        "id": "pause-panel",
+        "parentId": "pause-root",
+        "role": "container",
+        "enabled": true,
+        "name": "Pause Menu Panel",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 0],
+          "size": [360, 308],
+          "container": {
+            "direction": "column",
+            "gap": 14,
+            "padding": [28, 28, 28, 28],
+            "justify": "start",
+            "align": "stretch"
+          }
+        },
+        "style": {
+          "background": { "color": "#0D1530", "opacity": 0.94, "radius": 16 },
+          "border": { "width": 2, "color": "#2CE6E0", "radius": 16 },
+          "cornerRadius": 16
+        }
+      },
+      {
+        "id": "pause-title",
+        "parentId": "pause-panel",
+        "role": "text",
+        "enabled": true,
+        "text": "已暂停",
+        "layout": {
+          "size": [220, 34]
+        },
+        "style": {
+          "fontSize": 26,
+          "color": "#EAF6FF",
+          "align": "center",
+          "fontWeight": 700
+        }
+      },
+      {
+        "id": "pause-resume-button",
+        "parentId": "pause-panel",
+        "role": "button",
+        "enabled": true,
+        "text": "继续",
+        "name": "Resume (Primary)",
+        "layout": {
+          "size": [304, 48]
+        },
+        "style": {
+          "fontSize": 20,
+          "color": "#EAF6FF",
+          "background": { "color": "#0E1C38", "opacity": 0.9, "radius": 24 },
+          "border": { "width": 2, "color": "#2CE6E0", "radius": 24 },
+          "cornerRadius": 24
+        },
+        "actions": {
+          "click": "game:resume"
+        }
+      },
+      {
+        "id": "pause-restart-button",
+        "parentId": "pause-panel",
+        "role": "button",
+        "enabled": true,
+        "text": "重新开始",
+        "name": "Restart",
+        "layout": {
+          "size": [304, 48]
+        },
+        "style": {
+          "fontSize": 20,
+          "color": "#D8E2F8",
+          "background": { "color": "#0E1C38", "opacity": 0.72, "radius": 24 },
+          "border": { "width": 1, "color": "#5C6FA0", "radius": 24 },
+          "cornerRadius": 24
+        },
+        "actions": {
+          "click": "game:restart"
+        }
+      },
+      {
+        "id": "pause-quit-button",
+        "parentId": "pause-panel",
+        "role": "button",
+        "enabled": true,
+        "text": "退出",
+        "name": "Quit",
+        "layout": {
+          "size": [304, 48]
+        },
+        "style": {
+          "fontSize": 20,
+          "color": "#D8E2F8",
+          "background": { "color": "#0E1C38", "opacity": 0.72, "radius": 24 },
+          "border": { "width": 1, "color": "#5C6FA0", "radius": 24 },
+          "cornerRadius": 24
+        },
+        "actions": {
+          "click": "game:quit-to-title"
+        }
+      },
+      {
+        "id": "pause-mute-toggle",
+        "parentId": "pause-panel",
+        "role": "toggle",
+        "enabled": true,
+        "name": "Mute Toggle",
+        "layout": {
+          "anchor": "top-right",
+          "position": [-12, 12],
+          "size": [44, 44],
+          "item": {
+            "absolute": true
+          }
+        },
+        "style": {
+          "background": { "color": "#0E1C38", "opacity": 0.7, "radius": 22 },
+          "border": { "width": 1, "color": "#3A4A78", "radius": 22 },
+          "cornerRadius": 22
+        },
+        "actions": {
+          "click": "audio:toggle-mute"
+        },
+        "data": {
+          "stateIcon": {
+            "on": "icon:sound-on",
+            "off": "icon:sound-off"
+          }
+        }
+      },
+      {
+        "id": "pause-mute-icon",
+        "parentId": "pause-mute-toggle",
+        "role": "text",
+        "enabled": true,
+        "text": "♪",
+        "layout": {
+          "anchor": "middle-center",
+          "position": [0, 0],
+          "size": [24, 24]
+        },
+        "style": {
+          "fontSize": 18,
+          "color": "#AAB6D8",
+          "align": "center"
+        }
+      }
+    ]
+  }
+}

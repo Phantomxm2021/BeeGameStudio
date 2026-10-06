@@ -1,4 +1,5 @@
-import { emitNativeDiagnostic, nextNativeDiagnosticRequest } from '@bee-game-studio/agent-workflow/native-diagnostics'
+import { emitNativeDiagnostic, nextNativeDiagnosticRequest, nativeErrorMetadata, nativeObserverHeaders, type NativeDiagnostic } from '@bee-game-studio/agent-workflow/native-diagnostics'
+import { applyThinkingPolicy, thinkingParameterMode } from '../../utils/apiThinking.js'
 import { createEvidenceResponseRecorder, recordContextChange, recordNativeEvidence, withEvidenceRequest } from '@bee-game-studio/agent-workflow/native-evidence'
 import type {
   BetaContentBlock,
@@ -860,6 +861,7 @@ export async function* executeNonStreamingRequest(
     signal: AbortSignal
     initialConsecutive529Errors?: number
     querySource?: QuerySource
+    diagnostic?: Pick<NativeDiagnostic, 'actor' | 'originRequest'>
   },
   paramsFromContext: (context: RetryContext) => BetaMessageStreamParams,
   onAttempt: (attempt: number, start: number, maxOutputTokens: number) => void,
@@ -871,6 +873,9 @@ export async function* executeNonStreamingRequest(
   originatingRequestId?: string | null,
 ): AsyncGenerator<SystemAPIErrorMessage, BetaMessage> {
   const fallbackTimeoutMs = getNonstreamingFallbackTimeoutMs()
+  let fallbackRequest: number | undefined
+  const diagnostic = () => ({ ...retryOptions.diagnostic, request: fallbackRequest,
+    mode: 'non_streaming_fallback' as const, phase: 'query' as const })
   const generator = withRetry(
     () =>
       getAnthropicClient({
@@ -890,6 +895,10 @@ export async function* executeNonStreamingRequest(
         MAX_NON_STREAMING_TOKENS,
       )
       const evidenceRequest = nextNativeDiagnosticRequest()
+      fallbackRequest = evidenceRequest
+      const requestDiagnostic = { ...diagnostic(), event: 'request_start' as const, phase: 'headers' as const, attempt,
+        thinkingPolicy: context.thinkingConfig.type, thinkingParameter: thinkingParameterMode(adjustedParams.thinking) }
+      emitNativeDiagnostic(requestDiagnostic)
       const evidenceIds = { requestId: evidenceRequest, requestAttempt: attempt }
       const body = { ...adjustedParams, model: normalizeModelStringForAPI(adjustedParams.model) }
       recordNativeEvidence('sdk_request', { mode: 'non_streaming_fallback', originatingRequestId, body }, evidenceIds)
@@ -900,11 +909,17 @@ export async function* executeNonStreamingRequest(
           {
             signal: retryOptions.signal,
             timeout: fallbackTimeoutMs,
+            headers: nativeObserverHeaders(requestDiagnostic),
           },
         ))
         recordNativeEvidence('api_response', response, evidenceIds)
+        emitNativeDiagnostic({ ...diagnostic(), event: 'request_end', attempt, outcome: 'completed',
+          thinkingReturned: typeof response === 'object' && response !== null && 'content' in response &&
+            Array.isArray(response.content) && response.content.some(block => block.type === 'thinking' || block.type === 'redacted_thinking') })
         return response
       } catch (err) {
+        emitNativeDiagnostic({ ...diagnostic(), event: 'request_end', attempt,
+          outcome: retryOptions.signal.aborted ? 'cancelled' : 'failed', ...nativeErrorMetadata(err) })
         recordNativeEvidence('request_failed', { mode: 'non_streaming_fallback' }, evidenceIds)
         // User aborts are not errors — re-throw immediately without logging
         if (err instanceof APIUserAbortError) throw err
@@ -936,6 +951,7 @@ export async function* executeNonStreamingRequest(
       signal: retryOptions.signal,
       initialConsecutive529Errors: retryOptions.initialConsecutive529Errors,
       querySource: retryOptions.querySource,
+      diagnostic,
     },
   )
 
@@ -1800,7 +1816,7 @@ async function* queryModel(
     const filteredBetas = betasParams.filter(Boolean)
     lastRequestBetas = filteredBetas
 
-    return {
+    return applyThinkingPolicy({
       model: normalizeModelStringForAPI(options.model),
       messages: addCacheBreakpoints(
         messagesForAPI,
@@ -1829,7 +1845,7 @@ async function* queryModel(
         output_config: outputConfig,
       }),
       ...(speed !== undefined && { speed }),
-    }
+    }, thinkingConfig, isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_THINKING))
   }
 
   // Compute log scalars synchronously so the fire-and-forget .then() closure
@@ -1884,6 +1900,8 @@ async function* queryModel(
   let isFastModeRequest = isFastMode // Keep separate state as it may change if falling back
   let isAdvisorInProgress = false
   let diagnosticRequest = 0
+  const requestDiagnostic = () => ({ request: diagnosticRequest || undefined,
+    actor: options.agentId ?? 'main', mode: 'streaming' as const })
   const responseEvidence = createEvidenceResponseRecorder(() => diagnosticRequest)
 
   try {
@@ -1917,7 +1935,8 @@ async function* queryModel(
         // or the "Network TTFB" phase measurement is wrong.
         queryCheckpoint('query_api_request_sent')
         diagnosticRequest = nextNativeDiagnosticRequest()
-        emitNativeDiagnostic({ event: 'request_start', request: diagnosticRequest, attempt })
+        emitNativeDiagnostic({ ...requestDiagnostic(), event: 'request_start', attempt, phase: 'headers',
+          thinkingPolicy: thinkingConfig.type, thinkingParameter: thinkingParameterMode(params.thinking) })
         recordContextChange('api_message_preparation', messages, params.messages, { requestId: diagnosticRequest })
         recordNativeEvidence('sdk_request', { mode: 'streaming', querySource: options.querySource, requestedModel: options.model,
           runtime: { version: MACRO.VERSION, buildTime: MACRO.BUILD_TIME },
@@ -1942,14 +1961,13 @@ async function* queryModel(
             { ...params, stream: true },
             {
               signal,
-              ...(clientRequestId && {
-                headers: { [CLIENT_REQUEST_ID_HEADER]: clientRequestId },
-              }),
+              headers: { ...nativeObserverHeaders({ ...requestDiagnostic(), event: 'request_start', attempt }),
+                ...(clientRequestId ? { [CLIENT_REQUEST_ID_HEADER]: clientRequestId } : {}) },
             },
           )
           .withResponse())
         queryCheckpoint('query_response_headers_received')
-        emitNativeDiagnostic({ event: 'response_headers', request: diagnosticRequest, status: result.response.status })
+        emitNativeDiagnostic({ ...requestDiagnostic(), event: 'response_headers', status: result.response.status, phase: 'headers' })
         streamRequestId = result.request_id
         recordNativeEvidence('api_response_metadata', { providerRequestId: result.request_id, status: result.response.status }, { requestId: diagnosticRequest })
         streamResponse = result.response
@@ -1962,6 +1980,7 @@ async function* queryModel(
         ...(isFastModeEnabled() ? { fastMode: isFastMode } : false),
         signal,
         querySource: options.querySource,
+        diagnostic: () => ({ ...requestDiagnostic(), phase: 'headers' }),
       },
     )
 
@@ -2040,7 +2059,7 @@ async function* queryModel(
 
       for await (const part of providerStream) {
         responseEvidence.consume(part)
-        if (isFirstChunk) emitNativeDiagnostic({ event: 'first_stream_event', request: diagnosticRequest })
+        if (isFirstChunk) emitNativeDiagnostic({ ...requestDiagnostic(), event: 'first_stream_event', phase: 'body' })
         const now = Date.now()
 
         // Detect and log streaming stalls (only after first event to avoid counting TTFB)
@@ -2495,6 +2514,8 @@ async function* queryModel(
         responseHeaders = resp.headers
       }
     } catch (streamingError) {
+      emitNativeDiagnostic({ ...requestDiagnostic(), event: 'stream_error', phase: 'body',
+        outcome: signal.aborted ? 'cancelled' : 'failed', ...nativeErrorMetadata(streamingError) })
       if (streamingError instanceof ProviderStreamIdleError) {
         logForDiagnosticsNoPII(
           'error',
@@ -2645,6 +2666,7 @@ async function* queryModel(
           ...(isFastModeEnabled() && { fastMode: isFastMode }),
           signal,
           initialConsecutive529Errors: is529Error(streamingError) ? 1 : 0,
+          diagnostic: { actor: options.agentId ?? 'main', originRequest: diagnosticRequest },
           querySource: options.querySource,
         },
         paramsFromContext,
@@ -2746,6 +2768,7 @@ async function* queryModel(
             thinkingConfig,
             ...(isFastModeEnabled() && { fastMode: isFastMode }),
             signal,
+            diagnostic: { actor: options.agentId ?? 'main', originRequest: diagnosticRequest },
           },
           paramsFromContext,
           (attempt, _startTime, tokens) => {
@@ -2898,7 +2921,9 @@ async function* queryModel(
     }
   } finally {
     stopSessionActivity('api_call')
-    emitNativeDiagnostic({ event: 'stream_end', request: diagnosticRequest })
+    // This is query cleanup, including fallback/cancellation, not proof of message_stop.
+    emitNativeDiagnostic({ ...requestDiagnostic(), event: 'stream_end', phase: 'query', recovered: Boolean(fallbackMessage),
+      thinkingReturned: contentBlocks.some(block => block.type === 'thinking' || block.type === 'redacted_thinking') })
     responseEvidence.finish({ stopReason, usage, didFallBackToNonStreaming })
     // Must be in the finally block: if the generator is terminated early
     // via .return() (e.g. consumer breaks out of for-await-of, or query.ts

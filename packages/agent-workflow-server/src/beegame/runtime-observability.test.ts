@@ -8,6 +8,32 @@ import {
 } from './runtime-observability'
 
 describe('passive native runtime observability', () => {
+  test('retains only diagnostic metadata and does not assign late events to a finished turn', async () => {
+    const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-diagnostic-'))
+    try {
+      const observer = createRuntimeObservability({ workspacePath, sessionId: 'session',
+        provider: 'anthropic', model: 'model' })
+      observer.beginTurn({ requestId: 'host-turn' })
+      observer.observeDiagnostic({ event: 'api_error', request: 7, attempt: 2,
+        originRequest: 6, actor: 'a12345678', mode: 'non_streaming_fallback', phase: 'query', errorCode: 'ETIMEDOUT',
+        category: 'timeout', prompt: 'PRIVATE', url: 'SECRET', headers: { auth: 'SECRET' } })
+      observer.observeDiagnostic({ event: 'unknown', message: 'PRIVATE' })
+      observer.observeDiagnostic({ event: 'api_error', status: 'PRIVATE' })
+      observer.finishTurn({ outcome: 'success' })
+      observer.observeDiagnostic({ event: 'stream_end', request: 7 })
+      await observer.flush()
+      const raw = await readFile(join(workspacePath, '.beegame/logs/native-runtime.jsonl'), 'utf8')
+      const records = raw.trim().split('\n').map(line => JSON.parse(line))
+      const diagnostics = records.filter(record => record.type === 'native_diagnostic')
+      expect(diagnostics).toHaveLength(2)
+      expect(diagnostics[0]).toMatchObject({ requestId: 'host-turn',
+        diagnostic: { event: 'api_error', request: 7, attempt: 2, category: 'timeout',
+          originRequest: 6, actor: 'a12345678', mode: 'non_streaming_fallback', phase: 'query', errorCode: 'ETIMEDOUT' } })
+      expect(diagnostics[1].requestId).toBeUndefined()
+      expect(raw).not.toContain('PRIVATE')
+      expect(raw).not.toContain('SECRET')
+    } finally { await rm(workspacePath, { recursive: true, force: true }) }
+  })
   test('records stdout byte gaps without persisting streamed content', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-byte-gap-'))
     let nowMs = Date.parse('2026-08-12T10:00:00.000Z')

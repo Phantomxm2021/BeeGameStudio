@@ -1,5 +1,56 @@
 {
   "landing": {
+    "avatar": {
+      "conversation": "Conversation with your creative companion",
+      "companion": "Your game-making companion",
+      "morning": "Good morning. How shall we start?",
+      "afternoon": "Good afternoon. How shall we start?",
+      "evening": "Good evening. How shall we start?",
+      "invitation": "A sentence, an image, or a video is a great place to start.",
+      "replyPlaceholder": "I want to make a game about…",
+      "send": "Let’s think together",
+      "thinkingTitle": "Let me think about how this game could play…",
+      "thinkingDescription": "I’m working through gameplay, visuals, and build settings.",
+      "optionsTitle": "Here are a few directions. Which one feels right?",
+      "optionsDescription": "Pick a direction, then we’ll adjust its build settings.",
+      "settingsDescription": "How does this direction feel? Adjust the settings to your liking.",
+      "confirmDescription": "Take one more look at our plan, then let’s start building.",
+      "errorTitle": "That didn’t finish. Let’s try again.",
+      "errorDescription": "Your idea is still here. You can edit it and try again.",
+      "mood": {
+        "idle": "I’m here whenever you’re ready.",
+        "listening": "I’m paying attention to your idea.",
+        "thinking": "Let me think this through.",
+        "ready": "How does this direction feel?",
+        "error": "Your idea has been kept."
+      },
+      "chooseMode": "Choose a way to create.",
+      "creativeModeHint": "Let’s develop an idea",
+      "blueprintModeHint": "Build from a ready plan",
+      "creativePrompt": "What kind of game shall we make?",
+      "blueprintPrompt": "Share your game blueprint.",
+      "changeMode": "Change creation mode",
+      "nextStep": "Next step",
+      "muteSound": "Mute interaction sounds",
+      "enableSound": "Enable interaction sounds",
+      "back": "Back",
+      "closeFlow": "Close creation flow",
+      "creditNotice": "Generating ideas uses Credit based on actual tokens.",
+      "settingsGroups": [
+        {
+          "title": "Where will it run?",
+          "description": "Choose the platform, engine and presentation."
+        },
+        {
+          "title": "How does it play and look?",
+          "description": "Choose gameplay, visual style, controls and how to use the resource library."
+        },
+        {
+          "title": "Anything else to add?",
+          "description": "Add any details you would like me to keep in mind."
+        }
+      ]
+    },
     "intake": {
       "prompt": {
         "uploadAttachment": "Add a reference",
@@ -15,13 +66,22 @@
         "unsupportedOrTooLarge": "This file type is unsupported or the file is too large.",
         "attachmentReadFailed": "Could not read the file. Please try again."
       },
-      "devProjectPurge": {"button":"Development/test: delete all projects","confirm":"Permanently delete this account’s {{count}} projects and eligible workspaces. This cannot be undone. The account and resource library are not deleted.","delete":"Permanently delete all projects","cancel":"Cancel","pending":"Processing. Do not submit again…","result":"Deleted {{deleted}} projects; {{failed}} failed. Check the remaining list.","changed":"The project list changed. Review the list again before confirming.","failed":"Could not confirm the cleanup result. Refresh and check the project list before submitting again."},
+      "devProjectPurge": {
+        "button": "Development/test: delete all projects",
+        "confirm": "Permanently delete this account’s {{count}} projects and eligible workspaces. This cannot be undone. The account and resource library are not deleted.",
+        "delete": "Permanently delete all projects",
+        "cancel": "Cancel",
+        "pending": "Processing. Do not submit again…",
+        "result": "Deleted {{deleted}} projects; {{failed}} failed. Check the remaining list.",
+        "changed": "The project list changed. Review the list again before confirming.",
+        "failed": "Could not confirm the cleanup result. Refresh and check the project list before submitting again."
+      },
       "modal": {
         "chooseOption": "Choose a direction",
         "productionSettings": "Build settings",
         "confirmBuildBrief": "Confirm build brief",
         "startBuild": "Start build",
-        "close": "Close direction dialog"
+        "close": "Back to idea"
       },
       "optionCard": {
         "mode": "Game mode",
@@ -31,6 +91,7 @@
         "platform": "Platform",
         "engine": "Engine",
         "dimension": "Presentation",
+        "orientation": "Screen orientation",
         "genre": "Genre",
         "style": "Style",
         "inputs": "Inputs",
@@ -221,6 +282,8 @@
         "Fantasy": "Fantasy",
         "Realistic": "Realistic",
         "Keyboard/mouse": "Keyboard/mouse",
+        "Landscape": "Landscape",
+        "Portrait": "Portrait",
         "Gamepad": "Gamepad",
         "Touch": "Touch",
         "Voice": "Voice",
@@ -591,7 +654,9 @@
       "legacy": "Plain-text record: source metadata is unavailable; shown as-is.",
       "recent": "Recent activity only; earlier records or long outputs have been omitted.",
       "truncated": "This output is truncated; it is not the complete file or result.",
-      "command": "Command", "output": "Tool output", "file": "File content"
+      "command": "Command",
+      "output": "Tool output",
+      "file": "File content"
     },
     "assistantName": "BeeGame",
     "previewTitle": "Preview",

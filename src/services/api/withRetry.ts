@@ -1,5 +1,5 @@
 import { feature } from 'bun:bundle'
-import { emitNativeDiagnostic, nativeErrorCategory } from '@bee-game-studio/agent-workflow/native-diagnostics'
+import { emitNativeDiagnostic, nativeErrorMetadata, type NativeDiagnostic } from '@bee-game-studio/agent-workflow/native-diagnostics'
 import type Anthropic from '@anthropic-ai/sdk'
 import {
   APIConnectionError,
@@ -126,6 +126,8 @@ export interface RetryContext {
 }
 
 interface RetryOptions {
+  /** Metadata only; resolves the current attempt after operation allocated its request ID. */
+  diagnostic?: () => Partial<NativeDiagnostic>
   maxRetries?: number
   model: string
   fallbackModel?: string
@@ -248,15 +250,15 @@ export async function* withRetry<T>(
             await handleOAuth401Error(failedAccessToken)
           }
         }
-        emitNativeDiagnostic({ event: 'client_start', attempt })
+        emitNativeDiagnostic({ ...options.diagnostic?.(), event: 'client_start', attempt })
         client = await getClient()
-        emitNativeDiagnostic({ event: 'client_ready', attempt })
+        emitNativeDiagnostic({ ...options.diagnostic?.(), event: 'client_ready', attempt })
       }
 
       return await operation(client, attempt, retryContext)
     } catch (error) {
       lastError = error
-      emitNativeDiagnostic({ event: 'api_error', attempt, category: nativeErrorCategory(error),
+      emitNativeDiagnostic({ ...options.diagnostic?.(), event: 'api_error', attempt, ...nativeErrorMetadata(error),
         ...(error instanceof APIError && error.status !== undefined ? { status: error.status } : {}) })
       logForDebugging(
         `API error (attempt ${attempt}/${maxRetries + 1}): ${error instanceof APIError ? `${error.status} ${error.message}` : errorMessage(error)}`,
@@ -513,7 +515,7 @@ export async function* withRetry<T>(
         if (error instanceof APIError) {
           yield createSystemAPIErrorMessage(error, delayMs, attempt, maxRetries)
         }
-        emitNativeDiagnostic({ event: 'retry_wait', attempt, delayMs: Math.ceil(delayMs) })
+        emitNativeDiagnostic({ ...options.diagnostic?.(), event: 'retry_wait', attempt, delayMs: Math.ceil(delayMs) })
         await sleep(delayMs, options.signal, { abortError })
       }
     }

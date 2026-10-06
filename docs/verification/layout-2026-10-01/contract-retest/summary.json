@@ -1,0 +1,2126 @@
+{
+  "elapsedSeconds": 4645.647,
+  "model": "ark-code-latest",
+  "sessionId": "beegame_cfa21f5f597841059a73f5b6edb8ec76",
+  "requestCount": 158,
+  "usageRows": [
+    {
+      "id": 1,
+      "stage": "author-1",
+      "status": 401,
+      "usage": {},
+      "usageKnown": false,
+      "elapsedSeconds": 2.381
+    },
+    {
+      "id": 2,
+      "stage": "author-1",
+      "status": 200,
+      "usage": {
+        "input_tokens": 29076,
+        "output_tokens": 121,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 12.51
+    },
+    {
+      "id": 3,
+      "stage": "author-1",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1936,
+        "output_tokens": 295,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 28472
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 14.178
+    },
+    {
+      "id": 4,
+      "stage": "author-1",
+      "status": 200,
+      "usage": {
+        "input_tokens": 3016,
+        "output_tokens": 4573,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 28472
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 123.578
+    },
+    {
+      "id": 5,
+      "stage": "author-1",
+      "status": 200,
+      "usage": {
+        "input_tokens": 5188,
+        "output_tokens": 383,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 31032
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 14.28
+    },
+    {
+      "id": 6,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 11800,
+        "output_tokens": 238,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 27448
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 8.55
+    },
+    {
+      "id": 8,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 14426,
+        "output_tokens": 326,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.987
+    },
+    {
+      "id": 9,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 18860,
+        "output_tokens": 175,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 14136
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.732
+    },
+    {
+      "id": 10,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 759,
+        "output_tokens": 129,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 32568
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 4.857
+    },
+    {
+      "id": 11,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1264,
+        "output_tokens": 86,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 13112
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 2.265
+    },
+    {
+      "id": 13,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 6343,
+        "output_tokens": 200,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 14136
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.714
+    },
+    {
+      "id": 14,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 7256,
+        "output_tokens": 373,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 14136
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 6.43
+    },
+    {
+      "id": 7,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 3152,
+        "output_tokens": 2229,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 39224
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 56.996
+    },
+    {
+      "id": 16,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1144,
+        "output_tokens": 203,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 13112
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 4.771
+    },
+    {
+      "id": 17,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 6357,
+        "output_tokens": 189,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 14136
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.919
+    },
+    {
+      "id": 19,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 3337,
+        "output_tokens": 78,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 42296
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 3.438
+    },
+    {
+      "id": 15,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1060,
+        "output_tokens": 4896,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 21304
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 157.374
+    },
+    {
+      "id": 18,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 683,
+        "output_tokens": 8400,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 20280
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 207.089
+    },
+    {
+      "id": 21,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 9688,
+        "output_tokens": 565,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 20792
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 13.822
+    },
+    {
+      "id": 22,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 9493,
+        "output_tokens": 88,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 36664
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 4.771
+    },
+    {
+      "id": 12,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 4432,
+        "output_tokens": 10854,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 33080
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 293.736
+    },
+    {
+      "id": 23,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 12307,
+        "output_tokens": 294,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 37176
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 11.338
+    },
+    {
+      "id": 24,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 978,
+        "output_tokens": 82,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 45880
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 6.086
+    },
+    {
+      "id": 20,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 4970,
+        "output_tokens": 8971,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 22328
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 240.811
+    },
+    {
+      "id": 25,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 9389,
+        "output_tokens": 277,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 26936
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 7.754
+    },
+    {
+      "id": 26,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 488,
+        "output_tokens": 256,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 36152
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 7.327
+    },
+    {
+      "id": 27,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1165,
+        "output_tokens": 289,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 46392
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 8.651
+    },
+    {
+      "id": 28,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 7570,
+        "output_tokens": 275,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 47416
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 8.603
+    },
+    {
+      "id": 29,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 11147,
+        "output_tokens": 247,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 54584
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 14.07
+    },
+    {
+      "id": 30,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 9703,
+        "output_tokens": 835,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 65336
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 19.163
+    },
+    {
+      "id": 31,
+      "stage": "author-2",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1485,
+        "output_tokens": 489,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 74552
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 11.451
+    },
+    {
+      "id": 32,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 31948,
+        "output_tokens": 149,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 47416
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 9.17
+    },
+    {
+      "id": 33,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 2444,
+        "output_tokens": 1237,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 79160
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 40.823
+    },
+    {
+      "id": 34,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1709,
+        "output_tokens": 181,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 13112
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 3.691
+    },
+    {
+      "id": 35,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1872,
+        "output_tokens": 227,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 14648
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.81
+    },
+    {
+      "id": 36,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 3527,
+        "output_tokens": 140,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 14648
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 3.579
+    },
+    {
+      "id": 37,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 12381,
+        "output_tokens": 153,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 17720
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 4.076
+    },
+    {
+      "id": 38,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 19684,
+        "output_tokens": 96,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 30008
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 3.851
+    },
+    {
+      "id": 39,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 12531,
+        "output_tokens": 106,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 49464
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.618
+    },
+    {
+      "id": 40,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 404,
+        "output_tokens": 170,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 61752
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 4.168
+    },
+    {
+      "id": 41,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 593,
+        "output_tokens": 96,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 61752
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 3.264
+    },
+    {
+      "id": 42,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 364,
+        "output_tokens": 327,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 62264
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 9.235
+    },
+    {
+      "id": 43,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 729,
+        "output_tokens": 234,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 62264
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 6.529
+    },
+    {
+      "id": 44,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 3024,
+        "output_tokens": 228,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 62776
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.86
+    },
+    {
+      "id": 45,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 2420,
+        "output_tokens": 276,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 65336
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 7.107
+    },
+    {
+      "id": 46,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1773,
+        "output_tokens": 172,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 67384
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 4.596
+    },
+    {
+      "id": 47,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1387,
+        "output_tokens": 331,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 68920
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 8.524
+    },
+    {
+      "id": 48,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 895,
+        "output_tokens": 206,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 69944
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.148
+    },
+    {
+      "id": 49,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1181,
+        "output_tokens": 151,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 70456
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 4.996
+    },
+    {
+      "id": 50,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 350,
+        "output_tokens": 106,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 71480
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 4.499
+    },
+    {
+      "id": 51,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 955,
+        "output_tokens": 348,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 71480
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 8.905
+    },
+    {
+      "id": 52,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1527,
+        "output_tokens": 161,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 71992
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.306
+    },
+    {
+      "id": 54,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1948,
+        "output_tokens": 77,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 81208
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.726
+    },
+    {
+      "id": 53,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1407,
+        "output_tokens": 4925,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 73016
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 127.518
+    },
+    {
+      "id": 55,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 5346,
+        "output_tokens": 138,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 74040
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 4.193
+    },
+    {
+      "id": 56,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 381,
+        "output_tokens": 1835,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 79160
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 29.758
+    },
+    {
+      "id": 57,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 2279,
+        "output_tokens": 67,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 79160
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 3.767
+    },
+    {
+      "id": 58,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 321,
+        "output_tokens": 405,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 81208
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 8.531
+    },
+    {
+      "id": 59,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 938,
+        "output_tokens": 377,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 81208
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 12.768
+    },
+    {
+      "id": 60,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 934,
+        "output_tokens": 265,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 81720
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 6.563
+    },
+    {
+      "id": 61,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 819,
+        "output_tokens": 1998,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 82232
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 46.742
+    },
+    {
+      "id": 62,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 2343,
+        "output_tokens": 5066,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 82744
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 97.313
+    },
+    {
+      "id": 63,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 5418,
+        "output_tokens": 856,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 84792
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 18.877
+    },
+    {
+      "id": 64,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1663,
+        "output_tokens": 224,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 89912
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 6.094
+    },
+    {
+      "id": 65,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 389,
+        "output_tokens": 329,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 91448
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 8.786
+    },
+    {
+      "id": 66,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 7041,
+        "output_tokens": 1376,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 76600
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 32.998
+    },
+    {
+      "id": 67,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1784,
+        "output_tokens": 218,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 13112
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 4.032
+    },
+    {
+      "id": 68,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 20460,
+        "output_tokens": 158,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 14648
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 4.74
+    },
+    {
+      "id": 70,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 3141,
+        "output_tokens": 54,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 83256
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.62
+    },
+    {
+      "id": 69,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 20088,
+        "output_tokens": 15638,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 34616
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 394.699
+    },
+    {
+      "id": 71,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 15932,
+        "output_tokens": 1067,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 54584
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 21.977
+    },
+    {
+      "id": 72,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1666,
+        "output_tokens": 262,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 70456
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.619
+    },
+    {
+      "id": 73,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 430,
+        "output_tokens": 2682,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 71992
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 49.948
+    },
+    {
+      "id": 74,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 3169,
+        "output_tokens": 265,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 71992
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.723
+    },
+    {
+      "id": 75,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 400,
+        "output_tokens": 3132,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 75064
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 65.968
+    },
+    {
+      "id": 76,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 3591,
+        "output_tokens": 249,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 75064
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 7.415
+    },
+    {
+      "id": 77,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 294,
+        "output_tokens": 2180,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 78648
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 49.917
+    },
+    {
+      "id": 78,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 2639,
+        "output_tokens": 265,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 78648
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 16.513
+    },
+    {
+      "id": 79,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 382,
+        "output_tokens": 74,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 81208
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 15.106
+    },
+    {
+      "id": 80,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 9112,
+        "output_tokens": 681,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 81208
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 18.518
+    },
+    {
+      "id": 81,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1147,
+        "output_tokens": 228,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 89912
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 12.963
+    },
+    {
+      "id": 82,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 389,
+        "output_tokens": 543,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 90936
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 20.668
+    },
+    {
+      "id": 83,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 900,
+        "output_tokens": 165,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 86328
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 14.883
+    },
+    {
+      "id": 84,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 9312,
+        "output_tokens": 192,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 86840
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 17.811
+    },
+    {
+      "id": 85,
+      "stage": "author-3",
+      "status": 200,
+      "usage": {
+        "input_tokens": 5976,
+        "output_tokens": 790,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 96056
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 19.855
+    },
+    {
+      "id": 86,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 19349,
+        "output_tokens": 146,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 86840
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 9.043
+    },
+    {
+      "id": 87,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 2270,
+        "output_tokens": 1718,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 105784
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 44.548
+    },
+    {
+      "id": 88,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 2212,
+        "output_tokens": 289,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 13112
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.345
+    },
+    {
+      "id": 89,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1959,
+        "output_tokens": 270,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 15160
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 4.985
+    },
+    {
+      "id": 90,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1457,
+        "output_tokens": 71,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 16696
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 2.799
+    },
+    {
+      "id": 91,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 5054,
+        "output_tokens": 75,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 17720
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 2.541
+    },
+    {
+      "id": 92,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 7762,
+        "output_tokens": 74,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 22328
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 2.701
+    },
+    {
+      "id": 93,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 10539,
+        "output_tokens": 73,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 30008
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 2.944
+    },
+    {
+      "id": 94,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 9433,
+        "output_tokens": 75,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 40248
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 3.205
+    },
+    {
+      "id": 95,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 5979,
+        "output_tokens": 74,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 49464
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 3.109
+    },
+    {
+      "id": 96,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 9077,
+        "output_tokens": 86,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 55096
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 4.494
+    },
+    {
+      "id": 97,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 12666,
+        "output_tokens": 289,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 63800
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 6.17
+    },
+    {
+      "id": 98,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 706,
+        "output_tokens": 142,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 76088
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 3.65
+    },
+    {
+      "id": 99,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 498,
+        "output_tokens": 200,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 76600
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.75
+    },
+    {
+      "id": 100,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1519,
+        "output_tokens": 257,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 76600
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.709
+    },
+    {
+      "id": 101,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 789,
+        "output_tokens": 330,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 77624
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 9.466
+    },
+    {
+      "id": 102,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 2104,
+        "output_tokens": 364,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 78136
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 9.711
+    },
+    {
+      "id": 103,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1299,
+        "output_tokens": 162,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 80184
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 6.191
+    },
+    {
+      "id": 104,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 924,
+        "output_tokens": 140,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 81208
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 4.803
+    },
+    {
+      "id": 105,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1216,
+        "output_tokens": 481,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 81720
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 12.339
+    },
+    {
+      "id": 106,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1230,
+        "output_tokens": 138,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 82744
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 7.076
+    },
+    {
+      "id": 108,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 2255,
+        "output_tokens": 74,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 107832
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 6.552
+    },
+    {
+      "id": 107,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 967,
+        "output_tokens": 994,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 83768
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 25.718
+    },
+    {
+      "id": 109,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 2292,
+        "output_tokens": 7815,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 84280
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 207.029
+    },
+    {
+      "id": 110,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 9573,
+        "output_tokens": 176,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 86328
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 10.06
+    },
+    {
+      "id": 111,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1369,
+        "output_tokens": 196,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 95544
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 8.548
+    },
+    {
+      "id": 112,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 749,
+        "output_tokens": 207,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 96568
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 11.448
+    },
+    {
+      "id": 113,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1846,
+        "output_tokens": 256,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 97080
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 14.967
+    },
+    {
+      "id": 114,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1801,
+        "output_tokens": 596,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 98616
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 20.593
+    },
+    {
+      "id": 115,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 2262,
+        "output_tokens": 507,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 100152
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 15.213
+    },
+    {
+      "id": 116,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1566,
+        "output_tokens": 5630,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 102200
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 143.345
+    },
+    {
+      "id": 117,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 6667,
+        "output_tokens": 150,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 103736
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 5.374
+    },
+    {
+      "id": 118,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1110,
+        "output_tokens": 292,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 110392
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 9.576
+    },
+    {
+      "id": 119,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1993,
+        "output_tokens": 212,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 111416
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 6.468
+    },
+    {
+      "id": 120,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1278,
+        "output_tokens": 2108,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 112952
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 45.269
+    },
+    {
+      "id": 121,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 2721,
+        "output_tokens": 3778,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 113976
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 90.135
+    },
+    {
+      "id": 122,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 4651,
+        "output_tokens": 1603,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 116536
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 47.42
+    },
+    {
+      "id": 123,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1684,
+        "output_tokens": 7766,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 121144
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 121.823
+    },
+    {
+      "id": 124,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 7976,
+        "output_tokens": 855,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 122680
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 17.867
+    },
+    {
+      "id": 125,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1331,
+        "output_tokens": 200,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 130360
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 13.253
+    },
+    {
+      "id": 126,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 607,
+        "output_tokens": 308,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 131384
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 8.069
+    },
+    {
+      "id": 127,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 441,
+        "output_tokens": 181,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 131896
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 7.795
+    },
+    {
+      "id": 128,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 747,
+        "output_tokens": 277,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 131896
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 7.798
+    },
+    {
+      "id": 129,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1180,
+        "output_tokens": 1004,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 132408
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 23.718
+    },
+    {
+      "id": 130,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1287,
+        "output_tokens": 212,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 133432
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 8.136
+    },
+    {
+      "id": 131,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 527,
+        "output_tokens": 79,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 134456
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 8.113
+    },
+    {
+      "id": 132,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 140,
+        "output_tokens": 424,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 134968
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 16.963
+    },
+    {
+      "id": 133,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 616,
+        "output_tokens": 247,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 134968
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 10.274
+    },
+    {
+      "id": 134,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 714,
+        "output_tokens": 376,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 135480
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 15.581
+    },
+    {
+      "id": 135,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 681,
+        "output_tokens": 97,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 135992
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 12.334
+    },
+    {
+      "id": 136,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 446,
+        "output_tokens": 436,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 136504
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 75.733
+    },
+    {
+      "id": 137,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1263,
+        "output_tokens": 1792,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 136504
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 45.391
+    },
+    {
+      "id": 138,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 2153,
+        "output_tokens": 298,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 137528
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 12.55
+    },
+    {
+      "id": 139,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 686,
+        "output_tokens": 300,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 139576
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 17.223
+    },
+    {
+      "id": 140,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 581,
+        "output_tokens": 4057,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 140088
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 110.869
+    },
+    {
+      "id": 141,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 4273,
+        "output_tokens": 2949,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 140600
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 79.512
+    },
+    {
+      "id": 142,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 3184,
+        "output_tokens": 2451,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 144696
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 57.592
+    },
+    {
+      "id": 143,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 2622,
+        "output_tokens": 3682,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 147768
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 76.723
+    },
+    {
+      "id": 144,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 3803,
+        "output_tokens": 1770,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 150328
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 46.093
+    },
+    {
+      "id": 145,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 2048,
+        "output_tokens": 474,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 153912
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 13.943
+    },
+    {
+      "id": 146,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 533,
+        "output_tokens": 804,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 155960
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 22.711
+    },
+    {
+      "id": 147,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1192,
+        "output_tokens": 130,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 156472
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 7.855
+    },
+    {
+      "id": 148,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 3184,
+        "output_tokens": 710,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 157496
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 21.519
+    },
+    {
+      "id": 149,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 1205,
+        "output_tokens": 517,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 160568
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 12.823
+    },
+    {
+      "id": 150,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 863,
+        "output_tokens": 314,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 161592
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 9.814
+    },
+    {
+      "id": 151,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 703,
+        "output_tokens": 456,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 162104
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 11.858
+    },
+    {
+      "id": 152,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 663,
+        "output_tokens": 408,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 162616
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 11.424
+    },
+    {
+      "id": 153,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 572,
+        "output_tokens": 321,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 163128
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 7.922
+    },
+    {
+      "id": 154,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 392,
+        "output_tokens": 296,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 163640
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 10.906
+    },
+    {
+      "id": 155,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 701,
+        "output_tokens": 299,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 163640
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 10.627
+    },
+    {
+      "id": 156,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 501,
+        "output_tokens": 283,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 164152
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 21.942
+    },
+    {
+      "id": 157,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 797,
+        "output_tokens": 307,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 164152
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 84.585
+    },
+    {
+      "id": 158,
+      "stage": "author-4",
+      "status": 200,
+      "usage": {
+        "input_tokens": 630,
+        "output_tokens": 423,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 164664
+      },
+      "usageKnown": true,
+      "elapsedSeconds": 16.173
+    }
+  ],
+  "stages": [
+    {
+      "label": "author-1",
+      "elapsedSeconds": 166.773,
+      "firstRequest": 1,
+      "lastRequest": 5,
+      "sessionId": "beegame_cfa21f5f597841059a73f5b6edb8ec76",
+      "state": {
+        "version": 1,
+        "objective": "{\n  \"kind\": \"confirmed_build_brief\",\n  \"document_language\": \"zh\",\n  \"game_user_visible_language\": \"zh\",\n  \"agent_response_language\": \"zh\",\n  \"idea\": \"我想做一个打砖块游戏。\",\n  \"default_first_release_scope\": {\n    \"target\": \"small complete playable version\",\n    \"content\": \"one working core loop with only representative content; usually one or two levels if levels apply\",\n    \"defer\": \"unrequested extra levels, modes, and polish\"\n  },\n  \"selected_option\": null,\n  \"settings\": {\n    \"platform\": \"Web\",\n    \"engine\": \"React\",\n    \"dimension\": \"2D\",\n    \"orientation\": \"Landscape\",\n    \"genre\": \"Arcade\",\n    \"visualStyle\": \"Stylized\",\n    \"inputs\": [\n      \"Keyboard/mouse\",\n      \"Touch\"\n    ]\n  },\n  \"confirmed_gdd\": null,\n  \"build_source\": null,\n  \"analysis_id\": null,\n  \"creation_mode\": \"creative\",\n  \"reference_files\": [],\n  \"resource_library_usage\": \"optional\"\n}",
+        "status": "active",
+        "phase": "author",
+        "authorBatch": 1
+      },
+      "failed": false,
+      "stopped": false
+    },
+    {
+      "label": "author-2",
+      "elapsedSeconds": 539.579,
+      "firstRequest": 6,
+      "lastRequest": 31,
+      "sessionId": "beegame_cfa21f5f597841059a73f5b6edb8ec76",
+      "state": {
+        "version": 1,
+        "objective": "{\n  \"kind\": \"confirmed_build_brief\",\n  \"document_language\": \"zh\",\n  \"game_user_visible_language\": \"zh\",\n  \"agent_response_language\": \"zh\",\n  \"idea\": \"我想做一个打砖块游戏。\",\n  \"default_first_release_scope\": {\n    \"target\": \"small complete playable version\",\n    \"content\": \"one working core loop with only representative content; usually one or two levels if levels apply\",\n    \"defer\": \"unrequested extra levels, modes, and polish\"\n  },\n  \"selected_option\": null,\n  \"settings\": {\n    \"platform\": \"Web\",\n    \"engine\": \"React\",\n    \"dimension\": \"2D\",\n    \"orientation\": \"Landscape\",\n    \"genre\": \"Arcade\",\n    \"visualStyle\": \"Stylized\",\n    \"inputs\": [\n      \"Keyboard/mouse\",\n      \"Touch\"\n    ]\n  },\n  \"confirmed_gdd\": null,\n  \"build_source\": null,\n  \"analysis_id\": null,\n  \"creation_mode\": \"creative\",\n  \"reference_files\": [],\n  \"resource_library_usage\": \"optional\"\n}",
+        "status": "active",
+        "phase": "author",
+        "authorBatch": 2
+      },
+      "failed": false,
+      "stopped": false
+    },
+    {
+      "label": "author-3",
+      "elapsedSeconds": 1310.245,
+      "firstRequest": 32,
+      "lastRequest": 85,
+      "sessionId": "beegame_cfa21f5f597841059a73f5b6edb8ec76",
+      "state": {
+        "version": 1,
+        "objective": "{\n  \"kind\": \"confirmed_build_brief\",\n  \"document_language\": \"zh\",\n  \"game_user_visible_language\": \"zh\",\n  \"agent_response_language\": \"zh\",\n  \"idea\": \"我想做一个打砖块游戏。\",\n  \"default_first_release_scope\": {\n    \"target\": \"small complete playable version\",\n    \"content\": \"one working core loop with only representative content; usually one or two levels if levels apply\",\n    \"defer\": \"unrequested extra levels, modes, and polish\"\n  },\n  \"selected_option\": null,\n  \"settings\": {\n    \"platform\": \"Web\",\n    \"engine\": \"React\",\n    \"dimension\": \"2D\",\n    \"orientation\": \"Landscape\",\n    \"genre\": \"Arcade\",\n    \"visualStyle\": \"Stylized\",\n    \"inputs\": [\n      \"Keyboard/mouse\",\n      \"Touch\"\n    ]\n  },\n  \"confirmed_gdd\": null,\n  \"build_source\": null,\n  \"analysis_id\": null,\n  \"creation_mode\": \"creative\",\n  \"reference_files\": [],\n  \"resource_library_usage\": \"optional\"\n}",
+        "status": "active",
+        "phase": "author",
+        "authorBatch": 3
+      },
+      "failed": false,
+      "stopped": false
+    },
+    {
+      "label": "author-4",
+      "elapsedSeconds": 2629.023,
+      "firstRequest": 86,
+      "lastRequest": 158,
+      "sessionId": "beegame_cfa21f5f597841059a73f5b6edb8ec76",
+      "state": {
+        "version": 1,
+        "objective": "{\n  \"kind\": \"confirmed_build_brief\",\n  \"document_language\": \"zh\",\n  \"game_user_visible_language\": \"zh\",\n  \"agent_response_language\": \"zh\",\n  \"idea\": \"我想做一个打砖块游戏。\",\n  \"default_first_release_scope\": {\n    \"target\": \"small complete playable version\",\n    \"content\": \"one working core loop with only representative content; usually one or two levels if levels apply\",\n    \"defer\": \"unrequested extra levels, modes, and polish\"\n  },\n  \"selected_option\": null,\n  \"settings\": {\n    \"platform\": \"Web\",\n    \"engine\": \"React\",\n    \"dimension\": \"2D\",\n    \"orientation\": \"Landscape\",\n    \"genre\": \"Arcade\",\n    \"visualStyle\": \"Stylized\",\n    \"inputs\": [\n      \"Keyboard/mouse\",\n      \"Touch\"\n    ]\n  },\n  \"confirmed_gdd\": null,\n  \"build_source\": null,\n  \"analysis_id\": null,\n  \"creation_mode\": \"creative\",\n  \"reference_files\": [],\n  \"resource_library_usage\": \"optional\"\n}",
+        "status": "active",
+        "phase": "author",
+        "authorBatch": 4
+      },
+      "failed": false,
+      "stopped": true
+    }
+  ],
+  "stopped": true,
+  "failure": "Stage did not complete: author-4",
+  "scope": "Eight fresh documents + one Review/Revision; no extra repair/model turns"
+}

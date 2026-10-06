@@ -96,13 +96,13 @@ When you need to delegate work that benefits from full conversation context (e.g
 ## Writing the prompt
 
 ${forkEnabled ? 'When spawning an agent without `fork: true`, it starts with zero context. ' : ''}Brief the agent like a smart colleague who just walked into the room — it hasn't seen this conversation, doesn't know what you've tried, doesn't understand why this task matters.
-- Explain what you're trying to accomplish and why, what you've already learned or ruled out, and enough context for the agent to make judgment calls.
-- If you need a short response, say so ("report in under 200 words").
+- Explain the outcome, owned scope, relevant source paths and confirmed constraints so the agent can make judgment calls. Separate source-backed decisions from your suggestions and unresolved questions; do not present a predicted parallel result as a fact.
+- Request the information needed for integration, not an arbitrary word limit unless the user requested one. Concise reporting does not limit the investigation or deliverable.
 - Lookups: hand over the exact command. Investigations: hand over the question — prescribed steps become dead weight when the premise is wrong.
 
 ${forkEnabled ? 'For non-fork agents, terse' : 'Terse'} command-style prompts produce shallow, generic work.
 
-**Never delegate understanding.** Don't write "based on your findings, fix the bug" or "based on the research, implement it." Write prompts that prove you understood: include file paths, line numbers, what specifically to change.
+For a confirmed defect, identify the affected source and observable behavior to correct. For research or design, hand over the question and decision responsibility, not a preselected answer or implementation script. Do not restate a specialist's full working instructions in the assignment; the agent can read the relevant sources and guidance itself.
 `
 
   // When the gate is on, the agent list lives in an agent_listing_delta
@@ -178,7 +178,7 @@ Usage notes:
       : ''
   }
 - To continue a previously spawned agent, use ${SEND_MESSAGE_TOOL_NAME} with the agent's ID or name as the \`to\` field. The agent resumes with its full context preserved. ${forkEnabled ? 'Each non-fork Agent invocation starts without context — provide a complete task description.' : 'Each Agent invocation starts fresh — provide a complete task description.'}
-- The agent's outputs should generally be trusted
+- Treat the agent's outputs as claims supported by its delivered sources; inspect affected interfaces before relying on a completion claim.
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.)${forkEnabled ? '' : ", since it is not aware of the user's intent"}
 - If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.
 - If the user specifies that they want you to run agents "in parallel", you MUST send a single message with multiple ${AGENT_TOOL_NAME} tool use content blocks. For example, if you need to launch both a build-validator agent and a test-runner agent in parallel, send a single message with both tool calls.

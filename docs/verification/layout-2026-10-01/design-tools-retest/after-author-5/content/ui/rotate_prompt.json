@@ -1,0 +1,109 @@
+{
+  "schema": "beegame-content.v1",
+  "id": "ui.rotate-prompt",
+  "kind": "ui-screen",
+  "assetRefs": [],
+  "data": {
+    "rootId": "root",
+    "nodes": [
+      {
+        "id": "root",
+        "role": "screen-root",
+        "name": "横屏旋转提示根（竖屏宿主显示）",
+        "layout": {
+          "size": [1280, 720]
+        },
+        "data": {
+          "orientation": "Landscape",
+          "referenceResolution": [1280, 720],
+          "targetViewports": [[1280, 720], [1024, 576], [960, 540]],
+          "minimumControlSize": [88, 44],
+          "compactMaxWidth": 1024,
+          "note": "本屏为竖屏宿主下的消息视图；targetViewports 依约定只列横屏，竖屏几何以 --layout-draft 临时尺寸单独探查"
+        }
+      },
+      {
+        "id": "bg",
+        "parentId": "root",
+        "role": "container",
+        "name": "全屏暗底",
+        "layout": {
+          "anchorMin": [0, 0],
+          "anchorMax": [1, 1],
+          "sizeDelta": [0, 0]
+        },
+        "style": {
+          "background": { "color": "#060512", "opacity": 1 }
+        }
+      },
+      {
+        "id": "rotate-group",
+        "parentId": "bg",
+        "role": "container",
+        "name": "旋转提示组（纵向）",
+        "layout": {
+          "anchor": "middle-center",
+          "size": [320, 200],
+          "container": {
+            "direction": "column",
+            "gap": 20,
+            "align": "center"
+          }
+        }
+      },
+      {
+        "id": "rotate-icon",
+        "parentId": "rotate-group",
+        "role": "shape",
+        "name": "设备旋转图标占位（竖持设备轮廓）",
+        "layout": {
+          "size": [52, 82]
+        },
+        "style": {
+          "shape": "rounded-rectangle",
+          "cornerRadius": 8,
+          "background": { "color": "#000000", "opacity": 0 },
+          "border": { "width": 3, "color": "#2DE2FF", "radius": 8 },
+          "glow": { "color": "#2DE2FF", "radius": 8, "opacity": 0.45 }
+        },
+        "data": {
+          "component": "rotate-device-icon",
+          "note": "程序化占位；最终图标可由 ASSET_PLAN 提供，几何语义不变"
+        }
+      },
+      {
+        "id": "rotate-title",
+        "parentId": "rotate-group",
+        "role": "text",
+        "text": "请旋转设备至横屏",
+        "layout": {
+          "size": [320, 36]
+        },
+        "style": {
+          "fontSize": 22,
+          "fontWeight": 800,
+          "color": "#E8F4FF",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 4
+        }
+      },
+      {
+        "id": "rotate-hint",
+        "parentId": "rotate-group",
+        "role": "text",
+        "text": "旋转后将自动继续",
+        "layout": {
+          "size": [320, 24]
+        },
+        "style": {
+          "fontSize": 14,
+          "color": "#7B88B8",
+          "align": "center",
+          "verticalAlign": "middle",
+          "letterSpacing": 2
+        }
+      }
+    ]
+  }
+}

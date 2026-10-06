@@ -335,6 +335,8 @@ async function maybePersistLargeToolResult(
   }
 
   const message = buildLargeToolResultMessage(result)
+  // A small result can be shorter than its archive pointer plus preview.
+  if (message.length >= size) return toolResultBlock
 
   // Log analytics
   logEvent('tengu_tool_result_persisted', {

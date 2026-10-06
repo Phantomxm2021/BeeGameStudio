@@ -283,6 +283,7 @@ export type BeeGameIntakeSettings = {
   engine?: string
   visualStyle: string
   dimension: string
+  orientation?: 'Landscape' | 'Portrait' | ''
   genre: string
   inputs: string[]
   scope: string

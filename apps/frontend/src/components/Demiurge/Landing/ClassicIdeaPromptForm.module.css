@@ -1,0 +1,370 @@
+.form {
+    /* Match AvatarDialogue.glassSurface's theme-aware material. The liquid
+       mask paints it below the controls so their transitions cannot block blur. */
+    --composer-glass: color-mix(in srgb, var(--card) 76%, transparent);
+    --composer-text: var(--foreground);
+    --composer-muted: color-mix(in srgb, var(--foreground) 88%, var(--background));
+    --composer-control: color-mix(in srgb, var(--foreground) 6%, transparent);
+    --composer-control-hover: color-mix(in srgb, var(--foreground) 10%, transparent);
+    --composer-send: var(--foreground);
+    --composer-send-hover: color-mix(in srgb, var(--foreground) 88%, var(--background));
+    --composer-send-text: var(--background);
+    position: relative;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    justify-content: center;
+    padding-inline: 16px;
+}
+
+/* Bencho's width trade: the action grows 38 → 46px and the field gives
+   up exactly 8px. Total width stays fixed, with the bar's left edge anchored.
+   Morph uses layout pixels, so no move-style scale correction belongs here. */
+.liquidGroup { width: 820px; max-width: 100%; min-width: 0; display: flex; align-items: center; gap: 8px; transition: width 480ms cubic-bezier(.23,1,.32,1); }
+/* The opaque SVG is geometry only. Painting it would hide the page before
+   backdrop-filter could sample it. Keep glass outside the animated fieldset:
+   its opacity/filter transitions would otherwise create a backdrop boundary.
+   Reuse the library's mask so the neck and both bodies blur as one surface. */
+.liquidGroup::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: var(--composer-glass);
+    -webkit-backdrop-filter: blur(24px) saturate(1.15);
+    backdrop-filter: blur(24px) saturate(1.15);
+    mask-image: var(--composer-mask);
+    mask-mode: alpha;
+}
+.liquidGroup :global([data-gooey-svg]) { opacity: 0; }
+.liquidGroup :global([data-gooey-overlay] mask) { mask-type: alpha; }
+.liquidRim { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.barSlot { flex: none; min-width: 0; width: calc(100% - 46px); transition: width 340ms cubic-bezier(0.24, 1.34, 0.38, 1); }
+.sendSlot { position: absolute; right: 0; flex: none; display: block; pointer-events: none; }
+.liquidGroup .morphShell { max-width: none; width: 100%; }
+.liquidGroup[data-send-detached="true"] .barSlot { width: calc(100% - 54px); }
+.liquidGroup[data-send-detached="false"] .submitButton { opacity: 0; pointer-events: none; }
+/* Keep the glass and its live silhouette mounted through consent. The centred
+   group contracts to the measured copy; Send tucks into that same body. */
+.liquidGroup[data-confirming="true"] { width: var(--confirmation-width, 820px); }
+.liquidGroup[data-confirming="true"] .barSlot { width: 100%; transition: width 480ms cubic-bezier(.23,1,.32,1); }
+.liquidGroup .morphShell[data-confirming="true"] { height: 72px; }
+
+
+.morphShell {
+    display: inline-flex;
+    width: 100%;
+    height: 56px;
+    align-items: center;
+    margin-inline: 0;
+    overflow: hidden;
+    transition: height 480ms cubic-bezier(.23,1,.32,1);
+}
+
+.morphShell[data-has-attachments="true"][data-confirming="false"] {
+    height: auto;
+    min-height: 56px;
+}
+
+/* The group paints the merged glass; individual pills stay transparent so
+   their hard edges cannot cover the liquid neck. */
+.frostedSurface {
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 760px;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    color: var(--composer-text);
+    background: none;
+}
+
+.frostedSurface.morphShell {
+    margin-inline: 0;
+}
+
+.composerContent {
+    position: relative;
+    z-index: 3;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    flex: 0 0 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+}
+
+.morphShell[data-confirming="true"] .composerContent {
+    position: absolute;
+    inset: 0;
+}
+
+.attachments {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 12px 16px 0;
+}
+
+.attachment {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+    max-width: 240px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--composer-control);
+    color: var(--composer-text);
+    font-size: 12px;
+}
+
+.attachment img {
+    width: 32px;
+    height: 32px;
+    flex: 0 0 auto;
+    border-radius: 9px;
+    object-fit: cover;
+}
+
+.attachment > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.attachment > svg { width: 16px; height: 16px; flex: 0 0 auto; color: var(--composer-muted); }
+.attachment button { display: grid; flex: 0 0 auto; place-items: center; border: 0; padding: 2px; background: transparent; color: var(--composer-muted); cursor: pointer; }
+.attachment button:hover { color: var(--composer-text); }
+.attachment button svg { width: 14px; height: 14px; }
+
+.inputRow {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    min-width: 0;
+    height: 56px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px 0 12px;
+    border-radius: inherit;
+}
+
+.uploadButton {
+    display: inline-flex;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 999px;
+    background: var(--composer-control);
+    color: var(--composer-text);
+    cursor: pointer;
+    transition: background-color 160ms ease, color 160ms ease, transform 120ms ease;
+}
+
+.uploadButton:hover { background: var(--composer-control-hover); }
+.uploadButton:active { transform: scale(.95); }
+.uploadButton:focus-visible, .modeButton:focus-visible, .submitButton:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.uploadButton svg { width: 20px; height: 20px; }
+
+.input {
+    box-sizing: border-box;
+    width: auto;
+    min-width: 0;
+    height: 44px;
+    min-height: 0;
+    max-height: 52px;
+    flex: 1 1 auto;
+    margin: auto 0;
+    padding: 10px 0;
+    overflow-y: auto;
+    scrollbar-width: none;
+    border: 0;
+    outline: 0;
+    resize: none;
+    background: transparent;
+    color: var(--composer-text);
+    font-size: 17px;
+    font-weight: 400;
+    line-height: 1.5;
+}
+
+.input::-webkit-scrollbar { display: none; }
+
+.input::placeholder { color: var(--composer-muted); opacity: 1; }
+.input:disabled { cursor: not-allowed; opacity: .6; }
+
+.modeButton {
+    display: inline-flex;
+    height: 40px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--composer-text);
+    font: inherit;
+    font-size: 14px;
+    white-space: nowrap;
+    cursor: pointer;
+    opacity: 1;
+    transition: opacity 150ms ease, color 160ms ease;
+}
+
+/* Like Bencho's mic, the picker only fades: no travel or layout shift
+   competes with typing or the liquid action separating. */
+.modeButton[data-hidden="true"] { opacity: 0; pointer-events: none; }
+.modeButton:hover { color: var(--composer-muted); }
+.modeButton svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.modeChevron { margin-left: 1px; color: var(--composer-muted); transition: transform 160ms ease; }
+.modeButton[aria-expanded="true"] .modeChevron { transform: rotate(180deg); }
+
+.submitButton {
+    display: inline-flex;
+    width: 38px;
+    height: 38px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--composer-text);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    transition: background 220ms ease, color 220ms ease, opacity 160ms ease,
+        width 340ms cubic-bezier(0.24, 1.34, 0.38, 1),
+        height 340ms cubic-bezier(0.24, 1.34, 0.38, 1),
+        transform 320ms cubic-bezier(0.24, 1.34, 0.38, 1);
+}
+
+/* Focus offers an action in the field's material; content makes it primary.
+   The shared glass layer carries both silhouettes while the neck stretches. */
+.submitButton[data-detached="true"] { width: 46px; height: 46px; opacity: 1; background: transparent; pointer-events: auto; }
+.submitButton[data-detached="true"]:not(:disabled) { background: var(--composer-send); color: var(--composer-send-text); }
+.submitButton:hover:not(:disabled) { background: var(--composer-send-hover); }
+.submitButton:active:not(:disabled) { transform: scale(.92); }
+.submitButton:disabled { cursor: not-allowed; }
+.sendIcon { display: grid; place-items: center; }
+.submitButton svg { width: 20px; height: 20px; color: inherit; }
+.submitButton:disabled svg { opacity: .55; }
+.spinner { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.popoverMenu {
+    width: 224px;
+    max-width: calc(100vw - 32px);
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--popover);
+    color: var(--popover-foreground);
+    -webkit-backdrop-filter: blur(14px) saturate(120%);
+    backdrop-filter: blur(14px) saturate(120%);
+}
+
+.popoverItem { display: flex; width: 100%; align-items: center; gap: 10px; border: 0; border-radius: 10px; background: transparent; padding: 10px 12px; color: inherit; font-size: 14px; line-height: 20px; text-align: left; cursor: pointer; }
+.popoverItem > span { flex: 1; white-space: nowrap; }
+.popoverItem:hover, .popoverItem:focus-visible { background: var(--surface-hover); outline: none; }
+.popoverItem svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.selectedIcon { margin-left: auto; visibility: hidden; }
+.selectedIcon[data-selected="true"] { visibility: visible; }
+
+.error { margin: 8px 12px 0; padding: 8px; border: 1px solid rgb(248 113 113 / 24%); border-radius: 8px; background: rgb(62 19 19 / 90%); color: #fda29b; font-size: 13px; }
+
+.confirmationContent {
+    position: absolute;
+    z-index: 3;
+    inset: 0;
+    box-sizing: border-box;
+    display: flex;
+    width: 100%;
+    height: 72px;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px 0 20px;
+}
+
+.confirmationSizer {
+    box-sizing: border-box;
+    display: flex;
+    width: max-content;
+    height: 72px;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px 0 20px;
+    visibility: hidden;
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.confirmationSizer > span:first-child { font-size: 14px; font-weight: 500; }
+.confirmationSizerButton { box-sizing: border-box; display: inline-flex; min-height: 36px; align-items: center; border: 1px solid transparent; border-radius: 999px; padding: 0 14px; font-size: 13px; font-weight: 500; }
+
+.confirmationSummary {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    font-size: 14px;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.confirmationActions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.confirmationActions button { min-height: 36px; padding: 0 14px; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.confirmationCancel { border: 1px solid transparent; background: var(--composer-control); color: var(--composer-text); }
+.confirmationCancel:hover { background: var(--composer-control-hover); }
+.confirmationConfirm { border: 1px solid transparent; background: var(--composer-send); color: var(--composer-send-text); }
+.confirmationConfirm:hover { background: var(--composer-send-hover); }
+.confirmationActions button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 560px) {
+    .form { padding-inline: 12px; }
+    .inputRow { gap: 4px; padding-left: 8px; padding-right: 8px; }
+    .uploadButton { width: 40px; height: 40px; }
+    .modeButton { height: 40px; gap: 4px; padding-inline: 8px; font-size: 12px; }
+    .modeButton svg { width: 13px; height: 13px; }
+    .input { font-size: 16px; }
+    .confirmationContent { padding-left: 14px; }
+    .confirmationSummary { font-size: 12px; }
+    .confirmationSizer { padding-left: 14px; }
+    .confirmationSizer > span:first-child { font-size: 12px; }
+    .confirmationSizerButton { padding-inline: 8px; font-size: 12px; }
+    .confirmationActions { gap: 2px; }
+    .confirmationActions button { padding-inline: 8px; font-size: 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .liquidGroup, .morphShell, .barSlot, .submitButton, .frostedSurface *, .frostedSurface *::before, .frostedSurface *::after { animation: none; transition: none; }
+}
+
+@media (max-width: 480px) {
+    /* Icon + chevron retain the mode picker while giving the prompt room. */
+    .modeButton span { display: none; }
+}

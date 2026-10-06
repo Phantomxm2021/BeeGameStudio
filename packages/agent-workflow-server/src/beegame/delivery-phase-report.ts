@@ -102,14 +102,15 @@ function modelUsage(value: unknown): Map<string, Usage> | undefined {
   return result.size ? result : undefined
 }
 
-function streamUsage(value: unknown): Usage | undefined {
+function streamUsage(value: unknown, previous = emptyUsage()): Usage | undefined {
   const usage = object(value)
-  if (!usage) return undefined
+  const known = (key: string) => typeof usage?.[key] === 'number' && Number.isFinite(usage[key]) && Number(usage[key]) >= 0
+  if (!usage || !['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'].some(known)) return undefined
   return {
-    inputTokens: nonnegative(usage.input_tokens),
-    cacheReadInputTokens: nonnegative(usage.cache_read_input_tokens),
-    cacheCreationInputTokens: nonnegative(usage.cache_creation_input_tokens),
-    outputTokens: nonnegative(usage.output_tokens),
+    inputTokens: known('input_tokens') ? Number(usage.input_tokens) : previous.inputTokens,
+    cacheReadInputTokens: known('cache_read_input_tokens') ? Number(usage.cache_read_input_tokens) : previous.cacheReadInputTokens,
+    cacheCreationInputTokens: known('cache_creation_input_tokens') ? Number(usage.cache_creation_input_tokens) : previous.cacheCreationInputTokens,
+    outputTokens: known('output_tokens') ? Number(usage.output_tokens) : previous.outputTokens,
     upstreamCostUsd: 0,
   }
 }
@@ -257,7 +258,7 @@ export function summarizeDeliveryEvents(
         }
       } else if (streamEvent?.type === 'message_delta') {
         const messageId = activeMessageByStream.get(streamKey)
-        const usage = streamUsage(streamEvent.usage)
+        const usage = streamUsage(streamEvent.usage, messageId ? streamMessagesByTurn.get(turnId)?.get(messageId) : undefined)
         if (messageId && usage) {
           const snapshots = streamMessagesByTurn.get(turnId) ?? new Map<string, Usage>()
           snapshots.set(messageId, usage)

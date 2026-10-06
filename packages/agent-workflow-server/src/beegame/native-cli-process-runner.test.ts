@@ -4,6 +4,7 @@ import { mkdtemp, realpath, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { DashboardPermissionDecision } from './session-manager'
+import { createRuntimeObservability } from './runtime-observability'
 import {
   createNativeCliProcessRunner,
   nativeRuntimeEnvironment,
@@ -24,6 +25,7 @@ function startRuntime() {
       beginTurn: () => undefined,
       observeStdoutChunk: () => undefined,
       observeLine: () => undefined,
+      observeDiagnostic: () => undefined,
       observeMessage: () => undefined,
       finishTurn: () => undefined,
       flush: async () => undefined,
@@ -36,6 +38,59 @@ function startRuntime() {
 }
 
 describe('native CLI process runner', () => {
+  test('transports scheduled author metadata on its turn only', async () => {
+    const runtime = await startRuntime()
+    const messages: Record<string, unknown>[] = []
+    const directionAuthors = { contextPath: join(process.cwd(), 'context.md'), responsibilities: {
+      'TECHNICAL_DESIGN.md': 'Technical ownership', 'ART_DIRECTION.md': 'Art ownership', 'AUDIO_DESIGN.md': 'Audio ownership',
+    }, contextPaths: {
+      'TECHNICAL_DESIGN.md': join(process.cwd(), 'technical.context.md'),
+      'ART_DIRECTION.md': join(process.cwd(), 'art.context.md'),
+      'AUDIO_DESIGN.md': join(process.cwd(), 'audio.context.md'),
+    } }
+    const turn = { prompt: 'direction-author-metadata', signal: new AbortController().signal,
+      onMessage: (message: Record<string, unknown>) => { messages.push(message) },
+      requestPermission: async () => ({ behavior: 'deny' as const }) }
+    try {
+      await runtime.submit({ ...turn, directionAuthors })
+      await runtime.submit(turn)
+      expect(messages.filter(message => message.type === 'result').map(message => message.directionAuthors))
+        .toEqual([directionAuthors, null])
+    } finally { await runtime.dispose?.() }
+  })
+  test('captures fragmented safe stderr diagnostics without changing visible results', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'native-diagnostic-'))
+    const observer = createRuntimeObservability({ workspacePath: cwd, sessionId: 'diagnostic',
+      provider: 'fixture', model: 'fixture' })
+    let received!: () => void
+    const diagnosticsRead = new Promise<void>(resolve => { received = resolve })
+    const runtime = await createNativeCliProcessRunner({
+      command: [process.execPath, fixturePath],
+      observabilityFactory: () => ({ ...observer, observeDiagnostic(value) {
+        observer.observeDiagnostic(value)
+        if ((value as { event?: string }).event === 'api_error') received()
+      } }),
+    }).start({ sessionId: 'diagnostic', cwd, env: {} })
+    const controller = new AbortController()
+    const timeout = setTimeout(() => { controller.abort('test_timeout'); received() }, 3_000)
+    const messages: Record<string, unknown>[] = []
+    try {
+      await runtime.submit({ prompt: 'native-diagnostics', signal: controller.signal,
+        onMessage: message => { messages.push(message) },
+        requestPermission: async () => ({ behavior: 'deny' }) })
+      await diagnosticsRead
+      await observer.flush()
+      const raw = await Bun.file(join(cwd, '.beegame/logs/native-runtime.jsonl')).text()
+      const diagnostics = raw.trim().split('\n').map(line => JSON.parse(line))
+        .filter(record => record.type === 'native_diagnostic').map(record => record.diagnostic)
+      expect(diagnostics).toEqual([
+        { event: 'request_start', request: 7 },
+        { event: 'api_error', category: 'timeout', attempt: 2 },
+      ])
+      expect(raw).not.toContain('PRIVATE')
+      expect(messages.map(message => message.type)).toEqual(['result'])
+    } finally { clearTimeout(timeout); await runtime.dispose?.(); await rm(cwd, { recursive: true, force: true }) }
+  })
   test('delivers ordered progress while approvals wait and correlates independent decisions in reverse order', async () => {
     const runtime = await startRuntime()
     const decisions = new Map<string, (decision: DashboardPermissionDecision) => void>()
@@ -350,7 +405,7 @@ describe('native CLI process runner', () => {
       const terminals: Record<string, unknown>[] = []
       const runtime = await createNativeCliProcessRunner({
         command: [process.execPath, fixturePath],
-        observabilityFactory: () => ({ beginTurn() {}, observeStdoutChunk() {}, observeLine() {}, observeMessage() {},
+        observabilityFactory: () => ({ beginTurn() {}, observeStdoutChunk() {}, observeLine() {}, observeMessage() {}, observeDiagnostic() {},
           finishTurn: result => { terminals.push(result) }, flush: async () => {} }),
       }).start({ sessionId: 'stop-reason', cwd: process.cwd(), env: {} })
       const controller = new AbortController()
@@ -373,6 +428,7 @@ describe('native CLI process runner', () => {
     expect(env.ANTHROPIC_AUTH_TOKEN).toBe('selected-token')
     expect(env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1')
     expect(env.BEEGAME_NATIVE_BACKGROUND_PERMISSIONS).toBe('1')
+    expect(env.BEEGAME_NATIVE_DIAGNOSTICS).toBe('1')
   })
 
   test('reports the selected model and sanitized launch contract to passive observability', async () => {
@@ -400,6 +456,7 @@ describe('native CLI process runner', () => {
           beginTurn: () => undefined,
           observeStdoutChunk: () => undefined,
           observeLine: () => undefined,
+          observeDiagnostic: () => undefined,
           observeMessage: () => undefined,
           finishTurn: () => undefined,
           flush: async () => undefined,
@@ -495,6 +552,7 @@ describe('native CLI process runner', () => {
         beginTurn: () => undefined,
         observeStdoutChunk: () => undefined,
         observeLine: () => undefined,
+        observeDiagnostic: () => undefined,
         observeMessage: () => undefined,
         finishTurn: () => undefined,
         flush: async () => undefined,
@@ -553,6 +611,7 @@ describe('native CLI process runner', () => {
         beginTurn: () => undefined,
         observeStdoutChunk: () => undefined,
         observeLine: () => undefined,
+        observeDiagnostic: () => undefined,
         observeMessage: () => undefined,
         finishTurn: () => undefined,
         flush: async () => undefined,

@@ -7,6 +7,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const promptSource = readFileSync(join(__dirname, '..', 'prompt.ts'), 'utf-8')
 
 describe('prompt.ts fork-related text verification', () => {
+  test('delegation preserves undecided design ownership and does not introduce word quotas', () => {
+    expect(promptSource).not.toContain('report in under 200 words')
+    expect(promptSource).not.toContain('include file paths, line numbers, what specifically to change')
+    expect(promptSource).not.toContain('outputs should generally be trusted')
+    expect(promptSource).toContain('not a preselected answer or implementation script')
+    expect(promptSource).toContain('do not present a predicted parallel result as a fact')
+    expect(promptSource).toContain('unless the user requested one')
+  })
   test('does not contain "omit `subagent_type`" guidance', () => {
     expect(promptSource).not.toMatch(/omit.*subagent_type/)
   })

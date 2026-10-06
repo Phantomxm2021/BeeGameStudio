@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-04",
+  "evidenceRoot": "/private/tmp/bgs-gdd-bounded-reaccept-20261004-RXI5pGGe",
+  "document": "/private/tmp/bgs-gdd-bounded-reaccept-20261004-RXI5pGGe/projects/users/design-test/gdd-bounded-museum-20261004-RXI5pGGe/docs/GDD.md",
+  "scope": "One user-authorized fresh paid GDD author/inspect/revise/verify acceptance. Later author batches were not dispatched. Original product documents, receipts, snapshots and logs were not manually edited; this is a separate observer record.",
+  "modelConfigId": "llm_ac40e5d1be394ffe925e3f2532dedd34",
+  "model": "ark-code-latest",
+  "sourceChangesDuringRun": [],
+  "hostWorkflow": {
+    "result": "released",
+    "baselineBatch": 0,
+    "baselineRevision": "845b201bd2423814f09c6c9908c7ab17dd95f78ee936ad23291acb80948dde0b",
+    "documentHash": "2e0dbc5612189ccfb476ba72f5e401c2228913bbb4581168445e1e12c7e06847",
+    "independentNativeChildren": 3,
+    "skillPreloadRecordedInAllChildren": true,
+    "inspect": "Recorded F-01: 25 handoff section references omit actual numbered heading prefixes. Reused supplied structural/reference results; no unchanged checker rerun.",
+    "revision": "Native reviser made four grouped edits to readiness/output section strings, not body rules. Ran one handoff check after changed inputs; preserved finding F-01 and did not certify its own closure.",
+    "verify": "Fresh native verifier checked affected references against saved headings, closed F-01, and host released batch 0. No second automatic revision or owner-resolution run.",
+    "savedBodyChanges": false,
+    "remainingRecordedFindings": [],
+    "postRunReadOnlyChecks": { "handoffBatch1": "valid, issues=[]", "referencesBatch1": "valid, issues=[], checked 21 references; future documents remain scheduled dependencies" },
+    "reportScopeCaveat": "summary.json deterministicDiagnostics was computed after state advanced to authorBatch=1 and therefore lists unwritten future three-document inputs. These are not batch-0 release failures. The explicit batch-1 CLI checks (one-based GDD batch) above correctly validate the delivered GDD scope. Original summary remains unchanged."
+  },
+  "observerAcceptance": {
+    "result": "not-unconditionally-ready",
+    "basis": "Read complete final saved GDD and compare actual clauses, confirmed brief, professional ownership and next-consumer readiness. Host structural success and reviewer statements are not semantic proof.",
+    "findingAuthor": "Codex observer after native workflow, not the BGS reviewer",
+    "findings": [
+      {
+        "id": "OBS-GDD-01",
+        "severity": "blocker",
+        "owner": "GDD.md",
+        "sections": ["6.2 侦测三阶段（游玩中的警戒状态，非游戏流程状态）", "8. 成功与失败条件"],
+        "lines": [100, 101, 102, 160],
+        "sourceA": "未察觉：玩家不在任何守卫的有效视野内。",
+        "sourceB": "已发现（追击）：侦测进度满时守卫发现玩家，立即转入追击，向玩家当前位置移动；玩家脱离全部视野后，守卫在失去目标计时结束后回到巡逻路线。",
+        "counterexample": "玩家已经被发现并被追击，随后脱离全部守卫视野，而失去目标计时尚未结束。按 A 已属于未察觉，按 B 守卫仍处于追击。类似地，脱离视野但侦测进度仍在消退时，未察觉的定义没有排除残余警戒。",
+        "downstreamImpact": "正文称其为三个警戒阶段，并要求向玩家反馈当前阶段，却未区分可见性与警戒记忆、每守卫状态与全局信息。技术状态执行、视觉警戒反馈和音频阶段映射必须自行选择一个解释。",
+        "closeWhen": "GDD owner明确三个阶段的判定与退出条件，使失去视野、警戒消退及追击计时未结束时的状态有唯一解释；明确每守卫状态与全局反馈之间的关系。无需在 GDD 选择具体计时数值或规定 UI/音色实现。",
+        "notNativeRecordedFinding": true
+      }
+    ],
+    "limits": "This records one confirmed semantic ambiguity, not an exhaustive zero-defect claim or proof of playability. No new findings were injected into BGS state, receipts or paid model inputs, and no follow-up paid revision was started."
+  },
+  "tokenObservation": {
+    "basis": "Final provider usage once per model call; input/output/cache are separate and cache is included in total. Not settled credits.",
+    "modelCalls": 29,
+    "allModelUsageFinal": true,
+    "allModelAttempts": 1,
+    "total": 727154,
+    "uncachedInput": 116674,
+    "output": 19400,
+    "cacheRead": 591080,
+    "cacheCreation": 0,
+    "elapsedSeconds": 473.569,
+    "rows": [
+      { "stage": "author-1-write", "calls": 8, "input": 49646, "output": 11024, "cacheRead": 299656, "total": 360326, "elapsedSeconds": 280.542, "maxInputContext": 48304 },
+      { "stage": "review-1-inspect", "calls": 6, "input": 24883, "output": 3586, "cacheRead": 73240, "total": 101709, "elapsedSeconds": 89.479, "maxInputContext": 23910 },
+      { "stage": "review-1-revise", "calls": 9, "input": 22327, "output": 2617, "cacheRead": 140024, "total": 164968, "elapsedSeconds": 50.895, "maxInputContext": 24010 },
+      { "stage": "review-1-verify", "calls": 6, "input": 19818, "output": 2173, "cacheRead": 78160, "total": 100151, "elapsedSeconds": 52.264, "maxInputContext": 22741 }
+    ],
+    "unmeasured": "Non-model request 1 was an HTTP401 authentication probe with missing usage; missing usage is not asserted as zero spend. Credit observations before/after both failed with billing_observation_transport_failed.",
+    "previousRunComparison": { "previousTotal": 1044555, "currentTotal": 727154, "difference": 317401, "approximateReductionPercent": 30.4, "previousInspect": 773838, "currentInspect": 101709, "limits": "One sample each, different generated drafts; previous run stopped at invalid Inspect receipt while current also completed Revision and Verify. No stable cost or settled-credit guarantee." }
+  },
+  "operationalObservations": {
+    "reviewEnvironmentProbeCascade": false,
+    "reviewOpaqueCommandScopeDenials": 0,
+    "reviewFullFormatReads": 0,
+    "reviewRepeatedUnchangedChecks": 0,
+    "invalidReceiptWrites": 0,
+    "minorSourceLookupDetour": "All three fresh children first tried workspace/GDD.md, then used Glob and read workspace/docs/GDD.md. Each wrong-path Read was a normal file-not-found, not a checker outage. This remaining repeated lookup cost is not treated as a new automatic retry loop or silently fixed during acceptance.",
+    "semanticReviewLimit": "Inspect explicitly claimed detection phases and core rules were consistent but recorded only the host-provided structural issue. Targeted Verify correctly stayed with that structural correction; it did not remedy the earlier missed semantic ambiguity."
+  },
+  "manualProductEdits": false,
+  "additionalPaidRuns": 0,
+  "productionDeployment": false
+}

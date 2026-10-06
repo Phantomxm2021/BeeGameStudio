@@ -1,0 +1,42 @@
+{
+  "projectId": "priority-cli-breakout-20261001",
+  "initialMessage": "我想做一个打砖块游戏。",
+  "settings": {
+    "platform": "Web",
+    "engine": "React",
+    "dimension": "2D",
+    "orientation": "Landscape",
+    "genre": "Arcade",
+    "visualStyle": "Stylized",
+    "inputs": [
+      "Keyboard/mouse",
+      "Touch"
+    ]
+  },
+  "scope": "Eight fresh design documents and one Review/Revision; stop before resources",
+  "budget": "User authorized without credit limit; one fresh run, no automated extra repair turns",
+  "authorBatches": [
+    [
+      "GDD.md"
+    ],
+    [
+      "TECHNICAL_DESIGN.md",
+      "ART_DIRECTION.md",
+      "AUDIO_DESIGN.md"
+    ],
+    [
+      "LEVEL_SCENE_DESIGN.md",
+      "BALANCE_DESIGN.md"
+    ],
+    [
+      "UI_UX_SPEC.md"
+    ],
+    [
+      "TECHNICAL_DESIGN.md",
+      "ASSET_PLAN.md"
+    ]
+  ],
+  "mainSessions": 1,
+  "reusedDrafts": false,
+  "injectedFindings": false
+}

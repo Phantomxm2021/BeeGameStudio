@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { sharedPlaywright } from './shared-playwright'
 import { bundleContentConsumer } from './game-content-consumer-cli'
 import { saveLayoutBrowserReport, type LayoutVisualCase } from './layout-browser-report'
@@ -53,9 +53,8 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('portable menu/HUD layouts a
           { id: 'home', parentId: 'panel', role: 'button', text: '返回菜单', layout: { size: [220, 44], minSize: [220, 44] } },
         ]
         const before = JSON.stringify(nodes)
-        const canvas = document.createElement('canvas')
-        const measureText = lib.createUiTextMeasurer(canvas.getContext('2d'), () => 'Arial')
-        const rectangles = lib.inspectUiLayout(nodes, 'root', { width, height }, { measureText })
+        const inspected = await lib.inspectUiLayoutInBrowser(nodes, 'root', { width, height }, { fontFamily: () => 'Arial' })
+        const rectangles = inspected.nodes
         const byId = new Map<string, HTMLElement>()
         for (const node of nodes as any[]) {
           const el = document.createElement('div')
@@ -92,11 +91,13 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('portable menu/HUD layouts a
           }),
           boundsOk: rectangles.every((rect: any) => !rect.outsideViewport && !rect.outsideParent && !rect.outsideContentArea),
           textMeasured: rectangles.filter((rect: any) => rect.textFit !== 'not-applicable').every((rect: any) => rect.textFit !== 'unmeasured'),
+          candidateExplicit: inspected.textMeasurements.every((measurement: any) => measurement.basis === 'candidate-font'),
         }
       }, { kind, width, height })
       expect(result.sourcePreserved).toBe(true)
       expect(result.boundsOk).toBe(true)
       expect(result.textMeasured).toBe(true)
+      expect(result.candidateExplicit).toBe(true)
       for (const difference of result.differences) expect(difference).toBeLessThan(.6)
       if(process.env.BGS_LAYOUT_REPORT_DIR)evidence.push({group:'UI 布局计算对照',viewport:`${width} × ${height}`,
         strategy:kind==='menu'?'菜单／纵向布局':kind==='hud'?'HUD／横向布局':kind==='grid'?'等宽网格':kind==='pause'?'暂停弹窗':'结算弹窗',screenshot:await page.screenshot(),checks:[
@@ -106,6 +107,77 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER !== '1')('portable menu/HUD layouts a
           '源布局数据未被改写',
         ]})
     }
+    const sampled = await page.evaluate(async () => {
+      const consumerUrl = '/consumer.mjs'
+      const lib = await import(consumerUrl)
+      const source = [
+        { id: 'root', role: 'hud-root' },
+        { id: 'score', parentId: 'root', role: 'text', text: '0', layout: { size: [35,32] },
+          style: { fontSize: 24, lineHeight: 32, letterSpacing: 1 },
+          responsive: { compact: { style: { fontSize: 28 } } } },
+      ]
+      const before = JSON.stringify(source)
+      const options = { fontFamily: () => 'monospace', textSamples: { score: ['99999'] } }
+      const inspected = await lib.inspectUiLayoutInBrowser(source, 'root', { width: 500, height: 400 }, options)
+      const measurement = inspected.textMeasurements[0]
+      document.body.replaceChildren()
+      const text = document.createElement('span')
+      text.style.cssText = 'display:inline-block;white-space:pre;font:400 28px monospace;line-height:32px;letter-spacing:1px'
+      text.textContent = '99999'
+      document.body.append(text)
+      const actual = text.getBoundingClientRect()
+      const measured = measurement.values.find((value: any) => value.text === '99999')
+      let missingFontRejected = false
+      try {
+        await lib.inspectUiLayoutInBrowser(source.map(node => node.id === 'score'
+          ? { ...node, data: { font: { assetRef: 'MISSING' } } } : node), 'root', { width: 500, height: 400 }, options)
+      } catch (error) { missingFontRejected = String(error).includes('actual FontFace') }
+      return { sourcePreserved: before === JSON.stringify(source), missingFontRejected,
+        fit: inspected.nodes.find((node: any) => node.id === 'score').textFit,
+        basis: measurement.basis, widthDifference: Math.abs(actual.width - measured.width),
+        heightDifference: Math.abs(actual.height - measured.height) }
+    })
+    expect(sampled.sourcePreserved).toBe(true)
+    expect(sampled.missingFontRejected).toBe(true)
+    expect(sampled.fit).toBe('exceeds-intrinsic-bounds')
+    expect(sampled.basis).toBe('candidate-font')
+    expect(sampled.widthDifference).toBeLessThan(.6)
+    expect(sampled.heightDifference).toBeLessThan(.6)
+    // Original failed project's final UI inputs remain read-only. Candidate
+    // measurements expose text risks, not final-font or aesthetic acceptance.
+    const directory = new URL('../../../../docs/verification/layout-2026-10-01/design-tools-retest/after-review/content/ui/', import.meta.url)
+    const inputs = readdirSync(directory).filter(file => file.endsWith('.json')).map(file => {
+      const url = new URL(file, directory), bytes = readFileSync(url, 'utf8')
+      return { url, bytes, source: JSON.parse(bytes) }
+    })
+    const audit = await page.evaluate(async (inputs: { id: string; data: unknown }[]) => {
+      const consumerUrl = '/consumer.mjs'
+      const lib = await import(consumerUrl)
+      const observations = []
+      for (const input of inputs) {
+        const data = lib.readUiData(input)
+        const before = JSON.stringify(data)
+        const root = data.nodes.find((node: any) => node.id === data.rootId)
+        for (const [width,height] of root.data.targetViewports) {
+          const result = await lib.inspectUiLayoutInBrowser(data.nodes, data.rootId, { width,height }, {
+            fontFamily: (node: any) => node.style?.fontFamily ?? 'sans-serif',
+          })
+          observations.push({ id: input.id, viewport: [width,height], preserved: before === JSON.stringify(data),
+            unmeasured: result.nodes.filter((node: any) => node.active && node.textFit === 'unmeasured').map((node: any) => node.id),
+            exceeds: result.nodes.filter((node: any) => node.active && node.textFit === 'exceeds-intrinsic-bounds').map((node: any) => node.id),
+            allCandidate: result.textMeasurements.every((measurement: any) => measurement.basis === 'candidate-font') })
+        }
+      }
+      return observations
+    }, inputs.map(input => input.source))
+    for (const observation of audit) {
+      expect(observation.preserved).toBe(true)
+      expect(observation.unmeasured).toEqual([])
+      expect(observation.allCandidate).toBe(true)
+    }
+    for (const input of inputs) expect(readFileSync(input.url, 'utf8')).toBe(input.bytes)
+    console.info('Frozen UI candidate-font observations:', JSON.stringify(audit.map(({ id,viewport,exceeds }:
+      { id: string; viewport: number[]; exceeds: string[] }) => ({ id,viewport,exceeds }))))
     // One unchanged reference-plane input, compared with independent native CSS
     // percentage placement and scaling, not per-device projected coordinates.
     for (const [width, height] of [[960, 540], [390, 844], [320, 480], [320, 568]]) {

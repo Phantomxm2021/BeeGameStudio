@@ -1,0 +1,299 @@
+{
+  "source": "content/scenes/breakout_level.json",
+  "sha256": "d9eec7fdcbb9a03aa016f1c2e80dfdc609df8d3a516b8ef3d9553eba09bedbd9",
+  "projectUnmodified": true,
+  "observations": [
+    {
+      "width": 1280,
+      "height": 720,
+      "staticInspectionOnly": true,
+      "allowedByUiDimensionRule": true,
+      "outsideNodes": [],
+      "view": {
+        "projection": "orthographic",
+        "framing": "keep-height",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 720
+        },
+        "aspect": 1.7777777777777777,
+        "halfHeight": 3.6,
+        "halfWidth": 6.3999999999999995
+      }
+    },
+    {
+      "width": 1024,
+      "height": 576,
+      "staticInspectionOnly": true,
+      "allowedByUiDimensionRule": true,
+      "outsideNodes": [],
+      "view": {
+        "projection": "orthographic",
+        "framing": "keep-height",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 1024,
+          "height": 576
+        },
+        "aspect": 1.7777777777777777,
+        "halfHeight": 3.6,
+        "halfWidth": 6.3999999999999995
+      }
+    },
+    {
+      "width": 960,
+      "height": 540,
+      "staticInspectionOnly": true,
+      "allowedByUiDimensionRule": true,
+      "outsideNodes": [],
+      "view": {
+        "projection": "orthographic",
+        "framing": "keep-height",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 960,
+          "height": 540
+        },
+        "aspect": 1.7777777777777777,
+        "halfHeight": 3.6,
+        "halfWidth": 6.3999999999999995
+      }
+    },
+    {
+      "width": 960,
+      "height": 720,
+      "staticInspectionOnly": true,
+      "allowedByUiDimensionRule": true,
+      "outsideNodes": [
+        {
+          "id": "wall-left",
+          "screenBounds": {
+            "left": -16,
+            "top": 48,
+            "right": 0,
+            "bottom": 688
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "wall-right",
+          "screenBounds": {
+            "left": 960,
+            "top": 48,
+            "right": 976,
+            "bottom": 688
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "wall-top",
+          "screenBounds": {
+            "left": -16,
+            "top": 48,
+            "right": 976,
+            "bottom": 64
+          },
+          "fullyInside": false
+        }
+      ],
+      "view": {
+        "projection": "orthographic",
+        "framing": "keep-height",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 960,
+          "height": 720
+        },
+        "aspect": 1.3333333333333333,
+        "halfHeight": 3.6,
+        "halfWidth": 4.8
+      }
+    },
+    {
+      "width": 960,
+      "height": 900,
+      "staticInspectionOnly": true,
+      "allowedByUiDimensionRule": true,
+      "outsideNodes": [
+        {
+          "id": "wall-left",
+          "screenBounds": {
+            "left": -140,
+            "top": 60,
+            "right": -120,
+            "bottom": 860
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "wall-right",
+          "screenBounds": {
+            "left": 1080,
+            "top": 60,
+            "right": 1100,
+            "bottom": 860
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "wall-top",
+          "screenBounds": {
+            "left": -140,
+            "top": 60,
+            "right": 1100,
+            "bottom": 80
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "wall-bottom",
+          "screenBounds": {
+            "left": -120,
+            "top": 835,
+            "right": 1080,
+            "bottom": 845
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "brick-r1-c1",
+          "screenBounds": {
+            "left": -65,
+            "top": 120,
+            "right": 35,
+            "bottom": 155
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "brick-r1-c10",
+          "screenBounds": {
+            "left": 925,
+            "top": 120,
+            "right": 1025,
+            "bottom": 155
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "brick-r2-c1",
+          "screenBounds": {
+            "left": -65,
+            "top": 165,
+            "right": 35,
+            "bottom": 200
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "brick-r2-c10",
+          "screenBounds": {
+            "left": 925,
+            "top": 165,
+            "right": 1025,
+            "bottom": 200
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "brick-r3-c1",
+          "screenBounds": {
+            "left": -65,
+            "top": 210,
+            "right": 35,
+            "bottom": 245
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "brick-r3-c10",
+          "screenBounds": {
+            "left": 925,
+            "top": 210,
+            "right": 1025,
+            "bottom": 245
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "brick-r4-c1",
+          "screenBounds": {
+            "left": -65,
+            "top": 255,
+            "right": 35,
+            "bottom": 290
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "brick-r4-c10",
+          "screenBounds": {
+            "left": 925,
+            "top": 255,
+            "right": 1025,
+            "bottom": 290
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "brick-r5-c1",
+          "screenBounds": {
+            "left": -65,
+            "top": 300,
+            "right": 35,
+            "bottom": 335
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "brick-r5-c10",
+          "screenBounds": {
+            "left": 925,
+            "top": 300,
+            "right": 1025,
+            "bottom": 335
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "brick-r6-c1",
+          "screenBounds": {
+            "left": -65,
+            "top": 345,
+            "right": 35,
+            "bottom": 380
+          },
+          "fullyInside": false
+        },
+        {
+          "id": "brick-r6-c10",
+          "screenBounds": {
+            "left": 925,
+            "top": 345,
+            "right": 1025,
+            "bottom": 380
+          },
+          "fullyInside": false
+        }
+      ],
+      "view": {
+        "projection": "orthographic",
+        "framing": "keep-height",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 960,
+          "height": 900
+        },
+        "aspect": 1.0666666666666667,
+        "halfHeight": 3.6,
+        "halfWidth": 3.84
+      }
+    }
+  ]
+}

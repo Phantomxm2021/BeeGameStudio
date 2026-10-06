@@ -29,7 +29,7 @@ describe('registerUltracodeSkill', () => {
     expect(ultracode!.type).toBe('prompt')
     expect(ultracode!.userInvocable).toBe(true)
     expect(ultracode!.whenToUse).toBeTruthy()
-    expect(ultracode!.description).toContain('workflow')
+    expect(ultracode!.description).toBeTruthy()
     const promptCmd = asPrompt(ultracode!)
     expect(promptCmd.source).toBe('bundled')
   })
@@ -47,10 +47,8 @@ describe('registerUltracodeSkill', () => {
     expect(blocks[0]!.type).toBe('text')
 
     const text = (blocks[0] as { type: 'text'; text: string }).text
-    // Title + opt-in rule + harness-injection note
+    // The skill supplies a scripting playbook, not a mode switch.
     expect(text).toContain('Workflow Orchestration Playbook')
-    expect(text).toContain('explicitly opted into multi-agent orchestration')
-    expect(text).toContain('harness')
     // Orchestration primitives
     expect(text).toContain('Script body hooks')
     expect(text).toContain('parallel')

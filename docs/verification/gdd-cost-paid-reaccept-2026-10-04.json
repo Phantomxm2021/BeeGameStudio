@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-04",
+  "kind": "observer-audit-of-one-authorized-paid-run",
+  "rawEvidenceRoot": "/private/tmp/bgs-gdd-cost-reaccept-20261004-IJ2VZVOK",
+  "workspace": "/private/tmp/bgs-gdd-cost-reaccept-20261004-IJ2VZVOK/projects/users/design-test/gdd-cost-museum-20261004-IJ2VZVOK",
+  "modelConfigId": "llm_ac40e5d1be394ffe925e3f2532dedd34",
+  "model": "ark-code-latest",
+  "scope": "Fresh museum-stealth GDD only, same confirmed brief as the preceding run. No later author, resource, Content, implementation or additional review run.",
+  "paidRunsStarted": 1,
+  "creditCap": null,
+  "manualProductEdits": false,
+  "systemSourcesUnchangedDuringRun": true,
+  "gddUnchangedBetweenAuthorAndInspect": true,
+  "gddSha256": "3072b8e40be8235b889fee4e6b79beeeddf7f32f17c2ff2ac9672932bc94e2fd",
+  "outcome": {
+    "host": "Released GDD baseline; next author batch remains unstarted.",
+    "nativeReviewer": "Fresh independent bgs-design-review with actual game-design-check preload; read original task, complete saved GDD and document-check reference. Inspect receipt contains no findings or resolved items.",
+    "observer": "Complete saved prose and tables inspected. No definite blocker identified for starting technical baseline, art direction and audio design. Rules, scope, outcomes, restart and professional pending dependencies are present; this is not a zero-defect or runtime-quality certificate.",
+    "revisionAndVerify": "Not dispatched: clean Inspect requires no corrective stages. Their targeted-read behavior was not exercised by this paid sample."
+  },
+  "usage": {
+    "basis": "One final upstream usage record per model request; cache reads included, not double-counted streamed native partial usage.",
+    "modelCalls": 10,
+    "allModelCallsFirstAttempt": true,
+    "allModelCallsFinalUsage": true,
+    "inputTokens": 54004,
+    "cacheReadTokens": 207608,
+    "outputTokens": 14105,
+    "cacheCreationTokens": 0,
+    "totalObservedModelTokens": 275717,
+    "elapsedSeconds": 349.188,
+    "stages": [
+      { "stage": "author", "calls": 7, "input": 37754, "cacheRead": 181072, "output": 10268, "total": 229094, "elapsedSeconds": 246.417 },
+      { "stage": "inspect", "calls": 3, "input": 16250, "cacheRead": 26536, "output": 3837, "total": 46623, "elapsedSeconds": 102.233 }
+    ],
+    "otherRequest": "One non-model 401 authentication probe has no usage. Missing usage is unknown, not zero spend.",
+    "settledCredits": "Unavailable: billing-before and billing-after both report billing_observation_transport_failed."
+  },
+  "comparison": {
+    "previousRoot": "/private/tmp/bgs-gdd-bounded-reaccept-20261004-RXI5pGGe",
+    "previousTokens": 727154,
+    "previousModelCalls": 29,
+    "previousElapsedSeconds": 473.569,
+    "wholeRunTokenReductionPercent": 62.0827,
+    "elapsedReductionPercent": 26.2646,
+    "sharedAuthorAndInspectPreviousTokens": 462035,
+    "sharedAuthorAndInspectReductionPercent": 40.3255,
+    "initialAuthorContextPrevious": 36380,
+    "initialAuthorContextCurrent": 22960,
+    "initialContextReductionPercent": 36.8884,
+    "warning": "This is one sample, not a causal or stability guarantee. Previous Revision/Verify accounted for 265119 tokens and did not occur here. Generation content and review reasoning also vary."
+  },
+  "repairObservations": [
+    "Reviewer used the exact docs/GDD.md path without wrong-path Read/Glob recovery.",
+    "Author ran the existing scoped reference checker, including the new heading-pointer checks, once. Current pointers were already valid; malformed-heading repair was not exercised.",
+    "Reviewer reused host deterministic checks rather than running unchanged checks or probing implementation/format.",
+    "Successful reviewer receipt ended the native child with a deterministic saved-receipt handoff; no extra summary model call.",
+    "No source/evidence drift, invalid review receipt, model retry or paid coordinator polling observed."
+  ],
+  "remainingNonblockingExecutionError": {
+    "actor": "GDD author",
+    "problem": "Wrote the completion receipt with .ts instead of the exact .txt extension.",
+    "actualRecovery": "Author removed its mistaken temporary file and wrote the exact .txt receipt in the normal native flow. Observer did not edit either receipt.",
+    "additionalCall": "Provider request 7; 36876 observed tokens. Requests 6 and 7 together cost 73235, but a correct first receipt write would still require one request, so 73235 is not wholly extra waste.",
+    "impact": "One avoidable native call, no false release or product-document change. Exact tool descriptions and paths do not guarantee flawless model arguments."
+  },
+  "notEstablished": [
+    "Stable GDD quality across different game proposals or repeated samples",
+    "Semantic zero defects",
+    "Paid Revision/Verify savings or reliability in a case requiring correction",
+    "Final playability, balance, engine feasibility, runtime or settled credit cost"
+  ]
+}

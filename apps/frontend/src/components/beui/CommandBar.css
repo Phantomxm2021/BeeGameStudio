@@ -1,0 +1,217 @@
+/* Bencho Command bar, MIT — https://bencho.dev/licence.
+   All aliases belong to this root; existing project tokens remain the source
+   of theme and typography. Glass coefficients have no project equivalents,
+   so they are locally zero for the flat surface used here. */
+.bgs-command-bar {
+  --board: var(--muted);
+  --fill-on: var(--foreground);
+  --fill-slab: var(--muted);
+  --font-ui: var(--font-text);
+  --g-edge-far: 0;
+  --g-edge-hi: 0;
+  --g-edge-lo: 0;
+  --g-lift: 0;
+  --g-shadow: var(--shadow-raised);
+  --g-spec: 0;
+  --ink: var(--foreground);
+  --ink-4: var(--muted-foreground);
+  --ink-5: var(--muted-foreground);
+  --on-ink: var(--background);
+  --shadow-rgb: 0, 0, 0;
+  --try-edge: var(--border);
+  width: 100%;
+  min-width: 0;
+}
+
+/* D — command bar */
+/* the group lays the two bodies out; the library moves them */
+.bgs-command-bar .cmd-goo { display: flex; align-items: center; gap: 8px; }
+
+/* NO 1/k CORRECTION HERE. These are morph items, and morph
+   positions its bodies with a CSS transform in layout pixels,
+   which the card's own scale then handles correctly. The
+   correction exists for `move`, which measures screen pixels —
+   applying it to morph shrinks the silhouette below the
+   element it belongs to. */
+.bgs-command-bar .cmd-slot { display: block; flex: none; }
+.bgs-command-bar .cmd-field-slot { flex: 1; min-width: 0; }
+
+.bgs-command-bar .cmd {
+  position: relative;
+  display: flex; align-items: center;
+  gap: 6px;
+  /* ── THE BAR AND THE BUTTON TRADE ONE WIDTH ───────────────
+     Both states add up to the same 320 the component sits in —
+     274 + 8 + 38 at rest, 266 + 8 + 46 once the button opens
+     out. Holding the total fixed is not tidiness: this is a
+     card on the wall, and a box that changes size re-packs
+     every column around it. So the bar gives up exactly what
+     the button takes, and the outer box never moves. */
+  /* Responsive integration: the first slot flexes, preserving the same
+     width trade at any bubble width instead of fixing the root to 320px. */
+  width: 100%;
+  transition: width 340ms cubic-bezier(0.24, 1.34, 0.38, 1);
+  /* smaller: 54 was a bar you could have put two lines in */
+  /* Adaptation: compact single-line speech reply; keep a 44px touch target. */
+  height: 44px;
+  /* the right side is padded for the mic rather than for text */
+  padding: 0 8px 0 20px;
+  border-radius: var(--cmd-r, 22px);
+  /* no background: <Liquid> paints the bar, and a fill here
+     would lay a hard rectangle over the liquid edge exactly
+     where the button is leaving it */
+  background: none;
+  isolation: isolate;
+}
+
+/* ── NOT THE STROKE'S ANY MORE, THE GLASS'S ─────────────────
+   Stroke is gone from this component, so on a flat surface
+   this border stays transparent and draws nothing. It is kept
+   because the GLASS surface needs a box to paint its lit rim
+   into — a gradient cannot go in a border without a second
+   element to carry it, and this is that element. Delete it and
+   the bar loses its rim under glass. */
+.bgs-command-bar .cmd::before {
+  content: ""; position: absolute; inset: 0;
+  border-radius: inherit; border: 1px solid transparent; pointer-events: none;
+}
+.bgs-command-bar .cmd input {
+  flex: 1; min-width: 0; width: 100%;
+  border: 0; outline: none; background: none; box-shadow: none;
+  font-family: var(--font-ui); font-size: 15px;
+  letter-spacing: -0.005em; color: var(--fill-on, var(--ink));
+}
+.bgs-command-bar .cmd input::placeholder { color: var(--ink-5); }
+.bgs-command-bar .cmd:focus-within { outline: 1px solid var(--ring); outline-offset: 1px; }
+
+/* one slot, two faces, stacked so neither one moves the other */
+/* Inside the bar, and it does not travel. Fading is the whole
+   of what it does — see the note in the component. */
+.bgs-command-bar .cmd-mic {
+  flex: none; display: grid; place-items: center;
+  width: 36px; height: 36px;
+  border: 0; border-radius: 999px; background: none;
+  color: var(--ink-4); cursor: pointer;
+  /* it only fades. No scale, no travel — the one thing it does
+     is stop being there. */
+  opacity: 0; transition: opacity 150ms ease;
+}
+.bgs-command-bar .cmd-mic[data-show="true"] { opacity: 1; }
+.bgs-command-bar .cmd-mic:hover { color: var(--fill-on, var(--ink)); }
+
+.bgs-command-bar .cmd-go {
+  position: relative; flex: none; width: 38px; height: 38px;
+  border: 0; border-radius: 999px;
+  /* NOTHING AT REST. Tucked inside the bar it is a body for
+     the goo to split from and nothing more — no disc, and its
+     glyph is hidden too, so what you see is one bar. */
+  background: none; color: var(--fill-slab, var(--on-ink)); cursor: pointer;
+  display: grid; place-items: center; opacity: 0;
+  transition: background 220ms ease, color 220ms ease, opacity 160ms ease,
+    width 340ms cubic-bezier(0.24, 1.34, 0.38, 1),
+    height 340ms cubic-bezier(0.24, 1.34, 0.38, 1),
+    transform 320ms cubic-bezier(0.24, 1.34, 0.38, 1);
+}
+/* it arrives at full size, into the room the bar just made */
+.bgs-command-bar .cmd-go[data-on="true"] { opacity: 1; width: 38px; height: 38px; }
+
+/* ── THE SAME MATERIAL AS THE BAR ───────────────────────────
+   It was an ink disc with a light glyph, which made the thing
+   that splits off a different object from the thing it split
+   FROM — and the goo's whole claim is that they are one body
+   separating. Same fill as the field, ink glyph, and the seam
+   between them while they neck is now continuous. */
+.bgs-command-bar .cmd-go[data-on="true"] {
+  background: var(--fill-slab, var(--board)); color: var(--fill-on, var(--ink));
+}
+
+/* ── TWO STATES, AND NEITHER HAS AN EDGE ────────────────────
+   Focused with an empty field, the button is the same material
+   as the bar it just split out of: present and offered, asking
+   for nothing. The first character makes it the thing you are
+   about to press, and it says so by filling — the only solid
+   object in the component, which is what a primary action is.
+
+   Filled, not outlined, in both: the only edge either state
+   can ever have is the hairline the Stroke switch draws
+   below. */
+.bgs-command-bar .cmd-go[data-armed="true"] {
+  background: var(--fill-on, var(--ink)); color: var(--fill-slab, var(--on-ink));
+}
+.bgs-command-bar .cmd-go:active { transform: scale(0.92); }
+.bgs-command-bar button:disabled { cursor: not-allowed; }
+.bgs-command-bar .cmd-go[data-on="true"]:disabled { color: var(--ink-4); }
+
+/* ── the rim ─────────────────────────────────────────────────
+   Every glass surface already drew a 1px ring in one flat
+   colour. A flat rim is the single clearest tell that a thing
+   is a rectangle with a border rather than a pane with
+   thickness: real edges are lit unevenly, and evenly lit ones
+   read as ink.
+
+   So the ring becomes a gradient — bright at the corner
+   facing the light, almost nothing along the sides that run
+   edge-on to it, and a second weaker catch at the far corner
+   where the light has come through the pane and out again.
+
+   Painting a gradient in a border needs the border box filled
+   and the padding box punched out of it, which is what the
+   two masks do: one covers the whole element, one covers only
+   the inside, and compositing them apart leaves the rim. It
+   is the only way to get a gradient into a border without a
+   second element to draw it on.
+
+   Only under glass. Flat keeps its honest hairline, which is
+   what a solid pane should have. */
+.bgs-command-bar[data-surface="glass"] .cmd::before {
+  border-color: transparent;
+  background: linear-gradient(142deg,
+    rgba(255, 255, 255, var(--g-edge-hi, 0)) 0%,
+    rgba(255, 255, 255, var(--g-edge-lo, 0)) 26%,
+    rgba(255, 255, 255, var(--g-edge-lo, 0)) 62%,
+    rgba(255, 255, 255, var(--g-edge-far, 0)) 100%) border-box;
+  -webkit-mask: linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+/* ── thickness ───────────────────────────────────────────────
+   Three marks, and between them they are the difference
+   between a pane and a wash.
+
+   The lit line along the top is where light enters the edge of
+   a real sheet. The ring is the sheet's own thickness seen
+   from straight on. The shadow underneath says the pane is
+   ABOVE the page rather than painted onto it — which is the
+   one thing a backdrop-filter alone can never say, because a
+   filter has no depth.
+
+   All three ride on --glass and are gone at zero, where the
+   fallbacks take over and the surface is flat. */
+.bgs-command-bar[data-surface="glass"] .cmd {
+  box-shadow: var(--g-shadow,
+    /* the top face, catching light through the thickness of
+       the pane — inside the rim, not on it */
+    inset 0 1px 0 rgba(255, 255, 255, var(--g-spec, 0)),
+    /* And what it casts on the page below — wide and soft
+       rather than tight and close. It is a different claim
+       about how far the pane floats, and the softer one is
+       what reads as a sheet resting above the page instead of
+       a card stuck to it. */
+    0 10px 40px rgba(var(--shadow-rgb), var(--g-lift, 0)));
+}
+.bgs-command-bar[data-surface="flat"] .cmd { -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+/* ── a flat rim, for comparison ──────────────────────────────
+   Reverts the graded rim to one colour all the way round —
+   which is what almost every published glass snippet does,
+   Apple's own included. It is here so the two can be judged
+   against each other on the same ground rather than taken on
+   trust, and it applies only inside a test board. */
+.gtry[data-rim="flat"] .bgs-command-bar .cmd::before {
+  border-color: var(--try-edge, transparent); background: none;
+  -webkit-mask: none; mask: none;
+}
+@media(prefers-reduced-motion: reduce) { .bgs-command-bar * { transition: none; } }
+@media(pointer: coarse) { .bgs-command-bar .cmd-mic { width: 44px; height: 44px; } }

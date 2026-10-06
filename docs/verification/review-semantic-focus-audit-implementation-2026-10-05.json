@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-05",
+  "kind": "audited-minimal-review-input-change",
+  "status": "implemented-and-locally-verified; semantic-effect-unproven",
+  "objective": "减少已观察到的主机结构诊断对语义Inspect的干扰，不把既有检查要求重写当作语义漏检修复。",
+  "evidence": {
+    "paidRunRoot": "/private/tmp/bgs-newidea-stealth-paid-20261005-QKrE8huz",
+    "reviewer": "aa7720fd4e552a07a",
+    "observed": "UI Reviewer先分析主机输入标签诊断，再以关键词匹配宣布跨文档一致；同次读取含立即重开和暗场中点生效条款，仍未登记其冲突。检查Skill已注入。",
+    "causalLimit": "结构诊断是否导致语义漏检尚未证实。此次输入分工调整是待验证假设，不是已证明的模型能力修复。"
+  },
+  "implemented": [
+    "Inspect任务只提供主机确定性检查已执行、版本绑定及错误由既有修订处理的说明，不注入诊断明细；原始正文、侧车、来源和读取权限不变。",
+    "Inspect职责明确为语义可实施性和一致性；不将主机结构诊断重新包装成语义finding。职责分工在任务prompt，检查方法仍由现有Skill提供。",
+    "Revision和Verify保留完整主机检查结果。放行代码未变：结构错误不依赖LLM登记，自动纳入一次授权修订，未修复则停止。"
+  ],
+  "rejectedOrNotAdded": [
+    "不重复增加Skill已经要求的行为走查、条款比较或事实依据规则。",
+    "不新增审查覆盖字段、决策登记表、回执Schema或语义覆盖放行门。程序不能证明自然语言审查覆盖全部关键事项。",
+    "不增加Agent、审查轮次、自动重试或游戏案例专用检测。",
+    "不以已读声明、结构通过或空findings证明文档没有语义缺陷。"
+  ],
+  "verification": {
+    "beforeImplementation": "新增输入隔离断言在原实现上4项失败。",
+    "afterImplementation": {
+      "files": 6,
+      "passed": 131,
+      "failed": 0,
+      "expectations": 1231,
+      "seconds": 5.34,
+      "typecheckExitCode": 0,
+      "diffCheckExitCode": 0
+    },
+    "keyPaths": [
+      "结构角色表错误和缺失计算引用均不进入Inspect诊断明细，但完整进入Revision。",
+      "空语义findings不绕过结构修订；修复且升版后进入Verify，未修复则停止且不生成基线。",
+      "原有读写范围、原生Skill注入、回执完整性、版本提升和有限修订约束保持有效。"
+    ],
+    "scopeLimit": "本地测试使用合成文档和模拟Agent回执，证明输入分派及放行约束，不证明LLM语义检出效果。浏览器清理测试出现既有/bin/ps沙箱EPERM提示，不能视为浏览器游戏验收。"
+  },
+  "behavioralValidationPlan": {
+    "status": "not-run; separate-paid-test-authorization-required",
+    "method": "使用不同题材的原生流程，按原始需求、保存条款和实际工具结果独立判断缺陷。若做已知问题样本的对照，须在运行前固定独立判定，并与Reviewer输入隔离；不得注入答案或人工修补BGS产物。",
+    "measure": ["语义漏检", "误报", "Reviewer无依据的完成声明", "错误放行", "Token及耗时"],
+    "decision": "没有显示有效改善则放弃本候选输入调整，不继续叠规则或追加循环；单次通过不能证明语义漏检被消除。"
+  },
+  "scope": {
+    "productionFiles": [
+      "packages/agent-workflow-server/src/beegame/project-conversation.ts",
+      "packages/agent-workflow-server/src/beegame/project-author.ts"
+    ],
+    "testFiles": [
+      "packages/agent-workflow-server/src/beegame/project-conversation.test.ts",
+      "packages/agent-workflow-server/src/beegame/project-author.test.ts"
+    ],
+    "skillsChanged": false,
+    "releaseGateChanged": false,
+    "reviewSchemaChanged": false,
+    "manualProductEdits": false,
+    "paidRunsStarted": 0,
+    "unrelatedChangesPreserved": true,
+    "committed": false
+  }
+}

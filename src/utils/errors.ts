@@ -9,6 +9,14 @@ export class ClaudeError extends Error {
 
 export class MalformedCommandError extends Error {}
 
+/** A partial transcript is not a completed assignment when execution is capped. */
+export class AgentExecutionLimitError extends Error {
+  constructor(public readonly maxTurns: number) {
+    super(`Agent execution limit reached (${maxTurns} turns); the assignment is unfinished. Partial file changes may exist; no automatic retry.`)
+    this.name = 'AgentExecutionLimitError'
+  }
+}
+
 export class AbortError extends Error {
   constructor(message?: string) {
     super(message)

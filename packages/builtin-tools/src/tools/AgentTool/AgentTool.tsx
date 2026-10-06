@@ -45,7 +45,7 @@ import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js';
 import { getCwd, runWithCwdOverride } from 'src/utils/cwd.js';
 import { logForDebugging } from 'src/utils/debug.js';
 import { isEnvTruthy } from 'src/utils/envUtils.js';
-import { AbortError, errorMessage, toError } from 'src/utils/errors.js';
+import { AbortError, AgentExecutionLimitError, errorMessage, toError } from 'src/utils/errors.js';
 import type { CacheSafeParams } from 'src/utils/forkedAgent.js';
 import { lazySchema } from 'src/utils/lazySchema.js';
 import { createUserMessage, extractTextContent, isSyntheticMessage, normalizeMessages } from 'src/utils/messages.js';
@@ -1393,6 +1393,9 @@ export const AgentTool = buildTool({
           // whatever messages we have. If we have no assistant messages,
           // re-throw the error so it's properly handled by the tool framework.
           if (syncAgentError) {
+            // Retain partial work in the transcript, but never label a capped
+            // assignment completed merely because it emitted assistant messages.
+            if (syncAgentError instanceof AgentExecutionLimitError) throw syncAgentError;
             // Check if we have any assistant messages to return
             const hasAssistantMessages = agentMessages.some(msg => msg.type === 'assistant');
 

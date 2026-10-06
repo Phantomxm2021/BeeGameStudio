@@ -104,7 +104,7 @@ describe('screen UI content geometry handoff', () => {
       anchorMin: [0, 0], anchorMax: [1, 0], sizeDelta: [-1000, 52], position: [20, 20],
     } }])
     document.data.nodes[0]!.data = { referenceResolution: [960, 540] }
-    expect(auditUiInteractiveBounds(document).join(' ')).toContain('non-positive bounds')
+    expect(auditUiInteractiveBounds(document).join(' ')).toContain('Invalid UI geometry: play')
   })
 
   test('reports invalid authored viewport settings rather than silently ignoring them', () => {

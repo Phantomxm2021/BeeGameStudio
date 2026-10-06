@@ -1,19 +1,18 @@
-import { AGENT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/AgentTool/constants.js'
 import { registerBundledSkill } from '../bundledSkills.js'
 
 const SIMPLIFY_PROMPT = `# Simplify: Code Review and Cleanup
 
-Review all changed files for reuse, quality, and efficiency. Fix any issues found.
+Review the requested changes for reuse, quality, and efficiency. Preserve unrelated work; fix substantiated issues within the requested cleanup.
 
 ## Phase 1: Identify Changes
 
 Run \`git diff\` (or \`git diff HEAD\` if there are staged changes) to see what changed. If there are no git changes, review the most recently modified files that the user mentioned or that you edited earlier in this conversation.
 
-## Phase 2: Launch Three Review Agents in Parallel
+## Phase 2: Review from Three Perspectives
 
-Use the ${AGENT_TOOL_NAME} tool to launch all three agents concurrently in a single message. Pass each agent the full diff so it has the complete context.
+Apply the relevant perspectives below to the same scoped changes. They are review angles, not a required number of agents. If independent review is authorized and useful, share the relevant diff and source context.
 
-### Agent 1: Code Reuse Review
+### Code Reuse Review
 
 For each change:
 
@@ -21,7 +20,7 @@ For each change:
 2. **Flag any new function that duplicates existing functionality.** Suggest the existing function to use instead.
 3. **Flag any inline logic that could use an existing utility** — hand-rolled string manipulation, manual path handling, custom environment checks, ad-hoc type guards, and similar patterns are common candidates.
 
-### Agent 2: Code Quality Review
+### Code Quality Review
 
 Review the same changes for hacky patterns:
 
@@ -33,7 +32,7 @@ Review the same changes for hacky patterns:
 6. **Unnecessary JSX nesting**: wrapper Boxes/elements that add no layout value — check if inner component props (flexShrink, alignItems, etc.) already provide the needed behavior
 7. **Unnecessary comments**: comments explaining WHAT the code does (well-named identifiers already do that), narrating the change, or referencing the task/caller — delete; keep only non-obvious WHY (hidden constraints, subtle invariants, workarounds)
 
-### Agent 3: Efficiency Review
+### Efficiency Review
 
 Review the same changes for efficiency:
 
@@ -47,7 +46,7 @@ Review the same changes for efficiency:
 
 ## Phase 3: Fix Issues
 
-Wait for all three agents to complete. Aggregate their findings and fix each issue directly. If a finding is a false positive or not worth addressing, note it and move on — do not argue with the finding, just skip it.
+Aggregate the findings and check each against the source and requested outcome before fixing it. Skip false positives and changes that do not materially improve this task.
 
 When done, briefly summarize what was fixed (or confirm the code was already clean).
 `

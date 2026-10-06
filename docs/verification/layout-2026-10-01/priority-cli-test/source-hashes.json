@@ -1,0 +1,11 @@
+{
+  "packages/agent-workflow-server/src/beegame/project-author.ts": "c4c0e5296fb35669768460ec2d17aa4aee246b896ab805bc7abac4d974f894f9",
+  "packages/agent-workflow-server/src/beegame/project-conversation.ts": "7a1987cd50180b38385c8eca8d13db304e9d01cbd0c7858fae4398929edf25b0",
+  "packages/agent-workflow-server/src/beegame/project-delivery.ts": "9064373a54a6225797da3c6d4ea2df2364f9ea6b65249dd4fb60f585d6f3fa98",
+  "packages/agent-workflow-server/src/beegame/scene-ui-content-authoring.ts": "b978cd4975d8049bf258d9488c842891087b80748f16eb9eab92354777d06d5b",
+  "packages/agent-workflow-server/src/beegame/design-layout-check.ts": "bbf73db747e232a1da422080269617ea9fc19c904be8fa23403297444542fd83",
+  "packages/scene-editor/src/ui-layout-inspection.ts": "51778be94e1cfe5704c9482e65c3234b5c6ebf55601054c1777eef3def2a9b6e",
+  ".beegame/skills/builtinskills/game-ui-ux-designer/SKILL.md": "a83fc1c30a04f1f0cb4dbc6245a4ee4d6a943672656ca7958e3efa132c961310",
+  ".beegame/skills/builtinskills/game-ui-ux-designer/references/layout-calculation.md": "64e4370c052a3acdfd35261688c7d53fd73ad60c6c3e6380add83c0c3aebbfa8",
+  ".beegame/skills/builtinskills/evidence-before-completion/SKILL.md": "5f723a41ce2b76d575e585ac3dae3d7ec038da7a66f64b5424e12bb89480ca30"
+}

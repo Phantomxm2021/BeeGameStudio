@@ -1,0 +1,105 @@
+{
+  "date": "2026-10-04",
+  "scope": "Additional system-source diagnosis and repair. Original paid-project documents, receipts and runtime evidence remain read-only. No new paid run or production deployment.",
+  "originalEvidenceRoot": "/private/tmp/bgs-consumer-ready-accept-20261004-25yXjbuO",
+  "previousRepairRecord": "docs/verification/review-receipt-repair-2026-10-04.json",
+  "accounting": {
+    "basis": "One final provider usage record per model request, including cache-read tokens. Grouped by dominant produced action; inputs include previous results and accumulated history. Not isolated tool execution prices or settled credits.",
+    "model": "ark-code-latest",
+    "modelCalls": 29,
+    "elapsedSeconds": 475.807,
+    "totals": { "uncachedInput": 113996, "output": 17943, "cacheRead": 912616, "cacheCreation": 0, "total": 1044555 },
+    "rows": [
+      { "activity": "Author prepare/read task", "requestIds": [2, 3], "calls": 2, "input": 37593, "output": 975, "cacheRead": 35640, "total": 74208 },
+      { "activity": "Author generate/save GDD", "requestIds": [4], "calls": 1, "input": 3991, "output": 7571, "cacheRead": 36664, "total": 48226 },
+      { "activity": "Author reference check", "requestIds": [5], "calls": 1, "input": 8054, "output": 152, "cacheRead": 40248, "total": 48454 },
+      { "activity": "Author receipt/reply", "requestIds": [6, 7], "calls": 2, "input": 2154, "output": 795, "cacheRead": 96880, "total": 99829 },
+      { "activity": "Review task/Skill/GDD reads", "requestIds": [8, 9, 10], "calls": 3, "input": 25394, "output": 365, "cacheRead": 40560, "total": 66319 },
+      { "activity": "Rejected checks/help", "requestIds": [11, 12], "calls": 2, "input": 5615, "output": 518, "cacheRead": 53872, "total": 60005 },
+      { "activity": "Environment/source probes and extra format read", "requestIds": [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28], "calls": 16, "input": 12873, "output": 3710, "cacheRead": 520064, "total": 536647 },
+      { "activity": "Review synthesis/invalid receipt", "requestIds": [29], "calls": 1, "input": 13519, "output": 3276, "cacheRead": 37688, "total": 54483 },
+      { "activity": "Review reply", "requestIds": [30], "calls": 1, "input": 4803, "output": 581, "cacheRead": 51000, "total": 56384 }
+    ],
+    "avoidanceCandidate": { "calls": 18, "total": 596652, "percentage": 57.1, "meaning": "Observed rejected-check and recovery detour, not measured post-fix savings. Necessary targeted checks may still require calls." },
+    "peakInputContext": 55803,
+    "noRevisionOrVerificationCalls": true,
+    "allModelUsageFinal": true,
+    "nonModelProbe": "Request 1 was HTTP401 authentication observation with no final usage; missing usage is not asserted as zero spend.",
+    "allModelAttempts": 1,
+    "settledCredits": null,
+    "billingLimitation": "billing_observation_transport_failed",
+    "interpretation": [
+      "87.37% of the cumulative usage is cached history; this is not one million tokens in a single context or one million newly read source tokens.",
+      "96.9% of the 536647-token environment/source group is cache-read history. Sixteen small steps repeatedly carried tens of thousands of context tokens.",
+      "The 813.8KB checker source Read failed its file-size limit. Its entire source was not injected; inspect-design source and the late full content-format Read did add context.",
+      "No transport retry loop or duplicate partial transcript accounting caused the million-token total. Large-context model distortion is not established by this evidence."
+    ]
+  },
+  "historicalComparison": {
+    "purpose": "Locate regression only, not use old implementation or old acceptance as a correctness oracle.",
+    "closestRoot": "/private/tmp/bgs-shared-review-reaccept-20261004-GoQhQ0",
+    "sameModelAndBrief": true,
+    "priorPrefix": { "authorCalls": 7, "authorTokens": 295488, "reviewCalls": 17, "reviewTokens": 558786, "total": 854274 },
+    "currentPrefix": { "authorCalls": 6, "authorTokens": 270717, "reviewCalls": 23, "reviewTokens": 773838, "total": 1044555 },
+    "prefixDifference": 190281,
+    "limits": "Prior GDD Review combined inspection and corrections, including another child; current run stopped after inspect with an invalid receipt. These are similar task prefixes, not equivalent completion/quality outcomes. Percentage difference cannot prove causal savings.",
+    "observedRegression": "Earlier Review logs have no opaque-denial recovery cascade. Current bounded guard rejected cd/operator-wrapped checker commands; generic shell API remained visible and the model investigated a supposed environment outage.",
+    "additionalHistoricalRuns": [
+      { "root": "/private/tmp/bgs-design-check-reaccept-20261004-IzSoT4", "gddAuthor": 320791, "directions": 2738073, "total": 3058864, "limits": "Earlier self-check workflow, not equivalent review stages." },
+      { "root": "/private/tmp/bgs-direction-fixed-paid-20261004-U6f58A", "gddAuthor": 366212, "directions": 1687415, "total": 2053627, "limits": "Earlier workflow, not equivalent review stages." }
+    ],
+    "conclusion": "The new rejection/probe loop is a regression. High cumulative repeated-context costs also existed earlier; previous runs were not generally low-token."
+  },
+  "rootCausesAndAdditionalRepairs": [
+    {
+      "category": "Agent/runtime interface implementation defect",
+      "evidence": "Reviewer inherited general development tools and a Bash manual advertising compound shell commands, while bounded execution rejected those commands with an opaque denial. Logs show check rejection, shell probes, source investigation and full format reading instead of review.",
+      "repair": "Use the existing native AgentDefinition tool selector: inspect/verify expose seven relevant tools, revise additionally exposes Edit. Replace only this role's model-visible Bash manual with its actual read-only checker interface; retain executor and existing permission boundary.",
+      "sources": ["src/beegame/design-review.ts", "packages/builtin-tools/src/tools/AgentTool/runAgent.ts"],
+      "whyNotSimpler": "Only adding an outer prompt or a better denial still advertises incompatible tool capabilities. Removing permissions would authorize out-of-scope writes. Existing role tool selection and one role-specific description directly address the contradiction."
+    },
+    {
+      "category": "Native tool propagation/cache implementation defect exposed during repair",
+      "evidence": "The first real offline CLI test received generic Bash description despite an outer role-specific tool copy. AgentTool reconstructs workerTools; toolToAPISchema also memoizes by tool name and may reuse an earlier generic description.",
+      "repair": "Apply the role-specific interface after native worker pool reconstruction/selection in runAgent. Give only the review Bash copy an explicit API schema cache scope; ordinary keys, execution identity, permission identity and within-role byte stability remain unchanged.",
+      "sources": ["packages/builtin-tools/src/tools/AgentTool/runAgent.ts", "src/utils/api.ts", "src/Tool.ts"],
+      "whyNotSimpler": "Clearing all tool schema caches would disrupt unrelated sessions and prompt caching. A single optional scope separates the two proven distinct descriptions without global cache reset or another tool registry."
+    },
+    {
+      "category": "Existing output archive coverage gap",
+      "evidence": "The paid reviewer used native Read for the whole content-format.json. Existing first-emission persistence handled Bash format results only, so this successful result bypassed it and increased later inputs.",
+      "repair": "Route successful whole native Read of .beegame/delivery/content-format.json through the existing complete-output archive and preview limit. Preserve all returned bytes and the original file. Do not lower limits for source prose, focused reads or failed output; do not rewrite history.",
+      "sources": ["src/beegame/format-tool-result.ts"],
+      "whyNotSimpler": "The archive already exists; extending its exact format-file routing closes the observed bypass without a new compression, global context cutoff or hard read quota."
+    },
+    {
+      "category": "Checking-method instruction conflict",
+      "evidence": "The host supplies same-version structural/reference results, but the checking Skill's former unconditional command instruction encouraged running them again.",
+      "repair": "A narrow Skill method update tells Review to reuse supplied same-version results, rerun on changed inputs or absent coverage, and read named format sections for concrete unresolved questions. Ownership and phase boundaries remain host/prompt responsibilities.",
+      "source": ".beegame/skills/builtinskills/game-design-check/SKILL.md"
+    }
+  ],
+  "verification": {
+    "relatedRegression": { "files": 11, "passed": 116, "failed": 0, "expects": 1025 },
+    "nativeCliLoopback": { "files": 1, "passed": 2, "failed": 0, "expects": 33, "provider": "Synthetic 127.0.0.1 SSE provider, no saved credentials or paid requests", "fakeCalls": 14 },
+    "nativeCases": [
+      "Outgoing model API contains exactly the seven inspect tools and the scoped Bash checker description, not the generic developer shell manual.",
+      "Two fresh review submissions make four fake-provider requests each with no coordinator model calls and no stale verdict; independent Skill and original-task reads appear in durable child transcripts.",
+      "Whole native format Read is archived before model continuation; tail is absent from preview but complete returned format text remains in the retained archive.",
+      "Invalid invented closure receipt is rejected before saving, field feedback is visible in the next model request, and valid synthetic receipt is written in the same six-call step without rerunning checks or mutating source documents."
+    ],
+    "schemaCacheCases": "Both generic-first and role-first ordering preserve separate correct descriptions and session stability; unrelated tool identity and executor unchanged.",
+    "skillValidator": "passed",
+    "isolatedCliBuild": { "passed": true, "outputs": 611, "directory": "/private/tmp/bgs-review-cost-offline-DtnXUB/cli" },
+    "typecheck": { "agentWorkflow": "passed", "agentWorkflowServer": "passed", "fullRepository": "Existing scene-editor resolution and unrelated test typing errors remain. This turn's new source and tests have no remaining reported typing errors; old authorDocuments case in the edited native test file is unchanged and still incompatible." },
+    "testEnvironmentNotes": [
+      "Sandbox localhost listen required managed escalation for fake-provider native tests; no paid endpoint involved.",
+      "Some unrelated simulated browser-cleanup paths emitted /bin/ps EPERM warnings; selected regressions still passed.",
+      "Native transcript assertions wait at most two seconds for existing 100ms batched durable writes; no model calls or system execution retries added.",
+      "Two pre-existing author-selfcheck native cases were filtered out because they exercise the removed authorDocuments workflow; their old assertions were not used as acceptance criteria."
+    ],
+    "limitations": "Synthetic model outputs prove transport/tool exposure, archive retention and receipt feedback behavior, not semantic review accuracy or real-model savings. No fresh paid acceptance, settled-credit observation or production deployment occurred.",
+    "uniquePassingTests": 118
+  },
+  "notAdded": ["another review stage or reviewer", "extra paid runs", "new semantic acceptance framework", "global context truncation", "hard token/credit cap", "lowered semantic review limit", "automatic regeneration or recovery loops"]
+}

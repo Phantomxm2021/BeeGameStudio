@@ -11,7 +11,7 @@ import {
 import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { BeeGameAssetManifest } from './asset-contracts'
 import { auditAssetContract } from './asset-contract-audit'
-import { auditUiInteractiveBounds } from './ui-layout-audit'
+import { auditUiInteractiveBounds, readUiLayoutCamera } from './ui-layout-audit'
 import { parseTilemapData, validateTilemapGrid } from '../../../scene-editor/src/tilemap-data'
 import { readTileSetResource } from './tilemap-contract'
 import { resolveSceneCameraView, type SceneCameraInput } from '../../../scene-editor/src/scene-camera'
@@ -522,6 +522,7 @@ function validateComponentScene(input: {
 }
 
 function validateDocument(input: {
+  workspacePath: string
   path: string
   document: BeeGameContentDocument
   authority: BeeGameContentAuthority
@@ -571,8 +572,10 @@ function validateDocument(input: {
       document: input.document,
       issues: input.issues,
     })
-    for (const issue of auditUiInteractiveBounds(input.document))
-      input.issues.push(`${input.path}: ${issue}`)
+    try {
+      for (const issue of auditUiInteractiveBounds(input.document, readUiLayoutCamera(input.workspacePath, input.document)))
+        input.issues.push(`${input.path}: ${issue}`)
+    } catch (error) { input.issues.push(`${input.path}: ${error instanceof Error ? error.message : String(error)}`) }
   }
   if (input.document.kind === 'scene-2d' || input.document.kind === 'scene-3d') {
     const cameraNodeId = input.document.data.cameraNodeId
@@ -660,6 +663,7 @@ export function auditBeeGameContentPackage(
     if (wrongDirectory)
       issues.push(`${BEEGAME_CONTENT_ROOT}/${path}: kind is stored in the wrong directory.`)
     validateDocument({
+      workspacePath,
       path: `${BEEGAME_CONTENT_ROOT}/${path}`,
       document,
       authority,
@@ -837,6 +841,7 @@ export function saveBeeGameContentDocument(input: {
 
   const issues: string[] = []
   validateDocument({
+    workspacePath: input.workspacePath,
     path: `${BEEGAME_CONTENT_ROOT}/${input.path}`,
     document,
     authority: input.authority,

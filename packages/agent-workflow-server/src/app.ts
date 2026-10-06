@@ -194,7 +194,8 @@ import {
 import { sendProjectConversation, isProjectConversation, type ProjectConversationOptions } from './beegame/project-conversation'
 import { BEEGAME_USER_RESPONSE_SCOPE } from './beegame/user-response-scope'
 import { openResourceLibraryAccess } from './beegame/resource-library-access'
-import { beginProjectDelivery, captureProjectDeliveryAcceptance, evaluateProjectDeliveryGate, nativeContentAuthority, pauseProjectDelivery, projectDeliveryPhase, projectDeliveryStatePath, readProjectDelivery, resumeProjectDelivery } from './beegame/project-delivery'
+import { beginProjectDelivery, captureProjectDeliveryAcceptance, evaluateProjectDeliveryGate, nativeContentAuthority, pauseProjectDelivery, projectDeliveryPhase, projectDeliveryStatePath, readProjectDelivery, resumeProjectDelivery, requestProjectDesignResolution } from './beegame/project-delivery'
+import { designReviewResultSchema } from './beegame/design-handoff'
 import { projectRuntimeDisplayReason } from './beegame/project-runtime-display'
 import { createProjectMessageQueue } from './beegame/project-message-queue'
 import { createProjectTurnCheckpointStore } from './beegame/project-turn-checkpoint'
@@ -1873,6 +1874,8 @@ export function createAgentWorkflowApp(
         ? [] : validateBeeGameAttachments(brief.attachments)
       if (brief.creationMode !== undefined && brief.creationMode !== 'creative' && brief.creationMode !== 'blueprint')
         return c.json({ error: 'Invalid creation mode' }, 400)
+      try { resolveConfirmedOrientation(brief) }
+      catch (error) { return c.json({ error: toErrorMessage(error) }, 400) }
       const [workspacePath, modelConfigId] = await Promise.all([
         createManagedProjectWorkspacePath({
           defaultWorkspacePath: options.defaultWorkspacePath,
@@ -2390,6 +2393,37 @@ export function createAgentWorkflowApp(
         c.req.param('messageId'), 'remove')
       return removed ? c.json({ removed: true }) : c.json({ error: 'Queued message not found' }, 404)
     } catch (error) { return tracedRouteError(c, 'project.queue.delete', error) }
+  })
+  app.get('/api/projects/:id/design-review', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
+    const context = await queuedProjectContext(c.req.raw, user, c.req.param('id'))
+    if (!context) return c.json({ error: 'Project session not found' }, 404)
+    const state = await readProjectDelivery(context.workspacePath, dashboardDataRoot)
+    return c.json({ review: state?.designReview, baseline: state?.designBaseline, history: state?.designHistory ?? [] })
+  })
+  // Explicit owner decisions re-arm a finite affected revision, never mark an issue passed.
+  app.post('/api/projects/:id/design-resolution', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const context = await queuedProjectContext(c.req.raw, user, c.req.param('id'))
+      if (!context) return c.json({ error: 'Project session not found' }, 404)
+      const body = await c.req.json()
+      if (!body || typeof body.instruction !== 'string' || !['inspect', 'revise', 'verify'].includes(body.mode) ||
+          body.start !== undefined && typeof body.start !== 'boolean') return c.json({ error: 'Invalid design resolution' }, 400)
+      const parsed = designReviewResultSchema.safeParse({ step: body.mode, findings: body.findings, resolved: [] })
+      if (!parsed.success) return c.json({ error: 'Invalid affected findings', issues: parsed.error.issues }, 400)
+      const state = await projectOperation(user.id, context.workspacePath, async () => {
+        if (beeGameSessions.get(context.sessionId)?.turnStatus === 'running') throw new Error('Stop the current turn before resolving design decisions')
+        return requestProjectDesignResolution(context.workspacePath, dashboardDataRoot,
+          { instruction: body.instruction, mode: body.mode, findings: parsed.data.findings })
+      })
+      if (body.start) await sendNativeProjectRequest({ ...context, message: body.instruction, autoContinuation: true })
+      return c.json({ review: state.designReview, started: body.start === true }, body.start ? 202 : 200)
+    } catch (error) { return tracedRouteError(c, 'project.design-resolution', error) }
   })
   app.post('/api/projects/:id/queued-messages/:messageId/steer', async c => {
     const user = getCurrentUser(c.req.raw)
@@ -7211,6 +7245,7 @@ function buildConfirmedBriefPrompt(
   const { documentLanguage, gameUserVisibleLanguage, agentResponseLanguage } =
     resolveCanonicalConfirmedLanguages(brief, language)
   const resourceLibraryUsage = resolveConfirmedResourceLibraryUsage(brief)
+  const orientation = resolveConfirmedOrientation(brief)
   const confirmedBrief = JSON.stringify(
     {
       kind: 'confirmed_build_brief',
@@ -7224,7 +7259,7 @@ function buildConfirmedBriefPrompt(
         defer: 'unrequested extra levels, modes, and polish',
       },
       selected_option: toCanonicalConfirmedOption(brief.option),
-      settings: isObject(brief.settings) ? brief.settings : null,
+      settings: { ...(isObject(brief.settings) ? brief.settings : {}), ...(orientation ? { orientation } : {}) },
       confirmed_gdd: brief.confirmedGdd ?? null,
       build_source: brief.buildSource ?? null,
       analysis_id: brief.analysisId ?? null,
@@ -7244,11 +7279,20 @@ function buildConfirmedBriefPrompt(
     'Treat response language, document language, and player-visible game language as separate confirmed requirements even when they have the same value. Keep code identifiers, APIs, commands, file paths, package names, and unavoidable technical tokens unchanged.',
     '',
     'Use the confirmed brief as the source of truth. Keep the project documents and resulting game consistent with its explicit choices and constraints.',
+    'Screen games support the confirmed Landscape or Portrait direction only. Preserve any user-confirmed dimensions; otherwise UI_UX_SPEC owns reference resolution, minimum usable host dimensions and layout/adaptation, coordinated with LEVEL_SCENE_DESIGN world/framing requirements. GDD records the confirmed orientation and core gameplay, not invented host dimensions or an adaptation method. Other directions or insufficient space show a rotation/size message instead of another composition or unusable whole-screen shrinking. Input methods are independent: Touch does not imply Portrait and Landscape does not imply mouse-only. VR/AR world-space interfaces use their confirmed spatial requirements.',
     'Use default_first_release_scope for content breadth the user did not specify. Preserve explicit user requirements; a model-suggested option or scope does not by itself authorize an expansive first release.',
     '',
     'Confirmed brief:',
     confirmedBrief,
   ].join('\n')
+}
+
+function resolveConfirmedOrientation(brief: JsonObject): 'Landscape' | 'Portrait' | undefined {
+  const settings = isObject(brief.settings) ? brief.settings : undefined
+  if (settings?.dimension === 'VR' || settings?.dimension === 'AR') return undefined
+  const value = settings?.orientation ?? brief.orientation
+  if (value !== 'Landscape' && value !== 'Portrait') throw new Error('Confirmed brief must explicitly select Landscape or Portrait orientation')
+  return value
 }
 
 function extractConfirmedBriefContext(prompt: string): string {

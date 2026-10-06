@@ -1,5 +1,56 @@
 {
   "landing": {
+    "avatar": {
+      "conversation": "创作伙伴的对话",
+      "companion": "你的游戏创作伙伴",
+      "morning": "早上好，今天想怎么开始？",
+      "afternoon": "下午好，今天想怎么开始？",
+      "evening": "晚上好，今天想怎么开始？",
+      "invitation": "可以是一句话、一张图片、一段视频。",
+      "replyPlaceholder": "我想做一个…",
+      "send": "一起想想",
+      "thinkingTitle": "让我想想，这个游戏可以怎么玩…",
+      "thinkingDescription": "我在梳理玩法、画面和制作设置。",
+      "optionsTitle": "我想了几个方向，选一个喜欢的吧。",
+      "optionsDescription": "选好之后，我们一起调整制作设置。",
+      "settingsDescription": "这个方向怎么样？把制作设置调整到你喜欢的样子。",
+      "confirmDescription": "再看一眼我们的方案，确认后就开始制作。",
+      "errorTitle": "这次没能完成，我们再试一次。",
+      "errorDescription": "你的想法还在这里，可以调整后重新提交。",
+      "mood": {
+        "idle": "我在这里，随时开始。",
+        "listening": "嗯，我在认真看你的想法。",
+        "thinking": "让我认真想一想。",
+        "ready": "你觉得这个方向怎么样？",
+        "error": "你的想法已保留。"
+      },
+      "chooseMode": "先选一种创作方式。",
+      "creativeModeHint": "有个灵感，一起展开",
+      "blueprintModeHint": "已有方案，直接制作",
+      "creativePrompt": "想做一个什么样的游戏？",
+      "blueprintPrompt": "把游戏蓝图交给我吧。",
+      "changeMode": "切换创作方式",
+      "nextStep": "下一步",
+      "muteSound": "关闭交互声音",
+      "enableSound": "开启交互声音",
+      "back": "返回",
+      "closeFlow": "关闭创作流程",
+      "creditNotice": "生成方案会按实际 Token 用量扣 Credit。",
+      "settingsGroups": [
+        {
+          "title": "游戏运行在哪里？",
+          "description": "先选平台、引擎和画面形式。"
+        },
+        {
+          "title": "怎么玩，什么风格？",
+          "description": "定下玩法、视觉风格、操作方式和资源库使用方式。"
+        },
+        {
+          "title": "还有什么补充？",
+          "description": "把你希望我注意的细节写在这里。"
+        }
+      ]
+    },
     "intake": {
       "prompt": {
         "uploadAttachment": "添加参考文件",
@@ -15,13 +66,22 @@
         "unsupportedOrTooLarge": "文件类型不受支持，或文件过大。",
         "attachmentReadFailed": "无法读取文件，请重试。"
       },
-      "devProjectPurge": {"button":"开发测试：清空全部项目","confirm":"将永久删除当前账号的 {{count}} 个项目及可清理的工作区，无法恢复。不会删除账号或资源库。","delete":"永久删除全部项目","cancel":"取消","pending":"正在处理，请勿重复提交…","result":"已删除 {{deleted}} 个项目，失败 {{failed}} 个。请检查剩余列表。","changed":"项目列表已变化，请重新查看清单后确认。","failed":"未能确认清理结果。请刷新项目列表后检查；不要直接重复提交。"},
+      "devProjectPurge": {
+        "button": "开发测试：清空全部项目",
+        "confirm": "将永久删除当前账号的 {{count}} 个项目及可清理的工作区，无法恢复。不会删除账号或资源库。",
+        "delete": "永久删除全部项目",
+        "cancel": "取消",
+        "pending": "正在处理，请勿重复提交…",
+        "result": "已删除 {{deleted}} 个项目，失败 {{failed}} 个。请检查剩余列表。",
+        "changed": "项目列表已变化，请重新查看清单后确认。",
+        "failed": "未能确认清理结果。请刷新项目列表后检查；不要直接重复提交。"
+      },
       "modal": {
         "chooseOption": "选择方案",
         "productionSettings": "制作设置",
         "confirmBuildBrief": "确认构建方案",
         "startBuild": "启动构建",
-        "close": "关闭方案弹窗"
+        "close": "返回想法"
       },
       "optionCard": {
         "mode": "游戏模式",
@@ -31,6 +91,7 @@
         "platform": "平台",
         "engine": "引擎",
         "dimension": "表现形式",
+        "orientation": "屏幕方向",
         "genre": "游戏类型",
         "style": "风格",
         "inputs": "输入方式",
@@ -221,6 +282,8 @@
         "Fantasy": "奇幻",
         "Realistic": "写实",
         "Keyboard/mouse": "键鼠",
+        "Landscape": "横屏",
+        "Portrait": "竖屏",
         "Gamepad": "手柄",
         "Touch": "触屏",
         "Voice": "语音",
@@ -591,7 +654,9 @@
       "legacy": "此记录为纯文本，缺少来源信息，按原文保留。",
       "recent": "仅显示最近活动；较早记录或过长输出已省略。",
       "truncated": "此输出已截断，并非完整文件或执行结果。",
-      "command": "命令", "output": "工具输出", "file": "文件内容"
+      "command": "命令",
+      "output": "工具输出",
+      "file": "文件内容"
     },
     "assistantName": "BeeGame",
     "previewTitle": "预览",

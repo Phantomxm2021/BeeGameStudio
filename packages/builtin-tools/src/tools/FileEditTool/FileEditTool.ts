@@ -30,6 +30,7 @@ import {
   fileHistoryTrackEdit,
 } from 'src/utils/fileHistory.js'
 import { logFileOperation } from 'src/utils/fileOperationAnalytics.js'
+import { inspectedDraftHash } from 'src/utils/fileStateCache.js'
 import {
   type LineEndingType,
   readFileSyncWithMetadata,
@@ -506,11 +507,16 @@ export const FileEditTool = buildTool({
     notifyVscodeFileUpdated(absoluteFilePath, originalFileContents, updatedFile)
 
     // 6. Update read timestamp, to invalidate stale writes
+    const inspectedHash = readFileState.get(absoluteFilePath)?.beegameInspectedHash
+    const retainInspection = inspectedHash !== undefined && !userModified && actualOldString !== '' &&
+      inspectedDraftHash(actualOldString) !== inspectedDraftHash(originalFileContents) &&
+      inspectedHash === inspectedDraftHash(originalFileContents)
     readFileState.set(absoluteFilePath, {
       content: updatedFile,
       timestamp: getFileModificationTime(absoluteFilePath),
       offset: undefined,
       limit: undefined,
+      ...(retainInspection ? { beegameInspectedHash: inspectedDraftHash(updatedFile) } : {}),
     })
 
     // 7. Log events

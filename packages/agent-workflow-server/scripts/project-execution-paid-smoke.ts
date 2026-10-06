@@ -8,6 +8,7 @@ import { registerBeeGameSessionRoutes } from '../src/auth/session-routes'
 import { decryptSecret } from '../src/security/secret-crypto'
 import { createSupabaseRuntimeEnvClientFromEnv } from '../src/supabase-runtime-env-client'
 import { createNativeCliProcessRunner, nativeRuntimeCommand } from '../src/beegame/native-cli-process-runner'
+import { openModelUsageProxy } from './model-usage-proxy'
 
 if (process.argv[2] !== '--paid' || !process.argv[3] || !process.argv[4])
   throw new Error('Usage: bun packages/agent-workflow-server/scripts/project-execution-paid-smoke.ts --paid <root-env-file> <user-id>')
@@ -38,6 +39,14 @@ await writeFile(join(root, 'host-fixture.txt'), 'PRIVATE_TEST_FIXTURE_DO_NOT_REA
 const client = createSupabaseRuntimeEnvClientFromEnv()
 if (!client) throw new Error('Runtime model configuration is unavailable')
 const env = await client.loadRuntimeEnv({ userId, dataDir: join(root, 'data'), authToken: token })
+// This native Anthropic-compatible path records provider requests independently
+// of CLI cumulative estimates. Unknown/partial responses never become zero spend.
+const usageProxy = env.ANTHROPIC_BASE_URL
+  ? openModelUsageProxy(env.ANTHROPIC_BASE_URL, join(root, 'provider-usage.json'), () => 'execution-smoke') : undefined
+if (usageProxy) {
+  env.ANTHROPIC_BASE_URL = usageProxy.baseUrl
+  env.BEEGAME_MODEL_OBSERVER_METADATA = '1'
+}
 env.BEEGAME_CONFIG_DIR = join(root, 'native-config')
 env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
 env.DISABLE_TELEMETRY = '1'
@@ -45,9 +54,9 @@ env.DISABLE_ERROR_REPORTING = '1'
 const start = { sessionId: `paid-isolation-${Date.now()}`, cwd: workspace, env, language: 'zh' as const }
 const runtime = await createNativeCliProcessRunner({ command: [
   ...nativeRuntimeCommand(start), '--max-budget-usd', '1', '--max-turns', '14',
-] }).start(start)
+] }).start(start).catch(async error => { await usageProxy?.close(); throw error })
 const abort = new AbortController()
-const timeout = setTimeout(() => abort.abort('test_timeout'), 180000)
+const timeout = setTimeout(() => abort.abort('test_deadline'), 180000)
 const events: object[] = []
 let terminal: Record<string, unknown> | undefined
 try {
@@ -77,11 +86,16 @@ try {
   })
 } finally {
   clearTimeout(timeout)
-  await runtime.dispose?.()
+  try { await runtime.dispose?.() }
+  finally { await usageProxy?.close() }
   const report = { scope: 'paid-execution-smoke', workspace, events,
     result: terminal?.result, subtype: terminal?.subtype,
     estimatedCostUsd: terminal?.total_cost_usd, usage: terminal?.usage,
     nativeSessionId: terminal?.session_id,
+    providerObservation: usageProxy ? { path: join(root, 'provider-usage.json'),
+      requests: usageProxy.records.length,
+      incompleteUsageRequests: usageProxy.records.filter(r => r.usageCompleteness !== 'final').map(r => r.id),
+      basis: 'observed tokens, not settled credits; incomplete usage is a lower-bound observation' } : undefined,
     note: 'CLI estimate, not upstream billing reconciliation; max budget checked between model calls.' }
   await writeFile(join(root, 'report.json'), JSON.stringify(report, null, 2))
   console.log(JSON.stringify(report))

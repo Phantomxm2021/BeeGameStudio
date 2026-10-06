@@ -1,0 +1,96 @@
+{
+  "date": "2026-10-04",
+  "scope": "Saved-draft handoff false rejection; system implementation and offline native CLI only",
+  "priorPaidRun": {
+    "root": "/private/tmp/bgs-owner-context-paid-20261004-jvUF9R",
+    "actualVerdict": "FAIL — preserved; not relabeled by offline tests",
+    "model": "ark-code-latest",
+    "newPaidRunsThisTurn": 0,
+    "originalGddSha256": "2f7f5e80883afb12d8911bf423b8c79da247544488f302639d4683b1fb01393e",
+    "sha256RecheckedUnchanged": true
+  },
+  "attribution": [
+    {
+      "category": "LLM instruction execution",
+      "issue": "Initial self-check declaration before complete saved-source Read",
+      "evidence": "Paid execution-evidence.json and source-exposure-audit.json: first attempted handoff at 23:27:48.971Z, corrective complete Read at 23:27:53.688Z",
+      "assessment": "Initial correction remains warranted. This is distinct from later false rejection."
+    },
+    {
+      "category": "Agent implementation / gate design defect",
+      "issue": "Complete saved Read followed by successful incremental repair was rejected",
+      "evidence": "Full Read 173/173 lines, then three native Edits at 23:28:13.960Z, 23:28:16.782Z and 23:28:18.978Z; final handoff rejected",
+      "rootCause": "The gate conflated FileStateCache offset/timestamp read-dedup metadata with evidence of draft inspection. Native Edit intentionally sets offset/limit undefined while retaining updated content; this correctly invalidates read dedup but incorrectly invalidated the gate's inspection judgment.",
+      "responsibility": "Our added gate design/implementation, not a native Edit bug. Earlier attribution of the terminal failure only to model failure to reread was incomplete.",
+      "fix": "Complete BGS document Read establishes a normalized content hash in the existing bounded file cache. Successful native partial Edit advances it only when the before-image matches the inspected version. The stop gate compares this version to current disk content.",
+      "boundaries": "Partial Read alone, Write, whole-body replacement, user-modified edit, or unexplained external content changes do not establish current inspection. Existing permission and read-dedup metadata remain unchanged."
+    },
+    {
+      "category": "Rejected repair assumption, caught by actual CLI",
+      "issue": "Replaying old raw toolUseResult objects works on durable logs but fails in the live query",
+      "rootCause": "src/query.ts deliberately removes raw toolUseResult payloads on each loop to bound memory. Durable transcript availability is not live query availability.",
+      "resolution": "Removed receipt replay entirely. Preserve raw-payload cleanup; store only the current inspected version's 64-character hash, without new persistent ledgers, prompts or retries."
+    }
+  ],
+  "implementation": [
+    "src/utils/fileStateCache.ts: optional beegameInspectedHash and normalized hash utility",
+    "packages/builtin-tools/src/tools/FileReadTool/FileReadTool.ts: mark complete assigned-document text reads, retain known inspection for unchanged focused rereads",
+    "packages/builtin-tools/src/tools/FileEditTool/FileEditTool.ts: advance inspected content version after a known successful partial native edit; no hashing for ordinary edits without a marker",
+    "src/beegame/saved-draft-check.ts: compare known inspected version to current saved source, retain legacy full current Read checks",
+    "src/query/stopHooks.ts: explain delta verification after complete reading; correction count unchanged",
+    "src/beegame/saved-draft-check.test.ts and packages/agent-workflow-server/scripts/project-turn-native.test.ts: targeted regression coverage"
+  ],
+  "validation": {
+    "isolatedCli": "/private/tmp/bgs-edit-exposure-cli-iMvk7i/cli/cli.js",
+    "externalModelRequests": 0,
+    "relatedRegressionSuite": {
+      "passed": 122,
+      "failed": 0,
+      "files": 9
+    },
+    "targetedNativeToolTest": {
+      "passed": 5,
+      "failed": 0,
+      "includes": [
+        "partial Read alone rejected",
+        "complete Read plus three successful Edits accepted with no raw receipt history",
+        "focused unchanged reread retains inspection",
+        "failed Edit leaves version unchanged",
+        "Write and whole-body replacement invalidate inspection",
+        "user-modified edit invalidates inspection",
+        "unknown external changes rejected despite matching mtime",
+        "ordinary CLI Read does not establish BGS-specific marker"
+      ]
+    },
+    "nativeCliLoopback": {
+      "passed": 5,
+      "failed": 0,
+      "files": 2,
+      "includes": [
+        "complete Read plus three repairs handoff succeeds without another whole Read",
+        "ignoring corrective source inspection stops after one correction",
+        "complete format archive remains byte-identical",
+        "same-session milestone boundary and process resume",
+        "parent reasoning policy inheritance and transport regressions"
+      ]
+    },
+    "serviceTypecheck": "PASS",
+    "wholeRepositoryTypecheck": "Existing unrelated sceneContentAdapter module/types, subagentSystemPrompt branded expectations and sdkTaskNotification status errors remain; final output contains no errors in this turn's changed code",
+    "diffCheck": "PASS"
+  },
+  "designCost": {
+    "newPersistentFrameworks": 0,
+    "extraRetryRounds": 0,
+    "expandedRawToolHistoryRetention": false,
+    "additionalCacheData": "One optional fixed-length content hash per inspected document in existing bounded cache",
+    "necessity": "Existing offset metadata cannot express inspection that remains valid after a successful native delta edit. Avoids duplicating full draft bodies or retaining raw Read/Edit history."
+  },
+  "limitations": [
+    "This establishes complete source exposure plus accounted-for native edits, not correct semantic self-review or model attention.",
+    "Cumulative partial/Bash reads are not treated as a complete Read; large archived/compacted source exposure remains a limitation of the original mechanism.",
+    "No new evidence that high context caused this terminal failure; the cache/gate mismatch is directly demonstrated.",
+    "TECH/ART/AUDIO ownership and semantic outcomes were not executed in the failed paid run and are not validated by this repair.",
+    "No new paid acceptance, shared CLI deployment, artificial artifact repair or phase advancement.",
+    "Original paid artifacts, receipts, logs and historical reports remain untouched."
+  ]
+}

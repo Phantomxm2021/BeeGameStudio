@@ -6,7 +6,7 @@ export type AuthMode = 'login' | 'register' | 'resetPassword' | 'verifyEmail';
 export type IntakeCopy = {
   modal: { chooseOption: string; productionSettings: string; confirmBuildBrief: string; startBuild: string; close: string };
   optionCard: { mode: string; gameplay: string };
-  fields: { platform: string; engine: string; dimension: string; genre: string; style: string; inputs: string; notes: string; presentation: string; type: string; resourceLibrary: string; selectPlaceholder: string };
+  fields: { platform: string; engine: string; dimension: string; orientation: string; genre: string; style: string; inputs: string; notes: string; presentation: string; type: string; resourceLibrary: string; selectPlaceholder: string };
   resourceLibraryUsage: Record<BeeGameIntakeSettings['resourceLibraryUsage'], string>;
   actions: { chooseAgain: string; confirmBrief: string; edit: string; building: string; startBuild: string; continue: string; backToLogin: string; cancel: string; confirmGenerate: string; confirmBuild: string };
   starting: { title: string; description: string };

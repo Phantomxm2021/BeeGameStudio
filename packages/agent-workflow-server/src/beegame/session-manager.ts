@@ -44,6 +44,7 @@ import {
 } from './native-background-task-output'
 import { createNativeCliProcessRunner } from './native-cli-process-runner'
 import { createNativeSubagentChatEnricher, isNativeTaskLifecycle } from './native-subagent-chat'
+import type { NativeDirectionAuthorInput, NativeProjectTurnInput } from '@bee-game-studio/agent-workflow/native-direction-authors'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { ChatJsonlReader } from './chat-jsonl-reader'
@@ -307,6 +308,7 @@ export type RuntimeLaunchContract = {
 }
 
 const RUNTIME_MODEL_ENV_KEYS = new Set([
+  'BEEGAME_MODEL_OBSERVER_METADATA',
   'BEEGAME_CONFIG_DIR',
   'BEEGAME_NATIVE_BUILTIN_SKILLS_DIR',
   'BEEGAME_ARTIFACTS_URL',
@@ -357,6 +359,9 @@ const RUNTIME_MODEL_ENV_KEYS = new Set([
 
 export type BeeGameSessionSubmitInput = {
   prompt: BeeGamePromptInput
+  /** Fixed writing-owner dispatch for the existing Author-2 batch. */
+  directionAuthors?: NativeDirectionAuthorInput
+  projectTurn?: NativeProjectTurnInput
   /** Refreshed each turn, including when the native process is reused. */
   language?: BeeGameSessionLanguage
   /** User-confirmed context exposed read-only to platform contract tools. */
@@ -986,8 +991,8 @@ export class BeeGameSessionManager {
       language?: BeeGameSessionLanguage
       attachments?: BeeGameAttachment[]
       confirmedBriefContext?: string
-      onTurnAccepted?: () => void
-      prepareTurn?: () => Promise<{ systemContext?: string; turnContext?: string; close?: () => Promise<void> }>
+      onTurnAccepted?: (turnId: string) => void
+      prepareTurn?: () => Promise<{ systemContext?: string; turnContext?: string; directionAuthors?: NativeDirectionAuthorInput; projectTurn?: NativeProjectTurnInput; close?: () => Promise<void> }>
       onTurnSettled?: () => Promise<void>
       onTurnReady?: () => void | Promise<void>
       usageExternallyAccounted?: boolean
@@ -1067,7 +1072,7 @@ export class BeeGameSessionManager {
       record.currentTurnStartingUsage = this.deriveRuntimeSnapshot(record).usage
       record.currentTurnId = nextTurnId
       record.nextTurnIndex += 1
-      display?.onTurnAccepted?.()
+      display?.onTurnAccepted?.(nextTurnId)
       turnAccepted = true
       record.abortController = new AbortController()
       this.append(record, 'turn.started', text)
@@ -1104,6 +1109,8 @@ export class BeeGameSessionManager {
           finally { await close?.() }
           settlementSucceeded = true
         },
+        context?.directionAuthors,
+        context?.projectTurn,
       ).finally(() => {
         if (record.activeTurn === activeTurn) record.activeTurn = undefined
       })
@@ -1328,6 +1335,8 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     prompt: BeeGamePromptInput,
     settle?: () => Promise<void>,
+    directionAuthors?: NativeDirectionAuthorInput,
+    projectTurn?: NativeProjectTurnInput,
   ): Promise<void> {
     try {
       const signal = record.abortController?.signal
@@ -1402,6 +1411,8 @@ export class BeeGameSessionManager {
         runner,
         prompt,
         signal,
+        directionAuthors,
+        projectTurn,
       )
       try {
         if (!signal.aborted && record.session.status === 'running') {
@@ -1434,6 +1445,9 @@ export class BeeGameSessionManager {
     } catch (err) {
       await this.disposeRunner(record.runner)
       record.runner = null
+      // The disposed process cannot keep any task live. Clear attribution,
+      // without fabricating completed SDK events for unfinished writers.
+      record.activeNativeTaskToolUseIds.clear()
       if (record.session.status === 'running') {
         this.closeOpenThinkingLifecycle(record, 'turn_failed')
         this.append(
@@ -1508,11 +1522,15 @@ export class BeeGameSessionManager {
     runner: BeeGameSessionRuntime,
     prompt: BeeGamePromptInput,
     signal: AbortSignal,
+    directionAuthors?: NativeDirectionAuthorInput,
+    projectTurn?: NativeProjectTurnInput,
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
     let executionError: Error | undefined
     await runner.submit({
       prompt,
+      ...(directionAuthors ? { directionAuthors } : {}),
+      ...(projectTurn ? { projectTurn } : {}),
       ...(record.language ? { language: record.language } : {}),
       ...(record.confirmedBriefContext
         ? { confirmedBriefContext: record.confirmedBriefContext }

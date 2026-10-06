@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { PREVIEW_IFRAME_SANDBOX } from '@bee-game-studio/agent-workflow/preview-environment';
-import { BotAvatar } from 'bot-avatars';
+import { DotsAvatar } from '../Demiurge/Landing/DotsAvatar';
+import { useDailyAvatar } from '../Demiurge/Landing/useDailyAvatar';
 import { AlertTriangle, Ellipsis, Maximize2, MonitorSmartphone, RefreshCw, RotateCw, Sparkles, SquareTerminal, Trash2, X } from 'lucide-react';
 import { Liquid } from 'liquid-gooey';
 import { Button } from '../beui/project-button';
@@ -52,19 +53,20 @@ export function WorkspacePreviewPanel({
   onOpenExternal,
   onFixConsoleError,
 }: WorkspacePreviewPanelProps) {
+  const avatarToken = useDailyAvatar();
   const [attempt, setAttempt] = useState(0);
   const [viewport, setViewport] = useState<PreviewViewport>({ mode: 'responsive', width: 0, height: 0 });
   const [avatarState, setAvatarState] = useState<'default' | 'sleeping' | null>(null);
   const avatarSleepTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const frameKey = `${embeddedPreviewUrl}:${attempt}:${canShowPreview ? 'active' : 'inactive'}`;
-  const ghostIsWorking = isAgentWorking || previewState === 'starting';
+  const avatarIsWorking = isAgentWorking || previewState === 'starting';
 
   useEffect(() => () => {
     if (avatarSleepTimer.current) clearTimeout(avatarSleepTimer.current);
   }, []);
 
   const wakeAvatar = () => {
-    if (ghostIsWorking) return;
+    if (avatarIsWorking) return;
     setAvatarState('default');
     if (avatarSleepTimer.current) clearTimeout(avatarSleepTimer.current);
     avatarSleepTimer.current = setTimeout(() => setAvatarState('sleeping'), 3_000);
@@ -81,10 +83,10 @@ export function WorkspacePreviewPanel({
       ) : (
         <div className="relative flex h-full w-full items-center justify-center overflow-hidden px-8 text-center">
           <div className="relative z-10 max-w-md">
-            <div className="mx-auto grid h-16 w-16 place-items-center text-[var(--text-secondary)]">
+            <div className="mx-auto grid size-24 place-items-center text-[var(--text-secondary)]">
               {previewState === 'failed'
                 ? <AlertTriangle className="h-8 w-8 text-[var(--destructive)]" />
-                : <BotAvatar type="ghost" state={ghostIsWorking ? 'working' : avatarState || 'sleeping'} size={68} interactive={false} />}
+                : <DotsAvatar token={avatarToken} mood={avatarIsWorking ? 'thinking' : avatarState === 'default' ? 'idle' : 'sleeping'} label={statusText} />}
             </div>
             <div className="type-caption-1 mt-6 text-[var(--text-secondary)]">{statusText}</div>
             {previewDetailText ? <p className="type-callout mt-3 text-[var(--text-muted)]">{previewDetailText}</p> : null}

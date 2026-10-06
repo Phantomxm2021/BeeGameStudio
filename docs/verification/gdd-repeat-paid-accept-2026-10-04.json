@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-04",
+  "kind": "observer-audit-of-one-authorized-paid-repeat",
+  "rawEvidenceRoot": "/private/tmp/bgs-gdd-repeat-accept-20261004-X0XaTAaq",
+  "workspace": "/private/tmp/bgs-gdd-repeat-accept-20261004-X0XaTAaq/projects/users/design-test/gdd-repeat-museum-20261004-X0XaTAaq",
+  "model": "ark-code-latest",
+  "modelConfigId": "llm_ac40e5d1be394ffe925e3f2532dedd34",
+  "scope": "One fresh GDD-only BGS run with the same confirmed museum-stealth brief. No previous draft or observer findings injected. Stop after GDD release; do not dispatch the next three writers.",
+  "paidRunsStarted": 1,
+  "manualProductEdits": false,
+  "systemSourcesUnchangedDuringRun": true,
+  "gddUnchangedBetweenAuthorAndInspect": true,
+  "gddSha256": "90a8f69381f6958cff2195c0db18adcadd796c91b8f36a1e83b6e80fce6f2252",
+  "outcome": {
+    "host": "Released GDD baseline, authorBatch 1. Structural handoff and 23 explicit reference checks valid, no deterministic issues.",
+    "nativeReviewer": "Fresh native bgs-design-review; actual game-design-check preload present. Read original task, complete GDD through EOF and document-checks.md. Receipt findings=[] and resolved=[].",
+    "revisionAndVerify": "Not dispatched because Inspect returned no findings. These stages are untested by this sample.",
+    "observer": "Workflow completed, but not a clean professional-boundary acceptance. One audio-treatment overreach identified; one exit-boundary clarification remains. Neither appears in the native receipt. Do not equate release with semantic correctness or stable GDD quality."
+  },
+  "observerFindings": [
+    {
+      "id": "O1",
+      "classification": "professional-ownership wording defect",
+      "document": "docs/GDD.md",
+      "line": 76,
+      "source": "ACT_MOVE: 移动本身不发声、不影响守卫（首版无噪声机制）",
+      "analysis": "No gameplay noise/hearing detection is a GDD decision. Saying movement itself produces no sound also specifies audible treatment, which the original assignment leaves to AUDIO_DESIGN.md. The two meanings are not equivalent.",
+      "downstreamImpact": "Audio author may treat GDD as forbidding decorative movement sounds even though they have no detection consequence.",
+      "owner": "GDD.md",
+      "closure": "Express the absence of gameplay noise/detection consequences without selecting audible treatment; leave actual sound behavior to the audio owner.",
+      "nativeReviewerDetected": false,
+      "observerProductCorrection": false
+    },
+    {
+      "id": "O2",
+      "classification": "boundary clarification, not a proven contradictory pair",
+      "document": "docs/GDD.md",
+      "lines": [106, 107, 108, 143, 147, 149],
+      "analysis": "The exit activates immediately on the last pickup and victory requires entering an already activated exit. The text can support requiring a new entry, but does not expressly settle activation while the player already overlaps the exit, including a last collectible reachable from that overlap. No layout has yet excluded that case. Do not claim this is an established contradiction.",
+      "downstreamImpact": "If that geometry is allowed, consumers need to agree whether activation with occupancy wins immediately or requires leaving and re-entering; a layout guarantee excluding the case is also a possible owner decision.",
+      "owner": "GDD.md",
+      "closure": "Clarify the intended occupancy/entry behavior, or explicitly establish that the case cannot occur; do not prescribe an engine update algorithm.",
+      "nativeReviewerDetected": false,
+      "observerProductCorrection": false
+    }
+  ],
+  "positiveObservations": [
+    "UI pending dependency is now neededBefore=content, consistent with the prose deadline. The prior implementation-only deadline error did not recur.",
+    "Outcome priority is explicitly exit victory, capture, pickup. Capture suppresses simultaneous pickup; pause suppresses gameplay settlements. This is more explicit than the previous sample, not proof that every boundary is covered.",
+    "No wrong GDD path, receipt extension repair, duplicate deterministic check, model retry or paid coordinator polling observed."
+  ],
+  "usage": {
+    "basis": "One final provider usage record per model request, including cache reads. No streamed partial usage double counting.",
+    "modelCalls": 9,
+    "allModelCallsFirstAttempt": true,
+    "allModelCallsFinalUsage": true,
+    "inputTokens": 50823,
+    "cacheReadTokens": 187640,
+    "outputTokens": 16852,
+    "cacheCreationTokens": 0,
+    "totalObservedModelTokens": 255315,
+    "elapsedSeconds": 415.869,
+    "stages": [
+      { "stage": "author", "calls": 6, "input": 33222, "cacheRead": 161104, "output": 13353, "total": 207679, "elapsedSeconds": 326.231 },
+      { "stage": "inspect", "calls": 3, "input": 17601, "cacheRead": 26536, "output": 3499, "total": 47636, "elapsedSeconds": 89.013 }
+    ],
+    "otherRequest": "One non-model authentication probe has no usage. Missing usage is unknown, not zero spend.",
+    "settledCredits": "Unavailable: billing observation transport failed. Token observations do not establish settled credit cost."
+  },
+  "priorAssessmentWarning": "The preceding observer report initially identified no blocker; the user's subsequent recheck found deficiencies. That initial assessment is not a validated quality baseline and must not be used as proof that the previous GDD was defect-free.",
+  "notEstablished": [
+    "Stable semantic quality across repeated runs or other proposals",
+    "Zero-defect GDD or reliable detection of all ownership/boundary errors",
+    "Paid Revision/Verify behavior in a correction case",
+    "Runtime feasibility, final game feel or settled credit cost"
+  ]
+}

@@ -40,11 +40,13 @@ Here are the user's messages during this session. Pay attention to how they stee
 
 ### Step 1: Analyze the Session
 
+Extract reusable methods, not a copy of this run. Distinguish general technique from case-specific artifacts, examples, temporary workarounds and the current Agent assignment. Task ownership and execution permissions come from the user's request and Agent instructions, not from observed actions in a previous session.
+
 Before asking any questions, analyze the session to identify:
 - What repeatable process was performed
 - What the inputs/parameters were
 - The distinct steps (in order)
-- The success artifacts/criteria (e.g. not just "writing code," but "an open PR with CI fully passing") for each step
+- The reusable outcome and evidence that would establish it
 - Where the user corrected or steered you
 - What tools and permissions were needed
 - What agents were used
@@ -99,7 +101,7 @@ Use this format:
 name: {{skill-name}}
 description: {{one-line description}}
 allowed-tools:
-  {{list of tool permission patterns observed during session}}
+  {{only tool patterns needed for this capability, if applicable; not permissions inferred from the reference run}}
 when_to_use: {{detailed description of when Claude should automatically invoke this skill, including trigger phrases and example user messages}}
 argument-hint: "{{hint showing argument placeholders}}"
 arguments:
@@ -121,7 +123,7 @@ Clearly stated goal for this workflow. Best if you have clearly defined artifact
 ### 1. Step Name
 What to do in this step. Be specific and actionable. Include commands when appropriate.
 
-**Success criteria**: ALWAYS include this! This shows that the step is done and we can move on. Can be a list.
+**Useful check**: Include when a non-obvious failure could otherwise go unnoticed.
 
 IMPORTANT: see the next section below for the per-step annotations you can optionally include for each step.
 
@@ -129,11 +131,11 @@ IMPORTANT: see the next section below for the per-step annotations you can optio
 \`\`\`
 
 **Per-step annotations**:
-- **Success criteria** is REQUIRED on every step. This helps the model understand what the user expects from their workflow, and when it should have the confidence to move on.
-- **Execution**: \`Direct\` (default), \`Task agent\` (straightforward subagents), \`Teammate\` (agent with true parallelism and inter-agent communication), or \`[human]\` (user does it). Only needs specifying if not Direct.
+- **Checks**: Include evidence for consequential claims, not a mandatory gate for every step.
+- **Execution**: Describe a tool-specific method when needed; do not turn the reference session's agent arrangement into a universal requirement.
 - **Artifacts**: Data this step produces that later steps need (e.g., PR number, commit SHA). Only include if later steps depend on it.
 - **Human checkpoint**: When to pause and ask the user before proceeding. Include for irreversible actions (merging, sending messages), error judgment (merge conflicts), or output review.
-- **Rules**: Hard rules for the workflow. User corrections during the reference session can be especially useful here.
+- **Constraints**: Preserve actual capability or safety requirements. Do not promote a one-case correction into a universal rule or duplicate Agent responsibilities.
 
 **Step structure tips:**
 - Steps that can run concurrently use sub-numbers: 3a, 3b

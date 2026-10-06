@@ -1,5 +1,6 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { feature } from 'bun:bundle'
+import type { NativeDirectionAuthorInput, NativeProjectTurnInput } from '@bee-game-studio/agent-workflow/native-direction-authors'
 import { emitNativeDiagnostic } from '@bee-game-studio/agent-workflow/native-diagnostics'
 import { setNativeEvidenceTurn } from '@bee-game-studio/agent-workflow/native-evidence'
 import { readFile, stat } from 'fs/promises'
@@ -454,6 +455,8 @@ export function canBatchWith(
 ): boolean {
   return (
     next !== undefined &&
+    head.beegameDirectionAuthors === undefined && next.beegameDirectionAuthors === undefined &&
+    head.beegameProjectTurn === undefined && next.beegameProjectTurn === undefined &&
     next.mode === 'prompt' &&
     next.workload === head.workload &&
     next.isMeta === head.isMeta
@@ -1911,13 +1914,6 @@ function runHeadlessStreaming(
         }
       : undefined
 
-  // Abort the current operation when a 'now' priority message arrives.
-  subscribeToCommandQueue(() => {
-    if (abortController && getCommandsByMaxPriority('now').length > 0) {
-      abortController.abort('interrupt')
-    }
-  })
-
   const run = async () => {
     if (running) {
       return
@@ -2155,6 +2151,8 @@ function runHeadlessStreaming(
                   prompt: input,
                   promptUuid: cmd.uuid,
                   isMeta: cmd.isMeta,
+                  beegameDirectionAuthors: cmd.beegameDirectionAuthors,
+                  beegameProjectTurn: cmd.beegameProjectTurn,
                   cwd: cwd(),
                   tools: allTools,
                   verbose: options.verbose,
@@ -2731,11 +2729,25 @@ function runHeadlessStreaming(
         await finalizePendingAsyncHooks()
         unsubscribeSkillChanges()
         unsubscribeAuthStatus?.()
+        unsubscribeCommandQueue()
         statusListeners.delete(rateLimitListener)
         output.done()
       }
     }
   }
+
+  // Late background notifications must wake an idle stream without new stdin.
+  // While running, the drain loop and its post-mutex recheck own the queue.
+  const unsubscribeCommandQueue = subscribeToCommandQueue(() => {
+    if (isShuttingDown()) return
+    if (abortController && getCommandsByMaxPriority('now').some(cmd => cmd.agentId === undefined)) {
+      abortController.abort('interrupt')
+    }
+    if (!running && peek(cmd => cmd.agentId === undefined) !== undefined) {
+      void run()
+    }
+  })
+  registerCleanup(async () => { unsubscribeCommandQueue() })
 
   // Set up UDS inbox callback so the query loop is kicked off
   // when a message arrives via the UDS socket in headless mode.
@@ -2776,8 +2788,8 @@ function runHeadlessStreaming(
 
   // Cron scheduler: runs scheduled_tasks.json tasks in SDK/-p mode.
   // Mirrors REPL's useScheduledTasks hook. Fired prompts enqueue + kick
-  // off run() directly — unlike REPL, there's no queue subscriber here
-  // that drains on enqueue while idle. The run() mutex makes this safe
+  // off run() directly. The queue subscriber also wakes idle streams;
+  // the run() mutex makes these calls safe
   // during an active turn: the call no-ops and the post-run recheck at
   // the end of run() picks up the queued command.
   let cronScheduler: import('../utils/cronScheduler.js').CronScheduler | null =
@@ -4266,6 +4278,13 @@ function runHeadlessStreaming(
 
       enqueue({
         mode: 'prompt' as const,
+        // Validate inside the normal turn error path, not the stdin reader.
+        beegameDirectionAuthors: (userMsg as SDKUserMessage & {
+          beegame_direction_authors?: NativeDirectionAuthorInput
+        }).beegame_direction_authors,
+        beegameProjectTurn: (userMsg as SDKUserMessage & {
+          beegame_project_turn?: NativeProjectTurnInput
+        }).beegame_project_turn,
         // file_attachments rides the protobuf catchall from the web composer.
         // Same-ref no-op when absent (no 'file_attachments' key).
         value: await resolveAndPrepend(
@@ -4303,6 +4322,7 @@ function runHeadlessStreaming(
       await finalizePendingAsyncHooks()
       unsubscribeSkillChanges()
       unsubscribeAuthStatus?.()
+      unsubscribeCommandQueue()
       statusListeners.delete(rateLimitListener)
       output.done()
     }

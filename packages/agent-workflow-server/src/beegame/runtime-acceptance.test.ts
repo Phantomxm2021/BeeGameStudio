@@ -1,10 +1,110 @@
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readRuntimeAcceptanceReport, runtimeEvidenceIsCurrent } from './runtime-acceptance'
 import { bundleAcceptanceChecker } from './acceptance-check-bundle'
 import { advanceProjectDeliveryAfterTurn, beginProjectDelivery, projectDeliveryStatePath, PROJECT_DELIVERY_REPORT_PATH } from './project-delivery'
+import { designDocumentFixture, designHandoffFixture, designRequirementChecksFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
+import { designHandoffPath, finalizeDesignDocuments, snapshotDesignDocuments } from './design-handoff'
+
+test.each(['missing', 'failed', 'false-contract'] as const)('runtime acceptance cannot turn %s retained evidence into PASS through source hashes', async kind => {
+  const workspace = await mkdtemp(join(tmpdir(), 'synthetic-runtime-evidence-'))
+  try {
+    await writeDesignDocumentsFixture(workspace, ['GDD.md', 'TECHNICAL_DESIGN.md'])
+    await writeFile(join(workspace, 'game.js'), 'Synthetic build')
+    await writeFile(join(workspace, 'observation.txt'), 'Synthetic test fixture result')
+    const checks = designRequirementChecksFixture(workspace, ['observation.txt'])
+    const source = designHandoffFixture('TECHNICAL_DESIGN.md')
+    const bytes = JSON.stringify(kind === 'false-contract' ? { available: false }
+      : { observation: 'target-runtime', check: 'Synthetic capability failure', passed: false, expected: true, observed: false })
+    if (kind !== 'missing') await writeFile(join(workspace, 'proof.json'), bytes)
+    source.evidence.push({ id: 'proof', kind: kind === 'false-contract' ? 'contract' : 'capability', path: 'proof.json',
+      source: 'Synthetic fixture', sha256: createHash('sha256').update(bytes).digest('hex'),
+      ...(kind === 'false-contract' ? { pointer: '/available', expected: true } : {}) })
+    await writeDesignDocumentFixture(workspace, 'TECHNICAL_DESIGN.md', source)
+    const indexPath = join(workspace, designHandoffPath('TECHNICAL_DESIGN.md'))
+    const before = await readFile(indexPath, 'utf8')
+    const result = finalizeDesignDocuments(workspace, ['TECHNICAL_DESIGN.md'], snapshotDesignDocuments(workspace, ['TECHNICAL_DESIGN.md']))
+    expect(result.issues.length).toBeGreaterThan(0)
+    expect(result.unsafeIssues).toEqual([])
+    await writeFile(join(workspace, 'acceptance.json'), JSON.stringify({ scope: 'delivery', status: 'passed', summary: 'Synthetic fixture',
+      environment: 'Synthetic target runtime', evidencePaths: ['observation.txt'], artifactPaths: ['game.js'],
+      verification: { target: 'deployment', observation: 'target-runtime', knownIssues: [], unverified: [], requirementChecks: checks } }))
+    expect((await readRuntimeAcceptanceReport(workspace, 'acceptance.json'))?.status).toBe('blocked')
+    expect(await readFile(indexPath, 'utf8')).toBe(before)
+  } finally { await rm(workspace, { recursive: true, force: true }) }
+})
+
+test('delivery binds every declared expectation to actual result evidence and its current owned source', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'bgs-owned-acceptance-'))
+  try {
+    await writeDesignDocumentsFixture(workspace, ['GDD.md', 'AUDIO_DESIGN.md'])
+    const audio = designHandoffFixture('AUDIO_DESIGN.md')
+    audio.outputs[0]!.acceptance = { section: 'Design', method: 'target-runtime' }
+    await writeDesignDocumentFixture(workspace, 'AUDIO_DESIGN.md', audio)
+    await writeFile(join(workspace, 'game.js'), 'Synthetic build')
+    await writeFile(join(workspace, 'observations.txt'), 'Synthetic unit-test evidence, not a real gameplay result')
+    const checks = designRequirementChecksFixture(workspace, ['observations.txt'])
+    const report = { scope: 'delivery', status: 'passed', summary: 'Fixture results', environment: 'Synthetic test runtime',
+      artifactPaths: ['game.js'], evidencePaths: ['observations.txt'], verification: {
+        target: 'deployment', observation: 'target-runtime', knownIssues: [], unverified: [], requirementChecks: checks,
+      } }
+    const read = async (requirementChecks: unknown[] = checks, extra: object = {}) => {
+      await writeFile(join(workspace, 'acceptance.json'), JSON.stringify({ ...report, ...extra,
+        verification: { ...report.verification, requirementChecks } }))
+      return (await readRuntimeAcceptanceReport(workspace, 'acceptance.json'))!
+    }
+    const originalGdd = await readFile(join(workspace, 'docs/GDD.md'), 'utf8')
+    expect((await read([])).summary).toContain('Design requirements are unverified')
+    expect((await read([checks[0]!])).summary).toContain('AUDIO_DESIGN.md#ready')
+    expect((await read([{ ...checks[0]!, id: 'invented' }, checks[1]!])).diagnostic?.category).toBe('report-invalid')
+    expect((await read([{ ...checks[0]!, documentSha256: 'a'.repeat(64) }, checks[1]!])).summary).toContain('Requirement source changed')
+    expect((await read([{ ...checks[0]!, handoffSha256: 'a'.repeat(64) }, checks[1]!])).summary).toContain('Requirement source changed')
+    expect((await read([checks[0]!, { ...checks[1]!, method: 'test' }])).summary).toContain('requires target-runtime, not test')
+    expect((await read([{ ...checks[0]!, status: 'failed', observed: 'Unexpected outcome' }, checks[1]!])).diagnostic?.category).toBe('product-failed')
+    expect((await read([{ ...checks[0]!, status: 'unverified' }, checks[1]!])).diagnostic?.category).toBe('verification-incomplete')
+    expect((await read([{ ...checks[0]!, scenario: '' }, checks[1]!])).diagnostic?.category).toBe('report-invalid')
+    expect((await read([{ ...checks[0]!, evidencePaths: [] }, checks[1]!])).diagnostic?.category).toBe('report-invalid')
+    expect((await read([{ ...checks[0]!, evidencePaths: ['unrecorded.txt'] }, checks[1]!])).summary).toContain('recorded result evidence')
+    expect((await read([{ ...checks[0]!, evidencePaths: ['docs/GDD.md'] }, checks[1]!], {
+      evidencePaths: ['observations.txt', 'docs/GDD.md'],
+    })).summary).toContain('not its design source')
+    expect((await read(checks, { requirementChecks: checks })).summary).toContain('inside verification.requirementChecks')
+    expect((await read([{ ...checks[0]!, evidencePaths: ['.beegame/design-handoffs/GDD.json'] }, checks[1]!], {
+      evidencePaths: ['observations.txt', '.beegame/design-handoffs/GDD.json'],
+    })).summary).toContain('not its design source')
+    const accepted = await read()
+    expect(accepted.status).toBe('passed')
+    expect(await runtimeEvidenceIsCurrent(workspace, [accepted])).toBe(true)
+    const checker = join(workspace, 'check-acceptance.mjs')
+    await writeFile(checker, await bundleAcceptanceChecker())
+    const checkReport = () => Bun.spawnSync([process.execPath, checker, 'acceptance.json'], { cwd: workspace })
+    expect(checkReport().exitCode).toBe(0)
+    expect(await runtimeEvidenceIsCurrent(workspace, [{ ...accepted, verification: {
+      ...accepted.verification!, requirementChecks: [],
+    } }])).toBe(false)
+    await writeFile(join(workspace, 'docs/GDD.md'), originalGdd.replace('Fixture decision.', 'Changed decision.'))
+    const staleReport = checkReport()
+    expect(staleReport.exitCode).toBe(1)
+    expect(JSON.parse(staleReport.stdout.toString()).diagnostic.category).toBe('verification-incomplete')
+    expect((await read()).summary).toContain('Requirement source changed')
+    expect(await runtimeEvidenceIsCurrent(workspace, [accepted])).toBe(false)
+    const updated = designHandoffFixture('GDD.md')
+    updated.outputs.push({ ...updated.outputs[0]!, id: 'outcome' })
+    await writeDesignDocumentFixture(workspace, 'GDD.md', updated)
+    const fresh = designRequirementChecksFixture(workspace, ['observations.txt'])
+    expect((await read(fresh.filter(check => check.id !== 'outcome'))).summary).toContain('GDD.md#outcome')
+    expect((await read(fresh)).status).toBe('passed')
+    const missingCriteria = designHandoffFixture('GDD.md')
+    delete missingCriteria.outputs[0]!.acceptance
+    await writeDesignDocumentFixture(workspace, 'GDD.md', missingCriteria)
+    expect((await read()).summary).toContain('core gameplay delivery expectations must be declared')
+    // Structural validation itself never repairs the source or authenticates observations.
+    expect(await readFile(join(workspace, 'docs/GDD.md'), 'utf8')).toBe(designDocumentFixture('GDD.md', missingCriteria))
+  } finally { await rm(workspace, { recursive: true, force: true }) }
+})
 
 test('a delivery PASS requires actual target-runtime verification and no unresolved requirements', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'bgs-delivery-coverage-'))
@@ -102,7 +202,7 @@ test('a readable UI JSON and browser screenshot do not certify that its layout i
     const invalidMenu = JSON.parse(originalMenu)
     invalidMenu.data.nodes[1].layout = { anchor: 'top-center', position: [-120, -1000], size: [240, 52] }
     await writeFile(menuPath, JSON.stringify(invalidMenu))
-    expect((await read([check]))?.summary).toContain('Authored UI controls or their panels are outside the viewport')
+    expect((await read([check]))?.summary).toContain('Authored UI control geometry violates declared bounds or minima')
     await writeFile(menuPath, originalMenu)
     // Historical PASS objects cannot bypass the new consumption coverage check.
     expect(await runtimeEvidenceIsCurrent(workspace, [{ ...accepted, verification: {

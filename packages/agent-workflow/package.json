@@ -13,8 +13,13 @@
     "./subagent-activity": "./src/subagent-activity.ts",
     "./native-file-agent": "./src/native-file-agent.ts",
     "./native-task-access": "./src/native-task-access.ts",
+    "./native-direction-authors": "./src/native-direction-authors.ts",
+    "./design-review-result": "./src/design-review-result.ts",
     "./preview-environment": "./src/preview-environment.ts",
     "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "zod": "^4.3.6"
   },
   "scripts": {
     "test": "bun test src/__tests__",

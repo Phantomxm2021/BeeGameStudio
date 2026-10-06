@@ -1,0 +1,55 @@
+{
+  "goal": "下游能够按文档实施，不必猜关键决策；最终交付由实际游戏证据验收，而非文档 Review 的结论代替。",
+  "status": "implemented-local-verified",
+  "scope": "BGS 系统源代码、现有检查 Skill 和本地自动化测试；不改生成项目，不启动付费验收。",
+  "confirmedGap": "验收报告没有与文档中的具体交付要求及其源版本建立可检查的关联。已有提示、有限 Review/Revision、结构检查和运行验收继续复用。",
+  "steps": [
+    {
+      "step": 1,
+      "change": "现有 outputs 增加可选 acceptance 正文章节指针和验证方法；GDD 至少明确一个核心玩法交付要求。其余专业文档只标记自己拥有的必要交付要求，不重复消费者引用的要求。",
+      "reason": "让实施和验收知道应观察什么；指针复用现有输出 ID，不复制正文或创建新注册表。",
+      "check": "指针必须指向实际章节；未声明核心交付预期不能当作可工作的 GDD。章节存在不等于预期充分。"
+    },
+    {
+      "step": 2,
+      "change": "更新现有 Review Skill 的实施者推演方法；Revision 回放具体冲突情境，并检查关联消费者和验收预期。",
+      "reason": "检查下游是否仍要猜条件、结果或接口；不增加作者自检、审计角色或 Review 次数。",
+      "check": "职责和放行权限留在任务及宿主；Skill 提供检查方法，不能给项目新增需求。"
+    },
+    {
+      "step": 3,
+      "change": "现有验收报告增加 requirementChecks，以文档、输出 ID、源文件哈希关联实际情境、观察结果和证据；所有已声明交付要求必须覆盖且通过。",
+      "reason": "阻止仅凭整体 PASS 或无关截图宣称设计已经落实；复用现有报告和证据版本检查。",
+      "check": "遗漏、未知 ID、源版本改变、错误方法、失败或未验证、缺失证据均不能放行。规则可用测试，表现与交互要求实际运行，资源或来源要求可用直接检查。"
+    },
+    {
+      "step": 4,
+      "change": "运行本地结构、验收、交付流程、上下文传播、打包检查器和类型检查，记录结果。",
+      "reason": "验证系统约束是否真正生效，避免只修改提示。",
+      "check": "本地通过不代表真实模型生成及游戏质量已经通过；下一轮付费测试须单独授权。"
+    }
+  ],
+  "preserved": ["独立 Review", "一次集中 Revision 和定向 Verify", "专业决策所有权", "平台事实证据", "当前基线及已知限制", "问题按影响修正、关键争议交负责人", "实际运行验收与体验观察"],
+  "notAdded": ["完整正文 Schema", "Decision Taxonomy", "新的决策注册表", "固定原型阶段", "额外审计 Agent", "无限 Review", "默认人工研究门槛", "刚刚撤回的五项成本优化"],
+  "limitations": ["程序只能检查声明的要求及证据关联，无法证明必要要求没有漏写。", "证据哈希不能证明观察真实或游戏有趣；必须实际运行、查看证据并如实记录未验证事项。", "新增要求格式会使旧文档缺项明确报错；不自动篡改或迁移测试产物。"],
+  "implementation": {
+    "design": "design-handoff.ts 在既有 outputs 上加入 acceptance 章节/方法指针，检查真实章节及 GDD 核心交付预期；runtime 直接读取当前正文及其哈希，不生成新需求注册表。",
+    "review": "game-design-check 增加实施者推演和交付预期检查；review 任务显式要求使用，修订/复核回放原问题情境及关联要求。保持有限循环与原有所有权裁决。",
+    "implementationAndAcceptance": "project-delivery.ts 明确实现完成条件与真实验收区分；project-conversation.ts 在验收上下文提供新结果格式，自动续跑不重复整份接口。",
+    "gate": "runtime-acceptance.ts 同时在读报告和重验历史 PASS 时核对 requirementChecks 覆盖、源版本、方法、状态和证据引用；打包检查器共用同一实现。"
+  },
+  "verification": {
+    "relatedTests": { "passed": 133, "failed": 0, "files": 11, "expectations": 1154, "elapsedSeconds": 4.64 },
+    "typechecks": { "agentWorkflowServer": "passed", "agentWorkflow": "passed" },
+    "skill": "标准 Python 校验器因缺少 PyYAML 无法启动；使用 Bun YAML 执行元数据键、名称、描述和未完成占位符检查，通过。没有安装依赖。",
+    "expandedRegression": {
+      "initial": { "passed": 378, "skipped": 8, "failed": 13, "files": 66 },
+      "environmentRecheck": { "passed": 15, "failed": 0, "files": 5, "note": "12 项初次失败均为受限沙箱下的回环监听或系统 sandbox-exec 限制；在本机模拟服务环境重新执行全部通过，不连接付费提供者。" },
+      "remaining": [{ "file": "packages/agent-workflow-server/src/beegame/tilemap-content-preview.test.ts", "test": "invalid image bytes fail instead of emitting a successful partial preview", "cause": "测试期待 Scene preview failed，实际更早由资源检查拒绝 Invalid PNG signature。两个相关源文件都未被本次改动；仍作为未通过项保留，不修改无关代码。" }]
+    },
+    "newAssertions": ["GDD 缺少核心交付预期不得释放", "验收指针必须指向正文真实章节", "遗漏已声明要求不能交付", "未知要求 ID 或源版本失效不能复用 PASS", "静态测试不能代替声明的 target-runtime 方法", "失败、未验证、缺失证据及用设计正文当结果证据不能交付", "新增要求必须补充覆盖", "打包检查器和宿主使用一致约束", "报告补齐有效关联后正常推进，检查器不改正文", "验收接口仅出现在验收阶段且续跑复用上下文"],
+    "paidRun": "not-started",
+    "realModelAndGameQuality": "not-verified"
+  },
+  "next": "单独授权后，用新的真实项目跑文档到可运行游戏的完整流程，核对必要要求是否被发现、下游是否仍需猜决策、实际游戏与证据是否相符，同时记录每阶段 Token 与耗时。禁止仅凭本地校验或 Reviewer 无 findings 宣布游戏合格。"
+}

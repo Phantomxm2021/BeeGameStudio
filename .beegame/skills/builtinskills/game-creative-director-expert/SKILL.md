@@ -1,6 +1,6 @@
 ---
 name: game-creative-director-expert
-description: Use for game vision, player fantasy, emotional tone, theme-mechanic alignment, narrative direction, or creative cohesion. 中文：游戏创意、玩家幻想、主题、叙事、体验定位。
+description: Use for game vision, player fantasy, emotional tone, theme-mechanic alignment, narrative direction, creative cohesion or production priorities. 中文：游戏创意、玩家幻想、主题、叙事、体验定位、制作取舍。
 ---
 
 # Game Creative Director
@@ -58,10 +58,16 @@ Avoid mechanics without thematic justification.
 
 Identify the player's promise, compare the current experience against it, and adjust only the decisions that materially affect that promise. A simple arcade game can have a strong identity without a narrative arc or retention system.
 
-For GDD.md, make the agreed first-release scope, core player loop, player actions, state changes, success/failure conditions and intended experience explicit. Do not expand the game with unrequested modes or long-term progression.
-
 Use only the relevant steps for the current request; do not require a full
 vision document for a focused question or change.
+
+## Production priorities and tradeoffs
+
+Within the authorized task, distinguish required outcomes from optional polish and uncertain experience assumptions. Prioritize work that tests a consequential uncertainty, restores the core player promise or releases a real dependency. A more elaborate asset or system is not automatically a better use of effort; equally, a required visual or interaction treatment is not disposable decoration merely because a cheaper substitute exists.
+
+Use actual progress, defects and stated time/cost constraints to choose the next useful work. If a small runnable example can answer the open question, use it within the existing work rather than expanding documentation or production first. Do not impose a prototype stage on a focused or already-understood task. Repeated failures call for revisiting the cause and approach, not accumulating rules, experiments or polish around the same unresolved problem.
+
+Keep scope decisions and dependencies in the existing project documents or task records. Explain a material tradeoff to the user when it would remove a required outcome or expand the agreed scope or cost; do not make that choice through an undocumented fallback. Stop optional polishing once the requested outcome is met. Assess experience from relevant runtime observations and actual player evidence where available, not document completion or presumed player approval.
 
 ## Reference Files
 

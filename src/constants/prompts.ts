@@ -560,6 +560,14 @@ The following MCP servers have provided instructions for how to use their tools 
 ${instructionBlocks}`
 }
 
+// Explicit-type subagents rebuild their environment prompt rather than inherit
+// the main Agent's appended BGS context. Surface the same runtime fact in both.
+function getProjectWorkingFilesInfo(): string | null {
+  const directory = process.env.CLAUDE_CODE_TMPDIR
+  if (process.env.BEEGAME_PROJECT_EXECUTION !== '1' || !directory) return null
+  return `Project temporary working directory (TMPDIR / CLAUDE_CODE_TMPDIR): ${JSON.stringify(directory)}. Prefer this project-owned directory for disposable scripts and scratch files; keep maintained tests in the project's normal test structure. File tools require literal paths, not an unexpanded $TMPDIR; Bash can use "$TMPDIR".`
+}
+
 export async function computeEnvInfo(
   modelId: string,
   additionalWorkingDirectories?: string[],
@@ -593,11 +601,12 @@ export async function computeEnvInfo(
   const knowledgeCutoffMessage = cutoff
     ? `\n\nAssistant knowledge cutoff is ${cutoff}.`
     : ''
+  const workingFilesInfo = getProjectWorkingFilesInfo()
 
   return `Here is useful information about the environment you are running in:
 <env>
 Working directory: ${getCwd()}
-Is directory a git repo: ${isGit ? 'Yes' : 'No'}
+${workingFilesInfo ? workingFilesInfo + '\n' : ''}Is directory a git repo: ${isGit ? 'Yes' : 'No'}
 ${additionalDirsInfo}Platform: ${env.platform}
 ${getShellInfoLine()}
 OS Version: ${unameSR}
@@ -633,6 +642,7 @@ export async function computeSimpleEnvInfo(
 
   const envItems = [
     `Primary working directory: ${cwd}`,
+    getProjectWorkingFilesInfo(),
     isWorktree
       ? `This is a git worktree — an isolated copy of the repository. Run all commands from this directory. Do NOT \`cd\` to the original repository root.`
       : null,

@@ -84,7 +84,7 @@ describe('Unity-style Game Content scene contract', () => {
     const authority = { documentRevision: HASH, assetManifestRevision: HASH, manifest }
     const broken = auditBeeGameContentPackage(workspace, authority)
     expect(broken.valid).toBe(false)
-    expect(broken.issues.join('\n')).toContain('content/ui/menu.json: play: enabled control or its containing panel is outside the viewport')
+    expect(broken.issues.join('\n')).toContain('content/ui/menu.json: play: 390x844 control or containing panel is outside the viewport')
     writeFileSync(menuPath, JSON.stringify(menu(0)))
     expect(auditBeeGameContentPackage(workspace, authority).valid).toBe(true)
   })

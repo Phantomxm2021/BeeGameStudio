@@ -1,6 +1,12 @@
 import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
+import { resolve } from 'node:path'
+import { realpath } from 'node:fs/promises'
+import { getCwd } from 'src/utils/cwd.js'
+import { DESIGN_REVIEW_AGENT, designReviewTools } from 'src/beegame/design-review.js'
+import { designAuthorTools } from 'src/beegame/direction-authors.js'
+import { isNativeWritingAuthor } from '@bee-game-studio/agent-workflow/native-direction-authors'
 import uniqBy from 'lodash-es/uniqBy.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { getProjectRoot, getSessionId } from 'src/bootstrap/state.js'
@@ -41,7 +47,7 @@ import type {
   UserMessage,
 } from 'src/types/message.js'
 import { createAttachmentMessage } from 'src/utils/attachments.js'
-import { AbortError } from 'src/utils/errors.js'
+import { AbortError, AgentExecutionLimitError } from 'src/utils/errors.js'
 import { getDisplayPath } from 'src/utils/file.js'
 import {
   cloneFileStateCache,
@@ -87,6 +93,7 @@ import type { ContentReplacementState } from 'src/utils/toolResultStorage.js'
 import { createAgentId } from 'src/utils/uuid.js'
 import { resolveAgentTools } from './agentToolUtils.js'
 import { filterIncompleteToolCalls } from './filterIncompleteToolCalls.js'
+import { subagentSystemPrompt } from './subagentSystemPrompt.js'
 import { type AgentDefinition, isBuiltInAgent } from './loadAgentsDir.js'
 
 export { filterIncompleteToolCalls } from './filterIncompleteToolCalls.js'
@@ -509,15 +516,20 @@ export async function* runAgent({
     }
   }
 
-  const resolvedTools = useExactTools
+  const selectedTools = useExactTools
     ? availableTools
     : resolveAgentTools(agentDefinition, availableTools, isAsync).resolvedTools
+  // AgentTool rebuilds the worker pool. Apply each design role interface here, after
+  // that rebuild and selection, so the real child API receives its scoped tools.
+  const resolvedTools = agentDefinition.agentType === DESIGN_REVIEW_AGENT
+    ? designReviewTools(selectedTools)
+    : isNativeWritingAuthor(agentDefinition.agentType) ? designAuthorTools(selectedTools) : selectedTools
 
   const additionalWorkingDirectories = Array.from(
     appState.toolPermissionContext.additionalWorkingDirectories.keys(),
   )
 
-  const agentSystemPrompt = override?.systemPrompt
+  const baseAgentSystemPrompt = override?.systemPrompt
     ? override.systemPrompt
     : asSystemPrompt(
         await getAgentSystemPrompt(
@@ -528,6 +540,8 @@ export async function* runAgent({
           resolvedTools,
         ),
       )
+  const agentSystemPrompt = subagentSystemPrompt(baseAgentSystemPrompt,
+    toolUseContext.options.appendSystemPrompt, useExactTools)
 
   // Determine abortController:
   // - Override takes precedence
@@ -608,6 +622,8 @@ export async function* runAgent({
         agentDefinition,
       )
       if (!resolvedName) {
+        if (agentDefinition.agentType === DESIGN_REVIEW_AGENT)
+          throw new Error('Required BGS review Skill could not be loaded: ' + skillName)
         logForDebugging(
           `[Agent: ${agentDefinition.agentType}] Warning: Skill '${skillName}' specified in frontmatter was not found`,
           { level: 'warn' },
@@ -617,6 +633,8 @@ export async function* runAgent({
 
       const skill = getCommand(resolvedName, allSkills)
       if (skill.type !== 'prompt') {
+        if (agentDefinition.agentType === DESIGN_REVIEW_AGENT)
+          throw new Error('Required BGS review Skill is not prompt-based: ' + skillName)
         logForDebugging(
           `[Agent: ${agentDefinition.agentType}] Warning: Skill '${skillName}' is not a prompt-based skill`,
           { level: 'warn' },
@@ -688,12 +706,9 @@ export async function* runAgent({
     debug: toolUseContext.options.debug,
     verbose: toolUseContext.options.verbose,
     mainLoopModel: resolvedAgentModel,
-    // For fork children (useExactTools), inherit thinking config to match the
-    // parent's API request prefix for prompt cache hits. For regular
-    // sub-agents, disable thinking to control output token costs.
-    thinkingConfig: useExactTools
-      ? toolUseContext.options.thinkingConfig
-      : { type: 'disabled' as const },
+    // Delegation must not silently downgrade the caller's reasoning policy.
+    // This also keeps fork prefixes compatible with the parent's cache.
+    thinkingConfig: toolUseContext.options.thinkingConfig,
     mcpClients: mergedMcpClients,
     mcpResources: toolUseContext.options.mcpResources,
     agentDefinitions: toolUseContext.options.agentDefinitions,
@@ -710,6 +725,8 @@ export async function* runAgent({
   // - Sync agents share setAppState, setResponseLength, abortController with parent
   // - Async agents are fully isolated (but with explicit unlinked abortController)
   const agentToolUseContext = createSubagentContext(toolUseContext, {
+    // A host-owned read-only review boundary must also adjudicate hook-approved writes.
+    requireCanUseTool: agentDefinition.agentType === DESIGN_REVIEW_AGENT || isNativeWritingAuthor(agentDefinition.agentType) ? true : undefined,
     options: agentOptions,
     agentId,
     agentType: agentDefinition.agentType,
@@ -724,6 +741,18 @@ export async function* runAgent({
       agentDefinition.criticalSystemReminder_EXPERIMENTAL,
     contentReplacementState,
   })
+  agentToolUseContext.beegameReviewDocuments = toolUseContext.beegameReviewDocuments
+  // An independent reviewer must expose its saved sources, not reuse parent reads.
+  if (agentToolUseContext.beegameReviewDocuments) {
+    const owned = new Set(await Promise.all(agentToolUseContext.beegameReviewDocuments.map(name => {
+      const path = resolve(getCwd(), 'docs', name)
+      return realpath(path).catch(() => path)
+    })))
+    for (const key of [...agentToolUseContext.readFileState.keys()]) {
+      const canonical = await realpath(key).catch(() => key)
+      if (owned.has(canonical)) agentToolUseContext.readFileState.delete(key)
+    }
+  }
   if (isBackgrounded) {
     const setForegroundState = agentToolUseContext.setAppState
     agentToolUseContext.setAppState = update => {
@@ -808,19 +837,9 @@ export async function* runAgent({
       if (message.type === 'attachment') {
         // Handle max turns reached signal from query.ts
         if ((message as any).attachment.type === 'max_turns_reached') {
-          logForDebugging(
-            `[Agent
-: $
-{
-  agentDefinition.agentType
-}
-] Reached max turns limit ($
-{
-  (message as any).attachment.maxTurns
-}
-)`,
-          )
-          break
+          // Propagate through the existing foreground/background failure paths.
+          // Breaking here silently turned unfinished execution into completed.
+          throw new AgentExecutionLimitError((message as any).attachment.maxTurns)
         }
         yield message as Message
         continue

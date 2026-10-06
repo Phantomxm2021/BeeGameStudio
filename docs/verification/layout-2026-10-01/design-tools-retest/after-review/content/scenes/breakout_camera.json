@@ -1,0 +1,18 @@
+{
+  "orthographic": true,
+  "coordinateSpace": "logical-pixels",
+  "orthographicSize": 3.6,
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "framing": "keep-height",
+  "referenceViewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "pixelsPerUnit": 100,
+  "nearClip": 1,
+  "farClip": 100,
+  "note": "相机计算输入（草稿）：orthographicSize 为世界单位半高，可见逻辑像素高 = 2 * 3.6 * 100 = 720；viewport 描述参考宽高比 16:9，不是宿主窗口固定尺寸。最终 framing 选择待 UI_UX_SPEC 的 targetViewports 明确后由 TECH 末批次确认。"
+}

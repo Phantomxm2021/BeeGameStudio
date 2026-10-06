@@ -1,0 +1,393 @@
+{
+  "ok": true,
+  "scope": "layout-draft-inspection",
+  "runtimeVerified": false,
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "note": "Geometry only; ok means inspection ran, not that the layout passed. No content index, resources or acceptance are required or changed. Overlap candidates include sibling foreground boxes and projected world/screen foreground intersections, exclude backgrounds and parent-child composition, and may be intentional. outsideCameraView diagnoses projected reference-plane geometry beyond framing, not runtime clipping/occlusion. Boundary checks probe declared variant transitions, not supported-size guarantees. Text metrics remain unmeasured without the actual font.",
+  "diagnostics": {
+    "outsideViewport": [],
+    "outsideParent": [],
+    "outsideContentArea": [],
+    "belowMinimumControlSize": [],
+    "overlapCandidates": []
+  },
+  "boundaryChecks": [],
+  "nodes": [
+    {
+      "id": "rotate-root",
+      "active": true,
+      "layout": {
+        "size": [
+          1920,
+          1080
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          0,
+          0
+        ],
+        [
+          1920,
+          0
+        ],
+        [
+          1920,
+          1080
+        ],
+        [
+          0,
+          1080
+        ]
+      ],
+      "bounds": {
+        "left": 0,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "rotate-bg",
+      "parentId": "rotate-root",
+      "active": true,
+      "layout": {
+        "anchorMin": [
+          0,
+          0
+        ],
+        "anchorMax": [
+          1,
+          1
+        ],
+        "sizeDelta": [
+          0,
+          0
+        ],
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          1920,
+          1080
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          0,
+          0
+        ],
+        [
+          1920,
+          0
+        ],
+        [
+          1920,
+          1080
+        ],
+        [
+          0,
+          1080
+        ]
+      ],
+      "bounds": {
+        "left": 0,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "rotate-column",
+      "parentId": "rotate-root",
+      "active": true,
+      "layout": {
+        "anchor": "middle-center",
+        "position": [
+          0,
+          0
+        ],
+        "size": [
+          508,
+          280
+        ],
+        "container": {
+          "direction": "column",
+          "gap": 20,
+          "padding": [
+            24,
+            24,
+            24,
+            24
+          ],
+          "align": "center"
+        }
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "corners": [
+        [
+          706,
+          400
+        ],
+        [
+          1214,
+          400
+        ],
+        [
+          1214,
+          680
+        ],
+        [
+          706,
+          680
+        ]
+      ],
+      "bounds": {
+        "left": 706,
+        "top": 400,
+        "right": 1214,
+        "bottom": 680
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "rotate-icon",
+      "parentId": "rotate-column",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          206,
+          24
+        ],
+        "size": [
+          96,
+          96
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          912,
+          424
+        ],
+        [
+          1008,
+          424
+        ],
+        [
+          1008,
+          520
+        ],
+        [
+          912,
+          520
+        ]
+      ],
+      "bounds": {
+        "left": 912,
+        "top": 424,
+        "right": 1008,
+        "bottom": 520
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "rotate-icon-arrow",
+      "parentId": "rotate-icon",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          40,
+          10
+        ],
+        "size": [
+          20,
+          20
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          952,
+          434
+        ],
+        [
+          972,
+          434
+        ],
+        [
+          972,
+          454
+        ],
+        [
+          952,
+          454
+        ]
+      ],
+      "bounds": {
+        "left": 952,
+        "top": 434,
+        "right": 972,
+        "bottom": 454
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "not-applicable",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "rotate-title",
+      "parentId": "rotate-column",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          24,
+          140
+        ],
+        "size": [
+          460,
+          40
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          730,
+          540
+        ],
+        [
+          1190,
+          540
+        ],
+        [
+          1190,
+          580
+        ],
+        [
+          730,
+          580
+        ]
+      ],
+      "bounds": {
+        "left": 730,
+        "top": 540,
+        "right": 1190,
+        "bottom": 580
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    },
+    {
+      "id": "rotate-body",
+      "parentId": "rotate-column",
+      "active": true,
+      "layout": {
+        "anchor": "top-left",
+        "position": [
+          24,
+          200
+        ],
+        "size": [
+          460,
+          48
+        ]
+      },
+      "pivot": {
+        "x": 0,
+        "y": 0
+      },
+      "corners": [
+        [
+          730,
+          600
+        ],
+        [
+          1190,
+          600
+        ],
+        [
+          1190,
+          648
+        ],
+        [
+          730,
+          648
+        ]
+      ],
+      "bounds": {
+        "left": 730,
+        "top": 600,
+        "right": 1190,
+        "bottom": 648
+      },
+      "belowMinimumControlSize": false,
+      "textFit": "unmeasured",
+      "outsideViewport": false,
+      "outsideParent": false,
+      "outsideContentArea": false,
+      "overlapCandidates": [],
+      "occludedBy": []
+    }
+  ]
+}

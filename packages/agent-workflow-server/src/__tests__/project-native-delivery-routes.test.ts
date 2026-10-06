@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import { existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -11,21 +12,28 @@ import { writeBeeGameAssetManifest } from '../beegame/asset-contracts'
 import { assetManifestAuthoringExamples } from '../beegame/asset-manifest-authoring-contract'
 import { BEEGAME_SCENE_MODEL } from '../beegame/game-content-package'
 import { AUTHOR_BATCHES } from '../beegame/project-author'
+import { designDocumentFixture, designRequirementChecksFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture, writeUiLayoutFixture } from '../beegame/fixtures/layout-fixture'
 
 async function completeFixtureMilestone(input: BeeGameSessionRunnerStartInput, implementationEvidence = false): Promise<string> {
   const context = await readFile(join(input.cwd, '.beegame/tmp', input.sessionId, 'context.md'), 'utf8')
   const conclusionPath = context.match(/\.beegame\/tmp\/[^\s]+\/milestone-[\w-]+\.txt/)?.[0]
-  if (conclusionPath) await writeFile(join(input.cwd, conclusionPath.replace(/:$/, '')), 'complete\n')
+  if (conclusionPath) await writeFile(join(input.cwd, conclusionPath.replace(/:$/, '')), 'complete\n' + (context.includes('milestone: review.')
+    ? JSON.stringify({ step: 'inspect', findings: [], resolved: [] }) : ''))
   const contentContractExists = await Bun.file(join(input.cwd, '.beegame/delivery/content-contract.json')).exists()
   if (/milestone: (author|review|revision|resources)\./.test(context)) expect(contentContractExists).toBe(false)
   if (context.includes('milestone: content.')) expect(contentContractExists).toBe(true)
   if (context.includes('milestone: author.')) {
     await mkdir(join(input.cwd, 'docs'), { recursive: true })
-    const batch = Number(/Author batch (\d)\/4/.exec(context)?.[1]) - 1
+    const assignment = /Author batch (\d+)\/(\d+)/.exec(context)
+    const batch = Number(assignment?.[1]) - 1
+    expect(Number(assignment?.[2])).toBe(AUTHOR_BATCHES.length)
     expect(batch).toBeGreaterThanOrEqual(0)
     for (const document of AUTHOR_BATCHES.slice(0, batch).flat())
       expect(await Bun.file(join(input.cwd, 'docs', document)).exists()).toBe(true)
-    for (const document of AUTHOR_BATCHES[batch]!) await writeFile(join(input.cwd, 'docs', document), '# Design\n')
+    for (const document of AUTHOR_BATCHES[batch]!) await writeDesignDocumentFixture(input.cwd, document)
+  } else if (context.includes('milestone: review.')) {
+    expect(existsSync(join(input.cwd, 'content/index.json'))).toBe(false)
+    expect(existsSync(join(input.cwd, 'content/ui/menu.json'))).toBe(true)
   } else if (context.includes('milestone: resources.')) {
     await mkdir(join(input.cwd, 'assets/runtime/example'), { recursive: true })
     await writeFile(join(input.cwd, 'assets/runtime/example/resource.json'), '{"original":true}')
@@ -33,12 +41,15 @@ async function completeFixtureMilestone(input: BeeGameSessionRunnerStartInput, i
     await writeBeeGameAssetManifest(input.cwd, { ...manifest,
       project_target: { ...manifest.project_target!, resource_library_usage: 'optional' } })
   } else if (context.includes('milestone: content.')) {
+    expect(existsSync(join(input.cwd, 'content/index.json'))).toBe(false)
+    expect(existsSync(join(input.cwd, 'content/ui/menu.json'))).toBe(true)
+    await writeUiLayoutFixture(input.cwd)
     const authority = projectContentAuthority(input.cwd)
     await mkdir(join(input.cwd, 'content/scenes'), { recursive: true })
     await writeFile(join(input.cwd, 'content/index.json'), JSON.stringify({
       schema: 'beegame-content-package.v2', id: 'game', dimension: '2d',
       documentRevision: authority.documentRevision, assetManifestRevision: authority.assetManifestRevision,
-      entryScene: 'scene', sceneModel: BEEGAME_SCENE_MODEL, files: ['scenes/main.json'],
+      entryScene: 'scene', sceneModel: BEEGAME_SCENE_MODEL, files: ['scenes/main.json', 'ui/menu.json'],
     }))
     await writeFile(join(input.cwd, 'content/scenes/main.json'), JSON.stringify({
       schema: 'beegame-content.v1', id: 'scene', kind: 'scene-2d', assetRefs: [],
@@ -59,9 +70,13 @@ async function completeFixtureMilestone(input: BeeGameSessionRunnerStartInput, i
       environment: 'Browser preview', evidencePaths: ['.beegame/delivery/browser.txt'],
       artifactPaths: ['dist/game.js'],
       verification: { target: 'deployment', observation: 'target-runtime', knownIssues: [], unverified: [],
+        requirementChecks: designRequirementChecksFixture(input.cwd, ['.beegame/delivery/browser.txt']),
         contentChecks: [{ kind: 'scene-layout', document: 'content/scenes/main.json', nodeId: 'root',
           property: 'transform', change: 'Move root in test copy', expected: 'Scene moves',
-          observed: 'Scene moved with data', status: 'passed', evidencePaths: ['.beegame/delivery/browser.txt'] }] },
+          observed: 'Scene moved with data', status: 'passed', evidencePaths: ['.beegame/delivery/browser.txt'] },
+          { kind: 'ui-layout', document: 'content/ui/menu.json', nodeId: 'play', property: 'layout',
+            change: 'Move play in test copy', expected: 'Button moves', observed: 'Button moved with data',
+            status: 'passed', evidencePaths: ['.beegame/delivery/browser.txt'] }] },
     }))
   }
   return context
@@ -88,7 +103,7 @@ async function startExistingProjectConversation(input: {
   const confirmed = await input.app.request(`/api/beegame-sessions/${session.id}/confirmed-brief`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ brief: { idea: input.idea, creationMode: 'blueprint',
-      resourceLibraryUsage: 'optional', document_language: 'en', game_user_visible_language: 'en',
+      orientation: 'Landscape', resourceLibraryUsage: 'optional', document_language: 'en', game_user_visible_language: 'en',
       agent_response_language: 'en' } }),
   })
   expect(confirmed.status).toBe(200)
@@ -108,6 +123,14 @@ test('new project bootstrap starts one native project conversation', async () =>
     } } } },
     registerCleanup: cleanup => cleanups.push(cleanup) })
   try {
+    const invalid = await app.request('/api/projects/bootstrap', { method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project: { id: 'missing-direction', name: 'Unconfirmed game', created_at: Date.now() },
+        brief: { idea: 'Make a touch game', settings: { dimension: '2D', inputs: ['Touch'] } } }) })
+    expect(invalid.status).toBe(400)
+    expect(await invalid.json()).toMatchObject({ error: expect.stringContaining('explicitly select') })
+    expect(starts).toHaveLength(0)
+    expect(await Bun.file(join(root, 'projects/users/bootstrap-owner/missing-direction')).exists()).toBe(false)
     const model = await app.request('/api/model-configs', { method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'Offline', provider: 'openai-compatible', apiKey: 'fake',
@@ -116,7 +139,7 @@ test('new project bootstrap starts one native project conversation', async () =>
     const response = await app.request('/api/projects/bootstrap', { method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ project: { id: 'bootstrap-project', name: 'New game', created_at: Date.now() },
-        brief: { idea: 'Make a small game', creationMode: 'blueprint', resourceLibraryUsage: 'optional',
+        brief: { idea: 'Make a small game', creationMode: 'blueprint', orientation: 'Landscape', resourceLibraryUsage: 'optional',
           document_language: 'en', game_user_visible_language: 'en', agent_response_language: 'en' } }) })
     expect(response.status).toBe(202)
     await response.json()
@@ -125,7 +148,7 @@ test('new project bootstrap starts one native project conversation', async () =>
     expect(prompts).toHaveLength(1)
     expect(String(prompts[0])).toContain('Make a small game')
     expect(String(prompts[0])).toContain('The current milestone and its deliverables are supplied in the project state')
-    expect(String(prompts[0])).toContain('Document responsibilities and decision dependencies')
+    expect(String(prompts[0])).toContain('Document responsibilities:')
     expect(String(prompts[0])).not.toContain('visual-direction approval')
     expect(String(prompts[0])).toContain('default_first_release_scope')
     expect(String(prompts[0])).toContain('small complete playable version')
@@ -134,7 +157,7 @@ test('new project bootstrap starts one native project conversation', async () =>
     const stored = await readProjectDelivery(starts[0]!.cwd, join(root, 'dashboard'))
     expect(stored?.objective).toContain('default_first_release_scope')
     expect(String(prompts[0])).not.toContain('audit the complete document set yourself')
-    expect(String(prompts[0])).toContain('Include version, author and date in each header')
+    expect(String(prompts[0])).toContain('Include author and date once in the document header; the host maintains its version')
     const readiness = await app.request('/api/projects/bootstrap-project/deployment-readiness')
     expect(await readiness.json()).toMatchObject({ allowed: false })
   } finally {
@@ -274,7 +297,19 @@ test.each([false, true])('one native project session completes delivery; impleme
     input.onNativeSessionId?.('d0e9e5bc-8db2-4dbc-91df-17800ed20467')
     return { stop() {}, async submit(turn) {
       prompts.push(JSON.stringify(turn.prompt))
-      contexts.push(await completeFixtureMilestone(input, implementationEvidence))
+      const context = await completeFixtureMilestone(input, implementationEvidence)
+      contexts.push(context)
+      if (context.includes('milestone: author.')) {
+        const batch = Number(/Author batch (\d+)\//.exec(context)![1]) - 1
+        if (batch === 0) expect(turn.directionAuthors).toBeUndefined()
+        else {
+          expect(Number(turn.directionAuthors?.batch)).toBe(batch)
+          expect(Object.keys(turn.directionAuthors!.responsibilities).sort()).toEqual([...AUTHOR_BATCHES[batch]].sort())
+        }
+      } else if (context.includes('milestone: review.')) {
+        expect(turn.projectTurn?.reviewStep).toBe('inspect')
+        expect(turn.projectTurn?.reviewDocuments).toEqual([...PROJECT_DOCUMENTS])
+      }
       await turn.onMessage({ type: 'result', subtype: 'success', result: 'Game delivered' })
     } }
   } }
@@ -300,11 +335,11 @@ test.each([false, true])('one native project session completes delivery; impleme
     }
     expect(starts).toHaveLength(1)
     expect(contexts.map(context => /milestone: ([a-z-]+)\./.exec(context)?.[1])).toEqual([
-      'author', 'author', 'author', 'author', 'review', 'resources', 'content', 'implementation', 'acceptance',
+      ...AUTHOR_BATCHES.map(() => 'author'), 'review', 'resources', 'content', 'implementation', 'acceptance',
     ])
-    expect(prompts).toHaveLength(9)
-    expect(contexts[4]).toContain('Determine whether the design is ready for development')
-    expect(contexts[5]).toContain('Optional resources do not block completion')
+    expect(prompts).toHaveLength(AUTHOR_BATCHES.length + 5)
+    expect(contexts[AUTHOR_BATCHES.length]).toContain('Acceptance target: production can implement the agreed release')
+    expect(contexts[AUTHOR_BATCHES.length + 1]).toContain('Optional resources do not block completion')
     expect(prompts.slice(1).every(prompt => String(prompt).includes('Continue the current project delivery milestone'))).toBe(true)
     expect(starts[0]?.resumeSessionId).toBeUndefined()
     const milestoneEvents = await (await app.request(`/api/beegame-sessions/${session.id}/events`)).json() as Array<{
@@ -492,10 +527,12 @@ test('stopping a project does not preempt the next native request', async () => 
         input.onNativeSessionId?.('94429147-7294-4364-b363-d4097d11ae86')
       return { stop() { releaseInitial?.() }, async submit(turn) {
         prompts.push(JSON.stringify(turn.prompt))
-        // Keep the initial turn active until Stop; otherwise an automatic retry
-        // can occupy the follow-up slot before this test sends its user request.
+        // Keep the initial turn active so Stop interrupts the running request.
         if (prompts.length === 1) await new Promise<void>(resolve => { releaseInitial = resolve })
-        if (prompts.length === 2) await new Promise<void>(resolve => { releaseFollowup = resolve })
+        if (prompts.length === 2) {
+          await new Promise<void>(resolve => { releaseFollowup = resolve })
+          await completeFixtureMilestone(input)
+        }
         if (prompts.length === 3) await new Promise<void>(resolve => { releaseDelivery = resolve })
         await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
       } }
@@ -522,7 +559,7 @@ test('stopping a project does not preempt the next native request', async () => 
     expect(await response.json()).not.toMatchObject({ queued: true })
     for (let i = 0; i < 100; i++) {
       const current = await (await app.request(`/api/beegame-sessions/${session.id}`)).json() as { turnStatus: string }
-      if (prompts.length >= 2 && current.turnStatus === 'idle') break
+      if (prompts.length >= 1 && current.turnStatus === 'idle') break
       await Bun.sleep(5)
     }
     expect(prompts[1]).toContain('Change player speed')
@@ -533,6 +570,7 @@ test('stopping a project does not preempt the next native request', async () => 
     releaseFollowup?.()
     await Bun.sleep(50)
     expect(prompts).toHaveLength(3)
+    expect(prompts[1]).toContain('Record your author conclusion')
     expect(prompts[2]).toContain('Continue the current project delivery milestone')
     expect(prompts).not.toContain('A later request')
     expect(prompts.some(prompt => prompt.includes('resource-planner'))).toBe(false)
@@ -546,7 +584,7 @@ test('stopping a project does not preempt the next native request', async () => 
   }
 })
 
-test('an incomplete milestone gets one automatic retry; a later user turn stays in that milestone', async () => {
+test('an unfinished GDD is not automatically retried after a normal reply or a later user question', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-native-delivery-followup-'))
   const cleanups: Array<() => void | Promise<void>> = []
   const prompts: unknown[] = []
@@ -569,18 +607,18 @@ test('an incomplete milestone gets one automatic retry; a later user turn stays 
       ownerId: 'followup-owner', projectId, name: 'Followup', idea: 'Create a game' })
     for (let i = 0; i < 100; i++) {
       const current = await (await app.request(`/api/beegame-sessions/${session.id}`)).json() as { turnStatus: string }
-      if (prompts.length >= 2 && current.turnStatus === 'idle') break
+      if (prompts.length >= 1 && current.turnStatus === 'idle') break
       await Bun.sleep(5)
     }
-    expect(prompts).toHaveLength(2)
+    expect(prompts).toHaveLength(1)
     const followup = await app.request(`/api/beegame-sessions/${session.id}/input`, { method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text: 'What is left?', clientMessageId: 'question-one' }) })
     expect(followup.status).toBe(202)
     expect(await followup.json()).not.toMatchObject({ queued: true })
-    for (let i = 0; i < 100 && prompts.length < 4; i++) await Bun.sleep(5)
+    for (let i = 0; i < 100 && prompts.length < 2; i++) await Bun.sleep(5)
     await Bun.sleep(20)
-    expect(prompts).toHaveLength(4)
+    expect(prompts).toHaveLength(2)
     expect((await readProjectDelivery(project.root_path, join(root, 'dashboard')))?.phase).toBe('author')
     expect((await readProjectDelivery(project.root_path, join(root, 'dashboard')))?.accepted).toBeUndefined()
     const readiness = await app.request(`/api/projects/${projectId}/deployment-readiness`)
@@ -588,7 +626,7 @@ test('an incomplete milestone gets one automatic retry; a later user turn stays 
     const history = await app.request(`/api/beegame-sessions/${session.id}/events`)
     const events = await history.json() as Array<{ type: string; payload?: { displayKind?: string } }>
     expect(events.filter(event => event.type === 'user.message').map(event => event.payload?.displayKind))
-      .toEqual(['confirmed_brief', 'delivery_continue', 'project_request', 'delivery_continue'])
+      .toEqual(['confirmed_brief', 'project_request'])
     expect(await Bun.file(join(project.root_path, '.beegame/workflow/run.json')).exists()).toBe(false)
   } finally {
     for (const cleanup of cleanups.reverse()) await cleanup()
@@ -629,14 +667,14 @@ test('Continue restores the native objective from chat when delivery state is mi
 
     const briefResponse = await app.request(`/api/beegame-sessions/${session.id}/confirmed-brief`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ brief: { idea: 'Build a migration game', resourceLibraryUsage: 'optional',
+      body: JSON.stringify({ brief: { idea: 'Build a migration game', orientation: 'Landscape', resourceLibraryUsage: 'optional',
         document_language: 'en', game_user_visible_language: 'en', agent_response_language: 'en' } }),
     })
     expect(briefResponse.status).toBe(200)
     for (let i = 0; i < 100 && nativeTurns < 1; i++) await Bun.sleep(5)
     for (let i = 0; i < 100; i++) {
       const current = await (await app.request(`/api/beegame-sessions/${session.id}`)).json() as { turnStatus: string }
-      if (current.turnStatus === 'idle' && nativeTurns >= 2) break
+      if (current.turnStatus === 'idle' && nativeTurns >= 1) break
       await Bun.sleep(5)
     }
     const events = await (await app.request(`/api/beegame-sessions/${session.id}/events`)).json() as Array<{
@@ -652,8 +690,8 @@ test('Continue restores the native objective from chat when delivery state is mi
     const continued = await app.request(`/api/beegame-sessions/${session.id}/continue`, { method: 'POST',
       headers: { 'content-type': 'application/json' }, body: '{}' })
     expect(continued.status).toBe(202)
-    for (let i = 0; i < 100 && nativeTurns < 3; i++) await Bun.sleep(5)
-    expect(nativeTurns).toBe(3)
+    for (let i = 0; i < 100 && nativeTurns < 2; i++) await Bun.sleep(5)
+    expect(nativeTurns).toBe(2)
     expect((await readProjectDelivery(workspace, join(root, 'dashboard')))?.objective).toBe(originalObjective)
     expect((await readProjectDelivery(workspace, join(root, 'dashboard')))?.accepted).toBeUndefined()
     const legacyResume = await app.request(`/api/projects/${projectId}/workflow/resume`, { method: 'POST',

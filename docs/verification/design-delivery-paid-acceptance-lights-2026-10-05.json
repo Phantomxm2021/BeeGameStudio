@@ -1,0 +1,862 @@
+{
+  "auditedAt": "2026-10-05T14:50:00Z",
+  "verdict": "not_qualified; paid_native_acceptance_incomplete_at_deadline",
+  "runRoot": "/private/tmp/bgs-newidea-lights-paid-20261005-cwNL4ZqW",
+  "projectId": "newidea-lights-20261005-cwNL4ZqW",
+  "workspace": "/private/tmp/bgs-newidea-lights-paid-20261005-cwNL4ZqW/projects/users/design-test/newidea-lights-20261005-cwNL4ZqW",
+  "model": "ark-code-latest",
+  "startedAt": "2026-10-05T12:45:34.587Z",
+  "finishedAt": "2026-10-05T14:45:35.215Z",
+  "elapsedSeconds": 7200.628,
+  "outcome": "test_deadline",
+  "stopReason": "test_deadline",
+  "delivered": [
+    "BALANCE_DESIGN.md",
+    "UI_UX_SPEC.md",
+    "LEVEL_SCENE_DESIGN.md",
+    "ART_DIRECTION.md",
+    "GDD.md",
+    "ASSET_PLAN.md",
+    "AUDIO_DESIGN.md",
+    "TECHNICAL_DESIGN.md"
+  ],
+  "tokenObservation": {
+    "usage": {
+      "input_tokens": 1339335,
+      "output_tokens": 301933,
+      "cache_read_input_tokens": 35305504,
+      "cache_creation_input_tokens": 0
+    },
+    "totalObservedTokens": 36946772,
+    "startedRequests": 481,
+    "startedModelRequests": 480,
+    "runningRequestIds": [],
+    "partialUsageRequestIds": [],
+    "missingUsageRequestIds": [
+      1,
+      481
+    ],
+    "usageComplete": false,
+    "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations."
+  },
+  "actualWorkflow": "five dependency author groups -> joint inspect -> one grouped revision -> targeted verify -> resources -> Content -> implementation -> acceptance (unfinished)",
+  "integrity": {
+    "systemSourceSnapshot": {
+      "beforeFiles": 3829,
+      "afterFiles": 3829,
+      "changed": 0,
+      "paths": []
+    },
+    "rootProductMutations": 0,
+    "rootInjectedFindings": 0,
+    "additionalPaidRuns": 0,
+    "originalEvidencePreserved": true,
+    "rootReadOnlyStaticServer": "served native dist unchanged via Python stdlib HTTP; browser UI interactions only",
+    "scopeLimits": [
+      "Isolated native integration harness, not a production Dashboard bootstrap.",
+      "Fresh Lights Out idea, one sample only; no statistical stability proof.",
+      "No settled credit/currency amount available.",
+      "Observed provider usage has missing request usage; not an exact settled bill.",
+      "No independent full touch, audible audio/background, held-key or complete keyboard journey acceptance."
+    ]
+  },
+  "nativeOutcome": {
+    "phase": "acceptance",
+    "status": "active",
+    "finalAcceptanceReceipt": false,
+    "details": "Watchdog stopped at120min. No acceptance.json/report. Native acceptance fixed missing production Content copy, then continued browser journey/debugging; its final visible messages investigated level2 transitions and board-host displacement, with no final pass claim."
+  },
+  "independentRuntime": {
+    "artifact": "native final dist",
+    "positive": [
+      "Initial nine-cell L1 loads after native acceptance rebuild.",
+      "Reset level restores initial mask11 and zero moves.",
+      "Pointer solve L1 at0 -> explicit Continue -> L2 mask281.",
+      "Pointer solve L2 at0,2,5 -> explicit Continue -> S3.",
+      "Pointer restart from S3 restores L1 mask11 and zero moves."
+    ],
+    "blocking": [
+      "O9: declared minimum568x320 is rejected.",
+      "O14: reference960x540 clips board; actual last-column right974.6667; lit/focus layers are displaced.",
+      "O10: clicking cell2 then Enter acts at internal cell0, not selected cell2.",
+      "O15: S3 focus returns to locked board cell; Enter does not restart."
+    ],
+    "resolved": [
+      "O13: native Vite build corrected missing Content; final static artifact loads."
+    ],
+    "notRootRepaired": true
+  },
+  "tokenGroups": {
+    "author": {
+      "tokens": 3344291,
+      "calls": 101,
+      "input": 413050,
+      "output": 96129,
+      "cache": 2835112,
+      "maxContext": 68619,
+      "seconds": 1853.308
+    },
+    "review": {
+      "tokens": 1087718,
+      "calls": 28,
+      "input": 168224,
+      "output": 18342,
+      "cache": 901152,
+      "maxContext": 74775,
+      "seconds": 408.85299999999995
+    },
+    "resources": {
+      "tokens": 5460606,
+      "calls": 59,
+      "input": 166111,
+      "output": 39863,
+      "cache": 5254632,
+      "maxContext": 105661,
+      "seconds": 933
+    },
+    "content": {
+      "tokens": 7619180,
+      "calls": 68,
+      "input": 137805,
+      "output": 41279,
+      "cache": 7440096,
+      "maxContext": 146268,
+      "seconds": 966.309
+    },
+    "implementation": {
+      "tokens": 15842987,
+      "calls": 165,
+      "input": 369027,
+      "output": 78864,
+      "cache": 15395096,
+      "maxContext": 166807,
+      "seconds": 2278.41
+    },
+    "acceptance": {
+      "tokens": 3591990,
+      "calls": 59,
+      "input": 85118,
+      "output": 27456,
+      "cache": 3479416,
+      "maxContext": 92572,
+      "seconds": 760.649
+    }
+  },
+  "tokenByStageAndActor": [
+    {
+      "stage": "author-1-work-turn1",
+      "actor": "main",
+      "firstRequestId": 2,
+      "lastRequestId": 10,
+      "usage": {
+        "input_tokens": 46657,
+        "output_tokens": 6807,
+        "cache_read_input_tokens": 312256,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 365720,
+      "startedRequests": 9,
+      "startedModelRequests": 9,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 9,
+      "firstObservedInputContextTokens": 35983,
+      "lastObservedInputContextTokens": 44562,
+      "minObservedInputContextTokens": 35983,
+      "maxObservedInputContextTokens": 44562
+    },
+    {
+      "stage": "author-2-work-turn2",
+      "actor": "a2036490dba25dee1",
+      "firstRequestId": 11,
+      "lastRequestId": 32,
+      "usage": {
+        "input_tokens": 34784,
+        "output_tokens": 8955,
+        "cache_read_input_tokens": 149440,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 193179,
+      "startedRequests": 8,
+      "startedModelRequests": 8,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 8,
+      "firstObservedInputContextTokens": 9223,
+      "lastObservedInputContextTokens": 35033,
+      "minObservedInputContextTokens": 9223,
+      "maxObservedInputContextTokens": 35033
+    },
+    {
+      "stage": "author-2-work-turn2",
+      "actor": "a74ca280dcf81c7d8",
+      "firstRequestId": 12,
+      "lastRequestId": 35,
+      "usage": {
+        "input_tokens": 27180,
+        "output_tokens": 9935,
+        "cache_read_input_tokens": 170856,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 207971,
+      "startedRequests": 11,
+      "startedModelRequests": 11,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 11,
+      "firstObservedInputContextTokens": 9728,
+      "lastObservedInputContextTokens": 26591,
+      "minObservedInputContextTokens": 9728,
+      "maxObservedInputContextTokens": 26591
+    },
+    {
+      "stage": "author-2-work-turn2",
+      "actor": "a26a07f02155181b4",
+      "firstRequestId": 13,
+      "lastRequestId": 30,
+      "usage": {
+        "input_tokens": 21669,
+        "output_tokens": 7129,
+        "cache_read_input_tokens": 67920,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 96718,
+      "startedRequests": 6,
+      "startedModelRequests": 6,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 6,
+      "firstObservedInputContextTokens": 8518,
+      "lastObservedInputContextTokens": 22510,
+      "minObservedInputContextTokens": 8518,
+      "maxObservedInputContextTokens": 22510
+    },
+    {
+      "stage": "author-3-work-turn3",
+      "actor": "a6dc8bb82e3b86260",
+      "firstRequestId": 36,
+      "lastRequestId": 51,
+      "usage": {
+        "input_tokens": 48733,
+        "output_tokens": 15301,
+        "cache_read_input_tokens": 499584,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 563618,
+      "startedRequests": 16,
+      "startedModelRequests": 16,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 16,
+      "firstObservedInputContextTokens": 10003,
+      "lastObservedInputContextTokens": 48715,
+      "minObservedInputContextTokens": 10003,
+      "maxObservedInputContextTokens": 48715
+    },
+    {
+      "stage": "author-3-work-turn3",
+      "actor": "a2a848bd821e632a0",
+      "firstRequestId": 52,
+      "lastRequestId": 65,
+      "usage": {
+        "input_tokens": 40239,
+        "output_tokens": 12057,
+        "cache_read_input_tokens": 366864,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 419160,
+      "startedRequests": 14,
+      "startedModelRequests": 14,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 14,
+      "firstObservedInputContextTokens": 9123,
+      "lastObservedInputContextTokens": 41495,
+      "minObservedInputContextTokens": 9123,
+      "maxObservedInputContextTokens": 41495
+    },
+    {
+      "stage": "author-4-work-turn4",
+      "actor": "ac1dab4a9fc2abc1a",
+      "firstRequestId": 66,
+      "lastRequestId": 78,
+      "usage": {
+        "input_tokens": 61529,
+        "output_tokens": 12378,
+        "cache_read_input_tokens": 433112,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 507019,
+      "startedRequests": 13,
+      "startedModelRequests": 13,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 13,
+      "firstObservedInputContextTokens": 10272,
+      "lastObservedInputContextTokens": 62040,
+      "minObservedInputContextTokens": 10272,
+      "maxObservedInputContextTokens": 62040
+    },
+    {
+      "stage": "author-5-work-turn5",
+      "actor": "a8b9e2952f3cb806e",
+      "firstRequestId": 79,
+      "lastRequestId": 90,
+      "usage": {
+        "input_tokens": 61602,
+        "output_tokens": 11271,
+        "cache_read_input_tokens": 405152,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 478025,
+      "startedRequests": 12,
+      "startedModelRequests": 12,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 12,
+      "firstObservedInputContextTokens": 8792,
+      "lastObservedInputContextTokens": 63817,
+      "minObservedInputContextTokens": 8792,
+      "maxObservedInputContextTokens": 63817
+    },
+    {
+      "stage": "author-5-work-turn5",
+      "actor": "ae93148c273b4e94d",
+      "firstRequestId": 91,
+      "lastRequestId": 102,
+      "usage": {
+        "input_tokens": 70657,
+        "output_tokens": 12296,
+        "cache_read_input_tokens": 429928,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 512881,
+      "startedRequests": 12,
+      "startedModelRequests": 12,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 12,
+      "firstObservedInputContextTokens": 9223,
+      "lastObservedInputContextTokens": 68619,
+      "minObservedInputContextTokens": 9223,
+      "maxObservedInputContextTokens": 68619
+    },
+    {
+      "stage": "review-5-inspect-turn6",
+      "actor": "a0fa81eaced0dff3c",
+      "firstRequestId": 103,
+      "lastRequestId": 114,
+      "usage": {
+        "input_tokens": 75332,
+        "output_tokens": 7363,
+        "cache_read_input_tokens": 528032,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 610727,
+      "startedRequests": 12,
+      "startedModelRequests": 12,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 12,
+      "firstObservedInputContextTokens": 10480,
+      "lastObservedInputContextTokens": 74775,
+      "minObservedInputContextTokens": 10480,
+      "maxObservedInputContextTokens": 74775
+    },
+    {
+      "stage": "review-5-revise-turn7",
+      "actor": "a5b2166772c39e73b",
+      "firstRequestId": 115,
+      "lastRequestId": 121,
+      "usage": {
+        "input_tokens": 33602,
+        "output_tokens": 4548,
+        "cache_read_input_tokens": 160904,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 199054,
+      "startedRequests": 7,
+      "startedModelRequests": 7,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 7,
+      "firstObservedInputContextTokens": 10900,
+      "lastObservedInputContextTokens": 35721,
+      "minObservedInputContextTokens": 10900,
+      "maxObservedInputContextTokens": 35721
+    },
+    {
+      "stage": "review-5-verify-turn8",
+      "actor": "a04bbc322f4216ff1",
+      "firstRequestId": 122,
+      "lastRequestId": 130,
+      "usage": {
+        "input_tokens": 59290,
+        "output_tokens": 6431,
+        "cache_read_input_tokens": 212216,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 277937,
+      "startedRequests": 9,
+      "startedModelRequests": 9,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 9,
+      "firstObservedInputContextTokens": 10443,
+      "lastObservedInputContextTokens": 60921,
+      "minObservedInputContextTokens": 10443,
+      "maxObservedInputContextTokens": 60921
+    },
+    {
+      "stage": "resources-5-work-turn9",
+      "actor": "main",
+      "firstRequestId": 131,
+      "lastRequestId": 173,
+      "usage": {
+        "input_tokens": 90849,
+        "output_tokens": 34625,
+        "cache_read_input_tokens": 3714664,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 3840138,
+      "startedRequests": 43,
+      "startedModelRequests": 43,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 43,
+      "firstObservedInputContextTokens": 32215,
+      "lastObservedInputContextTokens": 105661,
+      "minObservedInputContextTokens": 32215,
+      "maxObservedInputContextTokens": 105661
+    },
+    {
+      "stage": "resources-5-work-turn10",
+      "actor": "main",
+      "firstRequestId": 174,
+      "lastRequestId": 189,
+      "usage": {
+        "input_tokens": 75262,
+        "output_tokens": 5238,
+        "cache_read_input_tokens": 1539968,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 1620468,
+      "startedRequests": 16,
+      "startedModelRequests": 16,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 16,
+      "firstObservedInputContextTokens": 96515,
+      "lastObservedInputContextTokens": 103789,
+      "minObservedInputContextTokens": 96515,
+      "maxObservedInputContextTokens": 103789
+    },
+    {
+      "stage": "content-5-work-turn11",
+      "actor": "main",
+      "firstRequestId": 190,
+      "lastRequestId": 257,
+      "usage": {
+        "input_tokens": 137805,
+        "output_tokens": 41279,
+        "cache_read_input_tokens": 7440096,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 7619180,
+      "startedRequests": 68,
+      "startedModelRequests": 68,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 68,
+      "firstObservedInputContextTokens": 31965,
+      "lastObservedInputContextTokens": 146268,
+      "minObservedInputContextTokens": 31965,
+      "maxObservedInputContextTokens": 146268
+    },
+    {
+      "stage": "implementation-5-work-turn12",
+      "actor": "main",
+      "firstRequestId": 258,
+      "lastRequestId": 422,
+      "usage": {
+        "input_tokens": 246200,
+        "output_tokens": 71623,
+        "cache_read_input_tokens": 15361504,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 15679327,
+      "startedRequests": 164,
+      "startedModelRequests": 164,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 164,
+      "firstObservedInputContextTokens": 33606,
+      "lastObservedInputContextTokens": 92465,
+      "minObservedInputContextTokens": 33606,
+      "maxObservedInputContextTokens": 166807
+    },
+    {
+      "stage": "implementation-5-work-turn12",
+      "actor": "a34c8af10990f035c",
+      "firstRequestId": 335,
+      "lastRequestId": 335,
+      "usage": {
+        "input_tokens": 122827,
+        "output_tokens": 7241,
+        "cache_read_input_tokens": 33592,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 163660,
+      "startedRequests": 1,
+      "startedModelRequests": 1,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 1,
+      "firstObservedInputContextTokens": 156419,
+      "lastObservedInputContextTokens": 156419,
+      "minObservedInputContextTokens": 156419,
+      "maxObservedInputContextTokens": 156419
+    },
+    {
+      "stage": "acceptance-5-work-turn13",
+      "actor": "main",
+      "firstRequestId": 423,
+      "lastRequestId": 481,
+      "usage": {
+        "input_tokens": 81877,
+        "output_tokens": 27332,
+        "cache_read_input_tokens": 3479416,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 3588625,
+      "startedRequests": 58,
+      "startedModelRequests": 58,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [
+        481
+      ],
+      "usageComplete": false,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 57,
+      "firstObservedInputContextTokens": 35800,
+      "lastObservedInputContextTokens": 92572,
+      "minObservedInputContextTokens": 35800,
+      "maxObservedInputContextTokens": 92572
+    },
+    {
+      "stage": "acceptance-5-work-turn13",
+      "actor": null,
+      "firstRequestId": 424,
+      "lastRequestId": 424,
+      "usage": {
+        "input_tokens": 3241,
+        "output_tokens": 124,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0
+      },
+      "totalObservedTokens": 3365,
+      "startedRequests": 1,
+      "startedModelRequests": 1,
+      "runningRequestIds": [],
+      "partialUsageRequestIds": [],
+      "missingUsageRequestIds": [],
+      "usageComplete": true,
+      "note": "Observed provider tokens, not settled credits. Missing/partial usage is not zero spend; incomplete totals are lower-bound observations.",
+      "finalModelCalls": 1,
+      "firstObservedInputContextTokens": 3241,
+      "lastObservedInputContextTokens": 3241,
+      "minObservedInputContextTokens": 3241,
+      "maxObservedInputContextTokens": 3241
+    }
+  ],
+  "cacheReadPercent": 95.5577499436216,
+  "usageInterpretation": "Total includes repeated cache-read input, is a lower-bound observation rather than settled credits. Noncached input1339335, output301933, cached input35305504. Root Codex/browser orchestration not included.",
+  "costFindings": [
+    "Implementation15.843M and Content7.619M dominate; review1.088M is not the dominant loop.",
+    "Resources/Content/implementation main histories reach105661/146268/166807 input tokens; repeated small model calls carry these histories.",
+    "Browser tooling setup, runtime/client mismatches, custom driver debugging, broad formats, test discovery and app journey repair consume many calls; logs support these categories, not an assertion that all spend was errors.",
+    "One native implementation child inherited156419-token context for a163660-token response.",
+    "Formal Content checks and mocked journey tests passed but did not establish final physical rendering, required viewport support, mixed-input focus or summary focus."
+  ],
+  "reviewFindings": {
+    "actualSkillPreloaded": "game-design-check SKILL.md",
+    "semanticInspectFindings": [],
+    "revisionScope": "Tech handoff pointers; Audio legal header/handoff index",
+    "targetedVerifyFollowup": "Audio stale dependency labels",
+    "caution": "Do not attribute runtime implementation bugs to the document reviewer unless document instructions are demonstrably ambiguous/conflicting; no final native game acceptance was reached."
+  },
+  "independentDocumentAndRuntimeNotes": [
+    {
+      "id": "O1",
+      "document": "GDD.md",
+      "sections": [
+        "8. 持久化与进度"
+      ],
+      "issue": "Global no-storage/no-cross-session wording conflicts with later exemption for specialist preference lifetime; Audio cites global GDD policy as basis.",
+      "status": "independent-document-observation-not-closed-by-joint-review; severity-requires-downstream-impact",
+      "impact": "Ownership/source attribution; no incompatible release lifetime observed so far."
+    },
+    {
+      "id": "O2",
+      "document": "ART_DIRECTION.md",
+      "sections": [
+        "7.4 重开本关"
+      ],
+      "related": [
+        "GDD.md §2.2",
+        "LEVEL_SCENE_DESIGN.md §7"
+      ],
+      "issue": "Restart animation extinguishes currently lit cells but does not state restoration of the non-empty initial board; compare its terminal presentation with GDD reset.",
+      "status": "independent-document-observation-not-closed-by-joint-review; severity-requires-downstream-impact",
+      "impact": "Potential presentation/state mismatch or implementer guess."
+    },
+    {
+      "id": "O3",
+      "document": "ART_DIRECTION.md",
+      "sections": [
+        "7.6 通关、换场与结算",
+        "7.7 密集输入与动效生命周期"
+      ],
+      "issue": "Winning move should finish its flip before celebration, while immediate S2 entry clears all S1 transient presentations.",
+      "status": "independent-document-observation-not-closed-by-joint-review; severity-requires-downstream-impact",
+      "impact": "Conflicting animation cancellation/order."
+    },
+    {
+      "id": "O4",
+      "document": "BALANCE_DESIGN.md",
+      "sections": [
+        "5.3 乱点风险的量化边界（material balance risk）"
+      ],
+      "issue": "Uniform enumeration of board states is presented as probability after unspecified random player actions; no action policy/step count/mixing argument supplied.",
+      "status": "independent-document-observation-not-closed-by-joint-review; severity-requires-downstream-impact",
+      "impact": "Unsupported risk claim; fixed release puzzle solutions may remain valid."
+    },
+    {
+      "id": "O5",
+      "document": "TECHNICAL_DESIGN.md",
+      "sections": [
+        "5.2 与 BGS 内容/资源契约的边界【平台事实 + 技术决策】"
+      ],
+      "issue": "Initial technical baseline delegates whether formal UI Content is produced to UI/Asset while host schedules Content; recheck final technical completion before judging.",
+      "status": "resolved-by-scheduled-final-technical-author",
+      "impact": "Could conflict with actual content-consumption requirements.",
+      "observed": "Final TECHNICAL_DESIGN §5.2 explicitly requires parsing/rendering formal UI Content and its authored geometry; no later root intervention."
+    },
+    {
+      "id": "O6",
+      "document": "UI_UX_SPEC.md",
+      "sections": [
+        "3.2 间距、对齐与安全区【UI 决策】",
+        "7.2 受支持与不支持尺寸【UI 决策】",
+        "7.3 适配规则【UI 决策】"
+      ],
+      "issue": "Minimum-height budget uses 8px root padding and 40px operation bar, but global root padding is at least 12px and controls are at least44px. Compact changes to fixed padding/gap also need reconciliation with proportional-scaling language.",
+      "status": "independent-document-observation-not-closed-by-joint-review; severity-requires-downstream-impact",
+      "impact": "Incorrect budget; actual minimum layout must be checked, not inferred unusable from arithmetic alone."
+    },
+    {
+      "id": "O7",
+      "document": "UI_UX_SPEC.md",
+      "sections": [
+        "5.1 键盘映射（权威表）【UI 决策】",
+        "8.3 换场：输入抑制、焦点与防双触发【UI 决策】"
+      ],
+      "related": [
+        "GDD.md §3.2",
+        "TECHNICAL_DESIGN.md §3.3"
+      ],
+      "issue": "e.repeat filtering is specified for S1 flip, not the newly focused S2/S3 confirmation button. Check held confirmation cannot continue without a fresh intentional press; reconcile timed input gate with final technical input policy.",
+      "status": "repeat-rule-specified-in-final-tech-runtime-check-pending",
+      "impact": "Possible unintended state transition from held input; actual runtime required.",
+      "observed": "Final TECHNICAL_DESIGN §4.2 ignores Enter/Space e.repeat without restricting it to S1; actual native implementation still needs inspection/testing."
+    },
+    {
+      "id": "O8",
+      "document": "ASSET_PLAN.md",
+      "sections": [
+        "2. 资源策略总决策（Asset 决策）",
+        "5.3 资源 Manifest 边界 (TECHNICAL_DESIGN.md)"
+      ],
+      "issue": "Released plan says no Manifest registration/no assets/runtime; resource gate required manifest and native author registered procedural TS/CSS as data resources under assets/runtime without owner revision.",
+      "status": "observed-native-production-deviation",
+      "impact": "Design/runtime authority divergence; actual downstream loading impact still to inspect.",
+      "evidence": [
+        "assets/asset-manifest.json",
+        "assets/manifest/resources/audio-engine.json",
+        "resource turn9 host missing-manifest diagnostic",
+        "resource turn10 completed"
+      ]
+    },
+    {
+      "id": "O9",
+      "document": "src/App.tsx",
+      "issue": "Current App subtracts 24px root padding before comparing 568x320 support threshold, so declared minimum viewport is rejected.",
+      "status": "confirmed-independent-browser-current-build",
+      "impact": "Required supported viewport likely unusable; verify final code and browser.",
+      "observedAt": "2026-10-05T14:38Z",
+      "finalRecheck": "Still reproducible after native run stopped, 2026-10-05T14:49Z"
+    },
+    {
+      "id": "O10",
+      "document": "src/game/reducer.ts / src/App.tsx",
+      "issue": "Pointer flip dispatch does not update state.focus to selected cell in currently saved code.",
+      "status": "confirmed-independent-browser-current-build",
+      "impact": "Pointer then keyboard confirmation may act on wrong cell; test actual page.",
+      "observedAt": "2026-10-05T14:38Z",
+      "finalRecheck": "Actual browser reproduced; final saved App/reducer retain same missing pointer-selection state update."
+    },
+    {
+      "id": "O11",
+      "document": "src/App.tsx",
+      "issue": "Advanced-to-S3 only stops audio and plays confirm-forward; no game-complete cue invocation present.",
+      "status": "confirmed-final-source-omission; audible-output-not-independently-tested",
+      "impact": "Required final completion sound missing; verify final implementation."
+    },
+    {
+      "id": "O12",
+      "document": "src/App.tsx",
+      "issue": "S2/S3 Enter/Space delegated to native overlay button without global repeat filter; check held winning confirmation doesn't advance automatically.",
+      "status": "final-source-risk; held-key-runtime-not-independently-tested",
+      "impact": "Potential unintended automatic continuation; test actual keyboard."
+    },
+    {
+      "id": "O13",
+      "document": "runtime bootstrap",
+      "issue": "Independent browser at native-served http://127.0.0.1:4173 shows 页面数据加载失败，请刷新重试。（Unexpected token '<', \"<!doctype \"... is not valid JSON）; cannot reach initial game.",
+      "status": "resolved-by-native-acceptance-rebuild",
+      "impact": "Runtime bootstrap failure; not a final verdict until native turn finishes.",
+      "observedAt": "2026-10-05T14:22Z",
+      "evidence": "Cua IAB tab 2 actual AX state",
+      "lastObservation": {
+        "at": "2026-10-05T14:35Z",
+        "url": "http://127.0.0.1:52101/",
+        "text": "页面数据加载失败，请刷新重试。（无法加载 content/index.json: 404）",
+        "serving": "Root-owned readonly stdlib HTTP server, existing dist bytes unchanged"
+      },
+      "limit": "Direct static production artifact test, not Dashboard sandbox iframe. BGS Preview result separately required.",
+      "resolution": "After native Vite correction and rebuild, readonly static server enters level1 with 9 visible cells and moves0."
+    },
+    {
+      "id": "O14",
+      "document": "runtime Scene presentation",
+      "status": "confirmed-independent-browser-current-build",
+      "issue": "At960x540 board is not centered and partially clipped; lights/focus layers displaced relative to wells.",
+      "impact": "Violates required complete visible board and aligned readable visual states.",
+      "observedGeometry": {
+        "viewport": [
+          960,
+          540
+        ],
+        "firstCell": [
+          628,
+          184.66665649414065,
+          734.6666870117188,
+          291.33331298828125
+        ],
+        "lastColumnRight": 974.6666870117188
+      },
+      "evidence": "Cua tab3 screenshot and readonly actual DOM bounding rectangles, 2026-10-05T14:38Z",
+      "finalRecheck": "Still reproducible after native run stopped, 2026-10-05T14:49Z"
+    },
+    {
+      "id": "O15",
+      "document": "src/App.tsx / runtime final summary",
+      "status": "confirmed-independent-browser-final-build",
+      "issue": "Entering S3 initially shows restart button, but the shared 220ms advanced callback moves focus to a locked board cell. Actual Enter at the resulting focused cell does not restart.",
+      "impact": "Keyboard completion/restart cannot follow the documented focused primary action.",
+      "evidence": "Actual two-level pointer journey reached S3; AX focused first all-off cell; Return left S3 unchanged. Pointer click on restart then correctly returned to L1."
+    }
+  ],
+  "finiteCheck": {
+    "states": 512,
+    "levelDistances": [
+      1,
+      3
+    ],
+    "distribution": [
+      1,
+      9,
+      36,
+      84,
+      126,
+      126,
+      84,
+      36,
+      9,
+      1
+    ],
+    "oneRandomActionFromLevel1": [
+      0,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "probabilityAtLeastFiveStepsAfterOneRandomAction": 0
+  },
+  "evidence": {
+    "summary": "/private/tmp/bgs-newidea-lights-paid-20261005-cwNL4ZqW/summary.json",
+    "stages": "/private/tmp/bgs-newidea-lights-paid-20261005-cwNL4ZqW/stages.json",
+    "usage": "/private/tmp/bgs-newidea-lights-paid-20261005-cwNL4ZqW/provider-usage.json",
+    "acceptanceEvents": "/private/tmp/bgs-newidea-lights-paid-20261005-cwNL4ZqW/acceptance-5-work-turn13-events.json",
+    "sourceBefore": "/private/tmp/bgs-newidea-lights-paid-20261005-cwNL4ZqW/source-before.json",
+    "sourceAfter": "/private/tmp/bgs-newidea-lights-paid-20261005-cwNL4ZqW/source-after.json"
+  },
+  "nextStep": "Stop paid retries. Diagnose shared Content-to-runtime coordinate/focus semantics and browser acceptance execution using preserved logs and system code, distinguishing implementation generation errors from host/tool defects; do not hardcode this puzzle or edit generated products."
+}

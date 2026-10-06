@@ -81,6 +81,15 @@ test('responsive UI overrides validate and resolve through the same public consu
   } })).toThrow()
 })
 
+test('the public runtime reader rejects misplaced layout configuration just like the host', () => {
+  const source = { schema: 'beegame-content.v1', id: 'menu', kind: 'ui-screen', assetRefs: [], data: {
+    rootId: 'root', nodes: [{ id: 'root', role: 'screen-root', layout: { size: [600, 400] },
+      data: { container: { direction: 'column' } } }],
+  } }
+  expect(() => readUiData(source)).toThrow('layout.container')
+  expect(() => parseBeeGameContentDocument(source)).toThrow('layout.container')
+})
+
 test('responsive adaptation preserves authored geometry rather than substituting a fixed CSS layout', () => {
   const data = readUiData({ schema: 'beegame-content.v1', id: 'menu', kind: 'ui-screen', assetRefs: [], data: {
     rootId: 'root', nodes: [

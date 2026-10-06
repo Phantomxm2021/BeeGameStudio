@@ -2,11 +2,14 @@ import { afterEach, expect, test } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { inspectGameContent, runGameContentCommand, summarizeContentLoadFootprint } from './game-content-validation-cli'
+import { CONTENT_CHECK_HELP, formatGameContentResult, generateUiLayoutAppendix, inspectGameContent, runGameContentCommand, summarizeContentLoadFootprint } from './game-content-validation-cli'
 import { parseBeeGameContentIndex, type BeeGameContentPackage } from './game-content-package'
 import type { BeeGameAssetManifest } from './asset-contracts'
 import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
 import type { inspectUiLayout } from '../../../scene-editor/src/ui-layout-inspection'
+import { materializeSceneUiFormat } from './scene-ui-content-authoring'
+import { DESIGN_HANDOFF_INSTRUCTION } from './design-handoff'
+import { uiLayoutFixture } from './fixtures/layout-fixture'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -28,6 +31,188 @@ function fixture() {
   writeFileSync(join(root, 'content/scenes/level.json'), JSON.stringify(doc))
   return { root, doc, index }
 }
+
+test('materialized Review geometry command fails saved errors and passes corrected inputs without writing reports', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'bgs-review-layout-cli-')); roots.push(root)
+  mkdirSync(join(root, 'content/ui'), { recursive: true })
+  mkdirSync(join(root, 'docs'))
+  writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n[Menu](../content/ui/menu.json)\n')
+  await materializeSceneUiFormat(root)
+  for (const [height, valid] of [[28, false], [52, true]] as const) {
+    const path = join(root, 'content/ui/menu.json'), source = JSON.stringify(uiLayoutFixture(height))
+    writeFileSync(path, source)
+    const child = Bun.spawn([process.execPath, join(root, '.beegame/delivery/check-content.mjs'), '--review-layouts'],
+      { cwd: root, stdout: 'pipe', stderr: 'pipe' })
+    const [output, error, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+    expect(error).toBe('')
+    expect(exit).toBe(valid ? 0 : 1)
+    expect(JSON.parse(output)).toMatchObject({ valid, runtimeVerified: false, scope: 'review-layout-geometry' })
+    expect(readFileSync(path, 'utf8')).toBe(source)
+  }
+})
+
+test('draft geometry checks targets without unfinished prose; final Review still requires linked sources', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'bgs-draft-geometry-cli-')); roots.push(root)
+  mkdirSync(join(root, 'content/ui'), { recursive: true })
+  await materializeSceneUiFormat(root)
+  const path = join(root, 'content/ui/menu.json'), ui = uiLayoutFixture()
+  // The format's responsive shape is consumed at node level by the real schema.
+  const format = runGameContentCommand(root, ['--format', 'uiDocument']) as any
+  const responsive = structuredClone(format.value.data.nodes[0].responsive)
+  Object.assign(ui.data.nodes[1]!, { responsive })
+  writeFileSync(path, JSON.stringify(ui))
+  const before = readFileSync(path, 'utf8')
+  expect(runGameContentCommand(root, ['--design-layouts'])).toMatchObject({ valid: true, runtimeVerified: false })
+  expect(runGameContentCommand(root, ['--review-layouts'])).toMatchObject({ valid: false })
+  // A fitting reference is not enough: the target variant remains checked.
+  responsive.compact.layout.size = [160, 28]
+  writeFileSync(path, JSON.stringify(ui))
+  const invalid = runGameContentCommand(root, ['--design-layouts']) as any
+  expect(invalid.valid).toBe(false)
+  expect(invalid.issues.join(' ')).toContain('600x360')
+  expect(invalid.issues.join(' ')).toContain('minimumControlSize')
+  // Schema failures also remain explicit issues, never an empty geometry PASS.
+  delete responsive.compact.layout.container.direction
+  writeFileSync(path, JSON.stringify(ui))
+  const schemaFailure = runGameContentCommand(root, ['--design-layouts']) as any
+  expect(schemaFailure.valid).toBe(false)
+  expect(schemaFailure.issues.join(' ')).toContain('direction')
+  writeFileSync(path, before)
+  mkdirSync(join(root, 'docs'))
+  writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n[Menu](../content/ui/menu.json)\n')
+  expect(runGameContentCommand(root, ['--review-layouts'])).toMatchObject({ valid: true })
+  expect(readFileSync(path, 'utf8')).toBe(before)
+})
+
+test('handoff contract help exits successfully without a document or resource prerequisite', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'bgs-handoff-help-')); roots.push(root)
+  await materializeSceneUiFormat(root)
+  const child = Bun.spawn([process.execPath, join(root, '.beegame/delivery/check-content.mjs'), '--design-handoff-help'],
+    { cwd: root, stdout: 'pipe', stderr: 'pipe' })
+  const [output, error, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+  expect(error).toBe('')
+  expect(exit).toBe(0)
+  expect(JSON.parse(output)).toMatchObject({ ok: true, scope: 'design-handoff-help' })
+  expect(JSON.parse(output).instruction).toBe(DESIGN_HANDOFF_INSTRUCTION)
+})
+
+test('format entry reads one actual contract section without full Content or resource prerequisites', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'bgs-format-section-')); roots.push(root)
+  await materializeSceneUiFormat(root)
+  const path = join(root, '.beegame/delivery/content-format.json'), before = readFileSync(path, 'utf8')
+  const format = JSON.parse(before)
+  expect(runGameContentCommand(root, ['--format'])).toMatchObject({ ok: true, sections: Object.keys(format) })
+  const result = runGameContentCommand(root, ['--format', 'coordinates'])
+  expect(result).toMatchObject({ ok: true, value: format.coordinates })
+  expect(JSON.stringify(result).length).toBeLessThan(before.length / 8)
+  for (const section of ['missing', '__proto__']) expect(() => runGameContentCommand(root, ['--format', section])).toThrow()
+  expect(() => runGameContentCommand(root, ['--format', 'coordinates', 'extra'])).toThrow()
+  expect(() => runGameContentCommand(root, ['--format', 'section', 'coordinates'])).toThrow('example: --format coordinates')
+  for (const instructions of [CONTENT_CHECK_HELP]) {
+    const example = instructions.match(/bun \.beegame\/delivery\/check-content\.mjs --format coordinates/)
+    expect(example).not.toBeNull()
+    expect(runGameContentCommand(root, example![0].split(' ').slice(2))).toMatchObject({ ok: true, value: format.coordinates })
+  }
+  expect(runGameContentCommand(root, ['--format', 'coordinates', 'runtimeConsumption', 'coordinates']))
+    .toEqual({ ok: true, scope: 'content-format-selection',
+      values: { coordinates: format.coordinates, runtimeConsumption: format.runtimeConsumption } })
+  expect(() => runGameContentCommand(root, ['--format', 'coordinates', 'missing'])).toThrow()
+  expect(readFileSync(path, 'utf8')).toBe(before)
+})
+
+test('help examples execute without resources/index and document actual result shapes', async () => {
+  await initializeUiLayout()
+  const root = mkdtempSync(join(tmpdir(), 'content-help-')); roots.push(root)
+  const examples = CONTENT_CHECK_HELP.split('\n').map(line => line.replace('Minimal Scene draft: ', ''))
+    .filter(line => line.startsWith('{"schema"')).map(line => JSON.parse(line))
+  expect(examples).toHaveLength(2)
+  writeFileSync(join(root, 'menu.json'), JSON.stringify(examples[0]))
+  writeFileSync(join(root, 'scene.json'), JSON.stringify(examples[1]))
+  expect(runGameContentCommand('/nonexistent', ['--help'])).toMatchObject({ ok: true, scope: 'help' })
+  for (const file of ['menu.json', 'scene.json']) {
+    const full = runGameContentCommand(root, ['--layout-draft', file, '960', '540', '--details'])
+    const compact = formatGameContentResult(full)
+    expect('nodes' in full).toBe(true); expect('nodes' in compact).toBe(false)
+    expect(formatGameContentResult(full, true)).toEqual(full)
+    expect('nodeCount' in compact && compact.nodeCount).toBe(2)
+    if (file === 'menu.json') expect(compact).toMatchObject({ diagnostics: {
+      textFit: { unmeasured: ['play'], exceedsIntrinsicBounds: [] },
+    } })
+  }
+  expect(CONTENT_CHECK_HELP).toContain('NOT authored role/style/text')
+})
+
+test('design appendix comes from actual shared geometry, preserves sources and never certifies success', async () => {
+  await initializeUiLayout()
+  const root = mkdtempSync(join(tmpdir(), 'layout-appendix-')); roots.push(root)
+  const source = { schema: 'beegame-content.v1', id: 'menu', kind: 'ui-screen', assetRefs: [],
+    data: { rootId: 'root', nodes: [
+      { id: 'root', role: 'screen-root', data: { targetViewports: [[640,360], [960,540]], minimumControlSize: [44,44] },
+        layout: { container: { direction: 'column', align: 'center', justify: 'center', gap: 12 } } },
+      { id: 'play', role: 'button', parentId: 'root', text: 'Play', layout: { size: [160,32] } },
+    ] } }
+  const path = join(root, 'draft.json'), original = JSON.stringify(source)
+  writeFileSync(path, original)
+  const args = ['--layout-draft', 'draft.json', '960', '540']
+  const appendix = generateUiLayoutAppendix(root, args)
+  expect(appendix.match(/## 960 × 540/g)).toHaveLength(1)
+  expect(appendix).toContain('## 640 × 360')
+  expect(appendix).toContain('SHA-256:')
+  expect(appendix).toContain('this is not a PASS')
+  expect(appendix).toMatch(/"belowMinimumControlSize":\s*\[\s*"play"/)
+  expect(appendix).toContain('"unmeasured"')
+  const inspection = runGameContentCommand(root, args)
+  if (!('nodes' in inspection)) throw Error('Expected geometry')
+  const play = inspection.nodes.find(n => n.id === 'play')!
+  if (!('bounds' in play)) throw Error('Expected UI bounds')
+  expect(appendix).toContain(JSON.stringify(play.bounds))
+  expect(readFileSync(path, 'utf8')).toBe(original)
+  await materializeSceneUiFormat(root)
+  const child = Bun.spawn([process.execPath, join(root,'.beegame/delivery/check-content.mjs'), ...args, '--appendix'],
+    { cwd: root, stdout: 'pipe', stderr: 'pipe' })
+  expect(await new Response(child.stdout).text()).toBe(appendix + '\n')
+  expect(await child.exited).toBe(0)
+  expect(readFileSync(path, 'utf8')).toBe(original)
+  source.data.nodes[0]!.data!.targetViewports = [[0,360]]
+  writeFileSync(path, JSON.stringify(source))
+  expect(() => generateUiLayoutAppendix(root, args)).toThrow('positive')
+  expect(() => generateUiLayoutAppendix(root, ['--layout-draft', '../draft.json', '960','540'])).toThrow()
+})
+
+test('compact Scene diagnostics retain clipping and unknown geometry, including linked Scene results', () => {
+  const scene = { view: { projection: 'orthographic' }, requiredVisibility: { status: 'failed' }, nodes: [
+    { id: 'visible', enabled: true, fullyInside: true },
+    { id: 'cropped', enabled: true, fullyInside: false },
+    { id: 'unknown', enabled: true, geometryUnavailable: 'Explicit size required' },
+    { id: 'disabled', enabled: false, fullyInside: false },
+  ] }
+  for (const result of [
+    { ok: true, scope: 'scene-layout-draft-inspection', runtimeVerified: false, ...scene },
+    { ok: true, scope: 'layout-draft-inspection', runtimeVerified: false, nodes: [], sceneInspection: scene },
+  ]) {
+    const compact = formatGameContentResult(result) as any
+    const measured = compact.sceneInspection ?? compact
+    expect(measured.requiredVisibility.status).toBe('failed')
+    expect(measured.diagnostics).toEqual({ outsideCameraView: ['cropped'],
+      geometryUnavailable: [{ id: 'unknown', reason: 'Explicit size required' }] })
+    expect(measured.nodes).toBeUndefined()
+  }
+})
+
+test('large healthy layout output stays concise without changing the full inspection API', () => {
+  const root = mkdtempSync(join(tmpdir(), 'content-summary-')); roots.push(root)
+  const source = JSON.stringify({ schema: 'beegame-content.v1', id: 'menu', kind: 'ui-screen', assetRefs: [], data: {
+    rootId: 'root', nodes: [{ id: 'root', role: 'screen-root' }, ...Array.from({ length: 500 }, (_, i) => ({
+      id: 'decor-' + i, role: 'container', parentId: 'root', layout: { size: [10, 10] },
+    }))],
+  } })
+  writeFileSync(join(root, 'ui.json'), source)
+  const full = runGameContentCommand(root, ['--layout-draft', 'ui.json', '960', '540'])
+  const compact = formatGameContentResult(full)
+  expect(JSON.stringify(compact).length).toBeLessThan(JSON.stringify(full).length / 20)
+  expect(compact).toMatchObject({ ok: true, nodeCount: 501, diagnostics: { outsideViewport: [], outsideParent: [] } })
+  expect(readFileSync(join(root, 'ui.json'), 'utf8')).toBe(source)
+})
 
 test('one connected UI source projects world text with screen controls for drafts, registered content and boundary probes', () => {
   const { root, index } = fixture()
@@ -66,12 +251,14 @@ test('one connected UI source projects world text with screen controls for draft
   expect(readFileSync(join(root, 'content/ui/combined.json'), 'utf8')).toBe(source)
   expect(readFileSync(join(root, 'camera.json'), 'utf8')).toBe(cameraSource)
   const interactive = structuredClone(ui)
+  Object.assign(interactive.data.nodes[0]!, { data: { minimumControlSize: [44, 44] } })
   interactive.data.nodes.push({ id: 'projected-control', role: 'button', parentId: 'world-ui', layout: { position: [0, 0], size: [48, 48] } })
   const unsupported = JSON.stringify(interactive)
   writeFileSync(join(root, 'draft.json'), unsupported)
   writeFileSync(join(root, 'content/ui/combined.json'), unsupported)
   for (const args of [['--layout-draft', 'draft.json'], ['--layout', 'ui/combined.json']])
-    expect(() => runGameContentCommand(root, [...args, '320', '480', '--game-view', 'game', '--camera', 'camera.json'])).toThrow('non-interactive information only')
+    expect(runGameContentCommand(root, [...args, '320', '480', '--game-view', 'game', '--camera', 'camera.json']))
+      .toMatchObject({ ok: true, runtimeVerified: false, diagnostics: { belowMinimumControlSize: ['screen-btn', 'projected-control'] } })
   expect(readFileSync(join(root, 'draft.json'), 'utf8')).toBe(unsupported)
   expect(readFileSync(join(root, 'content/ui/combined.json'), 'utf8')).toBe(unsupported)
 })
@@ -233,6 +420,13 @@ test('portrait and landscape compositions supply their computed game-view size t
   expect(() => runGameContentCommand(root, ['--layout-draft', 'ui.json', '390', '844',
     '--game-view', 'game-view', '--unknown', 'camera.json'])).toThrow('Usage')
   expect(() => readFileSync(join(root, 'content/index.json'))).toThrow()
+})
+
+test.each(['--camera-draft', '--layout-draft', '--layout'])('%s diagnoses argument-boundary errors before file or capability checks', command => {
+  const { root } = fixture()
+  for (const dimensions of [['700 410'], ['700 410', '--game-view'], ['700', 'NaN'], ['0', '410'], ['Infinity', '410']])
+    expect(() => runGameContentCommand(root, [command, 'not-created.json', ...dimensions]))
+      .toThrow('two separate positive numeric arguments')
 })
 
 test('camera draft reuses shared projection math and rejects invalid size and escaped files', () => {

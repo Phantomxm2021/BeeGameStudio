@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "scope": "camera-framing-draft-inspection",
+  "runtimeVerified": false,
+  "viewport": {
+    "width": 2560,
+    "height": 1080
+  },
+  "note": "Camera framing only; does not project objects, verify gameplay occlusion or establish XR comfort.",
+  "view": {
+    "projection": "orthographic",
+    "framing": "letterbox",
+    "rect": {
+      "x": 320,
+      "y": 0,
+      "width": 1920,
+      "height": 1080
+    },
+    "aspect": 1.7777777777777777,
+    "halfHeight": 5.4,
+    "halfWidth": 9.6
+  }
+}

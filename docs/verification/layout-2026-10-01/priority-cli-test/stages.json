@@ -1,0 +1,98 @@
+[
+  {
+    "label": "author-1",
+    "elapsedSeconds": 126.13,
+    "firstRequest": 1,
+    "lastRequest": 5,
+    "sessionId": "beegame_e079fc63b66e489bb8812332442614e7",
+    "state": {
+      "version": 1,
+      "objective": "{\n  \"kind\": \"confirmed_build_brief\",\n  \"document_language\": \"zh\",\n  \"game_user_visible_language\": \"zh\",\n  \"agent_response_language\": \"zh\",\n  \"idea\": \"我想做一个打砖块游戏。\",\n  \"default_first_release_scope\": {\n    \"target\": \"small complete playable version\",\n    \"content\": \"one working core loop with only representative content; usually one or two levels if levels apply\",\n    \"defer\": \"unrequested extra levels, modes, and polish\"\n  },\n  \"selected_option\": null,\n  \"settings\": {\n    \"platform\": \"Web\",\n    \"engine\": \"React\",\n    \"dimension\": \"2D\",\n    \"orientation\": \"Landscape\",\n    \"genre\": \"Arcade\",\n    \"visualStyle\": \"Stylized\",\n    \"inputs\": [\n      \"Keyboard/mouse\",\n      \"Touch\"\n    ]\n  },\n  \"confirmed_gdd\": null,\n  \"build_source\": null,\n  \"analysis_id\": null,\n  \"creation_mode\": \"creative\",\n  \"reference_files\": [],\n  \"resource_library_usage\": \"optional\"\n}",
+      "status": "active",
+      "phase": "author",
+      "authorBatch": 1
+    },
+    "failed": false,
+    "stopped": false
+  },
+  {
+    "label": "author-2",
+    "elapsedSeconds": 464.56,
+    "firstRequest": 6,
+    "lastRequest": 28,
+    "sessionId": "beegame_e079fc63b66e489bb8812332442614e7",
+    "state": {
+      "version": 1,
+      "objective": "{\n  \"kind\": \"confirmed_build_brief\",\n  \"document_language\": \"zh\",\n  \"game_user_visible_language\": \"zh\",\n  \"agent_response_language\": \"zh\",\n  \"idea\": \"我想做一个打砖块游戏。\",\n  \"default_first_release_scope\": {\n    \"target\": \"small complete playable version\",\n    \"content\": \"one working core loop with only representative content; usually one or two levels if levels apply\",\n    \"defer\": \"unrequested extra levels, modes, and polish\"\n  },\n  \"selected_option\": null,\n  \"settings\": {\n    \"platform\": \"Web\",\n    \"engine\": \"React\",\n    \"dimension\": \"2D\",\n    \"orientation\": \"Landscape\",\n    \"genre\": \"Arcade\",\n    \"visualStyle\": \"Stylized\",\n    \"inputs\": [\n      \"Keyboard/mouse\",\n      \"Touch\"\n    ]\n  },\n  \"confirmed_gdd\": null,\n  \"build_source\": null,\n  \"analysis_id\": null,\n  \"creation_mode\": \"creative\",\n  \"reference_files\": [],\n  \"resource_library_usage\": \"optional\"\n}",
+      "status": "active",
+      "phase": "author",
+      "authorBatch": 2
+    },
+    "failed": false,
+    "stopped": false
+  },
+  {
+    "label": "author-3",
+    "elapsedSeconds": 10650.854,
+    "firstRequest": 29,
+    "lastRequest": 82,
+    "sessionId": "beegame_e079fc63b66e489bb8812332442614e7",
+    "state": {
+      "version": 1,
+      "objective": "{\n  \"kind\": \"confirmed_build_brief\",\n  \"document_language\": \"zh\",\n  \"game_user_visible_language\": \"zh\",\n  \"agent_response_language\": \"zh\",\n  \"idea\": \"我想做一个打砖块游戏。\",\n  \"default_first_release_scope\": {\n    \"target\": \"small complete playable version\",\n    \"content\": \"one working core loop with only representative content; usually one or two levels if levels apply\",\n    \"defer\": \"unrequested extra levels, modes, and polish\"\n  },\n  \"selected_option\": null,\n  \"settings\": {\n    \"platform\": \"Web\",\n    \"engine\": \"React\",\n    \"dimension\": \"2D\",\n    \"orientation\": \"Landscape\",\n    \"genre\": \"Arcade\",\n    \"visualStyle\": \"Stylized\",\n    \"inputs\": [\n      \"Keyboard/mouse\",\n      \"Touch\"\n    ]\n  },\n  \"confirmed_gdd\": null,\n  \"build_source\": null,\n  \"analysis_id\": null,\n  \"creation_mode\": \"creative\",\n  \"reference_files\": [],\n  \"resource_library_usage\": \"optional\"\n}",
+      "status": "active",
+      "phase": "author",
+      "authorBatch": 3
+    },
+    "failed": false,
+    "stopped": false
+  },
+  {
+    "label": "author-4",
+    "elapsedSeconds": 872.646,
+    "firstRequest": 83,
+    "lastRequest": 129,
+    "sessionId": "beegame_e079fc63b66e489bb8812332442614e7",
+    "state": {
+      "version": 1,
+      "objective": "{\n  \"kind\": \"confirmed_build_brief\",\n  \"document_language\": \"zh\",\n  \"game_user_visible_language\": \"zh\",\n  \"agent_response_language\": \"zh\",\n  \"idea\": \"我想做一个打砖块游戏。\",\n  \"default_first_release_scope\": {\n    \"target\": \"small complete playable version\",\n    \"content\": \"one working core loop with only representative content; usually one or two levels if levels apply\",\n    \"defer\": \"unrequested extra levels, modes, and polish\"\n  },\n  \"selected_option\": null,\n  \"settings\": {\n    \"platform\": \"Web\",\n    \"engine\": \"React\",\n    \"dimension\": \"2D\",\n    \"orientation\": \"Landscape\",\n    \"genre\": \"Arcade\",\n    \"visualStyle\": \"Stylized\",\n    \"inputs\": [\n      \"Keyboard/mouse\",\n      \"Touch\"\n    ]\n  },\n  \"confirmed_gdd\": null,\n  \"build_source\": null,\n  \"analysis_id\": null,\n  \"creation_mode\": \"creative\",\n  \"reference_files\": [],\n  \"resource_library_usage\": \"optional\"\n}",
+      "status": "active",
+      "phase": "author",
+      "authorBatch": 4
+    },
+    "failed": false,
+    "stopped": false
+  },
+  {
+    "label": "author-5",
+    "elapsedSeconds": 604.487,
+    "firstRequest": 130,
+    "lastRequest": 168,
+    "sessionId": "beegame_e079fc63b66e489bb8812332442614e7",
+    "state": {
+      "version": 1,
+      "objective": "{\n  \"kind\": \"confirmed_build_brief\",\n  \"document_language\": \"zh\",\n  \"game_user_visible_language\": \"zh\",\n  \"agent_response_language\": \"zh\",\n  \"idea\": \"我想做一个打砖块游戏。\",\n  \"default_first_release_scope\": {\n    \"target\": \"small complete playable version\",\n    \"content\": \"one working core loop with only representative content; usually one or two levels if levels apply\",\n    \"defer\": \"unrequested extra levels, modes, and polish\"\n  },\n  \"selected_option\": null,\n  \"settings\": {\n    \"platform\": \"Web\",\n    \"engine\": \"React\",\n    \"dimension\": \"2D\",\n    \"orientation\": \"Landscape\",\n    \"genre\": \"Arcade\",\n    \"visualStyle\": \"Stylized\",\n    \"inputs\": [\n      \"Keyboard/mouse\",\n      \"Touch\"\n    ]\n  },\n  \"confirmed_gdd\": null,\n  \"build_source\": null,\n  \"analysis_id\": null,\n  \"creation_mode\": \"creative\",\n  \"reference_files\": [],\n  \"resource_library_usage\": \"optional\"\n}",
+      "status": "active",
+      "phase": "review",
+      "authorBatch": 4
+    },
+    "failed": false,
+    "stopped": false
+  },
+  {
+    "label": "review",
+    "elapsedSeconds": 697.054,
+    "firstRequest": 169,
+    "lastRequest": 213,
+    "sessionId": "beegame_e079fc63b66e489bb8812332442614e7",
+    "state": {
+      "version": 1,
+      "objective": "{\n  \"kind\": \"confirmed_build_brief\",\n  \"document_language\": \"zh\",\n  \"game_user_visible_language\": \"zh\",\n  \"agent_response_language\": \"zh\",\n  \"idea\": \"我想做一个打砖块游戏。\",\n  \"default_first_release_scope\": {\n    \"target\": \"small complete playable version\",\n    \"content\": \"one working core loop with only representative content; usually one or two levels if levels apply\",\n    \"defer\": \"unrequested extra levels, modes, and polish\"\n  },\n  \"selected_option\": null,\n  \"settings\": {\n    \"platform\": \"Web\",\n    \"engine\": \"React\",\n    \"dimension\": \"2D\",\n    \"orientation\": \"Landscape\",\n    \"genre\": \"Arcade\",\n    \"visualStyle\": \"Stylized\",\n    \"inputs\": [\n      \"Keyboard/mouse\",\n      \"Touch\"\n    ]\n  },\n  \"confirmed_gdd\": null,\n  \"build_source\": null,\n  \"analysis_id\": null,\n  \"creation_mode\": \"creative\",\n  \"reference_files\": [],\n  \"resource_library_usage\": \"optional\"\n}",
+      "status": "active",
+      "phase": "review",
+      "authorBatch": 4
+    },
+    "failed": false,
+    "stopped": false
+  }
+]

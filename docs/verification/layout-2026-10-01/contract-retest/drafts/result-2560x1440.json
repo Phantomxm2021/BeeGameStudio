@@ -1,0 +1,1164 @@
+{
+  "ok": true,
+  "scope": "scene-layout-draft-inspection",
+  "runtimeVerified": false,
+  "viewport": {
+    "width": 2560,
+    "height": 1440
+  },
+  "cameraNodeId": "main-camera",
+  "view": {
+    "projection": "orthographic",
+    "framing": "letterbox",
+    "rect": {
+      "x": 0,
+      "y": 0,
+      "width": 2560,
+      "height": 1440
+    },
+    "aspect": 1.7777777777777777,
+    "halfHeight": 5.4,
+    "halfWidth": 9.6
+  },
+  "worldToScreen": [
+    1.3333333333333333,
+    0,
+    0,
+    1.3333333333333333,
+    0,
+    0
+  ],
+  "nodes": [
+    {
+      "id": "main-camera",
+      "enabled": true
+    },
+    {
+      "id": "wall-top",
+      "enabled": true,
+      "worldBounds": {
+        "left": 0,
+        "top": 0,
+        "right": 1920,
+        "bottom": 8
+      },
+      "screenBounds": {
+        "left": 0,
+        "top": 0,
+        "right": 2560,
+        "bottom": 10.666666666666666
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "wall-left",
+      "enabled": true,
+      "worldBounds": {
+        "left": 0,
+        "top": 0,
+        "right": 8,
+        "bottom": 1080
+      },
+      "screenBounds": {
+        "left": 0,
+        "top": 0,
+        "right": 10.666666666666666,
+        "bottom": 1440
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "wall-right",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1912,
+        "top": 0,
+        "right": 1920,
+        "bottom": 1080
+      },
+      "screenBounds": {
+        "left": 2549.333333333333,
+        "top": 0,
+        "right": 2560,
+        "bottom": 1440
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "miss-line",
+      "enabled": true,
+      "worldBounds": {
+        "left": 0,
+        "top": 1074,
+        "right": 1920,
+        "bottom": 1080
+      },
+      "screenBounds": {
+        "left": 0,
+        "top": 1432,
+        "right": 2560,
+        "bottom": 1440
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-grid",
+      "enabled": true
+    },
+    {
+      "id": "brick-r0-c0",
+      "enabled": true,
+      "worldBounds": {
+        "left": 128,
+        "top": 120,
+        "right": 280,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 170.66666666666666,
+        "top": 160,
+        "right": 373.3333333333333,
+        "bottom": 224
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c1",
+      "enabled": true,
+      "worldBounds": {
+        "left": 296,
+        "top": 120,
+        "right": 448,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 394.66666666666663,
+        "top": 160,
+        "right": 597.3333333333333,
+        "bottom": 224
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c2",
+      "enabled": true,
+      "worldBounds": {
+        "left": 464,
+        "top": 120,
+        "right": 616,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 618.6666666666666,
+        "top": 160,
+        "right": 821.3333333333333,
+        "bottom": 224
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c3",
+      "enabled": true,
+      "worldBounds": {
+        "left": 632,
+        "top": 120,
+        "right": 784,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 842.6666666666666,
+        "top": 160,
+        "right": 1045.3333333333333,
+        "bottom": 224
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c4",
+      "enabled": true,
+      "worldBounds": {
+        "left": 800,
+        "top": 120,
+        "right": 952,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 1066.6666666666665,
+        "top": 160,
+        "right": 1269.3333333333333,
+        "bottom": 224
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c5",
+      "enabled": true,
+      "worldBounds": {
+        "left": 968,
+        "top": 120,
+        "right": 1120,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 1290.6666666666665,
+        "top": 160,
+        "right": 1493.3333333333333,
+        "bottom": 224
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c6",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1136,
+        "top": 120,
+        "right": 1288,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 1514.6666666666665,
+        "top": 160,
+        "right": 1717.3333333333333,
+        "bottom": 224
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c7",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1304,
+        "top": 120,
+        "right": 1456,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 1738.6666666666665,
+        "top": 160,
+        "right": 1941.3333333333333,
+        "bottom": 224
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c8",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1472,
+        "top": 120,
+        "right": 1624,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 1962.6666666666665,
+        "top": 160,
+        "right": 2165.333333333333,
+        "bottom": 224
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r0-c9",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1640,
+        "top": 120,
+        "right": 1792,
+        "bottom": 168
+      },
+      "screenBounds": {
+        "left": 2186.6666666666665,
+        "top": 160,
+        "right": 2389.333333333333,
+        "bottom": 224
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c0",
+      "enabled": true,
+      "worldBounds": {
+        "left": 128,
+        "top": 182,
+        "right": 280,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 170.66666666666666,
+        "top": 242.66666666666666,
+        "right": 373.3333333333333,
+        "bottom": 306.66666666666663
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c1",
+      "enabled": true,
+      "worldBounds": {
+        "left": 296,
+        "top": 182,
+        "right": 448,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 394.66666666666663,
+        "top": 242.66666666666666,
+        "right": 597.3333333333333,
+        "bottom": 306.66666666666663
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c2",
+      "enabled": true,
+      "worldBounds": {
+        "left": 464,
+        "top": 182,
+        "right": 616,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 618.6666666666666,
+        "top": 242.66666666666666,
+        "right": 821.3333333333333,
+        "bottom": 306.66666666666663
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c3",
+      "enabled": true,
+      "worldBounds": {
+        "left": 632,
+        "top": 182,
+        "right": 784,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 842.6666666666666,
+        "top": 242.66666666666666,
+        "right": 1045.3333333333333,
+        "bottom": 306.66666666666663
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c4",
+      "enabled": true,
+      "worldBounds": {
+        "left": 800,
+        "top": 182,
+        "right": 952,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 1066.6666666666665,
+        "top": 242.66666666666666,
+        "right": 1269.3333333333333,
+        "bottom": 306.66666666666663
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c5",
+      "enabled": true,
+      "worldBounds": {
+        "left": 968,
+        "top": 182,
+        "right": 1120,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 1290.6666666666665,
+        "top": 242.66666666666666,
+        "right": 1493.3333333333333,
+        "bottom": 306.66666666666663
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c6",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1136,
+        "top": 182,
+        "right": 1288,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 1514.6666666666665,
+        "top": 242.66666666666666,
+        "right": 1717.3333333333333,
+        "bottom": 306.66666666666663
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c7",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1304,
+        "top": 182,
+        "right": 1456,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 1738.6666666666665,
+        "top": 242.66666666666666,
+        "right": 1941.3333333333333,
+        "bottom": 306.66666666666663
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c8",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1472,
+        "top": 182,
+        "right": 1624,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 1962.6666666666665,
+        "top": 242.66666666666666,
+        "right": 2165.333333333333,
+        "bottom": 306.66666666666663
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r1-c9",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1640,
+        "top": 182,
+        "right": 1792,
+        "bottom": 230
+      },
+      "screenBounds": {
+        "left": 2186.6666666666665,
+        "top": 242.66666666666666,
+        "right": 2389.333333333333,
+        "bottom": 306.66666666666663
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c0",
+      "enabled": true,
+      "worldBounds": {
+        "left": 128,
+        "top": 244,
+        "right": 280,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 170.66666666666666,
+        "top": 325.3333333333333,
+        "right": 373.3333333333333,
+        "bottom": 389.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c1",
+      "enabled": true,
+      "worldBounds": {
+        "left": 296,
+        "top": 244,
+        "right": 448,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 394.66666666666663,
+        "top": 325.3333333333333,
+        "right": 597.3333333333333,
+        "bottom": 389.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c2",
+      "enabled": true,
+      "worldBounds": {
+        "left": 464,
+        "top": 244,
+        "right": 616,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 618.6666666666666,
+        "top": 325.3333333333333,
+        "right": 821.3333333333333,
+        "bottom": 389.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c3",
+      "enabled": true,
+      "worldBounds": {
+        "left": 632,
+        "top": 244,
+        "right": 784,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 842.6666666666666,
+        "top": 325.3333333333333,
+        "right": 1045.3333333333333,
+        "bottom": 389.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c4",
+      "enabled": true,
+      "worldBounds": {
+        "left": 800,
+        "top": 244,
+        "right": 952,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 1066.6666666666665,
+        "top": 325.3333333333333,
+        "right": 1269.3333333333333,
+        "bottom": 389.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c5",
+      "enabled": true,
+      "worldBounds": {
+        "left": 968,
+        "top": 244,
+        "right": 1120,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 1290.6666666666665,
+        "top": 325.3333333333333,
+        "right": 1493.3333333333333,
+        "bottom": 389.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c6",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1136,
+        "top": 244,
+        "right": 1288,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 1514.6666666666665,
+        "top": 325.3333333333333,
+        "right": 1717.3333333333333,
+        "bottom": 389.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c7",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1304,
+        "top": 244,
+        "right": 1456,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 1738.6666666666665,
+        "top": 325.3333333333333,
+        "right": 1941.3333333333333,
+        "bottom": 389.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c8",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1472,
+        "top": 244,
+        "right": 1624,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 1962.6666666666665,
+        "top": 325.3333333333333,
+        "right": 2165.333333333333,
+        "bottom": 389.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r2-c9",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1640,
+        "top": 244,
+        "right": 1792,
+        "bottom": 292
+      },
+      "screenBounds": {
+        "left": 2186.6666666666665,
+        "top": 325.3333333333333,
+        "right": 2389.333333333333,
+        "bottom": 389.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c0",
+      "enabled": true,
+      "worldBounds": {
+        "left": 128,
+        "top": 306,
+        "right": 280,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 170.66666666666666,
+        "top": 408,
+        "right": 373.3333333333333,
+        "bottom": 472
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c1",
+      "enabled": true,
+      "worldBounds": {
+        "left": 296,
+        "top": 306,
+        "right": 448,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 394.66666666666663,
+        "top": 408,
+        "right": 597.3333333333333,
+        "bottom": 472
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c2",
+      "enabled": true,
+      "worldBounds": {
+        "left": 464,
+        "top": 306,
+        "right": 616,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 618.6666666666666,
+        "top": 408,
+        "right": 821.3333333333333,
+        "bottom": 472
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c3",
+      "enabled": true,
+      "worldBounds": {
+        "left": 632,
+        "top": 306,
+        "right": 784,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 842.6666666666666,
+        "top": 408,
+        "right": 1045.3333333333333,
+        "bottom": 472
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c4",
+      "enabled": true,
+      "worldBounds": {
+        "left": 800,
+        "top": 306,
+        "right": 952,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 1066.6666666666665,
+        "top": 408,
+        "right": 1269.3333333333333,
+        "bottom": 472
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c5",
+      "enabled": true,
+      "worldBounds": {
+        "left": 968,
+        "top": 306,
+        "right": 1120,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 1290.6666666666665,
+        "top": 408,
+        "right": 1493.3333333333333,
+        "bottom": 472
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c6",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1136,
+        "top": 306,
+        "right": 1288,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 1514.6666666666665,
+        "top": 408,
+        "right": 1717.3333333333333,
+        "bottom": 472
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c7",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1304,
+        "top": 306,
+        "right": 1456,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 1738.6666666666665,
+        "top": 408,
+        "right": 1941.3333333333333,
+        "bottom": 472
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c8",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1472,
+        "top": 306,
+        "right": 1624,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 1962.6666666666665,
+        "top": 408,
+        "right": 2165.333333333333,
+        "bottom": 472
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r3-c9",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1640,
+        "top": 306,
+        "right": 1792,
+        "bottom": 354
+      },
+      "screenBounds": {
+        "left": 2186.6666666666665,
+        "top": 408,
+        "right": 2389.333333333333,
+        "bottom": 472
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c0",
+      "enabled": true,
+      "worldBounds": {
+        "left": 128,
+        "top": 368,
+        "right": 280,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 170.66666666666666,
+        "top": 490.66666666666663,
+        "right": 373.3333333333333,
+        "bottom": 554.6666666666666
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c1",
+      "enabled": true,
+      "worldBounds": {
+        "left": 296,
+        "top": 368,
+        "right": 448,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 394.66666666666663,
+        "top": 490.66666666666663,
+        "right": 597.3333333333333,
+        "bottom": 554.6666666666666
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c2",
+      "enabled": true,
+      "worldBounds": {
+        "left": 464,
+        "top": 368,
+        "right": 616,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 618.6666666666666,
+        "top": 490.66666666666663,
+        "right": 821.3333333333333,
+        "bottom": 554.6666666666666
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c3",
+      "enabled": true,
+      "worldBounds": {
+        "left": 632,
+        "top": 368,
+        "right": 784,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 842.6666666666666,
+        "top": 490.66666666666663,
+        "right": 1045.3333333333333,
+        "bottom": 554.6666666666666
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c4",
+      "enabled": true,
+      "worldBounds": {
+        "left": 800,
+        "top": 368,
+        "right": 952,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 1066.6666666666665,
+        "top": 490.66666666666663,
+        "right": 1269.3333333333333,
+        "bottom": 554.6666666666666
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c5",
+      "enabled": true,
+      "worldBounds": {
+        "left": 968,
+        "top": 368,
+        "right": 1120,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 1290.6666666666665,
+        "top": 490.66666666666663,
+        "right": 1493.3333333333333,
+        "bottom": 554.6666666666666
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c6",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1136,
+        "top": 368,
+        "right": 1288,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 1514.6666666666665,
+        "top": 490.66666666666663,
+        "right": 1717.3333333333333,
+        "bottom": 554.6666666666666
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c7",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1304,
+        "top": 368,
+        "right": 1456,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 1738.6666666666665,
+        "top": 490.66666666666663,
+        "right": 1941.3333333333333,
+        "bottom": 554.6666666666666
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c8",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1472,
+        "top": 368,
+        "right": 1624,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 1962.6666666666665,
+        "top": 490.66666666666663,
+        "right": 2165.333333333333,
+        "bottom": 554.6666666666666
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r4-c9",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1640,
+        "top": 368,
+        "right": 1792,
+        "bottom": 416
+      },
+      "screenBounds": {
+        "left": 2186.6666666666665,
+        "top": 490.66666666666663,
+        "right": 2389.333333333333,
+        "bottom": 554.6666666666666
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c0",
+      "enabled": true,
+      "worldBounds": {
+        "left": 128,
+        "top": 430,
+        "right": 280,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 170.66666666666666,
+        "top": 573.3333333333333,
+        "right": 373.3333333333333,
+        "bottom": 637.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c1",
+      "enabled": true,
+      "worldBounds": {
+        "left": 296,
+        "top": 430,
+        "right": 448,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 394.66666666666663,
+        "top": 573.3333333333333,
+        "right": 597.3333333333333,
+        "bottom": 637.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c2",
+      "enabled": true,
+      "worldBounds": {
+        "left": 464,
+        "top": 430,
+        "right": 616,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 618.6666666666666,
+        "top": 573.3333333333333,
+        "right": 821.3333333333333,
+        "bottom": 637.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c3",
+      "enabled": true,
+      "worldBounds": {
+        "left": 632,
+        "top": 430,
+        "right": 784,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 842.6666666666666,
+        "top": 573.3333333333333,
+        "right": 1045.3333333333333,
+        "bottom": 637.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c4",
+      "enabled": true,
+      "worldBounds": {
+        "left": 800,
+        "top": 430,
+        "right": 952,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 1066.6666666666665,
+        "top": 573.3333333333333,
+        "right": 1269.3333333333333,
+        "bottom": 637.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c5",
+      "enabled": true,
+      "worldBounds": {
+        "left": 968,
+        "top": 430,
+        "right": 1120,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 1290.6666666666665,
+        "top": 573.3333333333333,
+        "right": 1493.3333333333333,
+        "bottom": 637.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c6",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1136,
+        "top": 430,
+        "right": 1288,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 1514.6666666666665,
+        "top": 573.3333333333333,
+        "right": 1717.3333333333333,
+        "bottom": 637.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c7",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1304,
+        "top": 430,
+        "right": 1456,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 1738.6666666666665,
+        "top": 573.3333333333333,
+        "right": 1941.3333333333333,
+        "bottom": 637.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c8",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1472,
+        "top": 430,
+        "right": 1624,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 1962.6666666666665,
+        "top": 573.3333333333333,
+        "right": 2165.333333333333,
+        "bottom": 637.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "brick-r5-c9",
+      "enabled": true,
+      "worldBounds": {
+        "left": 1640,
+        "top": 430,
+        "right": 1792,
+        "bottom": 478
+      },
+      "screenBounds": {
+        "left": 2186.6666666666665,
+        "top": 573.3333333333333,
+        "right": 2389.333333333333,
+        "bottom": 637.3333333333333
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "paddle",
+      "enabled": true,
+      "worldBounds": {
+        "left": 850,
+        "top": 946,
+        "right": 1070,
+        "bottom": 974
+      },
+      "screenBounds": {
+        "left": 1133.3333333333333,
+        "top": 1261.3333333333333,
+        "right": 1426.6666666666665,
+        "bottom": 1298.6666666666665
+      },
+      "fullyInside": true
+    },
+    {
+      "id": "ball",
+      "enabled": true,
+      "worldBounds": {
+        "left": 946,
+        "top": 912,
+        "right": 974,
+        "bottom": 940
+      },
+      "screenBounds": {
+        "left": 1261.3333333333333,
+        "top": 1216,
+        "right": 1298.6666666666665,
+        "bottom": 1253.3333333333333
+      },
+      "fullyInside": true
+    }
+  ],
+  "note": "Static XY geometry only; offscreen objects can be intentional. Unknown bounds, depth/near-far clipping, occlusion, dynamic camera behavior and gameplay need runtime checks."
+}

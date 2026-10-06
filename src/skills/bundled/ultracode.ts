@@ -16,15 +16,7 @@ Execute a workflow script that orchestrates multiple subagents deterministically
 
 A workflow structures work across many agents — to be comprehensive (decompose and cover in parallel), to be confident (independent perspectives and adversarial checks before committing), or to take on scale one context can't hold (migrations, audits, broad sweeps). The script is where you encode that structure: what fans out, what verifies, what synthesizes.
 
-ONLY call this tool when the user has explicitly opted into multi-agent orchestration. Workflows can spawn dozens of agents and consume a large amount of tokens; the user must request that scale, not have it inferred. Explicit opt-in means one of:
-
-- The user included the keyword "ultracode" in their prompt (you'll see a system-reminder confirming it).
-- Ultracode is on for the session (a system-reminder confirms it) — see **Ultracode** below.
-- The user directly asked you to run a workflow or use multi-agent orchestration in their own words ("use a workflow", "run a workflow", "fan out agents", "orchestrate this with subagents"). The ask must be in the user's words — a task that would merely benefit from a workflow does not count.
-- The user invoked a skill or slash command whose instructions tell you to call Workflow.
-- The user asked you to run a specific named or saved workflow.
-
-For any other task — even one that would clearly benefit from parallelism — do NOT call this tool. Use the Agent tool for individual subagents, or briefly describe what a multi-agent workflow could do and how much it would roughly cost, and ask the user whether to run it. Mention they can ask for one with "use a workflow" in a future message to skip the ask.
+Use this playbook for a currently authorized orchestration task. Whether to run agents, and the applicable task scope and budget, come from the user's request and Agent instructions; loading a playbook does not enable a global mode.
 
 When you do call it, the right move is often **hybrid**: scout inline first (list the files, find the channels, scope the diff) to discover the work-list, then call Workflow to pipeline over it. You don't need to know the shape before the *task* — only before the *orchestration step*.
 
@@ -37,10 +29,6 @@ Common single-phase workflows you can chain across turns:
 - **Migrate** — discover sites → transform each (worktree isolation) → verify
 
 For larger work, run several in sequence — read each result before deciding the next phase. You stay in the loop; each workflow is one well-scoped fan-out.
-
-**Opt-in is harness-injected, not repo-controlled.** The "ultracode is on for the session" system-reminder is produced by the harness (claude.ai/client), not by this skill or any repo state. This skill is knowledge-only — it injects the playbook and toggles nothing. There is no in-repo feature flag, env var, or effort level for ultracode; do not add one. The Workflow tool is compiled in via the build-time WORKFLOW_SCRIPTS feature flag and exposes no per-session runtime gate.
-
-**Ultracode.** When a system-reminder confirms ultracode is on, that opt-in is standing: author and run a workflow for every substantive task by default. The goal is the most exhaustive, correct answer you can produce — token cost is not a constraint. For multi-phase work (understand → design → implement → review), that often means several workflows in sequence — one per phase — so you stay in the loop between them. The quality patterns below (adversarial verify, multi-modal sweep, completeness critic, loop-until-dry) are the tools; pick what fits the task. Lean toward orchestrating with workflows and adversarially verifying your findings — unless the work is trivial or already verified. Solo only on conversational turns or trivial mechanical edits. When a reminder says ultracode is off, revert to the opt-in rule above.
 
 Pass the script inline via \`script\` — do not Write it to a file first. Every invocation automatically persists its script to a file under the session directory and returns the path in the tool result. To iterate on a workflow, edit that file with Write/Edit and re-invoke Workflow with \`{scriptPath: "<path>"}\` instead of resending the full script.
 
@@ -74,7 +62,7 @@ Script body hooks:
 - \`budget: {total: number|null, spent(): number, remaining(): number}\` — the turn's token target from the user's "+500k"-style directive. \`budget.total\` is null if no target was set. \`budget.spent()\` returns output tokens spent this turn across the main loop and all workflows — the pool is shared, not per-workflow. \`budget.remaining()\` returns \`max(0, total - spent())\`, or \`Infinity\` if no target. The target is a HARD ceiling, not advisory: once \`spent()\` reaches \`total\`, further \`agent()\` calls throw. Use for dynamic loops: \`while (budget.total && budget.remaining() > 50_000) { ... }\`, or static scaling: \`const FLEET = budget.total ? Math.floor(budget.total / 100_000) : 5\`.
 - \`workflow(nameOrRef: string | {scriptPath: string}, args?: any): Promise<any>\` — run another workflow inline as a sub-step and return whatever it returns. Pass a name to invoke a saved workflow (same registry as {name: "..."}), or {scriptPath} to run a script file you Wrote earlier. The child shares this run's concurrency cap, agent counter, abort signal, and token budget — its agents appear under a "▸ name" group in /workflows and its tokens count toward budget.spent(). The args param becomes the child's \`args\` global. Nesting is one level only: workflow() inside a child throws. Throws on unknown name / unreadable scriptPath / child syntax error; catch to handle gracefully.
 
-Concurrent agent() calls are capped at 3 by default per workflow — excess calls queue and run as slots free up. The Workflow tool accepts an optional \`maxConcurrency\` input (1–16) to override per-run. OMIT it to use 3. To set maxConcurrency to ANY value other than 3, you MUST first ask the user via AskUserQuestion (offer 3 / 6 / 9 with 3 marked "(Recommended)") — the ONLY exception is when the user has already specified a number this session ("use 6", "maxConcurrency 9"). Never silently raise concurrency above 3 just because the workflow fans out; 3 is the recommended default. You can still pass 100 items to parallel()/pipeline() and they all complete; only the configured number run at any moment. Total agent count across a workflow's lifetime is capped at 1000 — a runaway-loop backstop set far above any real workflow. A single parallel()/pipeline() call accepts at most 4096 items; passing more is an explicit error, not a silent truncation.
+Concurrent agent() calls are capped at 3 by default per workflow — excess calls queue and run as slots free up. The Workflow tool accepts an optional \`maxConcurrency\` input (1–16) to override per-run. Use the authorized runtime constraints rather than deriving a permission policy here. You can pass many items to parallel()/pipeline() while only the configured number runs at any moment. Total agent count across a workflow's lifetime is capped at 1000 as a runaway-loop backstop. A single parallel()/pipeline() call accepts at most 4096 items; passing more is an explicit error, not a silent truncation.
 
 Model tier per task — when you DO override opts.model. Valid aliases: 'haiku' | 'sonnet' | 'opus' | 'best' | 'sonnet[1m]' | 'opus[1m]' | 'opusplan'. The main loop already runs on the user's chosen tier (usually sonnet), so omit model for most agents. Override only when the task clearly fits a different tier:
 
@@ -220,9 +208,9 @@ export function registerUltracodeSkill(): void {
   registerBundledSkill({
     name: 'ultracode',
     description:
-      'Enter multi-agent workflow orchestration mode: when to use the Workflow tool, script primitives, quality patterns, determinism constraints, resume/budget, and files/commands.',
+      'Workflow scripting methods: orchestration primitives, verification patterns, determinism constraints, resume and budget APIs.',
     whenToUse:
-      'When a task can be decomposed or parallelized, needs multi-perspective confidence (e.g. find then adversarially verify), exceeds a single context (large migrations, broad audits, long-tail enumeration), or needs resume/auditability — orchestrate multiple subagents with the Workflow tool.',
+      'Use when writing or understanding an authorized Workflow script, including parallel work, structured results, verification, resume or budget handling.',
     userInvocable: true,
     async getPromptForCommand(args) {
       let prompt = ULTRACODE_PROMPT

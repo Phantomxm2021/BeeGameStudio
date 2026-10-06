@@ -38,6 +38,7 @@ import {
   suggestPathUnderCwd,
 } from 'src/utils/file.js'
 import { logFileOperation } from 'src/utils/fileOperationAnalytics.js'
+import { inspectedDraftHash } from 'src/utils/fileStateCache.js'
 import { formatFileSize } from 'src/utils/format.js'
 import { getFsImplementation } from 'src/utils/fsOperations.js'
 import {
@@ -1038,11 +1039,17 @@ async function callInner(
 
   await validateContentTokens(content, ext, maxTokens)
 
+  const previous = readFileState.get(fullFilePath)
+  const inspectedHash = context.beegameReviewDocuments?.includes(path.basename(fullFilePath))
+    ? lineOffset === 0 && lineCount >= totalLines ? inspectedDraftHash(content)
+      : previous?.timestamp === Math.floor(mtimeMs) ? previous.beegameInspectedHash : undefined
+    : undefined
   readFileState.set(fullFilePath, {
     content,
     timestamp: Math.floor(mtimeMs),
     offset,
     limit,
+    ...(inspectedHash ? { beegameInspectedHash: inspectedHash } : {}),
   })
   context.nestedMemoryAttachmentTriggers?.add(fullFilePath)
 

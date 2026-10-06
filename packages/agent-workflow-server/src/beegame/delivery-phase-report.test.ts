@@ -78,7 +78,7 @@ test('a stopped turn without result uses the latest streamed usage per model mes
     } }, 'turn-1'),
     event(3, 'usage', { type: 'stream_event', event: {
       type: 'message_delta', usage: {
-        input_tokens: 100, output_tokens: 40, cache_read_input_tokens: 300,
+        output_tokens: 40,
       },
     } }, 'turn-1'),
     event(4, 'usage', { type: 'stream_event', event: {

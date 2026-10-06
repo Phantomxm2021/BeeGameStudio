@@ -161,12 +161,16 @@ describe('skill search prefetch', () => {
       ).map(skill => skill.name)
       expect(initialNames).toContain('game-creative-director-expert')
       expect(initialNames).toContain('game-ui-ux-designer')
+      expect(initialNames).toContain('game-feel-designer')
+      expect(initialNames).toContain('gameplay-programmer')
+      expect(initialNames).toContain('game-technical-artist')
       expect(initialNames).toContain('game-content-pipeline-engineer')
       const names = modelInvocableSkills.map(skill => skill.name)
       expect(names).toContain('game-creative-director-expert')
       expect(names).toContain('game-level-designer-expert')
       expect(names).toContain('game-content-pipeline-engineer')
       expect(names).toContain('game-ui-ux-designer')
+      expect(names).toContain('game-feel-designer')
       expect(names).toContain('game-audio-designer')
       expect(names).toContain('game-playtest-performance')
       expect(names).toContain('game-implementation-planning')
@@ -187,6 +191,39 @@ describe('skill search prefetch', () => {
       if (pipeline?.type !== 'prompt') throw new Error('pipeline Skill is not model-invocable')
       expect(JSON.stringify(await pipeline.getPromptForCommand('', unusedContext)))
         .toContain('Game Content Pipeline Engineer')
+      const feel = modelInvocableSkills.find(item => item.name === 'game-feel-designer')
+      if (feel?.type !== 'prompt' || !feel.skillRoot) {
+        throw new Error('game feel Skill is not model-invocable or has no source root')
+      }
+      const feelSourceBody = parseFrontmatter(readFileSync(join(feel.skillRoot, 'SKILL.md'), 'utf8')).content
+      const expandedFeel = (await feel.getPromptForCommand('', unusedContext))
+        .filter(block => block.type === 'text').map(block => block.text).join('\n')
+      expect(expandedFeel).toContain(feelSourceBody)
+      const designCheck = modelInvocableSkills.find(item => item.name === 'game-design-check')
+      if (designCheck?.type !== 'prompt' || !designCheck.skillRoot) {
+        throw new Error('design checking Skill is not model-invocable or has no source root')
+      }
+      const designCheckBody = parseFrontmatter(readFileSync(join(designCheck.skillRoot, 'SKILL.md'), 'utf8')).content
+      const expandedDesignCheck = (await designCheck.getPromptForCommand('', unusedContext))
+        .filter(block => block.type === 'text').map(block => block.text).join('\n')
+      expect(expandedDesignCheck).toContain(designCheckBody)
+      const referenceLinks = [...designCheckBody.matchAll(/\[[^\]]+\]\((references\/[^)]+)\)/g)]
+      expect(referenceLinks.length).toBeGreaterThan(0)
+      for (const link of referenceLinks) {
+        const reference = readFileSync(join(designCheck.skillRoot, link[1]!), 'utf8')
+        expect(reference.length).toBeGreaterThan(0)
+        expect(expandedDesignCheck).not.toContain(reference)
+      }
+      for (const name of ['gameplay-programmer', 'game-technical-artist']) {
+        const specialist = modelInvocableSkills.find(item => item.name === name)
+        if (specialist?.type !== 'prompt' || !specialist.skillRoot) {
+          throw new Error(`${name} is not model-invocable or has no source root`)
+        }
+        const body = parseFrontmatter(readFileSync(join(specialist.skillRoot, 'SKILL.md'), 'utf8')).content
+        const expanded = (await specialist.getPromptForCommand('', unusedContext))
+          .filter(block => block.type === 'text').map(block => block.text).join('\n')
+        expect(expanded).toContain(body)
+      }
       const planning = modelInvocableSkills.find(item => item.name === 'game-implementation-planning')
       const execution = modelInvocableSkills.find(item => item.name === 'game-plan-execution')
       expect(planning?.type).toBe('prompt')
@@ -218,6 +255,14 @@ describe('skill search prefetch', () => {
       expect(index.every(skill => skill.source !== 'builtin')).toBe(true)
       expect(searchSkills('design game HUD buttons for gamepad focus', index).map(item => item.name))
         .toContain('game-ui-ux-designer')
+      expect(searchSkills('改善操作手感、动作节奏与打击感', index)[0]?.name)
+        .toBe('game-feel-designer')
+      expect(searchSkills('修复运动碰撞和碰撞穿透，检查更新时序', index)[0]?.name)
+        .toBe('gameplay-programmer')
+      expect(searchSkills('实现受击特效和材质着色器，修复镜头表现', index)[0]?.name)
+        .toBe('game-technical-artist')
+      expect(searchSkills('观察玩家试玩，进行体验验证', index)[0]?.name)
+        .toBe('game-playtest-performance')
       const uiTask = '美术方向完成。现在写 UI/UX 规格，逐屏给出元素、锚点几何与状态。'
       const uiMatch = searchSkills(uiTask, index)
       expect(uiMatch[0]?.name).toBe('game-ui-ux-designer')

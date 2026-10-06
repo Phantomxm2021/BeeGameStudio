@@ -11,7 +11,7 @@ import { registerBundledSkill } from '../bundledSkills.js'
 
 const DREAM_PROMPT_PREFIX = `# Dream: Memory Consolidation (manual run)
 
-You are performing a manual dream — a reflective pass over your memory files. Unlike the automatic background dream, this run has full tool permissions and the user is watching. Synthesize what you've learned recently into durable, well-organized memories so that future sessions can orient quickly.
+You are performing a manual dream — a reflective pass over your memory files. Synthesize what you've learned recently into durable, well-organized memories so that future sessions can orient quickly.
 
 `
 

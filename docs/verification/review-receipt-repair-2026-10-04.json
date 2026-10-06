@@ -1,0 +1,91 @@
+{
+  "kind": "system-repair-and-observer-token-audit",
+  "date": "2026-10-04",
+  "sourceWorkspace": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+  "originalEvidenceRoot": "/private/tmp/bgs-consumer-ready-accept-20261004-25yXjbuO",
+  "scope": "System source, regression tests and separate observer analysis only. Original BGS test project, documents, receipts and runtime evidence are read-only. No additional paid run.",
+  "repairs": [
+    {
+      "rootCause": "The Review task advertised checker commands but the shell guard rejected common cwd/operator wrappers with an opaque generic denial. The reviewer interpreted this as a tool outage and pursued environment/source diagnosis.",
+      "change": "Allow only a single literal cd to the canonical same workspace plus a previously allowed read-only checker. Continue rejecting arbitrary shell commands, output redirection, pipes, appended commands, external cwd and executable project formulas. Denials give an actual supported command and identify syntax/scope rejection rather than outage.",
+      "source": "src/beegame/design-review.ts",
+      "whyNotSimpler": "Removing the guard would permit unauthorized writes; a bare-command-only rule without actionable rejection already failed in the observed run. This adds only an exact harmless cwd prefix, not a general shell parser."
+    },
+    {
+      "rootCause": "The host had executed structural/reference checks before dispatch, but the task listed their errors without explicitly handing off performed check results. Reviewer repeated unchanged checks and then investigated their rejection.",
+      "change": "Always hand off the host's existing check result, including the no-issues case, its current source revision and check limits. Tell the Reviewer to reuse unchanged results; host still rechecks saved corrections before release.",
+      "source": ["packages/agent-workflow-server/src/beegame/project-author.ts", "packages/agent-workflow-server/src/beegame/project-conversation.ts"],
+      "whyNotSimpler": "The results were already calculated. Making them an explicit handoff removes duplicate model/tool work without adding a stage or another checker."
+    },
+    {
+      "rootCause": "Model-authored review fields confused design findings, tool failures and routine passed checks. Invalid source filenames were detected only after native settlement; existing source headings and recorded closure IDs also failed their actual meanings.",
+      "change": "Move the existing Review schema and transport/record integrity rules to one shared module. Validate the full receipt at the native Write permission boundary using host-owned headings and recorded findings. Reject before saving with field-level feedback; correction stays within the same current step and reuses prior checks. Receipt Edit is rejected in favor of whole validated Write. Host still independently validates version, state, structural results and release requirements.",
+      "source": ["packages/agent-workflow/src/design-review-result.ts", "src/beegame/design-review.ts", "packages/agent-workflow-server/src/beegame/project-delivery.ts"],
+      "whyNotSimpler": "Prompt-only output requirements already yielded an invalid saved receipt. Checking at the existing write boundary is the smallest way to give immediate repairable feedback without a second reviewer, automatic semantic loop or silent data sanitization. The shared rules replace duplicated checks rather than create a second contract.",
+      "limits": "This validates structure, sources and issue accounting, not whether semantic findings or closure evidence are correct."
+    },
+    {
+      "rootCause": "Strict parsing erased the cause by returning undefined for malformed JSON fields, leaving only a generic no-valid-result error.",
+      "change": "Retain invalid receipt field diagnostics in the host conclusion and stopped progress. It still has no valid review and cannot release downstream work.",
+      "source": "packages/agent-workflow-server/src/beegame/milestone-result.ts"
+    },
+    {
+      "rootCause": "Critical-table instructions did not explicitly state that each typed item ID must also be an output with that same ID, including declared terminal transition targets.",
+      "change": "Clarify the existing ID/transition rule without introducing case-specific states, answers or a full-prose schema.",
+      "source": "packages/agent-workflow-server/src/beegame/design-handoff.ts",
+      "limits": "Clearer instructions do not prove that a fresh model-generated draft will be structurally or semantically correct."
+    }
+  ],
+  "verification": {
+    "offlineRegression": {"files": 13, "passed": 187, "failed": 0},
+    "cases": [
+      "Correct same-workspace checker and literal cwd wrapper allowed; external cwd, substitution, pipes, redirection, arbitrary probes and appended commands denied with actionable feedback.",
+      "Failed receipt pattern rejected before write; correct synthetic fixture allowed in the same step; hook automatic approval cannot bypass validation.",
+      "Unknown closure IDs, wrong heading descriptions, dropped/redefined findings and reviser self-closure rejected.",
+      "Recorded finding may close after legitimately removed offending source clause; read-only version drift remains blocked.",
+      "Host metadata supplies actual headings and recorded findings; finite inspect/revise/verify and release boundaries remain covered.",
+      "Malformed receipt retains field errors and cannot release a baseline."
+    ],
+    "originalReceiptReplay": {
+      "mode": "Read-only actual original native Write input; no replacement receipt generated or saved",
+      "result": "Rejected at findings.2.sources.0.document: context.md is not one of the eight design documents"
+    },
+    "typecheck": {"agentWorkflow": "passed", "agentWorkflowServer": "passed", "fullRepository": "failed on unrelated existing frontend scene-editor resolution and existing test typing errors; no errors remaining in this repair's files"},
+    "nativeCliBuild": {"passed": true, "write": false},
+    "testEnvironmentLimit": "Some simulated browser-cleanup paths emitted sandbox /bin/ps EPERM warnings; all 187 selected tests completed successfully. No real browser/game or paid model verification performed.",
+    "paidRetest": "not run",
+    "productionDeployment": "not performed"
+  },
+  "tokenAudit": {
+    "model": "ark-code-latest",
+    "modelRequests": 29,
+    "elapsedSeconds": 475.807,
+    "basis": "Provider final per-request usage, not native transcript cumulative/partial usage. Grouped by the dominant action produced by each request; each request input also contains earlier tool results and repeated context. These are model-call costs, not isolated tool execution costs.",
+    "rows": [
+      {"activity": "Author preparation and task read", "providerRequestIds": [2,3], "calls": 2, "input": 37593, "output": 975, "cacheRead": 35640, "total": 74208},
+      {"activity": "Author GDD generation/save", "providerRequestIds": [4], "calls": 1, "input": 3991, "output": 7571, "cacheRead": 36664, "total": 48226},
+      {"activity": "Author reference check", "providerRequestIds": [5], "calls": 1, "input": 8054, "output": 152, "cacheRead": 40248, "total": 48454},
+      {"activity": "Author receipt and handoff reply", "providerRequestIds": [6,7], "calls": 2, "input": 2154, "output": 795, "cacheRead": 96880, "total": 99829},
+      {"activity": "Reviewer task/Skill/GDD reads", "providerRequestIds": [8,9,10], "calls": 3, "input": 25394, "output": 365, "cacheRead": 40560, "total": 66319},
+      {"activity": "Reviewer rejected checks/help", "providerRequestIds": [11,12], "calls": 2, "input": 5615, "output": 518, "cacheRead": 53872, "total": 60005},
+      {"activity": "Reviewer environment/source probes and extra format read", "providerRequestIds": [13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28], "calls": 16, "input": 12873, "output": 3710, "cacheRead": 520064, "total": 536647},
+      {"activity": "Reviewer synthesis and invalid receipt", "providerRequestIds": [29], "calls": 1, "input": 13519, "output": 3276, "cacheRead": 37688, "total": 54483},
+      {"activity": "Reviewer handoff reply", "providerRequestIds": [30], "calls": 1, "input": 4803, "output": 581, "cacheRead": 51000, "total": 56384}
+    ],
+    "totals": {"input": 113996, "output": 17943, "cacheRead": 912616, "cacheCreation": 0, "allObserved": 1044555, "uncachedInputPlusOutput": 131939},
+    "noRevisionOrVerificationRequests": true,
+    "authorInputContext": {"first": 36202, "maximum": 49758},
+    "reviewInputContext": {"first": 18696, "maximum": 55803},
+    "conclusions": [
+      "Rejected checks and subsequent environment diagnosis consumed 18 calls and 596652 observed tokens (57.1%). This is an avoidable detour, not repeated semantic review/revision.",
+      "912616 tokens (87.37%) are cached context rereads across requests. Cumulative one-million usage is not one million new tokens or one million simultaneous context tokens.",
+      "Only 17943 output tokens were generated across the flow; the GDD-producing request generated 7571 output tokens. Generated output is not all useful saved prose.",
+      "The late full content-format read contributes to 13519 fresh input tokens in request 29 and carries forward into the final request. The checker full-source Read failed its size limit; it did not inject its entire 813.8 KB file into model context.",
+      "The transcript supports command-scope/recovery and repeated-history causes. It does not establish that large context caused model distortion or that useful document work inherently needs this usage.",
+      "No credit-savings claim can be made from removing these request categories before a fresh authorized paid retest."
+    ],
+    "usageLimits": "All 29 model requests have final usage. Provider request 1 was a non-model HTTP401 authentication probe with no usage record; its unknown usage is not asserted as zero.",
+    "settledCredits": null,
+    "billing": "Both before/after monetary observations unavailable: billing_observation_transport_failed"
+  }
+}

@@ -4,7 +4,12 @@ import { mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/prom
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { computeWorkspaceRevision, resolveWorkspaceRelativePath } from './workspace-revision'
 import { PROJECT_DOCUMENTS, projectContentAuthority } from './project-content-authority'
-import { AUTHOR_BATCHES, authorBatchInstruction } from './project-author'
+import { AUTHOR_BATCHES, authorBatchInstruction, authorBatchReviewInstruction } from './project-author'
+import { checkReviewUiLayouts } from './design-layout-check'
+import { checkDesignDocumentReferences } from './design-document-references'
+import { isHigherDocumentVersion, checkDesignHandoff, checkDesignFindingSources, designReviewSourceHeadings, designReviewResultSchema,
+  finalizeDesignDocuments, type DesignDocumentSnapshot, type DesignFinding, type DesignReviewStep } from './design-handoff'
+import { designReviewResultIssues } from '@bee-game-studio/agent-workflow/design-review-result'
 export { PROJECT_DOCUMENTS, projectContentAuthority } from './project-content-authority'
 import { auditBeeGameContentPackage, type BeeGameContentAuthority } from './game-content-package'
 import { buildSceneUiContentAuthoringAuthority, materializeSceneUiAuthoringContract, materializeSceneUiFormat } from './scene-ui-content-authoring'
@@ -33,80 +38,59 @@ export function projectDeliveryPhase(state: ProjectDeliveryState): ProjectDelive
 }
 
 /** Deliverables and platform interfaces, not a script for the Agent's work. */
-export function projectDeliveryPhaseInstruction(phase: ProjectDeliveryPhase, authorBatch = 0): string {
+export function projectDeliveryPhaseInstruction(phase: ProjectDeliveryPhase, authorBatch = phase === 'review' ? AUTHOR_BATCHES.length - 1 : 0): string {
   switch (phase) {
     case 'author': return authorBatchInstruction(authorBatch)
-    case 'review': return `Current delivery milestone: review. This stage includes review and revision.
-Review the current eight files in docs/ against the confirmed requirements and platform agreements. Establish findings from current source definitions and necessary dependencies: earlier authoring summaries, completion labels and your own previous conclusions are claims to check, not evidence that the design is correct.
-Determine whether a developer can implement the agreed experience and an acceptance reviewer can verify it from these documents, without inventing missing product decisions. Cover the whole design:
-- Gameplay, states and content: objectives, legal actions, outcomes, interactions, transitions and recovery fit together and cover the agreed release.
-- Rules and quantities: important conclusions follow from the authoritative rules and actual content. Check the modeled situation as well as arithmetic; use legal actions to support feasibility and distinguish examples, bounds and playtest hypotheses.
-- UI and scene: every planned screen/state is represented by its layout input or a referenced shared composition, including menus and modal contents, not only HUD/game-view regions. Check that declared adaptation is actually in these inputs and final resolved control bounds meet the declared host-pixel usability minima; local sizes or minSize alone do not establish that. Use the supplied spatial calculator on final inputs at the reference, smallest supported and layout-transition sizes. Investigate child containment, reserved padding and unreadable or unmeasured content; calculate required container space from child constraints rather than accepting a prose minimum. Calculate UI allocation first and use its game-view rectangle for scene framing, not the whole host window. Different screen shapes may select different compositions; check each against gameplay visibility and permitted overlay regions, including the full HUD/control footprint rather than only whether it touches game objects. UI_UX_SPEC owns allocation and layout selection; LEVEL_SCENE_DESIGN owns world/framing requirements and references that allocation. TECHNICAL_DESIGN explains consumption and coordinate conversion without duplicating final rectangles or camera offsets. Examples and verification expectations reference these same inputs/results rather than establishing another layout baseline.
-- Art, audio, resources and technology: the intended presentation is preserved; required versus optional deliverables, triggers, loading, failure handling and lifecycle responsibilities agree across their producers and consumers. Reconcile UI placement and animation with the art direction; when a decision changes, update the affected source and consumer clauses as well as its calculation input, not just the review conclusion.
-Establish concrete findings from the files before revising: identify the source requirement, the contradictory or unsupported claim, and the affected dependencies. Follow dependencies rather than limiting the review to items already labelled unresolved. Use applicable Skills; methods, tools and subagent collaboration are yours to choose.
-The review conclusion must match the requirements actually checked and the observed results; a passing subset of calculations or a subagent's agreement does not establish a whole-design pass. Keep concise working evidence so the basis and limits of consequential conclusions can be rechecked.
-Correct the affected documents directly, then verify each correction against its source requirements and affected consumers, including new claims and layout selection conditions. When layout decisions change, synchronize affected source and consumer region bounds and claims, update their calculation inputs and rerun affected compositions/sizes; updating prose or a camera result alone does not verify controls and overlays. Do not relax agreed usability minima merely to fit a chosen projection. Reconcile document references to the final inputs/results and remove superseded duplicate layout values. Keep findings and verification concise and traceable to source sections; no separate report, author self-review or independent checker is required.
-Preserve the confirmed scope and technical implementation freedom. If a correction requires changing the confirmed gameplay promise or delivery scope, explain the issue and leave that decision to the user. Resolve decisions needed for development here. Record concrete runtime checks for visual quality, feel and other assumptions that require a running game; do not defer contradictions or invalid calculations as playtest questions.
-Pass only when no development blockers remain and the corrected design has been rechecked. Update version information in revised documents and mark the design as the implementation and acceptance baseline; do not rewrite unchanged documents merely to synchronize version numbers. Briefly report the outcome, important findings and their verification, unresolved issues and runtime checks; do not claim checks you did not perform.`
+    case 'review': return authorBatchReviewInstruction(authorBatch)
     case 'resources': return `Current delivery milestone: resources.
 Using the reviewed ASSET_PLAN.md together with the art, audio, UI, scene and technical documents, complete the required resources for this delivery. Optional resources do not block completion.
 Inspect existing resources, reuse those that meet the requirements and fill the gaps. Each required resource must correspond to a usable file or reproducible procedural output, with its intended use and usage explained.
 For a planned generated file or reusable procedural resource, deliver the usable output or executable generator with its inputs and usage; a promise to create it later is not resource completion. Simple shapes or effects intentionally expressed by content parameters and runtime behavior need not become separate asset files or generator frameworks. Identify those design references and remaining content/runtime integration briefly in the handoff; do not claim that integration is already tested.
 Choose built-in library assets, web assets, AI generation or procedural creation according to actual needs. First meet the design requirements, visual consistency and target-platform constraints, then compare time and cost. Approved fallbacks in the documents are valid; do not lower requirements on your own.
+Inspect the retained Art/UI samples linked from their documents when choosing and producing visual resources. Preserve their intended treatment and independent layers; a design-reference image is not automatically a usable runtime asset, and copying a whole UI picture does not supply editable controls or text.
 Preserve the planned delivery structure and required variants as well as appearance: changing the production source does not silently cancel an atlas, animation or TileSet. Prefer compatible small 2D sprites with shared loading lifetime in atlases; keep large backgrounds, fonts, audio and models separate as appropriate. For AI-sourced small sprites or UI elements of one style that fit at usable detail, prefer one generation request for a shared sheet, not one request per element followed by optional packing. Request distinguishable, separated elements with useful spacing; choose transparency for their use. Split generation only for a concrete composition, detail or independent-use need and briefly explain it; a planned atlas is not optional merely because its source images were generated separately. The image model produces pixels, not authoritative frame coordinates: inspect the actual sheet and register named, in-bounds regions with logical display sizes, pivots and applicable padding/nine-slice metadata. Elements that vary independently must remain independently addressable. Functional text, interactions and layout belong in subsequent content data.
 AI image generation defaults to 1024x1024 and low quality. Choose transparency, image count and organization for the intended use; change size only for a concrete need. Consult the available capability instructions for tool usage and registration formats. Resource registration interface: ${ASSET_MANIFEST_AUTHORING_CONTRACT_PATH}.
 Atlas priority applies regardless of source: AI, retrieved images and procedurally drawn static sprites. For procedural sprites, prefer drawing directly into a shared sheet and emitting exact frame metadata from those drawing coordinates; existing separate sprites may be packed without regenerating their art. Group by concurrent use and compatible filtering, not source, and avoid loading unrelated content in a giant atlas. Keep dynamic text, live bars and simple parameter-driven geometry as runtime drawing where designed. Preserve source files when useful, but register runtime atlas/member bindings rather than loading both packed and source images for the same use.
 Check resource quality and import requirements, including the visual, audio and technical properties relevant to its type. Building a complete game is not a prerequisite for resource checks. Successful generation, file existence or valid format alone does not establish design compliance.
+Use game-technical-artist for applicable animation/effect/material production decisions; preserve the authored visual intent and distinguish usable resource output from later content bindings and runtime motion. Do not require advanced techniques or new asset files for effects already designed as simple runtime behavior.
 Deliver the selected files and assets/asset-manifest.json, recording origins and necessary usage metadata. Check licenses for third-party assets; downloaded fonts remain third-party resources, not procedural creations. Accurately record generation origins for AI and procedural assets. Verify image/font decoding in the target browser where applicable, not just extensions or file existence. The content stage handles scene and UI layout and bindings.
 When a required resource cannot be delivered, report the missing item, reason and feasible options. Do not edit the reviewed design documents or mark missing resources complete.
 Briefly report delivery results and unresolved issues. Check and invoke applicable Skills; use subagents in parallel for independent tasks with clear dependencies, choosing the task split yourself.`
     case 'content': return `Current delivery milestone: content. Translate the reviewed design and delivered resources into editable Scene/UI/VFX data and content/index.json for the agreed game.
 
 Inputs and scope:
-Read the relevant reviewed design documents and resource handoff. Account for every planned screen and level, reusing shared components, scenes and procedural definitions where appropriate rather than duplicating files for every state or generated level. Preserve existing correct data.
+Read the relevant reviewed design documents and resource handoff. This is the milestone that completes the formal Scene/UI/VFX package, state/action bindings, resource references and content/index.json. Read the UI-linked content/ui files and complete them in place: preserve their document/node identities, text, order, hierarchy, layout constraints, responsive geometry, supported sizes and control minima. There is no second planning layout to translate or compare. Bind the actual delivered assets and runtime references without inventing resources or selecting another composition; request an owner revision for a necessary layout change. The host protects layout decisions through the existing design baseline while allowing resource/style/action bindings. Account for every planned screen and level, reusing shared components, scenes and procedural definitions where appropriate rather than duplicating files for every state or generated level. Preserve existing correct data.
 Use the schemas, coordinate semantics, supported components, resource references and BGS-supplied revision values in ${PROJECT_CONTENT_CONTRACT_PATH} and its referenced format guidance. These are platform inputs, not algorithms to reverse-engineer. Choose representations suited to the confirmed 2D, 3D or XR target; do not introduce components merely to satisfy an unrelated example.
 
 Design-to-data handoff:
+Read the actual retained UI composition sample and the applicable Art sample with their prose. Carry through the selected proportions, hierarchy, type/icon treatment and visual details in editable data; do not turn a flattened reference into a background with unrelated generic controls. Samples illustrate the documented relationships, not a substitute coordinate table or production asset manifest.
 Preserve the reviewed spatial composition: scene hierarchy, transforms, camera/framing, visual layers, placements and applicable generation parameters. For UI, carry through each screen's elements, content, layout, adaptation and state/action bindings, including the play-area placement relative to UI. Use the actual delivered resources and their registered members/frames rather than inventing missing assets.
 Express static design and supported state configuration in the content format. Identify the existing node/action/state references that runtime code must connect for dynamic behavior and feedback. Data declaration is not executable gameplay; do not silently omit a requirement because it needs code, or invent unsupported fields to make it appear implemented. Keep standalone gameplay configuration outside the Scene/UI/VFX registry as the contract requires.
 
 Checks and completion:
 Derive concrete values from the reviewed layout rules; do not choose a new layout or interaction design. If a necessary design decision is missing, identify the requirement and affected content instead of silently deciding it here.
 Use the supplied --layout inspection at chosen viewport sizes using the Editor's shared coordinate functions. Keep the reviewed layout selection and space allocation; use resolved UI rectangles to determine the Scene viewport instead of independently sizing both against the whole window. Investigate anchors, stretch and containment; inspect actual Editor previews for text, visual hierarchy and intended overlaps. Geometry inspection does not certify appearance or gameplay. Preserve planned Tilemap/TileSet bindings; report an incompatible resource rather than silently replacing its representation.
-Compare the resulting data against the applicable document requirements, including space allocation and adaptation, and use the provided read-only content checker for format and reference errors. A valid schema alone does not establish design coverage or runtime correctness. Correct data omissions against explicit design requirements; report missing resources, contradictory design or requirements the format cannot express, without changing reviewed documents or silently simplifying the design.
+Measure the design's authored labels and legal longest counter values with delivered fonts here, using the supplied browser helper or equivalent actual-font checks. Identify glyph fallback, wrapping or overflow rather than treating geometry or candidate measurements as final. Preserve the reviewed design; report a required design change instead of silently shrinking text or editing upstream documents. Handoff unresolved complete-runtime composition and rendering checks explicitly.
+Compare the resulting data against the applicable document requirements, including space allocation and adaptation. Use the provided read-only content checker for format, references and saved layout geometry. Recalculate after binding resources. Render every defined UI composition and relevant expanded state from these actual saved files with delivered resources/fonts at the supported targets; inspect text fit and complete composition, not partial hand-authored samples or node presence alone. Use existing preview/browser capabilities and the shared consumer, without hardcoding a parallel layout or building gameplay for this check. Report unavailable rendering/font checks as blocked, not PASS. A valid schema or geometry result alone does not establish design coverage, appearance or runtime correctness. Correct data omissions against explicit design requirements within the protected layout; a needed layout/design change requires the UI owner revision and version increase. Report missing resources, contradictory design or requirements the format cannot express, without silently simplifying the design.
 Briefly hand off the delivered content, the runtime behavior still to connect and any unresolved gaps, using existing files and references rather than creating a separate mandatory report. Building the full game is not required in this stage, and runtime verification remains to be completed after implementation. Tools, task order and subagent collaboration are yours to choose.`
     case 'implementation': return `Current delivery milestone: implementation. Deliver the complete runnable game defined by the reviewed design and delivered content.
 
 Design and data inputs:
 Read the reviewed eight documents in docs/ for the agreed gameplay, presentation, interactions and first-release scope. Inspect existing code, resources and content; preserve correct work rather than rebuilding it.
+Use owned outputs declaring acceptance as source-linked implementation completion checks: read their pointed conditions/actions and expected results, implement them and retain the applicable tests or observations for acceptance. These pointers supplement the confirmed scope; unmarked requirements are not optional. Keep each result linked to its actual owner source rather than creating a second specification. Do not silently resolve a missing necessary decision while writing code.
 The documents define intended design. Consume content/index.json, its registered Scene/UI/VFX documents and assets/asset-manifest.json. Data semantics and runtimeConsumption are in .beegame/delivery/content-format.json; content-format files define data syntax, not gameplay design.
 Content remains the editable source for static hierarchy, transforms, layout, responsive variants, Tilemap cells and resource bindings. Runtime code parses these and implements gameplay and dynamic presentation; do not maintain a separate substitute layout.
 For atlas assets, share loading and decoded image/texture sources by resolved asset URL within their useful lifetime, including concurrent requests. Frames reference regions of that source; avoid per-frame fetch/decode or copied pixel buffers merely to select a region. Use the chosen engine's existing cache where available, release owned resources when no longer needed, and keep unrelated atlas groups on demand. Sharing a sheet does not by itself guarantee rendering batches.
 
-Implementation approach:
-Work incrementally in this same project session. Technology, tools and task granularity are yours to choose. The following are dependency-aware working steps, not additional delivery stages or approval gates; do not stop between them for BGS to dispatch another assignment.
-Reuse an existing valid plan, or form a concise checklist connecting required features, screens, scenes and key states to document/data references, implementation tasks and observable checks. Mark existing, missing and conflicting work; keep this plan current for interruption/resumption without separate step reports. Resume from unresolved work, not automatically from step one.
-
-1. Establish and verify data consumption before expanding presentation.
-Use representative real project UI and Scene data, including nested elements and resources where present. Verify rendered geometry, text, images/atlas regions, layering and enabled states against that data at the reference and constrained container sizes specified by the design. Use the supplied coordinate/format references or optional helpers; test actual rendering, not just parsed JSON. A representative temporary layout/resource change must affect the intended rendered element and be restored. Verify Tilemaps only where the project uses them.
-Completion: the foundation supports the representative content correctly, demonstrated in the target runtime. Fix discovered parsing/rendering errors before reusing that foundation across more screens; a hard-coded replacement or successful build does not close this step. Identify unsupported data or design conflicts and continue independent work where possible.
-
-2. Deliver a representative vertical slice that establishes the core experience.
-Connect loading, entry, a small portion of core play, its applicable end condition and restart using real content and the agreed rules. Integrate enough intended UI, art and feedback to verify the design and its technical feasibility, rather than leaving presentation entirely to the end. Target the documented quality, not open-ended polishing or new art direction. Non-blocking presentation refinements may remain on the existing checklist for completion before handoff; do not defer broken parsing, unreadable controls or feedback needed to understand play. Verify actual input and repeatability, including restart cleanup. For games without a conventional win/lose loop, use their documented equivalent.
-Completion: the representative experience works and dependencies needed for expansion are verified. An intermediate playable version is not final delivery; track all remaining scope explicitly.
-
-3. Expand through independently verifiable feature units.
-Split remaining scope by observable player outcomes and dependencies, not just files or disciplines such as "finish UI" then "finish gameplay". In the existing concise checklist, associate each unit with its document/data references, required behavior and relevant entry/exit or recovery paths, presentation/feedback, dependencies and a practical completion check. Shared rules may be referenced; do not create another set of design documents or prescribe a fixed task count.
-Complete the applicable rules, data bindings, interaction, presentation and verification together for each unit. Group work by a testable player behavior, not individual widgets or edits. Use deterministic tests for rules/calculations and target-runtime observation for presentation/input; batch related checks instead of launching a browser for every small task. Reuse checks shared by several units and recheck affected consumers when shared code changes. Cover the remaining agreed scope without silently substituting placeholders.
-Completion: every required item has an implementation and an observed check, or is explicitly unresolved. Optional enhancements do not block; required omissions are not optional polish. All planned screens and levels must work in the production build.
-
-4. Integrate and hand off the current build.
-Reconcile the checklist with the final build and existing evidence. Reuse evidence that remains valid for the current implementation; check remaining integration risks and results invalidated by final changes in the target environment, rather than repeating every earlier check. Preserve reusable tests and evidence, and clean up only test resources you started.
-Completion: required scope is implemented and checked for the handed-off version, or remaining gaps are explicitly reported. Implementation self-checks do not replace subsequent acceptance: that stage evaluates overall coverage and fills evidence gaps, not automatically rerunning the whole implementation test suite. Distinguish game defects from unavailable environments or faulty test drivers. Briefly hand off scope, actual results, evidence locations and unresolved issues; a successful build alone is not complete delivery.
-
-Parallel work:
-Use subagents for bounded feature units, independent modules or focused verification when useful. Establish the relevant shared state, data and interface agreements before parallelizing dependent work. Give each a bounded objective, relevant document/data references, owned files and completion checks. Avoid concurrent edits to the same parser or interface; the main Agent maintains the plan and integrates shared decisions in this project session. Do not split entire gameplay, UI and audio systems into disconnected efforts and postpone their integration until the end. Delegates do not each recreate the whole game or repeat full acceptance. Integrate and verify their combined result before claiming completion; a subagent's PASS alone is not integration evidence. You may adapt task order or combine steps for a small project whose slice covers most of its scope, but do not treat an unverified dependency as complete.
-
+Implementation and verification outcomes:
+Compare the actual rendered game with the retained visual samples and their authoritative clauses at corresponding states and supported sizes. Preserve the selected visual standard, including hierarchy, spacing, typography/icon alignment and restrained effects, not just element counts or functional navigation. Correct lost or substituted treatment within the existing design; report a missing necessary owner choice rather than redesigning. A user taste vote or another approval stage is not required.
+Use gameplay-programmer for real-time rules, movement/contact execution and lifecycle correctness, and game-technical-artist for applicable animation, effects, materials and camera presentation. Game-feel design supplies the intended response; these implementation responsibilities realize it without redefining rules or style. Invoke the relevant Skills for actual work, not to staff a fixed roster.
+Choose the plan, tools, task split and execution order for this project; no fixed step sequence, prescribed tool calls or extra approval gates are required. Reuse correct work and keep unresolved requirements traceable to the reviewed design. A representative vertical slice may help test coupled risks, but is not a mandatory new stage.
+Deliver real data consumption, the complete agreed player journey and all planned screens/levels with their rules, presentation, feedback and recovery behavior. An intermediate playable version is not final delivery. Target the documented quality, not new art direction or open-ended polishing; required omissions are not optional refinements.
+Use code tests for deterministic rules/calculations and target-runtime observation for rendering, input and feedback. Verify representative authored geometry, text, resources, layering and states at the supported sizes. Temporary changes to applicable layout/resource data should affect the intended rendered output and be restored; parsed JSON or a successful build does not establish consumption. Check Tilemaps only when used.
+Reuse existing numerical scripts and the shared layout algorithm; do not hand-maintain derived tables or substitute code-owned layouts. Batch related checks and reuse evidence still valid for the current version, retesting behavior invalidated by changes. State unavailable environments and faulty test drivers separately from game defects; unobserved behavior remains unverified.
+If delegating, give bounded outcomes, relevant authoritative sources, dependency boundaries, owned files and completion checks. Coordinate shared interfaces and conflicting writes, not the delegate's reasoning process. Integrate combined results before claiming completion; a subagent's PASS alone is not integration evidence.
+Briefly hand off the current build, scope, actual checks, evidence and unresolved issues. Preserve reusable tests/evidence and clean up only resources you started. Implementation self-checks do not replace subsequent acceptance; acceptance fills coverage/evidence gaps rather than automatically rerunning the whole implementation test suite.
 Design consistency and issue handling:
 Implement the full agreed scope, including necessary elements, interaction states, feedback and adaptation, not only the normal play path.
 If code fails to implement the design or consume data correctly, fix the implementation. If content omits or contradicts an explicit document requirement, correct the data while preserving valid formats and references.
@@ -117,13 +101,15 @@ Keep verification proportional to project complexity and risk; unobserved work r
 
 Acceptance basis:
 Derive checks from the confirmed scope and reviewed eight documents, including completion conditions and runtime-dependent questions left open in those documents. Scene/UI and resource data describe the corresponding content; neither the existing implementation nor an Agent summary replaces the agreed requirements.
+Cover each owned output declaring acceptance against its actual source conditions and expected results, reusing valid implementation evidence. Also inspect the confirmed scope for necessary checks the author omitted; a complete declared checklist does not establish a complete game. Missing design decisions go to the owner; missing implementation or evidence is corrected here against the existing requirement.
 Read the implementation handoff and existing evidence to identify remaining verification. Reuse results still valid for the current version; do not repeat the whole development process or write a separate long acceptance plan.
 
 Verification:
 Choose methods and order appropriate to the project, covering applicable requirements:
 - Complete experience: agreed gameplay, screens and levels, and the transitions through start, play, outcomes, retry and other key states.
 - Rules and boundaries: behavior, calculations and state transitions against the design, including important edge cases and abnormal operations.
-- Player-facing result: actual composition, framing, resources, text, interaction feedback and audio against the design under the agreed display conditions and input methods. Verify usable control bounds, not merely element presence or successful navigation. Keep visual captures or equivalent target-device evidence where relevant.
+- Player-facing result: actual composition, framing, resources, text, interaction feedback and audio against the design under the agreed display conditions and input methods. Compare corresponding rendered states with the retained Art/UI samples and their source clauses, allowing documented adaptation but identifying lost hierarchy, inconsistent type/icon treatment, crude substitutions or missing finish. Describe concrete visible defects, not invented aesthetic scores; user silence is not visual acceptance. Verify usable control bounds, not merely element presence or successful navigation. Keep visual captures or equivalent target-device evidence where relevant.
+- Experience evidence: use game-playtest-performance to distinguish rule correctness, understandable feedback and intended experience. An Agent's route or a bot pass is not real-player approval. Report experience observations and unresolved hypotheses within the agreed scope; do not fabricate player reactions or add a mandatory human-study gate.
 - Data consumption: the corresponding Scene/UI and resource data actually drives runtime behavior rather than merely loading before an independent substitute implementation runs.
 Use deterministic tests for rules where useful, and observation in the actual target runtime for presentation and interaction. Match depth to project complexity and risk without expanding the agreed platform, device or content scope. Document-stage simulations and review conclusions are not runtime evidence.
 
@@ -161,7 +147,171 @@ type ProjectDeliveryState = {
   phase?: ProjectDeliveryPhase
   authorBatch?: number
   lastValidationFailure?: string
+  // Saved drafts protect other owners' bytes during dependent writing. They
+  // are not a review certificate and cannot authorize downstream production.
+  designDrafts?: { batch: number; revision: string; snapshots: Record<string, string>; documentVersions?: Record<string, string>; evidenceHashes: Record<string, string> }
+  designReview?: { step: DesignReviewStep; revision: string; snapshots: Record<string, string>; documentVersions?: Record<string, string>; findings: DesignFinding[]; changedDocuments?: string[];
+    stopped?: boolean; instruction?: string; returnPhase?: ProjectDeliveryPhase; returnAuthorBatch?: number; writableDocuments?: Array<typeof PROJECT_DOCUMENTS[number]> }
+  designBaseline?: { batch: number; revision: string; snapshots: Record<string, string>; documentVersions?: Record<string, string>; evidenceHashes: Record<string, string>; followUps: DesignFinding[];
+    change?: { documents: Array<typeof PROJECT_DOCUMENTS[number]>; instruction?: string } }
+  designHistory?: Array<{ step: DesignReviewStep | 'owner-request'; revision: string; findings: DesignFinding[]; resolved: Array<{ id: string; evidence: string }>; instruction?: string }>
   accepted?: ProjectDeliveryAcceptance
+}
+
+function legacyIntermediateReview(state: ProjectDeliveryState) {
+  return projectDeliveryPhase(state) === 'review' && (state.authorBatch ?? AUTHOR_BATCHES.length - 1) < AUTHOR_BATCHES.length - 1 ||
+    projectDeliveryPhase(state) === 'author' && !!state.designBaseline && state.designBaseline.batch < AUTHOR_BATCHES.length - 1
+}
+
+const LEGACY_INTERMEDIATE_REVIEW = 'This delivery retains an earlier per-batch review. It cannot be treated as the joint eight-document inspection; explicit owner migration is required before continuing.'
+
+/** Basic saved delivery, not semantic approval of an author's design. */
+async function projectAuthorDraftIssues(workspace: string, batch: number) {
+  if (!AUTHOR_BATCHES[batch]) throw new Error('Invalid author batch')
+  const issues: string[] = []
+  for (const name of new Set(AUTHOR_BATCHES.slice(0, batch + 1).flat())) {
+    try {
+      const path = join(workspace, 'docs', name), file = await stat(path)
+      if (!file.isFile() || !(await readFile(path, 'utf8')).trim()) issues.push(`docs/${name} is missing or empty`)
+    } catch { issues.push(`docs/${name} is missing`) }
+  }
+  return issues
+}
+
+function designCheck(workspace: string, state: ProjectDeliveryState, nextConsumers?: readonly string[]) {
+  const batch = state.authorBatch ?? (projectDeliveryPhase(state) === 'author' ? 0 : AUTHOR_BATCHES.length - 1)
+  const documents = [...new Set(AUTHOR_BATCHES.slice(0, batch + 1).flat())]
+  let settings: { inputs?: string[]; orientation?: unknown; dimension?: unknown } | undefined
+  try { settings = JSON.parse(state.objective).settings } catch { /* Plain-text brief. */ }
+  const handoff = checkDesignHandoff(workspace, documents, { nextConsumers: nextConsumers ?? (state.designReview?.returnPhase ? [state.designReview.returnPhase] : AUTHOR_BATCHES[batch + 1] ?? ['resources']),
+    technicalBaseline: batch < AUTHOR_BATCHES.length - 1, inputs: settings?.inputs })
+  const geometry = documents.includes('UI_UX_SPEC.md') ? checkReviewUiLayouts(workspace, settings).issues : []
+  return { ...handoff, valid: handoff.valid && !geometry.length, issues: [...handoff.issues, ...geometry] }
+}
+
+export function projectDesignReleaseDiagnostics(workspace: string, state: ProjectDeliveryState) {
+  return [...designCheck(workspace, state).issues,
+    ...checkDesignDocumentReferences(workspace, state.authorBatch ?? AUTHOR_BATCHES.length - 1).issues]
+}
+
+/** Capture the actual inspected version before native dispatch, including legacy projects. */
+export async function prepareProjectDesignReview(workspace: string, dataRoot: string) {
+  return withStateMutation(workspace, dataRoot, async () => {
+    const state = await readProjectDelivery(workspace, dataRoot)
+    if (!state || state.status !== 'active' || projectDeliveryPhase(state) !== 'review') return state
+    if (legacyIntermediateReview(state)) throw new Error(LEGACY_INTERMEDIATE_REVIEW)
+    const draftIssues = await projectAuthorDraftIssues(workspace, AUTHOR_BATCHES.length - 1)
+    if (draftIssues.length) throw new Error('Saved design drafts are unavailable: ' + draftIssues.join('; '))
+    const check = designCheck(workspace, state)
+    if (Object.keys(check.snapshots).length !== PROJECT_DOCUMENTS.length)
+      throw new Error(`Saved design drafts are unavailable: ${check.issues.join('; ')}`)
+    if (state.designReview) {
+      if (state.designReview.stopped) throw new Error('Design review is stopped. Supply an explicit owner resolution through design-resolution; do not restart the automatic loop.')
+      if (state.designReview.revision !== check.revision) throw new Error('Design changed after review handoff; identify the affected owner change before resuming, not a silent full re-review')
+      return state
+    }
+    const next = { ...state, designReview: { step: 'inspect' as const, revision: check.revision, snapshots: check.snapshots, documentVersions: check.documentVersions, findings: state.designBaseline?.followUps ?? [] } }
+    await save(workspace, dataRoot, next)
+    return next
+  })
+}
+
+/** A trusted, explicit user/owner request re-arms only the identified affected scope.
+ * No natural-language message is silently interpreted as closure or authorization.
+ */
+export async function requestProjectDesignResolution(workspace: string, dataRoot: string, input: {
+  instruction: string; mode: DesignReviewStep; findings: DesignFinding[]
+}) {
+  return withStateMutation(workspace, dataRoot, async () => {
+    if (!input.instruction.trim()) throw new Error('Owner resolution needs an explicit decision or evidence instruction')
+    const validated = designReviewResultSchema.parse({ step: input.mode, findings: input.findings, resolved: [] })
+    if (input.mode !== 'inspect' && !validated.findings.length || new Set(validated.findings.map(f => f.id)).size !== validated.findings.length)
+      throw new Error('Owner resolution needs unique affected findings')
+    const state = await readProjectDelivery(workspace, dataRoot)
+    if (!state) throw new Error('No project delivery to resolve')
+    const recorded = state.designReview?.findings ?? state.designBaseline?.followUps ?? []
+    const sourceIssues = checkDesignFindingSources(workspace, validated.findings.filter(f => !recorded.some(old => old.id === f.id)))
+    if (sourceIssues.length) throw new Error(sourceIssues.join('; '))
+    if (input.mode === 'inspect') {
+      if (state.designReview || state.designBaseline) throw new Error('Use affected revise/verify, not a full re-review of a recorded baseline')
+      const phase = projectDeliveryPhase(state)
+      if (phase === 'author' || phase === 'review') throw new Error('Initial author/review uses its scheduled handoff')
+      const check = designCheck(workspace, { ...state, authorBatch: AUTHOR_BATCHES.length - 1 })
+      if (!check.valid) throw new Error('Prepare the missing saved design handoff through the authorized authors first: ' + check.issues.join('; '))
+      const next: ProjectDeliveryState = { ...state, status: 'active', phase: 'review', authorBatch: AUTHOR_BATCHES.length - 1,
+        designReview: { step: 'inspect', revision: check.revision, snapshots: check.snapshots, documentVersions: check.documentVersions,
+          findings: validated.findings, instruction: input.instruction, returnPhase: phase === 'complete' ? 'implementation' : phase }, accepted: undefined, lastValidationFailure: undefined,
+        designHistory: [{ step: 'owner-request', revision: check.revision, findings: validated.findings, resolved: [], instruction: input.instruction }] }
+      await save(workspace, dataRoot, next)
+      return next
+    }
+    if (!state.designReview && !state.designBaseline) throw new Error('Legacy delivery needs an explicit inspect before affected resolution')
+    const findings = [...(state.designReview?.findings ?? state.designBaseline?.followUps ?? [])]
+    for (const finding of validated.findings) {
+      const index = findings.findIndex(f => f.id === finding.id)
+      if (index >= 0) {
+        // Explicit decisions supply the answer, not permission to hide the recorded issue.
+        if (JSON.stringify(findings[index]) !== JSON.stringify(finding)) throw new Error('Do not redefine a recorded finding; supply its decision in instruction')
+      } else findings.push(finding)
+    }
+    const phase = projectDeliveryPhase(state), batch = phase === 'review' ? state.authorBatch ?? 4 : state.designBaseline!.batch
+    const check = designCheck(workspace, { ...state, authorBatch: batch })
+    if (findings.some(f => f.documents.some(name => !check.snapshots[name]))) throw new Error('Affected scope must consist of delivered documents')
+    if (input.mode === 'verify' && !check.valid) throw new Error(check.issues.join('; '))
+    const allowed = new Set(findings.flatMap(f => f.documents))
+    const original = state.designReview?.snapshots ?? state.designBaseline!.snapshots
+    const changed = Object.keys(original).filter(name => original[name] !== check.snapshots[name])
+    if (changed.some(name => !allowed.has(name as typeof PROJECT_DOCUMENTS[number]))) throw new Error('Changed documents exceed the explicit affected scope')
+    const originalVersions = state.designReview?.documentVersions ?? state.designBaseline?.documentVersions
+    for (const name of changed) {
+      const previous = originalVersions?.[name], current = check.documentVersions[name]
+      if (previous && (!current || !isHigherDocumentVersion(current, previous)))
+        throw new Error(name + ': revised document version must increase from ' + previous)
+    }
+    const next: ProjectDeliveryState = { ...state, status: 'active', phase: 'review', authorBatch: batch, lastValidationFailure: undefined,
+      designReview: { step: input.mode, revision: check.revision, snapshots: check.snapshots, documentVersions: check.documentVersions, findings,
+        writableDocuments: [...new Set(validated.findings.flatMap(f => f.documents))],
+        changedDocuments: changed, instruction: input.instruction,
+        returnPhase: state.designReview?.returnPhase ?? (phase === 'review' ? undefined : phase === 'complete' ? 'implementation' : phase),
+        returnAuthorBatch: state.designReview?.returnAuthorBatch ?? (phase === 'author' ? state.authorBatch : undefined) },
+      accepted: undefined, designHistory: [...state.designHistory ?? [], { step: 'owner-request', revision: check.revision, findings, resolved: [], instruction: input.instruction }] }
+    await save(workspace, dataRoot, next)
+    return next
+  })
+}
+
+/** Before dispatch and after completion: a changed baseline is not permission for paid dependent work. */
+export function checkProjectDesignBaseline(workspace: string, state: ProjectDeliveryState, finalizingDraft = false) {
+  if (legacyIntermediateReview(state)) return [LEGACY_INTERMEDIATE_REVIEW]
+  const phase = projectDeliveryPhase(state)
+  if (phase === 'review') return []
+  const baseline = state.designBaseline ?? (phase === 'author' ? state.designDrafts : undefined)
+  if (!baseline) return []
+  const scheduled = phase === 'author' ? AUTHOR_BATCHES[state.authorBatch ?? 0] ?? [] : []
+  const documents = [...new Set([...Object.keys(baseline.snapshots), ...scheduled])] as Array<typeof PROJECT_DOCUMENTS[number]>
+  const check = checkDesignHandoff(workspace, documents,
+    { technicalBaseline: baseline.batch < AUTHOR_BATCHES.length - 1,
+      nextConsumers: phase === 'author' ? [] : [phase] })
+  const changed = Object.keys(baseline.snapshots).filter(name => baseline.snapshots[name] !== check.snapshots[name] &&
+    !scheduled?.some(assigned => assigned === name))
+  const changedEvidencePaths = Object.keys(baseline.evidenceHashes).filter(path => baseline.evidenceHashes[path] !== check.evidenceHashes[path])
+  // Scheduled owners may revise their evidence too. Shared evidence still
+  // belongs to every protected consumer, not just the current writer.
+  const protectedEvidence = phase === 'author' && changedEvidencePaths.length
+    ? checkDesignHandoff(workspace, Object.keys(baseline.snapshots).filter(name => !scheduled.some(assigned => assigned === name)) as Array<typeof PROJECT_DOCUMENTS[number]>).evidenceHashes
+    : check.evidenceHashes
+  const changedEvidence = changedEvidencePaths.some(path => phase !== 'author' || Object.hasOwn(protectedEvidence, path))
+  const versionIssues = phase === 'author' && !finalizingDraft ? (scheduled ?? []).flatMap(name => {
+    const previous = baseline.documentVersions?.[name]
+    return previous && baseline.snapshots[name] !== check.snapshots[name] &&
+      (!check.documentVersions[name] || !isHigherDocumentVersion(check.documentVersions[name]!, previous))
+      ? [name + ': revised document version must increase from ' + previous] : []
+  }) : []
+  // Draft handoffs are inspected together after all authors finish. While
+  // writing, protect delivered bytes without turning a draft into approval.
+  const integrityIssues = phase === 'author' ? [] : check.issues
+  return [...integrityIssues, ...versionIssues, ...(changed.length || changedEvidence ? ['Reviewed design/evidence changed outside scheduled owner scope; request an affected design-resolution before dependent work.'] : []),
+    ...(state.designBaseline?.followUps ?? []).filter(f => phase !== 'author' && f.neededBefore === phase).map(f => `${f.id} is due before ${phase}; owner ${f.owner}: ${f.closeWhen}`)]
 }
 
 function statePath(workspacePath: string, dataRoot: string): string {
@@ -257,7 +407,7 @@ export async function pauseProjectDelivery(workspacePath: string, dataRoot: stri
 
 export async function resumeProjectDelivery(workspacePath: string, dataRoot: string): Promise<ProjectDeliveryState | undefined> {
   return withStateMutation(workspacePath, dataRoot, async () => {
-  const state = await readProjectDelivery(workspacePath, dataRoot)
+  let state = await readProjectDelivery(workspacePath, dataRoot)
   if (state?.status === 'paused') {
     const resumed = { ...state, status: 'active' as const }
     await save(workspacePath, dataRoot, resumed)
@@ -268,31 +418,138 @@ export async function resumeProjectDelivery(workspacePath: string, dataRoot: str
 }
 
 /** Advance only after a successful native turn; validation issues keep the same milestone. */
-export async function advanceProjectDeliveryAfterTurn(workspacePath: string, dataRoot: string, conclusion?: import('./milestone-result').MilestoneResult): Promise<{
+export async function advanceProjectDeliveryAfterTurn(workspacePath: string, dataRoot: string, conclusion?: import('./milestone-result').MilestoneResult,
+  completedAuthorBatch?: number, documentSnapshot?: DesignDocumentSnapshot): Promise<{
   phase: ProjectDeliveryPhase
   shouldContinue: boolean
   issues: string[]
   diagnostic?: AcceptanceDiagnostic
 } | undefined> {
   return withStateMutation(workspacePath, dataRoot, async () => {
-  const state = await readProjectDelivery(workspacePath, dataRoot)
-  if (!state || state.status !== 'active') return undefined
+  const initial = await readProjectDelivery(workspacePath, dataRoot)
+  if (!initial || initial.status !== 'active') return undefined
+  let state: ProjectDeliveryState = initial
   const phase = projectDeliveryPhase(state)
   if (phase === 'complete') return { phase, shouldContinue: false, issues: [] }
+  if (legacyIntermediateReview(state)) return { phase, shouldContinue: false, issues: [LEGACY_INTERMEDIATE_REVIEW] }
   const issues: string[] = []
   let diagnostic: AcceptanceDiagnostic | undefined
-  if (phase === 'review' || phase === 'implementation') {
+  // Design release has its own bounded result, not an LLM complete string.
+  if (phase === 'review') {
+    const parsed = designReviewResultSchema.safeParse(conclusion?.review)
+    const review = state.designReview
+    if (review?.stopped) return { phase, shouldContinue: false, issues: ['Review is stopped pending explicit owner resolution.'] }
+    if (conclusion?.phase !== 'review' || !parsed.success || !review || parsed.data.step !== review.step)
+      return { phase, shouldContinue: false, issues: ['Review has no valid version-bound result for its current step.', ...(conclusion?.validationIssues ?? [])] }
+    const result = parsed.data
+    let check = designCheck(workspacePath, state)
+    let changed = Object.keys(check.snapshots).filter(name => check.snapshots[name] !== review.snapshots[name])
+    if (review.step !== 'revise' && check.revision !== review.revision)
+      return { phase, shouldContinue: false, issues: ['Read-only review changed its source documents or evidence.'] }
+    // Recorded source locations belong to the inspected version. A legitimate
+    // correction can delete an offending clause; do not require it to survive.
+    const resultIssues = designReviewResultIssues(result, { step: review.step, findings: review.findings,
+      sourceHeadings: designReviewSourceHeadings(workspacePath, Object.keys(check.snapshots)) })
+    if (resultIssues.length) return { phase, shouldContinue: false, issues: resultIssues }
+    state = { ...state, designHistory: [...state.designHistory ?? [], { step: review.step, revision: check.revision, findings: result.findings, resolved: result.resolved }] }
+    const blockers = result.findings.filter(f => f.severity === 'blocker')
+    const stop = async (findings: DesignFinding[], reason: string) => {
+      await save(workspacePath, dataRoot, { ...state, designReview: { ...review, findings, stopped: true }, lastValidationFailure: reason })
+      return { phase, shouldContinue: false, issues: [reason, ...findings.filter(f => f.severity === 'blocker').map(f => `${f.id}: owner ${f.owner}; ${f.impact}; close: ${f.closeWhen}`)] }
+    }
+    if (conclusion.status === 'blocked') return stop(result.findings, 'Review requires evidence or an owner/user decision; no automatic retry.')
+    let references = checkDesignDocumentReferences(workspacePath, state.authorBatch ?? AUTHOR_BATCHES.length - 1)
+    if (review.step === 'inspect' && (blockers.length || !check.valid || !references.valid)) {
+      if (blockers.some(f => f.action !== 'correct' || f.owner === 'user')) return stop(result.findings, 'Required decision/evidence cannot be selected by the reviewer.')
+      const deterministicIssues = [...check.issues, ...references.issues]
+      // Program diagnostics name their actual source document. Their repair
+      // must not depend on a model severity label or an invented prose finding.
+      const sourceFor = (issue: string) => PROJECT_DOCUMENTS.find(name => Object.hasOwn(check.snapshots, name) &&
+        (issue.startsWith(name + ':') || issue.startsWith('docs/' + name + ':')))
+      if (deterministicIssues.some(issue => !sourceFor(issue)))
+        return stop(result.findings, 'Deterministic failure has no delivered correction scope: ' + deterministicIssues.join('; '))
+      await save(workspacePath, dataRoot, { ...state, designReview: { ...review, step: 'revise', findings: result.findings,
+        writableDocuments: [...new Set([...blockers.flatMap(f => f.documents), ...deterministicIssues.map(issue => sourceFor(issue)!)])] } })
+      return { phase, shouldContinue: true, issues: [] }
+    }
+    if (review.step === 'revise') {
+      const allowed = new Set(review.writableDocuments ?? review.findings.filter(f => f.severity === 'blocker').flatMap(f => f.documents))
+      if (changed.some(name => !allowed.has(name as typeof PROJECT_DOCUMENTS[number]))) return stop(review.findings, 'Revision modified a document outside the recorded affected scope.')
+      if (documentSnapshot) {
+        const finalized = finalizeDesignDocuments(workspacePath, [...allowed], documentSnapshot)
+        if (finalized.issues.length) return stop(review.findings, 'The one revision pass still fails saved handoff checks: ' + finalized.issues.join('; '))
+        check = designCheck(workspacePath, state)
+        changed = Object.keys(check.snapshots).filter(name => check.snapshots[name] !== review.snapshots[name])
+        references = checkDesignDocumentReferences(workspacePath, state.authorBatch ?? AUTHOR_BATCHES.length - 1)
+      }
+      const versionIssues = changed.flatMap(name => {
+        const previous = review.documentVersions?.[name], current = check.documentVersions[name]
+        return previous && (!current || !isHigherDocumentVersion(current, previous))
+          ? [name + ': revised document version must increase from ' + previous] : []
+      })
+      const staticIssues = [...check.issues, ...versionIssues, ...references.issues]
+      if (staticIssues.length) return stop(review.findings, 'The one revision pass still fails deterministic checks: ' + staticIssues.join('; '))
+      await save(workspacePath, dataRoot, { ...state, designReview: { ...review, step: 'verify', revision: check.revision,
+        snapshots: check.snapshots, documentVersions: check.documentVersions, changedDocuments: changed } })
+      return { phase, shouldContinue: true, issues: [] }
+    }
+    if (review.step === 'verify') {
+      if (blockers.length) return stop(result.findings, 'Targeted verification still has blockers; the one revision pass is exhausted.')
+    }
+    if (!check.valid || !references.valid) return stop(result.findings, 'Deterministic release checks still fail: ' + [...check.issues, ...references.issues].join('; '))
+    const batch = state.authorBatch ?? AUTHOR_BATCHES.length - 1
+    let next = review.returnPhase ?? 'resources'
+    const changedSources = Object.keys(check.snapshots).filter(name => state.designBaseline?.snapshots[name] !== check.snapshots[name]) as Array<typeof PROJECT_DOCUMENTS[number]>
+    const change = review.returnPhase && state.designBaseline?.revision !== check.revision
+      ? { documents: changedSources.length ? changedSources : review.writableDocuments ?? [...new Set(review.findings.flatMap(f => f.documents))], instruction: review.instruction }
+      : undefined
+    // Formal content binds the design revision. A changed baseline cannot jump
+    // straight back to implementation with stale content or resource bindings.
+    if (review.returnPhase && ['content', 'implementation', 'acceptance'].includes(review.returnPhase) &&
+        state.designBaseline?.revision !== check.revision) {
+      next = changedSources.some(name => ['ART_DIRECTION.md', 'AUDIO_DESIGN.md', 'ASSET_PLAN.md'].includes(name)) ? 'resources' : 'content'
+    }
+    const nextAuthorBatch = review.returnAuthorBatch ?? batch + 1
+    const nextConsumers: readonly string[] = next === 'author' ? AUTHOR_BATCHES[nextAuthorBatch] ?? [] : [next]
+    const consumerCheck = designCheck(workspacePath, state, nextConsumers)
+    if (!consumerCheck.valid) return stop(result.findings, 'Next-consumer delivery requirements still fail: ' + consumerCheck.issues.join('; '))
+    const due = result.findings.filter(f => f.neededBefore !== null &&
+      (nextConsumers.includes(f.neededBefore) || PROJECT_DOCUMENTS.some(name => name === f.neededBefore)))
+    if (due.length) return stop(result.findings, 'A deferred required decision is due before the next consumer; it cannot be released as a follow-up.')
+    const baseline = { batch: state.authorBatch ?? AUTHOR_BATCHES.length - 1, revision: check.revision, snapshots: check.snapshots, documentVersions: check.documentVersions, evidenceHashes: check.evidenceHashes,
+      followUps: result.findings.filter(f => f.severity === 'follow-up'), ...(change ? { change } : {}) }
+    if (next === 'content') await refreshProjectContentContract(workspacePath)
+    await save(workspacePath, dataRoot, { ...state, phase: next, ...(next === 'author' ? { authorBatch: nextAuthorBatch } : {}),
+      designReview: undefined, designDrafts: undefined, designBaseline: baseline, lastValidationFailure: undefined })
+    return { phase: next, shouldContinue: true, issues: [] }
+  }
+  const baselineIssues = checkProjectDesignBaseline(workspacePath, state, phase === 'author' && !!documentSnapshot)
+  if (baselineIssues.length) return { phase, shouldContinue: false, issues: baselineIssues }
+  if (phase === 'implementation' || phase === 'author' && (state.authorBatch ?? 0) === 0) {
     if (conclusion?.phase !== phase || conclusion.status !== 'complete') {
       return { phase, shouldContinue: false, issues: [conclusion?.phase === phase && conclusion.status === 'blocked'
         ? conclusion.summary : `The ${phase} milestone has no explicit completion result from this turn.`] }
     }
-  } else if (phase === 'author') {
+  }
+  if (phase === 'author') {
     const batch = state.authorBatch ?? 0
-    if (!AUTHOR_BATCHES[batch]) throw new Error('Invalid author batch')
-    for (const name of AUTHOR_BATCHES.slice(0, batch + 1).flat()) {
-      const path = join(workspacePath, 'docs', name)
-    try { const file = await stat(path); if (!file.isFile() || file.size === 0) issues.push(`docs/${name} is missing or empty`) }
-      catch { issues.push(`docs/${name} is missing`) }
+    if (batch > 0 && completedAuthorBatch !== batch)
+      return { phase, shouldContinue: false, issues: ['The scheduled writing owners have no completion result from this turn.'] }
+    issues.push(...await projectAuthorDraftIssues(workspacePath, batch))
+    // A completed chat or a draft file does not establish that the Agent's
+    // first GDD assignment is finished. No paid repair
+    // turn is dispatched for a contradictory completion signal.
+    if (issues.length) {
+      await save(workspacePath, dataRoot, { ...state, lastValidationFailure: JSON.stringify([phase, [...issues].sort()]) })
+      return { phase, shouldContinue: false, issues }
+    }
+    if (documentSnapshot) {
+      const finalized = finalizeDesignDocuments(workspacePath, AUTHOR_BATCHES[batch], documentSnapshot)
+      if (finalized.unsafeIssues.length) {
+        await save(workspacePath, dataRoot, { ...state, lastValidationFailure: JSON.stringify([phase, finalized.unsafeIssues]) })
+        return { phase, shouldContinue: false, issues: finalized.unsafeIssues }
+      }
+      if (finalized.issues.length) issues.push('Saved draft handoff diagnostics await the joint inspection: ' + finalized.issues.join('; '))
     }
   } else if (phase === 'resources') {
     try {
@@ -305,6 +562,12 @@ export async function advanceProjectDeliveryAfterTurn(workspacePath: string, dat
     try {
       const audit = auditBeeGameContentPackage(workspacePath, projectContentAuthority(workspacePath))
       if (!audit.valid) issues.push(...audit.issues)
+      // Recalculate the same UI source after resource/behavior binding.
+      let settings: { orientation?: unknown; dimension?: unknown } = {}
+      try { settings = JSON.parse(state.objective).settings ?? {} } catch { /* Legacy objectives may be plain text. */ }
+      if (audit.valid) {
+        issues.push(...checkReviewUiLayouts(workspacePath, settings).issues)
+      }
     }
     catch (error) { issues.push(`Content validation failed: ${error instanceof Error ? error.message : String(error)}`) }
   } else if (phase === 'acceptance') {
@@ -323,7 +586,7 @@ export async function advanceProjectDeliveryAfterTurn(workspacePath: string, dat
         .map(issue => `Publish readiness (${gate?.layer ?? 'acceptance-record'}): ${issue}`))
     }
   }
-  if (issues.length) {
+  if (issues.length && phase !== 'author') {
     const failure = JSON.stringify([phase, [...issues].sort()])
     await save(workspacePath, dataRoot, { ...state, phase, lastValidationFailure: failure })
     // Send new diagnostic information once. Unrelated edits are not evidence
@@ -332,11 +595,14 @@ export async function advanceProjectDeliveryAfterTurn(workspacePath: string, dat
     // explicit user turns (which are always delivered).
     return { phase, shouldContinue: state.lastValidationFailure !== failure, issues, ...(diagnostic ? { diagnostic } : {}) }
   }
-  if (phase === 'author' && (state.authorBatch ?? 0) < AUTHOR_BATCHES.length - 1) {
-    await save(workspacePath, dataRoot, {
-      ...state, authorBatch: (state.authorBatch ?? 0) + 1, lastValidationFailure: undefined,
-    })
-    return { phase, shouldContinue: true, issues: [] }
+  if (phase === 'author') {
+    const batch = state.authorBatch ?? 0, next = batch === AUTHOR_BATCHES.length - 1 ? 'review' : 'author'
+    const check = designCheck(workspacePath, state)
+    const designDrafts = { batch, revision: check.revision, snapshots: check.snapshots,
+      documentVersions: check.documentVersions, evidenceHashes: check.evidenceHashes }
+    await save(workspacePath, dataRoot, { ...state, phase: next, authorBatch: next === 'author' ? batch + 1 : batch,
+      designDrafts, lastValidationFailure: undefined })
+    return { phase: next, shouldContinue: true, issues }
   }
   const next = NEXT_PHASE[phase]
   if (next === 'content') await refreshProjectContentContract(workspacePath)
