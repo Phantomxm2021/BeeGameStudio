@@ -5,7 +5,64 @@ import {
   MAX_ERRORS_BEFORE_RECONNECT,
   isTerminalConnectionError,
   isMcpSessionExpiredError,
+  withConnectionTimeout,
 } from '../connection.js'
+
+describe('withConnectionTimeout', () => {
+  test('returns the timeout even when cleanup never settles', async () => {
+    let called = false
+    let guard: ReturnType<typeof setTimeout> | undefined
+    try {
+      const connection = withConnectionTimeout(new Promise(() => {}), 5, () => {
+        called = true
+        return new Promise(() => {})
+      })
+      const result = await Promise.race([
+        connection.catch(error => error.message),
+        new Promise<string>(resolve => {
+          guard = setTimeout(() => resolve('stalled'), 100)
+        }),
+      ])
+      expect(result).toBe('MCP connection timed out after 5ms')
+      expect(called).toBe(true)
+    } finally {
+      clearTimeout(guard)
+    }
+  })
+
+  test('cleanup throws or rejects without replacing the timeout or leaking a rejection', async () => {
+    for (const cleanup of [
+      () => {
+        throw new Error('cleanup failed')
+      },
+      () => Promise.reject(new Error('cleanup failed')),
+    ]) {
+      await expect(
+        withConnectionTimeout(new Promise(() => {}), 5, cleanup),
+      ).rejects.toThrow('MCP connection timed out after 5ms')
+    }
+    await Bun.sleep(1)
+  })
+
+  test('normal connection success and failure cancel cleanup', async () => {
+    let cleanupCalls = 0
+    const cleanup = () => {
+      cleanupCalls++
+    }
+    expect(
+      await withConnectionTimeout(Promise.resolve('connected'), 5, cleanup),
+    ).toBe('connected')
+    await expect(
+      withConnectionTimeout(
+        Promise.reject(new Error('connection failed')),
+        5,
+        cleanup,
+      ),
+    ).rejects.toThrow('connection failed')
+    await Bun.sleep(10)
+    expect(cleanupCalls).toBe(0)
+  })
+})
 
 describe('connection constants', () => {
   test('has reasonable defaults', () => {

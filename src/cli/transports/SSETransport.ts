@@ -382,6 +382,9 @@ export class SSETransport implements Transport {
                   { level: 'warn' },
                 )
                 logForDiagnosticsNoPII('warn', 'cli_sse_duplicate_sequence')
+                // Replayed frames must not reach the command handler or ACK
+                // callback again. The liveness timer above still gets reset.
+                continue
               } else {
                 this.seenSequenceNums.add(seqNum)
                 // Prevent unbounded growth: once we have many entries, prune

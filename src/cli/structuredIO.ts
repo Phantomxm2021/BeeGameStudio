@@ -506,13 +506,6 @@ export class StructuredIO {
     if (signal?.aborted) {
       throw new Error('Request aborted')
     }
-    this.outbound.enqueue(message)
-    if (
-      (request as { subtype?: string }).subtype === 'can_use_tool' &&
-      this.onControlRequestSent
-    ) {
-      this.onControlRequestSent(message)
-    }
     const aborted = () => {
       this.outbound.enqueue({
         type: 'control_cancel_request',
@@ -528,25 +521,23 @@ export class StructuredIO {
         request.reject(new AbortError())
       }
     }
-    if (signal) {
-      signal.addEventListener('abort', aborted, {
-        once: true,
-      })
-    }
     try {
       return await new Promise<Response>((resolve, reject) => {
+        // Register both the response and cancellation handlers before exposing
+        // the request. In-process brokers may respond or cancel synchronously.
         this.pendingRequests.set(requestId, {
-          request: {
-            type: 'control_request',
-            request_id: requestId,
-            request,
-          },
+          request: message,
           resolve: result => {
             resolve(result as Response)
           },
           reject,
           schema,
         })
+        signal?.addEventListener('abort', aborted, { once: true })
+        this.outbound.enqueue(message)
+        if ((request as { subtype?: string }).subtype === 'can_use_tool') {
+          this.onControlRequestSent?.(message)
+        }
       })
     } finally {
       if (signal) {

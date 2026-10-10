@@ -62,6 +62,7 @@ export async function callMcpTool(
   const effectiveTimeout = timeoutMs ?? getMcpToolTimeoutMs()
 
   let progressInterval: ReturnType<typeof setInterval> | undefined
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
 
   try {
     deps.logger.debug(`[${serverName}] Calling MCP tool: ${tool}`)
@@ -85,7 +86,16 @@ export async function callMcpTool(
           onprogress: onProgress,
         },
       ),
-      createTimeoutPromise(serverName, tool, effectiveTimeout),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(
+            new Error(
+              `MCP server "${serverName}" tool "${tool}" timed out after ${Math.floor(effectiveTimeout / 1000)}s`,
+            ),
+          )
+        }, effectiveTimeout)
+        timeoutId.unref?.()
+      }),
     ])
 
     // Handle isError in result
@@ -117,10 +127,6 @@ export async function callMcpTool(
         | undefined,
     }
   } catch (e) {
-    if (progressInterval !== undefined) {
-      clearInterval(progressInterval)
-    }
-
     if (e instanceof Error && e.name !== 'AbortError') {
       deps.logger.debug(`[${serverName}] Tool '${tool}' failed: ${e.message}`)
     }
@@ -138,6 +144,7 @@ export async function callMcpTool(
 
     throw e
   } finally {
+    clearTimeout(timeoutId)
     if (progressInterval !== undefined) {
       clearInterval(progressInterval)
     }
@@ -153,21 +160,4 @@ function getMcpToolTimeoutMs(): number {
     parseInt(process.env.MCP_TOOL_TIMEOUT || '', 10) ||
     DEFAULT_MCP_TOOL_TIMEOUT_MS
   )
-}
-
-function createTimeoutPromise(
-  serverName: string,
-  tool: string,
-  timeoutMs: number,
-): Promise<never> {
-  return new Promise((_, reject) => {
-    const timeoutId = setTimeout(() => {
-      reject(
-        new Error(
-          `MCP server "${serverName}" tool "${tool}" timed out after ${Math.floor(timeoutMs / 1000)}s`,
-        ),
-      )
-    }, timeoutMs)
-    timeoutId.unref?.()
-  })
 }

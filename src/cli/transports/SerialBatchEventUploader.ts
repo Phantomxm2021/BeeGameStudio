@@ -66,6 +66,9 @@ export class SerialBatchEventUploader<T> {
   private pendingAtClose = 0
   private draining = false
   private closed = false
+  private enqueueTail: Promise<void> = Promise.resolve()
+  private enqueuesPending = 0
+  private itemsWaiting = 0
   private backpressureResolvers: Array<() => void> = []
   private sleepResolve: (() => void) | null = null
   private flushResolvers: Array<() => void> = []
@@ -73,6 +76,16 @@ export class SerialBatchEventUploader<T> {
   private readonly config: SerialBatchEventUploaderConfig<T>
 
   constructor(config: SerialBatchEventUploaderConfig<T>) {
+    if (
+      !Number.isInteger(config.maxQueueSize) ||
+      config.maxQueueSize < 1 ||
+      !Number.isInteger(config.maxBatchSize) ||
+      config.maxBatchSize < 1
+    ) {
+      throw new Error(
+        'Uploader queue and batch sizes must be positive integers',
+      )
+    }
     this.config = config
   }
 
@@ -90,7 +103,9 @@ export class SerialBatchEventUploader<T> {
    * close() clears the queue but shutdown diagnostics may read this after.
    */
   get pendingCount(): number {
-    return this.closed ? this.pendingAtClose : this.pending.length
+    return this.closed
+      ? this.pendingAtClose
+      : this.pending.length + this.itemsWaiting
   }
 
   /**
@@ -100,22 +115,38 @@ export class SerialBatchEventUploader<T> {
    */
   async enqueue(events: T | T[]): Promise<void> {
     if (this.closed) return
-    const items = Array.isArray(events) ? events : [events]
+    const items = Array.isArray(events) ? [...events] : [events]
     if (items.length === 0) return
 
-    // Backpressure: wait until there's space
-    while (
-      this.pending.length + items.length > this.config.maxQueueSize &&
-      !this.closed
-    ) {
-      await new Promise<void>(resolve => {
-        this.backpressureResolvers.push(resolve)
-      })
+    // Admit oversized calls in bounded chunks. Serialize admission so a later
+    // enqueue cannot overtake the rest of an earlier call under backpressure.
+    this.enqueuesPending++
+    this.itemsWaiting += items.length
+    let offset = 0
+    const admission = this.enqueueTail.then(async () => {
+      while (offset < items.length && !this.closed) {
+        const capacity = this.config.maxQueueSize - this.pending.length
+        if (capacity <= 0) {
+          await new Promise<void>(resolve => {
+            this.backpressureResolvers.push(resolve)
+          })
+          continue
+        }
+        const count = Math.min(capacity, items.length - offset)
+        for (let i = 0; i < count; i++) this.pending.push(items[offset + i]!)
+        offset += count
+        this.itemsWaiting -= count
+        void this.drain()
+      }
+    })
+    this.enqueueTail = admission.catch(() => {})
+    try {
+      await admission
+    } finally {
+      this.itemsWaiting -= items.length - offset
+      this.enqueuesPending--
+      this.resolveFlushIfIdle()
     }
-
-    if (this.closed) return
-    this.pending.push(...items)
-    void this.drain()
   }
 
   /**
@@ -123,7 +154,12 @@ export class SerialBatchEventUploader<T> {
    * Used at turn boundaries and graceful shutdown.
    */
   flush(): Promise<void> {
-    if (this.pending.length === 0 && !this.draining) {
+    if (
+      this.closed ||
+      (this.pending.length === 0 &&
+        !this.draining &&
+        this.enqueuesPending === 0)
+    ) {
       return Promise.resolve()
     }
     void this.drain()
@@ -138,8 +174,8 @@ export class SerialBatchEventUploader<T> {
    */
   close(): void {
     if (this.closed) return
+    this.pendingAtClose = this.pendingCount
     this.closed = true
-    this.pendingAtClose = this.pending.length
     this.pending = []
     this.sleepResolve?.()
     this.sleepResolve = null
@@ -161,12 +197,16 @@ export class SerialBatchEventUploader<T> {
     try {
       while (this.pending.length > 0 && !this.closed) {
         const batch = this.takeBatch()
-        if (batch.length === 0) continue
+        if (batch.length === 0) {
+          this.releaseBackpressure()
+          continue
+        }
 
         try {
           await this.config.send(batch)
           failures = 0
         } catch (err) {
+          if (this.closed) break
           failures++
           if (
             this.config.maxConsecutiveFailures !== undefined &&
@@ -193,12 +233,19 @@ export class SerialBatchEventUploader<T> {
       }
     } finally {
       this.draining = false
-      // Notify flush waiters if queue is empty
-      if (this.pending.length === 0) {
-        for (const resolve of this.flushResolvers) resolve()
-        this.flushResolvers = []
-      }
+      this.resolveFlushIfIdle()
     }
+  }
+
+  private resolveFlushIfIdle(): void {
+    if (
+      this.pending.length !== 0 ||
+      this.draining ||
+      this.enqueuesPending !== 0
+    )
+      return
+    for (const resolve of this.flushResolvers) resolve()
+    this.flushResolvers = []
   }
 
   /**

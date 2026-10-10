@@ -366,10 +366,8 @@ export class CCRClient {
       maxBatchSize: 100,
       maxBatchBytes: 10 * 1024 * 1024,
       // flushStreamEventBuffer() enqueues a full 100ms window of accumulated
-      // stream_events in one call. A burst of mixed delta types that don't
-      // fold into a single snapshot could exceed the old cap (50) and deadlock
-      // on the SerialBatchEventUploader backpressure check. Match
-      // HybridTransport's bound — high enough to be memory-only.
+      // stream_events in one call. Oversized bursts are admitted in chunks;
+      // keep the existing capacity without relying on it to prevent deadlock.
       maxQueueSize: 100_000,
       send: async batch => {
         const result = await this.request(

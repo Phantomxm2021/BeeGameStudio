@@ -79,10 +79,9 @@ export class HybridTransport extends WebSocketTransport {
       // naturally batch during in-flight POSTs; this just bounds the payload.
       maxBatchSize: 500,
       // Bridge callers use `void transport.write()` — backpressure doesn't
-      // apply (they don't await). A batch >maxQueueSize deadlocks (see
-      // SerialBatchEventUploader backpressure check). So set it high enough
-      // to be a memory bound only. Wire real backpressure in a follow-up
-      // once callers await.
+      // apply to those callers (they don't await). Oversized batches are
+      // admitted in chunks, but real producer backpressure still requires
+      // callers to await writes; keep the existing capacity unchanged.
       maxQueueSize: 10_000,
       baseDelayMs: 500,
       maxDelayMs: 8000,

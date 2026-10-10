@@ -86,22 +86,21 @@ export async function withConnectionTimeout<T>(
   timeoutMs: number,
   onTimeout: () => Promise<void> | void,
 ): Promise<T> {
-  const startTime = Date.now()
-
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
   const timeoutPromise = new Promise<never>((_, reject) => {
-    const timeoutId = setTimeout(async () => {
-      await onTimeout()
+    timeoutId = setTimeout(() => {
       reject(new Error(`MCP connection timed out after ${timeoutMs}ms`))
+      // Cleanup is best-effort and must never postpone or replace the timeout.
+      // Catch both synchronous throws and asynchronous cleanup rejections.
+      void Promise.resolve()
+        .then(onTimeout)
+        .catch(() => {})
     }, timeoutMs)
-
-    // Clean up timeout if connect resolves or rejects
-    connectPromise.then(
-      () => clearTimeout(timeoutId),
-      () => clearTimeout(timeoutId),
-    )
   })
 
-  return Promise.race([connectPromise, timeoutPromise])
+  return Promise.race([connectPromise, timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId)
+  })
 }
 
 // ============================================================================

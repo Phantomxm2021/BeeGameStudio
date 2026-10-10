@@ -33,10 +33,12 @@ export interface CliLaunchSpec {
 // ---------------------------------------------------------------------------
 
 /**
- * Filter out leaked application arguments from process.execArgv.
- * Only keep known runtime flags: -d (defines), --feature, --inspect variants.
+ * Script runtimes already separate execArgv from application arguments.
+ * Filter only compiled Bun executables, where application arguments can leak.
  */
 function sanitizeExecArgv(raw: readonly string[]): string[] {
+  if (!isInBundledMode()) return [...raw]
+
   const result: string[] = []
   for (let i = 0; i < raw.length; i++) {
     const arg = raw[i]!
@@ -64,17 +66,6 @@ function sanitizeExecArgv(raw: readonly string[]): string[] {
     if (/^--inspect(-brk)?(=|$)/.test(arg)) {
       result.push(arg)
       continue
-    }
-    // Keep other known runtime flags (e.g. --conditions, --experimental-*)
-    if (arg.startsWith('--') && !arg.includes('=') && i + 1 < raw.length) {
-      // Unknown two-part flag — skip conservatively in bundled mode only
-      if (isInBundledMode()) continue
-      result.push(arg)
-      result.push(raw[++i]!)
-      continue
-    }
-    if (arg.startsWith('-') && !isInBundledMode()) {
-      result.push(arg)
     }
   }
   return result
