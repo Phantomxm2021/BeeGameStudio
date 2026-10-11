@@ -51,23 +51,31 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
   if(!measurement.finishedAt || measurement.error || !build || !smoke || !proof || !artifact ||
       proof.artifact.sha256!==artifact.sha256 || !smoke.coverage?.files.length)
     return fail('preview-unverified','Measurement is incomplete or failed; inspect saved checks. No automatic rebuild or retry.')
-  if(measurement.sourceEditId!==run.sourceEdits?.at(-1)?.attemptId || measurement.requirementsRevision!==run.requirements.revision)
-    return fail('measurement-stale','Requirements or an authorized source save changed; remeasure affected results')
+  const requirementsChanged=measurement.requirementsRevision!==run.requirements.revision
+  const sourceSaveChanged=measurement.sourceEditId!==run.sourceEdits?.at(-1)?.attemptId
   // Identify the actual stale report instead of forcing source/registry
   // exploration. A missing report is stale too; never strip a receipt footer
   // or ignore edited evidence to make it pass.
   const changedReports=[]
   for(const report of measurement.reports)
     if(!await versionsMatch(run.workspacePath,[report]))changedReports.push(report.path)
-  if(changedReports.length)return fail('measurement-stale','Reports changed or are missing: '+changedReports.join(', ')+'. Finalize evidence before measuring; the receipt is already saved in BGS, not in these files.')
-  if(!await checkIsCurrent(run.workspacePath,build,{editableProject:true}) || !await checkIsCurrent(run.workspacePath,smoke))
-    return fail('measurement-stale','Build inputs or measured artifact changed; inspect and remeasure affected results')
   const changedSources=changedProjectPaths(proof.files,await projectFiles(run.workspacePath,artifact.path,proof.excludedReports))
-  if(changedSources.length)
-    return fail('measurement-stale','Exportable sources changed: '+changedSources.join(', ')+'. Inspect and remeasure affected results')
-  if(proof.dependencySha256!==await projectDependencies(run.workspacePath))
-    return fail('measurement-stale','Installed dependencies changed; inspect and remeasure affected results')
-  return {current:true,code:'current',reason:'Source/build/report inputs match now; this is not game-quality acceptance or permission to ignore later edits.'}
+  const dependenciesChanged=proof.dependencySha256!==await projectDependencies(run.workspacePath)
+  const buildOrArtifactChanged=!await checkIsCurrent(run.workspacePath,build,{editableProject:true}) || !await checkIsCurrent(run.workspacePath,smoke)
+  const changes={requirements:requirementsChanged,authorizedSourceSave:sourceSaveChanged,
+    sources:changedSources,reports:changedReports,dependencies:dependenciesChanged,buildOrArtifact:buildOrArtifactChanged}
+  // A new requirement must not hide concurrent source/report changes. Return
+  // the whole deterministic comparison once, rather than forcing mtime guesses
+  // and another request for each successive stale cause. No build is executed.
+  const reasons=[
+    ...(changedReports.length?['Reports changed or are missing: '+changedReports.join(', ')+'. Finalize evidence before measuring; the receipt is already saved in BGS, not in these files.']:[]),
+    ...(requirementsChanged || sourceSaveChanged?['Requirements or an authorized source save changed; remeasure affected results']:[]),
+    ...(changedSources.length?['Exportable sources changed: '+changedSources.join(', ')]:[]),
+    ...(dependenciesChanged?['Installed dependencies changed']:[]),
+    ...(buildOrArtifactChanged?['Build inputs or measured artifact changed']:[]),
+  ]
+  return {current:!reasons.length,code:reasons.length?'measurement-stale':'current',changes,
+    reason:reasons.length?reasons.join('; '):'Source/build/report inputs match now; this is not game-quality acceptance or permission to ignore later edits.'}
 }
 export async function measuredFiles(run: Run, selected: {artifact: FileVersion; smoke: CheckResult}) {
   const files = new Map<string, string>()

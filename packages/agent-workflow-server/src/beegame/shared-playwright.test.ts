@@ -29,6 +29,42 @@ test('numeric evidence keeps counterexamples across runs; absent observations ca
   expect(() => checkNumericSamples([1], { minimum: 10, maximum: 5 })).toThrow('bound')
 })
 
+test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1')('rendered text ranges detect nested overflow missed by parent boxes; missing evidence is unverified',async()=>{
+  const workspace=await mkdtemp(join(tmpdir(),'bgs-text-layout-fixture-'))
+  const fixture=Bun.serve({hostname:'127.0.0.1',port:0,fetch:()=>new Response(
+    '<style>body{margin:0;font:24px/24px monospace}#badge{position:absolute;left:10px;top:10px;width:200px;height:24px}#badge span{display:block}#summary{position:absolute;left:10px;top:44px}</style>'+
+    '<div id="badge">Ready<span>Waiting</span></div><div id="summary">Score 10</div>',{headers:{'content-type':'text/html'}})})
+  const capability=openPreviewTestAccess({start:async()=>({status:'running',url:fixture.url.href}),
+    status:()=>({status:'running',url:fixture.url.href}),stop(){}})
+  try {
+    const access=await projectExecutionAccess({workspacePath:workspace,sessionId:'fixture',environment:{}})
+    const script=`
+      import assert from 'node:assert/strict';
+      const {withPreviewPage,checkTextSeparation}=await import(process.env.BEEGAME_PREVIEW_TEST_MODULE);
+      await withPreviewPage({apiUrl:process.env.FIXTURE_API,mode:'production'},async({gameFrame})=>{
+        const parents=await gameFrame.evaluate(()=>{
+          const a=document.querySelector('#badge').getBoundingClientRect(),b=document.querySelector('#summary').getBoundingClientRect();
+          return a.bottom<=b.top;
+        });assert.equal(parents,true);
+        const collision=await checkTextSeparation(gameFrame,['#badge','#summary']);
+        assert.equal(collision.status,'failed');assert.ok(collision.overlaps.length>0);
+        await gameFrame.evaluate(()=>document.querySelector('#badge span').style.display='inline');
+        assert.equal((await checkTextSeparation(gameFrame,['#badge','#summary'])).status,'passed');
+        assert.equal((await checkTextSeparation(gameFrame,['#missing','#summary'])).status,'unverified');
+        await gameFrame.evaluate(()=>document.querySelector('#badge').style.visibility='hidden');
+        assert.equal((await checkTextSeparation(gameFrame,['#badge','#summary'])).status,'unverified');
+        await assert.rejects(checkTextSeparation(gameFrame,['#badge','#badge']),/distinct/);
+      });console.log('TEXT_LAYOUT_FIXTURE_PASS');`
+    const child=Bun.spawn([Bun.which('node')!,'--input-type=module','-e',script],{cwd:workspace,
+      env:{...process.env,...access.environment,FIXTURE_API:capability.baseUrl},stdout:'pipe',stderr:'pipe'})
+    const timer=setTimeout(()=>child.kill(),20000)
+    try {
+      const [code,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()])
+      expect(code,err).toBe(0);expect(out).toContain('TEXT_LAYOUT_FIXTURE_PASS')
+    }finally{clearTimeout(timer)}
+  }finally{await capability.close();fixture.stop(true);await rm(workspace,{recursive:true,force:true})}
+},30000)
+
 test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1')('beforeNavigate captures boot errors and overrides the first data request without editing sources', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'bgs-preview-startup-'))
   const saved = '{"fontSize":17,"cameraCenter":100}'

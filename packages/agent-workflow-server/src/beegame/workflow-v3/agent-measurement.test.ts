@@ -49,6 +49,52 @@ async function fixture(script=builder,previousTurns:AgentTurn[]=[]) {
 }
 const request={requestKey:'measure-1',runtimeArtifact:'dist',reportPaths:['README.md']}
 
+test('one handoff diagnoses simultaneous requirement, report and source drift without mtime guessing',async()=>{
+  const f=await fixture()
+  try {
+    await mkdir(join(f.workspace,'reports'))
+    await writeFile(join(f.workspace,'reports/result.txt'),'Saved evidence')
+    const measured=await f.measurement.measure({...request,reportPaths:['reports/result.txt']})
+    expect(measured.checks.every(c=>c.status==='passed')).toBe(true)
+    await writeFile(join(f.workspace,'src/index.html'),'<h1>Changed source</h1>')
+    await writeFile(join(f.workspace,'reports/result.txt'),'Changed evidence')
+    const run=await f.current();run.requirements.revision='new-requirement'
+    run.blockedReason='Old turn measurement-stale'
+    // Read-only snapshot of a later authorized requirement. Do not overwrite
+    // requirements through a fake store commit or weaken its append-only guard.
+    const reader=createAgentMeasurement({run,turn:f.turn,store:{...f.store,async read(){return run}}})
+    const before=await f.current(),result=await reader.handoff(['src/index.html'])
+    expect(result.measurement?.freshness).toMatchObject({current:false,changes:{requirements:true,
+      sources:['src/index.html'],reports:['reports/result.txt'],dependencies:false}})
+    expect(result.blockedReason).toContain('src/index.html')
+    expect(result.blockedReason).toContain('reports/result.txt')
+    expect(result.blockedReason).not.toContain('Old turn')
+    expect(result.measurement?.measuredSourceFiles).toBe(4)
+    expect(await f.current()).toEqual(before)
+    expect(await readFile(join(f.workspace,'dist/index.html'),'utf8')).not.toContain('Changed')
+    await reader.close()
+  }finally{await f.close()}
+},30000)
+
+test('current handoff never reports a previous blocked reason as the cause of a valid measurement',async()=>{
+  const f=await fixture()
+  try {
+    await f.measurement.measure(request)
+    const run=await f.current();run.blockedReason='Old turn measurement-stale';run.version++
+    await f.store.commit(run.projectId,run.ownerId,run.version-1,run,'fixture.old-reason')
+    const before=await f.current(),compact=await f.measurement.handoff(['README.md'])
+    expect(compact.measurement?.freshness).toMatchObject({current:true,changes:{requirements:false,
+      sources:[],reports:[],dependencies:false,buildOrArtifact:false}})
+    expect(compact.blockedReason).toContain('inputs are current')
+    expect(compact.blockedReason).not.toContain('stale')
+    expect(compact).not.toHaveProperty('priorBlockedReason')
+    const details=await f.measurement.handoff(['README.md'],true)
+    expect(details.priorBlockedReason).toBe('Old turn measurement-stale')
+    expect(details.blockedReason).toBe(compact.blockedReason)
+    expect(await f.current()).toEqual(before)
+  }finally{await f.close()}
+},30000)
+
 test('handoff returns the exact latest user task and full current requirements, not an author summary or latest-change-only brief',async()=>{
   const f=await fixture(),live=structuredClone(await f.current())
   const text=JSON.stringify({original:'Deliver a game',changes:['Keep the earlier muted-by-default decision','Change only score colour']})

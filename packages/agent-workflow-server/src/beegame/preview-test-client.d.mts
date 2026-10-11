@@ -20,3 +20,9 @@ export function checkNumericSamples(samples: unknown, bounds: { minimum?: number
   violations: Array<{ index: number; value: number }>
   note: string
 }
+export function checkTextSeparation(gameFrame: Frame, selectors: string[]): Promise<{
+  status: 'passed' | 'failed' | 'unverified'
+  groups: Array<{ selector: string; elements: number; rects: Array<{ x: number; y: number; width: number; height: number }> }>
+  overlaps: Array<{ first: string; second: string; width: number; height: number }>
+  note: string
+}>

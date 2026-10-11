@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { BeeGameSessionManager, type BeeGameSessionSubmitInput } from '../session-manager'
 import { registerV3Routes } from './routes'
 import { createLocalWorkflowStore, createRemoteWorkflowStore, assertCommit, type WorkflowStore } from './store'
-import { createAgentGoalExecutor, agentGoalPrompt, agentMessagePrompt } from './agent-goal'
+import { createAgentGoalExecutor, agentGoalPrompt, agentMessagePrompt, agentProfessionalContext } from './agent-goal'
 import { createRun, type Run } from './state'
 import { openPreviewTestAccess } from '../preview-test-access'
 import type { AgentPreviewAccess, AgentImageAccess } from './agent-tools'
@@ -89,7 +89,8 @@ test('whole goal enters normal native conversation without host Tasks, stage fla
     expect(submit.language).toBe('zh')
     expect(submit.confirmedBriefContext).toBe(JSON.stringify(f.body.brief))
     expect(JSON.stringify(submit.prompt)).toContain('Plan and execute autonomously')
-    expect(JSON.stringify(submit.prompt)).toContain('GDD.md')
+    expect(JSON.stringify(submit.prompt)).not.toContain('Professional coverage:')
+    expect(f.starts[0].systemContext).toBe(agentProfessionalContext)
     expect(Array.isArray(submit.prompt)).toBe(true)
     expect((submit.prompt as {type:string;text:string}[])[0]!.text).toContain('Optional BGS project tools')
     expect((submit.prompt as {type:string;text:string}[]).at(-1)!.text).toContain(JSON.stringify(f.body.brief))
@@ -123,6 +124,7 @@ test('same-project discussion/change reuse native history; one CAS changes revis
     expect(f.starts[1].env.BEEGAME_CONFIG_DIR).toBe(f.starts[0].env.BEEGAME_CONFIG_DIR)
     expect(JSON.stringify(f.submissions[1]!.prompt)).toContain('answer only')
     expect(JSON.stringify(f.submissions[1]!.prompt)).not.toContain('GDD.md')
+    expect(f.starts[1].systemContext).toBeUndefined()
     const change=message('change-1','change','Change the target to four, preserve unrelated notes and rerun the rule test')
     const [a,b]=await Promise.all([f.call('/agent/messages','POST',change),f.call('/agent/messages','POST',change)])
     expect([a.status,b.status].sort()).toEqual(expect.arrayContaining([202]))
@@ -141,16 +143,18 @@ test('same-project discussion/change reuse native history; one CAS changes revis
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
     expect(f.submissions).toHaveLength(3)
     expect(JSON.stringify(f.submissions[2]!.prompt)).toContain('only affected domains')
+    expect(JSON.stringify(f.submissions[2]!.prompt)).not.toContain('Professional coverage:')
+    expect(f.starts[2].systemContext).toBe(agentProfessionalContext)
     const edited=structuredClone(run);edited.version++;edited.agentTurns![2]!.message!.text='Rewritten authorization'
     expect(()=>assertCommit(run.projectId,run.ownerId,run.version,edited,run)).toThrow('history')
   }finally{await f.close()}
 })
 
-test('professional responsibility accompanies production, changes and continuation, not discussion execution', () => {
+test('professional responsibilities stay complete in stable system context, not repeated in user history', () => {
   const run={requirements:{text:'ORIGINAL_CONFIRMED_GOAL'}} as Run
   const message={intent:'change',text:'Change only movement speed'} as Parameters<typeof agentMessagePrompt>[0]
   const prompts=[agentGoalPrompt(run),agentMessagePrompt(message),agentMessagePrompt({...message,intent:'continue'})]
-  for(const prompt of prompts) {
+  for(const prompt of [agentProfessionalContext]) {
     for(const name of ['GDD.md','TECHNICAL_DESIGN.md','ART_DIRECTION.md','AUDIO_DESIGN.md','UI_UX_SPEC.md',
       'LEVEL_SCENE_DESIGN.md','BALANCE_DESIGN.md','ASSET_PLAN.md']) expect(prompt).toContain(name)
     expect(prompt).toContain('not stages')
@@ -174,6 +178,7 @@ test('professional responsibility accompanies production, changes and continuati
     expect(prompt).toContain('before final measurement')
     expect(prompt).toContain('BGS does not reset the conversation')
   }
+  for(const prompt of prompts)expect(prompt).not.toContain('Professional coverage:')
   expect(prompts[0]).toContain('ORIGINAL_CONFIRMED_GOAL')
   expect(prompts[1]).not.toContain('ORIGINAL_CONFIRMED_GOAL')
   expect(prompts[1]).toContain('only affected domains')

@@ -97,7 +97,12 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
         attemptId:latest.attemptId,...measurementSummary(latest.record,details)} : null
       return {
         scope:'agent-task-evidence-handoff',runId:run.id,version:run.version,measurement,status:run.status,
-        blockedReason:run.blockedReason,
+        // run.blockedReason describes the previous settled turn while this
+        // writer is active. Do not present it as the current measurement cause.
+        blockedReason:measurement ? (measurement.freshness.current ?
+          'Measured inputs are current; game-quality acceptance remains unverified.' :
+          measurement.freshness.code+': '+measurement.freshness.reason) :
+          'No saved measurement; game-quality acceptance remains unverified.',
         task:{scope:'active-user-turn',attemptId:turn.attemptId,requestKey:turn.requestKey,intent:turn.message?.intent??'goal',
           source:turn.message?'user-message':'requirements',requirementsRevision:turn.requirementsRevision,
           text:turn.message?.text,continuationOf:turn.message?.continuationOf},
@@ -105,7 +110,7 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
           constraints:run.requirements.constraints,ids:run.requirements.ids,
           ...(details?{text:run.requirements.text}:{})},
         sources,
-        ...(details?{measurements:records.map(({attemptId,record})=>({attemptId,id:record.id,requestKey:record.requestKey,
+        ...(details?{priorBlockedReason:run.blockedReason,measurements:records.map(({attemptId,record})=>({attemptId,id:record.id,requestKey:record.requestKey,
           runtimeArtifact:record.runtimeArtifact,finishedAt:record.finishedAt,error:record.error}))}:{}),
         sourceEdit:edit?{attemptId:edit.attemptId,status:edit.status,requirementsRevision:edit.requirementsRevision,
           finishedAt:edit.finishedAt,error:edit.error,sourceEdit:edit.sourceEdit}:undefined,
@@ -138,6 +143,7 @@ export function measurementSummary(record: AgentMeasurement, details = true) {
     checks:record.checks.map(({id,status,observation,coverage,artifacts})=>({id,status,
       ...(details?{observation,artifacts,limitations:coverage?.limitations}:status!=='passed'?{observation}:{})})),
     sourceExclusions:record.checks.find(c=>c.id==='build')?.projectBuild?.excludedReports,
+    measuredSourceFiles:record.checks.find(c=>c.id==='build')?.projectBuild?.files.length,
     deliveryEligible:false,quality:'unverified',note:'Receipt is saved in BGS; reference this ID in the final reply, not in measured source/report files. Only source-copy build and static browser smoke are measured, not report semantics or game quality.'}
 }
 

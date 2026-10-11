@@ -146,6 +146,12 @@ test('full-goal independent debug drives real native plan, Skill, Question, fail
     expect(code,errors).toBe(0);const observed=JSON.parse(output);expect(observed.passed).toBe(true)
     const run=(await store.read('agent-debug','owner'))!,turn=run.agentTurns![0]!
     expect(requests).toHaveLength(25);expect(run.agentTurns).toHaveLength(5)
+    // Real CLI transports stable responsibilities as system context, not a
+    // growing duplicate in every user message. No model limit/history rewrite.
+    expect(JSON.stringify(requests[0].system)).toContain('Professional coverage:')
+    expect(JSON.stringify(requests[0].messages)).not.toContain('Professional coverage:')
+    expect(JSON.stringify(requests[15].system)).toContain('Professional coverage:')
+    expect(JSON.stringify(requests[15].messages)).not.toContain('Professional coverage:')
     const runtime=(await readFile(join(workspace,'.beegame/logs/native-runtime.jsonl'),'utf8'))
       .trim().split('\n').map(line=>JSON.parse(line))
     expect(runtime.some(row=>row.type==='native_diagnostic' && row.diagnostic.event==='request_start' && row.diagnostic.evidenceSource==='cli_debug')).toBe(true)
@@ -176,8 +182,8 @@ test('full-goal independent debug drives real native plan, Skill, Question, fail
     expect(turn.skillUses).toContainEqual(expect.objectContaining({name:'bgs-builtins:gameplay-programmer',status:'loaded'}))
     expect((turn.usage as {total_tokens:number}).total_tokens).toBe(180)
     expect(JSON.stringify(requests[0].messages)).toContain('Plan and execute autonomously')
-    expect(JSON.stringify(requests[0].messages)).toContain('BALANCE_DESIGN.md')
-    expect(JSON.stringify(requests[0].messages)).toContain('ASSET_PLAN.md')
+    expect(JSON.stringify(requests[0].system)).toContain('BALANCE_DESIGN.md')
+    expect(JSON.stringify(requests[0].system)).toContain('ASSET_PLAN.md')
     expect(JSON.stringify(requests[15].messages)).toContain('only affected domains')
     expect(JSON.stringify(requests[15].messages)).toContain('User-authorized source saves since the preceding native turn')
     expect(JSON.stringify(requests[15].messages)).toContain('content/scenes/level.json')

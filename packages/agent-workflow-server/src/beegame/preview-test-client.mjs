@@ -102,3 +102,42 @@ export function checkNumericSamples(samples, { minimum, maximum } = {}) {
       observedMaximum: samples.reduce((a,b)=>Math.max(a,b)) } : {}), violations,
     note: 'Only the supplied observations and explicit bounds; does not prove coverage, concurrency, listening quality or unseen behavior.' };
 }
+
+/** Explicit groups whose rendered text is expected to be separate. Text-node
+ * ranges include nested inline/block descendants that parent boxes can miss.
+ * This observes current DOM geometry, not Canvas pixels or aesthetic quality. */
+export async function checkTextSeparation(gameFrame, selectors) {
+  if (!Array.isArray(selectors) || selectors.length < 2 ||
+      selectors.some(s => typeof s !== 'string' || !s.trim()) || new Set(selectors).size !== selectors.length)
+    throw new Error('Supply at least two distinct CSS selectors for text groups intended not to overlap');
+  const groups = await gameFrame.evaluate(selected => selected.map(selector => {
+    const elements = [...document.querySelectorAll(selector)], rects = [];
+    for (const element of elements) {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      let text;
+      while ((text = walker.nextNode())) {
+        if (!text.textContent.trim()) continue;
+        let visible = true;
+        for (let parent = text.parentElement; parent; parent = parent.parentElement) {
+          const style = getComputedStyle(parent);
+          if (style.display === 'none' || style.visibility !== 'visible' || Number(style.opacity) === 0) { visible = false; break; }
+        }
+        if (!visible) continue;
+        const range = document.createRange(); range.selectNodeContents(text);
+        for (const r of range.getClientRects()) if (r.width > 0 && r.height > 0)
+          rects.push({ x: r.x, y: r.y, width: r.width, height: r.height });
+      }
+    }
+    return { selector, elements: elements.length, rects };
+  }), selectors);
+  const overlaps = [];
+  for (let i = 0; i < groups.length; i++) for (let j = i + 1; j < groups.length; j++)
+    for (const a of groups[i].rects) for (const b of groups[j].rects) {
+      const width = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+      const height = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+      if (width > 0 && height > 0) overlaps.push({ first: groups[i].selector, second: groups[j].selector, width, height });
+    }
+  return { status: overlaps.length ? 'failed' : groups.some(g => !g.rects.length) ? 'unverified' : 'passed',
+    groups, overlaps,
+    note: 'Only selected visible DOM text-range rectangles in this state; missing text is unverified. Select disjoint semantic groups. Not clipping/occlusion, Canvas, all-screen coverage, sound, taste or gameplay acceptance.' };
+}

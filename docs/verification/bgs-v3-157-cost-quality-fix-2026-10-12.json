@@ -1,0 +1,126 @@
+{
+  "version": "1.57",
+  "scope": "Offline BGS cost and evidence fixes; not deployed, no additional paid execution",
+  "baselineCommits": { "integration": "bbb9c132", "bgs": "698218ec" },
+  "paidEvidence": {
+    "runId": "bedaee26-a2a7-4997-adf2-688eb3a79a61",
+    "nativeSessionId": "a81cfeaf-b023-43c6-ad73-d5a94c6b60ed",
+    "attemptId": "d3530691-d927-4950-8a76-e8807f94728e",
+    "source": "docs/verification/bgs-v3-155-paid-acceptance-2026-10-12.json",
+    "ledger": "docs/verification/bgs-v3-155-paid-requests-2026-10-12.jsonl",
+    "totalTokens": 2260974,
+    "requests": 33,
+    "ordinaryInput": 174567,
+    "cachedInput": 2075392,
+    "output": 11015,
+    "sdkLedgerDifference": 0,
+    "main": { "requests": 16, "tokens": 1834125, "firstInput": 108547, "lastInput": 118648 },
+    "child": { "requests": 17, "tokens": 426849 },
+    "currentTurnCompactionRequests": 0,
+    "gameOrDesignSourceRevisions": 0
+  },
+  "costBreakdown": {
+    "units": "Whole request tokens, including carried history; not the marginal cost of each tool action",
+    "disjointMainPhases": [
+      { "requests": [1, 2, 3, 4, 5, 6], "tokens": 669568, "work": "Todo, handoff filtering, file times, directory lists, source/build/authority comparisons" },
+      { "requests": [7, 8, 9, 10], "tokens": 459033, "work": "Existing headless/feedback tests, r26 report, one host measurement" },
+      { "requests": [11, 12, 13], "tokens": 349638, "work": "Receipt backfill check, Todo, autonomous verification assignment" },
+      { "requests": [15], "tokens": 118052, "work": "Awaiting independently running verification" },
+      { "requests": [32, 33], "tokens": 237834, "work": "Final Todo and final answer after verification" }
+    ],
+    "disjointChildPhases": [
+      { "requests": [14, 16, 17], "tokens": 53280, "work": "Workspace discovery, handoff, file times and directory lists" },
+      { "requests": [18, 19, 20, 21, 22], "tokens": 111336, "work": "Locate authority entry and compare document/content revision evidence" },
+      { "requests": [23, 24, 25], "tokens": 78280, "work": "Read and inspect feedback/report structure and author claim of 13 checks" },
+      { "requests": [26, 27, 28, 29], "tokens": 118777, "work": "Repeated build/headless, drift probes, content check and type check; mixed work" },
+      { "requests": [30, 31], "tokens": 65176, "work": "Read old audio evidence and return verdict" }
+    ],
+    "overlappingDiagnosticSubsetNotAdditive": {
+      "todoRequests": [1, 6, 12, 32], "todoWholeRequestTokens": 457436,
+      "mainMtimeAndIdentityRequests": [3, 4, 5], "mainMtimeAndIdentityTokens": 336484,
+      "warning": "Subsets overlap the phase totals. Necessary work, excessive granularity and historical context coexist; these are not guaranteed savings. Cached tokens are not free."
+    }
+  },
+  "historyEvidence": {
+    "method": "Read-only parentUuid ancestry of the exact user entry at 2026-10-11T16:00:33.330Z, not all branches or the entire transcript indiscriminately",
+    "ancestorsBeforeNewUserIncludingCompactBoundary": 308,
+    "lastBoundary": "2026-10-11T12:45:04.500Z",
+    "boundaryPreTokens": 167524,
+    "ancestorToolUseBlocks": 99,
+    "ancestorToolResultBlocks": 99,
+    "conclusion": "The new turn resumed accumulated post-compaction history before it read any new game files. No current-turn compact hang or BGS automatic model retry occurred.",
+    "limitation": "Serialized character counts and ledger tokens are different units. Base tool/system tokens and exact historical item token allocations were not separately billed or measured."
+  },
+  "rootsAndFixes": [
+    {
+      "root": "Handoff mixed current measurement facts with the prior settled Run blockedReason while the writer was active",
+      "category": "BGS evidence interface defect",
+      "evidence": "Main request 2 custom parser printed blockedReason and identities but never measurement.freshness; child assignment inferred revision-only staleness from mtimes",
+      "fix": "Derive default blockedReason from the latest measurement freshness; retain the prior Run reason only as explicitly labelled priorBlockedReason in details",
+      "files": ["packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts"],
+      "boundary": "Does not prevent arbitrary field filtering or certify model reasoning"
+    },
+    {
+      "root": "Freshness returned at a changed requirement before inspecting simultaneous source/report/dependency drift",
+      "category": "BGS deterministic diagnostic defect",
+      "fix": "Compare existing hashes once and return all changed paths and requirement/source-save/dependency/build flags together; never rebuild or retry from inspection",
+      "files": ["packages/agent-workflow-server/src/beegame/workflow-v3/measured-build.ts"],
+      "boundary": "Incomplete/superseded measurements remain invalid; old receipt scopes are not upgraded"
+    },
+    {
+      "root": "Identical professional responsibilities appended to every production/continuation user message and retained in native history",
+      "category": "BGS context assembly defect plus native history amplification",
+      "unchangedResponsibilityCharacters": 3668,
+      "fix": "Move the exact existing responsibilities to the existing systemContext slot. Initial/change/continue messages retain current goal, authorized scope and edits. Discussion clears production context and opens no production tools",
+      "files": ["packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.ts"],
+      "boundary": "No history reset, compaction modification, turn limit or new prompt rules. Does not shrink already saved history; actual paid savings remain unmeasured"
+    },
+    {
+      "root": "Authority capability was available but omitted from the concise Content entry description; child discovered it through successive grep requests",
+      "category": "BGS capability discoverability gap plus agent exploration",
+      "fix": "Expose the existing --authority operation in the existing tool entry description and measured source count in measurement summary",
+      "files": ["packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts", "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts"],
+      "boundary": "No forced task sequencing; the agent still chooses actual tools"
+    },
+    {
+      "root": "Child assignment narrowed evidence to author assertions, mandated another build/headless run, and excused browser retest; tests did not assert the missed professional obligations",
+      "category": "Autonomous agent task/evidence selection and semantic judgment; not source freshness",
+      "missed": ["Nested text overflow into statistics", "Declared same-sound two-voice maximum absent from implementation", "Camera source x560 checked as x540 with overly broad screen sampling"],
+      "fix": "Add optional generic checkTextSeparation to the existing browser helper, comparing actual text-node range rectangles across explicitly selected disjoint DOM groups. Reuse existing exact --scene-point tool instead of a new camera implementation",
+      "files": ["packages/agent-workflow-server/src/beegame/preview-test-client.mjs", "packages/agent-workflow-server/src/beegame/preview-test-client.d.mts", "packages/agent-workflow-server/src/beegame/preview-test-access.ts"],
+      "boundary": "Only tested current-state DOM text geometry. Missing/hidden evidence is unverified. No all-screen, clipping/occlusion, Canvas, audio concurrency, taste or game-quality certification. It does not choose obligations or guarantee agent adoption. No case-specific selectors or Review prompt added"
+    }
+  ],
+  "regression": {
+    "command": "BGS_LAYOUT_BROWSER=1 BEEGAME_TEST_REAL_BROWSER=1 bun test packages/agent-workflow-server/src/beegame/preview-test-access.test.ts packages/agent-workflow-server/src/beegame/shared-playwright.test.ts packages/agent-workflow-server/src/beegame/design-source-reading.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/editable-project.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/measured-preview.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/export-feedback.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal-native.test.ts",
+    "files": 10, "passed": 94, "failed": 0, "skipped": 0, "expects": 964,
+    "seconds": 51.95,
+    "typeCheck": "bunx tsc --noEmit --pretty false: exit 0",
+    "diffCheck": "git diff --check: exit 0",
+    "realCliLoopbackModelRequests": 25,
+    "paidCalls": 0,
+    "coverage": ["Simultaneous drift in one read-only handoff", "Current evidence does not inherit prior block", "Unchanged eight-domain context reaches actual native system channel without copies in user history", "Same native UUID through discussion/change/interruption/continuation", "Real synthetic browser text overflow despite disjoint parent boxes", "Missing/hidden text cannot pass", "Existing Camera and Scene/UI consumer", "Measurement, revocation, exact source-copy build and ZIP"],
+    "initialFailures": ["Sandbox denied temporary ports; rerun under scoped test permission", "Synthetic requirement mutation violated append-only history; corrected fixture to a read-only requirement snapshot, not a weakened CAS", "Synthetic text fixture still intersected after its supposed repair; corrected the intended disjoint geometry", "Native integration retained an obsolete assertion for responsibilities in user messages; asserted full responsibilities in the actual system channel instead"]
+  },
+  "readonlyProof": {
+    "archive": "/Users/nswell/Downloads/bgs-v3-project (1).zip",
+    "archiveSha256": "db95b8b6ebbc6a5e4c784dcf3d36518ee698764e1f87b954c2330794a2cf8e9b",
+    "measurementId": "de91c660-0506-4207-914b-a93a29a6a171",
+    "artifactSha256": "612bdf39476ff82adb1eea8ac347b0de10130e5ea5281451a15bdc48f8ab997f",
+    "archiveAndCurrentProjectFilesMatchingReceipt": 51,
+    "sourceFiles": 38, "buildFiles": 13,
+    "protectedPublicTreesUnchanged": [
+      { "path": "apps/frontend", "files": 825, "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785" },
+      { "path": "src", "files": 2445, "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a" },
+      { "path": "packages/builtin-tools", "files": 383, "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23" }
+    ],
+    "scope": "Public non-hidden source files excluding node_modules/transcripts; real project source and dist matched the exact prior exported receipt"
+  },
+  "notSolved": [
+    "Real project quality gaps remain; no manual game or original evidence modifications",
+    "Model may ignore facts, choose insufficient obligations or repeat closing; native Todo/final requests are not host mandatory steps",
+    "Existing long native history remains. No paid net savings verified",
+    "No automatic coverage/semantic acceptance framework; deterministic helpers prove only their supplied observations",
+    "Running deployment remains 1.55, not these offline changes"
+  ]
+}

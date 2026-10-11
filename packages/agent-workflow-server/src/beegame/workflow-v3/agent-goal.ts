@@ -33,7 +33,7 @@ export const agentMessageSchema = z.object({
 
 // One responsibility definition for native production and follow-ups, not a
 // second plan or a host document gate. Skills supply methods, not ownership.
-const professionalWork = [
+export const agentProfessionalContext = [
   'Professional coverage: gameplay, technology, art, audio, UI/UX, levels/scenes, numbers/balance and resources. New design records belong together under docs/: GDD.md, TECHNICAL_DESIGN.md, ART_DIRECTION.md, AUDIO_DESIGN.md, UI_UX_SPEC.md, LEVEL_SCENE_DESIGN.md, BALANCE_DESIGN.md and ASSET_PLAN.md. Domain labels are not directories. These are default design records, not stages or eight separate assignments. Simple projects may use explicitly mapped merged records; retain all domains. Preserve existing paths/references on continuation; do not migrate unrelated work. No economy or external images does not remove numerical or resource planning.',
   'Decide order, prototypes, delegation and tools from actual dependencies; do not wait for all eight drafts. Before related professional work or review, invoke the relevant available Skills through the native Skill tool; reuse methods already loaded, not the whole catalog. Report unavailable methods honestly. Record concrete decisions, reasons, current source paths and unresolved assumptions so implementation and later edits need not guess. Keep a single source for runtime values/bindings, not duplicate tables. Update only changed records and their versions; group related edits and reuse valid checks.',
   'For new BGS Web games, deliver editable content/scenes/*.json and content/ui/*.json with the existing content/index.json registry unless the user explicitly excludes BGS visual editing. React/Canvas does not waive this delivery; the actual runtime must consume the saved data, not a second hardcoded layout. Use existing schema/layout tools and verify saved-data changes in the real build. Unity/Godot use native scene/UI data, not duplicate Web JSON. Do not silently convert an existing source-only project; disclose the delivery gap and obtain migration authorization.',
@@ -50,7 +50,6 @@ export function agentMessagePrompt(message: AgentMessage, edits: NonNullable<Run
       'The user explicitly authorizes continuing the interrupted work below in this same project and native conversation. Inspect saved partial results and actual external outcomes first. Do not blindly replay commands or unknown paid operations, resend the original goal, or redo unrelated work. Recheck affected results; partial work and old checks are not acceptance.'
   return [context, ...(message.intent==='discuss' ? [] : [
     'For this follow-up, apply the professional responsibilities to only affected domains and dependencies; preserve unrelated results, not a new eight-document production run.',
-    professionalWork,
   ]), ...(edits.length ? ['User-authorized source saves since the preceding native turn (not acceptance; inspect current files):\n'+
     JSON.stringify([...new Map(edits.map(e=>[e.sourceEdit.path,{path:e.sourceEdit.path,status:e.sourceEdit.status}])).values()])] : []),
     'User message:\n'+message.text].join('\n\n')
@@ -58,7 +57,6 @@ export function agentMessagePrompt(message: AgentMessage, edits: NonNullable<Run
 export function agentGoalPrompt(run: Run): string {
   return [
     'Develop the game from this complete confirmed goal in the current project. Plan and execute autonomously; do not wait for BGS milestones or a host Task plan.',
-    professionalWork,
     'Preserve explicit user choices. Ask the user when a material choice or authorization is missing. Do not claim unperformed checks or game acceptance.',
     'Confirmed goal:\n'+run.requirements.text,
   ].join('\n\n')
@@ -138,11 +136,17 @@ export function createAgentGoalExecutor(input: { store: WorkflowStore; sessions:
         confirmedBriefContext:run.requirements.text,
         authToken:options.authToken, getValidAuthToken:options.getValidAuthToken, language:options.language,
         onTurnAccepted:id=>{turnId=id},
-        prepareTurn:turn.message?.intent==='discuss' ? undefined : async ()=>tools=await openAgentTools({ workspacePath:run.workspacePath,
-          sessionId:session.id,openPreview:options.openPreview ? async ()=>preview=await options.openPreview!() : undefined,
-          libraryBaseUrl:input.resourceLibraryBaseUrl,
-          getAuthToken:()=>options.getValidAuthToken?.() ?? options.authToken, measurement,
-          openImage:options.openImage ? async ()=>image=await options.openImage!() : undefined }),
+        // Stable responsibilities belong to the existing system-context slot,
+        // not another full copy in each resumed user message/history entry.
+        // Discussion explicitly clears production context and opens no tools.
+        prepareTurn:turn.message?.intent==='discuss' ? async ()=>({systemContext:undefined}) : async ()=>{
+          tools=await openAgentTools({ workspacePath:run.workspacePath,
+            sessionId:session.id,openPreview:options.openPreview ? async ()=>preview=await options.openPreview!() : undefined,
+            libraryBaseUrl:input.resourceLibraryBaseUrl,
+            getAuthToken:()=>options.getValidAuthToken?.() ?? options.authToken, measurement,
+            openImage:options.openImage ? async ()=>image=await options.openImage!() : undefined })
+          return {...tools,systemContext:agentProfessionalContext}
+        },
       })
       await input.sessions.waitForSessionIdle(session.id)
       const events=input.sessions.transcript(session.id).filter(e=>e.turnId===turnId)
