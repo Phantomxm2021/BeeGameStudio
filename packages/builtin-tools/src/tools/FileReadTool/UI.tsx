@@ -4,7 +4,7 @@ import { extractTag } from 'src/utils/messages.js';
 import { FallbackToolUseErrorMessage } from 'src/components/FallbackToolUseErrorMessage.js';
 
 import { MessageResponse } from 'src/components/MessageResponse.js';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { FilePathLink } from 'src/components/FilePathLink.js';
 import { FILE_NOT_FOUND_CWD_NOTE, getDisplayPath } from 'src/utils/file.js';
 import { formatFileSize } from 'src/utils/format.js';

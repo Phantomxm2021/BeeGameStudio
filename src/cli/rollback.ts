@@ -1,5 +1,5 @@
 /**
- * `claude rollback [target]` — roll back to a previous Claude Code version.
+ * `bee-game-studio rollback [target]` — roll back to a previous BGS version.
  *
  * ANT-only command (USER_TYPE === "ant").
  *
@@ -13,35 +13,35 @@ export async function rollback(
   options?: { list?: boolean; dryRun?: boolean; safe?: boolean },
 ): Promise<void> {
   if (options?.list) {
-    console.log('Recent versions:')
-    console.log('  (version listing requires access to the release registry)')
-    console.log('  Use `claude update --list` for available versions.')
+    console.error('Version listing is unavailable: no BGS release registry is configured.')
+    process.exitCode = 1
     return
   }
 
   if (options?.safe) {
-    console.log('Safe rollback: would install the server-pinned safe version.')
-    if (options.dryRun) {
-      console.log('  (dry run — no changes made)')
-      return
-    }
-    console.log('  Safe version pinning requires access to the release API.')
-    console.log('  Contact oncall for the current safe version.')
+    console.error('Safe rollback is unavailable: no BGS version pinning API is configured.')
+    process.exitCode = 1
     return
   }
 
   if (!target) {
     console.error(
-      'Usage: claude rollback [target]\n\n' +
+      'Usage: bee-game-studio rollback [target]\n\n' +
         'Options:\n' +
         '  -l, --list     List recent published versions\n' +
         '  --dry-run      Show what would be installed\n' +
         '  --safe         Roll back to server-pinned safe version\n\n' +
         'Examples:\n' +
-        '  claude rollback 2.1.880\n' +
-        '  claude rollback --list\n' +
-        '  claude rollback --safe',
+        '  bee-game-studio rollback 2.1.880\n' +
+        '  bee-game-studio rollback --list\n' +
+        '  bee-game-studio rollback --safe',
     )
+    process.exitCode = 1
+    return
+  }
+
+  if (!MACRO.PACKAGE_URL) {
+    console.error('BGS distribution source is not configured; no installation was attempted.')
     process.exitCode = 1
     return
   }
@@ -53,17 +53,11 @@ export async function rollback(
     return
   }
 
-  // Version rollback via npm/bun
-  const { spawnSync } = await import('child_process')
-  const result = spawnSync(
-    'npm',
-    ['install', '-g', `@anthropic-ai/claude-code@${target}`],
-    { stdio: 'inherit' },
-  )
-
-  if (result.status !== 0) {
-    console.error(`Rollback failed with exit code ${result.status}`)
-    process.exitCode = result.status ?? 1
+  const { installGlobalPackage } = await import('../utils/autoUpdater.js')
+  const status = await installGlobalPackage(target)
+  if (status !== 'success') {
+    console.error(`Rollback failed: ${status}`)
+    process.exitCode = 1
   } else {
     console.log(`Rolled back to ${target} successfully.`)
   }

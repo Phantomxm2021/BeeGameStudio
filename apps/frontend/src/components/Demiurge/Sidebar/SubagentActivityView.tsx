@@ -7,6 +7,8 @@ import { MarkdownRenderer } from './ChatMarkdownContent';
 import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 import { filterPathsForDisplay } from '../../../utils/chatPathDisplay';
 import type { Language } from '../AgentsConfig';
+import { normalizeChatAttachments } from '../../../services/chatAttachments';
+import { ChatAttachmentView } from './ChatAttachmentView';
 
 function fileLanguage(path?: string): AgentCodeLanguage {
     const extension = path?.split('.').pop()?.toLowerCase();
@@ -46,17 +48,27 @@ export const SubagentActivityView = memo(function SubagentActivityView({ activit
     return <div className="space-y-3" data-testid="subagent-activity-list">
         {activity.truncated && <p className="type-caption-1 text-muted-foreground">{labels.recent}</p>}
         {activity.entries.map(entry => {
+            if (entry.kind === 'permission') {
+                const status = entry.status === 'pending' && !running ? 'incomplete' : entry.status;
+                return <section key={entry.id} data-permission-id={entry.id} data-permission-status={status}
+                    className="rounded-lg border border-border p-3 space-y-1.5">
+                    <p className="type-caption-1 text-muted-foreground">{entry.toolName} · {labels[status]}</p>
+                    <MarkdownRenderer content={filterPathsForDisplay(entry.message)} messageId={entry.id} lang={lang} />
+                </section>;
+            }
             if (entry.kind === 'message') return <div key={entry.id}>
                 <MarkdownRenderer content={filterPathsForDisplay(entry.text)} messageId={entry.id} lang={lang} />
                 {entry.truncated && <p className="type-caption-1 text-muted-foreground">{labels.truncated}</p>}
             </div>;
             const isShell = entry.toolName === 'Bash';
             const isRead = entry.toolName === 'Read' && Boolean(entry.filePath) && entry.status !== 'failed';
-            const status = entry.status === 'running' ? (running ? 'running' : 'cancelled') : entry.status === 'failed' ? 'error' : 'success';
+            const status = entry.status === 'running' ? (running ? 'running' : 'incomplete')
+                : entry.status === 'cancelled' ? 'cancelled' : entry.status === 'failed' ? 'error' : 'success';
             return <ToolResult key={entry.id} data-tool-id={entry.id} tool={entry.toolName || labels.output}
                 title={entry.filePath ? filterPathsForDisplay(entry.filePath) : filterPathsForDisplay(entry.command?.split('\n')[0].slice(0, 100) || labels.output)}
                 icon={entry.filePath ? <FileText className="size-4" /> : undefined}
-                kind={isShell ? 'terminal' : 'custom'} status={status} defaultOpen={entry.status === 'failed'}
+                kind={isShell ? 'terminal' : 'custom'} status={status} defaultOpen={entry.status === 'failed' || Boolean(entry.attachmentError)}
+                meta={entry.elapsedTimeSeconds !== undefined ? `${labels.elapsed}: ${entry.elapsedTimeSeconds}s` : status === 'incomplete' ? labels.incomplete : undefined}
                 collapseOnComplete={false} maxHeight={360} copyText={filterPathsForDisplay(entry.output || entry.command || entry.input || '')}
                 className="min-w-0" contentClassName="space-y-3">
                 {entry.command && <section aria-label={labels.command}>
@@ -68,6 +80,11 @@ export const SubagentActivityView = memo(function SubagentActivityView({ activit
                     <p className="mb-2 type-caption-1 text-muted-foreground">{isRead ? labels.file : labels.output}</p>
                     {isRead ? <SourceOutput output={filterPathsForDisplay(entry.output)} path={entry.filePath} /> : <AgentCode code={filterPathsForDisplay(entry.output)} language="text" />}
                 </section>}
+                {normalizeChatAttachments(entry.attachments)?.map((attachment, index) =>
+                    <ChatAttachmentView key={index} attachment={attachment} lang={lang} />)}
+                {entry.attachmentError && <p role="alert" className="type-caption-1 text-destructive">
+                    {labels.attachmentError}: {filterPathsForDisplay(entry.attachmentError)}
+                </p>}
                 {entry.truncated && <p className="type-caption-1 text-muted-foreground">{labels.truncated}</p>}
             </ToolResult>;
         })}

@@ -1,11 +1,11 @@
 import * as React from 'react';
 import { useState } from 'react';
 import { useExitOnCtrlCDWithKeybindings } from 'src/hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 import { Select } from './CustomSelect/index.js';
-import { Byline, KeyboardShortcutHint, Pane } from '@anthropic/ink';
+import { Byline, KeyboardShortcutHint, Pane } from '@bee-game-studio/ink';
 
 export type Props = {
   currentValue: boolean;
@@ -22,12 +22,12 @@ export function ThinkingToggle({ currentValue, onSelect, onCancel, isMidConversa
     {
       value: 'true',
       label: 'Enabled',
-      description: 'Claude will think before responding',
+      description: 'BGS will think before responding',
     },
     {
       value: 'false',
       label: 'Disabled',
-      description: 'Claude will respond without extended thinking',
+      description: 'BGS will respond without extended thinking',
     },
   ];
 

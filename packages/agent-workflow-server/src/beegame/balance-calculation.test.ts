@@ -3,7 +3,9 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { BALANCE_CALCULATOR_PATH, materializeBalanceCalculator } from './balance-calculation'
+import { BALANCE_CALCULATOR_PATH, materializeBalanceCalculator, readCalculationInputs } from './balance-calculation'
+import { checkDesignHandoff } from './design-handoff'
+import { sceneLayoutFixture, writeDesignDocumentFixture } from './fixtures/layout-fixture'
 
 // A tiny legal-action model, not a prefilled game answer or a runtime simulator.
 const model = `export async function calculate({readJson}) {
@@ -39,6 +41,158 @@ async function command(workspace: string, ...args: string[]) {
     new Response(child.stdout).text(), new Response(child.stderr).text()])
   return { code, stdout, stderr }
 }
+
+test('calculator deployment retains executable identity without masking source changes', () => fixture(async workspace => {
+  const helper = join(workspace, BALANCE_CALCULATOR_PATH)
+  // Emulate a different deployed build; the real synthetic calculation uses it.
+  const previous = (await readFile(helper, 'utf8')) + '\n// synthetic previous build\n'
+  await writeFile(helper, previous)
+  expect((await command(workspace, 'model.mjs', 'docs/calc/result.md')).code).toBe(0)
+  const saved = await readFile(join(workspace, 'docs/calc/result.md'), 'utf8')
+  await materializeBalanceCalculator(workspace)
+  const digest = createHash('sha256').update(previous).digest('hex')
+  expect(await readFile(join(workspace, '.beegame/delivery/calculators', digest + '.mjs'), 'utf8')).toBe(previous)
+  expect((await command(workspace, '--check-result', 'docs/calc/result.md')).code).toBe(0)
+  expect(await readFile(join(workspace, 'docs/calc/result.md'), 'utf8')).toBe(saved)
+  await writeFile(join(workspace, 'parameters.json'), '{"stock":17,"rate":3,"actions":[5,20,2]}')
+  expect((await command(workspace, '--check-result', 'docs/calc/result.md')).stdout).toContain('Input changed: parameters.json')
+  await writeFile(join(workspace, '.beegame/delivery/calculators', digest + '.mjs'), 'tampered')
+  expect((await command(workspace, '--check-result', 'docs/calc/result.md')).stdout).toContain('retained version is unavailable')
+}))
+
+test('dependency reading accepts stale inputs but rejects altered results and unsafe paths', async () => {
+  await fixture(async workspace => {
+    const output = 'docs/calc/result.md'
+    expect((await command(workspace, 'model.mjs', output)).code).toBe(0)
+    const saved = await readFile(join(workspace, output), 'utf8')
+    expect(readCalculationInputs(workspace, output)).toEqual(['model.mjs', 'parameters.json'])
+    await writeFile(join(workspace, 'parameters.json'), '{"stock":99}')
+    expect(readCalculationInputs(workspace, output)).toEqual(['model.mjs', 'parameters.json'])
+    await writeFile(join(workspace, output), 'changed\n' + saved)
+    expect(() => readCalculationInputs(workspace, output)).toThrow('Calculation output changed')
+    for (const path of ['../outside.json', '/tmp/outside.json', 'docs/../parameters.json']) {
+      const changed = saved.replace(/bgs-calculation-v1:([A-Za-z0-9+/=]+)/, (_, data) => {
+        const record = JSON.parse(Buffer.from(data, 'base64').toString('utf8'))
+        record.sources[0][0] = path
+        return 'bgs-calculation-v1:' + Buffer.from(JSON.stringify(record)).toString('base64')
+      })
+      await writeFile(join(workspace, output), changed)
+      expect(() => readCalculationInputs(workspace, output)).toThrow('Invalid retained input path')
+    }
+    await writeFile(join(workspace, output), saved)
+    await symlink(join(workspace, 'parameters.json'), join(workspace, 'linked-result.md'))
+    expect(() => readCalculationInputs(workspace, 'linked-result.md')).toThrow('non-symlink')
+  })
+})
+
+test('Scene calculation consumes discovered saved sources; freshness and host handoff never rerun the model', async () => {
+  await fixture(async workspace => {
+    await writeDesignDocumentFixture(workspace, 'LEVEL_SCENE_DESIGN.md')
+    await mkdir(join(workspace, 'docs/calc'), { recursive: true })
+    await mkdir(join(workspace, 'content/scenes/with spaces'), { recursive: true })
+    const extra = { ...sceneLayoutFixture(), id: 'extra' }
+    await writeFile(join(workspace, 'content/scenes/with spaces/extra level.json'), JSON.stringify(extra))
+    const sceneModel = `import {appendFile} from 'node:fs/promises';
+      export async function calculate({scenes,readText}) {
+        await appendFile('executions.txt','run\\n'); await readText('rules.txt');
+        return {tables:[{title:'Actual scenes',columns:['path','nodes'],rows:scenes.map(s=>[s.path,s.document.data.nodes.length])}],
+          checks:[{name:'Actual input count',passed:scenes.length===2,details:'Two saved fixtures'}],limitations:['Synthetic boundary, not game rules']};
+      }`
+    await writeFile(join(workspace, 'model.mjs'), sceneModel)
+    await writeFile(join(workspace, 'rules.txt'), 'fixture rule')
+    const output = 'docs/calc/scene.md'
+    const docPath = join(workspace, 'docs/LEVEL_SCENE_DESIGN.md')
+    await writeFile(docPath, await readFile(docPath, 'utf8') + '\n[Calculation](calc/scene.md)\n')
+    expect((await command(workspace, 'model.mjs', output, '--scenes')).code).toBe(0)
+    const result = await readFile(join(workspace, output), 'utf8')
+    expect(result).toContain('content/scenes/with spaces/extra level.json')
+    expect((await command(workspace, '--check-result', output)).code).toBe(0)
+    expect(checkDesignHandoff(workspace, ['LEVEL_SCENE_DESIGN.md']).valid).toBe(true)
+    expect(await readFile(join(workspace, 'executions.txt'), 'utf8')).toBe('run\n')
+
+    for (const [path, replacement, message] of [
+      ['rules.txt', 'changed rule', 'Input changed: rules.txt'],
+      ['model.mjs', sceneModel + '\n//changed', 'Input changed: model.mjs'],
+      ['content/scenes/with spaces/extra level.json', JSON.stringify({ ...extra, id: 'changed' }), 'Input changed: content/scenes'],
+      [output, result.replace('Actual scenes', 'Changed scenes'), 'Calculation output changed'],
+    ]) {
+      const file = join(workspace, path!), original = await readFile(file, 'utf8')
+      await writeFile(file, replacement!)
+      const check = await command(workspace, '--check-result', output)
+      expect(check.code).toBe(1)
+      expect(check.stdout).toContain(message!)
+      expect(checkDesignHandoff(workspace, ['LEVEL_SCENE_DESIGN.md']).issues.join(' ')).toContain(message!)
+      await writeFile(file, original)
+    }
+    await writeFile(join(workspace, 'content/scenes/new.json'), JSON.stringify({ ...extra, id: 'new' }))
+    expect((await command(workspace, '--check-result', output)).stdout).toContain('membership changed')
+    expect(await readFile(join(workspace, 'executions.txt'), 'utf8')).toBe('run\n')
+  })
+})
+
+test('missing calculation records are unverified, not semantic failures or permission to execute', async () => {
+  await fixture(async workspace => {
+    await writeFile(join(workspace, 'legacy.md'), '# Old calculation')
+    const check = await command(workspace, '--check-result', 'legacy.md')
+    expect(check.code).toBe(1)
+    expect(check.stdout).toContain('freshness is unverified')
+    expect(check.stdout).toContain('No model executed')
+  })
+})
+
+test('Scene models and freshness share design inputs; bindings do not invalidate, geometry and exact reads do', async () => {
+  await fixture(async workspace => {
+    await writeDesignDocumentFixture(workspace, 'LEVEL_SCENE_DESIGN.md')
+    const path = 'content/scenes/level.json', file = join(workspace, path)
+    const scene = sceneLayoutFixture() as any
+    scene.data.nodes[1].components = [{ id: 'art', type: 'sprite-renderer', data: { size: [24, 24], color: '#123456' } }]
+    await writeFile(file, JSON.stringify(scene))
+    const formula = `export async function calculate({scenes,readJson}) {
+      const doc = (await readJson('${path}'));
+      if ('assetRefs' in doc || doc.data.nodes[1].components[0].assetRef) throw Error('Binding leaked into design input');
+      return {tables:[{title:'Nodes',columns:['count'],rows:[[doc.data.nodes.length]]}],
+        checks:[{name:'Same view',passed:JSON.stringify(doc)===JSON.stringify(scenes[0].document),details:'Tracked reader and discovered Scene agree'}],limitations:['Fixture, not gameplay proof']}; }`
+    await writeFile(join(workspace, 'model.mjs'), formula)
+    const output = 'docs/calc/result.md'
+    expect((await command(workspace, 'model.mjs', output, '--scenes')).code).toBe(0)
+    const saved = await readFile(join(workspace, output), 'utf8')
+    expect(saved).toContain('scene-design-v1')
+    expect(readCalculationInputs(workspace, output)).toContain(path)
+    const owner = join(workspace, 'docs/LEVEL_SCENE_DESIGN.md')
+    await writeFile(owner, await readFile(owner, 'utf8') + '\n[Calculation](calc/result.md)\n')
+    const baseline = checkDesignHandoff(workspace, ['LEVEL_SCENE_DESIGN.md'])
+    expect(baseline.issues).toEqual([])
+    scene.assetRefs = ['atlas']; scene.data.nodes[1].components[0].assetRef = 'atlas'
+    Object.assign(scene.data.nodes[1].components[0].data, { member: 'assets/atlas.png', frame: 'tile' })
+    await writeFile(file, JSON.stringify(scene, null, 2))
+    expect((await command(workspace, '--check-result', output)).code).toBe(0)
+    const bound = checkDesignHandoff(workspace, ['LEVEL_SCENE_DESIGN.md'])
+    expect(bound.issues).toEqual([])
+    expect(bound.snapshots).toEqual(baseline.snapshots)
+    expect(bound.evidenceHashes).toEqual(baseline.evidenceHashes)
+    expect((await command(workspace, 'model.mjs', output, '--scenes')).code).toBe(0)
+    expect(await readFile(join(workspace, output), 'utf8')).toBe(saved)
+    for (const change of [
+      (d: any) => { d.data.nodes[1].components[0].data.size[0] = 25 },
+      (d: any) => { d.data.nodes[1].data = { behaviors: [{ id: 'rule', kind: 'different-rule', config: {} }] } },
+      (d: any) => { d.data.nodes.push({ id: 'extra-decoration', components: [] }) },
+    ]) {
+      const changed = structuredClone(scene); change(changed)
+      await writeFile(file, JSON.stringify(changed))
+      expect((await command(workspace, '--check-result', output)).stdout).toContain('Input changed: ' + path)
+    }
+    await writeFile(file, JSON.stringify(scene))
+    // Exact-byte users retain their stricter contract; legacy evidence is not
+    // silently upgraded to a weaker identity.
+    await writeFile(join(workspace, 'model.mjs'), `export async function calculate({readText}) {
+      const source = await readText('${path}');
+      return {tables:[{title:'Bytes',columns:['count'],rows:[[source.length]]}],checks:[],limitations:['Exact-byte fixture']}; }`)
+    expect((await command(workspace, 'model.mjs', output)).code).toBe(0)
+    scene.data.nodes[1].components[0].assetRef = 'different-atlas'
+    await writeFile(file, JSON.stringify(scene))
+    expect((await command(workspace, '--check-result', output)).stdout).toContain('Input changed: ' + path)
+  })
+})
 
 test('published tool computes tables, simulates legal actions and regenerates from changed source bytes', async () => {
   await fixture(async workspace => {

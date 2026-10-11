@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import figures from 'figures';
 import * as React from 'react';
 import { useEffect, useState } from 'react';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { toError } from '../utils/errors.js';
 import { logError } from '../utils/log.js';
@@ -12,7 +12,7 @@ import { getEnvironmentSelectionInfo } from '../utils/teleport/environmentSelect
 import type { EnvironmentResource } from '../utils/teleport/environments.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 import { Select } from './CustomSelect/select.js';
-import { Byline, Dialog, KeyboardShortcutHint, LoadingState } from '@anthropic/ink';
+import { Byline, Dialog, KeyboardShortcutHint, LoadingState } from '@bee-game-studio/ink';
 
 const DIALOG_TITLE = 'Select Remote Environment';
 const SETUP_HINT = `Configure environments at: https://claude.ai/code`;

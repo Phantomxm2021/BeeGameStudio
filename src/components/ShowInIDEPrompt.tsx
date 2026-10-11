@@ -1,6 +1,6 @@
 import { basename, relative } from 'path';
 import React from 'react';
-import { Box, Text, Pane } from '@anthropic/ink';
+import { Box, Text, Pane } from '@bee-game-studio/ink';
 import { getCwd } from '../utils/cwd.js';
 import { isSupportedVSCodeTerminal } from '../utils/ide.js';
 import { Select } from './CustomSelect/index.js';

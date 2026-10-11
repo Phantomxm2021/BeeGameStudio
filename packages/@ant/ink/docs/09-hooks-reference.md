@@ -1,6 +1,6 @@
 # Chapter 9: Hooks Reference
 
-Complete API reference for all hooks exported by `@anthropic/ink`.
+Complete API reference for all hooks exported by `@bee-game-studio/ink`.
 
 ---
 

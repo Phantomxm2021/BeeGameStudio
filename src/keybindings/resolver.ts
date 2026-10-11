@@ -1,4 +1,4 @@
-// Re-export from @anthropic/ink keybindings module
+// Re-export from @bee-game-studio/ink keybindings module
 export {
   resolveKey,
   resolveKeyWithChordState,
@@ -6,4 +6,4 @@ export {
   keystrokesEqual,
   type ResolveResult,
   type ChordResolveResult,
-} from '@anthropic/ink'
+} from '@bee-game-studio/ink'

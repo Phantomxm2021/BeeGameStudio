@@ -18,10 +18,17 @@ const redactVisible = createResponseRedactor({})
 export function createNativeSubagentChatEnricher() {
   const inputs = new Map<string, Record<string, unknown>>()
   const launches = new Map<string, { toolUseID: string; outputFile?: string; toolName: 'Agent' | 'Task' }>()
+  const toolOwners = new Map<string, string>()
   return <T extends ChatEvent>(event: T, readOutput = true): T => {
     const p = event.payload
     if (!p) return event
     const toolUseID = str(p.toolUseID)
+    const parent = str(p.parentToolUseID || p.parent_tool_use_id)
+    if (toolUseID && parent) toolOwners.set(toolUseID, parent)
+    if (event.type === 'permission.requested' || event.type === 'permission.resolved') {
+      const owner = parent || toolOwners.get(toolUseID) || launches.get(str(p.agentId))?.toolUseID
+      return owner ? { ...event, payload: { ...p, parentToolUseID: owner } } : event
+    }
     if (['Agent', 'Task'].includes(str(p.toolName)) && toolUseID) {
       if (p.input) inputs.set(toolUseID, record(p.input))
       const launch = parseNativeBackgroundTaskLaunch(str(p.output))
@@ -57,7 +64,9 @@ export function createNativeSubagentChatEnricher() {
     })
     inputs.set(id, input)
     const activity = readOutput && outputFile ? readVisibleSubagentActivity(outputFile) : undefined
+    const owner = toolOwners.get(id)
     return { ...event, payload: { ...p, toolUseID: id, toolName, input,
+      ...(owner ? { parentToolUseID: owner } : {}),
       ...(activity ? { subagentActivity: activity } : {}) } }
   }
 }
@@ -86,12 +95,14 @@ export function readVisibleSubagentActivity(path: string): SubagentActivitySnaps
       if (row.type !== 'assistant' && row.type !== 'user') continue
       const content = record(row.message).content
       if (!Array.isArray(content)) continue
-      for (const [blockIndex, block] of content.map(record).entries()) {
-        if (block.type === 'text' && row.type === 'assistant' && str(block.text)) {
-          const messageId = str(row.uuid) || str(record(row.message).id) || `${size - length}-${entries.length}`
-          const entry: SubagentActivityEntry = { id: `message-${messageId}-${blockIndex}`, kind: 'message', text: '' }
-          entry.text = clip(str(block.text), entry)
+      let textAdded = false
+      for (const block of content.map(record)) {
+        if (!textAdded && block.type === 'text' && row.type === 'assistant' && str(block.text)) {
+          const messageId = str(record(row.message).id) || str(row.uuid) || `${size - length}-${entries.length}`
+          const entry: SubagentActivityEntry = { id: `message-${messageId}`, kind: 'message', text: '' }
+          entry.text = clip(content.map(record).filter(item => item.type === 'text').map(item => str(item.text)).join(''), entry)
           entries.push(entry)
+          textAdded = true
         }
         if (block.type === 'tool_use') {
           const input = record(block.input)

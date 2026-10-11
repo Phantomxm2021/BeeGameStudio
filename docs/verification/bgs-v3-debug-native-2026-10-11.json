@@ -1,0 +1,73 @@
+{
+  "date": "2026-10-11",
+  "scope": "Independent debug -> actual native CLI -> native Question/Skill/Read/Write -> host build/UI consumption measurement/Preview/editable export -> confirmed requirement change/new measurement -> pause/reload",
+  "model": "Deterministic loopback Anthropic transport; not a paid or real-model ability/cost test",
+  "storeAndIdentity": "Local persistent store and explicit synthetic-owner test authentication; separate from prior Supabase/normal Chrome evidence",
+  "protected": {
+    "formalFrontendChanged": false,
+    "claudeCodeChanged": false,
+    "builtinToolsChanged": false,
+    "productionServicesRestarted": false,
+    "databaseDDLChanged": false,
+    "paidModelCalls": 0,
+    "diffSha256BeforeAndAfter": "1def2eee7cad28e6d33ce864a6e84068eb0b69c421330309d2bcbe53891fd995"
+  },
+  "confirmedBug": {
+    "rootCause": "runtime-smoke required a positive body flow height. Visible absolute-positioned game UI can have a zero-height body, so a saved and actually consumed UI was incorrectly unverified.",
+    "classification": "Host runtime checker assumption, not an observed LLM judgement failure",
+    "change": "Observe a concrete surface with nonzero bounds intersecting the viewport and visible ancestors, rather than require body flow height. Preserve ordinary direct body text, including text alongside scripts.",
+    "checkVersion": "runtime-smoke v3-static-artifact.2",
+    "compatibility": "Historical .1 evidence is preserved but is not current authority. Affected work needs explicit new measurement; no automatic task rerun, retry or database rewrite.",
+    "limits": "Initial-load surface/error smoke only, not occlusion/pixel correctness, meaningful gameplay, aesthetics or complete rendering proof. UI causal-consumption requirements are unchanged."
+  },
+  "actualNativeCoverage": {
+    "nativeAttempts": 2,
+    "loopbackModelRequests": 10,
+    "questionAnswers": ["80", "96"],
+    "checks": ["build", "runtime-smoke", "rule-tests", "ui-data-consumption", "skill-use"],
+    "assertions": [
+      "Normal debug Run/plan creation without prewritten PASS or fabricated Chat identity",
+      "Actual CLI Question receives the debug answer through normal project permissions",
+      "Actual native Skill load and Read/Write save formal UI height 80 then 96",
+      "Host source-copy build and position/size mutation-restoration observations pass",
+      "Measured Preview shows actual 80/96 height and clicked feedback; editable export is downloaded through normal API",
+      "Confirmed requirement change does not dispatch; previous Preview returns 409 and previous task qualification is removed",
+      "Explicit second execution has a distinct native session/Attempt and fresh measurements",
+      "Unrelated notes bytes stay intact; pause survives page reload with no writer",
+      "deliveryEligible remains false"
+    ]
+  },
+  "regression": {
+    "command": "bun test packages/agent-workflow-server/src/beegame/workflow-v3 packages/agent-workflow-server/src/auth/auth-context.test.ts packages/agent-workflow-server/src/beegame/session-routes.test.ts",
+    "passed": 172,
+    "failed": 0,
+    "assertions": 1436,
+    "files": 25,
+    "log": "/private/tmp/bgs-v3-debug-native-frozen-regression-2026-10-11.log",
+    "sha256": "49f1c7499ec5b28579bc0168e9ebea19ca1c6535091fedd524bc4293444f2e33",
+    "focused": {"passed": 18, "failed": 0, "assertions": 130, "files": 2, "log": "/private/tmp/bgs-v3-debug-native-surface-final-2026-10-11.log"},
+    "surfaceCases": ["absolute-button", "absolute-canvas", "hidden-button", "transparent-parent", "outside-viewport", "blank-flow", "text-with-script"],
+    "typecheck": {"exitCode": 2, "diagnostics": 3556, "workflowV3Diagnostics": 0, "log": "/private/tmp/bgs-v3-debug-native-typecheck-final-2026-10-11.log", "wholeRepoPassed": false}
+  },
+  "earlierFailuresRetained": [
+    {"log": "/private/tmp/bgs-v3-debug-native-first-2026-10-11.log", "reason": "Restricted loopback listen failed; not product evidence"},
+    {"log": "/private/tmp/bgs-v3-debug-native-first-authorized-2026-10-11.log", "reason": "Actual native source save and UI-consumption passed, but zero body height caused smoke to be unverified"},
+    {"log": "/private/tmp/bgs-v3-debug-native-final-regression-2026-10-11.log", "passed": 168, "failed": 4, "reason": "First surface fix excluded ordinary body text alongside script. Fixed direct TEXT_NODE detection; mixed-text regression and frozen full rerun passed."},
+    {"log": "/private/tmp/bgs-v3-debug-native-typecheck-2026-10-11.log", "reason": "Six new test subprocess stream typing errors, corrected without touching native code; final V3 diagnostics zero"}
+  ],
+  "sourceSha256": {
+    "debug-native.test.ts": "6f5e896af8c0ecd9008c58365245945cf1312de8fb47093626e4050f2397c712",
+    "debug-native-browser.mjs": "60ff42497e2438cf51d0c3da298553e39d4921d6401aed73714466e82e815a3c",
+    "runtime-browser.mjs": "e0e5fc74e864823854a41ee9cce826a81439075a2597b5ce90ff5f7381218495",
+    "runtime-checks.test.ts": "ecb84c45e5826e54574cf4b6613a68f8709489453793aeaf6f56cd956052fbe6",
+    "check-versions.ts": "fdb24165dae5e6e2cfe53cdca10474a23006915053e42e53ee245f898b0c5057"
+  },
+  "notVerified": [
+    "Combined real-Supabase/normal-user debug/actual CLI Review-Repair in a single composite test; prior suites prove these boundaries separately",
+    "Real-model review/design judgement or professional Skill application quality",
+    "Complete Scene/Tilemap/3D/animation/font/audio/gameplay consumption and game quality",
+    "Writer crash before an exit receipt, or unknown external paid operation recovery",
+    "Real tokens/cost improvement, ordinary Chat integration or production deployment"
+  ],
+  "cleanup": "Only owned test browser, loopback fixture services and synthetic temporary fixture directories closed/removed. Production services, user Chrome, real projects and prior remote evidence untouched."
+}

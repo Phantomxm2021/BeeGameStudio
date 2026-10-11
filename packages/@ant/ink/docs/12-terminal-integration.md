@@ -7,7 +7,7 @@ This chapter covers terminal-specific features: alternate screen, mouse tracking
 Enter a fullscreen alternate screen buffer (like vim, less, htop).
 
 ```tsx
-import { AlternateScreen } from '@anthropic/ink'
+import { AlternateScreen } from '@bee-game-studio/ink'
 
 <AlternateScreen mouseTracking={true}>
   <Box flexDirection="column" height="100%">
@@ -106,7 +106,7 @@ onSelectionDrag: (col: number, row: number) => void
 ### OSC 52 Clipboard
 
 ```tsx
-import { setClipboard } from '@anthropic/ink'
+import { setClipboard } from '@bee-game-studio/ink'
 
 await setClipboard('Copied text')
 ```
@@ -130,7 +130,7 @@ const text = copySelectionNoClear()  // Copies but keeps highlight
 Send desktop notifications from the terminal.
 
 ```tsx
-import { useTerminalNotification } from '@anthropic/ink'
+import { useTerminalNotification } from '@bee-game-studio/ink'
 
 function MyComponent() {
   const { notifyBell, progress } = useTerminalNotification()
@@ -169,7 +169,7 @@ notifyGhostty({ message: 'Build complete', title: 'My App' })
 Used for auto-theme detection:
 
 ```ts
-import { getTerminalBackground } from '@anthropic/ink'
+import { getTerminalBackground } from '@bee-game-studio/ink'
 const bg = await getTerminalBackground()
 // e.g., 'rgb:0000/0000/0000' (dark) or 'rgb:ffff/ffff/ffff' (light)
 ```
@@ -177,19 +177,19 @@ const bg = await getTerminalBackground()
 ### Terminal Version (XTVERSION)
 
 ```ts
-import { isXtermJs, setXtversionName, getXtversionName } from '@anthropic/ink'
+import { isXtermJs, setXtversionName, getXtversionName } from '@bee-game-studio/ink'
 ```
 
 ### Feature Detection
 
 ```ts
-import { supportsHyperlinks } from '@anthropic/ink'
+import { supportsHyperlinks } from '@bee-game-studio/ink'
 
 if (supportsHyperlinks()) {
   // OSC 8 hyperlinks supported
 }
 
-import { supportsExtendedKeys } from '@anthropic/ink'
+import { supportsExtendedKeys } from '@bee-game-studio/ink'
 
 if (supportsExtendedKeys()) {
   // Kitty keyboard protocol / modifyOtherKeys available
@@ -201,7 +201,7 @@ if (supportsExtendedKeys()) {
 Track terminal window focus/unfocus:
 
 ```tsx
-import { useTerminalFocus } from '@anthropic/ink'
+import { useTerminalFocus } from '@bee-game-studio/ink'
 
 const isFocused = useTerminalFocus()
 ```
@@ -209,7 +209,7 @@ const isFocused = useTerminalFocus()
 Low-level API:
 
 ```ts
-import { getTerminalFocused, subscribeTerminalFocus } from '@anthropic/ink'
+import { getTerminalFocused, subscribeTerminalFocus } from '@bee-game-studio/ink'
 
 getTerminalFocused()  // boolean
 subscribeTerminalFocus((focused: boolean) => {
@@ -224,7 +224,7 @@ Uses DECSET 1004 focus reporting.
 Set the terminal window title:
 
 ```tsx
-import { useTerminalTitle } from '@anthropic/ink'
+import { useTerminalTitle } from '@bee-game-studio/ink'
 
 useTerminalTitle('My App - Dashboard')
 ```
@@ -246,7 +246,7 @@ import {
   SHOW_CURSOR,
   HIDE_CURSOR,
   CURSOR_HOME,
-} from '@anthropic/ink'
+} from '@bee-game-studio/ink'
 
 // cursorPosition(row, col) -- Move cursor to absolute position
 // cursorMove(dx, dy) -- Move cursor relative
@@ -259,7 +259,7 @@ import {
   ENTER_ALT_SCREEN,
   EXIT_ALT_SCREEN,
   ERASE_SCREEN,
-} from '@anthropic/ink'
+} from '@bee-game-studio/ink'
 ```
 
 ### Mouse Control
@@ -268,7 +268,7 @@ import {
 import {
   ENABLE_MOUSE_TRACKING,
   DISABLE_MOUSE_TRACKING,
-} from '@anthropic/ink'
+} from '@bee-game-studio/ink'
 ```
 
 ### Keyboard Protocols
@@ -279,7 +279,7 @@ import {
   DISABLE_KITTY_KEYBOARD,
   ENABLE_MODIFY_OTHER_KEYS,
   DISABLE_MODIFY_OTHER_KEYS,
-} from '@anthropic/ink'
+} from '@bee-game-studio/ink'
 ```
 
 ### Clipboard & Tab Status
@@ -290,7 +290,7 @@ import {
   CLEAR_TAB_STATUS,
   CLEAR_TERMINAL_TITLE,
   wrapForMultiplexer,
-} from '@anthropic/ink'
+} from '@bee-game-studio/ink'
 ```
 
 `wrapForMultiplexer` wraps OSC sequences for tmux compatibility.
@@ -324,7 +324,7 @@ The framework gracefully degrades:
 ### Synchronized Output
 
 ```ts
-import { isSynchronizedOutputSupported } from '@anthropic/ink'
+import { isSynchronizedOutputSupported } from '@bee-game-studio/ink'
 
 if (isSynchronizedOutputSupported()) {
   // BSU/ESU for tear-free rendering

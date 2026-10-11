@@ -30,10 +30,17 @@ test('an issued preview remains readable when the identity upstream is unavailab
   try {
     expect((await post('/api/projects', { id: 'fixture', name: 'Fixture', root_path: workspace, created_at: Date.now() })).status).toBe(200)
     await post('/api/model-configs', { name: 'Fake', provider: 'openai-compatible', apiKey: 'fake', models: { balanced: 'fake' }, isDefault: true })
-    expect((await post('/api/projects/fixture/session/ensure')).status).toBe(200)
+    const ensured = await post('/api/projects/fixture/session/ensure')
+    expect(ensured.status).toBe(200)
+    const { session } = await ensured.json()
     const response = await post('/api/projects/fixture/preview')
-    expect(response.status).toBe(200)
+    expect(response.status, await response.clone().text()).toBe(200)
     const preview = await response.json()
+    const ungrantedPath = `/previews/${session.id}/src/main.ts`
+    const spoofedHeaders: HeadersInit[] = [{ origin: 'null' }, { 'sec-fetch-dest': 'script', 'sec-fetch-mode': 'cors' }]
+    for (const headers of spoofedHeaders) {
+      expect((await app.request(ungrantedPath, { headers })).status).toBe(401)
+    }
     const calls = identityCalls
     unavailable = true
     const html = await app.request(preview.url)
@@ -44,8 +51,13 @@ test('an issued preview remains readable when the identity upstream is unavailab
     expect(module.status).toBe(200)
     await module.text()
     expect(identityCalls).toBe(calls)
-    expect((await app.request(path)).status).toBe(503)
+    expect((await app.request(ungrantedPath)).status).toBe(503)
     expect(identityCalls).toBe(calls + 1)
+    unavailable = false
+    expect((await app.request('/api/projects/fixture/preview', {
+      method: 'DELETE', headers: { authorization: 'Bearer fixture' },
+    })).status).toBe(200)
+    expect((await app.request(path + 'src/main.ts', { headers: { origin: 'null' } })).status).toBe(404)
   } finally {
     for (const cleanup of cleanups) await cleanup()
     upstream.stop(true)

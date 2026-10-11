@@ -1,4 +1,4 @@
-import type { TerminalNotification } from '@anthropic/ink'
+import type { TerminalNotification } from '@bee-game-studio/ink'
 import { getGlobalConfig } from '../utils/config.js'
 import { env } from '../utils/env.js'
 import { execFileNoThrow } from '../utils/execFileNoThrow.js'
@@ -35,7 +35,7 @@ export async function sendNotification(
   })
 }
 
-const DEFAULT_TITLE = 'Claude Code'
+const DEFAULT_TITLE = 'BGS'
 
 async function sendToChannel(
   channel: string,

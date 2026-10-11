@@ -1,0 +1,153 @@
+{
+  "version": "1.52",
+  "planningRecord": {
+    "path": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/BGS_V3_Agent_Driven_Workflow_Implementation.md",
+    "section": "9.23",
+    "archiveSha256": "12450f6b7c1635a44690e37fc8ac78275b68754fabfcc6dabd35c706ab24e5f7",
+    "archiveNote": "Corrected one extra trailing empty line added by archive patch creation; retained original 1.51 text."
+  },
+  "date": "2026-10-11",
+  "scope": "Read-only paid-log postmortem + BGS integration fixes + offline regression only",
+  "paidCalls": 0,
+  "realGameEdits": 0,
+  "deployed": false,
+  "paidEvidence": "bgs-v3-150-paid-acceptance-2026-10-11.json",
+  "ledger": "bgs-v3-150-paid-requests-2026-10-11.jsonl",
+  "total": 10719833,
+  "requests": 128,
+  "roleCosts": {
+    "main": {
+      "requests": 96,
+      "tokens": 9179220
+    },
+    "review": {
+      "requests": 31,
+      "tokens": 1366018
+    },
+    "compact": {
+      "requests": 1,
+      "tokens": 174595
+    }
+  },
+  "requestTags": {
+    "todo": {
+      "requests": 6,
+      "tokens": 567399
+    },
+    "browserTestEdits": {
+      "requests": 15,
+      "tokens": 1369650
+    },
+    "designEdits": {
+      "requests": 16,
+      "tokens": 1523582
+    },
+    "wrongRuntime": {
+      "requests": 3,
+      "tokens": 246745
+    },
+    "wrongRuntimeExploration": {
+      "requests": 3,
+      "tokens": 216343
+    }
+  },
+  "costCaveat": "Whole-request costs including retained history. Tags are subsets of the paid ledger, not marginal waste or guaranteed savings; never add to the phase totals.",
+  "context": {
+    "firstInput": 132418,
+    "afterCompaction": 38842,
+    "lastInput": 116119,
+    "cached": 10096016,
+    "completion": 86211,
+    "compactionCompleted": true
+  },
+  "outputFeedback": {
+    "bytes": 7075811328,
+    "mtime": "2026-10-11T10:48:22.280Z",
+    "tailContainsOwnOutputPath": true,
+    "commandAt": "2026-10-11T10:46:17.198Z",
+    "taskId": "b0al6mp3x",
+    "originalRemoved": false,
+    "notes": "Recursive grep included .beegame/tmp task output; the tail contains its own path repeatedly. This is output self-scan amplification, not 7GB of model tokens. New project execution puts native tool output outside the game tree, per workspace+Chat, preserving TMPDIR inside and old evidence."
+  },
+  "reviewCauses": [
+    "Task handoff supplied 7577 bytes dominated by chosen author results and rerun commands, instead of deriving coverage from applicable professional promises.",
+    "Existing native verification system already asks for adversarial probes; it was not missing a generic instruction to be skeptical.",
+    "Source numerical expectations were wrong and a broad region/hit radius let them pass; Review reused this oracle.",
+    "Signal/mute tests did not check voice concurrency or the design's gain/peak promise; later smaller samples were treated as supporting PASS without closing the earlier counterexample.",
+    "The readonly review task ran scripts/builds that write measured reports/artifacts; source/report freshness correctly required a final measurement."
+  ],
+  "audioCaveat": "Design says 主增益峰值 <=0.12 without specifying signal vs GainNode parameter/units. Actual master.gain is 1 unmuted; recorded output-signal peak is 0.12731029. Neither a gain parameter nor an output signal should be silently substituted for the other. Concurrent same-type limit has no implementation. Test project remains unchanged.",
+  "fixes": [
+    "BGS_BUN_REQUIRED before importing the Bun-target checker/media/resource/binding modules; no auto-runtime relaunch.",
+    "Measurement arguments checked before capability I/O or host call, with actionable usage.",
+    "Explicit read-only --review-sources batch with source bytes/hashes/headings and opt-in full selected text, missing evidence visible and private/history/symlink paths rejected.",
+    "--scene-point reads saved hierarchy/Camera through existing geometry, emits one exact logical point plus source identity; no scene engine or guessed geometry.",
+    "Optional runtimeErrorPolicy=fail retains initial-load errors even if author callback returns PASS; observe remains compatible.",
+    "checkNumericSamples fails any retained finite-bound violation, keeps no-sample unverified; does not infer units, semantic coverage or unseen behavior.",
+    "Review handoff authority/ordering clarified without scheduled stages, mandatory delegation, history reset, or quality vote.",
+    "Native command/delegate output moved outside the source tree with stable per-workspace+Chat directory, exact sandbox read/write permission and no global tmp grant."
+  ],
+  "regression": {
+    "tests": 186,
+    "files": 11,
+    "fail": 0,
+    "skip": 0,
+    "expectations": 1262,
+    "seconds": 33.57,
+    "realIsolatedBrowser": true,
+    "realCliLocalFakeProvider": true,
+    "typesExit": 0,
+    "diffCheckExit": 0,
+    "earlyFailures": [
+      "Sandbox-restricted test launch could not bind localhost/start the OS build sandbox; same tests passed in the allowed environment.",
+      "Package-specific tsconfig lacked root alias paths; root repository typecheck passed after adding Preview helper types.",
+      "Existing native skill test assumed an unnamespaced label; actual standard plugin used bgs-builtins:review-evidence, compatible assertion corrected."
+    ]
+  },
+  "protectedBefore": {
+    "frontend": {
+      "files": 825,
+      "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"
+    },
+    "claude": {
+      "files": 2445,
+      "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"
+    },
+    "builtin": {
+      "files": 383,
+      "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"
+    },
+    "game": {
+      "files": 93,
+      "sha256": "547f47cb96d9fb687adcb7ce3ced2f95cc6408b2490a05e9fa10e9e052929824"
+    }
+  },
+  "protectedAfter": {
+    "frontend": {
+      "files": 825,
+      "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"
+    },
+    "claude": {
+      "files": 2445,
+      "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"
+    },
+    "builtin": {
+      "files": 383,
+      "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"
+    },
+    "game": {
+      "files": 93,
+      "sha256": "547f47cb96d9fb687adcb7ce3ced2f95cc6408b2490a05e9fa10e9e052929824"
+    }
+  },
+  "protectedUnchanged": true,
+  "protectionHashMethod": "Regular files recursively; exclude dot entries, node_modules and transcripts; sorted paths; SHA256 over relative path NUL bytes NUL. Game hashes cover 93 public files (including reports/build), not huge private native evidence.",
+  "notProven": [
+    "Actual token reduction after these fixes.",
+    "Real reviewer selection/execution of all applicable promises or zero semantic misses.",
+    "Correction of original game's audio design/implementation or legacy camera test.",
+    "Fixing native history/compaction or the prior supplier/network compression issue.",
+    "Legacy isolated-document task output relocation (unchanged .native-tmp); this change covers whole-project V3 execution only."
+  ],
+  "deployment": "Not deployed/restarted this turn; the prior running code remains 1.50. No paid replay or manual test-project repair."
+}

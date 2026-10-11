@@ -3,18 +3,18 @@
   "version": "2.8.4",
   "description": "BeeGameStudio interactive game-building assistant and runtime",
   "type": "module",
-  "author": "bee-game-studio <bee-game-studio@proton.me>",
+  "author": "PhantomLab",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bee-game-studio/claude-code.git"
+    "url": "git+https://github.com/Phantomxm2021/BeeGameStudio.git"
   },
-  "homepage": "https://github.com/bee-game-studio/claude-code#readme",
+  "homepage": "https://github.com/Phantomxm2021/BeeGameStudio#readme",
   "bugs": {
-    "url": "https://github.com/bee-game-studio/claude-code/issues"
+    "url": "https://github.com/Phantomxm2021/BeeGameStudio/issues"
   },
   "keywords": [
     "beegamestudio",
-    "anthropic",
+    "game-development",
     "cli",
     "ai",
     "coding-assistant",
@@ -27,7 +27,8 @@
   "bin": {
     "ccb": "dist/cli-node.js",
     "ccb-bun": "dist/cli-bun.js",
-    "bee-game-studio": "dist/cli-node.js"
+    "bee-game-studio": "dist/cli-node.js",
+    "bee-game-studio-bun": "dist/cli-bun.js"
   },
   "workspaces": [
     "apps/*",
@@ -37,6 +38,11 @@
   ],
   "files": [
     "dist",
+    "NOTICE.md",
+    "packages/workflow-engine/LICENSE",
+    "packages/scene-editor/src/components/ui/LICENSE",
+    "apps/frontend/src/components/Demiurge/Landing/vendor/BENCHO-LICENSE.txt",
+    "apps/frontend/src/components/Demiurge/Landing/vendor/COMPONENTRY-LICENSE.txt",
     "scripts/postinstall.cjs",
     "scripts/run-parallel.mjs",
     "scripts/setup-chrome-mcp.mjs"
@@ -48,7 +54,9 @@
     "build:bun": "bun run build.ts",
     "dev": "bun run scripts/dev.ts",
     "dev:inspect": "bun run scripts/dev-debug.ts",
-    "prepublishOnly": "bun run build:vite",
+    "prepublishOnly": "node scripts/require-release-package.cjs",
+    "prepack": "node scripts/require-release-package.cjs",
+    "release:pack": "bun run scripts/pack-release.ts",
     "lint": "biome lint .",
     "lint:fix": "biome lint --fix .",
     "format": "biome format --write .",
@@ -56,13 +64,8 @@
     "check:fix": "biome check --fix .",
     "prepare": "husky",
     "test": "bun test",
-    "test:production": "bun run scripts/production-test.ts",
-    "test:production:offline": "bun run scripts/production-test.ts --offline",
-    "test:production:verbose": "bun run scripts/production-test.ts --verbose",
-    "test:production:bun": "bun run scripts/production-test.ts --bun",
     "check:bundle": "bun run scripts/check-bundle-integrity.ts",
     "check:unused": "knip-bun",
-    "health": "bun run scripts/health-check.ts",
     "postinstall": "node scripts/run-parallel.mjs scripts/postinstall.cjs scripts/setup-chrome-mcp.mjs",
     "docs:dev": "npx mintlify dev",
     "dashboard:dev": "bun run scripts/dashboard-dev.ts",
@@ -110,7 +113,7 @@
     "@anthropic-ai/sandbox-runtime": "^0.0.44",
     "@anthropic-ai/sdk": "^0.81.0",
     "@anthropic-ai/vertex-sdk": "^0.16.0",
-    "@anthropic/ink": "workspace:*",
+    "@bee-game-studio/ink": "workspace:*",
     "@aws-sdk/client-bedrock": "^3.1037.0",
     "@aws-sdk/client-bedrock-runtime": "^3.1037.0",
     "@aws-sdk/client-sts": "^3.1037.0",

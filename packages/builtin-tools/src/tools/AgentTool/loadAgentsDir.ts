@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle'
 import memoize from 'lodash-es/memoize.js'
 import { basename } from 'path'
+import { readFile } from 'node:fs/promises'
 import type { SettingSource } from 'src/utils/settings/constants.js'
 import { z } from 'zod/v4'
 import { isAutoMemoryEnabled } from 'src/memdir/paths.js'
@@ -38,6 +39,14 @@ import {
 } from 'src/utils/plugins/loadPluginAgents.js'
 import { HooksSchema, type HooksSettings } from 'src/utils/settings/types.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
+
+/** @file keeps inline agent prompts/hooks out of process command lines. */
+export async function readAgentsArgument(argument: string): Promise<unknown> {
+  const contents = argument.startsWith('@')
+    ? await readFile(argument.slice(1), 'utf8')
+    : argument
+  return JSON.parse(contents)
+}
 import { FILE_EDIT_TOOL_NAME } from '../FileEditTool/constants.js'
 import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js'
 import { FILE_WRITE_TOOL_NAME } from '../FileWriteTool/prompt.js'
@@ -296,7 +305,7 @@ async function initializeAgentMemorySnapshots(
 export const getAgentDefinitionsWithOverrides = memoize(
   async (cwd: string): Promise<AgentDefinitionsResult> => {
     // Simple mode: skip custom agents, only return built-ins
-    if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+    if (isEnvTruthy(process.env.BGS_SIMPLE)) {
       const builtInAgents = getBuiltInAgents()
       return {
         activeAgents: builtInAgents,

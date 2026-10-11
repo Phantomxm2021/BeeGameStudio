@@ -1,0 +1,116 @@
+{
+  "version": "bgs-v3-155-offline.1",
+  "status": "offline-regression-passed-real-cost-and-quality-unverified",
+  "date": "2026-10-11",
+  "authorization": {
+    "paidCalls": 0,
+    "deployed": false,
+    "restarted": false,
+    "formalFrontendChanges": false,
+    "claudeCodeChanges": false,
+    "builtinToolsChanges": false,
+    "manualGameChanges": false,
+    "reviewPromptAdded": false,
+    "agentLimitsAdded": false
+  },
+  "priorRun": {
+    "projectId": "v3-paid-a801f793-52cb-4874-8893-f5eaad8bf833",
+    "runId": "bedaee26-a2a7-4997-adf2-688eb3a79a61",
+    "sdkTokens": 5378224,
+    "ledgerRequests": 80,
+    "ledgerTokens": 5377435,
+    "unattributedOutputTokens": 789,
+    "mainTokens": 3976801,
+    "childTokens": 1400634,
+    "cacheReadTokens": 5100304,
+    "mainInitialInput": 81062,
+    "mainFinalInput": 110704,
+    "compactRequestOccurred": false
+  },
+  "provenRootCauses": [
+    {
+      "problem": "Handoff truncation",
+      "evidence": "Actual author read head -120 (3495 chars) then a 2500-character measurement slice. Neither contained freshness. Source section directories and passed-check observations came before freshness.",
+      "fix": "Default handoff omits TOC, full prose, history and passed-check logs. Latest measurement and current freshness first. --details retains full selected evidence, requirements and saved observations."
+    },
+    {
+      "problem": "Stale final receipt",
+      "evidence": "Measurement at 15:10:53.135 UTC preceded 5 verify-r25 evidence files. Old source set 115 -> 120; dependency hash unchanged.",
+      "fix": "New autonomous static-Web builds explicitly reserve reports/ as attachments and physically omit it from the source-copy build/export. Explicit --report paths stay separately hashed. Every receipt uses its own recorded exclusions; old receipts are not upgraded."
+    },
+    {
+      "problem": "Repeated finalization with long history",
+      "evidence": "Agent made two measurements and chose native verification, then targeted Esc revision and child recheck. Esc revision/closing 46 requests, 3624651 tokens. Last four main requests alone 442529 tokens.",
+      "fix": "Read-only --inspect returns compact current facts; --details returns existing logs without model/build/browser execution. Changed sources/reports are named. Remove host-induced attachment invalidation, not legitimate retesting or native final replies.",
+      "limit": "46 requests include genuine changes and checks, not all waste. Agent decision granularity and old native history remain; paid savings not established."
+    },
+    {
+      "problem": "Suspected repeated BGS full-brief injection",
+      "evidence": "agentMessagePrompt includes current message, existing responsibilities and authorized saves; confirmedBriefContext is evidence metadata. Existing native runner regression proves it is not appended to model prompt.",
+      "fix": "No change: avoid treating an unconfirmed cause as a defect."
+    }
+  ],
+  "offlineRegression": {
+    "command": "BGS_LAYOUT_BROWSER=1 bun test <11 existing affected suites, including real native CLI with controlled local provider>",
+    "pass": 129,
+    "fail": 0,
+    "skip": 0,
+    "expects": 1164,
+    "seconds": 81.35,
+    "typecheck": "bunx tsc --noEmit: passed",
+    "diffCheck": "passed",
+    "paidModelCalls": 0
+  },
+  "verifiedCases": [
+    "160-heading source and 28000-character check log cannot push latest failed freshness beyond the first 2500 characters/120 lines in the regression fixture.",
+    "Default omits successful logs; details returns original bytes/logs without state mutation or build rerun.",
+    "New unbound reports/ screenshot after measurement leaves Preview current and project ZIP includes exact measured production files, no evidence directory.",
+    "Changed bound report invalidates currentness, Preview and export.",
+    "Old source proofs still invalidate on newly added reports, never retrospectively accepted.",
+    "reports-assets/ remains production source and stales with exact changed path.",
+    "Production build depending on omitted reports/result.txt actually fails in the copied build, and failure stays visible.",
+    "Reserved reports/ cannot be selected as a runtime artifact; malformed inspect flags rejected before execution.",
+    "Failed/interrupted/latest measurements cannot fall back to old PASS; duplicate requests do not rerun.",
+    "Requirements/source edits/dependencies/artifact mutations and missing evidence remain stale or unverified.",
+    "Native goal/change/discuss/interruption/continuation, debug Preview/project export and real browser UI/Scene geometry consume current data.",
+    "Confirmed brief metadata is not injected twice into native content."
+  ],
+  "protectedSourceFingerprints": {
+    "frontend": {
+      "files": 825,
+      "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"
+    },
+    "claudeCode": {
+      "files": 2445,
+      "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"
+    },
+    "builtinTools": {
+      "files": 383,
+      "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"
+    },
+    "matchPaid153Baseline": true
+  },
+  "realProjectReadOnlyHashes": {
+    "checked": 16,
+    "changed": []
+  },
+  "outstanding": [
+    "Source edits not deployed; running services still previous deployment.",
+    "Real project existing stale receipt stays stale; no retroactive upgrade or game edits.",
+    "Star layout, same-sound polyphony and defective camera test remain game-quality gaps; this offline system fix does not resolve or certify them.",
+    "Semantic/game-quality verdict is unverified. No fixed Review, task framework, native history reset or hard agent cap added.",
+    "No actual token reduction claimed; shorter tool output and less false source invalidation are verified, model behavior is not."
+  ],
+  "sources": [
+    "bgs-v3-153-paid-acceptance-2026-10-11.json",
+    "bgs-v3-153-paid-requests-2026-10-11.jsonl"
+  ],
+  "changedSystemFiles": [
+    "packages/agent-workflow-server/src/beegame/design-source-reading.ts",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/editable-project.ts",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/measured-build.ts",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts"
+  ]
+}

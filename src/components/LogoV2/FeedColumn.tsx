@@ -1,6 +1,6 @@
 import * as React from 'react';
-import { Box } from '@anthropic/ink';
-import { Divider } from '@anthropic/ink';
+import { Box } from '@bee-game-studio/ink';
+import { Divider } from '@bee-game-studio/ink';
 import type { FeedConfig } from './Feed.js';
 import { calculateFeedWidth, Feed } from './Feed.js';
 

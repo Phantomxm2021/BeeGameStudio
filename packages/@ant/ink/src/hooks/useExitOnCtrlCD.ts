@@ -3,7 +3,7 @@
  *
  * The original hooks depend on the keybinding system and useApp() exit.
  * This stub provides the same interface with simplified Ctrl+C/D handling
- * via useInput, suitable for the standalone @anthropic/ink package.
+ * via useInput, suitable for the standalone @bee-game-studio/ink package.
  */
 
 import { useCallback, useState } from 'react'

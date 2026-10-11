@@ -1,6 +1,6 @@
 import type { StructuredPatchHunk } from 'diff';
 import * as React from 'react';
-import { Box, NoSelect, Text } from '@anthropic/ink';
+import { Box, NoSelect, Text } from '@bee-game-studio/ink';
 import { intersperse } from '../utils/array.js';
 import { StructuredDiff } from './StructuredDiff.js';
 

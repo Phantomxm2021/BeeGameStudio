@@ -1,6 +1,6 @@
 import figures from 'figures';
 import React, { useCallback, useState } from 'react';
-import { type KeyboardEvent, Box, Text } from '@anthropic/ink';
+import { type KeyboardEvent, Box, Text } from '@bee-game-studio/ink';
 import { useAppState } from '../../../state/AppState.js';
 import type {
   Question,
@@ -12,7 +12,7 @@ import { toIDEDisplayName } from '../../../utils/ide.js';
 import type { ImageDimensions } from '../../../utils/imageResizer.js';
 import { editPromptInEditor } from '../../../utils/promptEditor.js';
 import { type OptionWithDescription, Select, SelectMulti } from '../../CustomSelect/index.js';
-import { Divider } from '@anthropic/ink';
+import { Divider } from '@bee-game-studio/ink';
 import { FilePathLink } from '../../FilePathLink.js';
 
 import { PermissionRequestTitle } from '../PermissionRequestTitle.js';

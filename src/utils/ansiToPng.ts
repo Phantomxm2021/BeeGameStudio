@@ -19,7 +19,7 @@
  */
 
 import { deflateSync } from 'zlib'
-import { stringWidth } from '@anthropic/ink'
+import { stringWidth } from '@bee-game-studio/ink'
 import {
   type AnsiColor,
   DEFAULT_BG,

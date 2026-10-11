@@ -203,9 +203,9 @@ export function mapStoredModelConfigToRuntime(
         env: compactEnv({
           ANTHROPIC_BASE_URL: record.baseUrl,
           ANTHROPIC_AUTH_TOKEN: record.apiKey,
-          ANTHROPIC_DEFAULT_HAIKU_MODEL: record.models.fast,
-          ANTHROPIC_DEFAULT_SONNET_MODEL: record.models.balanced,
-          ANTHROPIC_DEFAULT_OPUS_MODEL: record.models.strong,
+          BGS_DEFAULT_FAST_MODEL: record.models.fast,
+          BGS_DEFAULT_BALANCED_MODEL: record.models.balanced,
+          BGS_DEFAULT_STRONG_MODEL: record.models.strong,
         }),
       }
     case 'openai-compatible':

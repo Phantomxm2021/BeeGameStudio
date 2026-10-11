@@ -28,6 +28,8 @@ export type EngineContext = {
   journal: JournalEntry[]
   journalIndex: number
   journalInvalidated: boolean
+  /** Parallel calls must not append while the retained prefix is being published. */
+  journalReset?: Promise<void>
   currentPhase: string | null
 }
 

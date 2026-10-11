@@ -92,6 +92,42 @@ export const BEEGAME_SCENE_ASSET_COMPONENT_TYPES = [
   'image',
 ] as const satisfies readonly (typeof BEEGAME_SCENE_COMPONENT_TYPES)[number][]
 
+// Resource locators, not arbitrary same-named fields deeper in gameplay data.
+export const CONTENT_RESOURCE_LOCATOR_KEYS = ['assetRef', 'member', 'atlasMember', 'frame'] as const
+export function withoutResourceLocators(value: Record<string, unknown> = {}, keys: readonly string[] = CONTENT_RESOURCE_LOCATOR_KEYS) {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => !keys.includes(key)))
+}
+/** The same design-only input is consumed by numerical models and frozen-source
+ * checks. Models never receive fields excluded from their freshness identity. */
+export function sceneDesignSource(doc: Extract<BeeGameContentDocument, { kind: 'scene-2d' | 'scene-3d' }>) {
+  const types = new Set<string>(BEEGAME_SCENE_ASSET_COMPONENT_TYPES)
+  return { schema: doc.schema, id: doc.id, kind: doc.kind,
+    data: { ...doc.data, nodes: doc.data.nodes.map(node => ({ ...node,
+      components: node.components?.map(component => {
+        if (!types.has(component.type)) return component
+        const { assetRef: _assetRef, ...decision } = component
+        const data = { ...withoutResourceLocators(component.data),
+          ...(component.data?.assetRef !== undefined ? { assetRef: component.data.assetRef } : {}) }
+        return { ...decision, data: Object.keys(data).length ? data : undefined }
+      }),
+    })) } }
+}
+export function uiDesignData(value: Record<string, unknown> = {}, scope: 'data' | 'style' = 'data', assetRole = false) {
+  const data = { ...value }
+  // These are the existing font/image/texture consumer locations. Keep all
+  // non-locator parameters (crop, tint, font treatment, etc.) protected.
+  for (const key of scope === 'data' ? ['font', 'image', 'texture'] : ['image', 'texture']) {
+    const ref = data[key]
+    if (ref && typeof ref === 'object' && !Array.isArray(ref)) {
+      const decision = withoutResourceLocators(ref as Record<string, unknown>, key === 'font' ? ['assetRef', 'member'] : CONTENT_RESOURCE_LOCATOR_KEYS)
+      if (Object.keys(decision).length) data[key] = decision
+      else delete data[key]
+    }
+  }
+  if (assetRole) for (const key of ['member', 'atlasMember', 'frame']) delete data[key]
+  return Object.keys(data).length ? data : undefined
+}
+
 const digestSchema = string().regex(/^[a-f0-9]{64}$/)
 const finiteNumber = number().finite()
 const identifier = string().trim().min(1).max(256)

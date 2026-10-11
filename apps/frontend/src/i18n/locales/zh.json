@@ -656,7 +656,14 @@
       "truncated": "此输出已截断，并非完整文件或执行结果。",
       "command": "命令",
       "output": "工具输出",
-      "file": "文件内容"
+      "file": "文件内容",
+      "pending": "等待批准",
+      "allowed": "已批准",
+      "denied": "已拒绝",
+      "cancelled": "审批已取消",
+      "incomplete": "结束状态未确认",
+      "elapsed": "已运行",
+      "attachmentError": "附件显示失败"
     },
     "assistantName": "BeeGame",
     "previewTitle": "预览",

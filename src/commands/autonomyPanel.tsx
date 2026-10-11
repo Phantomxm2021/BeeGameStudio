@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Box, Text, useInput } from '@anthropic/ink';
-import { Dialog } from '@anthropic/ink';
+import { Box, Text, useInput } from '@bee-game-studio/ink';
+import { Dialog } from '@bee-game-studio/ink';
 import { useRegisterOverlay } from '../context/overlayContext.js';
 import type { LocalJSXCommandOnDone } from '../types/command.js';
 import { getAutonomyCommandText, getAutonomyDeepSectionText, getAutonomyStatusText } from '../cli/handlers/autonomy.js';

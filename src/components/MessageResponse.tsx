@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useContext } from 'react';
-import { Box, NoSelect, Text, Ratchet } from '@anthropic/ink';
+import { Box, NoSelect, Text, Ratchet } from '@bee-game-studio/ink';
 
 type Props = {
   children: React.ReactNode;

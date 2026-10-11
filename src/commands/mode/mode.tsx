@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { Select } from '../../components/CustomSelect/select.js';
 import type { LocalJSXCommandCall, LocalJSXCommandOnDone } from '../../types/command.js';
 import { getCurrentModeSlug, listModes, setCurrentMode } from '../../modes/store.js';

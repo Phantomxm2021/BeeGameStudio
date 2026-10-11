@@ -12,68 +12,21 @@
  *   bun scripts/check-bundle-integrity.ts ./dist    # 指定目录
  */
 
-import { readdir, readFile } from 'fs/promises'
-import { join, resolve, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { readdir, readFile, access } from 'fs/promises'
+import { join, resolve, dirname, sep } from 'path'
+import { isBuiltin } from 'node:module'
+import ts from 'typescript'
 
-// ─── 从 package.json 读取 dependencies 作为白名单 ────────────────
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const pkg = JSON.parse(
-  await readFile(join(__dirname, '..', 'package.json'), 'utf-8'),
-)
-const PKG_DEPS = new Set(Object.keys(pkg.dependencies ?? {}))
+const BUN_MODULES = new Set(['bun', 'bun:ffi', 'bun:test', 'bun:sqlite', 'bun:jsc', 'bun:wrap'])
+// Bun's isBuiltin() includes npm packages which Node does not provide.
+const BUN_ALIASED_PACKAGES = new Set(['undici', 'ws', 'node-fetch'])
+// Node 22+ provides SQLite, while some Bun versions omit it from isBuiltin().
+const NODE_ONLY_BUILTINS = new Set(['node:sqlite'])
 
-// ─── Node.js 内置模块白名单 ────────────────────────────────────────
-const NODE_BUILTINS = new Set([
-  'assert',
-  'async_hooks',
-  'buffer',
-  'child_process',
-  'cluster',
-  'console',
-  'constants',
-  'crypto',
-  'dgram',
-  'diagnostics_channel',
-  'dns',
-  'domain',
-  'events',
-  'fs',
-  'fs/promises',
-  'http',
-  'http2',
-  'https',
-  'inspector',
-  'module',
-  'net',
-  'os',
-  'path',
-  'perf_hooks',
-  'process',
-  'punycode',
-  'querystring',
-  'readline',
-  'repl',
-  'stream',
-  'string_decoder',
-  'sys',
-  'timers',
-  'tls',
-  'tty',
-  'url',
-  'util',
-  'v8',
-  'vm',
-  'worker_threads',
-  'zlib',
-  'node:test',
-])
-
-// Node 18+ 内置但不在传统列表中的模块
-const NODE_18_PLUS_BUILTINS = new Set(['undici'])
-
-// Bun 专用模块（仅在 Bun 运行时可用，Node.js 环境会失败）
-const BUN_MODULES = new Set(['bun', 'bun:ffi', 'bun:test', 'bun:sqlite'])
+// localVault/keychain.ts explicitly catches load failure and the vault
+// falls back to encrypted file storage. Report reduced capability, not a
+// guaranteed startup failure; do not silently whitelist unknown libraries.
+const OPTIONAL_FALLBACK_MODULES = new Set(['@napi-rs/keyring'])
 
 // macOS JXA / native 框架（通过 ObjC.import，非真正的 require）
 const NATIVE_FRAMEWORKS = new Set([
@@ -83,16 +36,6 @@ const NATIVE_FRAMEWORKS = new Set([
   'UIKit',
 ])
 
-// ─── 模式 ──────────────────────────────────────────────────────────
-// 匹配 import { ... } from "./chunk-xxxxx.js" 或 import"./chunk-xxxxx.js"
-const STATIC_IMPORT_RE = /(?:from\s+|import\s+)"(\.\/[^"]+\.js)"/g
-// 匹配 __require("xxx")
-const REQUIRE_RE = /__require\("([^"]+)"\)/g
-// 匹配动态 import("xxx")，排除 ./chunk-xxx.js 的内部引用
-const DYNAMIC_IMPORT_RE = /import\("([^"]+)"\)/g
-// 匹配 nodeRequire("xxx")（createRequire 创建的 require 别名）
-const NODE_REQUIRE_RE = /nodeRequire\("([^"]+)"\)/g
-
 interface Finding {
   type:
     | 'broken-chunk-ref'
@@ -100,11 +43,54 @@ interface Finding {
     | 'third-party-import'
     | 'third-party-node-require'
     | 'bun-runtime-only'
+    | 'optional-runtime-unavailable'
+    | 'syntax-error'
   severity: 'error' | 'warning'
   file: string
   line: number
   module: string
   snippet: string
+}
+
+export async function listBundleJavaScript(distDir: string): Promise<string[]> {
+  const entry = await readFile(join(distDir, 'cli.js'), 'utf8').catch(() => { throw new Error('Missing CLI entry: cli.js') })
+  const generation = entry.match(/^import\s+["']\.\/(build-[\w-]+)\/cli\.js["']/)?.[1]
+  const files: string[] = []
+  async function walk(directory: string, prefix = ''): Promise<void> {
+    for (const item of await readdir(directory, { withFileTypes: true })) {
+      const name = prefix + item.name
+      if (item.isFile() && item.name.endsWith('.js')) files.push(name)
+      if (item.isDirectory() && item.name === 'chunks') await walk(join(directory, item.name), name + '/')
+    }
+  }
+  if (generation) {
+    await access(join(distDir, generation, 'cli.js')).catch(() => { throw new Error('Missing active generation CLI entry') })
+    for (const name of ['cli.js', 'cli-bun.js', 'cli-node.js']) {
+      if (await Bun.file(join(distDir, name)).exists()) files.push(name)
+    }
+    await walk(join(distDir, generation), generation + '/')
+  } else {
+    await walk(distDir)
+  }
+  if (!files.length) throw new Error('No JavaScript build files found')
+  return files.sort()
+}
+
+/** Read only manifests inside the target; never borrow the source repo's deps. */
+async function packageDependencies(file: string, root: string): Promise<Set<string>> {
+  let directory = dirname(file)
+  while (directory === root || directory.startsWith(root + sep)) {
+    const manifest = await readFile(join(directory, 'package.json'), 'utf8').catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return null
+      throw error
+    })
+    if (manifest !== null) {
+      const metadata = JSON.parse(manifest)
+      return new Set([...Object.keys(metadata.dependencies ?? {}), ...Object.keys(metadata.optionalDependencies ?? {})])
+    }
+    directory = dirname(directory)
+  }
+  return new Set()
 }
 
 async function main() {
@@ -115,14 +101,14 @@ async function main() {
   // 1. 列出所有 chunk 文件
   let files: string[]
   try {
-    files = (await readdir(distDir)).filter(f => f.endsWith('.js'))
-  } catch {
-    console.error(`❌ 无法读取目录: ${distDir}`)
+    files = await listBundleJavaScript(distDir)
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error))
+    console.error(`❌ 构建入口或目录不完整: ${distDir}`)
     console.error('   请先运行 bun run build')
     process.exit(1)
   }
 
-  const fileSet = new Set(files)
   console.log(`📦 找到 ${files.length} 个 JS 文件\n`)
 
   const findings: Finding[] = []
@@ -131,135 +117,73 @@ async function main() {
   for (const file of files) {
     const filePath = join(distDir, file)
     const content = await readFile(filePath, 'utf-8')
-    const lines = content.split('\n')
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]
-      const lineNum = i + 1
-
-      // 2a. 检查静态 chunk 引用是否断链
-      const staticImportMatches = line.matchAll(STATIC_IMPORT_RE)
-      for (const m of staticImportMatches) {
-        const ref = m[1]
-        // 提取文件名部分（去掉 ./）
-        const refFile = ref.replace(/^\.\//, '')
-        if (!fileSet.has(refFile)) {
-          findings.push({
-            type: 'broken-chunk-ref',
-            severity: 'error',
-            file,
-            line: lineNum,
-            module: ref,
-            snippet: line.trim().slice(0, 120),
-          })
+    const dependencies = await packageDependencies(filePath, distDir)
+    const source = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
+    const options = { noResolve: true, noLib: true, allowJs: true, target: ts.ScriptTarget.Latest, module: ts.ModuleKind.ESNext }
+    const program = ts.createProgram([filePath], options, {
+      ...ts.createCompilerHost(options),
+      getSourceFile: name => name === filePath ? source : undefined,
+      readFile: () => undefined, fileExists: name => name === filePath,
+    })
+    for (const diagnostic of program.getSyntacticDiagnostics(source)) {
+      findings.push({ type: 'syntax-error', severity: 'error', file,
+        line: source.getLineAndCharacterOfPosition(diagnostic.start ?? 0).line + 1,
+        module: '', snippet: ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n') })
+    }
+    const checker = program.getTypeChecker()
+    const factories = new Set<ts.Symbol>()
+    const loaders = new Set<ts.Symbol>()
+    for (const statement of source.statements) {
+      if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || !['module', 'node:module'].includes(statement.moduleSpecifier.text)) continue
+      const bindings = statement.importClause?.namedBindings
+      if (bindings && ts.isNamedImports(bindings)) for (const item of bindings.elements) {
+        if ((item.propertyName ?? item.name).text === 'createRequire') {
+          const symbol = checker.getSymbolAtLocation(item.name)
+          if (symbol) factories.add(symbol)
         }
       }
-
-      // 2b. 检查 __require 中的第三方模块
-      const requireMatches = line.matchAll(REQUIRE_RE)
-      for (const m of requireMatches) {
-        const mod = m[1]
-        // 跳过 ObjC.import（JXA 语法，不是真正的 require）
-        if (NATIVE_FRAMEWORKS.has(mod)) continue
-        if (
-          NODE_BUILTINS.has(mod) ||
-          NODE_18_PLUS_BUILTINS.has(mod) ||
-          PKG_DEPS.has(mod) ||
-          mod.startsWith('node:')
-        )
-          continue
-        if (BUN_MODULES.has(mod)) {
-          findings.push({
-            type: 'bun-runtime-only',
-            severity: 'warning',
-            file,
-            line: lineNum,
-            module: mod,
-            snippet: line.trim().slice(0, 120),
-          })
-          continue
-        }
-        // 第三方模块 — 在生产环境（全局 npm install）中找不到
-        findings.push({
-          type: 'third-party-require',
-          severity: 'error',
-          file,
-          line: lineNum,
-          module: mod,
-          snippet: line.trim().slice(0, 120),
-        })
+    }
+    function collectLoaders(node: ts.Node): void {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && ts.isCallExpression(node.initializer) && ts.isIdentifier(node.initializer.expression) && factories.has(checker.getSymbolAtLocation(node.initializer.expression)!)) {
+        const symbol = checker.getSymbolAtLocation(node.name)
+        if (symbol) loaders.add(symbol)
       }
-
-      // 2c. 检查动态 import() 中的第三方模块
-      const dynImportMatches = line.matchAll(DYNAMIC_IMPORT_RE)
-      for (const m of dynImportMatches) {
-        const mod = m[1]
-        // 跳过内部 chunk 引用和相对路径
-        if (mod.startsWith('./') || mod.startsWith('../')) continue
-        // 跳过 ObjC.import
-        if (NATIVE_FRAMEWORKS.has(mod)) continue
-        if (
-          NODE_BUILTINS.has(mod) ||
-          NODE_18_PLUS_BUILTINS.has(mod) ||
-          PKG_DEPS.has(mod) ||
-          mod.startsWith('node:')
-        )
-          continue
-        if (BUN_MODULES.has(mod)) {
-          // bun:test 等只在 Bun 运行时可用，Node.js 运行时会失败
-          findings.push({
-            type: 'bun-runtime-only',
-            severity: 'warning',
-            file,
-            line: lineNum,
-            module: mod,
-            snippet: line.trim().slice(0, 120),
-          })
-          continue
-        }
-        // 第三方动态 import
-        findings.push({
-          type: 'third-party-import',
-          severity: 'error',
-          file,
-          line: lineNum,
-          module: mod,
-          snippet: line.trim().slice(0, 120),
-        })
+      ts.forEachChild(node, collectLoaders)
+    }
+    collectLoaders(source)
+    const references: Array<{ specifier: string; node: ts.Node; type: Finding['type'] }> = []
+    function visit(node: ts.Node): void {
+      if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+        references.push({ specifier: node.moduleSpecifier.text, node, type: 'third-party-import' })
+      } else if (ts.isCallExpression(node) && node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0]!)) {
+        const name = ts.isIdentifier(node.expression) ? node.expression.text : ''
+        const type = node.expression.kind === ts.SyntaxKind.ImportKeyword ? 'third-party-import'
+          : name === 'nodeRequire' || (ts.isIdentifier(node.expression) && loaders.has(checker.getSymbolAtLocation(node.expression)!)) ? 'third-party-node-require'
+          : ['require', '__require'].includes(name) ? 'third-party-require' : null
+        if (type) references.push({ specifier: node.arguments[0]!.text, node, type })
       }
-
-      // 2d. 检查 nodeRequire("xxx") 中的第三方模块（createRequire 别名）
-      const nodeRequireMatches = line.matchAll(NODE_REQUIRE_RE)
-      for (const m of nodeRequireMatches) {
-        const mod = m[1]
-        if (NATIVE_FRAMEWORKS.has(mod)) continue
-        if (
-          NODE_BUILTINS.has(mod) ||
-          NODE_18_PLUS_BUILTINS.has(mod) ||
-          PKG_DEPS.has(mod) ||
-          mod.startsWith('node:')
-        )
-          continue
-        if (BUN_MODULES.has(mod)) {
-          findings.push({
-            type: 'bun-runtime-only',
-            severity: 'warning',
-            file,
-            line: lineNum,
-            module: mod,
-            snippet: line.trim().slice(0, 120),
-          })
-          continue
+      ts.forEachChild(node, visit)
+    }
+    visit(source)
+    for (const { specifier: mod, node, type } of references) {
+      const location = source.getLineAndCharacterOfPosition(node.getStart(source))
+      const base = { file, line: location.line + 1, module: mod, snippet: node.getText(source).slice(0, 120) }
+      if (mod.startsWith('./') || mod.startsWith('../') || mod.startsWith('/')) {
+        if (!(await access(resolve(dirname(filePath), mod)).then(() => true, () => false))) {
+          findings.push({ ...base, type: 'broken-chunk-ref', severity: 'error' })
         }
-        findings.push({
-          type: 'third-party-node-require',
-          severity: 'error',
-          file,
-          line: lineNum,
-          module: mod,
-          snippet: line.trim().slice(0, 120),
-        })
+        continue
       }
+      if (BUN_MODULES.has(mod)) {
+        findings.push({ ...base, type: 'bun-runtime-only', severity: 'warning' })
+        continue
+      }
+      if (NODE_ONLY_BUILTINS.has(mod) || (isBuiltin(mod) && !BUN_ALIASED_PACKAGES.has(mod.replace(/^node:/, ''))) || NATIVE_FRAMEWORKS.has(mod)) continue
+      const packageName = mod.startsWith('@') ? mod.split('/').slice(0, 2).join('/') : mod.split('/')[0]!
+      if (dependencies.has(packageName)) continue
+      if (OPTIONAL_FALLBACK_MODULES.has(mod) && hasLoadErrorHandler(node)) {
+        findings.push({ ...base, type: 'optional-runtime-unavailable', severity: 'warning' })
+      } else findings.push({ ...base, type, severity: 'error' })
     }
   }
 
@@ -277,6 +201,10 @@ async function main() {
     f => f.type === 'third-party-node-require',
   )
   const bunRuntimeOnly = warnings.filter(f => f.type === 'bun-runtime-only')
+  const optionalRuntime = warnings.filter(f => f.type === 'optional-runtime-unavailable')
+  for (const finding of errors.filter(f => f.type === 'syntax-error')) {
+    console.log(`❌ JavaScript 语法错误: ${finding.file}:${finding.line}: ${finding.snippet}`)
+  }
 
   if (brokenRefs.length > 0) {
     console.log('❌ 断裂的 chunk 引用（引用了不存在的文件）:')
@@ -328,7 +256,7 @@ async function main() {
   }
 
   if (bunRuntimeOnly.length > 0) {
-    console.log('⚠️  Bun 运行时专用模块（Node.js 环境会失败）:')
+    console.log('⚠️  Bun 专用模块引用（需确认 Node 路径有运行时保护）:')
     const grouped = groupByModule(bunRuntimeOnly)
     for (const [mod, items] of grouped) {
       console.log(`   "${mod}" — 出现 ${items.length} 次`)
@@ -336,10 +264,16 @@ async function main() {
     console.log()
   }
 
+  if (optionalRuntime.length > 0) {
+    console.log('⚠️  可选系统钥匙串模块未随包提供；缺失时使用加密文件回退:')
+    for (const f of optionalRuntime) console.log(`   ${f.file}:${f.line} → ${f.module}`)
+    console.log()
+  }
+
   // 4. 总结
   console.log('─'.repeat(50))
   if (errors.length === 0 && warnings.length === 0) {
-    console.log('✅ 构建产物完整性检查通过，未发现问题。')
+    console.log('✅ 构建静态语法及依赖声明检查通过；实际安装和非字面量动态加载需运行验证。')
   } else {
     console.log(`📊 总计: ${errors.length} 个错误, ${warnings.length} 个警告`)
     if (errors.length > 0) {
@@ -355,6 +289,21 @@ async function main() {
   process.exit(errors.length > 0 ? 1 : 0)
 }
 
+/** A known optional module is optional only where its load error is caught. */
+function hasLoadErrorHandler(node: ts.Node): boolean {
+  if (!ts.isCallExpression(node)) return false // Static imports cannot fall back.
+  const asynchronous = node.expression.kind === ts.SyntaxKind.ImportKeyword
+  if (asynchronous && ts.isPropertyAccessExpression(node.parent) && node.parent.name.text === 'catch' && ts.isCallExpression(node.parent.parent)) return true
+  let awaited = !asynchronous
+  let child: ts.Node = node
+  for (let parent = node.parent; parent; child = parent, parent = parent.parent) {
+    if (ts.isAwaitExpression(parent)) awaited = true
+    if (ts.isTryStatement(parent) && parent.tryBlock === child && parent.catchClause) return awaited
+    if (ts.isFunctionLike(parent)) break
+  }
+  return false
+}
+
 function groupByModule(items: Finding[]): Map<string, Finding[]> {
   const map = new Map<string, Finding[]>()
   for (const item of items) {
@@ -366,7 +315,7 @@ function groupByModule(items: Finding[]): Map<string, Finding[]> {
   return new Map([...map.entries()].sort((a, b) => b[1].length - a[1].length))
 }
 
-main().catch(err => {
+if (import.meta.main) main().catch(err => {
   console.error('Fatal error:', err)
   process.exit(2)
 })

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Box, Text, useTheme } from '@anthropic/ink';
+import { Box, Text, useTheme } from '@bee-game-studio/ink';
 import { getTheme, type Theme } from '../../utils/theme.js';
 import { getDefaultCharacters, interpolateColor, parseRGB, toRGBColor } from './utils.js';
 

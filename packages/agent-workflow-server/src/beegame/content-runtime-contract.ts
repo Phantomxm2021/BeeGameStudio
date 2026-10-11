@@ -1,4 +1,4 @@
-import { z } from 'zod/v4'
+import { array, enum as enumeration, object, string } from 'zod/v4'
 
 /** An outcome contract, not a renderer, test runner or Agent execution plan. */
 export const CONTENT_RUNTIME_CHECKS = {
@@ -26,20 +26,20 @@ export const CONTENT_RUNTIME_CONTRACT = {
   checks: CONTENT_RUNTIME_CHECKS,
 } as const
 
-const text = z.string().trim().min(1)
-export const contentRuntimeCheckSchema = z.object({
-  kind: z.enum(['ui-layout', 'scene-layout', 'resource-binding']),
+const text = string().trim().min(1)
+export const contentRuntimeCheckSchema = object({
+  kind: enumeration(['ui-layout', 'scene-layout', 'resource-binding']),
   document: text, // workspace-relative registered content document
   nodeId: text,
-  property: z.enum(['layout', 'transform', 'tilemap', 'assetRef', 'frame', 'member']),
+  property: enumeration(['layout', 'transform', 'tilemap', 'assetRef', 'frame', 'member']),
   change: text,
   expected: text,
   observed: text,
-  status: z.enum(['passed', 'failed', 'unverified']),
-  evidencePaths: z.array(text).min(1),
+  status: enumeration(['passed', 'failed', 'unverified']),
+  evidencePaths: array(text).min(1),
 }).superRefine((check, context) => {
   if (!(CONTENT_RUNTIME_CHECKS[check.kind].properties as readonly string[]).includes(check.property))
     context.addIssue({ code: 'custom', path: ['property'], message: `${check.kind} cannot be established by changing ${check.property}` })
 })
 
-export const CONTENT_RUNTIME_REPORT_INSTRUCTION = 'For authored content, verification.contentChecks records representative data-binding checks (not at the report top level): {kind:"ui-layout"|"scene-layout"|"resource-binding",document:"content/<registered file>",nodeId,property:"layout"|"transform"|"tilemap"|"assetRef"|"frame"|"member",change,expected,observed,status:"passed"|"failed"|"unverified",evidencePaths:string[]}. Text fields describe the actual source change and before/after runtime result. Include ui-layout when screen/HUD data exists, scene-layout/transform when Scene data exists, an additional scene-layout/tilemap check when Tilemaps exist, and resource-binding when content references assets. A tile cell check cannot replace a parent/child transform check. Every check evidence path must also appear in the report evidencePaths. Failed or unverified bindings cannot be a delivery PASS. These are results, not an extra stage or required testing tool.'
+export const CONTENT_RUNTIME_REPORT_INSTRUCTION = 'For authored content, verification.contentChecks records representative data-binding checks (not at the report top level): {kind:"ui-layout"|"scene-layout"|"resource-binding",document:"content/<registered file>",nodeId,property:"layout"|"transform"|"tilemap"|"assetRef"|"frame"|"member",change,expected,observed,status:"passed"|"failed"|"unverified",evidencePaths:string[]}. Text fields describe the actual source change and before/after runtime result. Cover every applicable registered file: ui-layout for each screen/HUD, scene-layout/transform for each Scene, and resource-binding for each file referencing assets. Additionally cover each Tilemap node with its own scene-layout/tilemap result. One file cannot stand in for another; checks may share an actual batch test log without repeated test runs. A tile cell check cannot replace a parent/child transform check. Every check evidence path must also appear in the report evidencePaths. Failed or unverified bindings cannot be a delivery PASS. These are results, not an extra stage or required testing tool.'

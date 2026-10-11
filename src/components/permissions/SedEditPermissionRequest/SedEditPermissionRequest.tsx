@@ -5,7 +5,7 @@ import { getCwd } from 'src/utils/cwd.js';
 import { isENOENT } from 'src/utils/errors.js';
 import { detectEncodingForResolvedPath } from 'src/utils/fileRead.js';
 import { getFsImplementation } from 'src/utils/fsOperations.js';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { BashTool } from '@bee-game-studio/builtin-tools/tools/BashTool/BashTool.js';
 import {
   applySedSubstitution,

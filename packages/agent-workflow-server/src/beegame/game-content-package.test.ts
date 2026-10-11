@@ -48,6 +48,25 @@ const logicalCameraData = {
 }
 
 describe('Unity-style Game Content scene contract', () => {
+  it('revision errors point to the existing authority entry instead of requiring hash/source investigation', () => {
+    const result = audit({schema:'beegame-content.v1',id:'scene',kind:'scene-2d',assetRefs:[],data:{nodes:[{id:'root'}]}},
+      '2d',manifest,{documentRevision:'b'.repeat(64),assetManifestRevision:'c'.repeat(64)})
+    expect(result.valid).toBe(false)
+    const errors = result.issues.filter(issue=>issue.includes('match authority'))
+    expect(errors).toHaveLength(2)
+    expect(errors.every(issue=>issue.includes('check-content.mjs --authority'))).toBe(true)
+    expect(errors.join(' ')).toContain('before building/measuring')
+  })
+  it('checks atlasMember against its owning resource just like member', () => {
+    const source = { schema: 'beegame-content.v1', id: 'scene', kind: 'scene-2d', assetRefs: ['RES-SPRITE'], data: {
+      nodes: [{ id: 'sprite', components: [component('visual', 'sprite-renderer', { assetRef: 'RES-SPRITE', data: {
+        member: 'assets/runtime/0.bin', atlasMember: 'assets/runtime/unregistered.json', frame: 'idle',
+      } })] }],
+    } }
+    const result = audit(source)
+    expect(result.valid).toBe(false)
+    expect(result.issues.join(' ')).toContain('data.atlasMember does not resolve member assets/runtime/unregistered.json in asset RES-SPRITE')
+  })
   it('allows an intentional camera span independent of reference/map height and rejects invalid framing', () => {
     const data={...logicalCameraData,orthographicSize:120,framing:'keep-width'}
     const source={schema:'beegame-content.v1',id:'scene',kind:'scene-2d',assetRefs:[],data:{cameraNodeId:'camera',nodes:[

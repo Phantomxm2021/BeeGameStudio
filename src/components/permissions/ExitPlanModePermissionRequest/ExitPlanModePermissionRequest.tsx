@@ -18,7 +18,7 @@ import {
 } from '../../../bootstrap/state.js';
 import { generateSessionName } from '../../../commands/rename/generateSessionName.js';
 import { launchUltraplan } from '../../../commands/ultraplan.js';
-import { type KeyboardEvent, Box, Text } from '@anthropic/ink';
+import { type KeyboardEvent, Box, Text } from '@bee-game-studio/ink';
 import type { AppState } from '../../../state/AppStateStore.js';
 import { AGENT_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/AgentTool/constants.js';
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/ExitPlanModeTool/constants.js';
@@ -692,7 +692,7 @@ export function ExitPlanModePermissionRequest({
     return (
       <PermissionDialog color="planMode" title="Exit plan mode?" workerBadge={workerBadge}>
         <Box flexDirection="column" paddingX={1} marginTop={1}>
-          <Text>Claude wants to exit plan mode</Text>
+          <Text>BGS wants to exit plan mode</Text>
           <Box marginTop={1}>
             <Select
               options={[
@@ -752,7 +752,7 @@ export function ExitPlanModePermissionRequest({
             )}
             {!useStickyFooter && (
               <>
-                <Text dimColor>Claude has written up a plan and is ready to execute. Would you like to proceed?</Text>
+                <Text dimColor>BGS has written up a plan and is ready to execute. Would you like to proceed?</Text>
                 <Box marginTop={1}>
                   <Select
                     options={options}
@@ -861,7 +861,7 @@ export function buildPlanApprovalOptions({
     type: 'input',
     label: 'No, keep planning',
     value: 'no',
-    placeholder: 'Tell Claude what to change',
+    placeholder: 'Tell BGS what to change',
     description: 'shift+tab to approve with this feedback',
     onChange: onFeedbackChange,
   });

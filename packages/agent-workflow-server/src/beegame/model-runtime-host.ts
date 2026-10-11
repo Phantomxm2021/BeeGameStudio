@@ -185,7 +185,7 @@ const MODEL_RUNTIME_TRANSPORT_ENV_KEYS = [
   'CLAUDE_CODE_CLIENT_CERT',
   'CLAUDE_CODE_CLIENT_KEY',
   'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE',
-  'ANTHROPIC_UNIX_SOCKET',
+  'BGS_API_UNIX_SOCKET',
 ] as const
 
 // The model worker must use the same verified network path as the host. Keep
@@ -194,10 +194,14 @@ const MODEL_RUNTIME_TRANSPORT_ENV_KEYS = [
 export function getModelRuntimeWorkerEnvironment(): Record<string, string> {
   return {
     ...getSafeRuntimeProcessEnvironment(),
-    CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
+    BGS_PROVIDER_MANAGED_BY_HOST: '1',
     ...Object.fromEntries(
       MODEL_RUNTIME_TRANSPORT_ENV_KEYS.flatMap(key => {
-        const value = process.env[key]
+        // Bun can expose proxy variables through getters without enumerating
+        // them. Read the existing transport whitelist directly, not a spread.
+        const value = key === 'BGS_API_UNIX_SOCKET'
+          ? process.env.BGS_API_UNIX_SOCKET ?? process.env.ANTHROPIC_UNIX_SOCKET
+          : process.env[key]
         return value === undefined ? [] : [[key, value]]
       }),
     ),

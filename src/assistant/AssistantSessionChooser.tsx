@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useState } from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { Dialog } from '../components/design-system/Dialog.js';
 import { ListItem } from '../components/design-system/ListItem.js';
 import { useRegisterOverlay } from '../context/overlayContext.js';

@@ -1,0 +1,79 @@
+{
+  "protocol": "bgs.verification.v3-database-deployment-preflight.1",
+  "date": "2026-10-10",
+  "documentVersion": "1.14",
+  "scope": "Actual remote REST and local running-stack preflight; migration/deployed edit acceptance is blocked, not passed.",
+  "database": {
+    "backend": "existing Supabase PostgreSQL via host REST service credential",
+    "discoveryStatus": 200,
+    "missingRestObjects": ["/beegame_workflow_v3", "/beegame_workflow_v3_events", "/rpc/beegame_workflow_v3_read", "/rpc/beegame_workflow_v3_commit"],
+    "tableProbe": {"status": 404, "code": "PGRST205"},
+    "readRpcProbe": {"status": 404, "code": "PGRST202", "project": "nonexistent preflight id"},
+    "writesPerformed": false,
+    "ddlExecuted": false,
+    "managementCredentialAvailable": false,
+    "note": "REST absence may reflect absent SQL objects or stale schema cache. No direct PostgreSQL or migration-history inspection; service-role REST key is not DDL access. Supabase CLI linked history also unavailable without management credentials.",
+    "authorizedChangesRpcVersion": "unverified",
+    "crossProcessCas": "unverified",
+    "permissions": "unverified"
+  },
+  "systemChanges": [
+    "Both launchers now retain service-role credentials only on the trusted BGS V3 persistence host, while frontend launch environments strip both aliases. Native inherited/model environments and subprocess tests exclude both aliases. No Claude Code changes.",
+    "Missing commit RPC/table returns workflow-migration-required with both exact migration filenames. Failed authorized changes distinguish migration verification and invalid append-only history as possibilities, not automatic retry or source overwrite.",
+    "Read-only database structural preflight does not claim the same-named replacement RPC is the latest version. No generic migration framework or local fallback added.",
+    "Existing BGS model observability reads current BGS_DEFAULT_*_MODEL configuration names; model selection untouched."
+  ],
+  "deployment": {
+    "type": "local development running stack, not public production deployment",
+    "sourceRoot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+    "log": "/private/tmp/bgs-v3-current-services-v2.log",
+    "services": [
+      {"service": "runtime", "pid": 21851, "port": 62174, "healthStatus": 200},
+      {"service": "frontend", "pid": 21853, "port": 62173, "pageStatus": 200},
+      {"service": "billing", "pid": 21849, "port": 62175, "healthStatus": 200},
+      {"service": "skills", "pid": 21850, "port": 62176, "healthStatus": 200}
+    ],
+    "resources": "Not started: existing worker automatically resumes pending jobs; this turn does not authorize unrelated resource production.",
+    "browser": "Actual in-app browser loads and reloads the Bee Game Studio home; billing-unavailable toast cleared after billing startup. No editor/change form submitted.",
+    "cliRebuilt": false,
+    "modelTasksStarted": 0,
+    "nativeEntry": "dist/cli.js -> dist/build-pQANhD/cli.js"
+  },
+  "regression": [
+    {"log": "/private/tmp/bgs-v3-db-deploy-final-regression.log", "files": 7, "passed": 84, "failed": 0, "assertions": 370, "exitCode": 0, "scope": "Launchers, actual child environment isolation, existing native runner, database preflight/error mappings and HTTP/mode discovery"},
+    {"log": "/private/tmp/bgs-v3-db-change-regression.log", "files": 5, "passed": 47, "failed": 0, "assertions": 440, "exitCode": 0, "scope": "Formal edit/requirement change, stop/pause, actual source-copy build/Chromium measurement, old Preview/export refusal and current-source engineering export"}
+  ],
+  "distinctPassed": 131,
+  "failedExploration": [
+    {"log": "/private/tmp/bgs-v3-db-host-env-regression.log", "cause": "New isolation test revealed directly supplied selected environment could pass service-role aliases to native startup; fixed the BGS native launch boundary without modifying Claude Code."},
+    {"log": "/private/tmp/bgs-v3-db-host-env-final.log", "cause": "Existing observability regression exposed old model environment names; corrected BGS logging, not test expectations. Sandbox also prevented ps-based test cleanup; final scoped run used permitted execution."}
+  ],
+  "remainingAcceptance": [
+    "Authorized SQL connection/admin entry is required to inspect actual schema/history and apply only missing V3 migrations, then refresh PostgREST cache.",
+    "Verify PostgreSQL RPC/table permissions and two-connection CAS/workspace writer contention independently of local store tests.",
+    "Use independent owned project through normal deployed UI/API and native tasks: source save/change -> old qualifications revoked -> actual new build/measurement -> current-version Preview/export -> durable history reload. Not yet executed.",
+    "No paid provider experiment, real generated-project mutation, default V3 activation, unknown-writer recovery or complete game acceptance. deliveryEligible remains false."
+  ],
+  "hashes": [
+    {"path": "scripts/beegame-dev-lib.ts", "sha256": "fd31a22bbb82778ea44bcf7cca2542bb3dddd8c4c8f3e568f549aa616b517965"},
+    {"path": "scripts/dashboard-dev-lib.ts", "sha256": "554f455fb122f361f7edfe55b7cc8f275055926bad6a3ff4b37e9f2d98201e71"},
+    {"path": "scripts/beegame-dev-lib.test.ts", "sha256": "4048dc32e06acfb73ebc28a5a21700dbf1a23ee02675ac88b115cb9f9b66d7ec"},
+    {"path": "scripts/dashboard-dev-lib.test.ts", "sha256": "d196d01511bbb19d7b9e68cf8fe30e5e7dce8332c00668b1ac6def3aac841eb5"},
+    {"path": "scripts/check-workflow-v3-database.ts", "sha256": "b934430c88426b763bc03ecbd581a008fea9487efc37bdcbdc22dfff48a45a1b"},
+    {"path": "scripts/check-workflow-v3-database.test.ts", "sha256": "7e72ab655014354ac11551b416aeb83afb78894e2bd081eb6ba9731c2bdf3b17"},
+    {"path": ".env.example", "sha256": "b86beac7879f6c894759005482c0b6dc774fa8f08634f1a9658c64891408442f"},
+    {"path": "packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts", "sha256": "a2661e75fa2417860e6ded922a3ce70ef5c283aae4f9d563e8ae8018753558fc"},
+    {"path": "packages/agent-workflow-server/src/beegame/runtime-process-environment.test.ts", "sha256": "6335ca1e4387ebdbe8062dca8bea0fb3ba290cf3da07bdc45befc16dd940a6c7"},
+    {"path": "packages/agent-workflow-server/src/beegame/workflow-v3/store.ts", "sha256": "824febf1d574448ecf10b5712d229ef064688b4fa8b025e02c3bb55f21921c1c"},
+    {"path": "packages/agent-workflow-server/src/beegame/workflow-v3/workflow-v3.test.ts", "sha256": "d59fd721ebda69ac923f7ef984dc8ab33b6e57e01a16b604a05db52c4cc3ffbc"},
+    {"path": "packages/agent-workflow-server/src/app.ts", "sha256": "bafefcbee6c1bfd7a719cddbc9fc8910b0006dd113cd2b76ce999fe120bd60c0"},
+    {"path": "apps/frontend/src/components/Demiurge/Sidebar/WorkflowPanel.tsx", "sha256": "59f9362acf4ad5c8f0dcdf2318b10ca96d4166edf0d8ed11b38cc0ac5546db12"},
+    {"path": "supabase/migrations/20261010010000_workflow_v3_vertical_slice.sql", "sha256": "c425c3e5041c97a6740408df97a23fe2a4fe4f4a690f972078e44759f9050cdb"},
+    {"path": "supabase/migrations/20261010020000_workflow_v3_authorized_changes.sql", "sha256": "fec36be5a40f5b9c244c2ca3938b7c9cf7114c158b487a823104d58140329107"},
+    {"path": "dist/cli.js", "sha256": "02b0886d6c12279792668d85a05842666bfa3baaa4a5406a3fefc93f4d9ece21"},
+    {"path": "dist/build-pQANhD/cli.js", "sha256": "c9fe8396db921e2ddb550f6d97de5c42d328aff4f79abe91ea764b24b04eb8f6"},
+    {"path": "/private/tmp/bgs-v3-db-deploy-final-regression.log", "sha256": "fea0464537ccb5a7f811de6694e64a059a8841fb6054cb0d79bc5a0aa56d4567"},
+    {"path": "/private/tmp/bgs-v3-db-change-regression.log", "sha256": "a477d376469afa5f948d40ca645a1037f450c996d4e7d5b1fa4e8ba2995f9f82"},
+    {"path": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/BGS_V3_Agent_Driven_Workflow_Implementation.md", "sha256": "41b332ba8430d58f84c4d1a4dc7262a9a91d0ff7a7ac71b62d693a2965b8700e"}
+  ]
+}

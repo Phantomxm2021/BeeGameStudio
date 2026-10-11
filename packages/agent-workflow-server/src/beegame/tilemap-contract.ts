@@ -1,9 +1,49 @@
 /** Filesystem validation of authored TileSet data. No game loading or rendering. */
 import { readFileSync, realpathSync } from 'node:fs'
-import { resolve, relative, isAbsolute } from 'node:path'
+import { resolve, relative, isAbsolute, basename, extname } from 'node:path'
 import type { BeeGameAssetManifest } from './asset-contracts'
 import { parseTileSet, type TileDefinition } from '../../../scene-editor/src/tilemap-data'
-import { parseSpriteSheet, atlasFrameName } from '../../../scene-editor/src/sprite-sheet'
+import { parseSpriteSheet, atlasFrameName, spriteSheetSelection } from '../../../scene-editor/src/sprite-sheet'
+
+/** Resolve exact registered identities, never choose a similar name or the
+ * first of several files. Binding reuses the registered-file and atlas readers. */
+export function validateResourceSelections(workspace: string, manifest: BeeGameAssetManifest, value: unknown, issues: string[], location = 'data') {
+  if (Array.isArray(value)) { value.forEach((item, i) => validateResourceSelections(workspace, manifest, item, issues, `${location}[${i}]`)); return }
+  if (!value || typeof value !== 'object') return
+  const record = value as Record<string, any>
+  if (typeof record.assetRef === 'string') {
+    try {
+      const resource = manifest.resources.find(r => r.id === record.assetRef)
+      if (!resource) throw Error('Unknown resource ' + record.assetRef)
+      const fields = { ...record, ...(record.data && typeof record.data === 'object' ? record.data : {}) }
+      const member = (name?: string) => {
+        if (!name) return resource.root_path
+        if (resource.file_paths.includes(name)) return name
+        const matches = resource.file_paths.filter(path => basename(path, extname(path)) === name)
+        if (matches.length !== 1) throw Error(`Missing or ambiguous member ${record.assetRef}/${name}; specify a registered file path`)
+        return matches[0]!
+      }
+      const selected = member(fields.member)
+      readRegisteredResourceFile(workspace, manifest, record.assetRef, selected)
+      if (fields.atlasMember || fields.frame) {
+        const tablePath = fields.atlasMember ? member(fields.atlasMember)
+          : resource.file_paths.find(path => path === selected.replace(/\.[^.]+$/, '.json'))
+        if (!tablePath) throw Error(`No registered atlas metadata for ${record.assetRef}/${selected}`)
+        const sheet = parseSpriteSheet(JSON.parse(readRegisteredResourceFile(workspace, manifest, record.assetRef, tablePath).bytes.toString()))
+        if (!sheet) throw Error('Unsupported atlas metadata: ' + tablePath)
+        if (typeof fields.frame === 'string') {
+          if (!('frames' in sheet)) {
+            const names = sheet.states ?? sheet.facings ?? []
+            const normalized = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '')
+            if (!names.some(name => normalized(name) === normalized(fields.frame))) throw Error('Unknown atlas frame ' + fields.frame)
+          }
+          spriteSheetSelection(sheet, fields)
+        }
+      }
+    } catch (error) { issues.push(location + ': ' + (error instanceof Error ? error.message : String(error))) }
+  }
+  for (const [key, item] of Object.entries(record)) validateResourceSelections(workspace, manifest, item, issues, `${location}.${key}`)
+}
 
 export function readRegisteredResourceFile(workspace: string, manifest: BeeGameAssetManifest, id: string, member?: string) {
   const resource = manifest.resources.find(resource => resource.id === id)

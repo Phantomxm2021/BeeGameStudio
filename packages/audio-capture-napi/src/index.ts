@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
-import { dirname, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
+import { distRoot } from '../../../src/utils/distRoot.js'
 // createRequire works in both Bun and Node.js ESM contexts.
 // Needed because this package is "type": "module" but uses require() for
 // loading native .node addons — bare require is not available in Node.js ESM.
@@ -11,22 +11,11 @@ const nodeRequire = createRequire(import.meta.url)
  *
  * - Dev mode:  import.meta.url → packages/audio-capture-napi/src/index.ts
  *              → vendor root = <project>/vendor/
- * - Bun build: import.meta.url → dist/chunk-xxx.js
- *              → vendor root = <project>/dist/vendor/
+ * - Generated build: dist/build-xxx/chunk.js → dist/build-xxx/vendor/
  * - Vite build: import.meta.url → dist/chunks/chunk-xxx.js
  *              → vendor root = <project>/dist/vendor/
  */
-function getVendorRoot(): string {
-  const filePath = fileURLToPath(import.meta.url)
-  const dir = dirname(filePath)
-  const parts = dir.split(sep)
-  const distIdx = parts.lastIndexOf('dist')
-  if (distIdx !== -1) {
-    return parts.slice(0, distIdx + 1).join(sep) + sep + 'vendor'
-  }
-  // Dev mode — go up from packages/audio-capture-napi/src/ to project root
-  return resolve(dir, '..', '..', '..', 'vendor')
-}
+function getVendorRoot(): string { return resolve(distRoot, 'vendor') }
 
 type AudioCaptureNapi = {
   startRecording(onData: (data: Buffer) => void, onEnd: () => void): boolean
@@ -76,18 +65,13 @@ function loadModule(): AudioCaptureNapi | null {
     }
   }
 
-  // Candidates 2-5: resolved vendor path + relative fallbacks.
-  // The primary candidate uses getVendorRoot() to find the correct dist root
-  // regardless of chunk nesting depth. Relative fallbacks cover edge cases.
+  // Only the current build owns its native assets. Never select an older
+  // generation or a binary from the user's working directory as a fallback.
   const platformDir = `${process.arch}-${platform}`
   const binaryRel = `audio-capture/${platformDir}/audio-capture.node`
   const vendorRoot = getVendorRoot()
   const fallbacks = [
     resolve(vendorRoot, binaryRel),
-    `./vendor/${binaryRel}`,
-    `../vendor/${binaryRel}`,
-    `../../vendor/${binaryRel}`,
-    `${process.cwd()}/vendor/${binaryRel}`,
   ]
   for (const p of fallbacks) {
     try {

@@ -1,4 +1,4 @@
-import { type DOMElement, useAnimationFrame } from '@anthropic/ink'
+import { type DOMElement, useAnimationFrame } from '@bee-game-studio/ink'
 
 const RIPPLE_INTERVAL_MS = 60
 

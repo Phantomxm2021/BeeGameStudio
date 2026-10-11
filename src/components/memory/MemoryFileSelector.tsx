@@ -6,7 +6,7 @@ import * as React from 'react';
 import { use, useEffect, useState } from 'react';
 import { getOriginalCwd } from '../../bootstrap/state.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, Text, ListItem } from '@anthropic/ink';
+import { Box, Text, ListItem } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { getAutoMemPath, isAutoMemoryEnabled } from '../../memdir/paths.js';
 import { logEvent } from '../../services/analytics/index.js';

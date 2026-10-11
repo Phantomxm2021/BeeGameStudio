@@ -1,8 +1,8 @@
 import React, { type RefObject, useEffect, useRef } from 'react';
 import { useNotifications } from '../context/notifications.js';
 import { useCopyOnSelect, useSelectionBgColor } from '../hooks/useCopyOnSelect.js';
-import type { ScrollBoxHandle, FocusMove, SelectionState } from '@anthropic/ink';
-import { useSelection, type Key, useInput, isXtermJs, getClipboardPath } from '@anthropic/ink';
+import type { ScrollBoxHandle, FocusMove, SelectionState } from '@bee-game-studio/ink';
+import { useSelection, type Key, useInput, isXtermJs, getClipboardPath } from '@bee-game-studio/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { logForDebugging } from '../utils/debug.js';
 

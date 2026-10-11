@@ -3,6 +3,25 @@ import { describe, expect, test } from 'bun:test'
 const { interpretCommandResult } = await import('../commandSemantics')
 
 describe('interpretCommandResult', () => {
+  test.each(['cd /missing && rg pattern .', 'false && diff a b'])(
+    'does not borrow an unexecuted command exit meaning: %s',
+    command => {
+      expect(interpretCommandResult(command, 1, '', '')).toEqual({
+        isError: true,
+        message: 'Command failed with exit code 1',
+      })
+      expect(interpretCommandResult(command, 0, '', '').isError).toBe(false)
+    },
+  )
+  test.each(['false || rg pattern .', 'rg "a && b" file'])(
+    'keeps non-AND search semantics: %s',
+    command => {
+      expect(interpretCommandResult(command, 1, '', '')).toEqual({
+        isError: false,
+        message: 'No matches found',
+      })
+    },
+  )
   // ─── Default semantics ────────────────────────────────────────────
   test('exit 0 is not an error for unknown commands', () => {
     const result = interpretCommandResult('echo hello', 0, 'hello', '')

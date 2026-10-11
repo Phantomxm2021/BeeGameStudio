@@ -7,14 +7,26 @@ export async function proxyBeeGamePreviewRequest(
   internalBaseUrl: string,
   preservePublicPath = false,
   idleTimeoutMs = 15_000,
+  routeId = sessionId,
 ): Promise<Response> {
   const requestUrl = new URL(request.url)
-  const prefix = `/previews/${encodeURIComponent(sessionId)}`
+  const prefix = `/previews/${encodeURIComponent(routeId)}`
+  if (requestUrl.pathname !== prefix && !requestUrl.pathname.startsWith(prefix + '/'))
+    return new Response('Invalid preview path', { status: 400 })
   const restPath = requestUrl.pathname.startsWith(prefix)
     ? requestUrl.pathname.slice(prefix.length) || '/'
     : '/'
   const targetPath = preservePublicPath ? requestUrl.pathname : restPath
-  const target = new URL(targetPath, ensureTrailingSlash(internalBaseUrl))
+  let target: URL, upstreamBase: URL
+  try {
+    upstreamBase = new URL(internalBaseUrl)
+    target = new URL(targetPath, ensureTrailingSlash(internalBaseUrl))
+  } catch {
+    return new Response('Invalid preview target', { status: 400 })
+  }
+  if (!['http:', 'https:'].includes(upstreamBase.protocol) ||
+      target.origin !== upstreamBase.origin || target.username || target.password)
+    return new Response('Invalid preview target', { status: 400 })
   // URLSearchParams mutation reserializes bare Vite flags (`raw` -> `raw=`),
   // changing module semantics. Remove our credentials without rewriting the
   // remaining query bytes, including repeated keys and percent encoding.
@@ -75,7 +87,7 @@ export async function proxyBeeGamePreviewRequest(
       cleanup()
       for (const name of ['content-length', 'etag', 'content-md5']) responseHeaders.delete(name)
       return new Response(
-        injectBeeGamePreviewLifecycleBridge(stripViteClientScript(html, `${prefix}/`), sessionId),
+        injectBeeGamePreviewLifecycleBridge(stripViteClientScript(html, `${prefix}/`), routeId),
         { status: upstream.status, statusText: upstream.statusText, headers: responseHeaders },
       )
     }

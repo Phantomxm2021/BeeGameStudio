@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { MessageResponse } from '../../components/MessageResponse.js';
-import { supportsHyperlinks } from '@anthropic/ink';
-import { Link, Text } from '@anthropic/ink';
+import { supportsHyperlinks } from '@bee-game-studio/ink';
+import { Link, Text } from '@bee-game-studio/ink';
 import { renderToolResultMessage as renderDefaultMCPToolResultMessage } from '@bee-game-studio/builtin-tools/tools/MCPTool/UI.js';
 import type { MCPToolResult } from '../../utils/mcpValidation.js';
 import { truncateToWidth } from '../format.js';

@@ -1,5 +1,5 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
-import { Box, Text, stringWidth } from '@anthropic/ink';
+import { Box, Text, stringWidth } from '@bee-game-studio/ink';
 import * as React from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { computeGlimmerIndex, computeShimmerSegments, SHIMMER_INTERVAL_MS } from '../bridge/bridgeStatusUtil.js';
@@ -34,7 +34,7 @@ import figures from 'figures';
 import { getCurrentTurnTokenBudget, getTurnOutputTokens } from '../bootstrap/state.js';
 
 import { TeammateSpinnerTree } from './Spinner/TeammateSpinnerTree.js';
-import { useAnimationFrame } from '@anthropic/ink';
+import { useAnimationFrame } from '@bee-game-studio/ink';
 import { getGlobalConfig } from '../utils/config.js';
 export type { SpinnerMode } from './Spinner/index.js';
 
@@ -317,7 +317,7 @@ function SpinnerWithVerbInner({
     : showClearTip && !nextTask
       ? 'Use /clear to start fresh when switching topics and free up context'
       : showBtwTip && !nextTask
-        ? "Use /btw to ask a quick side question without interrupting Claude's current work"
+        ? "Use /btw to ask a quick side question without interrupting BGS's current work"
         : spinnerTip;
 
   // Budget text (ant-only) — shown above the tip line

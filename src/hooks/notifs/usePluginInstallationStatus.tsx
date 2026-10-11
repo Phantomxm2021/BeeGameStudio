@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { getIsRemoteMode } from '../../bootstrap/state.js';
 import { useNotifications } from '../../context/notifications.js';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { useAppState } from '../../state/AppState.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { plural } from '../../utils/stringUtils.js';

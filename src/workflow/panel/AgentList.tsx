@@ -1,6 +1,6 @@
 import React from 'react';
-import { Box, Text, useAnimationFrame } from '@anthropic/ink';
-import type { Theme } from '@anthropic/ink';
+import { Box, Text, useAnimationFrame } from '@bee-game-studio/ink';
+import type { Theme } from '@bee-game-studio/ink';
 import type { AgentProgress } from '../progress/store.js';
 import { agentMetaText, agentVisual } from './status.js';
 

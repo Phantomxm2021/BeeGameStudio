@@ -62,7 +62,7 @@ export CLAUDE_BRIDGE_OAUTH_TOKEN="your-api-key-here"
 然后启动远程控制模式：
 
 ```bash
-ccb --remote-control
+bee-game-studio --remote-control
 ```
 
 > **注意**：远程控制功能需要启用 `BRIDGE_MODE` feature flag。开发模式下默认启用。
@@ -104,7 +104,7 @@ volumes:
 
 
 ```sh
-ACP_RCS_URL=http://localhost:3000 ACP_RCS_TOKEN=test-my-key acp-link ccb-bun -- --acp
+ACP_RCS_URL=http://localhost:3000 ACP_RCS_TOKEN=test-my-key acp-link bee-game-studio-bun -- --acp
 ```
 
 ## 反向代理配置

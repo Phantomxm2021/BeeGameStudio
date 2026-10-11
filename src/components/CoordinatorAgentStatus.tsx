@@ -10,7 +10,7 @@ import figures from 'figures';
 import * as React from 'react';
 import { BLACK_CIRCLE, PAUSE_ICON, PLAY_ICON } from '../constants/figures.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box, Text, stringWidth, wrapText } from '@anthropic/ink';
+import { Box, Text, stringWidth, wrapText } from '@bee-game-studio/ink';
 import { type AppState, useAppState, useSetAppState } from '../state/AppState.js';
 import { enterTeammateView, exitTeammateView } from '../state/teammateViewHelpers.js';
 import { isPanelAgentTask, type LocalAgentTaskState } from '../tasks/LocalAgentTask/LocalAgentTask.js';

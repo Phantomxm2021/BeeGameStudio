@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { Select } from '../../CustomSelect/select.js';
 import { usePermissionRequestLogging } from '../hooks.js';
 import { PermissionDialog } from '../PermissionDialog.js';
@@ -42,7 +42,7 @@ export function ReviewArtifactPermissionRequest({
   return (
     <PermissionDialog color="permission" title="Review artifact?" workerBadge={workerBadge}>
       <Box flexDirection="column" marginTop={1} paddingX={1}>
-        <Text>Claude wants to review{title ? `: ${title}` : ' an artifact'}.</Text>
+        <Text>BGS wants to review{title ? `: ${title}` : ' an artifact'}.</Text>
 
         <Box marginTop={1} flexDirection="column">
           <Text dimColor>

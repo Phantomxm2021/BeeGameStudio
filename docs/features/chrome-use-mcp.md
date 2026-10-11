@@ -16,7 +16,7 @@
 
 ```bash
 bun run dev
-ccb # 或者 ccb 安装版也行
+bee-game-studio # 或者 bee-game-studio 安装版也行
 ```
 
 ### 第三步：启用 Chrome MCP

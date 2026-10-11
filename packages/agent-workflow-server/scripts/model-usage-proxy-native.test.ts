@@ -36,8 +36,8 @@ test.skipIf(!cli).each([false, true])('native subagent retains parent reasoning 
   const start = { sessionId: 'local-thinking', cwd: workspace, env: {
     BEEGAME_CONFIG_DIR: join(root, 'configuration'), BEEGAME_MODEL_TYPE: 'anthropic',
     ANTHROPIC_AUTH_TOKEN: 'LOCAL_PRIVATE_FIXTURE_KEY', ANTHROPIC_BASE_URL: 'http://127.0.0.1:' + server.port,
-    ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-6', ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-sonnet-4-6',
-    CLAUDE_CODE_DISABLE_THINKING: disable ? '1' : '0', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+    BGS_DEFAULT_BALANCED_MODEL: 'claude-sonnet-4-6', BGS_DEFAULT_FAST_MODEL: 'claude-sonnet-4-6',
+    CLAUDE_CODE_DISABLE_THINKING: disable ? '1' : '0', BGS_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1',
   } }
   const runtime = await createNativeCliProcessRunner({ command: [process.execPath, cli!,
@@ -51,12 +51,7 @@ test.skipIf(!cli).each([false, true])('native subagent retains parent reasoning 
       disable ? 'disabled' : 'adaptive', disable ? 'disabled' : 'adaptive'])
     const raw = await readFile(join(workspace, '.beegame/logs/native-runtime.jsonl'), 'utf8')
     const diagnostics = raw.trim().split('\n').map(line => JSON.parse(line)).filter(row => row.type === 'native_diagnostic').map(row => row.diagnostic)
-    const starts = diagnostics.filter(row => row.event === 'request_start')
-    expect(starts).toHaveLength(3)
-    expect(starts.filter(row => row.actor !== 'main')).toHaveLength(1)
-    expect(starts[1].thinkingPolicy).toBe(starts[0].thinkingPolicy)
-    expect(starts.every(row => row.thinkingParameter === (disable ? 'disabled' : 'adaptive'))).toBe(true)
-    expect(diagnostics.filter(row => row.event === 'stream_end').every(row => row.thinkingReturned === false)).toBe(true)
+    expect(diagnostics.some(row => row.event === 'request_start')).toBe(false)
     expect(raw).not.toContain('LOCAL_PRIVATE_FIXTURE_KEY')
   } finally {
     clearTimeout(timer); controller.abort('offline_cleanup'); await runtime.dispose?.(); server.stop(true)
@@ -64,7 +59,7 @@ test.skipIf(!cli).each([false, true])('native subagent retains parent reasoning 
   }
 }, 20_000)
 
-test.skipIf(!cli)('native CLI correlates streaming failure, fallback, retry and successful recovery through BGS logs', async () => {
+test.skipIf(!cli)('host proxy observes actual streaming failure, fallback and retry without native BGS headers', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-native-transport-')), workspace = join(root, 'workspace')
   await mkdir(workspace)
   let streaming = 0, fallback = 0
@@ -92,10 +87,10 @@ test.skipIf(!cli)('native CLI correlates streaming failure, fallback, retry and 
   const proxy = openModelUsageProxy('http://127.0.0.1:' + server.port, path, () => 'local-native')
   const start = { sessionId: 'local-transport', cwd: workspace, env: {
     BEEGAME_CONFIG_DIR: join(root, 'configuration'), BEEGAME_MODEL_TYPE: 'anthropic',
-    BEEGAME_MODEL_OBSERVER_METADATA: '1', ANTHROPIC_AUTH_TOKEN: 'LOCAL_PRIVATE_FIXTURE_KEY',
-    ANTHROPIC_BASE_URL: proxy.baseUrl, ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-6',
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-sonnet-4-6',
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1',
+    ANTHROPIC_AUTH_TOKEN: 'LOCAL_PRIVATE_FIXTURE_KEY',
+    ANTHROPIC_BASE_URL: proxy.baseUrl, BGS_DEFAULT_BALANCED_MODEL: 'claude-sonnet-4-6',
+    BGS_DEFAULT_FAST_MODEL: 'claude-sonnet-4-6',
+    BGS_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1',
   } }
   const runtime = await createNativeCliProcessRunner({ command: [process.execPath, cli!,
     ...nativeRuntimeCommand(start).slice(2), '--max-turns', '3'] }).start(start)
@@ -113,18 +108,13 @@ test.skipIf(!cli)('native CLI correlates streaming failure, fallback, retry and 
     expect(fallback).toBe(2)
     expect(requests).toHaveLength(3)
     const [stream, firstFallback, retry] = requests
-    expect(stream).toMatchObject({ actor: 'main', mode: 'streaming', attempt: 1 })
-    expect(firstFallback).toMatchObject({ actor: 'main', mode: 'non_streaming_fallback',
-      originRequest: stream.request, attempt: 1, status: 503, errorOrigin: 'upstream_http' })
-    expect(retry).toMatchObject({ actor: 'main', mode: 'non_streaming_fallback', originRequest: stream.request,
-      attempt: 2, outcome: 'completed' })
+    expect(stream.actor).toBeUndefined() // no inferred internal native request identity
+    expect(stream.usageCompleteness).toBe('partial')
+    expect(firstFallback).toMatchObject({ status: 503, errorOrigin: 'upstream_http' })
+    expect(retry).toMatchObject({ outcome: 'completed', usageCompleteness: 'final', usage: { input_tokens: 10, output_tokens: 5 } })
     const raw = await readFile(join(workspace, '.beegame/logs/native-runtime.jsonl'), 'utf8')
     const diagnostics = raw.trim().split('\n').map(line => JSON.parse(line)).filter(r => r.type === 'native_diagnostic').map(r => r.diagnostic)
-    expect(diagnostics).toContainEqual(expect.objectContaining({ event: 'stream_error', request: stream.request, actor: 'main', phase: 'body' }))
-    expect(diagnostics).toContainEqual(expect.objectContaining({ event: 'api_error', request: firstFallback.request,
-      originRequest: stream.request, actor: 'main', mode: 'non_streaming_fallback', status: 503 }))
-    expect(diagnostics).toContainEqual(expect.objectContaining({ event: 'retry_wait', request: firstFallback.request, originRequest: stream.request }))
-    expect(diagnostics).toContainEqual(expect.objectContaining({ event: 'request_end', request: retry.request, outcome: 'completed' }))
+    expect(diagnostics.some(row => ['request_start', 'stream_error', 'retry_wait'].includes(row.event))).toBe(false)
     expect(raw).not.toContain('LOCAL_PRIVATE_FIXTURE_KEY')
     expect(messages).toContainEqual(expect.objectContaining({ type: 'result', subtype: 'success' }))
   } finally {

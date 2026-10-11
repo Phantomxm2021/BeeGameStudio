@@ -673,9 +673,9 @@ export class StructuredIO {
         parentSignal.removeEventListener('abort', onParentAbort)
       }
     }
-    // Hosts with a live permission authority opt in. Other SDK sessions keep
-    // background auto-deny behavior; explicit denials above still win.
-    canUseTool.supportsBackgroundPermissionRequests = process.env.BEEGAME_NATIVE_BACKGROUND_PERMISSIONS === '1'
+    // Selecting the public stdio permission broker supplies a live authority.
+    // Background delegates can ask that same broker; explicit denials win.
+    canUseTool.supportsBackgroundPermissionRequests = true
     return canUseTool
   }
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { KeyboardEvent, useInput } from '@anthropic/ink'
+import { KeyboardEvent, useInput } from '@bee-game-studio/ink'
 // backward-compat bridge until REPL wires handleKeyDown to <Box onKeyDown>
 import {
   type AppState,

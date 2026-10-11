@@ -3,8 +3,8 @@
  */
 
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
-import { mkdir, realpath, writeFile } from 'fs/promises'
-import { join, resolve } from 'path'
+import { mkdir, writeFile } from 'fs/promises'
+import { join } from 'path'
 import { getOriginalCwd, getSessionId } from '../bootstrap/state.js'
 import {
   BYTES_PER_TOKEN,
@@ -102,12 +102,6 @@ function getSessionDir(): string {
  * Get the tool results directory for this session (projectDir/sessionId/tool-results)
  */
 export function getToolResultsDir(): string {
-  const scoped = process.env.BEEGAME_NATIVE_TOOL_RESULTS_DIR
-  if (scoped !== undefined) {
-    if (scoped !== resolve(getOriginalCwd(), '.native-tool-results') ||
-        !/^[a-zA-Z0-9_-]+$/.test(getSessionId())) throw new Error('Invalid native tool results scope')
-    return join(scoped, getSessionId())
-  }
   return join(getSessionDir(), TOOL_RESULTS_SUBDIR)
 }
 
@@ -118,8 +112,6 @@ export const PREVIEW_SIZE_BYTES = 2000
  * Get the filepath where a tool result would be persisted.
  */
 export function getToolResultPath(id: string, isJson: boolean): string {
-  if (process.env.BEEGAME_NATIVE_TOOL_RESULTS_DIR !== undefined && !/^[a-zA-Z0-9_-]+$/.test(id))
-    throw new Error('Invalid native tool result identity')
   const ext = isJson ? 'json' : 'txt'
   return join(getToolResultsDir(), `${id}.${ext}`)
 }
@@ -128,14 +120,6 @@ export function getToolResultPath(id: string, isJson: boolean): string {
  * Ensure the session-specific tool results directory exists
  */
 export async function ensureToolResultsDir(): Promise<void> {
-  if (process.env.BEEGAME_NATIVE_TOOL_RESULTS_DIR !== undefined) {
-    const scoped = process.env.BEEGAME_NATIVE_TOOL_RESULTS_DIR
-    const directory = getToolResultsDir()
-    if (await realpath(scoped) !== scoped) throw new Error('Invalid native tool results scope')
-    await mkdir(directory, { recursive: true, mode: 0o700 })
-    if (await realpath(directory) !== directory) throw new Error('Invalid native tool results directory')
-    return
-  }
   try {
     await mkdir(getToolResultsDir(), { recursive: true })
   } catch {

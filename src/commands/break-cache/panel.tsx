@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Box, Dialog, Text, useInput } from '@anthropic/ink';
+import { Box, Dialog, Text, useInput } from '@bee-game-studio/ink';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import { callBreakCache } from './index.js';
 

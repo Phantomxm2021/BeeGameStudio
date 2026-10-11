@@ -1,7 +1,7 @@
 import figures from 'figures';
 import React, { useMemo } from 'react';
 import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
-import { Box, Text, stringWidth } from '@anthropic/ink';
+import { Box, Text, stringWidth } from '@bee-game-studio/ink';
 import type { Question } from '@bee-game-studio/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js';
 import { truncateToWidth } from '../../../utils/format.js';
 

@@ -219,6 +219,7 @@ export async function launchInTerminal(
     repo?: string
     lastFetchMs?: number
   },
+  bootstrapArgs: readonly string[] = [],
 ): Promise<boolean> {
   const terminal = await detectTerminal()
   if (!terminal) {
@@ -229,7 +230,7 @@ export async function launchInTerminal(
   logForDebugging(
     `Launching in terminal: ${terminal.name} (${terminal.command})`,
   )
-  const claudeArgs = ['--deep-link-origin']
+  const claudeArgs = [...bootstrapArgs, '--deep-link-origin']
   if (action.repo) {
     claudeArgs.push('--deep-link-repo', action.repo)
     if (action.lastFetchMs !== undefined) {

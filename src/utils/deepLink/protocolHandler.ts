@@ -23,6 +23,7 @@ import { readLastFetchTime } from './banner.js'
 
 import { MACOS_BUNDLE_ID } from './registerProtocol.js'
 import { launchInTerminal } from './terminalLauncher.js'
+import { buildCliLaunch } from '../cliLaunch.js'
 
 /**
  * Handle an incoming deep link URI.
@@ -57,12 +58,13 @@ export async function handleDeepLinkUri(uri: string): Promise<number> {
   // stays await-free — the launched instance receives it as a precomputed
   // flag instead of statting the filesystem on its own startup path.
   const lastFetch = resolvedRepo ? await readLastFetchTime(cwd) : undefined
-  const launched = await launchInTerminal(process.execPath, {
+  const launch = buildCliLaunch([])
+  const launched = await launchInTerminal(launch.execPath, {
     query: action.query,
     cwd,
     repo: resolvedRepo,
     lastFetchMs: lastFetch?.getTime(),
-  })
+  }, launch.args)
   if (!launched) {
     console.error(
       'Failed to open a terminal. Make sure a supported terminal emulator is installed.',

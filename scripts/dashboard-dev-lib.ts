@@ -60,7 +60,7 @@ export function resolveDashboardDevOptions(
 
 export function buildFrontendEnv(input: FrontendEnvInput): Record<string, string> {
   return compactEnv({
-    ...input.baseEnv,
+    ...omitServiceRoleEnv(input.baseEnv),
     PORT: String(input.frontendPort),
     VITE_API_BASE_URL: `http://127.0.0.1:${input.apiPort}`,
     VITE_WS_BASE_URL: `ws://127.0.0.1:${input.apiPort}`,
@@ -74,7 +74,9 @@ export function buildApiEnv(input: {
   baseEnv: Record<string, string | undefined>
 }): Record<string, string> {
   return compactEnv({
-    ...omitRuntimeHostForbiddenEnv(input.baseEnv),
+    // The BGS host uses this credential only for V3 persistence RPCs. Native
+    // tasks use their own allowlisted model environment, not this host env.
+    ...input.baseEnv,
     AGENT_WORKFLOW_PORT: String(input.apiPort),
     AGENT_WORKFLOW_WORKSPACE_PATH: input.workspacePath,
     BEEGAME_API_CORS_ORIGINS: appendApiCorsOrigin(
@@ -131,15 +133,15 @@ function compactEnv(
   return compacted
 }
 
-const RUNTIME_HOST_FORBIDDEN_ENV = new Set([
+const SERVICE_ROLE_ENV = new Set([
   'BEEGAME_SUPABASE_SERVICE_ROLE_KEY',
   'SUPABASE_SERVICE_ROLE_KEY',
 ])
 
-function omitRuntimeHostForbiddenEnv(
+function omitServiceRoleEnv(
   env: Record<string, string | undefined>,
 ): Record<string, string | undefined> {
   return Object.fromEntries(
-    Object.entries(env).filter(([key]) => !RUNTIME_HOST_FORBIDDEN_ENV.has(key)),
+    Object.entries(env).filter(([key]) => !SERVICE_ROLE_ENV.has(key)),
   )
 }

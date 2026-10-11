@@ -1,7 +1,7 @@
 import figures from 'figures';
 import type { RefObject } from 'react';
 import React, { useCallback, useMemo, useRef } from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { logEvent } from '../services/analytics/index.js';
 import type { NormalizedUserMessage, RenderableMessage } from '../types/message.js';

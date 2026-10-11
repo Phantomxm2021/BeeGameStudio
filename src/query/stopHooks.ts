@@ -51,7 +51,6 @@ import { executePromptSuggestion } from '../services/PromptSuggestion/promptSugg
 import { isBareMode, isEnvDefinedFalsy } from '../utils/envUtils.js'
 import { saveCacheSafeParams } from '../utils/cacheSafeParamsSlot.js'
 import { createCacheSafeParams } from '../utils/forkedAgent.js'
-import { missingSavedDraftReads } from '../beegame/saved-draft-check.js'
 
 type StopHookResult = {
   blockingErrors: Message[]
@@ -76,20 +75,6 @@ export async function* handleStopHooks(
   StopHookResult
 > {
   const hookStartTime = Date.now()
-
-  if (!toolUseContext.abortController.signal.aborted) {
-    const missing = await missingSavedDraftReads(toolUseContext, [...messagesForQuery, ...assistantMessages])
-    if (missing.length) {
-      if (toolUseContext.beegameDraftReadCorrectionRequested)
-        throw new Error('BGS saved-document review incomplete: ' + missing.join(', '))
-      toolUseContext.beegameDraftReadCorrectionRequested = true
-      const message = createUserMessage({ isMeta: true, content:
-        'Before this review handoff, inspect the complete current assigned documents: ' + missing.join(', ') +
-        '. Perform the assigned independent Review/Revision. After a complete saved read, verify successful native edits and affected clauses; reread when the resulting content cannot be accounted for. A Write, partial excerpt or reference check alone does not establish full-document inspection. Report limits honestly; this check does not certify semantic quality.' })
-      yield message
-      return { blockingErrors: [message], preventContinuation: false }
-    }
-  }
 
   const stopHookContext: REPLHookContext = {
     messages: [...messagesForQuery, ...assistantMessages],

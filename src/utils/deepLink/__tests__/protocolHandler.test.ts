@@ -12,10 +12,13 @@ mock.module('../parseDeepLink.js', () => ({
   parseDeepLink: mockParseDeepLink,
 }))
 mock.module('../registerProtocol.js', () => ({
-  MACOS_BUNDLE_ID: 'com.anthropic.claude-code-url-handler',
+  MACOS_BUNDLE_ID: 'com.phantomlab.bgs-url-handler',
 }))
 mock.module('../terminalLauncher.js', () => ({
   launchInTerminal: mockLaunchInTerminal,
+}))
+mock.module('../../cliLaunch.js', () => ({
+  buildCliLaunch: () => ({ execPath: '/test/node', args: ['/test/bgs/cli-node.js'], env: {}, windowsHide: false }),
 }))
 mock.module('../banner.js', () => ({
   readLastFetchTime: async () => undefined,
@@ -61,14 +64,14 @@ describe('handleUrlSchemeLaunch', () => {
   })
 
   test('returns null for a matching bundle id when no URL event arrives', async () => {
-    process.env.__CFBundleIdentifier = 'com.anthropic.claude-code-url-handler'
+    process.env.__CFBundleIdentifier = 'com.phantomlab.bgs-url-handler'
 
     await expect(handleUrlSchemeLaunch()).resolves.toBeNull()
     expect(mockParseDeepLink).not.toHaveBeenCalled()
   })
 
   test('handles a URL event after waiting for url-handler-napi', async () => {
-    process.env.__CFBundleIdentifier = 'com.anthropic.claude-code-url-handler'
+    process.env.__CFBundleIdentifier = 'com.phantomlab.bgs-url-handler'
     process.env.CLAUDE_CODE_URL_EVENT = 'claude-cli://prompt?q=hello'
 
     await expect(handleUrlSchemeLaunch()).resolves.toBe(0)
@@ -89,5 +92,6 @@ describe('handleDeepLinkUri', () => {
       handleDeepLinkUri('claude-cli://prompt?q=hello'),
     ).resolves.toBe(0)
     expect(mockLaunchInTerminal).toHaveBeenCalled()
+    expect(mockLaunchInTerminal).toHaveBeenCalledWith('/test/node', expect.objectContaining({ query: 'hello' }), ['/test/bgs/cli-node.js'])
   })
 })

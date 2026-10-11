@@ -12,6 +12,29 @@ import { ImageProviderError } from './provider'
 import { openImageGenerationAccess } from './access'
 import { ImageConfigurationError } from './runtime-config'
 
+test('closing image access drains an in-flight paid outcome before workspace quiescence',async()=>{
+  const root=mkdtempSync(join(tmpdir(),'image-access-drain-'))
+  let release!:()=>void,entered!:()=>void
+  const wait=new Promise<void>(r=>{release=r}),started=new Promise<void>(r=>{entered=r})
+  const service=new ImageGenerationService(new ImageAttemptStore(root,{generate:async()=>{
+    entered();await wait;return {bytes:await png(),model:config.model,mimeType:'image/png',usage}
+  }}),fakeBilling().client)
+  const access=openImageGenerationAccess({userId:'owner',projectId:'synthetic',workspacePath:root,loadConfig:async()=>config,service})
+  try {
+    const response=fetch(access.endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({requestId:'one',prompt:'synthetic'})})
+    await started
+    let drained=false;const closing=access.close().then(()=>{drained=true})
+    await Bun.sleep(20);expect(drained).toBe(false)
+    release();expect((await response).status).toBe(200);await (await response).arrayBuffer();await closing
+    expect(drained).toBe(true)
+    expect(readFileSync(join(root,'assets/ai-generation-prompts.md'),'utf8')).toContain('image-returned')
+    // Bun may retain a keep-alive socket; either connection refusal or the
+    // closed capability's 404 is valid. Neither may initiate another call.
+    const after=await fetch(access.endpoint).catch(()=>undefined)
+    if(after)expect(after.status).toBe(404)
+  }finally{release();await access.close();rmSync(root,{recursive:true,force:true})}
+})
+
 test('access exposes safe failure facts and identifies a replay without another upstream call', async () => {
   const root = mkdtempSync(join(tmpdir(), 'image-error-access-'))
   let calls = 0

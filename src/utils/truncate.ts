@@ -1,6 +1,6 @@
 // Width-aware truncation/wrapping — needs ink/stringWidth (not leaf-safe).
 
-import { stringWidth } from '@anthropic/ink'
+import { stringWidth } from '@bee-game-studio/ink'
 import { getGraphemeSegmenter } from './intl.js'
 
 /**

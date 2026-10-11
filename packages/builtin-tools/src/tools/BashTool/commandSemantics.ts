@@ -5,7 +5,10 @@
  * For example, grep returns 1 when no matches are found, which is not an error condition.
  */
 
-import { splitCommand_DEPRECATED } from 'src/utils/bash/commands.js'
+import {
+  splitCommand_DEPRECATED,
+  splitCommandWithOperators,
+} from 'src/utils/bash/commands.js'
 
 export type CommandSemantic = (
   exitCode: number,
@@ -110,6 +113,9 @@ function extractBaseCommand(command: string): string {
  * May get it super wrong - don't depend on this for security
  */
 function heuristicallyExtractBaseCommand(command: string): string {
+  // An AND-list may stop before its final command. The aggregate exit code
+  // cannot tell us which command ran, so do not apply the last one's semantics.
+  if (splitCommandWithOperators(command).includes('&&')) return ''
   const segments = splitCommand_DEPRECATED(command)
 
   // Take the last command as that's what determines the exit code

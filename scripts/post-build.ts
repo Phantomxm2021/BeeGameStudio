@@ -10,7 +10,7 @@ import { readdir, readFile, writeFile, cp } from 'node:fs/promises'
 import { chmodSync } from 'node:fs'
 import { join } from 'node:path'
 
-const outdir = 'dist'
+const outdir = 'dist-vite'
 
 async function postBuild() {
   // Step 1: Patch globalThis.Bun destructuring in ALL output files
@@ -73,6 +73,15 @@ async function postBuild() {
     recursive: true,
   } as never)
   console.log(`Copied .beegame/skills/builtinskills/ → ${builtinSkillsDir}/`)
+
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  await writeFile(join(outdir, 'package.json'), JSON.stringify({
+    name: 'bgs-runtime', private: true, type: 'module',
+    dependencies: { sharp: pkg.dependencies.sharp },
+    optionalDependencies: {
+      'doubaoime-asr': pkg.optionalDependencies['doubaoime-asr'],
+    },
+  }, null, 2) + '\n')
 
   // Step 3: Generate dual entry points
   const cliBun = join(outdir, 'cli-bun.js')

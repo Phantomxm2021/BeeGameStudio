@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { type OptionWithDescription, Select } from '../../components/CustomSelect/select.js';
-import { Dialog } from '@anthropic/ink';
-import { Box, Text } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useAppState } from '../../state/AppState.js';
 import { isClaudeAISubscriber } from '../../utils/auth.js';
 import { openBrowser } from '../../utils/browser.js';

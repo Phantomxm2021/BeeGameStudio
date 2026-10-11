@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { handlePlanModeTransition } from '../../bootstrap/state.js';
 import type { LocalJSXCommandContext } from '../../commands.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import { getExternalEditor } from '../../utils/editor.js';
 import { toIDEDisplayName } from '../../utils/ide.js';

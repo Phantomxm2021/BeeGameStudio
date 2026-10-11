@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react';
 import type { Tools } from '../../../../Tool.js';
-import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
+import { Byline, KeyboardShortcutHint } from '@bee-game-studio/ink';
 import { ConfigurableShortcutHint } from '../../../ConfigurableShortcutHint.js';
 import { useWizard } from '../../../wizard/index.js';
 import { WizardDialogLayout } from '../../../wizard/WizardDialogLayout.js';

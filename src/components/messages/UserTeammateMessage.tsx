@@ -2,7 +2,7 @@ import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import figures from 'figures';
 import * as React from 'react';
 import { TEAMMATE_MESSAGE_TAG } from '../../constants/xml.js';
-import { Ansi, Box, Text, type TextProps } from '@anthropic/ink';
+import { Ansi, Box, Text, type TextProps } from '@bee-game-studio/ink';
 import { toInkColor } from '../../utils/ink.js';
 
 import { jsonParse } from '../../utils/slowOperations.js';

@@ -2,7 +2,7 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs
 import type { UUID } from 'crypto'
 import type React from 'react'
 import type { PermissionResult } from '../entrypoints/agentSdkTypes.js'
-import type { Key } from '@anthropic/ink'
+import type { Key } from '@bee-game-studio/ink'
 import type { PastedContent } from '../utils/config.js'
 import type { ImageDimensions } from '../utils/imageResizer.js'
 import type { TextHighlight } from '../utils/textHighlighting.js'
@@ -292,9 +292,6 @@ export type QueuePriority = 'now' | 'next' | 'later'
  * Queued command type
  */
 export type QueuedCommand = {
-  /** BGS stdin dispatch metadata, not a request inferred from message text. */
-  beegameDirectionAuthors?: import('@bee-game-studio/agent-workflow/native-direction-authors').NativeDirectionAuthorInput
-  beegameProjectTurn?: import('@bee-game-studio/agent-workflow/native-direction-authors').NativeProjectTurnInput
   value: string | Array<ContentBlockParam>
   mode: PromptInputMode
   /** Defaults to the priority implied by `mode` when enqueued. */

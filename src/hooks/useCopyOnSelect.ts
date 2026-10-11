@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { useTheme } from '@anthropic/ink'
-import type { useSelection } from '@anthropic/ink'
+import { useTheme } from '@bee-game-studio/ink'
+import type { useSelection } from '@bee-game-studio/ink'
 import { getGlobalConfig } from '../utils/config.js'
 import { getTheme } from '../utils/theme.js'
 

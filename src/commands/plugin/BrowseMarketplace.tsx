@@ -2,7 +2,7 @@ import figures from 'figures';
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
-import { Box, Byline, Text } from '@anthropic/ink';
+import { Box, Byline, Text } from '@bee-game-studio/ink';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { LoadedPlugin } from '../../types/plugin.js';
 import { count } from '../../utils/array.js';

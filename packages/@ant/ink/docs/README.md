@@ -1,10 +1,10 @@
-# @anthropic/ink Documentation
+# @bee-game-studio/ink Documentation
 
 A terminal React rendering framework for building rich command-line interfaces.
 
 ## Architecture Overview
 
-`@anthropic/ink` is a forked/internal Ink framework that renders React components directly to the terminal using ANSI escape sequences. It uses Yoga (via a custom layout engine) for Flexbox layout, a custom React reconciler for terminal DOM, and a screen-buffer differ for efficient updates.
+`@bee-game-studio/ink` is a forked/internal Ink framework that renders React components directly to the terminal using ANSI escape sequences. It uses Yoga (via a custom layout engine) for Flexbox layout, a custom React reconciler for terminal DOM, and a screen-buffer differ for efficient updates.
 
 ### Three-Layer Architecture
 

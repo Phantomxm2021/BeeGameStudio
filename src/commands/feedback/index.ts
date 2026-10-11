@@ -7,13 +7,13 @@ const feedback = {
   aliases: ['bug'],
   type: 'local-jsx',
   name: 'feedback',
-  description: `Submit feedback about Claude Code`,
+  description: `Show BGS feedback availability`,
   argumentHint: '[report]',
   isEnabled: () =>
     !(
-      isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
-      isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) ||
-      isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY) ||
+      isEnvTruthy(process.env.BGS_USE_BEDROCK) ||
+      isEnvTruthy(process.env.BGS_USE_VERTEX) ||
+      isEnvTruthy(process.env.BGS_USE_FOUNDRY) ||
       isEnvTruthy(process.env.DISABLE_FEEDBACK_COMMAND) ||
       isEnvTruthy(process.env.DISABLE_BUG_COMMAND) ||
       isEssentialTrafficOnly() ||

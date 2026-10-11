@@ -4,7 +4,7 @@ import { MessageResponse } from 'src/components/MessageResponse.js';
 import { RejectedPlanMessage } from 'src/components/messages/UserToolResultMessage/RejectedPlanMessage.js';
 import { BLACK_CIRCLE } from 'src/constants/figures.js';
 import { getModeColor } from 'src/utils/permissions/PermissionMode.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import type { ToolProgressData } from 'src/Tool.js';
 import type { ProgressMessage } from 'src/types/message.js';
 import { getDisplayPath } from 'src/utils/file.js';
@@ -60,7 +60,7 @@ export function renderToolResultMessage(
     <Box flexDirection="column" marginTop={1}>
       <Box flexDirection="row">
         <Text color={getModeColor('plan')}>{BLACK_CIRCLE}</Text>
-        <Text> User approved Claude&apos;s plan</Text>
+        <Text> User approved BGS&apos;s plan</Text>
       </Box>
       <MessageResponse>
         <Box flexDirection="column">

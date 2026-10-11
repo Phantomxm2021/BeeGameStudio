@@ -35,8 +35,8 @@ function getPromptContent(
   const username = process.env.USER || ''
 
   let prefix = ''
-  let reviewerArg = ' and `--reviewer anthropics/claude-code`'
-  let addReviewerArg = ' (and add `--add-reviewer anthropics/claude-code`)'
+  const reviewerArg = ''
+  const addReviewerArg = ''
   let changelogSection = `
 
 ## Changelog
@@ -48,8 +48,6 @@ function getPromptContent(
 5. After creating/updating the PR, check if the user's CLAUDE.md mentions posting to Slack channels. If it does, use SearchExtraTools to search for "slack send message" tools. If SearchExtraTools finds a Slack tool, ask the user if they'd like you to post the PR URL to the relevant Slack channel. Only post if the user confirms. If SearchExtraTools returns no results or errors, skip this step silently—do not mention the failure, do not attempt workarounds, and do not try alternative approaches.`
   if (process.env.USER_TYPE === 'ant' && isUndercover()) {
     prefix = getUndercoverInstructions() + '\n'
-    reviewerArg = ''
-    addReviewerArg = ''
     changelogSection = ''
     slackStep = ''
   }

@@ -1,6 +1,6 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import React, { useMemo } from 'react';
-import { Ansi, Box, Text } from '@anthropic/ink';
+import { Ansi, Box, Text } from '@bee-game-studio/ink';
 import { FilePathLink } from '../FilePathLink.js';
 import { toInkColor } from '../../utils/ink.js';
 import type { Attachment } from 'src/utils/attachments.js';

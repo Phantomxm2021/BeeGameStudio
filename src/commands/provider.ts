@@ -8,15 +8,15 @@ import { applyConfigEnvironmentVariables } from '../utils/managedEnv.js'
 function getEnvVarForProvider(provider: string): string {
   switch (provider) {
     case 'bedrock':
-      return 'CLAUDE_CODE_USE_BEDROCK'
+      return 'BGS_USE_BEDROCK'
     case 'vertex':
-      return 'CLAUDE_CODE_USE_VERTEX'
+      return 'BGS_USE_VERTEX'
     case 'foundry':
-      return 'CLAUDE_CODE_USE_FOUNDRY'
+      return 'BGS_USE_FOUNDRY'
     case 'gemini':
-      return 'CLAUDE_CODE_USE_GEMINI'
+      return 'BGS_USE_GEMINI'
     case 'grok':
-      return 'CLAUDE_CODE_USE_GROK'
+      return 'BGS_USE_GROK'
     default:
       throw new Error(`Unknown provider: ${provider}`)
   }
@@ -49,12 +49,12 @@ const call: LocalCommandCall = async (args, _context) => {
   if (arg === 'unset') {
     updateSettingsForSource('userSettings', { modelType: undefined })
     // Also clear all provider-specific env vars to prevent conflicts
-    delete process.env.CLAUDE_CODE_USE_BEDROCK
-    delete process.env.CLAUDE_CODE_USE_VERTEX
-    delete process.env.CLAUDE_CODE_USE_FOUNDRY
-    delete process.env.CLAUDE_CODE_USE_OPENAI
-    delete process.env.CLAUDE_CODE_USE_GEMINI
-    delete process.env.CLAUDE_CODE_USE_GROK
+    delete process.env.BGS_USE_BEDROCK
+    delete process.env.BGS_USE_VERTEX
+    delete process.env.BGS_USE_FOUNDRY
+    delete process.env.BGS_USE_OPENAI
+    delete process.env.BGS_USE_GEMINI
+    delete process.env.BGS_USE_GROK
     return {
       type: 'text',
       value: 'API provider cleared (will use environment variables).',
@@ -133,12 +133,12 @@ const call: LocalCommandCall = async (args, _context) => {
     arg === 'grok'
   ) {
     // Clear any cloud provider env vars to avoid conflicts
-    delete process.env.CLAUDE_CODE_USE_BEDROCK
-    delete process.env.CLAUDE_CODE_USE_VERTEX
-    delete process.env.CLAUDE_CODE_USE_FOUNDRY
-    delete process.env.CLAUDE_CODE_USE_OPENAI
-    delete process.env.CLAUDE_CODE_USE_GEMINI
-    delete process.env.CLAUDE_CODE_USE_GROK
+    delete process.env.BGS_USE_BEDROCK
+    delete process.env.BGS_USE_VERTEX
+    delete process.env.BGS_USE_FOUNDRY
+    delete process.env.BGS_USE_OPENAI
+    delete process.env.BGS_USE_GEMINI
+    delete process.env.BGS_USE_GROK
     // Update settings.json
     updateSettingsForSource('userSettings', { modelType: arg })
     // Ensure settings.env gets applied to process.env
@@ -146,11 +146,11 @@ const call: LocalCommandCall = async (args, _context) => {
     return { type: 'text', value: `API provider set to ${arg}.` }
   } else {
     // Cloud providers: set env vars only, do NOT touch settings.json
-    delete process.env.CLAUDE_CODE_USE_OPENAI
+    delete process.env.BGS_USE_OPENAI
     delete process.env.OPENAI_API_KEY
     delete process.env.OPENAI_BASE_URL
-    delete process.env.CLAUDE_CODE_USE_GEMINI
-    delete process.env.CLAUDE_CODE_USE_GROK
+    delete process.env.BGS_USE_GEMINI
+    delete process.env.BGS_USE_GROK
     process.env[getEnvVarForProvider(arg)] = '1'
     // Do not modify settings.json - cloud providers controlled solely by env vars
     applyConfigEnvironmentVariables()

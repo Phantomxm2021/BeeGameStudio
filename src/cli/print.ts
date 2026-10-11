@@ -1,8 +1,5 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { feature } from 'bun:bundle'
-import type { NativeDirectionAuthorInput, NativeProjectTurnInput } from '@bee-game-studio/agent-workflow/native-direction-authors'
-import { emitNativeDiagnostic } from '@bee-game-studio/agent-workflow/native-diagnostics'
-import { setNativeEvidenceTurn } from '@bee-game-studio/agent-workflow/native-evidence'
 import { readFile, stat } from 'fs/promises'
 import { dirname } from 'path'
 import {
@@ -62,7 +59,7 @@ import {
   type SessionExternalMetadata,
 } from 'src/utils/sessionState.js'
 import { externalMetadataToAppState } from 'src/state/onChangeAppState.js'
-import { getInMemoryErrors, logError, logMCPDebug } from 'src/utils/log.js'
+import { logError, logMCPDebug } from 'src/utils/log.js'
 import {
   writeToStdout,
   registerProcessOutputErrorHandlers,
@@ -362,6 +359,7 @@ import { stopTask } from '../tasks/stopTask.js'
 import {
   drainSdkEvents,
   parseTaskNotificationSdkEvent,
+  subscribeToSdkEvents,
 } from '../utils/sdkEventQueue.js'
 import { initializeGrowthBook } from '../services/analytics/growthbook.js'
 import { errorMessage, toError } from '../utils/errors.js'
@@ -455,8 +453,6 @@ export function canBatchWith(
 ): boolean {
   return (
     next !== undefined &&
-    head.beegameDirectionAuthors === undefined && next.beegameDirectionAuthors === undefined &&
-    head.beegameProjectTurn === undefined && next.beegameProjectTurn === undefined &&
     next.mode === 'prompt' &&
     next.workload === head.workload &&
     next.isMeta === head.isMeta
@@ -606,7 +602,6 @@ export async function runHeadless(
   }
 
   const structuredIO = getStructuredIO(inputPrompt, options)
-  emitNativeDiagnostic({ event: 'cli_ready' })
 
   // When emitting NDJSON for SDK clients, any stray write to stdout (debug
   // prints, dependency console.log, library banners) breaks the client's
@@ -1053,6 +1048,14 @@ function runHeadlessStreaming(
   let abortController: AbortController | undefined
   // Same queue sendRequest() enqueues to — one FIFO for everything.
   const output = structuredIO.outbound
+
+  // Background workers keep producing while ask() is awaiting a scheduled
+  // assignment. Forward their events independently of the parent iterator;
+  // these are UI/SDK events, never commands or parent model history.
+  const unsubscribeSdkEvents = subscribeToSdkEvents(() => {
+    for (const event of drainSdkEvents()) output.enqueue(event)
+  })
+  registerCleanup(async () => { unsubscribeSdkEvents() })
 
   // Ctrl+C in -p mode: abort the in-flight query, then shut down gracefully.
   // gracefulShutdown persists session state and flushes analytics, with a
@@ -2021,7 +2024,6 @@ function runHeadlessStreaming(
           }
           const batchUuids = batch.map(c => c.uuid).filter(u => u !== undefined)
           executingRequestId = command.uuid
-          setNativeEvidenceTurn(command.uuid)
 
           // QueryEngine will emit a replay for command.uuid (the last uuid in
           // the batch) via its messagesToAck path. Emit replays here for the
@@ -2151,8 +2153,6 @@ function runHeadlessStreaming(
                   prompt: input,
                   promptUuid: cmd.uuid,
                   isMeta: cmd.isMeta,
-                  beegameDirectionAuthors: cmd.beegameDirectionAuthors,
-                  beegameProjectTurn: cmd.beegameProjectTurn,
                   cwd: cwd(),
                   tools: allTools,
                   verbose: options.verbose,
@@ -2494,10 +2494,9 @@ function runHeadlessStreaming(
           modelUsage: {},
           permission_denials: [],
           uuid: randomUUID(),
-          errors: [
-            errorMessage(error),
-            ...getInMemoryErrors().map(_ => _.error),
-          ],
+          // Recovered tool failures remain in their original tool/debug records.
+          // A session-wide error history is not this request's failure cause.
+          errors: [errorMessage(error)],
         })
       } catch {
         // If we can't emit the error result, continue with shutdown anyway
@@ -2601,6 +2600,24 @@ function runHeadlessStreaming(
             for (const m of unread) {
               const shutdownApproval = isShutdownApproved(m.text)
               if (shutdownApproval && teamName) {
+                if (shutdownApproval.paneId && shutdownApproval.backendType) {
+                  let closed = false
+                  try {
+                    const { closeTeammatePane } = await import('../utils/swarm/backends/registry.js')
+                    const { isInsideTmux } = await import('../utils/swarm/backends/detection.js')
+                    const { isPaneBackend } = await import('../utils/swarm/backends/types.js')
+                    const { readTeamFile } = await import('../utils/swarm/teamHelpers.js')
+                    const cleanup = readTeamFile(teamName)?.members.find(member => member.name === shutdownApproval.from && member.tmuxPaneId === shutdownApproval.paneId)?.paneCleanup
+                    closed = isPaneBackend(shutdownApproval.backendType) &&
+                      await closeTeammatePane(shutdownApproval.backendType, shutdownApproval.paneId, cleanup?.useExternalSession ?? !(await isInsideTmux()), cleanup)
+                  } catch (error) {
+                    logForDebugging(`[print.ts] Teammate pane cleanup failed: ${errorMessage(error)}`)
+                  }
+                  if (!closed) {
+                    process.stderr.write('BGS: teammate pane cleanup incomplete; team tracking retained.\n')
+                    continue
+                  }
+                }
                 const teammateToRemove = shutdownApproval.from
                 logForDebugging(
                   `[print.ts] Processing shutdown_approved from ${teammateToRemove}`,
@@ -2730,6 +2747,7 @@ function runHeadlessStreaming(
         unsubscribeSkillChanges()
         unsubscribeAuthStatus?.()
         unsubscribeCommandQueue()
+        unsubscribeSdkEvents()
         statusListeners.delete(rateLimitListener)
         output.done()
       }
@@ -4278,13 +4296,6 @@ function runHeadlessStreaming(
 
       enqueue({
         mode: 'prompt' as const,
-        // Validate inside the normal turn error path, not the stdin reader.
-        beegameDirectionAuthors: (userMsg as SDKUserMessage & {
-          beegame_direction_authors?: NativeDirectionAuthorInput
-        }).beegame_direction_authors,
-        beegameProjectTurn: (userMsg as SDKUserMessage & {
-          beegame_project_turn?: NativeProjectTurnInput
-        }).beegame_project_turn,
         // file_attachments rides the protobuf catchall from the web composer.
         // Same-ref no-op when absent (no 'file_attachments' key).
         value: await resolveAndPrepend(
@@ -4323,6 +4334,7 @@ function runHeadlessStreaming(
       unsubscribeSkillChanges()
       unsubscribeAuthStatus?.()
       unsubscribeCommandQueue()
+      unsubscribeSdkEvents()
       statusListeners.delete(rateLimitListener)
       output.done()
     }
@@ -5251,7 +5263,7 @@ async function loadInitialMessages(
       }
 
       // Hydrate local transcript from remote before loading
-      if (isEnvTruthy(process.env.CLAUDE_CODE_USE_CCR_V2)) {
+      if (isEnvTruthy(process.env.BGS_USE_CCR_V2)) {
         // Await restore alongside hydration so SSE catchup lands on
         // restored state, not a fresh default.
         const [, metadata] = await Promise.all([
@@ -5290,7 +5302,7 @@ async function loadInitialMessages(
         // For URL-based or CCR v2 resume, start with empty session (it was hydrated but empty)
         if (
           parsedSessionId.isUrl ||
-          isEnvTruthy(process.env.CLAUDE_CODE_USE_CCR_V2)
+          isEnvTruthy(process.env.BGS_USE_CCR_V2)
         ) {
           // Execute SessionStart hooks for startup since we're starting a new session
           return {

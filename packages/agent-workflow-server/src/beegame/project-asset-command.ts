@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 export type ProjectAssetCapabilities = {
   libraryBaseUrl?: string
   imageEndpoint?: string
+  mediaCommand?: string
 }
 
 /** Wrap existing host capabilities in one short-lived project-local CLI command. */

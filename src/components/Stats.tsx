@@ -19,7 +19,7 @@ import {
   Tab,
   Tabs,
   useTabHeaderFocus,
-} from '@anthropic/ink';
+} from '@bee-game-studio/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { getGlobalConfig } from '../utils/config.js';
 import { formatDuration, formatNumber } from '../utils/format.js';
@@ -90,7 +90,7 @@ export function Stats({ onClose }: Props): React.ReactNode {
       fallback={
         <Box marginTop={1}>
           <Spinner />
-          <Text> Loading your Claude Code stats…</Text>
+          <Text> Loading your BGS stats…</Text>
         </Box>
       }
     >
@@ -195,7 +195,7 @@ function StatsContent({ allTimePromise, onClose }: StatsContentProps): React.Rea
   if (allTimeResult.type === 'empty') {
     return (
       <Box marginTop={1}>
-        <Text color="warning">No stats available yet. Start using Claude Code!</Text>
+        <Text color="warning">No stats available yet. Start using BGS!</Text>
       </Box>
     );
   }

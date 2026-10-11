@@ -1,4 +1,6 @@
 import type { RuntimeModelConfig } from '@bee-game-studio/agent-workflow'
+import { normalizeRuntimeEnvironment } from '../../../../src/utils/runtimeEnvironment'
+import { isEnvTruthy } from '../../../../src/utils/envUtils'
 import { randomUUID } from 'node:crypto'
 import { safeErrorFacts } from '../security/safe-error-facts'
 import type { DashboardRepository } from '../dashboard-repository'
@@ -166,8 +168,8 @@ function mergeRuntimeEnvironment(
   additionalEnv: Record<string, string>,
 ): Record<string, string> {
   const selectedEnvironment = {
-    ...additionalEnv,
-    ...(runtime?.env ?? {}),
+    ...normalizeRuntimeEnvironment(additionalEnv),
+    ...normalizeRuntimeEnvironment(runtime?.env ?? {}),
   }
   const modelType = runtime?.modelType ?? inferSelectedRuntimeModelType(selectedEnvironment)
   return {
@@ -183,28 +185,28 @@ function inferSelectedRuntimeModelType(
   if (
     environment.ANTHROPIC_BASE_URL ||
     environment.ANTHROPIC_AUTH_TOKEN ||
-    environment.ANTHROPIC_DEFAULT_SONNET_MODEL
+    environment.BGS_DEFAULT_BALANCED_MODEL
   ) {
     candidates.add('anthropic')
   }
   if (
     environment.OPENAI_BASE_URL ||
     environment.OPENAI_API_KEY ||
-    environment.CLAUDE_CODE_USE_OPENAI
+    isEnvTruthy(environment.BGS_USE_OPENAI)
   ) {
     candidates.add('openai')
   }
   if (
     environment.GEMINI_BASE_URL ||
     environment.GEMINI_API_KEY ||
-    environment.CLAUDE_CODE_USE_GEMINI
+    isEnvTruthy(environment.BGS_USE_GEMINI)
   ) {
     candidates.add('gemini')
   }
   if (
     environment.GROK_BASE_URL ||
     environment.GROK_API_KEY ||
-    environment.CLAUDE_CODE_USE_GROK
+    isEnvTruthy(environment.BGS_USE_GROK)
   ) {
     candidates.add('grok')
   }

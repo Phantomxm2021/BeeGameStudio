@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { isTaskAssignment, type TaskAssignmentMessage } from '../../utils/teammateMailbox.js';
 
 type Props = {

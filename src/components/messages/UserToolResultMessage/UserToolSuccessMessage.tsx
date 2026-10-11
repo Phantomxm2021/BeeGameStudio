@@ -2,7 +2,7 @@ import { feature } from 'bun:bundle';
 import figures from 'figures';
 import * as React from 'react';
 import { SentryErrorBoundary } from 'src/components/SentryErrorBoundary.js';
-import { Box, Text, useTheme } from '@anthropic/ink';
+import { Box, Text, useTheme } from '@bee-game-studio/ink';
 import { useAppState } from '../../../state/AppState.js';
 import { filterToolProgressMessages, type Tool, type Tools } from '../../../Tool.js';
 import type { NormalizedUserMessage, ProgressMessage } from '../../../types/message.js';

@@ -1653,6 +1653,8 @@ function normalizeProjectRuntimeSnapshot(snapshot: unknown): {
       }
     : undefined
   const normalized: BeeGameProjectRuntimeSnapshot = {
+    ...(snapshot.workflow_protocol === 'bgs.workflow.v3' ? { workflow_protocol: 'bgs.workflow.v3' as const,
+      ...(trimString(snapshot.workflow_chat_session_id) ? { workflow_chat_session_id: trimString(snapshot.workflow_chat_session_id) } : {}) } : {}),
     ...(normalizedUsage ? { usage: normalizedUsage } : {}),
     ...(trimString(snapshot.phase_name)
       ? { phase_name: trimString(snapshot.phase_name) }

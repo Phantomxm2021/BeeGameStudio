@@ -11,6 +11,8 @@ export type BeeGameProjectMetadata = {
 }
 
 export type BeeGameProjectRuntimeSnapshot = {
+  workflow_protocol?: 'bgs.workflow.v3'
+  workflow_chat_session_id?: string
   usage?: {
     prompt_tokens: number
     completion_tokens: number
@@ -149,6 +151,8 @@ function normalizeRuntimeSnapshot(
       }
     : undefined
   const normalized: BeeGameProjectRuntimeSnapshot = {
+    ...(snapshot.workflow_protocol === 'bgs.workflow.v3' ? { workflow_protocol: 'bgs.workflow.v3' as const,
+      ...(snapshot.workflow_chat_session_id ? { workflow_chat_session_id: snapshot.workflow_chat_session_id } : {}) } : {}),
     ...(normalizedUsage ? { usage: normalizedUsage } : {}),
     ...(snapshot.phase_name?.trim()
       ? { phase_name: snapshot.phase_name.trim() }

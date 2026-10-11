@@ -61,6 +61,32 @@ describe('chatStore Performance & Cap', () => {
     });
   });
 
+  it('merges older subagent activity without losing recent records or reopening a terminal card', () => {
+    const base = { id: 'agent-card', messageId: 'agent-card', sender: 'beegame', content: 'Agent',
+      taskId: 'run', isSubagentTool: true, type: 'tool' as const };
+    const { addMessage, loadHistory } = useChatStore.getState();
+    addMessage({ ...base, timestamp: 5000, sequence: 50, toolStatus: 'completed', subagentOutput: 'Done',
+      subagentActivity: { truncated: false, entries: [
+        { id: 'bash', kind: 'tool', toolName: 'Bash', status: 'completed', output: 'Passed' },
+        { id: 'note', kind: 'message', text: 'Final note' },
+        { id: 'permission', kind: 'permission', toolName: 'Bash', message: 'Reason', status: 'allowed' },
+      ] } });
+    loadHistory([{ ...base, timestamp: 1000, sequence: 10, toolStatus: 'running', subagentOutput: undefined,
+      subagentActivity: { truncated: true, entries: [
+        { id: 'read', kind: 'tool', toolName: 'Read', status: 'completed', output: 'Old read' },
+        { id: 'bash', kind: 'tool', toolName: 'Bash', status: 'running' },
+        { id: 'note', kind: 'message', text: 'Old note' },
+        { id: 'permission', kind: 'permission', toolName: 'Bash', message: 'Reason', status: 'pending' },
+      ] } }]);
+    const message = useChatStore.getState().messages[0];
+    expect(message).toMatchObject({ toolStatus: 'completed', subagentOutput: 'Done' });
+    expect(message.subagentActivity?.entries).toEqual([
+      expect.objectContaining({ id: 'read' }), expect.objectContaining({ id: 'bash', status: 'completed', output: 'Passed' }),
+      expect.objectContaining({ id: 'note', text: 'Final note' }), expect.objectContaining({ id: 'permission', status: 'allowed' }),
+    ]);
+    expect(message.subagentActivity?.truncated).toBe(true);
+  });
+
   it('keeps a complete answer at the live edge when an older page crosses its stream', () => {
     const { loadHistory } = useChatStore.getState();
     loadHistory([{ id: 'latest', messageId: 'latest', sender: 'beegame', content: '17:59 final',

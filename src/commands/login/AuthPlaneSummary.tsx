@@ -19,7 +19,7 @@
  * Security: never renders raw API key values. All output uses masked previews.
  */
 import * as React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import type { AuthStatus } from './getAuthStatus.js';
 
 // ---------------------------------------------------------------------------

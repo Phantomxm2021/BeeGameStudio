@@ -15,4 +15,4 @@ Make spatial information stable and usable on the target device. There is no uni
 
 For a focused interface problem, fix its placement or interaction without redesigning gameplay. Coordinate with the spatial game designer for locomotion and safety rules.
 
-Read only the relevant optional reference: `references/spatial-interaction-principles.md` for input and anchoring, `references/depth-layering-framework.md` for depth hierarchy, `references/gesture-ergonomics-model.md` for direct input comfort, or `references/spatial-cognitive-load-system.md` for attention management.
+The essential input and anchoring principles are covered above. Read only the relevant optional reference: `references/depth-layering-framework.md` for depth hierarchy, `references/gesture-ergonomics-model.md` for direct input comfort, or `references/spatial-cognitive-load-system.md` for attention management.

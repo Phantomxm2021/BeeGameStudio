@@ -11,8 +11,9 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises'
-import { extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { computeWorkspaceRevision } from './workspace-revision'
+import { artifactDigest } from './runtime-acceptance'
 
 export type BeeGameDeploymentStatus =
   | 'queued'
@@ -113,6 +114,8 @@ type DeploymentInput = {
   projectId?: string
   workspacePath: string
   authToken?: string
+  /** Server-owned acceptance snapshot; never taken from the request body. */
+  acceptance?: { revision: string; artifacts: Array<{ path: string; sha256: string }> }
 }
 
 export function mergeDeploymentRecords(...groups: BeeGameDeploymentRecord[][]): BeeGameDeploymentRecord[] {
@@ -208,67 +211,84 @@ export class BeeGameDeploymentManager {
     keepSuccessfulPerProject?: number
   }): Promise<BeeGameDeploymentRetentionResult> {
     await this.ready
-    if (!input.dryRun && this.active.size) throw new Error('Wait for active publications before cleaning deployment history')
-    const keepSuccessfulPerProject = Math.max(1, input.keepSuccessfulPerProject ?? 6)
-    const records = await this.loadRecords()
-    const retainedIds = new Set<string>()
-    const deleteIds = new Set<string>()
-    const byProject = new Map<string, BeeGameDeploymentRecord[]>()
-    for (const record of records) {
-      const groupId = record.projectId || record.sessionId
-      const group = byProject.get(groupId) ?? []
-      group.push(record)
-      byProject.set(groupId, group)
-    }
+    return this.withRecordWrite(async () => {
+      if (!input.dryRun && this.active.size) throw new Error('Wait for active publications before cleaning deployment history')
+      const keepSuccessfulPerProject = Math.max(1, input.keepSuccessfulPerProject ?? 6)
+      const records = await this.loadRecords()
+      const retainedIds = new Set<string>()
+      const deleteIds = new Set<string>()
+      const byProject = new Map<string, BeeGameDeploymentRecord[]>()
+      for (const record of records) {
+        const groupId = record.projectId || record.sessionId
+        const group = byProject.get(groupId) ?? []
+        group.push(record)
+        byProject.set(groupId, group)
+      }
 
-    for (const group of byProject.values()) {
-      const successful = group
-        .filter(record => record.status === 'succeeded')
-        .sort(compareDeploymentRecordsNewestFirst)
-      for (const [index, record] of successful.entries()) {
-        if (index < keepSuccessfulPerProject) {
+      for (const group of byProject.values()) {
+        const successful = group
+          .filter(record => record.status === 'succeeded')
+          .sort(compareDeploymentRecordsNewestFirst)
+        for (const [index, record] of successful.entries()) {
+          if (index < keepSuccessfulPerProject) {
+            retainedIds.add(record.id)
+          } else {
+            deleteIds.add(record.id)
+          }
+        }
+        for (const record of group) {
+          if (!retainedIds.has(record.id) && !deleteIds.has(record.id)) {
+            retainedIds.add(record.id)
+          }
+        }
+      }
+
+      // Rollbacks reference the original immutable artifact, not a new copy.
+      // Keep its owning record too so subsequent cleanups can still collect it
+      // once no retained release references those bytes.
+      const referencedArtifacts = records.filter(record => retainedIds.has(record.id) && record.artifactPath)
+        .map(record => resolve(record.artifactPath!))
+      const referencedOwners = new Set<string>()
+      for (const record of records.filter(record => deleteIds.has(record.id))) {
+        const directory = resolve(this.deploymentsRoot, record.id)
+        if (referencedArtifacts.some(path => isInsideOrEqual(path, directory))) {
+          deleteIds.delete(record.id)
           retainedIds.add(record.id)
-        } else {
-          deleteIds.add(record.id)
+          referencedOwners.add(record.id)
         }
       }
-      for (const record of group) {
-        if (!retainedIds.has(record.id) && !deleteIds.has(record.id)) {
-          retainedIds.add(record.id)
+      const retained = records
+        .filter(record => retainedIds.has(record.id))
+        .map(record => toRetentionItem(record, referencedOwners.has(record.id)
+          ? 'artifact_referenced_by_retained_deployment' : 'retention_policy_retained'))
+      const plannedForDeletion = records
+        .filter(record => deleteIds.has(record.id))
+        .map(record => toRetentionItem(record, 'older_than_rollback_retention_window'))
+      const deleted: BeeGameDeploymentRetentionItem[] = []
+      const skipped: BeeGameDeploymentRetentionItem[] = []
+      if (!input.dryRun) {
+        for (const record of records.filter(item => deleteIds.has(item.id))) {
+          const item = toRetentionItem(record, 'older_than_rollback_retention_window')
+          const deletedArtifact = await this.deleteLocalArtifact(record)
+          if (!deletedArtifact) {
+            skipped.push({
+              ...item,
+              reason: 'artifact_not_local_or_missing',
+            })
+          }
+          deleted.push(item)
         }
+        await this.saveRecords(records.filter(record => !deleteIds.has(record.id)))
       }
-    }
 
-    const retained = records
-      .filter(record => retainedIds.has(record.id))
-      .map(record => toRetentionItem(record, 'retention_policy_retained'))
-    const plannedForDeletion = records
-      .filter(record => deleteIds.has(record.id))
-      .map(record => toRetentionItem(record, 'older_than_rollback_retention_window'))
-    const deleted: BeeGameDeploymentRetentionItem[] = []
-    const skipped: BeeGameDeploymentRetentionItem[] = []
-    if (!input.dryRun) {
-      for (const record of records.filter(item => deleteIds.has(item.id))) {
-        const item = toRetentionItem(record, 'older_than_rollback_retention_window')
-        const deletedArtifact = await this.deleteLocalArtifact(record)
-        if (!deletedArtifact) {
-          skipped.push({
-            ...item,
-            reason: 'artifact_not_local_or_missing',
-          })
-        }
-        deleted.push(item)
+      return {
+        dryRun: input.dryRun,
+        retained,
+        plannedForDeletion,
+        deleted,
+        skipped,
       }
-      await this.saveRecords(records.filter(record => !deleteIds.has(record.id)))
-    }
-
-    return {
-      dryRun: input.dryRun,
-      retained,
-      plannedForDeletion,
-      deleted,
-      skipped,
-    }
+    })
   }
 
   async deploy(input: DeploymentInput, onQueued?: (record: BeeGameDeploymentRecord) => void,
@@ -295,6 +315,8 @@ export class BeeGameDeploymentManager {
         throw new Error('Worker publishing requires deployment record persistence before public verification')
       }
       const acceptedWorkspaceRevision = await computeWorkspaceRevision(workspacePath)
+      if (input.acceptance && input.acceptance.revision !== acceptedWorkspaceRevision)
+        throw new Error('Project source changed after acceptance; verify before publishing.')
       const plan = createDeploymentPlan(workspacePath)
       if (!plan.supported) {
         record = this.fail(record, plan.message)
@@ -306,13 +328,13 @@ export class BeeGameDeploymentManager {
       record = {
         ...record,
         status: 'building',
-        buildCommand: plan.command.join(' '),
+        ...(!input.acceptance ? { buildCommand: plan.command.join(' ') } : {}),
         entrypoint: plan.entrypoint,
         updatedAt: new Date().toISOString(),
       }
       await this.saveRecord(record)
 
-      const result = await this.runner(plan.command, {
+      const result = input.acceptance ? { exitCode: 0, stdout: 'Publishing the accepted build without rebuilding.', stderr: '' } : await this.runner(plan.command, {
         cwd: plan.cwd,
         env: buildDeploymentEnv(),
       })
@@ -355,6 +377,24 @@ export class BeeGameDeploymentManager {
       await mkdir(artifactPath, { recursive: true })
       await cp(outputDir, artifactPath, { recursive: true })
       await validateDeploymentArtifact(artifactPath)
+      if (input.acceptance) {
+        const covered: string[] = []
+        for (const artifact of input.acceptance.artifacts) {
+          const part = relative(outputDir, resolve(workspacePath, artifact.path))
+          if (part === '..' || part.startsWith('../') || isAbsolute(part)) continue
+          const copied = join(basename(artifactPath), part)
+          if (await artifactDigest(dirname(artifactPath), copied, true) !== artifact.sha256)
+            throw new Error('Deployment artifact differs from acceptance: ' + artifact.path)
+          covered.push(part)
+        }
+        for (const file of await listFiles(artifactPath)) {
+          const part = relative(artifactPath, file)
+          if (!covered.some(path => path === '' || part === path || part.startsWith(path + '/')))
+            throw new Error('Deployment file is not covered by acceptance: ' + part + '. Verify the complete output directory and record it in artifactPaths.')
+        }
+        if (await computeWorkspaceRevision(workspacePath) !== input.acceptance.revision)
+          throw new Error('Project source changed while preparing the accepted deployment.')
+      }
       const artifactHash = await hashDirectory(artifactPath)
       const files = await createDeploymentFiles(artifactPath)
       const published = this.publisher
@@ -408,30 +448,38 @@ export class BeeGameDeploymentManager {
 
   async rollbackTo(source: BeeGameDeploymentRecord): Promise<BeeGameDeploymentRecord> {
     await this.ready
-    if (source.status !== 'succeeded' || !source.url) {
-      throw new Error('Only successful deployments can be restored')
-    }
-    const now = new Date().toISOString()
-    const id = `deploy_${createHash('sha1')
-      .update(`${source.sessionId}-${source.id}-rollback-${now}`)
-      .digest('hex')
-      .slice(0, 12)}`
-    const {
-      buildCommand: _buildCommand,
-      buildLog: _buildLog,
-      ...restoredSource
-    } = source
-    const record: BeeGameDeploymentRecord = {
-      ...restoredSource,
-      id,
-      status: 'succeeded',
-      message: `Restored from deployment ${source.id}`,
-      createdAt: now,
-      updatedAt: now,
-      deployedAt: now,
-    }
-    await this.saveRecord(record)
-    return record
+    return this.withRecordWrite(async () => {
+      if (source.status !== 'succeeded' || !source.url) {
+        throw new Error('Only successful deployments can be restored')
+      }
+      // Cleanup may have completed while this request waited for the write lock.
+      if (source.url === this.publicUrl(source.id) ||
+          source.url.startsWith(`${this.publicBaseUrl}${PUBLIC_PATH_PREFIX}/`)) {
+        const publicPath = this.publicBaseUrl ? source.url.slice(this.publicBaseUrl.length) : source.url
+        if (!await this.readPublicFile(publicPath)) throw new Error('Deployment artifact is no longer available')
+      }
+      const now = new Date().toISOString()
+      const id = `deploy_${createHash('sha1')
+        .update(`${source.sessionId}-${source.id}-rollback-${now}`)
+        .digest('hex')
+        .slice(0, 12)}`
+      const {
+        buildCommand: _buildCommand,
+        buildLog: _buildLog,
+        ...restoredSource
+      } = source
+      const record: BeeGameDeploymentRecord = {
+        ...restoredSource,
+        id,
+        status: 'succeeded',
+        message: `Restored from deployment ${source.id}`,
+        createdAt: now,
+        updatedAt: now,
+        deployedAt: now,
+      }
+      await this.saveRecords(mergeDeploymentRecords(await this.loadRecords(), [record]))
+      return record
+    })
   }
 
   async readPublicFile(publicPath: string): Promise<
@@ -525,12 +573,16 @@ export class BeeGameDeploymentManager {
   }
 
   private async saveRecord(record: BeeGameDeploymentRecord): Promise<void> {
-    const write = this.recordWrites.catch(() => undefined).then(async () => {
+    await this.withRecordWrite(async () => {
       const records = await this.loadRecords()
       await this.saveRecords(mergeDeploymentRecords(records, [record]))
     })
-    this.recordWrites = write
-    await write
+  }
+
+  private withRecordWrite<T>(operation: () => Promise<T>): Promise<T> {
+    const write = this.recordWrites.catch(() => undefined).then(operation)
+    this.recordWrites = write.then(() => undefined, () => undefined)
+    return write
   }
 
   private async saveRecords(records: BeeGameDeploymentRecord[]): Promise<void> {

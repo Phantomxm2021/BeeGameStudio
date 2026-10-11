@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useInterval } from 'usehooks-ts';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw j/k/arrow dialog navigation
-import { Box, Text, useInput, stringWidth } from '@anthropic/ink';
+import { Box, Text, useInput, stringWidth } from '@bee-game-studio/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
 import { type AppState, useAppState, useSetAppState } from '../../state/AppState.js';
@@ -23,10 +23,10 @@ import {
 } from '../../utils/permissions/PermissionMode.js';
 import { jsonStringify } from '../../utils/slowOperations.js';
 import { IT2_COMMAND, isInsideTmuxSync } from '../../utils/swarm/backends/detection.js';
-import { ensureBackendsRegistered, getBackendByType, getCachedBackend } from '../../utils/swarm/backends/registry.js';
+import { ensureBackendsRegistered, closeTeammatePane, getCachedBackend } from '../../utils/swarm/backends/registry.js';
 import { isPaneBackend, type PaneBackendType } from '../../utils/swarm/backends/types.js';
 import { getSwarmSocketName, TMUX_COMMAND } from '../../utils/swarm/constants.js';
-import { removeMemberFromTeam, setMemberMode, setMultipleMemberModes } from '../../utils/swarm/teamHelpers.js';
+import { readTeamFile, removeMemberFromTeam, setMemberMode, setMultipleMemberModes } from '../../utils/swarm/teamHelpers.js';
 import { listTasks, type Task, unassignTeammateTasks } from '../../utils/tasks.js';
 import { getTeammateStatuses, type TeammateStatus, type TeamSummary } from '../../utils/teamDiscovery.js';
 import {
@@ -34,7 +34,7 @@ import {
   sendShutdownRequestToMailbox,
   writeToMailbox,
 } from '../../utils/teammateMailbox.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 import ThemedText from '../design-system/ThemedText.js';
 
 type Props = {
@@ -464,17 +464,21 @@ async function killTeammate(
   setAppState: (f: (prev: AppState) => AppState) => void,
 ): Promise<void> {
   // Kill the pane using the backend that created it (handles -s / -L flags correctly).
-  // Wrapped in try/catch so cleanup (removeMemberFromTeam, unassignTeammateTasks,
-  // setAppState) always runs — matches useInboxPoller.ts error isolation.
+  // Preserve the team record unless closing and private-file cleanup succeed.
   if (backendType) {
     try {
       // Use ensureBackendsRegistered (not detectAndGetBackend) — this process may
       // be a teammate that never ran detection, but we only need class imports
       // here, not subprocess probes that could throw in a different environment.
       await ensureBackendsRegistered();
-      await getBackendByType(backendType).killPane(paneId, !isInsideTmuxSync());
+      const cleanup = readTeamFile(teamName)?.members.find(member => member.agentId === teammateId)?.paneCleanup;
+      if (!await closeTeammatePane(backendType, paneId, cleanup?.useExternalSession ?? !isInsideTmuxSync(), cleanup)) {
+        throw new Error('Pane close was not confirmed');
+      }
     } catch (error) {
       logForDebugging(`[TeamsDialog] Failed to kill pane ${paneId}: ${error}`);
+      process.stderr.write('BGS: teammate pane cleanup incomplete; team tracking retained.\n');
+      return;
     }
   } else {
     // backendType undefined: old team files predating this field, or in-process.

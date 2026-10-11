@@ -3,9 +3,9 @@ import { useCallback, useEffect, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 import { TEARDROP_ASTERISK } from '../../constants/figures.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { setClipboard } from '@anthropic/ink';
+import { setClipboard } from '@bee-game-studio/ink';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- enter to copy link
-import { Box, Link, Text, useInput } from '@anthropic/ink';
+import { Box, Link, Text, useInput } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { logEvent } from '../../services/analytics/index.js';
 import {
@@ -16,7 +16,7 @@ import {
 import type { ReferralRedemptionsResponse, ReferrerRewardInfo } from '../../services/oauth/types.js';
 import { count } from '../../utils/array.js';
 import { logError } from '../../utils/log.js';
-import { Pane } from '@anthropic/ink';
+import { Pane } from '@bee-game-studio/ink';
 
 type PassStatus = {
   passNumber: number;

@@ -12,7 +12,7 @@ import { FileEditToolUseRejectedMessage } from 'src/components/FileEditToolUseRe
 
 import { HighlightedCode } from 'src/components/HighlightedCode.js';
 import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { FilePathLink } from 'src/components/FilePathLink.js';
 import type { ToolProgressData } from 'src/Tool.js';
 import type { ProgressMessage } from 'src/types/message.js';

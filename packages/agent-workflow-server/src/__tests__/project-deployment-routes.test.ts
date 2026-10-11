@@ -20,8 +20,12 @@ test('project publishing is gated, returns 202, and exposes progress without a m
     dashboardDataRoot: join(root, 'dashboard'), defaultWorkspacePath: projects,
     modelConfigStore: false, skillsConfig: false, registerCleanup: cleanup => cleanups.push(cleanup),
     sessionRunner: { async start() { throw new Error('Publishing must not start an Agent') } },
-    deploymentRunner: async () => { builds++; await gate; return { exitCode: 0, stdout: 'Built', stderr: '' } },
-    deploymentPublisher: { async publishStaticDirectory() { uploads++; return { url: 'https://games.test/version/index.html' } } },
+    deploymentRunner: async () => { builds++; throw new Error('Accepted game must not be rebuilt') },
+    deploymentPublisher: { async publishStaticDirectory(input) {
+      await gate
+      expect(await input.files.find(file => file.path === 'index.html')!.text()).toBe('<main>Published</main>')
+      uploads++; return { url: 'https://games.test/version/index.html' }
+    } },
   })
   const post = (url: string, body: unknown = {}) => app.request(url, { method: 'POST',
     headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
@@ -34,7 +38,7 @@ test('project publishing is gated, returns 202, and exposes progress without a m
 
     expect((await post('/api/projects', { id: project, name: 'Publish test', root_path: workspace, created_at: Date.now() })).status).toBe(200)
     await post('/api/model-configs', { name: 'Mock', provider: 'openai-compatible', apiKey: 'fake', models: { balanced: 'fake' }, isDefault: true })
-    await post(`/api/projects/${project}/session/ensure`, { language: 'zh' })
+    const { session } = await (await post(`/api/projects/${project}/session/ensure`, { language: 'zh' })).json()
     expect((await (await app.request(`/api/projects/${project}/deployment-readiness`)).json()).allowed).toBe(false)
     expect((await post(`/api/projects/${project}/deployments`)).status).toBe(409)
     expect(builds).toBe(0)
@@ -67,8 +71,13 @@ test('project publishing is gated, returns 202, and exposes progress without a m
       await Bun.sleep(10)
     }
     expect(final[0]).toMatchObject({ id: queued.id, status: 'succeeded', url: 'https://games.test/version/index.html' })
-    expect(builds).toBe(1)
+    expect(builds).toBe(0)
     expect(uploads).toBe(1)
+    const legacyPublish = await post(`/api/beegame-sessions/${session.id}/deployments`)
+    expect(legacyPublish.status).toBe(200)
+    expect(await legacyPublish.json()).toMatchObject({ status: 'succeeded' })
+    expect(builds).toBe(0)
+    expect(uploads).toBe(2)
     expect((await app.request('/api/projects/unknown/deployment-readiness')).status).toBe(404)
   } finally { release(); for (const cleanup of cleanups) await cleanup(); await rm(root, { recursive: true, force: true }) }
 })

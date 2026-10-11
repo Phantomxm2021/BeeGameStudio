@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Claude Code Architecture",
+  "name": "BGS Architecture",
   "colors": {
     "primary": "#D97706",
     "light": "#F59E0B",
@@ -161,23 +161,23 @@
   "navbar": {
     "primary": {
       "type": "github",
-      "href": "https://github.com/bee-game-studio/claude-code"
+      "href": "https://github.com/Phantomxm2021/BeeGameStudio"
     }
   },
   "search": {
-    "prompt": "搜索 Claude Code 架构文档..."
+    "prompt": "搜索 BGS 架构文档..."
   },
   "seo": {
     "metatags": {
-      "og:image": "https://ccb.agent-aura.top/docs/images/og-cover.png",
-      "twitter:image": "https://ccb.agent-aura.top/docs/images/og-cover.png",
+      "og:image": "/docs/logo/light.svg",
+      "twitter:image": "/docs/logo/light.svg",
       "twitter:card": "summary_large_image"
     },
     "indexing": "navigable"
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/anthropics/claude-code"
+      "github": "https://github.com/Phantomxm2021/BeeGameStudio"
     }
   },
   "redirects": [

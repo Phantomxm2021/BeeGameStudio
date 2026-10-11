@@ -5,7 +5,7 @@ import {
   hasDangerousSettings,
   hasDangerousSettingsChanged,
 } from '../../components/ManagedSettingsSecurityDialog/utils.js';
-import { wrappedRender as render } from '@anthropic/ink';
+import { wrappedRender as render } from '@bee-game-studio/ink';
 import { KeybindingSetup } from '../../keybindings/KeybindingProviderSetup.js';
 import { AppStateProvider } from '../../state/AppState.js';
 import { gracefulShutdownSync } from '../../utils/gracefulShutdown.js';

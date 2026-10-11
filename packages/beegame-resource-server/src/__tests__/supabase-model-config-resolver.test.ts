@@ -27,7 +27,7 @@ describe('resource model config resolver', () => {
         runtime: {
           modelType: 'openai',
           env: {
-            CLAUDE_CODE_USE_OPENAI: '1',
+            BGS_USE_OPENAI: '1',
             OPENAI_BASE_URL: 'https://model.test',
             OPENAI_API_KEY: 'backend-secret',
             OPENAI_DEFAULT_SONNET_MODEL: 'balanced-model',

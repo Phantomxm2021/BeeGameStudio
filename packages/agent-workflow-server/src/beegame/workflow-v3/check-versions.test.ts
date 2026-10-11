@@ -1,0 +1,27 @@
+import { test, expect } from 'bun:test'
+import { CHECK_IDS, type CheckResult } from './state'
+import { CHECK_VERSIONS, EDITABLE_BUILD_CHECK_VERSION, currentCheckVersion, isCurrentCheckVersion } from './check-versions'
+import { checkIsCurrent } from './checks'
+
+test('every declared checker and host-only evidence has one current driver identity; unknown/obsolete versions cannot be reused', async () => {
+  for (const id of [...CHECK_IDS, 'skill-use', 'content-binding'] as const) {
+    const check: CheckResult = { id, version: CHECK_VERSIONS[id], status: 'passed', inputs: [], observation: 'Synthetic version fixture, not acceptance', createdAt: '2026-10-11T00:00:00Z' }
+    expect(isCurrentCheckVersion(check)).toBe(true)
+    expect(await checkIsCurrent('/path-not-accessed-for-empty-input', check)).toBe(true)
+    expect(await checkIsCurrent('/path-not-accessed-for-empty-input', { ...check, version: 'obsolete.0' })).toBe(false)
+    expect(check.version).toBe(CHECK_VERSIONS[id])
+  }
+  for (const id of ['author-PASS', '__proto__', 'toString'])
+    expect(isCurrentCheckVersion({ id, version: 'v3-slice.1' })).toBe(false)
+})
+
+test('build evidence must match the owning task mode, not any recognized build version', () => {
+  const ordinary = { id: 'build', version: currentCheckVersion('build') }
+  const editable = { id: 'build', version: currentCheckVersion('build', { editableProject: true }) }
+  expect(editable.version).toBe(EDITABLE_BUILD_CHECK_VERSION)
+  expect(isCurrentCheckVersion(ordinary, {})).toBe(true)
+  expect(isCurrentCheckVersion(editable, { editableProject: true })).toBe(true)
+  expect(isCurrentCheckVersion(ordinary, { editableProject: true })).toBe(false)
+  expect(isCurrentCheckVersion(editable, {})).toBe(false)
+  expect(isCurrentCheckVersion(editable)).toBe(true)
+})

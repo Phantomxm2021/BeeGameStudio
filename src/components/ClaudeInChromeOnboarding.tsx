@@ -1,7 +1,7 @@
 import React from 'react';
 import { logEvent } from 'src/services/analytics/index.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- enter to continue
-import { Box, Dialog, Link, Newline, Text, useInput } from '@anthropic/ink';
+import { Box, Dialog, Link, Newline, Text, useInput } from '@bee-game-studio/ink';
 import { isChromeExtensionInstalled } from '../utils/claudeInChrome/setup.js';
 import { saveGlobalConfig } from '../utils/config.js';
 

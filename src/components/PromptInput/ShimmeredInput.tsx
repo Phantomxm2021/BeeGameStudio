@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Ansi, Box, Text, useAnimationFrame } from '@anthropic/ink';
+import { Ansi, Box, Text, useAnimationFrame } from '@bee-game-studio/ink';
 import { segmentTextByHighlights, type TextHighlight } from '../../utils/textHighlighting.js';
 import { ShimmerChar } from '../Spinner/ShimmerChar.js';
 

@@ -18,6 +18,7 @@ const EXPIRES_REGEX = /\bexpires:\s*([0-9T:.Z+-]+)/
 
 export function extractArtifacts(messages: Message[]): ArtifactInfo[] {
   const results: ArtifactInfo[] = []
+  let indexedResults: ReturnType<typeof indexToolResults> | undefined
 
   for (const message of messages) {
     if (message.type !== 'assistant') continue
@@ -35,7 +36,10 @@ export function extractArtifacts(messages: Message[]): ArtifactInfo[] {
       const input = b.input as { file_path?: string } | undefined
       const filePath = input?.file_path ?? '<unknown>'
 
-      const resultBlock = findToolResult(messages, toolUseId)
+      // Build once, only when an artifact exists. Preserve first-result-wins
+      // behavior, including results appearing before their invocation.
+      indexedResults ??= indexToolResults(messages)
+      const resultBlock = indexedResults.get(toolUseId)
       if (!resultBlock) continue
 
       const rawContent =
@@ -75,10 +79,10 @@ export function extractArtifacts(messages: Message[]): ArtifactInfo[] {
   return results.reverse()
 }
 
-function findToolResult(
+function indexToolResults(
   messages: Message[],
-  toolUseId: string,
-): { content: unknown; is_error?: boolean } | null {
+): Map<string, { content: unknown; is_error?: boolean }> {
+  const results = new Map<string, { content: unknown; is_error?: boolean }>()
   for (const message of messages) {
     if (message.type !== 'user') continue
     const content = message.message?.content
@@ -89,9 +93,13 @@ function findToolResult(
       if (!('type' in block)) continue
       const b = block as unknown as Record<string, unknown>
       if (b.type !== 'tool_result') continue
-      if (b.tool_use_id !== toolUseId) continue
-      return { content: b.content, is_error: b.is_error as boolean | undefined }
+      const id = b.tool_use_id as string
+      if (!results.has(id))
+        results.set(id, {
+          content: b.content,
+          is_error: b.is_error as boolean | undefined,
+        })
     }
   }
-  return null
+  return results
 }

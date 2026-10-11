@@ -4,7 +4,7 @@ import { useState } from 'react';
 import TextInput from '../../../components/TextInput.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
-import { Box, Newline, Text } from '@anthropic/ink';
+import { Box, Newline, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../../keybindings/useKeybinding.js';
 import { BashTool } from '@bee-game-studio/builtin-tools/tools/BashTool/BashTool.js';
 import { WebFetchTool } from '@bee-game-studio/builtin-tools/tools/WebFetchTool/WebFetchTool.js';

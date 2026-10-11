@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "date": "2026-10-10",
+  "scope": "V3-06 target UI DOM data-use observation and V3-07 source-backed directed Review / owner Repair / follow-up / Question backend",
+  "sourceRoot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+  "filesSha256": {
+    "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts": "58b9d6c44580e1767f08de99246dc42612b4a3e0451e21856beb5e9e302bae17",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/context.ts": "125e35331a1ce77847e7dd85adc9ac51c29e128015ededeb97cdd20407a92327",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/checks.ts": "8817247412fd3ee0d197a28059f4d72f0cae8a03762e1874eda2af18fa9b6456",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/execution.ts": "fd89eb1ac40967c3b20a86cf29a18881b8760346dfb9fc13f241c5e3301ed91b",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts": "990b738bb50992e5b88db16b3ecd4ca9e5786227e8a46d913dec9740d9a15760",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-checks.ts": "ac7b386d0393c05d657930b48801bd6c3207131648a24f0dfe6c414baecbcf3a",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-browser.mjs": "050172e99ebdda4d14400a1331707084f4bf943ee699dbcb73286aa33c77a8b0",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/ui-consumption.ts": "d3566fef1fba6c65708e1074eb627bc7eb36baf31cc2cf66669420008635960d",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/review.ts": "36a7519e6631a43342ad5243dd07d1d56598ffb063db67c2c0932327a72f96af",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/ui-consumption.test.ts": "5f01be6eeb671b1804f8ddf28f251d4da116cbc0ac229ee618d80dd88499a6e4",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/review.test.ts": "5be10bf96800339c0abf0789ec37bf7bb00742305f1ed28694021333d72bbf2c",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/review-native.test.ts": "bbe8ad4919eff3570cc52bf7067cc1a95ead06c7e0fe545a9509656eb5825ac1",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/workflow-v3.test.ts": "8ea1fde00228b37d0f908f15527f7db68fe9ce8af23fc9a762e4c3cdad32ce4d",
+    "packages/agent-workflow-server/src/beegame/session-manager.ts": "986b099f440706f72b665fdcd5140ddd682eb5d03c0a3a0d1c41de01761974cf"
+  },
+  "implemented": [
+    "Host derives original, independent position and size mutations from saved registered UI plus existing layout algorithm; actual target DOM observed and original response restored",
+    "Mutations are isolated browser responses, never source/build file edits; source and packed-byte freshness recorded",
+    "Registry UI documents and authored target viewports must have probes; missing/unsupported/hidden/too-small observations are unverified, ignored/wrong/partial geometry consumption fails",
+    "Saved source-backed findings retain requirement, owner, quoted bytes, versions, downstream impact and closure conditions",
+    "Repair scope checked against the original review plan owners, not a later broadened plan; explicit actual consumer checks required",
+    "Directed follow-up must retain blockers or cite current accepted authorized repairs and current actual consumer evidence; no silently omitted/downgraded/fabricated closures",
+    "Real AskUserQuestion uses standard input and finding-ID headers; BGS pins requirement/plan/fence/writer/source versions and preserves actual questions/answers",
+    "Invalid and stale questions/answers retain rejection diagnostics; unanswered/refused/cancelled questions do not authorize repairs",
+    "Related repair IDs, source/check pointers and actual answers are available to fresh follow-up contexts without whole unrelated histories",
+    "Actual required Skill lifecycle evidence retained; three review/repair/follow-up native sessions, normal native final replies and no legacy business flags",
+    "No automatic review/repair loop, paid retries, native turn limit or original-requirement rewriting; unrelated accepted UI branch/history/report unchanged"
+  ],
+  "tests": {
+    "regression": {
+      "passed": 180,
+      "failed": 0,
+      "assertions": 1163,
+      "files": 16,
+      "log": "/private/tmp/bgs-v3-consumption-review-regression-final-20261010.log",
+      "sha256": "a9e1df07e4e89718e2cbfa7a9083611fcb019ebd478e437b86af936a14f5b774"
+    },
+    "nativeAndBrowser": {
+      "passed": 27,
+      "failed": 0,
+      "assertions": 216,
+      "files": 4,
+      "log": "/private/tmp/bgs-v3-consumption-review-native-browser-final-20261010.log",
+      "sha256": "1a3140a3f6706fe53c656d2fc4044c5fbca9fc815fec888d94d3ddc8947e232f",
+      "provider": "Loopback deterministic fake Anthropic SSE, actual native CLI; no paid model",
+      "browser": "Host-owned isolated Chromium on synthetic target static builds; not a BGS preview or author's PASS report"
+    },
+    "sharedSession": {
+      "passed": 9,
+      "failed": 0,
+      "assertions": 42,
+      "files": 3,
+      "log": "/private/tmp/bgs-v3-review-shared-session-regression-20261010.log",
+      "sha256": "cf095a1ed96a65dfb31e02105a220b39b4c3824a74f642d50621e178bdb96af7"
+    },
+    "focusedTypes": {
+      "exitCode": 0,
+      "files": [
+        "state.ts",
+        "context.ts",
+        "checks.ts",
+        "ui-consumption.ts",
+        "review.ts"
+      ],
+      "log": "/private/tmp/bgs-v3-consumption-review-focused-types-20261010.log"
+    },
+    "fullServerTypes": {
+      "exitCode": 2,
+      "diagnostics": 3556,
+      "workflowV3PathDiagnostics": 0,
+      "sessionManagerPathDiagnostics": 0,
+      "log": "/private/tmp/bgs-v3-consumption-review-server-types-final-20261010.log",
+      "sha256": "43a892b87f4a09ac7842ad6479da216bc45ac1db517bc8ae1f2948a2291e9b6c",
+      "conclusion": "Full server typecheck remains failed, not a green repository build"
+    },
+    "whitespace": "No diagnostics on 14 scoped current source/test files or tracked SessionManager diff; no-index exit 1 itself means a diff, not failure",
+    "processCleanup": "Readonly process snapshot found no owned beegame-test-browser or scoped bgs-v3 native/browser fixture processes after combined tests",
+    "correctedTestAssumptions": [
+      "Initial UI index fixture corrected to the actual existing v2 content schema, rather than weakening production parsing",
+      "Small viewport alone does not scale the authored UI in this layout; replaced the incorrect tiny-viewport fixture with an actually scaled node and verified sub-tolerance size mutation is unverified",
+      "Question pause fixture corrected to the real persisted paused:{at} shape and read-only guard interface; new fixture type diagnostics resolved"
+    ]
+  },
+  "limitations": [
+    "Only registered representative DOM UI geometry and declared click paths/viewports are observed, not all nodes, interaction cycles, occlusion, pixels, fonts or aesthetics",
+    "Registry completeness against original natural-language requirements is not automatically proven",
+    "Scene/Canvas/Tilemap/resource/audio consumption, compiled-source transforms, full target gameplay and tested export/deployment are not implemented by this UI driver",
+    "Source/authority/closure protocol validation is not semantic correctness; model or human review may still miss defects",
+    "Actual rule command execution/zero exit does not independently prove the authored tests represent original requirements",
+    "Semantic/aesthetic findings without actual close-verification evidence cannot be automatically closed; a user answer alone is not factual proof",
+    "Bash indirect reads/writes and unknown external writer/operation effects remain incompletely tracked",
+    "Check implementation drift, original confirmed-requirement change protocol, production DB permissions/migration/cross-worker and V3 frontend state remain unfinished",
+    "No paid-token/cost improvement or real-model quality has been measured in this turn",
+    "Complete V3-06 / V3-07 and release acceptance remain unchecked, despite supported backend slice regression"
+  ],
+  "operations": {
+    "paidModelCalls": false,
+    "nativeClaudeSourceEdited": false,
+    "generatedRealProjectArtifactsEdited": false,
+    "historicalEvidenceOverwritten": false,
+    "databaseMigrationApplied": false,
+    "newMigrationRequired": false,
+    "deployed": false,
+    "servicesRestarted": false,
+    "deliveryEligible": false
+  },
+  "document": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/BGS_V3_Agent_Driven_Workflow_Implementation.md",
+  "documentVersion": "1.7"
+}

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Box, Text, stringWidth } from '@anthropic/ink';
+import { Box, Text, stringWidth } from '@bee-game-studio/ink';
 import TextInput from '../TextInput.js';
 
 type Props = {

@@ -1,5 +1,5 @@
 /**
- * Minimal modal context for the standalone @anthropic/ink package.
+ * Minimal modal context for the standalone @bee-game-studio/ink package.
  *
  * Provides useIsInsideModal() and useModalScrollRef() used by Pane and Tabs
  * to adjust rendering when inside a FullscreenLayout modal slot.

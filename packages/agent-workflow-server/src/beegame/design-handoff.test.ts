@@ -3,12 +3,265 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, writeFile, rm, rename, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { checkDesignHandoff, designCalculationFiles, designSupportingFiles, designDocumentVersion, designHandoffPath, isHigherDocumentVersion,
-  readDesignAcceptanceRequirements, snapshotDesignDocuments, finalizeDesignDocuments, DESIGN_HANDOFF_INSTRUCTION, type DesignDocument } from './design-handoff'
-import { designDocumentFixture, designHandoffFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
+import { checkDesignHandoff, checkDesignHandoffDraft, designCalculationFiles, designSupportingFiles, designDocumentVersion, designHandoffPath, isHigherDocumentVersion,
+  readDesignAcceptanceRequirements, snapshotDesignDocuments, finalizeDesignDocuments, changedDesignSections, designReviewReadScope, designReviewIndexes,
+  DESIGN_HANDOFF_INSTRUCTION, type DesignDocument } from './design-handoff'
+import { designDocumentFixture, designHandoffFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture, sceneLayoutFixture } from './fixtures/layout-fixture'
 import { checkDesignDocumentReferences } from './design-document-references'
 
 const digest = (body: string) => createHash('sha256').update(body).digest('hex')
+
+test.each(['GDD.md', 'AUDIO_DESIGN.md', 'TECHNICAL_DESIGN.md'] as const)(
+  '%s: numbering-only pointers are read-checkable and persisted only by authorized finalization', name => fixture(async workspace => {
+    const snapshot = snapshotDesignDocuments(workspace, [name])
+    const prose = '# Design\n## 2.1 Core rule\nDecision.\n## 3) Acceptance\nExpected outcome.\n'
+    await writeFile(join(workspace, 'docs', name), prose)
+    const index = { outputs: [{ id: 'core', section: 'Core rule',
+      acceptance: { section: '9. Acceptance', method: 'test' } }], evidence: [] }
+    const path = join(workspace, designHandoffPath(name)), saved = JSON.stringify(index)
+    await writeFile(path, saved)
+    const untouched = await readFile(join(workspace, 'docs/ART_DIRECTION.md'), 'utf8')
+    expect(checkDesignHandoffDraft(workspace, name).issues).toEqual([])
+    expect(await readFile(path, 'utf8')).toBe(saved)
+    expect(await readFile(join(workspace, 'docs', name), 'utf8')).toBe(prose)
+    expect(finalizeDesignDocuments(workspace, [name], snapshot).issues).toEqual([])
+    const finalized = JSON.parse(await readFile(path, 'utf8'))
+    expect(finalized.outputs[0]).toEqual({ id: 'core', section: '2.1 Core rule',
+      acceptance: { section: '3) Acceptance', method: 'test' } })
+    expect(checkDesignHandoff(workspace, [name], { technicalBaseline: true }).valid).toBe(true)
+    expect(await readFile(join(workspace, 'docs/ART_DIRECTION.md'), 'utf8')).toBe(untouched)
+    const finalBytes = await readFile(path, 'utf8')
+    expect(finalizeDesignDocuments(workspace, [name], snapshotDesignDocuments(workspace, [name])).issues).toEqual([])
+    expect(await readFile(path, 'utf8')).toBe(finalBytes)
+  }),
+)
+
+test.each([
+  ['## 1. Rules\nA\n## 2. Rules\nB\n', 'Rules'],
+  ['## 1. Rules\nA\n## 1. Rules\nB\n', 'Rules'],
+  ['## 1. Rules\nA\n', 'Different rules'],
+  ['## 20 enemies\nA\n', '10 enemies'],
+  ['## 3D models\nA\n', 'models'],
+])('no heading guesses or writes: %s / %s', (headings, pointer) => fixture(async workspace => {
+  const snapshot = snapshotDesignDocuments(workspace, ['GDD.md'])
+  await writeFile(join(workspace, 'docs/GDD.md'), '# Design\n' + headings)
+  const index = { outputs: [{ id: 'core', section: pointer,
+    acceptance: { section: pointer, method: 'test' } }], evidence: [] }
+  const path = join(workspace, designHandoffPath('GDD.md')), saved = JSON.stringify(index)
+  await writeFile(path, saved)
+  expect(checkDesignHandoffDraft(workspace, 'GDD.md').valid).toBe(false)
+  expect(finalizeDesignDocuments(workspace, ['GDD.md'], snapshot).issues.length).toBeGreaterThan(0)
+  expect(await readFile(path, 'utf8')).toBe(saved)
+}))
+
+test('numbering normalization includes task and retained-evidence pointers without changing their facts', () => fixture(async workspace => {
+  const name = 'TECHNICAL_DESIGN.md', snapshot = snapshotDesignDocuments(workspace, [name])
+  await writeFile(join(workspace, 'docs', name),
+    '# Design\n## 1. Rules\nOwned rule.\n## 2. Task\nTask description.\n## 3. Proof\nRetained contract.\n')
+  await writeFile(join(workspace, 'proof.json'), '{"value":3}')
+  const path = join(workspace, designHandoffPath(name))
+  await writeFile(path, JSON.stringify({
+    outputs: [{ id: 'rule', section: 'Rules', acceptance: { section: 'Rules', method: 'test' } }],
+    implementationItems: [{ id: 'task', section: 'Task', dependsOn: [],
+      requirementRefs: [{ document: name, id: 'rule' }] }],
+    evidence: [{ id: 'proof', section: 'Proof', kind: 'contract', path: 'proof.json',
+      source: 'Synthetic retained fact', pointer: '/value', expected: 3 }],
+  }))
+  expect(checkDesignHandoffDraft(workspace, name).valid).toBe(true)
+  expect(finalizeDesignDocuments(workspace, [name], snapshot).issues).toEqual([])
+  const result = JSON.parse(await readFile(path, 'utf8'))
+  expect(result.implementationItems[0]).toEqual({ id: 'task', section: '2. Task', dependsOn: [],
+    requirementRefs: [{ document: name, id: 'rule' }] })
+  expect(result.evidence[0]).toMatchObject({ section: '3. Proof', path: 'proof.json',
+    source: 'Synthetic retained fact', expected: 3 })
+  await writeFile(join(workspace, 'proof.json'), '{"value":4}')
+  expect(checkDesignHandoffDraft(workspace, name).valid).toBe(false)
+}))
+
+test('targeted verification uses actual edits, includes registered consumer clauses and falls back on moved headings', () => fixture(async workspace => {
+  const path = join(workspace, 'docs/GDD.md')
+  const original = (await readFile(path, 'utf8')).replace('# Design', '# GDD\n## Design') + '\n## Other clause\nOriginal\n'
+  await writeFile(path, original)
+  const before = snapshotDesignDocuments(workspace, ['GDD.md'])
+  await writeFile(path, original.replace('Original', 'Changed'))
+  expect(changedDesignSections(workspace, before)).toEqual({ 'GDD.md': ['Other clause'] })
+  const scope = designReviewReadScope(workspace, ['GDD.md'], [], changedDesignSections(workspace, before))
+  expect(scope['GDD.md']).toContain('Other clause')
+  expect(scope['GDD.md']).not.toContain('Design')
+  await writeFile(path, original.replace('## Other clause', '## Moved heading'))
+  expect(changedDesignSections(workspace, before)).toEqual({ 'GDD.md': null })
+}))
+
+test('a located note correction does not select all owner outcomes or technical tasks', () => fixture(async workspace => {
+  const body = (await readFile(join(workspace, 'docs/GDD.md'), 'utf8')).replace('# Design', '# GDD\n## Design')
+  await writeFile(join(workspace, 'docs/GDD.md'), body + '\n## Publication note\nA non-rule note.\n')
+  const finding: any = { id: 'note', documents: ['GDD.md'], sources: [{ document: 'GDD.md', section: 'Publication note' }] }
+  const scope = designReviewReadScope(workspace, ['GDD.md', 'TECHNICAL_DESIGN.md'], [finding])
+  expect(scope['GDD.md']).toEqual(['Publication note'])
+  expect(scope['TECHNICAL_DESIGN.md']).toEqual([])
+  const indexes = designReviewIndexes(workspace, ['GDD.md', 'TECHNICAL_DESIGN.md'], scope)
+  expect(indexes[0]).toMatchObject({ outputs: [] })
+  expect(indexes[1]).toMatchObject({ implementationItems: [] })
+  expect(designReviewIndexes(workspace, ['TECHNICAL_DESIGN.md'])[0]).toMatchObject({
+    implementationItems: designHandoffFixture('TECHNICAL_DESIGN.md').implementationItems,
+  })
+}))
+
+test('affected input retains exact task/source pointers but excludes unrelated tasks; moved headings fall back', () => fixture(async workspace => {
+  const tech = designHandoffFixture('TECHNICAL_DESIGN.md')
+  tech.outputs[0]!.section = 'Interface'
+  tech.outputs[0]!.acceptance!.section = 'Interface'
+  tech.implementationItems!.forEach(item => { item.section = 'Other tasks' })
+  tech.implementationItems![0]!.section = 'Changed task'
+  await writeDesignDocumentFixture(workspace, 'TECHNICAL_DESIGN.md', tech,
+    '# Technical\n- Version: v1.0\n## Interface\nContract\n## Changed task\nConsume rule\n## Other tasks\nUnchanged\n')
+  const selected = designReviewIndexes(workspace, ['TECHNICAL_DESIGN.md'], { 'TECHNICAL_DESIGN.md': ['Changed task'] })[0]!
+  expect(selected).toMatchObject({ implementationItems: [tech.implementationItems![0]!], outputs: [] })
+  expect(selected).toMatchObject({ sourceReads: [{ file_path: 'docs/TECHNICAL_DESIGN.md', offset: 5, limit: 2 }] })
+  expect(designReviewIndexes(workspace, ['TECHNICAL_DESIGN.md'], { 'TECHNICAL_DESIGN.md': [] })[0]).toMatchObject({ sourceReads: [] })
+  for (const scope of [null, ['Missing heading']]) {
+    const fallback = designReviewIndexes(workspace, ['TECHNICAL_DESIGN.md'], { 'TECHNICAL_DESIGN.md': scope })[0]!
+    expect(fallback).toMatchObject({ implementationItems: tech.implementationItems, outputs: tech.outputs })
+    expect(fallback).toMatchObject({ sourceReads: [{ file_path: 'docs/TECHNICAL_DESIGN.md', offset: 1, limit: 9 }] })
+  }
+}))
+
+test('source Read locations merge nested/adjacent ranges and refresh from the resulting original file', () => fixture(async workspace => {
+  const path = join(workspace, 'docs/GDD.md')
+  const body = '# Design\r\n- Version: v1.0\r\nIntro\r\n## Rules\r\nMove.\r\n### Input\r\nPress.\r\n## Feedback\r\nFlash.\r\n## Unrelated\r\nNotes.'
+  await writeFile(path, body)
+  const scope = { 'GDD.md': ['Rules', 'Input', 'Feedback'] }
+  expect(designReviewIndexes(workspace, ['GDD.md'], scope)[0])
+    .toMatchObject({ sourceReads: [{ file_path: 'docs/GDD.md', offset: 4, limit: 6 }] })
+  await writeFile(path, body.replace('Intro', 'Intro\r\nNew intro.'))
+  expect(designReviewIndexes(workspace, ['GDD.md'], scope)[0])
+    .toMatchObject({ sourceReads: [{ file_path: 'docs/GDD.md', offset: 5, limit: 6 }] })
+}))
+
+test('a changed outcome selects its acceptance and exact task consumers, not other task requirements', () => fixture(async workspace => {
+  const gdd = designHandoffFixture('GDD.md')
+  gdd.outputs[0]!.section = 'Rule'
+  gdd.outputs[0]!.acceptance!.section = 'Check rule'
+  await writeDesignDocumentFixture(workspace, 'GDD.md', gdd,
+    '# GDD\n- Version: v1.0\n## Rule\nActual rule.\n## Check rule\nExpected result.\n## Other\nUnrelated.\n')
+  const tech = designHandoffFixture('TECHNICAL_DESIGN.md')
+  tech.implementationItems![0]!.section = 'Rule task'
+  tech.implementationItems![1]!.section = 'Other task'
+  await writeDesignDocumentFixture(workspace, 'TECHNICAL_DESIGN.md', tech,
+    designDocumentFixture('TECHNICAL_DESIGN.md') + '\n## Rule task\nConsume Rule.\n## Other task\nOther work.\n')
+  const scope = designReviewReadScope(workspace, ['GDD.md', 'TECHNICAL_DESIGN.md'], [], { 'GDD.md': ['Rule'] })
+  expect(scope['GDD.md']).toEqual(['Rule', 'Check rule'])
+  expect(scope['TECHNICAL_DESIGN.md']).toEqual(['Rule task'])
+  expect(designReviewReadScope(workspace, ['GDD.md'], [], { 'GDD.md': null })['GDD.md']).toBeNull()
+}))
+
+test('owned draft checking rejects empty outcomes and missing acceptance without requiring siblings', () => fixture(async (workspace, put) => {
+  for (const name of ['ART_DIRECTION.md', 'TECHNICAL_DESIGN.md'] as const) {
+    await put(name, h => h.outputs = [])
+    expect(checkDesignHandoffDraft(workspace, name).issues.join(' ')).toContain('owned delivery outcomes are missing')
+  }
+  await put('ART_DIRECTION.md', h => delete h.outputs[0].acceptance)
+  expect(checkDesignHandoffDraft(workspace, 'ART_DIRECTION.md').issues.join(' ')).toContain('needs an acceptance section')
+  await rm(join(workspace, 'docs/GDD.md'))
+  await put('ART_DIRECTION.md', () => {})
+  await writeFile(join(workspace, 'docs/ART_DIRECTION.md'), '# Design\n[Pending audio](AUDIO_DESIGN.md)\n')
+  await rm(join(workspace, 'docs/AUDIO_DESIGN.md'))
+  expect(checkDesignHandoffDraft(workspace, 'ART_DIRECTION.md')).toEqual({ valid: true, issues: [] })
+}))
+
+test.each(['missing', 'contract', 'capability', 'documentation', 'section', 'duplicate'] as const)(
+  'owned draft checks declared evidence %s before joint revision, without demanding host hashes', kind => fixture(async (workspace, put) => {
+    const proof = { id: 'proof', kind: 'contract', path: 'proof.json', source: 'Synthetic fixture',
+      pointer: '/supported', expected: true } as any
+    if (kind !== 'missing') await writeFile(join(workspace, 'proof.json'), JSON.stringify({ supported: kind !== 'contract' }))
+    if (kind === 'capability') proof.kind = 'capability'
+    if (kind === 'documentation') { proof.kind = 'documentation'; proof.source = 'http://example.org' }
+    if (kind === 'section') proof.section = 'Absent'
+    await put('GDD.md', h => { h.evidence = kind === 'duplicate' ? [proof, proof] : [proof] })
+    expect(checkDesignHandoffDraft(workspace, 'GDD.md').valid).toBe(false)
+    const index = join(workspace, designHandoffPath('GDD.md')), before = await readFile(index, 'utf8')
+    checkDesignHandoffDraft(workspace, 'GDD.md')
+    expect(await readFile(index, 'utf8')).toBe(before)
+    await writeFile(join(workspace, 'proof.json'), JSON.stringify({ supported: true }))
+    await put('GDD.md', h => h.evidence = [{ ...proof, kind: 'contract', source: 'Synthetic fixture', section: 'Design' }])
+    expect(checkDesignHandoffDraft(workspace, 'GDD.md').valid).toBe(true)
+    expect(JSON.parse(await readFile(index, 'utf8')).evidence[0].sha256).toBeUndefined()
+  }),
+)
+
+test('the supplied new-index envelope validates and does not infer legacy from a missing version', () => fixture(async workspace => {
+  const sample = DESIGN_HANDOFF_INSTRUCTION.split('Minimal new index envelope: ')[1]!.split('. Replace example')[0]!
+  const envelope = JSON.parse(sample)
+  envelope.outputs[0].section = 'Design'
+  envelope.outputs[0].acceptance.section = 'Design'
+  await writeFile(join(workspace, designHandoffPath('GDD.md')), JSON.stringify(envelope))
+  expect(checkDesignHandoffDraft(workspace, 'GDD.md').valid).toBe(true)
+  envelope.document = 'docs/GDD.md'
+  await writeFile(join(workspace, designHandoffPath('GDD.md')), JSON.stringify(envelope))
+  expect(checkDesignHandoffDraft(workspace, 'GDD.md').issues.join(' ')).toContain('document')
+  envelope.version = 1
+  await writeFile(join(workspace, designHandoffPath('GDD.md')), JSON.stringify(envelope))
+  expect(checkDesignHandoffDraft(workspace, 'GDD.md').valid).toBe(true)
+}))
+
+test('save-time index checking catches field errors without demanding host versions or sibling delivery', () => fixture(async (workspace, put) => {
+  const path = join(workspace, 'docs/BALANCE_DESIGN.md')
+  await writeFile(path, (await readFile(path, 'utf8')).replace(/^.*Version:.*\n/m, ''))
+  expect(checkDesignHandoffDraft(workspace, 'BALANCE_DESIGN.md').valid).toBe(true)
+  await put('BALANCE_DESIGN.md', h => h.document = 'docs/BALANCE_DESIGN.md')
+  expect(checkDesignHandoffDraft(workspace, 'BALANCE_DESIGN.md').issues.join(' ')).toContain('document')
+  expect(checkDesignHandoffDraft(workspace, '../outside.md').valid).toBe(false)
+}))
+
+test('a malformed sibling index does not prevent host versioning of an independent valid owner', () => fixture(async (workspace, put) => {
+  const names = ['LEVEL_SCENE_DESIGN.md', 'BALANCE_DESIGN.md'] as const
+  for (const name of names) {
+    const path = join(workspace, 'docs', name)
+    await writeFile(path, (await readFile(path, 'utf8')).replace(/^.*Version:.*\n/m, ''))
+  }
+  const snapshot = snapshotDesignDocuments(workspace, names)
+  await put('BALANCE_DESIGN.md', h => h.document = 'docs/BALANCE_DESIGN.md')
+  const invalidBefore = await readFile(join(workspace, designHandoffPath('BALANCE_DESIGN.md')), 'utf8')
+  const result = finalizeDesignDocuments(workspace, names, snapshot)
+  expect(result.issues.join(' ')).toContain('BALANCE_DESIGN.md')
+  expect(result.issues.join(' ')).not.toContain('LEVEL_SCENE_DESIGN.md')
+  expect(designDocumentVersion(await readFile(join(workspace, 'docs/LEVEL_SCENE_DESIGN.md'), 'utf8'))).toBe('1.0')
+  expect(await readFile(join(workspace, designHandoffPath('BALANCE_DESIGN.md')), 'utf8')).toBe(invalidBefore)
+  expect(checkDesignHandoff(workspace, names).valid).toBe(false)
+}))
+
+test('Scene is owned by its linked scene document; binding completion preserves version, placement changes advance it', () => fixture(async workspace => {
+  const path = 'content/scenes/level.json', scene = sceneLayoutFixture() as any
+  scene.data.nodes[1].components = [{ id: 'visual', type: 'sprite-renderer', data: { size: [400, 200] } }]
+  await writeFile(join(workspace, path), JSON.stringify(scene))
+  const snapshot = snapshotDesignDocuments(workspace, ['LEVEL_SCENE_DESIGN.md'])
+  const original = checkDesignHandoff(workspace, ['LEVEL_SCENE_DESIGN.md'])
+  expect(designSupportingFiles(workspace, ['LEVEL_SCENE_DESIGN.md'])).toEqual([path])
+  await writeFile(join(workspace, 'docs/TECHNICAL_DESIGN.md'), designDocumentFixture('TECHNICAL_DESIGN.md') + '\n[Scene](../content/scenes/level.json)\n')
+  expect(designSupportingFiles(workspace, ['TECHNICAL_DESIGN.md'])).toEqual([])
+  scene.assetRefs = ['atlas']
+  scene.data.nodes[1].components[0].assetRef = 'atlas'
+  Object.assign(scene.data.nodes[1].components[0].data, { member: 'sprites.png', frame: 'board' })
+  await writeFile(join(workspace, path), JSON.stringify(scene))
+  expect(checkDesignHandoff(workspace, ['LEVEL_SCENE_DESIGN.md']).revision).toBe(original.revision)
+  expect(finalizeDesignDocuments(workspace, ['LEVEL_SCENE_DESIGN.md'], snapshot).issues).toEqual([])
+  expect(designDocumentVersion(await readFile(join(workspace, 'docs/LEVEL_SCENE_DESIGN.md'), 'utf8'))).toBe('1.0')
+  scene.data.nodes[1].transform.position[0] = 10
+  await writeFile(join(workspace, path), JSON.stringify(scene))
+  expect(checkDesignHandoff(workspace, ['LEVEL_SCENE_DESIGN.md']).revision).not.toBe(original.revision)
+  expect(finalizeDesignDocuments(workspace, ['LEVEL_SCENE_DESIGN.md'], snapshot).issues).toEqual([])
+  expect(designDocumentVersion(await readFile(join(workspace, 'docs/LEVEL_SCENE_DESIGN.md'), 'utf8'))).toBe('1.1')
+}))
+
+test('missing linked Scene authorizes only that exact repair; a live source cannot become immutable evidence', () => fixture(async (workspace, put) => {
+  await rm(join(workspace, 'content/scenes/level.json'))
+  expect(designSupportingFiles(workspace, ['LEVEL_SCENE_DESIGN.md'])).toEqual(['content/scenes/level.json'])
+  expect(checkDesignHandoff(workspace, ['LEVEL_SCENE_DESIGN.md']).valid).toBe(false)
+  await writeFile(join(workspace, 'content/scenes/level.json'), JSON.stringify(sceneLayoutFixture()))
+  await put('LEVEL_SCENE_DESIGN.md', h => h.evidence.push({ id: 'scene', kind: 'contract',
+    path: 'content/scenes/level.json', source: 'Synthetic Scene', section: 'Design', pointer: '/kind', expected: 'scene-2d' }))
+  expect(checkDesignHandoff(workspace, ['LEVEL_SCENE_DESIGN.md']).issues.join(' ')).toContain('Live Scene source')
+}))
 async function fixture(run: (workspace: string, put: (name: DesignDocument, change: (h: any) => void) => Promise<void>) => Promise<void>) {
   const workspace = await mkdtemp(join(tmpdir(), 'synthetic-design-handoff-'))
   try {
@@ -26,7 +279,8 @@ test('minimal output index is consumed by runtime acceptance without business mi
   expect(check.valid).toBe(true)
   expect(check.note).toContain('semantic adequacy')
   expect(check.documentVersions).toEqual({ 'GDD.md': '1.0' })
-  expect(readDesignAcceptanceRequirements(workspace)).toMatchObject([{ document: 'GDD.md', id: 'play', section: 'Design', method: 'test' }])
+  expect(readDesignAcceptanceRequirements(workspace).filter(source => source.document === 'GDD.md'))
+    .toMatchObject([{ document: 'GDD.md', id: 'play', section: 'Design', method: 'test' }])
   expect(await readFile(join(workspace, designHandoffPath('GDD.md')), 'utf8')).toBe(before)
   expect(DESIGN_HANDOFF_INSTRUCTION).toContain('Authors do not calculate or synchronize versions/hashes')
 }))
@@ -41,7 +295,7 @@ test('legacy v1 reads only actual consumer fields, explicitly abandons mirror ce
   const check = checkDesignHandoff(workspace, ['GDD.md'], { nextConsumers: ['resources'] })
   expect(check.valid).toBe(true)
   expect(check.note).toContain('ignored and not certified')
-  expect(readDesignAcceptanceRequirements(workspace)).toHaveLength(1)
+  expect(readDesignAcceptanceRequirements(workspace).filter(source => source.document === 'GDD.md')).toHaveLength(1)
   expect(await readFile(join(workspace, 'docs/GDD.md'), 'utf8')).toBe(body)
   expect(await readFile(join(workspace, designHandoffPath('GDD.md')), 'utf8')).toBe(sidecar)
 }))
@@ -280,7 +534,7 @@ test('single UI source is owned by UI; later bindings do not bump design version
   ui.assetRefs = ['planned-texture']
   ui.data.nodes[1].actions = { click: 'start-game' }
   ui.data.nodes[1].bindings = { enabled: 'canStart' }
-  ui.data.nodes[1].style = { texture: { assetRef: 'planned-texture' }, fontFamily: 'delivered-font' }
+  ui.data.nodes[1].style = { texture: { assetRef: 'planned-texture' } }
   await writeFile(path, JSON.stringify(ui))
   expect(checkDesignHandoff(workspace, ['UI_UX_SPEC.md']).revision).toBe(original.revision)
   expect(finalizeDesignDocuments(workspace, ['UI_UX_SPEC.md'], snapshot).issues).toEqual([])

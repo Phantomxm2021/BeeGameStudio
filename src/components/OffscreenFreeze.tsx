@@ -1,5 +1,5 @@
 import React, { useContext, useRef } from 'react';
-import { useTerminalViewport, Box } from '@anthropic/ink';
+import { useTerminalViewport, Box } from '@bee-game-studio/ink';
 import { InVirtualListContext } from './messageActions.js';
 
 type Props = {

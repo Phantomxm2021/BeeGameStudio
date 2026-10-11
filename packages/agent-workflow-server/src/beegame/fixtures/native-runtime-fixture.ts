@@ -82,7 +82,7 @@ for await (const chunk of Bun.stdin.stream()) {
         continue
       }
       if (pendingReview) {
-        if (pendingReview.path) await Bun.write(pendingReview.path, 'complete\n' + JSON.stringify({ step: 'inspect', findings: [], resolved: [] }))
+        if (pendingReview.path) await Bun.write(pendingReview.path, 'complete\n' + JSON.stringify({ step: 'revise', findings: [], resolved: [] }))
         process.stdout.write(`${JSON.stringify({ type: 'result', subtype: 'success', result: 'Review finished',
           request_id: pendingReview.requestId, permissionResponse: message })}\n`)
         pendingReview = undefined
@@ -105,6 +105,14 @@ for await (const chunk of Bun.stdin.stream()) {
             (block as { type?: string }).type === 'text',
         ) as { text?: unknown } | undefined)?.text
       : rawContent
+    if (content === 'native-standard-debug') {
+      process.stdout.write(JSON.stringify({type:'user',uuid:message.uuid,isReplay:true,parent_tool_use_id:null,message:message.message})+'\n')
+      process.stdout.write(JSON.stringify({type:'system',subtype:'status',status:'compacting'})+'\n')
+      process.stderr.write('2026-10-11T05:32:51.009Z [DEBUG] [API REQUEST] /v1/messages source=compact\n')
+      process.stderr.write('2026-10-11T05:32:51.009Z [DEBUG] API error (attempt 2/11): 429 PRIVATE_TOKEN\n')
+      process.stderr.write('PRIVATE_HEADER_BODY\n')
+      continue
+    }
     if (content === 'native-diagnostics') {
       // Fragments, oversized noise, malformed frames and an unterminated final
       // frame exercise stderr framing without any provider request.
@@ -115,6 +123,27 @@ for await (const chunk of Bun.stdin.stream()) {
       process.stderr.write('BEEGAME_NATIVE_DIAGNOSTIC {"event":"api_error","category":"timeout","attempt":2}')
       process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', request_id: message.uuid }) + '\n')
       process.exit(0)
+    }
+    if (content === 'native-usage-diagnostics') {
+      for (const diagnostic of [
+        { event: 'stream_end', cumulativeInputTokens: 12, cumulativeOutputTokens: 4, cumulativeCacheReadTokens: 80, cumulativeCacheCreationTokens: 0 },
+        { event: 'stream_end', cumulativeInputTokens: -1, cumulativeOutputTokens: 4, cumulativeCacheReadTokens: 80, cumulativeCacheCreationTokens: 0 },
+        { event: 'stream_end', cumulativeInputTokens: 12 },
+      ]) process.stderr.write('BEEGAME_NATIVE_DIAGNOSTIC ' + JSON.stringify(diagnostic) + '\n')
+      process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', request_id: message.uuid }) + '\n')
+      continue
+    }
+    if (content === 'native-usage-on-stop') {
+      process.once('SIGTERM', () => {
+        process.stderr.write('BEEGAME_NATIVE_DIAGNOSTIC ' + JSON.stringify({ event: 'stream_end',
+          cumulativeInputTokens: 12, cumulativeOutputTokens: 4,
+          cumulativeCacheReadTokens: 80, cumulativeCacheCreationTokens: 0 }) + '\n')
+        process.exit(0)
+      })
+      process.stdout.write(JSON.stringify({ type: 'user', uuid: message.uuid, isReplay: true,
+        parent_tool_use_id: null, message: message.message }) + '\n')
+      process.stdout.write(JSON.stringify({ type: 'stream_event', event: { type: 'message_start' } }) + '\n')
+      continue
     }
     const emit = (event: Record<string, unknown>) => process.stdout.write(`${JSON.stringify(event)}\n`)
     const promptText = typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
@@ -130,12 +159,25 @@ for await (const chunk of Bun.stdin.stream()) {
       emit({ type: 'result', subtype: 'success', result: 'Waiting for review', request_id: 'previous-request' })
       emit({ type: 'stream_event', event: { type: 'message_start' } })
     }
+    if (content === 'startup-load-error-before-ack') {
+      emit({type:'result',subtype:'error_during_execution',is_error:true,
+        num_turns:0,duration_ms:0,duration_api_ms:0,session_id:'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+        errors:['No conversation found with session ID: original-native-id']})
+      process.exit(1)
+    }
     if (content === 'error-before-ack') {
       emit({ type: 'result', subtype: 'error_during_execution', is_error: true,
         request_id: message.uuid, errors: ['provider failed before replay'] })
       continue
     }
     emit({ type: 'user', uuid: message.uuid, isReplay: true, parent_tool_use_id: null, message: message.message })
+    if (content === 'exit-after-success' || content === 'exit-after-error') {
+      emit({ type: 'assistant', message: { content: [{ type: 'text', text: 'Final output' }] } })
+      emit(content === 'exit-after-success'
+        ? { type: 'result', subtype: 'success', result: 'Done' }
+        : { type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['specific terminal error'] })
+      process.exit(0)
+    }
     if (content === 'concurrent-permissions' || content === 'permission-after-result') {
       concurrentPermissionReplies = new Set()
       const ids = content === 'concurrent-permissions'
@@ -317,7 +359,7 @@ for await (const chunk of Bun.stdin.stream()) {
       )
       continue
     }
-    if (content === 'permission' || content === 'question') {
+    if (content === 'permission' || content === 'question' || content === 'child-permission') {
       process.stdout.write(
         `${JSON.stringify({
           type: 'control_request',
@@ -326,6 +368,7 @@ for await (const chunk of Bun.stdin.stream()) {
             subtype: 'can_use_tool',
             tool_name: content === 'question' ? 'AskUserQuestion' : 'Write',
             tool_use_id: 'tool-1',
+            ...(content === 'child-permission' ? { agent_id: 'native-child' } : {}),
             decision_reason: 'Target requires explicit authorization',
             blocked_path: 'docs/GDD.md',
             input: content === 'question'

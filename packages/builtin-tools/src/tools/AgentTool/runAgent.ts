@@ -1,12 +1,7 @@
 import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
-import { resolve } from 'node:path'
-import { realpath } from 'node:fs/promises'
 import { getCwd } from 'src/utils/cwd.js'
-import { DESIGN_REVIEW_AGENT, designReviewTools } from 'src/beegame/design-review.js'
-import { designAuthorTools } from 'src/beegame/direction-authors.js'
-import { isNativeWritingAuthor } from '@bee-game-studio/agent-workflow/native-direction-authors'
 import uniqBy from 'lodash-es/uniqBy.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { getProjectRoot, getSessionId } from 'src/bootstrap/state.js'
@@ -19,6 +14,7 @@ import type { QuerySource } from 'src/constants/querySource.js'
 import { getSystemContext, getUserContext } from 'src/context.js'
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
 import { query } from 'src/query.js'
+import { emitSubagentStreamEvent } from 'src/utils/task/sdkProgress.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { getDumpPromptsPath } from 'src/services/api/dumpPrompts.js'
 import { cleanupAgentTracking } from 'src/services/api/promptCacheBreakDetection.js'
@@ -516,14 +512,9 @@ export async function* runAgent({
     }
   }
 
-  const selectedTools = useExactTools
+  const resolvedTools = useExactTools
     ? availableTools
     : resolveAgentTools(agentDefinition, availableTools, isAsync).resolvedTools
-  // AgentTool rebuilds the worker pool. Apply each design role interface here, after
-  // that rebuild and selection, so the real child API receives its scoped tools.
-  const resolvedTools = agentDefinition.agentType === DESIGN_REVIEW_AGENT
-    ? designReviewTools(selectedTools)
-    : isNativeWritingAuthor(agentDefinition.agentType) ? designAuthorTools(selectedTools) : selectedTools
 
   const additionalWorkingDirectories = Array.from(
     appState.toolPermissionContext.additionalWorkingDirectories.keys(),
@@ -622,8 +613,6 @@ export async function* runAgent({
         agentDefinition,
       )
       if (!resolvedName) {
-        if (agentDefinition.agentType === DESIGN_REVIEW_AGENT)
-          throw new Error('Required BGS review Skill could not be loaded: ' + skillName)
         logForDebugging(
           `[Agent: ${agentDefinition.agentType}] Warning: Skill '${skillName}' specified in frontmatter was not found`,
           { level: 'warn' },
@@ -633,8 +622,6 @@ export async function* runAgent({
 
       const skill = getCommand(resolvedName, allSkills)
       if (skill.type !== 'prompt') {
-        if (agentDefinition.agentType === DESIGN_REVIEW_AGENT)
-          throw new Error('Required BGS review Skill is not prompt-based: ' + skillName)
         logForDebugging(
           `[Agent: ${agentDefinition.agentType}] Warning: Skill '${skillName}' is not a prompt-based skill`,
           { level: 'warn' },
@@ -725,8 +712,6 @@ export async function* runAgent({
   // - Sync agents share setAppState, setResponseLength, abortController with parent
   // - Async agents are fully isolated (but with explicit unlinked abortController)
   const agentToolUseContext = createSubagentContext(toolUseContext, {
-    // A host-owned read-only review boundary must also adjudicate hook-approved writes.
-    requireCanUseTool: agentDefinition.agentType === DESIGN_REVIEW_AGENT || isNativeWritingAuthor(agentDefinition.agentType) ? true : undefined,
     options: agentOptions,
     agentId,
     agentType: agentDefinition.agentType,
@@ -741,18 +726,6 @@ export async function* runAgent({
       agentDefinition.criticalSystemReminder_EXPERIMENTAL,
     contentReplacementState,
   })
-  agentToolUseContext.beegameReviewDocuments = toolUseContext.beegameReviewDocuments
-  // An independent reviewer must expose its saved sources, not reuse parent reads.
-  if (agentToolUseContext.beegameReviewDocuments) {
-    const owned = new Set(await Promise.all(agentToolUseContext.beegameReviewDocuments.map(name => {
-      const path = resolve(getCwd(), 'docs', name)
-      return realpath(path).catch(() => path)
-    })))
-    for (const key of [...agentToolUseContext.readFileState.keys()]) {
-      const canonical = await realpath(key).catch(() => key)
-      if (owned.has(canonical)) agentToolUseContext.readFileState.delete(key)
-    }
-  }
   if (isBackgrounded) {
     const setForegroundState = agentToolUseContext.setAppState
     agentToolUseContext.setAppState = update => {
@@ -822,6 +795,8 @@ export async function* runAgent({
       maxTurns: maxTurns ?? agentDefinition.maxTurns,
     })) {
       onQueryProgress?.()
+      emitSubagentStreamEvent(message as any, toolUseContext.toolUseId,
+        toolUseContext.options.isNonInteractiveSession && Boolean(toolUseContext.options.includePartialMessages))
       // Forward subagent API request starts to parent's metrics display
       // so TTFT/OTPS update during subagent execution.
       if (

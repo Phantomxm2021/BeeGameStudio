@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { checkDesignDocumentReferences } from './design-document-references'
@@ -15,6 +15,18 @@ function fixture(text: string) {
   writeFileSync(join(root, 'docs/GDD.md'), text)
   return root
 }
+
+test('same-document anchors are not mistaken for separate retained evidence files', () => {
+  const source = '# Rules\n[Rules](#rules)\n[Local][here]\n[Top](#)\n\n[here]: #%E8%A7%84%E5%88%99\n'
+  const root = fixture(source)
+  expect(checkDesignDocumentReferences(root, 0)).toMatchObject({
+    valid: true, checkedReferences: 0, uncitedDocuments: ['docs/GDD.md'], issues: [],
+  })
+  expect(readFileSync(join(root, 'docs/GDD.md'), 'utf8')).toBe(source)
+  writeFileSync(join(root, 'docs/GDD.md'), source + '[Missing external source](MISSING.md#rules)\n')
+  expect(checkDesignDocumentReferences(root, 0)).toMatchObject({ valid: false, checkedReferences: 1 })
+  expect(checkDesignDocumentReferences(root, 0).issues.join(' ')).toContain('MISSING.md')
+})
 
 test('standard local link forms resolve relative to their source, without inspecting remote URLs or code examples', () => {
   const source = '# Game\n[Controls](UI_UX_SPEC.md#controls)\n[Input][ui]\n\n[ui]: UI_UX_SPEC.md\n\n`docs/UI_UX_SPEC.md`\n[Reference](https://example.test/design.md)\n```md\n[Example](NOT_A_SOURCE.md)\n```'
@@ -116,7 +128,7 @@ test('persistent platform contracts and user-owned tmp-named files remain valid'
   expect(checkDesignDocumentReferences(root, 0)).toMatchObject({ valid: true, checkedReferences: 2, issues: [] })
 })
 
-test('a broken source enters the joint diagnostic review but cannot release or re-dispatch authors', async () => {
+test('a broken source cannot advance the author batch to a paid joint review', async () => {
   const root = fixture('[Owner](UNASSIGNED_DESIGN.md)')
   const state = await beginProjectDelivery(root, root, 'Build a game')
   await writeDesignDocumentsFixture(root)
@@ -124,16 +136,11 @@ test('a broken source enters the joint diagnostic review but cannot release or r
     designDocumentFixture('GDD.md') + '[Owner](UNASSIGNED_DESIGN.md)')
   writeFileSync(projectDeliveryStatePath(root, root), JSON.stringify({ ...state, authorBatch: 4 }))
   const handoff = await advanceProjectDeliveryAfterTurn(root, root, undefined, 4)
-  expect(handoff).toMatchObject({ phase: 'review', shouldContinue: true })
+  expect(handoff).toMatchObject({ phase: 'author', shouldContinue: false })
   expect(checkDesignDocumentReferences(root, 4).issues.join(' ')).toContain('UNASSIGNED_DESIGN.md')
-  await prepareProjectDesignReview(root, root)
-  const release = await advanceProjectDeliveryAfterTurn(root, root, { phase: 'review', status: 'complete', summary: '',
-    review: { step: 'inspect', findings: [], resolved: [] } })
-  expect(release).toMatchObject({ phase: 'review', shouldContinue: true })
-  expect((await readProjectDelivery(root, root))?.designReview).toMatchObject({ step: 'revise', writableDocuments: ['GDD.md'] })
-  const unrepaired = await advanceProjectDeliveryAfterTurn(root, root, { phase: 'review', status: 'complete', summary: '',
-    review: { step: 'revise', findings: [], resolved: [] } })
-  expect(unrepaired?.shouldContinue).toBe(false)
+  expect(handoff?.issues.join(' ')).toContain('UNASSIGNED_DESIGN.md')
+  expect((await readProjectDelivery(root, root))?.authorBatch).toBe(4)
+  expect((await readProjectDelivery(root, root))?.designReview).toBeUndefined()
   expect((await readProjectDelivery(root, root))?.designBaseline).toBeUndefined()
 })
 
@@ -153,13 +160,14 @@ test('a Review complete claim cannot override a missing reference even when all 
   writeFileSync(join(root, 'docs/GDD.md'), designDocumentFixture('GDD.md') + '[Owner](UNASSIGNED_DESIGN.md)')
   writeFileSync(projectDeliveryStatePath(root, root), JSON.stringify({ ...state, phase: 'review' }))
   await prepareProjectDesignReview(root, root)
-  const result = await advanceProjectDeliveryAfterTurn(root, root, { phase: 'review', status: 'complete', summary: 'Claimed ready', review: { step: 'inspect', findings: [], resolved: [] } })
-  expect(result).toMatchObject({ phase: 'review', shouldContinue: true })
+  const result = await advanceProjectDeliveryAfterTurn(root, root, { phase: 'review', status: 'complete', summary: 'Claimed ready', review: { step: 'revise', findings: [], resolved: [] } })
+  expect(result).toMatchObject({ phase: 'review', shouldContinue: false })
   expect((await readProjectDelivery(root, root))?.designBaseline).toBeUndefined()
   const unrepaired = await advanceProjectDeliveryAfterTurn(root, root, { phase: 'review', status: 'complete', summary: '',
     review: { step: 'revise', findings: [], resolved: [] } })
   expect(unrepaired?.shouldContinue).toBe(false)
-  expect(unrepaired?.issues.join(' ')).toContain('UNASSIGNED_DESIGN.md')
+  expect(result?.issues.join(' ')).toContain('UNASSIGNED_DESIGN.md')
+  expect(unrepaired?.issues.join(' ')).toContain('stopped pending explicit owner resolution')
 })
 
 test('local draft checks allow only pending peers; strict batch and prior authorities remain strict', () => {
@@ -235,10 +243,13 @@ test('retained design evidence must exist; planned assets and later documents re
   writeFileSync(join(root, 'docs/calc/inputs.json'), '{"speed":4}')
   const saved = checkDesignDocumentReferences(root, 0)
   expect(saved).toMatchObject({ valid: true, checkedReferences: 3 })
+  expect(saved.retainedFiles).toEqual(['docs/calc/formula.mjs', 'docs/calc/inputs.json'])
+  expect(existsSync(join(root, 'calc/inputs.json'))).toBe(false)
   writeFileSync(join(root, 'docs/calc/inputs.json'), '{"speed":8}')
   expect(checkDesignDocumentReferences(root, 0).inputRevision).not.toBe(saved.inputRevision)
   writeFileSync(join(root, 'docs/calc/inputs.json'), '')
   expect(checkDesignDocumentReferences(root, 0).issues.join(' ')).toContain('not a nonempty file')
+  expect(checkDesignDocumentReferences(root, 0).retainedFiles).toEqual(['docs/calc/formula.mjs'])
 })
 
 test('file evidence outside docs cannot evade validation, including relative path mistakes and external targets', () => {
@@ -280,12 +291,13 @@ test('a review completion claim cannot release downstream work with missing cite
   writeFileSync(projectDeliveryStatePath(root, root), JSON.stringify({ ...state, phase: 'review', authorBatch: 4 }))
   await prepareProjectDesignReview(root, root)
   const result = await advanceProjectDeliveryAfterTurn(root, root,
-    { phase: 'review', status: 'complete', summary: 'The document claims its calculation passed', review: { step: 'inspect', findings: [], resolved: [] } })
-  expect(result).toMatchObject({ phase: 'review', shouldContinue: true })
+    { phase: 'review', status: 'complete', summary: 'The document claims its calculation passed', review: { step: 'revise', findings: [], resolved: [] } })
+  expect(result).toMatchObject({ phase: 'review', shouldContinue: false })
   expect((await readProjectDelivery(root, root))?.designBaseline).toBeUndefined()
   const unrepaired = await advanceProjectDeliveryAfterTurn(root, root, { phase: 'review', status: 'complete', summary: '',
     review: { step: 'revise', findings: [], resolved: [] } })
   expect(unrepaired?.shouldContinue).toBe(false)
-  expect(unrepaired?.issues.join(' ')).toContain('retained design evidence does not exist')
+  expect(result?.issues.join(' ')).toContain('retained design evidence does not exist')
+  expect(unrepaired?.issues.join(' ')).toContain('stopped pending explicit owner resolution')
   expect(await readProjectDelivery(root, root)).toMatchObject({ phase: 'review', authorBatch: 4 })
 })

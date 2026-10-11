@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { copyFile, cp, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, cp, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 
 type Checkpoint = {
@@ -23,6 +23,12 @@ const exists = async (path: string) => stat(path).then(() => true, error => {
 /** One pre-turn checkpoint per project. Backups of superseded work are retained separately. */
 export function createProjectTurnCheckpointStore(dataRoot: string) {
   const root = resolve(dataRoot, 'project-turn-checkpoints')
+  const recoveryMarker = (workspacePath: string) => join(root, 'recovery-required',
+    createHash('sha256').update(resolve(workspacePath)).digest('hex') + '.json')
+  async function assertRecovered(workspacePath: string): Promise<void> {
+    if (await exists(recoveryMarker(await realpath(workspacePath))))
+      throw new Error('Project recovery is incomplete; restore the retained backup before continuing')
+  }
   const projectDirectory = (ownerId: string, workspacePath: string) => join(root,
     createHash('sha256').update(`${ownerId}\0${resolve(workspacePath)}`).digest('hex'))
   const copyTree = (source: string, destination: string) => cp(source, destination, {
@@ -52,6 +58,7 @@ export function createProjectTurnCheckpointStore(dataRoot: string) {
 
   return {
     read,
+    assertRecovered,
     async save(input: {
       ownerId: string
       workspacePath: string
@@ -62,6 +69,7 @@ export function createProjectTurnCheckpointStore(dataRoot: string) {
       deliveryStatePath: string
     }): Promise<{ commit(): Promise<void>; rollback(): Promise<void> }> {
       const workspace = await realpath(input.workspacePath)
+      await assertRecovered(workspace)
       const base = projectDirectory(input.ownerId, workspace)
       // A checkpoint inside the project would recursively snapshot itself and alter the release revision.
       if (!relative(workspace, base).startsWith('..')) throw new Error('Project edit backup root must be outside the workspace')
@@ -193,9 +201,17 @@ export function createProjectTurnCheckpointStore(dataRoot: string) {
         throw new Error('The replaced project backup is unavailable')
       const staged = join(dirname(workspace), `.${randomUUID()}.beegame-reapply`)
       const current = join(dirname(workspace), `.${randomUUID()}.beegame-current`)
-      await copyTree(join(input.archivePath, 'workspace'), staged)
-      await rename(workspace, current)
+      const backup = await mkdtemp(join(dirname(input.archivePath), 'reapply-state-'))
+      let moved = false, nativeChanged = false, deliveryChanged = false, keepBackup = false
+      let nativeExisted = false, deliveryExisted = false
       try {
+        nativeExisted = Boolean(input.nativeTranscriptPath && await exists(input.nativeTranscriptPath))
+        deliveryExisted = await exists(input.deliveryStatePath)
+        if (nativeExisted) await copyFile(input.nativeTranscriptPath!, join(backup, 'native.jsonl'))
+        if (deliveryExisted) await copyFile(input.deliveryStatePath, join(backup, 'delivery.json'))
+        await copyTree(join(input.archivePath, 'workspace'), staged)
+        await rename(workspace, current)
+        moved = true
         await rename(staged, workspace)
         for (const name of ['node_modules', '.git', 'transcripts', join('.beegame', 'chat'), join('.beegame', 'logs')]) {
           const preserved = join(current, name)
@@ -205,31 +221,57 @@ export function createProjectTurnCheckpointStore(dataRoot: string) {
           }
         }
         if (input.nativeTranscriptPath) {
+          nativeChanged = true
           if (await exists(join(input.archivePath, 'native.jsonl')))
             await copyFile(join(input.archivePath, 'native.jsonl'), input.nativeTranscriptPath)
           else await rm(input.nativeTranscriptPath, { force: true })
         }
+        deliveryChanged = true
         if (await exists(join(input.archivePath, 'delivery.json'))) {
           await mkdir(dirname(input.deliveryStatePath), { recursive: true })
           await copyFile(join(input.archivePath, 'delivery.json'), input.deliveryStatePath)
         } else await rm(input.deliveryStatePath, { force: true })
-        await rm(current, { recursive: true, force: true })
       } catch (error) {
-        if (await exists(workspace)) {
-          for (const name of ['node_modules', '.git', 'transcripts', join('.beegame', 'chat'), join('.beegame', 'logs')]) {
-            const preserved = join(workspace, name)
-            if (await exists(preserved) && !await exists(join(current, name))) {
-              await mkdir(dirname(join(current, name)), { recursive: true })
-              await rename(preserved, join(current, name))
-            }
-          }
-          await rm(workspace, { recursive: true, force: true })
+        const failures: unknown[] = []
+        const recover = async (operation: () => Promise<unknown>) => {
+          try { await operation() } catch (failure) { failures.push(failure) }
         }
-        await rename(current, workspace)
+        if (moved) await recover(async () => {
+          if (await exists(workspace)) {
+            for (const name of ['node_modules', '.git', 'transcripts', join('.beegame', 'chat'), join('.beegame', 'logs')]) {
+              const preserved = join(workspace, name)
+              if (await exists(preserved) && !await exists(join(current, name))) {
+                await mkdir(dirname(join(current, name)), { recursive: true })
+                await rename(preserved, join(current, name))
+              }
+            }
+            await rm(workspace, { recursive: true, force: true })
+          }
+          await rename(current, workspace)
+        })
+        if (nativeChanged) await recover(async () => {
+          if (nativeExisted) await copyFile(join(backup, 'native.jsonl'), input.nativeTranscriptPath!)
+          else await rm(input.nativeTranscriptPath!, { force: true })
+        })
+        if (deliveryChanged) await recover(async () => {
+          if (deliveryExisted) await copyFile(join(backup, 'delivery.json'), input.deliveryStatePath)
+          else await rm(input.deliveryStatePath, { force: true })
+        })
+        if (failures.length) {
+          keepBackup = true
+          const marker = recoveryMarker(workspace)
+          await mkdir(dirname(marker), { recursive: true, mode: 0o700 })
+          await writeFile(marker, JSON.stringify({ workspace, backup, current }), { mode: 0o600 })
+          throw new AggregateError([error, ...failures], `Project recovery is incomplete; backup retained at ${backup}`)
+        }
         throw error
       } finally {
         if (await exists(staged)) await rm(staged, { recursive: true, force: true })
+        if (!keepBackup) await rm(backup, { recursive: true, force: true })
       }
+      // Cleanup is after commit: partial deletion of a discarded backup must
+      // never trigger a rollback from that now-incomplete directory.
+      await rm(current, { recursive: true, force: true })
     },
   }
 }

@@ -114,7 +114,7 @@ export function mapRuntimeSettingsToEnv(
     npm_config_userconfig: npmUserConfig,
   }
   if (config.autoMemoryEnabled !== undefined) {
-    env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = config.autoMemoryEnabled ? '0' : '1'
+    env.BGS_DISABLE_AUTO_MEMORY = config.autoMemoryEnabled ? '0' : '1'
   }
   if (config.skillSearchEnabled !== undefined) {
     env.SKILL_SEARCH_ENABLED = config.skillSearchEnabled ? '1' : '0'

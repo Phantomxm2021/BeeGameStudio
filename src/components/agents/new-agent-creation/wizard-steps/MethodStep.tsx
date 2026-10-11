@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react';
-import { Box, Byline, KeyboardShortcutHint } from '@anthropic/ink';
+import { Box, Byline, KeyboardShortcutHint } from '@bee-game-studio/ink';
 import { ConfigurableShortcutHint } from '../../../ConfigurableShortcutHint.js';
 import { Select } from '../../../CustomSelect/select.js';
 import { useWizard } from '../../../wizard/index.js';

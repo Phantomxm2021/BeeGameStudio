@@ -194,20 +194,19 @@ test('body interruption keeps partial usage, byte timestamps and actual cause wi
   }), { headers: { 'content-type': 'text/event-stream' } }) } })
 })
 
-test('proxy deadline is distinct from client cancellation and no request is automatically retried', async () => {
+test('upstream timeouts are observed, not caused by a proxy deadline or automatically retried', async () => {
   let calls = 0
   await fixture(() => Response.json({}), async (proxy, path) => {
     expect((await fetch(proxy.baseUrl + '/v1/messages')).status).toBe(502)
     expect(JSON.parse(await readFile(path, 'utf8')).requests[0]).toMatchObject({
-      outcome: 'failed', error: 'timeout', category: 'timeout', phase: 'headers', abortSource: 'proxy_deadline',
+      outcome: 'failed', error: 'timeout', category: 'timeout', phase: 'headers',
     })
+    expect(JSON.parse(await readFile(path, 'utf8')).requests[0].abortSource).toBeUndefined()
     expect(calls).toBe(1)
-  }, { timeoutMs: 25, fetch: async (_url, init) => {
+  }, { fetch: async (_url, init) => {
     calls++
-    return new Promise((_resolve, reject) => {
-      if (init.signal!.aborted) reject(init.signal!.reason)
-      else init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true })
-    })
+    expect(init.signal!.aborted).toBe(false)
+    throw new DOMException('Synthetic upstream timeout', 'TimeoutError')
   } })
 })
 

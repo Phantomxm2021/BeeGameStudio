@@ -60,7 +60,7 @@ export function getAttributionTexts(): AttributionTexts {
     return { commit: '', pr: '' }
   }
 
-  const defaultAttribution = `🤖 Generated with [Bee Game Studio](${PRODUCT_URL})`
+  const defaultAttribution = `🤖 Generated with [BGS](${PRODUCT_URL})`
   // Do not fabricate a provider-owned email address for Git co-authorship.
   const defaultCommit = ''
 
@@ -310,7 +310,7 @@ export async function getEnhancedPRAttribution(
     return ''
   }
 
-  const defaultAttribution = `🤖 Generated with [Claude Code](${PRODUCT_URL})`
+  const defaultAttribution = `🤖 Generated with [BGS](${PRODUCT_URL})`
 
   // Get AppState first
   const appState = getAppState()
@@ -353,7 +353,7 @@ export async function getEnhancedPRAttribution(
     memoryAccessCount > 0
       ? `, ${memoryAccessCount} ${memoryAccessCount === 1 ? 'memory' : 'memories'} recalled`
       : ''
-  const summary = `🤖 Generated with [Bee Game Studio](${PRODUCT_URL}) (${claudePercent}% ${promptCount}-shotted by ${realModelName}${memSuffix})`
+  const summary = `🤖 Generated with [BGS](${PRODUCT_URL}) (${claudePercent}% ${promptCount}-shotted by ${realModelName}${memSuffix})`
 
   // Append trailer lines for squash-merge survival. Only for allowlisted repos
   // (INTERNAL_MODEL_REPOS) and only in builds with COMMIT_ATTRIBUTION enabled —

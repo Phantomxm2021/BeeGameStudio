@@ -216,6 +216,60 @@ test('a readable UI JSON and browser screenshot do not certify that its layout i
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })
 
+test('consumption evidence covers every registered UI/Scene/resource file and each Tilemap, not just each kind', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'bgs-per-file-consumption-'))
+  try {
+    await mkdir(join(workspace, 'content/ui'), { recursive: true })
+    const files = ['ui/a.json', 'ui/b.json', 'a.json', 'b.json']
+    await writeFile(join(workspace, 'content/index.json'), JSON.stringify({ schema: 'beegame-content-package.v2',
+      id: 'test', dimension: '2d', documentRevision: 'a'.repeat(64), assetManifestRevision: 'b'.repeat(64),
+      entryScene: 'a', sceneModel: 'game-object-v2', files }))
+    for (const id of ['a', 'b']) {
+      await writeFile(join(workspace, `content/ui/${id}.json`), JSON.stringify({ schema: 'beegame-content.v1', id: 'ui-' + id, kind: 'ui-screen', assetRefs: [],
+        data: { rootId: 'root', nodes: [{ id: 'root', role: 'screen-root', layout: { size: [960, 540] } },
+          { id: 'play', parentId: 'root', role: 'button', layout: { position: [10, 20], size: [100, 50] } }] } }))
+      await writeFile(join(workspace, `content/${id}.json`), JSON.stringify({ schema: 'beegame-content.v1', id, kind: 'scene-2d', assetRefs: ['visual'],
+        data: { nodes: ['first', 'second'].map(nodeId => ({ id: nodeId, transform: { position: [0, 0, 0] }, components: [
+          { id: 'map-' + nodeId, type: 'tilemap', data: { schema: 'tilemap.v1', gridNodeId: nodeId, cells: [{ x: 0, y: 0, tileId: 'ground' }] } },
+        ] })) } }))
+    }
+    await writeFile(join(workspace, 'game.js'), 'Synthetic build')
+    await writeFile(join(workspace, 'evidence.txt'), 'Synthetic observation, not actual acceptance')
+    const common = { change: 'Synthetic change', expected: 'Synthetic expectation', observed: 'Synthetic outcome', status: 'passed', evidencePaths: ['evidence.txt'] }
+    const checks = ['a', 'b'].flatMap(id => [
+      { ...common, kind: 'ui-layout', document: `content/ui/${id}.json`, nodeId: 'play', property: 'layout' },
+      { ...common, kind: 'scene-layout', document: `content/${id}.json`, nodeId: 'first', property: 'transform' },
+      ...['first', 'second'].map(nodeId => ({ ...common, kind: 'scene-layout', document: `content/${id}.json`, nodeId, property: 'tilemap' })),
+      { ...common, kind: 'resource-binding', document: `content/${id}.json`, nodeId: 'first', property: 'assetRef' },
+    ])
+    const read = async (contentChecks: typeof checks) => {
+      await writeFile(join(workspace, 'acceptance.json'), JSON.stringify({ scope: 'delivery', status: 'passed', summary: 'Synthetic coverage', environment: 'Synthetic',
+        evidencePaths: ['evidence.txt'], artifactPaths: ['game.js'], verification: { target: 'deployment', observation: 'target-runtime', knownIssues: [], unverified: [], contentChecks } }))
+      return (await readRuntimeAcceptanceReport(workspace, 'acceptance.json'))!
+    }
+    const accepted = await read(checks)
+    expect(accepted.status).toBe('passed')
+    expect(await runtimeEvidenceIsCurrent(workspace, [accepted])).toBe(true)
+    for (const omitted of checks.filter(c => c.document.includes('b.json'))) {
+      const partial = checks.filter(c => c !== omitted)
+      const report = await read(partial)
+      expect(report.status).toBe('blocked')
+      expect(report.diagnostic?.category).toBe('verification-incomplete')
+      expect(report.summary).toContain(omitted.document)
+      expect(await runtimeEvidenceIsCurrent(workspace, [{ ...accepted, verification: { ...accepted.verification!, contentChecks: partial as any } }])).toBe(false)
+    }
+    const report = await read(checks.filter(c => !c.document.includes('b.json')))
+    expect(report.summary).toContain('ui-layout (content/ui/b.json)')
+    expect(report.summary).toContain('scene-layout (content/b.json)')
+    expect(report.summary).toContain('resource-binding (content/b.json)')
+    const script = join(workspace, 'check.mjs')
+    await writeFile(script, await bundleAcceptanceChecker())
+    const run = Bun.spawnSync([process.execPath, script, 'acceptance.json'], { cwd: workspace })
+    expect(run.exitCode).toBe(1)
+    expect(JSON.parse(run.stdout.toString())).toMatchObject({ diagnostic: report.diagnostic, publishReadiness: 'not-checked' })
+  } finally { await rm(workspace, { recursive: true, force: true }) }
+})
+
 test.each(['scene-2d', 'scene-3d'] as const)('%s resource and geometry verification cannot be replaced by UI text checks', async kind => {
   const workspace = await mkdtemp(join(tmpdir(), 'bgs-scene-binding-'))
   try {

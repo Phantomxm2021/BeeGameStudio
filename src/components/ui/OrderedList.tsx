@@ -1,5 +1,5 @@
 import React, { createContext, isValidElement, type ReactNode, useContext } from 'react';
-import { Box } from '@anthropic/ink';
+import { Box } from '@bee-game-studio/ink';
 import { OrderedListItem, OrderedListItemContext } from './OrderedListItem.js';
 
 const OrderedListContext = createContext({ marker: '' });

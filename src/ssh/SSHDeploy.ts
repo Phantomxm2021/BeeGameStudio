@@ -1,11 +1,13 @@
-import { existsSync } from 'fs'
-import { resolve } from 'path'
+import { existsSync, readFileSync } from 'fs'
+import { join } from 'path'
+import { randomUUID } from 'crypto'
+import { distRoot } from '../utils/distRoot.js'
 import { logForDebugging } from 'src/utils/debug.js'
 
 const SSH_TIMEOUT_MS = 60_000
 const REMOTE_BIN_DIR = '~/.local/bin'
-const REMOTE_CLI_FILE = 'claude-code-cli.js'
-const REMOTE_WRAPPER = 'claude'
+const REMOTE_BUILD_DIR = '~/.local/share/bee-game-studio'
+const REMOTE_WRAPPER = 'bee-game-studio'
 
 export interface DeployOptions {
   host: string
@@ -20,7 +22,7 @@ async function runSshCommand(
   command: string,
   timeoutMs = SSH_TIMEOUT_MS,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-  const proc = Bun.spawn(['ssh', '-o', 'ConnectTimeout=10', host, command], {
+  const proc = Bun.spawn(['ssh', '-o', 'ConnectTimeout=10', '--', host, command], {
     stdout: 'pipe',
     stderr: 'pipe',
   })
@@ -39,17 +41,14 @@ async function runSshCommand(
   }
 }
 
-function findLocalBinary(): string {
-  const projectRoot = resolve(import.meta.dir, '../..')
-  const distPath = resolve(projectRoot, 'dist/cli.js')
-  if (existsSync(distPath)) return distPath
-
-  const devPath = resolve(projectRoot, 'src/entrypoints/cli.tsx')
-  if (existsSync(devPath)) return devPath
-
-  throw new Error(
-    'Cannot find local CLI binary to deploy. Run `bun run build` first.',
-  )
+export function findLocalBuildDirectory(root = distRoot): string {
+  const directory = existsSync(join(root, 'cli-bun.js')) ? root : join(root, 'dist')
+  const entry = join(directory, 'cli.js')
+  if (!existsSync(entry)) throw new Error('Cannot find a built BGS CLI to deploy. Run bun run build first.')
+  const generation = readFileSync(entry, 'utf8').match(/^import\s+["']\.\/(build-[\w-]+)\/cli\.js["']/)?.[1]
+  const build = generation ? join(directory, generation) : directory
+  if (!existsSync(join(build, 'cli-bun.js'))) throw new Error('BGS build is incomplete: cli-bun.js is missing.')
+  return build
 }
 
 export async function deployBinary(options: DeployOptions): Promise<string> {
@@ -60,42 +59,73 @@ export async function deployBinary(options: DeployOptions): Promise<string> {
       `Remote platform "${remotePlatform}" is not supported. Only linux and darwin are supported.`,
     )
   }
+  if (!['x64', 'arm64'].includes(remoteArch)) throw new Error(`Unsupported remote architecture: ${remoteArch}`)
 
   logForDebugging(
     `[SSHDeploy] deploying to ${host} (${remotePlatform}/${remoteArch}, v${localVersion})`,
   )
 
-  const localBinary = findLocalBinary()
-  logForDebugging(`[SSHDeploy] local binary: ${localBinary}`)
+  const localBuild = findLocalBuildDirectory()
+  const generation = 'build-' + randomUUID()
+  logForDebugging(`[SSHDeploy] local build: ${localBuild}`)
 
   onProgress?.('Creating remote directory...')
-  const mkdirResult = await runSshCommand(host, `mkdir -p ${REMOTE_BIN_DIR}`)
+  const mkdirResult = await runSshCommand(host, `mkdir -p ${REMOTE_BIN_DIR} ${REMOTE_BUILD_DIR}`)
   if (mkdirResult.exitCode !== 0) {
     throw new Error(`Failed to create remote directory: ${mkdirResult.stderr}`)
   }
 
   onProgress?.('Uploading binary...')
-  const remotePath = `${REMOTE_BIN_DIR}/${REMOTE_CLI_FILE}`
+  const remotePath = `${REMOTE_BUILD_DIR}/${generation}`
   const scpProc = Bun.spawn(
-    ['scp', '-o', 'ConnectTimeout=10', localBinary, `${host}:${remotePath}`],
+    ['scp', '-r', '-o', 'ConnectTimeout=10', '--', localBuild, `${host}:${remotePath}`],
     { stdout: 'pipe', stderr: 'pipe' },
   )
   const scpTimer = setTimeout(() => scpProc.kill(), SSH_TIMEOUT_MS)
-  const scpStderr = await new Response(scpProc.stderr).text()
-  const scpExit = await scpProc.exited
-  clearTimeout(scpTimer)
+  let scpStderr: string
+  let scpExit: number
+  try {
+    const output = await Promise.all([new Response(scpProc.stdout).text(), new Response(scpProc.stderr).text(), scpProc.exited])
+    scpStderr = output[1]
+    scpExit = output[2]
+  } finally { clearTimeout(scpTimer) }
 
   if (scpExit !== 0) {
     throw new Error(`SCP upload failed (exit ${scpExit}): ${scpStderr.trim()}`)
   }
 
+  // --help does not load Grep/Glob. Install and execute the remote platform's
+  // search binary before publishing the wrapper, using the existing installer.
+  onProgress?.('Preparing remote search tools...')
+  const search = await runSshCommand(host, `bun ${remotePath}/scripts/postinstall.cjs --required && ${remotePath}/vendor/ripgrep/${remoteArch}-${remotePlatform}/rg --version`, 180_000)
+  if (search.exitCode !== 0) throw new Error(`Remote ripgrep installation/verification failed; existing wrapper preserved: ${search.stderr}`)
+
+  // Install declared external modules for the remote platform (never copy
+  // local node_modules/native binaries from a different OS or architecture).
+  if (existsSync(join(localBuild, 'package.json'))) {
+    onProgress?.('Installing remote runtime dependencies...')
+    const dependencies = await runSshCommand(host,
+      `bun install --production --ignore-scripts --cwd ${remotePath}`, 180_000)
+    if (dependencies.exitCode !== 0) throw new Error(`Remote runtime dependency installation failed: ${dependencies.stderr}`)
+  }
+
+  // Verify full startup before changing the stable wrapper. --version alone
+  // would not catch missing external modules loaded by the CLI.
+  const startup = await runSshCommand(host, `bun ${remotePath}/cli-bun.js --help`)
+  if (startup.exitCode !== 0) throw new Error(`Remote BGS startup failed; existing wrapper preserved: ${startup.stderr}`)
+
   onProgress?.('Installing wrapper script...')
+  const temporaryWrapper = `${REMOTE_BIN_DIR}/.${REMOTE_WRAPPER}-${generation}`
   const wrapperScript = [
-    `cat > ${REMOTE_BIN_DIR}/${REMOTE_WRAPPER} << 'WRAPPER'`,
+    'set -e',
+    `trap 'rm -f ${temporaryWrapper}' EXIT`,
+    `cat > ${temporaryWrapper} << 'WRAPPER'`,
     '#!/bin/sh',
-    `exec bun ${REMOTE_BIN_DIR}/${REMOTE_CLI_FILE} "$@"`,
+    `exec bun "$HOME/.local/share/bee-game-studio/${generation}/cli-bun.js" "$@"`,
     'WRAPPER',
-    `chmod +x ${REMOTE_BIN_DIR}/${REMOTE_WRAPPER}`,
+    `chmod +x ${temporaryWrapper}`,
+    `${temporaryWrapper} --version`,
+    `mv -f ${temporaryWrapper} ${REMOTE_BIN_DIR}/${REMOTE_WRAPPER}`,
   ].join('\n')
 
   const wrapperResult = await runSshCommand(host, wrapperScript)

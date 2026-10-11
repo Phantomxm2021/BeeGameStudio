@@ -1,6 +1,6 @@
 import React from 'react';
 import { MessageResponse } from 'src/components/MessageResponse.js';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { jsonStringify } from 'src/utils/slowOperations.js';
 import type { Input, Output } from './ConfigTool.js';
 

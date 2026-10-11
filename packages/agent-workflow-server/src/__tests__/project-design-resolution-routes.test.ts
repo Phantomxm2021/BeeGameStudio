@@ -6,7 +6,7 @@ import { createAgentWorkflowApp } from '../app'
 import type { DesignFinding } from '../beegame/design-handoff'
 import { writeDesignDocumentsFixture } from '../beegame/fixtures/layout-fixture'
 import { AUTHOR_BATCHES } from '../beegame/project-author'
-import { readProjectDelivery } from '../beegame/project-delivery'
+import { readProjectDelivery, projectDeliveryStatePath } from '../beegame/project-delivery'
 
 test('authenticated owner resolution records the decision, does not mark PASS or launch work by default', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-design-resolution-route-'))
@@ -27,7 +27,12 @@ test('authenticated owner resolution records the decision, does not mark PASS or
         const batch = Number(/Author batch (\d+)\//.exec(task)![1]) - 1
         await writeDesignDocumentsFixture(input.cwd, AUTHOR_BATCHES[batch])
         if (result) await writeFile(join(input.cwd, result), 'complete\n')
-      } else await writeFile(join(input.cwd, result!), 'complete\n' + JSON.stringify({ step: 'inspect', findings: [finding], resolved: [] }))
+      } else {
+        // A decide now reaches Revision. Simulate a declined/unavailable answer,
+        // rather than assuming every user finding stops inspection itself.
+        const step = turn.projectTurn!.reviewStep!
+        await writeFile(join(input.cwd, result!), (step === 'revise' ? 'blocked\n' : 'complete\n') + JSON.stringify({ step, findings: [finding], resolved: [] }))
+      }
       await turn.onMessage({ type: 'result', subtype: 'success', result: 'Step executed' })
     } } } } })
   try {
@@ -44,18 +49,31 @@ test('authenticated owner resolution records the decision, does not mark PASS or
     const get = await app.request('/api/projects/game/design-review')
     expect(get.status).toBe(200)
     expect((await get.json()).review).toMatchObject({ stopped: true, findings: [finding] })
-    expect(turns).toBe(AUTHOR_BATCHES.length + 1)
+    expect(turns).toBe(AUTHOR_BATCHES.length + 2)
     const resolve = await app.request('/api/projects/game/design-resolution', { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ mode: 'revise', instruction: 'User selects outcome A; record it in GDD before targeted verification.', findings: [finding] }) })
     expect(resolve.status).toBe(200)
     expect(await resolve.json()).toMatchObject({ started: false, review: { step: 'revise', findings: [finding] } })
-    expect(turns).toBe(AUTHOR_BATCHES.length + 1)
+    expect(turns).toBe(AUTHOR_BATCHES.length + 2)
+    expect((await readProjectDelivery(workspace, join(root, 'dashboard')))?.designReview?.userDecisions?.[0]?.answer)
+      .toBe('User selects outcome A; record it in GDD before targeted verification.')
     expect((await readProjectDelivery(workspace, join(root, 'dashboard')))?.designBaseline).toBeUndefined()
     const invalid = await app.request('/api/projects/game/design-resolution', { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ mode: 'verify', instruction: 'Ignore the issue', findings: [{ ...finding, severity: 'follow-up' }] }) })
     expect(invalid.status).not.toBe(200)
-    expect(turns).toBe(AUTHOR_BATCHES.length + 1)
+    expect(turns).toBe(AUTHOR_BATCHES.length + 2)
     expect((await app.request('/api/projects/not-owned/design-review')).status).toBe(404)
+    const production = await app.request('/api/projects/game/production')
+    expect(production.status).toBe(200)
+    expect((await production.json()).state).toMatchObject({ version: 1, phase: 'review' })
+    expect((await app.request('/api/projects/not-owned/production')).status).toBe(404)
+    const statePath = projectDeliveryStatePath(workspace, join(root, 'dashboard'))
+    const retired = JSON.stringify({ version: 2, objective: 'Retired Brief project', status: 'active', phase: 'playable' })
+    await writeFile(statePath, retired)
+    expect((await (await app.request('/api/projects/game/production')).json()).state.phase).toBe('legacy')
+    expect((await app.request('/api/projects/game/production-migration', { method: 'POST' })).status).toBe(409)
+    expect(await readFile(statePath, 'utf8')).toBe(retired)
+    expect(turns).toBe(AUTHOR_BATCHES.length + 2)
   } finally {
     for (const cleanup of cleanups.reverse()) await cleanup()
     await rm(root, { recursive: true, force: true })

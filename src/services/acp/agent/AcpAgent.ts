@@ -46,6 +46,7 @@ import {
   type ClientCapabilities,
 } from '@agentclientprotocol/sdk'
 import { unlink } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import type { Message } from '../../../types/message.js'
 import { sanitizeTitle } from '../utils.js'
 import { listSessionsImpl } from '../../../utils/listSessionsImpl.js'
@@ -53,7 +54,9 @@ import {
   resolveSessionFilePath,
   canonicalizePath,
 } from '../../../utils/sessionStoragePortable.js'
-import { getOriginalCwd } from '../../../bootstrap/state.js'
+import { getOriginalCwd, setOriginalCwd } from '../../../bootstrap/state.js'
+import type { SessionId } from '../../../types/ids.js'
+import { withAcpProcessContext, switchAcpSession } from './processContext.js'
 import type { AcpSession } from './sessionTypes.js'
 
 // ── Agent class ───────────────────────────────────────────────────
@@ -69,6 +72,7 @@ import type { AcpSession } from './sessionTypes.js'
 export class AcpAgent implements Agent {
   private conn: AgentSideConnection
   sessions = new Map<string, AcpSession>()
+  defaultSessionCwd?: string
   private clientCapabilities?: ClientCapabilities
 
   constructor(conn: AgentSideConnection) {
@@ -87,7 +91,7 @@ export class AcpAgent implements Agent {
       authMethods: [],
       agentInfo: {
         name: 'claude-code',
-        title: 'Claude Code',
+        title: 'BGS',
         version:
           typeof (globalThis as unknown as Record<string, unknown>).MACRO ===
             'object' &&
@@ -122,8 +126,8 @@ export class AcpAgent implements Agent {
           embeddedContext: true,
         },
         mcpCapabilities: {
-          http: true,
-          sse: true,
+          http: false,
+          sse: false,
         },
         loadSession: true,
         sessionCapabilities: {
@@ -200,7 +204,8 @@ export class AcpAgent implements Agent {
     // with empty params and no cwd — without a fallback, listSessionsImpl
     // treats undefined dir as "all projects" and returns every session on
     // disk, which is unrelated to the workspace the user actually has open.
-    const requestedCwd = params.cwd || getOriginalCwd()
+    const requestedCwd =
+      params.cwd || this.defaultSessionCwd || getOriginalCwd()
     const canonicalRequested = await canonicalizePath(requestedCwd)
 
     const candidates = await listSessionsImpl({
@@ -240,17 +245,28 @@ export class AcpAgent implements Agent {
     // Load the source session's messages so the fork actually branches from
     // the source conversation rather than starting a blank session. Per the
     // unstable ForkSessionRequest, params.sessionId is the ID to fork from.
-    const { initialMessages } = await loadForkSourceMessages(params.sessionId)
-    const response = await this.createSession(
-      {
-        cwd: params.cwd,
-        mcpServers: params.mcpServers ?? [],
-        _meta: params._meta,
-      },
-      { initialMessages },
-    )
-    this.scheduleAvailableCommandsUpdate(response.sessionId)
-    return response
+    return withAcpProcessContext(async () => {
+      const resolved = await resolveSessionFilePath(
+        params.sessionId,
+        params.cwd,
+      )
+      setOriginalCwd(params.cwd)
+      switchAcpSession(
+        params.sessionId as SessionId,
+        resolved ? dirname(resolved.filePath) : null,
+      )
+      const { initialMessages } = await loadForkSourceMessages(params.sessionId)
+      const response = await this.createSession(
+        {
+          cwd: params.cwd,
+          mcpServers: params.mcpServers ?? [],
+          _meta: params._meta,
+        },
+        { initialMessages },
+      )
+      this.scheduleAvailableCommandsUpdate(response.sessionId)
+      return response
+    })
   }
 
   // ── closeSession ───────────────────────────────────────────────
@@ -431,6 +447,7 @@ export interface AcpAgent {
       forceNewId?: boolean
       sessionId?: string
       initialMessages?: Message[]
+      projectDir?: string | null
     },
   ): Promise<NewSessionResponse>
   getOrCreateSession(params: {

@@ -60,7 +60,7 @@ mock.module('src/services/auth/hostGuard.ts', () => ({
   },
   assertNoAnthropicEnvForOpenAI(): void {
     const hasOpenAIMode =
-      process.env['CLAUDE_CODE_USE_OPENAI'] === '1' ||
+      process.env['BGS_USE_OPENAI'] === '1' ||
       Boolean(process.env['OPENAI_API_KEY'])
     const hasAnthropicKey = Boolean(process.env['ANTHROPIC_API_KEY'])
     if (hasOpenAIMode && hasAnthropicKey) {
@@ -187,7 +187,7 @@ describe('assertSubscriptionBaseUrl', () => {
 describe('assertNoAnthropicEnvForOpenAI', () => {
   const origAnthropicKey = process.env['ANTHROPIC_API_KEY']
   const origOpenAIKey = process.env['OPENAI_API_KEY']
-  const origOpenAIMode = process.env['CLAUDE_CODE_USE_OPENAI']
+  const origOpenAIMode = process.env['BGS_USE_OPENAI']
 
   afterEach(() => {
     // Restore env vars
@@ -202,22 +202,22 @@ describe('assertNoAnthropicEnvForOpenAI', () => {
       process.env['OPENAI_API_KEY'] = origOpenAIKey
     }
     if (origOpenAIMode === undefined) {
-      delete process.env['CLAUDE_CODE_USE_OPENAI']
+      delete process.env['BGS_USE_OPENAI']
     } else {
-      process.env['CLAUDE_CODE_USE_OPENAI'] = origOpenAIMode
+      process.env['BGS_USE_OPENAI'] = origOpenAIMode
     }
   })
 
   test('does not throw when only ANTHROPIC_API_KEY is set', () => {
     process.env['ANTHROPIC_API_KEY'] = 'sk-ant-api03-test'
     delete process.env['OPENAI_API_KEY']
-    delete process.env['CLAUDE_CODE_USE_OPENAI']
+    delete process.env['BGS_USE_OPENAI']
     expect(() => assertNoAnthropicEnvForOpenAI()).not.toThrow()
   })
 
   test('does not throw when only OpenAI mode is set', () => {
     delete process.env['ANTHROPIC_API_KEY']
-    process.env['CLAUDE_CODE_USE_OPENAI'] = '1'
+    process.env['BGS_USE_OPENAI'] = '1'
     expect(() => assertNoAnthropicEnvForOpenAI()).not.toThrow()
   })
 
@@ -228,9 +228,9 @@ describe('assertNoAnthropicEnvForOpenAI', () => {
     expect(() => assertNoAnthropicEnvForOpenAI()).not.toThrow()
   })
 
-  test('does not throw (only warns) when both ANTHROPIC_API_KEY and CLAUDE_CODE_USE_OPENAI=1 are set', () => {
+  test('does not throw (only warns) when both ANTHROPIC_API_KEY and BGS_USE_OPENAI=1 are set', () => {
     process.env['ANTHROPIC_API_KEY'] = 'sk-ant-api03-test'
-    process.env['CLAUDE_CODE_USE_OPENAI'] = '1'
+    process.env['BGS_USE_OPENAI'] = '1'
     // Must NOT throw
     expect(() => assertNoAnthropicEnvForOpenAI()).not.toThrow()
   })

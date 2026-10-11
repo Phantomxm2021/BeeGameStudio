@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { feature } from 'bun:bundle'
 import {
   existsSync,
   mkdirSync,
@@ -8,27 +9,32 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ToolUseContext } from '../../../Tool.js'
 import { clearCommandsCache, getSkillToolCommands } from '../../../commands.js'
 import { getTurnZeroSkillDiscovery, startSkillDiscoveryPrefetch } from '../prefetch.js'
 import { clearSkillIndexCache, getSkillIndex, searchSkills } from '../localSearch.js'
-import { clearSkillCaches, getSkillDirCommands } from '../../../skills/loadSkillsDir.js'
-import { getAllowedSettingSources, setAllowedSettingSources } from '../../../bootstrap/state.js'
-import { filterToInitiallyListedSkills, getSkillListingAttachments, resetSentSkillNames } from '../../../utils/attachments.js'
+import { clearSkillCaches } from '../../../skills/loadSkillsDir.js'
+import { getAllowedSettingSources, getInlinePlugins, setAllowedSettingSources, setInlinePlugins } from '../../../bootstrap/state.js'
+import { filterToBundledAndMcp, getSkillListingAttachments, resetSentSkillNames } from '../../../utils/attachments.js'
+import { clearPluginCache } from '../../../utils/plugins/pluginLoader.js'
 import { SkillTool } from '@bee-game-studio/builtin-tools/tools/SkillTool/SkillTool.js'
 import { createUserMessage } from '../../../utils/messages.js'
 import { parseFrontmatter } from '../../../utils/frontmatterParser.js'
 
 let root: string
 let previousCwd: string
+let previousPlugins: string[]
 const originalEnv = { ...process.env }
 const unusedContext = {} as ToolUseContext
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'skill-search-prefetch-'))
   previousCwd = process.cwd()
+  previousPlugins = getInlinePlugins()
+  setInlinePlugins([])
+  clearPluginCache()
   process.chdir(root)
   process.env = { ...originalEnv }
   process.env.BEEGAME_CONFIG_DIR = join(root, 'config')
@@ -44,6 +50,8 @@ beforeEach(() => {
 
 afterEach(() => {
   process.chdir(previousCwd)
+  setInlinePlugins(previousPlugins)
+  clearPluginCache()
   process.env = { ...originalEnv }
   clearCommandsCache()
   clearSkillCaches()
@@ -60,6 +68,16 @@ afterEach(() => {
   }
 })
 
+function useSkillCatalog(directory: string, name = 'bgs-builtins') {
+  const plugin = join(root, 'plugins', name)
+  mkdirSync(join(plugin, '.claude-plugin'), { recursive: true })
+  writeFileSync(join(plugin, '.claude-plugin/plugin.json'), JSON.stringify({
+    name, skills: './' + relative(plugin, directory),
+  }))
+  setInlinePlugins([...getInlinePlugins(), plugin])
+  clearPluginCache(); clearCommandsCache()
+}
+
 describe('skill search prefetch', () => {
   test('discovers Skills from initial native subagent messages with independent discovery state', async () => {
     const skillsDir = join(root, 'builtinskills')
@@ -72,7 +90,7 @@ describe('skill search prefetch', () => {
       '---',
       'Verify the original source behind the claim.',
     ].join('\n'))
-    process.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR = skillsDir
+    useSkillCatalog(skillsDir)
     const messages = [createUserMessage({ content:
       'Project source references and supporting material. '.repeat(30) + ' Review evidence',
     })]
@@ -86,14 +104,14 @@ describe('skill search prefetch', () => {
       const discovery = attachments[0]
       expect(discovery?.type).toBe('skill_discovery')
       if (discovery?.type !== 'skill_discovery') throw new Error('initial task did not discover Skills')
-      expect(discovery.skills[0]?.name).toBe('review-evidence')
+      expect(discovery.skills[0]?.name).toBe('bgs-builtins:review-evidence')
       expect(discovery.skills[0]?.autoLoaded).toBe(true)
       expect(discovery.skills[0]?.content).toContain('Verify the original source')
       expect(await startSkillDiscoveryPrefetch(null, messages, active)).toEqual([])
     }
   })
 
-  test('discovers and expands a projected native user skill with ordinary settings disabled', async () => {
+  test('discovers a standard user Skill plugin with ordinary settings disabled', async () => {
     const skillsDir = join(root, 'native-skills')
     const skillDir = join(skillsDir, 'user-level-design')
     mkdirSync(skillDir, { recursive: true })
@@ -104,15 +122,15 @@ describe('skill search prefetch', () => {
       '---',
       'Use the level design reference when relevant.',
     ].join('\n'))
-    process.env.BEEGAME_NATIVE_SKILLS_DIR = skillsDir
+    useSkillCatalog(skillsDir, 'bgs-user')
     const previousSources = getAllowedSettingSources()
     setAllowedSettingSources([])
     try {
-      const command = (await getSkillDirCommands(root)).find(item => item.name === 'user-level-design')
+      const command = (await getSkillToolCommands(root)).find(item => item.name === 'bgs-user:user-level-design')
       expect(command?.type).toBe('prompt')
       if (command?.type !== 'prompt') throw new Error('projected skill was not loaded')
       expect(searchSkills('spatial level design', await getSkillIndex(root)).map(item => item.name))
-        .toContain('user-level-design')
+        .toContain('bgs-user:user-level-design')
       const expanded = await command.getPromptForCommand('', unusedContext)
       expect(JSON.stringify(expanded)).toContain('Use the level design reference when relevant.')
     } finally {
@@ -120,7 +138,7 @@ describe('skill search prefetch', () => {
     }
   })
 
-  test('discovers a read-only BeeGameStudio built-in Skill with ordinary settings disabled', async () => {
+  test('discovers an explicit built-in Skill plugin with ordinary settings disabled', async () => {
     const builtinsDir = join(root, 'builtinskills')
     const skillDir = join(builtinsDir, 'game-level-designer-expert')
     mkdirSync(skillDir, { recursive: true })
@@ -131,16 +149,16 @@ describe('skill search prefetch', () => {
       '---',
       'Use the built-in level design reference.',
     ].join('\n'))
-    process.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR = builtinsDir
+    useSkillCatalog(builtinsDir)
     const previousSources = getAllowedSettingSources()
     setAllowedSettingSources([])
     try {
-      const command = (await getSkillDirCommands(root))
-        .find(item => item.name === 'game-level-designer-expert')
+      const command = (await getSkillToolCommands(root))
+        .find(item => item.name === 'bgs-builtins:game-level-designer-expert')
       expect(command?.type).toBe('prompt')
       if (command?.type !== 'prompt') throw new Error('built-in Skill was not loaded')
       expect(searchSkills('design game levels', await getSkillIndex(root)).map(item => item.name))
-        .toContain('game-level-designer-expert')
+        .toContain('bgs-builtins:game-level-designer-expert')
       expect(JSON.stringify(await command.getPromptForCommand('', unusedContext)))
         .toContain('Use the built-in level design reference.')
     } finally {
@@ -148,50 +166,50 @@ describe('skill search prefetch', () => {
     }
   })
 
-  test('loads the packaged built-in Skill catalog through native discovery', async () => {
-    process.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR = fileURLToPath(new URL(
+  test('loads the explicitly supplied catalog through standard plugin discovery', async () => {
+    useSkillCatalog(fileURLToPath(new URL(
       '../../../../.beegame/skills/builtinskills/', import.meta.url,
-    ))
+    )))
     const previousSources = getAllowedSettingSources()
     setAllowedSettingSources([])
     try {
       const modelInvocableSkills = await getSkillToolCommands(root)
-      const initialNames = filterToInitiallyListedSkills(
+      const initialNames = filterToBundledAndMcp(
         modelInvocableSkills,
       ).map(skill => skill.name)
-      expect(initialNames).toContain('game-creative-director-expert')
-      expect(initialNames).toContain('game-ui-ux-designer')
-      expect(initialNames).toContain('game-feel-designer')
-      expect(initialNames).toContain('gameplay-programmer')
-      expect(initialNames).toContain('game-technical-artist')
-      expect(initialNames).toContain('game-content-pipeline-engineer')
+      expect(initialNames).not.toContain('bgs-builtins:game-creative-director-expert')
+      expect(initialNames).not.toContain('bgs-builtins:game-ui-ux-designer')
+      expect(initialNames).not.toContain('bgs-builtins:game-feel-designer')
+      expect(initialNames).not.toContain('bgs-builtins:gameplay-programmer')
+      expect(initialNames).not.toContain('bgs-builtins:game-technical-artist')
+      expect(initialNames).not.toContain('bgs-builtins:game-content-pipeline-engineer')
       const names = modelInvocableSkills.map(skill => skill.name)
-      expect(names).toContain('game-creative-director-expert')
-      expect(names).toContain('game-level-designer-expert')
-      expect(names).toContain('game-content-pipeline-engineer')
-      expect(names).toContain('game-ui-ux-designer')
-      expect(names).toContain('game-feel-designer')
-      expect(names).toContain('game-audio-designer')
-      expect(names).toContain('game-playtest-performance')
-      expect(names).toContain('game-implementation-planning')
-      expect(names).toContain('game-plan-execution')
-      expect(names).toContain('root-cause-debugging')
-      expect(names).toContain('evidence-before-completion')
-      expect(names).toContain('spatial-computing-game-expert')
-      expect(names).toContain('beegame-interaction-contracts')
+      expect(names).toContain('bgs-builtins:game-creative-director-expert')
+      expect(names).toContain('bgs-builtins:game-level-designer-expert')
+      expect(names).toContain('bgs-builtins:game-content-pipeline-engineer')
+      expect(names).toContain('bgs-builtins:game-ui-ux-designer')
+      expect(names).toContain('bgs-builtins:game-feel-designer')
+      expect(names).toContain('bgs-builtins:game-audio-designer')
+      expect(names).toContain('bgs-builtins:game-playtest-performance')
+      expect(names).toContain('bgs-builtins:game-implementation-planning')
+      expect(names).toContain('bgs-builtins:game-plan-execution')
+      expect(names).toContain('bgs-builtins:root-cause-debugging')
+      expect(names).toContain('bgs-builtins:evidence-before-completion')
+      expect(names).toContain('bgs-builtins:spatial-computing-game-expert')
+      expect(names).toContain('bgs-builtins:beegame-interaction-contracts')
       expect(names).not.toContain('brainstorming')
       expect(names).not.toContain('interview')
       expect(names).not.toContain('beegame-game-delivery')
-      const skill = modelInvocableSkills.find(item => item.name === 'game-level-designer-expert')
+      const skill = modelInvocableSkills.find(item => item.name === 'bgs-builtins:game-level-designer-expert')
       expect(skill?.type).toBe('prompt')
       if (skill?.type !== 'prompt') throw new Error('built-in Skill is not model-invocable')
       expect(JSON.stringify(await skill.getPromptForCommand('', unusedContext))).toContain('Game Level Designer')
-      const pipeline = modelInvocableSkills.find(item => item.name === 'game-content-pipeline-engineer')
+      const pipeline = modelInvocableSkills.find(item => item.name === 'bgs-builtins:game-content-pipeline-engineer')
       expect(pipeline?.type).toBe('prompt')
       if (pipeline?.type !== 'prompt') throw new Error('pipeline Skill is not model-invocable')
       expect(JSON.stringify(await pipeline.getPromptForCommand('', unusedContext)))
         .toContain('Game Content Pipeline Engineer')
-      const feel = modelInvocableSkills.find(item => item.name === 'game-feel-designer')
+      const feel = modelInvocableSkills.find(item => item.name === 'bgs-builtins:game-feel-designer')
       if (feel?.type !== 'prompt' || !feel.skillRoot) {
         throw new Error('game feel Skill is not model-invocable or has no source root')
       }
@@ -199,7 +217,7 @@ describe('skill search prefetch', () => {
       const expandedFeel = (await feel.getPromptForCommand('', unusedContext))
         .filter(block => block.type === 'text').map(block => block.text).join('\n')
       expect(expandedFeel).toContain(feelSourceBody)
-      const designCheck = modelInvocableSkills.find(item => item.name === 'game-design-check')
+      const designCheck = modelInvocableSkills.find(item => item.name === 'bgs-builtins:game-design-check')
       if (designCheck?.type !== 'prompt' || !designCheck.skillRoot) {
         throw new Error('design checking Skill is not model-invocable or has no source root')
       }
@@ -215,7 +233,7 @@ describe('skill search prefetch', () => {
         expect(expandedDesignCheck).not.toContain(reference)
       }
       for (const name of ['gameplay-programmer', 'game-technical-artist']) {
-        const specialist = modelInvocableSkills.find(item => item.name === name)
+        const specialist = modelInvocableSkills.find(item => item.name === 'bgs-builtins:' + name)
         if (specialist?.type !== 'prompt' || !specialist.skillRoot) {
           throw new Error(`${name} is not model-invocable or has no source root`)
         }
@@ -224,8 +242,8 @@ describe('skill search prefetch', () => {
           .filter(block => block.type === 'text').map(block => block.text).join('\n')
         expect(expanded).toContain(body)
       }
-      const planning = modelInvocableSkills.find(item => item.name === 'game-implementation-planning')
-      const execution = modelInvocableSkills.find(item => item.name === 'game-plan-execution')
+      const planning = modelInvocableSkills.find(item => item.name === 'bgs-builtins:game-implementation-planning')
+      const execution = modelInvocableSkills.find(item => item.name === 'bgs-builtins:game-plan-execution')
       expect(planning?.type).toBe('prompt')
       expect(execution?.type).toBe('prompt')
       if (planning?.type !== 'prompt' || execution?.type !== 'prompt') {
@@ -235,8 +253,8 @@ describe('skill search prefetch', () => {
         .toContain('## Decompose the implementation')
       expect(JSON.stringify(await execution.getPromptForCommand('', unusedContext)))
         .toContain('## Execute one coherent slice')
-      const debugging = modelInvocableSkills.find(item => item.name === 'root-cause-debugging')
-      const verification = modelInvocableSkills.find(item => item.name === 'evidence-before-completion')
+      const debugging = modelInvocableSkills.find(item => item.name === 'bgs-builtins:root-cause-debugging')
+      const verification = modelInvocableSkills.find(item => item.name === 'bgs-builtins:evidence-before-completion')
       expect(debugging?.type).toBe('prompt')
       expect(verification?.type).toBe('prompt')
       if (debugging?.type !== 'prompt' || verification?.type !== 'prompt') {
@@ -254,18 +272,18 @@ describe('skill search prefetch', () => {
       const index = await getSkillIndex(root)
       expect(index.every(skill => skill.source !== 'builtin')).toBe(true)
       expect(searchSkills('design game HUD buttons for gamepad focus', index).map(item => item.name))
-        .toContain('game-ui-ux-designer')
+        .toContain('bgs-builtins:game-ui-ux-designer')
       expect(searchSkills('改善操作手感、动作节奏与打击感', index)[0]?.name)
-        .toBe('game-feel-designer')
+        .toBe('bgs-builtins:game-feel-designer')
       expect(searchSkills('修复运动碰撞和碰撞穿透，检查更新时序', index)[0]?.name)
-        .toBe('gameplay-programmer')
+        .toBe('bgs-builtins:gameplay-programmer')
       expect(searchSkills('实现受击特效和材质着色器，修复镜头表现', index)[0]?.name)
-        .toBe('game-technical-artist')
+        .toBe('bgs-builtins:game-technical-artist')
       expect(searchSkills('观察玩家试玩，进行体验验证', index)[0]?.name)
-        .toBe('game-playtest-performance')
+        .toBe('bgs-builtins:game-playtest-performance')
       const uiTask = '美术方向完成。现在写 UI/UX 规格，逐屏给出元素、锚点几何与状态。'
       const uiMatch = searchSkills(uiTask, index)
-      expect(uiMatch[0]?.name).toBe('game-ui-ux-designer')
+      expect(uiMatch[0]?.name).toBe('bgs-builtins:game-ui-ux-designer')
       expect(uiMatch[0]?.score).toBeLessThan(0.30)
       const discovery = await startSkillDiscoveryPrefetch(
         null,
@@ -279,57 +297,57 @@ describe('skill search prefetch', () => {
       expect(discovery[0]?.type).toBe('skill_discovery')
       if (discovery[0]?.type !== 'skill_discovery') throw new Error('expected task-specific discovery')
       expect(discovery[0].catalogFallback).toBe(false)
-      expect(discovery[0].skills[0]?.name).toBe('game-ui-ux-designer')
+      expect(discovery[0].skills[0]?.name).toBe('bgs-builtins:game-ui-ux-designer')
       expect(discovery[0].skills[0]?.autoLoaded).not.toBe(true)
       expect(searchSkills('fix tilemap atlas frame loading in the playable runtime', index).map(item => item.name))
-        .toContain('game-content-pipeline-engineer')
+        .toContain('bgs-builtins:game-content-pipeline-engineer')
       expect(searchSkills('mix game audio and spatial effects', index).map(item => item.name))
-        .toContain('game-audio-designer')
+        .toContain('bgs-builtins:game-audio-designer')
       expect(searchSkills('profile first interactive frame and loading', index).map(item => item.name))
-        .toContain('game-playtest-performance')
+        .toContain('bgs-builtins:game-playtest-performance')
       expect(searchSkills('plan a multi-step game implementation from design and scene UI documents', index).map(item => item.name))
-        .toContain('game-implementation-planning')
+        .toContain('bgs-builtins:game-implementation-planning')
       expect(searchSkills('execute the game implementation plan and verify playable slices', index).map(item => item.name))
-        .toContain('game-plan-execution')
+        .toContain('bgs-builtins:game-plan-execution')
       expect(searchSkills('diagnose unexpected behavior and find the root cause', index).map(item => item.name))
-        .toContain('root-cause-debugging')
+        .toContain('bgs-builtins:root-cause-debugging')
       expect(searchSkills('check evidence before claiming game delivery passed', index).map(item => item.name))
-        .toContain('evidence-before-completion')
+        .toContain('bgs-builtins:game-design-check')
       expect(searchSkills('writing plans for game implementation', index).map(item => item.name))
-        .toContain('game-implementation-planning')
+        .toContain('bgs-builtins:game-implementation-planning')
       expect(searchSkills('executing plans for game implementation', index).map(item => item.name))
-        .toContain('game-plan-execution')
+        .toContain('bgs-builtins:game-plan-execution')
       expect(searchSkills('systematic debugging for game performance issues', index).map(item => item.name))
-        .toContain('root-cause-debugging')
+        .toContain('bgs-builtins:root-cause-debugging')
       expect(searchSkills('verification before completion of game delivery', index).map(item => item.name))
-        .toContain('evidence-before-completion')
+        .toContain('bgs-builtins:evidence-before-completion')
       expect(searchSkills('根据设计文档拆解游戏实现任务', index).map(item => item.name))
-        .toContain('game-implementation-planning')
+        .toContain('bgs-builtins:game-implementation-planning')
       expect(searchSkills('排查测试失败的根本原因', index).map(item => item.name))
-        .toContain('root-cause-debugging')
+        .toContain('bgs-builtins:root-cause-debugging')
       expect(searchSkills('设计游戏界面的血条和手柄焦点', index)[0]?.name)
-        .toBe('game-ui-ux-designer')
+        .toBe('bgs-builtins:game-ui-ux-designer')
       expect(searchSkills('修复瓦片地图和图集加载', index)[0]?.name)
-        .toBe('game-content-pipeline-engineer')
+        .toBe('bgs-builtins:game-content-pipeline-engineer')
       expect(searchSkills('设计游戏音效和背景音乐', index)[0]?.name)
-        .toBe('game-audio-designer')
+        .toBe('bgs-builtins:game-audio-designer')
       expect(searchSkills('排查游戏启动慢和掉帧', index)[0]?.name)
-        .toBe('game-playtest-performance')
+        .toBe('bgs-builtins:game-playtest-performance')
       expect(searchSkills('设计游戏UI和响应式布局', index)[0]?.name)
-        .toBe('game-ui-ux-designer')
+        .toBe('bgs-builtins:game-ui-ux-designer')
       expect(searchSkills('design game UI screen layout', index)[0]?.name)
-        .toBe('game-ui-ux-designer')
+        .toBe('bgs-builtins:game-ui-ux-designer')
       expect(searchSkills('tilemap 图集 加载场景', index)[0]?.name)
-        .toBe('game-content-pipeline-engineer')
+        .toBe('bgs-builtins:game-content-pipeline-engineer')
     } finally {
       setAllowedSettingSources(previousSources)
     }
   })
 
-  test('sends shipped Skills in the initial runtime attachment', async () => {
-    process.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR = fileURLToPath(new URL(
+  test('does not force game plugins into the initial listing when Skill Search is enabled', async () => {
+    useSkillCatalog(fileURLToPath(new URL(
       '../../../../.beegame/skills/builtinskills/', import.meta.url,
-    ))
+    )))
     const previousSources = getAllowedSettingSources()
     const previousNodeEnv = process.env.NODE_ENV
     setAllowedSettingSources([])
@@ -341,11 +359,16 @@ describe('skill search prefetch', () => {
         getAppState: () => ({ mcp: { commands: [] } }),
       } as unknown as ToolUseContext
       const attachments = await getSkillListingAttachments(context)
-      expect(attachments).toHaveLength(1)
-      expect(attachments[0]?.type).toBe('skill_listing')
-      if (attachments[0]?.type !== 'skill_listing') throw new Error('Skill listing was not sent')
-      expect(attachments[0].content).toContain('game-creative-director-expert')
-      expect(attachments[0].content).toContain('game-ui-ux-designer')
+      const commands = await getSkillToolCommands(root)
+      expect(commands.map(skill => skill.name)).toContain('bgs-builtins:game-ui-ux-designer')
+      expect(filterToBundledAndMcp(commands).map(skill => skill.name)).not.toContain('bgs-builtins:game-ui-ux-designer')
+      if (feature('EXPERIMENTAL_SKILL_SEARCH')) {
+        expect(JSON.stringify(attachments)).not.toContain('bgs-builtins:game-ui-ux-designer')
+      } else {
+        // Source-mode Bun tests do not compile this feature; ordinary listing
+        // includes every plugin, exactly as upstream does without Skill Search.
+        expect(JSON.stringify(attachments)).toContain('bgs-builtins:game-ui-ux-designer')
+      }
     } finally {
       process.env.NODE_ENV = previousNodeEnv
       setAllowedSettingSources(previousSources)
@@ -354,9 +377,9 @@ describe('skill search prefetch', () => {
   })
 
   test('keeps the shipped Skill catalog visible with Skill Search disabled', async () => {
-    process.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR = fileURLToPath(new URL(
+    useSkillCatalog(fileURLToPath(new URL(
       '../../../../.beegame/skills/builtinskills/', import.meta.url,
-    ))
+    )))
     const previousSources = getAllowedSettingSources()
     const previousNodeEnv = process.env.NODE_ENV
     const previousSearchEnabled = process.env.SKILL_SEARCH_ENABLED
@@ -373,8 +396,8 @@ describe('skill search prefetch', () => {
       expect(attachments).toHaveLength(1)
       expect(attachments[0]?.type).toBe('skill_listing')
       if (attachments[0]?.type !== 'skill_listing') throw new Error('Skill listing was not sent')
-      expect(attachments[0].content).toContain('game-creative-director-expert')
-      expect(attachments[0].content).toContain('game-ui-ux-designer')
+      expect(attachments[0].content).toContain('bgs-builtins:game-creative-director-expert')
+      expect(attachments[0].content).toContain('bgs-builtins:game-ui-ux-designer')
     } finally {
       process.env.NODE_ENV = previousNodeEnv
       process.env.SKILL_SEARCH_ENABLED = previousSearchEnabled
@@ -428,7 +451,7 @@ describe('skill search prefetch', () => {
       '---',
       'Use this reference for puzzle board design.',
     ].join('\n'))
-    process.env.BEEGAME_NATIVE_SKILLS_DIR = skillsDir
+    useSkillCatalog(skillsDir, 'bgs-user')
     const context = {
       cwd: root,
       discoveredSkillNames: new Set<string>(),
@@ -449,7 +472,7 @@ describe('skill search prefetch', () => {
       expect(discovery?.type).toBe('skill_discovery')
       if (discovery?.type !== 'skill_discovery') throw new Error('expected catalog')
       expect(discovery.catalogFallback).toBe(true)
-      expect(discovery.skills.map(skill => skill.name)).toContain('puzzle-board-designer')
+      expect(discovery.skills.map(skill => skill.name)).toContain('bgs-user:puzzle-board-designer')
       expect(discovery.skills.some(skill => skill.autoLoaded)).toBe(false)
       expect(discovery.gap).toBeUndefined()
     }
@@ -467,7 +490,7 @@ describe('skill search prefetch', () => {
     )
     expect(exact?.type).toBe('skill_discovery')
     if (exact?.type !== 'skill_discovery') throw new Error('expected exact match')
-    expect(exact.skills[0]?.name).toBe('puzzle-board-designer')
+    expect(exact.skills[0]?.name).toBe('bgs-user:puzzle-board-designer')
     expect(exact.skills[0]?.autoLoaded).toBe(true)
 
     const addedSkillDir = join(skillsDir, 'new-camera-helper')
@@ -482,14 +505,14 @@ describe('skill search prefetch', () => {
     clearCommandsCache()
     clearSkillCaches()
     clearSkillIndexCache()
-    expect((await getSkillIndex(root)).map(skill => skill.name)).toContain('new-camera-helper')
+    expect((await getSkillIndex(root)).map(skill => skill.name)).toContain('bgs-user:new-camera-helper')
     const updatedCatalog = await getTurnZeroSkillDiscovery(
       'カメラの動きと構図を調べて', [], context,
     )
     expect(updatedCatalog?.type).toBe('skill_discovery')
     if (updatedCatalog?.type !== 'skill_discovery') throw new Error('expected updated catalog')
     expect(updatedCatalog.catalogFallback).toBe(true)
-    expect(updatedCatalog.skills.map(skill => skill.name)).toContain('new-camera-helper')
+    expect(updatedCatalog.skills.map(skill => skill.name)).toContain('bgs-user:new-camera-helper')
 
     const interTurnContext = {
       ...context,
@@ -501,7 +524,7 @@ describe('skill search prefetch', () => {
     expect(interTurn[0]?.type).toBe('skill_discovery')
     if (interTurn[0]?.type !== 'skill_discovery') throw new Error('expected inter-turn catalog')
     expect(interTurn[0].catalogFallback).toBe(true)
-    expect(interTurn[0].skills.map(skill => skill.name)).toContain('new-camera-helper')
+    expect(interTurn[0].skills.map(skill => skill.name)).toContain('bgs-user:new-camera-helper')
     expect(await startSkillDiscoveryPrefetch(
       '카메라 움직임과 구도를 살펴봐', [], interTurnContext,
     )).toEqual([])

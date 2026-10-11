@@ -1,7 +1,7 @@
 import { relative } from 'path';
 import * as React from 'react';
 import { Suspense, use, useMemo } from 'react';
-import { Box, NoSelect, Text } from '@anthropic/ink';
+import { Box, NoSelect, Text } from '@bee-game-studio/ink';
 import type { NotebookCell, NotebookCellType, NotebookContent } from '../../../types/notebook.js';
 import { intersperse } from '../../../utils/array.js';
 import { getCwd } from '../../../utils/cwd.js';

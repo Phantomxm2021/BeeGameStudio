@@ -9,7 +9,10 @@ import {
   createNativeCliProcessRunner,
   nativeRuntimeEnvironment,
   nativeRuntimeCommand,
+  appendWorkingFilesInstruction,
+  nativeWorkflowCommand,
   nativePromptContent,
+  nativeAssignmentPrompt,
   prepareNativeSessionTemporaryDirectory,
   publicArtifactApprovalMessage,
 } from './native-cli-process-runner'
@@ -17,6 +20,68 @@ import {
 const fixturePath = fileURLToPath(
   new URL('./fixtures/native-runtime-fixture.ts', import.meta.url),
 )
+
+test('standard CLI debug is passive, cancellation remains normal and raw stderr never becomes a public error', async () => {
+  const cwd=await mkdtemp(join(tmpdir(),'native-standard-debug-'))
+  const observer=createRuntimeObservability({workspacePath:cwd,sessionId:'debug',provider:'fixture',model:'fixture'})
+  let observed!:()=>void
+  const diagnostic=new Promise<void>(resolve=>{observed=resolve})
+  const runtime=await createNativeCliProcessRunner({command:[process.execPath,fixturePath,'--debug-to-stderr'],
+    observabilityFactory:()=>({...observer,observeDiagnostic(value){observer.observeDiagnostic(value);if((value as any).event==='api_error')observed()}}),
+  }).start({sessionId:'debug',cwd,env:{}})
+  const controller=new AbortController(), timeout=setTimeout(()=>{controller.abort('test_timeout');observed()},3000)
+  try {
+    const submitted=runtime.submit({prompt:'native-standard-debug',signal:controller.signal,onMessage:()=>{},requestPermission:async()=>({behavior:'deny'})})
+    const rejected=submitted.catch(error=>error)
+    await diagnostic;controller.abort('user_pause');expect((await rejected).message).toContain('user_pause');await runtime.dispose?.();await observer.flush()
+    const text=await Bun.file(join(cwd,'.beegame/logs/native-runtime.jsonl')).text()
+    const rows=text.trim().split('\n').map(line=>JSON.parse(line))
+    expect(rows.filter(row=>row.type==='native_diagnostic').map(row=>row.diagnostic)).toEqual([
+      {event:'request_start',source:'compact',evidenceSource:'cli_debug'},
+      {event:'api_error',attempt:2,status:429,category:'rate_limit',evidenceSource:'cli_debug'},
+    ])
+    expect(rows.find(row=>row.type==='turn_terminal').compaction.status).toBe('unfinished')
+    expect(text).not.toContain('PRIVATE')
+  } finally {clearTimeout(timeout);controller.abort();await runtime.dispose?.();await rm(cwd,{recursive:true,force:true})}
+})
+
+test('workflow tasks refresh only standard native prompt/session flags and preserve selected executable/settings', () => {
+  const input = { sessionId: 'host', cwd: process.cwd(), env: {}, systemContext: 'Worker ownership',
+    nativeSessionId: '01234567-1234-4234-8234-123456789abc' }
+  const command = ['bun', '/selected/cli.js', '--print', '--append-system-prompt', 'Parent ownership',
+    '--setting-sources', 'user', '--resume=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa']
+  const task = nativeWorkflowCommand(command, input)
+  expect(task.slice(0, 2)).toEqual(command.slice(0, 2))
+  expect(task).toContain('--session-id=' + input.nativeSessionId)
+  expect(task.some(value => value.startsWith('--resume='))).toBe(false)
+  expect(task[task.indexOf('--append-system-prompt') + 1]).toContain('Worker ownership')
+  expect(task[task.indexOf('--append-system-prompt') + 1]).not.toContain('Parent ownership')
+  expect(task.slice(task.indexOf('--setting-sources'), task.indexOf('--setting-sources') + 2)).toEqual(['--setting-sources', 'user'])
+  expect(command[4]).toBe('Parent ownership')
+})
+
+test('GDD uses a standard Skill invocation with intact task text, without private native role metadata', () => {
+  expect(nativeAssignmentPrompt('Confirmed original task', { authorDocument: 'GDD.md' })).toEqual([
+    { type: 'text', text: '/bgs-builtins:game-systems-designer-expert Confirmed original task' },
+  ])
+  expect(nativeAssignmentPrompt('Ordinary user task')).toEqual(nativePromptContent('Ordinary user task'))
+})
+
+test('standard GDD invocation preserves image blocks and leaves caller input unchanged', () => {
+  const image = { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/png' as const, data: 'fixture' } }
+  const prompt = [image, { type: 'text' as const, text: 'Use this reference.' }]
+  expect(nativeAssignmentPrompt(prompt, { authorDocument: 'GDD.md' })).toEqual([
+    image, { type: 'text', text: '/bgs-builtins:game-systems-designer-expert Use this reference.' },
+  ])
+  expect(prompt[1]).toEqual({ type: 'text', text: 'Use this reference.' })
+  const context = { type: 'text' as const, text: 'Host requirements' }
+  expect(nativeAssignmentPrompt([context, ...prompt], { authorDocument: 'GDD.md' })).toEqual([
+    context, image, { type: 'text', text: '/bgs-builtins:game-systems-designer-expert Use this reference.' },
+  ])
+  expect(nativeAssignmentPrompt([context, image], { authorDocument: 'GDD.md' })).toEqual([
+    context, image, { type: 'text', text: '/bgs-builtins:game-systems-designer-expert' },
+  ])
+})
 
 function startRuntime() {
   return createNativeCliProcessRunner({
@@ -38,7 +103,102 @@ function startRuntime() {
 }
 
 describe('native CLI process runner', () => {
-  test('transports scheduled author metadata on its turn only', async () => {
+  test('project working-directory guidance uses the standard append option without changing tools or commands', () => {
+    const original = ['bun', 'cli.js', '--append-system-prompt', 'Original platform context', '--resume=session']
+    const snapshot = [...original], directory = '/project with spaces/.beegame/tmp/task'
+    const command = appendWorkingFilesInstruction(original, directory)
+    expect(original).toEqual(snapshot)
+    expect(command.slice(0, 3)).toEqual(original.slice(0, 3))
+    expect(command.slice(4)).toEqual(original.slice(4))
+    expect(command[3]).toContain('Original platform context')
+    expect(command[3]).toContain(JSON.stringify(directory))
+    expect(command[3]).toContain('File tools require literal paths')
+    expect(command).not.toContain('--tools')
+    expect(command).not.toContain('--disallowedTools')
+    const fixture = ['bun', 'fixture.ts']
+    expect(appendWorkingFilesInstruction(fixture, directory)).toBe(fixture)
+    expect(() => appendWorkingFilesInstruction(['cli', '--append-system-prompt'], directory))
+      .toThrow('Missing append-system-prompt value')
+  })
+
+  test.each(['success', 'error'])('drains buffered stdout before classifying process exit: %s', async kind => {
+    const cwd = await mkdtemp(join(tmpdir(), 'native-exit-drain-'))
+    let release!: () => void
+    let entered!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const observing = new Promise<void>(resolve => { entered = resolve })
+    const runtime = await createNativeCliProcessRunner({ command: [process.execPath, fixturePath] }).start({
+      sessionId: 'exit-drain', cwd, env: {},
+    })
+    const messages: string[] = []
+    let settled = false
+    const completion = runtime.submit({
+      prompt: 'exit-after-' + kind, signal: new AbortController().signal,
+      onMessage: async message => {
+        messages.push(message.type)
+        if (message.type === 'assistant') { entered(); await gate }
+      },
+      requestPermission: async () => ({ behavior: 'deny' }),
+    }).then(() => { settled = true; return undefined }, error => { settled = true; return error as Error })
+    try {
+      await observing
+      await (runtime as unknown as { child: { exited: Promise<number> } }).child.exited
+      // Let exit handling run while the observer still holds stdout consumption.
+      await Bun.sleep(10)
+      expect(settled).toBe(false)
+      release()
+      const error = await completion
+      if (kind === 'success') expect(error).toBeUndefined()
+      else expect(error?.message).toContain('specific terminal error')
+      expect(messages).toEqual(['assistant', 'result'])
+    } finally {
+      release()
+      await runtime.dispose?.()
+      await completion
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
+  test('dispose drains the final provider accounting frame before returning', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'native-usage-stop-'))
+    const received: number[] = []
+    let ready!: () => void
+    const acknowledged = new Promise<void>(resolve => { ready = resolve })
+    const runtime = await createNativeCliProcessRunner({ command: [process.execPath, fixturePath] }).start({
+      sessionId: 'fixture-stop', systemContext: 'Fixture only', cwd, env: {},
+      onNativeUsage: usage => { received.push(usage.total_tokens) },
+    })
+    try {
+      const turn = runtime.submit({ prompt: 'native-usage-on-stop', signal: new AbortController().signal,
+        onMessage: message => { if (message.type === 'stream_event') ready() },
+        requestPermission: async () => ({ behavior: 'deny' as const }) }).catch(() => undefined)
+      await acknowledged
+      await runtime.dispose?.()
+      // No waiting for a later callback: terminal accounting must be ready now.
+      expect(received).toEqual([96])
+      await turn
+    } finally { await runtime.dispose?.(); await rm(cwd, { recursive: true, force: true }) }
+  })
+  test('forwards safe provider counters from stderr without inventing a result or using context length', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'native-usage-callback-'))
+    const received: unknown[] = []
+    let observed!: () => void
+    const usageArrived = new Promise<void>(resolve => { observed = resolve })
+    const runtime = await createNativeCliProcessRunner({ command: [process.execPath, fixturePath] }).start({
+      sessionId: 'usage-fixture', cwd, env: {},
+      onNativeUsage: usage => { received.push(usage); observed() },
+    })
+    const messages: unknown[] = []
+    try {
+      await runtime.submit({ prompt: 'native-usage-diagnostics', signal: new AbortController().signal,
+        onMessage: message => { messages.push(message) }, requestPermission: async () => ({ behavior: 'deny' }) })
+      await usageArrived
+      expect(received).toEqual([{ prompt_tokens: 12, completion_tokens: 4, cache_read_tokens: 80, cache_creation_tokens: 0, total_tokens: 96 }])
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({ type: 'result' })
+    } finally { await runtime.dispose?.(); await rm(cwd, { recursive: true, force: true }) }
+  })
+  test('ordinary native stdin does not carry BGS writing-owner metadata', async () => {
     const runtime = await startRuntime()
     const messages: Record<string, unknown>[] = []
     const directionAuthors = { contextPath: join(process.cwd(), 'context.md'), responsibilities: {
@@ -55,7 +215,7 @@ describe('native CLI process runner', () => {
       await runtime.submit({ ...turn, directionAuthors })
       await runtime.submit(turn)
       expect(messages.filter(message => message.type === 'result').map(message => message.directionAuthors))
-        .toEqual([directionAuthors, null])
+        .toEqual([null, null])
     } finally { await runtime.dispose?.() }
   })
   test('captures fragmented safe stderr diagnostics without changing visible results', async () => {
@@ -215,6 +375,21 @@ describe('native CLI process runner', () => {
         onMessage: () => undefined, requestPermission: async () => ({ behavior: 'deny' }),
       })).rejects.toThrow('provider failed before replay')
     } finally { clearTimeout(timeout); await runtime.dispose?.() }
+  })
+  test('a CLI startup load error preserves its cause and cannot replace the saved native identity', async () => {
+    const cwd=await mkdtemp(join(tmpdir(),'native-startup-load-'))
+    const ids:string[]=[],messages:unknown[]=[]
+    const runtime=await createNativeCliProcessRunner({command:[process.execPath,fixturePath]}).start({
+      sessionId:'startup-load',cwd,env:{},resumeSessionId:'11111111-2222-4333-8444-555555555555',
+      onNativeSessionId:id=>{ids.push(id)},
+    })
+    try {
+      await expect(runtime.submit({prompt:'startup-load-error-before-ack',signal:new AbortController().signal,
+        onMessage:message=>{messages.push(message)},requestPermission:async()=>({behavior:'deny'})}))
+        .rejects.toThrow('No conversation found with session ID: original-native-id')
+      expect(ids).toEqual([])
+      expect(messages).toHaveLength(1)
+    } finally {await runtime.dispose?.();await rm(cwd,{recursive:true,force:true})}
   })
   test('public artifact approval names the file, destination and lifetime without exposing its path', () => {
     const message = publicArtifactApprovalMessage('ExecuteExtraTool', {
@@ -426,9 +601,15 @@ describe('native CLI process runner', () => {
     expect(env.CLAUDE_ENABLE_STREAM_WATCHDOG).toBeUndefined()
     expect(env.CLAUDE_STREAM_IDLE_TIMEOUT_MS).toBeUndefined()
     expect(env.ANTHROPIC_AUTH_TOKEN).toBe('selected-token')
-    expect(env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe('1')
-    expect(env.BEEGAME_NATIVE_BACKGROUND_PERMISSIONS).toBe('1')
-    expect(env.BEEGAME_NATIVE_DIAGNOSTICS).toBe('1')
+    expect(env.BGS_SUBPROCESS_ENV_SCRUB).toBe('1')
+    expect(env.BEEGAME_NATIVE_BACKGROUND_PERMISSIONS).toBeUndefined()
+    expect(env.BEEGAME_NATIVE_DIAGNOSTICS).toBeUndefined()
+  })
+
+  test('consumes the selected provider in the host without forwarding a private native override', () => {
+    const env = nativeRuntimeEnvironment({ BEEGAME_MODEL_TYPE: 'anthropic', BGS_USE_OPENAI: '1' })
+    expect(env.BEEGAME_MODEL_TYPE).toBeUndefined()
+    expect(env.BGS_USE_OPENAI).toBe('0')
   })
 
   test('reports the selected model and sanitized launch contract to passive observability', async () => {
@@ -436,12 +617,12 @@ describe('native CLI process runner', () => {
     const launchContract = {
       selectedEnvironmentKeys: [
         'ANTHROPIC_AUTH_TOKEN',
-        'ANTHROPIC_DEFAULT_SONNET_MODEL',
+        'BGS_DEFAULT_BALANCED_MODEL',
         'BEEGAME_CONFIG_DIR',
       ],
       forwardedEnvironmentKeys: [
         'ANTHROPIC_AUTH_TOKEN',
-        'ANTHROPIC_DEFAULT_SONNET_MODEL',
+        'BGS_DEFAULT_BALANCED_MODEL',
         'BEEGAME_CONFIG_DIR',
       ],
       endpointClass: 'default' as const,
@@ -467,7 +648,7 @@ describe('native CLI process runner', () => {
       cwd: process.cwd(),
       env: {
         ANTHROPIC_AUTH_TOKEN: 'secret-provider-token',
-        ANTHROPIC_DEFAULT_SONNET_MODEL: 'selected-sonnet-model',
+        BGS_DEFAULT_BALANCED_MODEL: 'selected-sonnet-model',
         BEEGAME_CONFIG_DIR: '/private/config',
       },
       runtimeLaunchContract: launchContract,
@@ -715,5 +896,16 @@ describe('native CLI process runner', () => {
       subtype: 'success',
     })
     runtime.dispose?.()
+  })
+
+  test('preserves native child identity on the permission authority request', async () => {
+    const runtime = await startRuntime()
+    const requests: unknown[] = []
+    try {
+      await runtime.submit({ prompt: 'child-permission', signal: new AbortController().signal,
+        onMessage() {}, requestPermission: async request => { requests.push(request); return { behavior: 'deny' } },
+      })
+      expect(requests).toMatchObject([{ toolUseID: 'tool-1', agentId: 'native-child', toolName: 'Write' }])
+    } finally { await runtime.dispose?.() }
   })
 })

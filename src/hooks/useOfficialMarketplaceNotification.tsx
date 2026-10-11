@@ -1,5 +1,5 @@
 import type { Notification } from '../context/notifications.js';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { logForDebugging } from '../utils/debug.js';
 import { checkAndInstallOfficialMarketplace } from '../utils/plugins/officialMarketplaceStartupCheck.js';
 import { useStartupNotification } from './notifs/useStartupNotification.js';

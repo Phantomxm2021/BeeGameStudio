@@ -50,7 +50,7 @@ export function switchProvider(
   }
 
   const env: Record<string, string> = {
-    CLAUDE_CODE_USE_OPENAI: '1',
+    BGS_USE_OPENAI: '1',
     OPENAI_BASE_URL: found.baseUrl,
     OPENAI_MODEL: found.defaultModel,
     // The value is the env var name that holds the key, not the key itself.
@@ -66,7 +66,7 @@ export function switchProvider(
   // so that the Ink view (/providers use) can render it to the user rather than losing it
   // in a side-channel stderr log.
   const hasOpenAIMode =
-    process.env['CLAUDE_CODE_USE_OPENAI'] === '1' ||
+    process.env['BGS_USE_OPENAI'] === '1' ||
     Boolean(process.env['OPENAI_API_KEY'])
   const hasAnthropicKey = Boolean(process.env['ANTHROPIC_API_KEY'])
   if (hasOpenAIMode && hasAnthropicKey) {
@@ -81,7 +81,7 @@ export function switchProvider(
   if (!process.env[found.apiKeyEnv]) {
     warnings.push(
       `${found.apiKeyEnv} is not set in the current environment. ` +
-        `Set it before starting Claude Code: export ${found.apiKeyEnv}=<your-api-key>`,
+        `Set it before starting BGS: export ${found.apiKeyEnv}=<your-api-key>`,
     )
   }
 
@@ -92,7 +92,7 @@ export function switchProvider(
  * Build the shell export block to display to the user.
  *
  * Example output:
- *   export CLAUDE_CODE_USE_OPENAI=1
+ *   export BGS_USE_OPENAI=1
  *   export OPENAI_BASE_URL=https://api.cerebras.ai/v1
  *   export OPENAI_API_KEY=$CEREBRAS_API_KEY
  *   export OPENAI_MODEL=llama-3.3-70b
@@ -102,7 +102,7 @@ export function switchProvider(
 export function buildShellExportBlock(result: SwitchProviderResult): string {
   const { env, provider } = result
   const lines: string[] = [
-    `export CLAUDE_CODE_USE_OPENAI=${env['CLAUDE_CODE_USE_OPENAI'] ?? '1'}`,
+    `export BGS_USE_OPENAI=${env['BGS_USE_OPENAI'] ?? '1'}`,
     `export OPENAI_BASE_URL=${env['OPENAI_BASE_URL'] ?? provider.baseUrl}`,
     `export OPENAI_API_KEY=$${provider.apiKeyEnv}`,
     `export OPENAI_MODEL=${env['OPENAI_MODEL'] ?? provider.defaultModel}`,

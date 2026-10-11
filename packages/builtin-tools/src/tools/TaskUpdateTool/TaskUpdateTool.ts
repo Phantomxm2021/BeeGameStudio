@@ -1,4 +1,6 @@
+import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { isAgentSwarmsEnabled } from 'src/utils/agentSwarmsEnabled.js'
 import {
@@ -24,6 +26,7 @@ import {
   getTeamName,
 } from 'src/utils/teammate.js'
 import { writeToMailbox } from 'src/utils/teammateMailbox.js'
+import { VERIFICATION_AGENT_TYPE } from '../AgentTool/constants.js'
 import { TASK_UPDATE_TOOL_NAME } from './constants.js'
 import { DESCRIPTION, PROMPT } from './prompt.js'
 
@@ -75,6 +78,7 @@ const outputSchema = lazySchema(() =>
         to: z.string(),
       })
       .optional(),
+    verificationNudgeNeeded: z.boolean().optional(),
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>
@@ -319,6 +323,31 @@ export const TaskUpdateTool = buildTool({
       }
     }
 
+    // Structural verification nudge: if the main-thread agent just closed
+    // out a 3+ task list and none of those tasks was a verification step,
+    // append a reminder to the tool result. Fires at the loop-exit moment
+    // where skips happen ("when the last task closed, the loop exited").
+    // Mirrors the TodoWriteTool nudge for V1 sessions; this covers V2
+    // (interactive CLI). TaskUpdateToolOutput is @internal so this field
+    // does not touch the public SDK surface.
+    let verificationNudgeNeeded = false
+    if (
+      feature('VERIFICATION_AGENT') &&
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_hive_evidence', false) &&
+      !context.agentId &&
+      updates.status === 'completed'
+    ) {
+      const allTasks = await listTasks(taskListId)
+      const allDone = allTasks.every(t => t.status === 'completed')
+      if (
+        allDone &&
+        allTasks.length >= 3 &&
+        !allTasks.some(t => /verif/i.test(t.subject))
+      ) {
+        verificationNudgeNeeded = true
+      }
+    }
+
     return {
       data: {
         success: true,
@@ -328,6 +357,7 @@ export const TaskUpdateTool = buildTool({
           updates.status !== undefined
             ? { from: existingTask.status, to: updates.status }
             : undefined,
+        verificationNudgeNeeded,
       },
     }
   },
@@ -338,6 +368,7 @@ export const TaskUpdateTool = buildTool({
       updatedFields,
       error,
       statusChange,
+      verificationNudgeNeeded,
     } = content as Output
     if (!success) {
       // Return as non-error so it doesn't trigger sibling tool cancellation
@@ -360,6 +391,10 @@ export const TaskUpdateTool = buildTool({
     ) {
       resultContent +=
         '\n\nTask completed. Call TaskList now to find your next available task or see if your work unblocked others.'
+    }
+
+    if (verificationNudgeNeeded) {
+      resultContent += `\n\nNOTE: You just closed out 3+ tasks and none of them was a verification step. Before writing your final summary, spawn the verification agent (subagent_type="${VERIFICATION_AGENT_TYPE}"). You cannot self-assign PARTIAL by listing caveats in your summary — only the verifier issues a verdict.`
     }
 
     return {

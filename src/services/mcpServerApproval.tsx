@@ -1,6 +1,6 @@
 import { MCPServerApprovalDialog } from '../components/MCPServerApprovalDialog.js';
 import { MCPServerMultiselectDialog } from '../components/MCPServerMultiselectDialog.js';
-import type { Root } from '@anthropic/ink';
+import type { Root } from '@bee-game-studio/ink';
 import { KeybindingSetup } from '../keybindings/KeybindingProviderSetup.js';
 import { AppStateProvider } from '../state/AppState.js';
 import { getMcpConfigsByScope } from './mcp/config.js';

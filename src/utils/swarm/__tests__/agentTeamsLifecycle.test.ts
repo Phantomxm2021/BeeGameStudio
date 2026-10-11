@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 let terminateCalls: string[] = []
+let paneCloseCalls: string[] = []
+let paneCloseSucceeds = true
 
 mock.module('src/utils/swarm/backends/registry.js', () => {
   const executor = {
@@ -50,6 +52,10 @@ mock.module('src/utils/swarm/backends/registry.js', () => {
     getCachedDetectionResult: () => null,
     getResolvedTeammateMode: () => 'in-process',
     ensureBackendsRegistered: async () => {},
+    closeTeammatePane: async (_type: string, id: string) => {
+      paneCloseCalls.push(id)
+      return paneCloseSucceeds
+    },
     getBackendByType: () => ({
       type: 'tmux',
       killPane: async () => true,
@@ -80,6 +86,8 @@ function writeTeamConfig(teamName: string, config: unknown): void {
 
 beforeEach(() => {
   terminateCalls = []
+  paneCloseCalls = []
+  paneCloseSucceeds = true
   previousConfigDir = process.env.BEEGAME_CONFIG_DIR
   previousAnthropicApiKey = process.env.ANTHROPIC_API_KEY
   tempHome = join(
@@ -120,6 +128,27 @@ afterEach(() => {
 })
 
 describe('Agent Teams lifecycle', () => {
+  test('TeamDelete closes idle panes and retains metadata when closing fails', async () => {
+    const { TeamDeleteTool } = await import('@bee-game-studio/builtin-tools/tools/TeamDeleteTool/TeamDeleteTool.js')
+    writeTeamConfig('idle', {
+      name: 'idle', createdAt: Date.now(), leadAgentId: 'team-lead@idle',
+      members: [{
+        agentId: 'idle-worker@idle', name: 'idle-worker', isActive: false,
+        joinedAt: Date.now(), tmuxPaneId: '%idle', backendType: 'tmux',
+        cwd: tempHome, subscriptions: [],
+      }],
+    })
+    state.teamContext = { teamName: 'idle' }
+    const context = { getAppState: () => state, setAppState: setState } as any
+    paneCloseSucceeds = false
+    await expect(TeamDeleteTool.call({}, context, undefined as any, undefined as any)).rejects.toThrow('cleanup incomplete')
+    expect(paneCloseCalls).toEqual(['%idle'])
+    expect(readTeamConfig('idle').members).toHaveLength(1)
+    paneCloseSucceeds = true
+    const result = await TeamDeleteTool.call({}, context, undefined as any, undefined as any)
+    expect(result.data.success).toBe(true)
+    expect(paneCloseCalls).toEqual(['%idle', '%idle'])
+  })
   test('runs TeamCreate -> spawn -> TaskUpdate -> SendMessage -> TeamDelete', async () => {
     const { TeamCreateTool } = await import(
       '@bee-game-studio/builtin-tools/tools/TeamCreateTool/TeamCreateTool.js'

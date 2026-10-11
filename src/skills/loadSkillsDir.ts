@@ -63,7 +63,6 @@ import { isRestrictedToPluginOnly } from '../utils/settings/pluginOnlyPolicy.js'
 import { HooksSchema, type HooksSettings } from '../utils/settings/types.js'
 import { createSignal } from '../utils/signal.js'
 import { registerMCPSkillBuilders } from './mcpSkillBuilders.js'
-import { getNativeBuiltinSkillsDirectory } from './builtinSkillsDirectory.js'
 
 export type LoadedFrom =
   | 'commands_DEPRECATED'
@@ -639,10 +638,6 @@ async function loadSkillsFromCommandsDir(
 export const getSkillDirCommands = memoize(
   async (cwd: string): Promise<Command[]> => {
     const userSkillsDir = join(getClaudeConfigHomeDir(), 'skills')
-    // Isolated BeeGame tasks load only the user-selected skill files. Their
-    // other user/project settings remain disabled by --setting-sources ''.
-    const nativeSkillsDir = process.env.BEEGAME_NATIVE_SKILLS_DIR
-    const nativeBuiltinSkillsDir = getNativeBuiltinSkillsDirectory()
     const managedSkillsDir = join(getManagedFilePath(), '.claude', 'skills')
     const projectSkillsDirs = getProjectDirsUpToHome('skills', cwd)
 
@@ -684,8 +679,6 @@ export const getSkillDirCommands = memoize(
     const [
       managedSkills,
       userSkills,
-      nativeSkills,
-      nativeBuiltinSkills,
       projectSkillsNested,
       additionalSkillsNested,
       legacyCommands,
@@ -695,12 +688,6 @@ export const getSkillDirCommands = memoize(
         : loadSkillsFromSkillsDir(managedSkillsDir, 'policySettings'),
       isSettingSourceEnabled('userSettings') && !skillsLocked
         ? loadSkillsFromSkillsDir(userSkillsDir, 'userSettings')
-        : Promise.resolve([]),
-      nativeSkillsDir && !skillsLocked
-        ? loadSkillsFromSkillsDir(nativeSkillsDir, 'userSettings')
-        : Promise.resolve([]),
-      nativeBuiltinSkillsDir && !skillsLocked
-        ? loadSkillsFromSkillsDir(nativeBuiltinSkillsDir, 'userSettings')
         : Promise.resolve([]),
       projectSettingsEnabled
         ? Promise.all(
@@ -730,8 +717,6 @@ export const getSkillDirCommands = memoize(
     const allSkillsWithPaths = [
       ...managedSkills,
       ...userSkills,
-      ...nativeSkills,
-      ...nativeBuiltinSkills,
       ...projectSkillsNested.flat(),
       ...additionalSkillsNested.flat(),
       ...legacyCommands,

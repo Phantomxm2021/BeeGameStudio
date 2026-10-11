@@ -1,6 +1,7 @@
 import { lstat, mkdir, realpath } from 'node:fs/promises'
 import { isIP } from 'node:net'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
+import type { StandardCliModelType } from './standard-cli-provider'
 
 const within = (root: string, path: string) => {
   const part = relative(root, path)
@@ -16,6 +17,9 @@ export type NativeTaskAccessInput = {
   readOnlyPaths?: readonly string[]
   writablePaths?: readonly string[]
   allowWorkingFiles?: boolean
+  /** Exact public CLI cache for this session, read-only to task tools. */
+  toolResultsDirectory?: string
+  modelType?: StandardCliModelType
 }
 
 type TaskPermission =
@@ -56,9 +60,6 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
   const temporaryPath = resolve(root, '.native-tmp')
   await mkdir(temporaryPath, { recursive: true, mode: 0o700 })
   if (await realpath(temporaryPath) !== temporaryPath) throw new Error('Invalid native task temporary directory')
-  const toolResultsPath = resolve(root, '.native-tool-results')
-  await mkdir(toolResultsPath, { recursive: true, mode: 0o700 })
-  if (await realpath(toolResultsPath) !== toolResultsPath) throw new Error('Invalid native tool result directory')
   const protectedPaths = [...(input.readOnlyPaths ?? []), '.claude', '.git', '.native-tool-results']
     .map(path => resolve(root, path))
   const writable = (input.writablePaths ?? []).map(path => resolve(root, path))
@@ -71,6 +72,7 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
     '/private/etc', '/System', '/Library/Apple', '/Library/Developer', '/dev',
     '/opt/homebrew', process.execPath]
   const settings = {
+    ...(input.modelType ? { modelType: input.modelType } : {}),
     disableAllHooks: true,
     permissions: {
       // Explicit ask rules also apply to normally auto-approved file reads and
@@ -89,7 +91,8 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
       filesystem: {
         denyRead: ['/'], allowRead: [root, ...systemReadPaths,
           ...(skillsDirectory ? [skillsDirectory] : []),
-          ...(builtinSkillsDirectory ? [builtinSkillsDirectory] : [])],
+          ...(builtinSkillsDirectory ? [builtinSkillsDirectory] : []),
+          ...(input.toolResultsDirectory ? [input.toolResultsDirectory] : [])],
         allowWrite: [root], denyWrite: [...protectedPaths, ...(!input.allowWorkingFiles ? [root] : [])],
       },
     },
@@ -158,7 +161,7 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
       return deny(`Invalid ${fileKey}: expected a file path string.`)
     const writing = ['Write', 'Edit', 'NotebookEdit'].includes(name)
     const path = resolve(root, args[fileKey] ?? '.')
-    if (!within(root, path) && (writing || ![skillsDirectory, builtinSkillsDirectory]
+    if (!within(root, path) && (writing || ![skillsDirectory, builtinSkillsDirectory, input.toolResultsDirectory]
       .some(directory => directory && within(directory, path))))
       return deny(`Path ${JSON.stringify(path)} is outside this task workspace. Check the path against the working directory; no file was changed.`)
     if (name === 'Glob' && (typeof args.pattern !== 'string' || isAbsolute(args.pattern) ||
@@ -177,11 +180,7 @@ export async function createNativeTaskAccess(input: NativeTaskAccessInput) {
     flags: ['--permission-mode', 'default', '--setting-sources', '',
       '--strict-mcp-config', '--settings', JSON.stringify(settings)],
     // Shell/MCP/LSP children do not need the parent model's credentials.
-    environment: { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', ...nativeTaskToolEnvironment(temporaryPath),
-      ...(skillsDirectory ? { BEEGAME_NATIVE_SKILLS_DIR: skillsDirectory } : {}),
-      ...(builtinSkillsDirectory ? { BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: builtinSkillsDirectory } : {}),
-      BEEGAME_NATIVE_BACKGROUND_PERMISSIONS: '1',
-      BEEGAME_NATIVE_TOOL_RESULTS_DIR: toolResultsPath,
+    environment: { BGS_SUBPROCESS_ENV_SCRUB: '1', ...nativeTaskToolEnvironment(temporaryPath),
     },
   }
 }

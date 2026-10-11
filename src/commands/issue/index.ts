@@ -354,7 +354,7 @@ const issue: Command = {
         // to ~/.claude/issue-drafts/ and tell the user where to find it.
         const MAX_URL_BODY = 4096
         const sessionSummary = getTranscriptSummary()
-        const fullBodyText = `## Context from Claude Code session\n\n${sessionSummary}`
+        const fullBodyText = `## Context from BGS session\n\n${sessionSummary}`
 
         let bodyText = fullBodyText
         let draftPath: string | null = null
@@ -439,7 +439,7 @@ const issue: Command = {
       // Build rich body: session context + template (if present) + errors
       const sessionSummary = getTranscriptSummary(5)
       const bodyParts: string[] = [
-        '## Context from Claude Code session',
+        '## Context from BGS session',
         '',
         sessionSummary,
       ]
@@ -449,7 +449,7 @@ const issue: Command = {
       bodyParts.push(
         '',
         '---',
-        '_Created via `/issue` command in Claude Code._',
+        '_Created via `/issue` command in BGS._',
       )
       const body = bodyParts.join('\n')
 

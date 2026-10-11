@@ -73,12 +73,12 @@ export function assertSubscriptionBaseUrl(url: string): void {
  * alongside OpenAI-compat configuration.
  *
  * This prevents silent credential confusion when a user has both
- * ANTHROPIC_API_KEY and OPENAI_API_KEY / CLAUDE_CODE_USE_OPENAI set.
+ * ANTHROPIC_API_KEY and OPENAI_API_KEY / BGS_USE_OPENAI set.
  * The warning is informational — the calling code decides what to do.
  */
 export function assertNoAnthropicEnvForOpenAI(): void {
   const hasOpenAIMode =
-    process.env['CLAUDE_CODE_USE_OPENAI'] === '1' ||
+    process.env['BGS_USE_OPENAI'] === '1' ||
     Boolean(process.env['OPENAI_API_KEY'])
   const hasAnthropicKey = Boolean(process.env['ANTHROPIC_API_KEY'])
 

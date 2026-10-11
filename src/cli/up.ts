@@ -4,10 +4,10 @@ import { spawnSync } from 'child_process'
 import { findGitRoot } from '../utils/git.js'
 
 /**
- * `claude up` — run the "# claude up" section from the nearest CLAUDE.md.
+ * `bee-game-studio up` — run the "# bee-game-studio up" section from the nearest CLAUDE.md.
  *
  * Walks up from CWD looking for CLAUDE.md files, extracts the section
- * under the `# claude up` heading, and executes it as a shell script.
+ * under the `# bee-game-studio up` heading, and executes it as a shell script.
  *
  * ANT-only command (USER_TYPE === "ant").
  */
@@ -24,7 +24,7 @@ export async function up(): Promise<void> {
       const content = readFileSync(claudeMdPath, 'utf-8')
       upSection = extractUpSection(content)
       if (upSection) {
-        console.log(`Found "# claude up" in ${claudeMdPath}`)
+        console.log(`Found "# bee-game-studio up" in ${claudeMdPath}`)
         break
       }
     } catch {
@@ -34,9 +34,9 @@ export async function up(): Promise<void> {
 
   if (!upSection) {
     console.log(
-      'No "# claude up" section found in CLAUDE.md.\n' +
+      'No "# bee-game-studio up" section found in CLAUDE.md.\n' +
         'Add a section like:\n\n' +
-        '  # claude up\n' +
+        '  # bee-game-studio up\n' +
         '  ```bash\n' +
         '  npm install\n' +
         '  npm run build\n' +
@@ -55,16 +55,16 @@ export async function up(): Promise<void> {
   })
 
   if (result.status !== 0) {
-    console.error(`\nclaude up failed with exit code ${result.status}`)
+    console.error(`\nbee-game-studio up failed with exit code ${result.status}`)
     process.exitCode = result.status ?? 1
   } else {
-    console.log('\nclaude up completed successfully.')
+    console.log('\nbee-game-studio up completed successfully.')
   }
 }
 
 /**
- * Extract the content under "# claude up" heading from markdown.
- * Returns the text between `# claude up` and the next `#` heading (or EOF).
+ * Extract the content under "# bee-game-studio up" heading from markdown.
+ * Returns the text between `# bee-game-studio up` and the next `#` heading (or EOF).
  * Strips fenced code block markers if present.
  */
 function extractUpSection(markdown: string): string | null {
@@ -73,7 +73,7 @@ function extractUpSection(markdown: string): string | null {
   const sectionLines: string[] = []
 
   for (const line of lines) {
-    if (/^#\s+claude\s+up\b/i.test(line)) {
+    if (/^#\s+(?:bee-game-studio|bgs|claude)\s+up\b/i.test(line)) {
       inSection = true
       continue
     }

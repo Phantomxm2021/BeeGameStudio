@@ -26,22 +26,23 @@ const isolatedEnvKeys = [
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
   'ANTHROPIC_BASE_URL',
-  'ANTHROPIC_UNIX_SOCKET',
+  'BGS_API_UNIX_SOCKET',
   'CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR',
   'CLAUDE_CODE_OAUTH_TOKEN',
   'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR',
-  'CLAUDE_CODE_SIMPLE',
-  'CLAUDE_CODE_USE_BEDROCK',
-  'CLAUDE_CODE_USE_FOUNDRY',
-  'CLAUDE_CODE_USE_GEMINI',
-  'CLAUDE_CODE_USE_GROK',
-  'CLAUDE_CODE_USE_OPENAI',
-  'CLAUDE_CODE_USE_VERTEX',
+  'BGS_SIMPLE',
+  'BGS_USE_BEDROCK',
+  'BGS_USE_FOUNDRY',
+  'BGS_USE_GEMINI',
+  'BGS_USE_GROK',
+  'BGS_USE_OPENAI',
+  'BGS_USE_VERTEX',
   'DISABLE_INSTALL_GITHUB_APP_COMMAND',
   'DISABLE_LOGIN_COMMAND',
   'DISABLE_LOGOUT_COMMAND',
   'GEMINI_BASE_URL',
   'OPENAI_BASE_URL',
+  'BEEGAME_MODEL_TYPE',
 ] as const
 
 function clearIsolatedEnv(): void {
@@ -76,18 +77,19 @@ const { clearCommandsCache, getCommands, meetsAvailabilityRequirement } =
 const { isAnthropicAuthEnabled, isUsing3PServices } = await import(
   '../../auth.js'
 )
+const { getAPIProvider } = await import('../providers.js')
 const { default: fast } = await import('../../../commands/fast/index.js')
 const { default: installGitHubApp } = await import(
   '../../../commands/install-github-app/index.js'
 )
 
 const envProviderCases = [
-  ['CLAUDE_CODE_USE_BEDROCK', 'bedrock'],
-  ['CLAUDE_CODE_USE_VERTEX', 'vertex'],
-  ['CLAUDE_CODE_USE_FOUNDRY', 'foundry'],
-  ['CLAUDE_CODE_USE_OPENAI', 'openai'],
-  ['CLAUDE_CODE_USE_GEMINI', 'gemini'],
-  ['CLAUDE_CODE_USE_GROK', 'grok'],
+  ['BGS_USE_BEDROCK', 'bedrock'],
+  ['BGS_USE_VERTEX', 'vertex'],
+  ['BGS_USE_FOUNDRY', 'foundry'],
+  ['BGS_USE_OPENAI', 'openai'],
+  ['BGS_USE_GEMINI', 'gemini'],
+  ['BGS_USE_GROK', 'grok'],
 ] as const
 
 beforeEach(() => {
@@ -104,6 +106,11 @@ afterAll(() => {
 })
 
 describe('Console command availability', () => {
+  test('private BGS env cannot override the normal native provider settings', () => {
+    process.env.BEEGAME_MODEL_TYPE = 'openai'
+    expect(getAPIProvider({ modelType: 'gemini' })).toBe('gemini')
+    expect(getAPIProvider({})).toBe('firstParty')
+  })
   for (const modelType of ['openai', 'gemini', 'grok'] as const) {
     test(`rejects settings modelType=${modelType}`, () => {
       setModelType(modelType)

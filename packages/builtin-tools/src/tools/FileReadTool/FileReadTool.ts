@@ -38,7 +38,6 @@ import {
   suggestPathUnderCwd,
 } from 'src/utils/file.js'
 import { logFileOperation } from 'src/utils/fileOperationAnalytics.js'
-import { inspectedDraftHash } from 'src/utils/fileStateCache.js'
 import { formatFileSize } from 'src/utils/format.js'
 import { getFsImplementation } from 'src/utils/fsOperations.js'
 import {
@@ -337,10 +336,11 @@ export type Output = z.infer<OutputSchema>
 export const FileReadTool = buildTool({
   name: FILE_READ_TOOL_NAME,
   searchHint: 'read files, images, PDFs, notebooks',
-  // Output is bounded by maxTokens (validateContentTokens). Results exceeding
-  // 100KB are persisted to disk (reducing memory pressure in long sessions)
-  // rather than kept in the message array indefinitely.
-  maxResultSizeChars: 100_000,
+  // Read already enforces its byte/token limits before returning source text.
+  // Archiving the formatted result makes reading that archive archive it again,
+  // changing line coordinates and hiding text the read cache says was exposed.
+  // Oversized files still require offset/limit against the original source.
+  maxResultSizeChars: Infinity,
   strict: true,
   async description() {
     return DESCRIPTION
@@ -591,7 +591,7 @@ export const FileReadTool = buildTool({
     // Discover skills from this file's path (fire-and-forget, non-blocking)
     // Skip in simple mode - no skills available
     const cwd = getCwd()
-    if (!isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+    if (!isEnvTruthy(process.env.BGS_SIMPLE)) {
       const newSkillDirs = await discoverSkillDirsForPaths([fullFilePath], cwd)
       if (newSkillDirs.length > 0) {
         // Store discovered dirs for attachment display
@@ -1039,17 +1039,11 @@ async function callInner(
 
   await validateContentTokens(content, ext, maxTokens)
 
-  const previous = readFileState.get(fullFilePath)
-  const inspectedHash = context.beegameReviewDocuments?.includes(path.basename(fullFilePath))
-    ? lineOffset === 0 && lineCount >= totalLines ? inspectedDraftHash(content)
-      : previous?.timestamp === Math.floor(mtimeMs) ? previous.beegameInspectedHash : undefined
-    : undefined
   readFileState.set(fullFilePath, {
     content,
     timestamp: Math.floor(mtimeMs),
     offset,
     limit,
-    ...(inspectedHash ? { beegameInspectedHash: inspectedHash } : {}),
   })
   context.nestedMemoryAttachmentTriggers?.add(fullFilePath)
 

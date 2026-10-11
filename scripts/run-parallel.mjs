@@ -5,6 +5,12 @@ if (scripts.length === 0) {
   process.exit(0)
 }
 
-for (const script of scripts) {
-  spawn(process.execPath, [script], { stdio: 'inherit', shell: false })
-}
+const results = await Promise.all(scripts.map(script => new Promise(resolve => {
+  const child = spawn(process.execPath, [script], { stdio: 'inherit', shell: false })
+  child.once('error', error => {
+    console.error(`Failed to start ${script}: ${error.message}`)
+    resolve(1)
+  })
+  child.once('exit', (code, signal) => resolve(code ?? (signal ? 1 : 0)))
+})))
+process.exitCode = results.find(code => code !== 0) ?? 0

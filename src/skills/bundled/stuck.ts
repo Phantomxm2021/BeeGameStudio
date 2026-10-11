@@ -1,15 +1,15 @@
 import { registerBundledSkill } from '../bundledSkills.js'
 
-// Prompt text contains `ps` commands as instructions for Claude to run,
+// Prompt text contains `ps` commands as instructions for BGS to run,
 // not commands this file executes.
 // eslint-disable-next-line custom-rules/no-direct-ps-commands
-const STUCK_PROMPT = `# /stuck — diagnose frozen/slow Claude Code sessions
+const STUCK_PROMPT = `# /stuck — diagnose frozen/slow BGS sessions
 
-The user thinks another Claude Code session on this machine is frozen, stuck, or very slow. Investigate the relevant sessions and report the evidence to the user.
+The user thinks another BGS session on this machine is frozen, stuck, or very slow. Investigate the relevant sessions and report the evidence to the user.
 
 ## What to look for
 
-Scan for other Claude Code processes (excluding the current one — PID is in \`process.pid\` but for shell commands just exclude the PID you see running this prompt). Process names are typically \`claude\` (installed) or \`cli\` (native dev build).
+Scan for other BGS processes, excluding this session. The main process title is BGS; script builds can appear as bun/node with a BGS CLI entry path. A name match alone is not proof of ownership.
 
 Signs of a stuck session:
 - **High CPU (≥90%) sustained** — likely an infinite loop. Sample twice, 1-2s apart, to confirm it's not a transient spike.
@@ -21,11 +21,11 @@ Signs of a stuck session:
 
 ## Investigation steps
 
-1. **List all Claude Code processes** (macOS/Linux):
+1. **List candidate BGS processes** (macOS/Linux):
    \`\`\`
-   ps -axo pid=,pcpu=,rss=,etime=,state=,comm=,command= | grep -E '(claude|cli)' | grep -v grep
+   ps -axo pid=,pcpu=,rss=,etime=,state=,comm=,command= | grep -E '(BGS|bee-game-studio|ccb|cli-(bun|node)|entrypoints/cli)' | grep -v grep
    \`\`\`
-   Filter to rows where \`comm\` is \`claude\` or (\`cli\` AND the command path contains "claude").
+   Verify the executable/entry path belongs to the BGS installation or checkout. Do not treat an unrelated Claude, Bun or Node process as BGS.
 
 2. **For anything suspicious**, gather more context:
    - Child processes: \`pgrep -lP <pid>\`
@@ -56,7 +56,7 @@ export function registerStuckSkill(): void {
   registerBundledSkill({
     name: 'stuck',
     description:
-      '[ANT-ONLY] Investigate frozen/stuck/slow Claude Code sessions on this machine and explain the diagnostic evidence.',
+      '[ANT-ONLY] Investigate frozen/stuck/slow BGS sessions on this machine and explain the diagnostic evidence.',
     userInvocable: true,
     async getPromptForCommand(args) {
       let prompt = STUCK_PROMPT

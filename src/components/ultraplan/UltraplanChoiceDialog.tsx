@@ -2,7 +2,7 @@ import * as React from 'react';
 import { join } from 'path';
 import { stat, writeFile } from 'fs/promises';
 import figures from 'figures';
-import { Box, Text, useInput, wrapText } from '@anthropic/ink';
+import { Box, Text, useInput, wrapText } from '@bee-game-studio/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Select } from '../CustomSelect/select.js';
 import { Dialog } from '../design-system/Dialog.js';
@@ -139,7 +139,7 @@ export function UltraplanChoiceDialog({
             setMessages(prev => [
               ...prev,
               createSystemMessage(
-                `Previous session saved · resume with: ccb --resume ${previousSessionId}`,
+                `Previous session saved · resume with: bee-game-studio --resume ${previousSessionId}`,
                 'suggestion',
               ),
             ]);

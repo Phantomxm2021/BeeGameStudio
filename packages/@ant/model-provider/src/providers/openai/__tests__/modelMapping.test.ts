@@ -7,9 +7,9 @@ describe('resolveOpenAIModel', () => {
     OPENAI_DEFAULT_HAIKU_MODEL: process.env.OPENAI_DEFAULT_HAIKU_MODEL,
     OPENAI_DEFAULT_SONNET_MODEL: process.env.OPENAI_DEFAULT_SONNET_MODEL,
     OPENAI_DEFAULT_OPUS_MODEL: process.env.OPENAI_DEFAULT_OPUS_MODEL,
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
-    ANTHROPIC_DEFAULT_SONNET_MODEL: process.env.ANTHROPIC_DEFAULT_SONNET_MODEL,
-    ANTHROPIC_DEFAULT_OPUS_MODEL: process.env.ANTHROPIC_DEFAULT_OPUS_MODEL,
+    BGS_DEFAULT_FAST_MODEL: process.env.BGS_DEFAULT_FAST_MODEL,
+    BGS_DEFAULT_BALANCED_MODEL: process.env.BGS_DEFAULT_BALANCED_MODEL,
+    BGS_DEFAULT_STRONG_MODEL: process.env.BGS_DEFAULT_STRONG_MODEL,
   }
 
   beforeEach(() => {
@@ -17,9 +17,9 @@ describe('resolveOpenAIModel', () => {
     delete process.env.OPENAI_DEFAULT_HAIKU_MODEL
     delete process.env.OPENAI_DEFAULT_SONNET_MODEL
     delete process.env.OPENAI_DEFAULT_OPUS_MODEL
-    delete process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL
-    delete process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
-    delete process.env.ANTHROPIC_DEFAULT_OPUS_MODEL
+    delete process.env.BGS_DEFAULT_FAST_MODEL
+    delete process.env.BGS_DEFAULT_BALANCED_MODEL
+    delete process.env.BGS_DEFAULT_STRONG_MODEL
   })
 
   afterEach(() => {
@@ -31,18 +31,18 @@ describe('resolveOpenAIModel', () => {
     expect(resolveOpenAIModel('claude-sonnet-4-6')).toBe('my-custom-model')
   })
 
-  test('ANTHROPIC_DEFAULT_SONNET_MODEL overrides default map', () => {
-    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = 'my-sonnet'
+  test('BGS_DEFAULT_BALANCED_MODEL overrides default map', () => {
+    process.env.BGS_DEFAULT_BALANCED_MODEL = 'my-sonnet'
     expect(resolveOpenAIModel('claude-sonnet-4-6')).toBe('my-sonnet')
   })
 
-  test('ANTHROPIC_DEFAULT_HAIKU_MODEL overrides default map', () => {
-    process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = 'my-haiku'
+  test('BGS_DEFAULT_FAST_MODEL overrides default map', () => {
+    process.env.BGS_DEFAULT_FAST_MODEL = 'my-haiku'
     expect(resolveOpenAIModel('claude-haiku-4-5-20251001')).toBe('my-haiku')
   })
 
-  test('ANTHROPIC_DEFAULT_OPUS_MODEL overrides default map', () => {
-    process.env.ANTHROPIC_DEFAULT_OPUS_MODEL = 'my-opus'
+  test('BGS_DEFAULT_STRONG_MODEL overrides default map', () => {
+    process.env.BGS_DEFAULT_STRONG_MODEL = 'my-opus'
     expect(resolveOpenAIModel('claude-opus-4-6')).toBe('my-opus')
   })
 

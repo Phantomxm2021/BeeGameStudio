@@ -9,7 +9,7 @@ import { FallbackToolUseErrorMessage } from 'src/components/FallbackToolUseError
 import { HighlightedCode } from 'src/components/HighlightedCode.js';
 import { MessageResponse } from 'src/components/MessageResponse.js';
 import { NotebookEditToolUseRejectedMessage } from 'src/components/NotebookEditToolUseRejectedMessage.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { FilePathLink } from 'src/components/FilePathLink.js';
 import type { Tools } from 'src/Tool.js';
 import { getDisplayPath } from 'src/utils/file.js';

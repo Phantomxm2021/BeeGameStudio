@@ -9,9 +9,9 @@ Use for a multi-step game implementation once the relevant design or feature req
 
 ## Establish the source of truth
 
-1. Read the user request and the relevant project documents. Inspect the real resource manifest, scene/UI index and documents, code, and tests that the implementation will consume. Do not plan from a chat summary when the source files are available.
+1. Read the user request and the relevant project documents. Inspect the actual content, resource references, code and tests that the implementation will consume, including manifests or Scene/UI indexes when the project uses them. Do not plan from a chat summary when the source files are available.
 2. List concrete outcomes: what the player can do, what the authored scene/UI data must show, and which devices or input modes matter. Keep the requested first release small; do not invent more levels, screens, or assets to fill a template.
-3. Mark ownership boundaries. Authored JSON/YAML defines content, layout, IDs, transforms, and resource references; the selected game technology loads and interprets it. The plan must not silently move those authored decisions into hard-coded runtime layout.
+3. Mark ownership boundaries. Preserve the project's actual content authority: selected JSON/YAML, engine scenes/assets or framework source. Do not duplicate an existing layout or move its decisions into another runtime copy; do not invent a separate BGS data layer for a native engine or DOM project.
 4. Check that the inputs agree. If a required interface, asset ID, screen, or rule is missing or contradictory, name the exact source and gap. Correct the authoritative artifact if the task permits; otherwise identify the decision needed. Do not plan code around a known inconsistency.
 
 ## Decompose the implementation

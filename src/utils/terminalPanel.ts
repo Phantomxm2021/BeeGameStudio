@@ -17,7 +17,7 @@
 
 import { spawn, spawnSync } from 'child_process'
 import { getSessionId } from '../bootstrap/state.js'
-import { instances } from '@anthropic/ink'
+import { instances } from '@bee-game-studio/ink'
 import { registerCleanup } from './cleanupRegistry.js'
 import { pwd } from './cwd.js'
 import { logForDebugging } from './debug.js'

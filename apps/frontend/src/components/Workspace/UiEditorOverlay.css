@@ -3,8 +3,6 @@
 .ui-editor-overlay button,.ui-editor-overlay input,.ui-editor-overlay select { font: inherit; color: inherit; }
 .ui-editor-floating-toolbar button:hover:not(:disabled) { background: #ffffff0d; }
 .ui-editor-main { position: relative; min-height: 0; flex: 1; overflow: hidden; background: #3c3f43; }
-.ui-editor-dropdown-arrow { position: absolute; right: 8px; transform: rotate(90deg); }
-.ui-editor-node[data-role="tab"][data-selected="true"] { box-shadow: inset 0 -3px currentColor; }
 .ui-editor-inspector textarea { width: 100%; min-width: 0; padding: 8px; border: 1px solid #ffffff18; border-radius: 6px; background: #111318; color: #d4d7df; }
 .ui-editor-inspector-content > * { flex-shrink: 0; }
 .ui-editor-panel { position: absolute; top: 16px; bottom: 48px; z-index: 10; width: var(--ui-panel-width); min-height: 0; overflow: hidden; border: 1px solid #ffffff18; border-radius: 13px; background: linear-gradient(145deg, #ffffff08, #ffffff00 45%), #111115b8; box-shadow: inset 0 1px #ffffff12, 0 8px 28px #0003, 0 1px 3px #0003; backdrop-filter: blur(24px) saturate(125%); -webkit-backdrop-filter: blur(24px) saturate(125%); transition: transform .24s ease, visibility .24s; }
@@ -24,10 +22,6 @@
 .ui-editor-asset-card:hover,.ui-editor-asset-card.selected { border-color: #55aaff; background: #203347; color: #fff; }
 .ui-editor-viewport-hints kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 19px; height: 20px; padding: 0 4px; border: 1px solid #ffffff20; border-radius: 4px; background: #ffffff05; color: #d4d6db; font: inherit; line-height: 1; }
 .ui-editor-notice { position: absolute; left: 20px; bottom: 42px; z-index: 20; max-width: calc(100% - 40px); padding: 8px 12px; border: 1px solid #b7793338; border-radius: 7px; background: #30261fea; color: #eac69c; font-size: 11px; }
-.ui-editor-node[data-role="button"],.ui-editor-node[data-role="dropdown"],.ui-editor-node[data-role="tab"] { border: 1px solid #ffffff26; box-shadow: inset 0 1px #ffffff18; }
-.ui-editor-slider-handle { position: absolute; top: 50%; width: max(10px, 100% / 12); aspect-ratio: 1; border: 1px solid #ffffffb8; border-radius: 50%; translate: -50% -50%; background: #f7f8fb; box-shadow: 0 1px 3px #0009; }
-.ui-editor-toggle-box { display: grid; place-items: center; width: min(24px, 55%); aspect-ratio: 1; border: 1px solid #ffffff32; border-radius: 5px; color: #fff; font-size: 14px; font-style: normal; line-height: 1; box-shadow: inset 0 1px #ffffff18; }
-.ui-editor-node[data-role="panel"] { border: 1px solid #ffffff18; }
 .ui-editor-component-gizmo { position: absolute; z-index: 998; width: 22px; height: 22px; display: grid; place-items: center; padding: 0; border: 1px solid #d9edff; border-radius: 4px; background: #2878bdde; box-shadow: 0 1px 4px #0008; color: #fff; translate: -50% -50%; cursor: pointer; }
 .ui-editor-selection-gizmo { position: absolute; z-index: 999; border: 1px solid #55aaff; box-shadow: 0 0 0 1px #09090b80; pointer-events: none; transform-origin: center; }
 .ui-editor-selection-gizmo button { position: absolute; display: grid; place-items: center; padding: 0; border: 1px solid #eff8ff; background: #318ee0; color: #fff; pointer-events: auto; }
@@ -131,25 +125,8 @@
 .ui-editor-viewport-hints > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .ui-editor-viewport-hints svg { color: #b5bac3; }
 .ui-editor-notice:empty { display: none; }
-.ui-editor-node { box-sizing: border-box; min-width: 1px; min-height: 1px; outline: 1px dashed #8590a24d; }
+.ui-editor-overlay .ui-editor-node { outline: 1px dashed #8590a24d; }
 .ui-editor-node.selected { outline: 2px solid #55aaff; outline-offset: -1px; }
-.ui-editor-node > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
-.ui-editor-node > .ui-editor-image { position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; pointer-events: none; }
-.ui-editor-node > .ui-editor-image.tiled { display: block; background-repeat: repeat; background-size: auto; }
-.ui-editor-node > .ui-editor-image.sliced { display: block; border-width: 16px; border-style: solid; border-image-slice: 33 fill; border-image-repeat: stretch; }
-.ui-editor-node[data-role="sprite"] { overflow: hidden; }
-.ui-editor-node[data-role="sprite"] > img { width: auto; max-width: none; height: 100%; object-fit: cover; object-position: left top; }
-.ui-editor-node > span { position: relative; z-index: 1; display: grid; width: 100%; height: 100%; place-items: center; white-space: nowrap; }
-.ui-editor-node > .ui-editor-text { display: flex; white-space: pre-wrap; overflow-wrap: normal; word-break: normal; font: inherit; letter-spacing: inherit; text-transform: none; }
-.ui-editor-slider-preview { position: absolute !important; inset: 0; z-index: 1; display: block !important; width: 100%; height: 100%; pointer-events: none; }
-.ui-editor-slider-track,.ui-editor-slider-fill { position: absolute; top: 50%; left: 0; height: max(4px, 55%); border-radius: 999px; translate: 0 -50%; background-position: center; background-repeat: repeat-x; background-size: auto 100%; }
-.ui-editor-slider-track { width: 100%; background-color: #3f4656; }
-.ui-editor-slider-fill { background-color: #87a9ff; }
-.ui-editor-toggle-preview { position: absolute !important; inset: 0; z-index: 1; display: flex !important; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px; width: 100%; height: 100%; padding: 2px; pointer-events: none; white-space: normal !important; }
-.ui-editor-toggle-preview b { overflow: hidden; width: 100%; color: inherit; font: inherit; font-size: .75em; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
-.ui-editor-toggle-preview.mixed .ui-editor-toggle-box { outline: 1px dashed #ffffff72; outline-offset: 1px; }
-.ui-editor-particle-preview { position: absolute !important; inset: 0; z-index: 1; display: block !important; width: 100%; height: 100%; pointer-events: none; overflow: hidden; }
-.ui-editor-particle-preview i { position: absolute; width: 9px; aspect-ratio: 1; border-radius: 50%; translate: -50% -50%; background-position: center; background-size: contain; box-shadow: 0 0 8px currentColor; }
 .ui-editor-component-gizmo:hover,.ui-editor-component-gizmo.selected { background: #4da3ed; box-shadow: 0 0 0 2px #55aaff55, 0 1px 4px #0008; }
 .ui-editor-move-handle { left: 50%; top: 50%; width: 25px; height: 25px; border-radius: 50% !important; translate: -50% -50%; cursor: move !important; }
 .ui-editor-scale-handle { right: -7px; bottom: -7px; width: 13px; height: 13px; border-radius: 2px !important; cursor: nwse-resize !important; }

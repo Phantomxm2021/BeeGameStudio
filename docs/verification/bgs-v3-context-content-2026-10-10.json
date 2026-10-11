@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "date": "2026-10-10",
+  "sourceRoot": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+  "scope": [
+    "V3-04",
+    "V3-05 partial",
+    "V3-06 first-build correction"
+  ],
+  "implementation": {
+    "V3_04": "implemented: local context, derived read-only source pointers, native Skill lifecycle evidence; correct professional application and paid cost improvement unproven",
+    "V3_05": "scoped structure/layout/resource checks implemented; V3 batch-binding execution/source adaptation pending",
+    "V3_06": "first-build output ordering corrected; target-runtime, package and actual formal-data consumption acceptance pending",
+    "V3_02": "real PostgreSQL migration execution, cross-process CAS/writer and DB permission verification still pending"
+  },
+  "noPaidCalls": true,
+  "unchangedScopes": [
+    "Claude Code native source",
+    "real generated projects",
+    "existing raw paid-run evidence",
+    "production services/database",
+    "default legacy project creation"
+  ],
+  "filesSha256": {
+    "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts": "a1c1e1ac4879120397f749430f441b7607a2c66d67c554a3d615993a06012324",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/context.ts": "7a773a0e0c0197d5bafe9dfe20da5e97dbb01b9788fa7dd20f274903d7040d16",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/content-checks.ts": "0485f42f9801d33a95666cfb4de886f6ff51d77fd21378ddab3c0f71bc01f534",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/checks.ts": "8c3c1fa88bf140b505c13991b042c6831f98328b0380ab9c717957b459f3edb8",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/execution.ts": "4d79b50ccdf4123136c9025bb4bf07b15eae530a26aa5ad265e50750eb3c6fc4",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts": "dd8f0a18093b35e3da641c7e6d78dd0a3cee2d998c9bb6dc7d5c9ec4e76135bd",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/context-content.test.ts": "4801741f8e74f571027ad68311a96b38dbc0988fc343a22fa8f18f5d5c83f759",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/workflow-v3.test.ts": "fec89afbbb6a3c06d8ea7ff42511632f0df1e0505384090e16d5119888d0d60e",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/native-integration.test.ts": "6e7788268d5f2300a5a365948ea96dc9818d8ce14fe2af9a57ebd6013ac6de68",
+    "packages/agent-workflow-server/src/beegame/design-layout-check.ts": "efedfff7c80fe5454adf3cee26dd6d52103494fc6884035840ef53b10a1efea2",
+    "packages/agent-workflow-server/src/beegame/asset-contract-audit.ts": "4e5899714de574f984639e4151be7b2b30af01a86c52308812e44e1ee5a45d67"
+  },
+  "tests": {
+    "regression": {
+      "passed": 147,
+      "failed": 0,
+      "assertions": 933,
+      "files": 11,
+      "log": "/private/tmp/bgs-v3-continuation-regression.log",
+      "coverage": [
+        "existing single-process state/store and stage isolation",
+        "V3 source API and native contexts",
+        "required Skill evidence (load/fail/missing)",
+        "scoped saved UI overflow and original orientation",
+        "linked Scene/underlay missing and byte drift",
+        "manifest module/member versions and corrupted resource",
+        "unrelated content/required resource does not block scoped checks",
+        "first build creates outputs; exit zero without artifacts remains unverified",
+        "legacy binding, content package and acceptance consumers"
+      ]
+    },
+    "realNativeCli": {
+      "passed": 2,
+      "failed": 0,
+      "assertions": 25,
+      "log": "/private/tmp/bgs-v3-skills-native.log",
+      "provider": "deterministic localhost fake provider, no paid model",
+      "coverage": [
+        "normal native Write/final lifecycle",
+        "native Skill loading body -> Write -> actual saved-file host checks",
+        "normal final reply retained, no authorBatch/private legacy task fields"
+      ]
+    },
+    "focusedTypes": {
+      "passed": true,
+      "files": [
+        "state.ts",
+        "context.ts",
+        "checks.ts"
+      ],
+      "log": "/private/tmp/bgs-v3-continuation-types-final.log",
+      "note": "Not full repository typecheck or production build"
+    },
+    "diffWhitespace": {
+      "passed": true,
+      "files": [
+        "design-layout-check.ts",
+        "asset-contract-audit.ts"
+      ]
+    }
+  },
+  "limits": [
+    "No current-game release or semantic/visual quality proof",
+    "No paid cost comparison; fake provider token usage not a real cost estimate",
+    "Empty resource scope, missing links, deferred visual bounds and provisional resources are not final acceptance",
+    "Source index checks are recorded history, not fresh live validation",
+    "Prior independent suite failures and full type diagnostics were not repaired or declared passed"
+  ],
+  "next": [
+    "V3 source-scoped batch binding and executable capability entry",
+    "actual target-runtime and tested delivery-package/formal-data consumption",
+    "isolated real PostgreSQL permissions/concurrency validation"
+  ]
+}

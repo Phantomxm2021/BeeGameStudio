@@ -5,8 +5,8 @@
 A scrollable container with imperative scroll API, viewport culling, and sticky scroll support.
 
 ```tsx
-import { ScrollBox } from '@anthropic/ink'
-import type { ScrollBoxHandle } from '@anthropic/ink'
+import { ScrollBox } from '@bee-game-studio/ink'
+import type { ScrollBoxHandle } from '@bee-game-studio/ink'
 
 function MessageList({ messages }) {
   const scrollRef = useRef<ScrollBoxHandle>(null)

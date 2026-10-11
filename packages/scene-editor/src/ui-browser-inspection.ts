@@ -3,10 +3,12 @@ import { inspectUiLayout, type UiLayoutInspectionOptions } from './ui-layout-ins
 import { createUiTextMeasurer } from './ui-text-measurement'
 import type { UiResponsiveNode, UiViewport } from './ui-responsive'
 
+import { uiFontKey } from './ui-font-reference'
+
 export type UiBrowserInspectionOptions = Omit<UiLayoutInspectionOptions, 'measureText'> & {
   /** Explicit candidate/system font for nodes without a delivered font reference. */
   fontFamily: (node: UiResponsiveNode) => string
-  /** Already registered FontFaces keyed by the document's font assetRef. */
+  /** Loaded faces keyed by uiFontKey; bare assetRef aliases only the default member. */
   fontFaces?: Readonly<Record<string, FontFace>>
   /** Additional legal labels/counter values; never overwrites authored text. */
   textSamples?: Readonly<Record<string, readonly string[]>>
@@ -27,12 +29,14 @@ export async function inspectUiLayoutInBrowser(nodes: readonly UiResponsiveNode[
       throw new Error(`Text samples must be a nonempty string array: ${id}`)
   }
   const fontFor = (node: UiResponsiveNode) => {
-    const ref = (node.data?.font as { assetRef?: string } | undefined)?.assetRef
+    const selection = node.data?.font as { assetRef?: string; member?: string } | undefined
+    const ref = selection?.assetRef
     if (ref) {
-      const face = fontFaces?.[ref]
+      const face = fontFaces?.[uiFontKey(selection)!]
       if (!face || !document.fonts.has(face) || face.status !== 'loaded')
-        throw new Error(`Load and register the actual FontFace before inspecting ${node.id}: ${ref}`)
-      return { family: face.family, basis: 'registered-font' as const, assetRef: ref }
+        throw new Error(`Load and register the actual FontFace before inspecting ${node.id}: ${ref}${selection?.member ? '/' + selection.member : ''}`)
+      return { family: face.family, basis: 'registered-font' as const, assetRef: ref,
+        ...(selection?.member ? { member: selection.member } : {}) }
     }
     const family = fontFamily(node)
     if (typeof family !== 'string' || !family.trim()) throw new Error(`Choose an explicit candidate font: ${node.id}`)

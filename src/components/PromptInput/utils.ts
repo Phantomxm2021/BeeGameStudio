@@ -2,7 +2,7 @@ import {
   hasUsedBackslashReturn,
   isShiftEnterKeyBindingInstalled,
 } from '../../commands/terminalSetup/terminalSetup.js'
-import type { Key } from '@anthropic/ink'
+import type { Key } from '@bee-game-studio/ink'
 import { getGlobalConfig } from '../../utils/config.js'
 import { env } from '../../utils/env.js'
 /**

@@ -1,6 +1,6 @@
 import figures from 'figures';
 import React, { useState } from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import TextInput from './TextInput.js';
 

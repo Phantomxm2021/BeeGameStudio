@@ -2,7 +2,7 @@ import { registerBundledSkill } from '../bundledSkills.js'
 
 const USE_ARTIFACTS_PROMPT = `# Using Artifacts
 
-Artifacts are public HTML pages uploaded to the configured Bee Game Studio artifact service. Anyone with the link can read them. This is not the local project Artifacts panel, the resource manifest, or game publishing. Upload only when the user asks to share a public page and approves the destination and file.
+Artifacts are public HTML pages uploaded to the explicitly configured artifact hosting service. Anyone with the link can read them. Upload only when the user asks to share a public page and approves the destination and file.
 
 ## When to use artifacts
 
@@ -21,13 +21,13 @@ Artifacts are public HTML pages uploaded to the configured Bee Game Studio artif
 
 ## Before uploading
 
-- Confirm the user requested public sharing; a local delivery error is not such a request.
+- Confirm the user requested public sharing; a local error is not such a request.
 - State the source filename, configured destination domain, public visibility, and 7/30-day lifetime for approval.
-- If the Bee Game Studio artifact endpoint is not configured, do not substitute another hosting service.
+- If the artifact endpoint is not configured, do not substitute another hosting service.
 
 **Do NOT upload:**
 - At task start or a delivery milestone without a sharing request
-- To work around local file, asset-manifest, or validation errors
+- To work around local file or validation errors
 
 ## How to invoke (deferred tool)
 

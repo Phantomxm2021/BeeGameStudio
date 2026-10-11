@@ -1,51 +1,47 @@
-import { z } from 'zod'
+import { array, discriminatedUnion, enum as enumeration, literal, number, object, string } from 'zod'
+import type { z } from 'zod'
 
 export const BEEGAME_PROGRAMMATIC_AUDIO_FORMAT =
   'beegame-programmatic-audio-v1' as const
 
-const oscillatorSourceSchema = z
-  .object({
-    type: z.literal('oscillator'),
-    waveform: z.enum(['sine', 'square', 'triangle', 'sawtooth']),
-    frequency_hz: z.number().finite().positive().max(24_000),
-    end_frequency_hz: z.number().finite().positive().max(24_000).optional(),
+const oscillatorSourceSchema = object({
+    type: literal('oscillator'),
+    waveform: enumeration(['sine', 'square', 'triangle', 'sawtooth']),
+    frequency_hz: number().finite().positive().max(24_000),
+    end_frequency_hz: number().finite().positive().max(24_000).optional(),
   })
   .strict()
 
-const noiseSourceSchema = z
-  .object({
-    type: z.literal('noise'),
-    color: z.enum(['white', 'pink', 'brown']),
+const noiseSourceSchema = object({
+    type: literal('noise'),
+    color: enumeration(['white', 'pink', 'brown']),
   })
   .strict()
 
-const programmaticAudioVoiceSchema = z
-  .object({
-    source: z.discriminatedUnion('type', [
+const programmaticAudioVoiceSchema = object({
+    source: discriminatedUnion('type', [
       oscillatorSourceSchema,
       noiseSourceSchema,
     ]),
-    start_ms: z.number().finite().nonnegative(),
-    duration_ms: z.number().finite().positive(),
-    gain: z.number().finite().min(0).max(1),
-    attack_ms: z.number().finite().nonnegative().optional(),
-    release_ms: z.number().finite().nonnegative().optional(),
-    pan: z.number().finite().min(-1).max(1).optional(),
+    start_ms: number().finite().nonnegative(),
+    duration_ms: number().finite().positive(),
+    gain: number().finite().min(0).max(1),
+    attack_ms: number().finite().nonnegative().optional(),
+    release_ms: number().finite().nonnegative().optional(),
+    pan: number().finite().min(-1).max(1).optional(),
   })
   .strict()
 
-const programmaticAudioCueSchema = z
-  .object({
-    id: z.string().trim().min(1),
-    duration_ms: z.number().finite().positive().max(300_000),
-    loop: z
-      .object({
-        start_ms: z.number().finite().nonnegative(),
-        end_ms: z.number().finite().positive(),
+const programmaticAudioCueSchema = object({
+    id: string().trim().min(1),
+    duration_ms: number().finite().positive().max(300_000),
+    loop: object({
+        start_ms: number().finite().nonnegative(),
+        end_ms: number().finite().positive(),
       })
       .strict()
       .optional(),
-    voices: z.array(programmaticAudioVoiceSchema).min(1).max(256),
+    voices: array(programmaticAudioVoiceSchema).min(1).max(256),
   })
   .strict()
   .superRefine((cue, context) => {
@@ -77,10 +73,9 @@ const programmaticAudioCueSchema = z
     })
   })
 
-export const beeGameProgrammaticAudioResourceSchema = z
-  .object({
-    format: z.literal(BEEGAME_PROGRAMMATIC_AUDIO_FORMAT),
-    cues: z.array(programmaticAudioCueSchema).min(1).max(32),
+export const beeGameProgrammaticAudioResourceSchema = object({
+    format: literal(BEEGAME_PROGRAMMATIC_AUDIO_FORMAT),
+    cues: array(programmaticAudioCueSchema).min(1).max(32),
   })
   .strict()
   .superRefine((resource, context) => {

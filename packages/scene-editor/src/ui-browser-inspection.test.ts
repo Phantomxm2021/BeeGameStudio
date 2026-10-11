@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { inspectUiLayoutInBrowser } from './ui-browser-inspection'
+import { uiFontKey } from './ui-font-reference'
 
 // Synthetic metrics exercise integration boundaries; the backend browser test
 // separately checks real Canvas/FontFaceSet behavior.
@@ -59,5 +60,20 @@ describe('browser text/layout inspection', () => {
     await expect(inspectUiLayoutInBrowser(nodes(), 'root', { width: 900, height: 500 }, {
       fontFamily: () => '',
     })).rejects.toThrow('explicit candidate')
+  })
+  it('measures the explicit member and refuses an available default as its substitute', async () => {
+    const { registered } = browserFixture()
+    const selection = { assetRef: 'FONT', member: 'fonts/bold.ttf' }
+    const source = nodes().map(node => node.id === 'score' ? { ...node, data: { font: selection } } : node)
+    const regular = { family: 'Regular', status: 'loaded' } as FontFace
+    const bold = { family: 'Bold', status: 'loaded' } as FontFace
+    registered.add(regular); registered.add(bold)
+    await expect(inspectUiLayoutInBrowser(source, 'root', { width: 900, height: 500 }, {
+      fontFamily: () => 'Fallback', fontFaces: { FONT: regular },
+    })).rejects.toThrow('fonts/bold.ttf')
+    const result = await inspectUiLayoutInBrowser(source, 'root', { width: 900, height: 500 }, {
+      fontFamily: () => 'Fallback', fontFaces: { FONT: regular, [uiFontKey(selection)!]: bold },
+    })
+    expect(result.textMeasurements[0]).toMatchObject({ family: 'Bold', member: 'fonts/bold.ttf', basis: 'registered-font' })
   })
 })

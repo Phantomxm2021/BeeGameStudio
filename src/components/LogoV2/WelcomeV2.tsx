@@ -1,12 +1,12 @@
 import React from 'react';
-import { Box, Text, useTheme } from '@anthropic/ink';
+import { Box, Text, useTheme } from '@bee-game-studio/ink';
 import { env } from '../../utils/env.js';
 
 const WELCOME_V2_WIDTH = 58;
 
 export function WelcomeV2(): React.ReactNode {
   const [theme] = useTheme();
-  const welcomeMessage = 'Welcome to Claude Code';
+  const welcomeMessage = 'Welcome to BGS · PhantomLab';
 
   if (env.terminal === 'Apple_Terminal') {
     return <AppleTerminalWelcomeV2 theme={theme} welcomeMessage={welcomeMessage} />;

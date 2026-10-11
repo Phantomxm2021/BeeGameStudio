@@ -3,11 +3,11 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
-import { KeyboardShortcutHint } from '@anthropic/ink';
+import { KeyboardShortcutHint } from '@bee-game-studio/ink';
 import { Spinner } from '../../components/Spinner.js';
 import TextInput from '../../components/TextInput.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { type KeyboardEvent, setClipboard, Box, Link, Text } from '@anthropic/ink';
+import { type KeyboardEvent, setClipboard, Box, Link, Text } from '@bee-game-studio/ink';
 import { OAuthService } from '../../services/oauth/index.js';
 import { saveOAuthTokensIfNeeded } from '../../utils/auth.js';
 import { logError } from '../../utils/log.js';

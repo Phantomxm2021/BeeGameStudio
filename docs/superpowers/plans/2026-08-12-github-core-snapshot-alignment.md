@@ -141,10 +141,10 @@ git commit -m "feat: audit pinned upstream core snapshot"
 - [ ] **Step 1: Verify the upstream checkout**
 
 ```bash
-git -C /private/tmp/claude-code-best-upstream-audit fetch origin main
-git -C /private/tmp/claude-code-best-upstream-audit checkout --detach 3bb6b5746238c418138eb96d57765d79012edd96
-git -C /private/tmp/claude-code-best-upstream-audit status --short
-git -C /private/tmp/claude-code-best-upstream-audit rev-parse HEAD
+git -C /private/tmp/bee-game-studio-upstream-audit fetch origin main
+git -C /private/tmp/bee-game-studio-upstream-audit checkout --detach 3bb6b5746238c418138eb96d57765d79012edd96
+git -C /private/tmp/bee-game-studio-upstream-audit status --short
+git -C /private/tmp/bee-game-studio-upstream-audit rev-parse HEAD
 ```
 
 Expected: clean status and exact pinned hash.
@@ -152,7 +152,7 @@ Expected: clean status and exact pinned hash.
 - [ ] **Step 2: Capture the current nonzero audit**
 
 ```bash
-bun run core:audit -- --upstream /private/tmp/claude-code-best-upstream-audit
+bun run core:audit -- --upstream /private/tmp/bee-game-studio-upstream-audit
 ```
 
 Expected: drift including `src/QueryEngine.ts`, provider termination changes, BGS config loaders, security imports, upstream-missing files, and local-only files.
@@ -160,8 +160,8 @@ Expected: drift including `src/QueryEngine.ts`, provider termination changes, BG
 - [ ] **Step 3: Synchronize and prove zero normalized drift**
 
 ```bash
-bun run core:sync -- --upstream /private/tmp/claude-code-best-upstream-audit
-bun run core:audit -- --upstream /private/tmp/claude-code-best-upstream-audit
+bun run core:sync -- --upstream /private/tmp/bee-game-studio-upstream-audit
+bun run core:audit -- --upstream /private/tmp/bee-game-studio-upstream-audit
 ```
 
 Expected: `0 differences`.
@@ -250,7 +250,7 @@ Use actual upstream-supported variables per provider and assert original API/pro
 bun run typecheck
 bun test packages/agent-workflow-server/src
 bun test packages/agent-workflow/src packages/beegame-*/src
-bun run core:audit -- --upstream /private/tmp/claude-code-best-upstream-audit
+bun run core:audit -- --upstream /private/tmp/bee-game-studio-upstream-audit
 git add packages/agent-workflow packages/agent-workflow-server packages/beegame-* apps/frontend scripts
 git commit -m "fix: adapt BGS boundary to upstream runtime"
 ```
@@ -268,10 +268,10 @@ Expected: tests pass and normalized core remains at zero differences.
 ```yaml
 - name: Clone pinned core
   run: |
-    git clone --filter=blob:none https://github.com/claude-code-best/claude-code.git /tmp/claude-code-best
-    git -C /tmp/claude-code-best checkout --detach 3bb6b5746238c418138eb96d57765d79012edd96
+    git clone --filter=blob:none https://github.com/claude-code-best/claude-code.git /tmp/bee-game-studio
+    git -C /tmp/bee-game-studio checkout --detach 3bb6b5746238c418138eb96d57765d79012edd96
 - name: Verify core authority
-  run: bun run core:audit -- --upstream /tmp/claude-code-best
+  run: bun run core:audit -- --upstream /tmp/bee-game-studio
 ```
 
 - [ ] **Step 2: Document the change rule**
@@ -282,7 +282,7 @@ Document deliberate pin upgrades, no BGS edits under synchronized paths, manifes
 
 ```bash
 bun test scripts/__tests__/upstream-core-alignment.test.ts
-bun run core:audit -- --upstream /private/tmp/claude-code-best-upstream-audit
+bun run core:audit -- --upstream /private/tmp/bee-game-studio-upstream-audit
 git diff --check
 git add .github README.md
 git commit -m "ci: prevent shared core behavioral drift"
@@ -307,7 +307,7 @@ bun test packages/agent-workflow packages/agent-workflow-server packages/beegame
 - [ ] **Step 3: Run final pollution checks**
 
 ```bash
-bun run core:audit -- --upstream /private/tmp/claude-code-best-upstream-audit
+bun run core:audit -- --upstream /private/tmp/bee-game-studio-upstream-audit
 rg -n 'BEEGAME_RUNTIME_MODEL_TYPE|BEEGAME_PROJECT_CONFIG_DIR_NAME|CLAUDE_CONFIG_DIR|@bee-game-studio/security-core' src packages/@ant packages/acp-link packages/agent-tools packages/builtin-tools packages/mcp-client packages/workflow-engine
 git diff --check
 git status --short
@@ -339,7 +339,7 @@ Combine code evidence and document inspection. Report discipline coverage, respo
 - [ ] **Step 5: Final authority verification**
 
 ```bash
-bun run core:audit -- --upstream /private/tmp/claude-code-best-upstream-audit
+bun run core:audit -- --upstream /private/tmp/bee-game-studio-upstream-audit
 bun run typecheck
 git diff --check
 git status --short

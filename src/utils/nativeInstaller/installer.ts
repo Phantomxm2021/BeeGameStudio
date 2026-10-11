@@ -29,7 +29,7 @@ import {
   writeFile,
 } from 'fs/promises'
 import { homedir } from 'os'
-import { basename, delimiter, dirname, join, resolve } from 'path'
+import { basename, delimiter, dirname, join, resolve, sep } from 'path'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -109,7 +109,12 @@ export function getPlatform(): string {
 }
 
 export function getBinaryName(platform: string): string {
-  return platform.startsWith('win32') ? 'claude.exe' : 'claude'
+  return platform.startsWith('win32') ? 'bee-game-studio.exe' : 'bee-game-studio'
+}
+
+export function getNativePackageBinaryPath(stagingPath: string, packageName: string, platform: string): string {
+  if (!packageName) throw new Error('BGS native distribution is not configured')
+  return join(stagingPath, 'node_modules', `${packageName}-${platform}`, 'cli')
 }
 
 function getBaseDirectories() {
@@ -118,13 +123,13 @@ function getBaseDirectories() {
 
   return {
     // Data directories (permanent storage)
-    versions: join(getXDGDataHome(), 'claude', 'versions'),
+    versions: join(getXDGDataHome(), 'bee-game-studio', 'versions'),
 
     // Cache directories (can be deleted)
-    staging: join(getXDGCacheHome(), 'claude', 'staging'),
+    staging: join(getXDGCacheHome(), 'bee-game-studio', 'staging'),
 
     // State directories
-    locks: join(getXDGStateHome(), 'claude', 'locks'),
+    locks: join(getXDGStateHome(), 'bee-game-studio', 'locks'),
 
     // User bin
     executable: join(getUserBinDir(), executableName),
@@ -328,22 +333,7 @@ async function installVersionFromPackage(
 ) {
   try {
     // Extract binary from npm package structure in staging
-    const nodeModulesDir = join(stagingPath, 'node_modules', '@anthropic-ai')
-    const entries = await readdir(nodeModulesDir)
-    const nativePackage = entries.find((entry: string) =>
-      entry.startsWith('claude-cli-native-'),
-    )
-
-    if (!nativePackage) {
-      logEvent('tengu_native_install_package_failure', {
-        stage_find_package: true,
-        error_package_not_found: true,
-      })
-      const error = new Error('Could not find platform-specific native package')
-      throw error
-    }
-
-    const stagedBinaryPath = join(nodeModulesDir, nativePackage, 'cli')
+    const stagedBinaryPath = getNativePackageBinaryPath(stagingPath, MACRO.NATIVE_PACKAGE_URL!, getPlatform())
 
     try {
       await stat(stagedBinaryPath)
@@ -954,6 +944,7 @@ export function installLatest(
   channelOrVersion: string,
   forceReinstall: boolean = false,
 ): Promise<InstallLatestResult> {
+  if (!MACRO.NATIVE_PACKAGE_URL) return Promise.reject(new Error('BGS native distribution is not configured'))
   if (forceReinstall) {
     return installLatestImpl(channelOrVersion, forceReinstall)
   }
@@ -1455,7 +1446,7 @@ async function isNpmSymlink(executablePath: string): Promise<boolean> {
 }
 
 /**
- * Remove the claude symlink from the executable directory
+ * Remove the BGS symlink from the executable directory
  * This is used when switching away from native installation
  * Will only remove if it's a native binary symlink, not npm-managed JS files
  */
@@ -1463,6 +1454,11 @@ export async function removeInstalledSymlink(): Promise<void> {
   const dirs = getBaseDirectories()
 
   try {
+    const info = await lstat(dirs.executable)
+    if (!info.isSymbolicLink()) return
+    const target = await realpath(dirs.executable)
+    const versions = resolve(dirs.versions) + sep
+    if (!target.startsWith(versions)) return
     // Check if this is an npm-managed installation
     if (await isNpmSymlink(dirs.executable)) {
       logForDebugging(
@@ -1471,14 +1467,14 @@ export async function removeInstalledSymlink(): Promise<void> {
       return
     }
 
-    // It's a native binary symlink, safe to remove
+    // Only remove a symlink targeting this product's native versions directory.
     await unlink(dirs.executable)
-    logForDebugging(`Removed claude symlink at ${dirs.executable}`)
+    logForDebugging(`Removed BGS symlink at ${dirs.executable}`)
   } catch (error) {
     if (isENOENT(error)) {
       return
     }
-    logError(new Error(`Failed to remove claude symlink: ${error}`))
+    logError(new Error(`Failed to remove BGS symlink: ${error}`))
   }
 }
 
@@ -1500,7 +1496,7 @@ export async function cleanupShellAliases(): Promise<SetupMessage[]> {
       if (hadAlias) {
         await writeFileLines(configFile, filtered)
         messages.push({
-          message: `Removed claude alias from ${configFile}. Run: unalias claude`,
+          message: `Removed BGS alias from ${configFile}. Run: unalias bee-game-studio`,
           userActionRequired: true,
           type: 'alias',
         })
@@ -1519,90 +1515,6 @@ export async function cleanupShellAliases(): Promise<SetupMessage[]> {
   return messages
 }
 
-async function manualRemoveNpmPackage(
-  packageName: string,
-): Promise<{ success: boolean; error?: string; warning?: string }> {
-  try {
-    // Get npm global prefix
-    const prefixResult = await execFileNoThrowWithCwd('npm', [
-      'config',
-      'get',
-      'prefix',
-    ])
-    if (prefixResult.code !== 0 || !prefixResult.stdout) {
-      return {
-        success: false,
-        error: 'Failed to get npm global prefix',
-      }
-    }
-
-    const globalPrefix = prefixResult.stdout.trim()
-    let manuallyRemoved = false
-
-    // Helper to try removing a file. unlink alone is sufficient — it throws
-    // ENOENT if the file is missing, which the catch handles identically.
-    // A stat() pre-check would add a syscall and a TOCTOU window where
-    // concurrent cleanup causes a false-negative return.
-    async function tryRemove(filePath: string, description: string) {
-      try {
-        await unlink(filePath)
-        logForDebugging(`Manually removed ${description}: ${filePath}`)
-        return true
-      } catch {
-        return false
-      }
-    }
-
-    if (getPlatform().startsWith('win32')) {
-      // Windows - only remove executables, not the package directory
-      const binCmd = join(globalPrefix, 'claude.cmd')
-      const binPs1 = join(globalPrefix, 'claude.ps1')
-      const binExe = join(globalPrefix, 'claude')
-
-      if (await tryRemove(binCmd, 'bin script')) {
-        manuallyRemoved = true
-      }
-
-      if (await tryRemove(binPs1, 'PowerShell script')) {
-        manuallyRemoved = true
-      }
-
-      if (await tryRemove(binExe, 'bin executable')) {
-        manuallyRemoved = true
-      }
-    } else {
-      // Unix/Mac - only remove symlink, not the package directory
-      const binSymlink = join(globalPrefix, 'bin', 'claude')
-
-      if (await tryRemove(binSymlink, 'bin symlink')) {
-        manuallyRemoved = true
-      }
-    }
-
-    if (manuallyRemoved) {
-      logForDebugging(`Successfully removed ${packageName} manually`)
-      const nodeModulesPath = getPlatform().startsWith('win32')
-        ? join(globalPrefix, 'node_modules', packageName)
-        : join(globalPrefix, 'lib', 'node_modules', packageName)
-
-      return {
-        success: true,
-        warning: `${packageName} executables removed, but node_modules directory was left intact for safety. You may manually delete it later at: ${nodeModulesPath}`,
-      }
-    } else {
-      return { success: false }
-    }
-  } catch (manualError) {
-    logForDebugging(`Manual removal failed: ${manualError}`, {
-      level: 'error',
-    })
-    return {
-      success: false,
-      error: `Manual removal failed: ${manualError}`,
-    }
-  }
-}
-
 async function attemptNpmUninstall(
   packageName: string,
 ): Promise<{ success: boolean; error?: string; warning?: string }> {
@@ -1617,25 +1529,6 @@ async function attemptNpmUninstall(
     logForDebugging(`Removed global npm installation of ${packageName}`)
     return { success: true }
   } else if (stderr && !stderr.includes('npm ERR! code E404')) {
-    // Check for ENOTEMPTY error and try manual removal
-    if (stderr.includes('npm error code ENOTEMPTY')) {
-      logForDebugging(
-        `Failed to uninstall global npm package ${packageName}: ${stderr}`,
-        { level: 'error' },
-      )
-      logForDebugging(`Attempting manual removal due to ENOTEMPTY error`)
-
-      const manualResult = await manualRemoveNpmPackage(packageName)
-      if (manualResult.success) {
-        return { success: true, warning: manualResult.warning }
-      } else if (manualResult.error) {
-        return {
-          success: false,
-          error: `Failed to remove global npm installation of ${packageName}: ${stderr}. Manual removal also failed: ${manualResult.error}`,
-        }
-      }
-    }
-
     // Only report as error if it's not a "package not found" error
     logForDebugging(
       `Failed to uninstall global npm package ${packageName}: ${stderr}`,
@@ -1659,21 +1552,9 @@ export async function cleanupNpmInstallations(): Promise<{
   const warnings: string[] = []
   let removed = 0
 
-  // Always attempt to remove @anthropic-ai/claude-code
-  const codePackageResult = await attemptNpmUninstall(
-    '@anthropic-ai/claude-code',
-  )
-  if (codePackageResult.success) {
-    removed++
-    if (codePackageResult.warning) {
-      warnings.push(codePackageResult.warning)
-    }
-  } else if (codePackageResult.error) {
-    errors.push(codePackageResult.error)
-  }
-
   // Also attempt to remove MACRO.PACKAGE_URL if it's defined and different
-  if (MACRO.PACKAGE_URL && MACRO.PACKAGE_URL !== '@anthropic-ai/claude-code') {
+  if (!MACRO.PACKAGE_URL || MACRO.PACKAGE_URL === '@anthropic-ai/claude-code') return { removed, errors, warnings }
+  if (MACRO.PACKAGE_URL) {
     const macroPackageResult = await attemptNpmUninstall(MACRO.PACKAGE_URL)
     if (macroPackageResult.success) {
       removed++
@@ -1682,22 +1563,6 @@ export async function cleanupNpmInstallations(): Promise<{
       }
     } else if (macroPackageResult.error) {
       errors.push(macroPackageResult.error)
-    }
-  }
-
-  // Check for local installation at ~/.claude/local
-  const localInstallDir = join(homedir(), '.claude', 'local')
-
-  try {
-    await rm(localInstallDir, { recursive: true })
-    removed++
-    logForDebugging(`Removed local installation at ${localInstallDir}`)
-  } catch (error) {
-    if (!isENOENT(error)) {
-      errors.push(`Failed to remove ${localInstallDir}: ${error}`)
-      logForDebugging(`Failed to remove local installation: ${error}`, {
-        level: 'error',
-      })
     }
   }
 

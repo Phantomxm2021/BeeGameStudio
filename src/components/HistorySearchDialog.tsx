@@ -3,11 +3,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRegisterOverlay } from '../context/overlayContext.js';
 import { getTimestampedHistory, type TimestampedHistoryEntry } from '../history.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box, Text, stringWidth, wrapAnsi } from '@anthropic/ink';
+import { Box, Text, stringWidth, wrapAnsi } from '@bee-game-studio/ink';
 import { logEvent } from '../services/analytics/index.js';
 import type { HistoryEntry } from '../utils/config.js';
 import { formatRelativeTimeAgo, truncateToWidth } from '../utils/format.js';
-import { FuzzyPicker } from '@anthropic/ink';
+import { FuzzyPicker } from '@bee-game-studio/ink';
 
 type Props = {
   initialQuery?: string;

@@ -1,7 +1,3 @@
-import { randomUUID } from 'node:crypto'
-import { once } from 'node:events'
-
-export const NATIVE_RESPONSE_TRACE_PREFIX = 'BEEGAME_NATIVE_RESPONSE_TRACE '
 type RecordValue = Record<string, any>
 const record = (value: unknown): RecordValue | undefined =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : undefined
@@ -60,41 +56,6 @@ export function projectResponseMessage(value: unknown): RecordValue | undefined 
     }) : []
     if (!content.length && !body.usage) return
     return { type: message.type, message: { id: body.id, model: body.model, usage: body.usage, content } }
-  }
-}
-
-export type ResponseTraceFrame = {
-  queryId: string; agentId: string; parentToolUseId?: string
-  occurredAt?: string
-  kind: 'query_start' | 'query_end' | 'message'
-  message?: RecordValue; status?: string
-}
-
-/** Capture ALL query loops, including detached agents whose events never reach
- * parent stdout. Stderr is a dedicated opt-in wire channel; the host owns files. */
-export async function* traceNativeQuery<T, R>(source: AsyncGenerator<T, R>,
-  scope: { agentId?: string; parentToolUseId?: string; signal?: AbortSignal }): AsyncGenerator<T, R> {
-  if (process.env.BEEGAME_NATIVE_RESPONSE_TRACE !== '1') return yield* source
-  const identity = { queryId: randomUUID(), agentId: scope.agentId ?? 'root', parentToolUseId: scope.parentToolUseId }
-  const emit = async (frame: Omit<ResponseTraceFrame, keyof typeof identity>) => {
-    // No user content except the strict response projection travels here.
-    if (!process.stderr.write(NATIVE_RESPONSE_TRACE_PREFIX + JSON.stringify({ ...identity, ...frame, occurredAt: new Date().toISOString() }) + '\n'))
-      await once(process.stderr, 'drain')
-  }
-  let finished = false, failed = false
-  try {
-    await emit({ kind: 'query_start' })
-    while (true) {
-      const next = await source.next()
-      if (next.done) { finished = true; return next.value }
-      const message = projectResponseMessage(next.value)
-      if (message) await emit({ kind: 'message', message })
-      yield next.value
-    }
-  } catch (error) { failed = true; throw error }
-  finally {
-    try { if (!finished) await source.return(undefined as R) }
-    finally { await emit({ kind: 'query_end', status: scope.signal?.aborted ? 'aborted' : failed ? 'failed' : finished ? 'completed' : 'interrupted' }) }
   }
 }
 

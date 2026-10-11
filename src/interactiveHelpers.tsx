@@ -15,8 +15,8 @@ import type { Command } from './commands.js';
 import { createStatsStore, type StatsStore } from './context/stats.js';
 import { getSystemContext } from './context.js';
 import { initializeTelemetryAfterTrust } from './entrypoints/init.js';
-import { isSynchronizedOutputSupported } from '@anthropic/ink';
-import type { RenderOptions, Root, TextProps } from '@anthropic/ink';
+import { isSynchronizedOutputSupported } from '@bee-game-studio/ink';
+import type { RenderOptions, Root, TextProps } from '@bee-game-studio/ink';
 import { KeybindingSetup } from './keybindings/KeybindingProviderSetup.js';
 import { startDeferredPrefetches } from './main.js';
 import { initializeGrowthBook, resetGrowthBook } from './services/analytics/growthbook.js';
@@ -24,7 +24,7 @@ import { isQualifiedForGrove } from './services/api/grove.js';
 import { handleMcpjsonServerApprovals } from './services/mcpServerApproval.js';
 import { AppStateProvider } from './state/AppState.js';
 import { onChangeAppState } from './state/onChangeAppState.js';
-import { ThemeProvider } from '@anthropic/ink';
+import { ThemeProvider } from '@bee-game-studio/ink';
 import { normalizeApiKeyForConfig } from './utils/authPortable.js';
 import {
   getExternalClaudeMdIncludes,
@@ -86,7 +86,7 @@ export async function exitWithMessage(
     beforeExit?: () => Promise<void>;
   },
 ): Promise<never> {
-  const { Text } = await import('@anthropic/ink');
+  const { Text } = await import('@bee-game-studio/ink');
   const color = options?.color;
   const exitCode = options?.exitCode ?? 1;
   root.render(color ? <Text color={color}>{message}</Text> : <Text>{message}</Text>);

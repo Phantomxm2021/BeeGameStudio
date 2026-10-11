@@ -5,7 +5,7 @@ import { getAdditionalDirectoriesForClaudeMd, setAdditionalDirectoriesForClaudeM
 import type { LocalJSXCommandContext } from '../../commands.js';
 import { MessageResponse } from '../../components/MessageResponse.js';
 import { AddWorkspaceDirectory } from '../../components/permissions/rules/AddWorkspaceDirectory.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import { applyPermissionUpdate, persistPermissionUpdate } from '../../utils/permissions/PermissionUpdate.js';
 import type { PermissionUpdateDestination } from '../../utils/permissions/PermissionUpdateSchema.js';

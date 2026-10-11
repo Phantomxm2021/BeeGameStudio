@@ -312,12 +312,12 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
         ...(deps.sandbox && { CLAUDE_CODE_FORCE_SANDBOX: '1' }),
         CLAUDE_CODE_SESSION_ACCESS_TOKEN: opts.accessToken,
         // v1: HybridTransport (WS reads + POST writes) to Session-Ingress.
-        // Harmless in v2 mode — transportUtils checks CLAUDE_CODE_USE_CCR_V2 first.
+        // Harmless in v2 mode — transportUtils checks BGS_USE_CCR_V2 first.
         CLAUDE_CODE_POST_FOR_SESSION_INGRESS_V2: '1',
         // v2: SSETransport + CCRClient to CCR's /v1/code/sessions/* endpoints.
         // Same env vars environment-manager sets in the container path.
         ...(opts.useCcrV2 && {
-          CLAUDE_CODE_USE_CCR_V2: '1',
+          BGS_USE_CCR_V2: '1',
           CLAUDE_CODE_WORKER_EPOCH: String(opts.workerEpoch),
         }),
       }

@@ -2,7 +2,7 @@ import {
   type DOMElement,
   useAnimationFrame,
   useTerminalFocus,
-} from '@anthropic/ink'
+} from '@bee-game-studio/ink'
 
 const BLINK_INTERVAL_MS = 600
 

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Box, Text, setClipboard, useInput } from '@anthropic/ink';
+import { Box, Text, setClipboard, useInput } from '@bee-game-studio/ink';
 import type { ArtifactInfo } from './scanner.js';
 import { openBrowser } from 'src/utils/browser.js';
 

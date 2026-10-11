@@ -1,9 +1,4 @@
 import { feature } from 'bun:bundle'
-import { parseNativeProjectTurn, type NativeDirectionAuthorInput, type NativeProjectTurnInput } from '@bee-game-studio/agent-workflow/native-direction-authors'
-import { designReviewAgents, runNativeDesignReview } from './beegame/design-review.js'
-import { runNativeDirectionAuthors } from './beegame/direction-authors.js'
-import { projectMilestoneBoundary } from './beegame/project-turn.js'
-import { runPostCompactCleanup } from './services/compact/postCompactCleanup.js'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import { randomUUID } from 'crypto'
 import last from 'lodash-es/last.js'
@@ -168,8 +163,6 @@ export type QueryEngineConfig = {
   setSDKStatus?: (status: SDKStatus) => void
   abortController?: AbortController
   orphanedPermission?: OrphanedPermission
-  beegameDirectionAuthors?: NativeDirectionAuthorInput
-  beegameProjectTurn?: NativeProjectTurnInput
   /**
    * Snip-boundary handler: receives each yielded system message plus the
    * current mutableMessages store. Returns undefined if the message is not a
@@ -255,22 +248,6 @@ export class QueryEngine {
     setCwd(cwd)
     const persistSession = !isSessionPersistenceDisabled()
     const startTime = Date.now()
-    const projectTurn = parseNativeProjectTurn(this.config.beegameProjectTurn)
-    const turnAgents = await designReviewAgents(agents, projectTurn, cwd, commands)
-    if (projectTurn?.restartContext && this.mutableMessages.length) {
-      if (Object.values(getAppState().tasks).some(task => task.type === 'local_agent' &&
-          (task.status === 'running' || task.status === 'pending')))
-        throw new Error('Cannot retire BGS milestone context while an author is active')
-      const refreshed = projectMilestoneBoundary(this.mutableMessages)
-      this.mutableMessages.splice(0, this.mutableMessages.length, ...refreshed)
-      this.readFileState.clear()
-      this.loadedNestedMemoryPaths.clear()
-      runPostCompactCleanup('sdk')
-      if (persistSession) await recordTranscript(this.mutableMessages)
-      const boundary = refreshed[0] as SystemCompactBoundaryMessage
-      yield { type: 'system', subtype: 'compact_boundary', session_id: getSessionId(), uuid: boundary.uuid,
-        compact_metadata: toSDKCompactMetadata(boundary.compactMetadata) }
-    }
 
     // Wrap canUseTool to track permission denials
     const wrappedCanUseTool: CanUseToolFn = async (
@@ -391,9 +368,10 @@ export class QueryEngine {
         mcpResources: {},
         ideInstallationStatus: null,
         isNonInteractiveSession: true,
+        includePartialMessages,
         customSystemPrompt,
         appendSystemPrompt,
-        agentDefinitions: { activeAgents: turnAgents, allAgents: [] },
+        agentDefinitions: { activeAgents: agents, allAgents: [] },
         theme: resolveThemeSetting(getGlobalConfig().theme),
         maxBudgetUsd,
       },
@@ -401,7 +379,6 @@ export class QueryEngine {
       setAppState,
       abortController: this.abortController,
       readFileState: this.readFileState,
-      beegameReviewDocuments: projectTurn?.reviewDocuments,
       nestedMemoryAttachmentTriggers: new Set<string>(),
       loadedNestedMemoryPaths: this.loadedNestedMemoryPaths,
       dynamicSkillDirTriggers: new Set<string>(),
@@ -542,9 +519,10 @@ export class QueryEngine {
         ideInstallationStatus: null,
         isNonInteractiveSession: true,
         customSystemPrompt,
+        includePartialMessages,
         appendSystemPrompt,
         theme: resolveThemeSetting(getGlobalConfig().theme),
-        agentDefinitions: { activeAgents: turnAgents, allAgents: [] },
+        agentDefinitions: { activeAgents: agents, allAgents: [] },
         maxBudgetUsd,
       },
       getAppState,
@@ -559,7 +537,6 @@ export class QueryEngine {
       setResponseLength: () => {},
       updateFileHistoryState: processUserInputContext.updateFileHistoryState,
       updateAttributionState: processUserInputContext.updateAttributionState,
-      beegameReviewDocuments: projectTurn?.reviewDocuments,
       setSDKStatus,
     }
 
@@ -581,7 +558,7 @@ export class QueryEngine {
       permissionMode: initialAppState.toolPermissionContext
         .mode as PermissionMode, // TODO: avoid the cast
       commands,
-      agents: turnAgents,
+      agents,
       skills,
       plugins: enabledPlugins,
       fastMode: initialAppState.fastMode,
@@ -702,8 +679,7 @@ export class QueryEngine {
     const structuredOutputCallIds = new Set<string>()
     const failedStructuredOutputCallIds = new Set<string>()
     let structuredOutputCount = 0
-    const singleOutputToolMode = Boolean(jsonSchema && hasStructuredOutputTool && (tools.length === 1 ||
-      process.env.BEEGAME_STRUCTURED_OUTPUT_IS_TERMINAL === '1'))
+    const singleOutputToolMode = Boolean(jsonSchema && hasStructuredOutputTool && tools.length === 1)
     // Track the last stop_reason from assistant messages
     let lastStopReason: string | null = null
     // Reference-based watermark so error_during_execution's errors[] is
@@ -711,33 +687,20 @@ export class QueryEngine {
     // shift()s during the turn — the index slides. If this entry is rotated
     // out, lastIndexOf returns -1 and we include everything (safe fallback).
     const errorLogWatermark = getInMemoryErrors().at(-1)
-    const responses = async function* (directionAuthors?: NativeDirectionAuthorInput) {
-      if (directionAuthors !== undefined || projectTurn?.reviewDocuments) {
-        const handoffs = directionAuthors !== undefined
-          ? yield* runNativeDirectionAuthors(directionAuthors, processUserInputContext, wrappedCanUseTool)
-          : yield* runNativeDesignReview(projectTurn!, processUserInputContext, wrappedCanUseTool)
-        // Forward the actual owners' answers. A second main-model turn could
-        // start an early review or replace a required reviewer with an old claim.
-        yield createAssistantMessage({ content: [{ type: 'text', citations: null,
-          text: handoffs.filter(Boolean).join('\n\n') || 'BGS scheduled assignments returned no textual handoff.' }] })
-        return
-      }
-      yield* query({
-        messages,
-        systemPrompt,
-        userContext,
-        systemContext,
-        canUseTool: wrappedCanUseTool,
-        toolUseContext: processUserInputContext,
-        fallbackModel,
-        querySource: 'sdk',
-        maxTurns,
-        maxModelIterations: jsonSchema ? maxTurns : undefined,
-        stopAfterStructuredOutput: singleOutputToolMode,
-        taskBudget,
-      })
-    }
-    for await (const message of responses(this.config.beegameDirectionAuthors)) {
+    for await (const message of query({
+      messages,
+      systemPrompt,
+      userContext,
+      systemContext,
+      canUseTool: wrappedCanUseTool,
+      toolUseContext: processUserInputContext,
+      fallbackModel,
+      querySource: 'sdk',
+      maxTurns,
+      maxModelIterations: jsonSchema ? maxTurns : undefined,
+      stopAfterStructuredOutput: singleOutputToolMode,
+      taskBudget,
+    })) {
       // Record assistant, user, and compact boundary messages
       if (
         message.type === 'assistant' ||
@@ -1330,8 +1293,6 @@ export async function* ask({
   agents = [],
   setSDKStatus,
   orphanedPermission,
-  beegameDirectionAuthors,
-  beegameProjectTurn,
 }: {
   commands: Command[]
   prompt: string | Array<ContentBlockParam>
@@ -1363,8 +1324,6 @@ export async function* ask({
   agents?: AgentDefinition[]
   setSDKStatus?: (status: SDKStatus) => void
   orphanedPermission?: OrphanedPermission
-  beegameDirectionAuthors?: NativeDirectionAuthorInput
-  beegameProjectTurn?: NativeProjectTurnInput
 }): AsyncGenerator<SDKMessage, void, unknown> {
   const engine = new QueryEngine({
     cwd,
@@ -1393,8 +1352,6 @@ export async function* ask({
     setSDKStatus,
     abortController,
     orphanedPermission,
-    beegameDirectionAuthors,
-    beegameProjectTurn,
     ...(feature('HISTORY_SNIP')
       ? {
           snipReplay: (yielded: Message, store: Message[]) => {

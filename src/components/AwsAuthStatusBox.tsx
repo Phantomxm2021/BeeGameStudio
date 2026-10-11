@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Box, Link, Text } from '@anthropic/ink';
+import { Box, Link, Text } from '@bee-game-studio/ink';
 import { type AwsAuthStatus, AwsAuthStatusManager } from '../utils/awsAuthStatusManager.js';
 
 const URL_RE = /https?:\/\/\S+/;

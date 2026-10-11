@@ -4,14 +4,14 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { logEvent } from 'src/services/analytics/index.js';
 import type { CommandResultDisplay, LocalJSXCommandContext } from '../../commands.js';
 import { Select } from '../../components/CustomSelect/index.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 import {
   IdeAutoConnectDialog,
   IdeDisableAutoConnectDialog,
   shouldShowAutoConnectDialog,
   shouldShowDisableAutoConnectDialog,
 } from '../../components/IdeAutoConnectDialog.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { clearServerCache } from '../../services/mcp/client.js';
 import type { ScopedMcpServerConfig } from '../../services/mcp/types.js';
 import { useAppState, useSetAppState } from '../../state/AppState.js';

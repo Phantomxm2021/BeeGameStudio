@@ -1,5 +1,5 @@
 /**
- * REPL integration hook for `claude ssh` sessions.
+ * REPL integration hook for `bee-game-studio ssh` sessions.
  *
  * Sibling to useDirectConnect — same shape (isRemoteMode/sendMessage/
  * cancelRequest/disconnect), same REPL wiring, but drives an SSH child
@@ -57,6 +57,12 @@ export function useSSHSession({
   const managerRef = useRef<SSHSessionManager | null>(null)
   const hasReceivedInitRef = useRef(false)
   const isConnectedRef = useRef(false)
+  const pendingPermissionsRef = useRef(new Set<ToolUseConfirm>())
+  const clearSSHPermissions = useCallback(() => {
+    const stale = new Set(pendingPermissionsRef.current)
+    pendingPermissionsRef.current.clear()
+    if (stale.size) setToolUseConfirmQueue(q => q.filter(item => !stale.has(item)))
+  }, [setToolUseConfirmQueue])
 
   const toolsRef = useRef(tools)
   useEffect(() => {
@@ -124,36 +130,40 @@ export function useSSHSession({
           permissionPromptStartTimeMs: Date.now(),
           onUserInteraction() {},
           onAbort() {
+            if (!pendingPermissionsRef.current.delete(toolUseConfirm)) return
             manager.respondToPermissionRequest(requestId, {
               behavior: 'deny',
               message: 'User aborted',
             })
             setToolUseConfirmQueue(q =>
-              q.filter(i => i.toolUseID !== request.tool_use_id),
+              q.filter(i => i !== toolUseConfirm),
             )
           },
           onAllow(updatedInput) {
-            manager.respondToPermissionRequest(requestId, {
+            if (!pendingPermissionsRef.current.delete(toolUseConfirm)) return
+            const sent = manager.respondToPermissionRequest(requestId, {
               behavior: 'allow',
               updatedInput,
             })
             setToolUseConfirmQueue(q =>
-              q.filter(i => i.toolUseID !== request.tool_use_id),
+              q.filter(i => i !== toolUseConfirm),
             )
-            setIsLoading(true)
+            setIsLoading(sent)
           },
           onReject(feedback) {
+            if (!pendingPermissionsRef.current.delete(toolUseConfirm)) return
             manager.respondToPermissionRequest(requestId, {
               behavior: 'deny',
               message: feedback ?? 'User denied permission',
             })
             setToolUseConfirmQueue(q =>
-              q.filter(i => i.toolUseID !== request.tool_use_id),
+              q.filter(i => i !== toolUseConfirm),
             )
           },
           async recheckPermission() {},
         }
 
+        pendingPermissionsRef.current.add(toolUseConfirm)
         setToolUseConfirmQueue(q => [...q, toolUseConfirm])
         setIsLoading(false)
       },
@@ -166,9 +176,10 @@ export function useSSHSession({
           `[useSSHSession] ssh dropped, reconnecting (${attempt}/${max})`,
         )
         isConnectedRef.current = false
+        clearSSHPermissions()
         // Surface a transient system message in the transcript so the user
         // knows what's happening — the next onConnected clears the state.
-        // Any in-flight request is lost; the remote's --continue reloads
+        // Any in-flight request is lost; resuming the observed session reloads
         // history but there's no turn in progress to resume.
         setIsLoading(false)
         const msg: MessageType = {
@@ -187,6 +198,7 @@ export function useSSHSession({
         const connected = isConnectedRef.current
         const exitCode = session.proc.exitCode
         isConnectedRef.current = false
+        clearSSHPermissions()
         setIsLoading(false)
 
         let msg = connected
@@ -195,12 +207,20 @@ export function useSSHSession({
         // Surface remote stderr if it looks like an error (pre-connect always,
         // post-connect only on nonzero exit — normal --verbose noise otherwise).
         if (stderr && (!connected || exitCode !== 0)) {
-          msg += `\nRemote stderr (exit ${exitCode ?? 'signal ' + session.proc.signalCode}):\n${stderr}`
+          msg += `\nLatest process stderr:\n${stderr}`
         }
         void gracefulShutdown(1, 'other', { finalMessage: msg })
       },
       onError: error => {
         logForDebugging(`[useSSHSession] error: ${error.message}`)
+        setMessages(prev => [...prev, {
+          type: 'system',
+          subtype: 'informational',
+          content: error.message,
+          timestamp: new Date().toISOString(),
+          uuid: randomUUID(),
+          level: 'warning',
+        }])
       },
     })
 
@@ -210,17 +230,25 @@ export function useSSHSession({
     return () => {
       logForDebugging('[useSSHSession] cleanup')
       manager.disconnect()
+      clearSSHPermissions()
       session.proxy.stop()
       managerRef.current = null
     }
-  }, [session, setMessages, setIsLoading, setToolUseConfirmQueue])
+  }, [session, setMessages, setIsLoading, setToolUseConfirmQueue, clearSSHPermissions])
 
   const sendMessage = useCallback(
     async (content: RemoteMessageContent): Promise<boolean> => {
       const m = managerRef.current
       if (!m) return false
       setIsLoading(true)
-      return m.sendMessage(content)
+      try {
+        const sent = await m.sendMessage(content)
+        if (!sent) setIsLoading(false)
+        return sent
+      } catch (error) {
+        setIsLoading(false)
+        throw error
+      }
     },
     [setIsLoading],
   )
@@ -234,7 +262,9 @@ export function useSSHSession({
     managerRef.current?.disconnect()
     managerRef.current = null
     isConnectedRef.current = false
-  }, [])
+    clearSSHPermissions()
+    setIsLoading(false)
+  }, [clearSSHPermissions, setIsLoading])
 
   return useMemo(
     () => ({ isRemoteMode, sendMessage, cancelRequest, disconnect }),

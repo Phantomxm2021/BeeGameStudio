@@ -4,7 +4,7 @@ import { StatsProvider, type StatsStore } from '../context/stats.js';
 import { type AppState, AppStateProvider } from '../state/AppState.js';
 import { onChangeAppState } from '../state/onChangeAppState.js';
 import type { FpsMetrics } from '../utils/fpsTracker.js';
-import { ThemeProvider } from '@anthropic/ink';
+import { ThemeProvider } from '@bee-game-studio/ink';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
 
 type Props = {

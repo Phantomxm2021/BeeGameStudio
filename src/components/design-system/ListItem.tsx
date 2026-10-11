@@ -1,1 +1,1 @@
-export { ListItem } from '@anthropic/ink';
+export { ListItem } from '@bee-game-studio/ink';

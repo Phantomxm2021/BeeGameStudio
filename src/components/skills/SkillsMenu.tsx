@@ -7,14 +7,14 @@ import {
   getCommandName,
   type PromptCommand,
 } from '../../commands.js';
-import { Box, FuzzyPicker, Text } from '@anthropic/ink';
-import type { Theme } from '@anthropic/ink';
+import { Box, FuzzyPicker, Text } from '@bee-game-studio/ink';
+import type { Theme } from '@bee-game-studio/ink';
 import { estimateSkillFrontmatterTokens } from '../../skills/loadSkillsDir.js';
 import { formatTokens } from '../../utils/format.js';
 import { getSettingSourceName, type SettingSource } from '../../utils/settings/constants.js';
 import { plural } from '../../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 import { filterSkills } from './filterSkills.js';
 
 // Skills are always PromptCommands with CommandBase properties

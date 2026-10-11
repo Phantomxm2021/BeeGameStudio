@@ -6,8 +6,8 @@
 
 import React from 'react';
 import { WelcomeV2 } from '../../components/LogoV2/WelcomeV2.js';
-import type { Root } from '@anthropic/ink';
-import { Box, Text } from '@anthropic/ink';
+import type { Root } from '@bee-game-studio/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { KeybindingSetup } from '../../keybindings/KeybindingProviderSetup.js';
 import { logEvent } from '../../services/analytics/index.js';
 import { AppStateProvider } from '../../state/AppState.js';

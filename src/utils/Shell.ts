@@ -97,7 +97,7 @@ export async function findSuitableShell(): Promise<string> {
       if (hasWslBash && !hasGitBash) {
         process.env.CLAUDE_CODE_GIT_BASH_PATH_WARNED = '1'
         console.warn(
-          '[CCB] Detected WSL bash on PATH without Git for Windows. ' +
+          '[BGS] Detected WSL bash on PATH without Git for Windows. ' +
             'Hooks and BashTool will not work correctly. ' +
             'Install Git for Windows (https://git-scm.com/download/windows) ' +
             'or set CLAUDE_CODE_GIT_BASH_PATH to your bash.exe.',
@@ -164,7 +164,7 @@ export async function findSuitableShell(): Promise<string> {
   // If no valid shell found, throw a helpful error
   if (!shellPath) {
     const errorMsg =
-      'No suitable shell found. Claude CLI requires a Posix shell environment. ' +
+      'No suitable shell found. BGS requires a Posix shell environment. ' +
       'Please ensure you have a valid shell installed and the SHELL environment variable set.'
     logError(new Error(errorMsg))
     throw new Error(errorMsg)
@@ -270,7 +270,7 @@ export async function exec(
       cwd = fallback
     } catch {
       return createFailedCommand(
-        `Working directory "${cwd}" no longer exists. Please restart Claude from an existing directory.`,
+        `Working directory "${cwd}" no longer exists. Please restart BGS from an existing directory.`,
       )
     }
   }

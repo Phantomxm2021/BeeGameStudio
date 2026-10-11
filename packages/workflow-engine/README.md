@@ -68,4 +68,4 @@ bun test               # 178 tests
 
 ## License
 
-MIT © claude-code-best
+MIT — 原始版权声明见 [LICENSE](./LICENSE)，BGS 品牌不改变上游代码归属。

@@ -1,10 +1,10 @@
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import * as React from 'react';
-import { KeyboardShortcutHint } from '@anthropic/ink';
+import { KeyboardShortcutHint } from '@bee-game-studio/ink';
 import { FallbackToolUseErrorMessage } from 'src/components/FallbackToolUseErrorMessage.js';
 import { MessageResponse } from 'src/components/MessageResponse.js';
 import { ShellProgressMessage } from 'src/components/shell/ShellProgressMessage.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from 'src/keybindings/useKeybinding.js';
 import { useShortcutDisplay } from 'src/keybindings/useShortcutDisplay.js';
 import { useAppStateStore, useSetAppState } from 'src/state/AppState.js';

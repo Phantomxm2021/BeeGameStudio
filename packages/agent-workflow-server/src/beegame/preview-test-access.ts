@@ -14,7 +14,8 @@ export function openPreviewTestAccess(input: {
   start: (mode: 'development' | 'production') => Promise<Snapshot>
   status: () => Snapshot
   stop: () => void
-  browser?: ReturnType<typeof createPreviewTestBrowser>
+  browser?: Pick<ReturnType<typeof createPreviewTestBrowser>, 'start' | 'status' | 'close'> &
+    Partial<Pick<ReturnType<typeof createPreviewTestBrowser>, 'restart'>>
   recordingRoot?: string
   onRecordingFinished?: (report: any) => void
 }) {
@@ -26,6 +27,7 @@ export function openPreviewTestAccess(input: {
   const recordings = new Map<string, Awaited<ReturnType<typeof startPreviewRecording>>>()
   const published = new Set<string>()
   let startingRecording: Promise<Awaited<ReturnType<typeof startPreviewRecording>>> | undefined
+  let restartingBrowser: Promise<{ endpoint: string }> | undefined
   const finish = async (record: Awaited<ReturnType<typeof startPreviewRecording>>, reason: string, capture: boolean) => {
     const report = await record.finish(reason, capture)
     if (!published.has(record.id)) {
@@ -56,12 +58,29 @@ export function openPreviewTestAccess(input: {
             return json({ preview, ...host }, preview.status === 'running' ? 200 : 503)
           } finally { pending = undefined; if (closed) input.stop() }
         }
-        if (request.method === 'POST' && path === '/browser') return json({ ...await browser.start(), playwrightRuntime: 'node' })
+        if (request.method === 'POST' && path === '/browser') {
+          if (restartingBrowser) return json({ error: 'Browser restart in progress.' }, 409)
+          const reused = browser.status().status === 'running'
+          return json({ ...await browser.start(), reused, playwrightRuntime: 'node' })
+        }
+        if (request.method === 'POST' && path === '/browser/restart') {
+          if (restartingBrowser) return json({ error: 'Browser restart in progress.' }, 409)
+          if (!browser.restart) return json({ error: 'This browser does not support restart.' }, 501)
+          restartingBrowser = (async () => {
+            await startingRecording?.catch(() => undefined)
+            await Promise.all([...recordings.values()].filter(record => record.report().status === 'recording')
+              .map(record => finish(record, 'browser-restarted', false)))
+            return browser.restart!()
+          })()
+          try { return json({ ...await restartingBrowser, reused: false, playwrightRuntime: 'node' }) }
+          finally { restartingBrowser = undefined }
+        }
         if (request.method === 'GET' && path === '/recordings')
           return json([...recordings.values()].map(record => {
             const { events: _events, ...summary } = record.report(); return summary
           }))
         if (request.method === 'POST' && path === '/recordings') {
+          if (restartingBrowser) return json({ error: 'Browser restart in progress.' }, 409)
           const body = await request.json().catch(() => undefined)
           if (!body || Object.keys(body).some(key => !['targetId', 'label', 'conditions'].includes(key)) ||
               typeof body.targetId !== 'string' || !/^[\w-]{1,128}$/.test(body.targetId) ||
@@ -122,8 +141,10 @@ export function openPreviewTestAccess(input: {
       `Optional project-scoped Preview test API (native Bash/fetch, no account credentials): ${base}`,
       'POST /preview with {"mode":"development"} or {"mode":"production"}; GET /status. Read returned URLs from JSON. Production serves the existing build without rewriting it. Navigate to hostUrl and inspect its iframe; the sandbox matches Dashboard.',
       'The game may be mounted under a URL subpath. Resolve game JSON, images, fonts and audio relative to the game/build base, not the host origin root. Vite development receives the preview base from BGS; production uses your existing build base. Resolve registered content documents relative to content/index.json. Do not hardcode a session URL into source or build output.',
-      'POST /browser starts an isolated, muted Chromium and returns a CDP endpoint for Node Playwright or another CDP client. It avoids shell sandbox escape approvals and is closed with this capability. Native browser tools remain available; verification methods are yours.',
+      'POST /browser starts or reuses an isolated, muted Chromium (reused is returned); it does not restart it. POST /browser/restart explicitly closes the old browser/pages and finishes active recordings, then returns a new CDP endpoint. It avoids shell sandbox escape approvals and is closed with this capability. Native browser tools remain available; verification methods are yours.',
+      'Optional Node helper: run node <test-script.mjs> (not bun). const { withPreviewPage } = await import(process.env.BEEGAME_PREVIEW_TEST_MODULE); await withPreviewPage({mode:"production",contextOptions:{viewport:{width:960,height:540}},beforeNavigate:async({page,context})=>{ /* Install routes/recording here BEFORE the first game request. */ }}, async ({page,gameFrame,runtimeErrors}) => { /* Use gameFrame for the actual game. runtimeErrors counts pageErrors, consoleErrors, failedRequests and httpErrors from before first navigation through this inspection, even without your own listeners. No error payloads are logged. Check these observations explicitly; zero errors is not gameplay acceptance. Choose exact expected values from current authored sources. */ }); Omit apiUrl to resolve current workspace access. Explicit apiUrl is supported. frame is a FrameLocator, gameFrame a Frame; page.keyboard targets the focused iframe. The helper closes context/CDP on success or failure and assigns no verdict.',
       'A pinned shared playwright-core client is available to project Node scripts: const { chromium } = await import(process.env.BEEGAME_PLAYWRIGHT_MODULE); const browser = await chromium.connectOverCDP(endpoint). Use the endpoint returned by POST /browser; no npm install or browser download is needed for this path. Close your test pages/contexts and disconnect when finished; the capability owns browser startup and cleanup. This shared client is test tooling, not a game dependency or deployment asset.',
+      'For clean-runtime assertions use withPreviewPage({runtimeErrorPolicy:"fail",...},inspect): retained first-load errors reject even if inspect returns PASS or installs listeners only after a reload. Default "observe" remains diagnostic. checkNumericSamples(allRetainedValues,{minimum?,maximum?}) from the same helper deterministically reports passed/failed/unverified for explicit finite bounds; any violating sample remains failed, empty samples unverified. It does not verify the chosen bound, unseen behavior, concurrency or listening quality. Preserve separate per-run evidence; do not overwrite an already measured report while rechecking it.',
       'For reusable evidence, POST /recordings {targetId, label, conditions} before navigating (obtain targetId with CDP Target.getTargets). This passively records console, page and network errors for the page and child frames. POST /recordings/<id>/finish freezes observations and a screenshot; GET /recordings/<id> and /recordings/<id>/screenshot reread them without rerunning the game. Recording gaps and truncation are reported; reports never assign a gameplay pass.',
       'Save complete test output once. A browser connection, clean shell exit or failed automated route is not a gameplay verdict: distinguish product, environment and test-driver failures using evidence, and disclose unverified behavior. Keep this capability out of committed files.',
       'A missing locator or failed test precondition is inconclusive, not a product failure. Inspect the actual page errors, requests and input hit target before attributing the symptom to game logic. Keep reusable test scripts in the project; pass current URLs and CDP endpoints at execution time rather than saving session credentials. If temporary debug hooks are removed, update or retire dependent checks explicitly in the handoff.',
@@ -133,6 +154,7 @@ export function openPreviewTestAccess(input: {
         closed = true
         server.stop(true)
         input.stop()
+        await restartingBrowser?.catch(() => undefined)
         await startingRecording?.catch(() => undefined)
         await Promise.all([...recordings.values()].map(record => finish(record, 'session-closed', false)))
         await Promise.all([browser.close(), pending?.catch(() => undefined)])

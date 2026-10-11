@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import {
@@ -485,8 +486,30 @@ export async function registerBeeGameAuthoredResources(
   inputs: readonly BeeGameAuthoredResourceInput[],
   options: { additionalFormatCapabilities?: readonly string[] } = {},
 ): Promise<BeeGameAssetManifest> {
+  return registerBeeGameLocalResources(workspacePath, inputs.map(input => ({ ...input, source: undefined })), options)
+}
+
+/** Shared registration for already-produced files; web provenance is preserved.
+ * Mechanical verification is not aesthetic, licensing or runtime approval. */
+export async function registerBeeGameLocalResources(
+  workspacePath: string,
+  inputs: readonly (BeeGameAuthoredResourceInput & { source?: Extract<BeeGameProjectResourceSource, { type: 'web' | 'agent-authored' }> })[],
+  options: { additionalFormatCapabilities?: readonly string[];
+    projectTarget?: BeeGameAssetManifest['project_target']; requirements?: BeeGameAssetManifest['requirements'] } = {},
+): Promise<BeeGameAssetManifest> {
   const root = normalizeWorkspacePath(workspacePath)
-  const manifest = await readBeeGameAssetManifest(root)
+  let manifest = await readBeeGameAssetManifest(root)
+  if (options.projectTarget && manifest.project_target && !isDeepStrictEqual(options.projectTarget, manifest.project_target))
+    throw new Error('Registration cannot change the established project target')
+  for (const requirement of options.requirements ?? []) {
+    const existing = manifest.requirements.find(item => item.id === requirement.id)
+    if (existing && !isDeepStrictEqual(existing, requirement))
+      throw new Error('Registration cannot redefine an existing requirement: ' + requirement.id)
+  }
+  if (options.projectTarget || options.requirements) manifest = parseCanonicalBeeGameAssetManifest({
+    ...manifest, project_target: manifest.project_target ?? options.projectTarget,
+    requirements: [...new Map([...manifest.requirements, ...options.requirements ?? []].map(item => [item.id, item])).values()],
+  })
   const establishedTarget = requireProjectTarget(manifest)
   const additionalFormatCapabilities = uniqueStrings(
     options.additionalFormatCapabilities ?? [],
@@ -505,6 +528,32 @@ export async function registerBeeGameAuthoredResources(
     : establishedTarget
   if (!target)
     throw new Error('Additional authored resource formats are invalid.')
+  // Diagnose independently determinable batch mistakes together, before any
+  // registry write. Use the same format check and programmatic-audio exception
+  // as registration itself; do not invent or extend consumer capabilities.
+  const batchIssues: string[] = []
+  const formatIssues = new Map<string, { message: string; resources: Set<string>; files: number }>()
+  const requirementIds = new Set(manifest.requirements.map(item => item.id))
+  const programmatic = new Map<BeeGameAuthoredResourceInput, BeeGameProgrammaticAudioResource | undefined>()
+  for (const input of inputs) {
+    const existing = manifest.resources.find(item => item.id === input.id)
+    for (const id of input.fulfills ?? existing?.fulfills ?? [])
+      if (!requirementIds.has(id)) batchIssues.push(`resource ${input.id}.fulfills: unknown requirement ID ${id}; use an ID from requirements, not a display name/resource ID`)
+    const paths = uniqueStrings(input.file_paths.map(normalizedProjectPath))
+    const audio = validateAuthoredProgrammaticAudio(root, input, normalizedProjectPath(input.root_path), paths)
+    programmatic.set(input, audio)
+    if (!audio) for (const path of paths) {
+      try { assertFilenameFormatAllowed(path, target.asset_format_capabilities) }
+      catch (error) {
+        const format = normalizeFormat(extname(path).slice(1))
+        const issue = formatIssues.get(format) ?? { message: (error as Error).message, resources: new Set<string>(), files: 0 }
+        issue.resources.add(input.id); issue.files++; formatIssues.set(format, issue)
+      }
+    }
+  }
+  for (const issue of formatIssues.values())
+    batchIssues.push(`resources ${[...issue.resources].join(', ')}; ${issue.files} files with this unsupported extension; first example: ${issue.message}`)
+  if (batchIssues.length) throw new Error('Registration batch rejected; no registry changes:\n' + batchIssues.join('\n'))
   let updated = additionalFormatCapabilities.length
     ? parseCanonicalBeeGameAssetManifest({
         ...manifest,
@@ -519,7 +568,7 @@ export async function registerBeeGameAuthoredResources(
     const rootPath = normalizedProjectPath(input.root_path)
     const filePaths = uniqueStrings(input.file_paths.map(normalizedProjectPath))
     const existing = updated.resources.find(resource => resource.id === id)
-    if (existing && existing.source.type !== 'agent-authored')
+    if (existing && existing.source.type !== (input.source?.type ?? 'agent-authored'))
       throw new Error(
         `Authored resource id belongs to a different source: ${id}`,
       )
@@ -546,19 +595,12 @@ export async function registerBeeGameAuthoredResources(
       throw new Error(
         `Authored resource root must be listed in file_paths: ${id}`,
       )
-    const programmaticAudio = validateAuthoredProgrammaticAudio(
-      root,
-      input,
-      rootPath,
-      filePaths,
-    )
+    const programmaticAudio = programmatic.get(input)
     for (const path of filePaths) {
       assertPathInDeclaredRoot(path, target.runtime_asset_root)
       const absolute = resolveInsideWorkspace(root, path)
       if (!existsSync(absolute))
         throw new Error(`Authored resource file does not exist: ${path}`)
-      if (!programmaticAudio)
-        assertFilenameFormatAllowed(path, target.asset_format_capabilities)
       assertAuthoredResourceMediaFile(
         resolveInsideWorkspace(root, path),
         path,
@@ -579,7 +621,7 @@ export async function registerBeeGameAuthoredResources(
     const resource: BeeGameProjectResource = {
       id,
       fulfills: uniqueStrings(input.fulfills ?? existing?.fulfills ?? []),
-      source: {
+      source: input.source ?? {
         type: 'agent-authored',
         created_at:
           existing?.source.type === 'agent-authored'
@@ -617,9 +659,12 @@ export async function registerBeeGameAuthoredResources(
       existing?.file_paths
         .filter(path => !filePaths.includes(path))
         .forEach(path => obsoletePaths.add(path))
+    if (existing && isDeepStrictEqual({ ...resource, selected_at: existing.selected_at }, existing))
+      resource.selected_at = existing.selected_at
     updated = replaceResource(updated, resource)
   }
-  await writeManifestAtomically(root, updated)
+  if (!isDeepStrictEqual(await readBeeGameAssetManifest(root), updated))
+    await writeManifestAtomically(root, updated)
   const retainedPaths = new Set(
     updated.resources.flatMap(resource => resource.file_paths),
   )
@@ -1133,7 +1178,7 @@ function requireProjectTarget(
 ): BeeGameAssetProjectTarget {
   if (!manifest.project_target)
     throw new Error(
-      'project_target must be established before resource production',
+      'project_target must be established before resource production. The shared owner supplies projectTarget and requirements in a register request (resources may be []), then combines worker requests with resources.mjs --register-from. See resources.mjs --help or assets/manifest/CONTRACT.md; do not infer global formats from one worker.',
     )
   return manifest.project_target
 }
@@ -1265,7 +1310,7 @@ function assertFilenameFormatAllowed(
   const format = normalizeFormat(extname(filename).slice(1))
   if (!format || !allowed.has(format))
     throw new Error(
-      `Resource format is not supported by the target: ${filename}`,
+      `Resource format is not supported by the target: ${filename}; extension=${format || '(none)'}; allowed=${[...allowed].join(', ')}. Shared owner must verify actual runtime support before correcting projectTarget; registration never adds formats automatically.`,
     )
 }
 

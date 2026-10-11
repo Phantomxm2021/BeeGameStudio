@@ -24,23 +24,23 @@ afterAll(() => {
 // src/utils/model/model.ts's getDefaultOpusModel().
 function resolveDefaultOpusModelForTests(): string {
   // Highest priority: provider-specific env override.
-  if (process.env.CLAUDE_CODE_USE_OPENAI === '1') {
+  if (process.env.BGS_USE_OPENAI === '1') {
     if (process.env.OPENAI_DEFAULT_OPUS_MODEL)
       return process.env.OPENAI_DEFAULT_OPUS_MODEL
   }
-  if (process.env.CLAUDE_CODE_USE_GEMINI === '1') {
+  if (process.env.BGS_USE_GEMINI === '1') {
     if (process.env.GEMINI_DEFAULT_OPUS_MODEL)
       return process.env.GEMINI_DEFAULT_OPUS_MODEL
   }
   // Cross-provider override.
-  if (process.env.ANTHROPIC_DEFAULT_OPUS_MODEL)
-    return process.env.ANTHROPIC_DEFAULT_OPUS_MODEL
+  if (process.env.BGS_DEFAULT_STRONG_MODEL)
+    return process.env.BGS_DEFAULT_STRONG_MODEL
   // Provider-specific Opus 4.7 IDs (must match
   // src/utils/model/configs.ts CLAUDE_OPUS_4_7_CONFIG).
-  if (process.env.CLAUDE_CODE_USE_BEDROCK === '1')
+  if (process.env.BGS_USE_BEDROCK === '1')
     return 'us.anthropic.claude-opus-4-7-v1'
-  if (process.env.CLAUDE_CODE_USE_VERTEX === '1') return 'claude-opus-4-7'
-  if (process.env.CLAUDE_CODE_USE_FOUNDRY === '1') return 'claude-opus-4-7'
+  if (process.env.BGS_USE_VERTEX === '1') return 'claude-opus-4-7'
+  if (process.env.BGS_USE_FOUNDRY === '1') return 'claude-opus-4-7'
   return 'claude-opus-4-7'
 }
 
@@ -218,7 +218,7 @@ mock.module('src/utils/envUtils.js', () => ({
   },
   isEnvDefinedFalsy: realIsEnvDefinedFalsy,
   isBareMode: () =>
-    realIsEnvTruthy(process.env.CLAUDE_CODE_SIMPLE) ||
+    realIsEnvTruthy(process.env.BGS_SIMPLE) ||
     process.argv.includes('--bare'),
   parseEnvVars: (rawEnvArgs: string[] | undefined) => {
     const parsed: Record<string, string> = {}

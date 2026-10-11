@@ -5,7 +5,7 @@ import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useIsInsideModal, useModalOrTerminalSize } from '../../context/modalContext.js';
-import { Pane, Tab, Tabs } from '@anthropic/ink';
+import { Pane, Tab, Tabs } from '@bee-game-studio/ink';
 import { Status, buildDiagnostics } from './Status.js';
 import { Config } from './Config.js';
 import { Usage } from './Usage.js';

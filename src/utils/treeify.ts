@@ -1,5 +1,5 @@
 import figures from 'figures'
-import { color } from '@anthropic/ink'
+import { color } from '@bee-game-studio/ink'
 import type { Theme, ThemeName } from './theme.js'
 
 export type TreeNode = {

@@ -11,7 +11,7 @@ const notification = (status: string) =>
   '<duration_ms>264121</duration_ms></usage></task-notification>'
 
 describe('task notification SDK metadata', () => {
-  for (const status of ['completed', 'failed', 'stopped', 'killed']) {
+  for (const status of ['completed', 'failed', 'stopped', 'killed'] as const) {
     test('preserves terminal status ' + status, () => {
       expect(parseTaskNotificationSdkEvent(notification(status))).toEqual({
         type: 'system',

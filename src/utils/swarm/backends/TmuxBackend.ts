@@ -17,7 +17,7 @@ import {
   isTmuxAvailable,
 } from './detection.js'
 import { registerTmuxBackend } from './registry.js'
-import type { CreatePaneResult, PaneBackend, PaneId } from './types.js'
+import type { CreatePaneResult, PaneBackend, PaneId, PaneCleanupMetadata } from './types.js'
 
 // Track whether the first pane has been used for external swarm session
 let firstPaneUsedForExternal = false
@@ -178,7 +178,8 @@ export class TmuxBackend implements PaneBackend {
     await this.setPaneTitle(paneId, name, color, true)
     await this.setPaneBorderColor(paneId, color, true)
 
-    return { paneId, isFirstTeammate: false, windowName }
+    return { paneId, isFirstTeammate: false, windowName,
+      cleanup: { useExternalSession: true, tmuxSocketName: getSwarmSocketName() } }
   }
 
   /**
@@ -304,10 +305,18 @@ export class TmuxBackend implements PaneBackend {
   /**
    * Kills/closes a specific pane.
    */
-  async killPane(paneId: PaneId, useExternalSession = false): Promise<boolean> {
-    const runTmux = useExternalSession ? runTmuxInSwarm : runTmuxInUserSession
+  async killPane(paneId: PaneId, useExternalSession = false, cleanup?: PaneCleanupMetadata): Promise<boolean> {
+    const runTmux = cleanup?.tmuxSocketPath
+      ? (args: string[]) => execFileNoThrow(TMUX_COMMAND, ['-S', cleanup.tmuxSocketPath!, ...args])
+      : cleanup?.tmuxSocketName
+        ? (args: string[]) => execFileNoThrow(TMUX_COMMAND, ['-L', cleanup.tmuxSocketName!, ...args])
+        : useExternalSession ? runTmuxInSwarm : runTmuxInUserSession
     const result = await runTmux(['kill-pane', '-t', paneId])
-    return result.code === 0
+    if (result.code === 0) return true
+    // A pane can exit before its shutdown acknowledgement arrives.
+    const remaining = await runTmux(['list-panes', '-a', '-F', '#{pane_id}'])
+    return remaining.code === 0 &&
+      !remaining.stdout.split('\n').map(id => id.trim()).includes(paneId)
   }
 
   /**
@@ -662,7 +671,10 @@ export class TmuxBackend implements PaneBackend {
     // Wait for shell to initialize before returning, so commands can be sent immediately
     await waitForPaneShellReady()
 
-    return { paneId, isFirstTeammate }
+    return { paneId, isFirstTeammate, cleanup: {
+      useExternalSession: false,
+      tmuxSocketPath: process.env.TMUX?.split(',')[0],
+    } }
   }
 
   /**
@@ -734,7 +746,9 @@ export class TmuxBackend implements PaneBackend {
     // Wait for shell to initialize before returning, so commands can be sent immediately
     await waitForPaneShellReady()
 
-    return { paneId, isFirstTeammate }
+    return { paneId, isFirstTeammate, cleanup: {
+      useExternalSession: true, tmuxSocketName: getSwarmSocketName(),
+    } }
   }
 
   /**

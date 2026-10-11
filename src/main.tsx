@@ -33,7 +33,7 @@ import { getRemoteSessionUrl } from './constants/product.js';
 import { getSystemContext, getUserContext } from './context.js';
 import { init, initializeTelemetryAfterTrust } from './entrypoints/init.js';
 import { addToHistory } from './history.js';
-import type { Root } from '@anthropic/ink';
+import type { Root } from '@bee-game-studio/ink';
 import { launchRepl } from './replLauncher.js';
 import {
   hasGrowthBookEnvOverride,
@@ -154,7 +154,7 @@ import {
   launchTeleportRepoMismatchDialog,
   launchTeleportResumeWrapper,
 } from './dialogLaunchers.js';
-import { SHOW_CURSOR } from '@anthropic/ink';
+import { SHOW_CURSOR } from '@bee-game-studio/ink';
 import {
   exitWithError,
   exitWithMessage,
@@ -175,6 +175,7 @@ import {
   isBuiltInAgent,
   isCustomAgent,
   parseAgentsFromJson,
+  readAgentsArgument,
 } from '@bee-game-studio/builtin-tools/tools/AgentTool/loadAgentsDir.js';
 import type { LogOption } from './types/logs.js';
 import type { Message as MessageType } from './types/message.js';
@@ -554,10 +555,10 @@ export function startDeferredPrefetches(): void {
   void getUserContext();
   prefetchSystemContextIfSafe();
   void getRelevantTips();
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) && !isEnvTruthy(process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH)) {
+  if (isEnvTruthy(process.env.BGS_USE_BEDROCK) && !isEnvTruthy(process.env.CLAUDE_CODE_SKIP_BEDROCK_AUTH)) {
     void prefetchAwsCredentialsAndBedRockInfoIfSafe();
   }
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) && !isEnvTruthy(process.env.CLAUDE_CODE_SKIP_VERTEX_AUTH)) {
+  if (isEnvTruthy(process.env.BGS_USE_VERTEX) && !isEnvTruthy(process.env.CLAUDE_CODE_SKIP_VERTEX_AUTH)) {
     void prefetchGcpCredentialsIfSafe();
   }
   void countFilesRoundedRg(getCwd(), AbortSignal.timeout(3000), []);
@@ -714,7 +715,7 @@ const _pendingAssistantChat: PendingAssistantChat | undefined = feature('KAIROS'
   ? { sessionId: undefined, discover: false }
   : undefined;
 
-// `claude ssh <host> [dir]` — parsed from argv early (same pattern as
+// `bee-game-studio ssh <host> [dir]` — parsed from argv early (same pattern as
 // DIRECT_CONNECT above) so the main command path can pick it up and hand
 // the REPL an SSH-backed session instead of a local one.
 type PendingSSH = {
@@ -858,7 +859,7 @@ export async function main() {
     }
   }
 
-  // `claude ssh <host> [dir]` — strip from argv so the main command handler
+  // `bee-game-studio ssh <host> [dir]` — strip from argv so the main command handler
   // runs (full interactive TUI), stash the host/dir for the REPL branch at
   // ~line 3720 to pick up. Headless (-p) mode not supported in v1: SSH
   // sessions need the local REPL to drive them (interrupt, permissions).
@@ -867,7 +868,7 @@ export async function main() {
     // SSH-specific flags can appear before the host positional (e.g.
     // `ssh --permission-mode auto host /tmp` — standard POSIX flags-before-
     // positionals). Pull them all out BEFORE checking whether a host was
-    // given, so `claude ssh --permission-mode auto host` and `claude ssh host
+    // given, so `bee-game-studio ssh --permission-mode auto host` and `bee-game-studio ssh host
     // --permission-mode auto` are equivalent. The host check below only needs
     // to guard against `-h`/`--help` (which commander should handle).
     if (rawCliArgs[0] === 'ssh') {
@@ -945,7 +946,7 @@ export async function main() {
       // Headless (-p) mode is not supported with SSH in v1 — reject early
       // so the flag doesn't silently cause local execution.
       if (rest.includes('-p') || rest.includes('--print')) {
-        process.stderr.write('Error: headless (-p/--print) mode is not supported with claude ssh\n');
+        process.stderr.write('Error: headless (-p/--print) mode is not supported with bee-game-studio ssh\n');
         gracefulShutdownSync(1);
         return;
       }
@@ -1011,7 +1012,7 @@ export async function main() {
     setQuestionPreviewFormat('markdown');
   }
 
-  // Tag sessions created via `claude remote-control` so the backend can identify them
+  // Tag sessions created via `bee-game-studio remote-control` so the backend can identify them
   if (process.env.CLAUDE_CODE_ENVIRONMENT_KIND === 'bridge') {
     setSessionSource('remote-control');
   }
@@ -1100,7 +1101,7 @@ async function run(): Promise<CommanderCommand> {
     // terminal shell integration may mirror the process name to the tab.
     // After init() so settings.json env can also gate this (gh-4765).
     if (!isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE)) {
-      process.title = 'claude';
+      process.title = 'BGS';
     }
 
     // Attach logging sinks so subcommand handlers can use logEvent/logError.
@@ -1178,7 +1179,7 @@ async function run(): Promise<CommanderCommand> {
     )
     .option(
       '--bare',
-      'Minimal mode: skip hooks, LSP, plugin sync, attribution, auto-memory, background prefetches, keychain reads, and CLAUDE.md auto-discovery. Sets CLAUDE_CODE_SIMPLE=1. Anthropic auth is strictly ANTHROPIC_API_KEY or apiKeyHelper via --settings (OAuth and keychain are never read). 3P providers (Bedrock/Vertex/Foundry) use their own credentials. Skills still resolve via /skill-name. Explicitly provide context via: --system-prompt[-file], --append-system-prompt[-file], --add-dir (CLAUDE.md dirs), --mcp-config, --settings, --agents, --plugin-dir.',
+      'Minimal mode: skip hooks, LSP, plugin sync, attribution, auto-memory, background prefetches, keychain reads, and CLAUDE.md auto-discovery. Sets BGS_SIMPLE=1. Anthropic auth is strictly ANTHROPIC_API_KEY or apiKeyHelper via --settings (OAuth and keychain are never read). 3P providers (Bedrock/Vertex/Foundry) use their own credentials. Skills still resolve via /skill-name. Explicitly provide context via: --system-prompt[-file], --append-system-prompt[-file], --add-dir (CLAUDE.md dirs), --mcp-config, --settings, --agents, --plugin-dir.',
       () => true,
     )
     .addOption(new Option('--init', 'Run Setup hooks with init trigger, then continue').hideHelp())
@@ -1410,11 +1411,11 @@ async function run(): Promise<CommanderCommand> {
     .option('-n, --name <name>', 'Set a display name for this session (shown in /resume and terminal title)')
     .option(
       '--agents <json>',
-      'JSON object defining custom agents (e.g. \'{"reviewer": {"description": "Reviews code", "prompt": "You are a code reviewer"}}\')',
+      'JSON object or @file defining custom agents (e.g. \'{"reviewer": {"description": "Reviews code", "prompt": "You are a code reviewer"}}\')',
     )
     .option('--setting-sources <sources>', 'Comma-separated list of setting sources to load (user, project, local).')
     // gh-33508: <paths...> (variadic) consumed everything until the next
-    // --flag. `claude --plugin-dir /path mcp add --transport http` swallowed
+    // --flag. `bee-game-studio --plugin-dir /path mcp add --transport http` swallowed
     // `mcp` and `add` as paths, then choked on --transport as an unknown
     // top-level option. Single-value + collect accumulator means each
     // --plugin-dir takes exactly one arg; repeat the flag for multiple dirs.
@@ -1438,7 +1439,7 @@ async function run(): Promise<CommanderCommand> {
       // gates fire (CLAUDE.md, skills, hooks inside executeHooks, agent
       // dir-walk). Must be set before setup() / any of the gated work runs.
       if ((options as { bare?: boolean }).bare) {
-        process.env.CLAUDE_CODE_SIMPLE = '1';
+        process.env.BGS_SIMPLE = '1';
       }
 
       // Ignore "code" as a prompt - treat it the same as no prompt
@@ -2524,12 +2525,14 @@ async function run(): Promise<CommanderCommand> {
       let cliAgents: typeof agentDefinitionsResult.activeAgents = [];
       if (agentsJson) {
         try {
-          const parsedAgents = safeParseJSON(agentsJson);
+          const parsedAgents = await readAgentsArgument(agentsJson);
           if (parsedAgents) {
             cliAgents = parseAgentsFromJson(parsedAgents, 'flagSettings');
           }
         } catch (error) {
           logError(error);
+          console.error('Unable to load explicit --agents configuration. Check the JSON or @file path.');
+          process.exit(1);
         }
       }
 
@@ -2685,6 +2688,8 @@ async function run(): Promise<CommanderCommand> {
           }
         } else {
           logForDebugging(`[teammate] Custom agent ${storedTeammateOpts.agentType} not found in available agents`);
+          console.error(`Required teammate agent type is unavailable: ${storedTeammateOpts.agentType}`);
+          process.exit(1);
         }
       }
 
@@ -2755,7 +2760,7 @@ async function run(): Promise<CommanderCommand> {
           installAsciicastRecorder();
         }
 
-        const { createRoot } = await import('@anthropic/ink');
+        const { createRoot } = await import('@bee-game-studio/ink');
         root = await createRoot(ctx.renderOptions);
 
         // Log startup time now, before any blocking dialog renders. Logging
@@ -3073,7 +3078,7 @@ async function run(): Promise<CommanderCommand> {
 
       // Register PID file for concurrent-session detection (~/.claude/sessions/)
       // and fire multi-clauding telemetry. Lives here (not init.ts) so only the
-      // REPL path registers — not subcommands like `claude doctor`. Chained:
+      // REPL path registers — not subcommands like `bee-game-studio doctor`. Chained:
       // count must run after register's write completes or it misses our own file.
       void registerSession().then(registered => {
         if (!registered) return;
@@ -3780,7 +3785,7 @@ async function run(): Promise<CommanderCommand> {
         );
         return;
       } else if (feature('SSH_REMOTE') && _pendingSSH?.host) {
-        // `claude ssh <host> [dir]` — probe remote, deploy binary if needed,
+        // `bee-game-studio ssh <host> [dir]` — probe remote, deploy binary if needed,
         // spawn ssh with unix-socket -R forward to a local auth proxy, hand
         // the REPL an SSHSession. Tools run remotely, UI renders locally.
         // `--local` skips probe/deploy/ssh and spawns the current binary
@@ -4050,7 +4055,7 @@ async function run(): Promise<CommanderCommand> {
           if (!isRemoteTuiEnabled && !hasInitialPrompt) {
             return await exitWithError(
               root,
-              'Error: --remote requires a description.\nUsage: claude --remote "your task description"',
+              'Error: --remote requires a description.\nUsage: bee-game-studio --remote "your task description"',
               () => gracefulShutdown(1),
             );
           }
@@ -4082,7 +4087,7 @@ async function run(): Promise<CommanderCommand> {
             // Original behavior: print session info and exit
             process.stdout.write(`Created remote session: ${createdSession.title}\n`);
             process.stdout.write(`View: ${getRemoteSessionUrl(createdSession.id)}?m=0\n`);
-            process.stdout.write(`Resume with: claude --teleport ${createdSession.id}\n`);
+            process.stdout.write(`Resume with: bee-game-studio --teleport ${createdSession.id}\n`);
             await gracefulShutdown(0);
             process.exit(0);
           }
@@ -4203,9 +4208,9 @@ async function run(): Promise<CommanderCommand> {
                   } else {
                     // No known paths - show original error
                     throw new TeleportOperationError(
-                      `You must run claude --teleport ${teleport} from a checkout of ${sessionRepo}.`,
+                      `You must run bee-game-studio --teleport ${teleport} from a checkout of ${sessionRepo}.`,
                       chalk.red(
-                        `You must run claude --teleport ${teleport} from a checkout of ${chalk.bold(sessionRepo)}.\n`,
+                        `You must run bee-game-studio --teleport ${teleport} from a checkout of ${chalk.bold(sessionRepo)}.\n`,
                       ),
                     );
                   }
@@ -4609,7 +4614,7 @@ async function run(): Promise<CommanderCommand> {
     return program;
   }
 
-  // claude mcp
+  // bee-game-studio mcp
 
   const mcp = program
     .command('mcp')
@@ -4776,11 +4781,11 @@ async function run(): Promise<CommanderCommand> {
       );
   }
 
-  // `claude ssh <host> [dir]` — registered here only so --help shows it.
+  // `bee-game-studio ssh <host> [dir]` — registered here only so --help shows it.
   // The actual interactive flow is handled by early argv rewriting in main()
   // (parallels the DIRECT_CONNECT/cc:// pattern above). If commander reaches
   // this action it means the argv rewrite didn't fire (e.g. user ran
-  // `claude ssh` with no host) — just print usage.
+  // `bee-game-studio ssh` with no host) — just print usage.
   if (feature('SSH_REMOTE')) {
     program
       .command('ssh <host> [dir]')
@@ -4862,7 +4867,7 @@ async function run(): Promise<CommanderCommand> {
       );
   }
 
-  // claude auth
+  // bee-game-studio auth
 
   const auth = program.command('auth').description('Manage authentication').configureHelp(createSortedHelpConfig());
 
@@ -5080,7 +5085,7 @@ async function run(): Promise<CommanderCommand> {
     .action(async () => {
       const [{ setupTokenHandler }, { createRoot }] = await Promise.all([
         import('./cli/handlers/util.js'),
-        import('@anthropic/ink'),
+        import('@bee-game-studio/ink'),
       ]);
       const root = await createRoot(getBaseRenderOptions(false));
       await setupTokenHandler(root);
@@ -5253,7 +5258,7 @@ async function run(): Promise<CommanderCommand> {
     program
       .command('rollback [target]')
       .description(
-        '[ANT-ONLY] Roll back to a previous release\n\nExamples:\n  claude rollback                                    Go 1 version back from current\n  claude rollback 3                                  Go 3 versions back from current\n  claude rollback 2.0.73-dev.20251217.t190658        Roll back to a specific version',
+        '[ANT-ONLY] Install a specific previous BGS release from the configured distribution source\n\nExample:\n  bee-game-studio rollback 2.0.73',
       )
       .option('-l, --list', 'List recent published versions with ages')
       .option('--dry-run', 'Show what would be installed without installing')

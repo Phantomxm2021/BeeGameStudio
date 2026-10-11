@@ -2123,7 +2123,7 @@ async function* executeHooks({
     return
   }
 
-  if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+  if (isEnvTruthy(process.env.BGS_SIMPLE)) {
     return
   }
 
@@ -3158,7 +3158,7 @@ async function executeHooksOutsideREPL({
   signal?: AbortSignal
   timeoutMs: number
 }): Promise<HookOutsideReplResult[]> {
-  if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+  if (isEnvTruthy(process.env.BGS_SIMPLE)) {
     return []
   }
 

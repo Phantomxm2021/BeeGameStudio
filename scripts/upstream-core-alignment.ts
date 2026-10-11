@@ -155,12 +155,29 @@ function resolveInside(root: string, path: string): string {
   return absolute
 }
 
+async function assertNoSymlinkPath(root: string, path: string): Promise<void> {
+  assertSafeRelativePath(path)
+  let current = root
+  for (const part of path.split('/')) {
+    current = resolve(current, part)
+    try {
+      if ((await lstat(current)).isSymbolicLink()) {
+        throw new Error(`Alignment symbolic links are not allowed: ${path}`)
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
+  }
+}
+
 async function enumeratePath(
   root: string,
   path: string,
   expectedKind: 'directory' | 'file',
 ): Promise<string[]> {
   const absolute = resolveInside(root, path)
+  await assertNoSymlinkPath(root, path)
   if (!(await pathExists(absolute))) return []
   const stats = await lstat(absolute)
   if (stats.isSymbolicLink()) {
@@ -330,18 +347,24 @@ export async function syncCoreAlignment(input: AlignmentInput): Promise<void> {
   const localPaths = await enumerateConfiguredPaths(localRoot, input.manifest)
   const upstreamSet = new Set(upstreamPaths)
   const generatedSet = new Set(input.manifest.generatedPaths)
+  // Explicit product exceptions need a manual upstream merge. Keep reporting
+  // their differences in audit; sync must neither delete nor overwrite them.
+  const manualMergeSet = new Set(Object.keys(input.manifest.rootExceptions))
 
   for (const path of localPaths) {
-    if (!upstreamSet.has(path) && !generatedSet.has(path)) {
+    if (!upstreamSet.has(path) && !generatedSet.has(path) && !manualMergeSet.has(path)) {
       await rm(resolveInside(localRoot, path), { force: true })
     }
   }
   for (const path of upstreamPaths) {
+    if (manualMergeSet.has(path)) continue
     const destination = resolveInside(localRoot, path)
     const upstreamBytes = new Uint8Array(
       await readFile(resolveInside(upstreamRoot, path)),
     )
+    await assertNoSymlinkPath(localRoot, path)
     await mkdir(dirname(destination), { recursive: true })
+    await assertNoSymlinkPath(localRoot, path)
     await Bun.write(destination, expectedBytes(path, upstreamBytes, input.manifest))
   }
 }

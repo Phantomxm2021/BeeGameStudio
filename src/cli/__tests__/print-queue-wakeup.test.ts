@@ -10,18 +10,18 @@ const batchReturn = source.indexOf('  return (', batchStart)
 const batchEnd = source.indexOf('\n}', batchReturn)
 const canBatch = new Function('head', 'next', source.slice(batchReturn, batchEnd))
 
-test('scheduled author commands are never merged with adjacent user turns', () => {
+test('ordinary input ignores all removed private business dispatch fields', () => {
   const ordinary = { mode: 'prompt', workload: undefined, isMeta: false }
   const scheduled = { ...ordinary, beegameDirectionAuthors: { contextPath: '/context' } }
   expect(canBatch(ordinary, ordinary)).toBe(true)
-  expect(canBatch(scheduled, ordinary)).toBe(false)
-  expect(canBatch(ordinary, scheduled)).toBe(false)
-  expect(canBatch(scheduled, scheduled)).toBe(false)
+  expect(canBatch(scheduled, ordinary)).toBe(true)
+  expect(canBatch(ordinary, scheduled)).toBe(true)
+  expect(canBatch(scheduled, scheduled)).toBe(true)
   expect(canBatch(ordinary, undefined)).toBe(false)
-  expect(canBatch(ordinary, { ...ordinary, beegameDirectionAuthors: null })).toBe(false)
+  expect(canBatch(ordinary, { ...ordinary, beegameDirectionAuthors: null })).toBe(true)
   const scoped = { ...ordinary, beegameProjectTurn: { restartContext: true } }
-  expect(canBatch(scoped, ordinary)).toBe(false)
-  expect(canBatch(ordinary, scoped)).toBe(false)
+  expect(canBatch(scoped, ordinary)).toBe(true)
+  expect(canBatch(ordinary, scoped)).toBe(true)
 })
 const start = source.indexOf('const unsubscribeCommandQueue = subscribeToCommandQueue(')
 const end = source.indexOf('registerCleanup(', start)

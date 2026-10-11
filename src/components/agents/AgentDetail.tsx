@@ -1,6 +1,6 @@
 import figures from 'figures';
 import * as React from 'react';
-import { type KeyboardEvent, Box, Text } from '@anthropic/ink';
+import { type KeyboardEvent, Box, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import type { Tools } from '../../Tool.js';
 import { getAgentColor } from '@bee-game-studio/builtin-tools/tools/AgentTool/agentColorManager.js';

@@ -2,7 +2,7 @@ import { feature } from 'bun:bundle';
 import figures from 'figures';
 import React, { useEffect, useRef, useState } from 'react';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box, Text, stringWidth } from '@anthropic/ink';
+import { Box, Text, stringWidth } from '@bee-game-studio/ink';
 import { useAppState, useSetAppState } from '../state/AppState.js';
 import type { AppState } from '../state/AppStateStore.js';
 import { getGlobalConfig } from '../utils/config.js';

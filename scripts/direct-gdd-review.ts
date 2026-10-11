@@ -7,6 +7,7 @@ import { loadEnvFile } from './beegame-migration-cli.ts'
 import { createSupabaseDashboardStoreFromEnv } from '../packages/agent-workflow-server/src/supabase-dashboard-store.ts'
 import { openModelUsageProxy, summarizeModelRequests } from '../packages/agent-workflow-server/scripts/model-usage-proxy.ts'
 import { authorDocumentResponsibility } from '../packages/agent-workflow-server/src/beegame/project-author.ts'
+import { standardCliProvider } from '../packages/agent-workflow/src/standard-cli-provider.ts'
 
 let documentPath = '/private/tmp/bgs-scheduled-review-accept-20261004-AtjTBHgW/projects/users/spatial-test/scheduled-review-museum-20261004-AtjTBHgW/docs/GDD.md'
 let cli = '/private/tmp/bgs-scheduled-review-accept-20261004-AtjTBHgW/cli/cli.js'
@@ -85,14 +86,14 @@ const dashboard = createSupabaseDashboardStoreFromEnv()
 if (!dashboard) throw Error('Missing dashboard configuration')
 const selected = await dashboard.withAuthToken(auth.access_token)
   .loadRlsVisibleModelRuntimeEnv(modelConfigId)
-if (!selected.ANTHROPIC_BASE_URL || !selected.ANTHROPIC_DEFAULT_SONNET_MODEL)
+if (!selected.ANTHROPIC_BASE_URL || !selected.BGS_DEFAULT_BALANCED_MODEL)
   throw Error('Selected model configuration has no endpoint or model')
 const cwd = join(root, 'workspace')
 await mkdir(cwd, { recursive: true })
 await mkdir(join(root, 'config'), { recursive: true })
 await writeFile(join(root, 'prompt-input.txt'), prompt, { flag: 'wx' })
 await writeFile(join(root, 'started.json'), JSON.stringify({ at: new Date().toISOString(),
-  model: selected.ANTHROPIC_DEFAULT_SONNET_MODEL, modelConfigId, documentPath, documentSha256: hash(body),
+  model: selected.BGS_DEFAULT_BALANCED_MODEL, modelConfigId, documentPath, documentSha256: hash(body),
   question, suppliedInputs: ['question', 'existing GDD responsibility verbatim', 'complete saved GDD body'],
   suppliedBgsResponsibilities: true, responsibilitySource, responsibilityFunction: "authorDocumentResponsibility(0, 'GDD.md')",
   responsibilitySha256: hash(role), responsibilitySourceSha256: hash(await readFile(responsibilitySource, 'utf8')),
@@ -100,11 +101,13 @@ await writeFile(join(root, 'started.json'), JSON.stringify({ at: new Date().toIS
 const proxy = openModelUsageProxy(selected.ANTHROPIC_BASE_URL!, join(root, 'provider-usage.json'), () => 'direct-cli-role-gdd-review')
 const inherited = Object.fromEntries(['HOME', 'LANG', 'LC_ALL', 'LOGNAME', 'PATH', 'SHELL', 'USER']
   .flatMap(key => process.env[key] === undefined ? [] : [[key, process.env[key]!]]))
-const env = { ...inherited, ...selected, BEEGAME_MODEL_TYPE: 'anthropic', ANTHROPIC_BASE_URL: proxy.baseUrl,
-  BEEGAME_CONFIG_DIR: join(root, 'config'), BEEGAME_MODEL_OBSERVER_METADATA: '1',
-  CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-  DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1', SKILL_SEARCH_ENABLED: '0' }
+const provider = standardCliProvider({ ...inherited, ...selected, BEEGAME_MODEL_TYPE: 'anthropic', ANTHROPIC_BASE_URL: proxy.baseUrl,
+  BEEGAME_CONFIG_DIR: join(root, 'config'),
+  BGS_DISABLE_AUTO_MEMORY: '1', BGS_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+  DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1', SKILL_SEARCH_ENABLED: '0' })
+const env = provider.environment
 const command = [process.execPath, cli, '--print', '--output-format', 'json',
+  '--settings', JSON.stringify({ modelType: provider.modelType }),
   '--tools', '', '--disable-slash-commands', '--setting-sources', '',
   '--mcp-config', '{"mcpServers":{}}', '--strict-mcp-config', '--no-session-persistence', '--no-chrome']
 await writeFile(join(root, 'launch.json'), JSON.stringify({ cwd, command, customSystemPrompt: false,
@@ -128,7 +131,7 @@ const stop = () => {
 }
 process.on('SIGTERM', stop); process.on('SIGINT', stop)
 const deadline = setTimeout(stop, 10 * 60 * 1000)
-console.log(JSON.stringify({ event: 'direct_cli_started', model: selected.ANTHROPIC_DEFAULT_SONNET_MODEL,
+console.log(JSON.stringify({ event: 'direct_cli_started', model: selected.BGS_DEFAULT_BALANCED_MODEL,
   question, existingGddRoleIncluded: true, tools: [], documentUnchangedBeforeRun: true }))
 try {
   child.stdin.write(prompt)
@@ -142,7 +145,7 @@ try {
   try { result = JSON.parse(stdout) } catch {}
   const unchanged = hash(await readFile(documentPath, 'utf8')) === hash(body)
   const summary = { elapsedSeconds: (Date.now() - started) / 1000, exitCode, stopped,
-    model: selected.ANTHROPIC_DEFAULT_SONNET_MODEL, question, documentPath, documentSha256: hash(body),
+    model: selected.BGS_DEFAULT_BALANCED_MODEL, question, documentPath, documentSha256: hash(body),
     documentUnchanged: unchanged, resultSubtype: result?.subtype, resultIsError: result?.is_error,
     resultText: result?.result, tokenObservation: summarizeModelRequests(proxy.records),
     settledCredits: null, promptSha256: hash(prompt), bgsWorkflow: false, noKnownFindingsSupplied: true, noCheckingSkillSupplied: true,

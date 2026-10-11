@@ -13,7 +13,7 @@ import {
   isFastModeCooldown,
   isFastModeEnabled,
 } from 'src/utils/fastMode.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { useAppState, useSetAppState } from '../state/AppState.js';
 import {
@@ -36,7 +36,7 @@ import { getModelOptions } from '../utils/model/modelOptions.js';
 import { getSettingsForSource, updateSettingsForSource } from '../utils/settings/settings.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 import { Select } from './CustomSelect/index.js';
-import { Byline, KeyboardShortcutHint, Pane } from '@anthropic/ink';
+import { Byline, KeyboardShortcutHint, Pane } from '@bee-game-studio/ink';
 import { effortLevelToSymbol } from './EffortIndicator.js';
 
 export type Props = {

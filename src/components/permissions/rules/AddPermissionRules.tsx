@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useCallback } from 'react';
 import { Select } from '../../../components/CustomSelect/select.js';
-import { Box, Dialog, Text } from '@anthropic/ink';
+import { Box, Dialog, Text } from '@bee-game-studio/ink';
 import type { ToolPermissionContext } from '../../../Tool.js';
 import type {
   PermissionBehavior,

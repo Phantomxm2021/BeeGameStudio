@@ -19,7 +19,7 @@ export interface SSHSessionManagerOptions {
   onReconnecting: (attempt: number, max: number) => void
   onDisconnected: () => void
   onError: (error: Error) => void
-  reconnect?: () => Promise<Subprocess>
+  reconnect?: (sessionId?: string, signal?: AbortSignal) => Promise<Subprocess>
   maxReconnectAttempts?: number
 }
 
@@ -40,7 +40,7 @@ export interface SSHSessionManager {
   respondToPermissionRequest(
     requestId: string,
     response: { behavior: string; message?: string; updatedInput?: unknown },
-  ): void
+  ): boolean
 }
 
 function isStdoutMessage(value: unknown): value is StdoutMessage {
@@ -61,11 +61,14 @@ export class SSHSessionManagerImpl implements SSHSessionManager {
   private options: SSHSessionManagerOptions
   private connected = false
   private disconnected = false
-  private readLoopAbort: AbortController | null = null
+  private reader: ReadableStreamDefaultReader<Uint8Array> | null = null
+  private sessionId: string | undefined
   private reconnectAttempt = 0
   private readonly maxReconnectAttempts: number
   private userInitiatedDisconnect = false
   private reconnecting = false
+  private reconnectController: AbortController | undefined
+  private pendingPermissions = new Set<string>()
 
   constructor(proc: Subprocess, options: SSHSessionManagerOptions) {
     this.proc = proc
@@ -75,9 +78,8 @@ export class SSHSessionManagerImpl implements SSHSessionManager {
   }
 
   connect(): void {
-    if (this.connected) return
+    if (this.connected || this.disconnected || this.reconnecting) return
 
-    this.readLoopAbort = new AbortController()
     this.startReadLoop()
     this.monitorExit()
 
@@ -86,19 +88,22 @@ export class SSHSessionManagerImpl implements SSHSessionManager {
   }
 
   private async startReadLoop(): Promise<void> {
-    const stdout = this.proc.stdout
+    const proc = this.proc
+    const stdout = proc.stdout
     if (!stdout) {
       this.options.onError(new Error('SSH process stdout is not available'))
       return
     }
 
     const reader = (stdout as ReadableStream<Uint8Array>).getReader()
+    this.reader = reader
     const decoder = new TextDecoder()
     let lineBuffer = ''
 
     try {
-      while (!this.disconnected) {
+      while (!this.disconnected && proc === this.proc) {
         const { done, value } = await reader.read()
+        if (this.disconnected || proc !== this.proc) break
         if (done) break
 
         lineBuffer += decoder.decode(value, { stream: true })
@@ -112,42 +117,47 @@ export class SSHSessionManagerImpl implements SSHSessionManager {
         }
       }
     } catch (err) {
-      if (!this.disconnected) {
+      if (!this.disconnected && proc === this.proc) {
         this.options.onError(
           err instanceof Error ? err : new Error(String(err)),
         )
       }
     } finally {
       reader.releaseLock()
+      if (this.reader === reader) this.reader = null
       if (!this.disconnected && !this.userInitiatedDisconnect) {
-        void this.handleProcessExit()
+        void this.handleProcessExit(proc)
       }
     }
   }
 
   private monitorExit(): void {
-    if (this.proc.exitCode !== null) {
+    const proc = this.proc
+    if (proc.exitCode !== null) {
       if (!this.userInitiatedDisconnect) {
-        void this.handleProcessExit()
+        void this.handleProcessExit(proc)
       }
       return
     }
-    this.proc.exited
+    proc.exited
       .then(() => {
         if (!this.disconnected && !this.userInitiatedDisconnect) {
-          void this.handleProcessExit()
+          void this.handleProcessExit(proc)
         }
       })
       .catch(() => {
         if (!this.disconnected && !this.userInitiatedDisconnect) {
-          void this.handleProcessExit()
+          void this.handleProcessExit(proc)
         }
       })
   }
 
-  private async handleProcessExit(): Promise<void> {
-    if (this.disconnected || this.reconnecting) return
+  private async handleProcessExit(proc: Subprocess): Promise<void> {
+    if (proc !== this.proc || this.disconnected || this.reconnecting) return
     this.connected = false
+    this.pendingPermissions.clear()
+    // EOF can precede process exit. Retire this process before replacing it.
+    try { proc.kill() } catch { /* already exited */ }
 
     if (!this.options.reconnect) {
       this.disconnected = true
@@ -165,7 +175,8 @@ export class SSHSessionManagerImpl implements SSHSessionManager {
     try {
       await this.attemptReconnect()
     } finally {
-      this.reconnecting = false
+      // A replacement may already be reconnecting after its own EOF.
+      if (this.proc === proc) this.reconnecting = false
     }
   }
 
@@ -187,19 +198,40 @@ export class SSHSessionManagerImpl implements SSHSessionManager {
 
       if (this.userInitiatedDisconnect) return
 
+      const controller = new AbortController()
+      this.reconnectController = controller
       try {
-        const newProc = await reconnect()
+        const newProc = await reconnect(this.sessionId, controller.signal)
+        if (this.disconnected || this.userInitiatedDisconnect) {
+          try { newProc.kill() } catch { /* already exited */ }
+          if (newProc.stdout && typeof newProc.stdout !== 'number') {
+            await newProc.stdout.cancel().catch(() => {})
+          }
+          return
+        }
+        if (newProc.exitCode !== null || newProc.signalCode !== null) {
+          try { newProc.kill() } catch { /* already exited */ }
+          throw new Error(`Replacement SSH process exited (${newProc.exitCode ?? newProc.signalCode})`)
+        }
         this.proc = newProc
         this.reconnectAttempt = 0
         this.connected = true
+        this.reconnecting = false
         this.startReadLoop()
         this.monitorExit()
         this.options.onConnected()
         return
       } catch (err) {
-        logForDebugging(
-          `[SSH] reconnect attempt ${this.reconnectAttempt} failed: ${err instanceof Error ? err.message : String(err)}`,
+        if (this.disconnected || this.userInitiatedDisconnect) return
+        const error = new Error(
+          `SSH reconnect attempt ${this.reconnectAttempt} failed: ${err instanceof Error ? err.message : String(err)}`,
         )
+        logForDebugging(
+          `[SSH] ${error.message}`,
+        )
+        this.options.onError(error)
+      } finally {
+        if (this.reconnectController === controller) this.reconnectController = undefined
       }
     }
 
@@ -218,12 +250,18 @@ export class SSHSessionManagerImpl implements SSHSessionManager {
     if (!isStdoutMessage(raw)) return
     const parsed = raw
 
+    if (parsed.type === 'system' && (parsed as Record<string, unknown>).subtype === 'init') {
+      const id = (parsed as Record<string, unknown>).session_id
+      if (typeof id === 'string' && id) this.sessionId = id
+    }
+
     if (parsed.type === 'control_request') {
       const request = parsed as unknown as {
         request_id: string
         request: SDKControlPermissionRequest & { subtype: string }
       }
       if (request.request.subtype === 'can_use_tool') {
+        this.pendingPermissions.add(request.request_id)
         this.options.onPermissionRequest(
           request.request as unknown as SSHPermissionRequest,
           request.request_id,
@@ -257,13 +295,25 @@ export class SSHSessionManagerImpl implements SSHSessionManager {
 
   private writeToStdin(data: string): boolean {
     try {
+      if (!this.connected || this.reconnecting || this.proc.exitCode !== null || this.proc.signalCode !== null) return false
       const stdin = this.proc.stdin
       if (!stdin || typeof stdin === 'number' || this.disconnected) return false
       const encoded = new TextEncoder().encode(data + '\n')
-      ;(stdin as unknown as { write(d: Uint8Array): number }).write(encoded)
+      const written = (stdin as unknown as { write(d: Uint8Array): number }).write(encoded)
+      if (written !== encoded.length) {
+        this.options.onError(new Error('SSH process did not accept the complete message'))
+        // Retire a pipe containing an incomplete JSON frame; do not append a
+        // subsequent message or silently retry a possibly delivered action.
+        void this.handleProcessExit(this.proc)
+        return false
+      }
       ;(stdin as unknown as { flush?(): void }).flush?.()
       return true
     } catch {
+      if (this.connected && !this.disconnected) {
+        this.options.onError(new Error('SSH process pipe is not writable'))
+        void this.handleProcessExit(this.proc)
+      }
       return false
     }
   }
@@ -295,7 +345,8 @@ export class SSHSessionManagerImpl implements SSHSessionManager {
   respondToPermissionRequest(
     requestId: string,
     response: { behavior: string; message?: string; updatedInput?: unknown },
-  ): void {
+  ): boolean {
+    if (!this.pendingPermissions.has(requestId)) return false
     const msg = jsonStringify({
       type: 'control_response',
       response: {
@@ -309,7 +360,9 @@ export class SSHSessionManagerImpl implements SSHSessionManager {
         },
       },
     })
-    this.writeToStdin(msg)
+    const sent = this.writeToStdin(msg)
+    if (sent) this.pendingPermissions.delete(requestId)
+    return sent
   }
 
   private sendErrorResponse(requestId: string, error: string): void {
@@ -329,7 +382,9 @@ export class SSHSessionManagerImpl implements SSHSessionManager {
     this.userInitiatedDisconnect = true
     this.disconnected = true
     this.connected = false
-    this.readLoopAbort?.abort()
+    this.pendingPermissions.clear()
+    this.reconnectController?.abort()
+    void this.reader?.cancel().catch(() => {})
 
     try {
       const stdin = this.proc.stdin

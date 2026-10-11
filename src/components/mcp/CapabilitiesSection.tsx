@@ -1,6 +1,6 @@
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
-import { Byline } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
+import { Byline } from '@bee-game-studio/ink';
 
 type Props = {
   serverToolsCount: number;

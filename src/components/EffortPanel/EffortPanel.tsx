@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { BaseText, Box, Text, useTerminalSize } from '@anthropic/ink';
+import { BaseText, Box, Text, useTerminalSize } from '@bee-game-studio/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import { type EffortValue, getDisplayedEffortLevel, getEffortEnvOverride } from '../../utils/effort.js';
 import {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, color, Link, Text, useTheme, useTabHeaderFocus } from '@anthropic/ink';
+import { Box, color, Link, Text, useTheme, useTabHeaderFocus } from '@bee-game-studio/ink';
 import type { CommandResultDisplay } from '../../types/command.js';
 import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
 import { Select } from '../CustomSelect/select.js';
@@ -92,7 +92,7 @@ function OverridesSelect({ onComplete, currentMode }: Props & { currentMode: Ove
           <Text bold dimColor>
             Allow unsandboxed fallback:
           </Text>{' '}
-          When a command fails due to sandbox restrictions, Claude can retry with dangerouslyDisableSandbox to run
+          When a command fails due to sandbox restrictions, BGS can retry with dangerouslyDisableSandbox to run
           outside the sandbox (falling back to default permissions).
         </Text>
         <Text dimColor>

@@ -1,6 +1,6 @@
 import React from 'react';
-import { Box, Text, useAnimationFrame } from '@anthropic/ink';
-import type { Theme } from '@anthropic/ink';
+import { Box, Text, useAnimationFrame } from '@bee-game-studio/ink';
+import type { Theme } from '@bee-game-studio/ink';
 import type { AgentProgress } from '../progress/store.js';
 import { PHASE_COLOR, PHASE_MARK, type PhaseStatus } from './status.js';
 import { ALL_PHASE, type MergedPhase } from './selectors.js';

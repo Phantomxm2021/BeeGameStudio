@@ -1,10 +1,10 @@
 import React from 'react';
 import { removeSandboxViolationTags } from 'src/utils/sandbox/sandbox-ui-utils.js';
-import { KeyboardShortcutHint } from '@anthropic/ink';
+import { KeyboardShortcutHint } from '@bee-game-studio/ink';
 import { MessageResponse } from 'src/components/MessageResponse.js';
 import { OutputLine } from 'src/components/shell/OutputLine.js';
 import { ShellTimeDisplay } from 'src/components/shell/ShellTimeDisplay.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import type { Out as BashOut } from './BashTool.js';
 
 type Props = {
@@ -83,7 +83,7 @@ export default function BashToolResultMessage({
   if (isImage) {
     return (
       <MessageResponse height={1}>
-        <Text dimColor>[Image data detected and sent to Claude]</Text>
+        <Text dimColor>[Image data detected and sent to BGS]</Text>
       </MessageResponse>
     );
   }

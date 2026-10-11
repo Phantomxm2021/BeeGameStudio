@@ -1,6 +1,6 @@
 import type { UUID } from 'crypto';
 import React, { useCallback } from 'react';
-import { Box, Text, Byline, KeyboardShortcutHint, LoadingState } from '@anthropic/ink';
+import { Box, Text, Byline, KeyboardShortcutHint, LoadingState } from '@bee-game-studio/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { getAllBaseTools } from '../tools.js';
 import type { LogOption } from '../types/logs.js';

@@ -2,7 +2,7 @@ import { join } from 'path';
 import React, { useCallback, useState } from 'react';
 import type { ExitState } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { setClipboard, Box, Text, Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
+import { setClipboard, Box, Text, Byline, Dialog, KeyboardShortcutHint } from '@bee-game-studio/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { getCwd } from '../utils/cwd.js';
 import { writeFileSync_DEPRECATED } from '../utils/slowOperations.js';

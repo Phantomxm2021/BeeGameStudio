@@ -8,12 +8,14 @@ import { assetManifestAuthoringExamples } from './asset-manifest-authoring-contr
 import { BEEGAME_SCENE_MODEL } from './game-content-package'
 import { readRuntimeAcceptanceReport } from './runtime-acceptance'
 import { AUTHOR_BATCHES } from './project-author'
-import { designDocumentFixture, designRequirementChecksFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture, writeUiLayoutFixture } from './fixtures/layout-fixture'
+import { checkContentSources } from './delivery/stages/content'
+import { designBaselineFixture, designDocumentFixture, designRequirementChecksFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture, writeUiLayoutFixture } from './fixtures/layout-fixture'
 import {
   advanceProjectDeliveryAfterTurn,
   beginProjectDelivery,
   captureProjectDeliveryAcceptance,
   evaluateProjectDeliveryGate,
+  checkProjectDesignBaseline,
   pauseProjectDelivery,
   prepareProjectDesignReview,
   PROJECT_DOCUMENTS,
@@ -24,13 +26,120 @@ import {
   readProjectDelivery,
   resumeProjectDelivery,
   refreshProjectContentContract,
+  requestProjectDesignResolution,
 } from './project-delivery'
+import type { DesignFinding } from './design-handoff'
+
+test.each(['not-applicable', 'fixed', 'open'] as const)('legacy due user finding needs real resolution, not a fabricated answer: %s', async disposition => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-false-design-finding-')), workspace = join(root, 'project')
+  const finding: DesignFinding = { id: 'optional-control', severity: 'follow-up', action: 'decide', owner: 'user',
+    documents: ['UI_UX_SPEC.md'], sources: [{ document: 'UI_UX_SPEC.md', section: 'Design' }],
+    impact: 'An alternative input control was incorrectly treated as necessary', closeWhen: 'Determine whether a release requirement is unmet', neededBefore: 'content' }
+  try {
+    await mkdir(workspace)
+    const state = await beginProjectDelivery(workspace, root, 'Keyboard/mouse and touch; control implementation belongs to UI.')
+    await writeDesignDocumentsFixture(workspace)
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'content',
+      authorBatch: 4, designBaseline: { ...designBaselineFixture(workspace), followUps: [finding] } }))
+    await requestProjectDesignResolution(workspace, root, { mode: 'inspect', findings: [finding], instruction: 'Recheck the disputed input requirement against the original source.' })
+    const result = await advanceProjectDeliveryAfterTurn(workspace, root, { phase: 'review', status: 'complete', summary: '',
+      review: { step: 'inspect', findings: disposition === 'open' ? [finding] : [], resolved: disposition === 'open' ? [] : [
+        { id: finding.id, disposition, evidence: 'UI_UX_SPEC.md / Design selects a working touch path for the confirmed input requirement; the alternative adds no required release behavior.' },
+      ] } })
+    const saved = (await readProjectDelivery(workspace, root))!
+    if (disposition === 'not-applicable') {
+      expect(result).toMatchObject({ phase: 'content', shouldContinue: true })
+      expect(saved.designBaseline!.followUps).toEqual([])
+      expect(saved.designHistory!.at(-1)!.resolved[0]!.disposition).toBe('not-applicable')
+    } else {
+      expect(saved.phase).toBe('review')
+      expect(saved.designBaseline!.followUps).toEqual([finding])
+      expect(saved.designReview?.userDecisions).toBeUndefined()
+      if (disposition === 'fixed') expect(result!.issues.join(' ')).toContain('human answer')
+      else expect(saved.designReview!.step).toBe('revise')
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('combined reviewer cannot release a genuinely missing required user decision', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-joint-required-choice-')), workspace = join(root, 'project')
+  try {
+    await mkdir(workspace)
+    const state = await beginProjectDelivery(workspace, root, 'Explicit touch controls must be supplied.')
+    await writeDesignDocumentsFixture(workspace)
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'review', authorBatch: 4 }))
+    await prepareProjectDesignReview(workspace, root)
+    const result = await advanceProjectDeliveryAfterTurn(workspace, root, { phase: 'review', status: 'complete', summary: '',
+      review: { step: 'revise', findings: [{ id: 'missing-input', severity: 'blocker', action: 'decide', owner: 'user',
+        documents: ['UI_UX_SPEC.md'], sources: [{ document: 'UI_UX_SPEC.md', section: 'Design' }],
+        impact: 'Removing the explicitly required input changes confirmed scope', closeWhen: 'Retain the requirement or obtain real user direction', neededBefore: 'resources' }], resolved: [] } })
+    expect(result).toMatchObject({ phase: 'review', shouldContinue: false })
+    expect(result!.issues.join(' ')).toContain('no validated answer')
+    expect((await readProjectDelivery(workspace, root))!.designBaseline).toBeUndefined()
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
 
 async function completeReview(workspace: string, root: string) {
-  await prepareProjectDesignReview(workspace, root)
+  const state = await prepareProjectDesignReview(workspace, root)
   return advanceProjectDeliveryAfterTurn(workspace, root, { phase: 'review', status: 'complete', summary: '',
-    review: { step: 'inspect', findings: [], resolved: [] } })
+    review: { step: state!.designReview!.step, findings: [], resolved: [] } })
 }
+
+test('joint review policy remains active for later affected inspection, without another all-document repair', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-joint-policy-')), workspace = join(root, 'project')
+  try {
+    await mkdir(workspace)
+    const state = await beginProjectDelivery(workspace, root, 'Synthetic confirmed inputs')
+    await writeDesignDocumentsFixture(workspace)
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'review', authorBatch: 4 }))
+    expect((await completeReview(workspace, root))!.phase).toBe('resources')
+    expect((await readProjectDelivery(workspace, root))!.designBaseline!.combined).toBe(true)
+    const finding: DesignFinding = { id: 'reported-input', severity: 'blocker', action: 'correct', owner: 'UI_UX_SPEC.md',
+      documents: ['UI_UX_SPEC.md'], sources: [{ document: 'UI_UX_SPEC.md', section: 'Design' }],
+      impact: 'Synthetic suspected input omission', closeWhen: 'Inspect confirmed input', neededBefore: 'content' }
+    await requestProjectDesignResolution(workspace, root, { mode: 'inspect', findings: [finding], instruction: 'Check only the reported input omission.' })
+    const review = (await prepareProjectDesignReview(workspace, root))!.designReview!
+    expect(review).toMatchObject({ combined: true, step: 'inspect', writableDocuments: ['UI_UX_SPEC.md'] })
+    const later = { ...finding, id: 'new-consumer-defect', severity: 'follow-up' as const, neededBefore: 'content' as const }
+    const result = await advanceProjectDeliveryAfterTurn(workspace, root, { phase: 'review', status: 'complete', summary: '',
+      review: { step: 'inspect', findings: [finding, later], resolved: [] } })
+    expect(result).toMatchObject({ phase: 'review', shouldContinue: true })
+    expect((await readProjectDelivery(workspace, root))!.designReview!.findings).toEqual([finding, later])
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test.each(['resources', 'content'] as const)('new joint review enforces a required correction at its actual consumer: %s', async neededBefore => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-joint-deferred-')), workspace = join(root, 'project')
+  const finding: DesignFinding = { id: 'source-mismatch', severity: 'follow-up', action: 'correct', owner: 'LEVEL_SCENE_DESIGN.md',
+    documents: ['LEVEL_SCENE_DESIGN.md'], sources: [{ document: 'LEVEL_SCENE_DESIGN.md', section: 'Design' }],
+    impact: 'The content consumer would implement a contradictory placement rule; resource specifications are unchanged',
+    closeWhen: 'Source rule and saved layout agree', neededBefore }
+  try {
+    await mkdir(workspace)
+    const state = await beginProjectDelivery(workspace, root, 'Synthetic release requirement')
+    await writeDesignDocumentsFixture(workspace)
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'review', authorBatch: 4 }))
+    await prepareProjectDesignReview(workspace, root)
+    const revise = await advanceProjectDeliveryAfterTurn(workspace, root, { phase: 'review', status: 'complete', summary: '',
+      review: { step: 'revise', findings: [finding], resolved: [] } })
+    expect(revise).toMatchObject({ phase: 'review', shouldContinue: true })
+    expect((await readProjectDelivery(workspace, root))!.designReview!.step).toBe('verify')
+    const verify = await advanceProjectDeliveryAfterTurn(workspace, root, { phase: 'review', status: 'complete', summary: '',
+      review: { step: 'verify', findings: [finding], resolved: [] } })
+    if (neededBefore === 'resources') {
+      expect(verify).toMatchObject({ phase: 'review', shouldContinue: false })
+      expect((await readProjectDelivery(workspace, root))!.designBaseline).toBeUndefined()
+      return
+    }
+    expect(verify).toMatchObject({ phase: 'resources', shouldContinue: true })
+    const saved = (await readProjectDelivery(workspace, root))!
+    expect(saved.designBaseline!.followUps).toEqual([finding])
+    expect(checkProjectDesignBaseline(workspace, saved)).toEqual([])
+    // Synthetic boundary entry: this is not a resource production/acceptance test.
+    expect(checkProjectDesignBaseline(workspace, { ...saved, phase: 'content' }).join(' ')).toContain('source-mismatch is due before content')
+    expect(checkProjectDesignBaseline(workspace, { ...saved, phase: 'implementation' }).join(' ')).toContain('source-mismatch is due before implementation')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
 
 async function enterContentFixture(workspace: string, dataRoot: string, height = 52) {
   await writeDesignDocumentsFixture(workspace)
@@ -46,12 +155,7 @@ async function enterContentFixture(workspace: string, dataRoot: string, height =
   await writeFile(join(workspace, 'content/index.json'), JSON.stringify({
     schema: 'beegame-content-package.v2', id: 'game', dimension: '2d',
     documentRevision: authority.documentRevision, assetManifestRevision: authority.assetManifestRevision,
-    entryScene: 'scene', sceneModel: BEEGAME_SCENE_MODEL, files: ['scenes/main.json', 'ui/menu.json'],
-  }))
-  await writeFile(join(workspace, 'content/scenes/main.json'), JSON.stringify({
-    schema: 'beegame-content.v1', id: 'scene', kind: 'scene-2d', assetRefs: [],
-    data: { settings: { coordinateSystem: { origin: 'top-left', units: 'logical-pixels',
-      width: 1280, height: 720, pixelsPerUnit: 1 } }, nodes: [{ id: 'root', components: [] }] },
+    entryScene: 'level', sceneModel: BEEGAME_SCENE_MODEL, files: ['scenes/level.json', 'ui/menu.json'],
   }))
 }
 
@@ -117,7 +221,8 @@ test('writing keeps real dependency groups and one independent review after all 
   expect(review).toContain('fresh native bgs-design-review subagent')
   expect(review).toContain('game-design-check Skill')
   expect(review).toContain('Author reasoning, expected findings and expected verdicts are not review inputs')
-  expect(review).toContain('Remaining blockers after verify stop automatic work')
+  expect(review).toContain('No verified progress, unavailable factual evidence or an unauthorized scope change pauses automatic work')
+  expect(review).not.toContain('Remaining blockers after verify stop automatic work')
 })
 
 test('production keeps reviewed design authority and actual runtime acceptance', () => {
@@ -130,9 +235,17 @@ test('production keeps reviewed design authority and actual runtime acceptance',
   expect(projectDeliveryPhaseInstruction('content')).toContain('do not choose a new layout or interaction design')
   expect(projectDeliveryPhaseInstruction('acceptance')).toContain('actual target runtime')
   expect(projectDeliveryPhaseInstruction('acceptance')).toContain('Do not edit the reviewed design')
+  const content = projectDeliveryPhaseInstruction('content')
+  expect(content).not.toContain('Translate the reviewed design')
+  expect(content).not.toContain('Derive concrete values')
+  expect(content).toContain('Keep existing valid state/action bindings')
+  expect(content).toContain('--design-layouts --report')
+  expect(content).toContain('Do not separately enumerate Scene/window size combinations')
+  expect(content).toContain('--ui-all --report')
+  expect(content).toContain('missing planned Scene/UI source is an upstream handoff gap')
 })
 
-test('Review diagnoses the actual UI data without creating a full package or modifying it', async () => {
+test('joint review starts with actual UI diagnostics and cannot release an unrepaired layout', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-review-documents-only-'))
   const workspace = join(root, 'project')
   try {
@@ -143,15 +256,18 @@ test('Review diagnoses the actual UI data without creating a full package or mod
     await writeUiLayoutFixture(workspace, 28)
     const path = join(workspace, 'content/ui/menu.json')
     const before = await readFile(path, 'utf8')
+    const prepared = await prepareProjectDesignReview(workspace, root)
+    expect(prepared!.designReview).toMatchObject({ step: 'revise', combined: true, writableDocuments: [...PROJECT_DOCUMENTS] })
+    expect(prepared!.designReview!.pendingCheckIssues!.join(' ')).toContain('minimumControlSize')
     expect(await completeReview(workspace, root))
-      .toMatchObject({ phase: 'review', shouldContinue: true, issues: [] })
-    expect((await readProjectDelivery(workspace, root))?.designReview).toMatchObject({ step: 'revise', writableDocuments: ['UI_UX_SPEC.md'] })
+      .toMatchObject({ phase: 'review', shouldContinue: false })
+    expect((await readProjectDelivery(workspace, root))?.designReview).toMatchObject({ step: 'revise', stopped: true })
     expect(existsSync(join(workspace, 'content/index.json'))).toBe(false)
     expect(await readFile(path, 'utf8')).toBe(before)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-test('Content cannot advance broken geometry and does not repeatedly dispatch an unchanged failure', async () => {
+test('Content source checks reject broken geometry before release', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-content-geometry-gate-'))
   const workspace = join(root, 'project')
   try {
@@ -159,13 +275,13 @@ test('Content cannot advance broken geometry and does not repeatedly dispatch an
     await beginProjectDelivery(workspace, root, JSON.stringify({ settings: { orientation: 'Landscape' } }))
     await enterContentFixture(workspace, root, 28)
     for (let i = 0; i < 2; i++) {
-      const result = await advanceProjectDeliveryAfterTurn(workspace, root)
-      expect(result).toMatchObject({ phase: 'content', shouldContinue: i === 0 })
+      const result = checkContentSources(workspace, (await readProjectDelivery(workspace, root))!.objective)
+      expect(result).toMatchObject({ valid: false })
       expect(result!.issues.join(' ')).toContain('minimumControlSize')
     }
     await writeUiLayoutFixture(workspace, 52)
-    expect(await advanceProjectDeliveryAfterTurn(workspace, root))
-      .toMatchObject({ phase: 'implementation', shouldContinue: true, issues: [] })
+    expect(checkContentSources(workspace, (await readProjectDelivery(workspace, root))!.objective))
+      .toMatchObject({ valid: true, issues: [] })
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -180,8 +296,8 @@ test('Content completion cannot bypass ignored layout fields or declared clearan
     const ui = JSON.parse(await readFile(path, 'utf8'))
     ui.data.nodes[0].data.container = { direction: 'column' }
     await writeFile(path, JSON.stringify(ui))
-    let result = await advanceProjectDeliveryAfterTurn(workspace, root)
-    expect(result).toMatchObject({ phase: 'content' })
+    let result = checkContentSources(workspace, (await readProjectDelivery(workspace, root))!.objective)
+    expect(result).toMatchObject({ valid: false })
     expect(result!.issues.join(' ')).toContain('layout.container')
 
     delete ui.data.nodes[0].data.container
@@ -189,16 +305,16 @@ test('Content completion cannot bypass ignored layout fields or declared clearan
     ui.data.nodes.push({ id: 'clearance', role: 'container', parentId: 'root', data: { layoutOcclusion: 'protected' },
       layout: { anchor: 'middle-center', size: [200, 100] } })
     await writeFile(path, JSON.stringify(ui))
-    result = await advanceProjectDeliveryAfterTurn(workspace, root)
-    expect(result).toMatchObject({ phase: 'content' })
+    result = checkContentSources(workspace, (await readProjectDelivery(workspace, root))!.objective)
+    expect(result).toMatchObject({ valid: false })
     expect(result!.issues.join(' ')).toContain('declared occluders: play')
     expect((await readProjectDelivery(workspace, root))!.phase).toBe('content')
 
     ui.data.nodes[1].layout.position = [0, 150]
     await writeFile(path, JSON.stringify(ui))
-    // This fixture has no reviewed baseline; baseline mutation is tested separately.
-    expect(await advanceProjectDeliveryAfterTurn(workspace, root))
-      .toMatchObject({ phase: 'implementation', shouldContinue: true, issues: [] })
+    // Isolated source validation, not permission to advance without a released baseline.
+    expect(checkContentSources(workspace, (await readProjectDelivery(workspace, root))!.objective))
+      .toMatchObject({ valid: true, issues: [] })
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -214,18 +330,18 @@ test('Content requires declared supported sizes and the confirmed orientation', 
     const data = ui.data.nodes[0].data
     delete data.targetViewports
     await writeFile(path, JSON.stringify(ui))
-    let result = await advanceProjectDeliveryAfterTurn(workspace, root)
-    expect(result?.phase).toBe('content')
+    let result = checkContentSources(workspace, (await readProjectDelivery(workspace, root))!.objective)
+    expect(result?.valid).toBe(false)
     expect(result?.issues.join(' ')).toContain('targetViewports')
     data.targetViewports = [[600, 360]]
     data.orientation = 'Portrait'
     await writeFile(path, JSON.stringify(ui))
-    result = await advanceProjectDeliveryAfterTurn(workspace, root)
-    expect(result?.phase).toBe('content')
+    result = checkContentSources(workspace, (await readProjectDelivery(workspace, root))!.objective)
+    expect(result?.valid).toBe(false)
     expect(result?.issues.join(' ')).toContain('differs from the confirmed brief')
     data.orientation = 'Landscape'
     await writeFile(path, JSON.stringify(ui))
-    expect((await advanceProjectDeliveryAfterTurn(workspace, root))?.phase).toBe('implementation')
+    expect(checkContentSources(workspace, (await readProjectDelivery(workspace, root))!.objective).valid).toBe(true)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -245,6 +361,34 @@ test('unrelated writes cannot repeatedly dispatch an unchanged validation failur
     expect((await advanceProjectDeliveryAfterTurn(workspace, root))?.shouldContinue).toBe(false)
     expect((await advanceProjectDeliveryAfterTurn(workspace, root, undefined, 1))?.shouldContinue).toBe(true)
     expect(await readProjectDelivery(workspace, root)).toMatchObject({ phase: 'author', authorBatch: 2 })
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('product failure goes through implementation and rejects unchanged acceptance evidence after restart', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-product-repair-')), workspace = join(root, 'project')
+  try {
+    await mkdir(join(workspace, '.beegame/delivery'), { recursive: true })
+    const state = await beginProjectDelivery(workspace, root, 'Synthetic reviewed rule')
+    await writeDesignDocumentsFixture(workspace)
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state,
+      phase: 'acceptance', designBaseline: designBaselineFixture(workspace) }))
+    await writeFile(join(workspace, 'failure.txt'), 'Actual synthetic failed assertion')
+    await mkdir(join(workspace, 'dist'), { recursive: true })
+    await writeFile(join(workspace, 'dist/game.js'), 'synthetic delivered code')
+    const report = { scope: 'delivery', status: 'failed', summary: 'Synthetic rule check failed',
+      environment: 'Synthetic integration fixture', evidencePaths: ['failure.txt'], artifactPaths: ['dist'] }
+    await writeFile(join(workspace, PROJECT_DELIVERY_REPORT_PATH), JSON.stringify(report))
+    expect(await advanceProjectDeliveryAfterTurn(workspace, root)).toMatchObject({ phase: 'implementation', shouldContinue: true })
+    const repairing = (await readProjectDelivery(workspace, root))!
+    expect(repairing.designReview).toBeUndefined()
+    expect(await advanceProjectDeliveryAfterTurn(workspace, root, { phase: 'implementation', status: 'complete', summary: 'Synthetic correction handoff' }))
+      .toMatchObject({ phase: 'acceptance', shouldContinue: true })
+    expect((await readProjectDelivery(workspace, root))!.lastProductFailureEvidence).toBe(repairing.lastProductFailureEvidence)
+    expect((await readProjectDelivery(workspace, root))!.lastValidationFailure).toBeUndefined()
+    expect(await advanceProjectDeliveryAfterTurn(workspace, root)).toMatchObject({ phase: 'acceptance', shouldContinue: false })
+    expect(await evaluateProjectDeliveryGate(workspace, root)).toMatchObject({ allowed: false })
+    await writeFile(join(workspace, 'failure.txt'), 'Actual new synthetic verification finding')
+    expect(await advanceProjectDeliveryAfterTurn(workspace, root)).toMatchObject({ phase: 'implementation', shouldContinue: true })
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
@@ -376,7 +520,7 @@ test('one native project advances through author, review with revision, resource
     }
     expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot))?.phase).toBe('resources')
     await writeFile(join(workspace, 'assets/asset-manifest.json'), JSON.stringify({ schema: 'legacy', entries: [] }))
-    const invalidResource = await advanceProjectDeliveryAfterTurn(workspace, dataRoot)
+    const invalidResource = await advanceProjectDeliveryAfterTurn(workspace, dataRoot, { phase: 'resources', status: 'complete', summary: 'Synthetic invalid resource claim' })
     expect(invalidResource?.issues).toContain('version must be 9.')
     expect(invalidResource?.issues).not.toContain('assets/asset-manifest.json')
     await rm(join(workspace, 'assets/asset-manifest.json'))
@@ -387,10 +531,11 @@ test('one native project advances through author, review with revision, resource
       cwd: workspace, stdout: 'pipe', stderr: 'pipe',
     })
     expect(await resourceCheck.exited).toBe(0)
-    expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot))?.phase).toBe('content')
+    expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot, { phase: 'resources', status: 'complete', summary: 'Saved synthetic resources' }))?.phase).toBe('content')
     expect(existsSync(join(workspace, 'content/index.json'))).toBe(false)
     await writeUiLayoutFixture(workspace)
     const authority = projectContentAuthority(workspace)
+    await refreshProjectContentContract(workspace)
     const contract = JSON.parse(await readFile(join(workspace, '.beegame/delivery/content-contract.json'), 'utf8'))
     expect(contract.index.documentRevision).toBe(authority.documentRevision)
     expect(contract.index.assetManifestRevision).toBe(authority.assetManifestRevision)
@@ -398,19 +543,9 @@ test('one native project advances through author, review with revision, resource
     await writeFile(join(workspace, 'content/index.json'), JSON.stringify({
       schema: 'beegame-content-package.v2', id: 'game', dimension: '2d',
       documentRevision: authority.documentRevision, assetManifestRevision: authority.assetManifestRevision,
-      entryScene: 'scene', sceneModel: BEEGAME_SCENE_MODEL, files: ['scenes/main.json', 'ui/menu.json'],
+      entryScene: 'level', sceneModel: BEEGAME_SCENE_MODEL, files: ['scenes/level.json', 'ui/menu.json'],
     }))
-    await writeFile(join(workspace, 'content/scenes/main.json'), JSON.stringify({
-      schema: 'beegame-content.v1', id: 'scene', kind: 'scene-2d', assetRefs: [],
-      data: { settings: { coordinateSystem: { origin: 'top-left', units: 'logical-pixels',
-        width: 1280, height: 720, pixelsPerUnit: 1 } }, nodes: [{ id: 'root', components: [] }] },
-    }))
-    await writeFile(join(workspace, 'docs/GDD.md'), designDocumentFixture('GDD.md') + '\nUnreviewed change\n')
-    expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot))?.issues).toContain(
-      'Reviewed design/evidence changed outside scheduled owner scope; request an affected design-resolution before dependent work.',
-    )
-    await writeDesignDocumentFixture(workspace, 'GDD.md')
-    expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot))?.phase).toBe('implementation')
+    expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot, { phase: 'content', status: 'complete', summary: 'Saved synthetic Content' }))?.phase).toBe('implementation')
     expect((await advanceProjectDeliveryAfterTurn(workspace, dataRoot, { phase: 'implementation', status: 'complete', summary: '' }))?.phase).toBe('acceptance')
     await mkdir(join(workspace, '.beegame/delivery'), { recursive: true })
     await writeFile(join(workspace, 'game.ts'), 'export const game = true')
@@ -419,7 +554,7 @@ test('one native project advances through author, review with revision, resource
       scope: 'delivery', status: 'passed', summary: 'Verified current game',
       environment: 'Browser preview', evidencePaths: ['.beegame/delivery/verification.txt'],
       artifactPaths: ['game.ts'], verification: { target: 'deployment', observation: 'target-runtime', knownIssues: [], unverified: [],
-        contentChecks: [{ kind: 'scene-layout', document: 'content/scenes/main.json', nodeId: 'root', property: 'transform',
+        contentChecks: [{ kind: 'scene-layout', document: 'content/scenes/level.json', nodeId: 'board', property: 'transform',
           change: 'Translate root +20 on X in a test copy', expected: 'Scene moves 20 logical pixels',
           observed: 'Before x=0; after x=20', status: 'passed', evidencePaths: ['.beegame/delivery/verification.txt'] },
           { kind: 'ui-layout', document: 'content/ui/menu.json', nodeId: 'play', property: 'layout',
@@ -429,7 +564,8 @@ test('one native project advances through author, review with revision, resource
     await captureProjectDeliveryAcceptance(workspace, dataRoot, Date.now() - 2000)
     expect((await evaluateProjectDeliveryGate(workspace, dataRoot))?.allowed).toBe(false)
     expect(await advanceProjectDeliveryAfterTurn(workspace, dataRoot)).toMatchObject({
-      phase: 'acceptance', diagnostic: { category: 'verification-incomplete', message: 'Design requirements are unverified: GDD.md#play.' },
+      phase: 'acceptance', diagnostic: { category: 'verification-incomplete', message: 'Design requirements are unverified: ' +
+        PROJECT_DOCUMENTS.map(document => document + '#' + (document === 'GDD.md' ? 'play' : 'ready')).join(', ') + '.' },
     })
     const acceptance = JSON.parse(await readFile(join(workspace, PROJECT_DELIVERY_REPORT_PATH), 'utf8'))
     acceptance.verification.requirementChecks = designRequirementChecksFixture(workspace, ['.beegame/delivery/verification.txt'])
@@ -546,6 +682,41 @@ test('a current chat delivery PASS at the canonical report updates the publish g
     expect((await evaluateProjectDeliveryGate(workspace, dataRoot))?.issues).toContain(
       'Workspace changed after acceptance; revalidation is required.',
     )
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test.each(['source', 'artifact', 'evidence'] as const)('fresh identical report refreshes changed %s, but an old report does not', async changed => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-reaccept-')), workspace = join(root, 'game')
+  try {
+    await mkdir(join(workspace, '.beegame/delivery'), { recursive: true })
+    await mkdir(join(workspace, 'dist'))
+    await writeFile(join(workspace, 'game.js'), 'source A')
+    await writeFile(join(workspace, 'dist/index.html'), 'artifact A')
+    await writeFile(join(workspace, '.beegame/delivery/browser.txt'), 'evidence A')
+    await beginProjectDelivery(workspace, root, 'Synthetic reacceptance')
+    await enterAcceptanceFixture(workspace, root)
+    const reportPath = join(workspace, PROJECT_DELIVERY_REPORT_PATH)
+    const report = JSON.stringify({ scope: 'delivery', status: 'passed', summary: 'Verified current build',
+      environment: 'Synthetic offline fixture', evidencePaths: ['.beegame/delivery/browser.txt'], artifactPaths: ['dist'],
+      verification: { target: 'deployment', observation: 'target-runtime', knownIssues: [], unverified: [] } })
+    await writeFile(reportPath, report)
+    await captureProjectDeliveryAcceptance(workspace, root, Date.now() - 2000)
+    await advanceProjectDeliveryAfterTurn(workspace, root)
+    const before = (await readProjectDelivery(workspace, root))!.accepted
+    const path = { source: 'game.js', artifact: 'dist/index.html', evidence: '.beegame/delivery/browser.txt' }[changed]
+    await writeFile(join(workspace, path), 'new verified ' + changed)
+    expect((await evaluateProjectDeliveryGate(workspace, root))?.allowed).toBe(false)
+    // A prior-turn report cannot rebaseline changes by mere polling.
+    await captureProjectDeliveryAcceptance(workspace, root, Date.now() + 2000)
+    expect((await readProjectDelivery(workspace, root))!.accepted).toEqual(before)
+    await writeFile(reportPath, report)
+    await captureProjectDeliveryAcceptance(workspace, root, Date.now() - 1000)
+    const after = (await readProjectDelivery(workspace, root))!.accepted
+    expect(after?.reportSha256).toBe(before?.reportSha256)
+    expect(after).not.toEqual(before)
+    expect((await evaluateProjectDeliveryGate(workspace, root))?.allowed).toBe(true)
+    await captureProjectDeliveryAcceptance(workspace, root, Date.now() - 1000)
+    expect((await readProjectDelivery(workspace, root))!.accepted).toEqual(after)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 

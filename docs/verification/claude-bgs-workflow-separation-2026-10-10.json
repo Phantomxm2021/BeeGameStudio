@@ -1,0 +1,1181 @@
+{
+  "date": "2026-10-10",
+  "status": "core_bgs_interventions_removed_public_cli_verified_not_deployed",
+  "authority": {
+    "repository": "https://github.com/claude-code-best/claude-code",
+    "comparisonCommit": "34b3dc99bf40c57c0b78f3b5b1d70471ebc2d06d",
+    "comparisonRef": "tmp/claude-code-main",
+    "latestMainFullyFetched": false,
+    "existingAlignmentManifestUnchanged": true
+  },
+  "userRequirements": [
+    "BGS owns business workflow and supplies tasks through native public interfaces",
+    "Native Agent retains its methods, tools and necessary delegation within authorized scope",
+    "Preserve verified generic bug fixes, do not overwrite whole files",
+    "No new orchestration framework or arbitrary execution caps"
+  ],
+  "completed": [
+    {
+      "change": "Move temporary-working-directory instruction from native environment prompt into BGS standard --append-system-prompt option",
+      "files": [
+        "src/constants/prompts.ts",
+        "packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts"
+      ],
+      "upstreamEnvironmentFunctionsByteMatch": true
+    },
+    {
+      "change": "Remove BGS-specific replacement of older layout tool-result bodies from native query loop",
+      "files": [
+        "src/query.ts"
+      ],
+      "olderReportsPreservedInModelInput": true,
+      "normalNativeCompactionUnchanged": true
+    },
+    {
+      "change": "Remove unused layout-report-history module and its tests",
+      "removed": [
+        "src/beegame/layout-report-history.ts",
+        "src/beegame/layout-report-history.test.ts"
+      ],
+      "recoveryBackup": "/private/tmp/bgs-native-boundary-backup.qwXiKr/removed-source.json"
+    },
+    {
+      "change": "Restore native Skill directory loading byte-for-byte to pinned upstream; BGS catalogs now supplied through standard --plugin-dir",
+      "files": [
+        "src/skills/loadSkillsDir.ts",
+        "src/utils/attachments.ts",
+        "packages/agent-workflow-server/src/beegame/native-skill-plugins.ts",
+        "packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts",
+        "packages/agent-workflow/src/native-task-access.ts"
+      ],
+      "details": [
+        "No private BGS catalog environment handling in native loader",
+        "No default shipped-game-Skill preference in native initial listing",
+        "Canonical source paths remain stable; no Skill copies, hooks or agents installed",
+        "Settings-disabled isolated sessions receive only explicitly supplied plugins; security constraints retained",
+        "BGS role integration uses actual plugin-qualified Skill names"
+      ]
+    },
+    {
+      "change": "Restore upstream native delegation/write prompts and feature-gated verification reminders; retain generic disabled-tool discovery gate",
+      "upstreamByteMatched": [
+        "packages/builtin-tools/src/tools/AgentTool/prompt.ts",
+        "packages/builtin-tools/src/tools/FileWriteTool/prompt.ts",
+        "packages/builtin-tools/src/tools/TodoWriteTool/TodoWriteTool.ts",
+        "packages/builtin-tools/src/tools/TaskUpdateTool/TaskUpdateTool.ts"
+      ],
+      "reason": "Remove business ownership prescriptions and forced scaffold plus 3–6 Edit recipe; do not disable native feature behavior because BGS has its own review"
+    },
+    {
+      "change": "Remove native CLI packaging of BGS game catalog and unused private catalog locator",
+      "files": [
+        "build.ts"
+      ],
+      "removed": [
+        "src/skills/builtinSkillsDirectory.ts"
+      ],
+      "recoveryBackup": "/private/tmp/bgs-native-cleanup-ba1VV4/original-source.json",
+      "preserved": "Atomic isolated build and output-directory safety checks"
+    },
+    {
+      "change": "Remove unused BGS JSON envelope protocol from native structured output; preserve ordinary JSON Schema validation and focused errors",
+      "files": [
+        "packages/builtin-tools/src/tools/SyntheticOutputTool/SyntheticOutputTool.ts",
+        "src/QueryEngine.ts"
+      ],
+      "removed": [
+        "packages/builtin-tools/src/tools/SyntheticOutputTool/jsonEnvelope.ts",
+        "packages/builtin-tools/src/tools/SyntheticOutputTool/jsonEnvelope.test.ts"
+      ],
+      "recoveryBackup": "/private/tmp/bgs-native-cleanup-ba1VV4/legacy-envelope-source.json",
+      "details": [
+        "No active business caller of old payload_json marker remained",
+        "No private BEEGAME_STRUCTURED_OUTPUT_IS_TERMINAL override",
+        "Existing generic terminal mode for structured-output-only execution retained"
+      ]
+    },
+    {
+      "change": "Remove BGS product/delivery language from generic public artifact tool prompt",
+      "files": [
+        "packages/builtin-tools/src/tools/ArtifactTool/prompt.ts"
+      ],
+      "preserved": "Explicit external-upload approval and no unconfigured destination fallback"
+    },
+    {
+      "change": "GDD runs through the public native slash-command interface; BGS alone checks terminal conclusion and saved handoff acceptance",
+      "files": [
+        "packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts",
+        "packages/agent-workflow-server/src/beegame/project-conversation.ts",
+        "packages/agent-workflow-server/src/beegame/delivery/stages/planning.ts",
+        "src/QueryEngine.ts",
+        "src/query/stopHooks.ts",
+        "src/beegame/saved-draft-check.ts"
+      ],
+      "removed": [
+        "src/beegame/author-skills.ts",
+        "src/beegame/author-skills.test.ts"
+      ],
+      "recoveryBackup": "/private/tmp/bgs-gdd-native-removal-vS5kXR/removed-native-source.json",
+      "details": [
+        "BGS invokes its plugin Skill as /bgs-builtins:game-systems-designer-expert with native-required space argument syntax and last-text-block placement",
+        "Preserves original task, host context and images; no model request needed merely to load methods",
+        "No BGS business metadata travels through native stdin; assignment facts and methods use public CLI prompts/options.",
+        "No root native GDD author context, special preload, terminal-conclusion parser or forced stop-hook correction",
+        "Host terminal result must be valid and saved drafts/index/references accepted before advancing; no automatic paid retries added",
+        "Explicit continuation uses the existing native session and cumulative usage, not regenerated artifacts"
+      ]
+    },
+    {
+      "change": "Move all eight-document author scheduling and per-owner progress/recovery to the existing BGS host",
+      "files": [
+        "packages/agent-workflow-server/src/beegame/writing-workflow-runtime.ts",
+        "packages/agent-workflow-server/src/beegame/author-draft-check.ts",
+        "packages/agent-workflow-server/src/beegame/project-conversation.ts"
+      ],
+      "details": [
+        "Existing document dependency batches retained; no fabricated Agent calls or role types",
+        "Ordinary primary CLI session per owner, standard --session-id/--resume and --append-system-prompt",
+        "Host atomic session associations outside model-writable workspace; actual saved-source checks reuse valid siblings",
+        "No hard model-turn cap; unchanged failed transport/source checks stop honestly rather than declaring completion"
+      ]
+    },
+    {
+      "change": "Move bounded Review/Revision policy, saved-source exposure and user Question association out of native tools/StopHooks",
+      "files": [
+        "packages/agent-workflow-server/src/beegame/review-tool-policy.ts",
+        "packages/agent-workflow-server/src/beegame/review-source-exposure.ts",
+        "packages/agent-workflow-server/src/beegame/review-task-prompt.ts",
+        "packages/agent-workflow-server/src/beegame/milestone-handoff-check.ts"
+      ],
+      "details": [
+        "Actual SDK visible Read ranges compared to resulting saved files; claims/Write/inherited cache are not read evidence",
+        "Directory aliases accepted; symlinked authoritative sources rejected",
+        "Public --tools and --settings permission broker; no tool-schema/executor rewrite",
+        "Decision findings stay in BGS files; native AskUserQuestion uses upstream schema only",
+        "Original Question, actual human answer and pending proposal survive host restart; no fabricated permission"
+      ]
+    },
+    {
+      "change": "Resources/Content use ordinary independent primary CLI owners, not automatic native visual/audio Agent scheduling",
+      "files": [
+        "packages/agent-workflow-server/src/beegame/writing-workflow-runtime.ts",
+        "packages/agent-workflow-server/src/beegame/delivery/stages/resources.ts",
+        "packages/agent-workflow-server/src/beegame/delivery/stages/content.ts"
+      ],
+      "details": [
+        "Owner chooses ordinary native tools and delegation",
+        "Optional disjoint resource task context remains; shared registration has one owner",
+        "Receipt/source/design checks remain host-owned, corrupt artifacts cannot be cached as complete",
+        "Same production task resumes across input revision changes; no temporary input rewriting",
+        "Detected legacy private native production associations cause explicit reconciliation, not silent duplicate work"
+      ]
+    },
+    {
+      "change": "Remove native business imports, private stdin fields, role contexts, preload/read bookkeeping and business StopHooks",
+      "upstreamByteMatched": [
+        "src/query/stopHooks.ts",
+        "src/utils/fileStateCache.ts",
+        "packages/builtin-tools/src/tools/FileEditTool/FileEditTool.ts"
+      ],
+      "removed": [
+        "src/beegame/direction-authors.ts",
+        "src/beegame/direction-authors.test.ts",
+        "src/beegame/direction-authors-runtime.test.ts",
+        "src/beegame/fixtures/direction-handoff-runtime.ts",
+        "src/beegame/design-review.ts",
+        "src/beegame/design-review.test.ts",
+        "src/beegame/saved-draft-check.ts",
+        "src/beegame/saved-draft-check.test.ts",
+        "src/beegame/production-task.ts",
+        "src/beegame/production-task.test.ts",
+        "src/beegame/production-tools.ts",
+        "src/beegame/production-tools.test.ts",
+        "src/beegame/native-assignments.ts",
+        "src/beegame/native-assignments.test.ts"
+      ],
+      "recoveryBackup": "/private/tmp/bgs-writing-host-removal-gBhdXB"
+    },
+    {
+      "change": "Remove BGS-specific API headers, internal evidence/context interception and private stderr response/usage generation from native core",
+      "upstreamByteMatched": [
+        "src/services/api/client.ts",
+        "src/services/api/withRetry.ts"
+      ],
+      "files": [
+        "src/query.ts",
+        "src/services/api/claude.ts",
+        "src/cli/print.ts",
+        "src/entrypoints/cli.tsx",
+        "packages/agent-workflow/src/native-file-agent.ts",
+        "packages/agent-workflow/src/standard-cli-usage.ts"
+      ],
+      "details": [
+        "BGS observes actual public SDK events and terminal modelUsage; message snapshots deduplicated by provider ID",
+        "Completed visible work remains observed on interruption; missing internal/provider usage is not zero and completeness is not guaranteed",
+        "Native private internal request correlation/context-change evidence no longer claimed",
+        "Existing optional host fake-provider proxy records actual retry/fallback traffic without modifying native headers",
+        "Redacted partial child output is persisted from public SDK stream, never from fabricated model messages"
+      ]
+    },
+    {
+      "change": "Restore upstream tool-result cache location; grant narrowly scoped public cache reads from BGS",
+      "files": [
+        "src/utils/toolResultStorage.ts",
+        "packages/agent-workflow/src/standard-cli-cache.ts",
+        "packages/agent-workflow/src/native-task-access.ts",
+        "packages/agent-workflow-server/src/beegame/project-execution-access.ts"
+      ],
+      "details": [
+        "No BEEGAME_NATIVE_TOOL_RESULTS_DIR override in native or new child environment",
+        "Public session UUID determines upstream tool-results directory",
+        "Only cache is readable, not enclosing config/transcripts; writes/symlink escape rejected",
+        "Existing project-local caches retained, not deleted",
+        "Small result/archive-expansion guard retained as generic optimization"
+      ]
+    },
+    {
+      "change": "Remove private BGS background-permission/project-sandbox switches, preserve generic SDK and launch-boundary security fixes",
+      "files": [
+        "src/cli/structuredIO.ts",
+        "src/utils/sandbox/sandbox-adapter.ts",
+        "src/utils/execFileNoThrow.ts"
+      ],
+      "details": [
+        "Public stdio permission broker remains available to background delegates",
+        "Public --settings deny-all boundary cannot expand through cwd/additional directory/worktree changes",
+        "No BEEGAME_PROJECT_EXECUTION forced enable/disable/exclusion branches",
+        "Implicit Git still obeys explicitly required launch sandbox and credential-scrubbed subprocess environment"
+      ]
+    },
+    {
+      "change": "Remove final BGS-only Bash scratch-deletion command rewrite",
+      "files": [
+        "packages/builtin-tools/src/tools/BashTool/bashPermissions.ts"
+      ],
+      "removed": [
+        "packages/builtin-tools/src/tools/BashTool/sandboxScratchCleanup.ts",
+        "packages/builtin-tools/src/tools/BashTool/__tests__/sandboxScratchCleanup.test.ts"
+      ],
+      "recoveryBackup": "/private/tmp/bgs-writing-host-removal-gBhdXB/removed-native-scratch-cleanup.json",
+      "preserved": "Generic sandbox auto-allow policy, explicit deny/ask precedence and destructive-path checks retained; no replacement private deletion override added"
+    },
+    {
+      "change": "Remove unused native role-specific schema cache interface and obsolete Revision comments",
+      "files": [
+        "src/Tool.ts",
+        "src/utils/api.ts",
+        "packages/builtin-tools/src/tools/AgentTool/runAgent.ts"
+      ],
+      "removed": [
+        "src/utils/__tests__/toolSchemaRoleScope.test.ts"
+      ],
+      "reason": "Only consumer remaining was its own test. BGS no longer wraps native role tools; upstream schema identity and generic explicit-schema cache behavior retained.",
+      "recoveryBackup": "/private/tmp/bgs-writing-host-removal-gBhdXB/native-residual-before-provider-schema-cleanup.json"
+    },
+    {
+      "change": "Move selected provider override to the host's public modelType CLI setting",
+      "files": [
+        "src/utils/model/providers.ts",
+        "packages/agent-workflow/src/standard-cli-provider.ts",
+        "packages/agent-workflow/src/native-task-access.ts",
+        "packages/agent-workflow/src/native-file-agent.ts",
+        "packages/agent-workflow-server/src/beegame/project-execution-access.ts",
+        "packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts"
+      ],
+      "details": [
+        "No BEEGAME_MODEL_TYPE branch or selectedBeeGameAPIProvider in native source.",
+        "Host supplies existing --settings modelType, clears conflicting standard provider flags only for explicit selection, never edits saved config.",
+        "Without a selection, native provider config/flags retain upstream precedence.",
+        "Offline compiled ordinary and isolated tasks select Anthropic despite stale saved OpenAI setting and conflicting Gemini flag. Generic third-party auth/provider classification fixes retained."
+      ]
+    },
+    {
+      "change": "Restore upstream artifact configuration key names and remove game-specific instructions",
+      "files": [
+        "packages/builtin-tools/src/tools/ArtifactTool/config.ts",
+        "src/skills/bundled/useArtifacts.ts",
+        "src/utils/subprocessEnv.ts",
+        "packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts"
+      ],
+      "details": [
+        "Native tool uses CLAUDE_ARTIFACTS_URL / CLAUDE_ARTIFACTS_TOKEN; BGS translates its existing aliases at process launch.",
+        "No native mention of BGS asset manifests, game publishing or BGS artifact destination.",
+        "Explicit user approval, configured HTTPS origin, no default endpoint/token and subprocess credential scrubbing retained as generic safety fixes; unsafe upstream default upload destination is intentionally not restored."
+      ],
+      "recoveryBackup": "/private/tmp/bgs-writing-host-removal-gBhdXB/native-artifact-before-standard-config.json"
+    },
+    {
+      "change": "Move residual BGS cache-boundary tests out of native src/beegame; correct obsolete project-local cache assertion",
+      "removed": [
+        "src/beegame/native-tool-results.test.ts"
+      ],
+      "files": [
+        "packages/agent-workflow-server/src/beegame/native-tool-results.test.ts"
+      ],
+      "details": [
+        "All five native persistence/Read-boundary cases retained; updated host test checks actual public session cache, config exclusion and no cache writes.",
+        "Synthetic config is explicit under the fixture temp root; test no longer risks writing into the user's actual native config directory."
+      ],
+      "recoveryBackup": "/private/tmp/bgs-writing-host-removal-gBhdXB/moved-tool-result-tests-original.ts"
+    },
+    {
+      "change": "Delete unused native interception generators and obsolete private stdin metadata shim after checking the whole-repository consumer graph",
+      "files": [
+        "packages/agent-workflow/src/native-diagnostics.ts",
+        "packages/agent-workflow/src/native-response-trace.ts",
+        "packages/agent-workflow/src/native-file-agent.ts",
+        "packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts",
+        "packages/agent-workflow-server/src/beegame/session-manager.ts"
+      ],
+      "removed": [
+        "packages/agent-workflow/src/native-evidence.ts",
+        "packages/agent-workflow/src/native-evidence-writer.ts",
+        "packages/agent-workflow/src/__tests__/native-evidence.test.ts"
+      ],
+      "recoveryBackup": "/private/tmp/bgs-writing-host-removal-gBhdXB/unused-private-native-capture-originals.json",
+      "details": [
+        "Private native query/capture/header/stderr generators had no production consumers; only capture's own tests remained. Removed those dead paths, their package export and host enablement flags.",
+        "No empty nativeProjectTurnMetadata public-looking shim remains.",
+        "Host actual SDK projections, partial-response redaction and persistence remain active. Legacy stderr/header parsing retained for existing old executables and historical observations.",
+        "No real evidence files, project artifacts or running processes removed."
+      ]
+    },
+    {
+      "change": "Repair direct-GDD-review manual CLI runner left behind by provider override removal",
+      "files": [
+        "scripts/direct-gdd-review.ts",
+        "packages/agent-workflow-server/scripts/project-turn-native.test.ts"
+      ],
+      "details": [
+        "The manual direct runner still supplied BEEGAME_MODEL_TYPE without public modelType settings; native no longer interprets that private selector.",
+        "Host translates selection via the existing standardCliProvider and supplies ordinary --settings; conflicting public flags cleared only with explicit selection.",
+        "Offline compiled CLI test covers this direct launch shape with stale saved OpenAI settings, conflicting Gemini flag and a fake Anthropic endpoint; exactly one configured model request, successful response, saved config unchanged. No paid manual runner execution performed."
+      ]
+    }
+  ],
+  "preservedBugFixes": [
+    {
+      "area": "Foreground/background continuation and cancellation",
+      "files": [
+        "packages/builtin-tools/src/tools/AgentTool/backgroundContinuation.ts",
+        "packages/builtin-tools/src/tools/AgentTool/AgentTool.tsx"
+      ]
+    },
+    {
+      "area": "Unfinished/failed native executions must not be reported completed",
+      "files": [
+        "src/cli/print.ts",
+        "src/utils/queryHelpers.ts"
+      ]
+    },
+    {
+      "area": "File-write read-state, invalid input, atomic checks",
+      "files": [
+        "packages/builtin-tools/src/tools/FileWriteTool/FileWriteTool.ts"
+      ]
+    },
+    {
+      "area": "Tool and child-message ownership/progress",
+      "files": [
+        "src/services/tools/toolExecution.ts",
+        "src/utils/sdkEventQueue.ts",
+        "src/utils/task/sdkProgress.ts"
+      ]
+    },
+    {
+      "area": "Provider stream/usage/message transport fixes",
+      "files": [
+        "src/services/api/openai/responsesAdapter.ts",
+        "packages/@ant/model-provider/src/shared/openaiStreamAdapter.ts",
+        "packages/@ant/model-provider/src/shared/openaiConvertMessages.ts"
+      ]
+    },
+    {
+      "area": "Fresh delegates retain appended caller constraints without duplicating exact-context forks",
+      "files": [
+        "packages/builtin-tools/src/tools/AgentTool/subagentSystemPrompt.ts"
+      ],
+      "reason": "Generic prompt inheritance regression fix, not a BGS-specific role"
+    },
+    {
+      "area": "Standard plugin Skills lack source metadata needed by discovery/prefetch/reference reads",
+      "files": [
+        "src/utils/plugins/loadPluginCommands.ts"
+      ],
+      "change": "Set skillRoot for plugin Skills",
+      "test": "src/utils/plugins/pluginSkillRoot.test.ts",
+      "classification": "generic_bug_fix_added_during_migration"
+    },
+    {
+      "area": "Structured-output schema diagnostics",
+      "files": [
+        "packages/builtin-tools/src/tools/SyntheticOutputTool/schemaDiagnostics.ts",
+        "packages/builtin-tools/src/tools/SyntheticOutputTool/SyntheticOutputTool.ts"
+      ],
+      "reason": "Exact failing paths remain actionable without BGS output protocols"
+    },
+    {
+      "area": "Do not prompt for a disabled Skill Search tool",
+      "files": [
+        "src/constants/prompts.ts"
+      ],
+      "classification": "generic_bug_fix_retained"
+    },
+    {
+      "area": "Public partial-message SDK flag was silently lost for child query deltas",
+      "files": [
+        "src/Tool.ts",
+        "src/QueryEngine.ts",
+        "src/utils/sdkEventQueue.ts",
+        "src/utils/task/sdkProgress.ts",
+        "packages/builtin-tools/src/tools/AgentTool/runAgent.ts"
+      ],
+      "reason": "Reproduced loss after removing native private trace. Honor existing --include-partial-messages for real child events with immediate ownership; no business roles, BGS flags or model-history insertion."
+    }
+  ],
+  "remainingNotMigrated": [
+    {
+      "area": "Existing legacy private native task histories",
+      "status": "deployment_boundary_not_fully_verified",
+      "reason": "Ordinary primary interruption/resume is verified. Native subagent-to-primary import for older ongoing projects is not verified; production detects old associations and preserves/refuses replacement. No live project migration, deployment or restart performed."
+    },
+    {
+      "area": "Product compatibility configuration, package names, UI command surface and explicit artifact upload integration",
+      "status": "retained_separately_from_agent_business_authority",
+      "reason": "Public provider modelType selection and artifact key mapping now live in BGS. Product names, package/config aliases and install/update/doctor surface remain separately retained; they do not define game-stage authority. Native public upload safety stays generic. Do not enable foreign installers/updaters by blanket reset."
+    },
+    {
+      "area": "Non-business native optimizations and generic fixes",
+      "status": "retained_with_qualifications",
+      "reason": "Retained source-level judgments include skill discovery, provider/stream/image/write/tool/background recovery and security fixes. Their full quality/performance benefit is not proven by these offline tests; no assertion of byte-for-byte whole-repository upstream equivalence."
+    }
+  ],
+  "verification": {
+    "fakeProvidersOnly": true,
+    "paidCalls": 0,
+    "suites": [
+      {
+        "name": "Host public config, legacy diagnostic parsing, SDK redaction, environment filtering and ordinary runtime",
+        "passed": 77,
+        "failed": 0,
+        "log": "/private/tmp/bgs-residual-capture-tests.log"
+      },
+      {
+        "name": "Host usage proxy, runtime diagnostics, session error/asset evidence and child Chat attribution",
+        "passed": 26,
+        "failed": 0,
+        "log": "/private/tmp/bgs-residual-capture-host-permitted.log"
+      },
+      {
+        "name": "Compiled direct CLI/provider selection, standard owners, Review/Question, delegation, partial output, interruption/resume and accounting",
+        "passed": 41,
+        "skipped": 1,
+        "failed": 0,
+        "log": "/private/tmp/bgs-residual-capture-integration-permitted.log",
+        "cli": "/private/tmp/bgs-native-residual-cli-PBo8oZ/cli-bun.js"
+      }
+    ],
+    "uniqueTestsPassedThisBatch": 144,
+    "rootTypecheck": {
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-residual-capture-tsc-final.log"
+    },
+    "diffCheck": "passed",
+    "isolatedBuild": {
+      "reusedPreviousIsolatedBuild": true,
+      "directory": "/private/tmp/bgs-native-residual-cli-PBo8oZ",
+      "reason": "This follow-up changes only BGS host/helpers/manual runner/tests and removes unreferenced host-library capture. Native src and builtin-tools unchanged this turn. No deployed launcher changed."
+    },
+    "notVerified": [
+      "Latest GitHub main fully fetched",
+      "Every remaining product-facing diff fully audited",
+      "Paid model semantic document/game quality and real Token savings",
+      "Legacy private subagent transcript import into primary CLI",
+      "120-second automatic-background streaming case",
+      "Windows-only integration on a Windows host (10 platform-gated tests skipped)",
+      "All interrupted internal provider cost when public SDK does not expose it",
+      "Running services using migrated source/build"
+    ],
+    "initialEnvironmentFailures": [
+      {
+        "reason": "Sandbox denied loopback server binds; Bun reported EADDRINUSE for port 0.",
+        "logs": [
+          "/private/tmp/bgs-residual-capture-integration.log",
+          "/private/tmp/bgs-residual-capture-host.log"
+        ],
+        "resolution": "Reran exactly fake-provider/temporary-workspace tests with permission for loopback and OS-sandbox execution. No production changes or paid requests to bypass failures."
+      }
+    ],
+    "upstreamNormalizedMatches": [
+      "src/query/stopHooks.ts",
+      "src/utils/fileStateCache.ts",
+      "src/skills/loadSkillsDir.ts",
+      "src/services/api/client.ts",
+      "src/services/api/withRetry.ts",
+      "packages/builtin-tools/src/tools/AgentTool/prompt.ts",
+      "packages/builtin-tools/src/tools/FileWriteTool/prompt.ts",
+      "packages/builtin-tools/src/tools/FileEditTool/FileEditTool.ts",
+      "packages/builtin-tools/src/tools/TodoWriteTool/TodoWriteTool.ts",
+      "packages/builtin-tools/src/tools/TaskUpdateTool/TaskUpdateTool.ts"
+    ],
+    "businessScan": {
+      "paths": [
+        "src",
+        "packages/builtin-tools"
+      ],
+      "scope": "Non-test/non-fixture sources: no agent-workflow/beegame imports or BGS private role, native, review, provider, delivery environment branches found.",
+      "qualification": "A static targeted scan and sampled upstream semantic comparison are not proof every remaining native difference is completely classified. Product branding/config aliases intentionally retained."
+    }
+  },
+  "deployment": {
+    "latestMigratedBuildPublished": false,
+    "servicesRestarted": false,
+    "realProjectArtifactsModified": false,
+    "earlierBuildInvocationIncident": {
+      "unsupportedEqualsOutdirSyntax": true,
+      "temporaryAccidentalPublication": "dist/build-h8DAzO",
+      "stablePointerRestored": "dist/build-pr2xpC",
+      "basis": "Restored inferred previous generation from newest pre-existing build, not an observed pre-command pointer snapshot",
+      "accidentalGenerationRetained": true
+    }
+  },
+  "retainedOptimizations": [
+    {
+      "files": [
+        "src/skills/bundled/batch.ts",
+        "src/skills/bundled/simplify.ts"
+      ],
+      "classification": "generic_scoped_review_and_delivery_optimization",
+      "reason": "Avoid forced minimum agent counts and unrelated nested review; local work does not imply commit/push/PR authorization; not game-specific scheduling",
+      "qualification": "Retained by source-level judgment; token or quality benefit not established by this batch"
+    },
+    {
+      "files": [
+        "src/skills/bundled/skillify.ts",
+        "src/skills/bundled/ultracode.ts"
+      ],
+      "classification": "generic_skill_authority_and_authorization_optimization",
+      "reason": "Do not infer permissions or universal workflow from a reference run or loaded playbook",
+      "qualification": "No claim that these are all experimentally demonstrated defects"
+    },
+    {
+      "files": [
+        "src/skills/bundled/dream.ts",
+        "src/skills/bundled/loop.ts",
+        "src/skills/bundled/scheduleRemoteAgents.ts"
+      ],
+      "classification": "generic_permission_and_duplicate_side_effect_fixes",
+      "reason": "Avoid unsupported full-permissions claims and unrequested immediate execution or cloud-environment creation"
+    },
+    {
+      "files": [
+        "src/services/skillSearch/localSearch.ts",
+        "src/services/skillSearch/prefetch.ts",
+        "src/services/skillSearch/signals.ts",
+        "src/services/skillSearch/featureCheck.ts"
+      ],
+      "classification": "generic_search_correctness_and_local_discovery_optimization",
+      "reason": "Actual native message envelope, per-context dedup, multilingual tokenization, one-Skill index and exact name match fixes; local fallback only when search enabled, no game-specific role/authority; removes optional intent-normalization paid model request",
+      "qualification": "Offline regression validates selected cases, not ranking quality across every task or real token savings"
+    }
+  ],
+  "previousBatchVerification": {
+    "fakeProvidersOnly": true,
+    "paidCalls": 0,
+    "suites": [
+      {
+        "name": "native adapter, project execution and inherited prompt",
+        "passed": 55,
+        "failed": 0,
+        "log": "/private/tmp/bgs-workflow-native-boundary-unsandboxed.log"
+      },
+      {
+        "name": "model input preservation and provider/autonomy terminal behavior",
+        "passed": 5,
+        "failed": 0,
+        "log": "/private/tmp/bgs-workflow-query-preservation.log"
+      },
+      {
+        "name": "preserved general bug fixes",
+        "passed": 18,
+        "failed": 0,
+        "log": "/private/tmp/bgs-native-preserved-bugfixes.log"
+      },
+      {
+        "name": "existing GDD author/handoff behavior",
+        "passed": 135,
+        "failed": 0,
+        "log": "/private/tmp/bgs-native-workflow-business-regression.log"
+      },
+      {
+        "name": "isolated native integration",
+        "passed": 15,
+        "failed": 0,
+        "log": "/private/tmp/bgs-native-boundary-native-integration.log"
+      }
+    ],
+    "totalPassed": 228,
+    "rootTypecheck": {
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-workflow-native-boundary-tsc.log"
+    },
+    "diffCheck": "passed",
+    "isolatedCli": "/private/tmp/bgs-native-boundary-build.JDHaeF/cli-bun.js",
+    "initialSandboxedRunFailure": "macOS sandbox-exec could not nest inside the command sandbox; the same test passed in the approved unsandboxed offline rerun",
+    "notVerified": [
+      "Entire workflow migrated to public interfaces",
+      "Full normalized native tree equality with GitHub",
+      "Paid model behavior/token savings",
+      "Running services using the new isolated build"
+    ]
+  },
+  "backups": [
+    "/private/tmp/bgs-native-cleanup-ba1VV4/prompt-and-verifier-source.json"
+  ],
+  "previousBatchVerification2": {
+    "fakeProvidersOnly": true,
+    "paidCalls": 0,
+    "suites": [
+      {
+        "name": "standard Skill provision, discovery, plugin source roots and schema passthrough",
+        "passed": 15,
+        "failed": 0,
+        "log": "/private/tmp/bgs-standard-skill-discovery.log"
+      },
+      {
+        "name": "existing business role integration and restored Agent prompt",
+        "passed": 105,
+        "failed": 0,
+        "log": "/private/tmp/bgs-native-cleanup-roles.log"
+      },
+      {
+        "name": "preserved native continuation, write, event, transport and build fixes",
+        "passed": 80,
+        "failed": 0,
+        "log": "/private/tmp/bgs-native-cleanup-core-regression.log"
+      },
+      {
+        "name": "isolated native compiled CLI with fake loopback provider",
+        "passed": 15,
+        "failed": 0,
+        "log": "/private/tmp/bgs-native-cleanup-verified-integration.log"
+      },
+      {
+        "name": "strict project and task sandbox access",
+        "passed": 7,
+        "failed": 0,
+        "log": "/private/tmp/bgs-native-cleanup-sandbox.log"
+      },
+      {
+        "name": "restored file/task prompts, schema passthrough and artifact security",
+        "passed": 18,
+        "failed": 0,
+        "log": "/private/tmp/bgs-native-cleanup-final-prompt-schema.log"
+      }
+    ],
+    "uniqueTestsPassed": 238,
+    "repeatedTestsAcrossListedSuites": 2,
+    "rootTypecheck": {
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-native-cleanup-tsc.log"
+    },
+    "diffCheck": "passed",
+    "isolatedCli": "/private/tmp/bgs-native-cleanup-verified-build-nXRm6W/cli-bun.js",
+    "isolatedBuildLog": "/private/tmp/bgs-native-cleanup-verified-build.log",
+    "notVerified": [
+      "Entire workflow migrated to public interfaces",
+      "All native changes fully classified or reverted",
+      "Latest GitHub main completely fetched",
+      "Paid model behavior, token savings and semantic document quality",
+      "Running services using the new isolated build"
+    ]
+  },
+  "previousGddBatchVerification": {
+    "fakeProvidersOnly": true,
+    "paidCalls": 0,
+    "suites": [
+      {
+        "name": "saved-source regression, host conversation/acceptance, terminal parsing and native autonomy boundary",
+        "passed": 128,
+        "failed": 0,
+        "log": "/private/tmp/bgs-gdd-public-turn-host.log"
+      },
+      {
+        "name": "native runner, standard Skill request serialization and security regression",
+        "passed": 50,
+        "failed": 0,
+        "log": "/private/tmp/bgs-gdd-public-turn-runner.log"
+      },
+      {
+        "name": "compiled native CLI GDD plus unchanged writing/review/resume/event integration",
+        "passed": 15,
+        "failed": 0,
+        "log": "/private/tmp/bgs-gdd-public-turn-integration.log",
+        "cli": "/private/tmp/bgs-gdd-public-cli-icPR4Z/cli-bun.js"
+      },
+      {
+        "name": "GDD subset on final isolated CLI build",
+        "passed": 5,
+        "failed": 0,
+        "log": "/private/tmp/bgs-gdd-final-cli-integration.log",
+        "cli": "/private/tmp/bgs-gdd-public-cli-final-5jxqwf/cli-bun.js"
+      }
+    ],
+    "uniqueTestsPassed": 193,
+    "repeatedSubsetTests": 5,
+    "rootTypecheck": {
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-gdd-public-turn-tsc.log"
+    },
+    "diffCheck": "passed",
+    "isolatedCli": "/private/tmp/bgs-gdd-public-cli-final-5jxqwf/cli-bun.js",
+    "isolatedBuildLog": "/private/tmp/bgs-gdd-public-turn-build.log",
+    "initialMigrationFailures": "Standard slash-command parser expects the last text block and a space separator. Corrected BGS adapter only; native parser unchanged. Existing-directory build overwrite correctly refused; final build uses a new isolated directory.",
+    "notVerified": [
+      "All stages use public native interfaces",
+      "All native changes fully classified or reverted",
+      "Latest GitHub main completely fetched",
+      "Paid model behavior/token savings and semantic document quality",
+      "Running services using this build"
+    ]
+  },
+  "currentRecoveryBackups": {
+    "directory": "/private/tmp/bgs-writing-host-removal-gBhdXB",
+    "files": [
+      "removed-native-source.json",
+      "removed-native-tests.json",
+      "removed-native-review.json",
+      "removed-native-production.json",
+      "moved-production-stage-tests.json",
+      "native-before-passive-removal.diff",
+      "native-file-agent-before-sdk-observer.ts",
+      "removed-native-scratch-cleanup.json",
+      "native-residual-before-provider-schema-cleanup.json",
+      "native-artifact-before-standard-config.json",
+      "moved-tool-result-tests-original.ts"
+    ]
+  },
+  "previousCoreRemovalVerification": {
+    "fakeProvidersOnly": true,
+    "paidCalls": 0,
+    "suites": [
+      {
+        "name": "BGS owners, milestone acceptance, Review permission/exposure, stages, interruption, source authority and workflow release",
+        "passed": 306,
+        "failed": 0,
+        "log": "/private/tmp/bgs-clean-public-final-host-tests.log"
+      },
+      {
+        "name": "Native SDK progress/queue, ordinary CLI adapter and public usage snapshots",
+        "passed": 65,
+        "failed": 0,
+        "log": "/private/tmp/bgs-clean-public-final-native-unit-tests.log"
+      },
+      {
+        "name": "Public sandbox/cache/Skill read boundaries",
+        "passed": 5,
+        "failed": 0,
+        "log": "/private/tmp/bgs-clean-public-final-sandbox-tests.log"
+      },
+      {
+        "name": "Compiled CLI fake-provider stage, receipt, user Question, source checks, no32cap, primary recovery, parent/child output, cache, reasoning and fallback",
+        "passed": 38,
+        "failed": 0,
+        "skipped": 1,
+        "log": "/private/tmp/bgs-public-native-cleaned-integration.log",
+        "cli": "/private/tmp/bgs-public-native-cleaned-2045WH/cli-bun.js"
+      },
+      {
+        "name": "Retained generic Skill local discovery and destructive command warnings",
+        "passed": 59,
+        "failed": 0,
+        "log": "/private/tmp/bgs-public-native-retained-generic-tests.log"
+      }
+    ],
+    "uniqueTestsPassedThisBatch": 473,
+    "rootTypecheck": {
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-public-native-cleaned-tsc.log"
+    },
+    "diffCheck": "passed",
+    "notVerified": [
+      "Latest GitHub main fully fetched",
+      "Every remaining product-facing diff fully audited",
+      "Paid model semantic document/game quality and real Token savings",
+      "Legacy private subagent transcript import into primary CLI",
+      "120-second automatic-background streaming case (explicit slow suite skipped)",
+      "All interrupted internal provider request cost when public SDK does not expose it",
+      "Running services using migrated source/build"
+    ],
+    "initialMigrationFailures": [
+      "Host directory-alias comparison incorrectly rejected macOS /var Read evidence; fixed canonical identity without accepting symlinked source files",
+      "Public child partial events were discarded by ordinary runAgent and absent from SDK queue; generic existing opt-in propagation fixed",
+      "Scoped permission fixtures initially reached native Write read-state rejection before host policy; changed fixture to actual Read first",
+      "Resource test manifest referenced absent synthetic data file; fixed fixture, not production sources",
+      "OS sandbox/loopback test runner required sandbox escalation; no paid/provider credentials used",
+      "Stronger cache assertion exposed a synthetic 176KB single-line fixture: Read limit=1 still reads whole line and legitimately hits token cap. Fixture now uses multiline output; native size protection unchanged."
+    ],
+    "isolatedBuild": {
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-public-native-cleaned-build.log",
+      "directory": "/private/tmp/bgs-public-native-cleaned-2045WH"
+    }
+  },
+  "nativeResidualClassification": [
+    {
+      "classification": "BGS-specific removed or moved to host",
+      "files": [
+        "src/Tool.ts",
+        "src/utils/api.ts",
+        "src/utils/model/providers.ts",
+        "packages/builtin-tools/src/tools/ArtifactTool/config.ts",
+        "src/skills/bundled/useArtifacts.ts",
+        "packages/builtin-tools/src/tools/AgentTool/runAgent.ts",
+        "src/beegame/native-tool-results.test.ts"
+      ],
+      "reason": "Role wrappers/private override/config and game business instructions were not intrinsic native behavior."
+    },
+    {
+      "classification": "generic correctness/security fixes retained",
+      "files": [
+        "src/utils/ShellCommand.ts",
+        "src/tasks/LocalShellTask/LocalShellTask.tsx",
+        "src/utils/bash/ast.ts",
+        "packages/builtin-tools/src/tools/BashTool/bashPermissions.ts",
+        "packages/builtin-tools/src/tools/BashTool/pathValidation.ts",
+        "packages/builtin-tools/src/tools/BashTool/commandSemantics.ts",
+        "src/services/acp/bridge/notifications.ts",
+        "src/services/acp/bridge/types.ts",
+        "src/services/lsp/passiveFeedback.ts",
+        "src/components/messages/UserToolResultMessage/UserToolSuccessMessage.tsx",
+        "src/utils/windowsPaths.ts",
+        "src/utils/Shell.ts",
+        "src/utils/doctorDiagnostic.ts",
+        "src/utils/hooks.ts",
+        "src/utils/hooks/hookHelpers.ts",
+        "src/utils/hooks/structuredOutputPolicy.ts",
+        "src/utils/attribution.ts",
+        "src/utils/attributionEmail.ts"
+      ],
+      "reason": "Await actual process-tree termination; heredoc data vs command syntax; deny dangerous project-root removal; AND-list exit semantics; streamed API errors; LSP marked string; corrupt tool row render isolation; WSL vs Git Bash; internal structured-output enforcement under disabled external hooks; avoid invented coauthor emails.",
+      "qualification": "Selected offline regressions and source-level judgments, not proof for all operating systems or every failure mode."
+    },
+    {
+      "classification": "generic scoped authorization/verification prompt fixes retained",
+      "files": [
+        "src/skills/bundled/stuck.ts",
+        "src/skills/bundled/updateConfig.ts",
+        "src/skills/bundled/dream.ts",
+        "src/skills/bundled/ultracode.ts"
+      ],
+      "reason": "Do not post logs to an unrequested Slack destination, claim universal permissions, mutate real source to test hooks, equate jq extraction with full schema validation, or let a playbook invent task authorization."
+    },
+    {
+      "classification": "generic optimization retained",
+      "files": [
+        "src/commands/artifacts/scanner.ts",
+        "src/services/tools/toolExecution.ts",
+        "src/services/skillSearch/localSearch.ts",
+        "src/services/skillSearch/prefetch.ts",
+        "src/utils/conversationRecovery.ts",
+        "src/utils/attachments.ts"
+      ],
+      "reason": "Single indexed artifact-result lookup; reuse actual mapped tool block; local task-aware search and exact-context dedup; do not suppress Skill listing merely because a transcript resumed without actual listing evidence.",
+      "qualification": "No numerical Token-saving or quality claim."
+    },
+    {
+      "classification": "explicit operator API integration retained, not game-stage authority",
+      "files": [
+        "packages/builtin-tools/src/tools/WebFetchTool/utils.ts",
+        "packages/builtin-tools/src/tools/WebSearchTool/adapters/tavilyAdapter.ts",
+        "packages/builtin-tools/src/tools/WebSearchTool/adapters/exaAdapter.ts"
+      ],
+      "reason": "Official/configured search endpoints and explicit API credentials; no BGS stage, mandatory agent strategy or rewritten model tool results."
+    },
+    {
+      "classification": "product compatibility/branding retained separately; not claimed restored",
+      "files": [
+        "src/main.tsx",
+        "src/commands.ts",
+        "src/cli/handlers/util.tsx",
+        "src/cli/updateCCB.ts",
+        "src/commands/install.tsx",
+        "src/commands/doctor/index.ts",
+        "src/commands/doctor/doctor.tsx",
+        "src/screens/Doctor.tsx",
+        "src/hooks/notifs/useSettingsErrors.tsx",
+        "src/keybindings/KeybindingProviderSetup.tsx",
+        "src/skills/bundled/keybindings.ts",
+        "src/constants/product.ts",
+        "src/utils/envUtils.ts",
+        "src/services/api/openai/responsesAdapter.ts"
+      ],
+      "reason": "Package/config brand names and removed distribution install/update/doctor surfaces are not game-author responsibility injection. A blanket restoration would reintroduce foreign installer/updater and incompatible package/config locations; no claim they are all experimentally proven bug fixes. Responses originator name is retained as product client identity, not native prompt/tool/role policy; parser and terminal-event fixes remain generic."
+    }
+  ],
+  "previousResidualAuditVerification": {
+    "fakeProvidersOnly": true,
+    "paidCalls": 0,
+    "suites": [
+      {
+        "name": "Public provider selection, host adapter, native provider/auth gates, generic streaming opt-in, artifact mock upload and credential scrub",
+        "passed": 73,
+        "failed": 0,
+        "log": "/private/tmp/bgs-native-residual-unit.log"
+      },
+      {
+        "name": "Retained generic command semantics, stream cancellation, schema errors, hook policy, Windows path discovery, path validation and artifact indexing",
+        "passed": 65,
+        "failed": 0,
+        "skipped": 10,
+        "log": "/private/tmp/bgs-native-residual-retained-tests.log"
+      },
+      {
+        "name": "Existing BGS writers, Review, stages, source authority and interruption/recovery",
+        "passed": 306,
+        "failed": 0,
+        "log": "/private/tmp/bgs-native-residual-host-tests.log"
+      },
+      {
+        "name": "Compiled native CLI ordinary/isolated provider selection, eight-document owners, Review/Question, cache, delegation, streaming, recovery and accounting",
+        "passed": 40,
+        "failed": 0,
+        "skipped": 1,
+        "log": "/private/tmp/bgs-native-residual-integration.log",
+        "cli": "/private/tmp/bgs-native-residual-cli-PBo8oZ/cli-bun.js"
+      },
+      {
+        "name": "Migrated native persisted-result and bounded Read tests",
+        "passed": 5,
+        "failed": 0,
+        "log": "/private/tmp/bgs-native-residual-cache-tests.log"
+      }
+    ],
+    "uniqueTestsPassedThisBatch": 489,
+    "rootTypecheck": {
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-native-residual-tsc.log"
+    },
+    "diffCheck": "passed",
+    "isolatedBuild": {
+      "exitCode": 0,
+      "directory": "/private/tmp/bgs-native-residual-cli-PBo8oZ",
+      "log": "/private/tmp/bgs-native-residual-build.log"
+    },
+    "notVerified": [
+      "Latest GitHub main fully fetched",
+      "Every remaining product-facing diff fully audited",
+      "Paid model semantic document/game quality and real Token savings",
+      "Legacy private subagent transcript import into primary CLI",
+      "120-second automatic-background streaming case",
+      "Windows-only integration on a Windows host (10 platform-gated tests skipped)",
+      "All interrupted internal provider cost when public SDK does not expose it",
+      "Running services using migrated source/build"
+    ],
+    "initialMigrationFailures": [
+      "Provider synthetic test initially omitted required readOnlyPaths field; corrected fixture, not production logic.",
+      "Moved cache test required native relative imports under server tsconfig; corrected test imports.",
+      "No paid calls, source acceptance weakening or real-project edits used to make tests pass."
+    ]
+  },
+  "brandingFollowup": {
+    "requestedName": "BGS",
+    "secondBatch": {
+      "requestedProduct": "BGS",
+      "requestedOrganization": "PhantomLab",
+      "productionFiles": 27,
+      "scope": "Local product display text, ordinary statusline/classifier role introductions and generated product attribution only.",
+      "files": [
+        "src/components/LogoV2/ChannelsNotice.tsx",
+        "src/components/ClaudeMdExternalIncludesDialog.tsx",
+        "src/components/Stats.tsx",
+        "src/components/mcp/MCPRemoteServerMenu.tsx",
+        "src/components/permissions/ComputerUseApproval/ComputerUseApproval.tsx",
+        "src/components/IdeOnboardingDialog.tsx",
+        "src/cli/handlers/mcp.tsx",
+        "src/cli/handlers/autoMode.ts",
+        "src/commands/model/index.ts",
+        "src/commands/mcp/addCommand.ts",
+        "src/commands/status/index.ts",
+        "src/commands/statusline.tsx",
+        "src/commands/plugin/index.tsx",
+        "src/commands/plugin/ManageMarketplaces.tsx",
+        "src/commands/plugin/DiscoverPlugins.tsx",
+        "src/commands/tui/index.ts",
+        "src/utils/settings/validateEditTool.ts",
+        "src/utils/windowsPaths.ts",
+        "src/utils/messages.ts",
+        "packages/builtin-tools/src/tools/BashTool/pathValidation.ts",
+        "packages/builtin-tools/src/tools/PowerShellTool/pathValidation.ts",
+        "packages/builtin-tools/src/tools/AgentTool/built-in/statuslineSetup.ts",
+        "README.md",
+        "src/commands/plugin/PluginTrustWarning.tsx",
+        "src/components/LogoV2/WelcomeV2.tsx",
+        "src/components/ConsoleOAuthFlow.tsx",
+        "src/utils/attribution.ts"
+      ],
+      "organizationUses": [
+        "BGS product introduction and welcome title",
+        "Local plugin trust warning"
+      ],
+      "preserved": [
+        "Original copyright holders, licenses and source provenance",
+        "Actual Anthropic account/API/cloud services and transcript-sharing recipient",
+        "Model IDs, SDK/package imports, environment keys and network destinations",
+        "Native transport/system prefix; compatibility replacement remains unverified"
+      ],
+      "verification": {
+        "unit": {
+          "passed": 50,
+          "skipped": 10,
+          "failed": 0,
+          "skipReason": "Windows-only path-validation cases on macOS"
+        },
+        "typecheck": "Passed after all second-batch source edits (exit 0)",
+        "diffCheck": "passed",
+        "sourceChecks": {
+          "safeDisplayFiles": 22,
+          "protectedChecks": 7,
+          "result": "passed"
+        },
+        "identifierChangesInMappedLines": 0,
+        "paidCalls": 0,
+        "deployed": false,
+        "servicesRestarted": false
+      },
+      "qualification": "Branding is not a transfer of third-party copyright or proof of commercial-use rights. Remaining external/compatibility names intentionally retained; not a claim of exhaustive replacement."
+    },
+    "neverWroteMistakenBJS": true,
+    "scope": "Explicit safe display/ordinary role introductions only; no business policy/executor changes",
+    "productionFiles": 35,
+    "matchedReplacementsIncludingRelevantComment": 66,
+    "testFilesChanged": 2,
+    "files": [
+      "src/components/LogoV2/WelcomeV2.tsx",
+      "src/components/LogoV2/CondensedLogo.tsx",
+      "src/components/LogoV2/LogoV2.tsx",
+      "src/services/notifier.ts",
+      "src/services/acp/agent/AcpAgent.ts",
+      "src/services/mcp/client.ts",
+      "packages/builtin-tools/src/tools/AgentTool/built-in/generalPurposeAgent.ts",
+      "packages/builtin-tools/src/tools/AgentTool/built-in/exploreAgent.ts",
+      "packages/builtin-tools/src/tools/AgentTool/built-in/planAgent.ts",
+      "src/constants/prompts.ts",
+      "src/coordinator/coordinatorMode.ts",
+      "packages/builtin-tools/src/tools/ConfigTool/prompt.ts",
+      "packages/builtin-tools/src/tools/ConfigTool/ConfigTool.ts",
+      "packages/builtin-tools/src/tools/FileReadTool/prompt.ts",
+      "packages/builtin-tools/src/tools/EnterPlanModeTool/UI.tsx",
+      "packages/builtin-tools/src/tools/ExitPlanModeTool/UI.tsx",
+      "src/components/permissions/EnterPlanModePermissionRequest/EnterPlanModePermissionRequest.tsx",
+      "src/components/permissions/ExitPlanModePermissionRequest/ExitPlanModePermissionRequest.tsx",
+      "src/components/permissions/ReviewArtifactPermissionRequest/ReviewArtifactPermissionRequest.tsx",
+      "src/components/permissions/PermissionRequest.tsx",
+      "src/components/ThinkingToggle.tsx",
+      "src/components/OutputStylePicker.tsx",
+      "src/components/HelpV2/General.tsx",
+      "src/components/HelpV2/HelpV2.tsx",
+      "src/components/BypassPermissionsModeDialog.tsx",
+      "src/components/TrustDialog/TrustDialog.tsx",
+      "src/components/ManagedSettingsSecurityDialog/ManagedSettingsSecurityDialog.tsx",
+      "src/components/permissions/rules/AddWorkspaceDirectory.tsx",
+      "src/components/permissions/rules/RemoveWorkspaceDirectory.tsx",
+      "src/components/permissions/rules/PermissionRuleList.tsx",
+      "src/components/Onboarding.tsx",
+      "src/components/agents/AgentsList.tsx",
+      "src/components/mcp/ElicitationDialog.tsx",
+      "src/screens/REPL.tsx",
+      "README.md",
+      "src/services/acp/__tests__/agent.test.ts",
+      "packages/builtin-tools/src/tools/AgentTool/__tests__/subagentSystemPrompt.test.ts"
+    ],
+    "backup": "/private/tmp/bgs-branding-only.aA0Y18/restore-branding.patch",
+    "changed": [
+      "Welcome/title/notification/help/permission displays use BGS.",
+      "ACP/MCP display title and description use BGS; public machine name claude-code unchanged.",
+      "General-purpose/explore/plan/default child/coordinator introductions no longer claim to be Anthropic official CLI; task/read-only/delegation guidance unchanged.",
+      "README heading now BGS; provenance and rights/research statement preserved."
+    ],
+    "retainedPendingAnalysis": [
+      {
+        "area": "Transport system prefix",
+        "files": [
+          "src/constants/system.ts",
+          "src/constants/prompts.ts (CLAUDE_CODE_SIMPLE branch)"
+        ],
+        "reason": "Prefix values participate in exact cache-block recognition. Source also warns some first-party model requests fail without the native prefix; public/first-party compatibility has not been proved for replacement. No new provider-specific rewrite added."
+      },
+      {
+        "area": "Technical compatibility",
+        "items": [
+          "CLAUDE_CODE_* and ANTHROPIC_* env keys",
+          "API headers/schema keys/provider model IDs/SDK imports",
+          "ACP/MCP machine name claude-code",
+          "config filenames, paths and internal theme/function names"
+        ],
+        "reason": "These are not equivalent to display labels; no blanket renaming."
+      },
+      {
+        "area": "Factual external service descriptions",
+        "items": [
+          "Claude.ai accounts/remote sessions/subscriptions",
+          "Claude Code documentation and guide agent",
+          "Anthropic transcript-sharing recipient and privacy/consent descriptions"
+        ],
+        "reason": "Replacing actual external service or recipient with BGS could misrepresent destination/capabilities."
+      },
+      {
+        "area": "Copyright/license/provenance",
+        "items": [
+          "README.md:327 rights/research statement",
+          "workflow-engine MIT notice",
+          "Third-party LobeHub/shadcn/font/visual/audio notices"
+        ],
+        "reason": "Retained. Renaming UI does not settle commercial use rights."
+      },
+      {
+        "area": "Alignment configuration",
+        "file": "config/upstream-core-alignment.json",
+        "reason": "Manifest still records 3bb6b5746238c418138eb96d57765d79012edd96, while this audit uses pinned online 34b3dc99bf40c57c0b78f3b5b1d70471ebc2d06d; not changed as part of display-only edit."
+      }
+    ],
+    "verification": {
+      "paidCalls": 0,
+      "unit": {
+        "passed": 94,
+        "failed": 0,
+        "log": "/private/tmp/bgs-branding-only-unit-final.log"
+      },
+      "compiledCLI": {
+        "passed": 7,
+        "failed": 0,
+        "filtered": 19,
+        "log": "/private/tmp/bgs-branding-only-native-current.log",
+        "cli": "/private/tmp/bgs-branding-only.aA0Y18/cli/cli-bun.js"
+      },
+      "typecheck": {
+        "exitCode": 0,
+        "log": "/private/tmp/bgs-branding-only-tsc-final.log"
+      },
+      "diffCheck": "passed",
+      "build": {
+        "exitCode": 0,
+        "isolated": true,
+        "log": "/private/tmp/bgs-branding-only-build.log"
+      },
+      "deployed": false,
+      "servicesRestarted": false,
+      "excludedFailures": [
+        {
+          "log": "/private/tmp/bgs-branding-only-tests.log",
+          "reason": "First unit batch also invoked a loopback test under network sandbox; loopback bind denied."
+        },
+        {
+          "log": "/private/tmp/bgs-branding-only-autonomy-permitted.log",
+          "reason": "Autonomy fixture launched the default deployed CLI, then failed with stopped. Inspection additionally confirms fixture still asserts obsolete project .native-tool-results path. This obsolete test is not repaired or counted as passing. No claim this failure is fully diagnosed by cache expectation alone."
+        }
+      ],
+      "qualification": "101 relevant cases passed; this is not a claim all native regressions passed or current deployed behavior was changed."
+    }
+  }
+}

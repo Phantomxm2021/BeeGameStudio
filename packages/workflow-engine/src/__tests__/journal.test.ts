@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { agentCallKey, createFileJournalStore } from '../engine/journal.js'
@@ -33,12 +33,15 @@ test('FileJournalStore append → read preserves order, truncate clears', async 
     const e2 = { key: 'k2', seq: 1, result: { kind: 'dead' as const } }
     await store.append('run-1', e1)
     await store.append('run-1', e2)
+    const scriptPath = join(dir, 'run-1', 'script.js')
+    await writeFile(scriptPath, 'return agent("task")')
     const got = await store.read('run-1')
     expect(got).toHaveLength(2)
     expect(got[0]!.key).toBe('k1')
     expect(got[1]!.result.kind).toBe('dead')
     await store.truncate('run-1')
     expect(await store.read('run-1')).toEqual([])
+    expect(await readFile(scriptPath, 'utf8')).toBe('return agent("task")')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

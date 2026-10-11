@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNotifications } from 'src/context/notifications.js';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { logEvent } from 'src/services/analytics/index.js';
 import { useDebounceCallback } from 'usehooks-ts';
 import { type Command, getCommandName } from '../commands.js';
 import { getModeFromInput, getValueFromInput } from '../components/PromptInput/inputModes.js';
 import type { SuggestionItem, SuggestionType } from '../components/PromptInput/PromptInputFooterSuggestions.js';
 import { useIsModalOverlayActive, useRegisterOverlay } from '../context/overlayContext.js';
-import { KeyboardEvent, useInput } from '@anthropic/ink';
+import { KeyboardEvent, useInput } from '@bee-game-studio/ink';
 // backward-compat bridge until consumers wire handleKeyDown to <Box onKeyDown>
 import { useOptionalKeybindingContext, useRegisterKeybindingContext } from '../keybindings/KeybindingContext.js';
 import { useKeybindings } from '../keybindings/useKeybinding.js';

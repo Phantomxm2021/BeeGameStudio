@@ -9,7 +9,7 @@
  * ChatGPT Responses + OAuth path used by the main loop.
  *
  * Avoid mocking getAPIProvider (process-global pollution). Select OpenAI via
- * CLAUDE_CODE_USE_OPENAI env. Mock only client + ChatGPT token surface.
+ * BGS_USE_OPENAI env. Mock only client + ChatGPT token surface.
  */
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { logMock } from '../../../tests/mocks/log'
@@ -96,12 +96,12 @@ let capturedFetch: CapturedFetch | null = null
 let originalFetch: typeof globalThis.fetch
 
 const ENV_KEYS = [
-  'CLAUDE_CODE_USE_OPENAI',
-  'CLAUDE_CODE_USE_GROK',
-  'CLAUDE_CODE_USE_GEMINI',
-  'CLAUDE_CODE_USE_BEDROCK',
-  'CLAUDE_CODE_USE_VERTEX',
-  'CLAUDE_CODE_USE_FOUNDRY',
+  'BGS_USE_OPENAI',
+  'BGS_USE_GROK',
+  'BGS_USE_GEMINI',
+  'BGS_USE_BEDROCK',
+  'BGS_USE_VERTEX',
+  'BGS_USE_FOUNDRY',
   'OPENAI_AUTH_MODE',
   'OPENAI_API_KEY',
   'OPENAI_BASE_URL',
@@ -145,12 +145,12 @@ function buildFunctionCallSse(toolName: string, argsJson: string): string {
 }
 
 function enableOpenAIProvider(): void {
-  process.env.CLAUDE_CODE_USE_OPENAI = '1'
-  delete process.env.CLAUDE_CODE_USE_GROK
-  delete process.env.CLAUDE_CODE_USE_GEMINI
-  delete process.env.CLAUDE_CODE_USE_BEDROCK
-  delete process.env.CLAUDE_CODE_USE_VERTEX
-  delete process.env.CLAUDE_CODE_USE_FOUNDRY
+  process.env.BGS_USE_OPENAI = '1'
+  delete process.env.BGS_USE_GROK
+  delete process.env.BGS_USE_GEMINI
+  delete process.env.BGS_USE_BEDROCK
+  delete process.env.BGS_USE_VERTEX
+  delete process.env.BGS_USE_FOUNDRY
 }
 
 beforeEach(() => {
@@ -295,7 +295,7 @@ describe('sideQuery OpenAI ChatGPT OAuth path', () => {
     expect(chatCompletionsCreateCount).toBe(1)
     expect(capturedFetch).toBeNull()
     expect(lastChatCompletionsArgs?.model).toBe('gpt-4o')
-    expect(lastChatCompletionsArgs?.prompt_cache_key).toMatch(/^ccb:/)
+    expect(lastChatCompletionsArgs?.prompt_cache_key).toMatch(/^bgs:/)
 
     const toolUse = result.content.find(b => b.type === 'tool_use') as
       | { type: 'tool_use'; name: string; input: unknown }

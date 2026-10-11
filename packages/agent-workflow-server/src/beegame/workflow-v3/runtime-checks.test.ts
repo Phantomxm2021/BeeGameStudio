@@ -1,0 +1,131 @@
+import { test, expect } from 'bun:test'
+import { mkdtemp, mkdir, writeFile, cp, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { taskSchema, createRun, publishPlan, claimTask, finishTask, V3_PROTOCOL, type TaskSpec } from './state'
+import { runChecks, checkIsCurrent, assertFreshDependencies, readVersion } from './checks'
+import { uiLayoutFixture, sceneLayoutFixture } from '../fixtures/layout-fixture'
+import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
+import { writeBeeGameAssetManifest } from '../asset-contracts'
+
+export const artifactTask: TaskSpec = { id: 'verify', kind: 'game.verify', goal: 'Check current static package', dependsOn: [], requirementIds: ['req.loop'], inputs: [],
+  writablePaths: [], expectedOutputs: ['dist/index.html'], checks: ['delivery-package'], runtimeArtifact: 'dist' }
+
+test.each([
+  ['absolute-button', '<button style="position:absolute;left:50px;top:50px">Play</button>', 'passed'],
+  ['absolute-canvas', '<canvas width="100" height="80" style="position:absolute;left:50px;top:50px"></canvas>', 'passed'],
+  ['hidden-button', '<button style="position:absolute;display:none">Play</button>', 'unverified'],
+  ['transparent-parent', '<div style="opacity:0"><button style="position:absolute">Play</button></div>', 'unverified'],
+  ['outside-viewport', '<button style="position:absolute;left:2000px;top:50px">Play</button>', 'unverified'],
+  ['blank-flow', '<div style="height:200px"></div>', 'unverified'],
+  ['text-with-script', 'Visible text<script>void 0</script>', 'passed'],
+] as const)('static smoke observes actual surface rather than body flow: %s',async(_name,html,expected)=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-v3-surface-'))
+  try {
+    await mkdir(join(root,'dist'))
+    await writeFile(join(root,'dist/index.html'),'<!doctype html><body style="margin:0">'+html+'</body>')
+    const check=(await runChecks(root,{...artifactTask,checks:['runtime-smoke']},[])).checks[0]!
+    expect(check.status,check.observation).toBe(expected)
+    expect(JSON.parse(check.observation).surfacePresent).toBe(expected==='passed')
+    expect(await checkIsCurrent(root,{...check,version:'v3-static-artifact.1'})).toBe(false)
+  }finally{await rm(root,{recursive:true,force:true})}
+},30000)
+
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-v3-package-'))
+  await mkdir(join(root, 'dist'), { recursive: true })
+  await writeFile(join(root, 'dist/index.html'), '<!doctype html><body>Playable fixture</body>')
+  await mkdir(join(root, 'content/ui'), { recursive: true }); await mkdir(join(root, 'content/scenes'), { recursive: true })
+  await mkdir(join(root, 'assets/runtime/example'), { recursive: true })
+  const manifest = assetManifestAuthoringExamples().canonical
+  await writeBeeGameAssetManifest(root, manifest)
+  await writeFile(join(root, 'assets/runtime/example/resource.json'), '{}')
+  const ui = uiLayoutFixture() as any
+  ui.assetRefs = [manifest.resources[0]!.id]; ui.data.nodes[1].data = { image: { assetRef: manifest.resources[0]!.id } }
+  await writeFile(join(root, 'content/ui/menu.json'), JSON.stringify(ui))
+  await writeFile(join(root, 'content/scenes/level.json'), JSON.stringify(sceneLayoutFixture()))
+  await writeFile(join(root, 'content/index.json'), JSON.stringify({ schema: 'beegame-content-package.v2', id: 'fixture', dimension: '2d',
+    documentRevision: 'a'.repeat(64), assetManifestRevision: 'b'.repeat(64), sceneModel: 'game-object-v2', entryScene: 'level',
+    files: ['scenes/level.json', 'ui/menu.json'], documents: [
+      { id: 'level', kind: 'scene-2d', path: 'scenes/level.json', loadPhase: 'startup' },
+      { id: 'menu', kind: 'ui-screen', path: 'ui/menu.json', loadPhase: 'startup' },
+    ] }))
+  await cp(join(root, 'content'), join(root, 'dist/content'), { recursive: true })
+  await cp(join(root, 'assets'), join(root, 'dist/assets'), { recursive: true })
+  return root
+}
+
+test('runtime artifact is an optional local path, never an arbitrary URL/host metadata', () => {
+  expect(taskSchema.safeParse({ ...artifactTask, runtimeArtifact: '../other' }).success).toBe(false)
+  expect(taskSchema.safeParse({ ...artifactTask, runtimeArtifact: '/tmp/other' }).success).toBe(false)
+  expect(taskSchema.safeParse({ ...artifactTask, runtimeArtifact: '.beegame' }).success).toBe(false)
+})
+
+test('actual package bytes/resources checked without eight documents; additions and source edits invalidate historical checks', async () => {
+  const root = await fixture()
+  try {
+    const result = (await runChecks(root, artifactTask, [])).checks[0]!
+    expect(result.status).toBe('passed')
+    expect(result.observation).toContain('Not runtime data consumption')
+    expect(result.artifacts?.[0]?.path).toBe('dist')
+    expect(await checkIsCurrent(root, result)).toBe(true)
+    const original = createRun({ projectId: 'package-dependency', ownerId: 'owner', workspacePath: root, chatSessionId: 'chat', requestKey: 'run',
+      text: 'Synthetic packaging and consumer', constraints: {}, ids: ['req.loop'] })
+    const producer = { ...artifactTask, id: 'package', kind: 'game.develop' as const, writablePaths: ['dist/**'] }
+    const consumer: TaskSpec = { id: 'consumer', kind: 'game.verify', goal: 'Consume measured package', dependsOn: ['package'], requirementIds: ['req.loop'],
+      inputs: [], writablePaths: ['verification.json'], expectedOutputs: ['verification.json'], checks: ['artifact-json'] }
+    const planned = publishPlan(original, { protocol: V3_PROTOCOL, baseRevision: 0, requirementsRevision: original.requirements.revision, tasks: [producer, consumer] })
+    const claimed = claimTask(planned, { taskId: 'package', requestKey: 'package', workerId: 'worker', sessionId: 'synthetic', inputVersions: [] })
+    const accepted = finishTask(claimed, claimed.writer!.attemptId, claimed.fence, { checks: [result], outputs: [await readVersion(root, 'dist/index.html')] }, true)
+    await assertFreshDependencies(accepted, consumer)
+    await writeFile(join(root, 'dist/new.js'), 'new output')
+    expect(await checkIsCurrent(root, result)).toBe(false)
+    // index.html did not change. The measured directory still invalidates its consumer.
+    await expect(assertFreshDependencies(accepted, consumer)).rejects.toThrow('package')
+    await rm(join(root, 'dist/new.js'))
+    await writeFile(join(root, 'content/ui/extra.json'), '{}')
+    expect(await checkIsCurrent(root, result)).toBe(false)
+    await rm(join(root, 'content/ui/extra.json'))
+    await writeFile(join(root, 'assets/runtime/example/resource.json'), '{"changed":true}')
+    expect(await checkIsCurrent(root, result)).toBe(false)
+    await expect(assertFreshDependencies(accepted, consumer)).rejects.toThrow('package')
+    const stale = (await runChecks(root, artifactTask, [])).checks[0]!
+    expect(stale.status).toBe('failed'); expect(stale.observation).toContain('Packaged bytes differ')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('empty registry, stale ID, absent packed member and unregistered JSON cannot pass', async () => {
+  const root = await fixture()
+  try {
+    await rm(join(root, 'dist/assets/runtime/example/resource.json'))
+    expect((await runChecks(root, artifactTask, [])).checks[0]!.status).toBe('unverified')
+    await cp(join(root, 'assets'), join(root, 'dist/assets'), { recursive: true })
+    const index = await Bun.file(join(root, 'content/index.json')).json()
+    index.documents[0].id = 'wrong'
+    await writeFile(join(root, 'content/index.json'), JSON.stringify(index))
+    expect((await runChecks(root, artifactTask, [])).checks[0]!.status).toBe('failed')
+    index.documents = []
+    await writeFile(join(root, 'content/index.json'), JSON.stringify(index))
+    expect((await runChecks(root, artifactTask, [])).checks[0]!.status).toBe('unverified')
+  } finally { await rm(root, { recursive: true, force: true }) }
+  const other = await fixture()
+  try {
+    await writeFile(join(other, 'content/ui/unregistered.json'), JSON.stringify(uiLayoutFixture()))
+    expect((await runChecks(other, artifactTask, [])).checks[0]!.observation).toContain('Unregistered')
+  } finally { await rm(other, { recursive: true, force: true }) }
+})
+
+test('artifact aliases/escapes and cancellation are not accepted or allowed to write source', async () => {
+  const root = await fixture(), outside = await mkdtemp(join(tmpdir(), 'bgs-v3-outside-'))
+  try {
+    await writeFile(join(outside, 'secret.txt'), 'not a game asset')
+    await symlink(join(outside, 'secret.txt'), join(root, 'dist/secret.txt'))
+    expect((await runChecks(root, artifactTask, [])).checks[0]!.status).toBe('execution-error')
+    const controller = new AbortController(); controller.abort()
+    const result = (await runChecks(root, artifactTask, [], controller.signal)).checks[0]!
+    expect(result.status).toBe('execution-error')
+    expect(result.observation).toContain('cancelled')
+    const noDriver = (await runChecks(root, { ...artifactTask, runtimeArtifact: undefined, checks: ['runtime-smoke'] }, [])).checks[0]!
+    expect(noDriver.status).toBe('unverified')
+  } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }) }
+})

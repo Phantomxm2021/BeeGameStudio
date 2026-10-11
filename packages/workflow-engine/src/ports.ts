@@ -92,7 +92,8 @@ export type TaskRegistrar = {
 export type JournalStore = {
   read(runId: string): Promise<JournalEntry[]>
   append(runId: string, entry: JournalEntry): Promise<void>
-  truncate(runId: string): Promise<void>
+  /** Replace only the journal with its retained valid prefix; preserve run files. */
+  truncate(runId: string, retained?: readonly JournalEntry[]): Promise<void>
 }
 
 /** Cancellation / permission gate. */

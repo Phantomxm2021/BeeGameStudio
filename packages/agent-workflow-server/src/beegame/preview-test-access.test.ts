@@ -32,6 +32,12 @@ test('preview capability exposes only its owned preview and revokes browser acce
     expect(refreshed.environment.sandbox).toBe(PREVIEW_IFRAME_SANDBOX)
     expect(access.instruction).toContain('Read returned URLs from JSON')
     expect(access.instruction).toContain('avoids shell sandbox escape approvals')
+    const helper = access.instruction.split('\n').find(line=>line.startsWith('Optional Node helper:'))!
+    expect(helper).not.toContain(access.baseUrl)
+    expect(helper).not.toContain('apiUrl:')
+    expect(helper).toContain('gameFrame')
+    expect(helper).toContain('node <test-script.mjs> (not bun)')
+    expect(helper).toContain('beforeNavigate')
     const html = await (await fetch(result.hostUrl)).text()
     expect(html).toContain(`sandbox="${PREVIEW_IFRAME_SANDBOX}"`)
     expect(html).not.toContain('allow-same-origin')
@@ -54,5 +60,23 @@ test('browser startup failure is not reported as a ready test environment', asyn
     const result = await fetch(access.baseUrl + '/browser', { method: 'POST' })
     expect(result.status).toBe(503)
     expect(await result.json()).toEqual({ error: 'MachPort denied' })
+  } finally { await access.close() }
+})
+
+test('browser start explicitly reports reuse; restart is a separate owned operation', async () => {
+  let endpoint = 'ws://127.0.0.1:1234/first', running = false, restarts = 0
+  const access = openPreviewTestAccess({ start: async () => ({ status: 'running' }), status: () => ({ status: 'idle' }), stop() {},
+    browser: {
+      start: async () => { running = true; return { endpoint } },
+      restart: async () => { restarts++; endpoint = 'ws://127.0.0.1:1234/second'; return { endpoint } },
+      status: () => ({ status: running ? 'running' : 'not-running', endpoint }), close: async () => {},
+    } })
+  try {
+    const post = async (path: string) => await (await fetch(access.baseUrl + path, { method: 'POST' })).json()
+    expect(await post('/browser')).toMatchObject({ reused: false, endpoint })
+    expect(await post('/browser')).toMatchObject({ reused: true, endpoint })
+    expect(restarts).toBe(0)
+    expect(await post('/browser/restart')).toMatchObject({ reused: false, endpoint: 'ws://127.0.0.1:1234/second' })
+    expect(restarts).toBe(1)
   } finally { await access.close() }
 })

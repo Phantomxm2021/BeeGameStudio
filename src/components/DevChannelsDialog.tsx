@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
 import type { ChannelEntry } from '../bootstrap/state.js';
-import { Box, Text, Dialog } from '@anthropic/ink';
+import { Box, Text, Dialog } from '@bee-game-studio/ink';
 import { gracefulShutdownSync } from '../utils/gracefulShutdown.js';
 import { Select } from './CustomSelect/index.js';
 

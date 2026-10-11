@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { Text, Dialog } from '@anthropic/ink';
+import { Text, Dialog } from '@bee-game-studio/ink';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
 import { isSupportedTerminal } from '../utils/ide.js';
 import { Select } from './CustomSelect/index.js';

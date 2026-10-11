@@ -2,21 +2,21 @@ import figures from 'figures';
 import * as React from 'react';
 import { useMemo, useState } from 'react';
 import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
-import { stringWidth } from '@anthropic/ink';
+import { stringWidth } from '@bee-game-studio/ink';
 import { useAppState, useSetAppState } from 'src/state/AppState.js';
 import { enterTeammateView, exitTeammateView } from 'src/state/teammateViewHelpers.js';
 import { isPanelAgentTask } from 'src/tasks/LocalAgentTask/LocalAgentTask.js';
 import { getPillLabel, pillNeedsCta } from 'src/tasks/pillLabel.js';
 import { type BackgroundTaskState, isBackgroundTask, type TaskState } from 'src/tasks/types.js';
 import { calculateHorizontalScrollWindow } from 'src/utils/horizontalScroll.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import {
   AGENT_COLOR_TO_THEME_COLOR,
   AGENT_COLORS,
   type AgentColorName,
 } from '@bee-game-studio/builtin-tools/tools/AgentTool/agentColorManager.js';
 import type { Theme } from '../../utils/theme.js';
-import { KeyboardShortcutHint } from '@anthropic/ink';
+import { KeyboardShortcutHint } from '@bee-game-studio/ink';
 import { shouldHideTasksFooter } from './taskStatusUtils.js';
 
 type Props = {

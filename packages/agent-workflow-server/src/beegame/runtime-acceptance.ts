@@ -4,9 +4,10 @@ import { isAbsolute, relative, resolve } from 'node:path'
 import { z } from 'zod/v4'
 import { contentRuntimeCheckSchema } from './content-runtime-contract'
 import { parseBeeGameContentDocument, parseBeeGameContentIndex } from './game-content-schema'
-import { auditUiInteractiveBounds, readUiLayoutCamera } from './ui-layout-audit'
+import { auditUiInteractiveBounds, readUiLayoutCameras } from './ui-layout-audit'
 import { designHandoffPath, readDesignAcceptanceRequirements } from './design-handoff'
 import { PROJECT_DOCUMENTS } from './project-content-authority'
+import { designReviewResultSchema, type DesignFinding } from './design-handoff'
 
 export const DESIGN_RUNTIME_REPORT_INSTRUCTION = 'The reviewed .beegame/design-handoffs/<document stem>.json is a small output/acceptance index; the pointed prose section owns each expectation. For outputs declaring acceptance, verification.requirementChecks records actual results: {document:design filename,id:owned output ID,documentSha256:SHA-256 of current docs/<document> bytes,handoffSha256:SHA-256 of its current index JSON bytes,method:"test"|"target-runtime"|"inspection",scenario:actual conditions/actions checked,observed:actual outcome,status:"passed"|"failed"|"unverified",evidencePaths:string[]}. Read the acceptance section for the expected result; do not invent an easier expectation in the report. Cover all declared requirements and their applicable scenarios, matching the source method and version. Existing reusable tests/observations may supply results; this is not a new stage or a separate test plan. Every evidence path must also appear in the report evidencePaths. Report failed or unverified checks honestly; they cannot accompany a delivery PASS. Evidence records must be actual test logs, runtime observations/captures or direct inspections, not a review verdict or copied design prose. Host-maintained design versions/hashes and structural coverage do not establish truthful observation, complete requirements or game quality.'
 
@@ -38,6 +39,7 @@ const reportSchema = z.object({
   evidencePaths: z.array(z.string().trim().min(1)),
   artifactPaths: z.array(z.string().trim().min(1)).optional(),
   verification: verificationSchema.optional(),
+  designIssues: designReviewResultSchema.shape.findings.optional(),
 })
 export type RuntimeAcceptance = {
   scope?: 'request' | 'delivery'
@@ -48,6 +50,7 @@ export type RuntimeAcceptance = {
   verification?: z.infer<typeof verificationSchema>
   evidence: Array<{ path: string; sha256: string }>
   artifacts?: Array<{ path: string; sha256: string }>
+  designIssues?: DesignFinding[]
 }
 
 export type AcceptanceDiagnostic = {
@@ -56,7 +59,7 @@ export type AcceptanceDiagnostic = {
 }
 const diagnostic = (category: AcceptanceDiagnostic['category'], message: string): AcceptanceDiagnostic => ({ category, message })
 
-async function artifactDigest(workspace: string, path: string, allowDirectory = false): Promise<string> {
+export async function artifactDigest(workspace: string, path: string, allowDirectory = false): Promise<string> {
   if (isAbsolute(path) || path.replaceAll('\\', '/').split('/').includes('..'))
     throw new Error('Runtime evidence must be a workspace-relative file')
   const root = await realpath(workspace)
@@ -103,6 +106,8 @@ export async function readRuntimeAcceptanceReport(workspace: string, reportPath:
     const report = reportSchema.parse(raw)
     let limitation = report.scope !== 'request' && report.status === 'passed'
       ? deliveryLimitation(report) : undefined
+    if (report.designIssues?.length && report.status === 'passed')
+      limitation = diagnostic('product-failed', 'Design issues remain unresolved; a passed report cannot release them.')
     if (report.scope !== 'request' && report.status === 'passed' && !report.artifactPaths?.length)
       limitation ??= diagnostic('verification-incomplete', 'The tested deployment artifacts are not recorded.')
     if (report.scope !== 'request' && report.status === 'passed' && !limitation)
@@ -121,6 +126,7 @@ export async function readRuntimeAcceptanceReport(workspace: string, reportPath:
       ({ path, sha256: await artifactDigest(workspace, path, true) })))
     return { ...(report.scope ? { scope: report.scope } : {}),
       ...(report.verification ? { verification: report.verification } : {}),
+      ...(report.designIssues ? { designIssues: report.designIssues } : {}),
       status: limitation ? 'blocked' : report.status,
       diagnostic: limitation ?? (report.status === 'failed' ? diagnostic('product-failed', report.summary)
         : report.status === 'blocked' ? diagnostic('verification-incomplete', report.summary) : undefined),
@@ -187,7 +193,7 @@ async function contentBindingLimitation(workspace: string, verification: z.infer
     const document = parseBeeGameContentDocument(JSON.parse(await readFile(resolve(workspace, path), 'utf8')))
     nodeIds.set(path, new Set(document.data.nodes.map(node => node.id)))
     if (document.kind === 'ui-screen' || document.kind === 'ui-hud') {
-      const geometryIssues = auditUiInteractiveBounds(document, readUiLayoutCamera(workspace, document))
+      const geometryIssues = readUiLayoutCameras(workspace, document).flatMap(options => auditUiInteractiveBounds(document, options))
       if (geometryIssues.length)
         return diagnostic('product-failed', `Authored UI control geometry violates declared bounds or minima: ${path}: ${geometryIssues[0]}${geometryIssues.length > 1 ? ` (${geometryIssues.length - 1} more; run content validation)` : ''}`)
       add('ui-layout', path)
@@ -209,10 +215,12 @@ async function contentBindingLimitation(workspace: string, verification: z.infer
     if (check.evidencePaths.some(path => !evidencePaths.includes(path)))
       return diagnostic('report-invalid', `Content binding ${check.kind} evidence must be included in evidencePaths.`)
   }
-  const missing = [...required.keys()].filter(kind => !checks.some(check => check.kind === kind &&
-    (kind !== 'scene-layout' || check.property === 'transform')))
-  if (tilemapNodes.size && !checks.some(check => check.kind === 'scene-layout' && check.property === 'tilemap'))
-    missing.push('scene-layout/tilemap')
+  const missing = [...required].flatMap(([kind, paths]) => [...paths].filter(document =>
+    !checks.some(check => check.kind === kind && check.document === document &&
+      (kind !== 'scene-layout' || check.property === 'transform'))).map(path => `${kind} (${path})`))
+  for (const [document, nodes] of tilemapNodes) for (const nodeId of nodes)
+    if (!checks.some(check => check.kind === 'scene-layout' && check.document === document && check.property === 'tilemap' && check.nodeId === nodeId))
+      missing.push(`scene-layout/tilemap (${document}#${nodeId})`)
   if (missing.length) return diagnostic('verification-incomplete', `Content data consumption is unverified: ${missing.join(', ')}. Loading JSON or changing text alone does not verify layout/resource bindings.`)
 }
 

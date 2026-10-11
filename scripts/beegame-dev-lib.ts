@@ -228,7 +228,7 @@ function buildResourceEnv(
   })
 }
 
-function buildRuntimeEnv(input: {
+export function buildRuntimeEnv(input: {
   baseEnv: Record<string, string | undefined>
   ports: BeeGameDevPorts
   workspacePath: string
@@ -238,6 +238,10 @@ function buildRuntimeEnv(input: {
   )
   return compactEnv({
     ...serviceEnv,
+    // V3 persistence is host-only. Native model environments still use their
+    // separate allowlist, and the frontend never receives these credentials.
+    BEEGAME_SUPABASE_SERVICE_ROLE_KEY: input.baseEnv.BEEGAME_SUPABASE_SERVICE_ROLE_KEY,
+    SUPABASE_SERVICE_ROLE_KEY: input.baseEnv.SUPABASE_SERVICE_ROLE_KEY,
     NODE_ENV: input.baseEnv.NODE_ENV || 'development',
     AGENT_WORKFLOW_PORT: String(input.ports.runtime),
     AGENT_WORKFLOW_WORKSPACE_PATH: input.workspacePath,

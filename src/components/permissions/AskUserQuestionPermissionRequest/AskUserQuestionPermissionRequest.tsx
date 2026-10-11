@@ -2,7 +2,7 @@ import type { Base64ImageSource, ImageBlockParam } from '@anthropic-ai/sdk/resou
 import React, { Suspense, use, useCallback, useMemo, useRef, useState } from 'react';
 import { useSettings } from '../../../hooks/useSettings.js';
 import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
-import { stringWidth, useTheme } from '@anthropic/ink';
+import { stringWidth, useTheme } from '@bee-game-studio/ink';
 import { useKeybindings } from '../../../keybindings/useKeybinding.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,

@@ -6,7 +6,7 @@
  */
 import * as React from 'react';
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import {
   type HookSource,
   hookSourceInlineDisplayString,
@@ -14,7 +14,7 @@ import {
 } from '../../utils/hooks/hooksSettings.js';
 import { plural } from '../../utils/stringUtils.js';
 import { Select } from '../CustomSelect/select.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 
 type MatcherWithSource = {
   matcher: string;
@@ -62,7 +62,7 @@ export function SelectMatcherMode({
       >
         <Box flexDirection="column" gap={1}>
           <Text dimColor>No hooks configured for this event.</Text>
-          <Text dimColor>To add hooks, edit settings.json directly or ask Claude.</Text>
+          <Text dimColor>To add hooks, edit settings.json directly or ask BGS.</Text>
         </Box>
       </Dialog>
     );

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runWorkflow } from '../engine/runWorkflow.js'
@@ -69,6 +69,36 @@ function portsWithEvents(
     },
   }
 }
+
+test.each([
+  "return parallel([() => agent('x')])",
+  "return pipeline(['x'], (_prev, item) => agent(item))",
+])(
+  'cancellation inside a composite ends the workflow as killed: %s',
+  async script => {
+    const dir = await mkdtemp(join(tmpdir(), 'wf-abort-composite-'))
+    try {
+      const { ports, events } = portsWithEvents(dir, new Map())
+      const controller = new AbortController()
+      controller.abort()
+      const result = await runWorkflow({
+        script,
+        runId: 'aborted-composite',
+        ports,
+        host: createHostHandle(null),
+        signal: controller.signal,
+        cwd: dir,
+        budgetTotal: null,
+      })
+      expect(result.status).toBe('killed')
+      expect(events.findLast(e => e.type === 'run_done')).toMatchObject({
+        status: 'killed',
+      })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  },
+)
 
 test('end-to-end: script returns agent result, status completed', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wf-run-'))
@@ -167,6 +197,115 @@ test('resume: journal hit skips runner call', async () => {
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test.each(['AbortError', 'signal-and-error', 'signal-and-result'])(
+  'backend cancellation is not retried or saved as completion: %s',
+  async mode => {
+    const dir = await mkdtemp(join(tmpdir(), 'wf-cancel-backend-'))
+    try {
+      const { ports, events } = portsWithEvents(dir, new Map())
+      const controller = new AbortController()
+      let calls = 0
+      ports.agentRunner.runAgentToResult = async () => {
+        calls++
+        if (mode !== 'AbortError') controller.abort()
+        if (mode === 'signal-and-result')
+          return { kind: 'ok', output: 'partial', usage: { outputTokens: 1 } }
+        if (mode === 'AbortError')
+          throw new DOMException('cancelled', 'AbortError')
+        throw new Error('fetch failed after cancellation')
+      }
+      const result = await runWorkflow({
+        script: "return parallel([() => agent('x')])",
+        runId: 'cancelled',
+        ports,
+        host: createHostHandle(null),
+        signal: controller.signal,
+        cwd: dir,
+        budgetTotal: null,
+      })
+      expect(result.status).toBe('killed')
+      expect(calls).toBe(1)
+      expect(await ports.journalStore.read('cancelled')).toEqual([])
+      expect(events.findLast(event => event.type === 'run_done')).toMatchObject(
+        { status: 'killed' },
+      )
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  },
+)
+
+test.each(['sequential', 'parallel'])(
+  'resume retains the valid prefix and script across repeated resumes: %s',
+  async mode => {
+    const dir = await mkdtemp(join(tmpdir(), 'wf-resume-prefix-'))
+    try {
+      const ports = portsWith(dir, new Map())
+      for (const [seq, prompt] of ['A', 'B-old', 'C'].entries()) {
+        await ports.journalStore.append('resume', {
+          seq,
+          key: agentCallKey(prompt, { prompt }),
+          result: { kind: 'ok', output: prompt, usage: { outputTokens: 1 } },
+        })
+      }
+      const script =
+        mode === 'parallel'
+          ? "return parallel([() => agent('A'), () => agent(args), () => agent('C')])"
+          : "await agent('A'); await agent(args); return agent('C')"
+      const scriptPath = join(dir, 'resume', 'script.js')
+      await writeFile(scriptPath, script)
+      const calls: string[] = []
+      ports.agentRunner.runAgentToResult = async params => {
+        calls.push(params.prompt)
+        return { kind: 'ok', output: params.prompt, usage: { outputTokens: 1 } }
+      }
+      // Hold the actual disk rewrite open to exercise concurrent append ordering.
+      const truncate = ports.journalStore.truncate.bind(ports.journalStore)
+      let release!: () => void
+      let started!: () => void
+      const gate = new Promise<void>(resolve => {
+        release = resolve
+      })
+      const resetting = new Promise<void>(resolve => {
+        started = resolve
+      })
+      ports.journalStore.truncate = async (runId, retained) => {
+        started()
+        await gate
+        await truncate(runId, retained)
+      }
+      const options = {
+        script,
+        args: 'B-new',
+        runId: 'resume',
+        ports,
+        host: createHostHandle(null),
+        signal: new AbortController().signal,
+        cwd: dir,
+        budgetTotal: null,
+        resume: true,
+      }
+      const first = runWorkflow(options)
+      await resetting
+      expect(calls).toEqual([])
+      release()
+      expect((await first).status).toBe('completed')
+      expect(calls.sort()).toEqual(['B-new', 'C'])
+      expect(
+        (await ports.journalStore.read('resume')).map(entry =>
+          entry.result.kind === 'ok' ? entry.result.output : null,
+        ),
+      ).toEqual(['A', 'B-new', 'C'])
+      expect(await readFile(scriptPath, 'utf8')).toBe(script)
+      calls.length = 0
+      expect((await runWorkflow(options)).status).toBe('completed')
+      expect(calls).toEqual([])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  },
+)
 
 test('abort → killed', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wf-run-'))

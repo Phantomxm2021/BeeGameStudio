@@ -7,7 +7,7 @@ import {
 import { WorkflowMultiselectDialog } from '../../components/WorkflowMultiselectDialog.js';
 import { GITHUB_ACTION_SETUP_DOCS_URL } from '../../constants/github-app.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { type KeyboardEvent, Box } from '@anthropic/ink';
+import { type KeyboardEvent, Box } from '@bee-game-studio/ink';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import { getAnthropicApiKey, isAnthropicAuthEnabled } from '../../utils/auth.js';
 import { openBrowser } from '../../utils/browser.js';

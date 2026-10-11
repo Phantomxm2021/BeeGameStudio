@@ -4,7 +4,7 @@ const PROVIDER_REQUIREMENTS = [
   {
     label: 'OpenAI-compatible',
     keys: [
-      'CLAUDE_CODE_USE_OPENAI',
+      'BGS_USE_OPENAI',
       'OPENAI_API_KEY',
       'OPENAI_BASE_URL',
       'OPENAI_DEFAULT_SONNET_MODEL',
@@ -15,13 +15,13 @@ const PROVIDER_REQUIREMENTS = [
     keys: [
       'ANTHROPIC_AUTH_TOKEN',
       'ANTHROPIC_BASE_URL',
-      'ANTHROPIC_DEFAULT_SONNET_MODEL',
+      'BGS_DEFAULT_BALANCED_MODEL',
     ],
   },
   {
     label: 'Gemini',
     keys: [
-      'CLAUDE_CODE_USE_GEMINI',
+      'BGS_USE_GEMINI',
       'GEMINI_API_KEY',
       'GEMINI_DEFAULT_SONNET_MODEL',
     ],
@@ -29,7 +29,7 @@ const PROVIDER_REQUIREMENTS = [
   {
     label: 'Grok',
     keys: [
-      'CLAUDE_CODE_USE_GROK',
+      'BGS_USE_GROK',
       'GROK_API_KEY',
       'GROK_DEFAULT_SONNET_MODEL',
     ],

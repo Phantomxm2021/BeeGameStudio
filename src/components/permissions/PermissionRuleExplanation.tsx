@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle';
 import chalk from 'chalk';
 import React from 'react';
-import { Ansi, Box, Text } from '@anthropic/ink';
+import { Ansi, Box, Text } from '@bee-game-studio/ink';
 import ThemedText from '../design-system/ThemedText.js';
 import { useAppState } from '../../state/AppState.js';
 import type { PermissionDecision, PermissionDecisionReason } from '../../utils/permissions/PermissionResult.js';

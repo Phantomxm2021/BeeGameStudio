@@ -43,8 +43,7 @@ import {
   getConditionalRulesForCwdLevelDirectory,
   type MemoryFileInfo,
 } from './claudemd.js'
-import { dirname, isAbsolute, parse, relative, resolve, sep } from 'path'
-import { getNativeBuiltinSkillsDirectory } from '../skills/builtinSkillsDirectory.js'
+import { dirname, parse, relative, resolve } from 'path'
 import { getCwd } from 'src/utils/cwd.js'
 import { getViewedTeammateTask } from '../state/selectors.js'
 import { logError } from './log.js'
@@ -780,7 +779,7 @@ export async function getAttachments(
 ): Promise<Attachment[]> {
   if (
     isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_ATTACHMENTS) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)
+    isEnvTruthy(process.env.BGS_SIMPLE)
   ) {
     // query.ts:removeFromQueue dequeues these unconditionally after
     // getAttachmentMessages runs — returning [] here silently drops them.
@@ -2695,32 +2694,19 @@ let suppressNext = false
 const FILTERED_LISTING_MAX = 30
 
 /**
- * Keep the shipped BeeGameStudio catalog visible even when Skill Search is on.
- * Generic game requests have no reliable lexical match; hiding this catalog
- * makes the skills available to the tool but invisible in its initial listing.
- * The long tail of user/project/plugin skills still goes through discovery.
+ * Filter skills to bundled (Anthropic-curated) + MCP (user-connected) only.
+ * User/project/plugin skills go through discovery instead.
+ * Falls back to bundled-only if bundled+mcp exceeds FILTERED_LISTING_MAX.
  */
-export function filterToInitiallyListedSkills(commands: Command[]): Command[] {
-  const builtinDir = getNativeBuiltinSkillsDirectory()
-  const isShippedSkill = (cmd: Command): boolean => {
-    if (!builtinDir || cmd.type !== 'prompt' || !cmd.skillRoot) return false
-    const path = relative(builtinDir, cmd.skillRoot)
-    return (
-      path !== '' &&
-      path !== '..' &&
-      !path.startsWith(`..${sep}`) &&
-      !isAbsolute(path)
-    )
-  }
+export function filterToBundledAndMcp(commands: Command[]): Command[] {
   const filtered = commands.filter(
     cmd =>
       cmd.loadedFrom === 'bundled' ||
-      cmd.loadedFrom === 'mcp' ||
-      isShippedSkill(cmd),
+      cmd.loadedFrom === 'mcp',
   )
   if (filtered.length > FILTERED_LISTING_MAX) {
     return filtered.filter(
-      cmd => cmd.loadedFrom === 'bundled' || isShippedSkill(cmd),
+      cmd => cmd.loadedFrom === 'bundled',
     )
   }
   return filtered
@@ -2750,14 +2736,13 @@ export async function getSkillListingAttachments(
       ? uniqBy([...localCommands, ...mcpSkills], 'name')
       : localCommands
 
-  // With Skill Search active, retain the shipped game catalog in the initial
-  // listing; generic game requests do not reliably match search keywords.
-  // Other user/project/plugin skills remain discoverable on demand.
+  // With Skill Search active, user/project/plugin skills are discoverable
+  // on demand rather than being included in the initial listing.
   if (
     feature('EXPERIMENTAL_SKILL_SEARCH') &&
     skillSearchModules?.featureCheck.isSkillSearchEnabled()
   ) {
-    allCommands = filterToInitiallyListedSkills(allCommands)
+    allCommands = filterToBundledAndMcp(allCommands)
   }
 
   const agentKey = toolUseContext.agentId ?? ''

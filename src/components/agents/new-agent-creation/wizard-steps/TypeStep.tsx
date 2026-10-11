@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from 'react';
-import { Box, Byline, KeyboardShortcutHint, Text } from '@anthropic/ink';
+import { Box, Byline, KeyboardShortcutHint, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../../../keybindings/useKeybinding.js';
 import type { AgentDefinition } from '@bee-game-studio/builtin-tools/tools/AgentTool/loadAgentsDir.js';
 import { ConfigurableShortcutHint } from '../../../ConfigurableShortcutHint.js';

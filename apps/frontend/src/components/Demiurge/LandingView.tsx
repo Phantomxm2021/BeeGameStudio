@@ -12,7 +12,6 @@ import { useProjectStore } from '../../store/projectStore';
 import { useSystemStore } from '../../store/systemStore';
 import { AvatarDialogue, type AvatarMood } from './Landing/AvatarDialogue';
 import { IdeaHomeBackdrop } from './Landing/IdeaHomeBackdrop';
-import { HomeSoundToggle } from './Landing/HomeSoundToggle';
 import avatarStyles from './Landing/AvatarDialogue.module.css';
 import { ClassicIdeaPromptForm } from './Landing/ClassicIdeaPromptForm';
 import { DotsAvatar } from './Landing/DotsAvatar';
@@ -1393,7 +1392,6 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
         </div>
         <div className={`relative z-20 flex items-center ${landingPage === 'home' ? `gap-1 rounded-full border border-border p-1 ${avatarStyles.glassSurface}` : 'gap-2'}`}>
           {landingPage !== 'home' ? <LandingSiteMenu language={lang} onNavigate={navigateLandingPage} onOpenLegal={setActiveLegalDocument} /> : null}
-          {landingPage === 'home' ? <HomeSoundToggle /> : null}
           <ThemeToggle
             darkModeLabel={t.darkMode}
             lightModeLabel={t.lightMode}

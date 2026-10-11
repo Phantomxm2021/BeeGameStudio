@@ -165,22 +165,22 @@ function getNotificationMessage(toolUseConfirm: ToolUseConfirm): string {
   const toolName = toolUseConfirm.tool.userFacingName(toolUseConfirm.input as never);
 
   if (toolUseConfirm.tool === ExitPlanModeV2Tool) {
-    return 'Claude Code needs your approval for the plan';
+    return 'BGS needs your approval for the plan';
   }
 
   if (toolUseConfirm.tool === EnterPlanModeTool) {
-    return 'Claude Code wants to enter plan mode';
+    return 'BGS wants to enter plan mode';
   }
 
   if (feature('REVIEW_ARTIFACT') && toolUseConfirm.tool === ReviewArtifactTool) {
-    return 'Claude needs your approval for a review artifact';
+    return 'BGS needs your approval for a review artifact';
   }
 
   if (!toolName || toolName.trim() === '') {
-    return 'Claude Code needs your attention';
+    return 'BGS needs your attention';
   }
 
-  return `Claude needs your permission to use ${toolName}`;
+  return `BGS needs your permission to use ${toolName}`;
 }
 
 // TODO: Move this to Tool.renderPermissionRequest

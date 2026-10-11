@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { extractMcpToolDisplayName, getMcpDisplayName } from '../../services/mcp/mcpStringUtils.js';
 import { filterToolsByServer } from '../../services/mcp/utils.js';
 import { useAppState } from '../../state/AppState.js';
@@ -7,7 +7,7 @@ import type { Tool } from '../../Tool.js';
 import { plural } from '../../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
 import { Select } from '../CustomSelect/index.js';
-import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
+import { Byline, Dialog, KeyboardShortcutHint } from '@bee-game-studio/ink';
 import type { ServerInfo } from './types.js';
 
 type Props = {

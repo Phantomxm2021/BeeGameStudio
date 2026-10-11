@@ -2,7 +2,7 @@ import figures from 'figures';
 import React from 'react';
 import { Markdown } from 'src/components/Markdown.js';
 import { BLACK_CIRCLE } from 'src/constants/figures.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import type { ProgressMessage } from 'src/types/message.js';
 import { getDisplayPath } from 'src/utils/file.js';
 import { formatFileSize } from 'src/utils/format.js';
@@ -50,7 +50,7 @@ export function renderToolResultMessage(
     return (
       <Box flexDirection="column" marginTop={1} paddingLeft={2}>
         <Box flexDirection="row">
-          <Text color="briefLabelClaude">Claude</Text>
+          <Text color="briefLabelClaude">BGS</Text>
           {ts ? <Text dimColor> {ts}</Text> : null}
         </Box>
         <Box flexDirection="column">

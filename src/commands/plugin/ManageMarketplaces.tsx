@@ -6,9 +6,9 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js';
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
-import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
+import { Byline, KeyboardShortcutHint } from '@bee-game-studio/ink';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- useInput needed for marketplace-specific u/r shortcuts and y/n confirmation not in keybinding schema
-import { Box, Text, useInput } from '@anthropic/ink';
+import { Box, Text, useInput } from '@bee-game-studio/ink';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { LoadedPlugin } from '../../types/plugin.js';
 import { count } from '../../utils/array.js';
@@ -714,7 +714,7 @@ export function ManageMarketplaces({
         {!isUpdating && !shouldSkipPluginAutoupdate() && selectedMarketplace.autoUpdate && (
           <Box marginTop={1}>
             <Text dimColor>
-              Auto-update enabled. Claude Code will automatically update this marketplace and its installed plugins.
+              Auto-update enabled. BGS will automatically update this marketplace and its installed plugins.
             </Text>
           </Box>
         )}

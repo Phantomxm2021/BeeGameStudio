@@ -135,7 +135,7 @@ export function openImageGenerationAccess(input: {
     close() {
       closed = true
       // Stop accepting new work, but do not discard an already-paid in-flight response.
-      void server.stop(false)
+      return server.stop(false)
     },
   }
 }

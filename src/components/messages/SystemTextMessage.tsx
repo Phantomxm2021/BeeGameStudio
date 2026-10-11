@@ -1,5 +1,5 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
-import { Box, Link, Text, type TextProps } from '@anthropic/ink';
+import { Box, Link, Text, type TextProps } from '@bee-game-studio/ink';
 import { FilePathLink } from '../FilePathLink.js';
 import { feature } from 'bun:bundle';
 import * as React from 'react';

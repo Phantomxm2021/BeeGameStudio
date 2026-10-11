@@ -2,7 +2,7 @@ import { relative } from 'path';
 import React from 'react';
 import { getCwdState } from '../../bootstrap/state.js';
 import { SandboxSettings } from '../../components/sandbox/SandboxSettings.js';
-import { color } from '@anthropic/ink';
+import { color } from '@bee-game-studio/ink';
 import { getPlatform } from '../../utils/platform.js';
 import { addToExcludedCommands, SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
 import { getSettings_DEPRECATED, getSettingsFilePathForSource } from '../../utils/settings/settings.js';

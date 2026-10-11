@@ -63,8 +63,12 @@ describe('preview capability', () => {
         },
       },
     )
-    expect(manager.allowsSandboxedSubresource(moduleRequest, 'session-1')).toBe(true)
-    expect(manager.allowsSandboxedSubresource(moduleRequest, 'session-2')).toBe(false)
+    expect(manager.verifyRequest(moduleRequest, 'session-1')).toBeUndefined()
+    const routeId = new URL(capabilityUrl, 'https://studio.example').pathname.split('/')[2]!
+    expect(routeId).not.toBe('session-1')
+    expect(manager.resolveRoute(routeId)).toEqual({ sessionId: 'session-1', userId: 'user-1' })
+    expect(manager.resolveRoute(routeId + 'tampered')).toBeUndefined()
+    expect(manager.issueRouteId('session-1', 'user-1')).toBe(routeId)
 
     const navigationRequest = new Request(moduleRequest.url, {
       headers: {
@@ -73,11 +77,12 @@ describe('preview capability', () => {
         'sec-fetch-mode': 'navigate',
       },
     })
-    expect(manager.allowsSandboxedSubresource(navigationRequest, 'session-1')).toBe(false)
+    expect(manager.verifyRequest(navigationRequest, 'session-1')).toBeUndefined()
 
     manager.revokeSession('session-1')
     expect(manager.verifyRequest(request, 'session-1')).toBeUndefined()
     expect(manager.verifyRequest(sandboxedNavigation, 'session-1')).toBeUndefined()
-    expect(manager.allowsSandboxedSubresource(moduleRequest, 'session-1')).toBe(false)
+    expect(manager.resolveRoute(routeId)).toBeUndefined()
+    expect(manager.issueRouteId('session-1', 'user-1')).not.toBe(routeId)
   })
 })

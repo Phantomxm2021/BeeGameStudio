@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { type OptionWithDescription, Select } from '../../components/CustomSelect/index.js';
-import { Pane } from '@anthropic/ink';
+import { Pane } from '@bee-game-studio/ink';
 import { Spinner } from '../../components/Spinner.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- enter to proceed through setup steps
-import { Box, Text, useInput } from '@anthropic/ink';
+import { Box, Text, useInput } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import {
   detectPythonPackageManager,

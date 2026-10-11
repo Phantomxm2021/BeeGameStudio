@@ -6,7 +6,7 @@ import {
 import type { TeleportRemoteResponse } from 'src/utils/conversationRecovery.js';
 import type { CodeSession } from 'src/utils/teleport/api.js';
 import { type TeleportSource, useTeleportResume } from '../hooks/useTeleportResume.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { ResumeTask } from './ResumeTask.js';
 import { Spinner } from './Spinner.js';

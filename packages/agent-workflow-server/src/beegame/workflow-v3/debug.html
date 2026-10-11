@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BGS V3 独立 Debug 验收</title>
+<style>
+body{font:15px system-ui;max-width:1100px;margin:24px auto;padding:0 16px;background:#f6f7fa;color:#20252d}
+section{background:white;border:1px solid #ccd2dd;padding:16px;margin:16px 0;border-radius:8px}
+label{display:block;margin:10px 0}input,select,textarea,button{font:inherit;padding:8px;box-sizing:border-box}input,textarea{width:100%}
+textarea{font:13px monospace;min-height:180px}button{margin:4px}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:500px;overflow:auto}
+#status{white-space:pre-wrap}iframe{width:100%;height:480px;border:1px solid #ccd2dd}a{margin:8px;display:inline-block}
+</style>
+<h1>BGS V3 独立 Debug 验收</h1>
+<p>不是正式产品界面，不证明游戏品质。没有自动派发／轮询／重试。保存后必须重新构建、测量；历史通过不授予新版本资格。</p>
+<section>
+<label>项目 ID<input id="project" autocomplete="off"></label>
+<label>认证方式<select id="auth-mode"><option value="bearer">当前页 Access Token</option><option value="session">已有 BGS 登录态（HttpOnly Cookie）</option></select></label>
+<label>正常用户 Access Token（仅当前页内存；勿输入 service-role 密钥）<input id="token" type="password" autocomplete="off"></label>
+<p>已有登录态模式仅向本页同源 API 发送浏览器 Cookie，不读取、展示或复制凭据。未登录仍会被正常接口拒绝；此页不建立登录或管理员绕过。</p>
+<button id="load">读取 Run</button><button id="events">读取原始任务事件</button>
+<button id="restore-chat">恢复项目所属 Chat（不执行）</button>
+<button id="sources">读取来源索引</button><button id="stop">暂停</button><button id="resume">明确恢复（不派发）</button>
+<button id="recover-writer">核对证据并收尾中断写者（不重试）</button>
+<pre id="run"></pre>
+</section>
+<section>
+<h2>设计／报告来源核对（只读，不执行）</h2>
+<button id="artifact-index">读取已有产物目录</button>
+<label>实际设计或报告路径（也支持合并的 README）<input id="evidence-path" autocomplete="off" placeholder="README.md"></label>
+<button id="read-evidence">读取当前来源与需求版本</button>
+<p>读取保存正文并显示其文本指纹、当前需求和已有执行记录。文件存在、八份齐全或报告中的 PASS 不代表品质通过；下方实际测量可核对报告指纹与构建关联，但不证明报告语义或品质结论。</p>
+</section>
+<section>
+<h2>Agent 自主接单（无人工 Task 计划）</h2>
+<label>已确认 brief JSON：idea、selected_option、settings、三个 language 和 resource_library_usage 字段<textarea id="goal-brief" spellcheck="false" aria-label="完整游戏目标"></textarea></label>
+<button id="prepare-goal">准备本次接单身份（不执行）</button>
+<button id="submit-goal">确认交给原生 Agent（可能付费）</button>
+<p>先恢复项目 Chat。只发送完整目标，不选择八文档批次或预填任务。执行结束不代表游戏已验收。</p>
+</section>
+<section>
+<h2>同工程原生消息</h2>
+<label>本次授权<select id="message-intent"><option value="discuss">只讨论，不授权修改</option><option value="change">明确变更需求并修改</option><option value="continue">继续最近中断的工作</option></select></label>
+<label>用户消息<textarea id="message-text" aria-label="同工程用户消息" spellcheck="false"></textarea></label>
+<button id="prepare-message">按当前版本准备本次消息（不执行）</button>
+<button id="submit-message">确认发送同工程消息（可能付费）</button>
+<p>消息草稿绑定当前 Run、Chat 和版本。暂停后先明确恢复，再授权续作；恢复本身不执行。不会重发原始目标、自动重试或生成宿主修复计划。讨论意图不授权修改，但并非文件系统只读隔离。</p>
+</section>
+<section>
+<h2>当前原生 Question</h2>
+<label>普通工具权限 ID（从当前原始事件核对）<input id="tool-permission-id" autocomplete="off"></label>
+<label>拒绝原因<input id="tool-permission-message" autocomplete="off"></label>
+<button id="deny-tool-permission">拒绝这次普通工具权限</button>
+<p>只拒绝已核对的当前普通权限，不授予权限、不修改原始工具请求。真实权限与归属仍由正常项目 API 校验。</p>
+<button id="questions">读取待答问题及验证结果</button>
+<label>当前问题<select id="question"></select></label><pre id="question-detail"></pre>
+<label>答案 JSON（问题完整原文作为键；每题都需回答）<textarea id="answers" spellcheck="false"></textarea></label>
+<button id="answer">提交本次答复</button><button id="deny-question">拒绝本次问题</button>
+<p>复用正常权限答复接口。提交成功只表示交互已接收；读取验证结果／原始事件确认是否有权接受。没有真实待答请求不能补填历史答案。</p>
+</section>
+<section>
+<h2>版本绑定的 Scene／UI JSON 修改</h2>
+<p>自主 Run 使用项目编辑权限保存已登记数据，不需要 Task。保存保留原稿，不自动派发或收费；需要后续明确发送修改消息，让 Agent 协调改动并重新构建、测量。</p>
+<button id="content">读取现存 JSON</button><label>文档<select id="document"></select></label>
+<textarea id="document-json" aria-label="文档 JSON" spellcheck="false"></textarea>
+<button id="save">保存当前候选（旧资格失效）</button>
+<p>只编辑已经注册、有权所有者的文档。不会生成内容、伪造检查或自动重建。</p>
+</section>
+<section>
+<h2>显式计划／需求变更</h2>
+<button id="prepare-run">从已恢复 Chat 准备新 Run 草稿</button><button id="create-run">确认创建新 Run（不执行）</button>
+<button id="prepare-plan">载入当前计划作为候选</button><button id="prepare-change">载入当前需求作为候选</button>
+<textarea id="proposal" aria-label="计划或需求变更 JSON" spellcheck="false"></textarea>
+<button id="plan">提交候选计划</button><button id="requirements">确认提交需求变更</button>
+<p>核对全文需求、任务范围和版本后提交；接口拒绝时保留草稿，不刷新后偷偷重试。</p>
+<p>新项目须先恢复所属 Chat，再填写新 Run 草稿中的完整需求和 ID。已有 Run 不能覆盖；恢复 Chat 不恢复暂停、不启动任务。</p>
+</section>
+<section>
+<h2>执行／已测构建</h2>
+<label>自主 Agent 实际测量（非 Task）<select id="measurement"></select></label>
+<button id="read-measurement">核对测量／报告版本（只读）</button>
+<p>自主 Run 的预览／下载使用选中测量。只有实际调用按需 measure.mjs 后才有记录；无记录不会补造 Task 或自动构建。</p>
+<label>当前任务<select id="task"></select></label>
+<label>本次执行请求身份<input id="request-key" autocomplete="off"></label>
+<button id="new-key">准备新请求身份</button><button id="execute">执行选中任务（可能付费，需再次确认）</button>
+<button id="preview">打开当前已测 Preview</button><button id="close-preview">关闭本页 Preview</button>
+<button id="static">下载已测静态包</button><button id="project-export">下载已测工程</button>
+<iframe id="preview-frame" title="已测构建 Preview" sandbox="allow-scripts" hidden></iframe><div id="downloads"></div>
+<p>只有宿主已持久化完整退出证据的中断结算可收尾，未验收成果不转为通过。无证据的旧写者及未知外部操作仍不解锁／重试；完整游戏与真实成本未验收。</p>
+</section>
+<section>
+<h2>Preview 观察 → 定向 Review／Repair</h2>
+<button id="prepare-observation">从当前 Preview 准备问题草稿</button>
+<textarea id="observation-json" aria-label="Preview 观察 JSON" spellcheck="false"></textarea>
+<button id="submit-observation">确认保存观察（不派发）</button>
+<button id="observation-message">自主 Run：转入同工程消息草稿（不执行）</button>
+<p>自主 Agent 使用消息草稿：绑定实际测量和构建指纹，默认只讨论。需要修复时自行选择“明确变更需求并修改”，准备并确认发送；不创建宿主 Review／Repair Task。以下计划按钮仅用于兼容旧 Task Run。</p>
+<p>填写确认需求 ID、操作步骤、预期与实际表现。草稿固定本次构建身份；刷新不会绑定到新版本。保存的是用户观察，不是已证实缺陷。</p>
+<label>已保存观察<select id="issue"></select></label>
+<button id="issue-review">授权定向 Review 计划（不执行）</button>
+<label>当前有报告的 Review<select id="review-attempt"></select></label><pre id="review-detail"></pre>
+<label>集中修订的 finding IDs（JSON 数组；需包含全部阻断项）<input id="finding-ids" autocomplete="off" placeholder='["F1"]'></label>
+<button id="issue-repair">授权原所有者 Repair／定向复核计划（不执行）</button>
+<p>逐任务执行仍需上方显式授权。观察不等于缺陷；修订通过不等于问题已关闭，必须重新构建测量并由有来源的定向复核确认。争议不自动循环，无关任务不重做。</p>
+</section>
+<section><h2>最近响应／失败诊断</h2><p id="status" role="status">未发起请求</p><pre id="result"></pre></section>
+<script src="/debug/workflow-v3/client.js"></script>
+</html>

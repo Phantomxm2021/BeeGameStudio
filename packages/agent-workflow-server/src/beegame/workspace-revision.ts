@@ -14,6 +14,7 @@ async function collectFiles(root: string, directory: string, files: string[]): P
     const absolute = join(directory, entry.name)
     const path = relative(root, absolute).split(sep).join('/')
     if (EXCLUDED_PREFIXES.some(prefix => path === prefix.slice(0, -1) || path.startsWith(prefix))) continue
+    if (entry.isSymbolicLink()) throw new Error('Project source contains an unsupported symbolic link: ' + path)
     if (entry.isDirectory()) await collectFiles(root, absolute, files)
     else if (entry.isFile()) files.push(path)
   }
@@ -23,13 +24,11 @@ async function collectFiles(root: string, directory: string, files: string[]): P
 export async function computeWorkspaceRevision(workspacePath: string): Promise<string> {
   const root = resolve(workspacePath)
   const files: string[] = []
-  try { await collectFiles(root, root, files) }
-  catch { /* A new workspace may not exist yet. */ }
+  await collectFiles(root, root, files)
   const hash = createHash('sha256')
   for (const path of files.sort()) {
     hash.update(path).update('\0')
-    try { hash.update(await readFile(join(root, path))) }
-    catch { hash.update('<missing>') }
+    hash.update(await readFile(join(root, path)))
     hash.update('\0')
   }
   return hash.digest('hex')

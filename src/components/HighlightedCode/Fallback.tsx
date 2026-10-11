@@ -1,6 +1,6 @@
 import { extname } from 'path';
 import React, { Suspense, use, useMemo } from 'react';
-import { Ansi, Text } from '@anthropic/ink';
+import { Ansi, Text } from '@bee-game-studio/ink';
 import { LRUCache } from 'lru-cache';
 import { getCliHighlightPromise } from '../../utils/cliHighlight.js';
 import { logForDebugging } from '../../utils/debug.js';

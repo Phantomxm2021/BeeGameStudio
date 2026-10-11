@@ -1,13 +1,13 @@
-import { afterEach, expect, test } from 'bun:test'
-import { nativeErrorMetadata, nativeObserverHeaders, parseNativeDiagnostic, takeNativeObserverMetadata } from '../native-diagnostics'
+import { expect, test } from 'bun:test'
+import { nativeErrorMetadata, parseNativeDiagnostic, takeNativeObserverMetadata } from '../native-diagnostics'
 
-const originalFlag = process.env.BEEGAME_MODEL_OBSERVER_METADATA
-const originalUrl = process.env.ANTHROPIC_BASE_URL
-afterEach(() => {
-  if (originalFlag === undefined) delete process.env.BEEGAME_MODEL_OBSERVER_METADATA
-  else process.env.BEEGAME_MODEL_OBSERVER_METADATA = originalFlag
-  if (originalUrl === undefined) delete process.env.ANTHROPIC_BASE_URL
-  else process.env.ANTHROPIC_BASE_URL = originalUrl
+test('provider accounting admits only complete safe numeric counters, never raw usage/source data', () => {
+  const counts = { cumulativeInputTokens: 10, cumulativeOutputTokens: 3,
+    cumulativeCacheReadTokens: 100, cumulativeCacheCreationTokens: 0 }
+  expect(parseNativeDiagnostic({ event: 'stream_end', ...counts, prompt: 'PRIVATE', usage: { key: 'PRIVATE' } }))
+    .toEqual({ event: 'stream_end', ...counts })
+  for (const value of [-1, 1.5, Infinity, '100'])
+    expect(parseNativeDiagnostic({ event: 'stream_end', ...counts, cumulativeInputTokens: value })).toBeUndefined()
 })
 
 test('preserves safe correlation but drops arbitrary names, codes and source text', () => {
@@ -44,17 +44,10 @@ test('distinguishes observer-generated 502 from upstream HTTP 502', () => {
   expect(nativeErrorMetadata({ status: 502 })).toEqual({ category: 'server' })
 })
 
-test('correlation headers require explicit local observation and are removed before forwarding', () => {
-  const value = { event: 'request_start' as const, request: 42, actor: 'a12345678',
-    mode: 'non_streaming_fallback' as const, originRequest: 39, attempt: 2 }
-  process.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:1234'
-  delete process.env.BEEGAME_MODEL_OBSERVER_METADATA
-  expect(nativeObserverHeaders(value)).toEqual({})
-  process.env.BEEGAME_MODEL_OBSERVER_METADATA = '1'
-  process.env.ANTHROPIC_BASE_URL = 'https://provider.example'
-  expect(nativeObserverHeaders(value)).toEqual({})
-  process.env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:1234'
-  const headers = new Headers({ ...nativeObserverHeaders(value), 'x-api-key': 'PRIVATE_KEY' })
+test('legacy correlation metadata is sanitized and stripped before forwarding', () => {
+  const headers = new Headers({ 'x-bgs-observer-request': '42', 'x-bgs-observer-actor': 'a12345678',
+    'x-bgs-observer-mode': 'non_streaming_fallback', 'x-bgs-observer-origin': '39',
+    'x-bgs-observer-attempt': '2', 'x-api-key': 'PRIVATE_KEY' })
   expect(takeNativeObserverMetadata(headers)).toEqual({ request: 42, actor: 'a12345678',
     mode: 'non_streaming_fallback', originRequest: 39, attempt: 2 })
   expect([...headers]).toEqual([['x-api-key', 'PRIVATE_KEY']])

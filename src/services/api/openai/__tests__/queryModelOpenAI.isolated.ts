@@ -130,6 +130,7 @@ async function* eventStream(events: BetaRawMessageStreamEvent[]) {
 async function runQueryModel(
   events: BetaRawMessageStreamEvent[],
   envOverrides: Record<string, string | undefined> = {},
+  signal = new AbortController().signal,
 ) {
   // Wire events into the mocked stream adapter
   _nextEvents = events
@@ -169,7 +170,7 @@ async function runQueryModel(
       [],
       { type: 'text', text: '' } as any,
       [],
-      new AbortController().signal,
+      signal,
       minimalOptions,
     )) {
       if (item.type === 'assistant') {
@@ -458,9 +459,7 @@ describe('queryModelOpenAI — stop_reason propagation', () => {
     expect(errorMsg.apiError).toBe('max_output_tokens')
   })
 
-  test('stop_reason is null when no message_delta was received (safety fallback path)', async () => {
-    // Stream ends without message_stop — triggers the safety fallback branch.
-    // stop_reason stays null since no message_delta was ever seen.
+  test('reports truncation instead of accepting closed partial content', async () => {
     _nextEvents = [
       makeMessageStart(),
       makeContentBlockStart(0, 'text'),
@@ -471,9 +470,11 @@ describe('queryModelOpenAI — stop_reason propagation', () => {
 
     const { assistantMessages } = await runQueryModel(_nextEvents)
 
-    // Safety fallback should yield the partial content
     expect(assistantMessages).toHaveLength(1)
-    expect(assistantMessages[0]!.message.stop_reason).toBeNull()
+    expect((assistantMessages[0]!.message as any).apiError).toBe('api_error')
+    expect(JSON.stringify(assistantMessages[0]!.message.content)).toContain(
+      'message_stop',
+    )
   })
 })
 
@@ -577,7 +578,7 @@ describe('queryModelOpenAI — no duplicate AssistantMessage (partialMessage res
     expect(assistantMessages).toHaveLength(1)
   })
 
-  test('safety fallback path still yields message when stream ends without message_stop', async () => {
+  test('reports truncation instead of accepting an open partial block', async () => {
     // Simulates a stream that cuts off without the normal termination sequence.
     _nextEvents = [
       makeMessageStart(),
@@ -589,10 +590,49 @@ describe('queryModelOpenAI — no duplicate AssistantMessage (partialMessage res
     const { assistantMessages } = await runQueryModel(_nextEvents)
 
     expect(assistantMessages).toHaveLength(1)
+    expect((assistantMessages[0]!.message as any).apiError).toBe('api_error')
+    expect(JSON.stringify(assistantMessages[0]!.message.content)).toContain(
+      'message_stop',
+    )
   })
 })
 
 describe('queryModelOpenAI — stream_events forwarded', () => {
+  test('cancelled stream does not emit an API failure', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const { assistantMessages } = await runQueryModel([], {}, controller.signal)
+    expect(assistantMessages).toHaveLength(0)
+  })
+
+  test('empty stream without cancellation reports failure', async () => {
+    const { assistantMessages } = await runQueryModel([])
+    expect(assistantMessages).toHaveLength(1)
+    expect((assistantMessages[0]!.message as any).apiError).toBe('api_error')
+  })
+
+  test('truncated tool arguments never become an executable assistant message', async () => {
+    const { assistantMessages } = await runQueryModel([
+      makeMessageStart(),
+      {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'tool_use', id: 't', name: 'Write', input: {} },
+      } as any,
+      {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'input_json_delta', partial_json: '{"file_path":' },
+      } as any,
+    ])
+    expect(assistantMessages).toHaveLength(1)
+    expect((assistantMessages[0]!.message as any).apiError).toBe('api_error')
+    const content = assistantMessages[0]!.message.content
+    expect(Array.isArray(content)).toBe(true)
+    if (!Array.isArray(content)) throw new Error('Expected content blocks')
+    expect(content.some(block => block.type === 'tool_use')).toBe(false)
+  })
+
   test('every adapted event is also yielded as stream_event for real-time display', async () => {
     _nextEvents = [
       makeMessageStart(),
@@ -630,7 +670,7 @@ describe('queryModelOpenAI — max_tokens forwarded to request', () => {
 
     expect(_lastCreateArgs).not.toBeNull()
     expect(_lastCreateArgs!.max_tokens).toBe(8192)
-    expect(_lastCreateArgs!.prompt_cache_key).toStartWith('ccb:')
+    expect(_lastCreateArgs!.prompt_cache_key).toStartWith('bgs:')
   })
 
   test('compatible providers do not receive OpenAI cache parameters', async () => {

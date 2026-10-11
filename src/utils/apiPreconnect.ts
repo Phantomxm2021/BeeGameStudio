@@ -34,14 +34,14 @@ export function preconnectAnthropicApi(): void {
   fired = true
 
   // Also skip when non-essential traffic is disabled via
-  // CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC / DISABLE_TELEMETRY / proxy env.
+  // BGS_DISABLE_NONESSENTIAL_TRAFFIC / DISABLE_TELEMETRY / proxy env.
   if (isEssentialTrafficOnly()) return
 
   // Skip if using a cloud provider — different endpoint + auth
   if (
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
+    isEnvTruthy(process.env.BGS_USE_BEDROCK) ||
+    isEnvTruthy(process.env.BGS_USE_VERTEX) ||
+    isEnvTruthy(process.env.BGS_USE_FOUNDRY)
   ) {
     return
   }
@@ -51,7 +51,7 @@ export function preconnectAnthropicApi(): void {
     process.env.https_proxy ||
     process.env.HTTP_PROXY ||
     process.env.http_proxy ||
-    process.env.ANTHROPIC_UNIX_SOCKET ||
+    process.env.BGS_API_UNIX_SOCKET ||
     process.env.CLAUDE_CODE_CLIENT_CERT ||
     process.env.CLAUDE_CODE_CLIENT_KEY
   ) {

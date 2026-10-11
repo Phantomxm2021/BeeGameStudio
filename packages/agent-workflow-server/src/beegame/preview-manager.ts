@@ -107,6 +107,7 @@ export class BeeGamePreviewManager {
     private readonly allocatePort: BeeGamePreviewPortAllocator = findAvailablePort,
     private readonly readinessProbe: BeeGamePreviewReadinessProbe = waitForPreviewReady,
     private readonly publicBaseUrl = process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL || '',
+    private readonly routeIdForSession: (sessionId: string) => string = sessionId => sessionId,
   ) {}
 
   status(sessionId: string, workspacePath: string): BeeGamePreviewSnapshot {
@@ -284,14 +285,14 @@ export class BeeGamePreviewManager {
 
   private publicUrl(sessionId: string, internalUrl: string): string {
     if (!internalUrl) return ''
-    const encodedSessionId = encodeURIComponent(sessionId)
+    const encodedSessionId = encodeURIComponent(this.routeIdForSession(sessionId))
     if (!this.publicBaseUrl.trim()) return `/previews/${encodedSessionId}/`
     const base = this.publicBaseUrl.trim().replace(/\/+$/, '')
     return `${base}/${encodedSessionId}/`
   }
 
   private publicPath(sessionId: string): string {
-    if (!this.publicBaseUrl.trim()) return `/previews/${encodeURIComponent(sessionId)}/`
+    if (!this.publicBaseUrl.trim()) return `/previews/${encodeURIComponent(this.routeIdForSession(sessionId))}/`
     try {
       const url = new URL(this.publicUrl(sessionId, DEFAULT_HOST))
       return url.pathname.endsWith('/') ? url.pathname : `${url.pathname}/`

@@ -15,9 +15,13 @@ import type {
 } from '@agentclientprotocol/sdk'
 import type { SessionId } from '../../../types/ids.js'
 import {
-  switchSession,
-  getSessionProjectDir,
+  setOriginalCwd,
+  setCwdState,
+  setProjectRoot,
 } from '../../../bootstrap/state.js'
+import { resetSettingsCache } from '../../../utils/settings/settingsCache.js'
+import { applySafeConfigEnvironmentVariables } from '../../../utils/managedEnv.js'
+import { withAcpProcessContext, switchAcpSession } from './processContext.js'
 import { forwardSessionUpdates } from '../bridge.js'
 import type { ToolUseCache } from '../bridge.js'
 import { promptToQueryInput } from '../promptConversion.js'
@@ -83,75 +87,91 @@ async function prompt(
   session.promptRunning = true
 
   try {
-    // Reset the query engine's abort controller for a fresh query.
-    // After a previous interrupt(), the internal controller is stuck in
-    // aborted state — without this, submitMessage() fails immediately.
-    session.queryEngine.resetAbortController()
-    // Switch global session state so recordTranscript writes to the correct
-    // session file. Without this, multi-session scenarios (or creating a new
-    // session after another) write transcript data to the wrong file.
-    switchSession(params.sessionId as SessionId, getSessionProjectDir())
+    return await withAcpProcessContext(async () => {
+      // A session may have been closed/cancelled while waiting for another
+      // session's process-global context.
+      if (
+        session.cancelGeneration !== promptCancelGeneration ||
+        this.sessions.get(params.sessionId) !== session
+      ) {
+        return { stopReason: 'cancelled' }
+      }
+      // Reset the query engine's abort controller for a fresh query.
+      // After a previous interrupt(), the internal controller is stuck in
+      // aborted state — without this, submitMessage() fails immediately.
+      session.queryEngine.resetAbortController()
+      // Switch global session state so recordTranscript writes to the correct
+      // session file. Without this, multi-session scenarios (or creating a new
+      // session after another) write transcript data to the wrong file.
+      setOriginalCwd(session.cwd)
+      setCwdState(session.cwd)
+      setProjectRoot(session.cwd)
+      process.chdir(session.cwd)
+      switchAcpSession(params.sessionId as SessionId, session.projectDir)
+      resetSettingsCache()
+      applySafeConfigEnvironmentVariables()
 
-    const sdkMessages = session.queryEngine.submitMessage(promptInput)
+      const sdkMessages = session.queryEngine.submitMessage(promptInput)
 
-    const { stopReason, usage } = await forwardSessionUpdates(
-      params.sessionId,
-      sdkMessages,
-      getConnection(this),
-      session.queryEngine.getAbortSignal(),
-      session.toolUseCache,
-      readClientCapabilities(this),
-      session.cwd,
-      () => session.cancelled,
-    )
+      const { stopReason, usage } = await forwardSessionUpdates(
+        params.sessionId,
+        sdkMessages,
+        getConnection(this),
+        session.queryEngine.getAbortSignal(),
+        session.toolUseCache,
+        readClientCapabilities(this),
+        session.cwd,
+        () => session.cancelled,
+      )
 
-    // If the session was cancelled during processing, return cancelled
-    if (session.cancelled) {
-      return { stopReason: 'cancelled' }
-    }
+      // If the session was cancelled during processing, return cancelled
+      if (session.cancelled) {
+        return { stopReason: 'cancelled' }
+      }
 
-    // Emit a session_info_update so Clients learn the session's display
-    // title / last-activity timestamp via the stable v1 session/update
-    // channel. The title is derived from the first user prompt.
-    await emitSessionInfoUpdate(this, params.sessionId, promptInput)
+      // Emit a session_info_update so Clients learn the session's display
+      // title / last-activity timestamp via the stable v1 session/update
+      // channel. The title is derived from the first user prompt.
+      await emitSessionInfoUpdate(this, params.sessionId, promptInput)
 
-    // Per session-usage.mdx RFD and the bundled SDK schema, PromptResponse
-    // carries an optional `usage` field at the root with cumulative token
-    // totals for the session. The field is UNSTABLE in v1 but is implemented
-    // by all major ACP clients. We additionally mirror the same payload into
-    // `_meta.claudeCode.usage` for consumers that read the vendor namespace.
-    // thoughtTokens are reported as 0 until the bridge tracks them, but are
-    // included in totalTokens so totals match the sum of components.
-    if (usage) {
-      const thoughtTokens = 0
-      const usagePayload = {
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-        cachedReadTokens: usage.cachedReadTokens,
-        cachedWriteTokens: usage.cachedWriteTokens,
-        thoughtTokens,
-        totalTokens:
-          usage.inputTokens +
-          usage.outputTokens +
-          usage.cachedReadTokens +
-          usage.cachedWriteTokens +
+      // Per session-usage.mdx RFD and the bundled SDK schema, PromptResponse
+      // carries an optional `usage` field at the root with cumulative token
+      // totals for the session. The field is UNSTABLE in v1 but is implemented
+      // by all major ACP clients. We additionally mirror the same payload into
+      // `_meta.claudeCode.usage` for consumers that read the vendor namespace.
+      // thoughtTokens are reported as 0 until the bridge tracks them, but are
+      // included in totalTokens so totals match the sum of components.
+      if (usage) {
+        const thoughtTokens = 0
+        const usagePayload = {
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          cachedReadTokens: usage.cachedReadTokens,
+          cachedWriteTokens: usage.cachedWriteTokens,
           thoughtTokens,
+          totalTokens:
+            usage.inputTokens +
+            usage.outputTokens +
+            usage.cachedReadTokens +
+            usage.cachedWriteTokens +
+            thoughtTokens,
+        }
+        return {
+          stopReason,
+          usage: usagePayload,
+          ...(userMessageId ? { userMessageId } : {}),
+          _meta: {
+            claudeCode: {
+              usage: usagePayload,
+            },
+          },
+        }
       }
       return {
         stopReason,
-        usage: usagePayload,
         ...(userMessageId ? { userMessageId } : {}),
-        _meta: {
-          claudeCode: {
-            usage: usagePayload,
-          },
-        },
       }
-    }
-    return {
-      stopReason,
-      ...(userMessageId ? { userMessageId } : {}),
-    }
+    })
   } catch (err: unknown) {
     // Treat AbortError / cancellation-shaped errors as a turn cancellation
     // regardless of the session.cancelled flag, to close the race window

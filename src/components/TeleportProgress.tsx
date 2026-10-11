@@ -1,8 +1,8 @@
 import figures from 'figures';
 import * as React from 'react';
 import { useState } from 'react';
-import type { Root } from '@anthropic/ink';
-import { Box, Text, useAnimationFrame } from '@anthropic/ink';
+import type { Root } from '@bee-game-studio/ink';
+import { Box, Text, useAnimationFrame } from '@bee-game-studio/ink';
 import { AppStateProvider } from '../state/AppState.js';
 import {
   checkOutTeleportedSessionBranch,

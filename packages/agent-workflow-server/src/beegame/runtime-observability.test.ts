@@ -8,6 +8,95 @@ import {
 } from './runtime-observability'
 
 describe('passive native runtime observability', () => {
+  test('unfinished compaction is retained on cancellation, not passed or billed as zero', async () => {
+    const workspacePath=await mkdtemp(join(tmpdir(),'runtime-compact-'))
+    let now=1000
+    try {
+      const observer=createRuntimeObservability({workspacePath,sessionId:'compact',provider:'fixture',model:'fixture',clock:()=>new Date(now)})
+      observer.beginTurn({requestId:'turn'})
+      observer.observeMessage({type:'system',subtype:'status',status:'compacting'})
+      now+=30000
+      observer.observeMessage({type:'system',subtype:'status',status:'compacting'})
+      observer.observeDiagnostic({event:'request_start',source:'compact',evidenceSource:'cli_debug',prompt:'PRIVATE'})
+      now+=10000
+      observer.finishTurn({outcome:'aborted',stopReason:'user_pause'})
+      await observer.flush()
+      const text=await readFile(join(workspacePath,'.beegame/logs/native-runtime.jsonl'),'utf8')
+      const rows=text.trim().split('\n').map(line=>JSON.parse(line))
+      expect(rows.filter(row=>row.type==='compaction_started')).toHaveLength(1)
+      expect(rows.at(-1).compaction).toMatchObject({status:'unfinished',elapsedMs:40000,elapsedBasis:'compacting_status_observed',statusElapsedMs:40000,usage:'unknown'})
+      expect(rows.at(-1).outcome).toBe('aborted')
+      expect(text).not.toContain('PRIVATE')
+    } finally {await rm(workspacePath,{recursive:true,force:true})}
+  })
+  test('cleared compaction status is distinct from a successful boundary', async () => {
+    const workspacePath=await mkdtemp(join(tmpdir(),'runtime-compact-clear-'))
+    try {
+      const observer=createRuntimeObservability({workspacePath,sessionId:'compact',provider:'fixture',model:'fixture'})
+      observer.beginTurn({requestId:'turn'})
+      observer.observeMessage({type:'system',subtype:'status',status:'compacting'})
+      observer.observeMessage({type:'system',subtype:'status',status:null})
+      observer.observeMessage({type:'system',subtype:'status',status:null})
+      observer.finishTurn({outcome:'success'});await observer.flush()
+      const rows=(await readFile(join(workspacePath,'.beegame/logs/native-runtime.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+      expect(rows.filter(row=>row.type==='compaction_status_cleared')).toHaveLength(1)
+      expect(rows.filter(row=>row.type==='compaction_boundary')).toHaveLength(0)
+      expect(rows.at(-1).compaction).toMatchObject({status:'unfinished',usage:'unknown'})
+    } finally {await rm(workspacePath,{recursive:true,force:true})}
+  })
+  test('late SDK status does not replace the observed compact request duration or guess header ownership', async () => {
+    const workspacePath=await mkdtemp(join(tmpdir(),'runtime-compact-late-'))
+    let now=1000
+    try {
+      const observer=createRuntimeObservability({workspacePath,sessionId:'compact',provider:'fixture',model:'fixture',clock:()=>new Date(now)})
+      observer.beginTurn({requestId:'turn'})
+      observer.observeDiagnostic({event:'request_start',source:'compact',evidenceSource:'cli_debug'})
+      now+=14215;observer.observeDiagnostic({event:'response_headers',status:200,delayMs:14215,evidenceSource:'cli_debug'})
+      now=205141;observer.observeMessage({type:'system',subtype:'status',status:'compacting'})
+      now+=7;observer.observeMessage({type:'system',subtype:'compact_boundary'})
+      now+=1000;observer.finishTurn({outcome:'success'});await observer.flush()
+      const rows=(await readFile(join(workspacePath,'.beegame/logs/native-runtime.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+      expect(rows.find(row=>row.type==='compaction_boundary')).toMatchObject({elapsedMs:204148,statusElapsedMs:7,
+        elapsedBasis:'first_compact_request_observed',compactRequestCount:1})
+      expect(rows.at(-1).compaction).toBeUndefined()
+      expect(rows.find(row=>row.diagnostic?.event==='response_headers').diagnostic.source).toBeUndefined()
+    } finally {await rm(workspacePath,{recursive:true,force:true})}
+  })
+  test('request-only cancellation remains unknown; known child and late requests do not pollute the next turn', async () => {
+    const workspacePath=await mkdtemp(join(tmpdir(),'runtime-compact-request-only-'))
+    let now=1000
+    try {
+      const observer=createRuntimeObservability({workspacePath,sessionId:'compact',provider:'fixture',model:'fixture',clock:()=>new Date(now)})
+      observer.beginTurn({requestId:'first'})
+      observer.observeDiagnostic({event:'request_start',source:'compact'})
+      now+=1500;observer.observeDiagnostic({event:'request_start',source:'compact'})
+      now+=500;observer.finishTurn({outcome:'aborted'})
+      observer.observeDiagnostic({event:'request_start',source:'compact'})
+      observer.beginTurn({requestId:'next'})
+      observer.observeDiagnostic({event:'request_start',source:'compact',actor:'a12345678'})
+      observer.observeMessage({type:'system',subtype:'compact_boundary'})
+      observer.finishTurn({outcome:'success'});await observer.flush()
+      const rows=(await readFile(join(workspacePath,'.beegame/logs/native-runtime.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+      expect(rows.find(row=>row.type==='turn_terminal'&&row.requestId==='first').compaction).toMatchObject({
+        status:'unfinished',elapsedMs:2000,compactRequestCount:2,usage:'unknown'})
+      expect(rows.find(row=>row.type==='compaction_boundary').elapsedMs).toBeUndefined()
+      expect(rows.at(-1).compaction).toBeUndefined()
+    } finally {await rm(workspacePath,{recursive:true,force:true})}
+  })
+  test('an actual compaction boundary ends the observation even without a cleared status', async () => {
+    const workspacePath=await mkdtemp(join(tmpdir(),'runtime-compact-boundary-'))
+    let now=1000
+    try {
+      const observer=createRuntimeObservability({workspacePath,sessionId:'compact',provider:'fixture',model:'fixture',clock:()=>new Date(now)})
+      observer.beginTurn({requestId:'turn'})
+      observer.observeMessage({type:'system',subtype:'status',status:'compacting'})
+      now+=1500;observer.observeMessage({type:'system',subtype:'compact_boundary'})
+      observer.finishTurn({outcome:'success'});await observer.flush()
+      const rows=(await readFile(join(workspacePath,'.beegame/logs/native-runtime.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+      expect(rows.find(row=>row.type==='compaction_boundary').elapsedMs).toBe(1500)
+      expect(rows.at(-1).compaction).toBeUndefined()
+    } finally {await rm(workspacePath,{recursive:true,force:true})}
+  })
   test('retains only diagnostic metadata and does not assign late events to a finished turn', async () => {
     const workspacePath = await mkdtemp(join(tmpdir(), 'runtime-diagnostic-'))
     try {

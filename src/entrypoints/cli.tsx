@@ -3,11 +3,14 @@
 // with a JS-backed implementation before React/OTel capture the native reference.
 // Without this, JSC's C++ Vector grows without bound in long-running sessions.
 import '../utils/performanceShim.js';
+import { normalizeRuntimeEnvironment, RUNTIME_ENV_ALIASES } from '../utils/runtimeEnvironment.js';
 import { feature } from 'bun:bundle';
 import { isEnvTruthy } from '../utils/envUtils.js';
-import { emitNativeDiagnostic } from '@bee-game-studio/agent-workflow/native-diagnostics';
 
-emitNativeDiagnostic({ event: 'cli_entry' });
+// Translate legacy launcher names before importing runtime feature modules.
+const runtimeEnvironment = normalizeRuntimeEnvironment(process.env);
+for (const legacy of Object.keys(RUNTIME_ENV_ALIASES)) delete process.env[legacy];
+Object.assign(process.env, runtimeEnvironment);
 
 // Runtime fallback for MACRO.* when not injected by build/dev defines.
 // This happens when running cli.tsx directly (not via `bun run dev` or built dist/).
@@ -58,12 +61,12 @@ if (process.env.CLAUDE_CODE_REMOTE === 'true') {
 // eslint-disable-next-line custom-rules/no-top-level-side-effects, custom-rules/no-process-env-top-level
 if (feature('ABLATION_BASELINE') && process.env.CLAUDE_CODE_ABLATION_BASELINE) {
   for (const k of [
-    'CLAUDE_CODE_SIMPLE',
+    'BGS_SIMPLE',
     'CLAUDE_CODE_DISABLE_THINKING',
     'DISABLE_INTERLEAVED_THINKING',
     'DISABLE_COMPACT',
     'DISABLE_AUTO_COMPACT',
-    'CLAUDE_CODE_DISABLE_AUTO_MEMORY',
+    'BGS_DISABLE_AUTO_MEMORY',
     'CLAUDE_CODE_DISABLE_BACKGROUND_TASKS',
   ]) {
     // eslint-disable-next-line custom-rules/no-top-level-side-effects, custom-rules/no-process-env-top-level
@@ -178,7 +181,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Fast-path for `claude remote-control` (also accepts legacy `claude remote` / `claude sync` / `claude bridge`):
+  // Fast-path for `bee-game-studio remote-control` (also accepts legacy `bee-game-studio remote` / `claude sync` / `claude bridge`):
   // serve local machine as bridge environment.
   // feature() must stay inline for build-time dead code elimination;
   // isBridgeEnabled() checks the runtime GrowthBook gate.
@@ -228,7 +231,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Fast-path for `claude daemon [subcommand]`: unified daemon + session management.
+  // Fast-path for `bee-game-studio daemon [subcommand]`: unified daemon + session management.
   // Handles both supervisor (start/stop) and background session (bg/attach/logs/kill)
   // subcommands under one namespace.
   if ((feature('DAEMON') || feature('BG_SESSIONS')) && args[0] === 'daemon') {
@@ -283,7 +286,7 @@ async function main(): Promise<void> {
     (args[0] === 'ps' || args[0] === 'logs' || args[0] === 'attach' || args[0] === 'kill')
   ) {
     const mapped = args[0] === 'ps' ? 'status' : args[0];
-    console.error(`[deprecated] Use: claude daemon ${mapped}${args[1] ? ' ' + args[1] : ''}`);
+    console.error(`[deprecated] Use: bee-game-studio daemon ${mapped}${args[1] ? ' ' + args[1] : ''}`);
     profileCheckpoint('cli_daemon_path');
     const { enableConfigs } = await import('../utils/config.js');
     enableConfigs();
@@ -296,7 +299,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Fast-path for `claude job <subcommand>`: template jobs.
+  // Fast-path for `bee-game-studio job <subcommand>`: template jobs.
   if (feature('TEMPLATES') && args[0] === 'job') {
     profileCheckpoint('cli_templates_path');
     const { templatesMain } = await import('../cli/handlers/templateJobs.js');
@@ -309,7 +312,7 @@ async function main(): Promise<void> {
 
   // Backward-compat: new/list/reply → job <sub> (deprecated)
   if (feature('TEMPLATES') && (args[0] === 'new' || args[0] === 'list' || args[0] === 'reply')) {
-    console.error(`[deprecated] Use: claude job ${args[0]} ${args.slice(1).join(' ')}`.trim());
+    console.error(`[deprecated] Use: bee-game-studio job ${args[0]} ${args.slice(1).join(' ')}`.trim());
     profileCheckpoint('cli_templates_path');
     const { templatesMain } = await import('../cli/handlers/templateJobs.js');
     await templatesMain(args);
@@ -349,7 +352,7 @@ async function main(): Promise<void> {
   // --bare: set SIMPLE early so gates fire during module eval / commander
   // option building (not just inside the action handler).
   if (args.includes('--bare')) {
-    process.env.CLAUDE_CODE_SIMPLE = '1';
+    process.env.BGS_SIMPLE = '1';
   }
 
   // No special flags detected, load and run the full CLI

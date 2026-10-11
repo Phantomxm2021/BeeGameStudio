@@ -2,12 +2,12 @@
 
 ## Installation
 
-`@anthropic/ink` is a workspace package. It is consumed internally and not published to npm.
+`@bee-game-studio/ink` is a workspace package. It is consumed internally and not published to npm.
 
 ```json
 {
   "dependencies": {
-    "@anthropic/ink": "workspace:*"
+    "@bee-game-studio/ink": "workspace:*"
   }
 }
 ```
@@ -37,8 +37,8 @@
 The primary entry point. Renders a React element tree to the terminal.
 
 ```tsx
-import { render } from '@anthropic/ink'
-import { Box, Text } from '@anthropic/ink'
+import { render } from '@bee-game-studio/ink'
+import { Box, Text } from '@bee-game-studio/ink'
 
 const { unmount, rerender, waitUntilExit } = await render(
   <Box>
@@ -62,7 +62,7 @@ const { unmount, rerender, waitUntilExit } = await render(
 Synchronous version of render. Same API, returns `Instance` directly (no Promise).
 
 ```tsx
-import { renderSync } from '@anthropic/ink'
+import { renderSync } from '@bee-game-studio/ink'
 
 const instance = renderSync(<App />)
 // instance.rerender, instance.unmount, etc.
@@ -73,7 +73,7 @@ const instance = renderSync(<App />)
 Creates a managed Ink root without immediately rendering. Similar to `react-dom`'s `createRoot`.
 
 ```tsx
-import { createRoot } from '@anthropic/ink'
+import { createRoot } from '@bee-game-studio/ink'
 
 const root = await createRoot({ exitOnCtrlC: false })
 
@@ -148,22 +148,22 @@ Import everything from the package root:
 
 ```tsx
 // Core rendering
-import { render, createRoot, renderSync } from '@anthropic/ink'
+import { render, createRoot, renderSync } from '@bee-game-studio/ink'
 
 // Components (base, no theme)
-import { BaseBox, BaseText, ScrollBox, Button, Link, Newline, Spacer } from '@anthropic/ink'
+import { BaseBox, BaseText, ScrollBox, Button, Link, Newline, Spacer } from '@bee-game-studio/ink'
 
 // Theme-aware components (recommended)
-import { Box, Text } from '@anthropic/ink'
+import { Box, Text } from '@bee-game-studio/ink'
 
 // Hooks
-import { useApp, useInput, useTerminalSize, useInterval } from '@anthropic/ink'
+import { useApp, useInput, useTerminalSize, useInterval } from '@bee-game-studio/ink'
 
 // Theme
-import { ThemeProvider, useTheme, color } from '@anthropic/ink'
+import { ThemeProvider, useTheme, color } from '@bee-game-studio/ink'
 
 // Keybindings
-import { useKeybinding, KeybindingProvider } from '@anthropic/ink'
+import { useKeybinding, KeybindingProvider } from '@bee-game-studio/ink'
 ```
 
 ### Naming Convention: Base vs Theme-aware

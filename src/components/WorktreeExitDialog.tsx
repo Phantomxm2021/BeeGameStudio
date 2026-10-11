@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import type { CommandResultDisplay } from 'src/commands.js';
 import { logEvent } from 'src/services/analytics/index.js';
 import { logForDebugging } from 'src/utils/debug.js';
-import { Box, Text, Dialog } from '@anthropic/ink';
+import { Box, Text, Dialog } from '@bee-game-studio/ink';
 import { execFileNoThrow } from '../utils/execFileNoThrow.js';
 import { getPlansDirectory } from '../utils/plans.js';
 import { setCwd } from '../utils/Shell.js';

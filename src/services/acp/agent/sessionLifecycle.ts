@@ -13,11 +13,12 @@ import type {
   NewSessionRequest,
   NewSessionResponse,
 } from '@agentclientprotocol/sdk'
+import { RequestError } from '@agentclientprotocol/sdk'
 import type { Message } from '../../../types/message.js'
 import { deserializeMessages } from '../../../utils/conversationRecovery.js'
 import { getLastSessionLog } from '../../../utils/sessionStorage.js'
 import type { PermissionMode } from '../../../types/permissions.js'
-import { setOriginalCwd, switchSession } from '../../../bootstrap/state.js'
+import { setOriginalCwd } from '../../../bootstrap/state.js'
 import type { SessionId } from '../../../types/ids.js'
 import { replayHistoryMessages } from '../bridge.js'
 import { computeSessionFingerprint } from '../utils.js'
@@ -25,6 +26,7 @@ import { resolveSessionFilePath } from '../../../utils/sessionStoragePortable.js
 import { AcpAgent } from './AcpAgent.js'
 import type { AcpSession } from './sessionTypes.js'
 import { isPermissionMode } from './permissionMode.js'
+import { withAcpProcessContext, switchAcpSession } from './processContext.js'
 import {
   getConnection,
   readClientCapabilities,
@@ -47,6 +49,12 @@ async function getOrCreateSession(
     replay?: boolean
   },
 ): Promise<NewSessionResponse> {
+  if (params.mcpServers?.length) {
+    throw RequestError.invalidParams(
+      { field: 'mcpServers' },
+      'Client-provided MCP servers are not supported by this ACP agent.',
+    )
+  }
   const shouldReplay = params.replay !== false
   const existingSession = this.sessions.get(params.sessionId)
   if (existingSession) {
@@ -61,15 +69,17 @@ async function getOrCreateSession(
         params.sessionId,
         params.cwd,
       )
-      switchSession(
+      existingSession.projectDir = resolved ? dirname(resolved.filePath) : null
+      switchAcpSession(
         params.sessionId as SessionId,
-        resolved ? dirname(resolved.filePath) : null,
+        existingSession.projectDir,
       )
       setOriginalCwd(params.cwd)
 
       if (shouldReplay) {
         await this.replaySessionHistory(params)
       }
+      this.defaultSessionCwd = params.cwd
 
       return {
         sessionId: params.sessionId,
@@ -92,7 +102,7 @@ async function getOrCreateSession(
   const resolved = await resolveSessionFilePath(params.sessionId, params.cwd)
   const projectDir = resolved ? dirname(resolved.filePath) : null
 
-  switchSession(params.sessionId as SessionId, projectDir)
+  switchAcpSession(params.sessionId as SessionId, projectDir)
   setOriginalCwd(params.cwd)
 
   let initialMessages: Message[] | undefined
@@ -113,7 +123,7 @@ async function getOrCreateSession(
       mcpServers: params.mcpServers ?? [],
       _meta: params._meta,
     },
-    { sessionId: params.sessionId, initialMessages },
+    { sessionId: params.sessionId, initialMessages, projectDir },
   )
 
   // Replay history to client if loaded. session/resume skips this block.
@@ -258,7 +268,12 @@ async function updateConfigOption(
 // ── Prototype attachment ─────────────────────────────────────────
 
 Object.assign(AcpAgent.prototype, {
-  getOrCreateSession,
+  getOrCreateSession(
+    this: AcpAgent,
+    ...args: Parameters<typeof getOrCreateSession>
+  ) {
+    return withAcpProcessContext(() => getOrCreateSession.apply(this, args))
+  },
   teardownSession,
   replaySessionHistory,
   applySessionMode,

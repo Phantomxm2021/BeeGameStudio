@@ -1,5 +1,5 @@
 import React from 'react';
-import { type KeyboardEvent, Box } from '@anthropic/ink';
+import { type KeyboardEvent, Box } from '@bee-game-studio/ink';
 import { type OptionWithDescription, Select } from '../CustomSelect/select.js';
 
 export type TreeNode<T> = {

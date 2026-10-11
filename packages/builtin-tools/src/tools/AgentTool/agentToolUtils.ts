@@ -53,7 +53,7 @@ import {
   buildTranscriptForClassifier,
   classifyYoloAction,
 } from 'src/utils/permissions/yoloClassifier.js'
-import { emitTaskProgress as emitTaskProgressEvent } from 'src/utils/task/sdkProgress.js'
+import { emitTaskProgress as emitTaskProgressEvent, emitSubagentVisibleMessage } from 'src/utils/task/sdkProgress.js'
 import { isInProcessTeammate } from 'src/utils/teammateContext.js'
 import { getTokenCountFromUsage } from 'src/utils/tokens.js'
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../ExitPlanModeTool/constants.js'
@@ -565,6 +565,7 @@ export async function runAsyncAgentLifecycle({
       : undefined
     for await (const message of makeStream(onCacheSafeParams)) {
       agentMessages.push(message)
+      emitSubagentVisibleMessage(message, toolUseContext.toolUseId)
       // Append immediately when UI holds the task (retain). Bootstrap reads
       // disk in parallel and UUID-merges the prefix — disk-write-before-yield
       // means live is always a suffix of disk, so merge is order-correct.

@@ -6,7 +6,7 @@ import {
   tokenize,
   undoAnsiCodes,
 } from '@alcalzone/ansi-tokenize'
-import { stringWidth } from '@anthropic/ink'
+import { stringWidth } from '@bee-game-studio/ink'
 
 // A code is an "end code" if its code equals its endCode (e.g., hyperlink close)
 function isEndCode(code: AnsiCode): boolean {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text, stringWidth } from '@anthropic/ink';
+import { Box, Text, stringWidth } from '@bee-game-studio/ink';
 import { truncateToWidth } from '../utils/format.js';
 
 // Constants for width calculations - derived from actual rendered strings

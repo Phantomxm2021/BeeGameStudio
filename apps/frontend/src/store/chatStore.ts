@@ -7,6 +7,7 @@ import {
 } from '../services/supabaseAuthApi';
 import { buildMessageDedupeKey } from '../utils/chatHistory';
 import { settleChatActivity } from '../utils/chatActivity';
+import { mergeSubagentActivity } from '@bee-game-studio/agent-workflow/subagent-activity';
 
 function hasCloudSession(): boolean {
   return isHttpOnlySessionsEnabled() || Boolean(getSupabaseSessionUser()?.id?.trim());
@@ -129,6 +130,10 @@ function findMessageIndex(messages: Message[], candidate: Message): number {
 function mergeMessages(existing: Message, incoming: Message): Message {
   const isCompaction = existing.taskKind === 'context_compaction' || incoming.taskKind === 'context_compaction';
   const olderStreamCannotReopen = existing.streamStatus === 'complete' && incoming.streamStatus === 'streaming';
+  const incomingOlder = incoming.sequence !== undefined && existing.sequence !== undefined
+    ? incoming.sequence < existing.sequence : incoming.timestamp < existing.timestamp;
+  const keepSubagentOutcome = existing.isSubagentTool && (incomingOlder ||
+    existing.toolStatus !== undefined && existing.toolStatus !== 'running' && incoming.toolStatus === 'running');
   return withDerivedIdentity({
     ...existing,
     ...incoming,
@@ -137,15 +142,17 @@ function mergeMessages(existing: Message, incoming: Message): Message {
     streamStatus: olderStreamCannotReopen ? existing.streamStatus : incoming.streamStatus ?? existing.streamStatus,
     attachments: incoming.attachments || existing.attachments,
     thought: incoming.thought ?? existing.thought,
-    completionReason: Object.prototype.hasOwnProperty.call(incoming, 'completionReason') ||
+    toolStatus: keepSubagentOutcome ? existing.toolStatus : incoming.toolStatus ?? existing.toolStatus,
+    toolOutput: keepSubagentOutcome ? existing.toolOutput : incoming.toolOutput ?? existing.toolOutput,
+    completionReason: keepSubagentOutcome ? existing.completionReason : Object.prototype.hasOwnProperty.call(incoming, 'completionReason') ||
       (incoming.toolStatus && incoming.toolStatus !== 'running')
       ? incoming.completionReason : incoming.completionReason ?? existing.completionReason,
     thinkingDurationMs: incoming.thinkingDurationMs ?? existing.thinkingDurationMs,
     turnCompletedAt: incoming.turnCompletedAt ?? existing.turnCompletedAt,
     subagentPrompt: incoming.subagentPrompt ?? existing.subagentPrompt,
-    subagentOutput: incoming.subagentOutput ?? existing.subagentOutput,
+    subagentOutput: keepSubagentOutcome ? existing.subagentOutput : incoming.subagentOutput ?? existing.subagentOutput,
     subagentTrace: incoming.subagentTrace ?? existing.subagentTrace,
-    subagentActivity: incoming.subagentActivity ?? existing.subagentActivity,
+    subagentActivity: mergeSubagentActivity(existing.subagentActivity, incoming.subagentActivity, incomingOlder),
     timestamp: isCompaction ? Math.min(existing.timestamp, incoming.timestamp) : existing.timestamp || incoming.timestamp,
     sequence: isCompaction && existing.sequence !== undefined && incoming.sequence !== undefined
       ? Math.min(existing.sequence, incoming.sequence) : existing.sequence ?? incoming.sequence,

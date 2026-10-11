@@ -2,6 +2,39 @@ import { expect, test } from 'bun:test'
 import { proxyBeeGamePreviewRequest } from '../beegame/preview-proxy'
 import { gzipSync } from 'node:zlib'
 
+test.each([false, true])('proxy requests cannot escape the assigned upstream (preserve path: %s)', async preserve => {
+  const requests: string[] = []
+  const upstream = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+    requests.push(request.url)
+    return new Response('fixture')
+  } })
+  try {
+    const url = new URL(upstream.url)
+    for (const path of ['//example.invalid/secret', '//127.0.0.1:1/secret', '//[/secret', '/%2f%2fexample.invalid/secret']) {
+      const response = await proxyBeeGamePreviewRequest(new Request('http://studio/previews/s' + path),
+        's', url.href, preserve)
+      if (!preserve && path.startsWith('//')) expect(response.status).toBe(400)
+      else { expect(response.status).toBe(200); await response.text() }
+    }
+    expect(requests.every(request => new URL(request).origin === url.origin)).toBe(true)
+    expect((await proxyBeeGamePreviewRequest(new Request('http://studio/other/'), 's', url.href)).status).toBe(400)
+  } finally { upstream.stop(true) }
+})
+
+test('capability route paths preserve the upstream base and frontend lifecycle identity', async () => {
+  const upstream = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+    expect(new URL(request.url).pathname).toBe('/previews/opaque-grant/')
+    return new Response('<html><head></head></html>', { headers: { 'content-type': 'text/html' } })
+  } })
+  try {
+    const response = await proxyBeeGamePreviewRequest(new Request('http://studio/previews/opaque-grant/'),
+      'real-session', upstream.url.toString(), true, undefined, 'opaque-grant')
+    const html = await response.text()
+    expect(html).toContain('const sessionId = "opaque-grant"')
+    expect(html).not.toContain('real-session')
+  } finally { upstream.stop(true) }
+})
+
 test('a stalled upstream returns 504 and does not prevent a subsequent request', async () => {
   const upstream = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
     return new URL(request.url).pathname === '/hang' ? new Promise<Response>(() => {}) : new Response('ok')

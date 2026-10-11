@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import type { CommandResultDisplay, LocalJSXCommandContext } from '../../commands.js';
 import { type OptionWithDescription, Select } from '../../components/CustomSelect/select.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { logEvent } from '../../services/analytics/index.js';
 import { useClaudeAiLimits } from '../../services/claudeAiLimitsHook.js';

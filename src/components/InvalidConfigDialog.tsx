@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Dialog, wrappedRender as render, Text } from '@anthropic/ink';
+import { Box, Dialog, wrappedRender as render, Text } from '@bee-game-studio/ink';
 import { KeybindingSetup } from '../keybindings/KeybindingProviderSetup.js';
 import { AppStateProvider } from '../state/AppState.js';
 import type { ConfigParseError } from '../utils/errors.js';

@@ -5,7 +5,7 @@ import {
 } from 'src/services/analytics/index.js';
 import { setupTerminal, shouldOfferTerminalSetup } from '../commands/terminalSetup/terminalSetup.js';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, Link, Newline, Text, useTheme } from '@anthropic/ink';
+import { Box, Link, Newline, Text, useTheme } from '@bee-game-studio/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { isAnthropicAuthEnabled } from '../utils/auth.js';
 import { normalizeApiKeyForConfig } from '../utils/authPortable.js';
@@ -91,14 +91,14 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
           <OrderedList.Item>
             <Text>Always review changes before accepting</Text>
             <Text dimColor wrap="wrap">
-              Claude can make mistakes — especially when running commands
+              BGS can make mistakes — especially when running commands
               <Newline />
               or editing files. You stay in control of every action.
               <Newline />
             </Text>
           </OrderedList.Item>
           <OrderedList.Item>
-            <Text>Only use Claude Code on projects you trust</Text>
+            <Text>Only use BGS on projects you trust</Text>
             <Text dimColor wrap="wrap">
               Untrusted code could contain prompt injection attacks.
               <Newline />
@@ -161,7 +161,7 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
       id: 'terminal-setup',
       component: (
         <Box flexDirection="column" gap={1} paddingLeft={1}>
-          <Text bold>Use Claude Code&apos;s terminal setup?</Text>
+          <Text bold>Use BGS&apos;s terminal setup?</Text>
           <Box flexDirection="column" width={70} gap={1}>
             <Text>
               For the optimal coding experience, enable the recommended settings

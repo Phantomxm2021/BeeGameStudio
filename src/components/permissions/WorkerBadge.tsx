@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { BLACK_CIRCLE } from '../../constants/figures.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { toInkColor } from '../../utils/ink.js';
 
 export type WorkerBadgeProps = {

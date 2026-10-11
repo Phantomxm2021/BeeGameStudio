@@ -1,7 +1,7 @@
-// Re-export from @anthropic/ink keybindings module
+// Re-export from @bee-game-studio/ink keybindings module
 export {
   KeybindingProvider,
   useKeybindingContext,
   useOptionalKeybindingContext,
   useRegisterKeybindingContext,
-} from '@anthropic/ink';
+} from '@bee-game-studio/ink';

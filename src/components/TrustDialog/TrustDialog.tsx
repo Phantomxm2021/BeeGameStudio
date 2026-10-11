@@ -4,7 +4,7 @@ import { logEvent } from 'src/services/analytics/index.js';
 import { setSessionTrustAccepted } from '../../bootstrap/state.js';
 import type { Command } from '../../commands.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, Link, Text } from '@anthropic/ink';
+import { Box, Link, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { getMcpConfigsByScope } from '../../services/mcp/config.js';
 import { BASH_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/BashTool/toolName.js';
@@ -202,7 +202,7 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
         <Text>
           Is this a project you trust? (Your own code, a well-known open source project, or work from your team).
         </Text>
-        <Text>Once trusted, Claude Code can read, edit, and run commands in this folder.</Text>
+        <Text>Once trusted, BGS can read, edit, and run commands in this folder.</Text>
 
         <Text dimColor>
           <Link url="https://code.claude.com/docs/en/security">Security guide</Link>

@@ -144,8 +144,7 @@ function isOpenAIConvertibleMessage(
 
 /**
  * Assemble the final AssistantMessage (and optional max_tokens error) from
- * accumulated stream state. Extracted to avoid duplication between the
- * `message_stop` handler and the post-loop safety fallback.
+ * accumulated stream state after receiving `message_stop`.
  */
 function assembleFinalAssistantOutputs(params: {
   partialMessage: BetaMessage | null
@@ -233,7 +232,9 @@ export async function* queryModelOpenAI(
     const openaiModel = resolveOpenAIModel(options.model)
 
     // 2. Normalize messages using shared preprocessing
-    const messagesForAPI = await sanitizeInvalidImagesForAPI(normalizeMessagesForAPI(messages, tools))
+    const messagesForAPI = await sanitizeInvalidImagesForAPI(
+      normalizeMessagesForAPI(messages, tools),
+    )
 
     // 3. Check if tool search is enabled (similar to Anthropic path)
     const useSearchExtraTools = await isSearchExtraToolsEnabled(
@@ -417,6 +418,7 @@ export async function* queryModelOpenAI(
     const collectedMessages: AssistantMessage[] = []
     let partialMessage: BetaMessage | null = null
     let stopReason: string | null = null
+    let messageStopped = false
     let usage = {
       input_tokens: 0,
       output_tokens: 0,
@@ -489,6 +491,7 @@ export async function* queryModelOpenAI(
           break
         }
         case 'message_stop': {
+          messageStopped = true
           // Assemble ONE AssistantMessage with ALL content blocks, matching the
           // Anthropic SDK path. Real usage (input + output tokens) is available
           // here and injected so tokenCountWithEstimation() can read it.
@@ -535,6 +538,9 @@ export async function* queryModelOpenAI(
       } as StreamEvent
     }
 
+    if (!messageStopped)
+      throw new Error('OpenAI stream ended before message_stop')
+
     // Record LLM observation in Langfuse (no-op if not configured)
     recordLLMObservation(options.langfuseTrace ?? null, {
       model: openaiModel,
@@ -553,22 +559,9 @@ export async function* queryModelOpenAI(
       tools: convertToolsToLangfuse(toolSchemas as unknown[]),
       ...(enableThinking && { thinking: { type: 'enabled' } }),
     })
-
-    // Safety: if stream ended without message_stop, assemble and yield whatever we have
-    if (partialMessage) {
-      for (const output of assembleFinalAssistantOutputs({
-        partialMessage,
-        contentBlocks,
-        tools,
-        agentId: options.agentId,
-        usage,
-        stopReason,
-        maxTokens,
-      })) {
-        yield output
-      }
-    }
   } catch (error) {
+    // User cancellation is reported by the query loop, not as an API failure.
+    if (signal.aborted) return
     const errorMessage = error instanceof Error ? error.message : String(error)
     logForDebugging(`[OpenAI] Error: ${errorMessage}`, { level: 'error' })
     yield createAssistantAPIErrorMessage({

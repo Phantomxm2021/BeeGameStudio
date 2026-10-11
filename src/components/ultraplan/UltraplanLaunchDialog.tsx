@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Box, Text, Link } from '@anthropic/ink';
+import { Box, Text, Link } from '@bee-game-studio/ink';
 import { Select } from '../CustomSelect/select.js';
 import { Dialog } from '../design-system/Dialog.js';
 import { useAppState, useSetAppState } from '../../state/AppState.js';

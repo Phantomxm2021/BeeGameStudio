@@ -12,12 +12,12 @@ import {
 import { BRIDGE_FAILED_INDICATOR, BRIDGE_READY_INDICATOR } from '../constants/figures.js';
 import { useRegisterOverlay } from '../context/overlayContext.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw 'd' key for disconnect, not a configurable keybinding action
-import { Box, Text, useInput } from '@anthropic/ink';
+import { Box, Text, useInput } from '@bee-game-studio/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { useAppState, useSetAppState } from '../state/AppState.js';
 import { saveGlobalConfig } from '../utils/config.js';
 import { getBranch } from '../utils/git.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 
 type Props = {
   onDone: () => void;

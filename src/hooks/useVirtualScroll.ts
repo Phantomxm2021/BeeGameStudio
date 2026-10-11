@@ -7,7 +7,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from 'react'
-import type { ScrollBoxHandle, DOMElement } from '@anthropic/ink'
+import type { ScrollBoxHandle, DOMElement } from '@bee-game-studio/ink'
 
 /**
  * Estimated height (rows) for items not yet measured. Intentionally LOW:

@@ -1,8 +1,8 @@
-import { z } from 'zod/v4'
+import { strictObject, string, unknown } from 'zod/v4'
 import { TILEMAP_AUTHORING_CONTRACT } from './tilemap-authoring-contract'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { CONTENT_CHECKER_ENTRY, CONTENT_BINDING_ENTRY, MEDIA_PRODUCTION_ENTRY, RESOURCE_PRODUCTION_ENTRY, DRAFT_EDITS_ENTRY, COMPOSE_DRAFT_ENTRY } from './content-checker-runtime'
 import { CONTENT_COORDINATE_CONTRACT, UI_ANCHORS, UI_PAINT_PHASES } from '../../../scene-editor/src/content-coordinates'
 import { CONTENT_RUNTIME_CONTRACT } from './content-runtime-contract'
 import { bundleContentConsumer } from './game-content-consumer-cli'
@@ -14,34 +14,47 @@ import {
   BEEGAME_CONTENT_ROOT,
   BEEGAME_SCENE_ASSET_COMPONENT_TYPES,
   BEEGAME_SCENE_COMPONENT_TYPES,
+  CONTENT_RESOURCE_LOCATOR_KEYS,
   BEEGAME_SCENE_MODEL,
   BEEGAME_UI_ASSET_BACKED_ROLES,
   BEEGAME_UI_NODE_ROLES,
 } from './game-content-package'
 
-const digest = z.string().regex(/^[a-f0-9]{64}$/)
+const digest = string().regex(/^[a-f0-9]{64}$/)
 
 export const CONTENT_AUTHORING_CONTRACT_PATH = '.beegame/delivery/content-contract.json'
 export const CONTENT_FORMAT_PATH = '.beegame/delivery/content-format.json'
 export const CONTENT_CHECKER_PATH = '.beegame/delivery/check-content.mjs'
+export const CONTENT_CONSUMER_PATH = '.beegame/delivery/content-consumer.mjs'
 export const DESIGN_INSPECTOR_PATH = '.beegame/delivery/inspect-design.mjs'
 
+/** Refresh this BGS-owned entry on resumed turns as well as new authoring. */
+export async function materializeContentCheckerEntry(workspacePath: string) {
+  await mkdir(dirname(join(workspacePath, CONTENT_CHECKER_PATH)), { recursive: true })
+  await writeFile(join(workspacePath, CONTENT_CHECKER_PATH), CONTENT_CHECKER_ENTRY, 'utf8')
+  await writeFile(join(workspacePath, '.beegame/delivery/bind-content.mjs'), CONTENT_BINDING_ENTRY, 'utf8')
+  await writeFile(join(workspacePath, '.beegame/delivery/media.mjs'), MEDIA_PRODUCTION_ENTRY, 'utf8')
+  await writeFile(join(workspacePath, '.beegame/delivery/resources.mjs'), RESOURCE_PRODUCTION_ENTRY, 'utf8')
+  await writeFile(join(workspacePath, '.beegame/delivery/edit-drafts.mjs'), DRAFT_EDITS_ENTRY, 'utf8')
+  await writeFile(join(workspacePath, '.beegame/delivery/compose-drafts.mjs'), COMPOSE_DRAFT_ENTRY, 'utf8')
+}
+
 /** Begin UI data once; geometry is reviewed before production bindings exist. */
-export const DESIGN_CALCULATION_INSTRUCTION = `During document authoring/review, define composition, interaction and spatial requirements in the documents. UI begins linked ui-screen/ui-hud files directly in content/ui. During drafting use bun ${CONTENT_CHECKER_PATH} --design-layouts for saved geometry without unfinished prose/links; after the document is saved, Review and affected revisions use --review-layouts against these same files. The host independently recomputes them before release. Content completes resources and behavior bindings in these same files, not another copy. Missing bindings remain pending; planning does not claim full package/resource completion. No throwaway layout package, partial HTML sample or generated rectangle appendix is required. Other consequential feasibility or numerical uncertainties may use the smallest relevant calculation; bun ${CONTENT_CHECKER_PATH} --help provides --layout-draft and --camera-draft interfaces. Retain cited inputs and state their assumptions and limits. Content checks actual delivered fonts and complete rendering from saved UI; gameplay and interaction remain target-runtime acceptance. Geometry alone does not establish state coverage, text fit, appearance, gameplay or XR comfort.`
+export const DESIGN_CALCULATION_INSTRUCTION = `During document authoring/review, define composition, interaction and spatial requirements in the documents. UI begins linked ui-screen/ui-hud files directly in content/ui; Scene begins linked scene-2d/scene-3d files directly in content/scenes. During UI drafting use bun ${CONTENT_CHECKER_PATH} --design-layouts --draft for saved geometry without unfinished prose/links; only missing TileSet visual bounds defer until resource binding, not a visibility PASS. An actual Scene question can use --layout-draft on its same saved source. After documents are saved, use the supplied host --review-layouts report for owner-linked Scene drafts and UI geometry; rerun with the supplied confirmed direction/dimension when inputs or options change or a result is missing. Do not repeat unchanged checks merely to summarize them. A shared UI may declare multiple {nodeId,path} layoutCamera links; each Scene is checked. Do not replace unavailable required geometry with proxy nodes. The host independently checks them before release. Content completes resources and supported bindings in these same files, not another copy, and checks --design-layouts without --draft. Scene placement, collision geometry, Camera and unknown fields are protected; known resource selectors and UI action bindings may be completed. Missing bindings remain pending; planning does not claim full package/resource completion. No throwaway layout package, partial HTML sample or generated rectangle appendix is required. Retain cited inputs and their assumptions/limits. Content checks actual delivered fonts and complete rendering from saved sources; gameplay and interaction remain target-runtime acceptance. Geometry alone does not establish state coverage, text fit, appearance, traversal or XR comfort.`
 
 /** UI geometry starts in planning; Content completes its resource and behavior bindings. */
 export const SPATIAL_CALCULATION_INSTRUCTION = `Spatial calculation entry (run from the project root): \`bun ${CONTENT_CHECKER_PATH} --help\` provides commands, minimal UI/Scene/camera inputs and return shapes. Read relevant fields in ${CONTENT_FORMAT_PATH} when needed; the bundled implementation is not the API reference. Use \`bun ${CONTENT_CHECKER_PATH} --layout-draft workspace-relative-file width height\` for a temporary UI or 2D Scene draft, without a Manifest or content index. Registered content uses \`--layout content-relative-file width height\`. For camera framing, including perspective 3D, use \`--camera-draft workspace-relative-camera-file width height\` on the same command; that file contains the camera's orthographic, orthographicSize or fieldOfView, reference viewport and framing fields.
-Reviewed inputs: UI_UX_SPEC owns layout selection and saves linked ui-screen/ui-hud constraints in content/ui. Run \`bun ${CONTENT_CHECKER_PATH} --review-layouts\` at Review and after affected corrections; BGS independently recomputes these inputs before release. Include active geometry-changing overlays/expanded states, not disabled substitutes. If an overlay retains a separate UI layer, root data.layoutUnderlay links {path,clearance:"preserve"|"allow-cover"} to its actual content/ui source. Match the state's prose policy; do not infer coexistence from filenames or copy underlying rectangles. Mark actual protected regions and covering elements with layoutOcclusion. Content completes resource and behavior bindings in these same content/ui files after resource delivery, preserving reviewed identities, hierarchy, geometry and variants; it does not select another composition. Scene design owns world/framing requirements; Tech describes consumption rather than duplicating rectangles. Keep root data.orientation as Landscape or Portrait, referenceResolution, targetViewports (the smallest supported and relevant transition sizes), and minimumControlSize for controls in final host logical pixels. Limit targets to the confirmed direction. Use containers, padding and child constraints for allocation. For connected 2D layouts, root data.layoutCamera {nodeId,path} links the game-view to the authored camera/Scene input; do not copy camera values. Explicit --game-view/--camera options override the link. Run \`bun ${CONTENT_CHECKER_PATH} --design-layouts\` to recompute saved formal inputs at Content completion. These checks establish allocation, control minima and declared clearance, not prose agreement, state coverage, fonts or visual quality. Different state-specific compositions may share inputs when they express the designed differences.
+Reviewed inputs: UI_UX_SPEC owns layout selection and saves linked ui-screen/ui-hud constraints in content/ui. Use the supplied host --review-layouts report at Review; after affected corrections rerun with the confirmed orientation/dimension flags supplied by the task. BGS independently recomputes these inputs before release. Include active geometry-changing overlays/expanded states, not disabled substitutes. If an overlay retains a separate UI layer, root data.layoutUnderlay links {path,clearance:"preserve"|"allow-cover"} to its actual content/ui source. Match the state's prose policy; do not infer coexistence from filenames or copy underlying rectangles. Mark actual protected regions and covering elements with layoutOcclusion. Content completes resource and behavior bindings in these same content/ui files after resource delivery, preserving reviewed identities, hierarchy, geometry and variants; it does not select another composition. Scene design owns world/framing requirements; Tech describes consumption rather than duplicating rectangles. Keep root data.orientation as Landscape or Portrait, referenceResolution, targetViewports (the smallest supported and relevant transition sizes), and minimumControlSize for controls in final host logical pixels. Limit targets to the confirmed direction. Use containers, padding and child constraints for allocation. For connected 2D layouts, root data.layoutCamera {nodeId,path} links the game-view to the authored camera/Scene input; do not copy camera values. Explicit --game-view/--camera options override the link. Run \`bun ${CONTENT_CHECKER_PATH} --design-layouts\` to recompute saved formal inputs at Content completion. These checks establish allocation, control minima and declared clearance, not prose agreement, state coverage, fonts or visual quality. Different state-specific compositions may share inputs when they express the designed differences.
 For informational UI tied to the static top-left 2D camera reference plane, keep one world rectangle in the full-host draft using format.uiLayoutContract.cameraReferencePlane; the same connected command projects it together with screen UI. Do not replace the combined input with per-device copied projection rectangles.
-For fixed 2D views with complete-visibility requirements, Scene settings.requiredVisibleNodeIds names the nodes or groups that must fit; groups include enabled visual descendants. The Scene inspector reports requiredVisibility as passed, failed or unverified and derives the permitted Scene-viewport aspect interval from actual camera-local geometry. A sample passing size does not guarantee all hosts above a minimum size. Reconcile these limits with the UI's allocated game-view and support conditions; select the appropriate existing framing policy rather than altering geometry to hide clipping. root data.layoutCamera.path may point directly to the authoritative scene-2d document, using its authored Camera and requirements; linked Scene geometry is then checked by --design-layouts in the resolved game-view, not the whole host. Standalone camera inputs remain supported but cannot prove Scene object visibility.
-The eight-document author/review milestone defines composition, interaction, legal labels/counter ranges and typography constraints in documents, with linked UI constraints for calculation; it requires no temporary layout package or calculation appendix. Content produces resource-bound formal data and checks delivered fonts; implementation/acceptance inspect complete rendered Scene/UI compositions, wrapping, appearance and interaction against the reviewed documents. State unmeasured checks honestly instead of treating geometry as visual acceptance.
+For fixed 2D views with complete-visibility requirements, Scene settings.requiredVisibleNodeIds names the nodes or groups that must fit; groups include enabled visual descendants. The Scene inspector reports requiredVisibility as passed, failed or unverified and derives the permitted Scene-viewport aspect interval from actual camera-local geometry. A sample passing size does not guarantee all hosts above a minimum size. Reconcile these limits with the UI's allocated game-view and support conditions; select the appropriate existing framing policy rather than altering geometry to hide clipping. root data.layoutCamera may be one {nodeId,path} link or a nonempty array of these links for multiple levels sharing the same UI. Joint Review and Content check every linked Scene, not only the first. Use --game-view/--camera to inspect one explicit variant. Standalone camera inputs remain supported but cannot prove Scene object visibility.
+Before resources exist, use --review-layouts on saved owner-linked drafts. Only unavailable TileSet-dependent visual bounds are returned as deferred (required after binding, before Content release), not a visibility PASS or a design repair. Missing visual sizes, invalid links, offscreen known geometry and control/layout errors still block. Do not replace required-visible nodes with artificial proxy nodes, drop requirements, or duplicate UI files to silence a resource dependency. Content and acceptance checks remain strict and require actual delivered TileSet bounds.
+The eight-document author/review milestone defines composition, interaction, legal labels/counter ranges and typography constraints in documents and owner-linked Scene/UI layout sources; it requires no temporary layout package or calculation appendix. Scene retains its authored Camera and spatial rules. For supported 2D framing, UI links that same Scene with layoutCamera and checks requiredVisibleNodeIds in the resolved game-view, not against guessed window dimensions. Content completes the same sources with real resources and checks delivered fonts, image proportions/pivots/cropping and TileSet geometry; implementation/acceptance inspect complete rendered Scene/UI compositions, wrapping, appearance and interaction. An actual resource that invalidates design needs the existing affected-owner revision, not silently reduced requirements. State unmeasured checks honestly instead of treating geometry as visual acceptance.
 These read-only commands do not create resources, approve a design or implement the game. Unmeasured text, gameplay occlusion, 3D object visibility and XR comfort are not verified by rectangle or camera-framing calculations. XR device projection is not replaced by flat-window fitting. State those limits instead of treating command success as a quality PASS.`
 
-const inputSchema = z
-  .strictObject({
+const inputSchema = strictObject({
     documentRevision: digest,
     assetManifestRevision: digest,
-    manifest: z.unknown(),
+    manifest: unknown(),
   })
 
 export type SceneUiContentAuthoringInput = Readonly<{
@@ -50,42 +63,22 @@ export type SceneUiContentAuthoringInput = Readonly<{
   manifest: BeeGameAssetManifest
 }>
 
-let checkerBundle: Promise<string> | undefined
-function bundledContentChecker(): Promise<string> {
-  // Repeated in-process builds in our Bun 1.3 regression fixture report wrong
-  // source paths/read failures. Keep compilation out of the long-lived runtime.
-  return checkerBundle ??= (async () => {
-    const child = Bun.spawn([process.execPath, 'build',
-      fileURLToPath(new URL('./game-content-validation-cli.ts', import.meta.url)),
-      '--target=bun', '--minify'], { stdout: 'pipe', stderr: 'pipe' })
-    const [code, source, error] = await Promise.all([
-      child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
-    ])
-    if (code !== 0 || !source) throw new Error(`Cannot publish content checker: ${error}`)
-    return source
-  })().catch(error => { checkerBundle = undefined; throw error })
-}
-
 /** Design-time format is not the later project-specific authority snapshot. */
 export async function materializeSceneUiFormat(workspacePath: string) {
-  const format = structuredClone(buildSceneUiContentAuthoringAuthority({
-    documentRevision: '0'.repeat(64), assetManifestRevision: '0'.repeat(64),
-    manifest: {} as BeeGameAssetManifest,
-  }).contract.output.format) as Record<string, any>
-  delete format.index.documentRevision
-  delete format.index.assetManifestRevision
+  const format = structuredClone(sceneUiContentFormat()) as Record<string, any>
   format.revisionFields = 'documentRevision and assetManifestRevision are required BGS-supplied metadata, not Agent-defined hashes. Their actual values are supplied in content-contract.json when content authoring begins; none are available at design time.'
   format.layoutDraftInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --layout-draft workspace-relative-file width height`
-  format.layoutDraftAppendixCommand = `bun ${CONTENT_CHECKER_PATH} --layout-draft docs/calc/layout.json width height --appendix > docs/calc/layout-results.md`
-  format.designLayoutInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --design-layouts`
-  format.reviewLayoutInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --review-layouts`
+  format.sceneLayoutBatchInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --scene-layouts --report`
+  format.designLayoutInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --design-layouts --report`
+  format.designLayoutDraftInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --design-layouts --draft --report`
+  format.reviewLayoutInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --review-layouts --report`
   format.cameraDraftInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --camera-draft workspace-relative-camera-file width height`
   format.layoutCameraInspectionCommand = `bun ${CONTENT_CHECKER_PATH} --layout-draft workspace-relative-ui-file host-width host-height --game-view node-id --camera workspace-relative-camera-file`
   await mkdir(dirname(join(workspacePath, CONTENT_FORMAT_PATH)), { recursive: true })
   await writeFile(join(workspacePath, CONTENT_FORMAT_PATH), JSON.stringify(format, null, 2) + '\n')
   // Design geometry tool; no Manifest/index prerequisite or additional Agent turn.
-  await writeFile(join(workspacePath, CONTENT_CHECKER_PATH), await bundledContentChecker(), 'utf8')
-  await writeFile(join(workspacePath, '.beegame/delivery/content-consumer.mjs'), await bundleContentConsumer(), 'utf8')
+  await materializeContentCheckerEntry(workspacePath)
+  await writeFile(join(workspacePath, CONTENT_CONSUMER_PATH), await bundleContentConsumer(), 'utf8')
   await writeFile(join(workspacePath, DESIGN_INSPECTOR_PATH), await readFile(new URL('./design-browser-inspection.mjs', import.meta.url)), 'utf8')
 }
 
@@ -101,12 +94,15 @@ export async function materializeSceneUiAuthoringContract(workspacePath: string,
     assetManifestPath: 'assets/asset-manifest.json',
     validationCommand: `bun ${CONTENT_CHECKER_PATH}`,
     authorityCommand: `bun ${CONTENT_CHECKER_PATH} --authority`,
-    inspectionCommand: `bun ${CONTENT_CHECKER_PATH} --inspect [content-relative-file [--node id]]`,
-    layoutInspectionCommand: `bun ${CONTENT_CHECKER_PATH} --layout content-relative-file width height`,
+    inspectionCommand: 'bun .beegame/delivery/bind-content.mjs --inspect content/ui/FILE.json content/scenes/FILE.json',
+    layoutInspectionCommand: `bun ${CONTENT_CHECKER_PATH} --design-layouts --report`,
     revisionUsage: 'Copy these BGS-supplied values into content/index.json; they are not hash algorithms to design. If docs/resources change during this turn, --authority reads their current values locally. The checker is read-only and uses the same implementation as BGS.',
   }
   await materializeSceneUiFormat(workspacePath)
-  await writeFile(target, JSON.stringify({ ...task.contract.output.format, inputs }, null, 2) + '\n')
+  // Project-specific revision inputs are not another copy of the format reference.
+  // Keep the existing index example/digests, with all supported fields in one file.
+  await writeFile(target, JSON.stringify({ index: task.contract.output.format.index,
+    formatReference: CONTENT_FORMAT_PATH, inputs }, null, 2) + '\n')
   return inputs
 }
 
@@ -134,6 +130,7 @@ export function buildSceneUiContentAuthoringAuthority(
   input: SceneUiContentAuthoringInput,
 ): SceneUiContentAuthoringAuthority {
   const parsed = inputSchema.parse(structuredClone(input))
+  const format = sceneUiContentFormat()
   const contract = {
     documentRevision: parsed.documentRevision,
     assetManifestRevision: parsed.assetManifestRevision,
@@ -144,17 +141,26 @@ export function buildSceneUiContentAuthoringAuthority(
       packageSchema: BEEGAME_CONTENT_PACKAGE_SCHEMA,
       documentSchema: BEEGAME_CONTENT_DOCUMENT_SCHEMA,
       kinds: ['scene-2d', 'scene-3d', 'ui-screen', 'ui-hud', 'ui-flow', 'vfx'],
-      format: {
+      format: { ...format, index: { ...format.index,
+        documentRevision: parsed.documentRevision, assetManifestRevision: parsed.assetManifestRevision } },
+    },
+  } as const
+  return Object.freeze({ contract })
+}
+
+/** Pure schema/reference, never a project version or authoring authority. */
+export function sceneUiContentFormat() {
+  return {
         strict: true,
         coordinates: CONTENT_COORDINATE_CONTRACT,
         runtimeConsumption: CONTENT_RUNTIME_CONTRACT,
         tilemap: TILEMAP_AUTHORING_CONTRACT,
         index: {
           schema: BEEGAME_CONTENT_PACKAGE_SCHEMA,
+          documentRevision: '<required compatibility field: first autonomous index uses --package-metadata FILE ... indexMetadata.documentRevision; later --current retains the saved tag. Legacy design baseline uses --authority; do not invent approval>',
+          assetManifestRevision: '<required actual Manifest hash: first index uses --package-metadata FILE ... indexMetadata.assetManifestRevision; later --current supplies registry.assetManifestRevision. Legacy --authority remains supported>',
           id: '<stable-package-id>',
           dimension: '<2d|3d>',
-          documentRevision: parsed.documentRevision,
-          assetManifestRevision: parsed.assetManifestRevision,
           entryScene: '<scene-document-id>',
           sceneModel: BEEGAME_SCENE_MODEL,
           files: ['scenes/<name>.json', 'ui/<name>.json', 'vfx/<name>.json'],
@@ -164,6 +170,7 @@ export function buildSceneUiContentAuthoringAuthority(
             { id: '<other-document-id>', path: 'vfx/<name>.json', kind: 'vfx', loadPhase: 'on-demand' },
           ],
         },
+        revisionFields: 'Index revision fields are required metadata. Before a first autonomous index, --package-metadata content/scenes/FILE.json content/ui/FILE.json ... returns indexMetadata derived from those actual saved inputs/Manifest; author still chooses files, entry, dimension and load policy. It writes no files and does not certify design. Legacy --authority reads the eight-document/resource baseline. After saving an autonomous index, --current checks real content/resources while retaining its documentRevision compatibility tag; prose edits do not churn that tag. Measurement still binds source/reports. Draft checks need no index. Do not invent hashes or approval.',
         sceneDocument: {
           schema: BEEGAME_CONTENT_DOCUMENT_SCHEMA,
           id: '<stable-scene-id>',
@@ -214,10 +221,17 @@ export function buildSceneUiContentAuthoringAuthority(
         },
         sceneVocabulary: {
           model: BEEGAME_SCENE_MODEL,
+          planningBindings: 'Owner-linked Scene drafts use this same schema before resource delivery. Known locator fields are ' + CONTENT_RESOURCE_LOCATOR_KEYS.join(', ') + ': component.assetRef and component.data member/atlasMember/frame on asset-consuming components only. UI allows node.assetRef on asset-backed roles, their data member/atlasMember/frame, data.font assetRef/member, and locators in data/style image/texture references. UI actions/bindings are completed downstream. Other authored fields, including colors, opacity, typography and unknown data, remain design decisions. Names alone do not exempt nested gameplay data. Bind resources in the same files, validate references and recalculate actual geometry/fonts; bindings do not certify design compliance.',
           viewportAdaptation: 'Scene coordinates and the authored Camera viewport describe a reference frame, not the browser canvas size. At runtime the game applies its documented camera framing choice (for example preserve vertical span, preserve horizontal span or intentional letterbox) against the actual host container; do not resize world transforms or bake a second layout into code. Keep screen UI adaptation separate from world-camera framing. This format does not implement a game engine.',
           componentTypes: BEEGAME_SCENE_COMPONENT_TYPES,
           assetComponentTypes: BEEGAME_SCENE_ASSET_COMPONENT_TYPES,
+          tilemapHierarchy: TILEMAP_AUTHORING_CONTRACT.coordinates,
           requiredData: {
+            // The ordinary Scene format selection must contain the versioned
+            // component shapes it advertises, not require source-code probing.
+            grid: TILEMAP_AUTHORING_CONTRACT.examples.grid.data,
+            tilemap: TILEMAP_AUTHORING_CONTRACT.examples.tilemap.data,
+            'tilemap-renderer': TILEMAP_AUTHORING_CONTRACT.examples.renderer.data,
             camera: {
               orthographic: '<boolean>',
               orthographicSize: '<positive half-height in world units; independent of map/reference size; logical-pixel visible height = 2 * orthographicSize * pixelsPerUnit>',
@@ -303,7 +317,17 @@ export function buildSceneUiContentAuthoringAuthority(
           referenceResolution: 'Root data.referenceResolution is [width, height] in logical pixels: a design reference, not a fixed browser or iframe size. Root layout.size, if present, must match it. Screen-space root resolves to the actual viewport; world-space UI retains its authored root size.',
           orientation: 'Root data.orientation is Landscape or Portrait, matching the confirmed screen-game direction. Other directions and below-minimum hosts show a rotation/size message in the runtime, rather than requiring another HUD composition. VR/AR world UI is not a screen orientation target.',
           minimumControlSize: 'Root data.minimumControlSize is the project-agreed positive [width,height] minimum in final host logical pixels for controls/actions. It is not a global platform constant or local layout.minSize. Declare the actual interactive region as a node/action; an unrepresented larger hitbox in prose is not checked geometry.',
-          layoutCamera: 'Root data.layoutCamera optionally links {nodeId,path} to the game-view and existing workspace-relative Camera calculation input or scene-2d document. A Scene link consumes its authored Camera, coordinateSystem and requiredVisibleNodeIds in the allocated game-view; standalone inputs provide framing only. Automatic checks read this file; explicit CLI camera arguments override it. This is inspection linkage, not a duplicate runtime camera or a renderer.',
+          layoutCamera: 'Root data.layoutCamera links {nodeId,path}, or a nonempty array of these links when multiple Scenes share this UI. nodeId is the game-view node ID in THIS UI, not the Camera node ID in the Scene. Each path is workspace-relative to an existing Camera input or scene-2d document; that Scene supplies its own cameraNodeId. Review/Content check all links and each Scene requiredVisibleNodeIds inside the game-view. For inspecting one variant use explicit --game-view/--camera. This is inspection linkage, not a duplicate runtime camera or renderer. Missing TileSet visual bounds defer only at Review; actual resource-bound Content checks remain required.',
+          linkedGameViewExample: {
+            note: 'Example nodes for a ui-hud data.nodes array with rootId:"root". Replace the path, dimensions and direction with the actual design; this is a link/allocation example, not a complete HUD or font-fit proof.',
+            nodes: [
+              { id: 'root', role: 'hud-root', data: { orientation: 'Landscape', referenceResolution: [960, 540], targetViewports: [[960, 540]],
+                minimumControlSize: [44, 44], layoutCamera: { nodeId: 'game-view', path: 'content/scenes/world.json' } },
+                layout: { container: { direction: 'column' } } },
+              { id: 'game-view', role: 'container', parentId: 'root', layout: {
+                size: [960, 540], item: { grow: 1, shrink: 1 } } },
+            ],
+          },
           layoutUnderlay: 'For a composition that retains another screen-space UI layer, root data.layoutUnderlay is {path:"content/ui/<actual-file>.json",clearance:"preserve"|"allow-cover"}. Both sources keep their own geometry and are resolved at this overlay\'s authored host targets. preserve checks active protected regions in the retained chain against this layer\'s declared occluders; it requires actual protection/occluder markers. allow-cover explicitly permits covering inherited protection in this state, not exceeding the viewport or a local protected region. This policy must agree with the state-specific prose and Scene requirements; the checker cannot establish that agreement or infer an omitted link. Links must stay in collected content/ui files, have matching orientation and no cycles. Mark retained layers for relevant expanded states instead of copying their coordinates. This link describes composition/inspection, not automatic rendering or input suppression: Content and runtime still consume the actual underlying sources and implement the specified state behavior.',
           targetViewports: 'Root data.targetViewports lists required host [width,height] pairs for this composition, including its smallest supported size and relevant transition sizes; the reference size is included. There are no implicit desktop or phone targets. UI starts these same content/ui files during planning; --design-layouts checks their saved geometry without prose/index/resources, and --review-layouts additionally checks the completed UI document links. Content later completes bindings in place.',
           responsive: 'The base layout is the reference composition. Optional node.responsive.compact and node.responsive.portrait may override enabled, layout fields and style fields; responsive is a node field, not a layout field. A declared override layout.container requires direction (and columns for grid), even if changing only padding or gap. Compact applies when viewport width <= root data.compactMaxWidth (default 600 logical pixels); portrait applies when height>width, after compact. Use variants relevant to the confirmed direction and choose compactMaxWidth from required container space, not device or input labels. Unspecified fields inherit. Keep essential controls readable and inside the target safe area; do not stretch the entire composition indiscriminately.',
@@ -317,8 +341,8 @@ export function buildSceneUiContentAuthoringAuthority(
           inspectionResults: 'readUiData(document) returns {rootId,nodes}; inspectUiLayout(nodes,rootId,viewport,options?) returns an array of computed nodes; inspectUiLayoutInBrowser returns {viewport,nodes,textMeasurements,note}. Computed nodes expose id,parentId,active,layout,bounds,corners and diagnostics, not authored role/style/text/actions. Associate by id with the original authored nodes to consume content. bounds/corners use host space while layout uses local space; preserve that distinction. CLI output is concise by default; --details includes full geometry. These helpers do not render a scene or UI.',
           textStyle: 'Use style.fontSize, style.color, style.align, style.verticalAlign and style.lineHeight. Explicit fontSize and lineHeight are logical-pixel lengths, not unitless CSS multipliers; convert lineHeight to a CSS px string in DOM renderers. An omitted lineHeight uses the renderer default. For an actual font file use data.font.assetRef; do not invent font asset aliases.',
           textFit: 'After loading the actual font file, measure HUD values and labels at their authored font size (including the largest expected score/time/count and each supported language). Size text bounds and spacing to fit those measurements, not character-count estimates. Keep numeric counters intact; do not rely on arbitrary character wrapping, runtime shrinking, or editor-specific layout overrides to hide undersized bounds. Check both the generated UI and target runtime before reporting visual acceptance.',
-          browserInspection: 'The supplied browser helper exports inspectUiLayoutInBrowser(nodes, rootId, viewport, {fontFamily, fontFaces?, textSamples?, camera?}). fontFamily is an explicit candidate-family callback; fontFaces maps authored data.font.assetRef to loaded FontFaces already registered in document.fonts; textSamples maps text node IDs to legal labels/counter strings, including longest supported values. It returns shared layout diagnostics and textMeasurements with candidate-font or registered-font basis. It does not mutate source text, load resource files, render a screen, prove glyph coverage or approve aesthetics. Render the same final inputs with existing preview tools; preliminary candidate checks do not replace delivered-font and runtime checks.',
-          browserInspectionCommand: `node ${DESIGN_INSPECTOR_PATH} --help; stable helper: .beegame/delivery/content-consumer.mjs. This command measures final inputs and optionally captures an existing project-local HTML composition without a game package/server. It does not render a substitute composition or certify aesthetics.`,
+          browserInspection: 'The supplied browser helper exports inspectUiLayoutInBrowser(nodes, rootId, viewport, {fontFamily, fontFaces?, textSamples?, camera?}). fontFamily is an explicit candidate-family callback; fontFaces maps assetRef (default font) or JSON.stringify([assetRef, member]) (explicit font member) to loaded FontFaces already registered in document.fonts; the supplied inspector handles registration. textSamples maps text node IDs to legal labels/counter strings, including longest supported values. It returns shared layout diagnostics and textMeasurements with candidate-font or registered-font basis. It does not mutate source text, load resource files, render a screen, prove glyph coverage or approve aesthetics. Render the same final inputs with existing preview tools; preliminary candidate checks do not replace delivered-font and runtime checks.',
+          browserInspectionCommand: `Optional legacy entry, only when actually supplied: node ${DESIGN_INSPECTOR_PATH} --help; helper: .beegame/delivery/content-consumer.mjs. The pure format reference does not create these files. This command measures final inputs and optionally captures an existing project-local HTML composition without a game package/server. It does not render a substitute composition or certify aesthetics.`,
           image: 'Use assetRef + optional data.member for the image file, data.frame for an exact case-sensitive atlas frame name (without extension). Inspect the delivered atlas; never guess names.',
           nineSlice: 'Use data.image.type=sliced and data.nineSlice.border=[left,right,top,bottom]. data.frame may name an explicit meta.nine_slice composite made from tl,tr,bl,br,h,v,c frames, or a single packed frame. Never invent a panel frame absent from both tables.',
           appearance: 'Use style.opacity, style.background (CSS color or {color,opacity,radius}), style.gradient (color array), style.border ({width,color,radius}), style.cornerRadius. Shape uses style.shape and style.color.',
@@ -326,6 +350,12 @@ export function buildSceneUiContentAuthoringAuthority(
           example: '960x540 root; top-center title at [0,92] is centered at x=480. A centered 240px progress track with a left-pivot fill uses middle-center + data.anchor={x:0,y:0.5}, position=[-118,70], not middle-left.',
         },
         uiVocabulary: {
+          behaviorBindings: {
+            schema: 'actions and bindings are string-to-string maps, not objects containing event/payload/conditions. Keep stable node IDs; an action handler receives the action ID and node ID.',
+            example: { actions: { click: 'game.start' }, bindings: { text: 'session.label', enabled: 'session.canStart' } },
+            sharedSurface: 'The optional createProductionUiSurface supports actions.click and bindings.text/enabled. Pass onAction(action,nodeId) and a flat state dictionary keyed by the exact binding strings; text values are strings/numbers, enabled values booleans. Dots in a state key are not object traversal. It rejects other properties, absent state and data.visibleWhen; it does not interpret expressions, payload, litWhen or enabledWhen. A custom runtime may implement additional declared semantics, but the shared surface does not.',
+            placement: 'When an authority-backed binding entry is actually supplied, use it with mapping.json for exact node IDs (legacy example: bun .beegame/delivery/bind-content.mjs mapping.json). The pure format reference supplies neither that entry nor project authority. A supplied actions/bindings map replaces the old map; resource data/style merge. Binding is not authority to remove a color, resize a sprite or redesign the source.',
+          },
           roles: BEEGAME_UI_NODE_ROLES,
           rootByDocumentKind: {
             'ui-screen': 'screen-root',
@@ -383,10 +413,5 @@ export function buildSceneUiContentAuthoringAuthority(
           'Canvas owns a RectTransform; Image/Text require RectTransform and CanvasRenderer and must be descendants of a Canvas. RectTransform data uses anchorMin, anchorMax, anchoredPosition, sizeDelta and pivot with the top-left conventions in format.coordinates.rectTransform, not target-engine defaults.',
           'The optional static PNG preview supports rectangular 2D Tilemaps and their referenced images/atlas frames. It is a diagnostic snapshot, not game rendering or gameplay verification. Do not replace valid Tilemap data with sprites to work around preview limitations.',
         ],
-      },
-    },
   } as const
-  return Object.freeze({
-    contract,
-  })
 }

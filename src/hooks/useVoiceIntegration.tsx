@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNotifications } from '../context/notifications.js';
 import { useIsModalOverlayActive } from '../context/overlayContext.js';
 import { useGetVoiceState, useSetVoiceState, useVoiceState } from '../context/voice.js';
-import { KeyboardEvent, useInput } from '@anthropic/ink';
+import { KeyboardEvent, useInput } from '@bee-game-studio/ink';
 // backward-compat bridge until REPL wires handleKeyDown to <Box onKeyDown>
 import { useOptionalKeybindingContext } from '../keybindings/KeybindingContext.js';
 import { keystrokesEqual } from '../keybindings/resolver.js';

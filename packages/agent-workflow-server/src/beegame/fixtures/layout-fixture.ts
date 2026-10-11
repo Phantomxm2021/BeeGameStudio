@@ -3,6 +3,17 @@ import { join } from 'node:path'
 import { PROJECT_DOCUMENTS } from '../project-content-authority'
 import { checkDesignHandoff, designHandoffPath, readDesignAcceptanceRequirements, type DesignDocument, type DesignHandoff } from '../design-handoff'
 
+/** A pre-upgrade saved inspection, for compatibility tests only. New flow
+ * tests must call prepareProjectDesignReview directly instead. */
+export async function prepareLegacyDesignReviewFixture(workspace: string, root: string) {
+  const { prepareProjectDesignReview, projectDeliveryStatePath } = await import('../project-delivery')
+  const state = (await prepareProjectDesignReview(workspace, root))!
+  const { combined, writableDocuments, revisionDocuments, pendingCheckIssues, ...review } = state.designReview!
+  const legacy = { ...state, designReview: { ...review, step: 'inspect' as const } }
+  await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify(legacy))
+  return legacy
+}
+
 export function uiLayoutFixture(height = 52) {
   return { schema: 'beegame-content.v1', id: 'menu', kind: 'ui-screen', assetRefs: [], data: {
     rootId: 'root', nodes: [
@@ -14,10 +25,28 @@ export function uiLayoutFixture(height = 52) {
   } }
 }
 
+export function sceneLayoutFixture() {
+  return { schema: 'beegame-content.v1', id: 'level', kind: 'scene-2d', assetRefs: [], data: {
+    cameraNodeId: 'camera', settings: { coordinateSystem: {
+      origin: 'top-left', units: 'logical-pixels', width: 960, height: 540, pixelsPerUnit: 100,
+    } }, nodes: [
+      { id: 'camera', components: [{ id: 'camera-component', type: 'camera', data: {
+        orthographic: true, orthographicSize: 2.7, coordinateSpace: 'logical-pixels',
+        viewport: { width: 960, height: 540 }, framing: 'expand',
+      } }] },
+      { id: 'board', transform: { position: [0, 0, 0] }, components: [] },
+    ],
+  } }
+}
+
 export function designHandoffFixture(name: DesignDocument): DesignHandoff {
   return { version: 2, documentVersion: '1.0',
     outputs: [{ id: name === 'GDD.md' ? 'play' : 'ready', section: 'Design',
-      ...(name === 'GDD.md' ? { acceptance: { section: 'Design', method: 'test' as 'test' | 'target-runtime' | 'inspection' } } : {}) }],
+      acceptance: { section: 'Design', method: name === 'GDD.md' ? 'test' : 'inspection' } }],
+    ...(name === 'TECHNICAL_DESIGN.md' ? { implementationItems: PROJECT_DOCUMENTS.map(document => ({
+      id: 'fixture-' + document.slice(0, -3), section: 'Design',
+      requirementRefs: [{ document, id: document === 'GDD.md' ? 'play' : 'ready' }],
+    })) } : {}),
     evidence: [] }
 }
 
@@ -31,7 +60,8 @@ export function designRequirementChecksFixture(workspace: string, evidencePaths:
 export function designDocumentFixture(name: DesignDocument, handoff: unknown = designHandoffFixture(name)) {
   const version = (handoff as { documentVersion?: string })?.documentVersion ?? '1.0'
   return '# Design\n- Version: v' + version + '\nFixture decision.\n' +
-    (name === 'UI_UX_SPEC.md' ? '\n[Reviewed UI constraints](../content/ui/menu.json)\n' : '')
+    (name === 'UI_UX_SPEC.md' ? '\n[Reviewed UI constraints](../content/ui/menu.json)\n' : '') +
+    (name === 'LEVEL_SCENE_DESIGN.md' ? '\n[Reviewed Scene layout](../content/scenes/level.json)\n' : '')
 }
 export async function writeDesignDocumentFixture(workspace: string, name: DesignDocument, handoff: unknown = designHandoffFixture(name), body = designDocumentFixture(name, handoff)) {
   await mkdir(join(workspace, 'docs'), { recursive: true })
@@ -39,6 +69,10 @@ export async function writeDesignDocumentFixture(workspace: string, name: Design
   if (name === 'UI_UX_SPEC.md' && !await Bun.file(join(workspace, 'content/ui/menu.json')).exists()) {
     await mkdir(join(workspace, 'content/ui'), { recursive: true })
     await writeFile(join(workspace, 'content/ui/menu.json'), JSON.stringify(uiLayoutFixture()))
+  }
+  if (name === 'LEVEL_SCENE_DESIGN.md' && !await Bun.file(join(workspace, 'content/scenes/level.json')).exists()) {
+    await mkdir(join(workspace, 'content/scenes'), { recursive: true })
+    await writeFile(join(workspace, 'content/scenes/level.json'), JSON.stringify(sceneLayoutFixture()))
   }
   await writeFile(join(workspace, 'docs', name), body)
   await writeFile(join(workspace, designHandoffPath(name)), JSON.stringify(handoff))
@@ -53,7 +87,7 @@ export async function writeDesignDocumentsFixture(workspace: string, documents: 
 export function designBaselineFixture(workspace: string) {
   const check = checkDesignHandoff(workspace, PROJECT_DOCUMENTS)
   if (!check.valid) throw new Error(check.issues.join('; '))
-  return { batch: 4, revision: check.revision, snapshots: check.snapshots, documentVersions: check.documentVersions, evidenceHashes: check.evidenceHashes, followUps: [] }
+  return { batch: 4, revision: check.revision, snapshots: check.snapshots, documentVersions: check.documentVersions, evidenceHashes: check.evidenceHashes, digestVersion: check.digestVersion, followUps: [] }
 }
 
 export async function writeUiLayoutFixture(workspace: string, height = 52) {

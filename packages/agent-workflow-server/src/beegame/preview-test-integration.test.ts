@@ -11,14 +11,16 @@ import { createPreviewCapabilityManager } from '../auth/preview-capability'
 // Entirely temporary fixture; no workflow, model call or generated project is touched.
 test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1')('managed dev and built production execute inside the Dashboard sandbox', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'beegame-preview-fixture-'))
-  const manager = new BeeGamePreviewManager()
   const sessionId = 'fixture'
   const capabilities = createPreviewCapabilityManager()
+  const manager = new BeeGamePreviewManager(undefined, undefined, undefined, undefined, '',
+    id => capabilities.issueRouteId(id, 'fixture-owner'))
   const savedReports: any[] = []
   const proxy = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: request => {
-    if (!capabilities.verifyRequest(request, sessionId) && !capabilities.allowsSandboxedSubresource(request, sessionId))
+    const routeId = new URL(request.url).pathname.split('/')[2]!
+    if (capabilities.resolveRoute(routeId)?.sessionId !== sessionId)
       return new Response('Unauthorized', { status: 401 })
-    return proxyBeeGamePreviewRequest(request, sessionId, manager.internalUrl(sessionId)!, manager.expectsPublicPath(sessionId))
+    return proxyBeeGamePreviewRequest(request, sessionId, manager.internalUrl(sessionId)!, manager.expectsPublicPath(sessionId), undefined, routeId)
   } })
   const status = () => ({ ...manager.status(sessionId, workspace),
     url: capabilities.issueUrl(new URL('/previews/fixture/', proxy.url).href, sessionId, 'fixture-owner') })
@@ -74,7 +76,7 @@ test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1')('managed dev and buil
       if (mode === 'production') {
         // Deliberately leave BGS in development: the task build must not inherit it.
         process.env.NODE_ENV = 'development'
-        const build = Bun.spawn([process.execPath, join(dependencies, 'vite/bin/vite.js'), 'build', '--base', '/previews/fixture/'], {
+        const build = Bun.spawn([process.execPath, join(dependencies, 'vite/bin/vite.js'), 'build', '--base', './'], {
           cwd: workspace, env: getSafeRuntimeProcessEnvironment(), stdout: 'pipe', stderr: 'pipe',
         })
         const [code, output, error] = await Promise.all([build.exited, new Response(build.stdout).text(), new Response(build.stderr).text()])
@@ -107,7 +109,7 @@ test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1')('managed dev and buil
       const childFrame = frameTree.childFrames[0].frame.id
       const { executionContextId } = await send('Page.createIsolatedWorld', { frameId: childFrame }, page)
       await send('Runtime.evaluate', { contextId: executionContextId,
-        expression: `console.warn('recorded-warning'); fetch('/missing-observation-file?private=value'); fetch('http://127.0.0.1:1').catch(()=>{}); setTimeout(() => { throw new Error('recorded-page-error') }, 0)` }, page)
+        expression: `console.warn('recorded-warning'); fetch('./missing-observation-file.json?private=value', {headers: {accept: 'application/json'}}); fetch('http://127.0.0.1:1').catch(()=>{}); setTimeout(() => { throw new Error('recorded-page-error') }, 0)` }, page)
       const recordingUrl = access.baseUrl + '/recordings/' + record.id
       const errorDeadline = Date.now() + 5000
       let current: any
@@ -144,6 +146,7 @@ test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1')('managed dev and buil
       expect(typeof finished.observedEnvironment.maxTouchPoints).toBe('number')
       expect(finished.screenshotAvailable).toBe(true)
       expect(JSON.stringify(finished)).not.toContain('__beegame_preview_capability')
+      expect(JSON.stringify(finished)).not.toContain(capabilities.issueRouteId(sessionId, 'fixture-owner'))
       expect(JSON.stringify(finished)).not.toContain('private=value')
       expect(JSON.stringify(finished)).not.toContain('UNRELATED_PAGE')
       expect(await (await fetch(recordingUrl)).json()).toEqual(finished)

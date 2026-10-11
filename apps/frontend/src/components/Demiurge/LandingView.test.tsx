@@ -630,6 +630,14 @@ beforeEach(() => {
 });
 
 describe('LandingView bootstrap submission', () => {
+  it('keeps the idea home header controls without a sound button', async () => {
+    await renderLanding();
+
+    expect(screen.queryByTestId('home-sound-toggle')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '用户菜单' })).toBeInTheDocument();
+    expect(document.querySelector('header .lucide-moon')).toBeInTheDocument();
+  });
+
   it('asks the user to sign in before generating intake options', async () => {
     mockCurrentUser = null;
 
@@ -1039,6 +1047,23 @@ describe('LandingView bootstrap submission', () => {
     }
     await goToSettingsGroup(1);
     expect(screen.getByRole('button', { name: '资源库使用方式', exact: true })).toHaveTextContent('按需使用');
+    // The options must escape the scrolling dialog, not merely have a larger
+    // z-index inside its clipping ancestor. All choices still update the brief.
+    for (const option of ['优先使用', '必须使用', '按需使用']) {
+      const listbox = await openSettingOptions('资源库使用方式');
+      expect(listbox.parentElement).toBe(document.body);
+      expect(listbox.closest('[role="dialog"]')).toBeNull();
+      expect(within(listbox).getAllByRole('option')).toHaveLength(3);
+      fireEvent.click(within(listbox).getByRole('option', { name: option, exact: true }));
+      expect(screen.getByRole('button', { name: '资源库使用方式', exact: true })).toHaveTextContent(option);
+      expect(screen.queryByRole('listbox', { name: '资源库使用方式', exact: true })).not.toBeInTheDocument();
+      expect(screen.getByTestId('intake-settings')).toBeInTheDocument();
+    }
+    const openResourceMenu = await openSettingOptions('资源库使用方式');
+    fireEvent.keyDown(within(openResourceMenu).getByRole('option', { name: '必须使用', exact: true }), { key: 'Escape' });
+    expect(screen.queryByRole('listbox', { name: '资源库使用方式', exact: true })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '资源库使用方式', exact: true })).toHaveFocus();
+    expect(screen.getByTestId('intake-settings')).toBeInTheDocument();
     await selectSetting('资源库使用方式', '按需使用');
     await goToSettingsGroup(1);
     fireEvent.click(screen.getByRole('button', { name: /键鼠/ }));

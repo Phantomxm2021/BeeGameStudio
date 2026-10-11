@@ -1,5 +1,5 @@
 import React, { createContext, type ReactNode, useContext } from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 
 export const OrderedListItemContext = createContext({ marker: '' });
 

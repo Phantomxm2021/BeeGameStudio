@@ -26,7 +26,7 @@ import {
   getTeamFilePath,
   readTeamFileAsync,
   sanitizeAgentName,
-  writeTeamFileAsync,
+  mutateTeamFileAsync,
   type TeamFile,
 } from 'src/utils/swarm/teamHelpers.js'
 import { assignTeammateColor } from 'src/utils/swarm/teammateLayoutManager.js'
@@ -308,29 +308,29 @@ async function appendTeamMember(
   spawn: ResolvedSpawn,
   result: TeammateSpawnResult,
 ): Promise<void> {
-  const teamFile = await readTeamFileAsync(spawn.teamName)
-  if (!teamFile) {
-    throw new Error(
-      `Team "${spawn.teamName}" disappeared during teammate spawn.`,
-    )
-  }
-
   const display = getBackendDisplay(result)
-  teamFile.members.push({
-    agentId: spawn.teammateId,
-    name: spawn.sanitizedName,
-    agentType: input.agent_type,
-    model: spawn.model,
-    prompt: input.prompt,
-    color: spawn.teammateColor,
-    planModeRequired: input.plan_mode_required,
-    joinedAt: Date.now(),
-    tmuxPaneId: display.paneId,
-    cwd: spawn.workingDir,
-    subscriptions: [],
-    backendType: result.backendType,
+  await mutateTeamFileAsync(spawn.teamName, teamFile => {
+    if (teamFile.members.some(member => member.name === spawn.sanitizedName)) {
+      throw new Error(
+        `Teammate name "${spawn.sanitizedName}" is already registered`,
+      )
+    }
+    teamFile.members.push({
+      agentId: spawn.teammateId,
+      name: spawn.sanitizedName,
+      agentType: input.agent_type,
+      model: spawn.model,
+      prompt: input.prompt,
+      color: spawn.teammateColor,
+      planModeRequired: input.plan_mode_required,
+      joinedAt: Date.now(),
+      tmuxPaneId: display.paneId,
+      cwd: spawn.workingDir,
+      subscriptions: [],
+      backendType: result.backendType,
+      paneCleanup: result.paneCleanup,
+    })
   })
-  await writeTeamFileAsync(spawn.teamName, teamFile)
 }
 
 async function handleSpawn(
@@ -377,8 +377,20 @@ async function handleSpawn(
     throw new Error(result.error ?? 'Failed to spawn teammate')
   }
 
+  try {
+    await appendTeamMember(input, spawn, result)
+  } catch (error) {
+    let closed = false
+    try {
+      closed = await executor.kill(spawn.teammateId)
+    } catch {
+      /* report below */
+    }
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}; ${closed ? 'started teammate was closed' : 'teammate cleanup failed; live execution tracking retained'}`,
+    )
+  }
   updateTeamContext(context, spawn, result)
-  await appendTeamMember(input, spawn, result)
 
   const display = getBackendDisplay(result)
   return {

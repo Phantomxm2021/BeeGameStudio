@@ -15,7 +15,7 @@ import { fileURLToPath } from 'url';
 import { ModalContext } from '../context/modalContext.js';
 import { PromptOverlayProvider, usePromptOverlay, usePromptOverlayDialog } from '../context/promptOverlayContext.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box, ScrollBox, type ScrollBoxHandle, Text, instances } from '@anthropic/ink';
+import { Box, ScrollBox, type ScrollBoxHandle, Text, instances } from '@bee-game-studio/ink';
 import type { Message } from '../types/message.js';
 import { openBrowser, openPath } from '../utils/browser.js';
 import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';

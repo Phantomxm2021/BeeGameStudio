@@ -29,6 +29,7 @@ export function checkDesignDocumentReferences(workspacePath: string, authorBatch
   const revision = createHash('sha256').update(JSON.stringify({ authorBatch, document }))
   const issues: string[] = [], pendingReferences: string[] = [], uncitedDocuments: string[] = []
   let checkedReferences = 0
+  const retainedFiles = new Set<string>()
   const inside = (path: string) => {
     const rel = relative(root, path)
     return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)
@@ -72,6 +73,10 @@ export function checkDesignDocumentReferences(workspacePath: string, authorBatch
     })
     let documentReferences = 0
     for (const reference of references) {
+      // Fragment-only links address this already-read document, not its
+      // containing directory or a separate retained evidence file. This
+      // checker verifies file references; it does not certify anchor targets.
+      if (reference.path.startsWith('#')) continue
       const documentReference = /\.md(?:[?#].*)?$/i.test(reference.path)
       if (documentReference) { checkedReferences++; documentReferences++ }
       const location = `docs/${name}:${reference.line}`
@@ -113,6 +118,8 @@ export function checkDesignDocumentReferences(workspacePath: string, authorBatch
             revision.update(JSON.stringify([target, canonical, file.isFile()
               ? createHash('sha256').update(readFileSync(target)).digest('hex') : 'not-file']))
             if (!file.isFile() || !file.size) issues.push(`${location}: ${kind} is not a nonempty file: ${reference.path}`)
+            else if (!PROJECT_DOCUMENTS.some(name => target === join(root, 'docs', name)))
+              retainedFiles.add(relative(root, target).split(sep).join('/'))
           }
         }
       } catch (error) {
@@ -132,6 +139,7 @@ export function checkDesignDocumentReferences(workspacePath: string, authorBatch
     if (!documentReferences) uncitedDocuments.push(`docs/${name}`)
   }
   return { valid: issues.length === 0, issues, checkedReferences,
+    retainedFiles: [...retainedFiles].sort(),
     checkedDocuments: files.map(name => `docs/${name}`), inputRevision: revision.digest('hex'),
     pendingReferences: [...new Set(pendingReferences)], uncitedDocuments,
     note: 'Checks explicit local Markdown document references, retained file links outside planned assets/content and scheduled future documents; rejects links to platform-temporary files regardless of extension. Evidence existence is not evidence correctness. Unlinked titles, bare paths, section contents, decision ownership and semantic agreement remain unverified; no citations is not authority closure.' }

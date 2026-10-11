@@ -1,5 +1,5 @@
 {
-  "name": "@anthropic/remote-control-server",
+  "name": "@bee-game-studio/remote-control-server",
   "version": "0.1.0",
   "type": "module",
   "scripts": {

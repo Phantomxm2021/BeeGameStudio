@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text, Dialog } from '@anthropic/ink';
+import { Text, Dialog } from '@bee-game-studio/ink';
 import type { ValidationError } from '../utils/settings/validation.js';
 import { Select } from './CustomSelect/index.js';
 import { ValidationErrorsList } from './ValidationErrorsList.js';

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { PassThrough } from 'node:stream';
 import React from 'react';
-import { wrappedRender as render } from '@anthropic/ink';
+import { wrappedRender as render } from '@bee-game-studio/ink';
 import { SentryErrorBoundary } from '../../components/SentryErrorBoundary.js';
 import type { RunProgress } from '../progress/store.js';
 import { call as panelCall } from '../panel/panelCall.js';

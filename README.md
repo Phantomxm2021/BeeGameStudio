@@ -1,60 +1,51 @@
-# Claude Code Best V5 (CCB)
+# BGS
 
-[![GitHub Stars](https://img.shields.io/github/stars/bee-game-studio/claude-code?style=flat-square&logo=github&color=yellow)](https://github.com/bee-game-studio/claude-code/stargazers)
-[![GitHub Contributors](https://img.shields.io/github/contributors/bee-game-studio/claude-code?style=flat-square&color=green)](https://github.com/bee-game-studio/claude-code/graphs/contributors)
-[![GitHub Issues](https://img.shields.io/github/issues/bee-game-studio/claude-code?style=flat-square&color=orange)](https://github.com/bee-game-studio/claude-code/issues)
-[![GitHub License](https://img.shields.io/github/license/bee-game-studio/claude-code?style=flat-square)](https://github.com/bee-game-studio/claude-code/blob/main/LICENSE)
-[![Last Commit](https://img.shields.io/github/last-commit/bee-game-studio/claude-code?style=flat-square&color=blue)](https://github.com/bee-game-studio/claude-code/commits/main)
+[![GitHub Stars](https://img.shields.io/github/stars/Phantomxm2021/BeeGameStudio?style=flat-square&logo=github&color=yellow)](https://github.com/Phantomxm2021/BeeGameStudio/stargazers)
+[![GitHub Contributors](https://img.shields.io/github/contributors/Phantomxm2021/BeeGameStudio?style=flat-square&color=green)](https://github.com/Phantomxm2021/BeeGameStudio/graphs/contributors)
+[![GitHub Issues](https://img.shields.io/github/issues/Phantomxm2021/BeeGameStudio?style=flat-square&color=orange)](https://github.com/Phantomxm2021/BeeGameStudio/issues)
+[Source and third-party notices](./NOTICE.md)
+[![Last Commit](https://img.shields.io/github/last-commit/Phantomxm2021/BeeGameStudio?style=flat-square&color=blue)](https://github.com/Phantomxm2021/BeeGameStudio/commits/main)
 [![Bun](https://img.shields.io/badge/runtime-Bun-black?style=flat-square&logo=bun)](https://bun.sh/)
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=flat-square&logo=discord)](https://discord.gg/uApuzJWGKX)
 
-> Which Claude do you like? The open source one is the best.
+> BGS — PhantomLab 的 AI 游戏开发工作台。
 
-牢 A (Anthropic) 官方 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 完整复原的工程化项目。虽然很难绷, 但是它叫做 CCB(踩踩背)... 而且, 我们实现了企业版或者需要登陆 Claude 账号才能使用的特性, 并在此基础上扩展了更多好玩的特性。
+BGS（BeeGameStudio）由 PhantomLab 开发和维护。本仓库基于 [claude-code-best/claude-code](https://github.com/claude-code-best/claude-code) 扩展，不是 Anthropic 官方产品。上游代码及第三方组件的来源、版权与许可证声明保留；BGS 的产品品牌不改变这些代码的权利归属。
 
 [Peri Code](https://github.com/KonghaYao/peri)：Claude Code 兼容的 Rust Agent，多年大模型经验匠心制作，国内大模型（DeepSeek/GLM）精调，CPU/内存极致优化，在开发版/树莓派上也能跑 CC 一样的体验。
 
-[文档在这里](https://ccb.agent-aura.top/) | [留影文档在这里](./Friends.md) | [Discord 群组，群主在线答疑](https://discord.gg/uApuzJWGKX)
+[本地文档](./docs/) | [留影文档在这里](./Friends.md) | [Discord 群组，群主在线答疑](https://discord.gg/uApuzJWGKX)
 
 | 特性                        | 说明                                                                                                                         | 文档                                                                                                                                      |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| **Claude 群控技术**         | Pipe IPC 多实例协作：同机 main/sub 自动编排 + LAN 跨机器零配置发现与通讯，`/pipes` 选择面板 + `Shift+↓` 交互 + 消息广播路由 | [Pipe IPC](https://ccb.agent-aura.top/docs/features/uds-inbox) / [LAN](https://ccb.agent-aura.top/docs/features/lan-pipes)                |
-| **ACP 协议一等一支持**      | 支持接入 Zed、Cursor 等 IDE，支持会话恢复、Skills、权限桥接                                                                  | [文档](https://ccb.agent-aura.top/docs/features/acp-zed)                                                                                  |
-| **Remote Control 私有部署** | Docker 自托管远程界面, 可以手机上看 CC                                                                                       | [文档](https://ccb.agent-aura.top/docs/features/remote-control-self-hosting)                                                              |
-| **Langfuse 监控**           | 企业级 Agent 监控, 可以清晰看到每次 agent loop 细节, 可以一键转化为数据集                                                    | [文档](https://ccb.agent-aura.top/docs/features/langfuse-monitoring)                                                                      |
-| **Web Search**              | 内置网页搜索工具, 支持 bing 和 brave 搜索                                                                                    | [文档](https://ccb.agent-aura.top/docs/features/web-browser-tool)                                                                         |
+| **BGS 群控技术**         | Pipe IPC 多实例协作：同机 main/sub 自动编排 + LAN 跨机器零配置发现与通讯，`/pipes` 选择面板 + `Shift+↓` 交互 + 消息广播路由 | [Pipe IPC](./docs/features/uds-inbox.md) / [LAN](./docs/features/lan-pipes.md)                |
+| **ACP 协议一等一支持**      | 支持接入 Zed、Cursor 等 IDE，支持会话恢复、Skills、权限桥接                                                                  | [文档](./docs/features/acp-zed.md)                                                                                  |
+| **Remote Control 私有部署** | Docker 自托管远程界面, 可以手机上看 CC                                                                                       | [文档](./docs/features/remote-control-self-hosting.md)                                                              |
+| **Langfuse 监控**           | 企业级 Agent 监控, 可以清晰看到每次 agent loop 细节, 可以一键转化为数据集                                                    | [文档](./docs/features/langfuse-monitoring.md)                                                                      |
+| **Web Search**              | 内置网页搜索工具, 支持 bing 和 brave 搜索                                                                                    | [文档](./docs/features/web-browser-tool.md)                                                                         |
 | **Poor Mode**               | 穷鬼模式，关闭记忆提取和键入建议,大幅度减少并发请求                                                                          | /poor 可以开关                                                                                                                            |
-| **Channels 频道通知**       | MCP 服务器推送外部消息到会话（飞书/Slack/Discord/微信等），`--channels plugin:name@marketplace` 启用                         | [文档](https://ccb.agent-aura.top/docs/features/channels)                                                                                 |
-| **自定义模型供应商**        | OpenAI/Anthropic/Gemini/Grok 兼容  (`/login`)                                                                                          | [文档](https://ccb.agent-aura.top/docs/features/all-features-guide)                                                                        |
-| Voice Mode                  | 语音输入，支持豆包语言输入（`/voice doubao`）                                                                   | [文档](https://ccb.agent-aura.top/docs/features/voice-mode)                                                                               |
-| Computer Use                | 屏幕截图、键鼠控制                                                                                                           | [文档](https://ccb.agent-aura.top/docs/features/computer-use)                                                                             |
-| Chrome Use                  | 浏览器自动化、表单填写、数据抓取                                                                                             | [自托管](https://ccb.agent-aura.top/docs/features/chrome-use-mcp) [原生版](https://ccb.agent-aura.top/docs/features/claude-in-chrome-mcp) |
-| Sentry                      | 企业级错误追踪                                                                                                               | [文档](https://ccb.agent-aura.top/docs/internals/sentry-setup)                                                                            |
-| GrowthBook                  | 企业级特性开关                                                                                                               | [文档](https://ccb.agent-aura.top/docs/internals/growthbook-adapter)                                                                      |
-| /dream 记忆整理             | 自动整理和优化记忆文件                                                                                                       | [文档](https://ccb.agent-aura.top/docs/features/auto-dream)                                                                               |
+| **Channels 频道通知**       | MCP 服务器推送外部消息到会话（飞书/Slack/Discord/微信等），`--channels plugin:name@marketplace` 启用                         | [文档](./docs/features/channels.md)                                                                                 |
+| **自定义模型供应商**        | OpenAI/Anthropic/Gemini/Grok 兼容  (`/login`)                                                                                          | [文档](./docs/features/all-features-guide.md)                                                                        |
+| Voice Mode                  | 语音输入，支持豆包语言输入（`/voice doubao`）                                                                   | [文档](./docs/features/voice-mode.md)                                                                               |
+| Computer Use                | 屏幕截图、键鼠控制                                                                                                           | [文档](./docs/features/computer-use.md)                                                                             |
+| Chrome Use                  | 浏览器自动化、表单填写、数据抓取                                                                                             | [自托管](./docs/features/chrome-use-mcp.md) [原生版](./docs/features/claude-in-chrome-mcp.md) |
+| Sentry                      | 企业级错误追踪                                                                                                               | [文档](./docs/internals/sentry-setup.mdx)                                                                            |
+| GrowthBook                  | 企业级特性开关                                                                                                               | [文档](./docs/internals/growthbook-adapter.mdx)                                                                      |
+| /dream 记忆整理             | 自动整理和优化记忆文件                                                                                                       | [文档](./docs/features/auto-dream.md)                                                                               |
 
 - 🚀 [想要启动项目](#-快速开始源码版)
 - 🐛 [想要调试项目](#vs-code-调试)
 - 📖 [想要学习项目](#teach-me-学习项目)
 
-## ⚡ 快速开始(安装版)
+## 安装与更新
 
-不用克隆仓库, 从 NPM 下载后, 直接使用
+公开 npm 发布身份尚未核实；当前使用下方的源码启动方式。若使用维护者提供的发行包，按该发行渠道的说明安装和更新，不运行未实现的 CLI 自更新命令。
 
-```sh
-npm i -g bee-game-studio
+发行包的入口为 `bee-game-studio`（Node.js）和 `bee-game-studio-bun`（Bun）。`ccb`／`ccb-bun` 仅保留为已有用户的兼容别名。
 
-# bun 安装比较多问题, 推荐 npm 装
-# bun  i -g bee-game-studio
-# bun pm -g trust bee-game-studio @claude-code-best/mcp-chrome-bridge
+远程控制服务地址与令牌由部署者提供；本仓库不承诺存在公共 BGS 远程服务，不提供猜测生成的域名或示例认证令牌。
 
-ccb # 以 nodejs 打开 claude code
-ccb-bun # 以 bun 形态打开
-ccb update # 更新到最新版本
-CLAUDE_BRIDGE_BASE_URL=https://remote-control.bee-game-studio.win/ CLAUDE_BRIDGE_OAUTH_TOKEN=test-my-key ccb --remote-control # 我们有自部署的远程控制
-```
-
-> **安装/更新失败？** 先 `npm rm -g bee-game-studio` 清理旧版本，再 `npm i -g bee-game-studio@latest`。仍失败则指定版本号：`npm i -g bee-game-studio@<版本号>`
+维护者打包使用 `bun run release:pack --output /path/to/output`：在临时目录构建一个新版本，只打包该版本、安装脚本与已声明的版权说明。不会清空运行中的 `dist`，也不会打包其历史版本。检查生成的 `.tgz` 后才可显式发布；直接从开发工作区 `npm pack`／`npm publish` 会被拒绝。该命令不代表已完成整体许可证核验。
 
 ## ⚡ 快速开始(源码版)
 
@@ -136,9 +127,9 @@ bun run dev
 bun run build
 ```
 
-构建采用 code splitting 多文件打包（`build.ts`），产物输出到 `dist/` 目录（入口 `dist/cli.js` + 约 450 个 chunk 文件）。
+构建采用 code splitting 多文件打包（`build.ts`），每个版本保存在 `dist/build-*`，`dist/cli.js` 指向当前版本。旧版本保留供运行中的进程使用，不属于发行包。备用 Vite 构建位于 `dist-vite`，不清空默认运行目录。
 
-构建出的版本 bun 和 node 都可以启动, 你 publish 到私有源可以直接启动
+构建版本提供 Bun 和 Node 启动入口。私有源发布须使用上面的独立发行包流程。
 
 如果遇到 bug 请直接提一个 issues, 我们优先解决
 
@@ -200,11 +191,39 @@ Before merging a core-related change, run:
 bun run core:audit -- --upstream /absolute/path/to/the-pinned-checkout
 ```
 
-The expected result is `0 differences`. Deliberate upstream upgrades require a
-reviewed pin change in the manifest. Product-identity substitutions must also be
+Ordinary synchronized files should have `0 differences`. Files explicitly
+listed in `rootExceptions` require a manual upstream merge: `core:sync` preserves
+them, while `core:audit` still reports their differences (and remains nonzero
+until those differences are resolved). An exception is not evidence of upstream
+alignment. Deliberate upstream upgrades require a reviewed pin change in the
+manifest. Product-identity substitutions and manual-merge exceptions must also be
 declared there. The runtime configuration directory uses the single key
 `BEEGAME_CONFIG_DIR`; do not add a legacy fallback or a second configuration
 root.
+
+内部运行配置使用 BGS 命名：
+
+| 配置 | 名称 |
+| --- | --- |
+| 默认模型档位 | `BGS_DEFAULT_FAST_MODEL`、`BGS_DEFAULT_BALANCED_MODEL`、`BGS_DEFAULT_STRONG_MODEL` |
+| 模型名称、描述及能力 | 上述变量的 `_NAME`、`_DESCRIPTION`、`_SUPPORTED_CAPABILITIES` |
+| 供应商与云平台开关 | `BGS_USE_OPENAI/GEMINI/GROK/BEDROCK/VERTEX/FOUNDRY`（六个独立变量） |
+| 简化模式 | `BGS_SIMPLE` |
+| 禁用自动记忆／非必要流量 | `BGS_DISABLE_AUTO_MEMORY`、`BGS_DISABLE_NONESSENTIAL_TRAFFIC` |
+| 工具子进程凭据隔离 | `BGS_SUBPROCESS_ENV_SCRUB` |
+| 宿主保留模型路由／跳过 Chrome MCP 安装 | `BGS_PROVIDER_MANAGED_BY_HOST`、`BGS_SKIP_CHROME_MCP_SETUP` |
+| API Unix Socket 通道 | `BGS_API_UNIX_SOCKET` |
+| 远程 SSE／Cowork 插件／原生搜索／PowerShell | `BGS_USE_CCR_V2`、`BGS_USE_COWORK_PLUGINS`、`BGS_USE_NATIVE_FILE_SEARCH`、`BGS_USE_POWERSHELL_TOOL` |
+
+原生旧名仅在 CLI 启动、设置及宿主配置入口转换，已有配置不必立即迁移；同一输入同时含新旧名时，新名优先（包括空值及 `0`）。API 凭据、OAuth、外部服务地址及真实模型 ID 不随品牌改名。此变更不改写现有用户配置文件，也不改变第三方版权声明。
+
+独立面板在启动 CLI 前加载私有环境文件，继承供应商运行环境、认证及代理地址，不把凭据或带凭据的端点写进面板命令；加载时暂时关闭 Shell 跟踪，随后恢复。仅使用文件配置时原生 `--settings` 路径保持不变；若存在显式内联配置，只在原配置根目录写入私密的 flag-settings 副本，合并文件与内联内容，不复制整份会话 settings，不改变相对权限／Hook 路径基准。配置根目录不可写时会明确失败，不悄悄丢弃配置。POSIX 临时目录权限为 `0700`、文件为 `0600`（Windows ACL 尚未验证）。启动或关闭失败保留追踪与私密文件；确认面板关闭后才清理文件，清理失败可重试且不会重复杀进程。团队删除同样关闭空闲面板；工作树只通过 Git 删除已注册且干净的目录，不递归删除无法核实的路径。Windows 启动超时保留启动身份，关闭重试核对身份以降低 PID 复用造成误杀的风险。退出清理失败／超时会提示，强制杀死父进程仍可能留下私有文件。Windows 与真实 SSH 场景尚需平台实测，合成测试不代表该边界已验证。
+
+普通提示词及非 Anthropic 兼容供应商路径使用 BGS／PhantomLab 身份；真实 Anthropic 系列服务保留服务敏感前缀，API、认证和版权声明不伪装为自有服务。
+
+宿主管理路由时，settings 的 `modelType`、Unix socket、mTLS 与 TLS 配置不能覆盖宿主选择。独立面板先清除已知旧供应商开关，再加载父会话的私有环境；保留 `--setting-sources`（包括空值）、开发运行时 define／feature 参数，显式内联 Agent 可通过 `--agents @file` 私密交接。团队成员修改使用现有跨进程文件锁和原子替换，登记失败回收已启动成员，启动中取消不返回成功。新成员记录保存实际 socket、私有文件位置及 Windows 启动指纹（不保存凭据或编码命令）；缺少回收定位的旧记录不会猜测删除目标，会保留记录并报告失败。强制退出前尚未完成登记的启动、Windows 真实进程树与文件 ACL、真实 SSH 仍未完整实测，不能据合成测试承诺无残留。本轮未重启服务或发布构建。
+
+`/feedback`／`/bug` 暂只显示不可用提示：当前没有 BGS 反馈接收服务，不收集或上传报告／会话，也不调用模型生成反馈标题。此处不改变其他第三方功能的真实服务名称与协议。
 
 ### 🐝 BeeGame SaaS 首次部署
 
@@ -299,22 +318,23 @@ TUI (REPL) 模式需要真实终端，无法直接通过 VS Code launch 启动�
 
 ## 相关文档及网站
 
-- **在线文档（Mintlify）**: [ccb.agent-aura.top](https://ccb.agent-aura.top/) — 文档源码位于 [`docs/`](docs/) 目录，欢迎投稿 PR
-- **DeepWiki**: [https://deepwiki.com/bee-game-studio/claude-code](https://deepwiki.com/bee-game-studio/claude-code)
+- **本地文档**：[docs/](docs/)；运行 `bun run docs:dev` 预览。
+- **源码仓库**：[Phantomxm2021/BeeGameStudio](https://github.com/Phantomxm2021/BeeGameStudio)。
+- 部分技术文章继承自上游分析，文中第三方产品和协议名称不代表 BGS 品牌或 PhantomLab 原创。
 
 ## Contributors
 
-<a href="https://github.com/bee-game-studio/claude-code/graphs/contributors">
+<a href="https://github.com/Phantomxm2021/BeeGameStudio/graphs/contributors">
   <img src="contributors.svg" alt="Contributors" />
 </a>
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=bee-game-studio%2Fclaude-code&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=Phantomxm2021%2FBeeGameStudio&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=bee-game-studio/claude-code&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=bee-game-studio/claude-code&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=bee-game-studio/claude-code&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=Phantomxm2021/BeeGameStudio&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=Phantomxm2021/BeeGameStudio&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=Phantomxm2021/BeeGameStudio&type=date&legend=top-left" />
  </picture>
 </a>
 

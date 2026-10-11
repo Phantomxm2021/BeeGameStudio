@@ -1,6 +1,6 @@
-import { randomUUID } from 'crypto'
+import { randomUUID, createHash } from 'crypto'
 import { readFile, unlink } from 'fs/promises'
-import { join } from 'path'
+import { join, resolve, dirname, basename } from 'path'
 import { tmpdir } from 'os'
 import type { AgentColorName } from '@bee-game-studio/builtin-tools/tools/AgentTool/agentColorManager.js'
 import { logForDebugging } from '../../../utils/debug.js'
@@ -8,12 +8,23 @@ import { execFileNoThrow } from '../../../utils/execFileNoThrow.js'
 import { getPlatform, type Platform } from '../../../utils/platform.js'
 import { isInWindowsTerminal } from './detection.js'
 import { registerWindowsTerminalBackend } from './registry.js'
-import type { CreatePaneResult, PaneBackend, PaneId } from './types.js'
+import type {
+  CreatePaneResult,
+  PaneBackend,
+  PaneId,
+  PaneCleanupMetadata,
+} from './types.js'
 
 type CommandResult = { stdout: string; stderr: string; code: number }
 type CommandRunner = (command: string, args: string[]) => Promise<CommandResult>
 
-type PaneStatus = 'registered' | 'spawning' | 'ready' | 'killing' | 'dead'
+type PaneStatus =
+  | 'registered'
+  | 'spawning'
+  | 'uncertain'
+  | 'ready'
+  | 'killing'
+  | 'dead'
 
 type WindowsTerminalPane = {
   title: string
@@ -22,6 +33,9 @@ type WindowsTerminalPane = {
   status: PaneStatus
   pid?: number
   spawnPromise?: Promise<void>
+  launcherIdentity?: string
+  launcherHash?: string
+  closed?: boolean
 }
 
 function quotePowerShellString(value: string): string {
@@ -193,7 +207,11 @@ export class WindowsTerminalBackend implements PaneBackend {
     }
 
     // 拒绝 ready 态重 spawn（避免同 pidFile 双进程竞争）
-    if (pane.status === 'ready' || pane.status === 'killing') {
+    if (
+      pane.status === 'ready' ||
+      pane.status === 'killing' ||
+      pane.status === 'uncertain'
+    ) {
       throw new Error(
         `Pane ${paneId} already spawned (status=${pane.status}); create a new pane to re-launch`,
       )
@@ -230,6 +248,7 @@ export class WindowsTerminalBackend implements PaneBackend {
       // multi-statement PowerShell commands passed via -Command. Encode the
       // entire script as Base64 UTF-16LE and use -EncodedCommand instead.
       const encoded = Buffer.from(launcher, 'utf16le').toString('base64')
+      pane.launcherIdentity = encoded
       const args =
         pane.mode === 'window'
           ? ['-w', '-1', 'new-tab', '--title', pane.title]
@@ -274,7 +293,9 @@ export class WindowsTerminalBackend implements PaneBackend {
       pane.status = 'ready'
       resolveSpawn()
     } catch (err) {
-      pane.status = 'dead'
+      // wt.exe accepting a launch is not evidence that it exited when the PID
+      // file times out. Retain the unique launcher identity for cleanup/retry.
+      pane.status = 'uncertain'
       pane.pid = undefined
       rejectSpawn(err)
       throw err
@@ -317,10 +338,43 @@ export class WindowsTerminalBackend implements PaneBackend {
   async killPane(
     paneId: PaneId,
     _useExternalSession?: boolean,
+    cleanup?: PaneCleanupMetadata,
   ): Promise<boolean> {
-    const pane = this.panes.get(paneId)
+    let pane = this.panes.get(paneId)
+    // Recover only our own locator. The saved hash proves launcher identity;
+    // a saved PID by itself is never permission to stop a reused process.
+    if (!pane && cleanup?.windows) {
+      const saved = cleanup.windows
+      if (
+        !/^wt-[0-9a-f-]{36}$/.test(paneId) ||
+        !/^[0-9a-f]{64}$/.test(saved.launcherHash) ||
+        basename(saved.pidFile) !== `${paneId}.pid` ||
+        dirname(resolve(saved.pidFile)) !== resolve(this.pidFileDir) ||
+        (saved.pid !== undefined &&
+          (!Number.isSafeInteger(saved.pid) || saved.pid <= 0))
+      )
+        return false
+      pane = {
+        title: '',
+        mode: 'pane',
+        pidFile: saved.pidFile,
+        launcherHash: saved.launcherHash,
+        pid: saved.pid,
+        status: 'uncertain',
+      }
+      this.panes.set(paneId, pane)
+    }
     if (!pane) {
       return false
+    }
+    // Executor cleanup and team cleanup may both acknowledge this pane.
+    if (pane.closed) return true
+
+    // No terminal has been launched yet, so there is no process to stop.
+    if (pane.status === 'registered') {
+      pane.status = 'dead'
+      pane.closed = true
+      return true
     }
 
     // 1. 解 kill-while-spawn race：await spawn 完成（不论成功失败）
@@ -330,10 +384,9 @@ export class WindowsTerminalBackend implements PaneBackend {
 
     // 2. TOCTOU 修正：重读 status/pid
     if (pane.status === 'dead') {
-      this.panes.delete(paneId)
       return false
     }
-    if (pane.status !== 'ready') {
+    if (pane.status !== 'ready' && pane.status !== 'uncertain') {
       // 还在其它非终态（理论不可达，保险）
       return false
     }
@@ -343,34 +396,24 @@ export class WindowsTerminalBackend implements PaneBackend {
     // 3. 优先用缓存 pid
     let pid: number | undefined = pane.pid
 
-    // 4. fallback：缓存没有则读盘（保留 retry 3×500ms）
+    // A delayed launcher can create its PID file after the original timeout.
+    // If still absent, query its unique encoded command; absence is not proof
+    // that wt.exe won't start it later, so keep tracking on that result.
     if (pid === undefined) {
-      let pidContent: string | null = null
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          pidContent = (await readFile(pane.pidFile, 'utf-8')).trim()
-          break
-        } catch {
-          if (attempt === 2) {
-            pane.status = 'dead'
-            this.panes.delete(paneId)
-            return false
-          }
-          await new Promise(r => setTimeout(r, 500))
-        }
+      try {
+        const content = (await readFile(pane.pidFile, 'utf-8')).trim()
+        const parsed = /^\d+$/.test(content)
+          ? Number.parseInt(content, 10)
+          : NaN
+        if (Number.isSafeInteger(parsed) && parsed > 0) pid = parsed
+      } catch {
+        // Identity lookup below is the only fallback; never drop tracking.
       }
-      if (!pidContent || !/^\d+$/.test(pidContent)) {
-        pane.status = 'dead'
-        this.panes.delete(paneId)
-        return false
-      }
-      const parsed = Number.parseInt(pidContent, 10)
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        pane.status = 'dead'
-        this.panes.delete(paneId)
-        return false
-      }
-      pid = parsed
+    }
+
+    if (!pane.launcherIdentity && !pane.launcherHash) {
+      pane.status = 'uncertain'
+      return false
     }
 
     // 5. 执行 Stop-Process
@@ -378,18 +421,69 @@ export class WindowsTerminalBackend implements PaneBackend {
       '-NoLogo',
       '-NoProfile',
       '-Command',
-      `Stop-Process -Id ${pid} -Force -ErrorAction Stop`,
-    ])
+      [
+        "$ErrorActionPreference = 'Stop'",
+        ...(pane.launcherIdentity
+          ? [
+              `$identity = [regex]::Escape(${quotePowerShellString(pane.launcherIdentity)})`,
+              `$pattern = '(?:^|\\s)(?i:-EncodedCommand)\\s+"?' + $identity + '"?\\s*$'`,
+              'function Test-PaneLauncher($candidate) { return $candidate.CommandLine -and $candidate.CommandLine -cmatch $pattern }',
+            ]
+          : [
+              `$expectedHash = ${quotePowerShellString(pane.launcherHash!)}`,
+              "function Test-PaneLauncher($candidate) { if (!$candidate.CommandLine -or $candidate.CommandLine -notmatch '(?:^|\\s)(?i:-EncodedCommand)\\s+\"?([A-Za-z0-9+/=]+)\"?\\s*$') { return $false }; $encoded = $Matches[1]; $sha = [System.Security.Cryptography.SHA256]::Create(); try { $hash = [BitConverter]::ToString($sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($encoded))).Replace('-', '').ToLowerInvariant(); return $hash -ceq $expectedHash } finally { $sha.Dispose() } }",
+            ]),
+        ...(pid === undefined
+          ? [
+              '$p = @(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and (Test-PaneLauncher $_) })',
+              'if ($p.Count -ne 1) { exit 2 }',
+              '$p = $p[0]',
+            ]
+          : [
+              `$p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'`,
+              'if ($null -eq $p) { exit 0 }',
+            ]),
+        // Reject a reused PID. The launcher command is unique to this pane.
+        'if (!(Test-PaneLauncher $p)) { exit 2 }',
+        // Stop the verified launcher's native child as well as PowerShell.
+        '& taskkill.exe /PID $p.ProcessId /T /F',
+        'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+      ].join('; '),
+    ]).catch(error => {
+      pane.status = pid === undefined ? 'uncertain' : 'ready'
+      throw error
+    })
 
-    // 6. 不管成功失败都清缓存 + 标 dead + 从 map 删（防 PID 复用误杀）
+    if (result.code !== 0) {
+      pane.status = pid === undefined ? 'uncertain' : 'ready'
+      return false
+    }
+    // Only a confirmed close can remove tracking. Retries revalidate identity.
     pane.pid = undefined
     pane.status = 'dead'
-    this.panes.delete(paneId)
+    pane.closed = true
 
     logForDebugging(
       `[WindowsTerminalBackend] killPane ${paneId} pid=${pid} code=${result.code}`,
     )
     return result.code === 0
+  }
+
+  getPaneCleanupMetadata(paneId: PaneId): PaneCleanupMetadata | undefined {
+    const pane = this.panes.get(paneId)
+    const launcherHash = pane?.launcherIdentity
+      ? createHash('sha256').update(pane.launcherIdentity).digest('hex')
+      : pane?.launcherHash
+    return pane && launcherHash
+      ? {
+          useExternalSession: false,
+          windows: {
+            pidFile: pane.pidFile,
+            launcherHash,
+            pid: pane.pid,
+          },
+        }
+      : undefined
   }
 
   async hidePane(

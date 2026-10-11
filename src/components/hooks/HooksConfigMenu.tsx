@@ -4,7 +4,7 @@
  * Users can drill into each hook event, see configured matchers and hooks
  * (of any type: command, prompt, agent, http), and view individual hook
  * details. To add or modify hooks, users should edit settings.json directly
- * or ask Claude — the menu directs them there.
+ * or ask BGS — the menu directs them there.
  *
  * The menu is read-only because the old editing UI only supported
  * command-type hooks and duplicating the settings.json editing surface
@@ -16,7 +16,7 @@ import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js';
 import { useAppState, useAppStateStore } from 'src/state/AppState.js';
 import type { CommandResultDisplay } from '../../commands.js';
 import { useSettingsChange } from '../../hooks/useSettingsChange.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import {
   getHookEventMetadata,
@@ -28,7 +28,7 @@ import {
 import type { IndividualHookConfig } from '../../utils/hooks/hooksSettings.js';
 import { getSettings_DEPRECATED, getSettingsForSource } from '../../utils/settings/settings.js';
 import { plural } from '../../utils/stringUtils.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 import { SelectEventMode } from './SelectEventMode.js';
 import { SelectHookMode } from './SelectHookMode.js';
 import { SelectMatcherMode } from './SelectMatcherMode.js';
@@ -178,7 +178,7 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
 
   // If hooks are disabled, show an informational screen.
   // The menu is read-only, so we don't offer a re-enable button —
-  // users can edit settings.json or ask Claude instead.
+  // users can edit settings.json or ask BGS instead.
   if (hooksDisabled) {
     return (
       <Dialog title="Hook Configuration - Disabled" onCancel={handleExit} inputGuide={() => <Text>Esc to close</Text>}>
@@ -198,7 +198,7 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
           </Box>
           {!disabledByPolicy && (
             <Text dimColor>
-              To re-enable hooks, remove &quot;disableAllHooks&quot; from settings.json or ask Claude.
+              To re-enable hooks, remove &quot;disableAllHooks&quot; from settings.json or ask BGS.
             </Text>
           )}
         </Box>

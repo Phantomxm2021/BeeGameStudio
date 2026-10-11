@@ -1,5 +1,5 @@
 /**
- * Simplified ConfigurableShortcutHint for the standalone @anthropic/ink package.
+ * Simplified ConfigurableShortcutHint for the standalone @bee-game-studio/ink package.
  *
  * The full version reads user-configured keybindings via useShortcutDisplay.
  * This stub just renders the fallback shortcut — sufficient for the package's

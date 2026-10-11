@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { useAppState } from '../../state/AppState.js';
 
 type Props = {

@@ -66,5 +66,6 @@ credentials.json
 .claude-recovery.md
 .test-progress.md
 .squash-tmp/
+dist-vite/
 .git.*-backup
 .worktrees/

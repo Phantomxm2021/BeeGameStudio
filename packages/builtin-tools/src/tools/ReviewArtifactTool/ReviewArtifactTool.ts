@@ -2,7 +2,7 @@ import { z } from 'zod/v4'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import React from 'react'
-import { Box, Text } from '@anthropic/ink'
+import { Box, Text } from '@bee-game-studio/ink'
 
 const REVIEW_ARTIFACT_TOOL_NAME = 'ReviewArtifact'
 
@@ -62,8 +62,8 @@ export const ReviewArtifactTool = buildTool({
   async description(input) {
     const { title } = input as { title?: string }
     return title
-      ? `Claude wants to review: ${title}`
-      : 'Claude wants to review an artifact'
+      ? `BGS wants to review: ${title}`
+      : 'BGS wants to review an artifact'
   },
   userFacingName() {
     return 'ReviewArtifact'

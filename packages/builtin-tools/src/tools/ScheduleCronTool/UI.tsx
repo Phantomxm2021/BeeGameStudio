@@ -1,6 +1,6 @@
 import React from 'react';
 import { MessageResponse } from 'src/components/MessageResponse.js';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { truncate } from 'src/utils/format.js';
 import type { CreateOutput } from './CronCreateTool.js';
 import type { DeleteOutput } from './CronDeleteTool.js';

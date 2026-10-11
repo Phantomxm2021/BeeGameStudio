@@ -4,7 +4,7 @@
  */
 import * as React from 'react';
 
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 
 import type { GoalState } from 'src/types/logs.js';
 import { Select } from 'src/components/CustomSelect/index.js';

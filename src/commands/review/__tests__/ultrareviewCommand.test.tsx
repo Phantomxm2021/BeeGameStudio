@@ -31,7 +31,7 @@ import { setupAxiosMock } from '../../../../tests/mocks/axios.js';
 const _realReactMod = (await import('react')) as Record<string, unknown> & {
   default?: Record<string, unknown>;
 };
-const _realInkMod = (await import('@anthropic/ink')) as Record<string, unknown>;
+const _realInkMod = (await import('@bee-game-studio/ink')) as Record<string, unknown>;
 let _useStubReactForUltrareview = true;
 let _useStubInkForUltrareview = true;
 afterAll(() => {
@@ -161,9 +161,9 @@ mock.module('react', () => {
 
 // Spread real ink + flag-gate the stub components. Without spread, the bare
 // { Box: 'Box', Dialog: 'Dialog', Text: 'Text' } leaks into every later test
-// file (e.g. AgentsPlatformView.test.tsx) that imports @anthropic/ink — those
+// file (e.g. AgentsPlatformView.test.tsx) that imports @bee-game-studio/ink — those
 // consumers receive strings instead of real components and rendering breaks.
-mock.module('@anthropic/ink', () => {
+mock.module('@bee-game-studio/ink', () => {
   if (_useStubInkForUltrareview) {
     return {
       ..._realInkMod,

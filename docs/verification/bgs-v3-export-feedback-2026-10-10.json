@@ -1,0 +1,210 @@
+{
+  "protocol": "bgs.verification.v3-export-feedback.1",
+  "date": "2026-10-10",
+  "documentVersion": "1.11",
+  "workspace": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+  "scope": "Measured static build ZIP export and version-bound user Preview observations into existing authorized directed Review / owner Repair / remeasurement / follow-up. Not editable project export, release, or complete game quality.",
+  "implementation": [
+    "Preview, feedback and export reuse one measured build selection and file-coverage implementation. No new server, project script, rebuild or model call for download.",
+    "Archive contains build/ original measured bytes and measurement.json only. Refuses stale sources/directories, uncovered/private/alias paths, unknown measurement versions, writers and Run version drift before returning the complete ZIP. Reuses BGS ZIP32 helper with UTF-8 names.",
+    "Authenticated Preview observations append to existing Run JSON, bound to actual Task/Attempt/artifact and confirmed requirement IDs. Same key/content is idempotent; observations are untrusted reports, not findings, commands, user authorization or closure claims.",
+    "Preparing review/repair plans requires existing agent.send_message project authority and current plan revision, and never dispatches native work. Actual task execution remains explicit per task.",
+    "Directed review receives only selected observations and owners of bound source files; every observation needs a disposition with actual finding links or concrete non-reproduction/out-of-scope reason. Reports retain original source/version/owner/impact/close requirements.",
+    "Repair uses original owner write scope; changed report/source/owner contracts require explicit affected replanning. Affected measured consumer waits for remeasurement; unrelated accepted tasks/history remain. Follow-up preserves prior links and needs current repair/consumer evidence, not another PASS claim.",
+    "Review evidence also pins current measured directory membership, preventing added files during Review from escaping final freshness.",
+    "Existing actual source-bound AskUserQuestion path is retained. An unresolved follow-up escalates; no automatic review loop or new native turn limits."
+  ],
+  "endpoints": [
+    "POST /api/projects/:id/workflow-v3/export",
+    "POST /api/projects/:id/workflow-v3/preview-issues",
+    "POST /api/projects/:id/workflow-v3/preview-issues/:issueId/review-plan",
+    "POST /api/projects/:id/workflow-v3/preview-issues/:reviewAttemptId/repair-plan"
+  ],
+  "regression": [
+    {
+      "kind": "V3 plus shared Preview selection",
+      "passed": 150,
+      "failed": 0,
+      "files": 22,
+      "assertions": 1045,
+      "log": "/private/tmp/bgs-v3-export-feedback-core-verified.log"
+    },
+    {
+      "kind": "Final source-owner context change focused regression; included in the above test identities",
+      "passed": 18,
+      "failed": 0,
+      "files": 3,
+      "assertions": 112,
+      "log": "/private/tmp/bgs-v3-export-feedback-authority-final.log"
+    },
+    {
+      "kind": "Final Review measurement/closure and real native fake-provider chain; included in above test identities",
+      "passed": 20,
+      "failed": 0,
+      "files": 3,
+      "assertions": 122,
+      "log": "/private/tmp/bgs-v3-export-feedback-closure-complete.log"
+    },
+    {
+      "kind": "Frontend selected task/Preview/export/observation + existing viewer controls",
+      "passed": 149,
+      "failed": 0,
+      "files": 7,
+      "log": "/private/tmp/bgs-v3-export-feedback-front.log"
+    },
+    {
+      "kind": "Shared legacy canonical project package snapshot",
+      "passed": 1,
+      "failed": 0,
+      "files": 1,
+      "assertions": 10,
+      "log": "/private/tmp/bgs-v3-export-feedback-legacy-package.log"
+    }
+  ],
+  "distinctSelectedTests": 300,
+  "actualNativeEvidence": {
+    "provider": "Loopback deterministic fake model, not paid provider",
+    "observed": "Real CLI Skill / Read / AskUserQuestion / Write / normal end; 3 distinct task native contexts, actual retained user answer, host rule-tests exit zero, actual static runtime-smoke before observation and after owner repair, follow-up checks. 12 provider requests in the native fixture.",
+    "limits": "Not proof of LLM judgement, aesthetics, enjoyment or complete gameplay correctness."
+  },
+  "types": {
+    "frontend": {
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-v3-export-feedback-front-final-types.log"
+    },
+    "server": {
+      "exitCode": 2,
+      "diagnosticCount": 3556,
+      "baseline": "/private/tmp/bgs-v3-measured-preview-server-verified-types.log",
+      "addedDiagnostics": 0,
+      "removedDiagnostics": 0,
+      "log": "/private/tmp/bgs-v3-export-feedback-server-verified-types.log",
+      "note": "Entire server is not typecheck-clean. Exact diagnostic lines match previous baseline."
+    }
+  },
+  "failedExploration": [
+    {
+      "log": "/private/tmp/bgs-v3-export-feedback-core-final.log",
+      "passed": 149,
+      "failed": 1,
+      "finding": "A long-running suite loaded earlier Review code before the newly edited directory-drift test. It returned failed rather than unverified for that new case.",
+      "resolution": "Stopped editing that guard/test, ran focused closure then full suite again; verified logs retained separately. No ignored assertion or changed expected outcome."
+    }
+  ],
+  "limitations": [
+    "deliveryEligible remains false. Static ZIP is not editable source project or whole-game acceptance; HTTP build/ root required, not file:// compatibility.",
+    "No Claude Code native source changes, real generated game file edits, paid test, deployment/restart, or real database migration.",
+    "Existing optional JSON Run persistence is used; local CAS/restart and HTTP protocol tested. Real database competition/recovery and deployment UI/download not verified.",
+    "Review semantics and inability to reproduce an issue are not independent proof that an issue is absent or fixed. Required Skills remain selectable via existing task contracts; native test proves loading, not correct professional application.",
+    "Initial planning/conversational change UI, editable source project export, complete target platform / touch / audio / gameplay coverage remain incomplete.",
+    "ZIP is memory-collected with existing ZIP32 support; no large-package performance/installation guarantee.",
+    "Previously reported BeeGameLivePreviewPage avatar expectation and jsdom Path2D test failures remain outside selected frontend regression; no claim of all-repository tests passing.",
+    "No new DB table, persisted Preview capability, retry loop or additional agent service."
+  ],
+  "hashes": [
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/measured-build.ts",
+      "sha256": "3da842bd61a339ab6a8f176f0df23481fed90dfaea3600623225605a1a8b74e9"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/measured-preview.ts",
+      "sha256": "133763d5ee9d00bba654a3f0deec2e4db558a1aaaaef2473546ef355e1559ae4"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/preview-issues.ts",
+      "sha256": "69f6f50ca948c21d9a04283871a1398ca700a1208ed60c907a933267beecfa39"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts",
+      "sha256": "ac3232a3b42950550e658fff5f5b7257c9a1ec479b7b3b57e2c7fa5c50c940b8"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/store.ts",
+      "sha256": "947ea85e1b93e59b70aee86781127833c99c0d0c9915000184b2014d0a2703b9"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/context.ts",
+      "sha256": "bb53b85611ba1d2f7442c51c9794ff32ad3ca2c26c21e01e5a802e34e81fe7dc"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/review.ts",
+      "sha256": "77517f68b1a476f4a75044a9c0bce3e7080070d9b0af39bb193e2eb052e77c5e"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts",
+      "sha256": "48d8a8a413f289c7f61494292f0084c382ad9c552282372190e5dda2d158fcc1"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/export-feedback.test.ts",
+      "sha256": "fae52238eb47e94206b80f2801e69837717cd1617dd6d512c63aeef39d5b73ec"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/review-native.test.ts",
+      "sha256": "4971131e068a1d1982fe008f3afb2bcbf02d7795f969de90627931d6c67480cd"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/session-manager.ts",
+      "sha256": "7057745725b64cb6baabc71375ecaafe3ed11bd0f395a956b7ec682c706bdf5a"
+    },
+    {
+      "path": "apps/frontend/src/services/workflowV3Api.ts",
+      "sha256": "4e597ada4a84ef3def68fdeeacf72b00b2eddbf1c828c116f0a9c13980d5a297"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/WorkflowMeasuredPreview.tsx",
+      "sha256": "ea00b00ca48ba5149825ae98083f717b66d052788f06a01f265318d6fe7ab075"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/WorkflowMeasuredPreview.test.tsx",
+      "sha256": "212660d7d68bc2db1da4afa149cd27452756e32d9d57d14eb7643a50e2c59690"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/WorkflowPanel.tsx",
+      "sha256": "4c40ee490883ab3b74fa99126f2b2638c893dfb222f8618044e63a1be1353166"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/ChatPanel.tsx",
+      "sha256": "36e8c8ff4c38ada7bcaf551f8e72c71507530ab1de699178c83b99c27c990e9e"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/RightSidebar.tsx",
+      "sha256": "1654a4db9962e378f155070d72c4debec6780c070b21f78e8a5c46891e0f5940"
+    },
+    {
+      "path": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/BGS_V3_Agent_Driven_Workflow_Implementation.md",
+      "sha256": "f9dbc8d5bbeca4e19348a21c9f5dc9f80e57992aa70b32bc8e35774797271016"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-export-feedback-core-verified.log",
+      "sha256": "3bea25e51d8bca8ea9802bd9cb66cba66b27007b7ec2895f21a25de6d0780864"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-export-feedback-authority-final.log",
+      "sha256": "39e44d8c37a13b32bfda12c19ad095bfbaaa76bcccbb510db3cb69a22e867c5c"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-export-feedback-closure-complete.log",
+      "sha256": "27ed0fedc2a301012cfa238875b7539e5e24b5cd7be6909a7c328207b017e22c"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-export-feedback-front.log",
+      "sha256": "e5ed965f2e40ab519a1fd11eee9b8eca901f5d1e2a8289f9cd59b2d3dd1f1306"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-export-feedback-legacy-package.log",
+      "sha256": "deac6141e95c14a0ebf5120eefe4ad41e7458108ff17d5814729d94acc5a0162"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-export-feedback-front-final-types.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-export-feedback-server-verified-types.log",
+      "sha256": "b06a3b6e247600fba24b1fa1fffa7c6ef3dc5d692b1b7ba6615fb74e9cea15fb"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-export-feedback-core-final.log",
+      "sha256": "aa1e40fe0bda8aebf6b78d6cf8509ff3e65d35958ddf2463e1763f1d1e3f3314"
+    }
+  ]
+}

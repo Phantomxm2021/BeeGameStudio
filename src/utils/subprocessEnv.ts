@@ -1,4 +1,5 @@
 import { isEnvTruthy } from './envUtils.js'
+import { normalizeRuntimeEnvironment } from './runtimeEnvironment.js'
 
 /**
  * Env vars to strip from subprocess environments when running inside GitHub
@@ -24,12 +25,20 @@ const GHA_SUBPROCESS_SCRUB = [
   'GEMINI_API_KEY',
   'GOOGLE_API_KEY',
   'GROK_API_KEY',
-  'BEEGAME_ARTIFACTS_TOKEN',
+  'XAI_API_KEY',
+  'CLAUDE_ARTIFACTS_TOKEN',
   'TAVILY_API_KEY',
   'BRAVE_SEARCH_API_KEY',
   'EXA_API_KEY',
   'AWS_ACCESS_KEY_ID',
   'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE',
+  'CLAUDE_CODE_OAUTH_REFRESH_TOKEN',
+  'CLAUDE_LOCAL_VAULT_PASSPHRASE',
+  'CLAUDE_TRUSTED_DEVICE_TOKEN',
+  'LANGFUSE_SECRET_KEY',
+  'DATADOG_API_KEY',
+  'MCP_CLIENT_SECRET',
+  'BRAVE_API_KEY',
 
   // OTLP exporter headers — documented to carry Authorization=Bearer tokens
   // for monitoring backends; read in-process by OTEL SDK, subprocesses never need them
@@ -68,7 +77,7 @@ const GHA_SUBPROCESS_SCRUB = [
  * spawning subprocesses (Bash tool, shell snapshot, MCP stdio servers, LSP
  * servers, shell hooks).
  *
- * Gated on CLAUDE_CODE_SUBPROCESS_ENV_SCRUB. claude-code-action sets this
+ * Gated on BGS_SUBPROCESS_ENV_SCRUB. claude-code-action sets this
  * automatically when `allowed_non_write_users` is configured — the flag that
  * exposes a workflow to untrusted content (prompt injection surface).
  */
@@ -93,9 +102,12 @@ export function subprocessEnv(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv 
   // proxy is disabled or not registered (non-CCR), so this is a no-op outside
   // CCR containers.
   const proxyEnv = _getUpstreamProxyEnv?.() ?? {}
-  const inherited = overrides ? { ...process.env, ...overrides } : process.env
+  const parent = normalizeRuntimeEnvironment(process.env)
+  // Normalize each source before merging, so legacy overrides can replace
+  // canonical parent values without weakening the parent's credential scrub.
+  const inherited = overrides ? { ...parent, ...normalizeRuntimeEnvironment(overrides) } : parent
 
-  if (!isEnvTruthy(process.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)) {
+  if (!isEnvTruthy(parent.BGS_SUBPROCESS_ENV_SCRUB)) {
     return Object.keys(proxyEnv).length > 0
       ? { ...inherited, ...proxyEnv }
       : inherited

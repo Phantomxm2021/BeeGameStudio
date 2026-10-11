@@ -1,7 +1,7 @@
 import { homedir } from 'os';
 import { relative } from 'path';
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { getCwd } from '../../utils/cwd.js';
 
 export function getRelativeMemoryPath(path: string): string {

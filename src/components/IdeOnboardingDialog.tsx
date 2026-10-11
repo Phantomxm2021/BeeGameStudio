@@ -1,6 +1,6 @@
 import React from 'react';
 import { envDynamic } from 'src/utils/envDynamic.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
 import { env } from '../utils/env.js';
@@ -10,7 +10,7 @@ import {
   isJetBrainsIde,
   toIDEDisplayName,
 } from '../utils/ide.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 
 interface Props {
   onDone: () => void;
@@ -43,7 +43,7 @@ export function IdeOnboardingDialog({ onDone, installationStatus }: Props): Reac
         title={
           <>
             <Text color="claude">✻ </Text>
-            <Text>Welcome to Claude Code for {ideName}</Text>
+            <Text>Welcome to BGS for {ideName}</Text>
           </>
         }
         subtitle={installedVersion ? `installed ${pluginOrExtension} v${installedVersion}` : undefined}
@@ -57,7 +57,7 @@ export function IdeOnboardingDialog({ onDone, installationStatus }: Props): Reac
             <Text color="suggestion">⧉ selected lines</Text>
           </Text>
           <Text>
-            • Review Claude Code&apos;s changes <Text color="diffAddedWord">+11</Text>{' '}
+            • Review BGS&apos;s changes <Text color="diffAddedWord">+11</Text>{' '}
             <Text color="diffRemovedWord">-22</Text> in the comfort of your IDE
           </Text>
           <Text>

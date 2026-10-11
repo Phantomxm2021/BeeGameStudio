@@ -102,7 +102,7 @@ name: {{skill-name}}
 description: {{one-line description}}
 allowed-tools:
   {{only tool patterns needed for this capability, if applicable; not permissions inferred from the reference run}}
-when_to_use: {{detailed description of when Claude should automatically invoke this skill, including trigger phrases and example user messages}}
+when_to_use: {{detailed description of when BGS should automatically invoke this skill, including trigger phrases and example user messages}}
 argument-hint: "{{hint showing argument placeholders}}"
 arguments:
   {{list of argument names}}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Dialog, Text, useInput } from '@anthropic/ink';
+import { Box, Dialog, Text, useInput } from '@bee-game-studio/ink';
 import type { LocalJSXCommandCall, LocalJSXCommandOnDone } from '../../types/command.js';
 import {
   listStores,

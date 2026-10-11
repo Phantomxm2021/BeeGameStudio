@@ -9,8 +9,8 @@
 import { describe, expect, test } from 'bun:test'
 import { DEFAULT_BINDINGS } from '../defaultBindings.js'
 import { parseBindings } from '../parser.js'
-import { resolveKey } from '@anthropic/ink'
-import type { Key } from '@anthropic/ink'
+import { resolveKey } from '@bee-game-studio/ink'
+import type { Key } from '@bee-game-studio/ink'
 
 function makeKey(overrides: Partial<Key> = {}): Key {
   return {

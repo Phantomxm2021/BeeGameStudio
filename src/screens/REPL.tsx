@@ -14,10 +14,10 @@ import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import figures from 'figures';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- / n N Esc [ v are bare letters in transcript modal context, same class as g/G/j/k in ScrollKeybindingHandler
-import { useInput } from '@anthropic/ink';
+import { useInput } from '@bee-game-studio/ink';
 import { useSearchInput } from '../hooks/useSearchInput.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { useSearchHighlight } from '@anthropic/ink';
+import { useSearchHighlight } from '@bee-game-studio/ink';
 import type { JumpHandle } from '../components/VirtualMessageList.js';
 import { renderMessagesToPlainText } from '../utils/exportRenderer.js';
 import { openFileInExternalEditor } from '../utils/editor.js';
@@ -31,7 +31,7 @@ import {
   useTerminalFocus,
   useTerminalTitle,
   useTabStatus,
-} from '@anthropic/ink';
+} from '@bee-game-studio/ink';
 import { CostThresholdDialog } from '../components/CostThresholdDialog.js';
 import { IdleReturnDialog } from '../components/IdleReturnDialog.js';
 import * as React from 'react';
@@ -48,7 +48,7 @@ import {
 import { useNotifications } from '../context/notifications.js';
 import { sendNotification } from '../services/notifier.js';
 import { startPreventSleep, stopPreventSleep } from '../services/preventSleep.js';
-import { useTerminalNotification, hasCursorUpViewportYankBug } from '@anthropic/ink';
+import { useTerminalNotification, hasCursorUpViewportYankBug } from '@bee-game-studio/ink';
 import {
   createFileStateCacheWithSizeLimit,
   mergeFileStateCaches,
@@ -492,7 +492,7 @@ import { REMOTE_SAFE_COMMANDS } from '../commands.js';
 import type { RemoteMessageContent } from '../utils/teleport/api.js';
 import { FullscreenLayout, useUnseenDivider, computeUnseenDivider } from '../components/FullscreenLayout.js';
 import { isFullscreenEnvEnabled, maybeGetTmuxMouseHint, isMouseTrackingEnabled } from '../utils/fullscreen.js';
-import { AlternateScreen } from '@anthropic/ink';
+import { AlternateScreen } from '@bee-game-studio/ink';
 import { ScrollKeybindingHandler } from '../components/ScrollKeybindingHandler.js';
 import {
   useMessageActions,
@@ -502,8 +502,8 @@ import {
   type MessageActionsNav,
   type MessageActionCaps,
 } from '../components/messageActions.js';
-import { setClipboard } from '@anthropic/ink';
-import type { ScrollBoxHandle } from '@anthropic/ink';
+import { setClipboard } from '@bee-game-studio/ink';
+import type { ScrollBoxHandle } from '@bee-game-studio/ink';
 import { createAttachmentMessage, getQueuedCommandAttachments } from '../utils/attachments.js';
 
 // Stable empty array for hooks that accept MCPServerConnection[] — avoids
@@ -1423,7 +1423,7 @@ export function REPL({
   // session from mid-conversation context.
   const haikuTitleAttemptedRef = useRef((initialMessages?.length ?? 0) > 0);
   const agentTitle = mainThreadAgentDefinition?.agentType;
-  const terminalTitle = sessionTitle ?? agentTitle ?? haikuTitle ?? 'Claude Code';
+  const terminalTitle = sessionTitle ?? agentTitle ?? haikuTitle ?? 'BGS';
   const isWaitingForApproval =
     toolUseConfirmQueue.length > 0 || promptQueue.length > 0 || pendingWorkerRequest || pendingSandboxRequest;
   // Local-jsx commands (like /plugin, /config) show user-facing dialogs that
@@ -4888,7 +4888,7 @@ export function REPL({
         ) {
           void sendNotification(
             {
-              message: 'Claude is waiting for your input',
+              message: 'BGS is waiting for your input',
               notificationType: 'idle_prompt',
             },
             terminal,
@@ -5229,7 +5229,7 @@ export function REPL({
     const handleSuspend = () => {
       // Print suspension instructions
       process.stdout.write(
-        `\nClaude Code has been suspended. Run \`fg\` to bring Claude Code back.\nNote: ctrl + z now suspends Claude Code, ctrl + _ undoes input.\n`,
+        `\nBGS has been suspended. Run \`fg\` to bring BGS back.\nNote: ctrl + z now suspends BGS, ctrl + _ undoes input.\n`,
       );
     };
 

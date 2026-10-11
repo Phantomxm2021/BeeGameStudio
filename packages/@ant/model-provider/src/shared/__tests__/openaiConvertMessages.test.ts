@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { anthropicMessagesToOpenAI } from '../openaiConvertMessages.js'
+import { asSystemPrompt } from '../../types/systemPrompt.js'
 import type { UserMessage, AssistantMessage } from '../../types/message.js'
 
 // Helpers to create internal-format messages
@@ -20,6 +21,107 @@ function makeAssistantMsg(content: string | any[]): AssistantMessage {
 }
 
 describe('anthropicMessagesToOpenAI', () => {
+  test.each(['base64', 'url'])(
+    'preserves nested tool images and tool ordering: %s',
+    sourceType => {
+      const source =
+        sourceType === 'base64'
+          ? { type: 'base64', media_type: 'image/png', data: 'TEST_IMAGE' }
+          : { type: 'url', url: 'https://example.test/screenshot.png' }
+      const result = anthropicMessagesToOpenAI(
+        [
+          makeAssistantMsg([
+            { type: 'tool_use', id: 'read-1', name: 'Read', input: {} },
+            { type: 'tool_use', id: 'read-2', name: 'Read', input: {} },
+          ]),
+          makeUserMsg([
+            {
+              type: 'tool_result',
+              tool_use_id: 'read-1',
+              content: [
+                { type: 'text', text: 'Screenshot' },
+                { type: 'image', source },
+              ],
+            },
+          ]),
+          makeUserMsg([
+            {
+              type: 'tool_result',
+              tool_use_id: 'read-2',
+              content: 'Second result',
+            },
+          ]),
+          makeAssistantMsg('Checked'),
+        ],
+        asSystemPrompt([]),
+      )
+      expect(result.map(message => message.role)).toEqual([
+        'assistant',
+        'tool',
+        'tool',
+        'user',
+        'assistant',
+      ])
+      expect(result[1]).toMatchObject({
+        tool_call_id: 'read-1',
+        content: 'Screenshot',
+      })
+      expect(result[2]).toMatchObject({
+        tool_call_id: 'read-2',
+        content: 'Second result',
+      })
+      expect(result[3]!.content).toEqual([
+        { type: 'text', text: 'Images from tool result read-1:' },
+        {
+          type: 'image_url',
+          image_url: {
+            url:
+              sourceType === 'base64'
+                ? 'data:image/png;base64,TEST_IMAGE'
+                : 'https://example.test/screenshot.png',
+          },
+        },
+      ])
+    },
+  )
+
+  test('keeps multiple image-only tool results associated with their receipts', () => {
+    const result = anthropicMessagesToOpenAI(
+      [
+        makeUserMsg(
+          ['a', 'b'].map(id => ({
+            type: 'tool_result',
+            tool_use_id: id,
+            content: [
+              {
+                type: 'image',
+                source: {
+                  type: 'url',
+                  url: 'https://example.test/' + id + '.png',
+                },
+              },
+            ],
+          })),
+        ),
+      ],
+      asSystemPrompt([]),
+    )
+    expect(result.map(message => message.role)).toEqual([
+      'tool',
+      'tool',
+      'user',
+      'user',
+    ])
+    expect(result[2]!.content).toContainEqual({
+      type: 'text',
+      text: 'Images from tool result a:',
+    })
+    expect(result[3]!.content).toContainEqual({
+      type: 'text',
+      text: 'Images from tool result b:',
+    })
+  })
+
   test('converts system prompt to system message', () => {
     const result = anthropicMessagesToOpenAI([makeUserMsg('hello')], [
       'You are helpful.',

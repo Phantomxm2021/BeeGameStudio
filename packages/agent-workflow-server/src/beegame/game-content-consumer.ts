@@ -8,6 +8,8 @@ export { initializeUiLayout, type UiLayoutOptions } from '../../../scene-editor/
 export { inspectUiLayout } from '../../../scene-editor/src/ui-layout-inspection'
 export { createUiTextMeasurer } from '../../../scene-editor/src/ui-text-measurement'
 export { inspectUiLayoutInBrowser, type UiBrowserInspectionOptions } from '../../../scene-editor/src/ui-browser-inspection'
+export { createProductionUiSurface, renderProductionScene2d, sceneNodeClientPoint2d, PRODUCTION_SURFACE_CAPABILITIES,
+  type SurfaceImage, type SurfaceAssets } from '../../../scene-editor/src/production-surface'
 export * from '../../../scene-editor/src/scene-camera'
 export { inspectSceneLayout2d, sceneWorldTransforms2d, sceneCameraInput2d } from '../../../scene-editor/src/scene-layout-inspection'
 export {

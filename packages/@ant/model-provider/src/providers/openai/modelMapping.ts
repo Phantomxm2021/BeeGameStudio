@@ -1,3 +1,5 @@
+import { getSharedModelDefault } from '../../shared/modelDefaults.js'
+
 /**
  * Default mapping from Anthropic model names to OpenAI model names.
  * Used only when ANTHROPIC_DEFAULT_*_MODEL env vars are not set.
@@ -46,8 +48,7 @@ export function resolveOpenAIModel(anthropicModel: string): string {
     const openaiOverride = process.env[openaiEnvVar]
     if (openaiOverride) return openaiOverride
 
-    const anthropicEnvVar = `ANTHROPIC_DEFAULT_${family.toUpperCase()}_MODEL`
-    const anthropicOverride = process.env[anthropicEnvVar]
+    const anthropicOverride = getSharedModelDefault(family)
     if (anthropicOverride) return anthropicOverride
   }
 

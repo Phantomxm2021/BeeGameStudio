@@ -1,0 +1,36 @@
+{
+  "passed": [
+    "independent worker processes",
+    "concurrent first insert: exactly one winner",
+    "first-insert revision persisted",
+    "concurrent update: exactly one CAS winner",
+    "Run/event exact revisions survive independent reload",
+    "successful transaction commits project mode alongside Run/event",
+    "cross-project same-workspace writer race: exactly one winner",
+    "writer loser has no partial Run/event commit",
+    "writer winner persisted atomically",
+    "replacement RPC accepts append-only authorized requirement change",
+    "database rejects history rewrite without partial update",
+    "native first insert has one independent CAS winner",
+    "native request/writer claim has one independent CAS winner",
+    "pause and measurement reservation cannot overwrite each other",
+    "reload retains pause and unknown measurement without fabricating success",
+    "native requirement change uses one CAS without Task plan",
+    "remote adapter preserves ended native measurement history",
+    "native Run/event revisions and authorized history persist without host Tasks or game acceptance"
+  ],
+  "fixtureProjects": [
+    "v3-db-cas-4988e3b9-9507-4c9a-a656-71b4f588eacb",
+    "v3-db-writer-a-1800e4ac-3b17-4789-a846-50b8d72452f3",
+    "v3-db-writer-b-15c99b6e-0986-4b09-941f-2a417ae6e42a",
+    "v3-db-native-7883bf67-74cf-49b3-b4c6-a903d1e23b82"
+  ],
+  "fixtureRoot": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-remote-db-IFVwUR",
+  "retained": true,
+  "modelInvocations": 0,
+  "deliveryEligible": false,
+  "limits": [
+    "Synthetic database-only records, no native model execution or measurement",
+    "Ended history guard is checked through the host store adapter, not a new SQL constraint"
+  ]
+}

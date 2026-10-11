@@ -314,6 +314,9 @@ function createPluginCommand(
       contentLength: content.length,
       source: 'plugin' as const,
       loadedFrom: isSkill || config.isSkillMode ? 'plugin' : undefined,
+      // Discovery and linked references need the same source metadata as
+      // directory-loaded Skills, not just the path embedded in prompt text.
+      skillRoot: isSkill || config.isSkillMode ? dirname(file.filePath) : undefined,
       pluginInfo: {
         pluginManifest,
         repository: sourceName,

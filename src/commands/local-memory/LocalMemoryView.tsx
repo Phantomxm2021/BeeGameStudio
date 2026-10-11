@@ -1,6 +1,6 @@
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
-import type { Theme } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
+import type { Theme } from '@bee-game-studio/ink';
 
 export type LocalMemoryViewProps =
   | { mode: 'list'; stores: string[] }

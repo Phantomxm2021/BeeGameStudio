@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Box, Text, useTheme } from '@anthropic/ink';
+import { Box, Text, useTheme } from '@bee-game-studio/ink';
 import { WebFetchTool } from '@bee-game-studio/builtin-tools/tools/WebFetchTool/WebFetchTool.js';
 import { shouldShowAlwaysAllowOptions } from '../../../utils/permissions/permissionsLoader.js';
 import { type OptionWithDescription, Select } from '../../CustomSelect/select.js';

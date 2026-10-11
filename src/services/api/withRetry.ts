@@ -1,5 +1,4 @@
 import { feature } from 'bun:bundle'
-import { emitNativeDiagnostic, nativeErrorMetadata, type NativeDiagnostic } from '@bee-game-studio/agent-workflow/native-diagnostics'
 import type Anthropic from '@anthropic-ai/sdk'
 import {
   APIConnectionError,
@@ -126,8 +125,6 @@ export interface RetryContext {
 }
 
 interface RetryOptions {
-  /** Metadata only; resolves the current attempt after operation allocated its request ID. */
-  diagnostic?: () => Partial<NativeDiagnostic>
   maxRetries?: number
   model: string
   fallbackModel?: string
@@ -250,16 +247,12 @@ export async function* withRetry<T>(
             await handleOAuth401Error(failedAccessToken)
           }
         }
-        emitNativeDiagnostic({ ...options.diagnostic?.(), event: 'client_start', attempt })
         client = await getClient()
-        emitNativeDiagnostic({ ...options.diagnostic?.(), event: 'client_ready', attempt })
       }
 
       return await operation(client, attempt, retryContext)
     } catch (error) {
       lastError = error
-      emitNativeDiagnostic({ ...options.diagnostic?.(), event: 'api_error', attempt, ...nativeErrorMetadata(error),
-        ...(error instanceof APIError && error.status !== undefined ? { status: error.status } : {}) })
       logForDebugging(
         `API error (attempt ${attempt}/${maxRetries + 1}): ${error instanceof APIError ? `${error.status} ${error.message}` : errorMessage(error)}`,
         { level: 'error' },
@@ -515,7 +508,6 @@ export async function* withRetry<T>(
         if (error instanceof APIError) {
           yield createSystemAPIErrorMessage(error, delayMs, attempt, maxRetries)
         }
-        emitNativeDiagnostic({ ...options.diagnostic?.(), event: 'retry_wait', attempt, delayMs: Math.ceil(delayMs) })
         await sleep(delayMs, options.signal, { abortError })
       }
     }
@@ -634,7 +626,7 @@ function isOAuthTokenRevokedError(error: unknown): boolean {
 }
 
 function isBedrockAuthError(error: unknown): boolean {
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)) {
+  if (isEnvTruthy(process.env.BGS_USE_BEDROCK)) {
     // AWS libs reject without an API call if .aws holds a past Expiration value
     // otherwise, API calls that receive expired tokens give generic 403
     // "The security token included in the request is invalid"
@@ -673,7 +665,7 @@ function isGoogleAuthLibraryCredentialError(error: unknown): boolean {
 }
 
 function isVertexAuthError(error: unknown): boolean {
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)) {
+  if (isEnvTruthy(process.env.BGS_USE_VERTEX)) {
     // SDK-level: google-auth-library fails in prepareOptions() before the HTTP call
     if (isGoogleAuthLibraryCredentialError(error)) {
       return true

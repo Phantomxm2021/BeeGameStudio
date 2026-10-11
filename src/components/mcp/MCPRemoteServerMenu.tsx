@@ -8,9 +8,9 @@ import type { CommandResultDisplay } from '../../commands.js';
 import { getOauthConfig } from '../../constants/oauth.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { setClipboard } from '@anthropic/ink';
+import { setClipboard } from '@bee-game-studio/ink';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw j/k/arrow menu navigation
-import { Box, color, Link, Text, useInput, useTheme } from '@anthropic/ink';
+import { Box, color, Link, Text, useInput, useTheme } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { AuthenticationCancelledError, performMCPOAuthFlow, revokeServerTokens } from '../../services/mcp/auth.js';
 import { clearServerCache } from '../../services/mcp/client.js';
@@ -30,7 +30,7 @@ import { logMCPDebug } from '../../utils/log.js';
 import { capitalize } from '../../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
 import { Select } from '../CustomSelect/index.js';
-import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
+import { Byline, KeyboardShortcutHint } from '@bee-game-studio/ink';
 import { Spinner } from '../Spinner.js';
 import TextInput from '../TextInput.js';
 import { CapabilitiesSection } from './CapabilitiesSection.js';
@@ -113,11 +113,11 @@ export function MCPRemoteServerMenu({
         onComplete?.(`Authentication successful. Connected to ${server.name}.`);
       } else if (result.client.type === 'needs-auth') {
         onComplete?.(
-          'Authentication successful, but server still requires authentication. You may need to manually restart Claude Code.',
+          'Authentication successful, but server still requires authentication. You may need to manually restart BGS.',
         );
       } else {
         onComplete?.(
-          'Authentication successful, but server reconnection failed. You may need to manually restart Claude Code for the changes to take effect.',
+          'Authentication successful, but server reconnection failed. You may need to manually restart BGS for the changes to take effect.',
         );
       }
     } catch (err) {
@@ -330,13 +330,13 @@ export function MCPRemoteServerMenu({
           onComplete?.(message);
         } else if (result.client.type === 'needs-auth') {
           onComplete?.(
-            'Authentication successful, but server still requires authentication. You may need to manually restart Claude Code.',
+            'Authentication successful, but server still requires authentication. You may need to manually restart BGS.',
           );
         } else {
           // result.client.type === 'failed'
           logMCPDebug(server.name, `Reconnection failed after authentication`);
           onComplete?.(
-            'Authentication successful, but server reconnection failed. You may need to manually restart Claude Code for the changes to take effect.',
+            'Authentication successful, but server reconnection failed. You may need to manually restart BGS for the changes to take effect.',
           );
         }
       }

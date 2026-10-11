@@ -2,13 +2,13 @@ import React, { Suspense, use, useDeferredValue, useEffect, useState } from 'rea
 import type { DeepImmutable } from 'src/types/utils.js';
 import type { CommandResultDisplay } from '../../commands.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { type KeyboardEvent, Box, Text } from '@anthropic/ink';
+import { type KeyboardEvent, Box, Text } from '@bee-game-studio/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { LocalShellTaskState } from '../../tasks/LocalShellTask/guards.js';
 import { formatDuration, formatFileSize, truncateToWidth } from '../../utils/format.js';
 import { tailFile } from '../../utils/fsOperations.js';
 import { getTaskOutputPath } from '../../utils/task/diskOutput.js';
-import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
+import { Byline, Dialog, KeyboardShortcutHint } from '@bee-game-studio/ink';
 
 type Props = {
   shell: DeepImmutable<LocalShellTaskState>;

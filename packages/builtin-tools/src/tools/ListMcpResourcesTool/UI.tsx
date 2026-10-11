@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { MessageResponse } from 'src/components/MessageResponse.js';
 import { OutputLine } from 'src/components/shell/OutputLine.js';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import type { ToolProgressData } from 'src/Tool.js';
 import type { ProgressMessage } from 'src/types/message.js';
 import { jsonStringify } from 'src/utils/slowOperations.js';

@@ -81,7 +81,7 @@ describe('OpenAI-compatible provider pinning', () => {
       process.env.ANTHROPIC_API_KEY = 'must-not-cross-process-boundary'
 
       expect(getModelRuntimeWorkerEnvironment()).toMatchObject({
-        CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
+        BGS_PROVIDER_MANAGED_BY_HOST: '1',
         HTTPS_PROXY: 'https://proxy.example.test:8443',
         NO_PROXY: '127.0.0.1,localhost',
         NODE_EXTRA_CA_CERTS: '/tmp/runtime-ca.pem',
@@ -97,6 +97,26 @@ describe('OpenAI-compatible provider pinning', () => {
       }
       if (previousSecret === undefined) delete process.env.ANTHROPIC_API_KEY
       else process.env.ANTHROPIC_API_KEY = previousSecret
+    }
+  })
+
+  test('worker transport accepts the legacy socket only when the BGS socket is unset', () => {
+    const keys = ['BGS_API_UNIX_SOCKET', 'ANTHROPIC_UNIX_SOCKET'] as const
+    const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]))
+    try {
+      process.env.ANTHROPIC_UNIX_SOCKET = '/tmp/legacy-fixture.sock'
+      delete process.env.BGS_API_UNIX_SOCKET
+      expect(getModelRuntimeWorkerEnvironment().BGS_API_UNIX_SOCKET).toBe('/tmp/legacy-fixture.sock')
+      process.env.BGS_API_UNIX_SOCKET = '/tmp/bgs-fixture.sock'
+      expect(getModelRuntimeWorkerEnvironment().BGS_API_UNIX_SOCKET).toBe('/tmp/bgs-fixture.sock')
+      process.env.BGS_API_UNIX_SOCKET = ''
+      expect(getModelRuntimeWorkerEnvironment().BGS_API_UNIX_SOCKET).toBe('')
+      expect(getModelRuntimeWorkerEnvironment()).not.toHaveProperty('ANTHROPIC_UNIX_SOCKET')
+    } finally {
+      for (const key of keys) {
+        if (previous[key] === undefined) delete process.env[key]
+        else process.env[key] = previous[key]
+      }
     }
   })
 

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { PromptInputHelpMenu } from '../PromptInput/PromptInputHelpMenu.js';
 
 export function General(): React.ReactNode {
@@ -10,11 +10,11 @@ export function General(): React.ReactNode {
         <Box flexDirection="column">
           <Text>
             <Text bold>1. </Text>
-            <Text>Ask a question or describe a task — Claude will explore your code and respond.</Text>
+            <Text>Ask a question or describe a task — BGS will explore your code and respond.</Text>
           </Text>
           <Text>
             <Text bold>2. </Text>
-            <Text>When Claude wants to edit files or run commands, you review and approve each action.</Text>
+            <Text>When BGS wants to edit files or run commands, you review and approve each action.</Text>
           </Text>
           <Text>
             <Text bold>3. </Text>

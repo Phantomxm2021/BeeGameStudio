@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { Select } from '../../components/CustomSelect/select.js';
-import { Box, Dialog, Text } from '@anthropic/ink';
+import { Box, Dialog, Text } from '@bee-game-studio/ink';
 
 type Props = {
   onProceed: (signal: AbortSignal) => Promise<void>;

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
-import { useTheme } from '@anthropic/ink';
+import { useTheme } from '@bee-game-studio/ink';
 import { filterToolProgressMessages, type Tool, type Tools } from '../../../Tool.js';
 import type { ProgressMessage } from '../../../types/message.js';
 import type { buildMessageLookups } from '../../../utils/messages.js';

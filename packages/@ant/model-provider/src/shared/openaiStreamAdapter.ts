@@ -305,7 +305,15 @@ export async function* adaptOpenAIStreamToAnthropic(
     }
   }
 
-  // Safety: close any remaining open blocks
+  // EOF is not completion. Never turn truncated text/tool arguments into a
+  // completed block when the provider did not send a terminal finish reason.
+  if (pendingFinishReason === null) {
+    throw new Error(
+      'OpenAI stream ended before a terminal finish_reason was received',
+    )
+  }
+
+  // Close any remaining open blocks only after confirmed completion.
   for (const idx of openBlockIndices) {
     yield {
       type: 'content_block_stop',

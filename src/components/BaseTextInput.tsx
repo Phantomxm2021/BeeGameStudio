@@ -1,8 +1,8 @@
 import React from 'react';
 import { renderPlaceholder } from '../hooks/renderPlaceholder.js';
 import { usePasteHandler } from '../hooks/usePasteHandler.js';
-import { useDeclaredCursor } from '@anthropic/ink';
-import { Ansi, Box, Text, useInput } from '@anthropic/ink';
+import { useDeclaredCursor } from '@bee-game-studio/ink';
+import { Ansi, Box, Text, useInput } from '@bee-game-studio/ink';
 import type { BaseInputState, BaseTextInputProps } from '../types/textInputTypes.js';
 import type { TextHighlight } from '../utils/textHighlighting.js';
 import { HighlightedInput } from './PromptInput/ShimmeredInput.js';

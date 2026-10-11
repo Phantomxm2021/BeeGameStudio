@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { useSettings } from '../../hooks/useSettings.js';
-import { Box, Text, useAnimationFrame } from '@anthropic/ink';
+import { Box, Text, useAnimationFrame } from '@bee-game-studio/ink';
 import { interpolateColor, toRGBColor } from '../Spinner/utils.js';
 
 type Props = {

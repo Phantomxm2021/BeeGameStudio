@@ -38,6 +38,21 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
   let stdoutByteCount = 0
   let lastStdoutChunkAtMs: number | undefined
   let maxStdoutChunkGapMs = 0
+  let compactingAtMs: number | undefined
+  let compactingStatusActive = false
+  let compactRequestAtMs: number | undefined
+  let compactRequestCount = 0
+  const compactionTiming = (nowMs: number) => {
+    const useRequest = compactRequestAtMs !== undefined && (compactingAtMs === undefined || compactRequestAtMs <= compactingAtMs)
+    const start = useRequest ? compactRequestAtMs : compactingAtMs
+    return start === undefined ? {} : {
+      elapsedMs: Math.max(0, nowMs - start),
+      elapsedBasis: useRequest ? 'first_compact_request_observed' : 'compacting_status_observed',
+      ...(compactingAtMs !== undefined ? { statusElapsedMs: Math.max(0, nowMs - compactingAtMs) } : {}),
+      ...(compactRequestAtMs !== undefined ? { compactRequestCount,
+        note: 'Observed compaction interval, not server execution time. Unattributed CLI requests may include concurrent compactions.' } : {}),
+    }
+  }
   let queue = Promise.resolve()
 
   const enqueue = (record: Record<string, unknown>): void => {
@@ -66,6 +81,10 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
       stdoutByteCount = 0
       lastStdoutChunkAtMs = undefined
       maxStdoutChunkGapMs = 0
+      compactingAtMs = undefined
+      compactingStatusActive = false
+      compactRequestAtMs = undefined
+      compactRequestCount = 0
       enqueue({
         type: 'turn_started',
         timestamp: clock().toISOString(),
@@ -104,9 +123,18 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
     observeDiagnostic(value: unknown): void {
       const diagnostic = parseNativeDiagnostic(value)
       if (!diagnostic) return
+      const now = clock()
+      // SDK status can arrive only when compaction has already finished. Start
+      // the passive interval at the actual observed request, not that status.
+      // Known child requests must not be assigned to the main turn's boundary.
+      if (turnActive && diagnostic.event === 'request_start' && diagnostic.source === 'compact' &&
+          (!diagnostic.actor || diagnostic.actor === 'main')) {
+        compactRequestAtMs ??= now.getTime()
+        compactRequestCount += 1
+      }
       enqueue({
         type: 'native_diagnostic',
-        timestamp: clock().toISOString(),
+        timestamp: now.toISOString(),
         sessionId: input.sessionId,
         ...(turnActive ? { requestId } : {}),
         diagnostic,
@@ -118,6 +146,28 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
     observeMessage(message: Record<string, unknown>): void {
       eventCount += 1
       lastEventType = stringField(message, 'type') || 'unknown'
+      if (message.type === 'system' && message.subtype === 'status') {
+        if (message.status === 'compacting') compactingStatusActive = true
+        if (message.status === 'compacting' && compactingAtMs === undefined) {
+          compactingAtMs = clock().getTime()
+          enqueue({ type: 'compaction_started', timestamp: clock().toISOString(), sessionId: input.sessionId, requestId,
+            note: 'SDK compacting status observed; delivery may be delayed. This timestamp is not the compact request start.' })
+        } else if (message.status === null && compactingStatusActive && compactingAtMs !== undefined) {
+          compactingStatusActive = false
+          enqueue({ type: 'compaction_status_cleared', timestamp: clock().toISOString(), sessionId: input.sessionId, requestId,
+            ...compactionTiming(clock().getTime()),
+            note: 'Status cleared is not proof of successful compaction or complete usage.' })
+          // Keep unresolved evidence until an actual boundary or turn end.
+        }
+      }
+      if (message.type === 'system' && message.subtype === 'compact_boundary') {
+        enqueue({ type: 'compaction_boundary', timestamp: clock().toISOString(), sessionId: input.sessionId, requestId,
+          ...compactionTiming(clock().getTime()) })
+        compactingAtMs = undefined
+        compactingStatusActive = false
+        compactRequestAtMs = undefined
+        compactRequestCount = 0
+      }
       if (message.type !== 'assistant') return
       const envelope = objectField(message, 'message')
       const content = Array.isArray(envelope?.content) ? envelope.content : []
@@ -162,6 +212,8 @@ export function createRuntimeObservability(input: RuntimeObservationInput) {
           lastStdoutChunkAtMs === undefined
             ? 0
             : Math.max(0, finishedAt.getTime() - lastStdoutChunkAtMs),
+        ...(compactingAtMs !== undefined || compactRequestAtMs !== undefined ? { compaction: { status: 'unfinished',
+          ...compactionTiming(finishedAt.getTime()), usage: 'unknown' } } : {}),
         ...(error ? { error } : {}),
       })
       turnActive = false

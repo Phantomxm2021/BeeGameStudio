@@ -14,7 +14,7 @@
  */
 
 import { DEEP_LINK_PROTOCOL } from './parseDeepLink.js'
-import { promises as fs } from 'fs'
+import { constants as fsConstants, promises as fs } from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
@@ -29,22 +29,19 @@ import { execFileNoThrow } from '../execFileNoThrow.js'
 import { getInitialSettings } from '../settings/settings.js'
 import { which } from '../which.js'
 import { getUserBinDir, getXDGDataHome } from '../xdg.js'
+import { isInBundledMode } from '../bundledMode.js'
+import { shellQuote } from '../shellArgument.js'
 
-export const MACOS_BUNDLE_ID = 'com.anthropic.claude-code-url-handler'
-const APP_NAME = 'Claude Code URL Handler'
-const DESKTOP_FILE_NAME = 'claude-code-url-handler.desktop'
-const MACOS_APP_NAME = 'Claude Code URL Handler.app'
+export const MACOS_BUNDLE_ID = 'com.phantomlab.bgs-url-handler'
+const APP_NAME = 'BGS URL Handler'
+const DESKTOP_FILE_NAME = 'bgs-url-handler.desktop'
+const MACOS_APP_NAME = 'BGS URL Handler.app'
 
 // Shared between register* (writes these paths/values) and
 // isProtocolHandlerCurrent (reads them back). Keep the writer and reader
 // in lockstep — drift here means the check returns a perpetual false.
 const MACOS_APP_DIR = path.join(os.homedir(), 'Applications', MACOS_APP_NAME)
-const MACOS_SYMLINK_PATH = path.join(
-  MACOS_APP_DIR,
-  'Contents',
-  'MacOS',
-  'claude',
-)
+const MACOS_TARGET_MARKER = path.join(MACOS_APP_DIR, 'Contents', 'Resources', 'bgs-cli-path')
 function linuxDesktopPath(): string {
   return path.join(getXDGDataHome(), 'applications', DESKTOP_FILE_NAME)
 }
@@ -53,88 +50,59 @@ const WINDOWS_COMMAND_KEY = `${WINDOWS_REG_KEY}\\shell\\open\\command`
 
 const FAILURE_BACKOFF_MS = 24 * 60 * 60 * 1000
 
-function linuxExecLine(claudePath: string): string {
-  return `Exec="${claudePath}" --handle-uri %u`
+export function linuxExecLine(claudePath: string): string {
+  if (/[\r\n\0]/.test(claudePath)) throw new Error('Invalid BGS executable path')
+  // Exec argument quoting, followed by Desktop Entry string escaping. Percent
+  // signs are field codes, even in quotes; %% means a literal percent sign.
+  const quoted = claudePath.replace(/[\\"`$]/g, '\\$&').replaceAll('%', '%%')
+  return `Exec="${quoted.replaceAll('\\', '\\\\')}" --handle-uri %u`
 }
 function windowsCommandValue(claudePath: string): string {
   return `"${claudePath}" --handle-uri "%1"`
 }
 
-/**
- * Register the protocol handler on macOS.
- *
- * Creates a .app bundle where the CFBundleExecutable is a symlink to the
- * already-installed (and signed) `claude` binary. When macOS opens a
- * `claude-cli://` URL, it launches `claude` through this app bundle.
- * Claude then uses the url-handler NAPI module to read the URL from the
- * Apple Event and handles it normally.
- *
- * This approach avoids shipping a separate executable (which would need
- * to be signed and allowlisted by endpoint security tools like Santa).
- */
+/** Build an OS-native AppleScript applet that forwards Apple Events as CLI args. */
+export function macosUrlHandlerScript(executable: string, searchPath = process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin'): string {
+  if (/[\r\n\0]/.test(executable)) throw new Error('Invalid BGS executable path')
+  // AppleScript's shell uses a minimal PATH. Preserve runtime discovery for
+  // npm/Bun executable wrappers, without persisting any authentication env.
+  const command = (`PATH=${shellQuote(searchPath)} ${shellQuote(executable)} --handle-uri `).replaceAll('\\', '\\\\').replaceAll('"', '\\"')
+  return `on open location incomingURL
+  do shell script "${command}" & quoted form of incomingURL
+end open location`
+}
+
+export const MACOS_PLIST_EDITS = [
+  `Add :CFBundleIdentifier string ${MACOS_BUNDLE_ID}`,
+  'Add :LSBackgroundOnly bool true',
+  'Add :CFBundleURLTypes array',
+  'Add :CFBundleURLTypes:0 dict',
+  'Add :CFBundleURLTypes:0:CFBundleURLSchemes array',
+  `Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string ${DEEP_LINK_PROTOCOL}`,
+]
+
 async function registerMacos(claudePath: string): Promise<void> {
-  const contentsDir = path.join(MACOS_APP_DIR, 'Contents')
-
-  // Remove any existing app bundle to start clean
+  await fs.mkdir(path.dirname(MACOS_APP_DIR), { recursive: true })
+  const staging = await fs.mkdtemp(path.join(path.dirname(MACOS_APP_DIR), '.bgs-url-handler-'))
+  const app = path.join(staging, MACOS_APP_NAME)
   try {
-    await fs.rm(MACOS_APP_DIR, { recursive: true })
-  } catch (e: unknown) {
-    const code = getErrnoCode(e)
-    if (code !== 'ENOENT') {
-      throw e
+    const compiled = await execFileNoThrow('/usr/bin/osacompile', ['-o', app, '-e', macosUrlHandlerScript(claudePath)], { useCwd: false })
+    if (compiled.code !== 0) throw new Error(`Could not compile BGS URL handler: ${compiled.stderr}`)
+    const plist = path.join(app, 'Contents', 'Info.plist')
+    for (const edit of MACOS_PLIST_EDITS) {
+      const result = await execFileNoThrow('/usr/libexec/PlistBuddy', ['-c', edit, plist], { useCwd: false })
+      if (result.code !== 0) throw new Error(`Could not configure BGS URL handler: ${result.stderr}`)
     }
+    // Replace only our named bundle, and only after compilation succeeded.
+    await fs.rm(MACOS_APP_DIR, { recursive: true, force: true })
+    await fs.rename(app, MACOS_APP_DIR)
+    const lsregister = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
+    const registered = await execFileNoThrow(lsregister, ['-R', MACOS_APP_DIR], { useCwd: false })
+    if (registered.code !== 0) throw new Error(`LaunchServices registration failed: ${registered.stderr}`)
+    await fs.writeFile(MACOS_TARGET_MARKER, claudePath)
+  } finally {
+    await fs.rm(staging, { recursive: true, force: true })
   }
-
-  await fs.mkdir(path.dirname(MACOS_SYMLINK_PATH), { recursive: true })
-
-  // Info.plist — registers the URL scheme with claude as the executable
-  const infoPlist = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>CFBundleIdentifier</key>
-  <string>${MACOS_BUNDLE_ID}</string>
-  <key>CFBundleName</key>
-  <string>${APP_NAME}</string>
-  <key>CFBundleExecutable</key>
-  <string>claude</string>
-  <key>CFBundleVersion</key>
-  <string>1.0</string>
-  <key>CFBundlePackageType</key>
-  <string>APPL</string>
-  <key>LSBackgroundOnly</key>
-  <true/>
-  <key>CFBundleURLTypes</key>
-  <array>
-    <dict>
-      <key>CFBundleURLName</key>
-      <string>Claude Code Deep Link</string>
-      <key>CFBundleURLSchemes</key>
-      <array>
-        <string>${DEEP_LINK_PROTOCOL}</string>
-      </array>
-    </dict>
-  </array>
-</dict>
-</plist>`
-
-  await fs.writeFile(path.join(contentsDir, 'Info.plist'), infoPlist)
-
-  // Symlink to the already-signed claude binary — avoids a new executable
-  // that would need signing and endpoint-security allowlisting.
-  // Written LAST among the throwing fs calls: isProtocolHandlerCurrent reads
-  // this symlink, so it acts as the commit marker. If Info.plist write
-  // failed above, no symlink → next session retries.
-  await fs.symlink(claudePath, MACOS_SYMLINK_PATH)
-
-  // Re-register the app with LaunchServices so macOS picks up the URL scheme.
-  const lsregister =
-    '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
-  await execFileNoThrow(lsregister, ['-R', MACOS_APP_DIR], { useCwd: false })
-
-  logForDebugging(
-    `Registered ${DEEP_LINK_PROTOCOL}:// protocol handler at ${MACOS_APP_DIR}`,
-  )
 }
 
 /**
@@ -146,7 +114,7 @@ async function registerLinux(claudePath: string): Promise<void> {
 
   const desktopEntry = `[Desktop Entry]
 Name=${APP_NAME}
-Comment=Handle ${DEEP_LINK_PROTOCOL}:// deep links for Claude Code
+Comment=Handle ${DEEP_LINK_PROTOCOL}:// deep links for BGS
 ${linuxExecLine(claudePath)}
 Type=Application
 NoDisplay=true
@@ -216,6 +184,7 @@ export async function registerProtocolHandler(
   claudePath?: string,
 ): Promise<void> {
   const resolved = claudePath ?? (await resolveClaudePath())
+  if (!resolved) throw new Error('No installed BGS executable available for URI registration')
 
   switch (process.platform) {
     case 'darwin':
@@ -238,21 +207,26 @@ export async function registerProtocolHandler(
  * auto-updates; falls back to process.execPath when the symlink is absent
  * (dev builds, non-native installs).
  */
-async function resolveClaudePath(): Promise<string> {
-  const binaryName = process.platform === 'win32' ? 'claude.exe' : 'claude'
+export async function resolveClaudePath(): Promise<string | undefined> {
+  const binaryName = process.platform === 'win32' ? 'bee-game-studio.exe' : 'bee-game-studio'
   const stablePath = path.join(getUserBinDir(), binaryName)
   try {
     await fs.realpath(stablePath)
     return stablePath
   } catch {
-    return process.execPath
+    // Node/Bun alone cannot handle a CLI URI. Do not register a broken runtime
+    // trampoline or accidentally select an unrelated vendor installation.
+    const installed = await which('bee-game-studio')
+    if (installed) return installed
+    if (isInBundledMode()) return process.execPath
+    return undefined
   }
 }
 
 /**
  * Check whether the OS-level protocol handler is already registered AND
  * points at the expected `claude` binary. Reads the registration artifact
- * directly (symlink target, .desktop Exec line, registry value) rather than
+ * directly (applet target marker, .desktop Exec line, registry value) rather than
  * a cached flag in ~/.claude.json, so:
  *   - the check is per-machine (config can sync across machines; OS state can't)
  *   - stale paths self-heal (install-method change → re-register next session)
@@ -266,12 +240,17 @@ export async function isProtocolHandlerCurrent(
   try {
     switch (process.platform) {
       case 'darwin': {
-        const target = await fs.readlink(MACOS_SYMLINK_PATH)
-        return target === claudePath
+        const target = await fs.readFile(MACOS_TARGET_MARKER, 'utf8')
+        if (target !== claudePath) return false
+        const plist = await fs.readFile(path.join(MACOS_APP_DIR, 'Contents', 'Info.plist'), 'utf8')
+        if (!plist.includes(MACOS_BUNDLE_ID) || !plist.includes(DEEP_LINK_PROTOCOL)) return false
+        await fs.access(path.join(MACOS_APP_DIR, 'Contents', 'MacOS', 'applet'), fsConstants.X_OK)
+        await fs.access(path.join(MACOS_APP_DIR, 'Contents', 'Resources', 'Scripts', 'main.scpt'))
+        return true
       }
       case 'linux': {
         const content = await fs.readFile(linuxDesktopPath(), 'utf8')
-        return content.includes(linuxExecLine(claudePath))
+        return content.split(/\r?\n/).includes(linuxExecLine(claudePath))
       }
       case 'win32': {
         const { stdout, code } = await execFileNoThrow(
@@ -304,6 +283,7 @@ export async function ensureDeepLinkProtocolRegistered(): Promise<void> {
   }
 
   const claudePath = await resolveClaudePath()
+  if (!claudePath) return
   if (await isProtocolHandlerCurrent(claudePath)) {
     return
   }

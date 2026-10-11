@@ -1,7 +1,7 @@
 import figures from 'figures';
 import React, { useState } from 'react';
-import type { KeyboardEvent } from '@anthropic/ink';
-import { Box, Text } from '@anthropic/ink';
+import type { KeyboardEvent } from '@bee-game-studio/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import {
   AGENT_COLOR_TO_THEME_COLOR,
   AGENT_COLORS,

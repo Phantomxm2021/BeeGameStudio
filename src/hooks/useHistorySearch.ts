@@ -5,7 +5,7 @@ import {
   getValueFromInput,
 } from '../components/PromptInput/inputModes.js'
 import { makeHistoryReader } from '../history.js'
-import { KeyboardEvent, useInput } from '@anthropic/ink'
+import { KeyboardEvent, useInput } from '@bee-game-studio/ink'
 // backward-compat bridge until consumers wire handleKeyDown to <Box onKeyDown>
 import { useKeybinding, useKeybindings } from '../keybindings/useKeybinding.js'
 import type { PromptInputMode } from '../types/textInputTypes.js'

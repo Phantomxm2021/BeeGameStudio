@@ -1,3 +1,5 @@
+import { getSharedModelDefault, getSharedModelDefaultKey } from '../../shared/modelDefaults.js'
+
 function getModelFamily(model: string): 'haiku' | 'sonnet' | 'opus' | null {
   if (/haiku/i.test(model)) return 'haiku'
   if (/opus/i.test(model)) return 'opus'
@@ -23,8 +25,8 @@ export function resolveGeminiModel(anthropicModel: string): string {
     return geminiModel
   }
 
-  const sharedEnvVar = `ANTHROPIC_DEFAULT_${family.toUpperCase()}_MODEL`
-  const resolvedModel = process.env[sharedEnvVar]
+  const sharedEnvVar = getSharedModelDefaultKey(family)
+  const resolvedModel = getSharedModelDefault(family)
   if (resolvedModel) {
     return resolvedModel
   }

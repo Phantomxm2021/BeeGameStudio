@@ -944,7 +944,6 @@ function ResponseParts({
     onOpenSubagent,
     onOpenTool,
     onPreviewArtifact,
-    compactHistory = true,
 }: {
     parts: ResponsePart[];
     lang: Language;
@@ -952,28 +951,7 @@ function ResponseParts({
     onOpenSubagent: (tool: NormalizedTool) => void;
     onOpenTool: (tool: NormalizedTool) => void;
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
-    compactHistory?: boolean;
 }) {
-    const settled = !parts.some(part => part.kind === 'tool'
-        ? part.tool.status === 'running'
-        : matchesStreamingMessage(part.message, streamingMessageId));
-    const history = compactHistory && settled && parts.some(part => part.kind === 'agent')
-        ? parts.filter(part => (part.kind === 'thinking' && !part.message.completionReason) || (part.kind === 'tool'
-            && part.tool.status === 'completed' && !part.tool.completionReason
-            && !part.tool.attachments?.length)) : [];
-    if (history.length > 1) {
-        const props = { lang, streamingMessageId, onOpenSubagent, onOpenTool, onPreviewArtifact, compactHistory: false };
-        return <>
-            <ResponseParts {...props} parts={parts.filter(part => !history.includes(part))} />
-            <AgentActivity
-                className="w-full text-[var(--text-secondary)]"
-                status="complete"
-                defaultOpen={false}
-                summary={lang === 'zh' ? `执行记录 · ${history.length} 项` : `Execution details · ${history.length} items`}
-                items={[{ id: 'completed-history', type: 'text', content: <ResponseParts {...props} parts={history} /> }]}
-            />
-        </>;
-    }
     const rendered: ReactNode[] = [];
     for (let index = 0; index < parts.length; index += 1) {
         const part = parts[index];
@@ -1181,11 +1159,11 @@ function messagePresentation(message: ChatDisplayMessage): MessagePresentation {
 }
 
 const deliveryPhaseLabels: Record<string, Record<string, string>> = {
-    en: { author: 'Writing documents', review: 'Reviewing documents', revision: 'Revising documents', resources: 'Preparing resources', content: 'Building scene and UI content', implementation: 'Implementing game', acceptance: 'Verifying delivery', complete: 'Delivery complete' },
-    zh: { author: '编写项目文档', review: '评审文档', revision: '修订文档', resources: '准备资源', content: '构建场景与 UI 内容', implementation: '实现游戏', acceptance: '交付验收', complete: '交付完成' },
-    'zh-TW': { author: '編寫專案文件', review: '審查文件', revision: '修訂文件', resources: '準備資源', content: '建立場景與 UI 內容', implementation: '實作遊戲', acceptance: '交付驗收', complete: '交付完成' },
-    ja: { author: 'ドキュメント作成', review: 'ドキュメント審査', revision: 'ドキュメント修正', resources: 'アセット準備', content: 'シーンと UI の構築', implementation: 'ゲーム実装', acceptance: '納品検証', complete: '納品完了' },
-    ko: { author: '문서 작성', review: '문서 검토', revision: '문서 수정', resources: '리소스 준비', content: '장면 및 UI 구성', implementation: '게임 구현', acceptance: '납품 검증', complete: '납품 완료' },
+    en: { brief: 'Production brief', playable: 'Integrated playable sample', production: 'Completing release', legacy: 'Retired workflow — migration required', author: 'Writing documents', review: 'Reviewing documents', revision: 'Revising documents', resources: 'Preparing resources', content: 'Building scene and UI content', implementation: 'Implementing game', acceptance: 'Verifying delivery', complete: 'Delivery complete' },
+    zh: { brief: '制作说明', playable: '代表性可玩样板', production: '完善首发游戏', legacy: '旧流程已退役，需迁移', author: '编写项目文档', review: '评审文档', revision: '修订文档', resources: '准备资源', content: '构建场景与 UI 内容', implementation: '实现游戏', acceptance: '交付验收', complete: '交付完成' },
+    'zh-TW': { brief: '製作說明', playable: '代表性可玩樣板', production: '完善首發遊戲', legacy: '舊流程已退役，需遷移', author: '編寫專案文件', review: '審查文件', revision: '修訂文件', resources: '準備資源', content: '建立場景與 UI 內容', implementation: '實作遊戲', acceptance: '交付驗收', complete: '交付完成' },
+    ja: { brief: '制作方針', playable: '統合プレイサンプル', production: '初回リリース制作', legacy: '旧フロー移行が必要', author: 'ドキュメント作成', review: 'ドキュメント審査', revision: 'ドキュメント修正', resources: 'アセット準備', content: 'シーンと UI の構築', implementation: 'ゲーム実装', acceptance: '納品検証', complete: '納品完了' },
+    ko: { brief: '제작 개요', playable: '통합 플레이 샘플', production: '출시 제작', legacy: '이전 흐름 이관 필요', author: '문서 작성', review: '문서 검토', revision: '문서 수정', resources: '리소스 준비', content: '장면 및 UI 구성', implementation: '게임 구현', acceptance: '납품 검증', complete: '납품 완료' },
 };
 
 function ContextUpdateSeparator({ message, text, lang }: { message: ChatDisplayMessage; text: BeeGameText; lang: Language }) {

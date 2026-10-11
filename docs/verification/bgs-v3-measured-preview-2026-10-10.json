@@ -1,0 +1,243 @@
+{
+  "date": "2026-10-10",
+  "rfcVersion": "1.10",
+  "workspace": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+  "rfc": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/BGS_V3_Agent_Driven_Workflow_Implementation.md",
+  "scope": "V3 selected measured static build Preview on existing BGS HTTP service, with explicit frontend open/reload/revoke/freshness. Not game acceptance or release.",
+  "implemented": [
+    "Requires current successful Task/Attempt/runtimeArtifact, actual host runtime-smoke contract/version, covered bytes and fresh upstream evidence.",
+    "Returns exact measured HTML/JS/data/resource bytes: no HTML injection, path rewriting, project script, rebuild/retest, native dispatch or model call.",
+    "Configured dedicated Preview hosts intercepted before APIs/auth; root-absolute paths preserved; GET/HEAD/OPTIONS only; non-measured/private/alias paths rejected.",
+    "Reuses existing PreviewCapabilityManager and PREVIEW_IFRAME_SANDBOX; owned project/project.read and preview.manage required, not agent.send_message.",
+    "Source/build/writer/attempt/capability drift revokes, unrelated edits retain Preview; restart invalidates URLs and requires explicit reopen without task replay.",
+    "Delayed open/close cannot replace/revoke a newer capability or leave another effective orphan.",
+    "Frontend shows attempt/path/digest/limitations, rejects wrong-project/unsafe responses, removes stale iframe; loading is not acceptance.",
+    "Confirmed V3 mode disables primary legacy script Preview/release/automatic repair and directs users to the task panel.",
+    "Fixed existing registration order: resolve async identity before V3 routes and legacy guards; preserve public session-refresh/capability boundary and actual 401/503/conflict errors."
+  ],
+  "actualBrowser": {
+    "runner": "Existing owned Chromium + installed Node + pinned shared Playwright",
+    "fixture": "Synthetic static build measured by actual runtime-smoke, then served unmodified inside the existing opaque sandbox.",
+    "observed": [
+      "root-absolute module import",
+      "root-absolute JSON consumption into DOM",
+      "root-absolute image decode",
+      "reload",
+      "parent-document/localStorage blocked",
+      "BGS APIs inaccessible on Preview host"
+    ],
+    "limitations": [
+      "No deployed full React Dashboard browser validation",
+      "Not real-game/mobile/touch/audio/gameplay acceptance",
+      "No proof of LLM semantic review competence or aesthetics"
+    ]
+  },
+  "tests": [
+    {
+      "suite": "V3/core/legacy Preview, includes actual native CLI + loopback fake model and runtime/UI/Canvas browser checks",
+      "files": 21,
+      "passed": 138,
+      "failed": 0,
+      "assertions": 987,
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-v3-measured-preview-complete-final-regression.log"
+    },
+    {
+      "suite": "Shared auth consumers/stop/legacy Preview",
+      "files": 8,
+      "passed": 32,
+      "failed": 0,
+      "assertions": 138,
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-v3-measured-preview-shared-auth-regression.log"
+    },
+    {
+      "suite": "Auth context/public/user roles",
+      "files": 3,
+      "passed": 32,
+      "failed": 0,
+      "assertions": 82,
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-v3-measured-preview-auth-context-regression.log"
+    },
+    {
+      "suite": "Frontend selected jsdom Preview/Workflow/Sidebar/Scene/UI consumers",
+      "files": 7,
+      "passed": 146,
+      "failed": 0,
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-v3-measured-preview-front-verified-regression.log"
+    }
+  ],
+  "deduplicated": {
+    "serverPassed": 183,
+    "serverFiles": 28,
+    "frontendPassed": 146,
+    "totalPassed": 329,
+    "note": "Backend overlap deduplicated by file/case count; repeated focused runs not added."
+  },
+  "typechecks": {
+    "frontend": {
+      "exitCode": 0,
+      "log": "/private/tmp/bgs-v3-measured-preview-front-complete-types.log"
+    },
+    "server": {
+      "exitCode": 2,
+      "diagnostics": 3556,
+      "addedDiagnostics": 0,
+      "baselineComparison": "Identical error TS lines to previous source-view baseline; not a clean server build.",
+      "log": "/private/tmp/bgs-v3-measured-preview-server-verified-types.log"
+    }
+  },
+  "exploratoryFailures": [
+    {
+      "log": "/private/tmp/bgs-v3-measured-preview-core-regression.log",
+      "passed": 136,
+      "failed": 1,
+      "status": "resolved",
+      "cause": "Legacy/V3 guards used user projection before async auth. Final affected and full regression passed after moving existing common auth middleware."
+    },
+    {
+      "log": "/private/tmp/bgs-v3-measured-preview-front-regression.log",
+      "passed": 161,
+      "failed": 1,
+      "unhandledErrors": 17,
+      "status": "remaining test gap",
+      "cause": "Old BeeGameLivePreviewPage avatar data-state expectation differs from current component and jsdom lacks Path2D. Page/avatar/assertion not modified this turn; not counted as clean passing evidence."
+    },
+    {
+      "log": "/private/tmp/bgs-v3-measured-preview-legacy-auth-diagnostic.log",
+      "status": "resolved diagnostic reproduction",
+      "cause": "Authenticated request falsely reported v3-route-required before identity resolution."
+    }
+  ],
+  "configuration": {
+    "key": "BEEGAME_WORKFLOW_V3_PREVIEW_ORIGIN",
+    "localExample": "http://localhost:62174",
+    "production": "Dedicated HTTPS wildcard domain routed to same BGS service, preserve Host; TLS may terminate at gateway.",
+    "unavailable": "Explicit 503; no dev-script fallback. Templates updated, actual env/DNS/TLS/deployment untouched."
+  },
+  "limitations": [
+    "Deployed full Dashboard interaction, authorized editing/export, initial Chat planning/change and task events remain incomplete.",
+    "Preview findings -> authorized Review/Repair UI and measured export are subsequent work, not delegated to legacy automatic repair.",
+    "deliveryEligible=false; Preview/smoke are not game or release acceptance.",
+    "Tilemap/3D/animation/fonts/audio/full gameplay remain unverified.",
+    "Real DB migration/concurrency and unknown external effects remain unverified.",
+    "Per-file freshness rehashes measured dependency closure; host I/O cost not benchmarked/cached. No model calls in this Preview path.",
+    "Summaries/hashes retained in repo; full temporary logs only at listed paths."
+  ],
+  "notPerformed": [
+    "Claude Code/native source changes",
+    "real generated-game edits",
+    "paid provider calls",
+    "deployment/service restart",
+    "production DB writes/migration",
+    "historical evidence overwrite"
+  ],
+  "hashes": [
+    {
+      "path": "packages/agent-workflow-server/src/app.ts",
+      "sha256": "a520c6f29da8f5070d37710a8a6a9ad47f45e99ad876f82ac381549fa11e502d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/measured-preview.ts",
+      "sha256": "8c167284fd687c4a1bb2f359d18a0e6ff303596ebb7096569d221e2e681dc452"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/measured-preview.test.ts",
+      "sha256": "0926149f6aecccbfd60893600a3848a5a32391d6dff4a79d6d203b1d3448cf8f"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-checks.ts",
+      "sha256": "af819ea303ef7c90f5ed852f7a6e1e2e90f61ab8d778dd83fa8dd99583007e89"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts",
+      "sha256": "8d511e5e03952046043dd8ebdce934722cfd038169d077b2e30ab9c12a8a8186"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/__tests__/preview-authorization.test.ts",
+      "sha256": "39ea7af566617111c62d199bcd755bdadb0a63767d2d1443425be09336e4d4fe"
+    },
+    {
+      "path": "apps/frontend/src/services/workflowV3Api.ts",
+      "sha256": "18f2516387ab54125ed1ed960d01a9b5ab0afe8d6cbce0bd607296a4e7688249"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/WorkflowMeasuredPreview.tsx",
+      "sha256": "c30e033d656dd614ba854a3da343e06cb88edf001006fc129591cf10ca407489"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/WorkflowMeasuredPreview.test.tsx",
+      "sha256": "662063f73a938157ee262428b5d5b017c4e07206f5938f6d7a6856eb97df516c"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/WorkflowPanel.tsx",
+      "sha256": "f81178c2fa96ea2c3c67257db1310fb10a076f1f2557b8004af811ade61fd73e"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/WorkflowPanel.test.tsx",
+      "sha256": "3f6ea3ac6c5b1dbbe9b7a38a9a939387761c308a562cf4ac5301f7df7a8cc5a1"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/Sidebar/ChatPanel.tsx",
+      "sha256": "5c4ac9025f458078dd18c40801a68e2b9169c4ea184cfab80d357bab89a7b618"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/RightSidebar.tsx",
+      "sha256": "38bf3b522f213b335fb35f411fc4b8bee04a549cff140f0d8d48e5230464590e"
+    },
+    {
+      "path": "apps/frontend/src/components/Demiurge/DashboardView.tsx",
+      "sha256": "a476a3a6cba8122a9c098e6a2ae9c7b603af5341eba9ce35d21b42b3e5b97879"
+    },
+    {
+      "path": ".env.example",
+      "sha256": "2386cf1646a379937bb7cdaa2878bd2f2e72520fc83500ab702f5653b8d50b4f"
+    },
+    {
+      "path": "docker/.env.production.example",
+      "sha256": "b49f9f1b55812aa6b716c3f4d326a9a852df2dcc1efda6f589f24ea69b7cafef"
+    },
+    {
+      "path": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/BGS_V3_Agent_Driven_Workflow_Implementation.md",
+      "sha256": "1e90d096c251a958d47434a6d0283b9cc8a3d71b2bc4c852c0d55c19822769a8"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-measured-preview-complete-final-regression.log",
+      "sha256": "c4c5b13b65cdb411730b597269b7c69f770d7ecdc5e5ea01d639f6437e9aa555"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-measured-preview-shared-auth-regression.log",
+      "sha256": "9c76ab6d05a7cf2b9763d6e9776edd7098b56b5d61b8617320833e7546ad4a2f"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-measured-preview-auth-context-regression.log",
+      "sha256": "330b64dcb8427a3810ed72855f50b030b470d8042a6989089cd4d72872917838"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-measured-preview-front-verified-regression.log",
+      "sha256": "4bbca5a3348902984cd26fd4c5bf7f0a00345ad8f7934ffbbc109507a92283ee"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-measured-preview-front-complete-types.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-measured-preview-server-verified-types.log",
+      "sha256": "b06a3b6e247600fba24b1fa1fffa7c6ef3dc5d692b1b7ba6615fb74e9cea15fb"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-measured-preview-core-regression.log",
+      "sha256": "4379ff3587662255ed68a170d74e6635ac2b0ba208921509d8a14a68d5ca116c"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-measured-preview-front-regression.log",
+      "sha256": "9c4ca6215e808403e472588e2b13953dc7d99b0c32f78e513454d3f82676b3e0"
+    },
+    {
+      "path": "/private/tmp/bgs-v3-measured-preview-legacy-auth-diagnostic.log",
+      "sha256": "cf681ae466243806e414e18814c6aeb7a29ef4733a332b466e5918bb88733288"
+    }
+  ]
+}

@@ -16,7 +16,7 @@ import type { Project } from '../types/project'
 import type { UiLayoutOverride } from '../../../../packages/scene-editor/src/ui-responsive'
 import type { AssistantContentBlock, ProjectEventMessage } from '../types/message'
 import { authenticatedFetch } from './apiClient'
-import { readSubagentActivity } from '@bee-game-studio/agent-workflow/subagent-activity'
+import { readSubagentActivity, mergeSubagentActivity, type SubagentActivitySnapshot } from '@bee-game-studio/agent-workflow/subagent-activity'
 import { normalizeChatAttachments } from './chatAttachments'
 import { projectQuotaErrorMessage } from './projectQuotaError'
 import {
@@ -181,6 +181,8 @@ type ChatHistoryCursorState = BeeGameTranscriptPage['page'] & {
 }
 const chatHistoryCursorByProject = new Map<string, ChatHistoryCursorState>()
 const stoppedTurnsByProject = new Map<string, Set<string>>()
+type SubagentToolOwner = { event: BeeGameEvent; activity: SubagentActivitySnapshot }
+const subagentToolsByProject = new Map<string, Map<string, SubagentToolOwner>>()
 
 type BeeGameDiscoveredArtifact = {
   path: string
@@ -551,6 +553,7 @@ export const beeGameAdapter = {
     await deleteProjectMetadata(projectId)
     chatHistoryCursorByProject.delete(projectId)
     stoppedTurnsByProject.delete(projectId)
+    subagentToolsByProject.delete(projectId)
     return { ok: true }
   },
 
@@ -670,10 +673,13 @@ export const beeGameAdapter = {
     const pageIds = new Set(transcriptPage.events.map(event => event.id))
     const historyEvents = [...transcriptPage.events,
       ...(transcriptPage.todoEvents ?? []).filter(event => !pageIds.has(event.id))]
+    const subagentTools = new Map<string, SubagentToolOwner>()
+    subagentToolsByProject.set(projectId, subagentTools)
     return eventsToHistory(
       projectId,
       historyEvents,
       transcriptPage.workspacePath,
+      subagentTools,
     )
   },
 
@@ -1416,8 +1422,9 @@ function eventsToHistory(
   projectId: string,
   events: BeeGameEvent[],
   workspacePath = '',
+  subagentTools?: Map<string, SubagentToolOwner>,
 ): unknown[] {
-  const normalizedEvents = normalizeDisplayEvents(events)
+  const normalizedEvents = normalizeDisplayEvents(events, subagentTools, projectId)
   const turnCompletedAt = new Map<string, number>()
   for (const event of normalizedEvents) {
     if (event.type !== 'turn.completed' || !event.turnId) continue
@@ -1433,6 +1440,9 @@ function eventsToHistory(
   const thinkingStartedAtByMessage = new Map<string, number>()
   const endedThoughts = new Set<string>()
   const messages = projectedMessages.flatMap(message => {
+    // Keep the live human_gate notification (it refreshes the approval panel),
+    // but its record is already displayed inside the owning subagent.
+    if (message.type === 'human_gate' && message.task_kind === 'subagent_permission_request') return []
     if (message.type === 'context_compaction' && message.message_id) {
       const existing = compactionMessages.get(message.message_id)
       if (existing) {
@@ -1991,7 +2001,8 @@ function eventToProjectEventMessagesBase(
           message_id: getPermissionRequestMessageId(event),
           content: event.text,
           sender: 'beegame',
-          task_kind: 'permission_request',
+          task_kind: getPayloadString(event, 'parentToolUseID') || getPayloadString(event, 'parent_tool_use_id')
+            ? 'subagent_permission_request' : 'permission_request',
           turnId: event.turnId,
           turn_id: event.turnId,
           requires_user_action: true,
@@ -2078,10 +2089,12 @@ function eventToProjectEventMessagesBase(
   }
 }
 
-function normalizeDisplayEvents(events: BeeGameEvent[]): BeeGameEvent[] {
+function normalizeDisplayEvents(events: BeeGameEvent[], subagentTools?: Map<string, SubagentToolOwner>, projectId?: string): BeeGameEvent[] {
   return normalizeBeeGameEvents(events, {
     includeUserMessages: true,
     includePartialsWhenFinalExists: false,
+    subagentTools,
+    projectId,
   })
 }
 
@@ -2090,6 +2103,8 @@ function normalizeBeeGameEvents(
   options: {
     includeUserMessages: boolean
     includePartialsWhenFinalExists: boolean
+    subagentTools?: Map<string, SubagentToolOwner>
+    projectId?: string
   },
 ): BeeGameEvent[] {
   // A replacement turn keeps the immutable audit stream, but only the live
@@ -2303,7 +2318,148 @@ function normalizeBeeGameEvents(
   }
   flushPartial()
   flushThinking()
-  return visible
+  return routeSubagentToolEvents(visible, options.subagentTools, options.projectId)
+}
+
+/** Owned child activity updates its owner's detail, never a main-chat row.
+ * Use the same projection for old transcripts, polling and separate SSE frames;
+ * some foreground workers have no output-file activity snapshot to fall back on. */
+function routeSubagentToolEvents(
+  events: BeeGameEvent[],
+  owners = new Map<string, SubagentToolOwner>(),
+  projectId?: string,
+): BeeGameEvent[] {
+  const mergeActivity = (previous: SubagentActivitySnapshot, next?: SubagentActivitySnapshot) => mergeSubagentActivity(previous, next)!
+  return events.flatMap<BeeGameEvent>(event => {
+    let parent = getPayloadString(event, 'parentToolUseID') || getPayloadString(event, 'parent_tool_use_id')
+    const sourceOwner = parent
+    const toolName = getPayloadString(event, 'toolName') || getPayloadString(event, 'tool_name')
+    const lifecycle = event.type === 'system.status' &&
+      ['task_started', 'task_progress', 'task_notification'].includes(getPayloadString(event, 'subtype'))
+    const toolEvent = ['tool.started', 'tool.progress', 'tool.completed', 'tool.failed'].includes(event.type)
+    if (!parent) {
+      const backgroundResult = getPayloadRecord(event, 'nativeBackgroundTaskResult')
+      const completedOwner = toolName === 'TaskOutput' && typeof backgroundResult.toolUseID === 'string'
+        ? backgroundResult.toolUseID : ''
+      if (!lifecycle && !(toolEvent && (['Agent', 'Task'].includes(toolName) || completedOwner))) return [event]
+      const id = completedOwner || getPayloadString(event, 'toolUseID') || getPayloadString(event, 'tool_use_id') || getPayloadString(event, 'task_id')
+      if (!id) return [event]
+      const key = `${event.sessionId}:${id}`
+      const previous = owners.get(key)
+      const activity = mergeActivity(previous?.activity ?? { entries: [], truncated: false }, readSubagentActivity(event.payload?.subagentActivity))
+      const updated: BeeGameEvent = { ...event, payload: { ...event.payload, type: event.payload?.type ?? event.type,
+        input: { ...getPayloadRecord(previous?.event ?? event, 'input'), ...getPayloadRecord(event, 'input') },
+        ...(activity.entries.length ? { subagentActivity: activity } : {}),
+      } }
+      owners.set(key, { event: updated, activity })
+      return [updated]
+    }
+    // Nested workers belong inside the root owner's drawer as well. Retain
+    // their real invocation relation instead of creating a main-chat owner.
+    if ((toolEvent || lifecycle) && ['Agent', 'Task'].includes(toolName)) {
+      const childId = getPayloadString(event, 'toolUseID') || getPayloadString(event, 'tool_use_id')
+      if (childId) owners.set(`${event.sessionId}:${childId}`, { event, activity: { entries: [], truncated: false } })
+    }
+    const ancestors = new Set<string>()
+    while (parent && !ancestors.has(parent)) {
+      ancestors.add(parent)
+      const ancestor = owners.get(`${event.sessionId}:${parent}`)?.event
+      const next = ancestor && (getPayloadString(ancestor, 'parentToolUseID') || getPayloadString(ancestor, 'parent_tool_use_id'))
+      if (!next) break
+      parent = next
+    }
+    const key = `${event.sessionId}:${parent}`
+    const previous = owners.get(key)
+    // Provider message IDs are only unique inside their original worker.
+    // Scope both live messages and that worker's transcript snapshots equally.
+    const scopedMessageId = (id: string, worker = sourceOwner) => worker && worker !== parent ? `${worker}:${id}` : id
+    const input = getPayloadRecord(event, 'input')
+    const id = getPayloadString(event, 'toolUseID') || getPayloadString(event, 'tool_use_id')
+    const priorTool = previous?.activity.entries.find(item => item.id === id && item.kind === 'tool')
+    const output = getPayloadString(event, 'output')
+    const launchReceipt = event.type === 'tool.completed' && ['Agent', 'Task'].includes(toolName) &&
+      (Boolean(event.payload?.nativeBackgroundTask) || (/^agentId:\s*\S+/m.test(output) && /^output_file:\s*\S+/m.test(output)))
+    let entry: SubagentActivitySnapshot['entries'][number] | undefined
+    if (toolEvent && id) entry = { id, kind: 'tool' as const,
+      toolName: toolName || (priorTool?.kind === 'tool' ? priorTool.toolName : 'Tool'),
+      ...(typeof input.file_path === 'string' ? { filePath: input.file_path } : {}),
+      ...(typeof input.command === 'string' ? { command: input.command } : {}),
+      ...(Object.keys(input).length ? { input: JSON.stringify(input, null, 2) } : {}),
+      ...(!launchReceipt && typeof event.payload?.output === 'string' ? { output: event.payload.output } : {}),
+      ...(getPayloadString(event, 'attachmentError') ? { attachmentError: getPayloadString(event, 'attachmentError') } : {}),
+      ...(typeof event.payload?.elapsed_time_seconds === 'number' && Number.isFinite(event.payload.elapsed_time_seconds) && event.payload.elapsed_time_seconds >= 0
+        ? { elapsedTimeSeconds: event.payload.elapsed_time_seconds } : {}),
+      ...(Array.isArray(event.payload?.attachments) ? { attachments: normalizeChatAttachments(
+        event.payload.attachments.map(item => item && typeof item === 'object' ? { ...item, projectId } : item)) } : {}),
+      status: launchReceipt ? 'running' : event.type === 'tool.failed' ? 'failed' : event.type === 'tool.completed' ? 'completed' : 'running',
+    }
+    if (lifecycle && id) {
+      const terminal = getPayloadString(event, 'subtype') === 'task_notification'
+      const status = getPayloadString(event, 'status')
+      entry = { id, kind: 'tool', toolName: toolName || 'Agent',
+        status: terminal ? status === 'completed' ? 'completed' : ['stopped', 'killed'].includes(status) ? 'cancelled' : 'failed' : 'running',
+        ...(terminal ? { output: getPayloadString(event, 'summary') || event.text } : {}),
+      }
+    }
+    if (event.type === 'assistant.message' || event.type === 'assistant.partial') {
+      const messageId = scopedMessageId(`message-${getAssistantPayloadMessageId(event) || getPayloadString(event, 'uuid') || getBeeGameAssistantMessageId(event)}`)
+      const existing = previous?.activity.entries.find(item => item.id === messageId)
+      const text = event.type === 'assistant.partial' && getPayloadString(event, 'contentMode') !== 'snapshot' && existing?.kind === 'message'
+        ? existing.text + event.text : event.text
+      entry = { id: messageId, kind: 'message', text }
+    }
+    if (event.type === 'assistant.thinking' && getPayloadString(event, 'status') !== 'ended' && event.text !== 'Thinking') {
+      const thinkingId = `thinking-${getThinkingDisplayId(event)}`
+      const existing = previous?.activity.entries.find(item => item.id === thinkingId)
+      entry = { id: thinkingId, kind: 'message', text: getPayloadString(event, 'contentMode') !== 'snapshot' && existing?.kind === 'message'
+        ? existing.text + event.text : event.text }
+    }
+    if (event.type === 'permission.requested' || event.type === 'permission.resolved') {
+      const permissionId = `permission-${id || event.id}`
+      const existing = previous?.activity.entries.find(item => item.id === permissionId)
+      const decision = getPayloadString(event, 'decision')
+      // Routine automatic allows already have a tool record; they did not ask
+      // the user and must not look like a user-approved gate.
+      if (!(event.payload?.autoApproved && !existing)) entry = { id: permissionId, kind: 'permission', toolName,
+        message: getPayloadString(event, 'message') || (existing?.kind === 'permission' ? existing.message : event.text),
+        status: event.type === 'permission.requested' ? 'pending' : decision === 'allow' ? 'allowed' : decision === 'cancelled' ? 'cancelled' : 'denied' }
+    }
+    if (event.type === 'system.status' && !lifecycle) {
+      const subtype = getPayloadString(event, 'subtype')
+      const compacting = subtype === 'status' && getPayloadString(event, 'status') === 'compacting'
+      if (compacting || subtype === 'compact_boundary') {
+        entry = { id: `compaction-${event.turnId || event.sessionId}-${sourceOwner}`, kind: 'message',
+          text: compacting ? 'Context compacting' : 'Context compacted' }
+      } else if (event.text && !['system', 'control_response'].includes(event.text)) {
+        entry = { id: `status-${event.id}`, kind: 'message', text: event.text }
+      }
+    }
+    const snapshot = readSubagentActivity(event.payload?.subagentActivity)
+    const snapshotResult = getPayloadRecord(event, 'nativeBackgroundTaskResult')
+    const snapshotOwner = (lifecycle || ['Agent', 'Task'].includes(toolName)) && id ? id
+      : typeof snapshotResult.toolUseID === 'string' ? snapshotResult.toolUseID : sourceOwner
+    const scopedSnapshot = snapshot && { ...snapshot, entries: snapshot.entries.map(item => item.kind === 'message'
+      ? { ...item, id: scopedMessageId(item.id, snapshotOwner) } : item) }
+    let activity = mergeActivity(previous?.activity ?? { entries: [], truncated: true }, scopedSnapshot)
+    if (entry) activity = mergeActivity(activity, { entries: [entry], truncated: false })
+    const taskResult = getPayloadRecord(event, 'nativeBackgroundTaskResult')
+    if (typeof taskResult.toolUseID === 'string' && ['completed', 'failed', 'stopped', 'killed'].includes(String(taskResult.status))) {
+      activity = mergeActivity(activity, { entries: [{ id: taskResult.toolUseID, kind: 'tool', toolName: 'Agent',
+        status: taskResult.status === 'completed' ? 'completed' : taskResult.status === 'failed' ? 'failed' : 'cancelled',
+        ...(typeof taskResult.result === 'string' ? { output: taskResult.result } : {}),
+      }], truncated: false })
+    }
+    // History can start mid-worker. The known parent invocation ID still owns
+    // the record; no separate execution or completion is invented here.
+    const owner = previous?.event ?? { ...event, type: 'tool.progress', text: 'Agent',
+      payload: { type: 'tool.progress', toolName: 'Agent', toolUseID: parent, input: {} } }
+    const updated: BeeGameEvent = { ...owner, id: event.id, createdAt: event.createdAt,
+      payload: { ...owner.payload, type: owner.payload?.type ?? owner.type, subagentActivity: activity } }
+    owners.set(key, { event: updated, activity })
+    // TodoWrite also feeds the task checklist. That non-visible projection
+    // keeps its original owner scope; the feed already excludes it as a row.
+    return toolName === 'TodoWrite' || event.type === 'permission.requested' ? [updated, event] : [updated]
+  })
 }
 
 function getThinkingDisplayId(event: BeeGameEvent): string {
@@ -2328,7 +2484,7 @@ function coalesceLogicalAssistantMessages(
     if (event.type !== 'assistant.message') continue
     const messageId = getAssistantPayloadMessageId(event)
     if (!messageId) continue
-    const identity = `${event.sessionId}:${event.turnId ?? ''}:${getPayloadString(event, 'assistantBlockId') || messageId}`
+    const identity = `${event.sessionId}:${event.turnId ?? ''}:${getPayloadString(event, 'parentToolUseID') || getPayloadString(event, 'parent_tool_use_id')}:${getPayloadString(event, 'assistantBlockId') || messageId}`
     const payloadText = getAssistantPayloadVisibleText(event)
     const existing = representativeByMessage.get(identity)
     if (!existing) {
@@ -2527,6 +2683,8 @@ function normalizeLiveEvents(
 ): BeeGameEvent[] {
   const stopped = stoppedTurnsByProject.get(projectId) ?? new Set<string>()
   stoppedTurnsByProject.set(projectId, stopped)
+  const subagentTools = subagentToolsByProject.get(projectId) ?? new Map<string, SubagentToolOwner>()
+  subagentToolsByProject.set(projectId, subagentTools)
   const visible = events.filter(event => {
     if (event.turnId && (event.type === 'session.stopped' || event.type === 'session.failed'))
       stopped.add(event.turnId)
@@ -2536,6 +2694,8 @@ function normalizeLiveEvents(
   return normalizeBeeGameEvents(visible, {
     includeUserMessages: true,
     includePartialsWhenFinalExists: true,
+    subagentTools,
+    projectId,
   })
 }
 
@@ -2620,17 +2780,19 @@ function describePermissionResolution(event: BeeGameEvent): string {
 }
 
 function getBeeGameAssistantMessageId(event: BeeGameEvent): string {
+  const parent = getPayloadString(event, 'parentToolUseID') || getPayloadString(event, 'parent_tool_use_id')
+  const scope = parent ? `:subagent:${parent}` : ''
   const displayMessageId = getPayloadString(event, DISPLAY_MESSAGE_ID_KEY)
-  if (displayMessageId) return displayMessageId
+  if (displayMessageId) return displayMessageId + scope
   const blockId = getPayloadString(event, 'assistantBlockId')
-  if (blockId) return `beegame-block-${blockId}`
+  if (blockId) return `beegame-block-${blockId}${scope}`
   const nativeId = getAssistantPayloadMessageId(event)
-  if (nativeId) return `beegame-assistant-${event.sessionId}-${nativeId}`
+  if (nativeId) return `beegame-assistant-${event.sessionId}-${nativeId}${scope}`
   if (event.type === 'assistant.message')
-    return getFinalAssistantMessageId(event)
+    return getFinalAssistantMessageId(event) + scope
   if (event.type === 'assistant.partial')
-    return `beegame-partial-${getTurnDisplayId(event)}-${event.id}`
-  return `beegame-event-${event.id}`
+    return `beegame-partial-${getTurnDisplayId(event)}-${event.id}${scope}`
+  return `beegame-event-${event.id}${scope}`
 }
 
 function getPermissionRequestMessageId(event: BeeGameEvent): string {

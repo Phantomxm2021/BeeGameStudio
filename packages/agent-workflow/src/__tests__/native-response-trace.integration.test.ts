@@ -93,14 +93,14 @@ async function scenario(mode: 'background' | 'interrupted' | 'auto-background') 
       logPath, signal: stop.signal, onMessage: async message => { observed.push(message) },
       env: nativeFileAgentEnvironment({ BEEGAME_CONFIG_DIR: join(root, 'configuration'), BEEGAME_MODEL_TYPE: 'anthropic',
         ANTHROPIC_API_KEY: 'TRACE_PRIVATE_API_KEY', ANTHROPIC_BASE_URL: 'http://127.0.0.1:' + server.port,
-        ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-6', ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-sonnet-4-6',
-        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1' }),
+        BGS_DEFAULT_BALANCED_MODEL: 'claude-sonnet-4-6', BGS_DEFAULT_FAST_MODEL: 'claude-sonnet-4-6',
+        BGS_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1' }),
     })
     await monitor
     const raw = await readFile(logPath, 'utf8'), events = raw.trim().split('\n').map(line => JSON.parse(line))
     expect(raw).not.toContain('TRACE_PRIVATE_API_KEY')
-    expect(events.some(e => e.event === 'native_diagnostic' && e.data.event === 'request_start')).toBe(true)
-    expect(events.some(e => e.event === 'native_diagnostic' && e.data.event === 'first_stream_event')).toBe(true)
+    expect(events.some(e => e.event === 'native_diagnostic')).toBe(false)
+    expect(events.some(e => e.event === 'stream_event' && e.data.type === 'message_start')).toBe(true)
     expect(childReads).toBe(1)
     expect(childWrites).toBe(1)
     expect(raw).not.toContain('PARTIAL_ASSET_BODY')
@@ -109,9 +109,9 @@ async function scenario(mode: 'background' | 'interrupted' | 'auto-background') 
     expect(chatRaw).not.toContain('TRACE_PRIVATE_API_KEY')
     const childFrames = chatRaw.trim().split('\n').map(line => JSON.parse(line))
       .filter(e => e.event.startsWith('response.') && e.data.agentId !== 'root')
-    expect(childFrames.some(e => e.event === 'response.request_start')).toBe(true)
+    expect(childFrames.some(e => e.event === 'response.message_start')).toBe(true)
     expect(childFrames.some(e => e.event === 'response.content_snapshot' && e.data.content.includes('PARTIAL_ASSET_BODY'))).toBe(true)
-    expect(observed.some(message => message.nativeTraceAgentId && message.event?.type === 'message_start')).toBe(true)
+    expect(observed.some(message => message.parent_tool_use_id && message.event?.type === 'message_start')).toBe(true)
     if (mode === 'interrupted') {
       expect(capturedBeforeStop).toBe(true)
       expect(result.failure).toBe('stopped')

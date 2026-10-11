@@ -7,7 +7,7 @@ Pre-built theme-aware UI components for common terminal interface patterns.
 Modal dialog with border, title, and keyboard navigation.
 
 ```tsx
-import { Dialog } from '@anthropic/ink'
+import { Dialog } from '@bee-game-studio/ink'
 
 <Dialog
   title="Confirm Action"
@@ -60,7 +60,7 @@ import { Dialog } from '@anthropic/ink'
 Bordered container with themed top border.
 
 ```tsx
-import { Pane } from '@anthropic/ink'
+import { Pane } from '@bee-game-studio/ink'
 
 <Pane color="permission">
   <Text>Content inside a bordered pane</Text>
@@ -77,7 +77,7 @@ import { Pane } from '@anthropic/ink'
 Visual progress indicator.
 
 ```tsx
-import { ProgressBar } from '@anthropic/ink'
+import { ProgressBar } from '@bee-game-studio/ink'
 
 <ProgressBar
   ratio={0.65}
@@ -99,7 +99,7 @@ import { ProgressBar } from '@anthropic/ink'
 Animated loading spinner. No props.
 
 ```tsx
-import { Spinner } from '@anthropic/ink'
+import { Spinner } from '@bee-game-studio/ink'
 
 <Box gap={1}>
   <Spinner />
@@ -112,7 +112,7 @@ import { Spinner } from '@anthropic/ink'
 Loading message with spinner and optional subtitle.
 
 ```tsx
-import { LoadingState } from '@anthropic/ink'
+import { LoadingState } from '@bee-game-studio/ink'
 
 <LoadingState
   message="Installing dependencies"
@@ -133,7 +133,7 @@ import { LoadingState } from '@anthropic/ink'
 Semantic status indicator with icon and color.
 
 ```tsx
-import { StatusIcon } from '@anthropic/ink'
+import { StatusIcon } from '@bee-game-studio/ink'
 
 <StatusIcon status="success" withSpace />
 <Text>Build complete</Text>
@@ -157,7 +157,7 @@ Status icons:
 Full-featured fuzzy search selector with preview support.
 
 ```tsx
-import { FuzzyPicker } from '@anthropic/ink'
+import { FuzzyPicker } from '@bee-game-studio/ink'
 
 <FuzzyPicker
   title="Select a file"
@@ -200,7 +200,7 @@ import { FuzzyPicker } from '@anthropic/ink'
 Tabbed interface with keyboard navigation.
 
 ```tsx
-import { Tabs, Tab } from '@anthropic/ink'
+import { Tabs, Tab } from '@bee-game-studio/ink'
 
 <Tabs title="Settings" color="claude">
   <Tab title="General" id="general">
@@ -241,7 +241,7 @@ import { Tabs, Tab } from '@anthropic/ink'
 ### Tab Hooks
 
 ```tsx
-import { useTabsWidth, useTabHeaderFocus } from '@anthropic/ink'
+import { useTabsWidth, useTabHeaderFocus } from '@bee-game-studio/ink'
 
 const width = useTabsWidth()          // Available content width
 const focused = useTabHeaderFocus()   // Whether tab header is focused
@@ -252,7 +252,7 @@ const focused = useTabHeaderFocus()   // Whether tab header is focused
 Selectable list item with focus/selection indicators.
 
 ```tsx
-import { ListItem } from '@anthropic/ink'
+import { ListItem } from '@bee-game-studio/ink'
 
 <ListItem isFocused={index === focusedIndex} isSelected={item.checked}>
   <Text>{item.label}</Text>
@@ -276,7 +276,7 @@ import { ListItem } from '@anthropic/ink'
 Search input with theme-aware styling.
 
 ```tsx
-import { SearchBox } from '@anthropic/ink'
+import { SearchBox } from '@bee-game-studio/ink'
 
 <SearchBox
   query={searchQuery}
@@ -303,7 +303,7 @@ import { SearchBox } from '@anthropic/ink'
 Horizontal/vertical divider line.
 
 ```tsx
-import { Divider } from '@anthropic/ink'
+import { Divider } from '@bee-game-studio/ink'
 
 <Divider width={60} color="subtle" />
 <Divider title="Section Title" />
@@ -322,7 +322,7 @@ import { Divider } from '@anthropic/ink'
 Footer with middot-separated items.
 
 ```tsx
-import { Byline } from '@anthropic/ink'
+import { Byline } from '@bee-game-studio/ink'
 
 <Byline>
   <KeyboardShortcutHint shortcut="Enter" action="confirm" />
@@ -335,7 +335,7 @@ import { Byline } from '@anthropic/ink'
 Display a keyboard shortcut with its action.
 
 ```tsx
-import { KeyboardShortcutHint } from '@anthropic/ink'
+import { KeyboardShortcutHint } from '@bee-game-studio/ink'
 
 <KeyboardShortcutHint shortcut="Enter" action="confirm" />
 <KeyboardShortcutHint shortcut="↑/↓" action="navigate" parens />
@@ -353,7 +353,7 @@ import { KeyboardShortcutHint } from '@anthropic/ink'
 Displays a shortcut hint that reads the actual keybinding from config.
 
 ```tsx
-import { ConfigurableShortcutHint } from '@anthropic/ink'
+import { ConfigurableShortcutHint } from '@bee-game-studio/ink'
 
 <ConfigurableShortcutHint
   action="confirm:no"
@@ -377,7 +377,7 @@ import { ConfigurableShortcutHint } from '@anthropic/ink'
 Animated counter component that prevents layout jumps.
 
 ```tsx
-import { Ratchet } from '@anthropic/ink'
+import { Ratchet } from '@bee-game-studio/ink'
 
 <Ratchet lock="always">
   <Text>{count}</Text>

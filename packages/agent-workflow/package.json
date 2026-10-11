@@ -8,13 +8,17 @@
   "exports": {
     ".": "./src/index.ts",
     "./native-diagnostics": "./src/native-diagnostics.ts",
+    "./standard-cli-usage": "./src/standard-cli-usage.ts",
+    "./standard-cli-cache": "./src/standard-cli-cache.ts",
+    "./standard-cli-provider": "./src/standard-cli-provider.ts",
     "./native-response-trace": "./src/native-response-trace.ts",
-    "./native-evidence": "./src/native-evidence.ts",
     "./subagent-activity": "./src/subagent-activity.ts",
     "./native-file-agent": "./src/native-file-agent.ts",
     "./native-task-access": "./src/native-task-access.ts",
     "./native-direction-authors": "./src/native-direction-authors.ts",
     "./design-review-result": "./src/design-review-result.ts",
+    "./design-calculation-command": "./src/design-calculation-command.ts",
+    "./production-check-input": "./src/production-check-input.ts",
     "./preview-environment": "./src/preview-environment.ts",
     "./package.json": "./package.json"
   },

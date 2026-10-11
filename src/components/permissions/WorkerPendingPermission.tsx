@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { getAgentName, getTeammateColor, getTeamName } from '../../utils/teammate.js';
 import { Spinner } from '../Spinner.js';
 import { WorkerBadge } from './WorkerBadge.js';

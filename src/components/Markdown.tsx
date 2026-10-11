@@ -2,7 +2,7 @@ import { marked, type Token, type Tokens } from 'marked';
 import React, { Suspense, use, useMemo, useRef } from 'react';
 import { LRUCache } from 'lru-cache';
 import { useSettings } from '../hooks/useSettings.js';
-import { Ansi, Box, useTheme } from '@anthropic/ink';
+import { Ansi, Box, useTheme } from '@bee-game-studio/ink';
 import { type CliHighlight, getCliHighlightPromise } from '../utils/cliHighlight.js';
 import { hashContent } from '../utils/hash.js';
 import { configureMarked, formatToken } from '../utils/markdown.js';

@@ -25,6 +25,17 @@ export type PaneBackendType = 'tmux' | 'iterm2' | 'windows-terminal'
  */
 export type PaneId = string
 
+/** Non-secret cleanup locators, persisted with the owning team member. */
+export type PaneCleanupMetadata = {
+  useExternalSession: boolean
+  tmuxSocketPath?: string
+  tmuxSocketName?: string
+  environmentDirectory?: string
+  inlineSettingsPath?: string
+  agentsPath?: string
+  windows?: { pidFile: string; launcherHash: string; pid?: number }
+}
+
 /**
  * Result of creating a new teammate pane.
  */
@@ -33,6 +44,7 @@ export type CreatePaneResult = {
   paneId: PaneId
   /** Whether this is the first teammate pane (affects layout strategy) */
   isFirstTeammate: boolean
+  cleanup?: PaneCleanupMetadata
 }
 
 /**
@@ -153,7 +165,12 @@ export type PaneBackend = {
    * @param useExternalSession - If true, uses external session socket (tmux-specific)
    * @returns true if the pane was killed successfully, false otherwise
    */
-  killPane(paneId: PaneId, useExternalSession?: boolean): Promise<boolean>
+  killPane(
+    paneId: PaneId,
+    useExternalSession?: boolean,
+    cleanup?: PaneCleanupMetadata,
+  ): Promise<boolean>
+  getPaneCleanupMetadata?(paneId: PaneId): PaneCleanupMetadata | undefined
 
   /**
    * Hides a pane by breaking it out into a hidden window.
@@ -284,6 +301,7 @@ export type TeammateSpawnResult = {
   windowName?: string
   /** Whether the backend used split panes. */
   isSplitPane?: boolean
+  paneCleanup?: PaneCleanupMetadata
 }
 
 /**
@@ -343,7 +361,7 @@ export type TeammateExecutor = {
  * Type guard to check if a backend type uses terminal panes.
  */
 export function isPaneBackend(
-  type: BackendType,
+  type: string,
 ): type is 'tmux' | 'iterm2' | 'windows-terminal' {
   return type === 'tmux' || type === 'iterm2' || type === 'windows-terminal'
 }

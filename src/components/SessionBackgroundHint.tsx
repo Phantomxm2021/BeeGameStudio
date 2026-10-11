@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useCallback, useState } from 'react';
 import { useDoublePress } from '../hooks/useDoublePress.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
 import { useAppState, useAppStateStore, useSetAppState } from '../state/AppState.js';
@@ -9,7 +9,7 @@ import { backgroundAll, hasForegroundTasks } from '../tasks/LocalShellTask/Local
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
 import { env } from '../utils/env.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
-import { KeyboardShortcutHint } from '@anthropic/ink';
+import { KeyboardShortcutHint } from '@bee-game-studio/ink';
 
 type Props = {
   onBackgroundSession: () => void;

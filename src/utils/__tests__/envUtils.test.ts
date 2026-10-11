@@ -269,18 +269,18 @@ describe('getVertexRegionForModel', () => {
 // ─── isBareMode ────────────────────────────────────────────────────────
 
 describe('isBareMode', () => {
-  const saved = process.env.CLAUDE_CODE_SIMPLE
+  const saved = process.env.BGS_SIMPLE
   const originalArgv = [...process.argv]
 
   afterEach(() => {
-    if (saved === undefined) delete process.env.CLAUDE_CODE_SIMPLE
-    else process.env.CLAUDE_CODE_SIMPLE = saved
+    if (saved === undefined) delete process.env.BGS_SIMPLE
+    else process.env.BGS_SIMPLE = saved
     process.argv.length = 0
     process.argv.push(...originalArgv)
   })
 
-  test('returns true when CLAUDE_CODE_SIMPLE=1', () => {
-    process.env.CLAUDE_CODE_SIMPLE = '1'
+  test('returns true when BGS_SIMPLE=1', () => {
+    process.env.BGS_SIMPLE = '1'
     expect(isBareMode()).toBe(true)
   })
 
@@ -290,7 +290,7 @@ describe('isBareMode', () => {
   })
 
   test('returns false when neither set', () => {
-    delete process.env.CLAUDE_CODE_SIMPLE
+    delete process.env.BGS_SIMPLE
     // argv doesn't have --bare by default
     expect(isBareMode()).toBe(false)
   })

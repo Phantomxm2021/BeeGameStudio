@@ -57,6 +57,7 @@ export function makeHooks(
   }
 
   const agent: WorkflowHooks['agent'] = async (prompt, opts = {}) => {
+    if (ctx.signal.aborted) throw new WorkflowAbortedError()
     const r = ctx.resources
     if (r.agentCountBox.value >= MAX_TOTAL_AGENTS) {
       throw new WorkflowError(
@@ -79,7 +80,8 @@ export function makeHooks(
     const invalidateJournal = async (): Promise<void> => {
       ctx.journalInvalidated = true
       ctx.journal = ctx.journal.slice(0, ctx.journalIndex)
-      await ctx.ports.journalStore.truncate(ctx.runId)
+      ctx.journalReset = ctx.ports.journalStore.truncate(ctx.runId, ctx.journal)
+      await ctx.journalReset
     }
 
     // Journal hit -> return a still-valid cached result directly. Old journal entries predate the
@@ -113,6 +115,7 @@ export function makeHooks(
       }
     }
 
+    await ctx.journalReset
     let release: () => void
     try {
       release = await ctx.resources.semaphore.acquire(ctx.signal)
@@ -182,10 +185,13 @@ export function makeHooks(
       // this is a workflow configuration problem, not a transient backend failure; retrying is meaningless and would mask the bug.
       const adapter = registry ? registry.resolve(params) : null
       const invokeBackend = async (): Promise<AgentRunResult> => {
+        if (ctx.signal.aborted) throw new WorkflowAbortedError()
         const rawResult = adapter
           ? adapter.run(params, adapterCtx!)
           : ctx.ports.agentRunner.runAgentToResult(params, ctx.host)
-        return validateStructuredResult(await rawResult, params.schema)
+        const result = await rawResult
+        if (ctx.signal.aborted) throw new WorkflowAbortedError()
+        return validateStructuredResult(result, params.schema)
       }
 
       // Auto-retry once on failure: dead (terminal API error after retries) or a non-abort throw
@@ -203,7 +209,12 @@ export function makeHooks(
         try {
           return { kind: 'result', value: await invokeBackend() }
         } catch (error) {
-          if (error instanceof WorkflowAbortedError) throw error
+          if (
+            ctx.signal.aborted ||
+            error instanceof WorkflowAbortedError ||
+            (error instanceof Error && error.name === 'AbortError')
+          )
+            throw new WorkflowAbortedError()
           return { kind: 'error', error }
         }
       }
@@ -273,6 +284,7 @@ export function makeHooks(
         try {
           return await t()
         } catch (e) {
+          if (e instanceof WorkflowAbortedError) throw e
           // The "null on error" contract is unchanged, but it should log — otherwise the workflow author cannot locate why an agent failed
           ctx.ports.logger.warn?.(
             `parallel thunk #${i} failed: ${(e as Error).message}`,
@@ -303,6 +315,7 @@ export function makeHooks(
           }
           return prev as R
         } catch (e) {
+          if (e instanceof WorkflowAbortedError) throw e
           ctx.ports.logger.warn?.(
             `pipeline item #${index} failed: ${(e as Error).message}`,
           )

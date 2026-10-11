@@ -1,6 +1,6 @@
 import React from 'react';
 import { MessageResponse } from 'src/components/MessageResponse.js';
-import { Text, stringWidth } from '@anthropic/ink';
+import { Text, stringWidth } from '@bee-game-studio/ink';
 import { truncateToWidthNoEllipsis } from 'src/utils/format.js';
 import type { Output } from './TaskStopTool.js';
 

@@ -14,6 +14,7 @@ import { asSystemPrompt } from '../utils/systemPromptType'
 import { drainSdkEvents } from '../utils/sdkEventQueue'
 import { SLEEP_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/SleepTool/prompt.js'
 import {
+  createAssistantMessage,
   createAssistantAPIErrorMessage,
   createUserMessage,
 } from '../utils/messages'
@@ -66,6 +67,39 @@ afterEach(async () => {
       throw lastError
     }
   }
+})
+
+test('a BGS document assignment does not rewrite older layout results after a later PASS', async () => {
+  const command = 'bun .beegame/delivery/check-content.mjs --design-layouts --draft --report --orientation Landscape'
+  const report = (id: string, pass: boolean) => [
+    createAssistantMessage({ content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }] }),
+    createUserMessage({ content: [{ type: 'tool_result', tool_use_id: id,
+      content: `Saved-input checks: ${pass ? 'PASS (reported scope only)' : 'FAIL'}\nNot visual acceptance.\nFull result: .beegame/tmp/layout-reports/check-${id}/result.json\nFailures: ${pass ? 0 : 2}\nOriginal measured source geometry.\n` }] }),
+  ]
+  const messages = [createUserMessage({ content: 'Inspect the saved draft.' }), ...report('old', false), ...report('new', true)]
+  const context = createToolUseContext()
+  const original = JSON.stringify(messages)
+  let received = ''
+  for await (const _message of query({
+    messages, systemPrompt: asSystemPrompt([]), userContext: {}, systemContext: {},
+    canUseTool: async (_tool, input) => ({ behavior: 'allow', updatedInput: input }),
+    toolUseContext: context, querySource: 'sdk',
+    deps: {
+      uuid: () => 'unchanged-layout-report-query',
+      microcompact: async (input: unknown[]) => ({ messages: input }),
+      autocompact: async () => ({ compactionResult: undefined, consecutiveFailures: 0 }),
+      callModel: async function* (input: { messages: unknown[] }) {
+        received = JSON.stringify(input.messages)
+        yield createAssistantAPIErrorMessage({ content: 'API Error: offline fixture ended',
+          apiError: 'api_error', error: new Error('offline fixture ended') as never })
+      },
+    } as never,
+  })) { /* Drain the offline query, never contact a provider. */ }
+  expect(received).toContain('Original measured source geometry.')
+  expect(received).toContain('Saved-input checks: FAIL')
+  expect(received).toContain('Saved-input checks: PASS')
+  expect(received).not.toContain('Earlier layout report archived')
+  expect(JSON.stringify(messages)).toBe(original)
 })
 
 test.each(['next', 'later'] as const)(
@@ -125,7 +159,7 @@ test.each(['next', 'later'] as const)(
         ),
       ).toHaveLength(1)
       const terminal = drainSdkEvents().filter(
-        event => event.subtype === 'task_notification',
+        event => event.type === 'system' && event.subtype === 'task_notification',
       )
       expect(terminal).toHaveLength(1)
       expect(terminal[0]).toMatchObject({

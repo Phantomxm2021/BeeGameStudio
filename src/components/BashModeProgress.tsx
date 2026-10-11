@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box } from '@anthropic/ink';
+import { Box } from '@bee-game-studio/ink';
 import { BashTool } from '@bee-game-studio/builtin-tools/tools/BashTool/BashTool.js';
 import type { ShellProgress } from '../types/tools.js';
 import { UserBashInputMessage } from './messages/UserBashInputMessage.js';

@@ -4,7 +4,7 @@
  * This module provides the single source of truth for the plugins directory path.
  * It supports switching between 'plugins' and 'cowork_plugins' directories via:
  * - CLI flag: --cowork
- * - Environment variable: CLAUDE_CODE_USE_COWORK_PLUGINS
+ * - Environment variable: BGS_USE_COWORK_PLUGINS
  *
  * The base directory can be overridden via CLAUDE_CODE_PLUGIN_CACHE_DIR.
  */
@@ -28,7 +28,7 @@ const COWORK_PLUGINS_DIR = 'cowork_plugins'
  *
  * Priority:
  * 1. Session state (set by CLI flag --cowork)
- * 2. Environment variable CLAUDE_CODE_USE_COWORK_PLUGINS
+ * 2. Environment variable BGS_USE_COWORK_PLUGINS
  * 3. Default: 'plugins'
  */
 function getPluginsDirectoryName(): string {
@@ -37,7 +37,7 @@ function getPluginsDirectoryName(): string {
     return COWORK_PLUGINS_DIR
   }
   // Fall back to env var
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_COWORK_PLUGINS)) {
+  if (isEnvTruthy(process.env.BGS_USE_COWORK_PLUGINS)) {
     return COWORK_PLUGINS_DIR
   }
   return PLUGINS_DIR

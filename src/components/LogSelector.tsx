@@ -17,7 +17,7 @@ import {
   Byline,
   Divider,
   KeyboardShortcutHint,
-} from '@anthropic/ink';
+} from '@bee-game-studio/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { logEvent } from '../services/analytics/index.js';
 import type { LogOption, SerializedMessage } from '../types/logs.js';
@@ -187,7 +187,7 @@ export function LogSelector({
 
   // Agentic search state
   const [agenticSearchState, setAgenticSearchState] = React.useState<AgenticSearchState>({ status: 'idle' });
-  // Track if the "Search deeply using Claude" option is focused
+  // Track if the "Search deeply using BGS" option is focused
   const [isAgenticSearchOptionFocused, setIsAgenticSearchOptionFocused] = React.useState(false);
   // AbortController for cancelling agentic search
   const agenticSearchAbortRef = React.useRef<AbortController | null>(null);
@@ -954,7 +954,7 @@ export function LogSelector({
       {agenticSearchState.status === 'results' && agenticSearchState.results.length > 0 && (
         <Box paddingLeft={1} marginBottom={1} flexShrink={0}>
           <Text dimColor italic>
-            Claude found these results:
+            BGS found these results:
           </Text>
         </Box>
       )}
@@ -992,7 +992,7 @@ export function LogSelector({
                 {isAgenticSearchOptionFocused ? figures.pointer : ' '}
               </Text>
               <Text color={isAgenticSearchOptionFocused ? 'suggestion' : undefined} bold={isAgenticSearchOptionFocused}>
-                Search deeply using Claude →
+                Search deeply using BGS →
               </Text>
             </Box>
             <Box height={1} />
@@ -1095,7 +1095,7 @@ export function LogSelector({
         ) : agenticSearchState.status === 'searching' ? (
           <Text dimColor>
             <Byline>
-              <Text>Searching with Claude…</Text>
+              <Text>Searching with BGS…</Text>
               <ConfigurableShortcutHint
                 action="confirm:no"
                 context="Confirmation"

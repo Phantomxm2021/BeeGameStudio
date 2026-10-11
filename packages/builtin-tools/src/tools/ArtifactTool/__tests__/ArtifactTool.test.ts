@@ -34,14 +34,14 @@ describe('ArtifactTool.call', () => {
       'utf8',
     )
     writeFileSync(TXT_FILE, 'plain text content', 'utf8')
-    process.env.BEEGAME_ARTIFACTS_TOKEN = 'test-token'
-    process.env.BEEGAME_ARTIFACTS_URL = 'https://example.test'
+    process.env.CLAUDE_ARTIFACTS_TOKEN = 'test-token'
+    process.env.CLAUDE_ARTIFACTS_URL = 'https://example.test'
   })
 
   afterEach(() => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true })
-    delete process.env.BEEGAME_ARTIFACTS_TOKEN
-    delete process.env.BEEGAME_ARTIFACTS_URL
+    delete process.env.CLAUDE_ARTIFACTS_TOKEN
+    delete process.env.CLAUDE_ARTIFACTS_URL
     globalThis.fetch = originalFetch
   })
 
@@ -62,17 +62,17 @@ describe('ArtifactTool.call', () => {
     expect((result.data as { error?: string }).error).toBeUndefined()
   })
 
-  test('does not upload without an explicitly configured Bee Game Studio endpoint', async () => {
-    delete process.env.BEEGAME_ARTIFACTS_URL
+  test('does not upload without an explicitly configured artifact endpoint', async () => {
+    delete process.env.CLAUDE_ARTIFACTS_URL
     let called = false
     globalThis.fetch = mock(() => { called = true; return Promise.resolve(new Response('{}')) }) as unknown as typeof fetch
     const result = await ArtifactTool.call({ file_path: TEST_FILE, ttl: 7 })
     expect(called).toBe(false)
-    expect((result.data as { error?: string }).error).toContain('BEEGAME_ARTIFACTS_URL')
+    expect((result.data as { error?: string }).error).toContain('CLAUDE_ARTIFACTS_URL')
   })
 
   test('rejects a non-HTTPS public destination before uploading', async () => {
-    process.env.BEEGAME_ARTIFACTS_URL = 'http://artifacts.example.test'
+    process.env.CLAUDE_ARTIFACTS_URL = 'http://artifacts.example.test'
     let called = false
     globalThis.fetch = mock(() => { called = true; return Promise.resolve(new Response('{}')) }) as unknown as typeof fetch
     const result = await ArtifactTool.call({ file_path: TEST_FILE, ttl: 7 })

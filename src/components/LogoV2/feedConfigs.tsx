@@ -1,6 +1,6 @@
 import figures from 'figures';
 import { homedir } from 'os';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import type { Step } from '../../projectOnboardingState.js';
 import { formatCreditAmount, getCachedReferrerReward } from '../../services/api/referral.js';
 import type { LogOption } from '../../types/logs.js';
@@ -46,7 +46,7 @@ export function createWhatsNewFeed(releaseNotes: string[]): FeedConfig {
   const emptyMessage =
     process.env.USER_TYPE === 'ant'
       ? 'Unable to fetch latest claude-cli-internal commits'
-      : 'Check the Claude Code changelog for updates';
+      : 'BGS release notes are not configured';
 
   return {
     title: process.env.USER_TYPE === 'ant' ? "What's new [ANT-ONLY: Latest CC commits]" : "What's new",
@@ -70,7 +70,7 @@ export function createProjectOnboardingFeed(steps: Step[]): FeedConfig {
 
   const warningText =
     getCwd() === homedir()
-      ? 'Note: You have launched claude in your home directory. For the best experience, launch it in a project directory instead.'
+      ? 'Note: You have launched BGS in your home directory. For the best experience, launch it in a project directory instead.'
       : undefined;
 
   if (warningText) {

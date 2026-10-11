@@ -1,5 +1,5 @@
 import { type ReactNode } from 'react';
-import { Box, Byline, KeyboardShortcutHint } from '@anthropic/ink';
+import { Box, Byline, KeyboardShortcutHint } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../../../keybindings/useKeybinding.js';
 import { isAutoMemoryEnabled } from '../../../../memdir/paths.js';
 import {

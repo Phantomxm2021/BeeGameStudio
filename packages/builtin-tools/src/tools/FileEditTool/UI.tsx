@@ -8,7 +8,7 @@ import { extractTag } from 'src/utils/messages.js';
 import { FallbackToolUseErrorMessage } from 'src/components/FallbackToolUseErrorMessage.js';
 import { FileEditToolUpdatedMessage } from 'src/components/FileEditToolUpdatedMessage.js';
 
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { FilePathLink } from 'src/components/FilePathLink.js';
 import type { Tools } from 'src/Tool.js';
 import type { Message, ProgressMessage } from 'src/types/message.js';

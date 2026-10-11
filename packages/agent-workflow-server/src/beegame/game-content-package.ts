@@ -11,13 +11,13 @@ import {
 import { basename, extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { BeeGameAssetManifest } from './asset-contracts'
 import { auditAssetContract } from './asset-contract-audit'
-import { auditUiInteractiveBounds, readUiLayoutCamera } from './ui-layout-audit'
+import { auditUiInteractiveBounds, readUiLayoutCameras } from './ui-layout-audit'
 import { parseTilemapData, validateTilemapGrid } from '../../../scene-editor/src/tilemap-data'
 import { readTileSetResource } from './tilemap-contract'
 import { resolveSceneCameraView, type SceneCameraInput } from '../../../scene-editor/src/scene-camera'
 
 export * from './game-content-schema'
-import { BEEGAME_CONTENT_ROOT, BEEGAME_CONTENT_INDEX, BEEGAME_UI_ASSET_BACKED_ROLES, BEEGAME_SCENE_COMPONENT_TYPES, BEEGAME_SCENE_ASSET_COMPONENT_TYPES, contentIndexSchema, contentDocumentSchema, type BeeGameContentIndex, type BeeGameContentDocument } from './game-content-schema'
+import { BEEGAME_CONTENT_ROOT, BEEGAME_CONTENT_INDEX, BEEGAME_UI_ASSET_BACKED_ROLES, BEEGAME_SCENE_COMPONENT_TYPES, BEEGAME_SCENE_ASSET_COMPONENT_TYPES, CONTENT_RESOURCE_LOCATOR_KEYS, contentIndexSchema, contentDocumentSchema, type BeeGameContentIndex, type BeeGameContentDocument } from './game-content-schema'
 
 export type BeeGameContentAuthority = Readonly<{
   documentRevision: string
@@ -274,30 +274,23 @@ function validateAssetMembers(
   if (!isRecord(value)) return
   const assetRef = typeof value.assetRef === 'string' ? value.assetRef : undefined
   const data = isRecord(value.data) ? value.data : undefined
-  const member = typeof value.member === 'string'
-    ? value.member
-    : typeof data?.member === 'string'
-      ? data.member
-      : undefined
-  if (assetRef && member) {
-    const resource = manifest.resources.find(item => item.id === assetRef)
-    const profile = resource && isRecord(resource.content_profile)
-      ? resource.content_profile
-      : undefined
-    const components = profile && Array.isArray(profile.components)
-      ? profile.components
-      : []
-    const explicitMember = components.some(component =>
-      isRecord(component) && component.id === member,
-    )
-    const fileStemMember = resource?.file_paths.some(filePath => {
-      const name = basename(filePath)
-      return name.length > 0 && basename(name, extname(name)) === member
-    }) ?? false
-    if (!explicitMember && !fileStemMember && !resource?.file_paths.includes(member))
-      issues.push(
-        `${path}: ${[...trail, 'member'].join('.')} does not resolve member ${member} in asset ${assetRef}.`,
+  for (const locator of CONTENT_RESOURCE_LOCATOR_KEYS.filter(key => key === 'member' || key === 'atlasMember')) {
+    const member = typeof value[locator] === 'string'
+      ? value[locator] as string
+      : typeof data?.[locator] === 'string' ? data[locator] as string : undefined
+    if (assetRef && member) {
+      const resource = manifest.resources.find(item => item.id === assetRef)
+      const profile = resource && isRecord(resource.content_profile) ? resource.content_profile : undefined
+      const components = profile && Array.isArray(profile.components) ? profile.components : []
+      const explicitMember = components.some(component => isRecord(component) && component.id === member)
+      const fileStemMember = resource?.file_paths.some(filePath => {
+        const name = basename(filePath)
+        return name.length > 0 && basename(name, extname(name)) === member
+      }) ?? false
+      if (!explicitMember && !fileStemMember && !resource?.file_paths.includes(member)) issues.push(
+        `${path}: ${[...trail, ...(typeof value[locator] === 'string' ? [] : ['data']), locator].join('.')} does not resolve member ${member} in asset ${assetRef}.`,
       )
+    }
   }
   for (const [key, item] of Object.entries(value))
     validateAssetMembers(path, item, manifest, issues, [...trail, key])
@@ -307,6 +300,7 @@ function validateUiVocabulary(input: {
   path: string
   document: Extract<BeeGameContentDocument, { kind: 'ui-screen' | 'ui-hud' | 'ui-flow' }>
   issues: string[]
+  bindingsPending?: boolean
 }): void {
   const root = input.document.data.nodes.find(
     node => node.id === input.document.data.rootId,
@@ -338,7 +332,7 @@ function validateUiVocabulary(input: {
         `${input.path}: role ${node.role} is only valid in a ui-flow document (${node.id}).`,
       )
     }
-    if (assetBackedRoles.has(node.role) && !node.assetRef)
+    if (!input.bindingsPending && assetBackedRoles.has(node.role) && !node.assetRef)
       input.issues.push(
         `${input.path}: asset-backed UI role ${node.role} requires assetRef (${node.id}).`,
       )
@@ -353,6 +347,7 @@ function validateComponentScene(input: {
   path: string
   document: Extract<BeeGameContentDocument, { kind: 'scene-2d' | 'scene-3d' }>
   issues: string[]
+  bindingsPending?: boolean
 }): void {
   const componentTypes = new Set<string>(BEEGAME_SCENE_COMPONENT_TYPES)
   const assetComponentTypes = new Set<string>(BEEGAME_SCENE_ASSET_COMPONENT_TYPES)
@@ -414,7 +409,7 @@ function validateComponentScene(input: {
         input.issues.push(
           `${input.path}: Scene component ${component.type} is not an asset consumer and cannot own assetRef (${node.id}).`,
         )
-      if (['sprite-renderer', 'mesh-filter', 'skinned-mesh-renderer', 'tilemap'].includes(component.type) && !component.assetRef)
+      if (!input.bindingsPending && ['sprite-renderer', 'mesh-filter', 'skinned-mesh-renderer', 'tilemap'].includes(component.type) && !component.assetRef)
         input.issues.push(
           `${input.path}: Scene component ${component.type} requires assetRef (${node.id}).`,
         )
@@ -521,7 +516,33 @@ function validateComponentScene(input: {
   }
 }
 
-function validateDocument(input: {
+/** Reuse production structure rules for an unbound planning source. Only
+ * unavailable resource bindings are deferred; geometry/component rules stay. */
+export function sceneLayoutDraftIssues(path: string, document: Extract<BeeGameContentDocument, { kind: 'scene-2d' | 'scene-3d' }>) {
+  const issues: string[] = []
+  validateTree({ path, nodes: document.data.nodes, issues })
+  validateNoLegacyScriptFields(path, document.data, issues, ['data'])
+  validateComponentScene({ path, document, issues, bindingsPending: true })
+  if (document.data.cameraNodeId && !document.data.nodes.some(node => node.id === document.data.cameraNodeId))
+    issues.push(path + ': cameraNodeId does not resolve: ' + document.data.cameraNodeId)
+  validateNoResourcePathBypass(path, document.data, issues)
+  return issues
+}
+
+/** Save-time structural feedback reuses production rules, without requiring
+ * resources, an index, finished prose or a semantic verdict. */
+export function contentDraftStructureIssues(path: string, document: BeeGameContentDocument) {
+  if (document.kind === 'scene-2d' || document.kind === 'scene-3d') return sceneLayoutDraftIssues(path, document)
+  const issues: string[] = []
+  validateTree({ path, nodes: document.data.nodes,
+    ...('rootId' in document.data ? { rootId: document.data.rootId } : {}), issues })
+  if (document.kind === 'ui-screen' || document.kind === 'ui-hud' || document.kind === 'ui-flow')
+    validateUiVocabulary({ path, document, issues, bindingsPending: true })
+  validateNoResourcePathBypass(path, document.data, issues)
+  return issues
+}
+
+export function validateContentDocument(input: {
   workspacePath: string
   path: string
   document: BeeGameContentDocument
@@ -573,7 +594,8 @@ function validateDocument(input: {
       issues: input.issues,
     })
     try {
-      for (const issue of auditUiInteractiveBounds(input.document, readUiLayoutCamera(input.workspacePath, input.document)))
+      const document = input.document
+      for (const issue of readUiLayoutCameras(input.workspacePath, document).flatMap(options => auditUiInteractiveBounds(document, options)))
         input.issues.push(`${input.path}: ${issue}`)
     } catch (error) { input.issues.push(`${input.path}: ${error instanceof Error ? error.message : String(error)}`) }
   }
@@ -594,6 +616,8 @@ function validateDocument(input: {
   }
   validateNoResourcePathBypass(input.path, input.document.data, input.issues)
 }
+
+const validateDocument = validateContentDocument
 
 export function auditBeeGameContentPackage(
   workspacePath: string,
@@ -620,10 +644,10 @@ export function auditBeeGameContentPackage(
     }
   }
   if (index.documentRevision !== authority.documentRevision)
-    issues.push(`${BEEGAME_CONTENT_INDEX}: documentRevision does not match authority.`)
+    issues.push(`${BEEGAME_CONTENT_INDEX}: documentRevision does not match authority. Run the current project check-content.mjs --authority after final design saves; use its documentRevision, not a guessed hash. Refresh the index before building/measuring; if sources change again, the previous build/evidence is not current.`)
   if (index.assetManifestRevision !== authority.assetManifestRevision)
     issues.push(
-      `${BEEGAME_CONTENT_INDEX}: assetManifestRevision does not match authority.`,
+      `${BEEGAME_CONTENT_INDEX}: assetManifestRevision does not match authority. Run the current project check-content.mjs --authority after final Manifest saves; use its assetManifestRevision, not a guessed hash. Refresh the index before building/measuring.`,
     )
   const documents: BeeGameContentDocument[] = []
   const documentPathById = new Map<string, string>()

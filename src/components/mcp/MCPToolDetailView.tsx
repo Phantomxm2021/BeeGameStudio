@@ -1,9 +1,9 @@
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { extractMcpToolDisplayName, getMcpDisplayName } from '../../services/mcp/mcpStringUtils.js';
 import type { Tool } from '../../Tool.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 import type { ServerInfo } from './types.js';
 
 type Props = {

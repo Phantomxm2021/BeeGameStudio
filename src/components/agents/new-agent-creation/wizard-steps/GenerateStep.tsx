@@ -1,7 +1,7 @@
 import { APIUserAbortError } from '@anthropic-ai/sdk';
 import { type ReactNode, useCallback, useRef, useState } from 'react';
 import { useMainLoopModel } from '../../../../hooks/useMainLoopModel.js';
-import { Box, Byline, Text } from '@anthropic/ink';
+import { Box, Byline, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../../../keybindings/useKeybinding.js';
 import { createAbortController } from '../../../../utils/abortController.js';
 import { editPromptInEditor } from '../../../../utils/promptEditor.js';

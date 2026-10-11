@@ -74,12 +74,13 @@ export default defineConfig({
     // inlined into the bundle — they must be resolved from node_modules
     // at runtime.  doubaoime-asr uses opus-encdec which does
     // require.resolve('opus-encdec/dist/libopus-encoder.wasm.js').
-    external: ['doubaoime-asr', 'opus-encdec', 'sharp'],
+    external: ['doubaoime-asr', 'sharp'],
   },
 
   build: {
-    emptyOutDir: true,
-    outDir: 'dist',
+    // Alternative builds must not erase files used by running CLI sessions.
+    emptyOutDir: false,
+    outDir: 'dist-vite',
     target: 'es2020',
     copyPublicDir: false,
     sourcemap: false,

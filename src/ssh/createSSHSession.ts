@@ -11,11 +11,17 @@ import { probeRemote } from './SSHProbe.js'
 import { deployBinary } from './SSHDeploy.js'
 import { buildCliLaunch } from '../utils/cliLaunch.js'
 import { logForDebugging } from '../utils/debug.js'
-import { jsonParse } from '../utils/slowOperations.js'
 import { randomUUID } from 'crypto'
+import { resolve as resolvePosix } from 'node:path/posix'
+import { resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { initializeSSHProcess } from './SSHInitialization.js'
+import { remoteExecutable, shellQuote } from '../utils/shellArgument.js'
+import { cleanupRemoteSocket } from './SSHSocketCleanup.js'
 
-const INIT_TIMEOUT_MS = 30_000
 const STDERR_TAIL_LINES = 20
+const STDERR_TAIL_BYTES = 16 * 1024
+type StderrTail = { text: string }
 
 export interface SSHSession {
   remoteCwd: string
@@ -30,6 +36,23 @@ export class SSHSessionError extends Error {
     super(message)
     this.name = 'SSHSessionError'
   }
+}
+
+/** Resume the session actually observed, never whichever transcript is newest. */
+export function getReconnectCliArgs(args: string[], sessionId?: string): string[] {
+  if (!sessionId) return [...args] // No init/transcript yet: restart the original launch.
+  const result: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!
+    if (['--continue', '-c', '--fork-session'].includes(arg)) continue
+    if (['--resume', '-r', '--session-id', '--resume-session-at'].includes(arg)) {
+      if (args[i + 1] && !args[i + 1]!.startsWith('-')) i++
+      continue
+    }
+    if (/^--(?:resume|session-id|resume-session-at)=/.test(arg)) continue
+    result.push(arg)
+  }
+  return [...result, '--resume', sessionId]
 }
 
 export async function createSSHSession(
@@ -57,20 +80,31 @@ export async function createSSHSession(
     remoteBinaryPath = remoteBin
     logForDebugging(`[SSH] custom remoteBin: ${remoteBin}`)
     // Quick SSH to get remote home directory for default CWD
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let pwdProc: Subprocess | undefined
     try {
-      const pwdProc = Bun.spawn(
-        ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host, 'pwd'],
+      pwdProc = Bun.spawn(
+        ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '--', host, 'pwd'],
         {
           stdin: 'ignore',
           stdout: 'pipe',
           stderr: 'ignore',
         },
       )
-      await pwdProc.exited
-      const pwd = (await new Response(pwdProc.stdout).text()).trim()
-      if (pwd.startsWith('/')) defaultCwd = pwd
-    } catch {
-      /* use fallback */
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Remote directory probe timed out')), 15_000)
+      })
+      const [code, output] = await Promise.race([
+        Promise.all([pwdProc.exited, new Response(pwdProc.stdout as ReadableStream<Uint8Array>).text()]), timeout,
+      ])
+      const pwd = output.trim()
+      if (code !== 0 || !pwd.startsWith('/')) throw new Error('Unable to determine remote working directory')
+      defaultCwd = pwd
+    } catch (error) {
+      pwdProc?.kill()
+      throw new SSHSessionError(error instanceof Error ? error.message : String(error))
+    } finally {
+      clearTimeout(timer)
     }
   } else {
     // 1. Probe remote host
@@ -79,7 +113,7 @@ export async function createSSHSession(
     defaultCwd = probe.defaultCwd
 
     // 2. Deploy if binary missing or version mismatch
-    remoteBinaryPath = probe.binaryPath ?? '~/.local/bin/claude'
+    remoteBinaryPath = probe.binaryPath ?? '~/.local/bin/bee-game-studio'
     if (!probe.hasBinary || probe.remoteVersion !== localVersion) {
       onProgress?.(
         probe.hasBinary
@@ -101,68 +135,65 @@ export async function createSSHSession(
   logForDebugging(`[SSH] auth proxy listening on ${localAddress}`)
 
   // 4. Build SSH command with -R reverse forward and remote CLI
-  const remoteSocketId = randomUUID().slice(0, 8)
   const isWindows = process.platform === 'win32'
 
-  const remoteCli: string[] = []
-  for (const [k, v] of Object.entries(authEnv)) {
-    remoteCli.push(`${k}=${v}`)
-  }
-  remoteCli.push(
-    remoteBinaryPath,
+  const remoteCli: string[] = [
     '--output-format',
     'stream-json',
     '--input-format',
     'stream-json',
     '--verbose',
     '-p',
-  )
-  if (config.cwd) remoteCli.push('--cwd', config.cwd)
+  ]
   if (config.permissionMode)
     remoteCli.push('--permission-mode', config.permissionMode)
   if (config.dangerouslySkipPermissions)
     remoteCli.push('--dangerously-skip-permissions')
   remoteCli.push(...extraCliArgs)
 
-  const sshArgs = ['ssh']
-
-  if (!isWindows) {
-    const remoteSocket = `/tmp/claude-ssh-auth-${remoteSocketId}.sock`
-    sshArgs.push('-R', `${remoteSocket}:${localAddress}`)
-    sshArgs.push('-o', 'StreamLocalBindUnlink=yes')
-    // Override auth env to use the remote socket path
-    const idx = remoteCli.indexOf(
-      `ANTHROPIC_AUTH_SOCKET=${authEnv.ANTHROPIC_AUTH_SOCKET}`,
-    )
-    if (idx !== -1) {
-      remoteCli[idx] = `ANTHROPIC_AUTH_SOCKET=${remoteSocket}`
+  const remoteCwd = config.cwd?.startsWith('~/')
+    ? resolvePosix(defaultCwd || '/', config.cwd.slice(2))
+    : resolvePosix(defaultCwd || '/', config.cwd || '.')
+  const command = (args: string[], attemptEnv: Record<string, string>) => `cd ${remoteExecutable(config.cwd?.startsWith('~/') ? config.cwd : remoteCwd)} && ` + [
+    'exec', 'env',
+    ...Object.entries(attemptEnv).map(([key, value]) => `${key}=${shellQuote(value)}`),
+    remoteExecutable(remoteBinaryPath), ...args.map(shellQuote),
+  ].join(' ')
+  const spawnRemote = (args: string[]): Subprocess => {
+    const sshArgs = ['ssh', '-o', 'ExitOnForwardFailure=yes']
+    const attemptEnv = { ...authEnv }
+    let remoteSocket: string | undefined
+    // Remote sshd can leave a socket behind after disconnect. The client-side
+    // StreamLocalBindUnlink option cannot remove that remote listener.
+    if (!isWindows) {
+      remoteSocket = `/tmp/bgs-ssh-auth-${randomUUID()}.sock`
+      sshArgs.push('-R', `${remoteSocket}:${localAddress}`)
+      attemptEnv.BGS_API_UNIX_SOCKET = remoteSocket
+    } else {
+      const localPort = localAddress.split(':')[1]
+      const remotePort = 10000 + Math.floor(Math.random() * 50000)
+      sshArgs.push('-R', `${remotePort}:127.0.0.1:${localPort}`)
+      attemptEnv.ANTHROPIC_BASE_URL = `http://127.0.0.1:${remotePort}`
     }
-  } else {
-    // Windows: TCP reverse forward
-    const localPort = localAddress.split(':')[1]
-    const remotePort = 10000 + Math.floor(Math.random() * 50000)
-    sshArgs.push('-R', `${remotePort}:127.0.0.1:${localPort}`)
-    // Override auth env to use remote TCP address
-    const baseIdx = remoteCli.findIndex(s =>
-      s.startsWith('ANTHROPIC_BASE_URL='),
-    )
-    if (baseIdx !== -1) {
-      remoteCli[baseIdx] = `ANTHROPIC_BASE_URL=http://127.0.0.1:${remotePort}`
+    const proc = Bun.spawn([...sshArgs, '--', host, command(args, attemptEnv)], {
+      stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
+    })
+    if (remoteSocket) {
+      const socket = remoteSocket
+      void proc.exited.then(() => cleanupRemoteSocket(host, socket)).catch(() => {
+        logForDebugging('[SSH] unable to observe SSH exit; remote socket may remain')
+      })
     }
+    return proc
   }
-
-  sshArgs.push(host, remoteCli.join(' '))
+  const redact = stderrRedactor(authEnv)
 
   onProgress?.('Starting remote session…')
-  logForDebugging(`[SSH] spawning: ${sshArgs.join(' ')}`)
+  logForDebugging('[SSH] spawning remote CLI (arguments and credentials omitted)')
 
   let proc: Subprocess
   try {
-    proc = Bun.spawn(sshArgs, {
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
+    proc = spawnRemote(remoteCli)
   } catch (err) {
     proxy.stop()
     throw new SSHSessionError(
@@ -170,66 +201,27 @@ export async function createSSHSession(
     )
   }
 
-  const stderrChunks: string[] = []
-  collectStderr(proc, stderrChunks)
+  let stderrTail: StderrTail = { text: '' }
 
-  let remoteCwd: string
-  if (remoteBin) {
-    // Custom binary mode: the remote CLI in print+stream-json mode emits
-    // init only after receiving the first user message (QueryEngine yield).
-    // Waiting for init here would deadlock. Instead, verify the process
-    // is alive and use the configured or probed CWD.
-    const earlyExit = await Promise.race([
-      proc.exited.then(code => code),
-      new Promise<null>(r => setTimeout(() => r(null), 3_000)),
-    ])
-    if (earlyExit !== null) {
-      proxy.stop()
-      const tail = stderrChunks.join('').trim()
-      throw new SSHSessionError(
-        `Remote process exited immediately (code ${earlyExit})${tail ? `: ${tail}` : ''}`,
-      )
-    }
-    remoteCwd = config.cwd || defaultCwd || '/'
-  } else {
-    try {
-      remoteCwd = await waitForInit(proc, config.cwd || defaultCwd)
-    } catch (err) {
-      proxy.stop()
-      proc.kill()
-      throw err
-    }
+  try {
+    proc = await initializeWithDiagnostics(proc, stderrTail, redact)
+  } catch (err) {
+    proxy.stop()
+    throw err
   }
 
   logForDebugging(`[SSH] remote session initialized, remoteCwd=${remoteCwd}`)
 
   let currentProc = proc
 
-  const reconnect = async (): Promise<Subprocess> => {
-    logForDebugging('[SSH] reconnect: re-spawning SSH process with --continue')
-    const reconnectArgs = [...sshArgs]
-    const cmdIdx = reconnectArgs.length - 1
-    const existingCmd = reconnectArgs[cmdIdx]!
-    if (!existingCmd.includes('--continue')) {
-      reconnectArgs[cmdIdx] = existingCmd.replace(
-        / -p(?:\s|$)/,
-        ' -p --continue ',
-      )
-    }
+  const reconnect = async (sessionId?: string, signal?: AbortSignal): Promise<Subprocess> => {
+    signal?.throwIfAborted()
+    logForDebugging('[SSH] reconnect: re-spawning the original session')
+    stderrTail = { text: '' }
+    let newProc = spawnRemote(getReconnectCliArgs(remoteCli, sessionId))
 
-    const newProc = Bun.spawn(reconnectArgs, {
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-
-    const newStderrChunks: string[] = []
-    collectStderr(newProc, newStderrChunks)
-
-    await waitForInit(newProc, remoteCwd)
+    newProc = await initializeWithDiagnostics(newProc, stderrTail, redact, signal)
     currentProc = newProc
-    stderrChunks.length = 0
-    stderrChunks.push(...newStderrChunks)
 
     return newProc
   }
@@ -247,7 +239,7 @@ export async function createSSHSession(
       })
     },
     getStderrTail(): string {
-      return stderrChunks.slice(-STDERR_TAIL_LINES).join('')
+      return stderrTail.text
     },
   }
 }
@@ -258,17 +250,17 @@ export async function createLocalSSHSession(config: {
   dangerouslySkipPermissions?: boolean
 }): Promise<SSHSession> {
   const { proxy, authEnv } = await createAuthProxy()
+  const redact = stderrRedactor(authEnv)
 
   const cliArgs: string[] = [
     '--output-format',
     'stream-json',
     '--input-format',
     'stream-json',
+    '--verbose',
     '-p',
   ]
-  if (config.cwd) {
-    cliArgs.push('--cwd', config.cwd)
-  }
+  const remoteCwd = resolve(config.cwd?.startsWith('~/') ? homedir() + config.cwd.slice(1) : config.cwd || process.cwd())
   if (config.permissionMode) {
     cliArgs.push('--permission-mode', config.permissionMode)
   }
@@ -285,6 +277,7 @@ export async function createLocalSSHSession(config: {
       stdout: 'pipe',
       stderr: 'pipe',
       env: { ...spec.env, ...authEnv },
+      cwd: remoteCwd,
     })
   } catch (err) {
     proxy.stop()
@@ -293,17 +286,14 @@ export async function createLocalSSHSession(config: {
     )
   }
 
-  logForDebugging('[SSH] local session spawned, waiting for init message...')
+  logForDebugging('[SSH] local session spawned, initializing SDK...')
 
-  const stderrChunks: string[] = []
-  collectStderr(proc, stderrChunks)
+  let stderrTail: StderrTail = { text: '' }
 
-  let remoteCwd: string
   try {
-    remoteCwd = await waitForInit(proc, config.cwd)
+    proc = await initializeWithDiagnostics(proc, stderrTail, redact)
   } catch (err) {
     proxy.stop()
-    proc.kill()
     throw err
   }
 
@@ -311,28 +301,23 @@ export async function createLocalSSHSession(config: {
 
   let currentProc = proc
 
-  const reconnect = async (): Promise<Subprocess> => {
-    logForDebugging('[SSH] local reconnect: re-spawning CLI with --continue')
-    const reconnectCliArgs = [...cliArgs]
-    if (!reconnectCliArgs.includes('--continue')) {
-      reconnectCliArgs.push('--continue')
-    }
+  const reconnect = async (sessionId?: string, signal?: AbortSignal): Promise<Subprocess> => {
+    signal?.throwIfAborted()
+    logForDebugging('[SSH] local reconnect: re-spawning the original session')
+    const reconnectCliArgs = getReconnectCliArgs(cliArgs, sessionId)
 
     const reconnectSpec = buildCliLaunch(reconnectCliArgs)
-    const newProc = Bun.spawn([reconnectSpec.execPath, ...reconnectSpec.args], {
+    stderrTail = { text: '' }
+    let newProc = Bun.spawn([reconnectSpec.execPath, ...reconnectSpec.args], {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
       env: { ...reconnectSpec.env, ...authEnv },
+      cwd: remoteCwd,
     })
 
-    const newStderrChunks: string[] = []
-    collectStderr(newProc, newStderrChunks)
-
-    await waitForInit(newProc, remoteCwd)
+    newProc = await initializeWithDiagnostics(newProc, stderrTail, redact, signal)
     currentProc = newProc
-    stderrChunks.length = 0
-    stderrChunks.push(...newStderrChunks)
 
     return newProc
   }
@@ -350,101 +335,66 @@ export async function createLocalSSHSession(config: {
       })
     },
     getStderrTail(): string {
-      return stderrChunks.slice(-STDERR_TAIL_LINES).join('')
+      return stderrTail.text
     },
   }
 }
 
-async function waitForInit(
-  proc: Subprocess,
-  fallbackCwd?: string,
-): Promise<string> {
-  const stdout = proc.stdout
-  if (!stdout) {
-    throw new SSHSessionError('Child process stdout is not readable')
-  }
-
-  const reader = (stdout as ReadableStream<Uint8Array>).getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  const deadline = Date.now() + INIT_TIMEOUT_MS
-
-  try {
-    while (Date.now() < deadline) {
-      const remaining = deadline - Date.now()
-      const result = await Promise.race([
-        reader.read(),
-        new Promise<{ done: true; value: undefined }>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new SSHSessionError(
-                  'Remote CLI did not initialize within 30 seconds. Check SSH connectivity and remote binary.',
-                ),
-              ),
-            remaining,
-          ),
-        ),
-      ])
-
-      if (result.done) {
-        throw new SSHSessionError(
-          'Child process exited before sending init message',
-        )
-      }
-
-      buffer += decoder.decode(result.value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed) continue
-        try {
-          const msg = jsonParse(trimmed) as Record<string, unknown>
-          if (msg.type === 'system' && msg.subtype === 'init') {
-            reader.releaseLock()
-            return (msg.cwd as string) || fallbackCwd || process.cwd()
-          }
-        } catch {
-          // not valid JSON — skip
-        }
-      }
-    }
-  } catch (err) {
-    reader.releaseLock()
-    throw err instanceof SSHSessionError
-      ? err
-      : new SSHSessionError(
-          `Error reading init message: ${err instanceof Error ? err.message : String(err)}`,
-        )
-  }
-
-  reader.releaseLock()
-  throw new SSHSessionError(
-    'Remote CLI did not initialize within 30 seconds. Check SSH connectivity and remote binary.',
-  )
+function stderrRedactor(env: Record<string, string>): (text: string) => string {
+  const secrets = Object.entries(env)
+    .filter(([key, value]) => value && /(?:nonce|token|secret|api_key|password)/i.test(key))
+    .map(([, value]) => value)
+    .sort((a, b) => b.length - a.length)
+  return text => secrets.reduce((result, secret) => result.split(secret).join('[redacted]'), text)
 }
 
-function collectStderr(proc: Subprocess, chunks: string[]): void {
+async function initializeWithDiagnostics(
+  proc: Subprocess,
+  tail: StderrTail,
+  redact: (text: string) => string,
+  signal?: AbortSignal,
+): Promise<Subprocess> {
+  const drained = collectStderr(proc, tail, redact)
+  try {
+    return await initializeSSHProcess(proc, 30_000, signal)
+  } catch (error) {
+    // Initialization kills the failed process. Give its stderr time to drain,
+    // but do not hang if a descendant keeps the pipe open.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      if (!signal?.aborted) await Promise.race([drained, new Promise<void>(resolve => {
+        timer = setTimeout(resolve, 250)
+      })])
+    } finally {
+      clearTimeout(timer)
+    }
+    const detail = tail.text.trim()
+    throw new SSHSessionError(redact(`${error instanceof Error ? error.message : String(error)}${detail ? ': ' + detail : ''}`))
+  }
+}
+
+async function collectStderr(proc: Subprocess, tail: StderrTail, redact: (text: string) => string): Promise<void> {
   const stderr = proc.stderr
   if (!stderr) return
 
   const reader = (stderr as ReadableStream<Uint8Array>).getReader()
   const decoder = new TextDecoder()
 
-  void (async () => {
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        chunks.push(decoder.decode(value, { stream: true }))
-        if (chunks.length > STDERR_TAIL_LINES * 2) {
-          chunks.splice(0, chunks.length - STDERR_TAIL_LINES)
-        }
-      }
-    } catch {
-      // stderr closed — expected on process exit
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      const bytes = Buffer.from(redact(tail.text + decoder.decode(value, { stream: !done })))
+      let start = Math.max(0, bytes.length - STDERR_TAIL_BYTES)
+      // Do not start the retained UTF-8 suffix in the middle of a character.
+      while (start < bytes.length && (bytes[start]! & 0xc0) === 0x80) start++
+      const text = bytes.subarray(start).toString('utf8')
+      const lines = text.split('\n')
+      tail.text = lines.slice(-(text.endsWith('\n') ? STDERR_TAIL_LINES + 1 : STDERR_TAIL_LINES)).join('\n')
+      if (done) break
     }
-  })()
+  } catch {
+    // stderr closed — expected on process exit
+  } finally {
+    reader.releaseLock()
+  }
 }

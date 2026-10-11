@@ -11,6 +11,7 @@ import axios from 'axios'
 import { createHash } from 'crypto'
 import { chmod, writeFile } from 'fs/promises'
 import { join } from 'path'
+import { homedir } from 'os'
 import { logEvent } from 'src/services/analytics/index.js'
 import type { ReleaseChannel } from '../config.js'
 import { logForDebugging } from '../debug.js'
@@ -22,14 +23,10 @@ import { sleep } from '../sleep.js'
 import { jsonStringify, writeFileSync_DEPRECATED } from '../slowOperations.js'
 import { getBinaryName, getPlatform } from './installer.js'
 
-const GCS_BUCKET_URL =
-  'https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases'
-export const ARTIFACTORY_REGISTRY_URL =
-  'https://artifactory.infra.ant.dev/artifactory/api/npm/npm-all/'
-
 export async function getLatestVersionFromArtifactory(
   tag: string = 'latest',
 ): Promise<string> {
+  if (!MACRO.NATIVE_PACKAGE_URL) throw new Error('BGS native distribution is not configured')
   const startTime = Date.now()
   const { stdout, code, stderr } = await execFileNoThrowWithCwd(
     'npm',
@@ -38,12 +35,11 @@ export async function getLatestVersionFromArtifactory(
       `${MACRO.NATIVE_PACKAGE_URL}@${tag}`,
       'version',
       '--prefer-online',
-      '--registry',
-      ARTIFACTORY_REGISTRY_URL,
     ],
     {
       timeout: 30000,
       preserveOutputOnError: true,
+      cwd: homedir(),
     },
   )
 
@@ -112,6 +108,7 @@ export async function getLatestVersionFromBinaryRepo(
 export async function getLatestVersion(
   channelOrVersion: string,
 ): Promise<string> {
+  if (!MACRO.NATIVE_PACKAGE_URL) throw new Error('BGS native distribution is not configured')
   // Direct version - match internal format too (e.g. 1.0.30-dev.shaf4937ce)
   if (/^v?\d+\.\d+\.\d+(-\S+)?$/.test(channelOrVersion)) {
     const normalized = channelOrVersion.startsWith('v')
@@ -137,21 +134,15 @@ export async function getLatestVersion(
     )
   }
 
-  // Route to appropriate source
-  if (process.env.USER_TYPE === 'ant') {
-    // Use Artifactory for ant users
-    const npmTag = channel === 'stable' ? 'stable' : 'latest'
-    return getLatestVersionFromArtifactory(npmTag)
-  }
-
-  // Use GCS for external users
-  return getLatestVersionFromBinaryRepo(channel, GCS_BUCKET_URL)
+  // Use only the configured product package and the user's npm registry.
+  return getLatestVersionFromArtifactory(channel)
 }
 
 export async function downloadVersionFromArtifactory(
   version: string,
   stagingPath: string,
 ) {
+  if (!MACRO.NATIVE_PACKAGE_URL) throw new Error('BGS native distribution is not configured')
   const fs = getFsImplementation()
 
   // If we get here, we own the lock and can delete a partial download
@@ -175,12 +166,11 @@ export async function downloadVersionFromArtifactory(
       'view',
       `${platformPackageName}@${version}`,
       'dist.integrity',
-      '--registry',
-      ARTIFACTORY_REGISTRY_URL,
     ],
     {
       timeout: 30000,
       preserveOutputOnError: true,
+      cwd: homedir(),
     },
   )
 
@@ -201,7 +191,7 @@ export async function downloadVersionFromArtifactory(
   await fs.mkdir(stagingPath)
 
   const packageJson = {
-    name: 'claude-native-installer',
+    name: 'bgs-native-installer',
     version: '0.0.1',
     dependencies: {
       [MACRO.NATIVE_PACKAGE_URL!]: version,
@@ -210,13 +200,13 @@ export async function downloadVersionFromArtifactory(
 
   // Create package-lock.json with integrity verification for platform-specific package
   const packageLock = {
-    name: 'claude-native-installer',
+    name: 'bgs-native-installer',
     version: '0.0.1',
     lockfileVersion: 3,
     requires: true,
     packages: {
       '': {
-        name: 'claude-native-installer',
+        name: 'bgs-native-installer',
         version: '0.0.1',
         dependencies: {
           [MACRO.NATIVE_PACKAGE_URL!]: version,
@@ -251,7 +241,7 @@ export async function downloadVersionFromArtifactory(
   // Use --prefer-online to force fresh metadata checks, helping with Artifactory replication delays
   const result = await execFileNoThrowWithCwd(
     'npm',
-    ['ci', '--prefer-online', '--registry', ARTIFACTORY_REGISTRY_URL],
+    ['ci', '--prefer-online'],
     {
       timeout: 60000,
       preserveOutputOnError: true,
@@ -488,33 +478,9 @@ export async function downloadVersion(
   version: string,
   stagingPath: string,
 ): Promise<'npm' | 'binary'> {
-  // Test-fixture versions route to the private sentinel bucket. DCE'd in all
-  // shipped builds — the string 'claude-code-ci-sentinel' and the gcloud call
-  // never exist in compiled binaries. Same gcloud-token pattern as
-  // remoteSkillLoader.ts:175-195.
-  if (feature('ALLOW_TEST_VERSIONS') && /^99\.99\./.test(version)) {
-    const { stdout } = await execFileNoThrowWithCwd('gcloud', [
-      'auth',
-      'print-access-token',
-    ])
-    await downloadVersionFromBinaryRepo(
-      version,
-      stagingPath,
-      'https://storage.googleapis.com/claude-code-ci-sentinel',
-      { headers: { Authorization: `Bearer ${stdout.trim()}` } },
-    )
-    return 'binary'
-  }
-
-  if (process.env.USER_TYPE === 'ant') {
-    // Use Artifactory for ant users
-    await downloadVersionFromArtifactory(version, stagingPath)
-    return 'npm'
-  }
-
-  // Use GCS for external users
-  await downloadVersionFromBinaryRepo(version, stagingPath, GCS_BUCKET_URL)
-  return 'binary'
+  if (!MACRO.NATIVE_PACKAGE_URL) throw new Error('BGS native distribution is not configured')
+  await downloadVersionFromArtifactory(version, stagingPath)
+  return 'npm'
 }
 
 // Exported for testing

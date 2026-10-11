@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { artifactDigest } from '../beegame/runtime-acceptance'
+import { computeWorkspaceRevision } from '../beegame/workspace-revision'
 import {
   BeeGameDeploymentManager,
   createSupabaseStorageDeploymentPublisher,
@@ -22,6 +24,84 @@ describe('BeeGameDeploymentManager', () => {
   afterEach(async () => {
     await rm(root, { recursive: true, force: true })
   })
+
+  test('retention preserves rollback bytes and later collects them when unreferenced', async () => {
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
+    await mkdir(join(workspace, 'dist'))
+    await writeFile(join(workspace, 'dist/index.html'), '<main>Original</main>')
+    const manager = new BeeGameDeploymentManager({ dataRoot: root,
+      runner: async () => ({ exitCode: 0, stdout: '', stderr: '' }) })
+    const original = await manager.deploy({ sessionId: 'fixture', workspacePath: workspace })
+    await Bun.sleep(2)
+    const rollback = await manager.rollbackTo(original)
+    expect(rollback.url).toBe(original.url)
+    const plan = await manager.applyRetention({ dryRun: true, keepSuccessfulPerProject: 1 })
+    expect(plan.plannedForDeletion).toEqual([])
+    expect(plan.retained.find(item => item.id === original.id)?.reason).toBe('artifact_referenced_by_retained_deployment')
+    await manager.applyRetention({ dryRun: false, keepSuccessfulPerProject: 1 })
+    expect(await (await manager.readPublicFile(rollback.url))?.body.text()).toBe('<main>Original</main>')
+    await Bun.sleep(2)
+    const latest = await manager.deploy({ sessionId: 'fixture', workspacePath: workspace })
+    const cleanup = await manager.applyRetention({ dryRun: false, keepSuccessfulPerProject: 1 })
+    expect(cleanup.deleted.map(item => item.id).sort()).toEqual([original.id, rollback.id].sort())
+    expect(await manager.readPublicFile(original.url)).toBeUndefined()
+    expect((await manager.list()).map(item => item.id)).toEqual([latest.id])
+    await expect(manager.rollbackTo(original)).rejects.toThrow('no longer available')
+  })
+
+  test('cleanup cannot overwrite a concurrently requested rollback', async () => {
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
+    await mkdir(join(workspace, 'dist'))
+    await writeFile(join(workspace, 'dist/index.html'), '<main>Fixture</main>')
+    const manager = new BeeGameDeploymentManager({ dataRoot: root,
+      runner: async () => ({ exitCode: 0, stdout: '', stderr: '' }) })
+    const original = await manager.deploy({ sessionId: 'fixture', workspacePath: workspace })
+    await Bun.sleep(2)
+    const latest = await manager.deploy({ sessionId: 'fixture', workspacePath: workspace })
+    let entered!: () => void, release!: () => void
+    const deleting = new Promise<void>(resolve => { entered = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const internal = manager as unknown as { deleteLocalArtifact: (record: typeof original) => Promise<boolean> }
+    const remove = internal.deleteLocalArtifact.bind(manager)
+    internal.deleteLocalArtifact = async record => { entered(); await gate; return remove(record) }
+    const cleaning = manager.applyRetention({ dryRun: false, keepSuccessfulPerProject: 1 })
+    await deleting
+    const rollback = manager.rollbackTo(latest)
+    release()
+    await cleaning
+    const restored = await rollback
+    expect((await manager.list()).some(item => item.id === restored.id)).toBe(true)
+    await access(join(latest.artifactPath!, 'index.html'))
+  })
+
+  test.each(['unchanged-file', 'unchanged-directory', 'changed', 'extra', 'missing', 'source-changed'] as const)(
+    'accepted deployment publishes only covered tested bytes: %s', async mode => {
+      await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
+      await mkdir(join(workspace, 'dist'))
+      await writeFile(join(workspace, 'dist/index.html'), '<main>Tested A</main>')
+      const path = mode === 'unchanged-directory' ? 'dist' : 'dist/index.html'
+      const acceptance = { revision: await computeWorkspaceRevision(workspace),
+        artifacts: [{ path, sha256: await artifactDigest(workspace, path, true) }] }
+      if (mode === 'changed') await writeFile(join(workspace, 'dist/index.html'), '<main>Untested B</main>')
+      if (mode === 'extra') await writeFile(join(workspace, 'dist/untested.js'), 'untested')
+      if (mode === 'missing') await rm(join(workspace, 'dist/index.html'))
+      if (mode === 'source-changed') await writeFile(join(workspace, 'new-source.js'), 'unverified source')
+      let builds = 0, uploads = 0
+      const manager = new BeeGameDeploymentManager({ dataRoot: root,
+        runner: async () => { builds++; throw new Error('Do not rebuild accepted output') },
+        publisher: { async publishStaticDirectory(input) {
+          uploads++
+          expect(await input.files.find(file => file.path === 'index.html')!.text()).toBe('<main>Tested A</main>')
+          return { url: 'https://synthetic.invalid/no-upload' }
+        } } })
+      const result = await manager.deploy({ sessionId: 'fixture', workspacePath: workspace, acceptance })
+      const valid = mode.startsWith('unchanged')
+      expect(result.status).toBe(valid ? 'succeeded' : 'failed')
+      expect(uploads).toBe(valid ? 1 : 0)
+      expect(builds).toBe(0)
+      if (mode === 'changed') expect(result.message).toContain('differs from acceptance')
+      if (mode === 'extra') expect(result.message).toContain('not covered by acceptance')
+    })
 
   test.each([false, true])('registers before Worker verification and revokes failure: %s', async (rejectVerification) => {
     await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
@@ -386,6 +466,22 @@ describe('BeeGameDeploymentManager', () => {
 
     expect(deployment.status).toBe('failed')
     expect(deployment.message).toContain('invalid GLB')
+  })
+
+  test('rejects source symbolic links before building or publishing', async () => {
+    await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))
+    await writeFile(join(workspace, 'actual.js'), 'export default "fixture"')
+    await symlink('actual.js', join(workspace, 'entry.js'))
+    let built = false
+    const manager = new BeeGameDeploymentManager({ dataRoot: root, runner: async () => {
+      built = true
+      return { exitCode: 0, stdout: '', stderr: '' }
+    } })
+    const result = await manager.deploy({ sessionId: 'fixture', workspacePath: workspace })
+    expect(result.status).toBe('failed')
+    expect(result.message).toContain('unsupported symbolic link: entry.js')
+    expect(result.url).toBe('')
+    expect(built).toBe(false)
   })
 
   test('rejects symbolic links in deployment output', async () => {

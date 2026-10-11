@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import React from 'react';
 import { useClipboardImageHint } from '../hooks/useClipboardImageHint.js';
 import { useVimInput } from '../hooks/useVimInput.js';
-import { Box, color, useTerminalFocus, useTheme } from '@anthropic/ink';
+import { Box, color, useTerminalFocus, useTheme } from '@bee-game-studio/ink';
 import type { VimTextInputProps } from '../types/textInputTypes.js';
 import type { TextHighlight } from '../utils/textHighlighting.js';
 import { BaseTextInput } from './BaseTextInput.js';

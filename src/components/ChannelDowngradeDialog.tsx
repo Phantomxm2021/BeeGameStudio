@@ -1,7 +1,7 @@
 import React from 'react';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { Select } from './CustomSelect/index.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 
 export type ChannelDowngradeChoice = 'downgrade' | 'stay' | 'cancel';
 

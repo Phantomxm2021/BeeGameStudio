@@ -1,8 +1,8 @@
 import { type ReactNode } from 'react';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
+import { Byline, KeyboardShortcutHint } from '@bee-game-studio/ink';
 
 type Props = {
   instructions?: ReactNode;

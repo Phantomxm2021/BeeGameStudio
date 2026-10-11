@@ -1,4 +1,4 @@
-// Re-export types from @anthropic/ink keybindings module
+// Re-export types from @bee-game-studio/ink keybindings module
 export type {
   ParsedBinding,
   ParsedKeystroke,
@@ -6,4 +6,4 @@ export type {
   KeybindingBlock,
   Chord,
   KeybindingAction,
-} from '@anthropic/ink'
+} from '@bee-game-studio/ink'

@@ -181,7 +181,14 @@ export function inspectUiLayout(nodes: readonly UiResponsiveNode[], rootId: stri
     const occludedBy = rect.active && rect.layoutOcclusion === 'protected' ? rectangles.filter(other =>
       other.active && other.id !== rect.id && other.layoutOcclusion === 'occluder' &&
       rectanglesIntersect(rect.corners, other.corners)).map(other => other.id) : []
-    return { ...rect, outsideParent, outsideContentArea, overlapCandidates, occludedBy }
+    return { ...rect, outsideParent, outsideContentArea, overlapCandidates, occludedBy,
+      // Expose the same local geometry used by containment, not a second AABB test.
+      ...(parent && !referencePlane ? { parentGeometry: {
+        space: 'parent-local logical pixels', id: parent.id, childCorners: localCorners,
+        bounds: { left: 0, top: 0, right: parentSize[0], bottom: parentSize[1] },
+        contentBounds: { left: padding[3], top: padding[0],
+          right: parentSize[0] - padding[1], bottom: parentSize[1] - padding[2] },
+      } } : {}) }
   })
 }
 

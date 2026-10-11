@@ -1,6 +1,6 @@
 import figures from 'figures';
 import React, { useEffect, useState } from 'react';
-import { Box, Text, Dialog } from '@anthropic/ink';
+import { Box, Text, Dialog } from '@bee-game-studio/ink';
 import { logForDebugging } from '../utils/debug.js';
 import type { GitFileStatus } from '../utils/git.js';
 import { getFileStatus, stashToCleanState } from '../utils/git.js';

@@ -2,7 +2,7 @@ import type { SystemTheme } from '../src/theme/systemTheme.js'
 
 /**
  * Watch for live terminal theme changes via OSC 11 polling.
- * Stub implementation for the standalone @anthropic/ink package.
+ * Stub implementation for the standalone @bee-game-studio/ink package.
  */
 export function watchSystemTheme(
   _querier: unknown,

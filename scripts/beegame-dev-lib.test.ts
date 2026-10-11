@@ -69,7 +69,7 @@ describe('BeeGame local dev launcher helpers', () => {
     ])
   })
 
-  test('injects service urls and keeps service-role secrets out of runtime and frontend', () => {
+  test('injects service urls and scopes V3 service-role credentials to the host, not the frontend', () => {
     const plan = buildBeeGameDevPlan([], {
       cwd: '/repo',
       env: {
@@ -110,8 +110,8 @@ describe('BeeGame local dev launcher helpers', () => {
       NO_PROXY: '127.0.0.1,project.supabase.co',
       no_proxy: 'localhost,project.supabase.co',
     })
-    expect(runtime?.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
-    expect(runtime?.env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
+    expect(runtime?.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY).toBe('service-secret')
+    expect(runtime?.env.SUPABASE_SERVICE_ROLE_KEY).toBe('generic-service-secret')
     expect(frontend?.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
     expect(frontend?.env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
     expect(frontend?.env).toMatchObject({

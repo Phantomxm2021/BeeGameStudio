@@ -278,7 +278,7 @@ export function getWebSocketProxyUrl(url: string): string | undefined {
  * Get fetch options for the Anthropic SDK with proxy and mTLS configuration
  * Returns fetch options with appropriate dispatcher for proxy and/or mTLS
  *
- * @param opts.forAnthropicAPI - Enables ANTHROPIC_UNIX_SOCKET tunneling. This
+ * @param opts.forAnthropicAPI - Enables BGS_API_UNIX_SOCKET tunneling. This
  *   env var is set by `claude ssh` on the remote CLI to route API calls through
  *   an ssh -R forwarded unix socket to a local auth proxy. It MUST NOT leak
  *   into non-Anthropic-API fetch paths (MCP HTTP/SSE transports, etc.) or those
@@ -294,11 +294,11 @@ export function getProxyFetchOptions(opts?: { forAnthropicAPI?: boolean }): {
 } {
   const base = keepAliveDisabled ? ({ keepalive: false } as const) : {}
 
-  // ANTHROPIC_UNIX_SOCKET tunnels through the `claude ssh` auth proxy, which
+  // BGS_API_UNIX_SOCKET tunnels through the `claude ssh` auth proxy, which
   // hardcodes the upstream to the Anthropic API. Scope to the Anthropic API
   // client so MCP/SSE/other callers don't get their requests misrouted.
   if (opts?.forAnthropicAPI) {
-    const unixSocket = process.env.ANTHROPIC_UNIX_SOCKET
+    const unixSocket = process.env.BGS_API_UNIX_SOCKET
     if (unixSocket && typeof Bun !== 'undefined') {
       return { ...base, unix: unixSocket }
     }

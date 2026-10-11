@@ -2,7 +2,7 @@ import { homedir } from 'os';
 import { basename, join, sep } from 'path';
 import { type ReactNode } from 'react';
 import { getOriginalCwd } from '../../../bootstrap/state.js';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { getShortcutDisplay } from '../../../keybindings/shortcutFormat.js';
 import type { ToolPermissionContext } from '../../../Tool.js';
 import { expandPath, getDirectoryForPath } from '../../../utils/path.js';

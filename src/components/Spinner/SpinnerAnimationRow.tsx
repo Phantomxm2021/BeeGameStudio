@@ -1,7 +1,7 @@
 import figures from 'figures';
 import * as React from 'react';
 import { useMemo, useRef } from 'react';
-import { Box, Text, useAnimationFrame, stringWidth, Byline, ProgressBar } from '@anthropic/ink';
+import { Box, Text, useAnimationFrame, stringWidth, Byline, ProgressBar } from '@bee-game-studio/ink';
 import { toInkColor } from '../../utils/ink.js';
 import type { InProcessTeammateTaskState } from '../../tasks/InProcessTeammateTask/types.js';
 import { formatDuration, formatNumber } from '../../utils/format.js';

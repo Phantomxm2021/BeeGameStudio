@@ -1,9 +1,9 @@
 import React, { useCallback, useState } from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { getDisplayPath } from '../utils/file.js';
 import { removePathFromRepo, validateRepoAtPath } from '../utils/githubRepoPathMapping.js';
 import { Select } from './CustomSelect/index.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 import { Spinner } from './Spinner.js';
 
 type Props = {

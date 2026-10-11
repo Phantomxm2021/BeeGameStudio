@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { BashTool } from '@bee-game-studio/builtin-tools/tools/BashTool/BashTool.js';
 import type { PermissionRuleValue } from '../../../utils/permissions/PermissionRule.js';
 

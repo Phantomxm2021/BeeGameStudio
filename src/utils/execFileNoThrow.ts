@@ -111,9 +111,10 @@ export function execFileNoThrowWithCwd(
     // Git also runs implicitly (status/diffs), outside the Bash tool. Repository
     // config can execute filters/fsmonitor, so it must inherit project isolation.
     // Match a structured executable, never parse or rewrite an Agent's command.
-    const isolatedGit = process.env.BEEGAME_PROJECT_EXECUTION === '1' &&
-      ['git', 'git.exe'].includes(basename(file).toLowerCase())
+    const isGit = ['git', 'git.exe'].includes(basename(file).toLowerCase())
     void (async () => {
+      const sandbox = isGit ? (await import('./settings/settings.js')).getSettingsForSource('flagSettings')?.sandbox : undefined
+      const isolatedGit = sandbox?.filesystem?.denyRead?.includes('/') && sandbox.failIfUnavailable
       if (isolatedGit) {
         const { SandboxManager } = await import('./sandbox/sandbox-adapter.js')
         if (!SandboxManager.isSandboxingEnabled()) throw new Error('Project Git requires an active execution sandbox')

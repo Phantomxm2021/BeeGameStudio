@@ -350,7 +350,7 @@ function formatReportMarkdown(
     )
 
   return [
-    '# Claude Code Performance Snapshot',
+    '# BGS Performance Snapshot',
     '',
     `- timestamp: ${new Date().toISOString()}`,
     `- session:   ${sessionId}`,

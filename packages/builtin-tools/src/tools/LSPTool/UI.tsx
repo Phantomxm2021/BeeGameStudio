@@ -3,7 +3,7 @@ import React from 'react';
 import { CtrlOToExpand } from 'src/components/CtrlOToExpand.js';
 import { FallbackToolUseErrorMessage } from 'src/components/FallbackToolUseErrorMessage.js';
 import { MessageResponse } from 'src/components/MessageResponse.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { getDisplayPath } from 'src/utils/file.js';
 import { extractTag } from 'src/utils/messages.js';
 import type { Input, Output } from './LSPTool.js';

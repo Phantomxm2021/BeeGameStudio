@@ -6,7 +6,7 @@ import { logForDebugging } from 'src/utils/debug.js'
 import { getAllowedChannels } from '../../../bootstrap/state.js'
 import type { BridgePermissionCallbacks } from '../../../bridge/bridgePermissionCallbacks.js'
 import type { ToolUseConfirm } from '../../../components/permissions/PermissionRequest.js'
-import { getTerminalFocused } from '@anthropic/ink'
+import { getTerminalFocused } from '@bee-game-studio/ink'
 import {
   CHANNEL_PERMISSION_REQUEST_METHOD,
   type ChannelPermissionRequestParams,

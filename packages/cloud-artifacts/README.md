@@ -7,7 +7,7 @@ This Cloudflare Worker serves temporary, **public** HTML pages from an operator-
 1. Deploy this Worker and R2 bucket in the Bee Game Studio Cloudflare account. Configure R2 lifecycle rules for `7d/` and `30d/` prefixes.
 2. Set a strong Worker secret with `wrangler secret put TOKEN`. Do not commit it. Rotate any previously shared token before production use.
 3. Set the public Worker custom domain. Optionally configure `PUBLIC_URL` in the Worker environment when an approved reverse proxy changes the external origin; otherwise response URLs use the request origin.
-4. Configure the CLI/runtime with `BEEGAME_ARTIFACTS_URL=https://<your-public-domain>` and `BEEGAME_ARTIFACTS_TOKEN=<worker-secret>`. Both are required; without them the artifact tool refuses to upload.
+4. Configure the standalone CLI with `CLAUDE_ARTIFACTS_URL=https://<your-public-domain>` and `CLAUDE_ARTIFACTS_TOKEN=<worker-secret>`. BGS keeps accepting `BEEGAME_ARTIFACTS_URL` / `BEEGAME_ARTIFACTS_TOKEN` and translates them at launch to these public CLI keys. Both are required; without them the artifact tool refuses to upload. No default destination or credential is supplied.
 
 The user must approve each public upload after seeing the source filename, destination domain, and 7- or 30-day lifetime. Anyone with the returned URL can read the page.
 

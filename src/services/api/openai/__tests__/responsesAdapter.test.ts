@@ -1,9 +1,200 @@
 import { describe, expect, test } from 'bun:test'
-import { buildResponsesRequest, extractUsage } from '../responsesAdapter.js'
+import {
+  adaptResponsesStreamToAnthropic,
+  buildResponsesRequest,
+  extractUsage,
+  parseSSE,
+} from '../responsesAdapter.js'
 import { formatOpenAIPromptCacheKey } from '../openaiShared.js'
 import { calculateCacheHitRate } from '../../../../utils/cacheWarning.js'
+import { anthropicMessagesToOpenAI } from '@ant/model-provider'
+import { asSystemPrompt } from '@ant/model-provider/types'
+
+describe('Responses SSE framing and cleanup', () => {
+  async function collect(response: Response) {
+    const events = []
+    for await (const event of parseSSE(response)) events.push(event)
+    return events
+  }
+
+  test.each(['\n\n', '\r\n\r\n', '\r\n\n', '\n\r\n'])(
+    'parses complete frames across byte boundaries: %j',
+    async delimiter => {
+      const expected = { type: 'response.output_text.delta', delta: '中文' }
+      const bytes = new TextEncoder().encode(
+        ': heartbeat' +
+          delimiter +
+          'data: ' +
+          JSON.stringify(expected) +
+          delimiter +
+          'data: [DONE]' +
+          delimiter,
+      )
+      let offset = 0
+      const response = new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (offset === bytes.length) controller.close()
+            else controller.enqueue(bytes.slice(offset, ++offset))
+          },
+        }),
+      )
+      expect(await collect(response)).toEqual([expected])
+      expect(response.body!.locked).toBe(false)
+    },
+  )
+
+  test('supports multiline data and does not invent a frame at EOF', async () => {
+    const response = new Response(
+      'data: {"type":\r\ndata: "response.completed"}\r\n\r\ndata: {"type":"unfinished"}',
+    )
+    expect(await collect(response)).toEqual([{ type: 'response.completed' }])
+    expect(response.body!.locked).toBe(false)
+  })
+
+  test.each([
+    'early-return',
+    'invalid-json',
+    'provider-failure',
+    'cleanup-failure',
+  ])('cancels the source and releases its lock on %s', async mode => {
+    let cancelled = false
+    const payload =
+      mode === 'invalid-json'
+        ? '{broken'
+        : JSON.stringify({
+            type: 'response.failed',
+            response: { error: { message: 'provider failure' } },
+          })
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode('data: ' + payload + '\n\n'),
+          )
+          // Keep the source open: consumer termination must actively cancel it.
+        },
+        cancel() {
+          cancelled = true
+          if (mode === 'cleanup-failure') throw new Error('cleanup failure')
+        },
+      }),
+    )
+    if (mode === 'early-return') {
+      for await (const _event of parseSSE(response)) break
+    } else if (mode === 'invalid-json') {
+      await expect(collect(response)).rejects.toThrow()
+    } else {
+      const consume = async () => {
+        for await (const _event of adaptResponsesStreamToAnthropic(
+          parseSSE(response),
+          'test',
+        )) {
+        }
+      }
+      await expect(consume()).rejects.toThrow('provider failure')
+    }
+    expect(cancelled).toBe(true)
+    expect(response.body!.locked).toBe(false)
+  })
+})
+
+describe('Responses stream termination', () => {
+  async function collect(events: Record<string, unknown>[]) {
+    async function* stream() {
+      yield* events
+    }
+    const result = []
+    for await (const event of adaptResponsesStreamToAnthropic(stream(), 'test'))
+      result.push(event)
+    return result
+  }
+
+  test('rejects empty and partial streams', async () => {
+    await expect(collect([])).rejects.toThrow('terminal response event')
+    await expect(
+      collect([{ type: 'response.output_text.delta', delta: 'partial' }]),
+    ).rejects.toThrow('terminal response event')
+  })
+
+  test.each(['response.completed', 'response.incomplete'])(
+    'accepts the explicit terminal event %s',
+    async type => {
+      const events = await collect([
+        { type, response: { status: type.split('.')[1] } },
+      ])
+      expect(events.at(-1)?.type).toBe('message_stop')
+    },
+  )
+
+  test('preserves explicit API failures', async () => {
+    await expect(
+      collect([
+        {
+          type: 'response.failed',
+          response: { error: { message: 'provider failure' } },
+        },
+      ]),
+    ).rejects.toThrow('provider failure')
+  })
+})
 
 describe('buildResponsesRequest', () => {
+  test('tool-result screenshots survive the full conversion into Responses input', () => {
+    const messages = anthropicMessagesToOpenAI(
+      [
+        {
+          type: 'assistant',
+          message: {
+            content: [
+              { type: 'tool_use', id: 'read-image', name: 'Read', input: {} },
+            ],
+          },
+        },
+        {
+          type: 'user',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'read-image',
+                content: [
+                  {
+                    type: 'image',
+                    source: {
+                      type: 'base64',
+                      media_type: 'image/png',
+                      data: 'SCREENSHOT',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ] as any,
+      asSystemPrompt([]),
+    )
+    const request = buildResponsesRequest({
+      model: 'test',
+      messages,
+      tools: [],
+      toolChoice: undefined,
+      promptCacheKey: 'test',
+    })
+    expect(request.input[1]).toMatchObject({
+      type: 'function_call_output',
+      call_id: 'read-image',
+    })
+    expect(request.input[2]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'input_text', text: 'Images from tool result read-image:' },
+        { type: 'input_image', image_url: 'data:image/png;base64,SCREENSHOT' },
+      ],
+    })
+  })
+
   const promptCacheKey = formatOpenAIPromptCacheKey('session-abc-123')
 
   test('includes max reasoning effort for ChatGPT Responses requests', () => {
@@ -53,7 +244,7 @@ describe('buildResponsesRequest', () => {
       promptCacheKey,
     })
 
-    expect(request.prompt_cache_key).toBe('ccb:session-abc-123')
+    expect(request.prompt_cache_key).toBe('bgs:session-abc-123')
   })
 
   test('prompt_cache_key is stable across turns (not derived from messages)', () => {
@@ -78,7 +269,7 @@ describe('buildResponsesRequest', () => {
     })
 
     expect(turn1.prompt_cache_key).toBe(turn2.prompt_cache_key)
-    expect(turn1.prompt_cache_key).toBe('ccb:same-session')
+    expect(turn1.prompt_cache_key).toBe('bgs:same-session')
   })
 })
 

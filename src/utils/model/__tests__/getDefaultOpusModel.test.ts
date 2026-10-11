@@ -22,13 +22,13 @@ import { getModelStrings } from '../modelStrings.js'
  */
 
 const envKeys = [
-  'CLAUDE_CODE_USE_GEMINI',
-  'CLAUDE_CODE_USE_BEDROCK',
-  'CLAUDE_CODE_USE_VERTEX',
-  'CLAUDE_CODE_USE_FOUNDRY',
-  'CLAUDE_CODE_USE_OPENAI',
-  'CLAUDE_CODE_USE_GROK',
-  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'BGS_USE_GEMINI',
+  'BGS_USE_BEDROCK',
+  'BGS_USE_VERTEX',
+  'BGS_USE_FOUNDRY',
+  'BGS_USE_OPENAI',
+  'BGS_USE_GROK',
+  'BGS_DEFAULT_STRONG_MODEL',
   'OPENAI_DEFAULT_OPUS_MODEL',
   'GEMINI_DEFAULT_OPUS_MODEL',
 ] as const
@@ -66,28 +66,28 @@ describe('getDefaultOpusModel', () => {
   })
 
   test('returns Opus 4.7 for bedrock (3P no longer lags)', () => {
-    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+    process.env.BGS_USE_BEDROCK = '1'
     expect(getDefaultOpusModel()).toBe(ALL_MODEL_CONFIGS.opus47.bedrock)
   })
 
   test('returns Opus 4.7 for vertex (3P no longer lags)', () => {
-    process.env.CLAUDE_CODE_USE_VERTEX = '1'
+    process.env.BGS_USE_VERTEX = '1'
     expect(getDefaultOpusModel()).toBe(ALL_MODEL_CONFIGS.opus47.vertex)
   })
 
   test('returns Opus 4.7 for foundry (3P no longer lags)', () => {
-    process.env.CLAUDE_CODE_USE_FOUNDRY = '1'
+    process.env.BGS_USE_FOUNDRY = '1'
     expect(getDefaultOpusModel()).toBe(ALL_MODEL_CONFIGS.opus47.foundry)
   })
 
-  test('honors ANTHROPIC_DEFAULT_OPUS_MODEL env override (any provider)', () => {
-    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
-    process.env.ANTHROPIC_DEFAULT_OPUS_MODEL = 'claude-opus-4-1-custom'
+  test('honors BGS_DEFAULT_STRONG_MODEL env override (any provider)', () => {
+    process.env.BGS_USE_BEDROCK = '1'
+    process.env.BGS_DEFAULT_STRONG_MODEL = 'claude-opus-4-1-custom'
     expect(getDefaultOpusModel()).toBe('claude-opus-4-1-custom')
   })
 
   test('honors OPENAI_DEFAULT_OPUS_MODEL for openai provider', () => {
-    process.env.CLAUDE_CODE_USE_OPENAI = '1'
+    process.env.BGS_USE_OPENAI = '1'
     process.env.OPENAI_DEFAULT_OPUS_MODEL = 'gpt-5-turbo'
     expect(getDefaultOpusModel()).toBe('gpt-5-turbo')
   })
@@ -134,7 +134,7 @@ describe('getOpus46Option', () => {
   })
 
   test('bedrock: value is canonical opus46 string (unchanged behavior)', () => {
-    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+    process.env.BGS_USE_BEDROCK = '1'
     const opt = getOpus46Option(false)
     expect(opt.value).toBe(getModelStrings().opus46)
     expect(opt.value).toBe(ALL_MODEL_CONFIGS.opus46.bedrock)

@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useRegisterOverlay } from '../../context/overlayContext.js'
-import { type InputEvent, useInput } from '@anthropic/ink'
+import { type InputEvent, useInput } from '@bee-game-studio/ink'
 import { useKeybindings } from '../../keybindings/useKeybinding.js'
 import {
   normalizeFullWidthDigits,

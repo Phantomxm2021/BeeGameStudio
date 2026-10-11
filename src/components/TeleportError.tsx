@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { checkIsGitClean, checkNeedsClaudeAiLogin } from 'src/utils/background/remote/preconditions.js';
 import { gracefulShutdownSync } from 'src/utils/gracefulShutdown.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { ConsoleOAuthFlow } from './ConsoleOAuthFlow.js';
 import { Select } from './CustomSelect/index.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 import { TeleportStash } from './TeleportStash.js';
 
 export type TeleportLocalErrorType = 'needsLogin' | 'needsGitStash';

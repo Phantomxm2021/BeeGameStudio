@@ -1591,6 +1591,26 @@ begin
     order by created_at desc, id desc
     limit 1;
 
+    -- A legacy runtime submitted turn deltas, but retained the real cumulative
+    -- snapshot in metadata. Compare against that snapshot on the first corrected
+    -- submission, not the stored turn delta: never catch up historical charges.
+    if p_usage_source = 'runtime_snapshot' and p_metadata->>'usageBasis' = 'session-cumulative-v1'
+       and previous_row.id is not null and previous_row.usage_source = 'runtime_snapshot' then
+      if jsonb_typeof(previous_row.metadata->'providerCumulativeUsage') is distinct from 'object' then
+        raise exception 'Legacy runtime usage baseline is unknown; reconcile before resuming billing';
+      end if;
+      previous_row.prompt_tokens := (previous_row.metadata->'providerCumulativeUsage'->>'prompt_tokens')::bigint;
+      previous_row.completion_tokens := (previous_row.metadata->'providerCumulativeUsage'->>'completion_tokens')::bigint;
+      previous_row.cache_read_tokens := (previous_row.metadata->'providerCumulativeUsage'->>'cache_read_tokens')::bigint;
+      previous_row.cache_creation_tokens := (previous_row.metadata->'providerCumulativeUsage'->>'cache_creation_tokens')::bigint;
+      previous_row.total_tokens := (previous_row.metadata->'providerCumulativeUsage'->>'total_tokens')::bigint;
+      if previous_row.prompt_tokens is null or previous_row.completion_tokens is null or previous_row.cache_read_tokens is null
+         or previous_row.cache_creation_tokens is null or previous_row.total_tokens is null then
+        raise exception 'Legacy runtime usage baseline is incomplete; reconcile before resuming billing';
+      end if;
+      previous_row.weighted_tokens := ceil((previous_row.prompt_tokens * 100 + previous_row.cache_read_tokens * 10
+        + previous_row.cache_creation_tokens * 125 + previous_row.completion_tokens * 500)::numeric / 100)::bigint;
+    end if;
     current_weighted := ceil((current_prompt * 100 + current_cache_read * 10 + current_cache_creation * 125 + current_completion * 500)::numeric / 100)::bigint;
     reset_epoch := previous_row.id is null or
       current_prompt < previous_row.prompt_tokens or

@@ -94,10 +94,17 @@ function detectMusl() {
 // --- Paths ---
 
 function getVendorDir() {
+  // A raw SSH build keeps its installer under <active-build>/scripts/.
+  if (existsSync(path.join(projectRoot, 'cli.js'))) {
+    return path.resolve(projectRoot, 'vendor', 'ripgrep')
+  }
   if (existsSync(path.join(projectRoot, 'src'))) {
     return path.resolve(projectRoot, 'src', 'utils', 'vendor', 'ripgrep')
   }
-  return path.resolve(projectRoot, 'dist', 'vendor', 'ripgrep')
+  const dist = path.resolve(projectRoot, 'dist')
+  const entry = path.join(dist, 'cli.js')
+  const generation = existsSync(entry) && readFileSync(entry, 'utf8').match(/^import\s+["']\.\/(build-[\w-]+)\/cli\.js["']/)?.[1]
+  return path.resolve(dist, generation || '.', 'vendor', 'ripgrep')
 }
 
 function getBinaryPath() {
@@ -380,10 +387,11 @@ async function main() {
 
 main().catch(error => {
   const msg = error instanceof Error ? error.message : String(error)
-  console.error(`[postinstall] ripgrep download failed (non-fatal): ${msg}`)
+  const required = process.argv.includes('--required')
+  console.error(`[postinstall] ripgrep download failed${required ? '' : ' (non-fatal)'}: ${msg}`)
   console.error(
     `[postinstall] You can install ripgrep manually: https://github.com/BurntSushi/ripgrep#installation`,
   )
   // Never exit with error code — postinstall must not break install
-  process.exit(0)
+  process.exit(required ? 1 : 0)
 })

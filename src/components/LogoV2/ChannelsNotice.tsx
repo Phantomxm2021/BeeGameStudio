@@ -8,7 +8,7 @@ import * as React from 'react';
 import { useState } from 'react';
 import { type ChannelEntry, getAllowedChannels, getHasDevChannels } from '../../bootstrap/state.js';
 import { getBuiltinPlugins } from '../../plugins/builtinPlugins.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { getMcpConfigsByScope } from '../../services/mcp/config.js';
 import { loadInstalledPluginsV2 } from '../../utils/plugins/installedPluginsManager.js';
 
@@ -51,7 +51,7 @@ export function ChannelsNotice(): React.ReactNode {
       <Text color="error">Listening for channel messages from: {list}</Text>
       <Text dimColor>
         Experimental · inbound messages will be pushed into this session, this carries prompt injection risks. Restart
-        Claude Code without {flag} to disable.
+        BGS without {flag} to disable.
       </Text>
       {unmatched.map(u => (
         <Text key={`${formatEntry(u.entry)}:${u.why}`} color="warning">

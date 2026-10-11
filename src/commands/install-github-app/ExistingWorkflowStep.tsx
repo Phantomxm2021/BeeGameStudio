@@ -1,5 +1,5 @@
 import { Select } from 'src/components/CustomSelect/index.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 
 interface ExistingWorkflowStepProps {
   repoName: string;

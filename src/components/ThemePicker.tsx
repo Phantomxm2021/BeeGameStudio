@@ -2,7 +2,7 @@ import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box, Text, usePreviewTheme, useTheme, useThemeSetting } from '@anthropic/ink';
+import { Box, Text, usePreviewTheme, useTheme, useThemeSetting } from '@bee-game-studio/ink';
 import { useRegisterKeybindingContext } from '../keybindings/KeybindingContext.js';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
@@ -11,7 +11,7 @@ import { gracefulShutdown } from '../utils/gracefulShutdown.js';
 import { updateSettingsForSource } from '../utils/settings/settings.js';
 import type { ThemeSetting } from '../utils/theme.js';
 import { Select } from './CustomSelect/index.js';
-import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
+import { Byline, KeyboardShortcutHint } from '@bee-game-studio/ink';
 import { getColorModuleUnavailableReason, getSyntaxTheme } from './StructuredDiff/colorDiff.js';
 import { StructuredDiff } from './StructuredDiff.js';
 
@@ -149,7 +149,7 @@ export function ThemePicker({
               lines: [
                 ' function greet() {',
                 '-  console.log("Hello, World!");',
-                '+  console.log("Hello, Claude!");',
+                '+  console.log("Hello, BGS!");',
                 ' }',
               ],
             }}

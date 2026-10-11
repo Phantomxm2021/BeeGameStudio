@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import TextInput from '../../components/TextInput.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 
 interface ChooseRepoStepProps {

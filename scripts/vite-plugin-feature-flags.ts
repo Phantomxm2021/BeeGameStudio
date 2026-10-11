@@ -1,82 +1,73 @@
 import type { Plugin } from 'rollup'
-import { DEFAULT_BUILD_FEATURES } from './defines.ts'
+import ts from 'typescript'
+import { getBuildFeatures } from './defines.ts'
 
-/**
- * Collect enabled feature flags from defaults + env vars.
- */
 export function getEnabledFeatures(): Set<string> {
-  const envFeatures = Object.keys(process.env)
-    .filter(k => k.startsWith('FEATURE_'))
-    .map(k => k.replace('FEATURE_', ''))
-  return new Set([...DEFAULT_BUILD_FEATURES, ...envFeatures])
+  return new Set(getBuildFeatures())
 }
 
-// Regex to match feature('FLAG_NAME') calls with string literal arguments
-const FEATURE_CALL_RE = /feature\s*\(\s*['"]([\w]+)['"]\s*\)/g
-
-/**
- * Vite/Rollup plugin that replaces `feature('X')` calls with boolean literals
- * at the transform stage, BEFORE the bundler resolves imports.
- *
- * This approach is necessary because some feature-gated code blocks contain
- * require() calls to files that don't exist (e.g. hunter.js inside
- * feature('REVIEW_ARTIFACT')). The bundler must see these as dead code
- * (`if (false) { ... }`) before attempting import resolution.
- *
- * Also resolves `import { feature } from 'bun:bundle'` as a virtual module
- * to prevent "module not found" errors.
- */
+/** Replace real feature calls; leave strings/comments and disposal semantics intact. */
 export default function featureFlagsPlugin(): Plugin {
   const features = getEnabledFeatures()
-
   const virtualModuleId = 'bun:bundle'
   const resolvedVirtualModuleId = '\0' + virtualModuleId
-
   return {
     name: 'feature-flags',
-
-    // Resolve bun:bundle as a virtual module (prevents "module not found")
     resolveId(id) {
-      if (id === virtualModuleId) {
-        return resolvedVirtualModuleId
-      }
+      if (id === virtualModuleId) return resolvedVirtualModuleId
     },
-
-    // Provide a stub export for bun:bundle (unused at runtime after transform)
     load(id) {
-      if (id === resolvedVirtualModuleId) {
-        return 'export function feature(name) { return false; }'
-      }
+      if (id === resolvedVirtualModuleId) return 'export function feature(name) { return false; }'
     },
-
-    // Replace feature('X') calls with true/false literals at transform time,
-    // and transpile `using` declarations for Node.js compatibility.
     transform(code, id) {
-      // Skip node_modules
-      if (id.includes('node_modules')) return null
-
-      let modified = false
-
-      // 1. Replace feature('X') calls with boolean literals
-      let matchCount = 0
-      let transformed = code.replace(FEATURE_CALL_RE, (match, flagName) => {
-        matchCount++
-        return features.has(flagName) ? 'true' : 'false'
+      if (id.includes('node_modules') || !/\.[cm]?[jt]sx?(?:\?|$)/.test(id)) return null
+      if (!code.includes('feature') && !code.includes('using ')) return null
+      const result = ts.transpileModule(code, {
+        fileName: id.split('?')[0],
+        compilerOptions: {
+          target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext,
+          jsx: ts.JsxEmit.Preserve, sourceMap: true,
+        },
+        transformers: { before: [context => source => {
+          const bindings = new Set<string>()
+          for (const statement of source.statements) {
+            if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || statement.moduleSpecifier.text !== 'bun:bundle') continue
+            const imports = statement.importClause?.namedBindings
+            if (imports && ts.isNamedImports(imports)) {
+              for (const item of imports.elements) {
+                if ((item.propertyName ?? item.name).text === 'feature') bindings.add(item.name.text)
+              }
+            }
+          }
+          // Use TS's existing binder instead of guessing lexical scopes from
+          // names. This in-memory program loads no libraries or imports.
+          const options = { noResolve: true, noLib: true }
+          const checker = bindings.size ? ts.createProgram([source.fileName], options, {
+            ...ts.createCompilerHost(options),
+            getSourceFile: name => name === source.fileName ? source : undefined,
+            readFile: () => undefined,
+            fileExists: name => name === source.fileName,
+          }).getTypeChecker() : undefined
+          const importedSymbols = new Set<ts.Symbol>()
+          for (const statement of source.statements) {
+            if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || statement.moduleSpecifier.text !== 'bun:bundle') continue
+            const imports = statement.importClause?.namedBindings
+            if (imports && ts.isNamedImports(imports)) for (const item of imports.elements) {
+              if ((item.propertyName ?? item.name).text !== 'feature') continue
+              const symbol = checker?.getSymbolAtLocation(item.name)
+              if (symbol) importedSymbols.add(symbol)
+            }
+          }
+          const visit: ts.Visitor = node => {
+            if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && importedSymbols.has(checker?.getSymbolAtLocation(node.expression)!) && node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0]!)) {
+              return features.has(node.arguments[0]!.text) ? context.factory.createTrue() : context.factory.createFalse()
+            }
+            return ts.visitEachChild(node, visit, context)
+          }
+          return ts.visitNode(source, visit) as ts.SourceFile
+        }] },
       })
-      if (matchCount > 0) modified = true
-
-      // 2. Transpile `using _ = expr;` to `const _ = expr;` for Node.js compat.
-      //    Node.js v22 does not support `using` declarations (Explicit Resource Management).
-      //    Safe because: SLOW_OPERATION_LOGGING is not enabled, so slowLogging returns
-      //    a no-op disposable whose [Symbol.dispose]() is empty.
-      if (transformed.includes('using _')) {
-        transformed = transformed.replace(/\busing\s+(_\w*)\s*=/g, 'const $1 =')
-        modified = true
-      }
-
-      if (!modified) return null
-
-      return { code: transformed, map: null }
+      return { code: result.outputText, map: result.sourceMapText ? JSON.parse(result.sourceMapText) : null }
     },
   }
 }

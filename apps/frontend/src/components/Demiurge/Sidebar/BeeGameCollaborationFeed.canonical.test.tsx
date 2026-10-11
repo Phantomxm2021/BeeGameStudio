@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ChatDisplayMessage } from '../viewModels/displayModels';
 import { BeeGameCollaborationFeed } from './BeeGameCollaborationFeed';
 import { toChatDisplayMessages } from '../../../viewModels/displayModels';
 import { normalizeChatHistory } from '../../../utils/chatHistory';
 import { sampleMessages } from '../../../test/fixtures/canonicalTranscript';
+import { transcriptEventsToHistory } from '../../../services/beeGameAdapter';
 
 vi.mock('img-fx', async () => {
   const React = await import('react');
@@ -16,20 +17,62 @@ vi.mock('img-fx', async () => {
 
 const CHECKLIST_TURN_ID = 'beegame-turn-beegame_191b560f8a9046b18e1efed2fafa8f07-1';
 
-it('keeps failed work outside completed execution details and leaves active turns expanded', () => {
+it('shows child tools only inside the subagent detail while keeping main tools in chat', () => {
+  const event = (id: number, type: string, payload: Record<string, unknown>) => ({
+    id, type, payload, text: '', sessionId: 'routing-session', turnId: 'routing-turn',
+    createdAt: new Date(1_000 + id).toISOString(),
+  });
+  const events = [event(1, 'tool.started', { toolName: 'Agent', toolUseID: 'ui-author',
+    input: { description: 'Write UI', prompt: 'Design the UI' } }),
+    ...Array.from({ length: 11 }, (_, index) => event(2 + index, 'tool.completed', {
+      toolName: index < 9 ? 'Read' : 'Bash', toolUseID: `child-${index}`, parentToolUseID: 'ui-author',
+      input: index < 9 ? { file_path: `docs/source-${index}.md` } : { command: `echo check-${index}` },
+      output: `source output ${index}`,
+    })),
+    event(13, 'tool.completed', { toolName: 'Bash', toolUseID: 'main-tool', input: { command: 'bun test' }, output: 'main result' }),
+  ];
+  const messages = toChatDisplayMessages(normalizeChatHistory(transcriptEventsToHistory('routing', events)));
+  render(<BeeGameCollaborationFeed messages={messages} lang="en" />);
+  expect(screen.queryByText('Ran 11 tools')).not.toBeInTheDocument();
+  expect(screen.getByText('Ran 1 tool')).toBeInTheDocument();
+  expect(screen.getAllByTestId('beegame-subagent-row')).toHaveLength(1);
+  fireEvent.click(within(screen.getByTestId('beegame-subagent-row')).getByRole('button'));
+  const activity = screen.getByTestId('subagent-activity-list');
+  const toolButtons = within(activity).getAllByRole('button');
+  expect(toolButtons).toHaveLength(11);
+  fireEvent.click(toolButtons[0]);
+  fireEvent.click(toolButtons[10]);
+  expect(screen.getByText('source output 0')).toBeInTheDocument();
+  expect(screen.getByText('source output 10')).toBeInTheDocument();
+  expect(screen.queryByText('main result')).not.toBeInTheDocument();
+});
+
+it('keeps completed, failed and running work in its original position without an execution archive', () => {
   const messages: ChatDisplayMessage[] = [
     { id: 'compact-thought', sender: 'beegame', type: 'thought', thought: 'Inspecting files', content: 'Thinking', timestamp: 1, turnId: 'compact-turn' },
     { id: 'compact-read', sender: 'system', type: 'tool', toolName: 'Read', toolStatus: 'completed', content: 'Read', timestamp: 2, turnId: 'compact-turn' },
     { id: 'compact-check', sender: 'system', type: 'tool', toolName: 'Bash', toolStatus: 'failed', content: 'Check failed', timestamp: 3, turnId: 'compact-turn' },
     { id: 'compact-answer', sender: 'beegame', content: '检查失败，尚未完成验收。', timestamp: 4, turnId: 'compact-turn' },
   ];
-  const { rerender } = render(<BeeGameCollaborationFeed messages={messages} lang="zh" />);
-  const disclosure = screen.getByRole('button', { name: /执行记录/ });
-  expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+  const { container, rerender } = render(<BeeGameCollaborationFeed messages={messages} lang="zh" />);
+  expect(screen.queryByRole('button', { name: /执行记录/ })).not.toBeInTheDocument();
   expect(screen.getByText('检查失败，尚未完成验收。')).toBeVisible();
   expect(screen.getByText(/1 次失败/)).toBeVisible();
+  const activities = container.querySelectorAll('[data-content]');
+  expect(activities).toHaveLength(2);
+  expect(activities[0]).toHaveAttribute('data-content', 'text');
+  expect(activities[1]).toHaveAttribute('data-content', 'tool');
+  const answer = screen.getByTestId('beegame-agent-message-compact-answer');
+  expect(activities[0].compareDocumentPosition(activities[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(activities[1].compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   rerender(<BeeGameCollaborationFeed messages={messages.map(message => message.id === 'compact-check'
     ? { ...message, toolStatus: 'running' } : message)} lang="zh" isLoading />);
+  expect(screen.queryByRole('button', { name: /执行记录/ })).not.toBeInTheDocument();
+  expect(container.querySelectorAll('[data-content]')[0]).toBe(activities[0]);
+  expect(container.querySelectorAll('[data-content]')[1]).toBe(activities[1]);
+  rerender(<BeeGameCollaborationFeed messages={messages} lang="zh" />);
+  expect(container.querySelectorAll('[data-content]')[0]).toBe(activities[0]);
+  expect(container.querySelectorAll('[data-content]')[1]).toBe(activities[1]);
   expect(screen.queryByRole('button', { name: /执行记录/ })).not.toBeInTheDocument();
 });
 
@@ -59,6 +102,14 @@ it('renders delivery milestone and stop markers as separators', () => {
   ]} />);
   expect(screen.getByText('编写项目文档')).toBeInTheDocument();
   expect(screen.getByText('任务已停止')).toBeInTheDocument();
+});
+
+it('labels the integrated sample without declaring a quality pass', () => {
+  render(<BeeGameCollaborationFeed lang="zh" messages={[
+    { id: 'phase-sample', sender: 'system', content: 'playable', taskKind: 'delivery_phase', timestamp: 1 },
+  ]} />);
+  expect(screen.getByTestId('beegame-context-separator')).toHaveTextContent('代表性可玩样板');
+  expect(screen.queryByText(/质量通过/)).not.toBeInTheDocument();
 });
 
 it('keeps distinct references after history conversion and renders them with the existing BeUI sources disclosure', () => {
@@ -464,6 +515,26 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
     expect(within(screen.getByTestId('beegame-agent-run-detail')).getByRole('status', { name: 'Completed' }))
       .toHaveAttribute('data-subagent-state', 'completed');
   });
+  it('shows a tool in the already-open subagent drawer while it is still running, then updates it in place', () => {
+    const message: ChatDisplayMessage = { id: 'subagent-running-tools', sender: 'beegame', content: 'Inspect assets',
+      type: 'tool', timestamp: 1, toolName: 'Agent', toolStatus: 'running', isSubagentTool: true, subagentPrompt: 'Inspect assets' };
+    const { rerender } = render(<BeeGameCollaborationFeed messages={[message]} />);
+    fireEvent.click(within(screen.getByTestId('beegame-subagent-disclosure-subagent-running-tools')).getByRole('button'));
+    const entry = { id: 'slow-bash', kind: 'tool' as const, toolName: 'Bash', command: 'bun test slow.test.ts', status: 'running' as const };
+    rerender(<BeeGameCollaborationFeed messages={[{ ...message, subagentActivity: { entries: [entry], truncated: false } }]} />);
+    const detail = screen.getByTestId('beegame-agent-run-detail');
+    const pendingTool = detail.querySelector('[data-tool-id="slow-bash"]');
+    expect(pendingTool).toBeInTheDocument();
+    expect(pendingTool).toHaveTextContent('bun test slow.test.ts');
+    expect(pendingTool).not.toHaveTextContent('TOOL_FINISHED');
+    rerender(<BeeGameCollaborationFeed messages={[{ ...message, subagentActivity: {
+      entries: [{ ...entry, status: 'completed', output: 'TOOL_FINISHED' }], truncated: false,
+    } }]} />);
+    expect(detail.querySelector('[data-tool-id="slow-bash"]')).toBe(pendingTool);
+    expect(detail.querySelectorAll('[data-tool-id="slow-bash"]')).toHaveLength(1);
+    fireEvent.click(within(pendingTool as HTMLElement).getByRole('button', { name: /bun test slow.test.ts/ }));
+    expect(pendingTool).toHaveTextContent('TOOL_FINISHED');
+  });
   it('starts with the real idea and keeps three independent turns in source order', () => {
     expect(sampleMessages[0]).toMatchObject({
       sender: 'user',
@@ -496,32 +567,35 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
     expect(checklist.at(-1)?.content).toContain('Checklist 候选文件已写入');
   });
 
-  it('folds completed canonical activity without folding the markdown result', () => {
+  it('renders the canonical activity and markdown result in response order without an execution archive', async () => {
     render(<BeeGameCollaborationFeed messages={sampleMessages} />);
     const checklistTurn = screen.getAllByTestId(/^beegame-agent-turn-/)
       .find((turn) => turn.textContent?.includes('11 个经验证的验收场景'));
     expect(checklistTurn).toBeDefined();
     const activities = checklistTurn!.querySelectorAll('[data-content]');
     const activity = activities[0] as HTMLElement;
-    const toolActivity = activities[2] as HTMLElement;
+    const toolActivity = activities[1] as HTMLElement;
     expect(activity).toBeInTheDocument();
-    expect(activities).toHaveLength(3);
+    expect(activities).toHaveLength(2);
     expect(activities[0]).toHaveAttribute('data-content', 'text');
-    expect(activities[1]).toHaveAttribute('data-content', 'text');
-    expect(activities[2]).toHaveAttribute('data-content', 'tool');
+    expect(activities[1]).toHaveAttribute('data-content', 'tool');
     expect([...activities].every((candidate) => !candidate.textContent?.includes('Running tools'))).toBe(true);
     expect([...activities].every((candidate) => !candidate.textContent?.includes('Run Tool'))).toBe(true);
     expect(toolActivity).toHaveTextContent('Edit');
-    const disclosure = within(activity).getByRole('button', { name: /Execution details|执行记录/ });
-    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
-    fireEvent.click(disclosure);
-    expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.queryByRole('button', { name: /Execution details|执行记录/ })).not.toBeInTheDocument();
+    fireEvent.click(within(activity).getByRole('button'));
+    await waitFor(() => expect(within(activity).getByText(/11 verified acceptance scenarios/)).toBeVisible());
     expect(screen.getByTestId(`beegame-agent-message-beegame-assistant-beegame_191b560f8a9046b18e1efed2fafa8f07-${CHECKLIST_MIXED_MESSAGE_ID}-block-1`)).toBeInTheDocument();
     expect(screen.getByTestId(`beegame-agent-message-beegame-assistant-beegame_191b560f8a9046b18e1efed2fafa8f07-${CHECKLIST_FINAL_MESSAGE_ID}-block-0`)).toBeInTheDocument();
     expect(screen.getByTestId(`beegame-agent-message-beegame-assistant-beegame_0889307bbd6142f186543e33306e9b01-${IMPLEMENTATION_MIXED_MESSAGE_ID}-block-1`)).toBeInTheDocument();
     expect(within(checklistTurn!).getByText(/11 个经验证的验收场景/)).toBeInTheDocument();
     expect([...activities].every((candidate) => !candidate.textContent?.includes('11 个经验证的验收场景') && !candidate.textContent?.includes('Checklist 候选文件已写入'))).toBe(true);
     expect(within(checklistTurn!).getByText(/Checklist 候选文件已写入/)).toBeInTheDocument();
+    const intermediate = screen.getByTestId(`beegame-agent-message-beegame-assistant-beegame_191b560f8a9046b18e1efed2fafa8f07-${CHECKLIST_MIXED_MESSAGE_ID}-block-1`);
+    const final = screen.getByTestId(`beegame-agent-message-beegame-assistant-beegame_191b560f8a9046b18e1efed2fafa8f07-${CHECKLIST_FINAL_MESSAGE_ID}-block-0`);
+    expect(activity.compareDocumentPosition(intermediate) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(intermediate.compareDocumentPosition(toolActivity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(toolActivity.compareDocumentPosition(final) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(checklistTurn!).queryByTestId('beegame-file-diff')).not.toBeInTheDocument();
     expect(screen.queryByText('LLM generated')).not.toBeInTheDocument();
   });

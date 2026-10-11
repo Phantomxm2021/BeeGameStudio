@@ -1,11 +1,11 @@
 import React from 'react';
 import type { DeepImmutable } from 'src/types/utils.js';
 import { useElapsedTime } from '../../hooks/useElapsedTime.js';
-import { type KeyboardEvent, Box, Text } from '@anthropic/ink';
+import { type KeyboardEvent, Box, Text } from '@bee-game-studio/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { DreamTaskState } from '../../tasks/DreamTask/DreamTask.js';
 import { plural } from '../../utils/stringUtils.js';
-import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
+import { Byline, Dialog, KeyboardShortcutHint } from '@bee-game-studio/ink';
 
 type Props = {
   task: DeepImmutable<DreamTaskState>;

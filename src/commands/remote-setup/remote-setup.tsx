@@ -2,7 +2,7 @@ import { execa } from 'execa';
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { Select } from '../../components/CustomSelect/index.js';
-import { Box, Dialog, LoadingState, Text } from '@anthropic/ink';
+import { Box, Dialog, LoadingState, Text } from '@bee-game-studio/ink';
 import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS as SafeString,

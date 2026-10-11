@@ -2,7 +2,6 @@ import { getSessionId } from '../../../bootstrap/state.js'
 import type { ToolUseContext } from '../../../Tool.js'
 import { formatAgentId, parseAgentId } from '../../../utils/agentId.js'
 import { quote } from '../../../utils/bash/shellQuote.js'
-import { isInBundledMode } from '../../../utils/bundledMode.js'
 import { registerCleanup } from '../../../utils/cleanupRegistry.js'
 import { logForDebugging } from '../../../utils/debug.js'
 import { jsonStringify } from '../../../utils/slowOperations.js'
@@ -11,7 +10,11 @@ import {
   buildInheritedCliArgParts,
   buildInheritedEnvVars,
   getInheritedEnvVarAssignments,
-  getTeammateCommand,
+  getTeammateCommandParts,
+  writeInheritedFlagSettings,
+  writeInheritedProviderEnvironment,
+  writeInheritedAgentDefinition,
+  removePanePrivateFiles,
 } from '../spawnUtils.js'
 import { assignTeammateColor } from '../teammateLayoutManager.js'
 import { isInsideTmux } from './detection.js'
@@ -22,16 +25,17 @@ import type {
   TeammateMessage,
   TeammateSpawnConfig,
   TeammateSpawnResult,
+  PaneCleanupMetadata,
 } from './types.js'
 
 function quotePowerShellString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`
 }
 
-function withoutModelArg(args: string[]): string[] {
+function withoutCliOption(args: string[], option: string): string[] {
   const filtered: string[] = []
   for (let i = 0; i < args.length; i += 1) {
-    if (args[i] === '--model') {
+    if (args[i] === option) {
       i += 1
       continue
     }
@@ -41,22 +45,21 @@ function withoutModelArg(args: string[]): string[] {
 }
 
 function buildPowerShellSpawnCommand(
-  binaryPath: string,
+  commandParts: string[],
   args: string[],
   cwd: string,
+  environmentPath?: string,
 ): string {
   const envAssignments = getInheritedEnvVarAssignments().map(
     ([key, value]) => `$env:${key} = ${quotePowerShellString(value)}`,
   )
-  // In dev mode (non-bundled), binaryPath is a .ts/.tsx file that PowerShell
-  // cannot execute directly. Prepend `bun run` so the teammate process starts
-  // through Bun's runtime, matching how `bun run dev` works.
-  const invocation = isInBundledMode()
-    ? `& ${quotePowerShellString(binaryPath)}`
-    : `& ${quotePowerShellString(process.execPath)} ${quotePowerShellString(binaryPath)}`
+  // Share the runtime-aware command parts with POSIX; explicit executable
+  // overrides must not be treated as source files.
+  const invocation = `& ${commandParts.map(quotePowerShellString).join(' ')}`
   return [
     `Set-Location -LiteralPath ${quotePowerShellString(cwd)}`,
     ...envAssignments,
+    ...(environmentPath ? [`. ${quotePowerShellString(environmentPath)}`] : []),
     `${invocation} ${args.map(quotePowerShellString).join(' ')}`,
   ].join('; ')
 }
@@ -85,8 +88,24 @@ export class PaneBackendExecutor implements TeammateExecutor {
    * Track spawned teammates by agentId -> paneId mapping.
    * This allows us to find the pane for operations like kill/terminate.
    */
-  private spawnedTeammates: Map<string, { paneId: string; insideTmux: boolean }>
+  private spawnedTeammates: Map<
+    string,
+    {
+      paneId: string
+      insideTmux: boolean
+      settingsDirectory?: string
+      inlineSettingsPath?: string
+      cleanup?: PaneCleanupMetadata
+      paneClosed?: boolean
+      closing?: Promise<boolean>
+    }
+  >
   private cleanupRegistered = false
+  private pendingSpawns = new Map<
+    string,
+    { cancelled: boolean; done: Promise<void>; finish: () => void }
+  >()
+  private shuttingDown = false
 
   constructor(backend: PaneBackend) {
     this.backend = backend
@@ -109,6 +128,32 @@ export class PaneBackendExecutor implements TeammateExecutor {
     return this.backend.isAvailable()
   }
 
+  private registerPaneCleanup(): void {
+    if (this.cleanupRegistered) return
+    this.cleanupRegistered = true
+    registerCleanup(async () => {
+      this.shuttingDown = true
+      for (const pending of this.pendingSpawns.values())
+        pending.cancelled = true
+      await Promise.all(
+        [...this.pendingSpawns.values()].map(pending => pending.done),
+      )
+      const results = await Promise.allSettled(
+        [...this.spawnedTeammates.keys()].map(async agentId => {
+          if (!(await this.kill(agentId))) {
+            throw new Error(
+              `Pane cleanup failed for ${agentId}; tracking retained.`,
+            )
+          }
+        }),
+      )
+      // Wait for every pane before reporting failure; one failed close must not
+      // allow parent shutdown to abandon the other in-flight cleanups.
+      const failure = results.find(result => result.status === 'rejected')
+      if (failure?.status === 'rejected') throw failure.reason
+    })
+  }
+
   /**
    * Spawns a teammate in a new pane.
    *
@@ -117,6 +162,22 @@ export class PaneBackendExecutor implements TeammateExecutor {
    */
   async spawn(config: TeammateSpawnConfig): Promise<TeammateSpawnResult> {
     const agentId = formatAgentId(config.name, config.teamName)
+    if (this.shuttingDown)
+      return {
+        success: false,
+        agentId,
+        error: 'Pane executor is shutting down',
+      }
+
+    // A failed close must not be hidden by replacing its tracking record.
+    if (this.spawnedTeammates.has(agentId) || this.pendingSpawns.has(agentId)) {
+      return {
+        success: false,
+        agentId,
+        error:
+          'A pane is still tracked for this teammate; close it before spawning again.',
+      }
+    }
 
     if (!this.context) {
       logForDebugging(
@@ -130,6 +191,29 @@ export class PaneBackendExecutor implements TeammateExecutor {
       }
     }
 
+    let finish!: () => void
+    const pending = {
+      cancelled: false,
+      done: new Promise<void>(resolve => {
+        finish = resolve
+      }),
+      finish: () => finish(),
+    }
+    this.pendingSpawns.set(agentId, pending)
+    this.registerPaneCleanup()
+    let createdPane:
+      | {
+          paneId: string
+          insideTmux: boolean
+          settingsDirectory?: string
+          inlineSettingsPath?: string
+          cleanup?: PaneCleanupMetadata
+        }
+      | undefined
+    const checkCancelled = () => {
+      if (pending.cancelled || this.shuttingDown)
+        throw new Error('Teammate spawn cancelled before completion')
+    }
     try {
       // Assign a unique color to this teammate
       const teammateColor = config.color ?? assignTeammateColor(agentId)
@@ -148,7 +232,12 @@ export class PaneBackendExecutor implements TeammateExecutor {
       const { paneId, isFirstTeammate } = paneResult
 
       // Check if we're inside tmux to determine how to send commands
-      const insideTmux = await isInsideTmux()
+      const insideTmux = paneResult.cleanup
+        ? !paneResult.cleanup.useExternalSession
+        : await isInsideTmux()
+      createdPane = { paneId, insideTmux, cleanup: paneResult.cleanup }
+      this.spawnedTeammates.set(agentId, createdPane)
+      checkCancelled()
 
       // Enable pane border status on first teammate when inside tmux
       if (isFirstTeammate && insideTmux) {
@@ -156,7 +245,7 @@ export class PaneBackendExecutor implements TeammateExecutor {
       }
 
       // Build the command to spawn Claude Code with teammate identity
-      const binaryPath = getTeammateCommand()
+      const commandParts = getTeammateCommandParts()
 
       // Build teammate identity CLI args
       const teammateArgs = [
@@ -183,11 +272,31 @@ export class PaneBackendExecutor implements TeammateExecutor {
 
       // If teammate has a custom model, add --model flag (or replace inherited one)
       if (config.model) {
-        inheritedArgParts = withoutModelArg(inheritedArgParts)
+        inheritedArgParts = withoutCliOption(inheritedArgParts, '--model')
         inheritedArgParts.push('--model', config.model)
       }
 
       const workingDir = config.cwd
+
+      const providerSettings = await writeInheritedProviderEnvironment(
+        this.type === 'windows-terminal',
+      )
+      if (providerSettings) {
+        createdPane.settingsDirectory = providerSettings.directory
+      }
+      checkCancelled()
+      const agentsPath = await writeInheritedAgentDefinition(
+        providerSettings.directory,
+        config.agentDefinition,
+      )
+      if (agentsPath) inheritedArgParts.push('--agents', `@${agentsPath}`)
+      checkCancelled()
+      const inlineSettingsPath = await writeInheritedFlagSettings()
+      if (inlineSettingsPath) {
+        createdPane.inlineSettingsPath = inlineSettingsPath
+        inheritedArgParts = withoutCliOption(inheritedArgParts, '--settings')
+        inheritedArgParts.push('--settings', inlineSettingsPath)
+      }
 
       // Build environment variables to forward to teammate
       const envStr = buildInheritedEnvVars()
@@ -195,29 +304,26 @@ export class PaneBackendExecutor implements TeammateExecutor {
       const allArgs = [...teammateArgs, ...inheritedArgParts]
       const spawnCommand =
         this.type === 'windows-terminal'
-          ? buildPowerShellSpawnCommand(binaryPath, allArgs, workingDir)
-          : `cd ${quote([workingDir])} && env ${envStr} ${quote([binaryPath])} ${quote(allArgs)}`
+          ? buildPowerShellSpawnCommand(
+              commandParts,
+              allArgs,
+              workingDir,
+              providerSettings?.path,
+            )
+          : `cd ${quote([workingDir])} && ${providerSettings ? `. ${quote([providerSettings.path])} && ` : ''}env ${envStr} ${quote(commandParts)} ${quote(allArgs)}`
 
       // Send the command to the new pane
       // Use swarm socket when running outside tmux (external swarm session)
       await this.backend.sendCommandToPane(paneId, spawnCommand, !insideTmux)
-
-      // Track the spawned teammate
-      this.spawnedTeammates.set(agentId, { paneId, insideTmux })
-
-      // Register cleanup to kill all panes on leader exit (e.g., SIGHUP)
-      if (!this.cleanupRegistered) {
-        this.cleanupRegistered = true
-        registerCleanup(async () => {
-          for (const [id, info] of this.spawnedTeammates) {
-            logForDebugging(
-              `[PaneBackendExecutor] Cleanup: killing pane for ${id}`,
-            )
-            await this.backend.killPane(info.paneId, !info.insideTmux)
-          }
-          this.spawnedTeammates.clear()
-        })
+      createdPane.cleanup = {
+        ...createdPane.cleanup,
+        ...this.backend.getPaneCleanupMetadata?.(paneId),
+        useExternalSession: !insideTmux,
+        environmentDirectory: createdPane.settingsDirectory,
+        inlineSettingsPath: createdPane.inlineSettingsPath,
+        agentsPath,
       }
+      checkCancelled()
 
       // Send initial instructions to teammate via mailbox
       await writeToMailbox(
@@ -229,6 +335,7 @@ export class PaneBackendExecutor implements TeammateExecutor {
         },
         config.teamName,
       )
+      checkCancelled()
 
       logForDebugging(
         `[PaneBackendExecutor] Spawned teammate ${agentId} in pane ${paneId}`,
@@ -241,6 +348,7 @@ export class PaneBackendExecutor implements TeammateExecutor {
         backendType: this.type,
         color: teammateColor,
         insideTmux,
+        paneCleanup: createdPane.cleanup,
         windowName:
           'windowName' in paneResult
             ? (paneResult as { windowName: string }).windowName
@@ -248,8 +356,16 @@ export class PaneBackendExecutor implements TeammateExecutor {
         isSplitPane: config.useSplitPane !== false,
       }
     } catch (error) {
+      let cleanupFailed = false
+      try {
+        if (createdPane && !(await this.closeSpawnedPane(agentId)))
+          cleanupFailed = true
+      } catch {
+        cleanupFailed = true
+      }
       const errorMessage =
-        error instanceof Error ? error.message : String(error)
+        (error instanceof Error ? error.message : String(error)) +
+        (cleanupFailed ? '; pane or private-environment cleanup failed' : '')
       logForDebugging(
         `[PaneBackendExecutor] Failed to spawn ${agentId}: ${errorMessage}`,
       )
@@ -258,6 +374,9 @@ export class PaneBackendExecutor implements TeammateExecutor {
         agentId,
         error: errorMessage,
       }
+    } finally {
+      this.pendingSpawns.delete(agentId)
+      pending.finish()
     }
   }
 
@@ -346,6 +465,16 @@ export class PaneBackendExecutor implements TeammateExecutor {
    * Force kills a pane-based teammate by killing its pane.
    */
   async kill(agentId: string): Promise<boolean> {
+    const pending = this.pendingSpawns.get(agentId)
+    if (pending) {
+      pending.cancelled = true
+      await pending.done
+      if (!this.spawnedTeammates.has(agentId)) return true
+    }
+    return this.closeSpawnedPane(agentId)
+  }
+
+  private async closeSpawnedPane(agentId: string): Promise<boolean> {
     logForDebugging(`[PaneBackendExecutor] kill() called for ${agentId}`)
 
     const teammateInfo = this.spawnedTeammates.get(agentId)
@@ -358,18 +487,34 @@ export class PaneBackendExecutor implements TeammateExecutor {
 
     const { paneId, insideTmux } = teammateInfo
 
-    // Kill the pane via the backend
-    // Use external session socket when we spawned outside tmux
-    const killed = await this.backend.killPane(paneId, !insideTmux)
+    if (teammateInfo.closing) return teammateInfo.closing
+    const closing = (async () => {
+      // Once closed, retries only remove the private file. Do not kill a stale
+      // pane identifier again just because the first file removal failed.
+      const killed =
+        teammateInfo.paneClosed ||
+        (await this.backend.killPane(paneId, !insideTmux, teammateInfo.cleanup))
 
-    if (killed) {
-      this.spawnedTeammates.delete(agentId)
-      logForDebugging(`[PaneBackendExecutor] kill() succeeded for ${agentId}`)
-    } else {
-      logForDebugging(`[PaneBackendExecutor] kill() failed for ${agentId}`)
+      if (killed) {
+        teammateInfo.paneClosed = true
+        await removePanePrivateFiles({
+          environmentDirectory: teammateInfo.settingsDirectory,
+          inlineSettingsPath: teammateInfo.inlineSettingsPath,
+        })
+        this.spawnedTeammates.delete(agentId)
+        logForDebugging(`[PaneBackendExecutor] kill() succeeded for ${agentId}`)
+      } else {
+        logForDebugging(`[PaneBackendExecutor] kill() failed for ${agentId}`)
+      }
+
+      return killed
+    })()
+    teammateInfo.closing = closing
+    try {
+      return await closing
+    } finally {
+      delete teammateInfo.closing
     }
-
-    return killed
   }
 
   /**
@@ -393,7 +538,22 @@ export class PaneBackendExecutor implements TeammateExecutor {
     // For now, assume active if we have a record of it
     // A more robust check would query the backend for pane existence
     // but that would require adding a new method to PaneBackend
-    return true
+    return !teammateInfo.paneClosed
+  }
+
+  /** Close a tracked pane without losing its private-file cleanup ownership. */
+  async killPane(
+    paneId: string,
+    useExternalSession: boolean,
+  ): Promise<boolean | undefined> {
+    const matches = [...this.spawnedTeammates].filter(
+      ([, info]) => info.paneId === paneId,
+    )
+    const entry =
+      matches.length === 1
+        ? matches[0]
+        : matches.find(([, info]) => !info.insideTmux === useExternalSession)
+    return entry ? this.kill(entry[0]) : undefined
   }
 }
 

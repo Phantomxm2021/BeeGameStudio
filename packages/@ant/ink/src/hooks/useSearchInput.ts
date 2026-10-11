@@ -1,5 +1,5 @@
 /**
- * Minimal stub of useSearchInput for the standalone @anthropic/ink package.
+ * Minimal stub of useSearchInput for the standalone @bee-game-studio/ink package.
  *
  * Provides the same interface as the full implementation but without
  * kill-ring / yank support. Suitable for FuzzyPicker and other theme

@@ -11,7 +11,7 @@ import { isPowerShellToolEnabled } from './shellToolUtils.js'
  *   3. otherwise → 'bash'
  *
  * Opt out of the Windows PowerShell default via settings.defaultShell=bash
- * or CLAUDE_CODE_USE_POWERSHELL_TOOL=0 (disables the PowerShell tool entirely).
+ * or BGS_USE_POWERSHELL_TOOL=0 (disables the PowerShell tool entirely).
  */
 export function resolveDefaultShell(): 'bash' | 'powershell' {
   const configured = getInitialSettings().defaultShell

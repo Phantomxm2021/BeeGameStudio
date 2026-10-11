@@ -108,7 +108,7 @@ for(const mode of ['files','working-files','retry-limit','image'] as const)test(
  try {
   const result=await runNativeFileAgent({command:[process.execPath,cli],
    env:{...nativeFileAgentEnvironment({BEEGAME_CONFIG_DIR:join(dir,'config'),BEEGAME_MODEL_TYPE:'anthropic',ANTHROPIC_API_KEY:'offline',ANTHROPIC_BASE_URL:'http://127.0.0.1:'+server.port,
-    ANTHROPIC_DEFAULT_SONNET_MODEL:'claude-sonnet-4-6',CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:'1',DISABLE_TELEMETRY:'1',DISABLE_ERROR_REPORTING:'1'}),
+    BGS_DEFAULT_BALANCED_MODEL:'claude-sonnet-4-6',BGS_DISABLE_NONESSENTIAL_TRAFFIC:'1',DISABLE_TELEMETRY:'1',DISABLE_ERROR_REPORTING:'1'}),
     },
    workspacePath:workspace,writablePaths:['target.md'],allowWorkingFiles:mode==='working-files',readOnlyPaths:['docs'],
    prompt:'Test native files only.',
@@ -128,7 +128,7 @@ for(const mode of ['files','working-files','retry-limit','image'] as const)test(
    expect(await readFile(join(dir,'outside.md'),'utf8')).toBe('SECRET\n')
    const log=(await readFile(join(dir,'events.jsonl'),'utf8')).trim().split('\n').map(x=>JSON.parse(x))
    expect(log.filter(x=>x.event==='permission').map(x=>x.data.allowed)).toEqual(mode==='working-files'
-    ?[true,false,false,true,false,true,true,false,true,true]:[true,false,false,true,false,false,true])
+    ?[true,false,false,true,true,true,true,true]:[true,false,false,true,false,true])
    expect(log.find(x=>x.event==='started').data.cwd).toBe(workspace)
    const rejected=log.find(x=>x.event==='permission'&&x.data.path===join(dir,'outside.md'))
    expect(rejected.data.reason).toContain('outside this task workspace')

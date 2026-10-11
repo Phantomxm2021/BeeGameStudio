@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Box, Link, Text } from '@anthropic/ink';
+import { Box, Link, Text } from '@bee-game-studio/ink';
 import type { ToolProgressData } from 'src/Tool.js';
 import type { ProgressMessage } from 'src/types/message.js';
 import type { ArtifactOutput } from './ArtifactTool.js';

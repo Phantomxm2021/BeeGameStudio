@@ -18,7 +18,7 @@ mock.module('src/utils/platform.js', () => ({
 import { isPowerShellToolEnabled } from '../shellToolUtils.js'
 import { resolveDefaultShell } from '../resolveDefaultShell.js'
 
-const ENV_KEY = 'CLAUDE_CODE_USE_POWERSHELL_TOOL'
+const ENV_KEY = 'BGS_USE_POWERSHELL_TOOL'
 let savedEnv: string | undefined
 
 beforeEach(() => {

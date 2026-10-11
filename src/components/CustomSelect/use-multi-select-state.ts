@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { isDeepStrictEqual } from 'util'
 import { useRegisterOverlay } from '../../context/overlayContext.js'
-import { type InputEvent, useInput } from '@anthropic/ink'
+import { type InputEvent, useInput } from '@bee-game-studio/ink'
 import {
   normalizeFullWidthDigits,
   normalizeFullWidthSpace,

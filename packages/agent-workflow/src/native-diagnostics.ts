@@ -10,14 +10,19 @@ const errorCodes = ['ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'ETIMEDOUT', 'ENOTFOU
   'ERR_TLS_CERT_ALTNAME_INVALID', 'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
   'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'] as const
 export type NativeDiagnostic = { event: typeof events[number]; category?: typeof categories[number];
+  source?: 'compact' | 'main' | 'other'; evidenceSource?: 'cli_debug';
   request?: number; originRequest?: number; attempt?: number; status?: number; delayMs?: number; bytes?: number;
   actor?: string; mode?: 'streaming' | 'non_streaming_fallback'; phase?: 'headers' | 'body' | 'query';
   outcome?: 'completed' | 'failed' | 'cancelled'; recovered?: boolean;
   thinkingPolicy?: 'enabled' | 'adaptive' | 'disabled'; thinkingParameter?: 'default' | 'enabled' | 'adaptive' | 'disabled';
   thinkingReturned?: boolean;
+  /** Native process cumulative accounting, not an actor's context length. */
+  cumulativeInputTokens?: number; cumulativeOutputTokens?: number;
+  cumulativeCacheReadTokens?: number; cumulativeCacheCreationTokens?: number;
   errorCode?: typeof errorCodes[number]; errorOrigin?: 'observer';
   lines?: number; pid?: number; exitCode?: number; signal?: 'SIGTERM' | 'SIGKILL' | 'other' }
-const numeric = ['request', 'originRequest', 'attempt', 'status', 'delayMs', 'bytes', 'lines', 'pid', 'exitCode'] as const
+const numeric = ['request', 'originRequest', 'attempt', 'status', 'delayMs', 'bytes', 'lines', 'pid', 'exitCode',
+  'cumulativeInputTokens', 'cumulativeOutputTokens', 'cumulativeCacheReadTokens', 'cumulativeCacheCreationTokens'] as const
 
 /** Rebuild from an allowlist, including when input came from the child process. */
 export function parseNativeDiagnostic(value: unknown): NativeDiagnostic | undefined {
@@ -43,6 +48,7 @@ export function parseNativeDiagnostic(value: unknown): NativeDiagnostic | undefi
   // Only opaque runtime IDs, not user-chosen agent/team names.
   if (typeof record.actor === 'string' && /^(main|a[0-9a-f]{6,32}|[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12})$/.test(record.actor)) result.actor = record.actor
   const enums = { mode: ['streaming', 'non_streaming_fallback'], phase: ['headers', 'body', 'query'],
+    source: ['compact', 'main', 'other'], evidenceSource: ['cli_debug'],
     outcome: ['completed', 'failed', 'cancelled'], errorCode: errorCodes, errorOrigin: ['observer'],
     thinkingPolicy: ['enabled', 'adaptive', 'disabled'], thinkingParameter: ['default', 'enabled', 'adaptive', 'disabled'] } as const
   for (const key of Object.keys(enums) as (keyof typeof enums)[]) {
@@ -96,17 +102,6 @@ export function nativeErrorMetadata(error: unknown): Pick<NativeDiagnostic, 'cat
 
 const observerHeaders = { request: 'x-bgs-observer-request', originRequest: 'x-bgs-observer-origin',
   actor: 'x-bgs-observer-actor', mode: 'x-bgs-observer-mode', attempt: 'x-bgs-observer-attempt' } as const
-/** Explicitly enabled local acceptance only. The observer strips these before forwarding. */
-export function nativeObserverHeaders(value: NativeDiagnostic): Record<string, string> {
-  if (process.env.BEEGAME_MODEL_OBSERVER_METADATA !== '1') return {}
-  try { if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(process.env.ANTHROPIC_BASE_URL ?? '').hostname)) return {} }
-  catch { return {} }
-  const safe = parseNativeDiagnostic(value)
-  return Object.fromEntries(Object.entries(observerHeaders).flatMap(([key, header]) => {
-    const v = safe?.[key as keyof typeof observerHeaders]
-    return v === undefined ? [] : [[header, String(v)]]
-  }))
-}
 /** Rebuild safe correlation fields and remove them from the outbound headers. */
 export function takeNativeObserverMetadata(headers: Headers): Partial<NativeDiagnostic> {
   const value: Record<string, unknown> = { event: 'request_start' }
@@ -117,13 +112,4 @@ export function takeNativeObserverMetadata(headers: Headers): Partial<NativeDiag
   }
   const { event: _, ...metadata } = parseNativeDiagnostic(value) ?? { event: 'request_start' }
   return metadata
-}
-
-let requestSequence = 0
-export const nextNativeDiagnosticRequest = () => ++requestSequence
-export function emitNativeDiagnostic(value: NativeDiagnostic): void {
-  if (process.env.BEEGAME_NATIVE_DIAGNOSTICS !== '1') return
-  const event = parseNativeDiagnostic(value)
-  if (!event) return
-  try { process.stderr.write(NATIVE_DIAGNOSTIC_PREFIX + JSON.stringify(event) + '\n') } catch { /* No protocol interference. */ }
 }

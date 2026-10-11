@@ -104,14 +104,14 @@ export function isAnthropicAuthEnabled(): boolean {
   // --bare: API-key-only, never OAuth.
   if (isBareMode()) return false
 
-  // `claude ssh` remote: ANTHROPIC_UNIX_SOCKET tunnels API calls through a
+  // `bee-game-studio ssh` remote: BGS_API_UNIX_SOCKET tunnels API calls through a
   // local auth-injecting proxy. The launcher sets CLAUDE_CODE_OAUTH_TOKEN as a
   // placeholder iff the local side is a subscriber (so the remote includes the
   // oauth-2025 beta header to match what the proxy will inject). The remote's
   // ~/.claude settings (apiKeyHelper, settings.env.ANTHROPIC_API_KEY) MUST NOT
   // flip this — they'd cause a header mismatch with the proxy and a bogus
   // "invalid x-api-key" from the API. See src/ssh/sshAuthProxy.ts.
-  if (process.env.ANTHROPIC_UNIX_SOCKET) {
+  if (process.env.BGS_API_UNIX_SOCKET) {
     return !!process.env.CLAUDE_CODE_OAUTH_TOKEN
   }
 
@@ -253,7 +253,7 @@ export function getAnthropicApiKeyWithSource(
     ? undefined
     : process.env.ANTHROPIC_API_KEY
 
-  // Always check for direct environment variable when the user ran claude --print.
+  // Always check for direct environment variable when the user ran bee-game-studio --print.
   // This is useful for CI, etc.
   if (preferThirdPartyAuthentication() && apiKeyEnv) {
     return {
@@ -1587,9 +1587,9 @@ export function is1PApiCustomer(): boolean {
 
   // Exclude Vertex, Bedrock, and Foundry customers
   if (
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)
+    isEnvTruthy(process.env.BGS_USE_BEDROCK) ||
+    isEnvTruthy(process.env.BGS_USE_VERTEX) ||
+    isEnvTruthy(process.env.BGS_USE_FOUNDRY)
   ) {
     return false
   }
@@ -1728,21 +1728,21 @@ export function getSubscriptionName(): string {
  *
  * This environment-only compatibility check intentionally does not inspect
  * settings.modelType. It is used by behaviours whose existing visibility is
- * tied specifically to CLAUDE_CODE_USE_* flags, such as login/logout commands.
+ * tied specifically to BGS_USE_* flags, such as login/logout commands.
  *
- * KEEP IN SYNC with providers.ts — when a new CLAUDE_CODE_USE_* env var is
+ * KEEP IN SYNC with providers.ts — when a new BGS_USE_* env var is
  * added to getAPIProvider(), the corresponding check MUST be added here.
  * For complete provider classification, use
  * isThirdPartyAPIProvider(getAPIProvider()).
  */
 export function isUsing3PServices(): boolean {
   return !!(
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_GEMINI) ||
-    isEnvTruthy(process.env.CLAUDE_CODE_USE_GROK)
+    isEnvTruthy(process.env.BGS_USE_BEDROCK) ||
+    isEnvTruthy(process.env.BGS_USE_VERTEX) ||
+    isEnvTruthy(process.env.BGS_USE_FOUNDRY) ||
+    isEnvTruthy(process.env.BGS_USE_OPENAI) ||
+    isEnvTruthy(process.env.BGS_USE_GEMINI) ||
+    isEnvTruthy(process.env.BGS_USE_GROK)
   )
 }
 
@@ -1931,10 +1931,10 @@ export type OrgValidationResult =
  * token's org (network error, missing profile data), validation fails.
  */
 export async function validateForceLoginOrg(): Promise<OrgValidationResult> {
-  // `claude ssh` remote: real auth lives on the local machine and is injected
+  // `bee-game-studio ssh` remote: real auth lives on the local machine and is injected
   // by the proxy. The placeholder token can't be validated against the profile
   // endpoint. The local side already ran this check before establishing the session.
-  if (process.env.ANTHROPIC_UNIX_SOCKET) {
+  if (process.env.BGS_API_UNIX_SOCKET) {
     return { valid: true }
   }
 
@@ -1974,8 +1974,8 @@ export async function validateForceLoginOrg(): Promise<OrgValidationResult> {
         `Unable to verify organization for the current authentication token.\n` +
         `This machine requires organization ${requiredOrgUuid} but the profile could not be fetched.\n` +
         `This may be a network error, or the token may lack the user:profile scope required for\n` +
-        `verification (tokens from 'claude setup-token' do not include this scope).\n` +
-        `Try again, or obtain a full-scope token via 'claude auth login'.`,
+        `verification (tokens from 'bee-game-studio setup-token' do not include this scope).\n` +
+        `Try again, or obtain a full-scope token via 'bee-game-studio auth login'.`,
     }
   }
 
@@ -2005,7 +2005,7 @@ export async function validateForceLoginOrg(): Promise<OrgValidationResult> {
     message:
       `Your authentication token belongs to organization ${tokenOrgUuid},\n` +
       `but this machine requires organization ${requiredOrgUuid}.\n\n` +
-      `Please log in with the correct organization: claude auth login`,
+      `Please log in with the correct organization: bee-game-studio auth login`,
   }
 }
 

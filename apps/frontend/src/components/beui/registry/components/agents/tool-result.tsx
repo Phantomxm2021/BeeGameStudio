@@ -8,6 +8,7 @@ import {
   ChevronDown,
   CircleCheck,
   CircleX,
+  CircleHelp,
   Copy,
   LoaderCircle,
   RotateCcw,
@@ -33,7 +34,7 @@ import { AgentDisclosure } from "@/components/beui/registry/components/agents/ag
 import { SPRING_PRESS, SPRING_SWAP } from "@/components/beui/registry/lib/ease";
 import { cn } from "@/components/beui/registry/lib/utils";
 
-export type ToolResultStatus = "running" | "success" | "error" | "cancelled";
+export type ToolResultStatus = "running" | "success" | "error" | "cancelled" | "incomplete";
 export type ToolResultKind = "terminal" | "request" | "custom";
 
 export interface ToolResultProps {
@@ -70,6 +71,7 @@ function getStatusLabel(status: ToolResultStatus) {
   if (status === "running") return "Running";
   if (status === "success") return "Completed";
   if (status === "error") return "Failed";
+  if (status === "incomplete") return "Status unconfirmed";
   return "Cancelled";
 }
 
@@ -110,6 +112,7 @@ function StatusIcon({
   }
   if (status === "success") return <CircleCheck className="size-3" />;
   if (status === "error") return <CircleX className="size-3" />;
+  if (status === "incomplete") return <CircleHelp className="size-3" />;
   return <Ban className="size-3" />;
 }
 

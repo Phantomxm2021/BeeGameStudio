@@ -1,0 +1,175 @@
+{
+  "date": "2026-10-11",
+  "scope": "Offline system repair following one authorized same-project paid revision; no paid rerun, production frontend, Claude Code or real game edits.",
+  "implementation": {
+    "handoff": [
+      "Added read-only measure.mjs --inspect <request-id>; no model/build/browser/CAS mutation.",
+      "Original measurement request replay now returns actual current input freshness and exits nonzero when stale/incomplete/failed/superseded.",
+      "Preview/export and in-turn inspection share the same current-input predicate; ended/quiesced writer remains required for delivery paths.",
+      "Final native settlement computes current measurement status in blockedReason after owned work stops; no extra model summary, source rewrite or automatic retry.",
+      "Receipt stays in host Run/export evidence; help and result no longer imply copying mechanical ID/hash to a measured report. Changed reports are named explicitly."
+    ],
+    "verification": [
+      "Preview Node helper automatically counts page/console/request/HTTP errors before first navigation, including child game frames, regardless of author-installed listeners. No raw error payloads or URLs are copied to host logs.",
+      "Existing beforeNavigate hook still controls route overrides/recordings; no late reload masquerades as initial navigation.",
+      "Existing layout CLI produces current input hashes and exact geometry. Added synthetic camera/zoom regression contrasting a wrong coordinate within a wide sample with exact source-derived bounds.",
+      "Preserved source/requirement/artifact/report/dependency version checks, old failed reservations, no superseded fallback and no quality PASS inference."
+    ],
+    "quality": {
+      "status": "not-accepted",
+      "progress": "Reliable provenance and startup observations improved; existing geometry capabilities reused rather than introducing a semantic/aesthetic gate.",
+      "remaining": [
+        "Actual professional design and Skill use",
+        "Original and mutated data checks in real saved game",
+        "Representative art/action feedback and actual audio observation",
+        "Independent requirement/flow coverage"
+      ]
+    },
+    "tokens": {
+      "status": "real-savings-unverified",
+      "progress": "Host final receipt and read-only inspection remove a need for model-only receipt work and accidental rebuild replay. No fixed eight-document review or new model round.",
+      "remaining": "Large native history and author/reviewer fine-grained operations remain. Do not claim the prior 4,783,209-token handoff window eliminated; no paid comparable measurement.",
+      "nativeHistoryPolicyUnchanged": true,
+      "newAgentLimits": false
+    }
+  },
+  "regression": {
+    "restrictedSandbox": {
+      "pass": 2,
+      "skip": 5,
+      "fail": 15,
+      "reason": "Loopback listeners and isolated build unavailable in restricted sandbox; retained as environment failure, reran same source with explicit permitted local access."
+    },
+    "finalBatches": [
+      {
+        "command": "BEEGAME_TEST_REAL_BROWSER=1 BGS_LAYOUT_BROWSER=1 bun test packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.test.ts packages/agent-workflow-server/src/beegame/preview-test-access.test.ts packages/agent-workflow-server/src/beegame/shared-playwright.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/measured-preview.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/editable-project.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/check-versions.test.ts packages/agent-workflow-server/src/beegame/game-content-consumer.test.ts",
+        "files": 9,
+        "pass": 82,
+        "fail": 0,
+        "assertions": 828,
+        "seconds": 23.55,
+        "exitCode": 0
+      },
+      {
+        "command": "bun test packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal-native.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/runtime-integration.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/font-consumption.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/pixel-consumption.test.ts",
+        "files": 4,
+        "pass": 51,
+        "fail": 0,
+        "assertions": 290,
+        "seconds": 165.34,
+        "exitCode": 0,
+        "controlledNativeRequests": 25,
+        "paidModelCalls": 0,
+        "notes": "Real existing native CLI with fixed loopback model; synthetic debug project only. Path escape and incomplete settlement logs are expected negative cases."
+      }
+    ],
+    "nonOverlappingFinalFiles": 13,
+    "pass": 133,
+    "fail": 0,
+    "assertions": 1118,
+    "typecheck": {
+      "command": "bun run typecheck",
+      "exitCode": 0
+    },
+    "diffCheckExitCode": 0,
+    "preliminaryPassesNotAddedToFinalTotals": true,
+    "paidModelCalls": 0
+  },
+  "boundaries": {
+    "productionFrontendEdits": 0,
+    "claudeCodeEdits": 0,
+    "builtinToolsEdits": 0,
+    "manualGameEdits": 0,
+    "newPaidRuns": 0,
+    "normalServiceRestarts": 0,
+    "databaseMigrations": 0,
+    "protectedBefore": {
+      "apps/frontend": {
+        "files": 508,
+        "sha256": "f52e2ae0825cb04e6f94526bd1f258358d7f541e5a81343ec5b2dd138468cfba"
+      },
+      "src": {
+        "files": 2445,
+        "sha256": "8f0069cec3ff82f03f4845e4c4c2596c8507dcd3976c4af7823cdbc4fbfbf493"
+      },
+      "packages/builtin-tools": {
+        "files": 383,
+        "sha256": "6368c4fce0bd93d2a9e7af17a3895a195fed65abcd94d98fec7049991cdb6a5b"
+      }
+    },
+    "protectedAfter": {
+      "apps/frontend": {
+        "files": 508,
+        "sha256": "f52e2ae0825cb04e6f94526bd1f258358d7f541e5a81343ec5b2dd138468cfba"
+      },
+      "src": {
+        "files": 2445,
+        "sha256": "8f0069cec3ff82f03f4845e4c4c2596c8507dcd3976c4af7823cdbc4fbfbf493"
+      },
+      "packages/builtin-tools": {
+        "files": 383,
+        "sha256": "6368c4fce0bd93d2a9e7af17a3895a195fed65abcd94d98fec7049991cdb6a5b"
+      }
+    },
+    "protectedUnchanged": true,
+    "realGameReadOnlyHashCheck": {
+      "files": 40,
+      "changed": []
+    }
+  },
+  "sourceHashes": [
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts",
+      "sha256": "97a513b24a29b8125acfc2d94791d99d591aa683424a0d4cd0e3b3852899f90d"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts",
+      "sha256": "7df3acc1e0f3ac6b2bf920160ce23600d541379cd2a51188770e959920e74036"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/measured-build.ts",
+      "sha256": "20020eb3ab32b22b51b861664a8cc60cd3580dd80714330715f56e2e909e2932"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.ts",
+      "sha256": "bba02c7654e8cc31288eab19d167fa30dcea436457bc3895deaa6ece5e8c82cd"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts",
+      "sha256": "a904aea8564c7f7ec4264ae023d5eedef10572ae929777407dcbfb6578abe044"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.test.ts",
+      "sha256": "6eb18fcb25a0de6508fe5b11d73e7de809b0bee912b2d5849106c30eaf8c4b9f"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/preview-test-client.mjs",
+      "sha256": "43b7d2b536e2459d83c7bf11e9492b2d19b5ef63452a65a32010042920e5d3d3"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/preview-test-access.ts",
+      "sha256": "1046967094df36244242d71a321a1b803ced412a700690407351aaf14c6666b6"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/shared-playwright.test.ts",
+      "sha256": "f17669c838d835485937389dee5b4388be8644dd2f80446c960f6c89157ebfd2"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/game-content-consumer-cli.ts",
+      "sha256": "4850d7142b2566aec55ec8ea173894ab2ccef74faba3343d40bdd485eca50f32"
+    }
+  ],
+  "implementationDocument": {
+    "version": "1.48",
+    "path": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/bee-game-studio/docs/BGS_V3_Agent_Driven_Workflow_Implementation.md",
+    "previousArchive": "verification/BGS_V3_Agent_Driven_Workflow_Implementation.v1.47-before-offline-handoff-2026-10-11.md"
+  },
+  "limits": [
+    "An author can still modify reports after measurement. Current checks identify and reject that state, not guarantee model compliance.",
+    "Zero startup errors do not prove complete runtime paths or game quality; counts do not localize errors or replace recording detail.",
+    "Geometry is a deterministic oracle for supported semantics, not automatic verification of custom runtime consumers.",
+    "Read-only freshness is a current observation, not a file lock; later edits invalidate it.",
+    "Prior stuck-compression provider/network cause and actual total-token reduction remain unproved.",
+    "Changes are source/offline verified, not deployed through a normal service restart this turn."
+  ]
+}

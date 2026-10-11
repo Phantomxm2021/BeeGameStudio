@@ -8,14 +8,14 @@
 import * as React from 'react';
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js';
 import type { HookEventMetadata } from 'src/utils/hooks/hooksConfigManager.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import {
   getHookDisplayText,
   hookSourceHeaderDisplayString,
   type IndividualHookConfig,
 } from '../../utils/hooks/hooksSettings.js';
 import { Select } from '../CustomSelect/select.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 
 type Props = {
   selectedEvent: HookEvent;
@@ -49,7 +49,7 @@ export function SelectHookMode({
       >
         <Box flexDirection="column" gap={1}>
           <Text dimColor>No hooks configured for this event.</Text>
-          <Text dimColor>To add hooks, edit settings.json directly or ask Claude.</Text>
+          <Text dimColor>To add hooks, edit settings.json directly or ask BGS.</Text>
         </Box>
       </Dialog>
     );

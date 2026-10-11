@@ -11,7 +11,7 @@ export type ModelRequestObservation = Pick<NativeDiagnostic, 'request' | 'origin
   requestKind: 'messages' | 'other'; phase: 'request_body' | 'headers' | 'body'
   headersAt?: number; lastByteAt?: number; bytesReceived?: number
   errorOrigin?: 'observer' | 'upstream_transport' | 'upstream_http'
-  abortSource?: 'client' | 'observer_close' | 'proxy_deadline'
+  abortSource?: 'client' | 'observer_close'
 }
 
 export function summarizeModelRequests(records: readonly ModelRequestObservation[]) {
@@ -58,10 +58,10 @@ export function summarizeModelStageUsage(records: readonly ModelRequestObservati
 
 /** Test-only transparent proxy. Persists metadata, never prompts, headers or stream content.
  * Normal responses are byte-identical; interrupted SSE is explicitly failed rather than clean EOF.
- * Fault/clock overrides are local-test only; the default request deadline remains 600s.
+ * There is no observer-owned deadline; cancellation follows the caller or close().
  * This observes provider tokens; it neither submits a debit nor certifies settlement. */
 export function openModelUsageProxy(endpoint: string, outputPath: string, stage: () => string,
-  options: { fetch?: (url: string, init: RequestInit) => Promise<Response>; timeoutMs?: number } = {}) {
+  options: { fetch?: (url: string, init: RequestInit) => Promise<Response> } = {}) {
   const records: ModelRequestObservation[] = []
   const pending = new Set<{ abort: AbortController; finish: (outcome: ModelRequestObservation['outcome'], error?: ModelRequestObservation['error']) => Promise<void> }>()
   let closing = false, saved = Promise.resolve()
@@ -105,10 +105,9 @@ export function openModelUsageProxy(endpoint: string, outputPath: string, stage:
       await persist()
     }
     const task = { abort, finish }; pending.add(task)
-    const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(options.timeoutMs ?? 600000)])
+    const signal = abort.signal
     const noteAbort = () => {
-      if (record && signal.aborted) record.abortSource = abort.signal.aborted
-        ? (abort.signal.reason === 'observer_close' ? 'observer_close' : 'client') : 'proxy_deadline'
+      if (record && signal.aborted) record.abortSource = signal.reason === 'observer_close' ? 'observer_close' : 'client'
     }
     const cancel = () => { abort.abort('client'); noteAbort(); void finish('cancelled', 'cancelled') }
     request.signal.addEventListener('abort', cancel, { once: true })

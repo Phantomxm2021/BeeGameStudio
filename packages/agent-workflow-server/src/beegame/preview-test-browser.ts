@@ -14,18 +14,25 @@ export function createPreviewTestBrowser(options: { executable?: string; startup
   let closed = false
   let stderr = ''
   let closePromise: Promise<void> | undefined
-  const close = (): Promise<void> => closePromise ??= (async () => {
-    closed = true
-    // A start in flight checks closed after each asynchronous preparation step.
+  let restarting: Promise<{ endpoint: string }> | undefined
+  let draining: Promise<void> | undefined
+  const stopCurrent = async () => {
     await pending?.catch(() => undefined)
     if (child && child.exitCode === null) {
       child.kill('SIGTERM')
       const timer = setTimeout(() => { if (child?.exitCode === null) child.kill('SIGKILL') }, 2000)
-      await child.exited
-      clearTimeout(timer)
+      try { await child.exited } finally { clearTimeout(timer) }
     }
+    await draining
     endpoint = undefined
     if (profile) await rm(profile, { recursive: true, force: true })
+    child = undefined; profile = undefined; pending = undefined; draining = undefined; stderr = ''
+  }
+  const close = (): Promise<void> => closePromise ??= (async () => {
+    closed = true
+    // A start in flight checks closed after each asynchronous preparation step.
+    await restarting?.catch(() => undefined)
+    await stopCurrent()
   })()
   async function launch(): Promise<{ endpoint: string }> {
     if (closed) throw new Error('Preview test access is closed')
@@ -46,6 +53,7 @@ export function createPreviewTestBrowser(options: { executable?: string; startup
         stderr = (stderr + new TextDecoder().decode(bytes)).slice(-8192)
       }
     })()
+    draining = drained
     const deadline = Date.now() + (options.startupTimeoutMs ?? 15000)
     while (!closed && process.exitCode === null && Date.now() < deadline) {
       const match = stderr.match(/DevTools listening on (ws:\/\/127\.0\.0\.1:\d+\/devtools\/browser\/[\w-]+)/)
@@ -72,11 +80,20 @@ export function createPreviewTestBrowser(options: { executable?: string; startup
   return {
     start(): Promise<{ endpoint: string }> {
       if (closed) return Promise.reject(new Error('Preview test access is closed'))
+      if (restarting) return Promise.reject(new Error('Test browser restart is in progress'))
       if (endpoint && child?.exitCode === null) return Promise.resolve({ endpoint })
       if (endpoint) return Promise.reject(new Error('Test browser exited; this session no longer has a live endpoint'))
       // A failed launch is reported, not retried by a hidden loop. New access
       // can be explicitly requested after fixing the host configuration.
       return pending ??= launch()
+    },
+    restart(): Promise<{ endpoint: string }> {
+      if (closed) return Promise.reject(new Error('Preview test access is closed'))
+      return restarting ??= (async () => {
+        await stopCurrent()
+        if (closed) throw new Error('Preview test access is closed')
+        return await (pending = launch())
+      })().finally(() => { restarting = undefined })
     },
     status: () => ({ status: closed ? 'closed' : endpoint && child?.exitCode === null ? 'running' : 'not-running',
       ...(endpoint && child?.exitCode === null ? { endpoint } : {}) }),

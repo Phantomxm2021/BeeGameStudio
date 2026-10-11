@@ -13,7 +13,7 @@ import { z } from 'zod/v4';
 import { getTeleportErrors, TeleportError, type TeleportLocalErrorType } from '../components/TeleportError.js';
 import { getOauthConfig } from '../constants/oauth.js';
 import type { SDKMessage } from '../entrypoints/agentSdkTypes.js';
-import type { Root } from '@anthropic/ink';
+import type { Root } from '@bee-game-studio/ink';
 import { KeybindingSetup } from '../keybindings/KeybindingProviderSetup.js';
 import { queryHaiku } from '../services/api/claude.js';
 import { getSessionLogsViaOAuth, getTeleportEvents } from '../services/api/sessionIngress.js';
@@ -502,9 +502,9 @@ export async function teleportResumeCodeSession(
             ? `${repoValidation.sessionHost}/${repoValidation.sessionRepo}`
             : repoValidation.sessionRepo;
         throw new TeleportOperationError(
-          `You must run claude --teleport ${sessionId} from a checkout of ${notInRepoDisplay}.`,
+          `You must run bee-game-studio --teleport ${sessionId} from a checkout of ${notInRepoDisplay}.`,
           chalk.red(
-            `You must run claude --teleport ${sessionId} from a checkout of ${chalk.bold(notInRepoDisplay)}.\n`,
+            `You must run bee-game-studio --teleport ${sessionId} from a checkout of ${chalk.bold(notInRepoDisplay)}.\n`,
           ),
         );
       }
@@ -526,9 +526,9 @@ export async function teleportResumeCodeSession(
           ? `${repoValidation.currentHost}/${repoValidation.currentRepo}`
           : repoValidation.currentRepo;
         throw new TeleportOperationError(
-          `You must run claude --teleport ${sessionId} from a checkout of ${sessionDisplay}.\nThis repo is ${currentDisplay}.`,
+          `You must run bee-game-studio --teleport ${sessionId} from a checkout of ${sessionDisplay}.\nThis repo is ${currentDisplay}.`,
           chalk.red(
-            `You must run claude --teleport ${sessionId} from a checkout of ${chalk.bold(sessionDisplay)}.\nThis repo is ${chalk.bold(currentDisplay)}.\n`,
+            `You must run bee-game-studio --teleport ${sessionId} from a checkout of ${chalk.bold(sessionDisplay)}.\nThis repo is ${chalk.bold(currentDisplay)}.\n`,
           ),
         );
       }

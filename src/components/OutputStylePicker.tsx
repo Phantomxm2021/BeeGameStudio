@@ -1,14 +1,14 @@
 import * as React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { getAllOutputStyles, OUTPUT_STYLE_CONFIG, type OutputStyleConfig } from '../constants/outputStyles.js';
-import { Box, Text, Dialog } from '@anthropic/ink';
+import { Box, Text, Dialog } from '@bee-game-studio/ink';
 import type { OutputStyle } from '../utils/config.js';
 import { getCwd } from '../utils/cwd.js';
 import type { OptionWithDescription } from './CustomSelect/select.js';
 import { Select } from './CustomSelect/select.js';
 
 const DEFAULT_OUTPUT_STYLE_LABEL = 'Default';
-const DEFAULT_OUTPUT_STYLE_DESCRIPTION = 'Claude completes coding tasks efficiently and provides concise responses';
+const DEFAULT_OUTPUT_STYLE_DESCRIPTION = 'BGS completes coding tasks efficiently and provides concise responses';
 
 function mapConfigsToOptions(styles: { [styleName: string]: OutputStyleConfig | null }): OptionWithDescription[] {
   return Object.entries(styles).map(([style, config]) => ({
@@ -67,7 +67,7 @@ export function OutputStylePicker({
     >
       <Box flexDirection="column" gap={1}>
         <Box marginTop={1}>
-          <Text dimColor>This changes how Claude Code communicates with you</Text>
+          <Text dimColor>This changes how BGS communicates with you</Text>
         </Box>
         {isLoading ? (
           <Text dimColor>Loading output styles…</Text>

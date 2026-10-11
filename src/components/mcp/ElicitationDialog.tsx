@@ -10,7 +10,7 @@ import { useRegisterOverlay } from '../../context/overlayContext.js';
 import { useNotifyAfterTimeout } from '../../hooks/useNotifyAfterTimeout.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw text input for elicitation form
-import { Box, Text, useInput } from '@anthropic/ink';
+import { Box, Text, useInput } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import type { ElicitationRequestEvent } from '../../services/mcp/elicitationHandler.js';
 import { openBrowser } from '../../utils/browser.js';
@@ -27,7 +27,7 @@ import {
 } from '../../utils/mcp/elicitationValidation.js';
 import { plural } from '../../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
+import { Byline, Dialog, KeyboardShortcutHint } from '@bee-game-studio/ink';
 import TextInput from '../TextInput.js';
 
 type Props = {
@@ -229,7 +229,7 @@ function ElicitationFormDialog({
   const isEditingTextField = currentFieldIsText && !focusedButton;
 
   useRegisterOverlay('elicitation');
-  useNotifyAfterTimeout('Claude Code needs your input', 'elicitation_dialog');
+  useNotifyAfterTimeout('BGS needs your input', 'elicitation_dialog');
 
   // Sync textInputValue when the focused field changes
   const syncTextInput = useCallback(
@@ -1119,7 +1119,7 @@ function ElicitationURLDialog({
   const [focusedButton, setFocusedButton] = useState<'accept' | 'decline' | 'open' | 'action' | 'cancel'>('accept');
   const showCancel = waitingState?.showCancel ?? false;
 
-  useNotifyAfterTimeout('Claude Code needs your input', 'elicitation_url_dialog');
+  useNotifyAfterTimeout('BGS needs your input', 'elicitation_url_dialog');
   useRegisterOverlay('elicitation-url');
 
   // Keep refs in sync for use in abort handler (avoids re-registering listener)

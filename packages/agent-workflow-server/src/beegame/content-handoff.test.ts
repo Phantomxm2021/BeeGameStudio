@@ -3,10 +3,12 @@ import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { advanceProjectDeliveryAfterTurn, beginProjectDelivery, prepareProjectDesignReview, projectContentAuthority, projectDeliveryStatePath, readProjectDelivery, refreshProjectContentContract } from './project-delivery'
+import { advanceProjectDeliveryAfterTurn, beginProjectDelivery, projectContentAuthority, projectDeliveryStatePath, readProjectDelivery, refreshProjectContentContract } from './project-delivery'
+import { prepareLegacyDesignReviewFixture } from './fixtures/layout-fixture'
 import { assetManifestAuthoringExamples } from './asset-manifest-authoring-contract'
 import { writeBeeGameAssetManifest } from './asset-contracts'
 import { CONTENT_CHECKER_PATH, CONTENT_FORMAT_PATH, DESIGN_CALCULATION_INSTRUCTION, SPATIAL_CALCULATION_INSTRUCTION } from './scene-ui-content-authoring'
+import { sharedContentChecker } from './content-checker-runtime'
 import { auditBeeGameContentPackage } from './game-content-package'
 import { BeeGameSessionManager, type BeeGamePromptInput } from './session-manager'
 import { sendProjectConversation } from './project-conversation'
@@ -14,6 +16,8 @@ import { BALANCE_CALCULATOR_PATH, materializeBalanceCalculator } from './balance
 import { designBaselineFixture, designDocumentFixture, designHandoffFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
 import { createHash } from 'node:crypto'
 import type { DesignFinding } from './design-handoff'
+import { PROJECT_DOCUMENTS } from '@bee-game-studio/agent-workflow/design-review-result'
+import { designHandoffPath } from './design-handoff'
 
 test('simulated native revision repairs retained model/appendix, increases version and reaches read-only verify', async () => {
   const { root, workspace } = await fixture()
@@ -36,7 +40,7 @@ test('simulated native revision repairs retained model/appendix, increases versi
   await calculate()
   const originalAppendix = await readFile(join(workspace, appendixPath), 'utf8')
   await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ version: 1, status: 'active', objective: 'Synthetic fixture', phase: 'review', authorBatch: 4 }))
-  await prepareProjectDesignReview(workspace, root)
+  await prepareLegacyDesignReviewFixture(workspace, root)
   const finding: DesignFinding = { id: 'derived', severity: 'blocker', action: 'correct', owner: 'BALANCE_DESIGN.md',
     documents: ['BALANCE_DESIGN.md'], sources: [{ document: 'BALANCE_DESIGN.md', section: 'Design' }],
     impact: 'Consumer would use an incorrect derived value', closeWhen: 'Model and retained result match the corrected definition', neededBefore: 'UI_UX_SPEC.md' }
@@ -50,8 +54,11 @@ test('simulated native revision repairs retained model/appendix, increases versi
       const context = await readFile(input.reviewContextPath!, 'utf8')
       expect(context).toContain(finding.closeWhen)
       if (input.reviewStep === 'revise') {
-        expect(input.reviewWritableDocuments).toEqual(['BALANCE_DESIGN.md'])
-        expect(input.reviewWritableFiles?.sort()).toEqual([sidecarPath, appendixPath, modelPath].sort())
+        expect(input.reviewWritableDocuments).toEqual([...PROJECT_DOCUMENTS])
+        expect(input.reviewReadScope?.['ART_DIRECTION.md']).toEqual([])
+        expect(input.reviewWritableFiles?.sort()).toEqual([
+          ...PROJECT_DOCUMENTS.map(designHandoffPath), appendixPath, modelPath, 'content/scenes/level.json', 'content/ui/menu.json',
+        ].sort())
         // The native writer corrects the decision; the host owns the version.
         await writeDesignDocumentFixture(workspace, 'BALANCE_DESIGN.md', designHandoffFixture('BALANCE_DESIGN.md'),
           (await readFile(join(workspace, 'docs/BALANCE_DESIGN.md'), 'utf8')) + '\nCorrected synthetic definition.\n')
@@ -90,6 +97,72 @@ test('simulated native revision repairs retained model/appendix, increases versi
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
+test.each([
+  ['LEVEL_SCENE_DESIGN.md', 'content/scenes/level.json'],
+  ['UI_UX_SPEC.md', 'content/ui/menu.json'],
+  ['GDD.md', 'docs/GDD.md'],
+] as const)('revision of %s includes dependent calculation owner and reaches verify', async (owner, sourcePath) => {
+  const { root, workspace } = await fixture()
+  const modelPath = 'docs/calc/dependent.mjs', appendixPath = 'docs/calc/dependent.md'
+  await mkdir(join(workspace, 'docs/calc'), { recursive: true })
+  await writeFile(join(workspace, modelPath), `export async function calculate({readText}) {
+    const text = await readText(${JSON.stringify(sourcePath)});
+    return {tables:[{title:'Synthetic source size',columns:['bytes'],rows:[[text.length]]}],
+      checks:[],limitations:['Dependency plumbing only, not game feasibility']}; }`)
+  // Only the result is linked; its retained record already identifies the model.
+  await writeFile(join(workspace, 'docs/BALANCE_DESIGN.md'),
+    (await readFile(join(workspace, 'docs/BALANCE_DESIGN.md'), 'utf8')) + '\n[Result](calc/dependent.md)\n')
+  await materializeBalanceCalculator(workspace)
+  const calculate = async () => {
+    const child = Bun.spawn([process.execPath, BALANCE_CALCULATOR_PATH, modelPath, appendixPath],
+      { cwd: workspace, stdout: 'pipe', stderr: 'pipe' })
+    const [code, output, error] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
+    expect({ code, error }).toEqual({ code: 0, error: '' }); expect(JSON.parse(output).output).toBe(appendixPath)
+  }
+  await calculate()
+  await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ version: 1, status: 'active', objective: 'Synthetic dependency repair', phase: 'review', authorBatch: 4 }))
+  await prepareLegacyDesignReviewFixture(workspace, root)
+  const finding: DesignFinding = { id: 'source', severity: 'blocker', action: 'correct', owner,
+    documents: [owner], sources: [{ document: owner, section: 'Design' }],
+    impact: 'Synthetic input correction affects an existing derived result', closeWhen: 'Correct source and refresh dependent result', neededBefore: 'implementation' }
+  await advanceProjectDeliveryAfterTurn(workspace, root, { phase: 'review', status: 'complete', summary: '',
+    review: { step: 'inspect', findings: [finding], resolved: [] } })
+  const steps: string[] = []
+  const manager = new BeeGameSessionManager({ async start() { return { stop() {}, async submit(turn) {
+    const input = turn.projectTurn!; steps.push(input.reviewStep!)
+    if (input.reviewStep === 'revise') {
+      expect(input.reviewWritableDocuments).toContain(owner)
+      expect(input.reviewWritableDocuments).toContain('BALANCE_DESIGN.md')
+      expect(input.reviewReadScope?.['ART_DIRECTION.md']).toEqual([])
+      expect(input.reviewWritableFiles).toContain(modelPath)
+      expect(input.reviewWritableFiles).toContain(appendixPath)
+      const path = join(workspace, sourcePath), source = await readFile(path, 'utf8')
+      if (sourcePath.endsWith('.json')) {
+        const data = JSON.parse(source); data.data.nodes[1].name = 'Corrected synthetic node'
+        await writeFile(path, JSON.stringify(data))
+      } else await writeFile(path, source + '\nCorrected synthetic rule.\n')
+      expect((await command(workspace, '--design-handoff', '5')).result.issues.join(' ')).toContain('Input changed')
+      await calculate()
+    } else {
+      expect(input.reviewStep).toBe('verify'); expect(input.reviewWritableFiles).toEqual([])
+      expect((await command(workspace, '--design-handoff', '5')).result.valid).toBe(true)
+      expect(await readFile(join(workspace, 'docs/BALANCE_DESIGN.md'), 'utf8')).toContain('- Version: v1.1')
+    }
+    await writeFile(input.reviewResultPath!, 'complete\n' + JSON.stringify({ step: input.reviewStep,
+      findings: input.reviewStep === 'revise' ? [finding] : [],
+      resolved: input.reviewStep === 'verify' ? [{ id: finding.id, evidence: 'Synthetic source and retained result inspected' }] : [] }))
+    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Synthetic dispatch only' })
+  } } } }, root)
+  try {
+    const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+    for (const step of ['revise', 'verify']) {
+      await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id, ownerId: 'owner', message: 'Continue', autoContinuation: true })
+      await manager.waitForSessionIdle(session.id); expect(steps.at(-1)).toBe(step)
+    }
+    expect((await readProjectDelivery(workspace, root))?.phase).toBe('resources')
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'bgs-content-handoff-'))
   const workspace = join(root, 'project')
@@ -103,7 +176,9 @@ async function fixture() {
 }
 
 async function command(workspace: string, ...args: string[]) {
-  const child = Bun.spawn([process.execPath, CONTENT_CHECKER_PATH, ...args], { cwd: workspace, stdout: 'pipe', stderr: 'pipe' })
+  const checker = await sharedContentChecker()
+  const child = Bun.spawn([process.execPath, CONTENT_CHECKER_PATH, ...args], {
+    cwd: workspace, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: checker.moduleUrl }, stdout: 'pipe', stderr: 'pipe' })
   const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()])
   expect(stderr).toBe('')
   return { code, result: JSON.parse(stdout) }
@@ -118,7 +193,7 @@ test('spatial author and review turns receive and can execute the same calculato
   // Drafts have no resources, content index or full-game implementation.
   const ui = { schema: 'beegame-content.v1', kind: 'ui-hud', id: 'draft', assetRefs: [], data: {
     rootId: 'root', nodes: [
-      { id: 'root', role: 'container', layout: { container: { direction: 'column', align: 'stretch' } } },
+      { id: 'root', role: 'hud-root', layout: { container: { direction: 'column', align: 'stretch' } } },
       { id: 'hud', role: 'container', parentId: 'root', layout: { item: { basis: 48 } } },
       { id: 'game-view', role: 'container', parentId: 'root', layout: { item: { grow: 1 } } },
     ],
@@ -144,6 +219,7 @@ test('spatial author and review turns receive and can execute the same calculato
     for (const [phase, authorBatch] of [['author', 1], ['author', 2], ['review', 4]] as const) {
       await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ version: 1,
         status: 'active', objective: 'Build a game', phase, authorBatch }))
+      if (phase === 'review') await prepareLegacyDesignReviewFixture(workspace, root)
       // Resumed pre-update projects must receive the command too.
       await rm(join(workspace, CONTENT_CHECKER_PATH))
       await rm(join(workspace, CONTENT_FORMAT_PATH))
@@ -157,7 +233,7 @@ test('spatial author and review turns receive and can execute the same calculato
     expect(prompts[0]).not.toContain('Design calculations:')
     for (const prompt of prompts.slice(1)) {
       expect(prompt).toContain('check-content.mjs --help includes commands')
-      expect(prompt).toContain('Eight-document author/review delivers planning documents and the UI owner begins the actual content/ui layout files')
+      expect(prompt).toContain('Eight-document author/review delivers planning documents and owner-linked content/scenes and content/ui layout files')
       expect(prompt).not.toContain('Missing complete Scene/UI previews remain unresolved')
       expect(prompt).not.toContain(JSON.stringify(SPATIAL_CALCULATION_INSTRUCTION).slice(1, -1))
       expect(prompt).not.toContain('Arrange an independent check')
@@ -194,8 +270,18 @@ test('design-time format is not a fake authority; standalone checker and host ag
     expect(format.runtimeConsumption.checks['ui-layout'].outcome).toContain('text alone is not layout verification')
     expect(await Bun.file(join(workspace, '.beegame/delivery/content-contract.json')).exists()).toBe(false)
     const inputs = await refreshProjectContentContract(workspace)
+    const contract = JSON.parse(await readFile(join(workspace, '.beegame/delivery/content-contract.json'), 'utf8'))
+    expect(Object.keys(contract).sort()).toEqual(['formatReference', 'index', 'inputs'])
+    expect(contract.formatReference).toBe(CONTENT_FORMAT_PATH)
+    expect(contract.inputs).toEqual(inputs)
+    expect(contract.index.documentRevision).toBe(inputs.documentRevision)
+    expect(contract.index.assetManifestRevision).toBe(inputs.assetManifestRevision)
+    expect(await readFile(join(workspace, CONTENT_FORMAT_PATH), 'utf8')).toContain('sceneVocabulary')
+    expect(Buffer.byteLength(JSON.stringify(contract))).toBeLessThan(Buffer.byteLength(JSON.stringify(format)) / 4)
     expect(inputs.validationCommand).toBe(`bun ${CONTENT_CHECKER_PATH}`)
-    expect(inputs.layoutInspectionCommand).toBe(`bun ${CONTENT_CHECKER_PATH} --layout content-relative-file width height`)
+    expect(inputs.layoutInspectionCommand).toBe(`bun ${CONTENT_CHECKER_PATH} --design-layouts --report`)
+    expect(inputs.inspectionCommand).toContain('bind-content.mjs --inspect')
+    expect(format.sceneLayoutBatchInspectionCommand).toBe(`bun ${CONTENT_CHECKER_PATH} --scene-layouts --report`)
     expect(format.sceneVocabulary.requiredData.camera.orthographicSize).toContain('pixelsPerUnit')
     expect(format.rules.join('\n')).toContain('requires node.assetRef')
     expect(format.rules.join('\n')).toContain('Shared gameplay tuning or other project-specific data')
@@ -289,6 +375,7 @@ test('numerical authors generate evidence; read-only review inspects it without 
     for (const [phase, authorBatch] of [['author', 2], ['author', 3], ['review', 4]] as const) {
       await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ version: 1,
         status: 'active', objective: 'Build a game', phase, authorBatch }))
+      if (phase === 'review') await prepareLegacyDesignReviewFixture(workspace, root)
       await sendProjectConversation({ sessions: manager, deliveryDataRoot: root,
         sessionId: session.id, ownerId: 'owner', message: 'Continue', autoContinuation: true })
       await manager.waitForSessionIdle(session.id)
@@ -339,7 +426,7 @@ test('actual native turns receive fresh phase, revision inputs and resource entr
     // read. This runner deliberately never reads context.md.
     expect(JSON.stringify(prompts[0])).toContain('GDD.md')
     expect(JSON.stringify(prompts[0])).toContain('Build a game')
-    expect(JSON.stringify(prompts[1])).toContain('editable Scene/UI/VFX data')
+    expect(JSON.stringify(prompts[1])).toContain('Bind delivered resources and runtime interfaces into the existing reviewed Scene/UI sources')
     expect(JSON.stringify(prompts[1])).not.toContain('Do not start runtime implementation')
     expect(JSON.stringify(prompts[1])).toContain(firstAuthority.documentRevision)
     expect(JSON.stringify(prompts[1])).toContain('check-content.mjs')

@@ -3,11 +3,11 @@ import * as React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
 import { SearchBox } from '../../components/SearchBox.js';
-import { Byline } from '@anthropic/ink';
+import { Byline } from '@bee-game-studio/ink';
 import { useSearchInput } from '../../hooks/useSearchInput.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- useInput needed for raw search mode text input
-import { Box, Text, useInput, useTerminalFocus } from '@anthropic/ink';
+import { Box, Text, useInput, useTerminalFocus } from '@bee-game-studio/ink';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { LoadedPlugin } from '../../types/plugin.js';
 import { count } from '../../utils/array.js';
@@ -781,7 +781,7 @@ function EmptyStateMessage({ reason }: { reason: EmptyMarketplaceReason | null }
       return (
         <>
           <Text dimColor>Git is required to install marketplaces.</Text>
-          <Text dimColor>Please install git and restart Claude Code.</Text>
+          <Text dimColor>Please install git and restart BGS.</Text>
         </>
       );
     case 'all-blocked-by-policy':

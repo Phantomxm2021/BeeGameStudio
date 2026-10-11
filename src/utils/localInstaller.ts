@@ -20,7 +20,7 @@ function getLocalInstallDir(): string {
   return join(getClaudeConfigHomeDir(), 'local')
 }
 export function getLocalClaudePath(): string {
-  return join(getLocalInstallDir(), 'claude')
+  return join(getLocalInstallDir(), 'bee-game-studio')
 }
 
 /**
@@ -28,7 +28,7 @@ export function getLocalClaudePath(): string {
  */
 export function isRunningFromLocalInstallation(): boolean {
   const execPath = process.argv[1] || ''
-  return execPath.includes('/.claude/local/node_modules/')
+  return execPath.startsWith(join(getLocalInstallDir(), 'node_modules') + '/')
 }
 
 /**
@@ -64,17 +64,17 @@ export async function ensureLocalPackageEnvironment(): Promise<boolean> {
     await writeIfMissing(
       join(localInstallDir, 'package.json'),
       jsonStringify(
-        { name: 'claude-local', version: '0.0.1', private: true },
+        { name: 'bgs-local', version: '0.0.1', private: true },
         null,
         2,
       ),
     )
 
     // Create the wrapper script if it doesn't exist
-    const wrapperPath = join(localInstallDir, 'claude')
+    const wrapperPath = getLocalClaudePath()
     const created = await writeIfMissing(
       wrapperPath,
-      `#!/bin/sh\nexec "${localInstallDir}/node_modules/.bin/claude" "$@"`,
+      `#!/bin/sh\nexec "${localInstallDir}/node_modules/.bin/bee-game-studio" "$@"`,
       0o755,
     )
     if (created) {
@@ -98,6 +98,7 @@ export async function installOrUpdateClaudePackage(
   channel: ReleaseChannel,
   specificVersion?: string | null,
 ): Promise<'in_progress' | 'success' | 'install_failed'> {
+  if (!MACRO.PACKAGE_URL) return 'install_failed'
   try {
     // First ensure the environment is set up
     if (!(await ensureLocalPackageEnvironment())) {
@@ -118,7 +119,7 @@ export async function installOrUpdateClaudePackage(
 
     if (result.code !== 0) {
       const error = new Error(
-        `Failed to install Claude CLI package: ${result.stderr}`,
+        `Failed to install BGS CLI package: ${result.stderr}`,
       )
       logError(error)
       return result.code === 190 ? 'in_progress' : 'install_failed'
@@ -143,7 +144,7 @@ export async function installOrUpdateClaudePackage(
  */
 export async function localInstallationExists(): Promise<boolean> {
   try {
-    await access(join(getLocalInstallDir(), 'node_modules', '.bin', 'claude'))
+    await access(join(getLocalInstallDir(), 'node_modules', '.bin', 'bee-game-studio'))
     return true
   } catch {
     return false

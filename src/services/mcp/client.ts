@@ -996,9 +996,9 @@ export const connectToServer = memoize(
       const client = new Client(
         {
           name: 'claude-code',
-          title: 'Claude Code',
+          title: 'BGS',
           version: MACRO.VERSION ?? 'unknown',
-          description: "Anthropic's agentic coding tool",
+          description: 'BGS coding assistant',
           websiteUrl: PRODUCT_URL,
         },
         {
@@ -3385,9 +3385,9 @@ export async function setupSdkMcpClients(
       const client = new Client(
         {
           name: 'claude-code',
-          title: 'Claude Code',
+          title: 'BGS',
           version: MACRO.VERSION ?? 'unknown',
-          description: "Anthropic's agentic coding tool",
+          description: 'BGS coding assistant',
           websiteUrl: PRODUCT_URL,
         },
         {

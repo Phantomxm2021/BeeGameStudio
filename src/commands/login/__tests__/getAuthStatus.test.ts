@@ -47,7 +47,7 @@ describe('getAuthStatus', () => {
     delete process.env.GROQ_API_KEY
     delete process.env.DASHSCOPE_API_KEY
     delete process.env.DEEPSEEK_API_KEY
-    delete process.env.CLAUDE_CODE_USE_OPENAI
+    delete process.env.BGS_USE_OPENAI
     delete process.env.OPENAI_BASE_URL
   })
 

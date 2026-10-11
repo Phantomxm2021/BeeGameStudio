@@ -1,7 +1,7 @@
 import { toString as qrToString } from 'qrcode';
 import * as React from 'react';
 import { useEffect, useState } from 'react';
-import { Box, Pane, Text } from '@anthropic/ink';
+import { Box, Pane, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { useAppState } from '../../state/AppState.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
@@ -40,7 +40,7 @@ function SessionInfo({ onDone }: Props): React.ReactNode {
   if (!remoteSessionUrl) {
     return (
       <Pane>
-        <Text color="warning">Not in remote mode. Start with `claude --remote` to use this command.</Text>
+        <Text color="warning">Not in remote mode. Start with `bee-game-studio --remote` to use this command.</Text>
         <Text dimColor>(press esc to close)</Text>
       </Pane>
     );

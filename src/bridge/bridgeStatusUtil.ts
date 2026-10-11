@@ -1,6 +1,6 @@
 import { getClaudeAiBaseUrl } from '../constants/product.js'
 import { isSelfHostedBridge, getBridgeBaseUrl } from './bridgeConfig.js'
-import { stringWidth } from '@anthropic/ink'
+import { stringWidth } from '@bee-game-studio/ink'
 import { formatDuration, truncateToWidth } from '../utils/format.js'
 import { getGraphemeSegmenter } from '../utils/intl.js'
 

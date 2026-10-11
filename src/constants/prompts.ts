@@ -7,8 +7,10 @@ import { getIsNonInteractiveSession } from '../bootstrap/state.js'
 import { getCurrentWorktreeSession } from '../utils/worktree.js'
 import { getSessionStartDate } from './common.js'
 import { getInitialSettings } from '../utils/settings/settings.js'
+import { isPoorModeActive } from '../commands/poor/poorMode.js'
 import {
   AGENT_TOOL_NAME,
+  VERIFICATION_AGENT_TYPE,
 } from '@bee-game-studio/builtin-tools/tools/AgentTool/constants.js'
 import { FILE_WRITE_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileWriteTool/prompt.js'
 import { FILE_READ_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileReadTool/prompt.js'
@@ -63,6 +65,7 @@ import { isUndercover } from '../utils/undercover.js'
 import { getAntModelOverrideConfig } from '../utils/model/antModels.js'
 import { isMcpInstructionsDeltaEnabled } from '../utils/mcpInstructionsDelta.js'
 import { getCurrentMode } from 'src/modes/store.js'
+import { BGS_SYSTEM_IDENTITY } from './system.js'
 
 // Dead code elimination: conditional imports for feature-gated modules
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -111,16 +114,6 @@ export const CLAUDE_CODE_DOCS_MAP_URL =
  */
 export const SYSTEM_PROMPT_DYNAMIC_BOUNDARY =
   '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__'
-
-// @[MODEL LAUNCH]: Update the latest frontier model.
-const FRONTIER_MODEL_NAME = 'Claude Opus 4.7'
-
-// @[MODEL LAUNCH]: Update the model family IDs below to the latest in each tier.
-const CLAUDE_LATEST_MODEL_IDS = {
-  opus: 'claude-opus-4-7',
-  sonnet: 'claude-sonnet-4-6',
-  haiku: 'claude-haiku-4-5-20251001',
-}
 
 function getHooksSection(): string {
   return `Users may configure 'hooks', shell commands that execute in response to events like tool calls, in settings. Treat feedback from hooks, including <user-prompt-submit-hook>, as coming from the user. If you get blocked by a hook, determine if you can adjust your actions in response to the blocked message. If not, ask the user to check their hooks configuration.`
@@ -210,7 +203,7 @@ function getSimpleDoingTasksSection(): string {
   ]
 
   const userHelpSubitems = [
-    `/help: Get help with using Claude Code`,
+    `/help: Get help with using BGS`,
     `To give feedback, users should ${MACRO.ISSUES_EXPLAINER}`,
   ]
 
@@ -231,8 +224,7 @@ function getSimpleDoingTasksSection(): string {
     `Report outcomes faithfully: if tests fail, say so with the relevant output; if you did not run a verification step, say that rather than implying it succeeded. Never claim "all tests pass" when output shows failures, never suppress or simplify failing checks (tests, lints, type errors) to manufacture a green result, and never characterize incomplete or broken work as done. Equally, when a check did pass or a task is complete, state it plainly — do not hedge confirmed results with unnecessary disclaimers, downgrade finished work to "partial," or re-verify things you already checked. The goal is an accurate report, not a defensive one.`,
     `Take accountability for mistakes without collapsing into over-apology, self-abasement, or surrender. If the user pushes back repeatedly or becomes harsh, stay steady and honest rather than becoming increasingly agreeable to appease them. Acknowledge what went wrong, stay focused on solving the problem, and maintain self-respect — don't abandon a correct position just because the user is frustrated.`,
     `Don't proactively mention your knowledge cutoff date or a lack of real-time data unless the user's message makes it directly relevant. Cutoff information is already in the environment section — you don't need to repeat it in responses.`,
-    // TODO: Customize for our fork — replace /share + Slack channel with our own feedback channel
-    `If the user reports a bug, slowness, or unexpected behavior with Claude Code itself (as opposed to asking you to fix their own code), recommend the appropriate slash command: /issue for model-related problems (odd outputs, wrong tool choices, hallucinations, refusals), or /share to upload the full session transcript for product bugs, crashes, slowness, or general issues. Only recommend these when the user is describing a problem with Claude Code. After /share produces a ccshare link, if you have a Slack MCP tool available, offer to post the link to #claude-code-feedback (channel ID C07VBSHV7EV) for the user.`,
+    `If the user reports a bug, slowness, or unexpected behavior with BGS itself (as opposed to asking you to fix their own code), direct them to /help and the configured feedback destination: ${MACRO.ISSUES_EXPLAINER}.`,
     `If the user asks for help or wants to give feedback inform them of the following:`,
     userHelpSubitems,
   ]
@@ -317,7 +309,7 @@ function getDiscoverSkillsGuidance(): string | null {
     feature('EXPERIMENTAL_SKILL_SEARCH') &&
     DISCOVER_SKILLS_TOOL_NAME !== null
   ) {
-    return `Relevant skills may be surfaced as "Skills relevant to your task:" reminders. For a new subtask, you can use ${DISCOVER_SKILLS_TOOL_NAME} to look for a useful skill; choose whether to use it. Skills already visible or loaded are filtered automatically.`
+    return `Relevant skills are automatically surfaced each turn as "Skills relevant to your task:" reminders. If you're about to do something those don't cover — a mid-task pivot, an unusual workflow, a multi-step plan — call ${DISCOVER_SKILLS_TOOL_NAME} with a specific description of what you're doing. Skills already visible or loaded are filtered automatically. Skip this if the surfaced skills already cover your next action.`
   }
   return null
 }
@@ -370,6 +362,14 @@ function getSessionSpecificGuidanceSection(
     enabledTools.has(DISCOVER_SKILLS_TOOL_NAME)
       ? getDiscoverSkillsGuidance()
       : null,
+    hasAgentTool &&
+    feature('VERIFICATION_AGENT') &&
+    // 3P default: false — verification agent is ant-only A/B
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_hive_evidence', false) &&
+    // Poor mode: skip verification agent to save tokens
+    !isPoorModeActive()
+      ? `The contract: when non-trivial implementation happens on your turn, independent adversarial verification must happen before you report completion \u2014 regardless of who did the implementing (you directly, a fork you spawned, or a subagent). You are the one reporting to the user; you own the gate. Non-trivial means: 3+ file edits, backend/API changes, or infrastructure changes. Spawn the ${AGENT_TOOL_NAME} tool with subagent_type="${VERIFICATION_AGENT_TYPE}". Your own checks, caveats, and a fork's self-checks do NOT substitute \u2014 only the verifier assigns a verdict; you cannot self-assign PARTIAL. Pass the original user request, all files changed (by anyone), the approach, and the plan file path if applicable. Flag concerns if you have them but do NOT share test results or claim things work. On FAIL: fix, resume the verifier with its findings plus your fix, repeat until PASS. On PASS: spot-check it \u2014 re-run 2-3 commands from its report, confirm every PASS has a Command run block with output that matches your re-run. If any PASS lacks a command block or diverges, resume the verifier with the specifics. On PARTIAL (from the verifier): report what passed and what could not be verified.`
+      : null,
   ].filter(item => item !== null)
 
   if (items.length === 0) return null
@@ -417,9 +417,9 @@ export async function getSystemPrompt(
   additionalWorkingDirectories?: string[],
   mcpClients?: MCPServerConnection[],
 ): Promise<string[]> {
-  if (isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE)) {
+  if (isEnvTruthy(process.env.BGS_SIMPLE)) {
     return [
-      `You are Claude Code, Anthropic's official CLI for Claude.\n\nCWD: ${getCwd()}\nDate: ${getSessionStartDate()}`,
+      `${BGS_SYSTEM_IDENTITY}\n\nCWD: ${getCwd()}\nDate: ${getSessionStartDate()}`,
     ]
   }
 
@@ -560,14 +560,6 @@ The following MCP servers have provided instructions for how to use their tools 
 ${instructionBlocks}`
 }
 
-// Explicit-type subagents rebuild their environment prompt rather than inherit
-// the main Agent's appended BGS context. Surface the same runtime fact in both.
-function getProjectWorkingFilesInfo(): string | null {
-  const directory = process.env.CLAUDE_CODE_TMPDIR
-  if (process.env.BEEGAME_PROJECT_EXECUTION !== '1' || !directory) return null
-  return `Project temporary working directory (TMPDIR / CLAUDE_CODE_TMPDIR): ${JSON.stringify(directory)}. Prefer this project-owned directory for disposable scripts and scratch files; keep maintained tests in the project's normal test structure. File tools require literal paths, not an unexpanded $TMPDIR; Bash can use "$TMPDIR".`
-}
-
 export async function computeEnvInfo(
   modelId: string,
   additionalWorkingDirectories?: string[],
@@ -601,12 +593,11 @@ export async function computeEnvInfo(
   const knowledgeCutoffMessage = cutoff
     ? `\n\nAssistant knowledge cutoff is ${cutoff}.`
     : ''
-  const workingFilesInfo = getProjectWorkingFilesInfo()
 
   return `Here is useful information about the environment you are running in:
 <env>
 Working directory: ${getCwd()}
-${workingFilesInfo ? workingFilesInfo + '\n' : ''}Is directory a git repo: ${isGit ? 'Yes' : 'No'}
+Is directory a git repo: ${isGit ? 'Yes' : 'No'}
 ${additionalDirsInfo}Platform: ${env.platform}
 ${getShellInfoLine()}
 OS Version: ${unameSR}
@@ -642,7 +633,6 @@ export async function computeSimpleEnvInfo(
 
   const envItems = [
     `Primary working directory: ${cwd}`,
-    getProjectWorkingFilesInfo(),
     isWorktree
       ? `This is a git worktree — an isolated copy of the repository. Run all commands from this directory. Do NOT \`cd\` to the original repository root.`
       : null,
@@ -658,15 +648,7 @@ export async function computeSimpleEnvInfo(
     `OS Version: ${unameSR}`,
     modelDescription,
     knowledgeCutoffMessage,
-    process.env.USER_TYPE === 'ant' && isUndercover()
-      ? null
-      : `The most recent Claude model family is Claude 4.5/4.6/4.7. Model IDs — Opus 4.7: '${CLAUDE_LATEST_MODEL_IDS.opus}', Sonnet 4.6: '${CLAUDE_LATEST_MODEL_IDS.sonnet}', Haiku 4.5: '${CLAUDE_LATEST_MODEL_IDS.haiku}'. When building AI applications, default to the latest and most capable Claude models.`,
-    process.env.USER_TYPE === 'ant' && isUndercover()
-      ? null
-      : `Claude Code is available as a CLI in the terminal, desktop app (Mac/Windows), web app (claude.ai/code), and IDE extensions (VS Code, JetBrains). Claude is also accessible via Claude in Chrome (a browsing agent), Claude in Excel (a spreadsheet agent), and Cowork (desktop automation for non-developers).`,
-    process.env.USER_TYPE === 'ant' && isUndercover()
-      ? null
-      : `Fast mode for Claude Code uses the same ${FRONTIER_MODEL_NAME} model with faster output. It does NOT switch to a different model. It can be toggled with /fast.`,
+    'This session runs BGS, developed by PhantomLab. Use /help for the commands and capabilities available in this session.',
   ].filter(item => item !== null)
 
   return [
@@ -724,7 +706,7 @@ export function getUnameSR(): string {
   return `${osType()} ${osRelease()}`
 }
 
-export const DEFAULT_AGENT_PROMPT = `You are an agent for Claude Code, Anthropic's official CLI for Claude. Given the user's message, you should use the tools available to complete the task. Complete the task fully—don't gold-plate, but don't leave it half-done. When you complete the task, respond with a concise report covering what was done and any key findings — the caller will relay this to the user, so it only needs the essentials.`
+export const DEFAULT_AGENT_PROMPT = `You are an agent for BGS. Given the user's message, you should use the tools available to complete the task. Complete the task fully—don't gold-plate, but don't leave it half-done. When you complete the task, respond with a concise report covering what was done and any key findings — the caller will relay this to the user, so it only needs the essentials.`
 
 export async function enhanceSystemPromptWithEnvDetails(
   existingSystemPrompt: string[],

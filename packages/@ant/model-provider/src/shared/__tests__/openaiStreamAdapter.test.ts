@@ -4,7 +4,7 @@ import { adaptOpenAIStreamToAnthropic } from '../openaiStreamAdapter.js'
 
 /** Helper to create a mock async iterable from chunk array */
 function mockStream(
-  chunks: ChatCompletionChunk[],
+  chunks: readonly ChatCompletionChunk[],
 ): AsyncIterable<ChatCompletionChunk> {
   return {
     [Symbol.asyncIterator]() {
@@ -50,6 +50,55 @@ async function collectEvents(
 }
 
 describe('adaptOpenAIStreamToAnthropic', () => {
+  test.each([
+    { chunks: [] },
+    {
+      chunks: [
+        makeChunk({
+          choices: [
+            { index: 0, delta: { content: 'partial' }, finish_reason: null },
+          ],
+        }),
+      ],
+    },
+    {
+      chunks: [
+        makeChunk({
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 't',
+                    type: 'function',
+                    function: { name: 'Write', arguments: '{' },
+                  },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+        }),
+      ],
+    },
+  ])(
+    'rejects truncated streams without fabricating completion',
+    async ({ chunks }) => {
+      const events: any[] = []
+      const consume = async () => {
+        for await (const event of adaptOpenAIStreamToAnthropic(
+          mockStream(chunks),
+          'gpt-4o',
+        ))
+          events.push(event)
+      }
+      await expect(consume()).rejects.toThrow('terminal finish_reason')
+      expect(events.some(e => e.type === 'message_stop')).toBe(false)
+    },
+  )
+
   test('emits message_start on first chunk', async () => {
     const events = await collectEvents([
       makeChunk({

@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-10",
+  "scope": "GDD author input and completion transport; no paid run or generated-project repair",
+  "evidence": {
+    "previousPaidCost": "/private/tmp/bgs-gdd-paid-followup.fNIDMa/cost.json",
+    "confirmedProblem": "The paid GDD used seven requests; five after the initial prose save consumed 226380 of 303744 total tokens, including cached input. The assignment explicitly required a separate completion receipt.",
+    "indexConsumers": [
+      "designReviewIndexes: source and acceptance pointers for Review",
+      "readDesignImplementationChecklist: owner outputs and final technical task relationships",
+      "readDesignAcceptanceRequirements: owner acceptance requirements for downstream verification"
+    ]
+  },
+  "implemented": [
+    "GDD conclusion comes from the current accepted dispatch's root native final result, using the existing explicit complete/blocked parser; no separate GDD receipt file is assigned.",
+    "Native completion checks the final conclusion and saved draft; the host reuses the existing GDD draft validator before advancing. Invalid index structure is not deferred merely because prose exists.",
+    "Legacy native file assignments and non-GDD receipt contracts remain supported.",
+    "Preserve author-selected outcome/acceptance associations in the existing index. Host metadata finalization remains unchanged; no inferred semantic index or inline handoff data in prose.",
+    "Preserve distinct initial delivery instructions; deduplicate only an identical confirmed-input payload and avoid double-escaping structured GDD requirements.",
+    "Prepare target directories and simplify stable BGS guidance; do not change the system prompt by phase, tool availability, permissions, native history mechanics, Skills or turn limits.",
+    "Remove obligatory receipt-file work and unnecessary numbering/title-check guidance, without forbidding source investigation or necessary repair."
+  ],
+  "verification": {
+    "localRegression": { "passed": 301, "failed": 0, "files": 8, "log": "/private/tmp/bgs-gdd-final-handoff-regression.log" },
+    "bundledNativeOffline": {
+      "passed": 15,
+      "failed": 0,
+      "log": "/private/tmp/bgs-gdd-final-handoff-native-all2.log",
+      "healthySyntheticGddRequests": 2,
+      "healthySyntheticGddTools": ["Write", "Write"],
+      "note": "Loopback fake provider and synthetic files only. The two-request example proves transport feasibility, not a prediction of real model behavior or paid savings."
+    },
+    "boundaries": ["missing prose", "invalid index", "blocked/invalid conclusion", "interruption", "stale state", "historical receipt", "intermediate claim", "child result", "ordinary question", "legacy receipt compatibility", "stable runner across phases"],
+    "build": {
+      "passed": true,
+      "directory": "/private/tmp/bgs-gdd-final-handoff-ready.BPcbWc",
+      "log": "/private/tmp/bgs-gdd-final-handoff-ready-build.log",
+      "bunAndNodeStartupPassed": true,
+      "publishedOrServicesRestarted": false
+    },
+    "typecheck": {
+      "passed": false,
+      "newErrors": 0,
+      "existingErrors": 7,
+      "existingFile": "src/beegame/layout-report-history.ts",
+      "log": "/private/tmp/bgs-gdd-final-handoff-typecheck2.log"
+    },
+    "testMaintenance": "The full native suite exposed an existing absolute-path assertion although Review intentionally receives a workspace-relative task path. The failure was reproduced with the pre-change isolated CLI. Only that assertion was updated; original task-byte reading and fresh-child assertions remain."
+  },
+  "limits": [
+    "Real paid token/currency reduction and spontaneous model request counts are not yet verified.",
+    "Native public prompt/tool schemas remain significant fixed overhead. Offline input byte sizes are not the actual paid request's token breakdown.",
+    "Semantic completeness, ownership interpretation and gameplay quality are not certified by completion transport or these deterministic checks.",
+    "Normal final-response formatting still depends on the model; malformed status receives specific feedback, unchanged transport failure stops without an automatic paid rerun."
+  ]
+}

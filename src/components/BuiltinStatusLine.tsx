@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { formatCost } from '../cost-tracker.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { formatTokens } from '../utils/format.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 

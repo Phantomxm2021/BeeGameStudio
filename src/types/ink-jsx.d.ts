@@ -16,7 +16,7 @@ import type {
   Styles,
   TextStyles,
   DOMElement,
-} from '@anthropic/ink'
+} from '@bee-game-studio/ink'
 
 declare module 'react' {
   namespace JSX {

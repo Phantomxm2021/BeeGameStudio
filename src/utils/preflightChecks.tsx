@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useTimeout } from '../hooks/useTimeout.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { Spinner } from '../components/Spinner.js';
 
 export interface PreflightCheckResult {

@@ -6,8 +6,9 @@ let time: number;
 let calls: unknown[][];
 let canvas: HTMLCanvasElement;
 let parentWidth: number;
+let paints: { method: string; color: string }[];
 beforeEach(() => {
-  frames = new Map(); time = 0; calls = []; parentWidth = 112;
+  frames = new Map(); time = 0; calls = []; paints = []; parentWidth = 112;
   let sequence = 0;
   vi.stubGlobal('Path2D', class { moveTo() {} lineTo() {} closePath() {} });
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++sequence, callback); return sequence; });
@@ -16,17 +17,68 @@ beforeEach(() => {
   canvas = document.createElement('canvas');
   const parent = document.createElement('div'); parent.append(canvas);
   Object.defineProperty(parent, 'clientWidth', { get: () => parentWidth });
-  const context = new Proxy({}, { get: (_, name) => (...args: unknown[]) => calls.push([name, ...args]), set: () => true });
+  const styles: Record<string, unknown> = {};
+  const context = new Proxy(styles, {
+    get: (_, name: string) => name in styles ? styles[name] : (...args: unknown[]) => {
+      calls.push([name, ...args]);
+      if (name === 'fill' || name === 'stroke') paints.push({ method: name, color: String(styles[`${name}Style`]) });
+    },
+    set: (_, name: string, value) => { styles[name] = value; return true; }
+  });
   vi.spyOn(canvas, 'getContext').mockReturnValue(context as CanvasRenderingContext2D);
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const step = (now: number) => {
-  time = now; calls = [];
+  time = now; calls = []; paints = [];
   const pending = [...frames.values()]; frames.clear();
   pending.forEach(callback => callback(now));
   return JSON.stringify(calls);
 };
 const options: DotRenderOptions = { token: 'm110122bj08a5a3a', state: 'think', reduced: false, color: '#F5F5F5', ink: '#F5F5F5' };
+
+function contrast(first: string, second: string) {
+  const luminance = (color: string) => {
+    const channels = color.startsWith('#')
+      ? (color.length === 4 ? color.slice(1).split('').map(c => c + c) : color.slice(1).match(/../g)!).map(c => parseInt(c, 16))
+      : color.match(/\d+/g)!.map(Number);
+    const linear = channels.map(value => {
+      const channel = value / 255;
+      return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4;
+    });
+    return .2126 * linear[0] + .7152 * linear[1] + .0722 * linear[2];
+  };
+  const a = luminance(first), b = luminance(second);
+  return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
+}
+
+it.each([false, true])('keeps writing badge dots legible across theme changes (reduced motion: %s)', async reduced => {
+  const { animateDot } = await import('./vendor/dots-lab.js');
+  const renderer = animateDot(canvas, { ...options, state: 'write', reduced });
+  try {
+    for (const color of ['#F5F5F5', '#181818', '#F5F5F5']) {
+      renderer.update({ ...options, state: 'write', reduced, color, ink: color });
+      step(600);
+      const [background, ...dots] = paints.slice(-4);
+      expect(dots).toHaveLength(3);
+      for (const dot of dots) expect(contrast(background.color, dot.color)).toBeGreaterThanOrEqual(4.5);
+    }
+  } finally { renderer.dispose(); }
+});
+
+it.each(['alert', 'error'] as const)('keeps the %s badge symbol legible in both themes', async state => {
+  const { animateDot } = await import('./vendor/dots-lab.js');
+  const renderer = animateDot(canvas, { ...options, state });
+  try {
+    for (const color of ['#F5F5F5', '#181818']) {
+      renderer.update({ ...options, state, color, ink: color });
+      step(2200);
+      const badge = paints.slice(state === 'alert' ? -3 : -2);
+      expect(badge[0].method).toBe('fill');
+      expect(badge[1].method).toBe('stroke');
+      for (const symbol of badge.slice(1)) expect(contrast(badge[0].color, symbol.color)).toBeGreaterThanOrEqual(4.5);
+    }
+  } finally { renderer.dispose(); }
+});
 
 it('keeps thinking geometry moving, retains its loop across state changes and fits the resized avatar', async () => {
   const { animateDot } = await import('./vendor/dots-lab.js');

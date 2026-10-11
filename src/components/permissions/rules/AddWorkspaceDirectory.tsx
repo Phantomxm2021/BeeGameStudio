@@ -4,13 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDebounceCallback } from 'usehooks-ts';
 import { addDirHelpMessage, validateDirectoryForWorkspace } from '../../../commands/add-dir/validation.js';
 import TextInput from '../../../components/TextInput.js';
-import { type KeyboardEvent, Box, Text } from '@anthropic/ink';
+import { type KeyboardEvent, Box, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../../keybindings/useKeybinding.js';
 import type { ToolPermissionContext } from '../../../Tool.js';
 import { getDirectoryCompletions } from '../../../utils/suggestions/directoryCompletion.js';
 import { ConfigurableShortcutHint } from '../../ConfigurableShortcutHint.js';
 import { Select } from '../../CustomSelect/select.js';
-import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
+import { Byline, Dialog, KeyboardShortcutHint } from '@bee-game-studio/ink';
 import { PromptInputFooterSuggestions, type SuggestionItem } from '../../PromptInput/PromptInputFooterSuggestions.js';
 
 type Props = {
@@ -43,7 +43,7 @@ const REMEMBER_DIRECTORY_OPTIONS: Array<{
 function PermissionDescription(): React.ReactNode {
   return (
     <Text dimColor>
-      Claude Code will be able to read files in this directory and make edits when auto-accept edits is on.
+      BGS will be able to read files in this directory and make edits when auto-accept edits is on.
     </Text>
   );
 }

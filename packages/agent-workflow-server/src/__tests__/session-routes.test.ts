@@ -27,12 +27,16 @@ const originalDataDir = process.env.AGENT_WORKFLOW_DATA_DIR
 const temporaryDirectories: string[] = []
 
 // The original request and host context are distinct native input blocks.
-// Assert the actual user text, not String(blocks) ("[object Object]").
+// Platform context precedes the user's text so native Skill discovery reads
+// user intent from the final text block. These fixtures have no attachments.
 function requestText(prompt: BeeGamePromptInput): string {
   if (typeof prompt === 'string') return prompt
-  const first = prompt[0]
-  expect(first?.type).toBe('text')
-  return first?.type === 'text' ? first.text : ''
+  expect(prompt).toHaveLength(2)
+  const [context, request] = prompt
+  expect(context?.type).toBe('text')
+  if (context?.type === 'text') expect(context.text).toStartWith('BGS project state')
+  expect(request?.type).toBe('text')
+  return request?.type === 'text' ? request.text : ''
 }
 
 it('runtime returns recoverable 503 rather than 401 when token resolution is unavailable', async () => {
@@ -52,7 +56,7 @@ it('runtime returns recoverable 503 rather than 401 when token resolution is una
   } finally { cleanups.forEach(cleanup => cleanup()) }
 })
 
-it('project chat handles the user request, then resumes the delivery milestone', async () => {
+it('project chat handles the user request while paused; only explicit Continue resumes delivery', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-project-chat-route-')))
   temporaryDirectories.push(root)
   const ownerId = 'conversation-owner'
@@ -93,7 +97,7 @@ it('project chat handles the user request, then resumes the delivery milestone',
     expect((await recovered.json() as { session: { id: string } }).session.id).toBe(session.id)
     const sent = await post(`/api/beegame-sessions/${session.id}/input`, { text: '按钮没字，请修复', clientMessageId: 'request-one', language: 'zh' })
     expect({ httpStatus: sent.status, ...(await sent.json() as object) }).toMatchObject({ httpStatus: 202, status: 'running', turnStatus: 'running' })
-    expect((await readProjectDelivery(workspace, join(root, 'dashboard')))?.status).toBe('active')
+    expect((await readProjectDelivery(workspace, join(root, 'dashboard')))?.status).toBe('paused')
     for (let i = 0; i < 200 && prompts.length === 0; i++) await Bun.sleep(5)
     if (!prompts.length) {
       const transcript = await (await app.request(`/api/beegame-sessions/${session.id}/transcript`)).json() as Array<{ type: string; text: string }>
@@ -108,16 +112,28 @@ it('project chat handles the user request, then resumes the delivery milestone',
     expect((await post(`/api/beegame-sessions/${session.id}/input`, { text: '按钮没字，请修复', clientMessageId: 'request-one', language: 'zh' })).status).toBe(202)
     expect(prompts).toHaveLength(1)
     release?.()
-    for (let i = 0; i < 200 && prompts.length < 2; i++) await Bun.sleep(5)
-    // The original objective resumes after the inserted request. A concurrent
-    // manual Continue observes that turn instead of submitting another one.
+    for (let i = 0; i < 200; i++) {
+      const current = await (await app.request(`/api/beegame-sessions/${session.id}`)).json() as { turnStatus: string }
+      const queue = await (await app.request(`/api/projects/${projectId}/queued-messages`)).json() as { messages: unknown[] }
+      if (current.turnStatus === 'idle' && queue.messages.length === 0) break
+      await Bun.sleep(5)
+    }
+    expect((await (await app.request(`/api/beegame-sessions/${session.id}`)).json() as { turnStatus: string }).turnStatus).toBe('idle')
+    expect((await readProjectDelivery(workspace, join(root, 'dashboard')))?.status).toBe('paused')
+    expect(prompts).toHaveLength(1)
+    // A normal chat reply is not authorization to resume paused production.
     const continuation = await post(`/api/beegame-sessions/${session.id}/continue`, { language: 'zh' })
     expect(continuation.status).toBe(202)
+    for (let i = 0; i < 200 && prompts.length < 2; i++) await Bun.sleep(5)
+    expect(prompts).toHaveLength(2)
+    expect((await readProjectDelivery(workspace, join(root, 'dashboard')))?.status).toBe('active')
     expect(requestText(prompts[0]!)).toBe('按钮没字，请修复')
-    // The user turn already received the full assignment; the same-session
-    // continuation keeps the milestone without repeating that long handoff.
+    // The explicit continuation supplies the actual production assignment.
     expect(JSON.stringify(prompts[1])).toContain('milestone: author')
-    expect(JSON.stringify(prompts[1])).not.toContain('Current delivery milestone: author.')
+    expect(JSON.stringify(prompts[1])).toContain('Current delivery milestone: author.')
+    // Repeated Continue during the active turn must not start a third turn.
+    expect((await post(`/api/beegame-sessions/${session.id}/continue`, { language: 'zh' })).status).toBe(202)
+    expect(prompts).toHaveLength(2)
     // A second turn reuses the same native process/session.
     expect(starts).toBe(1)
     release?.()

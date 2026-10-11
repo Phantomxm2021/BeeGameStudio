@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Box } from '@anthropic/ink';
+import { Box } from '@bee-game-studio/ink';
 import type { Theme } from '../../utils/theme.js';
 import { PermissionRequestTitle } from './PermissionRequestTitle.js';
 import type { WorkerBadgeProps } from './WorkerBadge.js';

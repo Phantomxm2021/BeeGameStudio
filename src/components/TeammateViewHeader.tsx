@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Box, Text, KeyboardShortcutHint } from '@anthropic/ink';
+import { Box, Text, KeyboardShortcutHint } from '@bee-game-studio/ink';
 import { toInkColor } from '../utils/ink.js';
 import { useAppState } from '../state/AppState.js';
 import { getViewedTeammateTask } from '../state/selectors.js';

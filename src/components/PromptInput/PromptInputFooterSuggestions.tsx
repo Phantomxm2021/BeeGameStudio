@@ -1,6 +1,6 @@
 import { memo, type ReactNode } from 'react';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { Box, Text, stringWidth } from '@anthropic/ink';
+import { Box, Text, stringWidth } from '@bee-game-studio/ink';
 import { truncatePathMiddle, truncateToWidth } from '../../utils/format.js';
 import type { Theme } from '../../utils/theme.js';
 

@@ -22,34 +22,34 @@ function getAPIProviderTest(settings: { modelType?: string }): APIProvider {
   if (modelType === 'grok') return 'grok'
 
   if (
-    process.env.CLAUDE_CODE_USE_BEDROCK === '1' ||
-    process.env.CLAUDE_CODE_USE_BEDROCK === 'true'
+    process.env.BGS_USE_BEDROCK === '1' ||
+    process.env.BGS_USE_BEDROCK === 'true'
   )
     return 'bedrock'
   if (
-    process.env.CLAUDE_CODE_USE_VERTEX === '1' ||
-    process.env.CLAUDE_CODE_USE_VERTEX === 'true'
+    process.env.BGS_USE_VERTEX === '1' ||
+    process.env.BGS_USE_VERTEX === 'true'
   )
     return 'vertex'
   if (
-    process.env.CLAUDE_CODE_USE_FOUNDRY === '1' ||
-    process.env.CLAUDE_CODE_USE_FOUNDRY === 'true'
+    process.env.BGS_USE_FOUNDRY === '1' ||
+    process.env.BGS_USE_FOUNDRY === 'true'
   )
     return 'foundry'
 
   if (
-    process.env.CLAUDE_CODE_USE_OPENAI === '1' ||
-    process.env.CLAUDE_CODE_USE_OPENAI === 'true'
+    process.env.BGS_USE_OPENAI === '1' ||
+    process.env.BGS_USE_OPENAI === 'true'
   )
     return 'openai'
   if (
-    process.env.CLAUDE_CODE_USE_GEMINI === '1' ||
-    process.env.CLAUDE_CODE_USE_GEMINI === 'true'
+    process.env.BGS_USE_GEMINI === '1' ||
+    process.env.BGS_USE_GEMINI === 'true'
   )
     return 'gemini'
   if (
-    process.env.CLAUDE_CODE_USE_GROK === '1' ||
-    process.env.CLAUDE_CODE_USE_GROK === 'true'
+    process.env.BGS_USE_GROK === '1' ||
+    process.env.BGS_USE_GROK === 'true'
   )
     return 'grok'
 
@@ -100,12 +100,12 @@ function isFirstPartyAnthropicBaseUrlTest(): boolean {
 
 describe('getAPIProvider', () => {
   const envKeys = [
-    'CLAUDE_CODE_USE_GEMINI',
-    'CLAUDE_CODE_USE_BEDROCK',
-    'CLAUDE_CODE_USE_VERTEX',
-    'CLAUDE_CODE_USE_FOUNDRY',
-    'CLAUDE_CODE_USE_OPENAI',
-    'CLAUDE_CODE_USE_GROK',
+    'BGS_USE_GEMINI',
+    'BGS_USE_BEDROCK',
+    'BGS_USE_VERTEX',
+    'BGS_USE_FOUNDRY',
+    'BGS_USE_OPENAI',
+    'BGS_USE_GROK',
     'OPENAI_BASE_URL',
     'GEMINI_BASE_URL',
   ] as const
@@ -137,71 +137,71 @@ describe('getAPIProvider', () => {
   })
 
   test('modelType takes precedence over environment variables', () => {
-    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+    process.env.BGS_USE_BEDROCK = '1'
     expect(getAPIProviderTest({ modelType: 'gemini' })).toBe('gemini')
   })
 
-  test('returns "gemini" when CLAUDE_CODE_USE_GEMINI is set', () => {
-    process.env.CLAUDE_CODE_USE_GEMINI = '1'
+  test('returns "gemini" when BGS_USE_GEMINI is set', () => {
+    process.env.BGS_USE_GEMINI = '1'
     expect(getAPIProviderTest({})).toBe('gemini')
   })
 
-  test('returns "bedrock" when CLAUDE_CODE_USE_BEDROCK is set', () => {
-    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
+  test('returns "bedrock" when BGS_USE_BEDROCK is set', () => {
+    process.env.BGS_USE_BEDROCK = '1'
     expect(getAPIProviderTest({})).toBe('bedrock')
   })
 
-  test('returns "vertex" when CLAUDE_CODE_USE_VERTEX is set', () => {
-    process.env.CLAUDE_CODE_USE_VERTEX = '1'
+  test('returns "vertex" when BGS_USE_VERTEX is set', () => {
+    process.env.BGS_USE_VERTEX = '1'
     expect(getAPIProviderTest({})).toBe('vertex')
   })
 
-  test('returns "foundry" when CLAUDE_CODE_USE_FOUNDRY is set', () => {
-    process.env.CLAUDE_CODE_USE_FOUNDRY = '1'
+  test('returns "foundry" when BGS_USE_FOUNDRY is set', () => {
+    process.env.BGS_USE_FOUNDRY = '1'
     expect(getAPIProviderTest({})).toBe('foundry')
   })
 
-  test('returns "openai" when CLAUDE_CODE_USE_OPENAI is set', () => {
-    process.env.CLAUDE_CODE_USE_OPENAI = '1'
+  test('returns "openai" when BGS_USE_OPENAI is set', () => {
+    process.env.BGS_USE_OPENAI = '1'
     expect(getAPIProviderTest({})).toBe('openai')
   })
 
-  test('returns "grok" when CLAUDE_CODE_USE_GROK is set', () => {
-    process.env.CLAUDE_CODE_USE_GROK = '1'
+  test('returns "grok" when BGS_USE_GROK is set', () => {
+    process.env.BGS_USE_GROK = '1'
     expect(getAPIProviderTest({})).toBe('grok')
   })
 
   test('bedrock takes precedence over gemini', () => {
-    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
-    process.env.CLAUDE_CODE_USE_GEMINI = '1'
+    process.env.BGS_USE_BEDROCK = '1'
+    process.env.BGS_USE_GEMINI = '1'
     expect(getAPIProviderTest({})).toBe('bedrock')
   })
 
   test('bedrock takes precedence over vertex', () => {
-    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
-    process.env.CLAUDE_CODE_USE_VERTEX = '1'
+    process.env.BGS_USE_BEDROCK = '1'
+    process.env.BGS_USE_VERTEX = '1'
     expect(getAPIProviderTest({})).toBe('bedrock')
   })
 
   test('bedrock wins when all three env vars are set', () => {
-    process.env.CLAUDE_CODE_USE_BEDROCK = '1'
-    process.env.CLAUDE_CODE_USE_VERTEX = '1'
-    process.env.CLAUDE_CODE_USE_FOUNDRY = '1'
+    process.env.BGS_USE_BEDROCK = '1'
+    process.env.BGS_USE_VERTEX = '1'
+    process.env.BGS_USE_FOUNDRY = '1'
     expect(getAPIProviderTest({})).toBe('bedrock')
   })
 
   test('"true" is truthy', () => {
-    process.env.CLAUDE_CODE_USE_BEDROCK = 'true'
+    process.env.BGS_USE_BEDROCK = 'true'
     expect(getAPIProviderTest({})).toBe('bedrock')
   })
 
   test('"0" is not truthy', () => {
-    process.env.CLAUDE_CODE_USE_BEDROCK = '0'
+    process.env.BGS_USE_BEDROCK = '0'
     expect(getAPIProviderTest({})).toBe('firstParty')
   })
 
   test('empty string is not truthy', () => {
-    process.env.CLAUDE_CODE_USE_BEDROCK = ''
+    process.env.BGS_USE_BEDROCK = ''
     expect(getAPIProviderTest({})).toBe('firstParty')
   })
 })

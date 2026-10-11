@@ -46,18 +46,32 @@ export function anthropicMessagesToOpenAI(
     } satisfies ChatCompletionSystemMessageParam)
   }
 
+  const pendingUserMessages: ChatCompletionMessageParam[] = []
+  const flushUserMessages = () => {
+    // Tool results may arrive as separate consecutive user messages. All
+    // receipts must precede image sidecars, including for parallel tool calls.
+    result.push(
+      ...pendingUserMessages.filter(message => message.role === 'tool'),
+    )
+    result.push(
+      ...pendingUserMessages.filter(message => message.role !== 'tool'),
+    )
+    pendingUserMessages.length = 0
+  }
   for (const msg of messages) {
     switch (msg.type) {
       case 'user':
-        result.push(...convertInternalUserMessage(msg))
+        pendingUserMessages.push(...convertInternalUserMessage(msg))
         break
       case 'assistant':
+        flushUserMessages()
         result.push(...convertInternalAssistantMessage(msg))
         break
       default:
         break
     }
   }
+  flushUserMessages()
 
   return result
 }
@@ -107,6 +121,30 @@ function convertInternalUserMessage(
     // reject the request with "insufficient tool messages following tool_calls".
     for (const tr of toolResults) {
       result.push(convertToolResult(tr))
+    }
+    // Chat Completions tool messages accept text, not images. Keep their
+    // receipts intact and carry images in a supported user multimodal message.
+    for (const tr of toolResults) {
+      if (!Array.isArray(tr.content)) continue
+      const images = tr.content.flatMap(block => {
+        if (typeof block === 'string' || block.type !== 'image') return []
+        const image = convertImageBlockToOpenAI(
+          block as unknown as Record<string, unknown>,
+        )
+        return image ? [image] : []
+      })
+      if (images.length) {
+        result.push({
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `Images from tool result ${tr.tool_use_id}:`,
+            },
+            ...images,
+          ],
+        } satisfies ChatCompletionUserMessageParam)
+      }
     }
 
     // 如果有图片，构建多模态 content 数组

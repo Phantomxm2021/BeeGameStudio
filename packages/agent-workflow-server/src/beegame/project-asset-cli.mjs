@@ -17,12 +17,13 @@ const usage = `Usage: bun <this-file> <command> [arguments]
   pack <pack-id>                         Read license, version and pack metadata
   element <pack-id> <element-id>         Read element and dependency metadata
   fetch <pack-id> <element-id> <assets/path>  Download one selected library file
-  inspect <assets/path>                  Hash any local asset, regardless of source
+  inspect <assets/path> [assets/path ...] Hash local assets in one call; no provenance/quality inference
   cost [quality] [size]                 Show availability and the Cloudflare Credit quote
   generate <request.json> <assets/path>  Generate from {requestId,prompt,background?,quality?,size?,referenceImagePath?}
   atlas <assets/sheet.png> <assets/frames.json> <assets/runtime/name.png>
                                          Publish named rectangles as a PNG + same-basename atlas JSON
 For compatible small AI-generated elements, prefer one shared sheet request; use atlas to register inspected rectangles. generate returns an image, not frame metadata. atlas does not pack separate images. Split generation for a concrete visual/use need, preserving planned atlas delivery.
+For decoded image crop/resize/composition and packing separate sprites, use ${TOOL_CONFIG.mediaCommand ?? 'bun .beegame/delivery/media.mjs'} --help. Its JSON request supports named crop regions, explicit filtering/padding and compatible atlas output; no package installation or custom PNG encoder is needed.
 The same atlas delivery applies to retrieved and procedural static sprites. Procedural drawing can write a shared PNG and exact rectangles directly. Dynamic text and live geometry need not become images.
 Commands are optional. You choose the source and asset design. No command updates the Manifest.`
 
@@ -226,12 +227,13 @@ async function main() {
       if (!saved) await unlink(output.target).catch(() => undefined)
     }
   } else if (command === 'inspect') {
-    const asset = await assetDestination(args[0], false)
+    if (!args.length) throw new Error('inspect requires one or more asset paths')
+    const results = await Promise.all(args.map(async path => {
+    const asset = await assetDestination(path, false)
     if ((await realpath(asset.target)) !== asset.target)
       throw new Error('Asset must not resolve through a link')
     const bytes = await readFile(asset.target)
-    console.log(
-      JSON.stringify({
+    return {
         path: asset.path,
         bytes: bytes.length,
         sha256: createHash('sha256').update(bytes).digest('hex'),
@@ -241,8 +243,10 @@ async function main() {
           .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
           ? { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
           : {}),
-      }),
-    )
+      }
+    }))
+    console.log(JSON.stringify(results.length === 1 ? results[0] : { files: results,
+      local_file_hashes: Object.fromEntries(results.map(file => [file.path, file.sha256])) }))
   } else if (command === 'atlas') {
     const source = await assetDestination(args[0], false)
     const specification = await assetDestination(args[1], false)

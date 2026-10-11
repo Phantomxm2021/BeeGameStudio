@@ -5,7 +5,7 @@
 `Text` renders styled text content. It supports colors, emphasis, and text wrapping.
 
 ```tsx
-import { Text } from '@anthropic/ink'
+import { Text } from '@bee-game-studio/ink'
 
 <Text bold color="success">Operation complete</Text>
 ```
@@ -61,7 +61,7 @@ import { Text } from '@anthropic/ink'
 Uncolored `Text` children inherit a hover color from context:
 
 ```tsx
-import { TextHoverColorContext } from '@anthropic/ink'
+import { TextHoverColorContext } from '@bee-game-studio/ink'
 
 <TextHoverColorContext.Provider value="suggestion">
   <Text>Uncolored text gets the suggestion color</Text>
@@ -122,7 +122,7 @@ Full list of `ansi:` prefixed names:
 Curried theme-aware color function. Resolves theme keys to raw color values.
 
 ```tsx
-import { color } from '@anthropic/ink'
+import { color } from '@bee-game-studio/ink'
 
 const paint = color('error', 'dark')  // Returns (text: string) => string
 console.log(paint('failed'))          // 'failed' wrapped in ANSI red codes
@@ -144,7 +144,7 @@ Measures the visual width of a string in terminal columns, accounting for:
 - ANSI escape sequences (0 columns)
 
 ```tsx
-import { stringWidth } from '@anthropic/ink'
+import { stringWidth } from '@bee-game-studio/ink'
 
 stringWidth('hello')      // 5
 stringWidth('你好')        // 4
@@ -156,7 +156,7 @@ stringWidth('\x1b[31mhi')  // 2 (ANSI codes ignored)
 Wraps text to a given width with the specified wrapping mode.
 
 ```tsx
-import { wrapText } from '@anthropic/ink'
+import { wrapText } from '@bee-game-studio/ink'
 
 wrapText('Hello World', 5, 'wrap')    // 'Hello\nWorld'
 wrapText('Hello World', 8, 'end')     // 'Hello...'
@@ -167,7 +167,7 @@ wrapText('Hello World', 8, 'end')     // 'Hello...'
 Wraps text containing ANSI escape codes while preserving styling.
 
 ```tsx
-import { wrapAnsi } from '@anthropic/ink'
+import { wrapAnsi } from '@bee-game-studio/ink'
 
 wrapAnsi('\x1b[31mHello World\x1b[0m', 5)
 // Wraps at word boundaries, keeps color codes intact
@@ -178,7 +178,7 @@ wrapAnsi('\x1b[31mHello World\x1b[0m', 5)
 Measures a rendered DOM element's dimensions.
 
 ```tsx
-import { measureElement } from '@anthropic/ink'
+import { measureElement } from '@bee-game-studio/ink'
 
 const { width, height } = measureElement(domElement)
 ```
@@ -188,7 +188,7 @@ const { width, height } = measureElement(domElement)
 Renders an OSC 8 terminal hyperlink (clickable URL in supported terminals).
 
 ```tsx
-import { Link } from '@anthropic/ink'
+import { Link } from '@bee-game-studio/ink'
 
 <Link url="https://example.com">
   <Text underline color="suggestion">example.com</Text>
@@ -205,7 +205,7 @@ Props:
 Renders pre-formatted ANSI strings directly into the layout.
 
 ```tsx
-import { RawAnsi } from '@anthropic/ink'
+import { RawAnsi } from '@bee-game-studio/ink'
 
 <RawAnsi
   lines={['\x1b[31mRed line 1\x1b[0m', '\x1b[32mGreen line 2\x1b[0m']}
@@ -224,8 +224,8 @@ Props:
 Low-level border rendering function used internally by Box.
 
 ```tsx
-import { renderBorder } from '@anthropic/ink'
-import type { BorderTextOptions } from '@anthropic/ink'
+import { renderBorder } from '@bee-game-studio/ink'
+import type { BorderTextOptions } from '@bee-game-studio/ink'
 ```
 
 Border styles available (from `cli-boxes`):

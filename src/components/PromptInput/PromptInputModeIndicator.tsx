@@ -1,6 +1,6 @@
 import figures from 'figures';
 import * as React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import {
   AGENT_COLOR_TO_THEME_COLOR,
   AGENT_COLORS,

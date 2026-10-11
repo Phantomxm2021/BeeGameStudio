@@ -656,7 +656,14 @@
       "truncated": "This output is truncated; it is not the complete file or result.",
       "command": "Command",
       "output": "Tool output",
-      "file": "File content"
+      "file": "File content",
+      "pending": "Waiting for approval",
+      "allowed": "Approved",
+      "denied": "Denied",
+      "cancelled": "Approval cancelled",
+      "incomplete": "End status unconfirmed",
+      "elapsed": "Elapsed",
+      "attachmentError": "Attachment display failed"
     },
     "assistantName": "BeeGame",
     "previewTitle": "Preview",

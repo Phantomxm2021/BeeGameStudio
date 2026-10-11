@@ -14,11 +14,18 @@ import { parseNativeTerminalTaskNotification } from './native-task-notification'
 import { resolveNativeRuntimeCommand, nativeSessionTemporaryPath } from './native-runtime-process-path'
 import { getSafeRuntimeProcessEnvironment } from './runtime-process-environment'
 import { createNativeTaskAccess } from '@bee-game-studio/agent-workflow/native-task-access'
-import { NATIVE_DIAGNOSTIC_PREFIX } from '@bee-game-studio/agent-workflow/native-diagnostics'
+import { NATIVE_DIAGNOSTIC_PREFIX, parseNativeDiagnostic } from '@bee-game-studio/agent-workflow/native-diagnostics'
+import { StandardCliUsage } from '@bee-game-studio/agent-workflow/standard-cli-usage'
+import { standardCliCache } from '@bee-game-studio/agent-workflow/standard-cli-cache'
+import { standardCliProvider } from '@bee-game-studio/agent-workflow/standard-cli-provider'
+import { randomUUID } from 'node:crypto'
 import { mkdir, realpath } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { closeSessionTestBrowsers } from './native-test-browser-cleanup'
 import { projectExecutionAccess } from './project-execution-access'
+import { prepareNativeSkillPlugins } from './native-skill-plugins'
+import { WritingWorkflowRuntime } from './writing-workflow-runtime'
+import { standardCliDebugDiagnostic, withStandardCliDiagnostics } from './standard-cli-debug'
 import {
   createRuntimeObservability,
   type RuntimeObservability,
@@ -46,13 +53,28 @@ export function createNativeCliProcessRunner(options: {
 } = {}): BeeGameSessionRunner {
   return {
     async start(input) {
-      return NativeCliProcessRuntime.start(
-        input,
-        options.command ?? nativeRuntimeCommand(input),
-        options.observabilityFactory ?? createRuntimeObservability,
-      )
+      const command = options.command ?? nativeRuntimeCommand(input)
+      const start = (task: BeeGameSessionRunnerStartInput) => NativeCliProcessRuntime.start(task,
+        options.command && command.includes('--print') ? nativeWorkflowCommand(command, task)
+          : options.command ?? nativeRuntimeCommand(task), options.observabilityFactory ?? createRuntimeObservability)
+      // Non-CLI test transports remain ordinary transports. Production uses
+      // standard --print sessions, with business scheduling in this host.
+      return command.includes('--print') ? new WritingWorkflowRuntime(input, start) : start(input)
     },
   }
+}
+
+/** Preserve explicitly selected executable/settings, refresh standard session
+ * and prompt options per task instead of retaining the parent's role prompt. */
+export function nativeWorkflowCommand(command: string[], input: BeeGameSessionRunnerStartInput): string[] {
+  const standard = nativeRuntimeCommand(input)
+  const prompt = standard[standard.indexOf('--append-system-prompt') + 1]!
+  const index = command.indexOf('--append-system-prompt')
+  if (index < 0 || index + 1 >= command.length) throw Error('Workflow CLI requires a standard append-system-prompt option')
+  const refreshed = command.map((value, position) => position === index + 1 ? prompt : value)
+  return [...refreshed.filter(argument => !/^--(?:resume|session-id)=/.test(argument)),
+    ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : input.nativeSessionId ? [`--session-id=${input.nativeSessionId}`] : []),
+    ...(input.nativeTools ? ['--tools', input.nativeTools.join(',')] : [])]
 }
 
 export function nativeRuntimeCommand(
@@ -61,6 +83,8 @@ export function nativeRuntimeCommand(
   if (input.resumeSessionId && !isNativeSessionId(input.resumeSessionId)) {
     throw new Error('Bee Game Studio native resume session ID must be a UUID')
   }
+  if (input.nativeSessionId && (!isNativeSessionId(input.nativeSessionId) || input.resumeSessionId))
+    throw new Error('Bee Game Studio new native session ID must be a UUID and cannot be combined with resume')
   return [
     ...resolveNativeRuntimeCommand(),
     '--print',
@@ -73,7 +97,20 @@ export function nativeRuntimeCommand(
     '--append-system-prompt',
     [BEEGAME_USER_RESPONSE_SCOPE, input.language ? responseLanguageInstruction(input.language) : '', input.systemContext].filter(Boolean).join('\n\n'),
     ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : []),
+    ...(input.nativeSessionId ? [`--session-id=${input.nativeSessionId}`] : []),
+    ...(input.nativeTools ? ['--tools', input.nativeTools.join(',')] : []),
   ]
+}
+
+/** Supply project facts through the standard CLI prompt option, not native
+ * environment-prompt code. Use the resolved execution directory, including
+ * isolated tasks; preserve custom non-CLI fixture commands unchanged. */
+export function appendWorkingFilesInstruction(command: string[], directory: string): string[] {
+  const index = command.indexOf('--append-system-prompt')
+  if (index < 0) return command
+  if (index + 1 >= command.length) throw new Error('Missing append-system-prompt value')
+  const instruction = `Project temporary working directory (TMPDIR): ${JSON.stringify(directory)}. Prefer this project-owned directory for disposable scripts and scratch files; keep maintained tests in the project's normal test structure. Native tool output uses CLAUDE_CODE_TMPDIR separately; read actual tool-returned paths, not a guessed project path. File tools require literal paths, not an unexpanded $TMPDIR; Bash can use "$TMPDIR".`
+  return command.map((argument, position) => position === index + 1 ? [argument, instruction].filter(Boolean).join('\n\n') : argument)
 }
 
 class NativeCliProcessRuntime implements BeeGameSessionRuntime {
@@ -92,8 +129,13 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   private disposed = false
   private stderrTail = ''
   private nativeSessionId: string | undefined
+  private acknowledgedAnyTurn = false
+  private startupError: Error | undefined
+  private publicUsage = new StandardCliUsage()
   private browserCleanup: Promise<void> = Promise.resolve()
   private disposal: Promise<void> | undefined
+  private stderrCompletion: Promise<void> = Promise.resolve()
+  private stdoutCompletion: Promise<void> = Promise.resolve()
 
   private constructor(
     private readonly child: RuntimeProcess,
@@ -102,6 +144,8 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     private readonly scratchPath: string,
     private readonly taskAccess?: Awaited<ReturnType<typeof createNativeTaskAccess>>,
     private readonly projectAccess?: Awaited<ReturnType<typeof projectExecutionAccess>>,
+    private readonly closeSkillPlugins: () => Promise<void> = async () => {},
+    private readonly childDiagnosticsEnabled = false,
   ) {
     this.nativeSessionId = sessionInput.resumeSessionId
   }
@@ -119,47 +163,84 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   ): Promise<NativeCliProcessRuntime> {
     if (command.length === 0)
       throw new Error('Bee Game Studio native runtime command is required')
-    const taskAccess = input.isolatedTask ? await createNativeTaskAccess({
-      ...input.isolatedTask, allowWorkingFiles: true,
-      ...(input.env.BEEGAME_CONFIG_DIR
-        ? { skillsDirectory: resolve(input.env.BEEGAME_CONFIG_DIR, 'skills') } : {}),
-      ...(input.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR
-        ? { builtinSkillsDirectory: input.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR } : {}),
-    }) : undefined
-    const projectAccess = taskAccess ? undefined : await projectExecutionAccess({
-      workspacePath: input.cwd, sessionId: input.sessionId, environment: input.env,
-    })
-    const child = Bun.spawn([...command, ...(taskAccess?.flags ?? projectAccess!.flags)], {
-      cwd: taskAccess?.root ?? projectAccess!.root,
-      env: { ...nativeRuntimeEnvironment(input.env),
-        ...(taskAccess?.environment ?? projectAccess!.environment) },
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    }) as RuntimeProcess
-    const runtime = new NativeCliProcessRuntime(
-      child,
-      input,
-      observabilityFactory({
-        workspacePath: input.cwd,
-        sessionId: input.sessionId,
-        ...runtimeIdentity(input.env),
-        ...(input.runtimeLaunchContract
-          ? { launchContract: input.runtimeLaunchContract }
-          : {}),
-      }),
-      taskAccess?.environment.TMPDIR ?? projectAccess!.temporary,
-      taskAccess,
-      projectAccess,
-    )
-    void runtime.consumeStdout()
-    void runtime.consumeStderr()
-    void child.exited.then(code => runtime.onExit(code))
-    return runtime
+    let toolResultsDirectory: string | undefined
+    if (command.includes('--print')) {
+      const flag = (name: string) => command.find(value => value.startsWith(name + '='))?.slice(name.length + 1)
+        ?? (command.includes(name) ? command[command.indexOf(name) + 1] : undefined)
+      const resume = input.resumeSessionId ?? flag('--resume')
+      const session = resume ?? input.nativeSessionId ?? flag('--session-id') ?? randomUUID()
+      if (!resume && !flag('--session-id')) command = [...command, '--session-id=' + session]
+      input = { ...input, ...(resume ? { resumeSessionId: session, nativeSessionId: undefined } : { nativeSessionId: session }) }
+      toolResultsDirectory = standardCliCache(await realpath(input.cwd), session, input.env)
+    }
+    // Main sessions discover selected user Skills through their normal user
+    // config. Only isolated tasks need the plugin route for those Skills.
+    const skillPlugins = command.includes('--print')
+      ? await prepareNativeSkillPlugins(input.env, Boolean(input.isolatedTask)) : undefined
+    try {
+      const executionEnvironment = { ...input.env,
+        ...(skillPlugins ? { BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: skillPlugins.builtins } : {}) }
+      const taskAccess = input.isolatedTask ? await createNativeTaskAccess({
+        ...input.isolatedTask, allowWorkingFiles: true,
+        toolResultsDirectory,
+        modelType: standardCliProvider(input.env).modelType,
+        ...(input.env.BEEGAME_CONFIG_DIR
+          ? { skillsDirectory: resolve(input.env.BEEGAME_CONFIG_DIR, 'skills') } : {}),
+        ...(executionEnvironment.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR
+          ? { builtinSkillsDirectory: executionEnvironment.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR } : {}),
+      }) : undefined
+      const projectAccess = taskAccess ? undefined : await projectExecutionAccess({
+        workspacePath: input.cwd, sessionId: input.sessionId, environment: executionEnvironment,
+        toolResultsDirectory,
+        ...(input.toolPolicy ? { scopedTools: input.nativeTools } : {}),
+      })
+      const scratchPath = taskAccess?.environment.TMPDIR ?? projectAccess!.temporary
+      const childEnvironment: Record<string, string> = { ...nativeRuntimeEnvironment(input.env),
+        ...(taskAccess?.environment ?? projectAccess!.environment) }
+      delete childEnvironment.BEEGAME_NATIVE_SKILLS_DIR
+      delete childEnvironment.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR
+      command = withStandardCliDiagnostics(command)
+      // Standard SDK info logs expose response status/timing, not debug request
+      // bodies. Do not alter provider, timeout or retry configuration.
+      if (command.includes('--debug-to-stderr')) childEnvironment.ANTHROPIC_LOG = input.env.ANTHROPIC_LOG ?? 'info'
+      const child = Bun.spawn([...appendWorkingFilesInstruction(command, scratchPath),
+        ...(skillPlugins?.flags ?? []), ...(taskAccess?.flags ?? projectAccess!.flags)], {
+        cwd: taskAccess?.root ?? projectAccess!.root,
+        env: childEnvironment,
+        stdin: 'pipe',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      }) as RuntimeProcess
+      const runtime = new NativeCliProcessRuntime(
+        child,
+        input,
+        observabilityFactory({
+          workspacePath: input.cwd,
+          sessionId: input.sessionId,
+          ...runtimeIdentity(input.env),
+          ...(input.runtimeLaunchContract
+            ? { launchContract: input.runtimeLaunchContract }
+            : {}),
+        }),
+        scratchPath,
+        taskAccess,
+        projectAccess,
+        skillPlugins?.close,
+        command.includes('--debug-to-stderr'),
+      )
+      runtime.stdoutCompletion = runtime.consumeStdout()
+      runtime.stderrCompletion = runtime.consumeStderr()
+      void child.exited.then(code => runtime.onExit(code))
+      return runtime
+    } catch (error) {
+      await skillPlugins?.close()
+      throw error
+    }
   }
 
   async submit(input: BeeGameSessionSubmitInput): Promise<void> {
     await this.browserCleanup
+    if (this.startupError) throw this.startupError
     if (this.disposed) throw new Error('Bee Game Studio native runtime is closed')
     if (this.activeTurn)
       throw new Error('Bee Game Studio native runtime already has an active turn')
@@ -207,11 +288,9 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         // runtime itself.
         session_id: this.nativeSessionId ?? '',
         parent_tool_use_id: null,
-        ...(input.directionAuthors ? { beegame_direction_authors: input.directionAuthors } : {}),
-        ...(input.projectTurn ? { beegame_project_turn: input.projectTurn } : {}),
         message: {
           role: 'user',
-          content: nativePromptContent(input.prompt),
+          content: nativeAssignmentPrompt(input.prompt, input.projectTurn),
         },
       })
     })
@@ -232,7 +311,12 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         if (this.child.exitCode === null) this.child.kill('SIGKILL')
       }, 2000)
       try { await this.child.exited } finally { clearTimeout(timeout) }
-      await this.cleanupTestBrowsers()
+      // Process exit and pipe EOF are separate events. Drain passive provider
+      // accounting before the manager records terminal usage.
+      try {
+        await this.stderrCompletion
+        await this.cleanupTestBrowsers()
+      } finally { await this.closeSkillPlugins() }
     })()
   }
 
@@ -262,13 +346,28 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     let pending = ''
     let discarding = false
     const accept = (line: string) => {
+      const standard = standardCliDebugDiagnostic(line)
+      if (standard) this.observability.observeDiagnostic(standard)
       if (!line.startsWith(NATIVE_DIAGNOSTIC_PREFIX)) return
       try {
-        this.observability.observeDiagnostic(JSON.parse(line.slice(NATIVE_DIAGNOSTIC_PREFIX.length)))
+        const diagnostic = parseNativeDiagnostic(JSON.parse(line.slice(NATIVE_DIAGNOSTIC_PREFIX.length)))
+        if (!diagnostic) return
+        this.observability.observeDiagnostic(diagnostic)
+        const { cumulativeInputTokens: input, cumulativeOutputTokens: output,
+          cumulativeCacheReadTokens: cacheRead, cumulativeCacheCreationTokens: cacheCreation } = diagnostic
+        if (diagnostic.event === 'stream_end' && input !== undefined && output !== undefined &&
+            cacheRead !== undefined && cacheCreation !== undefined && Number.isSafeInteger(input + output + cacheRead + cacheCreation)) {
+          this.sessionInput.onNativeUsage?.({ prompt_tokens: input, completion_tokens: output,
+            cache_read_tokens: cacheRead, cache_creation_tokens: cacheCreation,
+            total_tokens: input + output + cacheRead + cacheCreation })
+        }
       } catch { /* Invalid diagnostics must not affect the runtime. */ }
     }
     const consume = (text: string) => {
-      this.stderrTail = (this.stderrTail + text).slice(-16_384)
+      // Standard debug mode also enables SDK logging, including request bodies.
+      // Never reflect that stream into public errors or persist its raw text.
+      // Non-CLI fixture/legacy transports keep their existing stderr behavior.
+      if (!this.childDiagnosticsEnabled) this.stderrTail = (this.stderrTail + text).slice(-16_384)
       for (const part of text.split(/(?<=\n)/)) {
         if (!discarding) pending += part
         if (pending.length > 4_096) { pending = ''; discarding = true }
@@ -287,6 +386,16 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
   }
 
   private async onMessage(message: Record<string, unknown>): Promise<void> {
+    // Standard CLI load failures happen before it can replay a user UUID.
+    // They belong to this cold process, not an old background turn. Preserve
+    // the actual error, but never adopt emitLoadError's temporary session ID.
+    if (!this.acknowledgedAnyTurn && isStartupLoadError(message)) {
+      this.startupError = new Error(nativeErrorDetail(message))
+      if (this.activeTurn) await this.deliverTurnMessage(message)
+      return
+    }
+    const usage = this.publicUsage.observe(message)
+    if (usage) this.sessionInput.onNativeUsage?.(usage)
     const reportedSessionId = stringField(message, 'session_id')
     if (reportedSessionId && isNativeSessionId(reportedSessionId)) {
       if (reportedSessionId !== this.nativeSessionId) {
@@ -332,6 +441,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         return
       }
       turn.acknowledged = true
+      this.acknowledgedAnyTurn = true
       const pending = turn.pendingMessages
       turn.pendingMessages = []
       for (const buffered of pending) {
@@ -439,6 +549,16 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     const toolInput = objectField(request, 'input') ?? {}
     const decisionReason = stringField(request, 'decision_reason')
     const blockedPath = stringField(request, 'blocked_path')
+    const agentId = stringField(request, 'agent_id')
+    if (this.sessionInput.toolPolicy && toolName && toolUseID) {
+      const scoped = await this.sessionInput.toolPolicy({
+        toolName, toolUseID, input: toolInput,
+        message: decisionReason ?? `${toolName} requires permission.`,
+        ...(agentId ? { agentId } : {}),
+      })
+      if (this.disposed || this.activeTurn !== turn) return
+      if (scoped) { respond(toolInput, scoped); return }
+    }
     if (await this.projectAccess?.isReferenceRead(toolName, toolInput)) {
       respond(toolInput, { behavior: 'allow', source: 'policy' })
       return
@@ -471,18 +591,23 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       ? await requestPermission({
           toolUseID,
           toolName,
-          message: publicArtifactApprovalMessage(toolName, toolInput, this.sessionInput.env.BEEGAME_ARTIFACTS_URL)
+          message: publicArtifactApprovalMessage(toolName, toolInput, this.sessionInput.env.BEEGAME_ARTIFACTS_URL ?? this.sessionInput.env.CLAUDE_ARTIFACTS_URL)
             ?? decisionReason ?? `${toolName} requires permission.`,
           input: toolInput,
           ...(decisionReason ? { decisionReason } : {}),
           ...(blockedPath ? { blockedPath } : {}),
+          ...(agentId ? { agentId } : {}),
           ...(permissionSuggestions ? { permissionSuggestions } : {}),
         })
       : ({ behavior: 'deny', message: 'Permission authority is unavailable.' } as const)
     respond(toolInput, decision)
   }
 
-  private onExit(code: number): void {
+  private async onExit(code: number): Promise<void> {
+    // Exit may precede pipe EOF or an awaited message observer. Do not reject
+    // the turn while its terminal result is still buffered on stdout.
+    await Promise.all([this.stdoutCompletion, this.stderrCompletion])
+    await this.closeSkillPlugins()
     void this.cleanupTestBrowsers()
     if (this.disposed) return
     this.disposed = true
@@ -587,6 +712,9 @@ function selectedRuntimeModel(
     env[`${provider}_DEFAULT_SONNET_MODEL`] ||
     env[`${provider}_DEFAULT_OPUS_MODEL`] ||
     env[`${provider}_DEFAULT_HAIKU_MODEL`] ||
+    env.BGS_DEFAULT_BALANCED_MODEL ||
+    env.BGS_DEFAULT_STRONG_MODEL ||
+    env.BGS_DEFAULT_FAST_MODEL ||
     env.BEEGAME_MODEL ||
     'configured'
   )
@@ -633,20 +761,35 @@ export function nativePromptContent(prompt: BeeGamePromptInput): unknown {
   return typeof prompt === 'string' ? [{ type: 'text', text: prompt }] : prompt
 }
 
+/** GDD is an ordinary native turn. Invoke its explicitly supplied plugin Skill
+ * through the public slash-command interface; native core needs no role flag.
+ * The host retains assignment metadata for saved-output acceptance. */
+export function nativeAssignmentPrompt(prompt: BeeGamePromptInput, turn?: BeeGameSessionSubmitInput['projectTurn']) {
+  if (turn?.authorDocument !== 'GDD.md') return nativePromptContent(prompt)
+  const blocks = typeof prompt === 'string' ? [{ type: 'text' as const, text: prompt }] : prompt
+  const command = '/bgs-builtins:game-systems-designer-expert'
+  // Native array input parses only its final text block. Earlier blocks
+  // (platform facts/images) remain source context, not command arguments.
+  const index = blocks.length - 1
+  if (blocks[index]?.type !== 'text') return [...blocks, { type: 'text', text: command }]
+  return blocks.map((block, position) => position === index && block.type === 'text'
+    ? { ...block, text: command + ' ' + block.text } : block)
+}
+
 export function nativeRuntimeEnvironment(
   selectedModelEnvironment: Record<string, string>,
 ): Record<string, string> {
-  return {
+  const environment: Record<string, string> = {
     ...getSafeRuntimeProcessEnvironment(),
-    ...selectedModelEnvironment,
+    ...standardCliProvider(selectedModelEnvironment).environment,
     // The native process needs provider credentials; its Bash/MCP/LSP children do not.
-    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
-    // This host can present permission requests from background agents.
-    // Route them to the same authority instead of silently auto-denying them.
-    BEEGAME_NATIVE_BACKGROUND_PERMISSIONS: '1',
-    // Reuse the metadata-only protocol; never enable full request/response capture.
-    BEEGAME_NATIVE_DIAGNOSTICS: '1',
+    BGS_SUBPROCESS_ENV_SCRUB: '1',
   }
+  // These authorize host database RPCs, never model execution. Also strip them
+  // if an alternate caller mistakenly supplies them in the selected env.
+  delete environment.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
+  delete environment.SUPABASE_SERVICE_ROLE_KEY
+  return environment
 }
 
 async function* ndjsonLines(
@@ -668,6 +811,13 @@ async function* ndjsonLines(
   }
   buffer += decoder.decode()
   if (buffer.trim()) yield buffer.trim()
+}
+
+function isStartupLoadError(message: Record<string, unknown>): boolean {
+  return message.type === 'result' && message.subtype === 'error_during_execution' &&
+    message.is_error === true && message.parent_tool_use_id == null && message.request_id === undefined &&
+    message.num_turns === 0 && message.duration_ms === 0 && message.duration_api_ms === 0 &&
+    Array.isArray(message.errors) && message.errors.some(error => typeof error === 'string' && error.length > 0)
 }
 
 function isErrorResult(message: Record<string, unknown>): boolean {

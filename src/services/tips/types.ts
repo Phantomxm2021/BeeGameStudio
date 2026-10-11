@@ -1,4 +1,4 @@
-import type { ThemeName } from '@anthropic/ink'
+import type { ThemeName } from '@bee-game-studio/ink'
 import type { FileStateCache } from '../../utils/fileStateCache.js'
 
 /** Spinner 提示评估时可用的会话上下文（字段可按调用场景部分提供）。 */

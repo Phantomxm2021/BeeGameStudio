@@ -5,7 +5,7 @@ import * as path from 'path';
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
-import { Byline } from '@anthropic/ink';
+import { Byline } from '@bee-game-studio/ink';
 import { MCPRemoteServerMenu } from '../../components/mcp/MCPRemoteServerMenu.js';
 import { MCPStdioServerMenu } from '../../components/mcp/MCPStdioServerMenu.js';
 import { MCPToolDetailView } from '../../components/mcp/MCPToolDetailView.js';
@@ -15,7 +15,7 @@ import { SearchBox } from '../../components/SearchBox.js';
 import { useSearchInput } from '../../hooks/useSearchInput.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- useInput needed for raw search mode text input
-import { Box, Text, useInput, useTerminalFocus } from '@anthropic/ink';
+import { Box, Text, useInput, useTerminalFocus } from '@bee-game-studio/ink';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import { getBuiltinPluginDefinition } from '../../plugins/builtinPlugins.js';
 import { useMcpToggleEnabled } from '../../services/mcp/MCPConnectionManager.js';

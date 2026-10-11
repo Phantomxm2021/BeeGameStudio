@@ -72,9 +72,83 @@ describe('upstream core manifest', () => {
     )
     expect(workflow).toContain('bun run core:audit')
   })
+
+  test('product substitutions target existing files and rename only locally maintained package namespaces', async () => {
+    const root = resolve(import.meta.dir, '../..')
+    const manifest = await loadAlignmentManifest(resolve(root, 'config/upstream-core-alignment.json'))
+    for (const path of Object.keys(manifest.fileSubstitutions)) {
+      expect(await Bun.file(resolve(root, path)).exists()).toBe(true)
+    }
+    for (const [from, to] of [
+      ['@anthropic/ink', '@bee-game-studio/ink'],
+      ['@anthropic/remote-control-server', '@bee-game-studio/remote-control-server'],
+    ]) {
+      expect(manifest.literalSubstitutions).toContainEqual({ from, to })
+    }
+    expect(manifest.fileSubstitutions).not.toHaveProperty('src/cli/updateCCB.ts')
+  })
 })
 
 describe('upstream core audit', () => {
+  test.each(['upstream', 'local'] as const)('rejects symlink ancestors of explicitly synchronized files (%s)', async side => {
+    const root = await mkdtemp('/private/tmp/bgs-alignment-parent-')
+    try {
+      const upstreamRoot = join(root, 'upstream')
+      const localRoot = join(root, 'local')
+      await mkdir(upstreamRoot)
+      await mkdir(localRoot)
+      await writeFixture(join(root, 'outside'), 'check.ts', 'outside evidence')
+      const linked = side === 'local' ? localRoot : upstreamRoot
+      const ordinary = side === 'local' ? upstreamRoot : localRoot
+      await symlink(join(root, 'outside'), join(linked, 'scripts'))
+      await writeFixture(ordinary, 'scripts/check.ts', 'ordinary source')
+      const input = { manifest: { ...fixtureManifest, synchronizedDirectories: [], synchronizedFiles: ['scripts/check.ts'] },
+        upstreamRoot, localRoot, verifyCommit: false }
+      await expect(auditCoreAlignment(input)).rejects.toThrow('symbolic links are not allowed')
+      await expect(syncCoreAlignment(input)).rejects.toThrow('symbolic links are not allowed')
+      expect(await readFile(join(root, 'outside/check.ts'), 'utf8')).toBe('outside evidence')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test('sync preserves declared compatibility files and entry hooks without hiding audit differences', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'core-alignment-runtime-'))
+    const upstreamRoot = join(root, 'upstream')
+    const localRoot = join(root, 'local')
+    const manifest = await loadAlignmentManifest(
+      resolve(import.meta.dir, '../../config/upstream-core-alignment.json'),
+    )
+    expect(manifest.rootExceptions['src/utils/runtimeEnvironment.ts']).toBeDefined()
+    expect(manifest.rootExceptions['src/entrypoints/cli.tsx']).toBeDefined()
+    const helper = await Bun.file(resolve(import.meta.dir, '../../src/utils/runtimeEnvironment.ts')).text()
+    const entry = "import {normalizeRuntimeEnvironment} from '../utils/runtimeEnvironment'\nexport const environment = normalizeRuntimeEnvironment({CLAUDE_CODE_SIMPLE:'1'})\n"
+    try {
+      await writeFixture(upstreamRoot, 'src/entrypoints/cli.tsx', 'export const upstream = true\n')
+      await writeFixture(upstreamRoot, 'src/normal.ts', 'export const updated = true\n')
+      await writeFixture(localRoot, 'src/entrypoints/cli.tsx', entry)
+      await writeFixture(localRoot, 'src/utils/runtimeEnvironment.ts', helper)
+      await writeFixture(localRoot, 'src/normal.ts', 'old\n')
+      await writeFixture(localRoot, 'src/unapproved.ts', 'unexpected\n')
+      const input = {
+        manifest: { ...fixtureManifest, rootExceptions: manifest.rootExceptions },
+        upstreamRoot, localRoot, verifyCommit: false,
+      }
+      await syncCoreAlignment(input)
+      expect(await Bun.file(join(localRoot, 'src/entrypoints/cli.tsx')).text()).toBe(entry)
+      expect(await Bun.file(join(localRoot, 'src/utils/runtimeEnvironment.ts')).text()).toBe(helper)
+      expect(await Bun.file(join(localRoot, 'src/normal.ts')).text()).toBe('export const updated = true\n')
+      expect(await Bun.file(join(localRoot, 'src/unapproved.ts')).exists()).toBe(false)
+      expect((await import(join(localRoot, 'src/entrypoints/cli.tsx'))).environment).toEqual({ BGS_SIMPLE: '1' })
+      expect((await auditCoreAlignment(input)).differences).toEqual([
+        { kind: 'modified', path: 'src/entrypoints/cli.tsx' },
+        { kind: 'local-only', path: 'src/utils/runtimeEnvironment.ts' },
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test('applies only declared branding substitutions', async () => {
     const root = await mkdtemp(join(tmpdir(), 'core-alignment-branding-'))
     const upstreamRoot = join(root, 'upstream')

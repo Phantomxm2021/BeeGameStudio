@@ -1,6 +1,6 @@
 import figures from 'figures';
 import * as React from 'react';
-import { Box, Text, StatusIcon } from '@anthropic/ink';
+import { Box, Text, StatusIcon } from '@bee-game-studio/ink';
 import type { ContextSuggestion } from '../utils/contextSuggestions.js';
 import { formatTokens } from '../utils/format.js';
 

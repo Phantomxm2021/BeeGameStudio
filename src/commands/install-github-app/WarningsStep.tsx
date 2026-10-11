@@ -1,6 +1,6 @@
 import figures from 'figures';
 import { GITHUB_ACTION_SETUP_DOCS_URL } from '../../constants/github-app.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import type { Warning } from './types.js';
 

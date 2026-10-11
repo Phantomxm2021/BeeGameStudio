@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from 'bun:test'
+import { describe, test, expect, mock, beforeEach, spyOn } from 'bun:test'
 import { debugMock } from '../../../tests/mocks/debug'
 
 mock.module('src/utils/debug.ts', debugMock)
@@ -14,6 +14,7 @@ function createMockSubprocess(options?: {
   proc: Subprocess
   writeToStdout: (data: string) => void
   simulateExit: (code?: number) => void
+  closeStdout: () => void
 } {
   let stdoutController: ReadableStreamDefaultController<Uint8Array>
   const exitResolvers: Array<(code: number) => void> = []
@@ -77,6 +78,7 @@ function createMockSubprocess(options?: {
       }
       for (const resolve of exitResolvers) resolve(code)
     },
+    closeStdout() { stdoutController.close() },
   }
 }
 
@@ -274,28 +276,38 @@ describe('SSHSessionManagerImpl', () => {
     expect(stdin.write).toBeDefined()
   })
 
-  test('respondToPermissionRequest sends allow response', () => {
-    const { proc } = createMockSubprocess()
+  test('respondToPermissionRequest sends allow response', async () => {
+    const { proc, writeToStdout } = createMockSubprocess()
     const opts = createMockOptions()
     const manager = new SSHSessionManagerImpl(proc, opts)
 
     manager.connect()
-    manager.respondToPermissionRequest('req-123', {
+    const write = spyOn(proc.stdin as unknown as { write(d: Uint8Array): number }, 'write')
+    writeToStdout(JSON.stringify({ type: 'control_request', request_id: 'req-123', request: { subtype: 'can_use_tool', tool_name: 'Bash', tool_use_id: 'tool-1', input: {} } }))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(manager.respondToPermissionRequest('req-123', {
       behavior: 'allow',
       updatedInput: { command: 'ls -la' },
-    })
+    })).toBe(true)
+    expect(JSON.parse(new TextDecoder().decode(write.mock.calls[0]![0])).response.response).toEqual({ behavior: 'allow', updatedInput: { command: 'ls -la' } })
+    manager.disconnect()
   })
 
-  test('respondToPermissionRequest sends deny response', () => {
-    const { proc } = createMockSubprocess()
+  test('respondToPermissionRequest sends deny response', async () => {
+    const { proc, writeToStdout } = createMockSubprocess()
     const opts = createMockOptions()
     const manager = new SSHSessionManagerImpl(proc, opts)
 
     manager.connect()
-    manager.respondToPermissionRequest('req-123', {
+    const write = spyOn(proc.stdin as unknown as { write(d: Uint8Array): number }, 'write')
+    writeToStdout(JSON.stringify({ type: 'control_request', request_id: 'req-123', request: { subtype: 'can_use_tool', tool_name: 'Bash', tool_use_id: 'tool-1', input: {} } }))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(manager.respondToPermissionRequest('req-123', {
       behavior: 'deny',
       message: 'User denied',
-    })
+    })).toBe(true)
+    expect(JSON.parse(new TextDecoder().decode(write.mock.calls[0]![0])).response.response).toEqual({ behavior: 'deny', message: 'User denied' })
+    manager.disconnect()
   })
 
   test('process exit without reconnect calls onDisconnected', async () => {
@@ -409,5 +421,207 @@ describe('SSHSessionManagerImpl', () => {
     expect(opts.state.reconnectingCalls.length).toBe(2)
     expect(opts.state.disconnectedCount).toBe(1)
     expect(manager.isConnected()).toBe(false)
+    expect(opts.state.errors.map(error => error.message)).toEqual([
+      'SSH reconnect attempt 1 failed: SSH connection refused',
+      'SSH reconnect attempt 2 failed: SSH connection refused',
+    ])
   }, 15000)
+})
+
+async function withFastReconnect(run: () => Promise<void>): Promise<void> {
+  const original = globalThis.setTimeout
+  const clock = spyOn(globalThis, 'setTimeout').mockImplementation(((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => original(fn, Math.min(ms ?? 0, 10), ...args)) as typeof setTimeout)
+  try { await run() } finally { clock.mockRestore() }
+}
+
+test('a late reconnect failure after user disconnect does not report a stale error', async () => {
+  await withFastReconnect(async () => {
+    const first = createMockSubprocess()
+    let rejectAttempt!: (error: Error) => void
+    const started = Promise.withResolvers<void>()
+    const opts = createMockOptions({ reconnect: () => {
+      started.resolve()
+      return new Promise((_resolve, reject) => { rejectAttempt = reject })
+    } })
+    const manager = new SSHSessionManagerImpl(first.proc, opts)
+    manager.connect()
+    first.simulateExit()
+    await started.promise
+    manager.disconnect()
+    rejectAttempt(new Error('late connection failure'))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(opts.state.errors).toEqual([])
+    expect(opts.state.disconnectedCount).toBe(0) // Explicit disconnect is owned by the caller.
+    expect(manager.isConnected()).toBe(false)
+    expect(opts.state.reconnectingCalls).toHaveLength(1)
+  })
+})
+
+test('an already exited replacement is a failed reconnect, not a connected session', async () => {
+  await withFastReconnect(async () => {
+    const first = createMockSubprocess(), dead = createMockSubprocess({ exitCode: 1 })
+    const reconnect = mock(async () => dead.proc)
+    const opts = createMockOptions({ reconnect, maxReconnectAttempts: 2 })
+    const manager = new SSHSessionManagerImpl(first.proc, opts)
+    manager.connect(); first.simulateExit()
+    for (let i = 0; i < 8; i++) await new Promise(resolve => setTimeout(resolve, 10))
+    expect(reconnect).toHaveBeenCalledTimes(2)
+    expect(opts.state.connectedCount).toBe(1)
+    expect(opts.state.disconnectedCount).toBe(1)
+    expect(manager.isConnected()).toBe(false)
+  })
+})
+
+test('EOF of a newly adopted process is not swallowed by the previous reconnect', async () => {
+  await withFastReconnect(async () => {
+    const first = createMockSubprocess(), closed = createMockSubprocess(), healthy = createMockSubprocess()
+    closed.closeStdout()
+    let calls = 0
+    const opts = createMockOptions({ reconnect: async () => ++calls === 1 ? closed.proc : healthy.proc })
+    const manager = new SSHSessionManagerImpl(first.proc, opts)
+    manager.connect(); first.simulateExit()
+    for (let i = 0; i < 8; i++) await new Promise(resolve => setTimeout(resolve, 10))
+    expect(calls).toBe(2)
+    expect(manager.isConnected()).toBe(true)
+    manager.disconnect()
+  })
+})
+
+test('a late reconnect is killed after user disconnect, without another connected callback', async () => {
+  await withFastReconnect(async () => {
+    const first = createMockSubprocess(), late = createMockSubprocess()
+    let accept!: (proc: Subprocess) => void
+    const started = Promise.withResolvers<void>()
+    const opts = createMockOptions({ reconnect: () => { started.resolve(); return new Promise(resolve => { accept = resolve }) } })
+    const manager = new SSHSessionManagerImpl(first.proc, opts)
+    manager.connect(); first.simulateExit()
+    await started.promise
+    manager.disconnect(); accept(late.proc)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(late.proc.kill).toHaveBeenCalledTimes(1)
+    expect(opts.state.connectedCount).toBe(1)
+    expect(manager.isConnected()).toBe(false)
+    manager.connect()
+    expect(opts.state.connectedCount).toBe(1)
+  })
+})
+
+test('a retired process exit cannot reconnect the replacement', async () => {
+  await withFastReconnect(async () => {
+    const old = createMockSubprocess(), replacement = createMockSubprocess()
+    const reconnect = mock(async () => replacement.proc)
+    const opts = createMockOptions({ reconnect })
+    const manager = new SSHSessionManagerImpl(old.proc, opts)
+    manager.connect(); old.closeStdout()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    old.simulateExit()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(reconnect).toHaveBeenCalledTimes(1)
+    expect(manager.isConnected()).toBe(true)
+    manager.disconnect()
+  })
+})
+
+test('reconnect receives the actual SDK init session ID', async () => {
+  await withFastReconnect(async () => {
+    const first = createMockSubprocess(), replacement = createMockSubprocess()
+    const reconnect = mock(async (_session?: string) => replacement.proc)
+    const manager = new SSHSessionManagerImpl(first.proc, createMockOptions({ reconnect }))
+    manager.connect()
+    first.writeToStdout(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'original-session' }))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    first.simulateExit()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(reconnect).toHaveBeenCalledWith('original-session', expect.any(AbortSignal))
+    manager.disconnect()
+  })
+})
+
+test('unconnected and reconnecting sessions cannot write to a retired pipe', async () => {
+  await withFastReconnect(async () => {
+    const first = createMockSubprocess(), second = createMockSubprocess()
+    const write = spyOn(first.proc.stdin as unknown as { write(d: Uint8Array): number }, 'write')
+    const manager = new SSHSessionManagerImpl(first.proc, createMockOptions({ reconnect: async () => second.proc }))
+    expect(await manager.sendMessage('before-connect')).toBe(false)
+    manager.connect()
+    first.simulateExit()
+    await Promise.resolve()
+    expect(await manager.sendMessage('during-reconnect')).toBe(false)
+    expect(write).not.toHaveBeenCalled()
+    manager.disconnect()
+    await new Promise(resolve => setTimeout(resolve, 20))
+  })
+})
+
+test.each([0, 1])('incomplete write (%s bytes) reports failure and retires the pipe', async written => {
+  const f = createMockSubprocess()
+  spyOn(f.proc.stdin as unknown as { write(d: Uint8Array): number }, 'write').mockReturnValue(written)
+  const opts = createMockOptions()
+  const manager = new SSHSessionManagerImpl(f.proc, opts)
+  manager.connect()
+  expect(await manager.sendMessage('not-accepted')).toBe(false)
+  expect(manager.isConnected()).toBe(false)
+  expect(opts.state.errors[0]?.message).toContain('complete message')
+  expect(f.proc.kill).toHaveBeenCalled()
+  f.simulateExit()
+})
+
+test('a throwing write fails visibly and retires the broken pipe', async () => {
+  const f = createMockSubprocess()
+  spyOn(f.proc.stdin as unknown as { write(d: Uint8Array): number }, 'write').mockImplementation(() => { throw new Error('EPIPE') })
+  const opts = createMockOptions()
+  const manager = new SSHSessionManagerImpl(f.proc, opts)
+  manager.connect()
+  expect(await manager.sendMessage('not-accepted')).toBe(false)
+  expect(manager.isConnected()).toBe(false)
+  expect(opts.state.errors[0]?.message).toContain('not writable')
+  expect(f.proc.kill).toHaveBeenCalled()
+  f.simulateExit()
+})
+
+test('old permission IDs cannot be sent to the replacement process', async () => {
+  await withFastReconnect(async () => {
+    const first = createMockSubprocess(), second = createMockSubprocess()
+    const opts = createMockOptions({ reconnect: async () => second.proc })
+    const manager = new SSHSessionManagerImpl(first.proc, opts)
+    manager.connect()
+    const request = (id: string) => JSON.stringify({ type: 'control_request', request_id: id, request: { subtype: 'can_use_tool', tool_name: 'Bash', tool_use_id: id, input: {} } })
+    first.writeToStdout(request('old-request'))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    first.simulateExit()
+    for (let i = 0; i < 8 && opts.state.connectedCount < 2; i++) await new Promise(resolve => setTimeout(resolve, 10))
+    const write = spyOn(second.proc.stdin as unknown as { write(d: Uint8Array): number }, 'write')
+    expect(manager.respondToPermissionRequest('old-request', { behavior: 'allow' })).toBe(false)
+    expect(write).not.toHaveBeenCalled()
+    second.writeToStdout(request('new-request'))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(manager.respondToPermissionRequest('new-request', { behavior: 'allow' })).toBe(true)
+    expect(manager.respondToPermissionRequest('new-request', { behavior: 'allow' })).toBe(false)
+    expect(write).toHaveBeenCalledTimes(1)
+    manager.disconnect()
+  })
+})
+
+test('disconnect aborts a pending reconnect factory without stale callbacks', async () => {
+  await withFastReconnect(async () => {
+    const first = createMockSubprocess()
+    const started = Promise.withResolvers<void>()
+    let signal: AbortSignal | undefined
+    const opts = createMockOptions({ reconnect: (_id, abortSignal) => {
+      signal = abortSignal
+      started.resolve()
+      return new Promise((_resolve, reject) => signal!.addEventListener('abort', () => reject(signal!.reason), { once: true }))
+    } })
+    const manager = new SSHSessionManagerImpl(first.proc, opts)
+    manager.connect()
+    first.simulateExit()
+    await started.promise
+    manager.disconnect()
+    expect(signal?.aborted).toBe(true)
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(opts.state.errors).toEqual([])
+    expect(opts.state.connectedCount).toBe(1)
+  })
 })

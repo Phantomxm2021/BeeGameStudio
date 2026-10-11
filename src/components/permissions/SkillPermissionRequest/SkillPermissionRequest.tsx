@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo } from 'react';
 import { logError } from 'src/utils/log.js';
 import { getOriginalCwd } from '../../../bootstrap/state.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { sanitizeToolNameForAnalytics } from '../../../services/analytics/metadata.js';
 import { SKILL_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/SkillTool/constants.js';
 import { SkillTool } from '@bee-game-studio/builtin-tools/tools/SkillTool/SkillTool.js';

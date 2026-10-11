@@ -5,7 +5,7 @@ import { MessageResponse } from 'src/components/MessageResponse.js';
 import { BLACK_CIRCLE } from 'src/constants/figures.js';
 import { getModeColor } from 'src/utils/permissions/PermissionMode.js';
 import { z } from 'zod/v4';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import type { Tool } from 'src/Tool.js';
 import { buildTool, type ToolDef } from 'src/Tool.js';
 import { lazySchema } from 'src/utils/lazySchema.js';
@@ -155,7 +155,7 @@ function AskUserQuestionResultMessage({ answers }: { answers: Output['answers'] 
     <Box flexDirection="column" marginTop={1}>
       <Box flexDirection="row">
         <Text color={getModeColor('default')}>{BLACK_CIRCLE}&nbsp;</Text>
-        <Text>User answered Claude&apos;s questions:</Text>
+        <Text>User answered BGS&apos;s questions:</Text>
       </Box>
       <MessageResponse>
         <Box flexDirection="column">

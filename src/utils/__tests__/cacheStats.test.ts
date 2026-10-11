@@ -85,7 +85,7 @@ mock.module('src/utils/envUtils.js', () => ({
   },
   isEnvDefinedFalsy: realIsEnvDefinedFalsy,
   isBareMode: () =>
-    realIsEnvTruthy(process.env.CLAUDE_CODE_SIMPLE) ||
+    realIsEnvTruthy(process.env.BGS_SIMPLE) ||
     process.argv.includes('--bare'),
   parseEnvVars: (rawEnvArgs: string[] | undefined) => {
     const parsed: Record<string, string> = {}

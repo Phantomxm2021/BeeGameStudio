@@ -2,7 +2,7 @@ import type { StructuredPatchHunk } from 'diff';
 import * as React from 'react';
 import { Suspense, use, useState } from 'react';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import type { FileEdit } from '@bee-game-studio/builtin-tools/tools/FileEditTool/types.js';
 import { findActualString } from '@bee-game-studio/builtin-tools/tools/FileEditTool/utils.js';
 import { adjustHunkLineNumbers, CONTEXT_LINES, getPatchForDisplay } from '../utils/diff.js';

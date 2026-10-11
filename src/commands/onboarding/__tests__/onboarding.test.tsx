@@ -7,7 +7,7 @@ import { debugMock } from '../../../../tests/mocks/debug';
 // mock.module is process-global / last-write-wins; without delegation the
 // stub Box/Pane/Text/useTheme leak into other test files (e.g.
 // AgentsPlatformView.test.tsx) that need real ink components.
-const _realOnboardingInkMod = (await import('@anthropic/ink')) as Record<string, unknown>;
+const _realOnboardingInkMod = (await import('@bee-game-studio/ink')) as Record<string, unknown>;
 let _useStubInkForOnboarding = true;
 afterAll(() => {
   _useStubInkForOnboarding = false;
@@ -49,7 +49,7 @@ mock.module('src/utils/config.js', () => ({
 // Stub heavy theme + ink imports — the launcher only references them for
 // the `theme` subcommand JSX render path. Spread real ink so when the flag
 // flips off in afterAll, later test files see real components.
-mock.module('@anthropic/ink', () => {
+mock.module('@bee-game-studio/ink', () => {
   if (_useStubInkForOnboarding) {
     return {
       ..._realOnboardingInkMod,

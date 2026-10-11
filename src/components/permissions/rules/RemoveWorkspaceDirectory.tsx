@@ -1,10 +1,10 @@
 import * as React from 'react';
 import { useCallback } from 'react';
 import { Select } from '../../../components/CustomSelect/select.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import type { ToolPermissionContext } from '../../../Tool.js';
 import { applyPermissionUpdate } from '../../../utils/permissions/PermissionUpdate.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 
 type Props = {
   directoryPath: string;
@@ -48,7 +48,7 @@ export function RemoveWorkspaceDirectory({
       <Box marginX={2} flexDirection="column">
         <Text bold>{directoryPath}</Text>
       </Box>
-      <Text>Claude Code will no longer have access to files in this directory.</Text>
+      <Text>BGS will no longer have access to files in this directory.</Text>
       <Select
         onChange={handleSelect}
         onCancel={onCancel}

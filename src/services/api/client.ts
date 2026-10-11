@@ -1,5 +1,4 @@
 import Anthropic, { type ClientOptions } from '@anthropic-ai/sdk'
-import { observeEvidenceFetch, recordEvidenceTransport } from '@bee-game-studio/agent-workflow/native-evidence'
 import { randomUUID } from 'crypto'
 import type { GoogleAuth } from 'google-auth-library'
 import {
@@ -151,7 +150,7 @@ export async function getAnthropicClient({
       fetch: resolvedFetch,
     }),
   }
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)) {
+  if (isEnvTruthy(process.env.BGS_USE_BEDROCK)) {
     const { BedrockClient } = await import('./bedrockClient.js')
     // Use region override for small fast model if specified
     const awsRegion =
@@ -189,7 +188,7 @@ export async function getAnthropicClient({
     // we have always been lying about the return type - this doesn't support batching or models
     return new BedrockClient(bedrockArgs) as unknown as Anthropic
   }
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)) {
+  if (isEnvTruthy(process.env.BGS_USE_FOUNDRY)) {
     const { AnthropicFoundry } = await import('@anthropic-ai/foundry-sdk')
     // Determine Azure AD token provider based on configuration
     // SDK reads ANTHROPIC_FOUNDRY_API_KEY by default
@@ -219,7 +218,7 @@ export async function getAnthropicClient({
     // we have always been lying about the return type - this doesn't support batching or models
     return new AnthropicFoundry(foundryArgs) as unknown as Anthropic
   }
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)) {
+  if (isEnvTruthy(process.env.BGS_USE_VERTEX)) {
     // Refresh GCP credentials if gcpAuthRefresh is configured and credentials are expired
     // This is similar to how we handle AWS credential refresh for Bedrock
     if (!isEnvTruthy(process.env.CLAUDE_CODE_SKIP_VERTEX_AUTH)) {
@@ -385,7 +384,6 @@ function buildFetch(
     } catch {
       // never let logging crash the fetch
     }
-    recordEvidenceTransport(init)
-    return observeEvidenceFetch(() => inner(input, { ...init, headers }))
+    return inner(input, { ...init, headers })
   }
 }

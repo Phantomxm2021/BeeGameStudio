@@ -19,7 +19,7 @@ import { getRemoteSessionUrl } from '../constants/product.js';
 import { useNotifications } from '../context/notifications.js';
 import type { PermissionMode, SDKMessage } from '../entrypoints/agentSdkTypes.js';
 import type { SDKControlResponse } from '../entrypoints/sdk/controlTypes.js';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';
 import { useAppState, useAppStateStore, useSetAppState } from '../state/AppState.js';
 import type { Message } from '../types/message.js';

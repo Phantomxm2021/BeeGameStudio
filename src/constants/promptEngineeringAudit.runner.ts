@@ -579,29 +579,29 @@ describe('Opus 4.7 Prompt Engineering Audit', () => {
   // TXT 来源: {product_information}
   // ------------------------------------------------------------------
   describe('#13 Product information', () => {
-    test('env info contains Claude Code product description', async () => {
+    test('env info identifies the actual BGS product', async () => {
       const envInfo = await computeSimpleEnvInfo('claude-opus-4-7')
-      expect(envInfo).toContain('Claude Code')
-      expect(envInfo).toContain('CLI')
+      expect(envInfo).toContain('BGS')
+      expect(envInfo).toContain('PhantomLab')
     })
 
-    test('env info contains model family', async () => {
+    test('env info does not prescribe a different model family', async () => {
       const envInfo = await computeSimpleEnvInfo('claude-opus-4-7')
-      expect(envInfo).toContain('Claude 4.5/4.6/4.7')
+      expect(envInfo).not.toContain('When building AI applications, default to')
     })
 
-    test('env info contains correct model IDs', async () => {
+    test('env info describes only the actual configured model', async () => {
       const envInfo = await computeSimpleEnvInfo('claude-opus-4-7')
       expect(envInfo).toContain('claude-opus-4-7')
-      expect(envInfo).toContain('claude-sonnet-4-6')
-      expect(envInfo).toContain('claude-haiku-4-5')
+      expect(envInfo).not.toContain('claude-sonnet-4-6')
+      expect(envInfo).not.toContain('claude-haiku-4-5')
     })
 
-    test('mentions Chrome/Excel/Cowork products', async () => {
+    test('does not advertise third-party products as BGS capabilities', async () => {
       const envInfo = await computeSimpleEnvInfo('claude-opus-4-7')
-      expect(envInfo).toContain('Chrome')
-      expect(envInfo).toContain('Excel')
-      expect(envInfo).toContain('Cowork')
+      expect(envInfo).not.toContain('Claude in Chrome')
+      expect(envInfo).not.toContain('Claude in Excel')
+      expect(envInfo).toContain('Use /help')
     })
   })
 

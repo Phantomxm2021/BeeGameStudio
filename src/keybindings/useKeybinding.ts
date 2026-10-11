@@ -1,2 +1,2 @@
-// Re-export from @anthropic/ink keybindings module
-export { useKeybinding, useKeybindings } from '@anthropic/ink'
+// Re-export from @bee-game-studio/ink keybindings module
+export { useKeybinding, useKeybindings } from '@bee-game-studio/ink'

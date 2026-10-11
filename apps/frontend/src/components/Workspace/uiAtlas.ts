@@ -1,4 +1,4 @@
-import { parseSpriteSheet, spriteSheetSelection } from '@beegame/scene-editor';
+import { parseSpriteSheet, spriteSheetSelection } from '../../../../../packages/scene-editor/src/sprite-sheet';
 
 const frameName = (name: string) => name.replace(/\.(png|webp|jpe?g)$/i, '');
 

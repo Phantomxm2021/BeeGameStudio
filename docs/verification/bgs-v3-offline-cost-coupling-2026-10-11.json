@@ -1,0 +1,508 @@
+{
+  "version": "bgs-v3-offline-cost-coupling.1",
+  "date": "2026-10-11",
+  "scope": "BGS-only, offline; no paid replay, real game edits, official frontend or Claude Code changes",
+  "paidEvidence": {
+    "transcript": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/.runtime/app/projects/-Users-nswell-Documents-PhantomsXR-Projects-InternalProjects-Others-BeeGameStudio-Projects-users-30fb0202-1f77-414f-82da-f92936e7bba3-v3-agent-acceptance--1b167e40f20a/a81cfeaf-b023-43c6-ad73-d5a94c6b60ed.jsonl",
+    "since": "2026-10-11T07:44:59.118Z",
+    "model": "ark-code-latest",
+    "sdkTokens": 13741088,
+    "requestLedgerTokens": 13740254,
+    "unattributedOutputTokens": 834,
+    "requests": 146,
+    "owners": {
+      "main": {
+        "requests": 97,
+        "input": 498179,
+        "cached": 9685048,
+        "creation": 0,
+        "output": 61271,
+        "total": 10244498
+      },
+      "compact": {
+        "requests": 1,
+        "input": 26300,
+        "cached": 139064,
+        "creation": 0,
+        "output": 7598,
+        "total": 172962
+      },
+      "agent-addf73d02a533f446.jsonl": {
+        "requests": 48,
+        "input": 255506,
+        "cached": 3046216,
+        "creation": 0,
+        "output": 21072,
+        "total": 3322794
+      }
+    },
+    "context": {
+      "initialMain": 139483,
+      "afterCompact": 43306,
+      "lastMain": 146618,
+      "reviewInitial": 16951,
+      "reviewMax": 91357
+    },
+    "mechanicalAuthorWindows": {
+      "requests": 37,
+      "tokens": 4783209
+    },
+    "callMetrics": {
+      "legacy": {
+        "calls": 10,
+        "requests": 10,
+        "tokens": 1076891,
+        "requestIds": [
+          "021791706416622fa871229fec4115dc08043e38393b8b5a226fb",
+          "021791706475766fa871229fec4115dc08043e38393b8b5ffe3e5",
+          "021791706782494fa871229fec4115dc08043e38393b8b55d1eec",
+          "021791706795701fa871229fec4115dc08043e38393b8b56b5dc4",
+          "021791707256502fa871229fec4115dc08043e38393b8b51a139e",
+          "021791707281910fa871229fec4115dc08043e38393b8b5c72d19",
+          "021791707390609a77e5a4c9aa25c0e7eca6d226bba90a0693609",
+          "021791707396963a77e5a4c9aa25c0e7eca6d226bba90a064218e",
+          "021791707514660a77e5a4c9aa25c0e7eca6d226bba90a037ab5b",
+          "021791707605598a77e5a4c9aa25c0e7eca6d226bba90a09bd1ea"
+        ]
+      },
+      "measurement": {
+        "calls": 13,
+        "requests": 13,
+        "tokens": 1397805,
+        "requestIds": [
+          "021791706505954fa871229fec4115dc08043e38393b8b570cb64",
+          "021791706515880fa871229fec4115dc08043e38393b8b5242dd6",
+          "021791706521814fa871229fec4115dc08043e38393b8b5a78129",
+          "021791706535936fa871229fec4115dc08043e38393b8b5172e3a",
+          "021791706864845fa871229fec4115dc08043e38393b8b5833244",
+          "021791706887934fa871229fec4115dc08043e38393b8b549879a",
+          "021791706900522fa871229fec4115dc08043e38393b8b5d65b4e",
+          "021791706923494fa871229fec4115dc08043e38393b8b5c0ba61",
+          "021791706947101fa871229fec4115dc08043e38393b8b5b034e1",
+          "021791707289464fa871229fec4115dc08043e38393b8b5fc0f9a",
+          "021791707403951a77e5a4c9aa25c0e7eca6d226bba90a09431c4",
+          "021791707530083a77e5a4c9aa25c0e7eca6d226bba90a0ba92f7",
+          "021791707567837a77e5a4c9aa25c0e7eca6d226bba90a0681cda"
+        ]
+      },
+      "reviewMeasure": {
+        "calls": 5,
+        "requests": 5,
+        "tokens": 420620,
+        "requestIds": [
+          "021791706887934fa871229fec4115dc08043e38393b8b549879a",
+          "021791706900522fa871229fec4115dc08043e38393b8b5d65b4e",
+          "021791706923494fa871229fec4115dc08043e38393b8b5c0ba61",
+          "021791706947101fa871229fec4115dc08043e38393b8b5b034e1",
+          "021791707403951a77e5a4c9aa25c0e7eca6d226bba90a09431c4"
+        ]
+      },
+      "build": {
+        "calls": 7,
+        "requests": 7,
+        "tokens": 702542,
+        "requestIds": [
+          "021791705268654fa871229fec4115dc08043e38393b8b5f96f9d",
+          "021791705322908fa871229fec4115dc08043e38393b8b5c6be1b",
+          "021791706155228fa871229fec4115dc08043e38393b8b53c0e82",
+          "021791706505954fa871229fec4115dc08043e38393b8b570cb64",
+          "021791706708144fa871229fec4115dc08043e38393b8b55e71de",
+          "021791707281910fa871229fec4115dc08043e38393b8b5c72d19",
+          "021791707530083a77e5a4c9aa25c0e7eca6d226bba90a0ba92f7"
+        ]
+      },
+      "browser": {
+        "calls": 5,
+        "requests": 5,
+        "tokens": 515930,
+        "requestIds": [
+          "021791705806323fa871229fec4115dc08043e38393b8b55d3ff6",
+          "021791706014367fa871229fec4115dc08043e38393b8b550dace",
+          "021791706161759fa871229fec4115dc08043e38393b8b5a57195",
+          "021791706292960fa871229fec4115dc08043e38393b8b511d049",
+          "021791706976495fa871229fec4115dc08043e38393b8b55f5331"
+        ]
+      }
+    },
+    "groupedToolCalls": {
+      "main:Bash": {
+        "calls": 37,
+        "resultBytes": 44085,
+        "resultChars": 43355,
+        "errors": 2
+      },
+      "main:TodoWrite": {
+        "calls": 7,
+        "resultBytes": 1400,
+        "resultChars": 1398,
+        "errors": 0
+      },
+      "main:Read": {
+        "calls": 17,
+        "resultBytes": 799790,
+        "resultChars": 794986,
+        "errors": 0
+      },
+      "main:Edit": {
+        "calls": 47,
+        "resultBytes": 10876,
+        "resultChars": 10876,
+        "errors": 1
+      },
+      "main:Grep": {
+        "calls": 5,
+        "resultBytes": 708,
+        "resultChars": 632,
+        "errors": 0
+      },
+      "main:Write": {
+        "calls": 2,
+        "resultBytes": 451,
+        "resultChars": 451,
+        "errors": 0
+      },
+      "main:Agent": {
+        "calls": 1,
+        "resultBytes": 1053,
+        "resultChars": 1051,
+        "errors": 0
+      },
+      "main:SendMessage": {
+        "calls": 1,
+        "resultBytes": 672,
+        "resultChars": 672,
+        "errors": 0
+      },
+      "agent-addf73d02a533f446.jsonl:Bash": {
+        "calls": 40,
+        "resultBytes": 34321,
+        "resultChars": 32074,
+        "errors": 3
+      },
+      "agent-addf73d02a533f446.jsonl:TodoWrite": {
+        "calls": 3,
+        "resultBytes": 480,
+        "resultChars": 480,
+        "errors": 0
+      },
+      "agent-addf73d02a533f446.jsonl:Read": {
+        "calls": 20,
+        "resultBytes": 1564232,
+        "resultChars": 1558283,
+        "errors": 1
+      },
+      "agent-addf73d02a533f446.jsonl:Grep": {
+        "calls": 1,
+        "resultBytes": 920,
+        "resultChars": 920,
+        "errors": 0
+      }
+    },
+    "readSerialization": {
+      "bytes": 2364022,
+      "imageSerializedBytes": 2169034
+    }
+  },
+  "interpretation": [
+    "Request totals include the full request context and overlap between command categories; they are not additive or a savings estimate.",
+    "Image tool-result JSON/base64 byte size is not image token usage. Do not delete visual observations on that basis.",
+    "Repeated complete source reads around compaction are real but not necessarily avoidable: the summary may no longer carry needed file details.",
+    "The V3 submit path sends one goal/turnContext, resumes the native UUID, and does not enable legacy milestone retry or direction authors. No evidence of automatic BGS paid retry.",
+    "Native compaction completed this round; later growth is cumulative request context, not proof of a stalled compressor or model distortion."
+  ],
+  "confirmedDefects": [
+    {
+      "problem": "V3 no-argument Content preflight used eight-document prose/handoff digest as runtime index authority",
+      "evidence": "UI prose edits at 08:27:36.374Z and 08:31:54.520Z followed by --authority, index edits at 08:27:52.148Z and 08:32:09.938Z and builds; no game source edits in those intervals",
+      "fix": "V3 managed entry defaults to --current. Actual content/Manifest/member/layout checks reused. Saved documentRevision remains compatibility metadata, no claim of design agreement. Explicit legacy commands/default legacy delivery unchanged."
+    },
+    {
+      "problem": "Measurement request conflict did not direct evidence readers to the existing read-only lookup",
+      "evidence": "Reviewer changed report arguments on the same key three times, then started a new independent measurement to access evidence",
+      "fix": "Conflict reports --inspect <request-id>; prior-turn inspect/idempotence/currentness work remains intact. No automatic rebuild or native retry."
+    }
+  ],
+  "quality": {
+    "verifiedOffline": [
+      "Actual member corruption, registry revision changes, missing/invalid inputs, unsafe index, unknown resources and UI overflow still fail",
+      "Currentness/export freshness rejects post-measure source/report edits",
+      "Source-derived Camera/font/pixel positive and deliberately wrong-consumer negative cases"
+    ],
+    "notVerified": [
+      "Real professional art/gameplay/audio quality",
+      "Actual Agent selection of correct independent assertions",
+      "Net paid Token savings",
+      "Earlier network/provider cause of stalled compaction"
+    ],
+    "noNewQualityGate": true,
+    "noAddedModelRound": true,
+    "noLimits": true
+  },
+  "implementationFiles": [
+    "packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts",
+    "packages/agent-workflow-server/src/beegame/content-checker-runtime.ts",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts",
+    "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts",
+    "packages/agent-workflow-server/src/beegame/scene-ui-content-authoring.ts",
+    "packages/agent-workflow-server/src/beegame/current-content-validation.test.ts"
+  ],
+  "sourceFreeze": "457aa9d2a966874106da6d4c26c27969fef8ea31bf5b418b4d880ffd70cf9479  packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts\ne59c47c7716b2f89be5248b35d73fc5e6c6e407a5faa0031635d7b3e0c0d8aa3  packages/agent-workflow-server/src/beegame/content-checker-runtime.ts\nfb00a59cc55d4ab44adc3e4a2eec5cccda96932afdcb887ca35d870c03888c8d  packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts\n264a9a2b8f59bbf3f7ba5b613e404b9b030087848c184f4f0b5963667e52580a  packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts\na6540e31be7262b01ce5fe96b192de89f780d07e5d69d1645c18b079861a4f80  packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts\nd60d2752460aa2985343d3aa8b609853f30b544a6759a16d37d1216fb0b3f8a5  packages/agent-workflow-server/src/beegame/scene-ui-content-authoring.ts\n6b54e1ce5d0363bd8f6b12ce91a73ae04406844d1428ecdca56f93105d130a22  packages/agent-workflow-server/src/beegame/current-content-validation.test.ts\n",
+  "regression": {
+    "targeted": {
+      "pass": 128,
+      "fail": 0,
+      "expects": 1127,
+      "files": 10,
+      "seconds": 18.12,
+      "initialNarrow": {
+        "pass": 47,
+        "fail": 0,
+        "files": 2,
+        "seconds": 1.65
+      },
+      "typecheckExit": 0,
+      "diffCheckExit": 0,
+      "command": "BEEGAME_TEST_REAL_BROWSER=1 BGS_LAYOUT_BROWSER=1 bun test packages/agent-workflow-server/src/beegame/current-content-validation.test.ts packages/agent-workflow-server/src/beegame/game-content-validation-cli.test.ts packages/agent-workflow-server/src/beegame/game-content-package.test.ts packages/agent-workflow-server/src/beegame/content-binding.test.ts packages/agent-workflow-server/src/beegame/scene-ui-content-authoring.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/measured-preview.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/check-versions.test.ts packages/agent-workflow-server/src/beegame/shared-playwright.test.ts",
+      "note": "The command also names a nonexistent scene-ui-content-authoring.test.ts; Bun ran 10 actual files, not 11. Initial 47 narrow tests overlap and are not added."
+    },
+    "extended": {
+      "pass": 51,
+      "fail": 0,
+      "expects": 290,
+      "files": 4,
+      "seconds": 163.69,
+      "nativeRequests": 25,
+      "nativeUUIDPreserved": true,
+      "paidModelCalls": 0,
+      "command": "BEEGAME_TEST_REAL_BROWSER=1 BGS_LAYOUT_BROWSER=1 bun test packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal-native.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/runtime-integration.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/font-consumption.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/pixel-consumption.test.ts"
+    },
+    "totalDistinctTests": 179
+  },
+  "protectedDirectories": {
+    "apps/frontend": {
+      "files": 508,
+      "sha256": "f52e2ae0825cb04e6f94526bd1f258358d7f541e5a81343ec5b2dd138468cfba"
+    },
+    "src": {
+      "files": 2445,
+      "sha256": "8f0069cec3ff82f03f4845e4c4c2596c8507dcd3976c4af7823cdbc4fbfbf493"
+    },
+    "packages/builtin-tools": {
+      "files": 383,
+      "sha256": "6368c4fce0bd93d2a9e7af17a3895a195fed65abcd94d98fec7049991cdb6a5b"
+    }
+  },
+  "gameReadOnlyFiles": [
+    {
+      "path": "bun.lock",
+      "sha256": "cd7f60aef306513e095d7d1478d449985dffdeec79464af96f1031d07fa2d040",
+      "unchanged": true
+    },
+    {
+      "path": "content/index.json",
+      "sha256": "9ef5bef7eaffaa4319cdf31283239a9ba8af21d07e7fb0077d4d61451423e427",
+      "unchanged": true
+    },
+    {
+      "path": "content/scenes/level-1.json",
+      "sha256": "990424e68d4e750799dfe5ba5af75f89f1c163369529afb89df09a8cec3f013d",
+      "unchanged": true
+    },
+    {
+      "path": "content/scenes/level-2.json",
+      "sha256": "07a463e85fce599296339f6ea7fb0ee631783576bd9236a5a81af34453562022",
+      "unchanged": true
+    },
+    {
+      "path": "content/scenes/level-3.json",
+      "sha256": "3f5cb30ec6b7be0fda59add01bcec3b2f3c19ef9217adc9863611e684fdc6af6",
+      "unchanged": true
+    },
+    {
+      "path": "content/ui/ending.json",
+      "sha256": "3766cd152dbd02482d63db5b1fb98fb0cd45970b409beee5faa64893b2dcaeee",
+      "unchanged": true
+    },
+    {
+      "path": "content/ui/fail.json",
+      "sha256": "a4bbb18bb30a456f047ae8e1267ce75ec29c9eb03e7c150b3ce6a5aac22c7226",
+      "unchanged": true
+    },
+    {
+      "path": "content/ui/hud.json",
+      "sha256": "b67165894e4c5d27a3712d60d4a8e9183a260cb2be2ff071fe69edd7291573d6",
+      "unchanged": true
+    },
+    {
+      "path": "content/ui/level-select.json",
+      "sha256": "9df195020bda8f6672d8488e09cdf0f11b0317b0b58ad8b9266cfc2497f76630",
+      "unchanged": true
+    },
+    {
+      "path": "content/ui/success.json",
+      "sha256": "721f7a0b2d011ee8f826d855d63753bc55ac5e7fb27ef7766fd446c933e6046b",
+      "unchanged": true
+    },
+    {
+      "path": "content/ui/title.json",
+      "sha256": "4653aa969024c25575d3886226d19fe9dec3264be8ca0093db051c08f47de722",
+      "unchanged": true
+    },
+    {
+      "path": "docs/ART_DIRECTION.md",
+      "sha256": "d86eb5698a74fa89f90ae06abb2ef0c1a794fd09b1950b39486e16a21e5916a7",
+      "unchanged": true
+    },
+    {
+      "path": "docs/ASSET_PLAN.md",
+      "sha256": "e6dfce8526090583a7807348ea07831537bc06f3b4f93ba3400e7d9afbc67f73",
+      "unchanged": true
+    },
+    {
+      "path": "docs/AUDIO_DESIGN.md",
+      "sha256": "202511b264a3e2652af368984d954b1962c743ee70a372eda8ef7f44edfa7c6d",
+      "unchanged": true
+    },
+    {
+      "path": "docs/BALANCE_DESIGN.md",
+      "sha256": "b5efbaed193c03069d4f5daa184014f1714d54410f6dea7c143f10e2c7ef6af3",
+      "unchanged": true
+    },
+    {
+      "path": "docs/GDD.md",
+      "sha256": "d05cb55092fb1ebf0a916268af15492879e66e13dbc0544ffb97839a0108e2e2",
+      "unchanged": true
+    },
+    {
+      "path": "docs/LEVEL_SCENE_DESIGN.md",
+      "sha256": "f6daac5c0bb5ae41f3c5cc4e57c224337e9dc9ab33d124aae0ca7c9f4b41e5c8",
+      "unchanged": true
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "5688687b1ba9a7db4c6d7124852517331baf87b307d725ecbcd610a1af92436d",
+      "unchanged": true
+    },
+    {
+      "path": "docs/TECHNICAL_DESIGN.md",
+      "sha256": "5a7d36b6370c83118a8f04579ce06ecd4597ab60f9690a2834bce405f21ae82b",
+      "unchanged": true
+    },
+    {
+      "path": "docs/UI_UX_SPEC.md",
+      "sha256": "e2c74c6b209940ce945f08259db1cc652e7b411ca97977779cd1630e5b487145",
+      "unchanged": true
+    },
+    {
+      "path": "index.html",
+      "sha256": "d798ec27a484d11c067958ddcf1b830d0fef6292231a903cc26fbc6a9c1a0799",
+      "unchanged": true
+    },
+    {
+      "path": "package.json",
+      "sha256": "a6e112c7e8f286c451503c014307fe598bc9eec86adb4344a4ac26c50af00398",
+      "unchanged": true
+    },
+    {
+      "path": "src/audio.ts",
+      "sha256": "0247da888558cda91bdb5a69ff50eca8b089b1c33df5ccd3e0268f7ef945b529",
+      "unchanged": true
+    },
+    {
+      "path": "src/content.ts",
+      "sha256": "e73fc9ec02b906cec7bf33625ae4297fd022f409ee7fbf7847239fe99882d0ac",
+      "unchanged": true
+    },
+    {
+      "path": "src/game.ts",
+      "sha256": "a37af585da1f6e2cf20e92ae32c4fb906484721b72cc91b3ec1c54f1427b003b",
+      "unchanged": true
+    },
+    {
+      "path": "src/main.ts",
+      "sha256": "0dc39610e5d9892f6a229cc08d4e9fec77b21d80b4ea2435add63ddabc405c42",
+      "unchanged": true
+    },
+    {
+      "path": "src/render.ts",
+      "sha256": "7f8108b74f2e9495a0bb789f1593d757870b1ba6039ff37fbfba79daf9e61eb7",
+      "unchanged": true
+    },
+    {
+      "path": "src/sim.ts",
+      "sha256": "6a7cff98d7ad50eed228c4819d11c7ffe1be2d6ee3f2428e1555ad98d0d27205",
+      "unchanged": true
+    },
+    {
+      "path": "src/storage.ts",
+      "sha256": "dfd9adbe96ba5c5fdf1e836ca24af4a8653f1250d095a3042a37c2c7bfe68905",
+      "unchanged": true
+    },
+    {
+      "path": "src/styles.css",
+      "sha256": "7680dbfa8292b36c1a48dc0182c76137a7818b7fdddac4bb188e96a8a2b5d1c6",
+      "unchanged": true
+    },
+    {
+      "path": "src/types.ts",
+      "sha256": "7009d7a731d39fec9826f177f2065b2a3ea46acfe41876b35046ae0ad1f26000",
+      "unchanged": true
+    },
+    {
+      "path": "tests/browser-fullflow.mjs",
+      "sha256": "35d99cf242881ce708eacab4c75191eafef0005017481ff59252055ce2dcc798",
+      "unchanged": true
+    },
+    {
+      "path": "tests/browser-verify.mjs",
+      "sha256": "23db3859b3c0f7ef22474fa833309bafdd0552a0fff919cbe19b25e3c133b9f9",
+      "unchanged": true
+    },
+    {
+      "path": "tests/headless-sim.ts",
+      "sha256": "9b9c87453519acc87dffee178cfa0f09f5492f8acc04fa946fcfa28dff7549b0",
+      "unchanged": true
+    },
+    {
+      "path": "tsconfig.json",
+      "sha256": "08316fe7b2133d3aaacdfd5eb393b0d7cb49c0fc9d69eb839c7d1bea81a9a61f",
+      "unchanged": true
+    },
+    {
+      "path": "vite.config.ts",
+      "sha256": "ea3af12244844b18d90e0594d4e4226274d6d54a2c97edc6b22cee26d8f7421e",
+      "unchanged": true
+    },
+    {
+      "path": "reports/browser/REPORT_V22.md",
+      "sha256": "e2fe7081ff4a3e3e56bf50a8c48baa07aaea5b93e1d8c639f3f73b942850479b",
+      "unchanged": true
+    },
+    {
+      "path": "docs/TECHNICAL_DESIGN.md",
+      "sha256": "5a7d36b6370c83118a8f04579ce06ecd4597ab60f9690a2834bce405f21ae82b",
+      "unchanged": true
+    },
+    {
+      "path": "docs/UI_UX_SPEC.md",
+      "sha256": "e2c74c6b209940ce945f08259db1cc652e7b411ca97977779cd1630e5b487145",
+      "unchanged": true
+    },
+    {
+      "path": "docs/LEVEL_SCENE_DESIGN.md",
+      "sha256": "f6daac5c0bb5ae41f3c5cc4e57c224337e9dc9ab33d124aae0ca7c9f4b41e5c8",
+      "unchanged": true
+    }
+  ],
+  "deployment": "Offline source changes only; no service restart/database migration/real project resume.",
+  "planning": {
+    "version": "1.49",
+    "section": "9.20",
+    "previousVersionArchiveBytes": 128403,
+    "previousVersionArchiveByteEqual": true,
+    "previousVersionArchiveSha256": "0e1385b378179abd50aaf93bef310e3d5649bee6e011adf4076e8273b861b2aa",
+    "sourcesUnchangedSinceRegressionFreeze": true
+  },
+  "remaining": "Removing the verified interface-induced churn does not remove native long-history costs or ensure Agent batching/semantic quality. No extra prompts, forced workers, history pruning or automatic paid iteration added."
+}

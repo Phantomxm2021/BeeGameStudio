@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { MessageResponse } from 'src/components/MessageResponse.js';
 import { OutputLine } from 'src/components/shell/OutputLine.js';
 import type { ToolProgressData } from 'src/Tool.js';

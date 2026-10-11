@@ -21,11 +21,11 @@ import { TodoWriteTool } from '@bee-game-studio/builtin-tools/tools/TodoWriteToo
 import { TungstenTool } from '@bee-game-studio/builtin-tools/tools/TungstenTool/TungstenTool.js';
 import { WebFetchTool } from '@bee-game-studio/builtin-tools/tools/WebFetchTool/WebFetchTool.js';
 import { WebSearchTool } from '@bee-game-studio/builtin-tools/tools/WebSearchTool/WebSearchTool.js';
-import { type KeyboardEvent, Box, Text } from '@anthropic/ink';
+import { type KeyboardEvent, Box, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { count } from '../../utils/array.js';
 import { plural } from '../../utils/stringUtils.js';
-import { Divider } from '@anthropic/ink';
+import { Divider } from '@bee-game-studio/ink';
 
 type Props = {
   tools: Tools;

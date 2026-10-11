@@ -50,6 +50,9 @@ import {
   userFacingName,
 } from './UI.js'
 
+const FILE_NOT_READ_ERROR =
+  'This existing file has no valid Read record in the current tool context. Use Read on this file before overwriting it.'
+
 const inputSchema = lazySchema(() =>
   z.strictObject({
     file_path: z
@@ -184,6 +187,13 @@ export const FileWriteTool = buildTool({
     let fileMtimeMs: number
     try {
       const fileStat = await fs.stat(fullFilePath)
+      if (fileStat.isDirectory()) {
+        return {
+          result: false,
+          message: `Cannot write to '${file_path}': the path is a directory. Specify a file path inside it, or use Bash ls to list its contents.`,
+          errorCode: 5,
+        }
+      }
       fileMtimeMs = fileStat.mtimeMs
     } catch (e) {
       if (isENOENT(e)) {
@@ -193,6 +203,10 @@ export const FileWriteTool = buildTool({
     }
 
     const readTimestamp = toolUseContext.readFileState.get(fullFilePath)
+
+    if (!readTimestamp) {
+      return { result: false, message: FILE_NOT_READ_ERROR, errorCode: 2 }
+    }
 
     // Reuse mtime from the stat above — avoids a redundant statSync via
     // getFileModificationTime.
@@ -269,7 +283,8 @@ export const FileWriteTool = buildTool({
     if (meta !== null) {
       const lastWriteTime = getFileModificationTime(fullFilePath)
       const lastRead = readFileState.get(fullFilePath)
-      if (!lastRead || lastWriteTime > lastRead.timestamp) {
+      if (!lastRead) throw new Error(FILE_NOT_READ_ERROR)
+      if (lastWriteTime > lastRead.timestamp) {
         // Timestamp indicates modification, but on Windows timestamps can change
         // without content changes (cloud sync, antivirus, etc.). For full reads,
         // compare content as a fallback to avoid false positives.

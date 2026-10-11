@@ -6,7 +6,7 @@ import {
 } from 'src/services/analytics/index.js';
 import { useInterval } from 'usehooks-ts';
 import { useUpdateNotification } from '../hooks/useUpdateNotification.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import {
   type AutoUpdaterResult,
   getLatestVersion,

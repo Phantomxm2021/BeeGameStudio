@@ -1,8 +1,8 @@
 import * as React from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
-import { Pane } from '@anthropic/ink';
+import { Pane } from '@bee-game-studio/ink';
 import { ThemePicker } from '../../components/ThemePicker.js';
-import { useTheme } from '@anthropic/ink';
+import { useTheme } from '@bee-game-studio/ink';
 import type { LocalJSXCommandCall } from '../../types/command.js';
 
 type Props = {

@@ -57,7 +57,7 @@ function assertPngPixelStream(bytes: Buffer): void {
   catch { throw new Error('PNG pixel stream cannot be decoded') }
 }
 
-export function auditAssetContract(workspacePath: string): AssetContractAudit {
+export function auditAssetContract(workspacePath: string, resourceIds?: readonly string[]): AssetContractAudit {
   const workspace = resolve(workspacePath)
   const manifestPath = resolve(workspace, 'assets', 'asset-manifest.json')
   const empty: Omit<AssetContractAudit, 'present' | 'valid'> = {
@@ -67,7 +67,8 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
     bindings: [],
     issues: [],
   }
-  if (existsSync(resolve(workspace, 'assets', 'content')))
+  if (resourceIds && !resourceIds.length) empty.issues.push('An explicit resource audit scope must not be empty.')
+  if (!resourceIds && existsSync(resolve(workspace, 'assets', 'content')))
     empty.issues.push(
       'Retired resource content root exists: assets/content. Move game content to the later content/ package stage.',
     )
@@ -88,7 +89,7 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
   const registeredModulePaths = new Set(
     readBeeGameAssetManifestModulePathsSync(workspace),
   )
-  for (const moduleKind of ['requirements', 'resources'] as const) {
+  for (const moduleKind of resourceIds ? [] : ['requirements', 'resources'] as const) {
     const moduleRoot = resolve(workspace, 'assets', 'manifest', moduleKind)
     if (!existsSync(moduleRoot)) continue
     for (const entry of readdirSync(moduleRoot, { withFileTypes: true })) {
@@ -99,7 +100,9 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
     }
   }
 
-  const resources = manifest.resources.map(resource => {
+  const selectedResources = resourceIds ? manifest.resources.filter(resource => resourceIds.includes(resource.id)) : manifest.resources
+  for (const id of resourceIds ?? []) if (!selectedResources.some(resource => resource.id === id)) empty.issues.push(`Unknown resource: ${id}`)
+  const resources = selectedResources.map(resource => {
     const issues: string[] = []
     if (resource.technical_facts?.artifactClass === 'content-definition')
       issues.push(
@@ -166,7 +169,8 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
       issues,
     }
   })
-  const requirements = manifest.requirements.map(requirement => ({
+  const selectedRequirements = resourceIds ? manifest.requirements.filter(requirement => selectedResources.some(resource => resource.fulfills.includes(requirement.id))) : manifest.requirements
+  const requirements = selectedRequirements.map(requirement => ({
     id: requirement.id,
     required: requirement.required !== false,
     issues: [] as string[],
@@ -180,13 +184,13 @@ export function auditAssetContract(workspacePath: string): AssetContractAudit {
   const resourceById = new Map(
     manifest.resources.map(resource => [resource.id, resource]),
   )
-  const bindings = manifest.requirements.flatMap(requirement => {
-    const resourceIds = manifest.resources
+  const bindings = selectedRequirements.flatMap(requirement => {
+    const resourceIds = selectedResources
       .filter(resource => resource.fulfills.includes(requirement.id))
       .map(resource => resource.id)
     return resourceIds.length ? [{ requirementId: requirement.id, resourceIds }] : []
   })
-  for (const requirement of manifest.requirements)
+  for (const requirement of selectedRequirements)
     if (
       requirement.required !== false &&
       !bindings.some(binding => binding.requirementId === requirement.id)

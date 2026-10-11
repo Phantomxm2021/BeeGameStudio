@@ -2,6 +2,7 @@ import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
 import { getIsNonInteractiveSession, getSessionId } from '../bootstrap/state.js'
 import type { SdkWorkflowProgress } from '../types/tools.js'
+import type { StdoutMessage } from '../entrypoints/sdk/controlTypes.js'
 
 type TaskStartedEvent = {
   type: 'system'
@@ -112,20 +113,30 @@ export type SdkEvent =
   | TaskProgressEvent
   | TaskNotificationSdkEvent
   | SessionStateChangedEvent
+  | Extract<StdoutMessage, { type: 'assistant' | 'user' | 'tool_progress' | 'stream_event' }>
+  | (Extract<StdoutMessage, { type: 'system'; subtype: 'compact_boundary' }> & { parent_tool_use_id?: string })
 
-const MAX_QUEUE_SIZE = 1000
 const queue: SdkEvent[] = []
+const listeners = new Set<() => void>()
+
+/** Wake the SDK output consumer without waking a model turn. Drain any events
+ * queued before the consumer was attached, and detach when its stream closes. */
+export function subscribeToSdkEvents(listener: () => void): () => void {
+  listeners.add(listener)
+  listener()
+  return () => { listeners.delete(listener) }
+}
 
 export function enqueueSdkEvent(event: SdkEvent): void {
   // SDK events are only consumed (drained) in headless/streaming mode.
-  // In TUI mode they would accumulate up to the cap and never be read.
+  // In TUI mode they would accumulate and never be read.
   if (!getIsNonInteractiveSession()) {
     return
   }
-  if (queue.length >= MAX_QUEUE_SIZE) {
-    queue.shift()
-  }
+  // Tool results and lifecycle events cannot be discarded to bound a backlog.
+  // The streaming consumer drains on arrival, even while the parent is waiting.
   queue.push(event)
+  for (const listener of listeners) listener()
 }
 
 export function drainSdkEvents(): Array<
@@ -137,7 +148,7 @@ export function drainSdkEvents(): Array<
   const events = queue.splice(0)
   return events.map(e => ({
     ...e,
-    uuid: randomUUID(),
+    uuid: ('uuid' in e && e.uuid ? e.uuid : randomUUID()) as UUID,
     session_id: getSessionId(),
   }))
 }

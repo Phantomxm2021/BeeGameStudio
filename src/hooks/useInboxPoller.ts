@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useInterval } from 'usehooks-ts'
 import type { ToolUseConfirm } from '../components/permissions/PermissionRequest.js'
 import { TEAMMATE_MESSAGE_TAG } from '../constants/xml.js'
-import { useTerminalNotification } from '@anthropic/ink'
+import { useTerminalNotification } from '@bee-game-studio/ink'
 import { sendNotification } from '../services/notifier.js'
 import {
   type AppState,
@@ -30,7 +30,7 @@ import { jsonStringify } from '../utils/slowOperations.js'
 import { isInsideTmux } from '../utils/swarm/backends/detection.js'
 import {
   ensureBackendsRegistered,
-  getBackendByType,
+  closeTeammatePane,
 } from '../utils/swarm/backends/registry.js'
 import type { PaneBackendType } from '../utils/swarm/backends/types.js'
 import { TEAM_LEAD_NAME } from '../utils/swarm/constants.js'
@@ -689,27 +689,35 @@ export function useInboxPoller({
 
         // Kill the pane if we have the info (pane-based teammates)
         if (parsed.paneId && parsed.backendType) {
-          void (async () => {
+          const closed = await (async () => {
             try {
               // Ensure backend classes are imported (no subprocess probes)
               await ensureBackendsRegistered()
               const insideTmux = await isInsideTmux()
-              const backend = getBackendByType(
+              const { readTeamFile } = await import('../utils/swarm/teamHelpers.js')
+              const teamName = currentAppState.teamContext?.teamName
+              const cleanup = teamName ? readTeamFile(teamName)?.members.find(member => member.name === parsed.from && member.tmuxPaneId === parsed.paneId)?.paneCleanup : undefined
+              const success = await closeTeammatePane(
                 parsed.backendType as PaneBackendType,
-              )
-              const success = await backend?.killPane(
                 parsed.paneId!,
-                !insideTmux,
+                cleanup?.useExternalSession ?? !insideTmux,
+                cleanup,
               )
               logForDebugging(
                 `[InboxPoller] Killed pane ${parsed.paneId} for ${parsed.from}: ${success}`,
               )
+              return success
             } catch (error) {
               logForDebugging(
                 `[InboxPoller] Failed to kill pane for ${parsed.from}: ${error}`,
               )
+              return false
             }
           })()
+          if (!closed) {
+            process.stderr.write('BGS: teammate pane cleanup incomplete; team tracking retained.\n')
+            continue
+          }
         }
 
         // Remove the teammate from teamContext.teammates so the count is accurate

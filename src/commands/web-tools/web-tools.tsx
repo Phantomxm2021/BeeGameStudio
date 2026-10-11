@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useCallback, useState } from 'react';
-import { Box, Text, Tabs, Tab, useInput } from '@anthropic/ink';
+import { Box, Text, Tabs, Tab, useInput } from '@bee-game-studio/ink';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useIsInsideModal } from '../../context/modalContext.js';

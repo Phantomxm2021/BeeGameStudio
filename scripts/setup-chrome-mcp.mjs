@@ -14,7 +14,9 @@ import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-if (process.env.CLAUDE_CODE_SKIP_CHROME_MCP_SETUP === '1') {
+// This script is also shipped standalone, outside the TypeScript CLI bootstrap.
+// Explicit BGS values (including "0" and "") take precedence over legacy flags.
+if ((process.env.BGS_SKIP_CHROME_MCP_SETUP ?? process.env.CLAUDE_CODE_SKIP_CHROME_MCP_SETUP) === '1') {
   process.exit(0)
 }
 

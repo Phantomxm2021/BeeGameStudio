@@ -1,0 +1,138 @@
+{
+  "date": "2026-10-11",
+  "scope": "V3-06 encoded Scene audio-source -> actual target HTML audio consumption; host-owned Chromium, not a replacement BGS player",
+  "coverageGap": {
+    "case": "legacy-gap: actual static page loads saved Scene/audio but its Play action does not start media",
+    "runtimeSmokeStatus": "passed",
+    "meaning": "Initial surface/load smoke never certified playback. No historical smoke evidence is promoted to audio proof."
+  },
+  "implementation": {
+    "checkId": "audio-data-consumption",
+    "version": "v3-html-audio-consumption.1",
+    "contract": "Optional audioProbes identifies registered document/node/component, actual HTML audio selector, viewport, optional activation steps and nonempty playSteps/stopSteps. Existing UI probe operand schema and task/runtime/Review/Repair mechanisms are reused. No database objects, service, render engine, new business stage or native-loop change.",
+    "sourceCoverage": "All registered Scene audio-source bindings must have probes, with explicit assetRef, data.volume (0..1) and data.loop, optionally an exact registered encoded data.member. Missing bindings, properties, resources or matching packed bytes remain unverified.",
+    "inputs": "Registry, Scene sources, manifest/modules, referenced actual resources and source/build copies; final artifact digest and all file versions rechecked.",
+    "measurement": "The game itself plays/stops from real clicks; host never calls its play/pause or resumes its audio graph. Native paused/ended/currentSrc/currentTime/volume/loop/muted/playbackRate/error are observed. A separate captureStream -> observer AudioContext -> Analyser tap measures decoded signal without connecting to output.",
+    "perturbation": "Fresh browser contexts observe original, response-only volume change, loop toggle, exact resource replaced by generated silent WAV, then restored original bytes. No source/build/resource file mutation.",
+    "interpretation": "Volume and loop fields are consumed as native properties; decoded non-silence becomes silence for the exact registered resource response and returns after restoration. Capture ignores media volume/mute, so native properties are checked separately; no final output/mix or real loop-boundary verdict.",
+    "boundedDriver": "Clicks and async media load have driver timeouts; capture context resume has a deadline. Observer graph/tracks/context, driver and owned browser are cleaned up. This is not an agent turn/token cap.",
+    "evidenceCurrency": "Existing check versions unchanged; new audio checker has its own version. Actual resource mutation and obsolete checker version invalidate closure.",
+    "sourceSha256": {
+      "workflow-v3/audio-consumption.ts": "5ebe732b4d50517a37d8c419e05fa0c255fd87054a87cc4b5511a4934bcbef87",
+      "workflow-v3/audio-consumption.test.ts": "29a062ee106bdf71f19d3893afdcf242e7855d65e25b069d452a9369c7f9bbed",
+      "workflow-v3/runtime-audio.mjs": "a0a069e26c7ca5e105a4505caa58e0b0283f6061ba630e99b84a4251542961ae",
+      "workflow-v3/runtime-browser.mjs": "f78f690d05f9a49e2019ff5268333137e32cd59843ce241d01508d61f1c8a520",
+      "workflow-v3/runtime-checks.ts": "3582df718b6d0d7bb42661e6e1c7c777d1160f3cccdfc4c426ae0beddfd78241",
+      "workflow-v3/state.ts": "cc3adc4f51796fc9bdda222594ae73400b3dd05c1cad1977fd68bd5f628fbda2",
+      "workflow-v3/checks.ts": "8ddf0399e81e418bd70d404a37feeb4f51bf56aee28cf6c23b4ffc7038acdd44",
+      "workflow-v3/check-versions.ts": "370e2386b186de7e97fbaf3d42e24b546334ad7dcf6d107a1d3e38f912507860",
+      "workflow-v3/context.ts": "081f94024510bbfe0db7068bb5b3bc3635b67a4eb8bef210b1d1bfa4223bf7cb"
+    }
+  },
+  "cases": {
+    "expectedPassed": [
+      "consume",
+      "loop-true",
+      "member",
+      "lazy-play"
+    ],
+    "expectedFailed": [
+      "ignore-volume",
+      "ignore-loop",
+      "ignore-stop",
+      "fetch-only",
+      "muted",
+      "unrelated-error",
+      "decode-error"
+    ],
+    "expectedUnverified": [
+      "wrong-member",
+      "missing-probe",
+      "missing-properties",
+      "stale-audio",
+      "silent-original",
+      "not-audio"
+    ],
+    "additionalTests": [
+      "legacy smoke coverage gap",
+      "Review -> failed owner repair cannot close -> actual fixed playback -> directed closure -> obsolete audio checker cannot close",
+      "plan operand/runtime/check authorization"
+    ],
+    "allFinalExpectedStatusesMatched": true,
+    "sourceProtection": "All consumer matrix cases assert original Scene/audio bytes remain unchanged. Passed cases become noncurrent when the actual registered clip changes. Review/repair writes only its synthetic authorized fixture, not a generated game project."
+  },
+  "regression": {
+    "main": {
+      "command": "bun test packages/agent-workflow-server/src/beegame/workflow-v3 packages/agent-workflow-server/src/beegame/font-inspection.test.ts",
+      "passed": 230,
+      "failed": 0,
+      "assertions": 1764,
+      "files": 28,
+      "seconds": 544.43,
+      "exitCode": 0,
+      "path": "/private/tmp/bgs-v3-audio-complete-regression-2026-10-11.log",
+      "sha256": "ed28878e92c55c98ba387b3da960dccab9565844eb610993335cbbfbb8201a6f"
+    },
+    "authentication": {
+      "command": "bun test packages/agent-workflow-server/src/auth/auth-context.test.ts packages/agent-workflow-server/src/__tests__/session-routes.test.ts",
+      "passed": 33,
+      "failed": 0,
+      "assertions": 224,
+      "files": 2,
+      "exitCode": 0,
+      "path": "/private/tmp/bgs-v3-audio-auth-regression-2026-10-11.log",
+      "sha256": "b23570e65addf99392c48bb172cf734f324f08c884109a358920eca6816cb3ed"
+    },
+    "commandNote": "The actual main invocation also named two nonexistent auth paths; they contributed no tests and are not claimed as coverage. The correct auth/session suites were explicitly run separately. Main and supplemental counts are not described as one invocation.",
+    "sourceFrozen": true,
+    "coverage": "Actual target audio, UI, font, image and Tilemap browser matrices; owned-driver cancellation; independent debug, CLI with local fake model, Review/Question/Repair, editing, rebuild, version freshness, export, recovery, binding and permissions. Synthetic semantic reports do not establish LLM quality."
+  },
+  "typecheck": {
+    "exitCode": 2,
+    "existingDiagnostics": 3556,
+    "workflowV3OrSharedFontDiagnostics": 0,
+    "path": "/private/tmp/bgs-v3-audio-frozen-typecheck-2026-10-11.log",
+    "sha256": "b06a3b6e247600fba24b1fa1fffa7c6ef3dc5d692b1b7ba6615fb74e9cea15fb",
+    "meaning": "Whole server typecheck is not passing; no claim that existing errors were fixed."
+  },
+  "trials": {
+    "logs": [
+      {
+        "path": "/private/tmp/bgs-v3-audio-development-2026-10-11.log",
+        "sha256": "2057aa66debadecdfd48044eb31907513915e2731b655bf63862d3ef05dad2fc"
+      },
+      {
+        "path": "/private/tmp/bgs-v3-audio-development-typecheck-2026-10-11.log",
+        "sha256": "21b6bc5b57a72f6a3e14a020c3f003af00f4d4fee26125a463aeec40635b12e7"
+      },
+      {
+        "path": "/private/tmp/bgs-v3-audio-review-development-2026-10-11.log",
+        "sha256": "809e89597bf3907b1e59a94d342e25697931a3528e13e37fbeaa863cb741a87f"
+      }
+    ],
+    "note": "Initial audio matrix passed 17 tests, then lazy-load/legacy-gap/review integration were added before the final frozen full run. One new optional asset_kind TypeScript dereference was fixed; final V3 diagnostics are zero. Development logs are preserved, not final all-slice evidence."
+  },
+  "boundaries": {
+    "formalFrontendChanged": false,
+    "claudeCodeSourceChanged": false,
+    "builtinToolsChanged": false,
+    "realGeneratedProjectChanged": false,
+    "protectedDiffSha256Before": "1def2eee7cad28e6d33ce864a6e84068eb0b69c421330309d2bcbe53891fd995",
+    "protectedDiffSha256After": "1def2eee7cad28e6d33ce864a6e84068eb0b69c421330309d2bcbe53891fd995",
+    "paidModelCalls": 0,
+    "databaseWrites": 0,
+    "productionServicesRestarted": false,
+    "personalChromeUsed": false,
+    "deliveryEligible": false
+  },
+  "limitations": [
+    "Actual encoded runtime matrix uses WAV, not proof that every listed encoding/device is supported.",
+    "Only DOM-connected HTML audio with idle -> declared game play -> decoded signal -> declared game pause/stop path. The supported sample is unmuted, unit playbackRate; short one-shots/auto-play/detached Audio and alternative playback semantics need other evidence.",
+    "Volume/loop property consumption does not prove final device gain/mute, mix, actual loop wrap, reset/restart, fades, audio aesthetics or listening quality.",
+    "Current selected resource consumption, not dynamic assetRef/member switching or complete gameplay-event mapping.",
+    "Web Audio/synthesis/spatial audio, full game acceptance, real remote-database + native CLI audio-specific integrated acceptance, paid model/token savings and production deployment remain unverified."
+  ],
+  "standards": {
+    "captureSemantics": "https://www.w3.org/TR/mediacapture-fromelement/"
+  }
+}

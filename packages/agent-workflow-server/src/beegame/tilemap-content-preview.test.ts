@@ -88,7 +88,7 @@ test('PNG preview respects renderer order, disabled renderer and disabled ancest
 test('invalid image bytes fail instead of emitting a successful partial preview',async()=>{
   const f=await fixture()
   await writeFile(join(f.root,'assets/runtime/colors.png'),'not an image')
-  await expect(f.render()).rejects.toThrow('Scene preview failed')
+  await expect(f.render()).rejects.toThrow('ART: assets/runtime/colors.png: Invalid PNG signature')
 })
 test('10,000 cells produce one layer image with shared tile definitions',async()=>{
   const f=await fixture()

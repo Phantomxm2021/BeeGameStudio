@@ -48,7 +48,9 @@ export async function startPreviewRecording(endpoint: string, input: Start, outp
   const add = (type: string, targetId: string, detail: unknown) => {
     if (!recording) return
     if (events.length >= 1000) { droppedEvents++; return }
-    const serialized = JSON.stringify(detail)
+    // Preview route segments now carry the sandbox's grant, including in stacks.
+    const serialized = JSON.stringify(detail).replace(/\/previews\/[^/\s"\\]+/g, '/previews/[redacted]')
+    detail = JSON.parse(serialized)
     if (serialized.length > 4096) { truncatedEvents++; detail = { truncated: true, text: serialized.slice(0, 4096) } }
     events.push({ at: new Date().toISOString(), type, targetId, detail })
   }
@@ -192,6 +194,6 @@ export async function startPreviewRecording(endpoint: string, input: Start, outp
 // Capability tokens, URL credentials and query payloads do not belong in reports.
 export function cleanPreviewUrl(value: string | undefined): string {
   if (!value) return ''
-  try { const url = new URL(value); return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin + url.pathname : url.protocol }
+  try { const url = new URL(value); return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin + url.pathname.replace(/^\/previews\/[^/]+/, '/previews/[redacted]') : url.protocol }
   catch { return '[unparseable URL]' }
 }

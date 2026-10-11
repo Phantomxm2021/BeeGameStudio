@@ -1,6 +1,6 @@
 import { relative } from 'path';
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { DiagnosticTrackingService } from '../services/diagnosticTracking.js';
 import type { Attachment } from '../utils/attachments.js';
 import { getCwd } from '../utils/cwd.js';

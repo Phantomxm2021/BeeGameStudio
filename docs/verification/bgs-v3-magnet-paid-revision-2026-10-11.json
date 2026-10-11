@@ -1,0 +1,914 @@
+{
+  "status": "completed-delivery-blocked",
+  "scope": "One authorized same-project paid revision and acceptance; no automatic rerun",
+  "projectId": "v3-paid-a801f793-52cb-4874-8893-f5eaad8bf833",
+  "runId": "bedaee26-a2a7-4997-adf2-688eb3a79a61",
+  "attemptId": "c14b36c5-7cd1-4469-b96b-859f1693c397",
+  "requestKey": "9c5bbfab-7fe7-4e2b-a9a9-fd7c0654f9ad",
+  "startedAt": "2026-10-11T07:44:59.118Z",
+  "runtimeRequestId": "b21a5653-fb95-43a6-9274-89863e978d2c",
+  "nativeSessionId": "a81cfeaf-b023-43c6-ad73-d5a94c6b60ed",
+  "debugOrigin": "http://127.0.0.1:58313",
+  "developerGameEdits": 0,
+  "productionFrontendEdits": 0,
+  "claudeCodeEdits": 0,
+  "automaticPaidReruns": 0,
+  "protectedBefore": {
+    "apps/frontend": {
+      "files": 508,
+      "sha256": "f52e2ae0825cb04e6f94526bd1f258358d7f541e5a81343ec5b2dd138468cfba"
+    },
+    "src": {
+      "files": 2445,
+      "sha256": "8f0069cec3ff82f03f4845e4c4c2596c8507dcd3976c4af7823cdbc4fbfbf493"
+    },
+    "packages/builtin-tools": {
+      "files": 383,
+      "sha256": "6368c4fce0bd93d2a9e7af17a3895a195fed65abcd94d98fec7049991cdb6a5b"
+    }
+  },
+  "sourceBefore": [
+    {
+      "path": "bun.lock",
+      "sha256": "cd7f60aef306513e095d7d1478d449985dffdeec79464af96f1031d07fa2d040"
+    },
+    {
+      "path": "content/index.json",
+      "sha256": "f23ca6d111cd17d194df6d71e5e18844e583c08b82a77fd3dd082443ce7d6f4b"
+    },
+    {
+      "path": "content/scenes/level-1.json",
+      "sha256": "990424e68d4e750799dfe5ba5af75f89f1c163369529afb89df09a8cec3f013d"
+    },
+    {
+      "path": "content/scenes/level-2.json",
+      "sha256": "07a463e85fce599296339f6ea7fb0ee631783576bd9236a5a81af34453562022"
+    },
+    {
+      "path": "content/scenes/level-3.json",
+      "sha256": "3f5cb30ec6b7be0fda59add01bcec3b2f3c19ef9217adc9863611e684fdc6af6"
+    },
+    {
+      "path": "content/ui/ending.json",
+      "sha256": "3766cd152dbd02482d63db5b1fb98fb0cd45970b409beee5faa64893b2dcaeee"
+    },
+    {
+      "path": "content/ui/fail.json",
+      "sha256": "a4bbb18bb30a456f047ae8e1267ce75ec29c9eb03e7c150b3ce6a5aac22c7226"
+    },
+    {
+      "path": "content/ui/hud.json",
+      "sha256": "b67165894e4c5d27a3712d60d4a8e9183a260cb2be2ff071fe69edd7291573d6"
+    },
+    {
+      "path": "content/ui/level-select.json",
+      "sha256": "9df195020bda8f6672d8488e09cdf0f11b0317b0b58ad8b9266cfc2497f76630"
+    },
+    {
+      "path": "content/ui/success.json",
+      "sha256": "721f7a0b2d011ee8f826d855d63753bc55ac5e7fb27ef7766fd446c933e6046b"
+    },
+    {
+      "path": "content/ui/title.json",
+      "sha256": "4653aa969024c25575d3886226d19fe9dec3264be8ca0093db051c08f47de722"
+    },
+    {
+      "path": "docs/ART_DIRECTION.md",
+      "sha256": "d86eb5698a74fa89f90ae06abb2ef0c1a794fd09b1950b39486e16a21e5916a7"
+    },
+    {
+      "path": "docs/ASSET_PLAN.md",
+      "sha256": "e6dfce8526090583a7807348ea07831537bc06f3b4f93ba3400e7d9afbc67f73"
+    },
+    {
+      "path": "docs/AUDIO_DESIGN.md",
+      "sha256": "202511b264a3e2652af368984d954b1962c743ee70a372eda8ef7f44edfa7c6d"
+    },
+    {
+      "path": "docs/BALANCE_DESIGN.md",
+      "sha256": "b5efbaed193c03069d4f5daa184014f1714d54410f6dea7c143f10e2c7ef6af3"
+    },
+    {
+      "path": "docs/GDD.md",
+      "sha256": "d05cb55092fb1ebf0a916268af15492879e66e13dbc0544ffb97839a0108e2e2"
+    },
+    {
+      "path": "docs/LEVEL_SCENE_DESIGN.md",
+      "sha256": "58c2a7a519708e07b54bd9af3acd6b56ff576f886be7ce8c02adfac9f31500d4"
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "5688687b1ba9a7db4c6d7124852517331baf87b307d725ecbcd610a1af92436d"
+    },
+    {
+      "path": "docs/TECHNICAL_DESIGN.md",
+      "sha256": "d910e0c60db4255edec3ea76e2740b81aea446d37d1968b92876ecdb090f0625"
+    },
+    {
+      "path": "docs/UI_UX_SPEC.md",
+      "sha256": "3fb02a2d69fdd6a77679e0d424881539304ef5786d1c2f48334378922e59233d"
+    },
+    {
+      "path": "index.html",
+      "sha256": "d798ec27a484d11c067958ddcf1b830d0fef6292231a903cc26fbc6a9c1a0799"
+    },
+    {
+      "path": "package.json",
+      "sha256": "a6e112c7e8f286c451503c014307fe598bc9eec86adb4344a4ac26c50af00398"
+    },
+    {
+      "path": "src/audio.ts",
+      "sha256": "0247da888558cda91bdb5a69ff50eca8b089b1c33df5ccd3e0268f7ef945b529"
+    },
+    {
+      "path": "src/content.ts",
+      "sha256": "6fd73657008c028766f9a3b835fd64c94c35305f34a2b8930c288ac688c0bff9"
+    },
+    {
+      "path": "src/game.ts",
+      "sha256": "5f54a438354fb370f6eb5202928a7709fb3517bda6fd16b7b8be9ed68dea7488"
+    },
+    {
+      "path": "src/main.ts",
+      "sha256": "0f87dd18f745087e329f05dd4fb96da2dab2a94326504d7ffd25904a5866ba42"
+    },
+    {
+      "path": "src/render.ts",
+      "sha256": "77f4f3ceb9300a79bb7eb72b802626ce7964f5170b45b46f7e2d3c3d5eedfa8e"
+    },
+    {
+      "path": "src/sim.ts",
+      "sha256": "6a7cff98d7ad50eed228c4819d11c7ffe1be2d6ee3f2428e1555ad98d0d27205"
+    },
+    {
+      "path": "src/styles.css",
+      "sha256": "7680dbfa8292b36c1a48dc0182c76137a7818b7fdddac4bb188e96a8a2b5d1c6"
+    },
+    {
+      "path": "src/types.ts",
+      "sha256": "7009d7a731d39fec9826f177f2065b2a3ea46acfe41876b35046ae0ad1f26000"
+    },
+    {
+      "path": "tests/headless-sim.ts",
+      "sha256": "1f948b94dfbb4fafbedc297971614483232482989cbdb4e6c3225c54e0d8ec0a"
+    },
+    {
+      "path": "tsconfig.json",
+      "sha256": "08316fe7b2133d3aaacdfd5eb393b0d7cb49c0fc9d69eb839c7d1bea81a9a61f"
+    },
+    {
+      "path": "vite.config.ts",
+      "sha256": "ea3af12244844b18d90e0594d4e4226274d6d54a2c97edc6b22cee26d8f7421e"
+    }
+  ],
+  "previousReportedTokenLowerBound": 29133820,
+  "finishedAt": "2026-10-11T08:34:22.049Z",
+  "debugService": {
+    "origin": "http://127.0.0.1:58313",
+    "closed": true,
+    "normalServicesRestarted": false
+  },
+  "result": {
+    "nativeExecution": "success",
+    "nativeModel": "ark-code-latest",
+    "runVersion": 41,
+    "runStatus": "blocked",
+    "writerLiveness": "none",
+    "turnStatus": "ended",
+    "deliveryEligible": false,
+    "quality": "unverified",
+    "preview": {
+      "http": 409,
+      "code": "measurement-stale"
+    },
+    "staticExport": {
+      "http": 409,
+      "code": "measurement-stale"
+    },
+    "editableExport": {
+      "http": 409,
+      "code": "measurement-stale"
+    }
+  },
+  "measurement": {
+    "id": "4a232625-73b7-4cf6-81d5-c0b4d7173f4b",
+    "requestKey": "maglev-v22-final3-20261011",
+    "finishedAt": "2026-10-11T08:33:07.341Z",
+    "requirementsRevision": "48bf2392-f2f5-4f17-b2c4-9bebf578ce0e",
+    "artifact": {
+      "path": "dist",
+      "sha256": "3b65ea8487d7be155c84e7d714a2c0de137b67572f16717e226841760ec66b33"
+    },
+    "freshness": {
+      "current": false,
+      "code": "measurement-stale"
+    },
+    "quality": "unverified",
+    "deliveryEligible": false,
+    "reports": [
+      {
+        "path": "reports/browser/REPORT_V22.md",
+        "sha256": "8cf59230233fc77f938e05ec74619373e1136eb99dba0268c6166d2e20a52c17"
+      },
+      {
+        "path": "docs/TECHNICAL_DESIGN.md",
+        "sha256": "5a7d36b6370c83118a8f04579ce06ecd4597ab60f9690a2834bce405f21ae82b"
+      },
+      {
+        "path": "docs/UI_UX_SPEC.md",
+        "sha256": "e2c74c6b209940ce945f08259db1cc652e7b411ca97977779cd1630e5b487145"
+      },
+      {
+        "path": "docs/LEVEL_SCENE_DESIGN.md",
+        "sha256": "f6daac5c0bb5ae41f3c5cc4e57c224337e9dc9ab33d124aae0ca7c9f4b41e5c8"
+      }
+    ]
+  },
+  "currentReportFiles": [
+    {
+      "path": "reports/browser/REPORT_V22.md",
+      "sha256": "e2fe7081ff4a3e3e56bf50a8c48baa07aaea5b93e1d8c639f3f73b942850479b",
+      "modified": "2026-10-11T08:33:25.552Z"
+    },
+    {
+      "path": "docs/TECHNICAL_DESIGN.md",
+      "sha256": "5a7d36b6370c83118a8f04579ce06ecd4597ab60f9690a2834bce405f21ae82b",
+      "modified": "2026-10-11T07:58:28.588Z"
+    },
+    {
+      "path": "docs/UI_UX_SPEC.md",
+      "sha256": "e2c74c6b209940ce945f08259db1cc652e7b411ca97977779cd1630e5b487145",
+      "modified": "2026-10-11T08:31:54.610Z"
+    },
+    {
+      "path": "docs/LEVEL_SCENE_DESIGN.md",
+      "sha256": "f6daac5c0bb5ae41f3c5cc4e57c224337e9dc9ab33d124aae0ca7c9f4b41e5c8",
+      "modified": "2026-10-11T07:58:55.515Z"
+    }
+  ],
+  "currentArtifact": {
+    "artifactSha256": "3b65ea8487d7be155c84e7d714a2c0de137b67572f16717e226841760ec66b33",
+    "unchangedPreexisting": [
+      {
+        "path": "src/storage.ts",
+        "modified": "2026-10-11T06:40:48.212Z",
+        "sha256": "dfd9adbe96ba5c5fdf1e836ca24af4a8653f1250d095a3042a37c2c7bfe68905"
+      },
+      {
+        "path": "tests/browser-verify.mjs",
+        "modified": "2026-10-11T06:50:46.751Z",
+        "sha256": "23db3859b3c0f7ef22474fa833309bafdd0552a0fff919cbe19b25e3c133b9f9"
+      }
+    ]
+  },
+  "usage": {
+    "sdk": {
+      "cache_creation_tokens": 0,
+      "cache_read_tokens": 12870328,
+      "completion_tokens": 90775,
+      "prompt_tokens": 779985,
+      "total_tokens": 13741088
+    },
+    "ledgerTotals": {
+      "requests": 146,
+      "input": 779985,
+      "cached": 12870328,
+      "creation": 0,
+      "output": 89941,
+      "total": 13740254
+    },
+    "byOwner": {
+      "main": {
+        "requests": 97,
+        "input": 498179,
+        "cached": 9685048,
+        "creation": 0,
+        "output": 61271,
+        "total": 10244498
+      },
+      "compact": {
+        "requests": 1,
+        "input": 26300,
+        "cached": 139064,
+        "creation": 0,
+        "output": 7598,
+        "total": 172962
+      },
+      "agent-addf73d02a533f446.jsonl": {
+        "requests": 48,
+        "input": 255506,
+        "cached": 3046216,
+        "creation": 0,
+        "output": 21072,
+        "total": 3322794
+      }
+    },
+    "stageWindows": [
+      {
+        "name": "Initial inspection before compaction",
+        "requests": 8,
+        "input": 1197220,
+        "output": 7176,
+        "total": 1204396,
+        "requestIds": [
+          "021791704705628fa871229fec4115dc08043e38393b8b5e12c9e",
+          "021791704727474fa871229fec4115dc08043e38393b8b512183c",
+          "021791704736810fa871229fec4115dc08043e38393b8b59481ca",
+          "021791704754400fa871229fec4115dc08043e38393b8b526c355",
+          "021791704761375fa871229fec4115dc08043e38393b8b5ea755e",
+          "021791704780283fa871229fec4115dc08043e38393b8b5206a15",
+          "021791704787483fa871229fec4115dc08043e38393b8b56e39b5",
+          "021791704867047fa871229fec4115dc08043e38393b8b52c412e"
+        ]
+      },
+      {
+        "name": "Source/docs/test preparation after compaction",
+        "requests": 40,
+        "input": 2942460,
+        "output": 30365,
+        "total": 2972825,
+        "requestIds": [
+          "021791705095862fa871229fec4115dc08043e38393b8b5f30d68",
+          "021791705105890fa871229fec4115dc08043e38393b8b5d4d536",
+          "021791705116053fa871229fec4115dc08043e38393b8b58c6d13",
+          "021791705128096fa871229fec4115dc08043e38393b8b52182e7",
+          "021791705143049fa871229fec4115dc08043e38393b8b536c8d8",
+          "021791705155419fa871229fec4115dc08043e38393b8b55e5bd0",
+          "021791705163048fa871229fec4115dc08043e38393b8b55ed288",
+          "021791705169511fa871229fec4115dc08043e38393b8b53dbd7a",
+          "021791705178478fa871229fec4115dc08043e38393b8b5b88eba",
+          "021791705217902fa871229fec4115dc08043e38393b8b5e8ef22",
+          "021791705230080fa871229fec4115dc08043e38393b8b54262c7",
+          "021791705252105fa871229fec4115dc08043e38393b8b559bd53",
+          "021791705258911fa871229fec4115dc08043e38393b8b5595bb9",
+          "021791705268654fa871229fec4115dc08043e38393b8b5f96f9d",
+          "021791705275113fa871229fec4115dc08043e38393b8b573d630",
+          "021791705285777fa871229fec4115dc08043e38393b8b5f90b15",
+          "021791705292704fa871229fec4115dc08043e38393b8b5dd467f",
+          "021791705300651fa871229fec4115dc08043e38393b8b59969dc",
+          "021791705304678fa871229fec4115dc08043e38393b8b5126b07",
+          "021791705310376fa871229fec4115dc08043e38393b8b5b81874",
+          "021791705322908fa871229fec4115dc08043e38393b8b5c6be1b",
+          "021791705328101fa871229fec4115dc08043e38393b8b541e01e",
+          "021791705335187fa871229fec4115dc08043e38393b8b5bce3dc",
+          "021791705383364fa871229fec4115dc08043e38393b8b574a875",
+          "021791705397381fa871229fec4115dc08043e38393b8b567d288",
+          "021791705403184fa871229fec4115dc08043e38393b8b5c8cbd6",
+          "021791705418066fa871229fec4115dc08043e38393b8b55d1013",
+          "021791705426805fa871229fec4115dc08043e38393b8b5d3910e",
+          "021791705439135fa871229fec4115dc08043e38393b8b59d5279",
+          "021791705443255fa871229fec4115dc08043e38393b8b5ca247a",
+          "021791705464843fa871229fec4115dc08043e38393b8b576a03d",
+          "021791705469686fa871229fec4115dc08043e38393b8b5ec5792",
+          "021791705481616fa871229fec4115dc08043e38393b8b5bec9cd",
+          "021791705487161fa871229fec4115dc08043e38393b8b57b9b06",
+          "021791705508658fa871229fec4115dc08043e38393b8b53d728b",
+          "021791705525129fa871229fec4115dc08043e38393b8b59299ca",
+          "021791705535555fa871229fec4115dc08043e38393b8b56102a5",
+          "021791705609403fa871229fec4115dc08043e38393b8b5102e4c",
+          "021791705789132fa871229fec4115dc08043e38393b8b53e5ad1",
+          "021791705796792fa871229fec4115dc08043e38393b8b5766e51"
+        ]
+      },
+      {
+        "name": "Browser checks and test/game repairs",
+        "requests": 12,
+        "input": 1276795,
+        "output": 7273,
+        "total": 1284068,
+        "requestIds": [
+          "021791705806323fa871229fec4115dc08043e38393b8b55d3ff6",
+          "021791705931259fa871229fec4115dc08043e38393b8b5dac076",
+          "021791705948274fa871229fec4115dc08043e38393b8b52dfaf8",
+          "021791705961136fa871229fec4115dc08043e38393b8b53d8782",
+          "021791706004333fa871229fec4115dc08043e38393b8b5e78eb9",
+          "021791706014367fa871229fec4115dc08043e38393b8b550dace",
+          "021791706119180fa871229fec4115dc08043e38393b8b5899650",
+          "021791706126029fa871229fec4115dc08043e38393b8b597e320",
+          "021791706155228fa871229fec4115dc08043e38393b8b53c0e82",
+          "021791706161759fa871229fec4115dc08043e38393b8b5a57195",
+          "021791706269132fa871229fec4115dc08043e38393b8b5b08f61",
+          "021791706292960fa871229fec4115dc08043e38393b8b511d049"
+        ]
+      },
+      {
+        "name": "Reports/versioning/measurement before Review returned",
+        "requests": 17,
+        "input": 1997793,
+        "output": 8489,
+        "total": 2006282,
+        "requestIds": [
+          "021791706403820fa871229fec4115dc08043e38393b8b541f30d",
+          "021791706416622fa871229fec4115dc08043e38393b8b5a226fb",
+          "021791706425585fa871229fec4115dc08043e38393b8b5ea0ae8",
+          "021791706466313fa871229fec4115dc08043e38393b8b57fdc46",
+          "021791706475766fa871229fec4115dc08043e38393b8b5ffe3e5",
+          "021791706480733fa871229fec4115dc08043e38393b8b5d613cb",
+          "021791706484793fa871229fec4115dc08043e38393b8b59f7316",
+          "021791706491735fa871229fec4115dc08043e38393b8b5baeb6d",
+          "021791706498943fa871229fec4115dc08043e38393b8b5eb4f13",
+          "021791706505954fa871229fec4115dc08043e38393b8b570cb64",
+          "021791706515880fa871229fec4115dc08043e38393b8b5242dd6",
+          "021791706521814fa871229fec4115dc08043e38393b8b5a78129",
+          "021791706535936fa871229fec4115dc08043e38393b8b5172e3a",
+          "021791706545860fa871229fec4115dc08043e38393b8b55d1eb8",
+          "021791706566369fa871229fec4115dc08043e38393b8b5cafd66",
+          "021791706638082fa871229fec4115dc08043e38393b8b59b54a4",
+          "021791706647382fa871229fec4115dc08043e38393b8b527923e"
+        ]
+      },
+      {
+        "name": "Post-Review wording/receipt and handoff",
+        "requests": 20,
+        "input": 2768959,
+        "output": 7968,
+        "total": 2776927,
+        "requestIds": [
+          "021791707238870fa871229fec4115dc08043e38393b8b560a5c4",
+          "021791707256502fa871229fec4115dc08043e38393b8b51a139e",
+          "021791707264030fa871229fec4115dc08043e38393b8b52aa9f5",
+          "021791707272329fa871229fec4115dc08043e38393b8b5f68981",
+          "021791707281910fa871229fec4115dc08043e38393b8b5c72d19",
+          "021791707289464fa871229fec4115dc08043e38393b8b5fc0f9a",
+          "021791707318919fa871229fec4115dc08043e38393b8b5f9a953",
+          "021791707339647fa871229fec4115dc08043e38393b8b5d08862",
+          "021791707346076fa871229fec4115dc08043e38393b8b5f7f59e",
+          "021791707366846a77e5a4c9aa25c0e7eca6d226bba90a01f7d7f",
+          "021791707502724a77e5a4c9aa25c0e7eca6d226bba90a046e392",
+          "021791707514660a77e5a4c9aa25c0e7eca6d226bba90a037ab5b",
+          "021791707520602a77e5a4c9aa25c0e7eca6d226bba90a0eb0ea6",
+          "021791707530083a77e5a4c9aa25c0e7eca6d226bba90a0ba92f7",
+          "021791707546305a77e5a4c9aa25c0e7eca6d226bba90a045cc9c",
+          "021791707555821a77e5a4c9aa25c0e7eca6d226bba90a0219b2b",
+          "021791707567837a77e5a4c9aa25c0e7eca6d226bba90a0681cda",
+          "021791707592492a77e5a4c9aa25c0e7eca6d226bba90a0ed91d5",
+          "021791707605598a77e5a4c9aa25c0e7eca6d226bba90a09bd1ea",
+          "021791707626039a77e5a4c9aa25c0e7eca6d226bba90a06cb577"
+        ]
+      },
+      {
+        "name": "Review and targeted follow-up",
+        "requests": 48,
+        "input": 3301722,
+        "output": 21072,
+        "total": 3322794,
+        "requestIds": [
+          "0217917066382009255aa03547266d00c3fa3dce78057f1522609",
+          "0217917066469519255aa03547266d00c3fa3dce78057f153e928",
+          "0217917066517289255aa03547266d00c3fa3dce78057f1d13577",
+          "0217917066562839255aa03547266d00c3fa3dce78057f1ce9d6c",
+          "021791706663885fa871229fec4115dc08043e38393b8b5e50d04",
+          "021791706674042fa871229fec4115dc08043e38393b8b58bdb7a",
+          "021791706684888fa871229fec4115dc08043e38393b8b5782df3",
+          "021791706694018fa871229fec4115dc08043e38393b8b51fc630",
+          "021791706699789fa871229fec4115dc08043e38393b8b51b058e",
+          "021791706708144fa871229fec4115dc08043e38393b8b55e71de",
+          "021791706727676fa871229fec4115dc08043e38393b8b52fc353",
+          "021791706735666fa871229fec4115dc08043e38393b8b550abc8",
+          "021791706743498fa871229fec4115dc08043e38393b8b5def264",
+          "021791706761262fa871229fec4115dc08043e38393b8b5d44c7e",
+          "021791706782494fa871229fec4115dc08043e38393b8b55d1eec",
+          "021791706788072fa871229fec4115dc08043e38393b8b591a076",
+          "021791706795701fa871229fec4115dc08043e38393b8b56b5dc4",
+          "021791706800876fa871229fec4115dc08043e38393b8b563e78a",
+          "021791706810010fa871229fec4115dc08043e38393b8b5d7c97e",
+          "021791706816402fa871229fec4115dc08043e38393b8b5b5ca7d",
+          "021791706825640fa871229fec4115dc08043e38393b8b52359b6",
+          "021791706838418fa871229fec4115dc08043e38393b8b533f63a",
+          "021791706848601fa871229fec4115dc08043e38393b8b51f3992",
+          "021791706855461fa871229fec4115dc08043e38393b8b58ac115",
+          "021791706864845fa871229fec4115dc08043e38393b8b5833244",
+          "021791706877005fa871229fec4115dc08043e38393b8b5bd3206",
+          "021791706887934fa871229fec4115dc08043e38393b8b549879a",
+          "021791706900522fa871229fec4115dc08043e38393b8b5d65b4e",
+          "021791706908367fa871229fec4115dc08043e38393b8b5c88c1b",
+          "021791706923494fa871229fec4115dc08043e38393b8b5c0ba61",
+          "021791706947101fa871229fec4115dc08043e38393b8b5b034e1",
+          "021791706960788fa871229fec4115dc08043e38393b8b5c667c5",
+          "021791706976495fa871229fec4115dc08043e38393b8b55f5331",
+          "021791707081827fa871229fec4115dc08043e38393b8b5c4dac3",
+          "021791707092933fa871229fec4115dc08043e38393b8b59de8d6",
+          "021791707115525fa871229fec4115dc08043e38393b8b51ac0d9",
+          "021791707123226fa871229fec4115dc08043e38393b8b54f9172",
+          "021791707132127fa871229fec4115dc08043e38393b8b553c454",
+          "021791707150208fa871229fec4115dc08043e38393b8b5ac699b",
+          "021791707156662fa871229fec4115dc08043e38393b8b5af5541",
+          "021791707184480fa871229fec4115dc08043e38393b8b5373b9a",
+          "021791707366724fa871229fec4115dc08043e38393b8b5553df5",
+          "021791707383540a77e5a4c9aa25c0e7eca6d226bba90a0b67efa",
+          "021791707390609a77e5a4c9aa25c0e7eca6d226bba90a0693609",
+          "021791707396963a77e5a4c9aa25c0e7eca6d226bba90a064218e",
+          "021791707403951a77e5a4c9aa25c0e7eca6d226bba90a09431c4",
+          "021791707418741a77e5a4c9aa25c0e7eca6d226bba90a0a03408",
+          "021791707427472a77e5a4c9aa25c0e7eca6d226bba90a073af16"
+        ]
+      },
+      {
+        "name": "Native automatic compaction",
+        "requests": 1,
+        "input": 165364,
+        "output": 7598,
+        "total": 172962,
+        "requestIds": [
+          "021791704930342fa871229fec4115dc08043e38393b8b5c6e9e9"
+        ]
+      }
+    ],
+    "stageMethod": "Timestamp windows, not semantic attribution of individual tokens; test-process CPU activity does not consume model tokens by itself.",
+    "ledgerMethod": "Deduplicate by message ID globally across main/reviewer/compaction; exclude all main IDs already present before this turn, including timestamp-refreshed compact copies.",
+    "unattributedOutputTokens": 834,
+    "reportVersionMeasurementHandoff": {
+      "requests": 37,
+      "totalTokens": 4783209
+    },
+    "projectReportedLowerBound": 42874908,
+    "requestLedger": "bgs-v3-magnet-paid-revision-requests-2026-10-11.jsonl"
+  },
+  "compression": {
+    "events": [
+      {
+        "type": "compaction_started",
+        "timestamp": "2026-10-11T07:48:50.307Z",
+        "sessionId": "beegame_b266ce1d42ab4e41bb4e45a6f985eb09",
+        "requestId": "b21a5653-fb95-43a6-9274-89863e978d2c",
+        "note": "SDK compacting status observed; delivery may be delayed. This timestamp is not the compact request start."
+      },
+      {
+        "type": "native_diagnostic",
+        "timestamp": "2026-10-11T07:48:50.325Z",
+        "sessionId": "beegame_b266ce1d42ab4e41bb4e45a6f985eb09",
+        "requestId": "b21a5653-fb95-43a6-9274-89863e978d2c",
+        "diagnostic": {
+          "event": "request_start",
+          "source": "compact",
+          "evidenceSource": "cli_debug"
+        }
+      },
+      {
+        "type": "native_diagnostic",
+        "timestamp": "2026-10-11T07:51:35.591Z",
+        "sessionId": "beegame_b266ce1d42ab4e41bb4e45a6f985eb09",
+        "requestId": "b21a5653-fb95-43a6-9274-89863e978d2c",
+        "diagnostic": {
+          "event": "request_end",
+          "source": "compact",
+          "evidenceSource": "cli_debug"
+        }
+      },
+      {
+        "type": "compaction_boundary",
+        "timestamp": "2026-10-11T07:51:35.823Z",
+        "sessionId": "beegame_b266ce1d42ab4e41bb4e45a6f985eb09",
+        "requestId": "b21a5653-fb95-43a6-9274-89863e978d2c",
+        "elapsedMs": 165516,
+        "elapsedBasis": "compacting_status_observed",
+        "statusElapsedMs": 165516,
+        "compactRequestCount": 1,
+        "note": "Observed compaction interval, not server execution time. Unattributed CLI requests may include concurrent compactions."
+      },
+      {
+        "type": "turn_terminal",
+        "timestamp": "2026-10-11T08:34:17.735Z",
+        "sessionId": "beegame_b266ce1d42ab4e41bb4e45a6f985eb09",
+        "requestId": "b21a5653-fb95-43a6-9274-89863e978d2c",
+        "provider": "anthropic",
+        "model": "ark-code-latest",
+        "outcome": "success",
+        "eventCount": 58977,
+        "byteCount": 19800259,
+        "lastEventType": "result",
+        "stdoutChunkCount": 21302,
+        "stdoutByteCount": 19859339,
+        "maxStdoutChunkGapMs": 165464,
+        "stdoutSilenceAtTerminalMs": 127
+      }
+    ],
+    "firstMainInputTokens": 139483,
+    "firstPostCompactMainInputTokens": 43306,
+    "lastMainInputTokens": 146618,
+    "previousStuckCompactionRootCauseResolved": false
+  },
+  "gameplay": {
+    "source": "Native author browser-fullflow.mjs and independent native reviewer rerun",
+    "summary": {
+      "runs": [
+        {
+          "name": "A-font-camera-override",
+          "fontSizeObserved": "23px",
+          "fontSize23px": true,
+          "camObserved": {
+            "width": 1280,
+            "height": 720,
+            "cx": 540,
+            "cy": 300,
+            "zoom": 1.2
+          },
+          "camExpected": {
+            "width": 1280,
+            "height": 720,
+            "cx": 540,
+            "cy": 300,
+            "zoom": 1.2
+          },
+          "tealAroundMapped": 378,
+          "tealAroundLegacy": 0,
+          "renderedAtMapped": true,
+          "input": {
+            "opsAfterMappedDispatch": 1,
+            "trainsAfterMappedDispatch": 1,
+            "s1AfterLegacyClick": "a",
+            "s1AfterMappedClick": "b",
+            "mappedHitWorks": true
+          }
+        },
+        {
+          "name": "B-full-journey",
+          "journey": [
+            {
+              "mute": {
+                "m0": "🔊",
+                "m1": "🔇",
+                "m2": "🔊",
+                "toggled": true
+              }
+            },
+            {
+              "level": "L1",
+              "earlyExit": null,
+              "screen": "success",
+              "failReason": null,
+              "ops": 5,
+              "par": 5,
+              "delivered": "3/3",
+              "starsLit": "★★★",
+              "threeStars": true,
+              "camIdentityAtStart": true
+            },
+            {
+              "level": "L2",
+              "earlyExit": null,
+              "screen": "success",
+              "failReason": null,
+              "ops": 14,
+              "par": 14,
+              "delivered": "6/6",
+              "starsLit": "★★★",
+              "threeStars": true,
+              "camIdentityAtStart": true
+            },
+            {
+              "level": "L3",
+              "earlyExit": null,
+              "screen": "success",
+              "failReason": null,
+              "ops": 17,
+              "par": 17,
+              "delivered": "8/8",
+              "starsLit": "★★★",
+              "threeStars": true,
+              "camIdentityAtStart": true
+            },
+            {
+              "ending": {
+                "screen": "ending",
+                "stats": "总操作 36 次　总用时 1 分 10 秒"
+              }
+            }
+          ]
+        },
+        {
+          "name": "C-fail-retry-back-select",
+          "failScreen": "fail",
+          "failReason": "miss",
+          "failReasonText": "货物送错了货站。发车前确认道岔接通的方向。",
+          "retriedToLevel": 1,
+          "retryWin": {
+            "earlyExit": null,
+            "screen": "success",
+            "ops": 5
+          },
+          "level2CardEnabledAfterWin": true,
+          "selectEntered": {
+            "screen": "playing",
+            "level": 2,
+            "par": 14
+          },
+          "menuBackToTitle": true
+        }
+      ],
+      "consoleErrors": [
+        {
+          "run": "A-override",
+          "errors": []
+        },
+        {
+          "run": "B-full-journey",
+          "errors": []
+        },
+        {
+          "run": "C-fail-retry",
+          "errors": []
+        }
+      ]
+    },
+    "normalInputsUsed": true,
+    "authorBrowserInvocations": 4,
+    "reviewerBrowserInvocations": 1,
+    "headlessAssertionsPassed": 13,
+    "observedFixes": [
+      "Numeric fontSize converts to CSS px",
+      "Scene Camera rendering transform and inverse pointer mapping",
+      "Final-level next no longer requests missing level-4"
+    ],
+    "resources": "Existing procedural Canvas/WebAudio reused; no resource acquisition this turn"
+  },
+  "unresolved": [
+    "Author appended final measurement ID/hash to tracked REPORT_V22.md 18.211 seconds after measurement; report digest changed while dist and the three captured design files still matched.",
+    "Native reviewer PASS missed current measurement eligibility.",
+    "Camera test expected switch x=540 while saved Scene uses x=560; broad 70x70 sample masks 24px expected-position discrepancy. Exact source-derived rendering proof is insufficient.",
+    "Browser test listeners and routes attach after helper initial navigation, before reload; not before first load. Fresh host runtime smoke is separate evidence.",
+    "Base fontSize17 was not directly measured; override23 was measured.",
+    "Mute-label behavior was checked, not actual audio quality; muted browser provides no listening proof.",
+    "Mutable debug action hooks remain; test did not use them, but release hardening is not proven.",
+    "No verified Skill/SKILL.md read in this paid turn.",
+    "Scene visibility warnings for procedural rendering remain unverified."
+  ],
+  "developerIndependentProbe": {
+    "status": "not-run",
+    "reason": "Normal measured Preview rejected stale measurement; no unqualified fallback or game/report patch.",
+    "temporaryFiles": [
+      "/private/tmp/magnet-measured-audit.mjs",
+      "/private/tmp/magnet-measured-audit.ts"
+    ]
+  },
+  "protectedAfter": {
+    "apps/frontend": {
+      "files": 508,
+      "sha256": "f52e2ae0825cb04e6f94526bd1f258358d7f541e5a81343ec5b2dd138468cfba"
+    },
+    "src": {
+      "files": 2445,
+      "sha256": "8f0069cec3ff82f03f4845e4c4c2596c8507dcd3976c4af7823cdbc4fbfbf493"
+    },
+    "packages/builtin-tools": {
+      "files": 383,
+      "sha256": "6368c4fce0bd93d2a9e7af17a3895a195fed65abcd94d98fec7049991cdb6a5b"
+    }
+  },
+  "protectedUnchanged": true,
+  "sourceAfter": [
+    {
+      "path": "bun.lock",
+      "sha256": "cd7f60aef306513e095d7d1478d449985dffdeec79464af96f1031d07fa2d040"
+    },
+    {
+      "path": "content/index.json",
+      "sha256": "9ef5bef7eaffaa4319cdf31283239a9ba8af21d07e7fb0077d4d61451423e427"
+    },
+    {
+      "path": "content/scenes/level-1.json",
+      "sha256": "990424e68d4e750799dfe5ba5af75f89f1c163369529afb89df09a8cec3f013d"
+    },
+    {
+      "path": "content/scenes/level-2.json",
+      "sha256": "07a463e85fce599296339f6ea7fb0ee631783576bd9236a5a81af34453562022"
+    },
+    {
+      "path": "content/scenes/level-3.json",
+      "sha256": "3f5cb30ec6b7be0fda59add01bcec3b2f3c19ef9217adc9863611e684fdc6af6"
+    },
+    {
+      "path": "content/ui/ending.json",
+      "sha256": "3766cd152dbd02482d63db5b1fb98fb0cd45970b409beee5faa64893b2dcaeee"
+    },
+    {
+      "path": "content/ui/fail.json",
+      "sha256": "a4bbb18bb30a456f047ae8e1267ce75ec29c9eb03e7c150b3ce6a5aac22c7226"
+    },
+    {
+      "path": "content/ui/hud.json",
+      "sha256": "b67165894e4c5d27a3712d60d4a8e9183a260cb2be2ff071fe69edd7291573d6"
+    },
+    {
+      "path": "content/ui/level-select.json",
+      "sha256": "9df195020bda8f6672d8488e09cdf0f11b0317b0b58ad8b9266cfc2497f76630"
+    },
+    {
+      "path": "content/ui/success.json",
+      "sha256": "721f7a0b2d011ee8f826d855d63753bc55ac5e7fb27ef7766fd446c933e6046b"
+    },
+    {
+      "path": "content/ui/title.json",
+      "sha256": "4653aa969024c25575d3886226d19fe9dec3264be8ca0093db051c08f47de722"
+    },
+    {
+      "path": "docs/ART_DIRECTION.md",
+      "sha256": "d86eb5698a74fa89f90ae06abb2ef0c1a794fd09b1950b39486e16a21e5916a7"
+    },
+    {
+      "path": "docs/ASSET_PLAN.md",
+      "sha256": "e6dfce8526090583a7807348ea07831537bc06f3b4f93ba3400e7d9afbc67f73"
+    },
+    {
+      "path": "docs/AUDIO_DESIGN.md",
+      "sha256": "202511b264a3e2652af368984d954b1962c743ee70a372eda8ef7f44edfa7c6d"
+    },
+    {
+      "path": "docs/BALANCE_DESIGN.md",
+      "sha256": "b5efbaed193c03069d4f5daa184014f1714d54410f6dea7c143f10e2c7ef6af3"
+    },
+    {
+      "path": "docs/GDD.md",
+      "sha256": "d05cb55092fb1ebf0a916268af15492879e66e13dbc0544ffb97839a0108e2e2"
+    },
+    {
+      "path": "docs/LEVEL_SCENE_DESIGN.md",
+      "sha256": "f6daac5c0bb5ae41f3c5cc4e57c224337e9dc9ab33d124aae0ca7c9f4b41e5c8"
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "5688687b1ba9a7db4c6d7124852517331baf87b307d725ecbcd610a1af92436d"
+    },
+    {
+      "path": "docs/TECHNICAL_DESIGN.md",
+      "sha256": "5a7d36b6370c83118a8f04579ce06ecd4597ab60f9690a2834bce405f21ae82b"
+    },
+    {
+      "path": "docs/UI_UX_SPEC.md",
+      "sha256": "e2c74c6b209940ce945f08259db1cc652e7b411ca97977779cd1630e5b487145"
+    },
+    {
+      "path": "index.html",
+      "sha256": "d798ec27a484d11c067958ddcf1b830d0fef6292231a903cc26fbc6a9c1a0799"
+    },
+    {
+      "path": "package.json",
+      "sha256": "a6e112c7e8f286c451503c014307fe598bc9eec86adb4344a4ac26c50af00398"
+    },
+    {
+      "path": "src/audio.ts",
+      "sha256": "0247da888558cda91bdb5a69ff50eca8b089b1c33df5ccd3e0268f7ef945b529"
+    },
+    {
+      "path": "src/content.ts",
+      "sha256": "e73fc9ec02b906cec7bf33625ae4297fd022f409ee7fbf7847239fe99882d0ac"
+    },
+    {
+      "path": "src/game.ts",
+      "sha256": "a37af585da1f6e2cf20e92ae32c4fb906484721b72cc91b3ec1c54f1427b003b"
+    },
+    {
+      "path": "src/main.ts",
+      "sha256": "0dc39610e5d9892f6a229cc08d4e9fec77b21d80b4ea2435add63ddabc405c42"
+    },
+    {
+      "path": "src/render.ts",
+      "sha256": "7f8108b74f2e9495a0bb789f1593d757870b1ba6039ff37fbfba79daf9e61eb7"
+    },
+    {
+      "path": "src/sim.ts",
+      "sha256": "6a7cff98d7ad50eed228c4819d11c7ffe1be2d6ee3f2428e1555ad98d0d27205"
+    },
+    {
+      "path": "src/storage.ts",
+      "sha256": "dfd9adbe96ba5c5fdf1e836ca24af4a8653f1250d095a3042a37c2c7bfe68905"
+    },
+    {
+      "path": "src/styles.css",
+      "sha256": "7680dbfa8292b36c1a48dc0182c76137a7818b7fdddac4bb188e96a8a2b5d1c6"
+    },
+    {
+      "path": "src/types.ts",
+      "sha256": "7009d7a731d39fec9826f177f2065b2a3ea46acfe41876b35046ae0ad1f26000"
+    },
+    {
+      "path": "tests/browser-fullflow.mjs",
+      "sha256": "35d99cf242881ce708eacab4c75191eafef0005017481ff59252055ce2dcc798"
+    },
+    {
+      "path": "tests/browser-verify.mjs",
+      "sha256": "23db3859b3c0f7ef22474fa833309bafdd0552a0fff919cbe19b25e3c133b9f9"
+    },
+    {
+      "path": "tests/headless-sim.ts",
+      "sha256": "9b9c87453519acc87dffee178cfa0f09f5492f8acc04fa946fcfa28dff7549b0"
+    },
+    {
+      "path": "tsconfig.json",
+      "sha256": "08316fe7b2133d3aaacdfd5eb393b0d7cb49c0fc9d69eb839c7d1bea81a9a61f"
+    },
+    {
+      "path": "vite.config.ts",
+      "sha256": "ea3af12244844b18d90e0594d4e4226274d6d54a2c97edc6b22cee26d8f7421e"
+    }
+  ],
+  "sourceBeforeScope": "33-file selected baseline from previous audit, not a complete fresh pre-turn snapshot. storage.ts and browser-verify.mjs pre-existed this turn and are not new edits.",
+  "nextDirectionNotImplemented": [
+    "Keep mechanical measurement receipt in BGS state, out of tracked report; freeze actual evidence before measuring.",
+    "Review qualification against final current inputs, not reviewer prose PASS.",
+    "Use source-derived precise expected values and existing beforeNavigate for targeted browser evidence.",
+    "Reduce optional report/version wording churn without weakening freshness checks or limiting agent."
+  ],
+  "evidenceScreenshot": "bgs-v3-magnet-revision-delivery-blocked-2026-10-11.jpg",
+  "regressionScope": "No BGS production source changed in this paid acceptance turn. Prior offline regression remains a separate record; no new full suite claimed."
+}

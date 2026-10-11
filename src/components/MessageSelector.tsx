@@ -16,7 +16,7 @@ import {
 } from 'src/utils/fileHistory.js';
 import { logError } from 'src/utils/log.js';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, Text, Divider } from '@anthropic/ink';
+import { Box, Text, Divider } from '@bee-game-studio/ink';
 import { useKeybinding, useKeybindings } from '../keybindings/useKeybinding.js';
 import type { Message, PartialCompactDirection, UserMessage } from '../types/message.js';
 import { stripDisplayTags } from '../utils/displayTags.js';

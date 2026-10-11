@@ -5,7 +5,7 @@
 The primary hook for handling keyboard input.
 
 ```tsx
-import { useInput } from '@anthropic/ink'
+import { useInput } from '@bee-game-studio/ink'
 
 function MyComponent() {
   useInput((input, key, event) => {
@@ -224,7 +224,7 @@ useInput((input, key) => {
 Lower-level access to the stdin stream.
 
 ```tsx
-import { useStdin } from '@anthropic/ink'
+import { useStdin } from '@bee-game-studio/ink'
 
 const {
   stdin,                    // Raw stdin stream
@@ -243,7 +243,7 @@ const {
 Interactive button that responds to keyboard and mouse:
 
 ```tsx
-import { Button } from '@anthropic/ink'
+import { Button } from '@bee-game-studio/ink'
 
 <Button onAction={() => handleClick()} tabIndex={0} autoFocus>
   {(state) => (

@@ -1,30 +1,98 @@
 import { createHash } from 'node:crypto'
+import { designSectionHashes, designDocumentSections } from './design-document-sections'
+import { checkCalculationResult } from './balance-calculation.mjs'
+import { readCalculationInputs } from './balance-calculation'
 import { readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { fromMarkdown } from 'mdast-util-from-markdown'
-import { z } from 'zod'
+import { array, enum as enumeration, literal, object, string, unknown } from 'zod'
+import type { z } from 'zod'
 import { PROJECT_DOCUMENTS } from '@bee-game-studio/agent-workflow/design-review-result'
 import { designFindingSourceIssues, type DesignFinding } from '@bee-game-studio/agent-workflow/design-review-result'
-import { parseBeeGameContentDocument } from './game-content-schema'
+import { parseBeeGameContentDocument, sceneDesignSource, BEEGAME_UI_ASSET_BACKED_ROLES, uiDesignData } from './game-content-schema'
 export { designReviewResultSchema, type DesignReviewStep, type DesignReviewResult, type DesignFinding } from '@bee-game-studio/agent-workflow/design-review-result'
 
 export type DesignDocument = typeof PROJECT_DOCUMENTS[number]
-const text = z.string().trim().min(1)
-const handoffSchema = z.object({
-  version: z.literal(2).default(2),
+const text = string().trim().min(1)
+const handoffSchema = object({
+  version: literal(2).default(2),
   documentVersion: text.optional(),
-  outputs: z.array(z.object({ id: text, section: text,
-    acceptance: z.object({ section: text, method: z.enum(['test', 'target-runtime', 'inspection']) }).strict().optional() }).strict()),
-  evidence: z.array(z.object({ id: text, kind: z.enum(['contract', 'documentation', 'capability']),
-    path: text, sha256: z.string().regex(/^[a-f0-9]{64}$/).optional(), source: text, section: text.optional(),
-    pointer: z.string().optional(), expected: z.unknown().optional() }).strict()).default([]),
+  outputs: array(object({ id: text, section: text,
+    acceptance: object({ section: text, method: enumeration(['test', 'target-runtime', 'inspection']) }).strict().optional() }).strict()),
+  implementationItems: array(object({ id: text, section: text,
+    dependsOn: array(text).optional(),
+    requirementRefs: array(object({ document: enumeration(PROJECT_DOCUMENTS), id: text }).strict()).min(1) }).strict()).optional(),
+  evidence: array(object({ id: text, kind: enumeration(['contract', 'documentation', 'capability']),
+    path: text, sha256: string().regex(/^[a-f0-9]{64}$/).optional(), source: text, section: text.optional(),
+    pointer: string().optional(), expected: unknown().optional() }).strict()).default([]),
 }).strict()
 export type DesignHandoff = z.infer<typeof handoffSchema>
 
-export const DESIGN_HANDOFF_INSTRUCTION = `Keep decisions, dependencies, open questions, limits and human-readable tables in docs/<NAME>.md. Save only the downstream index at .beegame/design-handoffs/<NAME without .md>.json; do not embed bgs-handoff JSON in prose.
+/** Owned outcome/pointer/evidence feedback, without host versions, sibling readiness
+ * or semantic certification. Catch malformed indexes in the author's short
+ * history instead of deferring basic field errors to a full joint Revision. */
+export function checkDesignHandoffDraft(workspace: string, name: string, options: { finalTechnical?: boolean } = {}) {
+  const issues: string[] = []
+  const availableRequirements: Array<{ document: DesignDocument; id: string; section: string }> = []
+  try {
+    // This public command takes either the logical name or its exact workspace
+    // docs path. Do not use basename(), which would accept arbitrary/traversing paths.
+    const documentName = name.startsWith('docs/') ? name.slice(5) : name
+    if (!PROJECT_DOCUMENTS.some(document => document === documentName))
+      throw new Error('Invalid design document argument ' + JSON.stringify(name) +
+        '. Expected NAME.md or docs/NAME.md; supported names: ' + PROJECT_DOCUMENTS.join(', '))
+    name = documentName
+    const document = name as DesignDocument
+    const { headings, headingNames, blocks } = documentStructure(readRetained(workspace, `docs/${name}`).toString('utf8'))
+    if (blocks.length) throw new Error('Move inline bgs-handoff to ' + designHandoffPath(name))
+    const handoff = canonicalHeadingPointers(diagnosticHandoff(document,
+      JSON.parse(readRetained(workspace, designHandoffPath(name)).toString('utf8')), issues), headingNames)
+    issues.push(...outputIssues(document, handoff.outputs ?? [], headings))
+    const indexes: Partial<Record<DesignDocument, IndexedDesign>> = { [document]: { handoff, headings } }
+    const finalTechnical = document === 'TECHNICAL_DESIGN.md' && options.finalTechnical === true
+    // Earlier owners are finished only at final technical completion. Check
+    // declared task coverage here, without demanding host versions/hashes or
+    // repeating semantic review of their prose.
+    if (finalTechnical) for (const sibling of PROJECT_DOCUMENTS) {
+      if (sibling === document) continue
+      try {
+        const source = documentStructure(readRetained(workspace, `docs/${sibling}`).toString('utf8'))
+        indexes[sibling] = { headings: source.headings, handoff: diagnosticHandoff(sibling,
+          JSON.parse(readRetained(workspace, designHandoffPath(sibling)).toString('utf8')), issues) }
+      } catch (error) { issues.push(`Cannot check task coverage against ${sibling}: ${error instanceof Error ? error.message : String(error)}`) }
+    }
+    issues.push(...implementationIssues(indexes, finalTechnical))
+    if (finalTechnical && issues.length) for (const source of PROJECT_DOCUMENTS) {
+      const index = indexes[source]
+      for (const output of index?.handoff.outputs ?? []) if (index!.headings.has(output.section) &&
+          output.acceptance && index!.headings.has(output.acceptance.section))
+        availableRequirements.push({ document: source, id: output.id, section: output.section })
+    }
+    if (!handoff.outputs?.length) issues.push('required owned delivery outcomes are missing')
+    for (const output of handoff.outputs ?? []) if (!output.acceptance)
+      issues.push(`output ${output.id} needs an acceptance section for its owned delivery`)
+    const ids = new Set<string>()
+    for (const evidence of handoff.evidence ?? []) {
+      if (ids.has(evidence.id)) issues.push(`duplicate evidence ID ${evidence.id}`)
+      ids.add(evidence.id)
+      if (evidence.section && !headings.has(evidence.section))
+        issues.push(`evidence ${evidence.id} references an absent section`)
+      try { evidenceDigest(workspace, evidence) }
+      catch (error) { issues.push(`evidence ${evidence.id} (${evidence.path}): ${error instanceof Error ? error.message : String(error)}`) }
+    }
+  } catch (error) { issues.push(error instanceof Error ? error.message : String(error)) }
+  return { valid: !issues.length, issues: issues.map(issue => issue.startsWith(name + ':') ? issue : `${name}: ${issue}`),
+    ...(availableRequirements.length ? { availableRequirements } : {}) }
+}
+
+export const DESIGN_INDEX_INSTRUCTION = `Keep decisions, dependencies, open questions, limits and human-readable tables in docs/<NAME>.md. Save only the downstream index at .beegame/design-handoffs/<NAME without .md>.json; do not embed bgs-handoff JSON in prose.
+Minimal new index envelope: {"outputs":[{"id":"owned-outcome","section":"Exact saved heading","acceptance":{"section":"Exact saved acceptance heading","method":"test"}}],"evidence":[]}. Replace example IDs/headings with actual owned outcomes. Do not add a top-level document/path field; the sidecar filename identifies its document. Only final TECHNICAL_DESIGN owns implementationItems; other authors do not add them. Preserve existing valid fields when editing. Legacy compatibility requires an explicit version:1; an absent version means a current draft, not a legacy index. A section uses its full saved heading, including numbering. The host canonicalizes a uniquely matching title differing only by leading chapter numbering; missing or ambiguous titles remain invalid. The host adds metadata only after validation; it does not discard invalid fields or repair malformed indexes.
 Write outputs:[{id,section,acceptance?:{section,method:"test"|"target-runtime"|"inspection"}}] and, where retained evidence is needed, evidence:[{id,kind:"contract"|"documentation"|"capability",path:workspace-relative retained file,source,section?:actual prose heading,pointer?:JSON pointer,expected?:value}]. IDs are local to their document. Headings point to the authoritative decisions and expectations; do not copy their rules into JSON. Do not mirror states, events, parameters, resources, inputs, consumes, pending, limits, platformFacts or readiness in the index. The host sets format version 2, document header/documentVersion and evidence sha256 after an authorized completed write. It advances versions on material changes to prose, the index or referenced retained evidence; unchanged documents keep their version. Authors do not calculate or synchronize versions/hashes.
-For owned release-critical outputs, acceptance points to an actual prose heading explaining the relevant conditions/actions and observable expected result, including necessary boundaries or recovery. Reuse the decision's section where sufficient; do not create one check per sentence. GDD identifies core gameplay delivery expectations on at least one output; this minimum does not establish full coverage. Other owners index their necessary professional expectations when decided. Use test for deterministic rules/calculations, target-runtime for actual presentation/input/audio and end-to-end play, inspection for directly examinable resources or retained provenance. Prose review is not runtime evidence; no completed runtime check is required while authoring.
-Contract evidence checks its JSON pointer against expected. Capability evidence retains an actual JSON observation {observation:"target-runtime",check,passed:true,expected,observed}; expected and observed must agree. Documentation retains source bytes with an HTTPS source URL and precise source location. Live content/ui JSON is a design source, not immutable evidence: link it from UI prose instead of indexing it in evidence, because Content completes bindings in the same file. Host-generated hashes bind bytes, not source authority, observation authenticity or semantic adequacy. Unsupported consequential assumptions, their owner, needed-by point and authorized fallback remain in prose for the joint review. User decisions must trace to actual user authorization. Legacy version 1 sidecars are read only for outputs and evidence; their retired business mirrors are not checked or treated as certified.`
+Register every necessary owned release outcome in outputs with acceptance pointing to an actual prose heading explaining conditions/actions, observable expected results and necessary boundaries/recovery. Keep explanatory prose out of the required checklist. Use an independently checkable behavior, page/state interaction, professional treatment or technical integration, not "implement all gameplay/UI" or one item per function, constant or sentence. Existing v1/v2 indexes remain readable but their coarse or unindexed expectations are not certified as a new complete checklist. Use test for deterministic rules/calculations, target-runtime for actual presentation/input/audio and end-to-end play, inspection for directly examinable resources or retained provenance. Prose review is not runtime evidence; no completed runtime check is required while authoring.`
+
+export const DESIGN_HANDOFF_INSTRUCTION = DESIGN_INDEX_INSTRUCTION + `
+Only the final TECHNICAL_DESIGN author adds implementationItems:[{id,section,dependsOn:[existing task IDs],requirementRefs:[{document:actual design filename,id:owned output ID}]}] to its existing index. New tasks state dependsOn explicitly (empty when independent); existing indexes without it remain readable but do not assert independence. Each section points to one concise task paragraph in TECHNICAL_DESIGN.md: deliverable goal, prerequisite task IDs, authoritative professional references, needed data inputs, observable completion conditions and verification method. Reference owner acceptance instead of copying it; add only task-specific integration expectations. Choose independently implementable and verifiable work units: foundational capabilities and end-to-end integration are both valid. Split independently failing work, not every constant or function; a whole player journey need not be one giant task. Retain shared constraints once and an end-to-end journey check. Cover every registered required output, including technical ones. Do not invent dependencies before specialists finish, another delivery-plan file, a task database, fixed command sequence or runtime verification. Joint Review compares original confirmed requirements, necessary professional decisions and task meaning; the program checks declared coverage, references and dependencies, not semantic completeness.
+Contract evidence checks its JSON pointer against expected. Capability evidence retains an actual JSON observation {observation:"target-runtime",check,passed:true,expected,observed}; expected and observed must agree. Documentation retains source bytes with an HTTPS source URL and precise source location. Live content/ui and content/scenes JSON are design sources, not immutable evidence: link them from their owning UI_UX_SPEC.md or LEVEL_SCENE_DESIGN.md sections, because Content completes bindings in the same files. Host-generated hashes bind bytes, not source authority, observation authenticity or semantic adequacy. Unsupported consequential assumptions, their owner, needed-by point and authorized fallback remain in prose for the joint review. User decisions must trace to actual user authorization. Legacy version 1 sidecars are read only for outputs and evidence; their retired business mirrors are not checked or treated as certified.`
 
 function hash(body: string | Buffer) { return createHash('sha256').update(body).digest('hex') }
 function readRetained(workspace: string, path: string) {
@@ -38,15 +106,36 @@ function readRetained(workspace: string, path: string) {
   return bytes
 }
 function documentStructure(body: string) {
-  const tree = fromMarkdown(body), blocks: string[] = [], headings = new Set<string>()
+  const tree = fromMarkdown(body), blocks: string[] = [], headings = new Set<string>(), headingNames: string[] = []
   function words(node: any): string { return node.value ?? (node.children ?? []).map(words).join('') }
   function walk(node: any) {
     if (node.type === 'code' && node.lang === 'bgs-handoff') blocks.push(node.value)
-    if (node.type === 'heading') headings.add(words(node))
+    if (node.type === 'heading') { headings.add(words(node)); headingNames.push(words(node)) }
     for (const child of node.children ?? []) walk(child)
   }
   walk(tree)
-  return { blocks, headings }
+  return { blocks, headings, headingNames }
+}
+
+/** Numbering is presentation, not a decision. Resolve only an identical title
+ * with one real source location; never choose between same-title sections or
+ * fuzzy-match words. Read checks normalize parsed copies; only authorized
+ * finalization persists the exact source heading in an index. */
+function canonicalHeadingPointers<T extends Partial<DesignHandoff>>(handoff: T, headings: readonly string[]): T {
+  const title = (heading: string) => heading.replace(/^(?:\d+(?:\.\d+)+[.)]?|\d+[.)])\s+/, '')
+  const exact = new Set(headings)
+  const canonical = (section: string) => {
+    if (exact.has(section)) return section
+    const matches = headings.filter(heading => title(heading) === title(section))
+    return matches.length === 1 ? matches[0]! : section
+  }
+  for (const output of handoff.outputs ?? []) {
+    output.section = canonical(output.section)
+    if (output.acceptance) output.acceptance.section = canonical(output.acceptance.section)
+  }
+  for (const item of handoff.implementationItems ?? []) item.section = canonical(item.section)
+  for (const evidence of handoff.evidence ?? []) if (evidence.section) evidence.section = canonical(evidence.section)
+  return handoff
 }
 export const DESIGN_HANDOFF_DIRECTORY = '.beegame/design-handoffs'
 export function designHandoffPath(name: string) {
@@ -67,8 +156,8 @@ export function isHigherDocumentVersion(current: string, previous: string) {
   }
   return false
 }
-/** Exact supporting files cited by affected documents; a UI owner may also
- * create its explicitly linked missing UI output. No broad directory grant. */
+/** Exact supporting files cited by affected documents; Scene/UI owners may
+ * create explicitly linked missing layout outputs. No broad directory grant. */
 export function designSupportingFiles(workspace: string, documents: readonly string[]) {
   const root = realpathSync(workspace), files = new Set<string>()
   for (const name of documents) {
@@ -90,16 +179,17 @@ export function designSupportingFiles(workspace: string, documents: readonly str
       const calculation = /^docs\/calc\/[A-Za-z0-9_./-]+\.(?:mjs|js|json|md)$/.test(part)
       const ownVisual = part.startsWith('docs/visual/' + name.slice(0, -3) + '/') &&
         /^docs\/visual\/[A-Za-z0-9_./-]+\.(?:html|svg|png|jpg|jpeg|webp)$/.test(part)
-      const ownUi = name === 'UI_UX_SPEC.md' && isDesignUiFile(part)
-      if (!calculation && !ownVisual && !ownUi) return
+      const ownLayout = (name === 'UI_UX_SPEC.md' && isDesignUiFile(part)) ||
+        (name === 'LEVEL_SCENE_DESIGN.md' && isDesignSceneFile(part))
+      if (!calculation && !ownVisual && !ownLayout) return
       // readRetained checks containment; reject even an in-workspace symlink.
       let actual: string
       try { actual = realpathSync(target) } catch (error) {
-        // Missing factual evidence cannot be invented. A UI layout is an
+        // Missing factual evidence cannot be invented. A planned layout is an
         // owned output, however: its exact planned link can authorize repair.
-        // Missing UI data still fails reference/geometry checks until saved.
+        // Missing data still fails reference/layout checks until saved.
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-          if (ownUi) files.add(part)
+          if (ownLayout) files.add(part)
           return
         }
         throw error
@@ -108,6 +198,21 @@ export function designSupportingFiles(workspace: string, documents: readonly str
       readRetained(workspace, part)
       files.add(part)
     })
+  }
+  // An appendix already records its model/imported calculation code. It
+  // need not also be duplicated as Markdown links to permit a retained rerun.
+  for (const file of [...files]) {
+    if (!file.startsWith('docs/calc/') || !file.endsWith('.md')) continue
+    try {
+      for (const input of readCalculationInputs(workspace, file)) {
+        // Consumed data/other owners' appendices stay read-only unless their
+        // owner joins the correction scope; code is needed for the retained rerun.
+        if (!/^docs\/calc\/[A-Za-z0-9_./-]+\.(?:mjs|js)$/.test(input)) continue
+        if (realpathSync(resolve(root, input)) !== resolve(root, input)) continue
+        readRetained(workspace, input)
+        files.add(input)
+      }
+    } catch { /* Invalid evidence retains its existing handoff diagnostic; no extra grant. */ }
   }
   return [...files].sort()
 }
@@ -119,23 +224,51 @@ export function designCalculationFiles(workspace: string, documents: readonly st
 export function isDesignUiFile(path: string) {
   return /^content\/ui\/[A-Za-z0-9_./-]+\.json$/.test(path)
 }
+export function isDesignSceneFile(path: string) {
+  return /^content\/scenes\/[A-Za-z0-9_./-]+\.json$/.test(path)
+}
+function layoutTypography(style: Record<string, unknown> = {}) {
+  const fields = Object.fromEntries(Object.entries(style).filter(([key]) =>
+    ['fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'align', 'textAlign', 'verticalAlign'].includes(key)))
+  return Object.keys(fields).length ? fields : undefined
+}
 
-/** Freeze UI decisions, not later resource/action bindings in the same file.
+/** Freeze layout decisions, not known later resource bindings in the same file.
  * This is only a digest in the existing baseline, never a second layout copy.
  * Immutable factual evidence (not live UI sources) still binds whole bytes. */
-export function designSupportingFileDigest(workspace: string, path: string) {
+export const DESIGN_DIGEST_VERSION = 2 as const
+export function designSupportingFileDigest(workspace: string, path: string, digestVersion: 1 | 2 = DESIGN_DIGEST_VERSION) {
   const bytes = readRetained(workspace, path)
-  if (!isDesignUiFile(path)) return hash(bytes)
+  return designSupportingBytesDigest(path, bytes, digestVersion)
+}
+export function designSupportingBytesDigest(path: string, bytes: Buffer, digestVersion: 1 | 2 = DESIGN_DIGEST_VERSION) {
+  if (!isDesignUiFile(path) && !isDesignSceneFile(path)) return hash(bytes)
   try {
     const doc = parseBeeGameContentDocument(JSON.parse(bytes.toString('utf8')))
+    if (isDesignSceneFile(path) && (doc.kind === 'scene-2d' || doc.kind === 'scene-3d')) {
+      // Only known resource selections are excluded. Camera, collider, grid,
+      // placement, behavior and unknown fields remain design decisions.
+      return hash(JSON.stringify(stable(sceneDesignSource(doc))))
+    }
     if (doc.kind !== 'ui-screen' && doc.kind !== 'ui-hud' && doc.kind !== 'ui-flow') return hash(bytes)
+    if (digestVersion === 2) return hash(JSON.stringify(stable({ schema: doc.schema, id: doc.id, kind: doc.kind,
+      data: { ...doc.data, nodes: doc.data.nodes.map(node => {
+        const { assetRef: _assetRef, actions: _actions, bindings: _bindings, ...decision } = node
+        // assetRef is always a locator slot. Illegal use on a non-asset role
+        // is a Content validation error, not authority to redesign that role.
+        return { ...decision,
+          enabled: node.enabled ?? true, data: uiDesignData(node.data, 'data', BEEGAME_UI_ASSET_BACKED_ROLES.some(role => role === node.role)), style: uiDesignData(node.style, 'style'),
+          responsive: Object.fromEntries(Object.entries(node.responsive ?? {}).map(([name, variant]) => [name,
+            { ...variant, style: uiDesignData(variant.style, 'style') }] as const).filter(([, variant]) => Object.values(variant).some(value => value !== undefined))) }
+      }) } })))
     return hash(JSON.stringify(stable({ schema: doc.schema, id: doc.id, kind: doc.kind, rootId: doc.data.rootId,
       nodes: doc.data.nodes.map(node => ({ id: node.id, parentId: node.parentId, role: node.role, text: node.text,
         enabled: node.enabled ?? true, layout: node.layout,
         responsive: Object.fromEntries(Object.entries(node.responsive ?? {})
-          .filter(([, variant]) => variant.enabled !== undefined || variant.layout !== undefined)
-          .map(([name, variant]) => [name, { enabled: variant.enabled, layout: variant.layout }])),
-        anchor: node.data?.anchor, space: node.data?.space, layoutOcclusion: node.data?.layoutOcclusion,
+          .filter(([, variant]) => variant.enabled !== undefined || variant.layout !== undefined || layoutTypography(variant.style) !== undefined)
+          .map(([name, variant]) => [name, { enabled: variant.enabled, layout: variant.layout, typography: layoutTypography(variant.style) }])),
+        typography: layoutTypography(node.style),
+        anchor: node.data?.anchor, space: node.data?.space, layoutCamera: node.data?.layoutCamera, layoutOcclusion: node.data?.layoutOcclusion,
         layoutUnderlay: node.data?.layoutUnderlay,
         orientation: node.data?.orientation, referenceResolution: node.data?.referenceResolution,
         targetViewports: node.data?.targetViewports, minimumControlSize: node.data?.minimumControlSize,
@@ -165,34 +298,122 @@ function documentHandoff(workspace: string, name: DesignDocument, body: string) 
   const raw = JSON.parse(sidecar.toString('utf8'))
   if (raw?.documentVersion !== undefined && raw.documentVersion !== documentVersion)
     throw new Error('Handoff documentVersion must match document header ' + documentVersion)
-  return { handoff: handoffSchema.parse(consumerHandoff(raw)), headings, sidecar }
+  return { handoff: parseHandoff(name, raw), headings, sidecar }
 }
 
 // A malformed evidence record must not hide an independently invalid output pointer.
 function diagnosticHandoff(name: DesignDocument, raw: unknown, issues: string[]): Partial<DesignHandoff> {
   const current = consumerHandoff(raw), parsed = handoffSchema.safeParse(current)
   if (parsed.success) return parsed.data
-  issues.push(`${name}: ${parsed.error.message}`)
+  issues.push(...handoffShapeIssues(name, current, parsed.error))
   if (!current || typeof current !== 'object' || Array.isArray(current)) return {}
   const fields: Partial<DesignHandoff> = {}
   for (const [key, schema] of Object.entries(handoffSchema.shape)) {
     const field = schema.safeParse((current as Record<string, unknown>)[key])
     if (field.success) Object.assign(fields, { [key]: field.data })
-    else issues.push(`${name}: checks requiring handoff.${key} were not run because the field is invalid`)
+    else {
+      // One malformed task must not hide valid task/source mappings and cause
+      // a spurious request to rebuild the entire implementation index.
+      const value = (current as Record<string, unknown>)[key]
+      if (key === 'implementationItems' && Array.isArray(value)) {
+        fields.implementationItems = value.flatMap(item => {
+          const parsedItem = handoffSchema.shape.implementationItems.unwrap().element.safeParse(item)
+          return parsedItem.success ? [parsedItem.data] : []
+        })
+        issues.push(`${name}: checks for invalid handoff.implementationItems entries were not run; valid entries remain checked`)
+      } else issues.push(`${name}: checks requiring handoff.${key} were not run because the field is invalid`)
+    }
   }
   return fields
+}
+
+/** Compact source-addressed errors, not a serialized validator stack. */
+function handoffShapeIssues(name: DesignDocument, raw: unknown, error: z.ZodError) {
+  return error.issues.map(issue => {
+    const [field, index] = issue.path
+    const item = typeof index === 'number' && raw && typeof raw === 'object'
+      ? (raw as Record<string, any>)[String(field)]?.[index] : undefined
+    const target = `${designHandoffPath(name)} / ${issue.path.join('.') || 'root'}` +
+      (typeof item?.id === 'string' ? ` (id: ${JSON.stringify(item.id)})` : '')
+    const hint = field === 'implementationItems' && issue.path[2] === 'requirementRefs'
+      ? ' Each task needs at least one real owned-output reference {document,id}, including technical foundations and end-to-end tasks. Select relevant availableRequirements from --check-handoff-drafts TECHNICAL_DESIGN.md --final-technical; do not invent IDs or inspect checker source.' : ''
+    return `${name}: ${target}: ${issue.message}${hint}`
+  })
+}
+function parseHandoff(name: DesignDocument, raw: unknown): DesignHandoff {
+  const current = consumerHandoff(raw), parsed = handoffSchema.safeParse(current)
+  if (!parsed.success) throw Error(handoffShapeIssues(name, current, parsed.error).join('; '))
+  return parsed.data
 }
 function outputIssues(name: DesignDocument, outputs: DesignHandoff['outputs'], headings: Set<string>) {
   const issues: string[] = [], ids = new Set<string>()
   for (const output of outputs) {
     if (ids.has(output.id)) issues.push(`${name}: duplicate output ID ${output.id}`)
     ids.add(output.id)
-    if (!headings.has(output.section)) issues.push(`${name}: output ${output.id} references an absent section`)
+    if (!headings.has(output.section)) issues.push(`${name}: output ${output.id} references an absent section ${JSON.stringify(output.section)}`)
     if (output.acceptance && !headings.has(output.acceptance.section))
-      issues.push(`${name}: acceptance ${output.id} references an absent section`)
+      issues.push(`${name}: acceptance ${output.id} references an absent section ${JSON.stringify(output.acceptance.section)}`)
   }
   if (name === 'GDD.md' && !outputs.some(output => output.acceptance))
     issues.push(`${name}: core gameplay delivery expectations must be declared on an owned output`)
+  return issues
+}
+type IndexedDesign = { handoff: Partial<DesignHandoff>; headings: Set<string> }
+/** Structural task/source relationships, never semantic grouping or task completion. */
+function implementationIssues(indexes: Partial<Record<DesignDocument, IndexedDesign>>, required: boolean) {
+  const issues: string[] = []
+  for (const name of PROJECT_DOCUMENTS) {
+    const index = indexes[name]
+    if (!index) continue
+    if (required) {
+      if (!index.handoff.outputs?.length) issues.push(`${name}: required delivery outcomes are missing`)
+      for (const output of index.handoff.outputs ?? []) if (!output.acceptance)
+        issues.push(`${name}: output ${output.id} needs an acceptance section before implementation`)
+    }
+    if (name !== 'TECHNICAL_DESIGN.md' && index.handoff.implementationItems !== undefined)
+      issues.push(`${name}: implementationItems belongs only to the final TECHNICAL_DESIGN.md index`)
+  }
+  const tech = indexes['TECHNICAL_DESIGN.md'], items = tech?.handoff.implementationItems
+  if (required && !items?.length)
+    issues.push('TECHNICAL_DESIGN.md: implementationItems is missing or empty; prepare the cross-document task checklist through authorized design revision, not an implementation Todo')
+  const ids = new Set<string>(), covered = new Set<string>()
+  const byId = new Map((items ?? []).map(item => [item.id, item]))
+  for (const item of items ?? []) {
+    if (ids.has(item.id)) issues.push(`TECHNICAL_DESIGN.md: duplicate implementation item ID ${item.id}`)
+    ids.add(item.id)
+    const dependencies = new Set<string>()
+    for (const dependency of item.dependsOn ?? []) {
+      if (dependencies.has(dependency)) issues.push(`TECHNICAL_DESIGN.md: implementation item ${item.id} has duplicate dependency ${dependency}`)
+      dependencies.add(dependency)
+      if (dependency === item.id) issues.push(`TECHNICAL_DESIGN.md: implementation item ${item.id} depends on itself`)
+      else if (!byId.has(dependency)) issues.push(`TECHNICAL_DESIGN.md: implementation item ${item.id} references missing dependency ${dependency}`)
+    }
+    if (!tech!.headings.has(item.section)) issues.push(`TECHNICAL_DESIGN.md: implementation item ${item.id} references an absent section`)
+    const refs = new Set<string>()
+    for (const ref of item.requirementRefs) {
+      const key = `${ref.document}#${ref.id}`
+      if (refs.has(key)) issues.push(`TECHNICAL_DESIGN.md: implementation item ${item.id} has duplicate requirement ${key}`)
+      refs.add(key)
+      const source = indexes[ref.document]
+      // Pending draft siblings are not failures during dependent writing.
+      if (!source && !required) continue
+      const output = source?.handoff.outputs?.find(output => output.id === ref.id)
+      if (!output) issues.push(`TECHNICAL_DESIGN.md: implementation item ${item.id} references missing requirement ${key}`)
+      else if (!output.acceptance) issues.push(`TECHNICAL_DESIGN.md: implementation item ${item.id} requirement ${key} has no acceptance section`)
+      else covered.add(key)
+    }
+  }
+  const visited = new Set<string>(), active = new Set<string>()
+  const visit = (id: string): void => {
+    if (active.has(id)) { issues.push(`TECHNICAL_DESIGN.md: implementation dependency cycle at ${id}`); return }
+    if (visited.has(id)) return
+    visited.add(id); active.add(id)
+    for (const dependency of byId.get(id)?.dependsOn ?? []) if (byId.has(dependency)) visit(dependency)
+    active.delete(id)
+  }
+  for (const id of byId.keys()) visit(id)
+  if (required) for (const name of PROJECT_DOCUMENTS) for (const output of indexes[name]?.handoff.outputs ?? [])
+    if (!covered.has(`${name}#${output.id}`)) issues.push(`TECHNICAL_DESIGN.md: required output ${name}#${output.id} has no implementation item`)
   return issues
 }
 function readImmutableEvidence(workspace: string, path: string) {
@@ -202,6 +423,8 @@ function readImmutableEvidence(workspace: string, path: string) {
   const part = relative(realpathSync(workspace), realpathSync(resolve(workspace, path))).split(sep).join('/')
   if (part.startsWith('content/ui/') && part.endsWith('.json'))
     throw new Error('Live UI source ' + path + ' cannot be immutable evidence; remove this evidence entry and link the source from UI_UX_SPEC.md. Content completes bindings in place.')
+  if (isDesignSceneFile(part))
+    throw new Error('Live Scene source ' + path + ' cannot be immutable evidence; link the source from LEVEL_SCENE_DESIGN.md. Content completes bindings in place.')
   return bytes
 }
 function evidenceDigest(workspace: string, evidence: DesignHandoff['evidence'][number], bytes = readImmutableEvidence(workspace, evidence.path)) {
@@ -228,9 +451,10 @@ function evidenceDigest(workspace: string, evidence: DesignHandoff['evidence'][n
 /** Index/evidence integrity only. Prose decisions and dependencies need semantic review.
  * The old options remain source compatible; none enables retired mirror checks. */
 export function checkDesignHandoff(workspace: string, documents: readonly DesignDocument[], _options: {
-  nextConsumers?: readonly string[]; technicalBaseline?: boolean; inputs?: readonly string[]
+  nextConsumers?: readonly string[]; technicalBaseline?: boolean; inputs?: readonly string[]; digestVersion?: 1 | 2
 } = {}) {
   const issues: string[] = [], snapshots: Record<string, string> = {}, evidenceHashes: Record<string, string> = {}, documentVersions: Record<string, string> = {}
+  const indexes: Partial<Record<DesignDocument, IndexedDesign>> = {}
   for (const name of documents) {
     try {
       const root = realpathSync(workspace)
@@ -246,8 +470,16 @@ export function checkDesignHandoff(workspace: string, documents: readonly Design
       if (blocks.length) issues.push(`${name}: Move inline bgs-handoff to ${path}; preserve prose decisions`)
       try {
         const supporting = designSupportingFiles(workspace, [name]).map(file => {
-          const digest = designSupportingFileDigest(workspace, file)
+          const digest = designSupportingFileDigest(workspace, file, _options.digestVersion)
           evidenceHashes[file] = digest
+          // Only retained helper results carry a machine-checkable input record.
+          // This never executes the model or certifies its rules; ordinary notes
+          // and legacy appendices still require evidence review, not a new format gate.
+          if (file.startsWith('docs/calc/') && file.endsWith('.md') &&
+              readRetained(workspace, file).includes('<!-- bgs-calculation-v1:')) {
+            const freshness = checkCalculationResult(workspace, file, resolve(root, '.beegame/delivery/calculate-balance.mjs'))
+            issues.push(...freshness.issues.map(issue => `${name}: ${file}: ${issue}`))
+          }
           return [file, digest]
         })
         if (supporting.length) snapshots[name] = hash(JSON.stringify([snapshots[name], supporting]))
@@ -256,6 +488,7 @@ export function checkDesignHandoff(workspace: string, documents: readonly Design
       if (documentVersions[name] && raw?.documentVersion !== undefined && raw.documentVersion !== documentVersions[name])
         issues.push(`${name}: Handoff documentVersion must match document header ${documentVersions[name]}`)
       const h = diagnosticHandoff(name, raw, issues)
+      indexes[name] = { handoff: h, headings }
       if (h.outputs) issues.push(...outputIssues(name, h.outputs, headings))
       const evidenceIds = new Set<string>()
       for (const evidence of h.evidence ?? []) {
@@ -276,7 +509,9 @@ export function checkDesignHandoff(workspace: string, documents: readonly Design
       issues.push(`${name}: remaining handoff checks were not run because the document or index could not be read/parsed`)
     }
   }
-  return { valid: !issues.length, issues, snapshots, evidenceHashes, documentVersions,
+  const completeDesign = PROJECT_DOCUMENTS.every(name => documents.includes(name)) && !_options.technicalBaseline
+  issues.push(...implementationIssues(indexes, completeDesign))
+  return { valid: !issues.length, issues, snapshots, evidenceHashes, documentVersions, digestVersion: _options.digestVersion ?? DESIGN_DIGEST_VERSION,
     revision: hash(JSON.stringify([snapshots, evidenceHashes])),
     note: 'Checks output/acceptance pointers, local IDs and retained evidence bytes/declared observations. Legacy v1 is read-only compatible for outputs/evidence; retired readiness, states, events, parameters, resources, inputs, consumes, platformFacts, pending and limits are ignored and not certified. Prose completeness, dependencies, source authority, observation authenticity, semantic adequacy and experience quality remain review/owner judgments.' }
 }
@@ -339,10 +574,41 @@ function materialDocument(workspace: string, name: DesignDocument) {
   } catch (error) { evidence.push(['calculation-reference-error', String(error)]) }
   let version: string | undefined
   if (bytes) try { version = designDocumentVersion(bytes.toString('utf8')) } catch { /* Host can add missing metadata. */ }
-  return { version, contentHash: hash(JSON.stringify([bytes ? withoutVersion(bytes.toString('utf8')) : null,
+  return { version, sections: bytes ? designSectionHashes(bytes.toString('utf8')) : undefined,
+    contentHash: hash(JSON.stringify([bytes ? withoutVersion(bytes.toString('utf8')) : null,
     materialHandoff(raw), evidence.sort(([a], [b]) => a.localeCompare(b))])) }
 }
-export type DesignDocumentSnapshot = { workspace: string; documents: Partial<Record<DesignDocument, { version?: string; contentHash: string }>> }
+export type DesignDocumentSnapshot = { workspace: string; documents: Partial<Record<DesignDocument, { version?: string; contentHash: string; sections?: Record<string, string> }>> }
+/** Raw bytes for interrupted-write attribution, not normalized design semantics. */
+export function designRevisionFileDigest(workspace: string, path: string): string | null {
+  const part = relative(resolve(workspace), resolve(workspace, path))
+  if (!part || isAbsolute(path) || part === '..' || part.startsWith('..' + sep))
+    throw new Error('Design revision file must remain inside the workspace: ' + path)
+  const bytes = optionalDesignFile(workspace, path)
+  return bytes === undefined ? null : hash(bytes)
+}
+export function snapshotDesignRevisionFiles(workspace: string): Record<string, string | null> {
+  const paths = new Set<string>()
+  const evidenceFiles: Record<string, string | null> = {}
+  for (const name of PROJECT_DOCUMENTS) {
+    paths.add(`docs/${name}`)
+    const indexPath = designHandoffPath(name)
+    paths.add(indexPath)
+    for (const path of designSupportingFiles(workspace, [name])) paths.add(path)
+    const bytes = optionalDesignFile(workspace, indexPath)
+    let index: { evidence?: Array<{ path?: unknown }> } | undefined
+    try { index = bytes ? JSON.parse(bytes.toString('utf8')) : undefined } catch { /* A malformed index can be repaired. */ }
+    if (Array.isArray(index?.evidence))
+      for (const evidence of index.evidence) if (typeof evidence?.path === 'string') {
+        // A bad reference must remain repairable through its index. It is not
+        // readable evidence and cannot authorize a write outside the scope.
+        try { evidenceFiles[evidence.path] = designRevisionFileDigest(workspace, evidence.path) }
+        catch { /* Handoff validation reports the invalid reference. */ }
+      }
+  }
+  const files = { ...evidenceFiles, ...Object.fromEntries([...paths].map(path => [path, designRevisionFileDigest(workspace, path)])) }
+  return Object.fromEntries(Object.entries(files).sort(([a], [b]) => a.localeCompare(b)))
+}
 /** Capture before a controlled author/revise write; malformed drafts can be repaired. */
 export function snapshotDesignDocuments(workspace: string, documents: readonly DesignDocument[]): DesignDocumentSnapshot {
   const result: DesignDocumentSnapshot = { workspace: realpathSync(workspace), documents: {} }
@@ -368,7 +634,8 @@ function designFilePath(root: string, path: string) {
 }
 /** Called only at an authorized completed-write boundary, never by read/check APIs.
  * Stages metadata after validating saved decisions/evidence; does not invent proof. */
-export function finalizeDesignDocuments(workspace: string, documents: readonly DesignDocument[], snapshot: DesignDocumentSnapshot) {
+export function finalizeDesignDocuments(workspace: string, documents: readonly DesignDocument[], snapshot: DesignDocumentSnapshot,
+  prior?: { changedDocuments: string[]; documentVersions?: Record<string, string> }) {
   const issues: string[] = [], unsafeIssues: string[] = [], writes: Array<{ path: string; body: string }> = [], root = realpathSync(workspace)
   if (snapshot.workspace !== root) {
     const issue = 'Design finalization snapshot belongs to another workspace'
@@ -382,10 +649,11 @@ export function finalizeDesignDocuments(workspace: string, documents: readonly D
       const sourcePath = designFilePath(root, `docs/${name}`), indexPath = designFilePath(root, designHandoffPath(name))
       const body = readFileSync(sourcePath, 'utf8'), originalIndex = readFileSync(indexPath, 'utf8')
       safeTargets = true
-      const { blocks, headings } = documentStructure(body)
+      const { blocks, headings, headingNames } = documentStructure(body)
       if (blocks.length) throw new Error('Move inline bgs-handoff to ' + designHandoffPath(name) + '; preserve prose decisions')
-      const handoff = handoffSchema.parse(consumerHandoff(JSON.parse(originalIndex)))
+      const handoff = canonicalHeadingPointers(parseHandoff(name, JSON.parse(originalIndex)), headingNames)
       const invalidOutputs = outputIssues(name, handoff.outputs, headings)
+      invalidOutputs.push(...implementationIssues({ [name]: { handoff, headings } }, false))
       if (invalidOutputs.length) throw new Error(invalidOutputs.join('; '))
       const evidenceIds = new Set<string>()
       handoff.evidence = handoff.evidence.map(evidence => {
@@ -395,7 +663,9 @@ export function finalizeDesignDocuments(workspace: string, documents: readonly D
         return { ...evidence, sha256: evidenceDigest(root, evidence) }
       })
       const current = materialDocument(root, name)
-      const version = before.version ? current.contentHash === before.contentHash ? before.version : nextVersion(before.version) : '1.0'
+      const originalVersion = prior?.changedDocuments.includes(name) ? prior.documentVersions?.[name] ?? before.version : before.version
+      const changed = prior?.changedDocuments.includes(name) || current.contentHash !== before.contentHash
+      const version = originalVersion ? changed ? nextVersion(originalVersion) : originalVersion : '1.0'
       handoff.documentVersion = version
       const finalizedBody = withVersion(body, version), finalizedIndex = JSON.stringify(handoff, null, 2) + '\n'
       if (body !== finalizedBody) writes.push({ path: sourcePath, body: finalizedBody })
@@ -410,7 +680,10 @@ export function finalizeDesignDocuments(workspace: string, documents: readonly D
       if (!safeTargets && (error as NodeJS.ErrnoException).code !== 'ENOENT') unsafeIssues.push(issue)
     }
   }
-  if (!issues.length) for (const write of writes) {
+  // Finalize independent valid owners even when a sibling has a recoverable
+  // index error. Otherwise its missing host version becomes a second repair
+  // assigned to the model. Unsafe I/O still prevents the whole batch.
+  if (!unsafeIssues.length) for (const write of writes) {
     try { writeFileSync(write.path, write.body) }
     catch (error) {
       const issue = `${relative(root, write.path)}: ${error instanceof Error ? error.message : String(error)}`
@@ -422,14 +695,16 @@ export function finalizeDesignDocuments(workspace: string, documents: readonly D
 
 /** Reuse the only output index actually consumed by runtime acceptance. */
 export function readDesignAcceptanceRequirements(workspace: string) {
-  const requirements: Array<{ document: DesignDocument; id: string; section: string;
+  const requirements: Array<{ document: DesignDocument; id: string; section: string; outputSection: string;
     method: 'test' | 'target-runtime' | 'inspection'; documentSha256: string; handoffSha256: string }> = []
   const documents: DesignDocument[] = []
+  const indexes: Partial<Record<DesignDocument, IndexedDesign>> = {}
   for (const document of PROJECT_DOCUMENTS) {
     const bytes = optionalDesignFile(workspace, `docs/${document}`)
     if (!bytes) continue
     documents.push(document)
     const { handoff, headings, sidecar } = documentHandoff(workspace, document, bytes.toString('utf8'))
+    indexes[document] = { handoff, headings }
     const issues = outputIssues(document, handoff.outputs, headings)
     if (issues.length) throw new Error(issues.join('; '))
     for (const evidence of handoff.evidence) {
@@ -437,10 +712,64 @@ export function readDesignAcceptanceRequirements(workspace: string) {
       if (evidence.sha256 !== undefined && evidence.sha256 !== digest) throw new Error(`${document}: evidence ${evidence.id}: Evidence bytes changed`)
     }
     for (const output of handoff.outputs) if (output.acceptance)
-      requirements.push({ document, id: output.id, ...output.acceptance, documentSha256: hash(bytes), handoffSha256: hash(sidecar) })
+      requirements.push({ document, id: output.id, outputSection: output.section, ...output.acceptance, documentSha256: hash(bytes), handoffSha256: hash(sidecar) })
   }
   if (documents.length && !documents.includes('GDD.md')) throw new Error('Design acceptance requires the current GDD.md')
+  const issues = implementationIssues(indexes, PROJECT_DOCUMENTS.every(name => documents.includes(name)))
+  if (issues.length) throw new Error(issues.join('; '))
   return requirements
+}
+
+/** Same reviewed index, deterministically presented to the implementation Agent.
+ * No inferred task graph, copied business rules, or author-awarded completion. */
+export function readDesignImplementationChecklist(workspace: string) {
+  const check = checkDesignHandoff(workspace, PROJECT_DOCUMENTS)
+  if (!check.valid) throw new Error(check.issues.join('; '))
+  const requirements = readDesignAcceptanceRequirements(workspace)
+  const { handoff } = documentHandoff(workspace, 'TECHNICAL_DESIGN.md', readRetained(workspace, 'docs/TECHNICAL_DESIGN.md').toString('utf8'))
+  return { source: designHandoffPath('TECHNICAL_DESIGN.md'), designRevision: check.revision,
+    globalSources: PROJECT_DOCUMENTS.map(document => `docs/${document}`),
+    resultPath: '.beegame/delivery/acceptance.json',
+    items: handoff.implementationItems!.map(item => ({ id: item.id,
+      ...(item.dependsOn !== undefined ? { dependsOn: item.dependsOn } : {}),
+      taskSource: { document: 'docs/TECHNICAL_DESIGN.md', section: item.section },
+      requirements: item.requirementRefs.map(ref => {
+        const source = requirements.find(requirement => requirement.document === ref.document && requirement.id === ref.id)!
+        return { document: source.document, id: source.id, sourceSection: source.outputSection, acceptanceSection: source.section, method: source.method }
+      }),
+    })),
+    limitation: 'This is a required task/source checklist, not proof of original completeness, semantic grouping, implementation or truthful observation. Read task paragraphs, original owner clauses, global constraints and actual data. Reuse still-valid evidence; report unverified outcomes honestly.' }
+}
+/** An explicitly revised owner may affect its existing task consumer. The
+ * exact technical document/index enter the same revision scope, not all docs. */
+export function designImplementationRevisionDocuments(workspace: string, documents: readonly DesignDocument[]) {
+  const scope = [...new Set(documents)]
+  const supporting = new Map<DesignDocument, readonly string[]>(PROJECT_DOCUMENTS.map(name => {
+    try { return [name, designSupportingFiles(workspace, [name])] as const }
+    catch { return [name, []] as const }
+  }))
+  // A correction can invalidate another owner's retained calculation. Follow
+  // existing recorded inputs before dispatch, including chained appendices;
+  // no model-selected dependency list and no blanket document grant.
+  let previousSize: number
+  do {
+    previousSize = scope.length
+    if (!scope.includes('TECHNICAL_DESIGN.md')) try {
+      const { handoff } = documentHandoff(workspace, 'TECHNICAL_DESIGN.md', readRetained(workspace, 'docs/TECHNICAL_DESIGN.md').toString('utf8'))
+      if (handoff.implementationItems?.some(item => item.requirementRefs.some(ref => scope.includes(ref.document))))
+        scope.push('TECHNICAL_DESIGN.md')
+    } catch { /* Malformed task sources have their own structural repair diagnostic. */ }
+    const changedInputs = new Set(scope.flatMap(name => [`docs/${name}`, designHandoffPath(name), ...supporting.get(name) ?? []]))
+    for (const [name, files] of supporting) {
+      if (scope.includes(name)) continue
+      if (files.some(file => {
+        if (!file.startsWith('docs/calc/') || !file.endsWith('.md')) return false
+        try { return readCalculationInputs(workspace, file).some(input => changedInputs.has(input)) }
+        catch { return false } // Unrecorded/malformed evidence cannot establish dependencies.
+      })) scope.push(name)
+    }
+  } while (scope.length !== previousSize)
+  return scope
 }
 export function designReviewSourceHeadings(workspace: string, documents: readonly string[]): Record<string, string[]> {
   const result: Record<string, string[]> = {}
@@ -452,16 +781,100 @@ export function designReviewSourceHeadings(workspace: string, documents: readonl
   return result
 }
 
+/** Host locations from findings, registered outcomes and actual revision changes. */
+export function designReviewReadScope(workspace: string, documents: readonly string[], findings: readonly DesignFinding[],
+  changed: Record<string, string[] | null> = {}): Record<string, string[] | null> {
+  const scope: Record<string, string[] | null> = {}
+  const sources = findings.filter(finding => finding.documents.some(name => documents.includes(name)) ||
+    finding.sources.some(source => documents.includes(source.document))).flatMap(finding => finding.sources)
+  const names = [...new Set([...documents, ...sources.map(source => source.document)])]
+  const indexes = designReviewIndexes(workspace, names)
+  const affectedOutputs = new Set<string>()
+  const located = sources.length > 0 || Object.keys(changed).length > 0
+  for (const name of names) {
+    const index = indexes.find(index => index.document === name)
+    const own = index && 'outputs' in index ? index : undefined
+    const headings = new Set([...sources.filter(source => source.document === name).map(source => source.section), ...changed[name] ?? []])
+    let sections: ReturnType<typeof designDocumentSections> = []
+    try { sections = designDocumentSections(readRetained(workspace, 'docs/' + name).toString('utf8')) } catch { /* Full-source diagnostic below. */ }
+    // Unknown/moved sources and unlocated structural failures retain full reads.
+    // Permission to edit a consumer alone does not require all its output clauses.
+    if (!own || !sections.length || changed[name] === null || !located ||
+        [...headings].some(heading => sections.filter(section => section.heading === heading).length !== 1)) {
+      scope[name] = null
+      for (const output of own?.outputs ?? []) affectedOutputs.add(name + '#' + output.id)
+      continue
+    }
+    const selected = sections.filter(section => headings.has(section.heading))
+    const overlaps = (heading: string) => sections.some(section => section.heading === heading &&
+      selected.some(source => source.start <= section.end && section.start <= source.end))
+    for (const output of own.outputs) {
+      if (!overlaps(output.section) && !(output.acceptance && overlaps(output.acceptance.section))) continue
+      affectedOutputs.add(name + '#' + output.id)
+      headings.add(output.section)
+      if (output.acceptance) headings.add(output.acceptance.section)
+    }
+    // [] means no initial mandatory clauses, not a whole-file read. Actual
+    // edits outside this selection are still detected at the native stop check.
+    scope[name] = [...headings]
+  }
+  for (const index of indexes) {
+    if (!('outputs' in index) || scope[index.document] === null) continue
+    for (const item of index.implementationItems ?? [])
+      if (item.requirementRefs.some(ref => affectedOutputs.has(ref.document + '#' + ref.id)))
+        scope[index.document] = [...new Set([...scope[index.document] ?? [], item.section])]
+  }
+  return scope
+}
+
+export function changedDesignSections(workspace: string, before: DesignDocumentSnapshot): Record<string, string[] | null> {
+  const changes: Record<string, string[] | null> = {}
+  for (const [name, previous] of Object.entries(before.documents)) {
+    const current = materialDocument(workspace, name as DesignDocument)
+    if (current.contentHash === previous!.contentHash) continue
+    if (!previous!.sections || !current.sections ||
+        Object.keys(previous!.sections).join('\n') !== Object.keys(current.sections).join('\n')) {
+      changes[name] = null; continue
+    }
+    changes[name] = Object.keys(current.sections).filter(heading => current.sections![heading] !== previous!.sections![heading])
+  }
+  return changes
+}
+
 /** Current pointers only, not another authority or semantic verdict. This
  * replaces serial metadata reads; the reviewer still reads the saved prose
  * and actual evidence. Malformed indexes retain the host's revision path. */
-export function designReviewIndexes(workspace: string, documents: readonly string[]) {
+export function designReviewIndexes(workspace: string, documents: readonly string[], scope?: Record<string, string[] | null>) {
   return documents.map(name => {
     if (!PROJECT_DOCUMENTS.some(document => document === name)) throw new Error('Unknown design document')
     try {
-      const { handoff } = documentHandoff(workspace, name as DesignDocument,
-        readRetained(workspace, `docs/${name}`).toString('utf8'))
-      return { document: name, outputs: handoff.outputs, evidence: handoff.evidence.map(({ sha256: _hash, ...source }) => source) }
+      const body = readRetained(workspace, `docs/${name}`).toString('utf8')
+      const { handoff } = documentHandoff(workspace, name as DesignDocument, body)
+      const headings = scope?.[name]
+      const sections = designDocumentSections(body)
+      // Unknown/moved headings keep the full source fallback, just as the
+      // reading contract does. [] explicitly selects no mandatory material.
+      const full = headings === undefined || headings === null || headings.some(heading =>
+        sections.filter(section => section.heading === heading).length !== 1)
+      const selected = sections.filter(section => headings?.includes(section.heading))
+      const includes = (heading: string) => full || sections.some(section => section.heading === heading &&
+        selected.some(source => source.start <= section.end && section.start <= source.end))
+      // Give native Read its actual source coordinates. Do not force the model
+      // to grep headings or parse tool archives just to locate assigned text.
+      // These hints never count as having read the file, and edits invalidate them.
+      const ranges: { offset: number; limit: number }[] = []
+      const sourceRanges = full ? [{ start: 1, end: body.replace(/\r(?=\n|$)/g, '').split('\n').length }] : selected
+      for (const section of [...sourceRanges].sort((a, b) => a.start - b.start)) {
+        const previous = ranges.at(-1)
+        if (previous && section.start <= previous.offset + previous.limit)
+          previous.limit = Math.max(previous.offset + previous.limit - 1, section.end) - previous.offset + 1
+        else ranges.push({ offset: section.start, limit: section.end - section.start + 1 })
+      }
+      return { document: name, sourceReads: ranges.map(range => ({ file_path: 'docs/' + name, ...range })),
+        outputs: handoff.outputs.filter(output => includes(output.section) ||
+          !!output.acceptance && includes(output.acceptance.section)),
+        ...(handoff.implementationItems ? { implementationItems: handoff.implementationItems.filter(item => includes(item.section)) } : {}),
+        evidence: full || selected.length ? handoff.evidence.map(({ sha256: _hash, ...source }) => source) : [] }
     } catch { return { document: name, unavailable: 'Index unavailable/malformed; use the host structural revision scope, not invented pointers.' } }
   })
 }

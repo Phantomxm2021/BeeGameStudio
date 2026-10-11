@@ -1,15 +1,23 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises'
+import { readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { parseBeeGameContentDocument, sceneDesignSource } from './game-content-schema.ts'
 
-const help = `Usage: bun .beegame/delivery/calculate-balance.mjs model.mjs output.md [--verify verifier.mjs]
+const help = `Usage: bun .beegame/delivery/calculate-balance.mjs model.mjs output.md [--scenes] [--verify verifier.mjs]
+       bun .beegame/delivery/calculate-balance.mjs --check-result output.md
 Run from the project root. This executes project-authored code with the native tool's
 permissions, not inside the BGS server or a sandbox supplied by this helper.
 
 The model exports async calculate({readJson, readText}). Readers accept workspace-relative
 paths. For the eight docs/<DESIGN_NAME>.md sources, readText returns and hashes the
-body without its unique valid host-maintained Version line; all other sources use
+body without its unique valid host-maintained Version line. readJson of content/scenes
+and --scenes supply design-only Scene data: registered asset declarations and known
+resource locator slots are omitted from BOTH the model input and freshness hash.
+Geometry, nodes, behaviors, component parameters and unknown design fields remain.
+Use readText when exact source bytes (including bindings) are required; do not mix
+exact and design-only views of the same file in one calculation. Other sources use
 exact bytes. The appendix states each hash's scope. Host version changes therefore
 do not change a calculation's inputs; substantive source changes still do.
 Use this helper only for a concrete consequential numerical or feasibility question.
@@ -46,12 +54,29 @@ inputs and output/input collisions. It generates one Markdown calculation append
 with scoped source hashes and check outcomes. Reference results actually used by
 the design and rerun only after substantive model/source changes. Use readText/readJson
 for dependencies, including imported model files, whose bytes must appear in the record.
+For Scene feasibility use --scenes: the helper discovers every saved content/scenes/*.json
+recursively and supplies scenes:[{path,document}] to calculate(). Use these actual documents,
+not a second hand-maintained level table. Read rule sources and imported dependencies with
+readText/readJson, include nonempty checks that distinguish the applicable rule boundaries.
+This records actual inputs, not proof that a model correctly consumed them.
+--check-result is read-only and never executes the model. It checks retained output,
+helper/model/read dependencies and, for --scenes, current Scene membership. Fresh means
+only these recorded bytes are current, not correct rules or complete dependency coverage.
+Read fresh results instead of solving again; stale/unrecorded inputs require recalculation.
 Unrecorded imports, a passing script and a valid table do not prove the model,
 assumptions, visual quality, runtime behavior or game feel correct.`
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const designDocument = /^docs\/(?:GDD|TECHNICAL_DESIGN|ART_DIRECTION|AUDIO_DESIGN|LEVEL_SCENE_DESIGN|BALANCE_DESIGN|UI_UX_SPEC|ASSET_PLAN)\.md$/
-function calculationSource(path, bytes) {
+function calculationSource(path, bytes, scope) {
+  if (scope === 'scene-design-v1') {
+    if (!/^content\/scenes\/.+\.json$/.test(path)) throw Error('Invalid Scene design source: ' + path)
+    const doc = parseBeeGameContentDocument(JSON.parse(bytes.toString('utf8')))
+    if (doc.kind !== 'scene-2d' && doc.kind !== 'scene-3d') throw Error('Expected a Scene design source: ' + path)
+    const stable = value => Array.isArray(value) ? value.map(stable) : value && typeof value === 'object'
+      ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, stable(item)])) : value
+    return { body: JSON.stringify(stable(sceneDesignSource(doc))), scope }
+  }
   if (!designDocument.test(path)) return { body: bytes, scope: 'exact-bytes' }
   const body = bytes.toString('utf8')
   const version = /^[ \t]*-[ \t]*(?:Version|版本)[ \t]*[:：][ \t]*v?((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))?)[ \t]*(?:\r?\n|$)/gim
@@ -66,6 +91,62 @@ const inside = (root, path) => {
 const cell = value => String(value).replace(/\\/g, '\\\\').replace(/\|/g, '\\|')
   .replace(/</g, '&lt;').replace(/\r?\n/g, '<br>')
 const text = value => typeof value === 'string' && value.trim().length > 0
+
+function scenePaths(root) {
+  const paths = []
+  const visit = directory => {
+    const absolute = resolve(root, directory)
+    if (realpathSync(absolute) !== absolute) throw Error('Scene directory must not be a symlink: ' + directory)
+    for (const entry of readdirSync(absolute, { withFileTypes: true })) {
+      const path = directory + '/' + entry.name
+      if (entry.isSymbolicLink()) throw Error('Scene source must not be a symlink: ' + path)
+      if (entry.isDirectory()) visit(path)
+      else if (entry.isFile() && entry.name.endsWith('.json')) paths.push(path)
+    }
+  }
+  visit('content/scenes')
+  if (!paths.length) throw Error('No actual saved Scene JSON in content/scenes')
+  return paths.sort()
+}
+
+/** Freshness of this existing appendix only; no code execution or semantic PASS. */
+export function checkCalculationResult(workspace, outputPath, helperPath = fileURLToPath(import.meta.url)) {
+  const issues = []
+  try {
+    const root = realpathSync(workspace)
+    const output = realpathSync(resolve(root, outputPath))
+    if (isAbsolute(outputPath) || !inside(root, output)) throw Error('Result must be inside the workspace')
+    const body = readFileSync(output, 'utf8')
+    const match = /\n<!-- bgs-calculation-v1:([A-Za-z0-9+/=]+) -->\n?$/.exec(body)
+    if (!match) throw Error('No retained input record; freshness is unverified')
+    const record = JSON.parse(Buffer.from(match[1], 'base64').toString('utf8'))
+    if (hash(body.slice(0, match.index)) !== record.outputDigest) issues.push('Calculation output changed')
+    if (!/^[a-f0-9]{64}$/.test(record.helperDigest)) throw Error('Invalid retained calculator identity')
+    if (hash(readFileSync(helperPath)) !== record.helperDigest) {
+      // Tool deployment is not a design edit. Check the exact retained executable
+      // without running project code or weakening any recorded input comparison.
+      const archived = resolve(root, '.beegame/delivery/calculators', record.helperDigest + '.mjs')
+      try {
+        if (realpathSync(archived) !== archived || hash(readFileSync(archived)) !== record.helperDigest)
+          throw Error('Retained calculator bytes changed')
+      } catch { issues.push('Calculation helper changed and its retained version is unavailable') }
+    }
+    if (!Array.isArray(record.sources) || !record.sources.length) throw Error('Input record has no sources')
+    for (const [path, source] of record.sources) {
+      if (typeof path !== 'string' || isAbsolute(path) || !inside(root, resolve(root, path))) throw Error('Invalid retained input path')
+      const actual = realpathSync(resolve(root, path))
+      if (!inside(root, actual)) throw Error('Retained input escapes workspace: ' + path)
+      try {
+        const current = calculationSource(path, readFileSync(actual), source.scope)
+        if (current.scope !== source.scope || hash(current.body) !== source.digest) issues.push('Input changed: ' + path)
+      } catch (error) { issues.push('Input unavailable or invalid: ' + path + ': ' + (error instanceof Error ? error.message : String(error))) }
+    }
+    if (record.scenes && JSON.stringify(scenePaths(root)) !== JSON.stringify(record.scenes))
+      issues.push('Saved Scene membership changed')
+  } catch (error) { issues.push(error instanceof Error ? error.message : String(error)) }
+  return { valid: !issues.length, scope: 'calculation-input-freshness', output: outputPath, issues,
+    unverified: ['Rule correctness, actual source consumption and unrecorded dependencies remain unverified. No model executed.'] }
+}
 
 function renderChecks(checks, label, requireChecks = false) {
   if (!Array.isArray(checks) || requireChecks && !checks.length) throw new Error(`${label} requires nonempty checks`)
@@ -130,22 +211,26 @@ function render(result, sources, independent) {
 }
 
 /** Only native Agent tools invoke this function; the host never executes project models. */
-export async function calculateBalance(workspace, modelPath, outputPath, verifierPath) {
+export async function calculateBalance(workspace, modelPath, outputPath, verifierPath, includeScenes = false) {
   const root = await realpath(workspace)
   const sources = new Map()
-  const readText = async path => {
+  const readSource = async (path, scope) => {
     if (typeof path !== 'string' || isAbsolute(path) || !inside(root, resolve(root, path)))
       throw new Error('Calculation sources must be workspace-relative files')
     const absolute = await realpath(resolve(root, path))
     if (!inside(root, absolute)) throw new Error('Calculation source escapes the workspace')
     const bytes = await readFile(absolute)
     const name = relative(root, absolute).split(sep).join('/')
-    const source = calculationSource(name, bytes)
+    const source = calculationSource(name, bytes, scope)
     const digest = hash(source.body)
+    if (sources.has(name) && sources.get(name).scope !== source.scope) throw new Error(`Cannot mix exact and design-only Scene input views: ${name}`)
     if (sources.has(name) && sources.get(name).digest !== digest) throw new Error(`Source changed during calculation: ${name}`)
     sources.set(name, { digest, scope: source.scope })
     return source.body.toString('utf8')
   }
+  const readText = path => readSource(path)
+  const readJson = async path => JSON.parse(await readSource(path,
+    /^content\/scenes\/.+\.json$/.test(path) ? 'scene-design-v1' : undefined))
   await readText(modelPath)
   if (verifierPath !== undefined) {
     await readText(verifierPath)
@@ -164,7 +249,15 @@ export async function calculateBalance(workspace, modelPath, outputPath, verifie
   if (ancestor !== root && !inside(root, ancestor)) throw new Error('Calculation output escapes the workspace')
   const module = await import(`${pathToFileURL(await realpath(resolve(root, modelPath))).href}?run=${randomUUID()}`)
   if (typeof module.calculate !== 'function') throw new Error('Model must export calculate({readJson, readText})')
-  const result = await module.calculate({ readText, readJson: async path => JSON.parse(await readText(path)) })
+  const paths = includeScenes ? await scenePaths(root) : undefined
+  const scenes = paths ? await Promise.all(paths.map(async path => {
+    const document = await readJson(path)
+    if (!['scene-2d', 'scene-3d'].includes(document.kind) || !Array.isArray(document.data?.nodes))
+      throw Error(path + ': expected an actual Scene document; run --check-drafts for full structure diagnostics')
+    return { path, document }
+  })) : undefined
+  const result = await module.calculate({ readText, readJson, ...(scenes ? { scenes } : {}) })
+  if (includeScenes) renderChecks(result?.checks, 'Scene rule boundary check', true)
   // Validate the model before auditing; the independent module sees only cloned
   // data, so it cannot mutate or approve the calculation's own passed flags.
   render(result, sources)
@@ -174,10 +267,10 @@ export async function calculateBalance(workspace, modelPath, outputPath, verifie
     const verifier = await import(`${pathToFileURL(await realpath(resolve(root, verifierPath))).href}?run=${randomUUID()}`)
     if (typeof verifier.verify !== 'function') throw new Error('Verifier must export verify({tables, observations, readJson, readText})')
     independent = await verifier.verify({ tables: structuredClone(result.tables), observations,
-      readText, readJson: async path => JSON.parse(await readText(path)) })
+      readText, readJson })
     if (!independent) throw new Error('Independent verification must return checks and limitations')
   }
-  const markdown = render(result, sources, independent)
+  let markdown = render(result, sources, independent)
   await mkdir(dirname(output), { recursive: true })
   const parent = await realpath(dirname(output))
   if (parent !== root && !inside(root, parent)) throw new Error('Calculation output escapes the workspace')
@@ -186,9 +279,13 @@ export async function calculateBalance(workspace, modelPath, outputPath, verifie
   if (existingOutput && existingOutput !== output) throw new Error('Calculation output must not be a symlink')
   if (sources.has(relative(root, output).split(sep).join('/'))) throw new Error('Calculation output would overwrite an input')
   for (const [path, source] of sources) {
-    if (hash(calculationSource(path, await readFile(resolve(root, path))).body) !== source.digest)
+    if (hash(calculationSource(path, await readFile(resolve(root, path)), source.scope).body) !== source.digest)
       throw new Error(`Source changed during calculation: ${path}`)
   }
+  if (paths && JSON.stringify(await scenePaths(root)) !== JSON.stringify(paths)) throw Error('Saved Scene membership changed during calculation')
+  const record = { helperDigest: hash(await readFile(fileURLToPath(import.meta.url))),
+    outputDigest: hash(markdown), sources: [...sources], ...(paths ? { scenes: paths } : {}) }
+  markdown += '\n<!-- bgs-calculation-v1:' + Buffer.from(JSON.stringify(record)).toString('base64') + ' -->\n'
   const temporary = `${output}.${randomUUID()}.tmp`
   try { await writeFile(temporary, markdown, 'utf8'); await rename(temporary, output) }
   finally { await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error }) }
@@ -196,12 +293,27 @@ export async function calculateBalance(workspace, modelPath, outputPath, verifie
     independentVerification: independent ? { status: 'passed', checks: independent.checks.length } : { status: 'not-run' } }
 }
 
-if (import.meta.main) {
+async function main() {
   const args = process.argv.slice(2)
   if (args.length === 1 && args[0] === '--help') console.log(help)
-  else if (args.length !== 2 && !(args.length === 4 && args[2] === '--verify' && text(args[3]))) { console.error(help); process.exitCode = 1 }
   else {
-    try { console.log(JSON.stringify(await calculateBalance(process.cwd(), args[0], args[1], args[3]))) }
+    try {
+      if (args[0] === '--check-result' && args.length === 2) {
+        const result = await checkCalculationResult(process.cwd(), args[1])
+        console.log(JSON.stringify(result)); process.exitCode = result.valid ? 0 : 1
+      } else {
+        const [model, output, ...options] = args
+        let scenes = false, verifier
+        for (let i = 0; i < options.length; i++) {
+          if (options[i] === '--scenes' && !scenes) scenes = true
+          else if (options[i] === '--verify' && !verifier && text(options[i + 1]) && !options[i + 1].startsWith('--')) verifier = options[++i]
+          else throw Error(help)
+        }
+        if (!text(model) || !text(output) || model.startsWith('--') || output.startsWith('--')) throw Error(help)
+        console.log(JSON.stringify(await calculateBalance(process.cwd(), model, output, verifier, scenes)))
+      }
+    }
     catch (error) { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1 }
   }
 }
+if (import.meta.main) void main()

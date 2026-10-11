@@ -1,5 +1,7 @@
 # Reviewer 输入输出诊断证据
 
+> 历史实现说明。2026-10-10 原生 CLI 的 BGS 专属 API/查询拦截已移除：新执行的响应证据由 BGS 观察公开 SDK 流，用量取公开消息与 `modelUsage`，必要的假模型验收仍可使用宿主代理。下文的原生 `BEEGAME_REVIEW_EVIDENCE` 开关及内部上下文差分不再是当前 CLI 能力。旧证据保留；中断时未暴露的供应商用量不能当作零，也不能宣称已完整统计。现状见 `docs/verification/claude-bgs-workflow-separation-2026-10-10.json`。
+
 本次只增加诊断采集，不改变审查提示词、语义规则、模型配置、计费或停止策略；不触发真实付费审查。
 
 ## 启用与位置

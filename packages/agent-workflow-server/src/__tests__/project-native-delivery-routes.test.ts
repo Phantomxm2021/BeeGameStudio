@@ -49,12 +49,7 @@ async function completeFixtureMilestone(input: BeeGameSessionRunnerStartInput, i
     await writeFile(join(input.cwd, 'content/index.json'), JSON.stringify({
       schema: 'beegame-content-package.v2', id: 'game', dimension: '2d',
       documentRevision: authority.documentRevision, assetManifestRevision: authority.assetManifestRevision,
-      entryScene: 'scene', sceneModel: BEEGAME_SCENE_MODEL, files: ['scenes/main.json', 'ui/menu.json'],
-    }))
-    await writeFile(join(input.cwd, 'content/scenes/main.json'), JSON.stringify({
-      schema: 'beegame-content.v1', id: 'scene', kind: 'scene-2d', assetRefs: [],
-      data: { settings: { coordinateSystem: { origin: 'top-left', units: 'logical-pixels',
-        width: 1280, height: 720, pixelsPerUnit: 1 } }, nodes: [{ id: 'root', components: [] }] },
+      entryScene: 'level', sceneModel: BEEGAME_SCENE_MODEL, files: ['scenes/level.json', 'ui/menu.json'],
     }))
   } else if (context.includes('milestone: implementation.')) {
     await mkdir(join(input.cwd, 'dist'), { recursive: true })
@@ -71,8 +66,8 @@ async function completeFixtureMilestone(input: BeeGameSessionRunnerStartInput, i
       artifactPaths: ['dist/game.js'],
       verification: { target: 'deployment', observation: 'target-runtime', knownIssues: [], unverified: [],
         requirementChecks: designRequirementChecksFixture(input.cwd, ['.beegame/delivery/browser.txt']),
-        contentChecks: [{ kind: 'scene-layout', document: 'content/scenes/main.json', nodeId: 'root',
-          property: 'transform', change: 'Move root in test copy', expected: 'Scene moves',
+        contentChecks: [{ kind: 'scene-layout', document: 'content/scenes/level.json', nodeId: 'board',
+          property: 'transform', change: 'Move board in test copy', expected: 'Scene moves',
           observed: 'Scene moved with data', status: 'passed', evidencePaths: ['.beegame/delivery/browser.txt'] },
           { kind: 'ui-layout', document: 'content/ui/menu.json', nodeId: 'play', property: 'layout',
             change: 'Move play in test copy', expected: 'Button moves', observed: 'Button moved with data',
@@ -152,6 +147,8 @@ test('new project bootstrap starts one native project conversation', async () =>
     expect(String(prompts[0])).not.toContain('visual-direction approval')
     expect(String(prompts[0])).toContain('default_first_release_scope')
     expect(String(prompts[0])).toContain('small complete playable version')
+    expect(String(prompts[0])).toContain('do not defer the audiovisual feedback or usability needed by the agreed core loop')
+    expect(String(prompts[0])).not.toContain('unrequested extra levels, modes, and polish')
     expect(String(prompts[0])).toContain('one or two levels if levels apply')
     expect(String(prompts[0])).toContain('a model-suggested option or scope does not by itself authorize an expansive first release')
     const stored = await readProjectDelivery(starts[0]!.cwd, join(root, 'dashboard'))
@@ -265,6 +262,10 @@ test('editing the latest user message restores the prior project before the repl
     await writeFile(join(workspace, 'game.ts'), 'baseline')
     expect((await send('Original request', 'original')).status).toBe(202)
     await waitForCompletedTurns(2)
+    // A network retry must preserve the first request's pre-turn checkpoint.
+    expect((await send('Original request', 'original')).status).toBe(202)
+    expect(turns).toBe(2)
+    expect((await send('Different request with same ID', 'original')).status).toBe(400)
     const older = await send('Must reject older message', 'invalid', 'not-latest')
     expect(older.status).toBe(400)
     const replacement = await send('Replacement request', 'replacement', 'original')
@@ -275,6 +276,9 @@ test('editing the latest user message restores the prior project before the repl
     expect(nativeStarts).toEqual([undefined, nativeSessionId])
     expect(nativeBeforeReplacement).toEqual(['native before user change'])
     expect(await readFile(join(workspace, 'game.ts'), 'utf8')).toBe('replacement change')
+    // Retrying an edit must be idempotent before the superseded-message check.
+    expect((await send('Replacement request', 'replacement', 'original')).status).toBe(202)
+    expect(turns).toBe(3)
     const history = await app.request(`/api/projects/${projectId}/transcript`)
     const body = await history.json() as { events: Array<{ type: string; text: string }> }
     expect(body.events.filter(event => event.type === 'user.message').map(event => event.text))
@@ -309,6 +313,15 @@ test.each([false, true])('one native project session completes delivery; impleme
       } else if (context.includes('milestone: review.')) {
         expect(turn.projectTurn?.reviewStep).toBe('inspect')
         expect(turn.projectTurn?.reviewDocuments).toEqual([...PROJECT_DOCUMENTS])
+      } else if (turn.projectTurn?.milestoneResult) {
+        const baseline = turn.projectTurn.milestoneResult.designBaseline!
+        expect(Object.keys(baseline.snapshots)).toHaveLength(PROJECT_DOCUMENTS.length)
+        expect(Object.keys(baseline.evidenceHashes)).toContain('content/scenes/level.json')
+        if (turn.projectTurn.milestoneResult.phase === 'content') {
+          expect(context).toContain('# Current UI binding format')
+          expect(context).toContain('behaviorBindings')
+          expect(context).toContain('--ui-all --report')
+        }
       }
       await turn.onMessage({ type: 'result', subtype: 'success', result: 'Game delivered' })
     } }
@@ -334,6 +347,7 @@ test.each([false, true])('one native project session completes delivery; impleme
       await Bun.sleep(5)
     }
     expect(starts).toHaveLength(1)
+    expect((await readProjectDelivery(project.root_path, join(root, 'dashboard')))?.lastValidationFailure).toBeUndefined()
     expect(contexts.map(context => /milestone: ([a-z-]+)\./.exec(context)?.[1])).toEqual([
       ...AUTHOR_BATCHES.map(() => 'author'), 'review', 'resources', 'content', 'implementation', 'acceptance',
     ])
@@ -437,6 +451,7 @@ test('publish readiness preserves verified milestone state after runtime restart
       if ((initialReadiness as { allowed: boolean }).allowed) break
       await Bun.sleep(5)
     }
+    expect((await readProjectDelivery(project.root_path, join(root, 'dashboard')))?.lastValidationFailure).toBeUndefined()
     expect(initialReadiness).toMatchObject({ allowed: true })
 
     for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
@@ -531,7 +546,8 @@ test('stopping a project does not preempt the next native request', async () => 
         if (prompts.length === 1) await new Promise<void>(resolve => { releaseInitial = resolve })
         if (prompts.length === 2) {
           await new Promise<void>(resolve => { releaseFollowup = resolve })
-          await completeFixtureMilestone(input)
+          expect(turn.projectTurn?.authorDocument).toBeUndefined()
+          expect(turn.directionAuthors).toBeUndefined()
         }
         if (prompts.length === 3) await new Promise<void>(resolve => { releaseDelivery = resolve })
         await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
@@ -570,10 +586,11 @@ test('stopping a project does not preempt the next native request', async () => 
     releaseFollowup?.()
     await Bun.sleep(50)
     expect(prompts).toHaveLength(3)
-    expect(prompts[1]).toContain('Record your author conclusion')
-    expect(prompts[2]).toContain('Continue the current project delivery milestone')
-    expect(prompts).not.toContain('A later request')
+    expect(prompts[1]).not.toContain('Record your author conclusion')
+    expect(prompts[2]).toContain('A later request')
+    expect(prompts[2]).not.toContain('Continue the current project delivery milestone')
     expect(prompts.some(prompt => prompt.includes('resource-planner'))).toBe(false)
+    expect((await readProjectDelivery(join(root, 'projects/users/checkpoint-owner', projectId), join(root, 'dashboard')))?.status).toBe('paused')
     expect(starts.every(start => !start.resumeSessionId ||
       start.resumeSessionId === '94429147-7294-4364-b363-d4097d11ae86')).toBe(true)
   } finally {

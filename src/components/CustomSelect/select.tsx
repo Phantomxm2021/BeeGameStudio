@@ -1,6 +1,6 @@
 import figures from 'figures';
 import React, { type ReactNode, useEffect, useRef, useState } from 'react';
-import { Ansi, Box, Text, stringWidth, useDeclaredCursor } from '@anthropic/ink';
+import { Ansi, Box, Text, stringWidth, useDeclaredCursor } from '@bee-game-studio/ink';
 import { count } from '../../utils/array.js';
 import type { PastedContent } from '../../utils/config.js';
 import type { ImageDimensions } from '../../utils/imageResizer.js';

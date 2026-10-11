@@ -5,7 +5,7 @@ import {
 } from 'src/services/analytics/index.js';
 import { getSettings_DEPRECATED, updateSettingsForSource } from '../utils/settings/settings.js';
 import { Select } from './CustomSelect/index.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 import { MCPServerDialogCopy } from './MCPServerDialogCopy.js';
 
 type Props = {

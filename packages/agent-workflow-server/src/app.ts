@@ -1,4 +1,10 @@
 import { Hono, type Context } from 'hono'
+import { registerV3Routes } from './beegame/workflow-v3/routes'
+import { registerV3DebugPage } from './beegame/workflow-v3/debug-page'
+import { createMeasuredPreview, type MeasuredPreviewManager } from './beegame/workflow-v3/measured-preview'
+import { WorkflowError } from './beegame/workflow-v3/state'
+import { createLocalWorkflowStore, createRemoteWorkflowStore, type WorkflowStore } from './beegame/workflow-v3/store'
+import { normalizeRuntimeEnvironment } from '../../../src/utils/runtimeEnvironment'
 import { UserQuestionValidationError } from './beegame/user-question'
 import { intakeReferenceParts } from './beegame/intake-references'
 import { openPreviewTestAccess } from './beegame/preview-test-access'
@@ -194,8 +200,9 @@ import {
 import { sendProjectConversation, isProjectConversation, type ProjectConversationOptions } from './beegame/project-conversation'
 import { BEEGAME_USER_RESPONSE_SCOPE } from './beegame/user-response-scope'
 import { openResourceLibraryAccess } from './beegame/resource-library-access'
-import { beginProjectDelivery, captureProjectDeliveryAcceptance, evaluateProjectDeliveryGate, nativeContentAuthority, pauseProjectDelivery, projectDeliveryPhase, projectDeliveryStatePath, readProjectDelivery, resumeProjectDelivery, requestProjectDesignResolution } from './beegame/project-delivery'
+import { beginProjectDelivery, captureProjectDeliveryAcceptance, evaluateProjectDeliveryGate, nativeContentAuthority, pauseProjectDelivery, projectDeliveryPhase, projectDeliveryStatePath, readProjectDelivery, resumeProjectDelivery, requestProjectDesignResolution, recordProjectQualityReview, projectRuntimeReview } from './beegame/project-delivery'
 import { designReviewResultSchema } from './beegame/design-handoff'
+import { computeWorkspaceRevision } from './beegame/workspace-revision'
 import { projectRuntimeDisplayReason } from './beegame/project-runtime-display'
 import { createProjectMessageQueue } from './beegame/project-message-queue'
 import { createProjectTurnCheckpointStore } from './beegame/project-turn-checkpoint'
@@ -236,22 +243,22 @@ function buildResourceSemanticCuratorSystemPrompt(
 const RESOURCE_MODEL_RUNTIME_KEYS = new Set([
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_AUTH_TOKEN',
-  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
-  'ANTHROPIC_DEFAULT_SONNET_MODEL',
-  'ANTHROPIC_DEFAULT_OPUS_MODEL',
-  'CLAUDE_CODE_USE_OPENAI',
+  'BGS_DEFAULT_FAST_MODEL',
+  'BGS_DEFAULT_BALANCED_MODEL',
+  'BGS_DEFAULT_STRONG_MODEL',
+  'BGS_USE_OPENAI',
   'OPENAI_BASE_URL',
   'OPENAI_API_KEY',
   'OPENAI_DEFAULT_HAIKU_MODEL',
   'OPENAI_DEFAULT_SONNET_MODEL',
   'OPENAI_DEFAULT_OPUS_MODEL',
-  'CLAUDE_CODE_USE_GEMINI',
+  'BGS_USE_GEMINI',
   'GEMINI_BASE_URL',
   'GEMINI_API_KEY',
   'GEMINI_DEFAULT_HAIKU_MODEL',
   'GEMINI_DEFAULT_SONNET_MODEL',
   'GEMINI_DEFAULT_OPUS_MODEL',
-  'CLAUDE_CODE_USE_GROK',
+  'BGS_USE_GROK',
   'GROK_BASE_URL',
   'GROK_API_KEY',
   'GROK_DEFAULT_HAIKU_MODEL',
@@ -367,6 +374,9 @@ type BeeGameIntakeJob = {
 }
 
 export type AgentWorkflowAppOptions = {
+  /** Explicit backend injection for local development and deterministic tests. */
+  workflowV3Store?: WorkflowStore | false
+  workflowV3PreviewOrigin?: string
   sessionRunner?: BeeGameSessionRunner
   modelRuntimeHost?: BeeGameModelRuntimeHost
   previewRunner?: BeeGamePreviewRunner
@@ -408,6 +418,13 @@ export function createAgentWorkflowApp(
 ): Hono {
   validateSecretStorageAtStartup()
   const app = new Hono()
+  let measuredPreview: MeasuredPreviewManager | undefined
+  // Before auth and every API route: preview hosts can only serve measured files.
+  app.use('*', async (c, next) => {
+    const response = await measuredPreview?.handle(c.req.raw)
+    if (response) return response
+    await next()
+  })
   app.onError((error, c) => {
     // Covers auth middleware, session refresh and downstream service proxies.
     if (error instanceof BeeGameAuthUnavailableError) {
@@ -433,6 +450,9 @@ export function createAgentWorkflowApp(
       // Deliberately omit allowHeaders: Hono reflects the browser's requested
       // headers after the origin has passed the explicit trusted-origin policy.
       allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+      // Explicit export identity is verified by separately hosted dashboards.
+      // Do not expose credentials or loosen the trusted-origin policy.
+      exposeHeaders: ['X-BGS-Artifact-SHA256', 'X-BGS-Export-Kind'],
     }),
   )
   const outboundTargetPolicyOptions: OutboundTargetPolicyOptions = {
@@ -526,6 +546,18 @@ export function createAgentWorkflowApp(
   const getRequestAuthToken = authContext.getAccessToken
   const previewCapabilities = createPreviewCapabilityManager()
   const getCurrentUser = authContext.getCurrentUser
+  // Resolve async identity before V3 routes and legacy-mode guards use the
+  // synchronous request projection. Session refresh routes were registered
+  // above; capability-only preview hosts were isolated before every API route.
+  app.use('/api/*', async (c, next) => {
+    if (c.req.path === '/api/internal/resource-semantic-curation' || options.currentUser) {
+      await next()
+      return
+    }
+    const user = await authContext.resolveRequestUser(c.req.raw)
+    if (!user) return c.json({ error: 'Unauthorized', message: 'authentication required' }, 401)
+    await next()
+  })
   const getCurrentUserDataRoot = (request?: Request) =>
     getUserDashboardDataRoot(dashboardDataRoot, getCurrentUser(request).id)
   const modelConfigStore = options.modelConfigStore
@@ -609,12 +641,85 @@ export function createAgentWorkflowApp(
     dashboardRepository.createSessionUsageBillingBackend(),
     Boolean(supabaseRuntimeEnvClient),
   )
+  const v3ServiceKey = process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY?.trim() || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()
+  const v3Url = process.env.BEEGAME_SUPABASE_URL?.trim() || process.env.SUPABASE_URL?.trim()
+  const v3Store = options.workflowV3Store === false ? undefined : options.workflowV3Store ??
+    (supabaseStore && v3ServiceKey && v3Url ? createRemoteWorkflowStore({ url: v3Url, serviceKey: v3ServiceKey, fetchImpl: serviceFetch }) :
+      !supabaseStore && process.env.BEEGAME_WORKFLOW_V3_STORE === 'local-single-process' ? createLocalWorkflowStore(dashboardDataRoot) : undefined)
+  measuredPreview = createMeasuredPreview({
+    origin: options.workflowV3PreviewOrigin ?? process.env.BEEGAME_WORKFLOW_V3_PREVIEW_ORIGIN,
+    capabilities: previewCapabilities,
+    readRun: async (projectId, ownerId) => v3Store?.read(projectId, ownerId),
+    isBusy: run => beeGameSessions.hasActiveProjectTurn(run.ownerId, run.projectId, run.workspacePath),
+  })
+  options.registerCleanup?.(async () => measuredPreview?.dispose())
+  registerV3DebugPage(app, process.env.BEEGAME_WORKFLOW_V3_DEBUG === '1')
+  const v3Routes = registerV3Routes(app, {
+    resourceLibraryBaseUrl: options.resourceSelectionRuntimeConfig?.baseUrl,
+    // Evaluated only for an authorized production turn, after app setup.
+    // Reuse the existing candidate Preview; no Task or engine routing.
+    openAgentPreview: value => openProjectPreviewAccess(value),
+    openAgentImage: value => openImageGenerationAccess({userId:value.user.id,projectId:value.projectId,
+      workspacePath:value.workspacePath,service:imageGeneration,
+      loadConfig:()=>loadRuntimeImageConfig(dashboardDataRoot,{remote:Boolean(supabaseStore),billing:billingConfig},
+        (url,init)=>serviceFetch(url,init))}),
+    preview: measuredPreview,
+    store: v3Store, sessions: beeGameSessions, getUser: getCurrentUser,
+    getProject: (request, user, projectId) => getOwnedProjectMetadata(request, user, projectId, dashboardRepository),
+    getAuthToken: getRequestAuthToken,
+    getUserDataRoot: getCurrentUserDataRoot,
+    getValidAuthToken: request => {
+      const credential = sessionAuth?.getCredential?.(request)
+      return credential ? options => credential.getValidAccessToken(options) : undefined
+    },
+    assertNoLegacyRun: async workspace => {
+      if (await readProjectDelivery(workspace, dashboardDataRoot))
+        throw new Error('Existing legacy delivery must not be silently migrated to V3')
+    },
+    persistMode: async (request, user, project, run) => {
+      if (!supabaseStore) await dashboardRepository.upsertProject(request, user, { ...project, runtime_snapshot: {
+        ...project.runtime_snapshot, workflow_protocol: 'bgs.workflow.v3', workflow_chat_session_id: run.chatSessionId } })
+    },
+    readBody: request => readJson(request, MAX_BEEGAME_REQUEST_BYTES),
+    registerCleanup: options.registerCleanup,
+  })
+  // Route before legacy handlers: rejection must precede file/state/queue mutations.
+  app.use('/api/projects/:id/*', async (c, next) => {
+    const tail = c.req.path.split('/').slice(4).join('/')
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) && !tail.startsWith('workflow-v3') &&
+        tail !== 'session/ensure' && !(c.req.method === 'PUT' && tail === 'game-content/document') && !tail.startsWith('permissions/')) {
+      try { await v3Routes.assertLegacy(c.req.param('id')!, getCurrentUser(c.req.raw).id, c.req.raw) }
+      catch (error) {
+        if (error instanceof WorkflowError) return c.json({ error: error.message, code: error.code }, error.status)
+        throw error
+      }
+    }
+    await next()
+  })
+  app.use('/api/beegame-sessions/:id/*', async (c, next) => {
+    if (c.req.method === 'POST' && ['input', 'confirmed-brief', 'continue'].includes(c.req.path.split('/').at(-1)!)) {
+      const metadata = beeGameSessions.metadata(c.req.param('id')!)
+      if (metadata?.projectId) {
+        try { await v3Routes.assertLegacy(metadata.projectId, getCurrentUser(c.req.raw).id, c.req.raw) }
+        catch (error) {
+          if (error instanceof WorkflowError) return c.json({ error: error.message, code: error.code }, error.status)
+          throw error
+        }
+      }
+    }
+    await next()
+  })
   const beeGamePreviews = new BeeGamePreviewManager(
     options.previewRunner,
     undefined,
     options.previewPortAllocator,
     options.previewReadinessProbe,
     process.env.BEEGAME_PREVIEW_PUBLIC_BASE_URL,
+    sessionId => {
+      const metadata = beeGameSessions.metadata(sessionId)
+      if (!metadata) throw new Error('Preview session not found')
+      return previewCapabilities.issueRouteId(sessionId, metadata.userId)
+    },
   )
   options.registerCleanup?.(async () => {
     beeGamePreviews.dispose()
@@ -689,22 +794,20 @@ export function createAgentWorkflowApp(
     })
   })
   const handlePreviewProxy = async (c: Context) => {
-    const sessionId = c.req.param('sessionId')
-    if (!sessionId) return c.text('Preview not found', 404)
+    const routeId = c.req.param('sessionId')
+    if (!routeId) return c.text('Preview not found', 404)
+    const routeGrant = previewCapabilities.resolveRoute(routeId)
+    const sessionId = routeGrant?.sessionId ?? routeId
     const sessionMetadata = beeGameSessions.metadata(sessionId)
     if (!sessionMetadata) return c.text('Preview not found', 404)
-    const capability = previewCapabilities.verifyRequest(c.req.raw, sessionId)
-    const sandboxedSubresource = previewCapabilities.allowsSandboxedSubresource(
-      c.req.raw,
-      sessionId,
-    )
+    const capability = routeGrant ?? previewCapabilities.verifyRequest(c.req.raw, sessionId)
     // A valid, session-scoped preview grant does not need a second trip to
     // the identity service for each module/image. Keep normal auth for callers
     // without the existing preview grant; never fall back after failed auth.
-    const user = options.currentUser ?? (capability || sandboxedSubresource
+    const user = options.currentUser ?? (capability
       ? undefined : await authContext.resolveRequestUser(c.req.raw))
     const authenticatedUserId = user?.id ?? capability?.userId
-    if (!authenticatedUserId && !sandboxedSubresource)
+    if (!authenticatedUserId)
       return c.text('Unauthorized', 401)
     if (authenticatedUserId && sessionMetadata.userId !== authenticatedUserId) {
       return c.text('Preview not found', 404)
@@ -716,6 +819,8 @@ export function createAgentWorkflowApp(
       sessionId,
       internalUrl,
       beeGamePreviews.expectsPublicPath(sessionId),
+      undefined,
+      routeId,
     )
   }
   app.all('/previews/:sessionId', handlePreviewProxy)
@@ -742,28 +847,6 @@ export function createAgentWorkflowApp(
     } catch (error) {
       return invitationRouteError(c, error)
     }
-  })
-
-  app.use('/api/*', async (c, next) => {
-    if (c.req.path === '/api/internal/resource-semantic-curation') {
-      await next()
-      return
-    }
-    if (options.currentUser) {
-      await next()
-      return
-    }
-    const user = await authContext.resolveRequestUser(c.req.raw)
-    if (!user) {
-      return c.json(
-        {
-          error: 'Unauthorized',
-          message: 'authentication required',
-        },
-        401,
-      )
-    }
-    await next()
   })
 
   app.get('/health', c => c.json({ status: 'ok' }))
@@ -1824,6 +1907,7 @@ export function createAgentWorkflowApp(
     if (error) return c.json({ error }, 400)
     try {
       const user = getCurrentUser(c.req.raw)
+      await v3Routes.assertLegacy(String(body.id), user.id, c.req.raw)
       return c.json(
         await dashboardRepository.upsertProject(
           c.req.raw,
@@ -1870,6 +1954,7 @@ export function createAgentWorkflowApp(
     }
 
     try {
+      await v3Routes.assertLegacy(projectId, user.id, c.req.raw)
       const referenceAttachments = brief.attachments === undefined || (Array.isArray(brief.attachments) && !brief.attachments.length)
         ? [] : validateBeeGameAttachments(brief.attachments)
       if (brief.creationMode !== undefined && brief.creationMode !== 'creative' && brief.creationMode !== 'blueprint')
@@ -2394,6 +2479,55 @@ export function createAgentWorkflowApp(
       return removed ? c.json({ removed: true }) : c.json({ error: 'Queued message not found' }, 404)
     } catch (error) { return tracedRouteError(c, 'project.queue.delete', error) }
   })
+  // Retained frontend status/feedback API; it is not a production dispatcher.
+  app.get('/api/projects/:id/production', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const context = await queuedProjectContext(c.req.raw, user, c.req.param('id'))
+      if (!context) return c.json({ error: 'Project session not found' }, 404)
+      const revision = await computeWorkspaceRevision(context.workspacePath)
+      let state
+      try { state = await readProjectDelivery(context.workspacePath, dashboardDataRoot) }
+      catch (error) {
+        if (!(error instanceof Error) || !error.message.startsWith('The Brief/playable production workflow was withdrawn.')) throw error
+        return c.json({ revision, state: { phase: 'legacy', lastValidationFailure: error.message },
+          gate: { allowed: false, issues: [error.message] } })
+      }
+      return c.json({ state: state ? { ...state, phase: projectDeliveryPhase(state) } : undefined, revision,
+        runtimeReview: await projectRuntimeReview(context.workspacePath),
+        gate: await evaluateProjectDeliveryGate(context.workspacePath, dashboardDataRoot) })
+    } catch (error) { return tracedRouteError(c, 'project.production-status', error) }
+  })
+  app.post('/api/projects/:id/production-migration', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'agent.send_message')
+    if (forbidden) return c.json(forbidden, 403)
+    const context = await queuedProjectContext(c.req.raw, user, c.req.param('id'))
+    if (!context) return c.json({ error: 'Project session not found' }, 404)
+    return c.json({ error: 'The replacement production workflow was withdrawn. Existing project files and state are preserved; no automatic migration is available.' }, 409)
+  })
+  app.post('/api/projects/:id/quality-review', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'deployment.manage')
+    if (forbidden) return c.json(forbidden, 403)
+    try {
+      const context = await queuedProjectContext(c.req.raw, user, c.req.param('id'))
+      if (!context) return c.json({ error: 'Project session not found' }, 404)
+      const body = await c.req.json()
+      if (!body || !['accepted', 'changes-required'].includes(body.decision) || typeof body.note !== 'string' ||
+          typeof body.revision !== 'string' || body.scope !== undefined && body.scope !== 'release')
+        return c.json({ error: 'Invalid release feedback' }, 400)
+      return c.json(await projectOperation(user.id, context.workspacePath, async () => {
+        if (beeGameSessions.get(context.sessionId)?.turnStatus === 'running') throw new Error('Stop the current turn before recording release feedback')
+        await recordProjectQualityReview(context.workspacePath, dashboardDataRoot,
+          { reviewerId: user.id, decision: body.decision, note: body.note, revision: body.revision })
+        return { state: await readProjectDelivery(context.workspacePath, dashboardDataRoot),
+          gate: await evaluateProjectDeliveryGate(context.workspacePath, dashboardDataRoot) }
+      }))
+    } catch (error) { return tracedRouteError(c, 'project.quality-review', error) }
+  })
   app.get('/api/projects/:id/design-review', async c => {
     const user = getCurrentUser(c.req.raw)
     const forbidden = requirePermission(user, 'agent.send_message')
@@ -2401,7 +2535,8 @@ export function createAgentWorkflowApp(
     const context = await queuedProjectContext(c.req.raw, user, c.req.param('id'))
     if (!context) return c.json({ error: 'Project session not found' }, 404)
     const state = await readProjectDelivery(context.workspacePath, dashboardDataRoot)
-    return c.json({ review: state?.designReview, baseline: state?.designBaseline, history: state?.designHistory ?? [] })
+    return c.json({ review: state?.designReview, baseline: state?.designBaseline, history: state?.designHistory ?? [], repair: state?.designRepair,
+      acceptancePending: !!state?.designRepair && state.designRepair.status !== 'resolved' })
   })
   // Explicit owner decisions re-arm a finite affected revision, never mark an issue passed.
   app.post('/api/projects/:id/design-resolution', async c => {
@@ -2497,6 +2632,11 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(user, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     try {
+      const v3Content = await v3Routes.contentView(c.req.raw, c.req.param('id'), c.req.query('metadata') === '1')
+      if (v3Content) {
+        c.header('Cache-Control', 'private, no-store')
+        return c.json(v3Content)
+      }
       const project = await getOwnedProjectMetadata(
         c.req.raw,
         user,
@@ -2519,6 +2659,7 @@ export function createAgentWorkflowApp(
         : loadBeeGameContentPackageForEditing(workspacePath, authority)
       return c.json({ state: 'ready', ...snapshot })
     } catch (err) {
+      if (err instanceof WorkflowError) return c.json({ error: err.message, code: err.code }, err.status)
       return c.json({ error: toErrorMessage(err) }, 409)
     }
   })
@@ -2528,6 +2669,9 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(user, 'project.create')
     if (forbidden) return c.json(forbidden, 403)
     try {
+      const rawBody = await readJson(c.req.raw)
+      const v3Saved = await v3Routes.saveContent(c.req.raw, c.req.param('id'), rawBody)
+      if (v3Saved) { c.header('Cache-Control', 'no-store'); return c.json(v3Saved) }
       const project = await getOwnedProjectMetadata(
         c.req.raw,
         user,
@@ -2542,7 +2686,7 @@ export function createAgentWorkflowApp(
           expectedRevision: z.string().regex(/^[a-f0-9]{64}$/),
           document: z.unknown(),
         })
-        .parse(await readJson(c.req.raw))
+        .parse(rawBody)
       const workspacePath = await resolveSessionWorkspacePath(
         project.root_path,
         options.defaultWorkspacePath,
@@ -2555,6 +2699,7 @@ export function createAgentWorkflowApp(
         document: parseBeeGameContentDocument(body.document),
         authority: nativeContentAuthority(workspacePath) }))
     } catch (err) {
+      if (err instanceof WorkflowError) return c.json({ error: err.message, code: err.code }, err.status)
       return c.json({ error: toErrorMessage(err) }, 409)
     }
   })
@@ -2631,9 +2776,11 @@ export function createAgentWorkflowApp(
       })
       if (!sessionRef) return c.json({ error: 'Session not found' }, 404)
       let resolved: { resolved: boolean; stale?: boolean }
+      const permissionSessionId = beeGameSessions.pendingPermissionsForProject(user.id, projectId, sessionRef.workspacePath)
+        .find(permission => permission.toolUseID === c.req.param('toolUseID'))?.sessionId ?? sessionRef.sessionId
       try {
         resolved = beeGameSessions.resolvePermission(
-          sessionRef.sessionId,
+          permissionSessionId,
           c.req.param('toolUseID'),
           {
             behavior: decision,
@@ -2655,7 +2802,7 @@ export function createAgentWorkflowApp(
           actorId: user.id,
           action: 'agent_permission.resolved',
           targetType: 'beegame_session',
-          targetId: sessionRef.sessionId,
+          targetId: permissionSessionId,
           metadata: {
             projectId,
             toolUseID: c.req.param('toolUseID'),
@@ -2936,7 +3083,7 @@ export function createAgentWorkflowApp(
       })
       const deliveryGate = await evaluateProjectDeliveryGate(ensured.binding.workspacePath, dashboardDataRoot) ??
         { allowed: false, issues: ['Project delivery state is missing; the chat acceptance could not be linked to this workspace.'] }
-      if (!deliveryGate.allowed) {
+      if (!deliveryGate.allowed || !('acceptance' in deliveryGate) || !deliveryGate.acceptance) {
         return c.json(
           {
             error: 'Current project version has not passed delivery acceptance',
@@ -2948,6 +3095,7 @@ export function createAgentWorkflowApp(
         )
       }
       const deployment = await beeGameDeployments.start({
+        acceptance: deliveryGate.acceptance,
         sessionId: ensured.session.id,
         userId: user.id,
         projectId: project.id,
@@ -3557,6 +3705,9 @@ export function createAgentWorkflowApp(
     })
     const delivery = await migrateQuiescentProjectDelivery(input)
     if (!delivery || delivery.status !== 'active') return delivery
+    // Status reads can recover a missing record, never rebaseline an existing
+    // acceptance against files edited since its completed turn.
+    if (delivery.accepted) return delivery
     if (beeGameSessions.get(input.sessionId)?.turnStatus === 'running') return delivery
     const latestTurnStart = events.findLast(event => event.type === 'turn.started')
     const turnStartedAt = latestTurnStart?.createdAt.getTime()
@@ -3579,8 +3730,20 @@ export function createAgentWorkflowApp(
     initialBrief?: { displayText: string; confirmedBriefContext: string }
     autoContinuation?: boolean
   }) => projectOperation(input.user.id, input.workspacePath, async () => {
+    await v3Routes.assertLegacy(input.projectId, input.user.id, input.request)
+    // A transport retry must not replace the original pre-turn checkpoint or
+    // rewind files again. Check under the same project lock as those mutations.
+    if (input.options?.clientMessageId) {
+      const previous = beeGameSessions.transcript(input.sessionId).find(event =>
+        event.type === 'user.message' && event.payload?.clientMessageId === input.options!.clientMessageId)
+      if (previous) {
+        if (previous.text !== input.message) throw new Error('Client message ID already belongs to another request')
+        return beeGameSessions.get(input.sessionId)!
+      }
+    }
     if (beeGameDeployments.isPublishing(input.user.id, input.workspacePath))
       throw new Error('Publishing is in progress. Wait for publication before editing the project.')
+    await projectTurnCheckpoints.assertRecovered(input.workspacePath)
     if (!input.initialBrief) await migrateQuiescentProjectDelivery(input)
     let clientMessageId = input.options?.clientMessageId
     let editCheckpoint: Awaited<ReturnType<typeof projectTurnCheckpoints.save>> | undefined
@@ -3617,8 +3780,8 @@ export function createAgentWorkflowApp(
         ...native, deliveryStatePath: projectDeliveryStatePath(input.workspacePath, dashboardDataRoot) })
     }
     try {
-    // A user message after Stop remains in the same project conversation.
-    if (!input.initialBrief && !input.autoContinuation)
+    // Only a trusted Continue dispatch resumes paused production, not a chat question.
+    if (!input.initialBrief && input.autoContinuation)
       await resumeProjectDelivery(input.workspacePath, dashboardDataRoot)
     const result = await sendProjectConversation({
       sessions: beeGameSessions, deliveryDataRoot: dashboardDataRoot,
@@ -3632,6 +3795,10 @@ export function createAgentWorkflowApp(
         const terminal = beeGameSessions.transcript(input.sessionId).findLast(event =>
           event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.empty')
         if (terminal?.type !== 'turn.completed') return
+        if ((await projectMessageQueue.list(input.user.id, input.workspacePath)).length) {
+          await drainProjectMessageQueue(input, !input.autoContinuation && !input.initialBrief)
+          return
+        }
         if (progress?.shouldContinue) {
           const delivery = await readProjectDelivery(input.workspacePath, dashboardDataRoot)
           const session = beeGameSessions.get(input.sessionId)
@@ -3644,7 +3811,7 @@ export function createAgentWorkflowApp(
           })
           return
         }
-        await drainProjectMessageQueue(input)
+        await drainProjectMessageQueue(input, !input.autoContinuation && !input.initialBrief)
       },
       openCapabilities: phase => {
         const credential = sessionAuth?.getCredential?.(input.request)
@@ -3701,20 +3868,20 @@ export function createAgentWorkflowApp(
     if (timer) clearInterval(timer)
     queuePollers.delete(key)
   }
-  const drainProjectMessageQueue = async (input: ProjectQueueContext): Promise<boolean> => {
+  const drainProjectMessageQueue = async (input: ProjectQueueContext, allowPausedChat = false): Promise<boolean> => {
     const key = queueKey(input)
     if (queueDraining.has(key)) return false
     const session = beeGameSessions.get(input.sessionId)
     if (!session || session.status !== 'running' || session.turnStatus !== 'idle') return false
     const delivery = await readProjectDelivery(input.workspacePath, dashboardDataRoot)
-    if (delivery && !(await evaluateProjectDeliveryGate(input.workspacePath, dashboardDataRoot))?.allowed)
-      return false
+    if (delivery?.status === 'paused' && !allowPausedChat) return false
     queueDraining.add(key)
     try {
       const item = await projectMessageQueue.claimNext(input.user.id, input.workspacePath)
       if (!item) { clearQueuePoller(key); return false }
       try {
-        await sendNativeProjectRequest({ ...input, message: item.text,
+        await sendNativeProjectRequest({ request: input.request, user: input.user,
+          projectId: input.projectId, workspacePath: input.workspacePath, sessionId: input.sessionId, message: item.text,
           options: { clientMessageId: item.clientMessageId, attachments: item.attachments,
             ...(item.supersedesMessageId ? { supersedesMessageId: item.supersedesMessageId } : {}),
             ...(item.language ? { language: item.language } : {}) } })
@@ -3820,7 +3987,9 @@ export function createAgentWorkflowApp(
         if (!(await projectMessageQueue.list(input.user.id, input.workspacePath)).length) return false
         const current = beeGameSessions.get(input.sessionId)
         if (current?.turnStatus === 'running' || queueDraining.has(queueKey(input))) return true
-        if (await drainProjectMessageQueue(input)) return true
+        // This callback is invoked by the explicit Continue route. Preserve
+        // queued user-message priority even while production itself is paused.
+        if (await drainProjectMessageQueue(input, true)) return true
         const delivery = await readProjectDelivery(input.workspacePath, dashboardDataRoot)
         if (delivery && !(await evaluateProjectDeliveryGate(input.workspacePath, dashboardDataRoot))?.allowed)
           return false
@@ -3951,9 +4120,15 @@ async function readBeeGameProjectArtifact(
   if (!isPathInsideWorkspace(workspaceRoot, targetPath)) {
     throw new Error('Artifact path must stay inside the session workspace')
   }
+  // A lexical in-project path can still resolve through a symlink outside it.
+  // Read the checked canonical target, not the alias again after validation.
+  const [actualRoot, actualTarget] = await Promise.all([realpath(workspaceRoot), realpath(targetPath)])
+  if (!isPathInsideWorkspace(actualRoot, actualTarget)) {
+    throw new Error('Artifact path must stay inside the session workspace')
+  }
   return {
     path: relative(workspaceRoot, targetPath).split('\\').join('/'),
-    content: await readFile(targetPath, 'utf8'),
+    content: await readFile(actualTarget, 'utf8'),
   }
 }
 
@@ -5325,7 +5500,7 @@ function findLiveProjectSession(
   return beeGameSessions
     .list(userId)
     .filter(
-      session => beeGameSessions.metadata(session.id)?.projectId === projectId,
+      session => beeGameSessions.metadata(session.id)?.projectId === projectId && !session.workflowExecution,
     )
     .sort((left, right) => {
       if (left.status !== right.status) return left.status === 'running' ? -1 : 1
@@ -6111,6 +6286,7 @@ function registerBeeGameSessionRoutes(
       message: string
       options?: ProjectConversationOptions
       initialBrief?: { displayText: string; confirmedBriefContext: string }
+      autoContinuation?: boolean
     }) => Promise<unknown>
     queueProjectRequest?: (input: {
       request: Request
@@ -6537,7 +6713,7 @@ function registerBeeGameSessionRoutes(
         })
         const deliveryGate = await evaluateProjectDeliveryGate(workspacePath, options.deliveryDataRoot) ??
           { allowed: false, issues: ['Project delivery state is missing; the chat acceptance could not be linked to this workspace.'] }
-        if (!deliveryGate.allowed) {
+        if (!deliveryGate.allowed || !('acceptance' in deliveryGate) || !deliveryGate.acceptance) {
           return c.json(
             {
               error: 'Current project version has not passed delivery acceptance',
@@ -6548,6 +6724,7 @@ function registerBeeGameSessionRoutes(
           )
         }
         const deployment = await beeGameDeployments.deploy({
+          acceptance: deliveryGate.acceptance,
           sessionId: c.req.param('id'),
           userId: currentUser.id,
           ...(metadata?.projectId ? { projectId: metadata.projectId } : {}),
@@ -6770,6 +6947,7 @@ function registerBeeGameSessionRoutes(
                 request: c.req.raw, user: options.getCurrentUser(c.req.raw),
                 sessionId: session.id, projectId: metadata.projectId, workspacePath: session.cwd,
                 message: getServerOwnedContinuePrompt(language),
+                autoContinuation: true,
                 options: { language, authToken: options.getAuthToken(c.req.raw) },
               }), 202)
             } catch (error) {
@@ -7256,7 +7434,7 @@ function buildConfirmedBriefPrompt(
       default_first_release_scope: {
         target: 'small complete playable version',
         content: 'one working core loop with only representative content; usually one or two levels if levels apply',
-        defer: 'unrequested extra levels, modes, and polish',
+        defer: 'unrequested extra levels and modes; do not defer the audiovisual feedback or usability needed by the agreed core loop',
       },
       selected_option: toCanonicalConfirmedOption(brief.option),
       settings: { ...(isObject(brief.settings) ? brief.settings : {}), ...(orientation ? { orientation } : {}) },
@@ -7409,7 +7587,7 @@ function parseResourceSemanticRuntimeEnv(
 ): Record<string, string> | undefined {
   if (!isObject(value)) return undefined
   const runtimeEnv: Record<string, string> = {}
-  for (const [key, raw] of Object.entries(value)) {
+  for (const [key, raw] of Object.entries(normalizeRuntimeEnvironment(value as Record<string, string>))) {
     if (
       !RESOURCE_MODEL_RUNTIME_KEYS.has(key) ||
       typeof raw !== 'string' ||

@@ -91,6 +91,7 @@ export type BridgeAssistantMessage = {
   uuid?: string
   session_id?: string
   error?: unknown
+  isApiErrorMessage?: boolean
   [key: string]: unknown
 }
 

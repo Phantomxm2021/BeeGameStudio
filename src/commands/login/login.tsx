@@ -5,9 +5,9 @@ import { clearTrustedDeviceToken, enrollTrustedDevice } from '../../bridge/trust
 import type { LocalJSXCommandContext } from '../../commands.js';
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
 import { ConsoleOAuthFlow } from '../../components/ConsoleOAuthFlow.js';
-import { Box, Dialog, useInput } from '@anthropic/ink';
+import { Box, Dialog, useInput } from '@bee-game-studio/ink';
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { refreshGrowthBookAfterAuthChange } from '../../services/analytics/growthbook.js';
 import { refreshPolicyLimits } from '../../services/policyLimits/index.js';
 import { refreshRemoteManagedSettings } from '../../services/remoteManagedSettings/index.js';

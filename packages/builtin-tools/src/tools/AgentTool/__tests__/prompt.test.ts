@@ -7,13 +7,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const promptSource = readFileSync(join(__dirname, '..', 'prompt.ts'), 'utf-8')
 
 describe('prompt.ts fork-related text verification', () => {
-  test('delegation preserves undecided design ownership and does not introduce word quotas', () => {
-    expect(promptSource).not.toContain('report in under 200 words')
-    expect(promptSource).not.toContain('include file paths, line numbers, what specifically to change')
-    expect(promptSource).not.toContain('outputs should generally be trusted')
-    expect(promptSource).toContain('not a preselected answer or implementation script')
-    expect(promptSource).toContain('do not present a predicted parallel result as a fact')
-    expect(promptSource).toContain('unless the user requested one')
+  test('delegation uses native upstream guidance rather than BGS ownership policy', () => {
+    expect(promptSource).toContain("Explain what you're trying to accomplish and why")
+    expect(promptSource).toContain('Never delegate understanding.')
+    expect(promptSource).toContain('outputs should generally be trusted')
+    expect(promptSource).not.toContain('do not present a predicted parallel result as a fact')
+    expect(promptSource).not.toContain('not a preselected answer or implementation script')
   })
   test('does not contain "omit `subagent_type`" guidance', () => {
     expect(promptSource).not.toMatch(/omit.*subagent_type/)

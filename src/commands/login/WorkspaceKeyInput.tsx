@@ -13,7 +13,7 @@
  */
 
 import * as React from 'react';
-import { Box, Text, useInput } from '@anthropic/ink';
+import { Box, Text, useInput } from '@bee-game-studio/ink';
 import { saveWorkspaceKey } from '../../services/auth/saveWorkspaceKey.js';
 
 // ---------------------------------------------------------------------------

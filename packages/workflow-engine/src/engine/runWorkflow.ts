@@ -121,7 +121,9 @@ export async function runWorkflow(
       opts.args,
       ctx.resources.budget,
     )
-    result = { status: 'completed', returnValue }
+    result = opts.signal.aborted
+      ? { status: 'killed' }
+      : { status: 'completed', returnValue }
   } catch (e) {
     if (e instanceof WorkflowAbortedError) {
       result = { status: 'killed' }

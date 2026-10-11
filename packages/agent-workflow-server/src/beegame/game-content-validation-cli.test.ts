@@ -1,18 +1,168 @@
 import { afterEach, expect, test } from 'bun:test'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { CONTENT_CHECK_HELP, formatGameContentResult, generateUiLayoutAppendix, inspectGameContent, runGameContentCommand, summarizeContentLoadFootprint } from './game-content-validation-cli'
+import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
+import { CONTENT_CHECK_HELP, CONTENT_DRAFT_EXAMPLES, formatGameContentResult, generateUiLayoutAppendix, inspectGameContent, runGameContentCommand, summarizeContentLoadFootprint } from './game-content-validation-cli'
 import { parseBeeGameContentIndex, type BeeGameContentPackage } from './game-content-package'
 import type { BeeGameAssetManifest } from './asset-contracts'
 import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
 import type { inspectUiLayout } from '../../../scene-editor/src/ui-layout-inspection'
 import { materializeSceneUiFormat } from './scene-ui-content-authoring'
-import { DESIGN_HANDOFF_INSTRUCTION } from './design-handoff'
-import { uiLayoutFixture } from './fixtures/layout-fixture'
+import { CONTENT_CHECKER_ENTRY, sharedContentChecker } from './content-checker-runtime'
+import { DESIGN_HANDOFF_INSTRUCTION, checkDesignHandoffDraft, designHandoffPath } from './design-handoff'
+import { sceneLayoutFixture, uiLayoutFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
 
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
+
+test('input identity follows saved sources/links, not a generator public copy, and changes with actual bytes',async()=>{
+  const root=mkdtempSync(join(tmpdir(),'bgs-input-identity-'));roots.push(root)
+  await writeDesignDocumentsFixture(root)
+  const ui=uiLayoutFixture() as any
+  ui.data.nodes[0].data.layoutCamera={nodeId:'play',path:'content/scenes/level.json'}
+  writeFileSync(join(root,'content/ui/menu.json'),JSON.stringify(ui))
+  mkdirSync(join(root,'public/content/scenes'),{recursive:true})
+  writeFileSync(join(root,'public/content/scenes/level.json'),JSON.stringify({...sceneLayoutFixture(),id:'wrong-copy'}))
+  const first=runGameContentCommand(root,['--inspect-draft','content/ui/menu.json']) as any
+  const source=first.inputLocation.sources.find((f:any)=>f.path==='content/scenes/level.json')
+  expect(first.inputLocation.contentRoot).toBe(join(realpathSync(root),'content'))
+  expect(source.sha256).toBe(createHash('sha256').update(readFileSync(join(root,source.path))).digest('hex'))
+  const publicBefore=readFileSync(join(root,'public/content/scenes/level.json'),'utf8')
+  writeFileSync(join(root,'public/content/scenes/level.json'),'changed wrong copy')
+  expect((runGameContentCommand(root,['--inspect-draft','content/ui/menu.json']) as any).inputLocation).toEqual(first.inputLocation)
+  writeFileSync(join(root,source.path),readFileSync(join(root,source.path),'utf8')+'\n')
+  const changed=runGameContentCommand(root,['--inspect-draft','content/ui/menu.json']) as any
+  expect(changed.inputLocation.sources.find((f:any)=>f.path===source.path).sha256).not.toBe(source.sha256)
+  expect(changed.runtimeVerified).toBe(false)
+  expect(publicBefore).toContain('wrong-copy')
+  const format=runGameContentCommand(root,['--format','index']) as any
+  expect(format.value.documentRevision).toContain('--authority')
+  expect(format.value.assetManifestRevision).toContain('--authority')
+  expect(CONTENT_CHECK_HELP).toContain('NOT JSON')
+  expect(CONTENT_CHECK_HELP).toContain('after final design/Manifest saves')
+  expect(CONTENT_CHECK_HELP).toContain('does not certify design or quality')
+})
+
+test('input snapshots do not follow links outside the project or change validity claims',()=>{
+  const root=mkdtempSync(join(tmpdir(),'bgs-input-linked-'));roots.push(root)
+  const ui=uiLayoutFixture() as any
+  ui.data.nodes[0].data.layoutUnderlay={path:'../private.json',clearance:'allow-cover'}
+  writeFileSync(join(root,'draft.json'),JSON.stringify(ui))
+  const result=runGameContentCommand(root,['--inspect-draft','draft.json']) as any
+  expect(result.inputLocation.sources.find((f:any)=>f.path==='../private.json').state).toBeDefined()
+  expect(result.runtimeVerified).toBe(false)
+})
+
+test('Scene batch discovers saved paths with spaces, reports all inputs and never requires a shell loop', () => {
+  const root = mkdtempSync(join(tmpdir(), 'bgs-scene-batch-')); roots.push(root)
+  mkdirSync(join(root, 'content/scenes/chapter one'), { recursive: true })
+  const scene = sceneLayoutFixture()
+  writeFileSync(join(root, 'content/scenes/chapter one/level one.json'), JSON.stringify(scene))
+  writeFileSync(join(root, 'content/scenes/broken.json'), '{')
+  const args = ['--scene-layouts', '960', '540', '600', '360']
+  const result = runGameContentCommand(root, args) as any
+  expect(result.valid).toBe(false)
+  expect(result.files).toHaveLength(2)
+  expect(result.issues.join(' ')).toContain('broken.json')
+  expect(result.inspections).toHaveLength(2)
+  expect((runGameContentCommand(root, [...args, '960', '540']) as any).inspections).toEqual(result.inspections)
+  expect(result.inspections[0].source).toBe('content/scenes/chapter one/level one.json')
+  expect(result.inspections[0].nodes).toBeUndefined()
+  expect((runGameContentCommand(root, [...args, '--details']) as any).inspections[0].nodes).toHaveLength(2)
+  expect(result.runtimeVerified).toBe(false)
+  expect(() => runGameContentCommand(root, ['--scene-layouts', '960 540'])).toThrow('Usage')
+  expect(() => runGameContentCommand(root, ['--scene-layouts', '0', '540'])).toThrow('positive')
+  expect(CONTENT_CHECK_HELP).toContain('measurements:[{source,scene?,viewport,nodes}]')
+})
+
+test('batch inspection checks missing planned pages and matches confirmed host settings', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'bgs-layout-coverage-')); roots.push(root)
+  await writeDesignDocumentsFixture(root)
+  const file = join(root, 'docs/UI_UX_SPEC.md')
+  writeFileSync(file, readFileSync(file, 'utf8') + '\n[Required results](../content/ui/results.json)\n')
+  const result = runGameContentCommand(root, ['--review-layouts', '--orientation', 'Portrait']) as any
+  expect(result.valid).toBe(false)
+  expect(result.issues.join(' ')).toContain('orientation differs')
+  expect(result.coverage.missing).toEqual(['content/ui/results.json'])
+  expect(result.inputs.confirmed.orientation).toBe('Portrait')
+  expect(() => runGameContentCommand(root, ['--review-layouts', '--orientation', 'wrong'])).toThrow('Invalid --orientation')
+})
+
+test('Scene planning uses each saved Camera viewport once; explicit common targets remain available', () => {
+  const root = mkdtempSync(join(tmpdir(), 'bgs-scene-own-viewports-')); roots.push(root)
+  mkdirSync(join(root, 'content/scenes'), { recursive: true })
+  for (const [id, width, height] of [['wide', 1200, 600], ['square', 640, 640]] as const) {
+    const scene = sceneLayoutFixture()
+    scene.id = id
+    scene.data.nodes[0]!.components[0]!.data.viewport = { width, height }
+    writeFileSync(join(root, 'content/scenes/' + id + '.json'), JSON.stringify(scene))
+  }
+  const own = runGameContentCommand(root, ['--scene-layouts']) as any
+  expect(own.valid).toBe(true)
+  expect(own.coverage.basis).toBe('saved-camera-per-scene')
+  expect(own.inspections.map((item: any) => [item.source, item.viewport])).toEqual([
+    ['content/scenes/square.json', { width: 640, height: 640 }],
+    ['content/scenes/wide.json', { width: 1200, height: 600 }],
+  ])
+  const explicit = runGameContentCommand(root, ['--scene-layouts', '1200', '600', '640', '640']) as any
+  expect(explicit.inspections).toHaveLength(4)
+  expect(explicit.coverage.basis).toBe('explicit-common-viewports')
+  const broken = sceneLayoutFixture()
+  delete (broken.data.nodes[0]!.components[0]!.data as any).viewport
+  writeFileSync(join(root, 'content/scenes/missing.json'), JSON.stringify({ ...broken, id: 'missing' }))
+  const failure = runGameContentCommand(root, ['--scene-layouts']) as any
+  expect(failure.valid).toBe(false)
+  expect(failure.issues.join(' ')).toContain('viewport')
+  expect(failure.inspections).toHaveLength(2)
+  expect(failure.runtimeVerified).toBe(false)
+})
+
+test('final technical CLI shares completion coverage checking without host version requirements', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'handoff-cli-final-')); roots.push(root)
+  await writeDesignDocumentsFixture(root)
+  const args = ['--check-handoff-drafts', 'docs/TECHNICAL_DESIGN.md', '--final-technical']
+  expect(runGameContentCommand(root, args)).toMatchObject({ valid: true })
+  const file = join(root, designHandoffPath('TECHNICAL_DESIGN.md'))
+  const original = JSON.parse(readFileSync(file, 'utf8'))
+  for (const mode of ['uncovered', 'duplicate', 'unknown'] as const) {
+    const index = structuredClone(original)
+    if (mode === 'uncovered') index.implementationItems.pop()
+    if (mode === 'duplicate') index.implementationItems.push(structuredClone(index.implementationItems[0]))
+    if (mode === 'unknown') index.implementationItems[0].requirementRefs[0].id = 'unknown-output'
+    writeFileSync(file, JSON.stringify(index))
+    const saved = readFileSync(file, 'utf8')
+    const result = runGameContentCommand(root, args) as any
+    expect(result.valid).toBe(false)
+    expect(result.issues).toEqual(checkDesignHandoffDraft(root, 'TECHNICAL_DESIGN.md', { finalTechnical: true }).issues)
+    expect(readFileSync(file, 'utf8')).toBe(saved)
+    if (mode === 'uncovered')
+      expect(runGameContentCommand(root, ['--check-handoff-drafts', 'TECHNICAL_DESIGN.md'])).toMatchObject({ valid: true })
+  }
+  for (const invalid of [
+    ['--check-handoff-drafts', '--final-technical'],
+    ['--check-handoff-drafts', 'UI_UX_SPEC.md', '--final-technical'],
+    ['--check-handoff-drafts', '--final-technical', 'TECHNICAL_DESIGN.md'],
+  ]) expect(() => runGameContentCommand(root, invalid)).toThrow()
+})
+
+test('handoff draft CLI accepts document names and their docs paths without changing files', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'handoff-cli-path-')); roots.push(root)
+  await writeDesignDocumentFixture(root, 'UI_UX_SPEC.md')
+  const file = join(root, '.beegame/design-handoffs/UI_UX_SPEC.json')
+  const before = readFileSync(file, 'utf8')
+  const expected = runGameContentCommand(root, ['--check-handoff-drafts', 'UI_UX_SPEC.md'])
+  expect(expected).toMatchObject({ valid: true })
+  expect(runGameContentCommand(root, ['--check-handoff-drafts', 'docs/UI_UX_SPEC.md'])).toEqual(expected)
+  for (const argument of ['../docs/UI_UX_SPEC.md', '/docs/UI_UX_SPEC.md', 'content/UI_UX_SPEC.md', 'docs/UNKNOWN.md']) {
+    const result = runGameContentCommand(root, ['--check-handoff-drafts', argument]) as any
+    expect(result.valid).toBe(false)
+    expect(result.issues.join(' ')).toContain('Expected NAME.md or docs/NAME.md')
+    expect(result.issues.join(' ')).toContain('UI_UX_SPEC.md')
+  }
+  expect(readFileSync(file, 'utf8')).toBe(before)
+})
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'content-inspection-'))
   roots.push(root)
@@ -32,17 +182,60 @@ function fixture() {
   return { root, doc, index }
 }
 
+test('checker bundle retains English validation but no unused Zod locales', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'bgs-checker-bundle-')); roots.push(root)
+  const checker = join(root, 'check-content.mjs'), metadata = join(root, 'meta.json')
+  const build = Bun.spawn([process.execPath, 'build', fileURLToPath(new URL('./game-content-validation-cli.ts', import.meta.url)),
+    '--target=bun', '--production', `--outfile=${checker}`, `--metafile=${metadata}`], { stdout: 'pipe', stderr: 'pipe' })
+  const [stdout, stderr, exit] = await Promise.all([new Response(build.stdout).text(), new Response(build.stderr).text(), build.exited])
+  expect({ exit, stderr, hasOutput: Boolean(stdout) }).toEqual({ exit: 0, stderr: '', hasOutput: true })
+  const meta = JSON.parse(readFileSync(metadata, 'utf8')) as { outputs: Record<string, { inputs: Record<string, { bytesInOutput: number }> }> }
+  const locales = Object.keys(Object.values(meta.outputs)[0]!.inputs).filter(path =>
+    path.includes('/zod/v4/locales/') && Object.values(meta.outputs)[0]!.inputs[path]!.bytesInOutput > 0)
+  expect(locales).toHaveLength(1)
+  expect(locales[0]).toEndWith('/en.js')
+  const invalid = uiLayoutFixture(); invalid.data.nodes[1]!.role = 'not-a-role'
+  writeFileSync(join(root, 'invalid.json'), JSON.stringify(invalid))
+  const child = Bun.spawn([process.execPath, checker, '--layout-draft', 'invalid.json', '960', '540'],
+    { cwd: root, stdout: 'pipe', stderr: 'pipe' })
+  const [output, error, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+  expect(error).toBe('')
+  expect(code).toBe(1)
+  const result = JSON.parse(output)
+  expect(result.valid).toBe(false)
+  expect(result.issues.join(' ')).toContain('Invalid option: expected one of')
+})
+
+test('project checker entry exposes no implementation and fails explicitly without its BGS runtime', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'bgs-checker-entry-')); roots.push(root)
+  await materializeSceneUiFormat(root)
+  const path = join(root, '.beegame/delivery/check-content.mjs')
+  expect(readFileSync(path, 'utf8')).toBe(CONTENT_CHECKER_ENTRY)
+  expect(CONTENT_CHECKER_ENTRY).not.toContain('base64')
+  for (const moduleUrl of ['', 'file:///nonexistent-bgs-checker.mjs']) {
+    const child = Bun.spawn([process.execPath, path, '--help'], { cwd: root,
+      env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: moduleUrl }, stdout: 'pipe', stderr: 'pipe' })
+    const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+    expect(code).toBe(1)
+    expect(err).toBe('')
+    expect(JSON.parse(out)).toMatchObject({ valid: false, issues: [expect.any(String)] })
+    if (!moduleUrl) expect(JSON.parse(out).issues[0]).toContain('BGS project execution environment')
+  }
+})
+
 test('materialized Review geometry command fails saved errors and passes corrected inputs without writing reports', async () => {
   const root = mkdtempSync(join(tmpdir(), 'bgs-review-layout-cli-')); roots.push(root)
   mkdirSync(join(root, 'content/ui'), { recursive: true })
   mkdirSync(join(root, 'docs'))
   writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n[Menu](../content/ui/menu.json)\n')
+  await writeDesignDocumentFixture(root, 'LEVEL_SCENE_DESIGN.md')
   await materializeSceneUiFormat(root)
+  const runtime = await sharedContentChecker()
   for (const [height, valid] of [[28, false], [52, true]] as const) {
     const path = join(root, 'content/ui/menu.json'), source = JSON.stringify(uiLayoutFixture(height))
     writeFileSync(path, source)
     const child = Bun.spawn([process.execPath, join(root, '.beegame/delivery/check-content.mjs'), '--review-layouts'],
-      { cwd: root, stdout: 'pipe', stderr: 'pipe' })
+      { cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: runtime.moduleUrl }, stdout: 'pipe', stderr: 'pipe' })
     const [output, error, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
     expect(error).toBe('')
     expect(exit).toBe(valid ? 0 : 1)
@@ -80,6 +273,7 @@ test('draft geometry checks targets without unfinished prose; final Review still
   writeFileSync(path, before)
   mkdirSync(join(root, 'docs'))
   writeFileSync(join(root, 'docs/UI_UX_SPEC.md'), '# UI\n[Menu](../content/ui/menu.json)\n')
+  await writeDesignDocumentFixture(root, 'LEVEL_SCENE_DESIGN.md')
   expect(runGameContentCommand(root, ['--review-layouts'])).toMatchObject({ valid: true })
   expect(readFileSync(path, 'utf8')).toBe(before)
 })
@@ -87,8 +281,9 @@ test('draft geometry checks targets without unfinished prose; final Review still
 test('handoff contract help exits successfully without a document or resource prerequisite', async () => {
   const root = mkdtempSync(join(tmpdir(), 'bgs-handoff-help-')); roots.push(root)
   await materializeSceneUiFormat(root)
+  const runtime = await sharedContentChecker()
   const child = Bun.spawn([process.execPath, join(root, '.beegame/delivery/check-content.mjs'), '--design-handoff-help'],
-    { cwd: root, stdout: 'pipe', stderr: 'pipe' })
+    { cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: runtime.moduleUrl }, stdout: 'pipe', stderr: 'pipe' })
   const [output, error, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
   expect(error).toBe('')
   expect(exit).toBe(0)
@@ -101,6 +296,7 @@ test('format entry reads one actual contract section without full Content or res
   await materializeSceneUiFormat(root)
   const path = join(root, '.beegame/delivery/content-format.json'), before = readFileSync(path, 'utf8')
   const format = JSON.parse(before)
+  expect(format).not.toHaveProperty('layoutDraftAppendixCommand')
   expect(runGameContentCommand(root, ['--format'])).toMatchObject({ ok: true, sections: Object.keys(format) })
   const result = runGameContentCommand(root, ['--format', 'coordinates'])
   expect(result).toMatchObject({ ok: true, value: format.coordinates })
@@ -118,6 +314,83 @@ test('format entry reads one actual contract section without full Content or res
       values: { coordinates: format.coordinates, runtimeConsumption: format.runtimeConsumption } })
   expect(() => runGameContentCommand(root, ['--format', 'coordinates', 'missing'])).toThrow()
   expect(readFileSync(path, 'utf8')).toBe(before)
+  const runtime = await sharedContentChecker()
+  const command = ['--format', 'uiDocument', 'uiVocabulary', 'uiLayoutContract']
+  const child = Bun.spawn([process.execPath, join(root, '.beegame/delivery/check-content.mjs'), ...command],
+    { cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: runtime.moduleUrl }, stdout: 'pipe', stderr: 'pipe' })
+  const [output, error, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+  expect(error).toBe('')
+  expect(exit).toBe(0)
+  expect(JSON.parse(output)).toEqual(runGameContentCommand(root, command))
+  expect(output.trim().split('\n')).toHaveLength(1)
+  expect(output.length).toBeLessThan(30_000)
+  expect(JSON.parse(output).values.uiVocabulary.behaviorBindings.example).toEqual({
+    actions: { click: 'game.start' }, bindings: { text: 'session.label', enabled: 'session.canStart' },
+  })
+  const scene = runGameContentCommand(root, ['--format', 'sceneVocabulary']) as any
+  expect(scene.value.requiredData.grid.schema).toBe('grid.v1')
+  expect(scene.value.requiredData.tilemap.schema).toBe('tilemap.v1')
+  expect(scene.value.requiredData['tilemap-renderer'].schema).toBe('tilemap-renderer.v1')
+  expect(scene.value.tilemapHierarchy).toContain('ancestor')
+})
+
+test('published linked UI and Tilemap examples run through real draft checks without production assets', async () => {
+  await initializeUiLayout()
+  const root = mkdtempSync(join(tmpdir(), 'bgs-connected-format-')); roots.push(root)
+  await materializeSceneUiFormat(root)
+  mkdirSync(join(root, 'content/scenes'), { recursive: true })
+  mkdirSync(join(root, 'content/ui'), { recursive: true })
+  const tilemap = (runGameContentCommand(root, ['--format', 'tilemap']) as any).value.examples.scene
+  const uiNodes = (runGameContentCommand(root, ['--format', 'uiLayoutContract']) as any).value.linkedGameViewExample.nodes
+  const ui = { schema: 'beegame-content.v1', id: 'linked-example', kind: 'ui-hud', assetRefs: [], data: { rootId: 'root', nodes: uiNodes } }
+  const tilePath = join(root, 'content/scenes/tiles.json'), uiPath = join(root, 'content/ui/hud.json')
+  writeFileSync(tilePath, JSON.stringify(tilemap))
+  writeFileSync(join(root, 'content/scenes/world.json'), JSON.stringify(CONTENT_DRAFT_EXAMPLES.scene))
+  writeFileSync(uiPath, JSON.stringify(ui))
+  expect(runGameContentCommand(root, ['--check-drafts', 'content/scenes/tiles.json', 'content/scenes/world.json', 'content/ui/hud.json']))
+    .toMatchObject({ valid: true, issues: [], runtimeVerified: false })
+  expect(runGameContentCommand(root, ['--design-layouts', '--draft', '--orientation', 'Landscape', '--dimension', '2D']))
+    .toMatchObject({ valid: true, issues: [], runtimeVerified: false })
+  const sceneCheck = runGameContentCommand(root, ['--scene-layouts']) as any
+  expect(sceneCheck).toMatchObject({ valid: true, issues: [], runtimeVerified: false })
+
+  // The published hierarchy matters: a gridNodeId without ancestry is invalid.
+  delete tilemap.data.nodes.find((node: any) => node.id === 'ground').parentId
+  writeFileSync(tilePath, JSON.stringify(tilemap))
+  const brokenGrid = runGameContentCommand(root, ['--check-drafts', 'content/scenes/tiles.json']) as any
+  expect(brokenGrid.valid).toBe(false)
+  expect(brokenGrid.issues.join(' ')).toContain('ancestor')
+
+  // nodeId selects a UI region; the Scene owns its separate Camera identity.
+  uiNodes[0].data.layoutCamera.nodeId = 'camera'
+  writeFileSync(uiPath, JSON.stringify(ui))
+  const brokenLink = runGameContentCommand(root, ['--design-layouts', '--draft']) as any
+  expect(brokenLink.valid).toBe(false)
+  expect(brokenLink.issues.join(' ')).toContain('camera')
+})
+
+test('final task diagnostics identify malformed tasks and expose valid sources without losing other coverage', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'bgs-task-diagnostics-')); roots.push(root)
+  await writeDesignDocumentsFixture(root)
+  const path = join(root, '.beegame/design-handoffs/TECHNICAL_DESIGN.json')
+  const index = JSON.parse(readFileSync(path, 'utf8'))
+  index.implementationItems[0].requirementRefs = []
+  const before = JSON.stringify(index)
+  writeFileSync(path, before)
+  const result = runGameContentCommand(root, ['--check-handoff-drafts', 'TECHNICAL_DESIGN.md', '--final-technical']) as any
+  expect(result.valid).toBe(false)
+  expect(result.issues.join('\n')).toContain('implementationItems.0.requirementRefs (id: "fixture-GDD")')
+  expect(result.issues.join('\n')).toContain('GDD.md#play has no implementation item')
+  expect(result.issues.join('\n')).not.toContain('AUDIO_DESIGN.md#ready has no implementation item')
+  expect(result.availableRequirements).toContainEqual({ document: 'GDD.md', id: 'play', section: 'Design' })
+  expect(result.availableRequirements).toContainEqual({ document: 'TECHNICAL_DESIGN.md', id: 'ready', section: 'Design' })
+  expect(result.issues.join('\n')).not.toContain('"origin":')
+  expect(readFileSync(path, 'utf8')).toBe(before)
+  index.implementationItems[0].requirementRefs = [{ document: 'GDD.md', id: 'play' }]
+  writeFileSync(path, JSON.stringify(index))
+  const valid = runGameContentCommand(root, ['--check-handoff-drafts', 'TECHNICAL_DESIGN.md', '--final-technical']) as any
+  expect(valid).toMatchObject({ valid: true, issues: [] })
+  expect(valid.availableRequirements).toBeUndefined()
 })
 
 test('help examples execute without resources/index and document actual result shapes', async () => {
@@ -130,6 +403,7 @@ test('help examples execute without resources/index and document actual result s
   writeFileSync(join(root, 'scene.json'), JSON.stringify(examples[1]))
   expect(runGameContentCommand('/nonexistent', ['--help'])).toMatchObject({ ok: true, scope: 'help' })
   for (const file of ['menu.json', 'scene.json']) {
+    expect(runGameContentCommand(root, ['--check-drafts', file])).toMatchObject({ valid: true, issues: [], runtimeVerified: false })
     const full = runGameContentCommand(root, ['--layout-draft', file, '960', '540', '--details'])
     const compact = formatGameContentResult(full)
     expect('nodes' in full).toBe(true); expect('nodes' in compact).toBe(false)
@@ -140,6 +414,64 @@ test('help examples execute without resources/index and document actual result s
     } })
   }
   expect(CONTENT_CHECK_HELP).toContain('NOT authored role/style/text')
+})
+
+test('draft structure checks the selected batch only and detects shared component IDs before Review', () => {
+  const root = mkdtempSync(join(tmpdir(), 'bgs-early-drafts-')); roots.push(root)
+  const scene = structuredClone(CONTENT_DRAFT_EXAMPLES.scene)
+  scene.data.nodes.push({ ...structuredClone(scene.data.nodes[1]!), id: 'second-shape' })
+  writeFileSync(join(root, 'scene.json'), JSON.stringify(scene))
+  writeFileSync(join(root, 'menu.json'), JSON.stringify(CONTENT_DRAFT_EXAMPLES.ui))
+  writeFileSync(join(root, 'unfinished.json'), '{')
+  const before = readFileSync(join(root, 'scene.json'), 'utf8')
+  const structure = runGameContentCommand(root, ['--check-drafts', 'scene.json', 'menu.json']) as any
+  expect(structure).toMatchObject({ valid: false, runtimeVerified: false, files: ['scene.json', 'menu.json'] })
+  expect(structure.issues.join(' ')).toContain('duplicate scene component id shape-sprite')
+  const geometry = runGameContentCommand(root, ['--layout-draft', 'scene.json', '960', '540']) as any
+  expect(geometry).toMatchObject({ ok: false, valid: false, issues: structure.issues })
+  expect(readFileSync(join(root, 'scene.json'), 'utf8')).toBe(before)
+  expect(runGameContentCommand(root, ['--check-drafts', 'menu.json'])).toMatchObject({ valid: true })
+  expect(() => runGameContentCommand(root, ['--check-drafts'])).toThrow('Usage')
+})
+
+test('connected UI checks retain linked Scene structural failures rather than a geometry-only success', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'bgs-connected-draft-')); roots.push(root)
+  mkdirSync(join(root, 'content/ui'), { recursive: true })
+  const ui = structuredClone(CONTENT_DRAFT_EXAMPLES.ui) as any
+  ui.data.nodes[0].data.layoutCamera = { nodeId: 'play', path: 'scene.json' }
+  const scene = structuredClone(CONTENT_DRAFT_EXAMPLES.scene)
+  scene.data.nodes.push({ ...structuredClone(scene.data.nodes[1]!), id: 'other' })
+  writeFileSync(join(root, 'scene.json'), JSON.stringify(scene))
+  writeFileSync(join(root, 'content/ui/menu.json'), JSON.stringify(ui))
+  const result = runGameContentCommand(root, ['--design-layouts']) as any
+  expect(result.valid).toBe(false)
+  expect(result.issues.join(' ')).toContain('duplicate scene component id shape-sprite')
+  expect(() => runGameContentCommand(root, ['--layout-draft', 'content/ui/menu.json', '960', '540']))
+    .toThrow('duplicate scene component id')
+})
+
+test('draft inspection returns exact multiple nodes/fields without package prerequisites or a full Scene replay', () => {
+  const { root, doc } = fixture()
+  rmSync(join(root, 'content/index.json'))
+  const path = join(root, 'content/scenes/level.json'), before = readFileSync(path, 'utf8')
+  const result = runGameContentCommand(root, ['--inspect-draft', 'content/scenes/level.json',
+    '--node', 'node-3', '--node', 'node-300', '--pointer', '/data/settings']) as any
+  expect(result).toMatchObject({ ok: true, runtimeVerified: false, nodes: [doc.data.nodes[3], doc.data.nodes[300]],
+    fields: [{ pointer: '/data/settings', value: doc.data.settings }] })
+  expect(JSON.stringify(result).length).toBeLessThan(before.length / 50)
+  const overview = runGameContentCommand(root, ['--inspect-draft', 'content/scenes/level.json']) as any
+  expect(overview.nodeCount).toBe(600)
+  expect(overview).not.toHaveProperty('nodes')
+  expect(readFileSync(path, 'utf8')).toBe(before)
+  for (const suffix of [['--node', 'missing'], ['--pointer', '/data/missing'], ['--pointer', '/__proto__'],
+    ['--pointer', '/data/bad~3'], ['--node'], ['--unknown', 'field']])
+    expect(() => runGameContentCommand(root, ['--inspect-draft', 'content/scenes/level.json', ...suffix])).toThrow()
+  const external = mkdtempSync(join(tmpdir(), 'bgs-draft-external-')); roots.push(external)
+  writeFileSync(join(external, 'scene.json'), before)
+  symlinkSync(join(external, 'scene.json'), join(root, 'escape.json'))
+  expect(() => runGameContentCommand(root, ['--inspect-draft', 'escape.json'])).toThrow('inside')
+  expect(() => runGameContentCommand(root, ['--check-drafts', 'escape.json'])).not.toThrow()
+  expect(runGameContentCommand(root, ['--check-drafts', 'escape.json'])).toMatchObject({ valid: false })
 })
 
 test('design appendix comes from actual shared geometry, preserves sources and never certifies success', async () => {
@@ -168,8 +500,9 @@ test('design appendix comes from actual shared geometry, preserves sources and n
   expect(appendix).toContain(JSON.stringify(play.bounds))
   expect(readFileSync(path, 'utf8')).toBe(original)
   await materializeSceneUiFormat(root)
+  const runtime = await sharedContentChecker()
   const child = Bun.spawn([process.execPath, join(root,'.beegame/delivery/check-content.mjs'), ...args, '--appendix'],
-    { cwd: root, stdout: 'pipe', stderr: 'pipe' })
+    { cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: runtime.moduleUrl }, stdout: 'pipe', stderr: 'pipe' })
   expect(await new Response(child.stdout).text()).toBe(appendix + '\n')
   expect(await child.exited).toBe(0)
   expect(readFileSync(path, 'utf8')).toBe(original)
@@ -198,6 +531,35 @@ test('compact Scene diagnostics retain clipping and unknown geometry, including 
     expect(measured.nodes).toBeUndefined()
   }
 })
+
+test('large detailed layout JSON survives a slow stdout pipe including failed checks', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'bgs-layout-pipe-')); roots.push(root)
+  await materializeSceneUiFormat(root)
+  mkdirSync(join(root, 'content/ui'), { recursive: true })
+  const source = uiLayoutFixture(28) as any
+  source.data.nodes.push(...Array.from({ length: 500 }, (_, i) => ({
+    id: 'decor-' + i, role: 'container', parentId: 'root', layout: { size: [10, 10] },
+  })))
+  writeFileSync(join(root, 'content/ui/menu.json'), JSON.stringify(source))
+  const runtime = await sharedContentChecker()
+  const child = Bun.spawn([process.execPath, join(root, '.beegame/delivery/check-content.mjs'),
+    '--design-layouts', '--draft', '--details'], {
+    cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: runtime.moduleUrl }, stdout: 'pipe', stderr: 'pipe',
+  })
+  // Pipe backpressure, not a file redirect; reports must not end at a pipe-buffer boundary.
+  const reader = child.stdout.getReader(), chunks: Uint8Array[] = []
+  while (true) {
+    await Bun.sleep(1)
+    const { value, done } = await reader.read()
+    if (done) break
+    chunks.push(value)
+  }
+  const output = Buffer.concat(chunks).toString('utf8')
+  expect(await new Response(child.stderr).text()).toBe('')
+  expect(await child.exited).toBe(1)
+  expect(output.length).toBeGreaterThan(262144)
+  expect(JSON.parse(output)).toMatchObject({ valid: false })
+}, 30000)
 
 test('large healthy layout output stays concise without changing the full inspection API', () => {
   const root = mkdtempSync(join(tmpdir(), 'content-summary-')); roots.push(root)
@@ -350,7 +712,7 @@ test('portrait and landscape compositions supply their computed game-view size t
   roots.push(root)
   const ui = { schema: 'beegame-content.v1', kind: 'ui-hud', id: 'hud', assetRefs: [], data: {
     rootId: 'root', nodes: [
-      { id: 'root', role: 'container', layout: { container: { direction: 'row', align: 'stretch' } },
+      { id: 'root', role: 'hud-root', layout: { container: { direction: 'row', align: 'stretch' } },
         responsive: { portrait: { layout: { container: { direction: 'column' } } } } },
       { id: 'hud', role: 'container', parentId: 'root', layout: { item: { basis: 120 } },
         responsive: { portrait: { layout: { item: { basis: 48 } } } } },
@@ -358,9 +720,9 @@ test('portrait and landscape compositions supply their computed game-view size t
     ],
   } }
   const scene = { schema: 'beegame-content.v1', kind: 'scene-2d', id: 'world', assetRefs: [], data: {
-    settings: { coordinateSystem: { pixelsPerUnit: 100 } }, cameraNodeId: 'camera', nodes: [
+    settings: { coordinateSystem: { origin: 'top-left', units: 'logical-pixels', width: 200, height: 200, pixelsPerUnit: 100 } }, cameraNodeId: 'camera', nodes: [
       { id: 'camera', components: [{ id: 'cam', type: 'camera', data: {
-        orthographic: true, orthographicSize: 1, viewport: { width: 200, height: 200 }, framing: 'expand',
+        orthographic: true, orthographicSize: 1, coordinateSpace: 'logical-pixels', viewport: { width: 200, height: 200 }, framing: 'expand',
       } }] },
       { id: 'board', components: [{ id: 'sprite', type: 'sprite-renderer', data: { size: [200, 200] } }] },
     ],
@@ -465,6 +827,20 @@ test('large scenes have a compact node index and exact node access without rewri
   expect(readFileSync(path)).toEqual(before)
 })
 
+test('missing CLI inputs still identify the actual workspace and missing source', async () => {
+  const root=mkdtempSync(join(tmpdir(),'bgs-missing-check-input-'));roots.push(root)
+  const checker=await sharedContentChecker()
+  const entry=join(root,'check-content.mjs');writeFileSync(entry,CONTENT_CHECKER_ENTRY)
+  const child=Bun.spawn([process.execPath,entry,root,'--layout-draft','content/ui/missing.json','640','360'],
+    {env:{...process.env,BEEGAME_CONTENT_CHECKER_MODULE:checker.moduleUrl},stdout:'pipe',stderr:'pipe'})
+  const [output,errors,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited])
+  expect(code,errors).toBe(1)
+  const result=JSON.parse(output)
+  expect(result.valid).toBe(false)
+  expect(result.inputLocation.workspace).toBe(realpathSync(root))
+  expect(result.inputLocation.sources).toContainEqual({path:'content/ui/missing.json',state:'unavailable'})
+})
+
 test('inspection fails explicitly for unknown files/nodes, ambiguous nodes and invalid arguments', () => {
   const { root, doc } = fixture()
   expect(() => inspectGameContent(root, '../outside.json')).toThrow('registered')
@@ -499,6 +875,7 @@ test('layout command resolves screen rectangles read-only and rejects invalid re
   const result = runGameContentCommand(root, ['--layout', 'ui/menu.json', '640', '360'])
   expect(result).toMatchObject({ ok: true, scope: 'layout-inspection', runtimeVerified: false,
     nodes: [{ id: 'root' }, { id: 'title', bounds: { left: 220, right: 420, top: 0, bottom: 40 } }] })
+  expect(runGameContentCommand(root, ['--layout', 'content/ui/menu.json', '640', '360'])).toEqual(result)
   expect(readFileSync(path)).toEqual(before)
   expect(() => runGameContentCommand(root, ['--layout', 'ui/menu.json', '0', '360'])).toThrow('positive')
   expect(() => runGameContentCommand(root, ['--layout', 'scenes/level.json', '640', '360'])).toThrow('pixelsPerUnit')

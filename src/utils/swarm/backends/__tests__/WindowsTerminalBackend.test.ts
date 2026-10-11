@@ -115,7 +115,7 @@ describe('WindowsTerminalBackend', () => {
     expect(killed).toBe(true)
     expect(calls[calls.length - 1]!.command).toBe('powershell.exe')
     expect(calls[calls.length - 1]!.args.join(' ')).toContain(
-      'Stop-Process -Id 54321',
+      'ProcessId = 54321',
     )
   })
 
@@ -134,6 +134,35 @@ describe('WindowsTerminalBackend', () => {
     expect((caught as Error).message).toMatch(
       /Windows Terminal pane failed to launch within 300ms/,
     )
+    expect((backend as any).panes.get(pane.paneId).status).toBe('uncertain')
+    await writeFile((backend as any).panes.get(pane.paneId).pidFile, '54321')
+    expect(await backend.killPane(pane.paneId)).toBe(true)
+    expect(calls.at(-1)!.args.join(' ')).toContain('ProcessId = 54321')
+  })
+
+  test('uncertain launch without PID retains tracking and can be closed on an explicit retry', async () => {
+    process.env.CLAUDE_WT_PANE_TIMEOUT_MS = '1'
+    let closeCode = 2
+    const calls: Call[] = []
+    const backend = new WindowsTerminalBackend({
+      runCommand: async (command, args) => {
+        calls.push({ command, args })
+        return { stdout: '', stderr: '', code: command === 'wt.exe' ? 0 : closeCode }
+      },
+      getPlatform: () => 'windows',
+      pidFileDir: tempDir,
+    })
+    const pane = await backend.createTeammatePaneInSwarmView('late', 'blue')
+    await expect(backend.sendCommandToPane(pane.paneId, "Write-Output 'fixture'")).rejects.toThrow()
+    expect(await backend.killPane(pane.paneId)).toBe(false)
+    expect((backend as any).panes.get(pane.paneId).status).toBe('uncertain')
+    const script = calls.at(-1)!.args.join(' ')
+    expect(script).toContain('Where-Object')
+    expect(script).toContain('$_.ProcessId -ne $PID')
+    expect(script).toContain('taskkill.exe /PID $p.ProcessId /T /F')
+    closeCode = 0
+    expect(await backend.killPane(pane.paneId)).toBe(true)
+    expect(await backend.killPane(pane.paneId)).toBe(true)
   })
 
   test('error message includes paneId pidFile and override hint', async () => {
@@ -174,7 +203,7 @@ describe('WindowsTerminalBackend', () => {
     const killed = await backend.killPane(pane.paneId)
     expect(killed).toBe(true)
     expect(calls[calls.length - 1]!.args.join(' ')).toContain(
-      'Stop-Process -Id 54321',
+      'ProcessId = 54321',
     )
   })
 
@@ -270,11 +299,12 @@ describe('WindowsTerminalBackend', () => {
     // stale-or-missing fallback path.
     const killCall = calls[calls.length - 1]!
     expect(killCall.command).toBe('powershell.exe')
-    expect(killCall.args.join(' ')).toContain('Stop-Process -Id 54321')
+    expect(killCall.args.join(' ')).toContain('ProcessId = 54321')
   })
 
-  test('Stop-Process failure clears cached pid and marks pane dead', async () => {
+  test('failed close retains process identity for a safe explicit retry', async () => {
     const calls: Call[] = []
+    let closeFails: boolean | 'throw' = true
     // Runner returns code 1 only for powershell.exe (kill); wt.exe succeeds.
     const backend = new WindowsTerminalBackend({
       runCommand: async (command, args) => {
@@ -295,7 +325,8 @@ describe('WindowsTerminalBackend', () => {
           return { stdout: 'ok', stderr: '', code: 0 }
         }
         // powershell Stop-Process fails
-        return { stdout: '', stderr: 'access denied', code: 1 }
+        if (closeFails === 'throw') throw new Error('synthetic runner failure')
+        return { stdout: '', stderr: closeFails ? 'access denied' : '', code: closeFails ? 1 : 0 }
       },
       getPlatform: () => 'windows',
       pidFileDir: tempDir,
@@ -306,13 +337,30 @@ describe('WindowsTerminalBackend', () => {
     const killed = await backend.killPane(pane.paneId)
     expect(killed).toBe(false) // Stop-Process exit 1 → false
 
-    // After kill failure, pane is removed from map: second killPane → false (not retry).
+    closeFails = 'throw'
+    await expect(backend.killPane(pane.paneId)).rejects.toThrow('synthetic runner failure')
+    closeFails = false
     const killedAgain = await backend.killPane(pane.paneId)
-    expect(killedAgain).toBe(false)
-    // Critically: only ONE powershell call happened — the second killPane returned
-    // false from "pane not in map", not from another Stop-Process attempt.
+    expect(killedAgain).toBe(true)
+    expect(await backend.killPane('unknown-fixture')).toBe(false)
     const psCalls = calls.filter(c => c.command === 'powershell.exe')
-    expect(psCalls.length).toBe(1)
+    expect(psCalls.length).toBe(3)
+    const launch = calls.find(c => c.command === 'wt.exe')!
+    const identity = launch.args[launch.args.indexOf('-EncodedCommand') + 1]!
+    for (const call of psCalls) {
+      expect(call.args.join(' ')).toContain('Get-CimInstance Win32_Process')
+      expect(call.args.join(' ')).toContain(`[regex]::Escape('${identity}')`)
+      expect(call.args.join(' ')).toContain('exit 2')
+    }
+    expect(await backend.killPane(pane.paneId)).toBe(true)
+  })
+
+  test('closing an unlaunched pane requires no process kill', async () => {
+    const calls: Call[] = []
+    const backend = createBackend(calls)
+    const pane = await backend.createTeammatePaneInSwarmView('unlaunched', 'blue')
+    expect(await backend.killPane(pane.paneId)).toBe(true)
+    expect(calls).toHaveLength(0)
   })
 
   test('killPane uses cached pid and returns false when pane is unknown', async () => {
@@ -326,11 +374,11 @@ describe('WindowsTerminalBackend', () => {
     const killed = await backend.killPane(pane.paneId)
     expect(killed).toBe(true)
     expect(calls[calls.length - 1]!.args.join(' ')).toContain(
-      'Stop-Process -Id 54321',
+      'ProcessId = 54321',
     )
 
-    // After kill, pane is removed — a second killPane must return false.
+    // A confirmed close is idempotent; only unknown pane ids return false.
     const killedAgain = await backend.killPane(pane.paneId)
-    expect(killedAgain).toBe(false)
+    expect(killedAgain).toBe(true)
   })
 })

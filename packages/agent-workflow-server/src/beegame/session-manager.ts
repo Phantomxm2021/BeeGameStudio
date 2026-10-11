@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { normalizeRuntimeEnvironment } from '../../../../src/utils/runtimeEnvironment'
+import { isEnvTruthy } from '../../../../src/utils/envUtils'
 import {
   readCanonicalProjectArtifactConsistently,
   type ProjectArtifactIdentity,
@@ -49,7 +51,10 @@ import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { ChatJsonlReader } from './chat-jsonl-reader'
 import { answeredQuestionInput } from './user-question'
+import { recordProjectDesignUserDecision, projectDesignQuestionContext } from './project-delivery'
+import { designReviewQuestionFindings } from '@bee-game-studio/agent-workflow/design-review-result'
 import { sanitizePath } from '../../../../src/utils/sessionStoragePortable'
+import { SessionUsageOutbox } from './session-usage-outbox'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -150,6 +155,8 @@ export type BeeGameEventType =
   | 'tool.progress'
   | 'permission.requested'
   | 'permission.resolved'
+  | 'workflow.question.validated'
+  | 'workflow.question.rejected'
   | 'system.status'
   | 'result'
   | 'turn.completed'
@@ -210,6 +217,7 @@ type ProjectEventSubscription = {
 
 export type BeeGameSession = {
   id: string
+  workflowExecution?: { runId: string; taskId: string; attemptId: string }
   cwd: string
   modelConfigId?: string
   status: BeeGameSessionStatus
@@ -239,6 +247,7 @@ export type BeeGameRuntimeSnapshot = {
   roleTokens: {
     mainAgent: number
     otherSubagents: number
+    unattributed: number
   }
   turnDiagnostics?: {
     turnId: string
@@ -256,6 +265,7 @@ export type BeeGameRuntimeSnapshot = {
     roleTokens: {
       mainAgent: number
       otherSubagents: number
+      unattributed: number
     }
   }
 }
@@ -285,8 +295,12 @@ export type BeeGameSessionRunnerStartInput = {
   /** Platform evidence root exposed only through read-only contract facts. */
   deliveryEvidenceDataRoot?: string
   resumeSessionId?: string
+  /** Host-owned workflow task identity supplied through standard --session-id. */
+  nativeSessionId?: string
   /** Records the UUID emitted by the native runtime for durable resume. */
   onNativeSessionId?(sessionId: string): void
+  /** Passive provider accounting, cumulative within this native process. */
+  onNativeUsage?(usage: Usage): void
   cwd: string
   env: Record<string, string>
   /** Sanitized evidence of the selected versus forwarded launch settings. */
@@ -294,6 +308,10 @@ export type BeeGameSessionRunnerStartInput = {
   language?: BeeGameSessionLanguage
   /** Native background tasks may outlive the foreground turn that spawned them. */
   onNativeTaskNotification?(notification: BeeGameNativeTaskNotification): void
+  /** BGS business scope evaluated before standard permission shortcuts. */
+  toolPolicy?(request: DashboardPermissionRequest): Promise<DashboardPermissionDecision | undefined>
+  /** Standard CLI role configuration; never private native task metadata. */
+  nativeTools?: readonly string[]
   requestPermission?(
     request: DashboardPermissionRequest,
   ): Promise<DashboardPermissionDecision>
@@ -308,11 +326,12 @@ export type RuntimeLaunchContract = {
 }
 
 const RUNTIME_MODEL_ENV_KEYS = new Set([
-  'BEEGAME_MODEL_OBSERVER_METADATA',
   'BEEGAME_CONFIG_DIR',
   'BEEGAME_NATIVE_BUILTIN_SKILLS_DIR',
   'BEEGAME_ARTIFACTS_URL',
   'BEEGAME_ARTIFACTS_TOKEN',
+  'CLAUDE_ARTIFACTS_URL',
+  'CLAUDE_ARTIFACTS_TOKEN',
   'TAVILY_API_KEY',
   'BRAVE_SEARCH_API_KEY',
   'EXA_API_KEY',
@@ -320,22 +339,22 @@ const RUNTIME_MODEL_ENV_KEYS = new Set([
   'BEEGAME_MODEL_TYPE',
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_AUTH_TOKEN',
-  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
-  'ANTHROPIC_DEFAULT_SONNET_MODEL',
-  'ANTHROPIC_DEFAULT_OPUS_MODEL',
-  'CLAUDE_CODE_USE_OPENAI',
+  'BGS_DEFAULT_FAST_MODEL',
+  'BGS_DEFAULT_BALANCED_MODEL',
+  'BGS_DEFAULT_STRONG_MODEL',
+  'BGS_USE_OPENAI',
   'OPENAI_BASE_URL',
   'OPENAI_API_KEY',
   'OPENAI_DEFAULT_HAIKU_MODEL',
   'OPENAI_DEFAULT_SONNET_MODEL',
   'OPENAI_DEFAULT_OPUS_MODEL',
-  'CLAUDE_CODE_USE_GEMINI',
+  'BGS_USE_GEMINI',
   'GEMINI_BASE_URL',
   'GEMINI_API_KEY',
   'GEMINI_DEFAULT_HAIKU_MODEL',
   'GEMINI_DEFAULT_SONNET_MODEL',
   'GEMINI_DEFAULT_OPUS_MODEL',
-  'CLAUDE_CODE_USE_GROK',
+  'BGS_USE_GROK',
   'GROK_BASE_URL',
   'GROK_API_KEY',
   'GROK_DEFAULT_HAIKU_MODEL',
@@ -354,7 +373,7 @@ const RUNTIME_MODEL_ENV_KEYS = new Set([
   'CLAUDE_CODE_CLIENT_CERT',
   'CLAUDE_CODE_CLIENT_KEY',
   'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE',
-  'ANTHROPIC_UNIX_SOCKET',
+  'BGS_API_UNIX_SOCKET',
 ])
 
 export type BeeGameSessionSubmitInput = {
@@ -392,6 +411,7 @@ export type DashboardPermissionRequest = {
   permissionSuggestions?: Record<string, unknown>[]
   decisionReason?: string
   blockedPath?: string
+  agentId?: string
 }
 
 export type DashboardPermissionDecision = {
@@ -427,6 +447,8 @@ type SessionRecord = {
   /** Native runtime UUID, distinct from session.id (the BGS routing key). */
   nativeSessionId?: string
   currentTurnUsageExternallyAccounted?: boolean
+  /** Process identity, separate from the resumable transcript/session UUID. */
+  nativeAccountingEpoch?: string
   runtime: RuntimeModelConfig | undefined
   userId: string
   authToken?: string
@@ -440,8 +462,10 @@ type SessionRecord = {
   confirmedBriefContext?: string
   transcriptPath: string
   runner: BeeGameSessionRuntime | null
+  runtimeCleanupFailed?: boolean
   abortController: AbortController | null
   pendingPermissions: Map<string, PendingPermission>
+  workflowQuestionGuard?: StartBeeGameSessionInput['workflowQuestionGuard']
   /** User-approved network hosts for this live session only. */
   approvedNetworkHosts: Set<string>
   toolUses: Map<string, { toolName: string; input?: unknown }>
@@ -462,6 +486,7 @@ type SessionRecord = {
   nextEventId: number
   nextTurnIndex: number
   currentTurnId: string | null
+  currentProjectTurn?: NativeProjectTurnInput
   /** Provider-cumulative usage captured before the active turn starts. */
   currentTurnStartingUsage?: BeeGameRuntimeSnapshot['usage']
   /** The complete active model turn, including final event/usage callbacks. */
@@ -475,6 +500,10 @@ type SessionRecord = {
 
 export type StartBeeGameSessionInput = {
   workspacePath: string
+  /** Host-owned V3 task identity; never forwarded as native business flags. */
+  workflowExecution?: { runId: string; taskId: string; attemptId: string }
+  /** BGS-side evidence binding only; never forwarded to the native runner. */
+  workflowQuestionGuard?: (request: DashboardPermissionRequest, decision?: DashboardPermissionDecision) => Promise<Record<string, unknown>>
   isolatedTask?: { workspacePath: string; readOnlyPaths: string[] }
   projectId?: string
   modelConfigId?: string
@@ -492,6 +521,7 @@ export type StartBeeGameSessionInput = {
 
 export type BeeGameSessionInternalMetadata = {
   id: string
+  workflowExecution?: BeeGameSession['workflowExecution']
   userId: string
   projectId?: string
   workspacePath: string
@@ -527,10 +557,13 @@ export type BeeGameSessionUsageBillingBackend = {
 export class BeeGameSessionManager {
   private readonly runnerDisposals = new Set<Promise<void>>()
 
-  private disposeRunner(runner: BeeGameSessionRuntime | null): Promise<void> {
+  private disposeRunner(runner: BeeGameSessionRuntime | null, record?: SessionRecord): Promise<void> {
     if (!runner) return Promise.resolve()
-    const completion = Promise.resolve(runner.dispose ? runner.dispose() : runner.stop())
-      .catch(error => { console.error('[BeeGame] Runtime cleanup failed', error) })
+    const completion = Promise.resolve().then(() => runner.dispose ? runner.dispose() : runner.stop())
+      .catch(() => {
+        if (record) record.runtimeCleanupFailed = true
+        console.error('[BeeGame] Runtime cleanup failed; writer exit is unverified')
+      })
     this.runnerDisposals.add(completion)
     void completion.then(() => this.runnerDisposals.delete(completion))
     return completion
@@ -543,6 +576,7 @@ export class BeeGameSessionManager {
   >()
   private readonly projectEventSubscribers = new Set<ProjectEventSubscription>()
   private readonly dashboardDataRoot: string
+  private readonly usageOutbox?: SessionUsageOutbox
 
   constructor(
     private readonly runner: BeeGameSessionRunner = createNativeCliProcessRunner(),
@@ -564,6 +598,24 @@ export class BeeGameSessionManager {
       throw new Error('BeeGame session data root is required')
     }
     this.dashboardDataRoot = resolveExistingPath(configuredDataRoot)
+    if (usageBillingBackend.recordUsage) {
+      this.usageOutbox = new SessionUsageOutbox(this.dashboardDataRoot, usageBillingBackend,
+        (entry, result, debit) => {
+          const record = this.sessions.get(entry.input.sessionId)
+          if (!record || record.session.status !== 'running') return
+          for (const [receipt, type, text] of [
+            [result, 'billing.usage_recorded', 'Usage recorded'],
+            [debit, 'billing.realtime_debited', 'Realtime usage debited'],
+          ] as const) {
+            if (!receipt || receipt.duplicate || receipt.event.weightedTokensDelta <= 0) continue
+            this.append(record, 'system.status', text, {
+              type, ...(type === 'billing.usage_recorded' ? { usageEventId: receipt.event.id } : { debitEventId: receipt.event.id }),
+              weightedTokens: receipt.event.weightedTokensDelta, creditsMicro: receipt.event.creditsMicro,
+              pricingVersion: receipt.event.pricingVersion, idempotencyKey: entry.input.idempotencyKey,
+            })
+          }
+        }, () => console.error('[BeeGame] Pending usage billing could not be settled; retained for retry'))
+    }
   }
 
   start(input: StartBeeGameSessionInput): BeeGameSession {
@@ -572,13 +624,15 @@ export class BeeGameSessionManager {
     }
     const cwd = resolve(input.workspacePath)
     const existingLease = [...this.sessions.values()].find(record =>
-      record.session.cwd === cwd && record.session.status === 'running',
+      record.session.cwd === cwd && record.session.status === 'running' &&
+      (!input.workflowExecution || Boolean(record.session.workflowExecution) || record.session.turnStatus !== 'idle'),
     )
     if (existingLease) {
       if (
         input.projectId &&
         existingLease.projectId === input.projectId &&
-        existingLease.userId === input.userId
+        existingLease.userId === input.userId &&
+        !input.workflowExecution && !existingLease.session.workflowExecution
       ) {
         return cloneSession(existingLease.session)
       }
@@ -601,6 +655,7 @@ export class BeeGameSessionManager {
       input.transcriptSessionId || `beegame_${randomUUID().replaceAll('-', '')}`
     const session: BeeGameSession = {
       id: sessionId,
+      ...(input.workflowExecution ? { workflowExecution: input.workflowExecution } : {}),
       cwd,
       ...(input.modelConfigId ? { modelConfigId: input.modelConfigId } : {}),
       status: 'running',
@@ -648,6 +703,7 @@ export class BeeGameSessionManager {
       runner: null,
       abortController: null,
       pendingPermissions: new Map(),
+      ...(input.workflowQuestionGuard ? { workflowQuestionGuard: input.workflowQuestionGuard } : {}),
       approvedNetworkHosts: new Set(),
       toolUses: new Map(),
       nativeTaskTurnIds: new Map(),
@@ -756,6 +812,7 @@ export class BeeGameSessionManager {
     if (!record) return undefined
     return {
       id: record.session.id,
+      ...(record.session.workflowExecution ? { workflowExecution: record.session.workflowExecution } : {}),
       userId: record.userId,
       ...(record.projectId ? { projectId: record.projectId } : {}),
       workspacePath: record.session.cwd,
@@ -793,7 +850,7 @@ export class BeeGameSessionManager {
     if (!record) throw new Error('Project session not found')
     if (record.session.turnStatus !== 'idle' || record.activeTurn || record.preparingTurn)
       throw new Error('Wait for the current agent turn before editing a message')
-    await this.disposeRunner(record.runner)
+    await this.disposeRunner(record.runner, record)
     record.runner = null
     record.nativeSessionId = nativeSessionId
     record.systemContext = undefined
@@ -805,7 +862,7 @@ export class BeeGameSessionManager {
     const root = resolve(workspacePath)
     return [...this.sessions.values()]
       .filter(record => record.userId === userId &&
-        record.projectId === projectId && resolve(record.session.cwd) === root)
+        record.projectId === projectId && resolve(record.session.cwd) === root && !record.session.workflowExecution)
       .sort((left, right) => right.session.updatedAt.getTime() - left.session.updatedAt.getTime())[0]
       ?.session.id
   }
@@ -1021,14 +1078,14 @@ export class BeeGameSessionManager {
       if (display?.authToken) record.authToken = display.authToken
       if (display?.getValidAuthToken) record.getValidAuthToken = display.getValidAuthToken
       if (display?.language && display.language !== record.language) {
-        await this.disposeRunner(record.runner)
+        await this.disposeRunner(record.runner, record)
         record.runner = null
         record.language = display.language
       }
       const context = await display?.prepareTurn?.()
       close = context?.close
       if (context && context.systemContext !== record.systemContext) {
-        await this.disposeRunner(record.runner)
+        await this.disposeRunner(record.runner, record)
         record.runner = null
         record.systemContext = context.systemContext
       }
@@ -1144,7 +1201,7 @@ export class BeeGameSessionManager {
     if (record.session.status === 'running') {
       record.session.status = 'stopped'
       record.abortController?.abort(reason)
-      void this.disposeRunner(record.runner)
+      void this.disposeRunner(record.runner, record)
       record.runner = null
       record.activeNativeTaskToolUseIds.clear()
       this.resolveAllPendingPermissions(record, {
@@ -1167,7 +1224,7 @@ export class BeeGameSessionManager {
     if (!record) throw new Error('Session not found')
     if (record.session.turnStatus === 'running' || record.preparingTurn) {
       record.abortController?.abort(reason)
-      void this.disposeRunner(record.runner)
+      void this.disposeRunner(record.runner, record)
       record.runner = null
       this.resolveAllPendingPermissions(record, {
         behavior: 'deny',
@@ -1191,7 +1248,7 @@ export class BeeGameSessionManager {
 
     if (record.session.status === 'running') {
       record.abortController?.abort('session_deleted')
-      await this.disposeRunner(record.runner)
+      await this.disposeRunner(record.runner, record)
       record.runner = null
       this.resolveAllPendingPermissions(record, {
         behavior: 'deny',
@@ -1224,6 +1281,7 @@ export class BeeGameSessionManager {
     while (record.preparingTurn) await new Promise(resolve => setTimeout(resolve, 10))
     await record.activeTurn?.catch(() => undefined)
     await Promise.all([...this.runnerDisposals])
+    if (record.runtimeCleanupFailed) throw new Error('Runtime cleanup failed; writer exit is unverified')
   }
 
   async dispose(): Promise<void> {
@@ -1235,7 +1293,7 @@ export class BeeGameSessionManager {
       if (record.session.status === 'running') this.stop(record.session.id, 'service_shutdown')
       else {
         record.abortController?.abort('service_shutdown')
-        void this.disposeRunner(record.runner)
+        void this.disposeRunner(record.runner, record)
         record.runner = null
         this.resolveAllPendingPermissions(record, {
           behavior: 'deny',
@@ -1248,6 +1306,8 @@ export class BeeGameSessionManager {
     }
     await Promise.all(activeTurnDrains)
     await Promise.all(this.runnerDisposals)
+    await Promise.all([...this.sessions.values()].map(record => record.usageWriteTail))
+    await this.usageOutbox?.dispose()
     this.eventSubscribers.clear()
   }
 
@@ -1259,7 +1319,7 @@ export class BeeGameSessionManager {
     let refreshed = 0
     for (const record of this.sessions.values()) {
       if (record.session.turnStatus !== 'idle' || !record.runner) continue
-      void this.disposeRunner(record.runner)
+      void this.disposeRunner(record.runner, record)
       record.runner = null
       refreshed += 1
     }
@@ -1338,6 +1398,8 @@ export class BeeGameSessionManager {
     directionAuthors?: NativeDirectionAuthorInput,
     projectTurn?: NativeProjectTurnInput,
   ): Promise<void> {
+    record.currentProjectTurn = projectTurn
+    let turnRunner: BeeGameSessionRuntime | null = null
     try {
       const signal = record.abortController?.signal
       if (!signal) throw new Error('Turn abort controller was not initialized')
@@ -1350,6 +1412,8 @@ export class BeeGameSessionManager {
       }
       record.redactVisible = createResponseRedactor(env)
       if (signal.aborted || record.session.status !== 'running') return
+      if (!record.runner) record.nativeAccountingEpoch = randomUUID()
+      const accountingEpoch = record.nativeAccountingEpoch
       const runner =
         record.runner ??
         (await this.runner.start({
@@ -1363,6 +1427,13 @@ export class BeeGameSessionManager {
           onNativeSessionId: nativeSessionId => {
             record.nativeSessionId = nativeSessionId
             this.persistRuntimeSnapshot(record)
+          },
+          onNativeUsage: usage => {
+            // Passive accounting stays out of model history. Persist completed
+            // provider work even if cancellation prevents a parent result.
+            if (usage.total_tokens > 0) this.append(record, 'usage', '', {
+              type: 'usage', subtype: 'native_accounting', nativeAccountingEpoch: accountingEpoch, usage,
+            })
           },
           onNativeTaskNotification: notification => {
             const message = notification.message ?? notification.backgroundMessage
@@ -1401,8 +1472,9 @@ export class BeeGameSessionManager {
           requestPermission: request => this.requestPermission(record, request),
         }))
       record.runner = runner
+      turnRunner = runner
       if (signal.aborted || record.session.status !== 'running') {
-        await this.disposeRunner(runner)
+        await this.disposeRunner(runner, record)
         record.runner = null
         return
       }
@@ -1415,7 +1487,11 @@ export class BeeGameSessionManager {
         projectTurn,
       )
       try {
-        if (!signal.aborted && record.session.status === 'running') {
+        if (signal.aborted && record.session.status === 'running') {
+          // A cooperative runner may return normally on cancellation. Preserve
+          // the interrupted turn identity for settlement/recovery even then.
+          this.append(record, 'turn.failed', 'Turn interrupted before completion', { type: 'turn.failed', reason: 'turn_interrupted' })
+        } else if (record.session.status === 'running') {
           const turnId = record.currentTurnId
           const hasFinalResult = hasNativeFinalResult(record.events, turnId)
           this.closeOpenThinkingLifecycle(
@@ -1437,14 +1513,14 @@ export class BeeGameSessionManager {
           }
         }
       } finally {
-        if (signal.aborted && record.runner === runner) {
-          await this.disposeRunner(record.runner)
-          record.runner = null
+        if (signal.aborted) {
+          await this.disposeRunner(runner, record)
+          if (record.runner === runner) record.runner = null
         }
       }
     } catch (err) {
-      await this.disposeRunner(record.runner)
-      record.runner = null
+      await this.disposeRunner(turnRunner ?? record.runner, record)
+      if (!turnRunner || record.runner === turnRunner) record.runner = null
       // The disposed process cannot keep any task live. Clear attribution,
       // without fabricating completed SDK events for unfinished writers.
       record.activeNativeTaskToolUseIds.clear()
@@ -1474,6 +1550,7 @@ export class BeeGameSessionManager {
       // These files back durable Chat references; a finished turn must not
       // delete earlier user uploads or tool screenshots from the same store.
       record.currentTurnId = null
+      record.currentProjectTurn = undefined
       record.currentTurnStartingUsage = undefined
       record.assistantPartialTextByMessage.clear()
       record.activeAssistantMessageId = null
@@ -1526,6 +1603,7 @@ export class BeeGameSessionManager {
     projectTurn?: NativeProjectTurnInput,
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
+    const accountingEpoch = record.nativeAccountingEpoch
     let executionError: Error | undefined
     await runner.submit({
       prompt,
@@ -1568,10 +1646,15 @@ export class BeeGameSessionManager {
           )
         }
         const mapped = mapSDKMessageToEvent(record, message)
+        const childOwner = getStringField(message, 'parent_tool_use_id')
         if (mapped) {
-          if (mapped.type !== 'assistant.thinking')
+          if (mapped.type !== 'assistant.thinking' && !childOwner)
             this.closeOpenThinkingLifecycle(record, 'visible_output_started')
-          if (mapped.type === 'assistant.partial') {
+          if (childOwner) {
+            // Child output must not reconcile against the parent's answer or
+            // consume its partial-text/thinking cursors.
+            this.append(record, mapped.type, mapped.text, { ...message, ...mapped.payload })
+          } else if (mapped.type === 'assistant.partial') {
             this.append(record, mapped.type, mapped.text, {
               ...message, messageId: record.activeAssistantMessageId,
               assistantBlockId: nativeAssistantBlockId(record, record.activeAssistantMessageId),
@@ -1591,12 +1674,14 @@ export class BeeGameSessionManager {
               record,
               mapped.type,
               mapped.text,
-              mapped.payload ?? message,
+              message.type === 'result'
+                ? { ...(mapped.payload ?? message), nativeAccountingEpoch: accountingEpoch }
+                : mapped.payload ?? message,
             )
           }
         }
         for (const toolEvent of mapSDKMessageToToolEvents(record, message)) {
-          if (toolEvent.type === 'tool.started')
+          if (toolEvent.type === 'tool.started' && !childOwner)
             this.closeOpenThinkingLifecycle(record, 'tool_started')
           const images = extractNativeToolImages(message, String(toolEvent.payload?.toolUseID ?? ''))
           if (images.length) {
@@ -1654,22 +1739,29 @@ export class BeeGameSessionManager {
     const write = {
       turnId,
       sourceMessageType: terminalEvent?.type ?? 'turn_terminal',
-      usage: turnDeltaUsage,
+      // runtime_snapshot is session cumulative; the billing authority computes
+      // its own delta. Sending a turn delta here subtracts usage a second time.
+      usage: providerCumulativeUsage,
       idempotencyKey,
       metadata: {
+        usageBasis: 'session-cumulative-v1',
         providerCumulativeUsage,
         turnDeltaUsage,
-        billableFinalUsage: turnDeltaUsage,
+        billableFinalUsage: providerCumulativeUsage,
         terminalDigest,
         ...(typeof deliveryPhase === 'string' ? { deliveryPhase } : {}),
       },
     }
+    // Persist the bill now, not after an earlier remote request finishes.
+    // Model turns are allowed to continue while billing is unavailable.
+    const firstAttempt = this.writeUsageRecord(record, write)
+    void firstAttempt.catch(() => undefined)
     const previousWrite = record.usageWriteTail
     record.usageWriteTail = previousWrite.catch(() => undefined).then(async () => {
       let failure: unknown
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          await this.writeUsageRecord(record, write)
+          await (attempt === 0 ? firstAttempt : this.writeUsageRecord(record, write))
           failure = undefined
           break
         } catch (error) {
@@ -1721,46 +1813,8 @@ export class BeeGameSessionManager {
         modelConfigId: record.session.modelConfigId,
         ...write.metadata,
       },
-      ...(record.authToken ? { authToken: record.authToken } : {}),
     }
-    const result = await this.usageBillingBackend.recordUsage!(
-      record.userId,
-      options,
-    )
-    if (this.usageBillingBackend.debitRealtimeUsage) {
-      const debit = await this.usageBillingBackend.debitRealtimeUsage(
-        record.userId,
-        options,
-      )
-      if (
-        record.session.status === 'running' &&
-        !debit.duplicate &&
-        debit.event.weightedTokensDelta > 0
-      ) {
-        this.append(record, 'system.status', 'Realtime usage debited', {
-          type: 'billing.realtime_debited',
-          debitEventId: debit.event.id,
-          weightedTokens: debit.event.weightedTokensDelta,
-          creditsMicro: debit.event.creditsMicro,
-          pricingVersion: debit.event.pricingVersion,
-          idempotencyKey: write.idempotencyKey,
-        })
-      }
-    }
-    if (
-      record.session.status === 'running' &&
-      !result.duplicate &&
-      result.event.weightedTokensDelta > 0
-    ) {
-      this.append(record, 'system.status', 'Usage recorded', {
-        type: 'billing.usage_recorded',
-        usageEventId: result.event.id,
-        weightedTokens: result.event.weightedTokensDelta,
-        creditsMicro: result.event.creditsMicro,
-        pricingVersion: result.event.pricingVersion,
-        idempotencyKey: write.idempotencyKey,
-      })
-    }
+    await this.usageOutbox!.submit({ userId: record.userId, input: options })
   }
 
   private appendAssistantPartialText(
@@ -1813,6 +1867,7 @@ export class BeeGameSessionManager {
       decision = {
         ...decision,
         updatedInput: answeredQuestionInput(pending.toolName, pending.input, decision.answers),
+        source: 'user',
         scope: 'once',
         updatedPermissions: [],
       }
@@ -1842,9 +1897,12 @@ export class BeeGameSessionManager {
         type: 'permission.resolved',
         toolUseID,
         toolName: pending.toolName,
+        ...(pending.agentId ? { agentId: pending.agentId } : {}),
+        message: pending.message,
         decision: decision.behavior,
         scope: decision.scope ?? 'once',
         remember: Boolean(decision.remember),
+        ...(pending.toolName === 'AskUserQuestion' && decision.behavior === 'allow' ? { input: decision.updatedInput } : {}),
       },
     )
     return { resolved: true }
@@ -1862,12 +1920,35 @@ export class BeeGameSessionManager {
       return { behavior: 'deny', source: 'policy',
         message: 'Session stopped before permission was resolved' }
     }
+    const reviewTurn = record.currentProjectTurn
+    const turnId = record.currentTurnId
+    const designQuestion = request.toolName === 'AskUserQuestion' && reviewTurn?.reviewStep !== undefined
+    let workflowQuestion: Record<string, unknown> | undefined
+    if (request.toolName === 'AskUserQuestion' && record.workflowQuestionGuard) {
+      try { workflowQuestion = await record.workflowQuestionGuard(request) }
+      catch (error) {
+        this.append(record, 'workflow.question.rejected', 'Workflow question is not bound to current authorized findings', { type: 'workflow.question.rejected', toolUseID: request.toolUseID, message: toErrorMessage(error) })
+        return { behavior: 'deny', source: 'policy', message: toErrorMessage(error) }
+      }
+    }
+    let questionSourceRevision: string | undefined
+    if (designQuestion) {
+      try {
+        if (reviewTurn.reviewStep !== 'revise' || !reviewTurn.reviewRevision ||
+            (request.input.metadata as { source?: unknown } | undefined)?.source !== 'bgs-design-review:' + reviewTurn.reviewRevision ||
+            request.input.answers !== undefined) throw new Error('Question is not bound to this design revision.')
+        const context = await projectDesignQuestionContext(record.session.cwd, this.dashboardDataRoot, reviewTurn.reviewRevision)
+        designReviewQuestionFindings(request.input, context)
+        questionSourceRevision = context.sourceRevision
+      } catch (error) { return { behavior: 'deny', source: 'policy', message: toErrorMessage(error) } }
+    }
     if (request.toolName === 'SandboxNetworkAccess') {
       const host = typeof request.input.host === 'string' ? request.input.host.trim().toLowerCase() : ''
       if (host && record.approvedNetworkHosts.has(host)) {
         this.append(record, 'permission.resolved', `${request.toolName}: allow`, {
           type: 'permission.resolved', toolUseID: request.toolUseID,
           toolName: request.toolName, decision: 'allow', scope: 'session',
+          ...(request.agentId ? { agentId: request.agentId } : {}),
           autoApproved: true, reason: 'session_network_host_approval',
         })
         return { behavior: 'allow', source: 'user', scope: 'session' }
@@ -1878,6 +1959,7 @@ export class BeeGameSessionManager {
         type: 'permission.resolved',
         toolUseID: request.toolUseID,
         toolName: request.toolName,
+        ...(request.agentId ? { agentId: request.agentId } : {}),
         decision: 'allow',
         scope: 'once',
         autoApproved: true,
@@ -1898,11 +1980,13 @@ export class BeeGameSessionManager {
           type: 'permission.resolved',
           toolUseID: request.toolUseID,
           toolName: request.toolName,
+          ...(request.agentId ? { agentId: request.agentId } : {}),
           decision: projectFileAccess.behavior,
           scope: 'once',
           autoApproved: projectFileAccess.behavior === 'allow',
           autoDenied: projectFileAccess.behavior === 'deny',
           reason: projectFileAccess.reason,
+          message: projectFileAccess.message ?? request.message,
           input: request.input,
         },
       )
@@ -1918,7 +2002,7 @@ export class BeeGameSessionManager {
     // Native tools already execute permitted operations without asking here.
     // Worker ownership is not permission to bypass a native safety prompt
     // (including unsandboxed shell execution). Preserve that user decision.
-    return new Promise(resolve => {
+    const decision = await new Promise<DashboardPermissionDecision>(resolve => {
       record.pendingPermissions.set(request.toolUseID, {
         ...request,
         requestedAt: new Date(),
@@ -1928,12 +2012,36 @@ export class BeeGameSessionManager {
         type: 'permission.requested',
         toolUseID: request.toolUseID,
         toolName: request.toolName,
+        ...(request.agentId ? { agentId: request.agentId } : {}),
         message: request.message,
         input: request.input,
+        ...(workflowQuestion ? { workflowQuestion } : {}),
         ...(request.decisionReason ? { decisionReason: request.decisionReason } : {}),
         ...(request.blockedPath ? { blockedPath: request.blockedPath } : {}),
       })
     })
+    if (designQuestion && decision.behavior === 'allow') {
+      try {
+        if (record.currentTurnId !== turnId || record.currentProjectTurn !== reviewTurn || record.abortController?.signal.aborted)
+          throw new Error('Design question belongs to an interrupted turn.')
+        await recordProjectDesignUserDecision(record.session.cwd, this.dashboardDataRoot, reviewTurn.reviewRevision!,
+          request.toolUseID, decision.updatedInput!, questionSourceRevision)
+      } catch (error) { return { behavior: 'deny', source: 'policy', message: toErrorMessage(error) } }
+    }
+    if (workflowQuestion && decision.behavior === 'allow') {
+      try {
+        if (record.currentTurnId !== turnId || record.abortController?.signal.aborted)
+          throw new Error('Workflow question belongs to an interrupted turn.')
+        const binding = await record.workflowQuestionGuard!(request, decision)
+        this.append(record, 'workflow.question.validated', 'User answer bound to current workflow sources', {
+          type: 'workflow.question.validated', ...binding, toolUseID: request.toolUseID, questions: request.input.questions, answers: decision.updatedInput?.answers,
+        })
+      } catch (error) {
+        this.append(record, 'workflow.question.rejected', 'User answer is not valid for the current workflow sources', { type: 'workflow.question.rejected', toolUseID: request.toolUseID, message: toErrorMessage(error) })
+        return { behavior: 'deny', source: 'policy', message: toErrorMessage(error) }
+      }
+    }
+    return decision
   }
 
   private closeOpenThinkingLifecycle(
@@ -1957,6 +2065,11 @@ export class BeeGameSessionManager {
     for (const [toolUseID, pending] of record.pendingPermissions) {
       record.pendingPermissions.delete(toolUseID)
       pending.resolve(decision)
+      this.append(record, 'permission.resolved', `${pending.toolName}: cancelled`, {
+        type: 'permission.resolved', toolUseID, toolName: pending.toolName,
+        decision: 'cancelled', message: pending.message,
+        ...(pending.agentId ? { agentId: pending.agentId } : {}),
+      })
     }
   }
 
@@ -1976,6 +2089,7 @@ export class BeeGameSessionManager {
       this.subagentChat.set(record, enrich)
     }
     let eventPayload = enrich({ type, payload }).payload as DashboardSDKMessage | undefined
+    if (record.session.workflowExecution) eventPayload = { type, ...eventPayload, workflowExecution: record.session.workflowExecution }
     if (type === 'tool.completed' && eventPayload?.nativeBackgroundTask) {
       const launch = eventPayload.nativeBackgroundTask as Record<string, unknown>
       const taskId = typeof launch.taskId === 'string' ? launch.taskId : ''
@@ -2271,6 +2385,7 @@ export async function recoverLatestProjectSessionFromDisk(
       )
       if (
         events.length === 0 ||
+        events.some(event => Boolean(event.payload?.workflowExecution)) ||
         events.some(event => event.sessionId && event.sessionId !== sessionId)
       ) {
         continue
@@ -2954,8 +3069,7 @@ function findLastModelUsageEventIndex(events: BeeGameEvent[]): number {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
     if (
-      event?.type === 'result' &&
-      getModelUsageFromEventPayload(event.payload)
+      event && getCumulativeUsageSnapshot(event)
     ) {
       return index
     }
@@ -2972,8 +3086,15 @@ function latestCumulativeUsageEvent(
   // example input tokens at message_start and output tokens at message_delta)
   // compose without summing the same cumulative work repeatedly.
   const latest = emptyRuntimeUsage()
+  const checkpoint = events[afterIndex]
+  const epoch = getDashboardPayloadString(checkpoint?.payload, 'nativeAccountingEpoch')
+  // Native checkpoints include completed main/child requests. Raw SSE is only
+  // one request and can arrive after its stderr checkpoint; adding it again
+  // would double-charge. With this source available, show completed usage only.
+  if (epoch && events.some(event => event.type === 'usage' && event.payload?.subtype === 'native_accounting' &&
+      getDashboardPayloadString(event.payload, 'nativeAccountingEpoch') === epoch)) return latest
   for (const event of events.slice(afterIndex + 1)) {
-    if (event.type !== 'usage') continue
+    if (event.type !== 'usage' || event.payload?.subtype === 'native_accounting') continue
     const usage = getUsageFromEventPayload(event.payload)
     latest.prompt_tokens = Math.max(latest.prompt_tokens, usage.prompt_tokens)
     latest.completion_tokens = Math.max(
@@ -3121,8 +3242,7 @@ function deriveObservedRoleTokens(
     if (event.type !== 'system.status' || !isRuntimeRecord(event.payload))
       continue
     if (
-      getDashboardPayloadString(event.payload, 'subtype') !==
-      'task_notification'
+      !['task_notification', 'task_progress'].includes(getDashboardPayloadString(event.payload, 'subtype'))
     )
       continue
     const taskId = getDashboardPayloadString(event.payload, 'task_id')
@@ -3131,11 +3251,12 @@ function deriveObservedRoleTokens(
       ? event.payload.usage
       : undefined
     if (!taskId || !toolUseID || !usage) continue
-    latestTerminalByTask.set(taskId, {
+    latestTerminalByTask.set(toolUseID, {
       toolUseID,
       role: roleByToolUse.get(toolUseID) ?? 'other',
       tokens: Math.max(
         normalizeFiniteNumber(usage.total_tokens),
+        latestTerminalByTask.get(toolUseID)?.tokens ?? 0,
         backgroundUsageByToolUse.get(toolUseID) ?? 0,
       ),
     })
@@ -3160,8 +3281,11 @@ function deriveObservedRoleTokens(
     otherSubagents += value.tokens
   }
   return {
-    mainAgent: Math.max(0, total - otherSubagents),
-    otherSubagents,
+    // Provider checkpoints include all roles. A missing child receipt is not
+    // evidence that the coordinator consumed the remaining tokens.
+    mainAgent: 0,
+    otherSubagents: Math.min(total, otherSubagents),
+    unattributed: Math.max(0, total - otherSubagents),
   }
 }
 
@@ -3245,26 +3369,50 @@ function getModelUsageFromEventPayload(
   return found ? total : null
 }
 
+function getCumulativeUsageSnapshot(event: BeeGameEvent): BeeGameRuntimeSnapshot['usage'] | null {
+  if (event.type === 'result') return getModelUsageFromEventPayload(event.payload)
+  if (event.type === 'usage' && event.payload?.subtype === 'native_accounting') {
+    const usage = getUsageFromEventPayload(event.payload)
+    return usage.total_tokens > 0 ? usage : null
+  }
+  return null
+}
+
 function aggregateCumulativeModelUsage(
   events: BeeGameEvent[],
 ): BeeGameRuntimeSnapshot['usage'] | null {
-  const epochs: BeeGameRuntimeSnapshot['usage'][] = []
-  let latestInEpoch: BeeGameRuntimeSnapshot['usage'] | null = null
+  const groups = new Map<string, { native: boolean; snapshots: BeeGameRuntimeSnapshot['usage'][] }>()
   for (const event of events) {
-    if (event.type !== 'result') continue
-    const snapshot = getModelUsageFromEventPayload(event.payload)
+    const snapshot = getCumulativeUsageSnapshot(event)
     if (!snapshot) continue
-    if (latestInEpoch && hasCumulativeCounterReset(latestInEpoch, snapshot)) {
-      epochs.push(latestInEpoch)
-    }
-    latestInEpoch = snapshot
+    const key = getDashboardPayloadString(event.payload, 'nativeAccountingEpoch') || 'legacy'
+    const group = groups.get(key) ?? { native: false, snapshots: [] }
+    group.native ||= event.type === 'usage'
+    group.snapshots.push(snapshot)
+    groups.set(key, group)
   }
-  if (latestInEpoch) epochs.push(latestInEpoch)
-  if (epochs.length === 0) return null
-  return epochs.reduce((total, usage) => {
-    addRuntimeUsage(total, usage)
-    return total
-  }, emptyRuntimeUsage())
+  if (!groups.size) return null
+  const total = emptyRuntimeUsage()
+  for (const group of groups.values()) {
+    let latest = emptyRuntimeUsage()
+    for (const snapshot of group.snapshots) {
+      if (!group.native) {
+        // Legacy SDK-only transports lack process identity/callback counters.
+        if (hasCumulativeCounterReset(latest, snapshot)) addRuntimeUsage(total, latest)
+        latest = snapshot
+      } else {
+        // stdout and stderr are independent streams. A late SDK result can
+        // precede a newer diagnostic logically; never mistake it for a reset.
+        latest = { prompt_tokens: Math.max(latest.prompt_tokens, snapshot.prompt_tokens),
+          completion_tokens: Math.max(latest.completion_tokens, snapshot.completion_tokens),
+          cache_read_tokens: Math.max(latest.cache_read_tokens, snapshot.cache_read_tokens),
+          cache_creation_tokens: Math.max(latest.cache_creation_tokens, snapshot.cache_creation_tokens), total_tokens: 0 }
+        latest.total_tokens = latest.prompt_tokens + latest.completion_tokens + latest.cache_read_tokens + latest.cache_creation_tokens
+      }
+    }
+    addRuntimeUsage(total, latest)
+  }
+  return total
 }
 
 function hasCumulativeCounterReset(
@@ -3465,8 +3613,9 @@ function normalizeRoleTokens(
 ): NonNullable<BeeGameRuntimeSnapshot['turnDiagnostics']>['roleTokens'] {
   const record = isRuntimeRecord(value) ? value : {}
   return {
-    mainAgent: Number(record.mainAgent ?? 0),
+    mainAgent: record.unattributed === undefined ? 0 : Number(record.mainAgent ?? 0),
     otherSubagents: Number(record.otherSubagents ?? 0),
+    unattributed: Number(record.unattributed ?? record.mainAgent ?? 0),
   }
 }
 
@@ -3493,7 +3642,7 @@ async function collectPackageFiles(root: string): Promise<string[]> {
   return files.sort((a, b) => a.localeCompare(b))
 }
 
-function createZipArchive(
+export function createZipArchive(
   files: Array<{ path: string; data: Uint8Array }>,
 ): Uint8Array {
   const localParts: Uint8Array[] = []
@@ -3507,7 +3656,7 @@ function createZipArchive(
     const localView = new DataView(localHeader.buffer)
     localView.setUint32(0, 0x04034b50, true)
     localView.setUint16(4, 20, true)
-    localView.setUint16(6, 0, true)
+    localView.setUint16(6, 0x0800, true) // Paths are UTF-8, including resource names.
     localView.setUint16(8, 0, true)
     localView.setUint16(10, 0, true)
     localView.setUint16(12, 0, true)
@@ -3524,7 +3673,7 @@ function createZipArchive(
     centralView.setUint32(0, 0x02014b50, true)
     centralView.setUint16(4, 20, true)
     centralView.setUint16(6, 20, true)
-    centralView.setUint16(8, 0, true)
+    centralView.setUint16(8, 0x0800, true)
     centralView.setUint16(10, 0, true)
     centralView.setUint16(12, 0, true)
     centralView.setUint16(14, 0, true)
@@ -3881,6 +4030,11 @@ function mapSDKMessageToEvent(
   text: string
   payload?: DashboardSDKMessage
 } | null {
+  if (getStringField(message, 'parent_tool_use_id') && message.type === 'stream_event') {
+    // Preserve visible child text without altering the parent's stream state.
+    // Private reasoning/signature blocks are not display text.
+    return mapTextEvent('assistant.partial', extractStreamTextDelta(message))
+  }
   switch (message.type) {
     case 'user':
       return null
@@ -3900,7 +4054,10 @@ function mapSDKMessageToEvent(
     case 'stream_event':
       return mapStreamEvent(record, message)
     case 'tool_progress':
-      return mapTextEvent('tool.progress', extractMessageText(message))
+      return { type: 'tool.progress', text: extractMessageText(message), payload: { ...message,
+        toolUseID: getStringField(message, 'tool_use_id'), toolName: getStringField(message, 'tool_name'),
+        ...(getStringField(message, 'parent_tool_use_id') ? { parentToolUseID: getStringField(message, 'parent_tool_use_id') } : {}),
+      } }
     case 'result': {
       // A native terminal result can legitimately carry accounting and status
       // metadata without user-visible text. Persist that envelope so credits,
@@ -4279,6 +4436,8 @@ function mapStreamingToolInputActivity(message: DashboardSDKMessage): {
       toolUseID: toolUseId,
       toolName,
       phase: 'input_streaming',
+      ...(getStringField(message, 'parent_tool_use_id')
+        ? { parentToolUseID: getStringField(message, 'parent_tool_use_id') } : {}),
     },
   }
 }
@@ -4421,8 +4580,8 @@ export function mergeRuntimeEnv(
   additionalEnv: Record<string, string>,
 ): Record<string, string> {
   const selectedEnvironment = {
-    ...additionalEnv,
-    ...(runtime?.env ?? {}),
+    ...normalizeRuntimeEnvironment(additionalEnv),
+    ...normalizeRuntimeEnvironment(runtime?.env ?? {}),
   }
   const modelType =
     runtime?.modelType ?? inferSelectedRuntimeModelType(selectedEnvironment)
@@ -4439,28 +4598,28 @@ function inferSelectedRuntimeModelType(
   if (
     environment.ANTHROPIC_BASE_URL ||
     environment.ANTHROPIC_AUTH_TOKEN ||
-    environment.ANTHROPIC_DEFAULT_SONNET_MODEL
+    environment.BGS_DEFAULT_BALANCED_MODEL
   ) {
     candidates.add('anthropic')
   }
   if (
     environment.OPENAI_BASE_URL ||
     environment.OPENAI_API_KEY ||
-    environment.CLAUDE_CODE_USE_OPENAI
+    isEnvTruthy(environment.BGS_USE_OPENAI)
   ) {
     candidates.add('openai')
   }
   if (
     environment.GEMINI_BASE_URL ||
     environment.GEMINI_API_KEY ||
-    environment.CLAUDE_CODE_USE_GEMINI
+    isEnvTruthy(environment.BGS_USE_GEMINI)
   ) {
     candidates.add('gemini')
   }
   if (
     environment.GROK_BASE_URL ||
     environment.GROK_API_KEY ||
-    environment.CLAUDE_CODE_USE_GROK
+    isEnvTruthy(environment.BGS_USE_GROK)
   ) {
     candidates.add('grok')
   }

@@ -1,5 +1,4 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
-import { traceNativeQuery } from '@bee-game-studio/agent-workflow/native-response-trace'
 import type {
   ToolResultBlockParam,
   ToolUseBlock,
@@ -328,12 +327,11 @@ export async function* query(
   let didThrow = false
   let thrownError: unknown
   try {
-    terminal = yield* traceNativeQuery(queryLoop(
+    terminal = yield* queryLoop(
       paramsWithTrace,
       consumedCommandUuids,
       consumedAutonomyCommands,
-    ), { agentId: params.toolUseContext.agentId, parentToolUseId: params.toolUseContext.toolUseId,
-      signal: params.toolUseContext.abortController.signal })
+    )
   } catch (error) {
     didThrow = true
     thrownError = error
@@ -525,9 +523,7 @@ async function* queryLoop(
       queryTracking,
     }
 
-    const captureBoundary = evidenceContextCheckpoint('compact_boundary', messages)
     let messagesForQuery = getMessagesAfterCompactBoundary(messages)
-    captureBoundary(messagesForQuery)
 
     // Local skill search is cheap. Surface the current subtask's results
     // before this model request, not after it has already chosen a tool.
@@ -586,7 +582,6 @@ async function* queryLoop(
     const persistReplacements =
       querySource.startsWith('agent:') ||
       querySource.startsWith('repl_main_thread')
-    const captureToolBudget = evidenceContextCheckpoint('tool_result_budget', messagesForQuery)
     messagesForQuery = await applyToolResultBudget(
       messagesForQuery,
       toolUseContext.contentReplacementState,
@@ -604,7 +599,6 @@ async function* queryLoop(
       ),
     )
 
-    captureToolBudget(messagesForQuery)
     // Apply snip before microcompact (both may run — they are not mutually exclusive).
     // snipTokensFreed is plumbed to autocompact so its threshold check reflects
     // what snip removed; tokenCountWithEstimation alone can't see it (reads usage
@@ -612,10 +606,8 @@ async function* queryLoop(
     let snipTokensFreed = 0
     if (feature('HISTORY_SNIP')) {
       queryCheckpoint('query_snip_start')
-      const captureSnip = evidenceContextCheckpoint('history_snip', messagesForQuery)
       const snipResult = snipModule!.snipCompactIfNeeded(messagesForQuery)
       messagesForQuery = snipResult.messages
-      captureSnip(messagesForQuery)
       snipTokensFreed = snipResult.tokensFreed
       if (snipResult.boundaryMessage) {
         yield snipResult.boundaryMessage
@@ -625,14 +617,12 @@ async function* queryLoop(
 
     // Apply microcompact before autocompact
     queryCheckpoint('query_microcompact_start')
-    const captureMicrocompact = evidenceContextCheckpoint('microcompact', messagesForQuery)
     const microcompactResult = await deps.microcompact(
       messagesForQuery,
       toolUseContext,
       querySource,
     )
     messagesForQuery = microcompactResult.messages
-    captureMicrocompact(messagesForQuery)
     // Release original strings from contentReplacementState.replacements for
     // tool results whose content was replaced with the cleared message.
     if (microcompactResult.clearedToolUseIds?.length) {
@@ -664,14 +654,12 @@ async function* queryLoop(
     // continue site (query.ts:1192), and the next projectView() no-ops
     // because the archived messages are already gone from its input.
     if (feature('CONTEXT_COLLAPSE') && contextCollapse) {
-      const captureCollapse = evidenceContextCheckpoint('context_collapse', messagesForQuery)
       const collapseResult = await contextCollapse.applyCollapsesIfNeeded(
         messagesForQuery,
         toolUseContext,
         querySource,
       )
       messagesForQuery = collapseResult.messages
-      captureCollapse(messagesForQuery)
     }
 
     const fullSystemPrompt = asSystemPrompt(
@@ -679,7 +667,6 @@ async function* queryLoop(
     )
 
     queryCheckpoint('query_autocompact_start')
-    const captureAutocompact = evidenceContextCheckpoint('autocompact', messagesForQuery)
     const { compactionResult, consecutiveFailures } = await deps.autocompact(
       messagesForQuery,
       toolUseContext,
@@ -762,7 +749,6 @@ async function* queryLoop(
 
       // Continue on with the current query call using the post compact messages
       messagesForQuery = postCompactMessages
-      captureAutocompact(messagesForQuery)
     } else if (consecutiveFailures !== undefined) {
       // Autocompact failed — propagate failure count so the circuit breaker
       // can stop retrying on the next iteration.
@@ -905,11 +891,9 @@ async function* queryLoop(
           snipTokensFreed,
         )
         if (predictiveResult.compactionResult) {
-          const capturePredictive = evidenceContextCheckpoint('predictive_compact', messagesForQuery)
           messagesForQuery = buildPostCompactMessages(
             predictiveResult.compactionResult,
           )
-          capturePredictive(messagesForQuery)
           snipTokensFreed = 0
           tracking = tracking
             ? {
@@ -1219,9 +1203,7 @@ async function* queryLoop(
             // block (e.g. capybara) to an unprotected fallback (e.g. opus) 400s.
             // Strip before retry so the fallback model gets clean history.
             if (process.env.USER_TYPE === 'ant') {
-              const captureSignatures = evidenceContextCheckpoint('strip_signatures_retry', messagesForQuery)
               messagesForQuery = stripSignatureBlocks(messagesForQuery)
-              captureSignatures(messagesForQuery)
             }
 
             // Log the fallback event
@@ -1471,7 +1453,6 @@ async function* queryLoop(
           }
 
           const postCompactMessages = buildPostCompactMessages(compacted)
-          evidenceContextCheckpoint('reactive_compact', messagesForQuery)(postCompactMessages)
           for (const msg of postCompactMessages) {
             yield msg
           }
@@ -2109,4 +2090,3 @@ async function* queryLoop(
     state = next
   } // while (true)
 }
-import { evidenceContextCheckpoint } from '@bee-game-studio/agent-workflow/native-evidence'

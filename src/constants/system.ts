@@ -4,17 +4,19 @@ import { feature } from 'bun:bundle'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { logForDebugging } from '../utils/debug.js'
 import { isEnvDefinedFalsy } from '../utils/envUtils.js'
-import { getAPIProvider } from '../utils/model/providers.js'
+import { getAPIProvider, isFirstPartyAnthropicBaseUrl } from '../utils/model/providers.js'
 import { getWorkload } from '../utils/workloadContext.js'
 
 const DEFAULT_PREFIX = `You are Claude Code, Anthropic's official CLI for Claude.`
 const AGENT_SDK_CLAUDE_CODE_PRESET_PREFIX = `You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK.`
 const AGENT_SDK_PREFIX = `You are a Claude agent, built on Anthropic's Claude Agent SDK.`
+export const BGS_SYSTEM_IDENTITY = 'You are BGS, an AI assistant developed by PhantomLab.'
 
 const CLI_SYSPROMPT_PREFIX_VALUES = [
   DEFAULT_PREFIX,
   AGENT_SDK_CLAUDE_CODE_PRESET_PREFIX,
   AGENT_SDK_PREFIX,
+  BGS_SYSTEM_IDENTITY,
 ] as const
 
 export type CLISyspromptPrefix = (typeof CLI_SYSPROMPT_PREFIX_VALUES)[number]
@@ -32,6 +34,11 @@ export function getCLISyspromptPrefix(options?: {
   hasAppendSystemPrompt: boolean
 }): CLISyspromptPrefix {
   const apiProvider = getAPIProvider()
+  // Keep server-sensitive prefix text for genuine Anthropic-family routes.
+  if (apiProvider === 'openai' || apiProvider === 'gemini' || apiProvider === 'grok' ||
+      (apiProvider === 'firstParty' && !isFirstPartyAnthropicBaseUrl())) {
+    return BGS_SYSTEM_IDENTITY
+  }
   if (apiProvider === 'vertex') {
     return DEFAULT_PREFIX
   }

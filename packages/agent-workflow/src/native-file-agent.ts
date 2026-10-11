@@ -1,23 +1,24 @@
 import { spawn } from 'node:child_process'
-import { appendFile } from 'node:fs/promises'
+import { appendFile, realpath } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createNativeTaskAccess } from './native-task-access'
 import { createNativeToolDiagnostics } from './native-tool-diagnostics'
-import { createNativeResponseTraceLog, createResponseRedactor, projectResponseMessage, NATIVE_RESPONSE_TRACE_PREFIX } from './native-response-trace'
-import { NATIVE_DIAGNOSTIC_PREFIX, parseNativeDiagnostic } from './native-diagnostics'
+import { standardCliCache } from './standard-cli-cache'
+import { standardCliProvider } from './standard-cli-provider'
+import { createNativeResponseTraceLog, createResponseRedactor, projectResponseMessage } from './native-response-trace'
 
 const SAFE_INHERITED = ['HOME', 'LANG', 'LC_ALL', 'LOGNAME', 'PATH', 'SHELL', 'TMPDIR', 'USER', 'CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING']
 const CONFIG_KEYS = new Set([
-  'BEEGAME_MODEL_OBSERVER_METADATA',
-  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC', 'DISABLE_TELEMETRY', 'DISABLE_ERROR_REPORTING',
+  'BGS_DISABLE_NONESSENTIAL_TRAFFIC', 'DISABLE_TELEMETRY', 'DISABLE_ERROR_REPORTING',
   'BEEGAME_MODEL', 'BEEGAME_MODEL_TYPE', 'BEEGAME_CONFIG_DIR', 'BEEGAME_NATIVE_BUILTIN_SKILLS_DIR', 'SKILL_SEARCH_ENABLED', 'NPM_CONFIG_CACHE', 'npm_config_cache', 'NPM_CONFIG_USERCONFIG', 'npm_config_userconfig',
-  'ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL',
-  'CLAUDE_CODE_USE_OPENAI', 'OPENAI_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_DEFAULT_HAIKU_MODEL', 'OPENAI_DEFAULT_SONNET_MODEL', 'OPENAI_DEFAULT_OPUS_MODEL',
-  'CLAUDE_CODE_USE_GEMINI', 'GEMINI_BASE_URL', 'GEMINI_API_KEY', 'GEMINI_DEFAULT_HAIKU_MODEL', 'GEMINI_DEFAULT_SONNET_MODEL', 'GEMINI_DEFAULT_OPUS_MODEL',
-  'CLAUDE_CODE_USE_GROK', 'GROK_BASE_URL', 'GROK_API_KEY', 'GROK_DEFAULT_HAIKU_MODEL', 'GROK_DEFAULT_SONNET_MODEL', 'GROK_DEFAULT_OPUS_MODEL',
+  'CLAUDE_ARTIFACTS_URL', 'CLAUDE_ARTIFACTS_TOKEN',
+  'ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'BGS_DEFAULT_FAST_MODEL', 'BGS_DEFAULT_BALANCED_MODEL', 'BGS_DEFAULT_STRONG_MODEL',
+  'BGS_USE_OPENAI', 'OPENAI_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_DEFAULT_HAIKU_MODEL', 'OPENAI_DEFAULT_SONNET_MODEL', 'OPENAI_DEFAULT_OPUS_MODEL',
+  'BGS_USE_GEMINI', 'GEMINI_BASE_URL', 'GEMINI_API_KEY', 'GEMINI_DEFAULT_HAIKU_MODEL', 'GEMINI_DEFAULT_SONNET_MODEL', 'GEMINI_DEFAULT_OPUS_MODEL',
+  'BGS_USE_GROK', 'GROK_BASE_URL', 'GROK_API_KEY', 'GROK_DEFAULT_HAIKU_MODEL', 'GROK_DEFAULT_SONNET_MODEL', 'GROK_DEFAULT_OPUS_MODEL',
   'AWS_REGION', 'AWS_BEDROCK_MODEL', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'NODE_EXTRA_CA_CERTS',
-  'CLAUDE_CODE_PROXY_RESOLVES_HOSTS', 'CLAUDE_CODE_CLIENT_CERT', 'CLAUDE_CODE_CLIENT_KEY', 'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE', 'ANTHROPIC_UNIX_SOCKET',
+  'CLAUDE_CODE_PROXY_RESOLVES_HOSTS', 'CLAUDE_CODE_CLIENT_CERT', 'CLAUDE_CODE_CLIENT_KEY', 'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE', 'BGS_API_UNIX_SOCKET',
 ])
 export function nativeFileAgentEnvironment(selected: Readonly<Record<string, string>>) {
   return {
@@ -50,7 +51,7 @@ export type FileAgentInput = {
   /** Optional terminal payload contract. File-producing tasks may omit it. */
   schema?: object
   logPath: string
-  /** Opt-in response evidence, including detached child queries; no hidden reasoning. */
+  /** Opt-in public SDK response evidence; no native/private query interception. */
   responseTrace?: boolean
   signal?: AbortSignal
   onMessage?(message: Record<string, unknown>): void | Promise<void>
@@ -77,7 +78,12 @@ export function nativeChatEventsPath(logPath: string): string {
 
 /** Native file tools with a workspace permission boundary. */
 export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAgentResult> {
+  const session = randomUUID()
+  const provider = standardCliProvider(input.env)
+  input = { ...input, env: provider.environment }
   const access = await createNativeTaskAccess({ ...input,
+    modelType: provider.modelType,
+    toolResultsDirectory: standardCliCache(await realpath(input.workspacePath), session, input.env),
     ...(input.env.BEEGAME_CONFIG_DIR
       ? { skillsDirectory: resolve(input.env.BEEGAME_CONFIG_DIR, 'skills') } : {}),
     ...(input.env.BEEGAME_NATIVE_BUILTIN_SKILLS_DIR
@@ -90,11 +96,9 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
     '--input-format=stream-json', '--output-format=stream-json',
     '--include-partial-messages', '--replay-user-messages', '--permission-prompt-tool=stdio',
     ...(input.schema ? ['--json-schema', JSON.stringify(input.schema)] : []),
-    '--no-session-persistence', ...access.flags]
+    '--session-id=' + session, '--no-session-persistence', ...access.flags]
   const child = spawn(command[0]!, command.slice(1), {
-    cwd: root, env: { ...input.env, ...access.environment,
-      BEEGAME_NATIVE_RESPONSE_TRACE: input.responseTrace ? '1' : '0',
-      BEEGAME_NATIVE_DIAGNOSTICS: input.responseTrace ? '1' : '0' },
+    cwd: root, env: { ...provider.environment, ...access.environment },
     shell: false, stdio: ['pipe', 'pipe', 'pipe'],
   })
   let closed = false, exitCode: number | null = null, signalCode: string | null = null
@@ -133,11 +137,8 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
   // Workers can outlive the API process. Their durable, redacted Chat source
   // must remain readable independently of diagnostic retention/rotation.
   const chat = (event: string, data: unknown) => writeRecord(nativeChatEventsPath(input.logPath), event, data)
-  const trace = input.responseTrace ? createNativeResponseTraceLog(chat, input.env, async message => {
-    // Root messages also arrive on stdout. Forward only detached child
-    // observations here so usage is persisted exactly once per source.
-    if (message.nativeTraceAgentId !== 'root') await input.onMessage?.(structuredClone(message))
-  }) : undefined
+  const trace = input.responseTrace ? createNativeResponseTraceLog(chat, input.env) : undefined
+  const sdkQueries = new Set<string>()
   let traceQueue = Promise.resolve()
   const enqueueTrace = (work: () => Promise<void>) => {
     const pending = traceQueue.then(work)
@@ -184,6 +185,21 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
     if (!closed && !child.stdin.destroyed) child.stdin.write(JSON.stringify(value) + '\n')
   }
   async function handle(message: Record<string, any>) {
+    if (trace && message.isReplay !== true) {
+      const agentId = typeof message.parent_tool_use_id === 'string' ? message.parent_tool_use_id : 'root'
+      const identity = { queryId: agentId, agentId, ...(agentId === 'root' ? {} : { parentToolUseId: agentId }) }
+      const projected = projectResponseMessage(message)
+      if (projected) await enqueueTrace(async () => {
+        if (!sdkQueries.has(agentId)) {
+          sdkQueries.add(agentId); await trace.accept({ ...identity, kind: 'query_start' })
+        }
+        await trace.accept({ ...identity, kind: 'message', message: projected })
+      })
+      if (message.type === 'result' && message.parent_tool_use_id == null) await enqueueTrace(async () => {
+        await trace.accept({ ...identity, kind: 'query_end', status: message.is_error === true ? 'failed' : 'completed' })
+        sdkQueries.delete(agentId)
+      })
+    }
     if (message.type === 'system' && ['task_started', 'task_progress', 'task_notification'].includes(message.subtype)) {
       await chat('native.task_lifecycle', redactTaskObservation(projectResponseMessage(message)))
     }
@@ -272,7 +288,7 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
           await reportProgress({ modelResponses: modelIds.size, message: '正在等待委派任务返回；本次取结果尚未完成' })
       }
     }
-    if (message.type === 'result') {
+    if (message.type === 'result' && message.parent_tool_use_id == null) {
       lastActivityAt = new Date().toISOString()
       await log('result', { subtype: message.subtype, isError: message.is_error,
         usage: message.usage, modelUsage: message.modelUsage,
@@ -322,56 +338,13 @@ export async function runNativeFileAgent(input: FileAgentInput): Promise<FileAge
       message: { role: 'user', content: [{ type: 'text', text: input.prompt }] } })
     waitObservationTimer = setInterval(observeUpstreamWait, 5_000)
     await Promise.all([consume(), (async () => {
-      let pending = '', discarding = false
-      const decoder = new TextDecoder()
-      const line = async (text: string) => {
-        if (!trace) return
-        try {
-          if (text.startsWith(NATIVE_RESPONSE_TRACE_PREFIX)) {
-            const frame = JSON.parse(text.slice(NATIVE_RESPONSE_TRACE_PREFIX.length))
-            await enqueueTrace(() => trace.accept(frame))
-          } else if (text.startsWith(NATIVE_DIAGNOSTIC_PREFIX)) {
-            const data = parseNativeDiagnostic(JSON.parse(text.slice(NATIVE_DIAGNOSTIC_PREFIX.length)))
-            if (data) {
-              await log('native_diagnostic', data)
-              const message = data.event === 'retry_wait'
-                ? `上游请求重试等待${data.delayMs === undefined ? '' : ` · ${data.delayMs}ms`}`
-                : data.event === 'api_error'
-                  ? `上游 API 错误 · ${data.category ?? 'unknown'}`
-                  : data.event === 'response_headers'
-                    ? '已收到上游响应头，等待模型流'
-                    : undefined
-              if (message) await reportProgress({ modelResponses: modelIds.size, message })
-            }
-          }
-        } catch {
-          const response = text.startsWith(NATIVE_RESPONSE_TRACE_PREFIX)
-          if (response) fail('observation_failed')
-          await log('response.invalid_frame', { reason: response ? 'invalid_chat_frame' : 'invalid_diagnostic_frame' })
-        }
-      }
       try {
         for await (const chunk of child.stderr) {
           stderrBytes += Buffer.byteLength(chunk)
           lastStderrAt = new Date().toISOString()
           await log('stderr_activity', { bytes: Buffer.byteLength(chunk), totalBytes: stderrBytes })
-          pending += decoder.decode(chunk, { stream: true })
-          let index: number
-          while ((index = pending.indexOf('\n')) >= 0) {
-            const text = pending.slice(0, index); pending = pending.slice(index + 1)
-            if (!discarding) await line(text)
-            discarding = false
-          }
-          // Bound unstructured stderr noise, not a known Chat response body.
-          if (pending.length > 32 * 1024 * 1024 && !pending.startsWith(NATIVE_RESPONSE_TRACE_PREFIX)) {
-            pending = ''; discarding = true
-            await log('response.invalid_frame', { reason: 'diagnostic_frame_too_large', modelContinues: true })
-          }
         }
-        pending += decoder.decode()
-        if (pending.trim() && !discarding) await line(pending)
-      }
-      catch { if (!failure) fail('observation_failed') }
+      } catch { if (!failure) fail('observation_failed') }
     })(), exited])
     if (waitObservationTimer) { clearInterval(waitObservationTimer); waitObservationTimer = undefined }
     await waitObservationQueue

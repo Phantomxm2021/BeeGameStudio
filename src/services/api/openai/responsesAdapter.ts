@@ -22,7 +22,7 @@ type ResponsesRequest = {
   tool_choice?: unknown
   reasoning?: { effort: ResponsesReasoningEffort }
   parallel_tool_calls?: boolean
-  /** Sticky cache routing key — stable for the CCB session. */
+  /** Sticky cache routing key — stable for the BGS session. */
   prompt_cache_key: string
 }
 
@@ -196,33 +196,48 @@ export function buildResponsesRequest(params: {
   }
 }
 
-async function* parseSSE(
+/** @internal exported for offline parser and cleanup regression tests. */
+export async function* parseSSE(
   response: Response,
 ): AsyncGenerator<Record<string, unknown>, void> {
   if (!response.body) throw new Error('ChatGPT response did not include a body')
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    let splitAt = buffer.indexOf('\n\n')
-    while (splitAt >= 0) {
-      const frame = buffer.slice(0, splitAt)
-      buffer = buffer.slice(splitAt + 2)
-      const data = frame
-        .split(/\r?\n/)
-        .filter(line => line.startsWith('data:'))
-        .map(line => line.slice(5).trimStart())
-        .join('\n')
-      if (data && data !== '[DONE]') {
-        const parsed = JSON.parse(data) as unknown
-        if (parsed && typeof parsed === 'object') {
-          yield parsed as Record<string, unknown>
-        }
+  let ended = false
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) {
+        ended = true
+        break
       }
-      splitAt = buffer.indexOf('\n\n')
+      buffer += decoder.decode(value, { stream: true })
+      let delimiter = /\r?\n\r?\n/.exec(buffer)
+      while (delimiter) {
+        const frame = buffer.slice(0, delimiter.index)
+        buffer = buffer.slice(delimiter.index + delimiter[0].length)
+        const data = frame
+          .split(/\r?\n/)
+          .filter(line => line.startsWith('data:'))
+          .map(line => line.slice(5).trimStart())
+          .join('\n')
+        if (data && data !== '[DONE]') {
+          const parsed = JSON.parse(data) as unknown
+          if (parsed && typeof parsed === 'object') {
+            yield parsed as Record<string, unknown>
+          }
+        }
+        delimiter = /\r?\n\r?\n/.exec(buffer)
+      }
+    }
+  } finally {
+    try {
+      // Early return, invalid JSON, and provider failures must stop consumption.
+      // Cleanup failure must not replace the original parsing/provider error.
+      if (!ended) await reader.cancel().catch(() => {})
+    } finally {
+      reader.releaseLock()
     }
   }
 }
@@ -285,6 +300,7 @@ export async function* adaptResponsesStreamToAnthropic(
   let currentContentIndex = -1
   let textBlockOpen = false
   let thinkingBlockOpen = false
+  let terminalSeen = false
 
   const ensureStarted = async function* () {
     if (started) return
@@ -443,6 +459,7 @@ export async function* adaptResponsesStreamToAnthropic(
     }
 
     if (type === 'response.completed' || type === 'response.incomplete') {
+      terminalSeen = true
       if (textBlockOpen) {
         yield {
           type: 'content_block_stop',
@@ -465,6 +482,11 @@ export async function* adaptResponsesStreamToAnthropic(
       } as unknown as BetaRawMessageStreamEvent
       yield { type: 'message_stop' } as BetaRawMessageStreamEvent
     }
+  }
+  if (!terminalSeen) {
+    throw new Error(
+      'Responses stream ended before a terminal response event was received',
+    )
   }
 }
 

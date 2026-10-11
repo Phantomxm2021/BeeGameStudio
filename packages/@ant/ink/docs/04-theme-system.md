@@ -7,7 +7,7 @@ The theme system provides consistent, accessible color palettes across the appli
 Wraps the application to provide theme context.
 
 ```tsx
-import { ThemeProvider } from '@anthropic/ink'
+import { ThemeProvider } from '@bee-game-studio/ink'
 
 function App() {
   return (
@@ -31,7 +31,7 @@ function App() {
 Before mounting, inject config persistence callbacks:
 
 ```tsx
-import { setThemeConfigCallbacks } from '@anthropic/ink'
+import { setThemeConfigCallbacks } from '@bee-game-studio/ink'
 
 setThemeConfigCallbacks({
   loadTheme: () => configStore.get('theme', 'dark'),
@@ -185,7 +185,7 @@ Every theme defines these semantic color keys:
 ### color() Utility
 
 ```tsx
-import { color, useTheme } from '@anthropic/ink'
+import { color, useTheme } from '@bee-game-studio/ink'
 
 function MyComponent() {
   const [themeName] = useTheme()

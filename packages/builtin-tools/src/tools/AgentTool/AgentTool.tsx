@@ -4,7 +4,7 @@ import { buildTool, type ToolDef, toolMatchesName } from 'src/Tool.js';
 import type { AssistantMessage, Message as MessageType, NormalizedUserMessage } from 'src/types/message.js';
 import { getQuerySourceForAgent } from 'src/utils/promptCategory.js';
 import { z } from 'zod/v4';
-import { clearInvokedSkillsForAgent, getSdkAgentProgressSummariesEnabled } from 'src/bootstrap/state.js';
+import { clearInvokedSkillsForAgent, getIsNonInteractiveSession, getSdkAgentProgressSummariesEnabled } from 'src/bootstrap/state.js';
 import { enhanceSystemPromptWithEnvDetails, getSystemPrompt } from 'src/constants/prompts.js';
 import { isCoordinatorMode } from 'src/coordinator/coordinatorMode.js';
 import { startAgentSummarization } from 'src/services/AgentSummary/agentSummary.js';
@@ -54,6 +54,7 @@ import { permissionModeSchema } from 'src/utils/permissions/PermissionMode.js';
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js';
 import { filterDeniedAgents, getDenyRuleForAgent } from 'src/utils/permissions/permissions.js';
 import { enqueueSdkEvent } from 'src/utils/sdkEventQueue.js';
+import { emitSubagentVisibleMessage } from 'src/utils/task/sdkProgress.js';
 import { writeAgentMetadata } from 'src/utils/sessionStorage.js';
 import { sleep } from 'src/utils/sleep.js';
 import { buildEffectiveSystemPrompt } from 'src/utils/systemPrompt.js';
@@ -1085,6 +1086,7 @@ export const AgentTool = buildTool({
                       // response. Cleanup belongs to its eventual completion.
                       for await (const msg of continueAgentIterator(agentIterator, nextMessagePromise)) {
                         agentMessages.push(msg);
+                        emitSubagentVisibleMessage(msg, toolUseContext.toolUseId);
 
                         // Track progress for backgrounded agents
                         updateProgressFromMessage(tracker, msg, resolveActivity2, toolUseContext.options.tools);
@@ -1222,6 +1224,12 @@ export const AgentTool = buildTool({
               const message = result.value as MessageType;
 
               agentMessages.push(message);
+              // A nested foreground Agent's progress is not a model message.
+              // Preserve its own parent invocation when the outer agent is the
+              // SDK-facing worker; normalizing this wrapper would drop it.
+              if (message.type === 'system' || message.type === 'progress' && (message.data as { type?: string })?.type === 'agent_progress') {
+                emitSubagentVisibleMessage(message, toolUseContext.toolUseId);
+              }
 
               // Emit task_progress for the VS Code subagent panel
               updateProgressFromMessage(syncTracker, message, syncResolveActivity, toolUseContext.options.tools);
@@ -1253,7 +1261,8 @@ export const AgentTool = buildTool({
                   (message.data as { type: string })?.type === 'powershell_progress') &&
                 onProgress
               ) {
-                onProgress({
+                if (getIsNonInteractiveSession()) emitSubagentVisibleMessage(message, toolUseContext.toolUseId);
+                else onProgress({
                   toolUseID: message.toolUseID as string,
                   data: message.data,
                 });
@@ -1275,25 +1284,23 @@ export const AgentTool = buildTool({
 
               const normalizedNew = normalizeMessages([message]);
               for (const m of normalizedNew) {
-                for (const content of (m.message?.content ?? []) as readonly { readonly type: string }[]) {
-                  if (content.type !== 'tool_use' && content.type !== 'tool_result') {
-                    continue;
-                  }
-
-                  // Forward progress updates
-                  if (onProgress) {
-                    onProgress({
-                      toolUseID: `agent_${assistantMessage.message.id}`,
-                      data: {
-                        message: m,
-                        type: 'agent_progress',
-                        // prompt only needed on first progress message (UI.tsx:624
-                        // reads progressMessages[0]). Omit here to avoid duplication.
-                        prompt: '',
-                        agentId: syncAgentId,
-                      },
-                    });
-                  }
+                const visibleContent = ((m.message?.content ?? []) as readonly { readonly type: string }[])
+                  .filter(content => content.type === 'tool_use' || content.type === 'tool_result' ||
+                    (m.type === 'assistant' && content.type === 'text'));
+                // Forward each complete message once, including text-only updates.
+                // Multiple tool blocks must not duplicate the whole SDK message.
+                if (visibleContent.length && onProgress) {
+                  onProgress({
+                    toolUseID: `agent_${assistantMessage.message.id}`,
+                    data: {
+                      message: getIsNonInteractiveSession() && m.message
+                        ? { ...m, message: { ...m.message, content: visibleContent } } as typeof m : m,
+                      type: 'agent_progress',
+                      // Prompt is only needed on the initial progress message.
+                      prompt: '',
+                      agentId: syncAgentId,
+                    },
+                  });
                 }
               }
             }

@@ -9,7 +9,7 @@ import {
 } from '../../commands.js';
 import { useIsInsideModal } from '../../context/modalContext.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { Box, Link, Text, Tab, Tabs, Pane } from '@anthropic/ink';
+import { Box, Link, Text, Tab, Tabs, Pane } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { Commands } from './Commands.js';
 import { General } from './General.js';
@@ -94,7 +94,7 @@ export function HelpV2({ onClose, commands }: Props): React.ReactNode {
     <Box flexDirection="column" height={insideModal ? undefined : maxHeight}>
       <Pane color="professionalBlue">
         <Tabs
-          title={process.env.USER_TYPE === 'ant' ? '/help' : `Claude Code v${MACRO.VERSION}`}
+          title={process.env.USER_TYPE === 'ant' ? '/help' : `BGS v${MACRO.VERSION}`}
           color="professionalBlue"
           defaultTab="general"
         >

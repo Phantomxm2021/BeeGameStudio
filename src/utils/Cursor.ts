@@ -1,4 +1,4 @@
-import { stringWidth, wrapAnsi } from '@anthropic/ink'
+import { stringWidth, wrapAnsi } from '@bee-game-studio/ink'
 import {
   firstGrapheme,
   getGraphemeSegmenter,

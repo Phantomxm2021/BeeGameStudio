@@ -9,8 +9,8 @@ import { useNotifications } from '../context/notifications.js';
 import { count } from '../utils/array.js';
 import { logForDebugging } from '../utils/debug.js';
 import { plural } from '../utils/stringUtils.js';
-import { KeybindingSetup as InkKeybindingSetup } from '@anthropic/ink';
-import type { KeybindingWarning } from '@anthropic/ink';
+import { KeybindingSetup as InkKeybindingSetup } from '@bee-game-studio/ink';
+import type { KeybindingWarning } from '@bee-game-studio/ink';
 import {
   initializeKeybindingWatcher,
   loadKeybindingsSyncWithWarnings,

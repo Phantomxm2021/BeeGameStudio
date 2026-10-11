@@ -98,7 +98,7 @@ export function IntakeSettingsForm({
         </div>
         <div className={inputLabelClass}>
           {copy.fields.resourceLibrary}
-          <ProjectSelect ariaLabel={copy.fields.resourceLibrary} value={settings.resourceLibraryUsage || ''} onValueChange={value => onChange({ resourceLibraryUsage: value as BeeGameIntakeSettings['resourceLibraryUsage'] })} placeholder={copy.fields.selectPlaceholder} options={(['preferred', 'optional', 'required'] as const).map(value => ({ value, label: copy.resourceLibraryUsage[value] }))} className="w-full" triggerClassName={selectClass} contentClassName={styles.selectMenu} />
+          <ProjectSelect portal ariaLabel={copy.fields.resourceLibrary} value={settings.resourceLibraryUsage || ''} onValueChange={value => onChange({ resourceLibraryUsage: value as BeeGameIntakeSettings['resourceLibraryUsage'] })} placeholder={copy.fields.selectPlaceholder} options={(['preferred', 'optional', 'required'] as const).map(value => ({ value, label: copy.resourceLibraryUsage[value] }))} className="w-full" triggerClassName={selectClass} contentClassName={styles.selectMenu} />
         </div>
         </> : null}
       </div> : null}
@@ -114,7 +114,8 @@ export function IntakeSettingsForm({
 }
 
 function SettingSelect({ label, value, options, onChange, copy, localizedOptionLabel, className, labelClass }: { label: string; value: string; options: string[]; onChange: (value: string) => void; copy: IntakeCopy; localizedOptionLabel: (value: string) => string; className: string; labelClass: string }) {
-  return <div className={labelClass}>{label}<ProjectSelect ariaLabel={label} value={value} onValueChange={onChange} placeholder={copy.fields.selectPlaceholder} options={options.map(option => ({ value: option, label: localizedOptionLabel(option) }))} className="w-full" triggerClassName={className} contentClassName={styles.selectMenu} /></div>;
+  // The settings dialog scrolls: inline menus would be clipped by its bounds.
+  return <div className={labelClass}>{label}<ProjectSelect portal ariaLabel={label} value={value} onValueChange={onChange} placeholder={copy.fields.selectPlaceholder} options={options.map(option => ({ value: option, label: localizedOptionLabel(option) }))} className="w-full" triggerClassName={className} contentClassName={styles.selectMenu} /></div>;
 }
 
 type ConfirmedBriefProps = { settings: BeeGameIntakeSettings; copy: IntakeCopy; localizedOptionLabel: (value: string) => string; isPreparing: boolean; onStart: () => void };

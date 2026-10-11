@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn, type SpawnOptions } from 'child_process'
 import { isInBundledMode } from './bundledMode.js'
 import { quote } from './bash/shellQuote.js'
+import { normalizeRuntimeEnvironment } from './runtimeEnvironment.js'
 
 /**
  * CliLaunchSpec — normalized descriptor for spawning a child CLI process.
@@ -103,7 +104,7 @@ export function buildCliLaunch(
       : [...BOOTSTRAP_ARGS, SCRIPT_PATH, ...cliArgs]
 
   // Ensure Windows children can discover git-bash without shelling out
-  const env: NodeJS.ProcessEnv = { ...baseEnv }
+  const env: NodeJS.ProcessEnv = normalizeRuntimeEnvironment(baseEnv)
   if (IS_WINDOWS) {
     if (
       process.env.CLAUDE_CODE_GIT_BASH_PATH &&

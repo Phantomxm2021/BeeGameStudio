@@ -1,14 +1,14 @@
 import figures from 'figures';
 import React, { useCallback, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
-import { Box, color, Link, Text, useTheme } from '@anthropic/ink';
+import { Box, color, Link, Text, useTheme } from '@bee-game-studio/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { ConfigScope } from '../../services/mcp/types.js';
 import { describeMcpConfigFilePath } from '../../services/mcp/utils.js';
 import { isDebugMode } from '../../utils/debug.js';
 import { plural } from '../../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
-import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
+import { Byline, Dialog, KeyboardShortcutHint } from '@bee-game-studio/ink';
 import { McpParsingWarnings } from './McpParsingWarnings.js';
 import type { AgentMcpServerInfo, ServerInfo } from './types.js';
 
@@ -289,7 +289,7 @@ export function MCPListPanel({
           <Box flexDirection="column">
             {hasFailedClients && (
               <Text dimColor>
-                {debugMode ? '※ Error logs shown inline with --debug' : '※ Run claude --debug to see error logs'}
+                {debugMode ? '※ Error logs shown inline with --debug' : '※ Run bee-game-studio --debug to see error logs'}
               </Text>
             )}
             <Text dimColor>

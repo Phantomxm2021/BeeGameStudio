@@ -108,8 +108,8 @@ export const TeamDeleteTool: Tool<InputSchema, Output> = buildTool({
           m => m.name !== TEAM_LEAD_NAME,
         )
 
-        // Separate truly active members from idle/dead ones
-        // Members with isActive === false are idle (finished their turn or crashed)
+        // Busy members get graceful shutdown first. Idle does not mean exited:
+        // remaining panes are closed by cleanupTeamDirectories below.
         const activeMembers = nonLeadMembers.filter(m => m.isActive !== false)
 
         if (activeMembers.length > 0) {
@@ -196,6 +196,14 @@ export const TeamDeleteTool: Tool<InputSchema, Output> = buildTool({
         }
       }
 
+      for (const member of readTeamFile(teamName)?.members ?? []) {
+        if (member.name === TEAM_LEAD_NAME || member.backendType !== 'in-process') continue
+        const executor = getInProcessBackend()
+        executor.setContext?.(context)
+        if (await executor.isActive(member.agentId) && !await executor.kill(member.agentId)) {
+          throw new Error('Idle teammate cleanup incomplete; team files retained')
+        }
+      }
       await cleanupTeamDirectories(teamName)
       // Already cleaned — don't try again on gracefulShutdown.
       unregisterTeamForSessionCleanup(teamName)

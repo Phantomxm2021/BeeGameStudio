@@ -18,6 +18,24 @@ afterEach(() => {
 })
 
 describe('native runtime process environment', () => {
+  test('host V3 database credentials do not enter native tasks or their subprocesses', () => {
+    const keys = ['BEEGAME_SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_SERVICE_ROLE_KEY'] as const
+    const prior = keys.map(key => process.env[key])
+    try {
+      for (const key of keys) process.env[key] = 'host-database-secret'
+      for (const env of [getSafeRuntimeProcessEnvironment(), nativeRuntimeEnvironment({
+        BEEGAME_SUPABASE_SERVICE_ROLE_KEY: 'explicit-secret', SUPABASE_SERVICE_ROLE_KEY: 'explicit-secret',
+      })]) {
+        for (const key of keys) expect(env).not.toHaveProperty(key)
+        const child = Bun.spawnSync([process.execPath, '-e',
+          'console.log(Boolean(process.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY))'], { env })
+        expect(child.exitCode).toBe(0)
+        expect(child.stdout.toString().trim()).toBe('false')
+      }
+    } finally {
+      keys.forEach((key, i) => { if (prior[i] === undefined) delete process.env[key]; else process.env[key] = prior[i] })
+    }
+  })
   test('does not leak the server build mode into native tasks and their shell children', () => {
     process.env.NODE_ENV = 'development'
     expect(getSafeRuntimeProcessEnvironment()).not.toHaveProperty('NODE_ENV')

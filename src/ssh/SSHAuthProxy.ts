@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { unlinkSync } from 'fs'
+import { chmodSync, unlinkSync } from 'fs'
 import { getClaudeAIOAuthTokens } from 'src/utils/auth.js'
 import { getOauthConfig } from 'src/constants/oauth.js'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -36,6 +36,14 @@ function resolveUpstreamBaseUrl(): string {
   return process.env.ANTHROPIC_BASE_URL || getOauthConfig().BASE_API_URL
 }
 
+function getRemoteAuthEnvironment(): Record<string, string> {
+  // Match the real local auth mode so the remote sends the correct beta
+  // headers, but never transmit actual credentials to the remote machine.
+  return resolveAuthHeaders().Authorization
+    ? { CLAUDE_CODE_OAUTH_TOKEN: 'ssh-proxy' }
+    : { ANTHROPIC_API_KEY: 'ssh-proxy' }
+}
+
 async function proxyFetch(
   req: Request,
   nonce: string | null,
@@ -59,6 +67,8 @@ async function proxyFetch(
   }
 
   const forwardHeaders = new Headers(req.headers)
+  forwardHeaders.delete('authorization')
+  forwardHeaders.delete('x-api-key')
   for (const [k, v] of Object.entries(authHeaders)) {
     forwardHeaders.set(k, v)
   }
@@ -107,12 +117,20 @@ export async function createAuthProxy(): Promise<AuthProxyInfo> {
 }
 
 async function createUnixSocketAuthProxy(id: string): Promise<AuthProxyInfo> {
-  const socketPath = `/tmp/claude-ssh-auth-${id}.sock`
+  const socketPath = `/tmp/bgs-ssh-auth-${id}.sock`
 
   const server = Bun.serve({
     unix: socketPath,
     fetch: req => proxyFetch(req, null),
   })
+
+  try {
+    chmodSync(socketPath, 0o600)
+  } catch (error) {
+    server.stop(true)
+    try { unlinkSync(socketPath) } catch {}
+    throw error
+  }
 
   logForDebugging(`[SSHAuthProxy] listening on unix:${socketPath}`)
 
@@ -130,7 +148,10 @@ async function createUnixSocketAuthProxy(id: string): Promise<AuthProxyInfo> {
   return {
     proxy,
     localAddress: socketPath,
-    authEnv: { ANTHROPIC_AUTH_SOCKET: socketPath },
+    authEnv: {
+      BGS_API_UNIX_SOCKET: socketPath,
+      ...getRemoteAuthEnvironment(),
+    },
   }
 }
 
@@ -160,6 +181,7 @@ async function createTcpAuthProxy(id: string): Promise<AuthProxyInfo> {
     authEnv: {
       ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`,
       ANTHROPIC_AUTH_NONCE: nonce,
+      ...getRemoteAuthEnvironment(),
     },
   }
 }

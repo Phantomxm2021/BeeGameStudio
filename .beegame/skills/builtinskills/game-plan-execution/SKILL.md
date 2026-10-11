@@ -18,7 +18,7 @@ Use when a project already has an implementation plan. Execute it in the existin
 For each task:
 
 1. Read its sources and define the expected observable result. If a requirement is underspecified, investigate the existing project conventions and make a reasoned decision within the task's scope; record a consequential deviation rather than silently inventing a new design.
-2. Implement the behavior in the owning code or content. For scene/UI delivery, load the authored documents and resources; do not recreate their node positions or screen composition as separate hard-coded runtime data.
+2. Implement the behavior in the owning code or content. For scene/UI delivery, consume the project's actual authored sources and resources without a second layout copy. Use native engine or framework sources when those are authoritative; no separate BGS JSON is required.
 3. Run the task's focused check and read the result. For deterministic code, use a test that distinguishes old and new behavior when practical. For visual or interactive behavior, inspect the running game at relevant viewports and input modes. Capture the actual observation, not just a command exit code.
 4. If the check fails, decide whether the code, the test, or the plan is wrong. Trace the cause; do not repeat the same failed command without changing the relevant condition. Identify the responsible source and apply a correction only within the current task's editing scope, then rerun the affected check. If the source is outside that scope, report the evidence, impact and needed correction rather than changing it or working around it.
 5. Mark the task complete only with its evidence. Record any remaining gap and proceed to the next dependency-ready task without seeking routine approval after every slice.
@@ -27,6 +27,6 @@ Keep narration and repeated source reading economical. Independent work may be d
 
 ## Finish the implementation
 
-Run the relevant integrated build and tests, then inspect a representative playable path including authored scene/UI loading, controls, responsive layout, and the requested end condition. Compare the result with the plan and source requirements. A unit-test pass is not proof of a complete game. Report passed evidence and remaining gaps; use `evidence-before-completion` when making the final claim.
+Run the relevant integrated build and tests, then inspect a representative playable path including the actual scene/UI, resource consumption, controls, responsive layout, and the requested end condition. Compare the result with the plan and source requirements. A unit-test pass is not proof of a complete game. Report passed evidence and remaining gaps; use `evidence-before-completion` when making the final claim.
 
 This Skill gives the Agent a repeatable execution loop. It does not require a new worktree, fixed task duration, mandatory commits, or BeeGameStudio intervention in task choices.

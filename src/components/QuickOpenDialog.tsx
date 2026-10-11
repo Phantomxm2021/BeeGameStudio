@@ -4,14 +4,14 @@ import { useEffect, useRef, useState } from 'react';
 import { useRegisterOverlay } from '../context/overlayContext.js';
 import { generateFileSuggestions } from '../hooks/fileSuggestions.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { logEvent } from '../services/analytics/index.js';
 import { getCwd } from '../utils/cwd.js';
 import { openFileInExternalEditor } from '../utils/editor.js';
 import { truncatePathMiddle, truncateToWidth } from '../utils/format.js';
 import { highlightMatch } from '../utils/highlightMatch.js';
 import { readFileInRange } from '../utils/readFileInRange.js';
-import { FuzzyPicker, LoadingState } from '@anthropic/ink';
+import { FuzzyPicker, LoadingState } from '@bee-game-studio/ink';
 
 type Props = {
   onDone: () => void;

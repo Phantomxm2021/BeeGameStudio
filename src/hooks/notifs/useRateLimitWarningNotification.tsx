@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNotifications } from 'src/context/notifications.js';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { getRateLimitWarning, getUsingOverageText } from 'src/services/claudeAiLimits.js';
 import { useClaudeAiLimits } from 'src/services/claudeAiLimitsHook.js';
 import { getSubscriptionType } from 'src/utils/auth.js';

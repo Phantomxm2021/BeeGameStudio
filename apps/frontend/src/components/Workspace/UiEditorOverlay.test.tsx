@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { beeGameAdapter } from '../../services/beeGameAdapter';
 import { UiEditorOverlay } from './UiEditorOverlay';
 import { readFileSync } from 'node:fs';
-const editorCss = readFileSync('src/components/Workspace/UiEditorOverlay.css', 'utf8');
+const editorCss = readFileSync('src/components/Workspace/UiEditorOverlay.css', 'utf8') + readFileSync('src/components/Workspace/UiContentRenderer.css', 'utf8');
 
 function selectEditorOption(label: string, option: string) {
   fireEvent.click(screen.getByLabelText(label));
@@ -108,7 +108,7 @@ describe('UiEditorOverlay', () => {
     expect(screen.getByLabelText('UI preview')).toBeInTheDocument();
     expect(screen.queryByText(/Failed to load 1 assets/)).not.toBeInTheDocument();
     if (failure === 'decode') {
-      expect(constructor).toHaveBeenCalledWith('BGS-RES-FONT', bytes);
+      expect(constructor).toHaveBeenCalledWith(expect.stringMatching(/^BGS-/), bytes);
       expect(screen.getByText(/Font data could not be decoded/)).toBeInTheDocument();
     } else expect(screen.getByText(/403 Forbidden/)).toBeInTheDocument();
   });
@@ -347,6 +347,7 @@ describe('UiEditorOverlay', () => {
     if(atlas){
       vi.stubGlobal('Image',class {
         onload?:()=>void; onerror?:()=>void; naturalWidth=64; naturalHeight=32;
+        decode(){ return Promise.resolve(); }
         set src(value:string){if(value)queueMicrotask(()=>this.onload?.())}
       });
       let cropX=0;

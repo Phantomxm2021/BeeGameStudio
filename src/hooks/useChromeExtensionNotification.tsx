@@ -1,4 +1,4 @@
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { isClaudeAISubscriber } from '../utils/auth.js';
 import { isChromeExtensionInstalled, shouldEnableClaudeInChrome } from '../utils/claudeInChrome/setup.js';
 import { isRunningOnHomespace } from '../utils/envUtils.js';

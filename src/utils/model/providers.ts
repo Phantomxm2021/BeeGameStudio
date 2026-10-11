@@ -9,35 +9,24 @@ export {
   isThirdPartyAPIProvider,
 } from './providerClassification.js'
 
-export function selectedBeeGameAPIProvider(
-  modelType: string | undefined,
-): APIProvider | undefined {
-  if (modelType === 'anthropic') return 'firstParty'
-  if (modelType === 'openai') return 'openai'
-  if (modelType === 'gemini') return 'gemini'
-  if (modelType === 'grok') return 'grok'
-  return undefined
-}
-
 export function getAPIProvider(
   settings: Pick<SettingsJson, 'modelType'> = getInitialSettings(),
 ): APIProvider {
-  const selectedProvider = selectedBeeGameAPIProvider(
-    process.env.BEEGAME_MODEL_TYPE,
-  )
-  if (selectedProvider) return selectedProvider
-  const modelType = settings.modelType
+  // A host-owned route must not be replaced by terminal/project settings.
+  const modelType = isEnvTruthy(process.env.BGS_PROVIDER_MANAGED_BY_HOST ?? process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST)
+    ? undefined
+    : settings.modelType
   if (modelType === 'openai') return 'openai'
   if (modelType === 'gemini') return 'gemini'
   if (modelType === 'grok') return 'grok'
 
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)) return 'bedrock'
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)) return 'vertex'
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)) return 'foundry'
+  if (isEnvTruthy(process.env.BGS_USE_BEDROCK)) return 'bedrock'
+  if (isEnvTruthy(process.env.BGS_USE_VERTEX)) return 'vertex'
+  if (isEnvTruthy(process.env.BGS_USE_FOUNDRY)) return 'foundry'
 
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI)) return 'openai'
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_GEMINI)) return 'gemini'
-  if (isEnvTruthy(process.env.CLAUDE_CODE_USE_GROK)) return 'grok'
+  if (isEnvTruthy(process.env.BGS_USE_OPENAI)) return 'openai'
+  if (isEnvTruthy(process.env.BGS_USE_GEMINI)) return 'gemini'
+  if (isEnvTruthy(process.env.BGS_USE_GROK)) return 'grok'
 
   return 'firstParty'
 }

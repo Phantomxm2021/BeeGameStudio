@@ -10,7 +10,7 @@ mock.module('src/utils/settings/settings.js', () => ({
 
 beforeEach(() => {
   // Clean OpenAI env vars before each test
-  delete process.env['CLAUDE_CODE_USE_OPENAI']
+  delete process.env['BGS_USE_OPENAI']
   delete process.env['OPENAI_API_KEY']
   delete process.env['OPENAI_BASE_URL']
   delete process.env['ANTHROPIC_API_KEY']
@@ -21,7 +21,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  delete process.env['CLAUDE_CODE_USE_OPENAI']
+  delete process.env['BGS_USE_OPENAI']
   delete process.env['OPENAI_API_KEY']
   delete process.env['OPENAI_BASE_URL']
   delete process.env['ANTHROPIC_API_KEY']
@@ -32,7 +32,7 @@ describe('switchProvider', () => {
     const { switchProvider } = await import('../switcher.js')
     const { DEFAULT_PROVIDERS } = await import('../loader.js')
     const result = switchProvider('cerebras', DEFAULT_PROVIDERS)
-    expect(result.env['CLAUDE_CODE_USE_OPENAI']).toBe('1')
+    expect(result.env['BGS_USE_OPENAI']).toBe('1')
     expect(result.env['OPENAI_BASE_URL']).toBe('https://api.cerebras.ai/v1')
     expect(result.env['OPENAI_MODEL']).toBe('llama-3.3-70b')
     expect(result.provider.id).toBe('cerebras')
@@ -106,7 +106,7 @@ describe('buildShellExportBlock', () => {
     const { DEFAULT_PROVIDERS } = await import('../loader.js')
     const result = switchProvider('cerebras', DEFAULT_PROVIDERS)
     const block = buildShellExportBlock(result)
-    expect(block).toContain('export CLAUDE_CODE_USE_OPENAI=1')
+    expect(block).toContain('export BGS_USE_OPENAI=1')
     expect(block).toContain('export OPENAI_BASE_URL=https://api.cerebras.ai/v1')
     expect(block).toContain('export OPENAI_API_KEY=$CEREBRAS_API_KEY')
     expect(block).toContain('export OPENAI_MODEL=llama-3.3-70b')

@@ -157,6 +157,8 @@ export type ToolUseContext = {
     mcpClients: MCPServerConnection[]
     mcpResources: Record<string, ServerResource[]>
     isNonInteractiveSession: boolean
+    /** Public SDK --include-partial-messages also applies to delegates. */
+    includePartialMessages?: boolean
     agentDefinitions: AgentDefinitionsResult
     maxBudgetUsd?: number
     /** Custom system prompt that replaces the default system prompt */
@@ -183,11 +185,6 @@ export type ToolUseContext = {
   }
   abortController: AbortController
   readFileState: FileStateCache
-  /** Assigned BGS planning documents for this turn; absent in ordinary work. */
-  /** Assigned saved sources for independent review; writers/coordinator do not self-audit. */
-  beegameReviewDocuments?: string[]
-  /** One corrective stop check; an unchanged missing read must not loop. */
-  beegameDraftReadCorrectionRequested?: boolean
   getAppState(): AppState
   setAppState(f: (prev: AppState) => AppState): void
   /**
@@ -392,9 +389,6 @@ export type Tool<
    * Prefer terms not already in the tool name (e.g. 'jupyter' for NotebookEdit).
    */
   searchHint?: string
-  /** Separate session-stable API schemas when a role overrides a tool's prompt.
-   * The execution name and permission identity remain unchanged. */
-  apiSchemaCacheScope?: string
   call(
     args: z.infer<Input>,
     context: ToolUseContext,

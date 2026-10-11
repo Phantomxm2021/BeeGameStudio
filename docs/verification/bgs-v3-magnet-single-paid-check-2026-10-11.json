@@ -1,0 +1,1212 @@
+{
+  "status": "finished-not-fully-passed",
+  "acceptanceHostClosed": true,
+  "automaticPaidReruns": 0,
+  "regularServicesRestarted": false,
+  "scope": "One paid continuation only; no automatic rerun; real project read-only for the developer.",
+  "startedAt": "2026-10-11T06:29:57.915Z",
+  "projectId": "v3-paid-a801f793-52cb-4874-8893-f5eaad8bf833",
+  "runId": "bedaee26-a2a7-4997-adf2-688eb3a79a61",
+  "attemptId": "94fce2ef-8ffc-4429-96a3-0daa2a2a9604",
+  "runtimeRequestId": "9da72858-5a7b-4a78-8154-1d30f0376cf6",
+  "nativeSessionId": "a81cfeaf-b023-43c6-ad73-d5a94c6b60ed",
+  "debugOrigin": "http://127.0.0.1:53710",
+  "sourceBaseline": {
+    "at": "2026-10-11T06:28:17.075Z",
+    "runtimeBytes": 44906,
+    "sources": [
+      {
+        "path": "bun.lock",
+        "sha256": "cd7f60aef306513e095d7d1478d449985dffdeec79464af96f1031d07fa2d040"
+      },
+      {
+        "path": "content/index.json",
+        "sha256": "5cae7061a4ca3a0295916680ccecdd0e8d0a02225460ebe5dabfb0b9eac68e3d"
+      },
+      {
+        "path": "content/scenes/level-1.json",
+        "sha256": "990424e68d4e750799dfe5ba5af75f89f1c163369529afb89df09a8cec3f013d"
+      },
+      {
+        "path": "content/scenes/level-2.json",
+        "sha256": "07a463e85fce599296339f6ea7fb0ee631783576bd9236a5a81af34453562022"
+      },
+      {
+        "path": "content/scenes/level-3.json",
+        "sha256": "dd774fe71b7d3eb635784e1857e2a56bb37fbb6d639a4eb18998c363964324bc"
+      },
+      {
+        "path": "content/ui/ending.json",
+        "sha256": "3766cd152dbd02482d63db5b1fb98fb0cd45970b409beee5faa64893b2dcaeee"
+      },
+      {
+        "path": "content/ui/fail.json",
+        "sha256": "a4bbb18bb30a456f047ae8e1267ce75ec29c9eb03e7c150b3ce6a5aac22c7226"
+      },
+      {
+        "path": "content/ui/hud.json",
+        "sha256": "bdb4dbed202339304f16493c74845e3c762002edc573209826214c9d4022eb75"
+      },
+      {
+        "path": "content/ui/level-select.json",
+        "sha256": "9df195020bda8f6672d8488e09cdf0f11b0317b0b58ad8b9266cfc2497f76630"
+      },
+      {
+        "path": "content/ui/success.json",
+        "sha256": "721f7a0b2d011ee8f826d855d63753bc55ac5e7fb27ef7766fd446c933e6046b"
+      },
+      {
+        "path": "content/ui/title.json",
+        "sha256": "4653aa969024c25575d3886226d19fe9dec3264be8ca0093db051c08f47de722"
+      },
+      {
+        "path": "docs/ART_DIRECTION.md",
+        "sha256": "d86eb5698a74fa89f90ae06abb2ef0c1a794fd09b1950b39486e16a21e5916a7"
+      },
+      {
+        "path": "docs/ASSET_PLAN.md",
+        "sha256": "e6dfce8526090583a7807348ea07831537bc06f3b4f93ba3400e7d9afbc67f73"
+      },
+      {
+        "path": "docs/AUDIO_DESIGN.md",
+        "sha256": "202511b264a3e2652af368984d954b1962c743ee70a372eda8ef7f44edfa7c6d"
+      },
+      {
+        "path": "docs/BALANCE_DESIGN.md",
+        "sha256": "b5efbaed193c03069d4f5daa184014f1714d54410f6dea7c143f10e2c7ef6af3"
+      },
+      {
+        "path": "docs/GDD.md",
+        "sha256": "d05cb55092fb1ebf0a916268af15492879e66e13dbc0544ffb97839a0108e2e2"
+      },
+      {
+        "path": "docs/LEVEL_SCENE_DESIGN.md",
+        "sha256": "1142c2f9b5c16d5b947ac6fed287623d13c60a01bd008c76a154cbf138a7bd47"
+      },
+      {
+        "path": "docs/README.md",
+        "sha256": "5688687b1ba9a7db4c6d7124852517331baf87b307d725ecbcd610a1af92436d"
+      },
+      {
+        "path": "docs/TECHNICAL_DESIGN.md",
+        "sha256": "2df8bb9773c4b718b9c4f84a8e3513297009302942b614f1445c402137ff1af7"
+      },
+      {
+        "path": "docs/UI_UX_SPEC.md",
+        "sha256": "183c45bded46ec4fdd253f8fde72ab93dd74c11363d734707a397fd3d0a8af72"
+      },
+      {
+        "path": "index.html",
+        "sha256": "d798ec27a484d11c067958ddcf1b830d0fef6292231a903cc26fbc6a9c1a0799"
+      },
+      {
+        "path": "package.json",
+        "sha256": "a6e112c7e8f286c451503c014307fe598bc9eec86adb4344a4ac26c50af00398"
+      },
+      {
+        "path": "src/audio.ts",
+        "sha256": "e5d81709d744bcd0df797634df4cb8e54a64ccd64be295f872da4a6508d485b3"
+      },
+      {
+        "path": "src/content.ts",
+        "sha256": "2d1af513f0dff5288ba8f7d62edb4b33c70ec6381791bef3ab6b72189b13b81b"
+      },
+      {
+        "path": "src/game.ts",
+        "sha256": "18554922fa059ef5bc4e6b8251d160d95f2ffe219b413f2dc484307878486f75"
+      },
+      {
+        "path": "src/main.ts",
+        "sha256": "0f87dd18f745087e329f05dd4fb96da2dab2a94326504d7ffd25904a5866ba42"
+      },
+      {
+        "path": "src/render.ts",
+        "sha256": "77f4f3ceb9300a79bb7eb72b802626ce7964f5170b45b46f7e2d3c3d5eedfa8e"
+      },
+      {
+        "path": "src/sim.ts",
+        "sha256": "6a7cff98d7ad50eed228c4819d11c7ffe1be2d6ee3f2428e1555ad98d0d27205"
+      },
+      {
+        "path": "src/styles.css",
+        "sha256": "7680dbfa8292b36c1a48dc0182c76137a7818b7fdddac4bb188e96a8a2b5d1c6"
+      },
+      {
+        "path": "src/types.ts",
+        "sha256": "7009d7a731d39fec9826f177f2065b2a3ea46acfe41876b35046ae0ad1f26000"
+      },
+      {
+        "path": "tests/headless-sim.ts",
+        "sha256": "1f948b94dfbb4fafbedc297971614483232482989cbdb4e6c3225c54e0d8ec0a"
+      },
+      {
+        "path": "tsconfig.json",
+        "sha256": "08316fe7b2133d3aaacdfd5eb393b0d7cb49c0fc9d69eb839c7d1bea81a9a61f"
+      },
+      {
+        "path": "vite.config.ts",
+        "sha256": "ea3af12244844b18d90e0594d4e4226274d6d54a2c97edc6b22cee26d8f7421e"
+      }
+    ]
+  },
+  "protectedBefore": {
+    "apps/frontend": {
+      "files": 508,
+      "sha256": "f52e2ae0825cb04e6f94526bd1f258358d7f541e5a81343ec5b2dd138468cfba"
+    },
+    "src": {
+      "files": 2445,
+      "sha256": "8f0069cec3ff82f03f4845e4c4c2596c8507dcd3976c4af7823cdbc4fbfbf493"
+    },
+    "packages/builtin-tools": {
+      "files": 383,
+      "sha256": "6368c4fce0bd93d2a9e7af17a3895a195fed65abcd94d98fec7049991cdb6a5b"
+    }
+  },
+  "transcriptOffset": 1800906,
+  "priorReportedTokenLowerBound": 16761497,
+  "environmentLimitations": [
+    "Regular resource server 62177 was not listening; no unrelated production queue was started."
+  ],
+  "regression": {
+    "pass": 22,
+    "fail": 0,
+    "skip": 0,
+    "files": 4,
+    "browserFixtureEnabled": true,
+    "note": "All offline tests use synthetic workspaces; not game-quality acceptance."
+  },
+  "finishedAt": "2026-10-11T07:14:49.634Z",
+  "finalRun": {
+    "version": 28,
+    "status": "blocked",
+    "turnStatus": "ended",
+    "writerLiveness": "none",
+    "deliveryEligible": false
+  },
+  "finalMeasurement": {
+    "id": "a2b330ee-b876-4657-8bc7-580b013900cb",
+    "finishedAt": "2026-10-11T07:10:52.015Z",
+    "freshness": {
+      "current": true
+    },
+    "artifactSha256": "90cb0f9eedce17c718b0d0045532fd06ccc9d3c724758a959c8dfbcb429a8c09",
+    "checks": {
+      "build": "passed",
+      "runtimeSmoke": "passed"
+    },
+    "quality": "unverified",
+    "deliveryEligible": false,
+    "note": "Source-copy build and initial browser smoke only; not a full gameplay/content/audio-quality acceptance."
+  },
+  "verdict": {
+    "compression": "Completed; diagnostic duration field is misleading and not accepted as real elapsed time.",
+    "sceneUiConsumption": "Partial: scene positions/par are proven; numeric UI font sizes and camera center/orthographicSize remain unconsumed.",
+    "tokens": "Not improved to acceptable cost: 155 identified requests plus SDK output reconciliation; history grew again.",
+    "overall": "Not fully passed. Native verifier PASS covers its supplied command checklist, not these independent consumption gaps."
+  },
+  "usage": {
+    "bgsSdk": {
+      "prompt_tokens": 568120,
+      "cache_read_tokens": 11727792,
+      "cache_creation_tokens": 0,
+      "completion_tokens": 76411,
+      "total_tokens": 12372323
+    },
+    "identified": {
+      "main": {
+        "requests": 115,
+        "input": 301926,
+        "cached": 10469928,
+        "creation": 0,
+        "output": 49925,
+        "total": 10821779
+      },
+      "nativeReview": {
+        "requests": 39,
+        "input": 105172,
+        "cached": 1253968,
+        "creation": 0,
+        "output": 18480,
+        "total": 1377620
+      },
+      "compaction": {
+        "requests": 1,
+        "input": 161022,
+        "cached": 3896,
+        "creation": 0,
+        "output": 7558,
+        "total": 172476
+      }
+    },
+    "reconciliation": {
+      "transcriptTotal": 12371875,
+      "sdkExtraOutputTokens": 448,
+      "note": "Input and cache totals agree exactly. One SendMessage request has only a partial usage record in the main transcript; the exact allocation of 448 additional SDK output tokens is not asserted."
+    },
+    "cachedShare": 0.9479054176002356,
+    "projectReportedTokenLowerBound": 29133820,
+    "notACompleteInvoice": true,
+    "phases": [
+      {
+        "name": "类型修复与首次构建",
+        "count": 2,
+        "total": 86667,
+        "requests": [
+          1,
+          2
+        ]
+      },
+      {
+        "name": "浏览器脚本、入口与白屏定位",
+        "count": 24,
+        "total": 1370262,
+        "requests": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26
+        ]
+      },
+      {
+        "name": "存储兼容修复",
+        "count": 14,
+        "total": 986247,
+        "requests": [
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40
+        ]
+      },
+      {
+        "name": "布局、场景净空修订与浏览器复查",
+        "count": 32,
+        "total": 2869350,
+        "requests": [
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63,
+          64,
+          65,
+          66,
+          67,
+          68,
+          69,
+          70,
+          71,
+          72
+        ]
+      },
+      {
+        "name": "文档、标识、测量及交付收尾",
+        "count": 43,
+        "total": 5509253,
+        "requests": [
+          73,
+          74,
+          75,
+          76,
+          77,
+          78,
+          79,
+          80,
+          81,
+          82,
+          83,
+          84,
+          85,
+          86,
+          87,
+          88,
+          89,
+          90,
+          91,
+          92,
+          93,
+          94,
+          95,
+          96,
+          97,
+          98,
+          99,
+          100,
+          101,
+          102,
+          103,
+          104,
+          105,
+          106,
+          107,
+          108,
+          109,
+          110,
+          111,
+          112,
+          113,
+          114,
+          115
+        ]
+      }
+    ]
+  },
+  "compression": {
+    "requestStarted": "2026-10-11T06:30:02.152Z",
+    "responseHeaders": "2026-10-11T06:30:16.366Z",
+    "compactBoundary": "2026-10-11T06:33:26.300Z",
+    "requestToBoundaryMs": 204148,
+    "reportedStatusElapsedMs": 7,
+    "preTokens": 170314,
+    "firstPostCompactInputIncludingCache": 42719,
+    "finalMainInputIncludingCache": 154733,
+    "note": "Compacting status was emitted only at the end; its 7ms interval is not wall-clock compaction duration. The paid run proves this attempt completed, not that the earlier stalled request has been fixed."
+  },
+  "interventions": [
+    {
+      "kind": "normal-continuation",
+      "count": 1,
+      "note": "Existing project, requirements and native session; no new project, reset, automatic paid rerun or developer-authored game repair."
+    },
+    {
+      "kind": "deny-unnecessary-cleanup",
+      "toolUseId": "call_crhql3dz3msdy6u3qymclws8",
+      "resolved": true,
+      "at": "2026-10-11T07:08:51.782Z",
+      "note": "Denied deletion of three temporary probes; preserved evidence. This is not an unassisted run."
+    }
+  ],
+  "independentFindings": [
+    {
+      "id": "F1",
+      "category": "runtime-consumption",
+      "evidence": "Saved content/ui/hud.json hud-level.style.fontSize=17; src/content.ts:220 sets CSS String(17) without units. User Chrome measured empty inline style and 16px computed font.",
+      "severity": "P1"
+    },
+    {
+      "id": "F2",
+      "category": "runtime-consumption",
+      "evidence": "src/content.ts:80 only reads camera viewport. Camera position and orthographicSize do not enter scene rendering. No camera-center/zoom mutation test was performed.",
+      "severity": "P1"
+    },
+    {
+      "id": "F3",
+      "category": "observability",
+      "evidence": "Status event elapsedMs=7 vs request-to-boundary 204148ms; do not report the former as compaction duration.",
+      "severity": "P2"
+    },
+    {
+      "id": "F4",
+      "category": "verification-interface-and-model-use",
+      "evidence": "Node helper was first invoked with Bun, causing import and CDP failures. Multiple source probes followed. Both the runnable interface and actual agent usage need further review; no sandbox-only cause is asserted.",
+      "severity": "P2"
+    },
+    {
+      "id": "F5",
+      "category": "revision-order",
+      "evidence": "Documents changed after content documentRevision update; native verifier found mismatch. Author then updated revision, rebuilt and created a second measurement; finally resolved.",
+      "resolved": true
+    },
+    {
+      "id": "F6",
+      "category": "cost",
+      "evidence": "Main: 115 requests; 43 document/revision/measurement/delivery requests consumed 5509253 tokens. Separate native review consumed 1377620. Compression alone did not prevent history growing from 42719 to 154733.",
+      "severity": "P1"
+    },
+    {
+      "id": "F7",
+      "category": "old-process-residue",
+      "evidence": "Read-only process inventory found orphan zsh PID15984/PGID15984 and Python PID15988 from prior same-project sv.json probe. Python while loop does not update i/cnt. No link to this run's token total or compaction failure is asserted; not terminated by this acceptance.",
+      "resolved": false
+    }
+  ],
+  "observations": {
+    "firstBrowserReport": {
+      "runs": [
+        {
+          "name": "L1-start",
+          "par": 5,
+          "switches": {
+            "s1": "a"
+          },
+          "nodeXY": {
+            "D": [
+              140,
+              380
+            ],
+            "j0": [
+              340,
+              380
+            ],
+            "s1": [
+              560,
+              380
+            ],
+            "ua": [
+              800,
+              250
+            ],
+            "ub": [
+              1000,
+              235
+            ],
+            "B": [
+              1150,
+              230
+            ],
+            "la": [
+              800,
+              510
+            ],
+            "lb": [
+              1000,
+              525
+            ],
+            "A": [
+              1150,
+              530
+            ]
+          }
+        },
+        {
+          "name": "L1-after-flip",
+          "switches": {
+            "s1": "b"
+          },
+          "trains": 1,
+          "delivered": 0
+        },
+        {
+          "name": "L1-click-playthrough",
+          "screen": "fail",
+          "ops": 4,
+          "delivered": 0,
+          "total": 3
+        },
+        {
+          "name": "layouts",
+          "L2": {
+            "switches": {
+              "s1": "a",
+              "s2": "b",
+              "s3": "b",
+              "s4": "a"
+            },
+            "nodes": 15,
+            "par": 14
+          },
+          "L3": {
+            "switches": {
+              "s1": "a",
+              "s2": "b",
+              "s3": "a",
+              "s4": "a",
+              "s5": "a"
+            },
+            "nodes": 22,
+            "par": 17
+          }
+        },
+        {
+          "name": "mute-toggle",
+          "label0": "🔊",
+          "label1": "🔇",
+          "label2": "🔊",
+          "toggled": true
+        },
+        {
+          "name": "geometry-960",
+          "geom": {
+            "frame": {
+              "w": 960,
+              "h": 540
+            },
+            "canvas": {
+              "w": 960,
+              "h": 540
+            },
+            "layers": {
+              "canvasZ": "auto",
+              "hudZ": "auto",
+              "screensZ": "10",
+              "hud": {
+                "x": 0,
+                "y": 0,
+                "width": 960,
+                "height": 540,
+                "top": 0,
+                "right": 960,
+                "bottom": 540,
+                "left": 0
+              },
+              "screens": {
+                "x": 0,
+                "y": 0,
+                "width": 960,
+                "height": 540,
+                "top": 0,
+                "right": 960,
+                "bottom": 540,
+                "left": 0
+              }
+            },
+            "bar": {
+              "x": 0,
+              "y": 21,
+              "w": 960,
+              "h": 0.75,
+              "fontSize": "16px",
+              "z": "auto"
+            },
+            "hint": {
+              "x": -15,
+              "y": 531,
+              "w": 990,
+              "h": 1.5,
+              "fontSize": "16px",
+              "z": "auto"
+            },
+            "levelText": {
+              "x": 13.5,
+              "y": 12,
+              "w": 131.25,
+              "h": 18,
+              "fontSize": "16px",
+              "z": "auto"
+            },
+            "muteBtn": {
+              "x": 835.5,
+              "y": 4.5,
+              "w": 33,
+              "h": 33,
+              "fontSize": "15px",
+              "z": "auto"
+            }
+          }
+        },
+        {
+          "name": "content-binding-intercept",
+          "parObserved": 5,
+          "s1Observed": [
+            560,
+            380
+          ],
+          "parChanged": false,
+          "xyChanged": false
+        }
+      ],
+      "consoleErrors": [
+        {
+          "run": "1280-playthrough",
+          "errors": []
+        },
+        {
+          "run": "960-geometry",
+          "errors": []
+        },
+        {
+          "run": "intercept",
+          "errors": []
+        }
+      ]
+    },
+    "secondBrowserReport": {
+      "runs": [
+        {
+          "name": "L1-start",
+          "par": 5,
+          "switches": {
+            "s1": "a"
+          },
+          "nodeXY": {
+            "D": [
+              140,
+              380
+            ],
+            "j0": [
+              340,
+              380
+            ],
+            "s1": [
+              560,
+              380
+            ],
+            "ua": [
+              800,
+              250
+            ],
+            "ub": [
+              1000,
+              235
+            ],
+            "B": [
+              1150,
+              230
+            ],
+            "la": [
+              800,
+              510
+            ],
+            "lb": [
+              1000,
+              525
+            ],
+            "A": [
+              1150,
+              530
+            ]
+          }
+        },
+        {
+          "name": "L1-after-flip",
+          "elapsed": 3.7496000000000023,
+          "switches": {
+            "s1": "b"
+          },
+          "trains": 2,
+          "delivered": 0
+        },
+        {
+          "name": "L1-click-playthrough",
+          "screen": "success",
+          "ops": 5,
+          "delivered": 3,
+          "total": 3,
+          "failReason": null
+        },
+        {
+          "name": "layouts",
+          "L2": {
+            "switches": {
+              "s1": "a",
+              "s2": "b",
+              "s3": "b",
+              "s4": "a"
+            },
+            "nodes": 15,
+            "par": 14
+          },
+          "L3": {
+            "switches": {
+              "s1": "a",
+              "s2": "b",
+              "s3": "a",
+              "s4": "a",
+              "s5": "a"
+            },
+            "nodes": 22,
+            "par": 17
+          }
+        },
+        {
+          "name": "mute-toggle",
+          "label0": "🔊",
+          "label1": "🔇",
+          "label2": "🔊",
+          "toggled": true
+        },
+        {
+          "name": "geometry-960",
+          "geom": {
+            "frame": {
+              "w": 960,
+              "h": 540
+            },
+            "canvas": {
+              "w": 960,
+              "h": 540
+            },
+            "layers": {
+              "canvasZ": "auto",
+              "hudZ": "auto",
+              "screensZ": "10",
+              "hud": {
+                "x": 0,
+                "y": 0,
+                "width": 960,
+                "height": 540,
+                "top": 0,
+                "right": 960,
+                "bottom": 540,
+                "left": 0
+              },
+              "screens": {
+                "x": 0,
+                "y": 0,
+                "width": 960,
+                "height": 540,
+                "top": 0,
+                "right": 960,
+                "bottom": 540,
+                "left": 0
+              }
+            },
+            "bar": {
+              "x": 0,
+              "y": -21,
+              "w": 960,
+              "h": 42,
+              "fontSize": "16px",
+              "z": "auto"
+            },
+            "hint": {
+              "x": 15,
+              "y": 495,
+              "w": 930,
+              "h": 36,
+              "fontSize": "16px",
+              "z": "auto"
+            },
+            "levelText": {
+              "x": 13.5,
+              "y": -9.375,
+              "w": 131.25,
+              "h": 18,
+              "fontSize": "16px",
+              "z": "auto"
+            },
+            "muteBtn": {
+              "x": 835.5,
+              "y": -16.875,
+              "w": 33,
+              "h": 33,
+              "fontSize": "15px",
+              "z": "auto"
+            }
+          }
+        },
+        {
+          "name": "content-binding-intercept",
+          "parObserved": 99,
+          "s1Observed": [
+            999,
+            555
+          ],
+          "parChanged": true,
+          "xyChanged": true
+        }
+      ],
+      "consoleErrors": [
+        {
+          "run": "1280-playthrough",
+          "errors": []
+        },
+        {
+          "run": "960-geometry",
+          "errors": []
+        },
+        {
+          "run": "intercept",
+          "errors": []
+        }
+      ]
+    },
+    "finalBrowserReport": {
+      "runs": [
+        {
+          "name": "L1-start",
+          "par": 5,
+          "switches": {
+            "s1": "a"
+          },
+          "nodeXY": {
+            "D": [
+              140,
+              380
+            ],
+            "j0": [
+              340,
+              380
+            ],
+            "s1": [
+              560,
+              380
+            ],
+            "ua": [
+              800,
+              250
+            ],
+            "ub": [
+              1000,
+              235
+            ],
+            "B": [
+              1150,
+              230
+            ],
+            "la": [
+              800,
+              510
+            ],
+            "lb": [
+              1000,
+              525
+            ],
+            "A": [
+              1150,
+              530
+            ]
+          }
+        },
+        {
+          "name": "L1-after-flip",
+          "elapsed": 3.7325999999999997,
+          "switches": {
+            "s1": "b"
+          },
+          "trains": 2,
+          "delivered": 0
+        },
+        {
+          "name": "L1-click-playthrough",
+          "screen": "success",
+          "ops": 5,
+          "delivered": 3,
+          "total": 3,
+          "failReason": null
+        },
+        {
+          "name": "layouts",
+          "L2": {
+            "switches": {
+              "s1": "a",
+              "s2": "b",
+              "s3": "b",
+              "s4": "a"
+            },
+            "nodes": 15,
+            "par": 14
+          },
+          "L3": {
+            "switches": {
+              "s1": "a",
+              "s2": "b",
+              "s3": "a",
+              "s4": "a",
+              "s5": "a"
+            },
+            "nodes": 22,
+            "par": 17
+          },
+          "d3HintClearance": {
+            "overlap": false,
+            "gapPx": 59,
+            "d3": [
+              90,
+              540
+            ]
+          }
+        },
+        {
+          "name": "mute-toggle",
+          "label0": "🔊",
+          "label1": "🔇",
+          "label2": "🔊",
+          "toggled": true
+        },
+        {
+          "name": "geometry-960",
+          "geom": {
+            "frame": {
+              "w": 960,
+              "h": 540
+            },
+            "canvas": {
+              "w": 960,
+              "h": 540
+            },
+            "layers": {
+              "canvasZ": "auto",
+              "hudZ": "auto",
+              "screensZ": "10",
+              "hud": {
+                "x": 0,
+                "y": 0,
+                "width": 960,
+                "height": 540,
+                "top": 0,
+                "right": 960,
+                "bottom": 540,
+                "left": 0
+              },
+              "screens": {
+                "x": 0,
+                "y": 0,
+                "width": 960,
+                "height": 540,
+                "top": 0,
+                "right": 960,
+                "bottom": 540,
+                "left": 0
+              }
+            },
+            "bar": {
+              "x": 0,
+              "y": 0,
+              "w": 960,
+              "h": 42,
+              "fontSize": "16px",
+              "z": "auto"
+            },
+            "hint": {
+              "x": 15,
+              "y": 495,
+              "w": 930,
+              "h": 36,
+              "fontSize": "16px",
+              "z": "auto"
+            },
+            "levelText": {
+              "x": 13.5,
+              "y": 11.625,
+              "w": 131.25,
+              "h": 18,
+              "fontSize": "16px",
+              "z": "auto"
+            },
+            "muteBtn": {
+              "x": 835.5,
+              "y": 4.125,
+              "w": 33,
+              "h": 33,
+              "fontSize": "15px",
+              "z": "auto"
+            }
+          }
+        },
+        {
+          "name": "content-binding-intercept",
+          "parObserved": 99,
+          "s1Observed": [
+            999,
+            555
+          ],
+          "parChanged": true,
+          "xyChanged": true
+        }
+      ],
+      "consoleErrors": [
+        {
+          "run": "1280-playthrough",
+          "errors": []
+        },
+        {
+          "run": "960-geometry",
+          "errors": []
+        },
+        {
+          "run": "intercept",
+          "errors": []
+        }
+      ]
+    },
+    "userChrome": {
+      "hudLevel": {
+        "jsonFontSize": 17,
+        "inlineFontSize": "",
+        "computedFontSize": "16px"
+      },
+      "screenshot": "bgs-v3-magnet-single-paid-preview-2026-10-11.png"
+    }
+  },
+  "protectedAfter": {
+    "apps/frontend": {
+      "files": 508,
+      "sha256": "f52e2ae0825cb04e6f94526bd1f258358d7f541e5a81343ec5b2dd138468cfba"
+    },
+    "src": {
+      "files": 2445,
+      "sha256": "8f0069cec3ff82f03f4845e4c4c2596c8507dcd3976c4af7823cdbc4fbfbf493"
+    },
+    "packages/builtin-tools": {
+      "files": 383,
+      "sha256": "6368c4fce0bd93d2a9e7af17a3895a195fed65abcd94d98fec7049991cdb6a5b"
+    }
+  },
+  "protectedUnchanged": true,
+  "sourceAfter": [
+    {
+      "path": "bun.lock",
+      "sha256": "cd7f60aef306513e095d7d1478d449985dffdeec79464af96f1031d07fa2d040"
+    },
+    {
+      "path": "content/index.json",
+      "sha256": "f23ca6d111cd17d194df6d71e5e18844e583c08b82a77fd3dd082443ce7d6f4b"
+    },
+    {
+      "path": "content/scenes/level-1.json",
+      "sha256": "990424e68d4e750799dfe5ba5af75f89f1c163369529afb89df09a8cec3f013d"
+    },
+    {
+      "path": "content/scenes/level-2.json",
+      "sha256": "07a463e85fce599296339f6ea7fb0ee631783576bd9236a5a81af34453562022"
+    },
+    {
+      "path": "content/scenes/level-3.json",
+      "sha256": "3f5cb30ec6b7be0fda59add01bcec3b2f3c19ef9217adc9863611e684fdc6af6"
+    },
+    {
+      "path": "content/ui/ending.json",
+      "sha256": "3766cd152dbd02482d63db5b1fb98fb0cd45970b409beee5faa64893b2dcaeee"
+    },
+    {
+      "path": "content/ui/fail.json",
+      "sha256": "a4bbb18bb30a456f047ae8e1267ce75ec29c9eb03e7c150b3ce6a5aac22c7226"
+    },
+    {
+      "path": "content/ui/hud.json",
+      "sha256": "b67165894e4c5d27a3712d60d4a8e9183a260cb2be2ff071fe69edd7291573d6"
+    },
+    {
+      "path": "content/ui/level-select.json",
+      "sha256": "9df195020bda8f6672d8488e09cdf0f11b0317b0b58ad8b9266cfc2497f76630"
+    },
+    {
+      "path": "content/ui/success.json",
+      "sha256": "721f7a0b2d011ee8f826d855d63753bc55ac5e7fb27ef7766fd446c933e6046b"
+    },
+    {
+      "path": "content/ui/title.json",
+      "sha256": "4653aa969024c25575d3886226d19fe9dec3264be8ca0093db051c08f47de722"
+    },
+    {
+      "path": "docs/ART_DIRECTION.md",
+      "sha256": "d86eb5698a74fa89f90ae06abb2ef0c1a794fd09b1950b39486e16a21e5916a7"
+    },
+    {
+      "path": "docs/ASSET_PLAN.md",
+      "sha256": "e6dfce8526090583a7807348ea07831537bc06f3b4f93ba3400e7d9afbc67f73"
+    },
+    {
+      "path": "docs/AUDIO_DESIGN.md",
+      "sha256": "202511b264a3e2652af368984d954b1962c743ee70a372eda8ef7f44edfa7c6d"
+    },
+    {
+      "path": "docs/BALANCE_DESIGN.md",
+      "sha256": "b5efbaed193c03069d4f5daa184014f1714d54410f6dea7c143f10e2c7ef6af3"
+    },
+    {
+      "path": "docs/GDD.md",
+      "sha256": "d05cb55092fb1ebf0a916268af15492879e66e13dbc0544ffb97839a0108e2e2"
+    },
+    {
+      "path": "docs/LEVEL_SCENE_DESIGN.md",
+      "sha256": "58c2a7a519708e07b54bd9af3acd6b56ff576f886be7ce8c02adfac9f31500d4"
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "5688687b1ba9a7db4c6d7124852517331baf87b307d725ecbcd610a1af92436d"
+    },
+    {
+      "path": "docs/TECHNICAL_DESIGN.md",
+      "sha256": "d910e0c60db4255edec3ea76e2740b81aea446d37d1968b92876ecdb090f0625"
+    },
+    {
+      "path": "docs/UI_UX_SPEC.md",
+      "sha256": "3fb02a2d69fdd6a77679e0d424881539304ef5786d1c2f48334378922e59233d"
+    },
+    {
+      "path": "index.html",
+      "sha256": "d798ec27a484d11c067958ddcf1b830d0fef6292231a903cc26fbc6a9c1a0799"
+    },
+    {
+      "path": "package.json",
+      "sha256": "a6e112c7e8f286c451503c014307fe598bc9eec86adb4344a4ac26c50af00398"
+    },
+    {
+      "path": "src/audio.ts",
+      "sha256": "0247da888558cda91bdb5a69ff50eca8b089b1c33df5ccd3e0268f7ef945b529"
+    },
+    {
+      "path": "src/content.ts",
+      "sha256": "6fd73657008c028766f9a3b835fd64c94c35305f34a2b8930c288ac688c0bff9"
+    },
+    {
+      "path": "src/game.ts",
+      "sha256": "5f54a438354fb370f6eb5202928a7709fb3517bda6fd16b7b8be9ed68dea7488"
+    },
+    {
+      "path": "src/main.ts",
+      "sha256": "0f87dd18f745087e329f05dd4fb96da2dab2a94326504d7ffd25904a5866ba42"
+    },
+    {
+      "path": "src/render.ts",
+      "sha256": "77f4f3ceb9300a79bb7eb72b802626ce7964f5170b45b46f7e2d3c3d5eedfa8e"
+    },
+    {
+      "path": "src/sim.ts",
+      "sha256": "6a7cff98d7ad50eed228c4819d11c7ffe1be2d6ee3f2428e1555ad98d0d27205"
+    },
+    {
+      "path": "src/styles.css",
+      "sha256": "7680dbfa8292b36c1a48dc0182c76137a7818b7fdddac4bb188e96a8a2b5d1c6"
+    },
+    {
+      "path": "src/types.ts",
+      "sha256": "7009d7a731d39fec9826f177f2065b2a3ea46acfe41876b35046ae0ad1f26000"
+    },
+    {
+      "path": "tests/headless-sim.ts",
+      "sha256": "1f948b94dfbb4fafbedc297971614483232482989cbdb4e6c3225c54e0d8ec0a"
+    },
+    {
+      "path": "tsconfig.json",
+      "sha256": "08316fe7b2133d3aaacdfd5eb393b0d7cb49c0fc9d69eb839c7d1bea81a9a61f"
+    },
+    {
+      "path": "vite.config.ts",
+      "sha256": "ea3af12244844b18d90e0594d4e4226274d6d54a2c97edc6b22cee26d8f7421e"
+    }
+  ],
+  "developerGameEdits": false,
+  "requestLedger": "bgs-v3-magnet-single-paid-requests-2026-10-11.jsonl"
+}

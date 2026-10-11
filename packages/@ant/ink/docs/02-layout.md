@@ -7,7 +7,7 @@ Ink uses [Yoga](https://yogalayout.com/) (Facebook's cross-platform layout engin
 `Box` is the fundamental layout primitive. It is the terminal equivalent of `<div style="display: flex">`.
 
 ```tsx
-import { Box, Text } from '@anthropic/ink'
+import { Box, Text } from '@bee-game-studio/ink'
 
 <Box flexDirection="row" gap={1}>
   <Text>Left</Text>
@@ -313,7 +313,7 @@ Inserts line breaks.
 Wraps a region to exclude it from text selection in alt-screen mode. A convenience wrapper around `Box` with `noSelect` set.
 
 ```tsx
-import { NoSelect } from '@anthropic/ink'
+import { NoSelect } from '@bee-game-studio/ink'
 
 <Box flexDirection="row">
   <NoSelect>

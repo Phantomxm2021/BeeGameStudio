@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { pathToFileURL } from 'url';
-import { Box, Link, supportsHyperlinks, Text } from '@anthropic/ink';
+import { Box, Link, supportsHyperlinks, Text } from '@bee-game-studio/ink';
 import { getStoredImagePath } from '../../utils/imageStore.js';
 import { MessageResponse } from '../MessageResponse.js';
 

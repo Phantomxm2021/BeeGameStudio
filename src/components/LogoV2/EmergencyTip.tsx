@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useEffect, useMemo } from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { getDynamicConfig_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js';
 import { getGlobalConfig, saveGlobalConfig } from 'src/utils/config.js';
 

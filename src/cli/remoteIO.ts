@@ -113,7 +113,7 @@ export class RemoteIO extends StructuredIO {
     // synchronously, so new CCRClient() MUST run before transport.connect() —
     // otherwise early SSE frames hit an unwired onEventCallback and their
     // 'received' delivery acks are silently dropped.
-    if (isEnvTruthy(process.env.CLAUDE_CODE_USE_CCR_V2)) {
+    if (isEnvTruthy(process.env.BGS_USE_CCR_V2)) {
       // CCR v2 is SSE+POST by definition. getTransportForUrl returns
       // SSETransport under the same env var, but the two checks live in
       // different files — assert the invariant so a future decoupling

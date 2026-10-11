@@ -1,3 +1,7 @@
+const gridExample = { id: 'grid-layout', type: 'grid', data: { schema: 'grid.v1', cellSize: [32,32], cellGap: [0,0] } } as const
+const tilemapExample = { id: 'ground-map', type: 'tilemap', assetRef: 'RES-TILES', data: { schema: 'tilemap.v1', gridNodeId: 'grid-node', tileAnchor: [.5,.5], collisionEnabled: true, cells: [{x: -1,y: 0,tileId:'ground'},{x:0,y:0,tileId:'ground'}] } } as const
+const rendererExample = { id: 'ground-renderer', type: 'tilemap-renderer', data: { schema: 'tilemap-renderer.v1', sortingOrder: 0 } } as const
+
 /** Author-facing data documentation, shared by resource and content tasks. */
 export const TILEMAP_AUTHORING_CONTRACT = {
   scope: 'Rectangular orthogonal 2D only. Consider Tilemap for repetitive grid environments; the Agent decides. Characters, props and free-form artwork can remain separate objects. No engine or tool choice is prescribed.',
@@ -8,9 +12,21 @@ export const TILEMAP_AUTHORING_CONTRACT = {
   collision: 'Optional per-tile polygon points are logical pixels relative to tile pivot; >=3 points. mode is solid, trigger or one-way. one-way requires a nonzero normal in the same local y-down space. Tilemap collisionEnabled defaults false. Agent implements target physics; BGS only validates data and previews outlines.',
   versions: 'Only the exact versioned fields below are accepted. No unversioned/legacy Tilemap guessing or automatic project migration. schema/cellSize, schema/gridNodeId/cells, schema, and schema/tiles are required for Grid, Tilemap, TilemapRenderer and TileSet respectively. Components may add enabled (default true); Tile definitions may add pivot, offset, collision.',
   examples: {
-    grid: { id: 'grid-layout', type: 'grid', data: { schema: 'grid.v1', cellSize: [32,32], cellGap: [0,0] } },
-    tilemap: { id: 'ground-map', type: 'tilemap', assetRef: 'RES-TILES', data: { schema: 'tilemap.v1', gridNodeId: 'grid-node', tileAnchor: [.5,.5], collisionEnabled: true, cells: [{x: -1,y: 0,tileId:'ground'},{x:0,y:0,tileId:'ground'}] } },
-    renderer: { id: 'ground-renderer', type: 'tilemap-renderer', data: { schema: 'tilemap-renderer.v1', sortingOrder: 0 } },
+    grid: gridExample,
+    tilemap: tilemapExample,
+    renderer: rendererExample,
+    // A complete draft demonstrates the ancestry that disconnected component
+    // examples cannot express. RES-TILES is a pending binding, not an asset.
+    scene: { schema: 'beegame-content.v1', id: 'tilemap-example', kind: 'scene-2d', assetRefs: ['RES-TILES'], data: {
+      settings: { coordinateSystem: { origin: 'top-left', units: 'logical-pixels', width: 960, height: 540, pixelsPerUnit: 100 } },
+      cameraNodeId: 'camera', nodes: [
+        { id: 'camera', transform: { position: [480,270,0] }, components: [{ id: 'camera-component', type: 'camera', data: {
+          orthographic: true, orthographicSize: 2.7, coordinateSpace: 'logical-pixels', viewport: { width: 960, height: 540 }, framing: 'expand',
+        } }] },
+        { id: 'grid-node', transform: { position: [480,270,0] }, components: [gridExample] },
+        { id: 'ground', parentId: 'grid-node', components: [tilemapExample, rendererExample] },
+      ],
+    } },
     tileSet: { schema:'beegame-tileset.v1', tiles: { ground: {
       sprite: {assetRef:'RES-ATLAS',member:'assets/runtime/terrain.png',atlasMember:'assets/runtime/terrain.json',frame:'ground'},
       size:[32,32],pivot:[.5,.5],

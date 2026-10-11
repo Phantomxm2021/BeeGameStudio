@@ -6,10 +6,10 @@ import { getBridgeAccessToken } from '../../bridge/bridgeConfig.js';
 import { checkBridgeMinVersion, getBridgeDisabledReason, isEnvLessBridgeEnabled } from '../../bridge/bridgeEnabled.js';
 import { checkEnvLessBridgeMinVersion } from '../../bridge/envLessBridgeConfig.js';
 import { BRIDGE_LOGIN_INSTRUCTION, REMOTE_CONTROL_DISCONNECTED_MSG } from '../../bridge/types.js';
-import { Dialog, ListItem } from '@anthropic/ink';
+import { Dialog, ListItem } from '@bee-game-studio/ink';
 import { shouldShowRemoteCallout } from '../../components/RemoteCallout.js';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,

@@ -169,8 +169,8 @@ export function getDefaultOpusModel(): ModelName {
     return process.env.GEMINI_DEFAULT_OPUS_MODEL
   }
   // Anthropic-specific override (for first-party and other 3P providers)
-  if (process.env.ANTHROPIC_DEFAULT_OPUS_MODEL) {
-    return process.env.ANTHROPIC_DEFAULT_OPUS_MODEL
+  if (process.env.BGS_DEFAULT_STRONG_MODEL) {
+    return process.env.BGS_DEFAULT_STRONG_MODEL
   }
   // 3P providers: if user set a primary model (e.g. OPENAI_MODEL=glm-5.1),
   // fall back to it instead of a hardcoded Anthropic model. This prevents
@@ -194,8 +194,8 @@ export function getDefaultSonnetModel(): ModelName {
     return process.env.GEMINI_DEFAULT_SONNET_MODEL
   }
   // Anthropic-specific override (for first-party and other 3P providers)
-  if (process.env.ANTHROPIC_DEFAULT_SONNET_MODEL) {
-    return process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
+  if (process.env.BGS_DEFAULT_BALANCED_MODEL) {
+    return process.env.BGS_DEFAULT_BALANCED_MODEL
   }
   // 3P providers: fall back to user's primary model instead of a hardcoded
   // Anthropic model name. Prevents background API calls from being routed to
@@ -218,8 +218,8 @@ export function getDefaultHaikuModel(): ModelName {
     return process.env.GEMINI_DEFAULT_HAIKU_MODEL
   }
   // Anthropic-specific override (for first-party and other 3P providers)
-  if (process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL) {
-    return process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL
+  if (process.env.BGS_DEFAULT_FAST_MODEL) {
+    return process.env.BGS_DEFAULT_FAST_MODEL
   }
   // 3P providers: fall back to user's primary model instead of a hardcoded
   // Anthropic model name.

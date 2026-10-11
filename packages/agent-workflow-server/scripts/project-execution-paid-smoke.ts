@@ -45,10 +45,9 @@ const usageProxy = env.ANTHROPIC_BASE_URL
   ? openModelUsageProxy(env.ANTHROPIC_BASE_URL, join(root, 'provider-usage.json'), () => 'execution-smoke') : undefined
 if (usageProxy) {
   env.ANTHROPIC_BASE_URL = usageProxy.baseUrl
-  env.BEEGAME_MODEL_OBSERVER_METADATA = '1'
 }
 env.BEEGAME_CONFIG_DIR = join(root, 'native-config')
-env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
+env.BGS_DISABLE_NONESSENTIAL_TRAFFIC = '1'
 env.DISABLE_TELEMETRY = '1'
 env.DISABLE_ERROR_REPORTING = '1'
 const start = { sessionId: `paid-isolation-${Date.now()}`, cwd: workspace, env, language: 'zh' as const }

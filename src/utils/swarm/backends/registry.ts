@@ -13,12 +13,13 @@ import {
 } from './detection.js'
 import { createInProcessBackend } from './InProcessBackend.js'
 import { getPreferTmuxOverIterm2 } from './it2Setup.js'
-import { createPaneBackendExecutor } from './PaneBackendExecutor.js'
+import { createPaneBackendExecutor, PaneBackendExecutor } from './PaneBackendExecutor.js'
 import { getTeammateModeFromSnapshot } from './teammateModeSnapshot.js'
 import type {
   BackendDetectionResult,
   PaneBackend,
   PaneBackendType,
+  PaneCleanupMetadata,
   TeammateExecutor,
 } from './types.js'
 
@@ -361,6 +362,7 @@ Then start a tmux session with: tmux new-session -s claude`
  * @throws If the requested backend type is not available
  */
 export function getBackendByType(type: PaneBackendType): PaneBackend {
+  if (cachedBackend?.type === type) return cachedBackend
   switch (type) {
     case 'tmux':
       return createTmuxBackend()
@@ -369,6 +371,30 @@ export function getBackendByType(type: PaneBackendType): PaneBackend {
     case 'windows-terminal':
       return createWindowsTerminalBackend()
   }
+}
+
+/** Use the owning executor so closing a pane also clears its private handoff. */
+export async function closeTeammatePane(
+  type: PaneBackendType,
+  paneId: string,
+  useExternalSession: boolean,
+  cleanup?: PaneCleanupMetadata,
+): Promise<boolean> {
+  await ensureBackendsRegistered()
+  if (cachedPaneBackendExecutor instanceof PaneBackendExecutor &&
+      cachedPaneBackendExecutor.type === type) {
+    const result = await cachedPaneBackendExecutor.killPane(paneId, useExternalSession)
+    if (result !== undefined) return result
+  }
+  // After restart an old pane ID alone cannot identify its socket/process or
+  // private files. Retain that team record instead of guessing a kill target.
+  if (!cleanup) return false
+  const closed = await getBackendByType(type).killPane(paneId, useExternalSession, cleanup)
+  if (closed && cleanup) {
+    const { removePanePrivateFiles } = await import('../spawnUtils.js')
+    await removePanePrivateFiles(cleanup)
+  }
+  return closed
 }
 
 /**

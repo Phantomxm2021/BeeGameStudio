@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { KeyboardEvent, useInput } from '@anthropic/ink'
+import { KeyboardEvent, useInput } from '@bee-game-studio/ink'
 // backward-compat bridge until consumers wire handleKeyDown to <Box onKeyDown>
 import {
   Cursor,

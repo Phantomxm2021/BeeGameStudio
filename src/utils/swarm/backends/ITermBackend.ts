@@ -326,8 +326,9 @@ export class ITermBackend implements PaneBackend {
     // still has a running process (the shell always is). tmux kill-pane has no
     // such prompt, which is why this was only broken for iTerm2.
     const result = await runIt2(['session', 'close', '-f', '-s', paneId])
-    // Clean up module state regardless of close result — even if the pane is
-    // already gone (e.g., user closed it manually), removing the stale ID is correct.
+    const listed = result.code === 0 ? undefined : await runIt2(['session', 'list'])
+    const closed = result.code === 0 || (listed?.code === 0 && !listed.stdout.includes(paneId))
+    if (!closed) return false
     const idx = teammateSessionIds.indexOf(paneId)
     if (idx !== -1) {
       teammateSessionIds.splice(idx, 1)
@@ -335,7 +336,7 @@ export class ITermBackend implements PaneBackend {
     if (teammateSessionIds.length === 0) {
       firstPaneUsed = false
     }
-    return result.code === 0
+    return true
   }
 
   /**

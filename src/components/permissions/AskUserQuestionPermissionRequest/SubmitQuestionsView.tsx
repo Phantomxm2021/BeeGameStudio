@@ -1,10 +1,10 @@
 import figures from 'figures';
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import type { Question } from '@bee-game-studio/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js';
 import type { PermissionDecision } from '../../../utils/permissions/PermissionResult.js';
 import { Select } from '../../CustomSelect/index.js';
-import { Divider } from '@anthropic/ink';
+import { Divider } from '@bee-game-studio/ink';
 import { PermissionRequestTitle } from '../PermissionRequestTitle.js';
 import { PermissionRuleExplanation } from '../PermissionRuleExplanation.js';
 import { QuestionNavigationBar } from './QuestionNavigationBar.js';

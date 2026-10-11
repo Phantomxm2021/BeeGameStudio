@@ -6,7 +6,7 @@
 
 import * as React from 'react';
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
-import { Box, Byline, Text } from '@anthropic/ink';
+import { Box, Byline, Text } from '@bee-game-studio/ink';
 import type { PluginMarketplaceEntry } from '../../utils/plugins/schemas.js';
 
 /**

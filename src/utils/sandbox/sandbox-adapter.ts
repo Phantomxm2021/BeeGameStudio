@@ -356,13 +356,12 @@ export function convertToSandboxRuntimeConfig(
     argv0,
   }
 
-  // The host supplies a project boundary at launch. Session cwd changes,
-  // additionalDirectories and a .git worktree pointer must not widen it.
-  const projectFilesystem = process.env.BEEGAME_PROJECT_EXECUTION === '1'
-    ? getSettingsForSource('flagSettings')?.sandbox?.filesystem : undefined
-  if (process.env.BEEGAME_PROJECT_EXECUTION === '1' &&
-      (!projectFilesystem?.allowRead?.length || !projectFilesystem.allowWrite?.length))
-    throw new Error('Missing project execution filesystem boundary')
+  // A deny-all filesystem boundary supplied through public --settings must
+  // not expand through cwd changes, extra directories or worktree pointers.
+  const launchFilesystem = getSettingsForSource('flagSettings')?.sandbox?.filesystem
+  const projectFilesystem = launchFilesystem?.denyRead?.includes('/') ? launchFilesystem : undefined
+  if (projectFilesystem && (!projectFilesystem.allowRead?.length || !projectFilesystem.allowWrite?.length))
+    throw new Error('Missing launch filesystem allow-list')
 
   return {
     network: {
@@ -466,7 +465,6 @@ const checkDependencies = memoize((): SandboxDependencyCheck => {
 })
 
 function getSandboxEnabledSetting(): boolean {
-  if (process.env.BEEGAME_PROJECT_EXECUTION === '1') return true
   try {
     const settings = getSettings_DEPRECATED()
     return settings?.sandbox?.enabled ?? false
@@ -482,13 +480,11 @@ function isAutoAllowBashIfSandboxedEnabled(): boolean {
 }
 
 function areUnsandboxedCommandsAllowed(): boolean {
-  if (process.env.BEEGAME_PROJECT_EXECUTION === '1') return false
   const settings = getSettings_DEPRECATED()
   return settings?.sandbox?.allowUnsandboxedCommands ?? true
 }
 
 function isSandboxRequired(): boolean {
-  if (process.env.BEEGAME_PROJECT_EXECUTION === '1') return true
   const settings = getSettings_DEPRECATED()
   return (
     getSandboxEnabledSetting() &&
@@ -706,7 +702,8 @@ async function setSandboxSettings(options: {
  * Get excluded commands (commands that should not be sandboxed)
  */
 function getExcludedCommands(): string[] {
-  if (process.env.BEEGAME_PROJECT_EXECUTION === '1') return []
+  const launch = getSettingsForSource('flagSettings')?.sandbox
+  if (launch?.filesystem?.denyRead?.includes('/')) return launch.excludedCommands ?? []
   const settings = getSettings_DEPRECATED()
   return settings?.sandbox?.excludedCommands ?? []
 }

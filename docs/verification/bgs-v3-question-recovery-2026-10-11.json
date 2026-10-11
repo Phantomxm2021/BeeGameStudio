@@ -1,0 +1,85 @@
+{
+  "date": "2026-10-11",
+  "scope": "BGS V3 host-evidence recovery and native Question closure through an independent debug page",
+  "rfcVersion": "1.20",
+  "productionFrontendChanged": false,
+  "claudeCodeSourceChanged": false,
+  "builtinToolsChanged": false,
+  "realProjectArtifactsChanged": false,
+  "paidModelsUsed": false,
+  "servicesRestarted": false,
+  "databaseDDLExecuted": false,
+  "runtimeDebugEnabled": false,
+  "protectedDiffSha256BeforeAndAfter": "1def2eee7cad28e6d33ce864a6e84068eb0b69c421330309d2bcbe53891fd995",
+  "confirmedDefects": [
+    "Successful native cleanup and drained host work had no durable evidence before settlement. A failed settlement or worker reload left an unrecoverable lease even though all local writes had ended.",
+    "Session-manager runtime cleanup rejection was logged and swallowed; waitForSessionIdle could then be mistaken for verified exit.",
+    "The standalone debug page could inspect events but could not answer a real pending native Question.",
+    "Reading all archived attempts failed on a missing transcript and hid a live pending question. Missing or unreadable history now remains explicit per attempt."
+  ],
+  "implementation": {
+    "quiescence": "Append host quiescedAt to the existing Attempt only after native cleanup and owned host work drain. Preserve actual accounting and question provenance, never grant passed checks from the receipt.",
+    "recovery": "Authenticated version/attempt/fence CAS; reject active writers and absent evidence; mark interrupted task/edit failed, preserve pause, unrelated successes, bytes and request identity. No dispatch or paid retry.",
+    "questions": "Read actual live pending requests; show unchanged questions/options/finding binding with empty answers; submit or deny through the existing project permissions route. HTTP resolved is interaction receipt, not authorization validation. Current-source guard and native validation/rejection events determine the actual outcome.",
+    "history": "Cold reload reads persisted native decisions without reviving an expired request; historyUnavailable distinguishes missing/unreadable records from absence of decisions.",
+    "storage": "Existing Run JSON and CAS API; no new tables, state machine, process registry, model loop or provider override."
+  },
+  "coverage": [
+    "failed settlement, fresh executor/session manager/store reload, explicit evidence-based recovery",
+    "unknown writer without receipt, old timestamp, wrong version/fence, active writer rejection",
+    "runtime disposal rejection and delayed disposal cannot create premature exit evidence",
+    "host edit candidate remains unaccepted and its owner stays pending after recovery",
+    "receipt deletion, identity change and timestamp rewrite rejected by local store",
+    "standalone Chromium + actual BGS permissions API + source-bound guard",
+    "empty/invalid answers preserve the request, no prefilled answers, cancelled confirmation sends no authorization",
+    "valid answer retained with actual rule test and repair verification",
+    "user refusal does not grant authority",
+    "source changes immediately before reply deny the answer before reaching the repair runner",
+    "pause cancels the Question and reopening cannot answer archived requests",
+    "cold BGS app reload retains actual validated question evidence",
+    "missing old transcripts do not hide the live question and remain explicit",
+    "unrelated notes bytes/status preserved across each synthetic project",
+    "existing edit/change/rebuild/measure/Preview/export flow and actual CLI protocol regression"
+  ],
+  "finalRegression": {
+    "v3": {
+      "passed": 158, "failed": 0, "assertions": 1364, "files": 23, "durationSeconds": 153.44,
+      "log": "/private/tmp/bgs-v3-question-recovery-suite-final.log",
+      "sha256": "488f3ba5333ccc041ae698cff89457fc89b4785708354fb3a268afd51e088215"
+    },
+    "affectedBgsAdapters": {
+      "passed": 85, "failed": 0, "assertions": 369, "files": 3,
+      "log": "/private/tmp/bgs-v3-question-recovery-adapter.log",
+      "sha256": "221ad95b49b3545eff33017fc6605bb67a322f8670d7f9361676e47ad2075ef3"
+    },
+    "focusedReload": {
+      "passed": 6, "failed": 0, "assertions": 89,
+      "overlapsV3Suite": true,
+      "log": "/private/tmp/bgs-v3-question-recovery-reload-final.log",
+      "sha256": "453f47c33351dbf3b1d52ad60670d28241fe39576fdbd3c40932c223d27f7fd6"
+    },
+    "serverTypecheck": {
+      "exitCode": 2, "diagnosticCount": 3556,
+      "workflowV3AndSessionManagerDiagnostics": 0,
+      "status": "whole repository still failing; not presented as a successful typecheck",
+      "log": "/private/tmp/bgs-v3-question-recovery-typecheck-final2.log",
+      "sha256": "b06a3b6e247600fba24b1fa1fffa7c6ef3dc5d692b1b7ba6615fb74e9cea15fb"
+    },
+    "diffWhitespaceCheck": "passed"
+  },
+  "intermediateFailures": [
+    "An initial test command used the wrong working directory and matched no files; corrected without code change.",
+    "Initial cleanup-failure fixture cancelled before native start, testing the wrong branch. It now explicitly waits until disposal was attempted.",
+    "Initial TypeScript check caught broad Bun subprocess stdin/stdout types in the new test; fixed by retaining the narrowed spawned driver variable.",
+    "Intermediate V3 run had 156 pass / 2 fail while implementation changes were still in progress: immutable receipt history needed enforcement and archived history reads blocked live questions. A separate frozen final run passed all 158 tests.",
+    "Intermediate focused run had 16 pass / 1 fail, and reload run 5 pass / 1 fail, exposing the archived-history read failure. Both original logs are retained under /private/tmp; final regression uses explicit per-attempt historyUnavailable and passes."
+  ],
+  "remainingUnverified": [
+    "worker death before durable quiescence evidence or old-version writer lacking evidence remains unknown; no automatic or user-asserted unlock",
+    "external charged operation with lost response remains unverified and is not automatically replayed",
+    "recovery/debug interaction against deployed remote database has not been exercised in this turn",
+    "runtime services still have the previously deployed code and debug flag state; no restart performed",
+    "complete game quality, semantic/aesthetic reviewer competence and real paid-model cost not established",
+    "V3-08 and V3-09 remain partially complete, complete delivery remains disabled"
+  ]
+}

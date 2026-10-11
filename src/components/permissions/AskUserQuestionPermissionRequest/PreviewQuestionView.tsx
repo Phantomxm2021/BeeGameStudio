@@ -1,14 +1,14 @@
 import figures from 'figures';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
-import { type KeyboardEvent, Box, Text } from '@anthropic/ink';
+import { type KeyboardEvent, Box, Text } from '@bee-game-studio/ink';
 import { useKeybinding, useKeybindings } from '../../../keybindings/useKeybinding.js';
 import { useAppState } from '../../../state/AppState.js';
 import type { Question } from '@bee-game-studio/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js';
 import { getExternalEditor } from '../../../utils/editor.js';
 import { toIDEDisplayName } from '../../../utils/ide.js';
 import { editPromptInEditor } from '../../../utils/promptEditor.js';
-import { Divider } from '@anthropic/ink';
+import { Divider } from '@bee-game-studio/ink';
 import TextInput from '../../TextInput.js';
 import { PermissionRequestTitle } from '../PermissionRequestTitle.js';
 import { PreviewBox } from './PreviewBox.js';

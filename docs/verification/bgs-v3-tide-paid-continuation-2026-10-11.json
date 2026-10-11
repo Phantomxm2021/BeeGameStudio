@@ -1,0 +1,3393 @@
+{
+  "date": "2026-10-11",
+  "scope": "One authorized paid group: clean new project, one actual pause/resume, one same-project change. No manual project edits.",
+  "projectId": "v3-paid-6fc08c27-1946-499b-999c-bd775af26361",
+  "workspace": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/tide-beacons-v3--21ad5ba1fc87",
+  "runId": "500544ad-af89-4c1b-a96a-bf684950fca5",
+  "nativeSessionId": "f3fd2356-1a45-4126-89e2-f22be426ed17",
+  "model": "ark-code-latest",
+  "runFinal": {
+    "version": 12,
+    "status": "blocked",
+    "writer": false,
+    "writerLiveness": "none",
+    "deliveryEligible": false,
+    "planRevision": 1,
+    "tasks": {},
+    "requirementChanges": 1
+  },
+  "requirementsRevisions": [
+    "c465b816-c70c-4238-94d0-2af3f1e5dae7",
+    "e669ca6a-c217-40c2-8fc7-caa9bdcea71f"
+  ],
+  "pauseBefore": {
+    "package.json": {
+      "bytes": 478,
+      "sha256": "31b9f79afa06dd10d19eb16442b9575d019d038526e87c5b2ad6c2ecea2cbb7e"
+    },
+    "index.html": {
+      "bytes": 372,
+      "sha256": "54bee85a0a287ca30e59db8801972c332aa7f736b43330fd5dd7ae2d414dcea0"
+    },
+    "vite.config.js": {
+      "bytes": 231,
+      "sha256": "0ce8d11ad6d5b8637478b8e7927cf9b6df66c5b7dc41ed75e16de964e237a1ff"
+    }
+  },
+  "pauseAfter": {
+    "package.json": {
+      "bytes": 478,
+      "sha256": "31b9f79afa06dd10d19eb16442b9575d019d038526e87c5b2ad6c2ecea2cbb7e"
+    },
+    "index.html": {
+      "bytes": 372,
+      "sha256": "54bee85a0a287ca30e59db8801972c332aa7f736b43330fd5dd7ae2d414dcea0"
+    },
+    "vite.config.js": {
+      "bytes": 231,
+      "sha256": "0ce8d11ad6d5b8637478b8e7927cf9b6df66c5b7dc41ed75e16de964e237a1ff"
+    }
+  },
+  "beforeChange": {
+    "package.json": {
+      "bytes": 478,
+      "sha256": "31b9f79afa06dd10d19eb16442b9575d019d038526e87c5b2ad6c2ecea2cbb7e"
+    },
+    "index.html": {
+      "bytes": 372,
+      "sha256": "54bee85a0a287ca30e59db8801972c332aa7f736b43330fd5dd7ae2d414dcea0"
+    },
+    "vite.config.js": {
+      "bytes": 231,
+      "sha256": "0ce8d11ad6d5b8637478b8e7927cf9b6df66c5b7dc41ed75e16de964e237a1ff"
+    },
+    "README.md": {
+      "bytes": 2249,
+      "sha256": "f9142ed89198d25a8a8189ca59392ff1a561934ce528429e77135748453030b3"
+    },
+    "src/App.jsx": {
+      "bytes": 12006,
+      "sha256": "20e215ea5387ec78c1d6498af93392267962401f8a62a64a69a4878634f68b25"
+    },
+    "src/audio/sound.js": {
+      "bytes": 2607,
+      "sha256": "4d8088bb594e59b410b598482ed8dc164944d4b8287d4e1bf7ee3db660079215"
+    },
+    "src/components/Board.jsx": {
+      "bytes": 1388,
+      "sha256": "8f5d0f288942f30655db277cd28689a85b661feee809d6d2d27cefea203c7b79"
+    },
+    "src/game/levels.js": {
+      "bytes": 731,
+      "sha256": "e52a62f9a1a911a685ec1e70566b44e3f3317a3dc52c4db12c70603293fa19f6"
+    },
+    "src/game/lightsOut.js": {
+      "bytes": 3704,
+      "sha256": "1584a64fe12beef8d5055dec6fccaac3670a3fc7c790d50d11bc5a8e26cd9025"
+    },
+    "src/game/lightsOut.test.js": {
+      "bytes": 2894,
+      "sha256": "f0232e20fff8748e11a9ab62eb7e84e4c307e0825da23dd4694096aba278061d"
+    },
+    "src/main.jsx": {
+      "bytes": 237,
+      "sha256": "06d268a0202792907b2ac9d483f91e06c7017f426c8216d9097c0d3f614b42b5"
+    },
+    "src/styles.css": {
+      "bytes": 13021,
+      "sha256": "ebb0083d017f513142d9c6e2e143aace9cb9a004361159120d0e55916638ed1b"
+    },
+    "tests/preview-playthrough.mjs": {
+      "bytes": 6277,
+      "sha256": "d6f8d5e6944f9576c34e3a744fd872ad0487ef267d692bfd24cb8f5f3606fc11"
+    },
+    "dist/assets/index-BkZwwsf-.css": {
+      "bytes": 10442,
+      "sha256": "81eb572e1473f926216f715fa8ee4ad13198e5abb2043c78a024ce09d54735f9"
+    },
+    "dist/assets/index-CG43k9P_.js": {
+      "bytes": 153338,
+      "sha256": "56505956ba44b1cc6fbc17e5e9c42bba0cbe4e62224eb87ea0116669d277e17d"
+    },
+    "dist/index.html": {
+      "bytes": 472,
+      "sha256": "dce2659464b0276018ea2a5b674363e6888b9361f8534014a11e9f56964b7575"
+    }
+  },
+  "finalCandidate": {
+    "package.json": {
+      "bytes": 478,
+      "sha256": "fc91f50cadff159bb69e34e2da6df264895b78077d80970fdb97baa2f5fc2df6"
+    },
+    "index.html": {
+      "bytes": 372,
+      "sha256": "54bee85a0a287ca30e59db8801972c332aa7f736b43330fd5dd7ae2d414dcea0"
+    },
+    "vite.config.js": {
+      "bytes": 231,
+      "sha256": "0ce8d11ad6d5b8637478b8e7927cf9b6df66c5b7dc41ed75e16de964e237a1ff"
+    },
+    "README.md": {
+      "bytes": 3864,
+      "sha256": "b8f7af75d5b38174e30ad6df048537fae88cf1c35babad9380b448b8e0a47781"
+    },
+    "src/App.jsx": {
+      "bytes": 14239,
+      "sha256": "74b6744cd258955ad10b6e99ff562633b1f2886e153ff40cdf390b2c52f73bde"
+    },
+    "src/audio/sound.js": {
+      "bytes": 2904,
+      "sha256": "ce52ca2cf20e952eb8c4bc291f1e22401eaed14f362af9422ba917a8282234fb"
+    },
+    "src/components/Board.jsx": {
+      "bytes": 1524,
+      "sha256": "848622eb4751f90e17e9d35bfada697e16c3ce4a532099d1a2670447751d0ae7"
+    },
+    "src/game/levels.js": {
+      "bytes": 731,
+      "sha256": "e52a62f9a1a911a685ec1e70566b44e3f3317a3dc52c4db12c70603293fa19f6"
+    },
+    "src/game/lightsOut.js": {
+      "bytes": 3704,
+      "sha256": "1584a64fe12beef8d5055dec6fccaac3670a3fc7c790d50d11bc5a8e26cd9025"
+    },
+    "src/game/lightsOut.test.js": {
+      "bytes": 3644,
+      "sha256": "8a2f8c14cdef2f8df76dcbfbfe7c7e6d78079de97ff74d0f00a6e2215d8a95eb"
+    },
+    "src/main.jsx": {
+      "bytes": 237,
+      "sha256": "06d268a0202792907b2ac9d483f91e06c7017f426c8216d9097c0d3f614b42b5"
+    },
+    "src/styles.css": {
+      "bytes": 15919,
+      "sha256": "09c95fa7cda74e297e65b7ee1da6665709dfd3095e251a17e784b0746e7a2b2f"
+    },
+    "tests/preview-hints-layout.mjs": {
+      "bytes": 9627,
+      "sha256": "4f69aaabe103ccaf68bfde115746e0d45be23735d9febf874eba92e939fcd619"
+    },
+    "tests/preview-playthrough.mjs": {
+      "bytes": 6277,
+      "sha256": "d6f8d5e6944f9576c34e3a744fd872ad0487ef267d692bfd24cb8f5f3606fc11"
+    },
+    "dist/assets/index-CW2vdOAq.css": {
+      "bytes": 12372,
+      "sha256": "c3690949accf0669b6fcdb07c290c5a85a6676cc5e3e3b72cd735930e7353ba9"
+    },
+    "dist/assets/index-CkI-CRGA.js": {
+      "bytes": 155623,
+      "sha256": "4e774053e98f72fc293071afb78ef356753ce4a942ea1f8868f542d6e6e064bb"
+    },
+    "dist/index.html": {
+      "bytes": 472,
+      "sha256": "bd0b00787719a1d8dc09363bbded21ba0fd06b08cb1cb656edff1af478340be6"
+    }
+  },
+  "changeFiles": {
+    "unchanged": [
+      "index.html",
+      "vite.config.js",
+      "src/game/levels.js",
+      "src/game/lightsOut.js",
+      "src/main.jsx",
+      "tests/preview-playthrough.mjs"
+    ],
+    "changed": [
+      "package.json",
+      "README.md",
+      "src/App.jsx",
+      "src/audio/sound.js",
+      "src/components/Board.jsx",
+      "src/game/lightsOut.test.js",
+      "src/styles.css",
+      "dist/index.html"
+    ],
+    "added": [
+      "tests/preview-hints-layout.mjs",
+      "dist/assets/index-CW2vdOAq.css",
+      "dist/assets/index-CkI-CRGA.js"
+    ],
+    "removed": [
+      "dist/assets/index-BkZwwsf-.css",
+      "dist/assets/index-CG43k9P_.js"
+    ]
+  },
+  "usage": {
+    "basis": "Deduplicated stream message_start/message_delta per provider request id, grouped by actual native turn and parentToolUseID. Matches saved Run usage. Initial interrupted request has unknown final output: lower bound, not invoice.",
+    "perTurn": {
+      "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-1": {
+        "starts": 7,
+        "complete": 6,
+        "input": 35600,
+        "output": 2603,
+        "cached": 176976,
+        "created": 0,
+        "total": 215179
+      },
+      "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2": {
+        "starts": 75,
+        "complete": 75,
+        "input": 291012,
+        "output": 50283,
+        "cached": 3642928,
+        "created": 0,
+        "total": 3984223
+      },
+      "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3": {
+        "starts": 88,
+        "complete": 88,
+        "input": 332033,
+        "output": 51932,
+        "cached": 7328576,
+        "created": 0,
+        "total": 7712541
+      }
+    },
+    "byParent": {
+      "main": {
+        "requests": 115,
+        "input": 434561,
+        "cached": 8968944,
+        "output": 71367,
+        "total": 9474872
+      },
+      "call_yx0gj3g72p79oumf5ba1zutd": {
+        "requests": 14,
+        "input": 70493,
+        "cached": 371160,
+        "output": 8988,
+        "total": 450641
+      },
+      "call_zysoszeaz8rndkmenku9iv44": {
+        "requests": 12,
+        "input": 41184,
+        "cached": 470688,
+        "output": 5297,
+        "total": 517169
+      },
+      "call_maqs6fkwhlytktugpj7vepse": {
+        "requests": 21,
+        "input": 58179,
+        "cached": 907160,
+        "output": 12699,
+        "total": 978038
+      },
+      "call_z2wlj9eb1p59xt9w5z6vv4as": {
+        "requests": 8,
+        "input": 54228,
+        "cached": 430528,
+        "output": 6467,
+        "total": 491223
+      }
+    },
+    "segments": {
+      "initial-interrupted": {
+        "requests": 7,
+        "input": 35600,
+        "cached": 176976,
+        "output": 2603,
+        "total": 215179
+      },
+      "production-main": {
+        "requests": 41,
+        "input": 165869,
+        "cached": 2177016,
+        "output": 33147,
+        "total": 2376032
+      },
+      "production-review": {
+        "requests": 14,
+        "input": 70493,
+        "cached": 371160,
+        "output": 8988,
+        "total": 450641
+      },
+      "production-repair-final": {
+        "requests": 8,
+        "input": 13466,
+        "cached": 624064,
+        "output": 2851,
+        "total": 640381
+      },
+      "production-recheck": {
+        "requests": 12,
+        "input": 41184,
+        "cached": 470688,
+        "output": 5297,
+        "total": 517169
+      },
+      "change-main": {
+        "requests": 59,
+        "input": 219626,
+        "cached": 5990888,
+        "output": 32766,
+        "total": 6243280
+      },
+      "change-review": {
+        "requests": 21,
+        "input": 58179,
+        "cached": 907160,
+        "output": 12699,
+        "total": 978038
+      },
+      "change-audio-recheck": {
+        "requests": 8,
+        "input": 54228,
+        "cached": 430528,
+        "output": 6467,
+        "total": 491223
+      }
+    },
+    "requests": [
+      {
+        "index": 1,
+        "id": "021791675906028d6f60410e67e178f28d968f0420b51c3d6bc8e",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-1",
+        "parent": null,
+        "startedAt": "2026-10-10T23:45:12.738Z",
+        "input": 27727,
+        "output": 236,
+        "cached": 0,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:45:15.110Z",
+        "total": 27963,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 2,
+        "id": "021791675916206d6f60410e67e178f28d968f0420b51c38604a0",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-1",
+        "parent": null,
+        "startedAt": "2026-10-10T23:45:17.795Z",
+        "input": 1896,
+        "output": 690,
+        "cached": 27448,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:45:33.797Z",
+        "total": 30034,
+        "tools": [
+          "TodoWrite"
+        ]
+      },
+      {
+        "index": 3,
+        "id": "021791675933837d6f60410e67e178f28d968f0420b51c362d2cc",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-1",
+        "parent": null,
+        "startedAt": "2026-10-10T23:45:36.462Z",
+        "input": 1600,
+        "output": 151,
+        "cached": 28472,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:45:38.699Z",
+        "total": 30223,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 4,
+        "id": "021791675938830d6f60410e67e178f28d968f0420b51c3155e06",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-1",
+        "parent": null,
+        "startedAt": "2026-10-10T23:45:41.393Z",
+        "input": 756,
+        "output": 1068,
+        "cached": 29496,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:46:08.162Z",
+        "total": 31320,
+        "tools": [
+          "Write"
+        ]
+      },
+      {
+        "index": 5,
+        "id": "021791675968293d6f60410e67e178f28d968f0420b51c3fd837e",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-1",
+        "parent": null,
+        "startedAt": "2026-10-10T23:46:10.054Z",
+        "input": 1917,
+        "output": 200,
+        "cached": 29496,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:46:12.946Z",
+        "total": 31613,
+        "tools": [
+          "Write"
+        ]
+      },
+      {
+        "index": 6,
+        "id": "021791675972999d6f60410e67e178f28d968f0420b51c372cebc",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-1",
+        "parent": null,
+        "startedAt": "2026-10-10T23:46:17.556Z",
+        "input": 1189,
+        "output": 257,
+        "cached": 30520,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:46:21.405Z",
+        "total": 31966,
+        "tools": [
+          "Write"
+        ]
+      },
+      {
+        "index": 7,
+        "id": "021791675981464d6f60410e67e178f28d968f0420b51c319c7c9",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-1",
+        "parent": null,
+        "startedAt": "2026-10-10T23:46:22.601Z",
+        "input": 515,
+        "output": 1,
+        "cached": 31544,
+        "created": 0,
+        "complete": false,
+        "total": 32060,
+        "tools": []
+      },
+      {
+        "index": 8,
+        "id": "0217916760902033a391e43edef5299850de6066b8d72e2d4aa90",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:48:12.384Z",
+        "input": 5836,
+        "output": 220,
+        "cached": 24376,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:48:15.950Z",
+        "total": 30432,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 9,
+        "id": "0217916760969803a391e43edef5299850de6066b8d72e2d6863b",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:48:18.436Z",
+        "input": 4398,
+        "output": 437,
+        "cached": 29496,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:48:26.391Z",
+        "total": 34331,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 10,
+        "id": "0217916761064643a391e43edef5299850de6066b8d72e2e208a0",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:48:27.641Z",
+        "input": 764,
+        "output": 2552,
+        "cached": 33592,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:49:23.664Z",
+        "total": 36908,
+        "tools": [
+          "Write"
+        ]
+      },
+      {
+        "index": 11,
+        "id": "0217916761638033a391e43edef5299850de6066b8d72e284edc6",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:49:26.080Z",
+        "input": 3923,
+        "output": 340,
+        "cached": 33592,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:49:31.032Z",
+        "total": 37855,
+        "tools": [
+          "TodoWrite"
+        ]
+      },
+      {
+        "index": 12,
+        "id": "0217916761710543a391e43edef5299850de6066b8d72e23a8c34",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:49:32.449Z",
+        "input": 1334,
+        "output": 921,
+        "cached": 36664,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:49:49.313Z",
+        "total": 38919,
+        "tools": [
+          "Write"
+        ]
+      },
+      {
+        "index": 13,
+        "id": "0217916761893393a391e43edef5299850de6066b8d72e233b359",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:49:50.696Z",
+        "input": 1357,
+        "output": 164,
+        "cached": 37688,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:49:53.248Z",
+        "total": 39209,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 14,
+        "id": "0217916761934153a391e43edef5299850de6066b8d72e277d41c",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:49:55.138Z",
+        "input": 705,
+        "output": 729,
+        "cached": 38712,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:50:10.782Z",
+        "total": 40146,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 15,
+        "id": "0217916762109533a391e43edef5299850de6066b8d72e2912263",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:50:12.392Z",
+        "input": 1703,
+        "output": 634,
+        "cached": 38712,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:50:24.248Z",
+        "total": 41049,
+        "tools": [
+          "Write"
+        ]
+      },
+      {
+        "index": 16,
+        "id": "0217916762242763a391e43edef5299850de6066b8d72e274f1b0",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:50:26.413Z",
+        "input": 1409,
+        "output": 1186,
+        "cached": 39736,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:50:49.121Z",
+        "total": 42331,
+        "tools": [
+          "Write"
+        ]
+      },
+      {
+        "index": 17,
+        "id": "0217916762491753a391e43edef5299850de6066b8d72e24e07f5",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:50:51.716Z",
+        "input": 1669,
+        "output": 169,
+        "cached": 40760,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:50:54.406Z",
+        "total": 42598,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 18,
+        "id": "0217916762544353a391e43edef5299850de6066b8d72e26f0d31",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:51:01.224Z",
+        "input": 1339,
+        "output": 1175,
+        "cached": 41784,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:51:22.384Z",
+        "total": 44298,
+        "tools": [
+          "Write"
+        ]
+      },
+      {
+        "index": 19,
+        "id": "0217916762824753a391e43edef5299850de6066b8d72e2a5f4db",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:51:24.794Z",
+        "input": 1931,
+        "output": 609,
+        "cached": 42808,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:51:40.622Z",
+        "total": 45348,
+        "tools": [
+          "Write"
+        ]
+      },
+      {
+        "index": 20,
+        "id": "0217916763006903a391e43edef5299850de6066b8d72e2c6bb3f",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:51:42.994Z",
+        "input": 1725,
+        "output": 531,
+        "cached": 43832,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:51:53.201Z",
+        "total": 46088,
+        "tools": [
+          "Write"
+        ]
+      },
+      {
+        "index": 21,
+        "id": "0217916763132943a391e43edef5299850de6066b8d72e2b85a26",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:51:56.142Z",
+        "input": 1329,
+        "output": 3639,
+        "cached": 44856,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:52:56.469Z",
+        "total": 49824,
+        "tools": [
+          "Write"
+        ]
+      },
+      {
+        "index": 22,
+        "id": "0217916763765633a391e43edef5299850de6066b8d72e2c28490",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:52:58.969Z",
+        "input": 4039,
+        "output": 5579,
+        "cached": 45880,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:54:37.061Z",
+        "total": 55498,
+        "tools": [
+          "Write"
+        ]
+      },
+      {
+        "index": 23,
+        "id": "0217916764771583a391e43edef5299850de6066b8d72e28d3281",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:54:41.316Z",
+        "input": 6640,
+        "output": 346,
+        "cached": 48952,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:54:45.597Z",
+        "total": 55938,
+        "tools": [
+          "TodoWrite"
+        ]
+      },
+      {
+        "index": 24,
+        "id": "0217916764856483a391e43edef5299850de6066b8d72e249015f",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:54:47.416Z",
+        "input": 880,
+        "output": 141,
+        "cached": 55096,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:54:49.386Z",
+        "total": 56117,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 25,
+        "id": "0217916764894683a391e43edef5299850de6066b8d72e2f786b3",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:54:50.791Z",
+        "input": 1049,
+        "output": 178,
+        "cached": 55096,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:54:54.122Z",
+        "total": 56323,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 26,
+        "id": "0217916764942573a391e43edef5299850de6066b8d72e283fbf0",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:54:56.186Z",
+        "input": 333,
+        "output": 211,
+        "cached": 56120,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:55:00.028Z",
+        "total": 56664,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 27,
+        "id": "0217916765016453a391e43edef5299850de6066b8d72e240ba58",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:55:05.055Z",
+        "input": 802,
+        "output": 262,
+        "cached": 56120,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:55:10.465Z",
+        "total": 57184,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 28,
+        "id": "0217916765112213a391e43edef5299850de6066b8d72e2804610",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:55:13.631Z",
+        "input": 1205,
+        "output": 193,
+        "cached": 56120,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:55:16.833Z",
+        "total": 57518,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 29,
+        "id": "0217916765169793a391e43edef5299850de6066b8d72e23cd666",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:55:20.714Z",
+        "input": 1235,
+        "output": 2889,
+        "cached": 57144,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:56:34.038Z",
+        "total": 61268,
+        "tools": [
+          "Write"
+        ]
+      },
+      {
+        "index": 30,
+        "id": "0217916765941383a391e43edef5299850de6066b8d72e2d891e6",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:56:36.405Z",
+        "input": 3465,
+        "output": 248,
+        "cached": 58168,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:56:40.330Z",
+        "total": 61881,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 31,
+        "id": "0217916766063033a391e43edef5299850de6066b8d72e22243b5",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:56:48.180Z",
+        "input": 809,
+        "output": 73,
+        "cached": 61240,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:56:49.816Z",
+        "total": 62122,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 32,
+        "id": "0217916766098423a391e43edef5299850de6066b8d72e28717b4",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:56:55.169Z",
+        "input": 941,
+        "output": 70,
+        "cached": 61240,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:56:56.097Z",
+        "total": 62251,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 33,
+        "id": "0217916766162033a391e43edef5299850de6066b8d72e2546aea",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:56:58.076Z",
+        "input": 1167,
+        "output": 151,
+        "cached": 61240,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:57:00.163Z",
+        "total": 62558,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 34,
+        "id": "0217916766203823a391e43edef5299850de6066b8d72e2b52015",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:57:02.275Z",
+        "input": 1602,
+        "output": 281,
+        "cached": 62264,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:57:08.492Z",
+        "total": 64147,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 35,
+        "id": "0217916766287303a391e43edef5299850de6066b8d72e24d993d",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:57:11.138Z",
+        "input": 2168,
+        "output": 642,
+        "cached": 63288,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:57:27.214Z",
+        "total": 66098,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 36,
+        "id": "0217916766473013a391e43edef5299850de6066b8d72e2e98d31",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:57:30.537Z",
+        "input": 2070,
+        "output": 1270,
+        "cached": 65336,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:57:57.185Z",
+        "total": 68676,
+        "tools": [
+          "Edit",
+          "Edit",
+          "Edit"
+        ]
+      },
+      {
+        "index": 37,
+        "id": "0217916766772783a391e43edef5299850de6066b8d72e2644132",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:58:01.765Z",
+        "input": 1838,
+        "output": 1223,
+        "cached": 67384,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:58:20.740Z",
+        "total": 70445,
+        "tools": [
+          "Edit",
+          "Edit"
+        ]
+      },
+      {
+        "index": 38,
+        "id": "0217916767008103a391e43edef5299850de6066b8d72e2695d98",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:58:25.088Z",
+        "input": 2223,
+        "output": 399,
+        "cached": 68408,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:58:32.514Z",
+        "total": 71030,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 39,
+        "id": "0217916767181793a391e43edef5299850de6066b8d72e23b22fc",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:58:40.387Z",
+        "input": 784,
+        "output": 152,
+        "cached": 70456,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:58:42.503Z",
+        "total": 71392,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 40,
+        "id": "0217916767226573a391e43edef5299850de6066b8d72e26db9b3",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:58:46.275Z",
+        "input": 2245,
+        "output": 219,
+        "cached": 70456,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:58:49.863Z",
+        "total": 72920,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 41,
+        "id": "0217916767300753a391e43edef5299850de6066b8d72e2fbabaf",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:58:52.592Z",
+        "input": 1724,
+        "output": 1773,
+        "cached": 72504,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:59:37.983Z",
+        "total": 76001,
+        "tools": [
+          "Write",
+          "Write"
+        ]
+      },
+      {
+        "index": 42,
+        "id": "0217916767780823a391e43edef5299850de6066b8d72e2ae551e",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:59:41.897Z",
+        "input": 2921,
+        "output": 272,
+        "cached": 73528,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:59:47.277Z",
+        "total": 76721,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 43,
+        "id": "0217916767884633a391e43edef5299850de6066b8d72e2918bdc",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-10T23:59:51.101Z",
+        "input": 1274,
+        "output": 363,
+        "cached": 75576,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-10T23:59:59.645Z",
+        "total": 77213,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 44,
+        "id": "0217916767997573a391e43edef5299850de6066b8d72e2602fd5",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-11T00:00:02.170Z",
+        "input": 646,
+        "output": 626,
+        "cached": 76600,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:00:12.874Z",
+        "total": 77872,
+        "tools": [
+          "Edit",
+          "Edit"
+        ]
+      },
+      {
+        "index": 45,
+        "id": "0217916768129633a391e43edef5299850de6066b8d72e2f66489",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-11T00:00:15.358Z",
+        "input": 1456,
+        "output": 335,
+        "cached": 76600,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:00:20.434Z",
+        "total": 78391,
+        "tools": [
+          "TodoWrite"
+        ]
+      },
+      {
+        "index": 46,
+        "id": "0217916768204993a391e43edef5299850de6066b8d72e25c8b50",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-11T00:00:23.083Z",
+        "input": 805,
+        "output": 1170,
+        "cached": 77624,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:00:49.795Z",
+        "total": 79599,
+        "tools": [
+          "Agent"
+        ]
+      },
+      {
+        "index": 47,
+        "id": "0217916768498523a391e43edef5299850de6066b8d72e25727b7",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_yx0gj3g72p79oumf5ba1zutd",
+        "startedAt": "2026-10-11T00:00:51.702Z",
+        "input": 17100,
+        "output": 114,
+        "cached": 0,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:00:53.899Z",
+        "total": 17214,
+        "tools": [
+          "Bash",
+          "Bash"
+        ]
+      },
+      {
+        "index": 48,
+        "id": "0217916768499580b63b37cbca791937f2f41fb0469576d8bedf3",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-11T00:00:56.324Z",
+        "input": 44991,
+        "output": 106,
+        "cached": 29496,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:00:59.272Z",
+        "total": 74593,
+        "tools": []
+      },
+      {
+        "index": 49,
+        "id": "0217916768546563a391e43edef5299850de6066b8d72e2f4ea67",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_yx0gj3g72p79oumf5ba1zutd",
+        "startedAt": "2026-10-11T00:00:56.497Z",
+        "input": 2215,
+        "output": 334,
+        "cached": 16184,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:01:02.037Z",
+        "total": 18733,
+        "tools": [
+          "Bash",
+          "Read",
+          "Read"
+        ]
+      },
+      {
+        "index": 50,
+        "id": "0217916770164870b63b37cbca791937f2f41fb0469576db4d782",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_yx0gj3g72p79oumf5ba1zutd",
+        "startedAt": "2026-10-11T00:03:38.523Z",
+        "input": 706,
+        "output": 326,
+        "cached": 18232,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:03:43.528Z",
+        "total": 19264,
+        "tools": [
+          "Bash",
+          "Read",
+          "Read"
+        ]
+      },
+      {
+        "index": 51,
+        "id": "0217916770236150b63b37cbca791937f2f41fb0469576d4d1de3",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_yx0gj3g72p79oumf5ba1zutd",
+        "startedAt": "2026-10-11T00:03:47.695Z",
+        "input": 4102,
+        "output": 1127,
+        "cached": 18232,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:04:09.170Z",
+        "total": 23461,
+        "tools": [
+          "Bash",
+          "Read"
+        ]
+      },
+      {
+        "index": 52,
+        "id": "0217916770492580b63b37cbca791937f2f41fb0469576dbe5465",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_yx0gj3g72p79oumf5ba1zutd",
+        "startedAt": "2026-10-11T00:04:12.068Z",
+        "input": 5951,
+        "output": 1174,
+        "cached": 22328,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:04:39.443Z",
+        "total": 29453,
+        "tools": [
+          "Read",
+          "Read",
+          "Bash"
+        ]
+      },
+      {
+        "index": 53,
+        "id": "0217916770795760b63b37cbca791937f2f41fb0469576db36dda",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_yx0gj3g72p79oumf5ba1zutd",
+        "startedAt": "2026-10-11T00:04:41.566Z",
+        "input": 4071,
+        "output": 941,
+        "cached": 27448,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:05:02.578Z",
+        "total": 32460,
+        "tools": [
+          "Bash",
+          "Read"
+        ]
+      },
+      {
+        "index": 54,
+        "id": "0217916771026660b63b37cbca791937f2f41fb0469576d882bf1",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_yx0gj3g72p79oumf5ba1zutd",
+        "startedAt": "2026-10-11T00:05:04.419Z",
+        "input": 4633,
+        "output": 561,
+        "cached": 30520,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:05:18.428Z",
+        "total": 35714,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 55,
+        "id": "0217916771186020b63b37cbca791937f2f41fb0469576d58e970",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_yx0gj3g72p79oumf5ba1zutd",
+        "startedAt": "2026-10-11T00:05:20.108Z",
+        "input": 1255,
+        "output": 166,
+        "cached": 34616,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:05:22.714Z",
+        "total": 36037,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 56,
+        "id": "0217916771277910b63b37cbca791937f2f41fb0469576dd192a1",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_yx0gj3g72p79oumf5ba1zutd",
+        "startedAt": "2026-10-11T00:05:31.574Z",
+        "input": 642,
+        "output": 2138,
+        "cached": 35640,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:06:21.751Z",
+        "total": 38420,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 57,
+        "id": "0217916771856640b63b37cbca791937f2f41fb0469576d1bf258",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_yx0gj3g72p79oumf5ba1zutd",
+        "startedAt": "2026-10-11T00:06:30.582Z",
+        "input": 3078,
+        "output": 190,
+        "cached": 35640,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:06:34.031Z",
+        "total": 38908,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 58,
+        "id": "0217916771942000b63b37cbca791937f2f41fb0469576d524604",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_yx0gj3g72p79oumf5ba1zutd",
+        "startedAt": "2026-10-11T00:06:36.964Z",
+        "input": 436,
+        "output": 195,
+        "cached": 38712,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:06:40.318Z",
+        "total": 39343,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 59,
+        "id": "0217916772044550b63b37cbca791937f2f41fb0469576dc24336",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_yx0gj3g72p79oumf5ba1zutd",
+        "startedAt": "2026-10-11T00:06:48.330Z",
+        "input": 825,
+        "output": 670,
+        "cached": 38712,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:07:07.547Z",
+        "total": 40207,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 60,
+        "id": "0217916772276810b63b37cbca791937f2f41fb0469576d6d0291",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_yx0gj3g72p79oumf5ba1zutd",
+        "startedAt": "2026-10-11T00:07:12.680Z",
+        "input": 2211,
+        "output": 190,
+        "cached": 38712,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:07:15.541Z",
+        "total": 41113,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 61,
+        "id": "0217916772356440b63b37cbca791937f2f41fb0469576dd1e83e",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_yx0gj3g72p79oumf5ba1zutd",
+        "startedAt": "2026-10-11T00:07:18.374Z",
+        "input": 23268,
+        "output": 862,
+        "cached": 16184,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:07:35.377Z",
+        "total": 40314,
+        "tools": []
+      },
+      {
+        "index": 62,
+        "id": "0217916772555310b63b37cbca791937f2f41fb0469576dff488a",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-11T00:07:41.828Z",
+        "input": 47135,
+        "output": 669,
+        "cached": 28472,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:07:53.554Z",
+        "total": 76276,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 63,
+        "id": "0217916772736520b63b37cbca791937f2f41fb0469576da40c9f",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-11T00:07:55.884Z",
+        "input": 2105,
+        "output": 366,
+        "cached": 75576,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:08:00.602Z",
+        "total": 78047,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 64,
+        "id": "0217916772806830b63b37cbca791937f2f41fb0469576dfc8774",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-11T00:08:03.104Z",
+        "input": 521,
+        "output": 298,
+        "cached": 77624,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:08:09.099Z",
+        "total": 78443,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 65,
+        "id": "0217916772904480b63b37cbca791937f2f41fb0469576dfaad03",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-11T00:08:13.706Z",
+        "input": 950,
+        "output": 250,
+        "cached": 77624,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:08:17.080Z",
+        "total": 78824,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 66,
+        "id": "0217916773022370b63b37cbca791937f2f41fb0469576db8bb14",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-11T00:08:25.235Z",
+        "input": 1356,
+        "output": 326,
+        "cached": 77624,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:08:30.995Z",
+        "total": 79306,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 67,
+        "id": "0217916773163390b63b37cbca791937f2f41fb0469576da64f71",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-11T00:08:38.811Z",
+        "input": 1084,
+        "output": 535,
+        "cached": 78648,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:08:49.911Z",
+        "total": 80267,
+        "tools": [
+          "SendMessage"
+        ]
+      },
+      {
+        "index": 68,
+        "id": "021791677330083e78c31fe06d4434dfef0260629e4a08b7ff093",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-11T00:08:52.845Z",
+        "input": 4757,
+        "output": 29,
+        "cached": 75576,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:08:53.829Z",
+        "total": 80362,
+        "tools": []
+      },
+      {
+        "index": 69,
+        "id": "0217916773299790b63b37cbca791937f2f41fb0469576d45d451",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_zysoszeaz8rndkmenku9iv44",
+        "startedAt": "2026-10-11T00:08:52.861Z",
+        "input": 24303,
+        "output": 168,
+        "cached": 13112,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:08:55.629Z",
+        "total": 37583,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 70,
+        "id": "021791677335694e78c31fe06d4434dfef0260629e4a08b80e15b",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_zysoszeaz8rndkmenku9iv44",
+        "startedAt": "2026-10-11T00:08:57.450Z",
+        "input": 1860,
+        "output": 165,
+        "cached": 36664,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:09:01.415Z",
+        "total": 38689,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 71,
+        "id": "021791677342766e78c31fe06d4434dfef0260629e4a08b84e089",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_zysoszeaz8rndkmenku9iv44",
+        "startedAt": "2026-10-11T00:09:06.035Z",
+        "input": 2643,
+        "output": 170,
+        "cached": 37688,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:09:08.057Z",
+        "total": 40501,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 72,
+        "id": "021791677352211e78c31fe06d4434dfef0260629e4a08b925df5",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_zysoszeaz8rndkmenku9iv44",
+        "startedAt": "2026-10-11T00:09:14.474Z",
+        "input": 959,
+        "output": 770,
+        "cached": 39736,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:09:28.083Z",
+        "total": 41465,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 73,
+        "id": "021791677400178e78c31fe06d4434dfef0260629e4a08b972a6c",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_zysoszeaz8rndkmenku9iv44",
+        "startedAt": "2026-10-11T00:10:02.071Z",
+        "input": 1936,
+        "output": 948,
+        "cached": 39736,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:10:23.751Z",
+        "total": 42620,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 74,
+        "id": "021791677423933e78c31fe06d4434dfef0260629e4a08be959d2",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_zysoszeaz8rndkmenku9iv44",
+        "startedAt": "2026-10-11T00:10:25.517Z",
+        "input": 2032,
+        "output": 248,
+        "cached": 40760,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:10:30.057Z",
+        "total": 43040,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 75,
+        "id": "021791677430245e78c31fe06d4434dfef0260629e4a08bb1678f",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_zysoszeaz8rndkmenku9iv44",
+        "startedAt": "2026-10-11T00:10:31.550Z",
+        "input": 1428,
+        "output": 260,
+        "cached": 41784,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:10:35.894Z",
+        "total": 43472,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 76,
+        "id": "021791677436047e78c31fe06d4434dfef0260629e4a08b1ae71f",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_zysoszeaz8rndkmenku9iv44",
+        "startedAt": "2026-10-11T00:10:38.682Z",
+        "input": 988,
+        "output": 774,
+        "cached": 42808,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:10:51.924Z",
+        "total": 44570,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 77,
+        "id": "021791677454207e78c31fe06d4434dfef0260629e4a08b150198",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_zysoszeaz8rndkmenku9iv44",
+        "startedAt": "2026-10-11T00:10:55.897Z",
+        "input": 2052,
+        "output": 216,
+        "cached": 42808,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:10:59.638Z",
+        "total": 45076,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 78,
+        "id": "021791677461917e78c31fe06d4434dfef0260629e4a08bcf80c5",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_zysoszeaz8rndkmenku9iv44",
+        "startedAt": "2026-10-11T00:11:04.894Z",
+        "input": 578,
+        "output": 712,
+        "cached": 44856,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:11:15.878Z",
+        "total": 46146,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 79,
+        "id": "021791677478034e78c31fe06d4434dfef0260629e4a08b53f05a",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_zysoszeaz8rndkmenku9iv44",
+        "startedAt": "2026-10-11T00:11:20.447Z",
+        "input": 1513,
+        "output": 299,
+        "cached": 44856,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:11:24.762Z",
+        "total": 46668,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 80,
+        "id": "021791677495111e78c31fe06d4434dfef0260629e4a08bec5b13",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": "call_zysoszeaz8rndkmenku9iv44",
+        "startedAt": "2026-10-11T00:11:37.638Z",
+        "input": 892,
+        "output": 567,
+        "cached": 45880,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:11:49.221Z",
+        "total": 47339,
+        "tools": []
+      },
+      {
+        "index": 81,
+        "id": "021791677509321e78c31fe06d4434dfef0260629e4a08b9ec162",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-11T00:11:52.168Z",
+        "input": 2180,
+        "output": 342,
+        "cached": 79672,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:11:57.151Z",
+        "total": 82194,
+        "tools": [
+          "TodoWrite"
+        ]
+      },
+      {
+        "index": 82,
+        "id": "021791677517223e78c31fe06d4434dfef0260629e4a08b1c97c0",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-2",
+        "parent": null,
+        "startedAt": "2026-10-11T00:12:00.951Z",
+        "input": 513,
+        "output": 705,
+        "cached": 81720,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:12:16.895Z",
+        "total": 82938,
+        "tools": []
+      },
+      {
+        "index": 83,
+        "id": "021791677609031e4d5e3acd6b6d5c09c835e2d36b9596cd26e4f",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:13:45.286Z",
+        "input": 50685,
+        "output": 702,
+        "cached": 27448,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:13:49.115Z",
+        "total": 78835,
+        "tools": [
+          "TodoWrite"
+        ]
+      },
+      {
+        "index": 84,
+        "id": "021791677629150e4d5e3acd6b6d5c09c835e2d36b9596c5de107",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:13:51.606Z",
+        "input": 2457,
+        "output": 156,
+        "cached": 77624,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:13:54.084Z",
+        "total": 80237,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 85,
+        "id": "021791677634123e4d5e3acd6b6d5c09c835e2d36b9596cf85f77",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:13:56.807Z",
+        "input": 4964,
+        "output": 2800,
+        "cached": 79672,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:15:05.462Z",
+        "total": 87436,
+        "tools": [
+          "TodoWrite"
+        ]
+      },
+      {
+        "index": 86,
+        "id": "021791677705548e4d5e3acd6b6d5c09c835e2d36b9596c49e17d",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:15:09.432Z",
+        "input": 3820,
+        "output": 425,
+        "cached": 83768,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:15:16.718Z",
+        "total": 88013,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 87,
+        "id": "021791677716835e4d5e3acd6b6d5c09c835e2d36b9596ca3b97b",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:15:20.874Z",
+        "input": 1272,
+        "output": 208,
+        "cached": 86840,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:15:23.674Z",
+        "total": 88320,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 88,
+        "id": "021791677723773e4d5e3acd6b6d5c09c835e2d36b9596c64bb83",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:15:26.017Z",
+        "input": 555,
+        "output": 405,
+        "cached": 87864,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:15:31.163Z",
+        "total": 88824,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 89,
+        "id": "021791677731259e4d5e3acd6b6d5c09c835e2d36b9596c1841fa",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:15:33.646Z",
+        "input": 1059,
+        "output": 557,
+        "cached": 87864,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:15:43.936Z",
+        "total": 89480,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 90,
+        "id": "021791677744049e4d5e3acd6b6d5c09c835e2d36b9596cb13a3f",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:15:47.306Z",
+        "input": 782,
+        "output": 263,
+        "cached": 88888,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:15:50.904Z",
+        "total": 89933,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 91,
+        "id": "021791677750987e4d5e3acd6b6d5c09c835e2d36b9596c1fa55f",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:15:54.260Z",
+        "input": 1142,
+        "output": 380,
+        "cached": 88888,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:15:59.626Z",
+        "total": 90410,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 92,
+        "id": "021791677759705e4d5e3acd6b6d5c09c835e2d36b9596cb476e9",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:16:02.559Z",
+        "input": 595,
+        "output": 276,
+        "cached": 89912,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:16:06.673Z",
+        "total": 90783,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 93,
+        "id": "021791677766756e4d5e3acd6b6d5c09c835e2d36b9596ca1ed58",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:16:09.967Z",
+        "input": 968,
+        "output": 398,
+        "cached": 89912,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:16:15.672Z",
+        "total": 91278,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 94,
+        "id": "021791677775783e4d5e3acd6b6d5c09c835e2d36b9596c85e755",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:16:19.567Z",
+        "input": 1699,
+        "output": 379,
+        "cached": 89912,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:16:26.183Z",
+        "total": 91990,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 95,
+        "id": "021791677786256e4d5e3acd6b6d5c09c835e2d36b9596c23d673",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:16:28.966Z",
+        "input": 1151,
+        "output": 214,
+        "cached": 90936,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:16:31.471Z",
+        "total": 92301,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 96,
+        "id": "021791677791514e4d5e3acd6b6d5c09c835e2d36b9596c4759f5",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:16:34.684Z",
+        "input": 438,
+        "output": 230,
+        "cached": 91960,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:16:38.170Z",
+        "total": 92628,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 97,
+        "id": "021791677798245e4d5e3acd6b6d5c09c835e2d36b9596cead4b6",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:16:40.459Z",
+        "input": 765,
+        "output": 806,
+        "cached": 91960,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:16:52.075Z",
+        "total": 93531,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 98,
+        "id": "021791677812188e4d5e3acd6b6d5c09c835e2d36b9596c9e955d",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:16:54.667Z",
+        "input": 1669,
+        "output": 277,
+        "cached": 91960,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:16:58.331Z",
+        "total": 93906,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 99,
+        "id": "021791677818410e4d5e3acd6b6d5c09c835e2d36b9596cecb31c",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:17:00.968Z",
+        "input": 1019,
+        "output": 2380,
+        "cached": 92984,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:17:55.492Z",
+        "total": 96383,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 100,
+        "id": "021791677875601e4d5e3acd6b6d5c09c835e2d36b9596c7dcddc",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:17:59.302Z",
+        "input": 3495,
+        "output": 361,
+        "cached": 92984,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:18:03.777Z",
+        "total": 96840,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 101,
+        "id": "021791677883861e4d5e3acd6b6d5c09c835e2d36b9596c5efa1e",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:18:07.950Z",
+        "input": 880,
+        "output": 312,
+        "cached": 96056,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:18:13.658Z",
+        "total": 97248,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 102,
+        "id": "021791677893739e4d5e3acd6b6d5c09c835e2d36b9596c8c2526",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:18:16.382Z",
+        "input": 1288,
+        "output": 615,
+        "cached": 96056,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:18:26.135Z",
+        "total": 97959,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 103,
+        "id": "021791677906245e4d5e3acd6b6d5c09c835e2d36b9596cae1f0b",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:18:29.407Z",
+        "input": 1212,
+        "output": 578,
+        "cached": 97080,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:18:37.838Z",
+        "total": 98870,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 104,
+        "id": "021791677917922e4d5e3acd6b6d5c09c835e2d36b9596c32d0e5",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:18:40.358Z",
+        "input": 863,
+        "output": 878,
+        "cached": 98104,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:18:55.103Z",
+        "total": 99845,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 105,
+        "id": "021791677935188e4d5e3acd6b6d5c09c835e2d36b9596cba980b",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:18:58.718Z",
+        "input": 1837,
+        "output": 558,
+        "cached": 98104,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:19:09.406Z",
+        "total": 100499,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 106,
+        "id": "021791677949513e4d5e3acd6b6d5c09c835e2d36b9596c945b92",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:19:12.908Z",
+        "input": 1467,
+        "output": 402,
+        "cached": 99128,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:19:17.903Z",
+        "total": 100997,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 107,
+        "id": "021791677957981e4d5e3acd6b6d5c09c835e2d36b9596c3a870b",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:19:20.345Z",
+        "input": 941,
+        "output": 572,
+        "cached": 100152,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:19:30.289Z",
+        "total": 101665,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 108,
+        "id": "021791677970367e4d5e3acd6b6d5c09c835e2d36b9596c5cfa05",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:19:33.047Z",
+        "input": 1613,
+        "output": 159,
+        "cached": 100152,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:19:35.366Z",
+        "total": 101924,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 109,
+        "id": "021791677977563e4d5e3acd6b6d5c09c835e2d36b9596cf19bc3",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:19:39.548Z",
+        "input": 853,
+        "output": 3438,
+        "cached": 101176,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:20:40.907Z",
+        "total": 105467,
+        "tools": [
+          "Write"
+        ]
+      },
+      {
+        "index": 110,
+        "id": "021791678041008e4d5e3acd6b6d5c09c835e2d36b9596c78185a",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:20:43.625Z",
+        "input": 4626,
+        "output": 238,
+        "cached": 101176,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:20:46.192Z",
+        "total": 106040,
+        "tools": [
+          "TodoWrite"
+        ]
+      },
+      {
+        "index": 111,
+        "id": "021791678046216e4d5e3acd6b6d5c09c835e2d36b9596cfb3b06",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:20:48.430Z",
+        "input": 806,
+        "output": 187,
+        "cached": 105272,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:20:51.520Z",
+        "total": 106265,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 112,
+        "id": "021791678051601e4d5e3acd6b6d5c09c835e2d36b9596cf9fb04",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:20:54.477Z",
+        "input": 1088,
+        "output": 111,
+        "cached": 105272,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:20:55.832Z",
+        "total": 106471,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 113,
+        "id": "021791678055889e4d5e3acd6b6d5c09c835e2d36b9596c15c543",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:20:58.996Z",
+        "input": 1017,
+        "output": 497,
+        "cached": 106296,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:21:06.690Z",
+        "total": 107810,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 114,
+        "id": "021791678066766e4d5e3acd6b6d5c09c835e2d36b9596c6f06eb",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:21:09.450Z",
+        "input": 1609,
+        "output": 487,
+        "cached": 106296,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:21:17.508Z",
+        "total": 108392,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 115,
+        "id": "021791678077622e4d5e3acd6b6d5c09c835e2d36b9596cf3d20f",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:21:20.923Z",
+        "input": 1167,
+        "output": 699,
+        "cached": 107320,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:21:31.725Z",
+        "total": 109186,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 116,
+        "id": "021791678091804e4d5e3acd6b6d5c09c835e2d36b9596ca7ced8",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:21:35.769Z",
+        "input": 937,
+        "output": 285,
+        "cached": 108344,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:21:40.534Z",
+        "total": 109566,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 117,
+        "id": "021791678100616e4d5e3acd6b6d5c09c835e2d36b9596c9ff39a",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:21:45.707Z",
+        "input": 1317,
+        "output": 247,
+        "cached": 108344,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:21:48.717Z",
+        "total": 109908,
+        "tools": [
+          "TodoWrite"
+        ]
+      },
+      {
+        "index": 118,
+        "id": "021791678108809e4d5e3acd6b6d5c09c835e2d36b9596cc6060a",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:21:51.084Z",
+        "input": 578,
+        "output": 265,
+        "cached": 109368,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:21:54.884Z",
+        "total": 110211,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 119,
+        "id": "021791678115669e4d5e3acd6b6d5c09c835e2d36b9596c66bcd7",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:21:58.158Z",
+        "input": 1438,
+        "output": 220,
+        "cached": 109368,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:22:01.454Z",
+        "total": 111026,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 120,
+        "id": "021791678121580e4d5e3acd6b6d5c09c835e2d36b9596cdb209e",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:22:04.624Z",
+        "input": 1481,
+        "output": 242,
+        "cached": 110392,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:22:07.873Z",
+        "total": 112115,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 121,
+        "id": "021791678131927e4d5e3acd6b6d5c09c835e2d36b9596c89dffc",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:22:14.646Z",
+        "input": 1291,
+        "output": 633,
+        "cached": 111416,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:22:26.041Z",
+        "total": 113340,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 122,
+        "id": "021791678146307e4d5e3acd6b6d5c09c835e2d36b9596c4a56f0",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:22:28.649Z",
+        "input": 2030,
+        "output": 370,
+        "cached": 112440,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:22:36.316Z",
+        "total": 114840,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 123,
+        "id": "021791678156403e4d5e3acd6b6d5c09c835e2d36b9596ca01709",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:22:39.483Z",
+        "input": 2607,
+        "output": 370,
+        "cached": 113464,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:22:47.783Z",
+        "total": 116441,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 124,
+        "id": "021791678167878e4d5e3acd6b6d5c09c835e2d36b9596cc2c78b",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:22:50.579Z",
+        "input": 1030,
+        "output": 285,
+        "cached": 115512,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:22:54.750Z",
+        "total": 116827,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 125,
+        "id": "021791678174832e4d5e3acd6b6d5c09c835e2d36b9596c3fa7ce",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:22:58.202Z",
+        "input": 392,
+        "output": 207,
+        "cached": 116536,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:23:00.773Z",
+        "total": 117135,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 126,
+        "id": "021791678180882e4d5e3acd6b6d5c09c835e2d36b9596c2c99be",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:23:03.348Z",
+        "input": 936,
+        "output": 288,
+        "cached": 116536,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:23:08.681Z",
+        "total": 117760,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 127,
+        "id": "021791678188763e4d5e3acd6b6d5c09c835e2d36b9596c297874",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:23:12.443Z",
+        "input": 1325,
+        "output": 241,
+        "cached": 116536,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:23:15.922Z",
+        "total": 118102,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 128,
+        "id": "021791678211698e4d5e3acd6b6d5c09c835e2d36b9596c276b25",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:23:34.832Z",
+        "input": 737,
+        "output": 205,
+        "cached": 117560,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:23:38.077Z",
+        "total": 118502,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 129,
+        "id": "021791678218254e4d5e3acd6b6d5c09c835e2d36b9596c2e381a",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:23:41.257Z",
+        "input": 2226,
+        "output": 2161,
+        "cached": 117560,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:24:38.073Z",
+        "total": 121947,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 130,
+        "id": "021791678280180e4d5e3acd6b6d5c09c835e2d36b9596cd82b3c",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:24:44.836Z",
+        "input": 2503,
+        "output": 511,
+        "cached": 119608,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:24:56.365Z",
+        "total": 122622,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 131,
+        "id": "021791678296458e4d5e3acd6b6d5c09c835e2d36b9596c79d6ec",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:24:59.186Z",
+        "input": 2250,
+        "output": 260,
+        "cached": 121656,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:25:04.905Z",
+        "total": 124166,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 132,
+        "id": "021791678305126e4d5e3acd6b6d5c09c835e2d36b9596c546731",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:25:12.262Z",
+        "input": 39728,
+        "output": 405,
+        "cached": 77624,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:25:20.562Z",
+        "total": 117757,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 133,
+        "id": "021791678331411e4d5e3acd6b6d5c09c835e2d36b9596cbfe6d1",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:25:35.891Z",
+        "input": 1250,
+        "output": 256,
+        "cached": 116536,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:25:39.545Z",
+        "total": 118042,
+        "tools": [
+          "TodoWrite"
+        ]
+      },
+      {
+        "index": 134,
+        "id": "021791678339607e4d5e3acd6b6d5c09c835e2d36b9596c29b98b",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:25:42.680Z",
+        "input": 588,
+        "output": 1249,
+        "cached": 117560,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:26:09.482Z",
+        "total": 119397,
+        "tools": [
+          "Agent"
+        ]
+      },
+      {
+        "index": 135,
+        "id": "021791678369553e4d5e3acd6b6d5c09c835e2d36b9596cb97244",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:26:11.191Z",
+        "input": 3158,
+        "output": 122,
+        "cached": 14136,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:26:13.190Z",
+        "total": 17416,
+        "tools": [
+          "Bash",
+          "Bash"
+        ]
+      },
+      {
+        "index": 136,
+        "id": "02179167836966739b5b0f4b57789945865e795386c353044121e",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:26:12.762Z",
+        "input": 3285,
+        "output": 247,
+        "cached": 116536,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:26:20.770Z",
+        "total": 120068,
+        "tools": []
+      },
+      {
+        "index": 137,
+        "id": "021791678373297e4d5e3acd6b6d5c09c835e2d36b9596cbc3253",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:26:15.146Z",
+        "input": 1752,
+        "output": 214,
+        "cached": 17208,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:26:18.256Z",
+        "total": 19174,
+        "tools": [
+          "Read",
+          "Read"
+        ]
+      },
+      {
+        "index": 138,
+        "id": "021791678378316e4d5e3acd6b6d5c09c835e2d36b9596cb18472",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:26:20.729Z",
+        "input": 7779,
+        "output": 368,
+        "cached": 18232,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:26:29.190Z",
+        "total": 26379,
+        "tools": [
+          "Read",
+          "Read"
+        ]
+      },
+      {
+        "index": 139,
+        "id": "02179167838925739b5b0f4b57789945865e795386c3530c31ef4",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:26:30.515Z",
+        "input": 3005,
+        "output": 260,
+        "cached": 25400,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:26:35.229Z",
+        "total": 28665,
+        "tools": [
+          "Bash",
+          "Bash",
+          "Grep"
+        ]
+      },
+      {
+        "index": 140,
+        "id": "02179167839533739b5b0f4b57789945865e795386c35308285e6",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:26:39.454Z",
+        "input": 1697,
+        "output": 249,
+        "cached": 27448,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:26:44.695Z",
+        "total": 29394,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 141,
+        "id": "02179167840480639b5b0f4b57789945865e795386c3530bfa648",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:26:47.047Z",
+        "input": 10123,
+        "output": 369,
+        "cached": 28472,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:26:53.308Z",
+        "total": 38964,
+        "tools": [
+          "Read",
+          "Read",
+          "Read"
+        ]
+      },
+      {
+        "index": 142,
+        "id": "02179167841336739b5b0f4b57789945865e795386c3530951176",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:26:54.971Z",
+        "input": 5481,
+        "output": 224,
+        "cached": 37688,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:26:59.145Z",
+        "total": 43393,
+        "tools": [
+          "Bash",
+          "Read"
+        ]
+      },
+      {
+        "index": 143,
+        "id": "02179167841922239b5b0f4b57789945865e795386c3530b90da7",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:27:01.253Z",
+        "input": 3035,
+        "output": 263,
+        "cached": 42808,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:27:06.578Z",
+        "total": 46106,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 144,
+        "id": "02179167842670839b5b0f4b57789945865e795386c3530945d3a",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:27:08.990Z",
+        "input": 1360,
+        "output": 79,
+        "cached": 44856,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:27:10.011Z",
+        "total": 46295,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 145,
+        "id": "02179167843012139b5b0f4b57789945865e795386c3530a0969a",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:27:12.032Z",
+        "input": 1338,
+        "output": 1893,
+        "cached": 45880,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:28:08.388Z",
+        "total": 49111,
+        "tools": [
+          "TodoWrite"
+        ]
+      },
+      {
+        "index": 146,
+        "id": "02179167848846039b5b0f4b57789945865e795386c3530bd2aa2",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:28:11.597Z",
+        "input": 2427,
+        "output": 70,
+        "cached": 46904,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:28:12.688Z",
+        "total": 49401,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 147,
+        "id": "02179167849277139b5b0f4b57789945865e795386c35309d5d92",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:28:15.343Z",
+        "input": 648,
+        "output": 3582,
+        "cached": 48952,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:29:22.012Z",
+        "total": 53182,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 148,
+        "id": "02179167856215939b5b0f4b57789945865e795386c3530577bdb",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:29:24.501Z",
+        "input": 4317,
+        "output": 343,
+        "cached": 48952,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:29:29.308Z",
+        "total": 53612,
+        "tools": [
+          "TodoWrite",
+          "Bash"
+        ]
+      },
+      {
+        "index": 149,
+        "id": "02179167858782439b5b0f4b57789945865e795386c3530fa4ce7",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:29:52.597Z",
+        "input": 1811,
+        "output": 710,
+        "cached": 53048,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:30:09.661Z",
+        "total": 55569,
+        "tools": [
+          "TodoWrite",
+          "Bash"
+        ]
+      },
+      {
+        "index": 150,
+        "id": "02179167862821439b5b0f4b57789945865e795386c35308b32fe",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:30:29.921Z",
+        "input": 2461,
+        "output": 1726,
+        "cached": 54072,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:31:13.309Z",
+        "total": 58259,
+        "tools": [
+          "Bash",
+          "Bash"
+        ]
+      },
+      {
+        "index": 151,
+        "id": "02179167867546339b5b0f4b57789945865e795386c3530677d7d",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:31:20.575Z",
+        "input": 2841,
+        "output": 387,
+        "cached": 56120,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:31:32.749Z",
+        "total": 59348,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 152,
+        "id": "02179167869307939b5b0f4b57789945865e795386c3530eb9ff6",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:31:35.943Z",
+        "input": 1511,
+        "output": 190,
+        "cached": 58168,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:31:38.664Z",
+        "total": 59869,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 153,
+        "id": "02179167870390539b5b0f4b57789945865e795386c3530fcc832",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:31:46.026Z",
+        "input": 792,
+        "output": 234,
+        "cached": 59192,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:31:50.915Z",
+        "total": 60218,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 154,
+        "id": "02179167871628739b5b0f4b57789945865e795386c3530d82533",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:31:57.850Z",
+        "input": 1124,
+        "output": 181,
+        "cached": 59192,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:32:00.342Z",
+        "total": 60497,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 155,
+        "id": "02179167873645539b5b0f4b57789945865e795386c3530976532",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:32:18.216Z",
+        "input": 385,
+        "output": 586,
+        "cached": 60216,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:32:31.625Z",
+        "total": 61187,
+        "tools": [
+          "Bash",
+          "TodoWrite"
+        ]
+      },
+      {
+        "index": 156,
+        "id": "02179167886482439b5b0f4b57789945865e795386c353042f14a",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_maqs6fkwhlytktugpj7vepse",
+        "startedAt": "2026-10-11T00:34:27.923Z",
+        "input": 1134,
+        "output": 649,
+        "cached": 60216,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:34:44.561Z",
+        "total": 61999,
+        "tools": []
+      },
+      {
+        "index": 157,
+        "id": "02179167888469839b5b0f4b57789945865e795386c35304fb321",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:34:52.155Z",
+        "input": 44112,
+        "output": 798,
+        "cached": 76600,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:35:11.109Z",
+        "total": 121510,
+        "tools": [
+          "Edit"
+        ]
+      },
+      {
+        "index": 158,
+        "id": "02179167891124439b5b0f4b57789945865e795386c353054ba84",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:35:16.039Z",
+        "input": 2283,
+        "output": 353,
+        "cached": 120632,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:35:22.393Z",
+        "total": 123268,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 159,
+        "id": "02179167894512239b5b0f4b57789945865e795386c353059c3e9",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:35:49.144Z",
+        "input": 680,
+        "output": 690,
+        "cached": 122680,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:36:01.709Z",
+        "total": 124050,
+        "tools": [
+          "SendMessage"
+        ]
+      },
+      {
+        "index": 160,
+        "id": "02179167896178739b5b0f4b57789945865e795386c3530afc3b3",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_z2wlj9eb1p59xt9w5z6vv4as",
+        "startedAt": "2026-10-11T00:36:05.673Z",
+        "input": 41313,
+        "output": 733,
+        "cached": 14136,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:36:23.289Z",
+        "total": 56182,
+        "tools": [
+          "Read"
+        ]
+      },
+      {
+        "index": 161,
+        "id": "02179167896189875251d478e5bf6426f4e0f08f6c1b20043ff1a",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:36:06.288Z",
+        "input": 3407,
+        "output": 59,
+        "cached": 120632,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:36:08.127Z",
+        "total": 124098,
+        "tools": []
+      },
+      {
+        "index": 162,
+        "id": "02179167898338975251d478e5bf6426f4e0f08f6c1b2006afc1c",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_z2wlj9eb1p59xt9w5z6vv4as",
+        "startedAt": "2026-10-11T00:36:25.420Z",
+        "input": 1425,
+        "output": 2926,
+        "cached": 55096,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:37:25.668Z",
+        "total": 59447,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 163,
+        "id": "02179167904582175251d478e5bf6426f4e0f08f6c1b2008e0418",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_z2wlj9eb1p59xt9w5z6vv4as",
+        "startedAt": "2026-10-11T00:37:27.985Z",
+        "input": 3517,
+        "output": 169,
+        "cached": 56120,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:37:30.304Z",
+        "total": 59806,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 164,
+        "id": "02179167905623775251d478e5bf6426f4e0f08f6c1b200ae1f20",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_z2wlj9eb1p59xt9w5z6vv4as",
+        "startedAt": "2026-10-11T00:37:37.931Z",
+        "input": 955,
+        "output": 921,
+        "cached": 59192,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:37:57.079Z",
+        "total": 61068,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 165,
+        "id": "02179167907909075251d478e5bf6426f4e0f08f6c1b200f24a05",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_z2wlj9eb1p59xt9w5z6vv4as",
+        "startedAt": "2026-10-11T00:38:01.058Z",
+        "input": 2112,
+        "output": 623,
+        "cached": 59192,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:38:21.884Z",
+        "total": 61927,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 166,
+        "id": "02179167910214475251d478e5bf6426f4e0f08f6c1b200e42ee4",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_z2wlj9eb1p59xt9w5z6vv4as",
+        "startedAt": "2026-10-11T00:38:24.536Z",
+        "input": 1836,
+        "output": 436,
+        "cached": 61240,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:38:31.806Z",
+        "total": 63512,
+        "tools": [
+          "Bash"
+        ]
+      },
+      {
+        "index": 167,
+        "id": "02179167911742675251d478e5bf6426f4e0f08f6c1b200b0270f",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_z2wlj9eb1p59xt9w5z6vv4as",
+        "startedAt": "2026-10-11T00:38:38.847Z",
+        "input": 1701,
+        "output": 309,
+        "cached": 62264,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:38:45.425Z",
+        "total": 64274,
+        "tools": [
+          "Bash",
+          "Bash"
+        ]
+      },
+      {
+        "index": 168,
+        "id": "02179167913127275251d478e5bf6426f4e0f08f6c1b20020ee37",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": "call_z2wlj9eb1p59xt9w5z6vv4as",
+        "startedAt": "2026-10-11T00:38:52.982Z",
+        "input": 1369,
+        "output": 350,
+        "cached": 63288,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:39:02.591Z",
+        "total": 65007,
+        "tools": []
+      },
+      {
+        "index": 169,
+        "id": "02179167914273175251d478e5bf6426f4e0f08f6c1b200ee782a",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:39:07.099Z",
+        "input": 1081,
+        "output": 237,
+        "cached": 123704,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:39:10.216Z",
+        "total": 125022,
+        "tools": [
+          "TodoWrite"
+        ]
+      },
+      {
+        "index": 170,
+        "id": "02179167915030375251d478e5bf6426f4e0f08f6c1b200c4bb75",
+        "turn": "beegame-turn-beegame_eeb062b506f2405aa776654d4ed37b6a-3",
+        "parent": null,
+        "startedAt": "2026-10-11T00:39:13.689Z",
+        "input": 332,
+        "output": 734,
+        "cached": 124728,
+        "created": 0,
+        "complete": true,
+        "finishedAt": "2026-10-11T00:39:29.116Z",
+        "total": 125794,
+        "tools": []
+      }
+    ],
+    "reportedTotals": {
+      "input": 658645,
+      "cached": 11148480,
+      "output": 104818,
+      "total": 11911943
+    },
+    "completeRequests": 169,
+    "incompleteRequests": 1
+  },
+  "functionalChecks": {
+    "independentBfsCases": 4384,
+    "levelPars": [
+      3,
+      5,
+      7
+    ],
+    "newHintRules": true,
+    "pauseUndoResetReplay": true,
+    "independentLandscapeViewports": [
+      [
+        844,
+        390
+      ],
+      [
+        667,
+        375
+      ]
+    ],
+    "finalBrowserScript": "./assets/index-CkI-CRGA.js",
+    "finalJsHash": "4e774053e98f72fc293071afb78ef356753ce4a942ea1f8868f542d6e6e064bb",
+    "finalScreenshot": "/private/tmp/bgs-v3-tide-final-1.1.0-2026-10-11.png",
+    "sameFinalBuildVerified": true,
+    "nativeUnitTests": 14,
+    "nativeIndependentChecksPerMode": 73,
+    "nativeTargetedAudioSchedulingChecked": true,
+    "realTouchAndAudibleMix": "not-verified",
+    "professionalSkillCalls": 0
+  },
+  "regressions": {
+    "initialTargeted": {
+      "passed": 75,
+      "failed": 0,
+      "files": 4,
+      "expects": 335
+    },
+    "finalSubset": {
+      "passed": 21,
+      "failed": 0,
+      "files": 2,
+      "expects": 170,
+      "overlapsInitial": true
+    },
+    "finalDebugAfterRemoval": {
+      "passed": 2,
+      "failed": 0,
+      "expects": 23
+    },
+    "typescriptExitCode": 0,
+    "sandboxAttempt": {
+      "passed": 18,
+      "failed": 3,
+      "reason": "Loopback server binding failed; identical source passed outside sandbox"
+    }
+  },
+  "permissionsDenied": [
+    {
+      "id": "call_way5j0181ad1gquljlhhrnqs",
+      "requestedAt": "2026-10-11T00:00:59.138Z",
+      "resolvedAt": "2026-10-11T00:03:36.382Z",
+      "decision": "deny",
+      "target": "unresolved $TMPDIR/distcheck"
+    },
+    {
+      "id": "call_4ntpmss4d4vwb0tu0dkl0mel",
+      "requestedAt": "2026-10-11T00:32:28.913Z",
+      "resolvedAt": "2026-10-11T00:34:24.748Z",
+      "decision": "deny",
+      "target": "unresolved $TMPDIR/probe"
+    }
+  ],
+  "protectedUnchanged": {
+    "src": {
+      "files": 2445,
+      "sha256": "c9ebce9fd4a0a161bd6d686866eca1ca645f39f45e0c4f4bad87e119393534d6"
+    },
+    "packages/builtin-tools": {
+      "files": 383,
+      "sha256": "6ea20f3920b4217d60e6eb11f6adf31bc89dd47859708c83259c68f936f85461"
+    },
+    "apps/frontend": {
+      "files": 508,
+      "sha256": "2ba3b642e4fa584b4b488e912f79853fdba122d8b38c2dcf33fa29928e52e091"
+    }
+  },
+  "workflowSourceHashes": {
+    "app.ts": {
+      "bytes": 294907,
+      "sha256": "7d507791795e8566db4aac6bbd2bb8b6e660606e9b2d494bb490cc27b0962167"
+    },
+    "beegame/workflow-v3/agent-goal.ts": {
+      "bytes": 18345,
+      "sha256": "8ee4156b5d16e1d1b94361418f2d48fe646006d3e278124c0195dadf6cb15f43"
+    },
+    "beegame/workflow-v3/agent-tools.ts": {
+      "bytes": 5998,
+      "sha256": "ee0ec8116e80efdc11828f8591f5e09af23ed05ddf14d60e8bd65a2b7b8b5732"
+    },
+    "beegame/workflow-v3/routes.ts": {
+      "bytes": 31098,
+      "sha256": "740fb8d4eccee7bdff5cd0a46c02f09ab1c5ca0f6e42db8ac62e6d3fcb5ee2c4"
+    },
+    "beegame/workflow-v3/store.ts": {
+      "bytes": 12572,
+      "sha256": "6673f689efe9b2a7cf99d323e41100cee2874d8dbfed02301959fda8b3f7ff10"
+    },
+    "beegame/workflow-v3/agent-goal.test.ts": {
+      "bytes": 28688,
+      "sha256": "4b8c144e6c1d0cf46f6ec969676fdc806018a657ffef23c580e8e124a733ae4f"
+    },
+    "beegame/workflow-v3/agent-tools.test.ts": {
+      "bytes": 9673,
+      "sha256": "843318dd259174357bbd062e51af38c4f16894b05e2a78ba83d951037c5b104f"
+    },
+    "beegame/workflow-v3/agent-goal-native.test.ts": {
+      "bytes": 17035,
+      "sha256": "208c784ee55b67d493a6746c2201320b00e616268b96e3c21cff60ae86c78c72"
+    }
+  },
+  "debugSourceHashes": {
+    "packages/agent-workflow-server/src/beegame/workflow-v3/debug.html": {
+      "bytes": 8064,
+      "sha256": "b7e3c3399d6cae021362d782a046c1f1cfe5b38ed44551f11f4de474f01e5d19"
+    },
+    "packages/agent-workflow-server/src/beegame/workflow-v3/debug-client.js": {
+      "bytes": 21357,
+      "sha256": "60e5d2b38bb2f959d555040ae97cc55bda9371e1c30da786aa6a0ee1a1e1c3cb"
+    },
+    "packages/agent-workflow-server/src/beegame/workflow-v3/debug-page.test.ts": {
+      "bytes": 3353,
+      "sha256": "abbb721920b0f889c5cb8952a08fd98d6ac86a4c8eb2d40b29d7e064813a6d44"
+    },
+    "scripts/serve-workflow-v3-paid-debug.ts": {
+      "bytes": 5701,
+      "sha256": "05a90d25008046b540ef605497d175703286c22d642a287867b403af16ab7d03"
+    }
+  },
+  "limitations": [
+    "Old polluted project history not manually repaired or proven recovered",
+    "Normal legacy candidate Preview route returns 409 v3-route-required; newly-added unsupported debug controls removed, no guard bypass",
+    "No professional Skill invocation evidence despite initial brief asking for them",
+    "Cost remains excessive; no claim of optimization or complete high-quality delivery",
+    "Real-device touch, audible mix and game fun not fully accepted",
+    "Formal frontend and V3 preview/export/release bridge not connected; deliveryEligible remains false",
+    "Same-tick synthetic H double-dispatch can double consume before repaint; independent native review retained this as nonblocking automation edge"
+  ]
+}

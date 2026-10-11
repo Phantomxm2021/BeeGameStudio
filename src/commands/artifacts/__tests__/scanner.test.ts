@@ -32,6 +32,32 @@ function userToolResult(id: string, content: string, isError = false): Message {
 }
 
 describe('extractArtifacts', () => {
+  test('indexes results once, including preceding and duplicate results', () => {
+    let inspections = 0
+    const messages: Message[] = []
+    for (let i = 0; i < 100; i++) {
+      messages.push(
+        userToolResult('t' + i, 'first', true),
+        assistantToolUse('t' + i, { file_path: '/tmp/' + i + '.html' }),
+        userToolResult('t' + i, 'second', false),
+      )
+    }
+    const tracked = messages.map(
+      message =>
+        new Proxy(message, {
+          get(target, key, receiver) {
+            if (key === 'type') inspections++
+            return Reflect.get(target, key, receiver)
+          },
+        }),
+    )
+    const results = extractArtifacts(tracked)
+    expect(results).toHaveLength(100)
+    expect(results.every(result => result.isError)).toBe(true)
+    expect(results[0]!.basename).toBe('99.html')
+    expect(inspections).toBeLessThanOrEqual(messages.length * 3)
+  })
+
   test('returns empty list when no artifact tool_use messages', () => {
     expect(extractArtifacts([])).toEqual([])
     expect(

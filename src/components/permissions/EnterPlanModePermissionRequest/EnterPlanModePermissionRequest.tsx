@@ -1,6 +1,6 @@
 import React from 'react';
 import { handlePlanModeTransition } from '../../../bootstrap/state.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -38,10 +38,10 @@ export function EnterPlanModePermissionRequest({
   return (
     <PermissionDialog color="planMode" title="Enter plan mode?" workerBadge={workerBadge}>
       <Box flexDirection="column" marginTop={1} paddingX={1}>
-        <Text>Claude wants to enter plan mode to explore and design an implementation approach.</Text>
+        <Text>BGS wants to enter plan mode to explore and design an implementation approach.</Text>
 
         <Box marginTop={1} flexDirection="column">
-          <Text dimColor>In plan mode, Claude will:</Text>
+          <Text dimColor>In plan mode, BGS will:</Text>
           <Text dimColor> · Explore the codebase thoroughly</Text>
           <Text dimColor> · Identify existing patterns</Text>
           <Text dimColor> · Design an implementation strategy</Text>

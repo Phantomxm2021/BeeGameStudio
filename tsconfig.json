@@ -13,6 +13,9 @@
     "resolveJsonModule": true,
     "types": ["bun"],
     "paths": {
+      "@bee-game-studio/ink": ["./packages/@ant/ink/src/index.ts"],
+      "@beegame/scene-editor": ["./packages/scene-editor/src/index.ts"],
+      "@beegame/scene-editor/platform": ["./packages/scene-editor/src/platform.ts"],
       "src/*": ["./src/*"],
       "@bee-game-studio/builtin-tools/*": ["./packages/builtin-tools/src/*"],
       "@bee-game-studio/builtin-tools": [

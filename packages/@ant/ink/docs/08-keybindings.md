@@ -18,7 +18,7 @@ KeybindingSetup (loads config)
 Loads and validates keybinding configuration at app startup.
 
 ```tsx
-import { KeybindingSetup } from '@anthropic/ink'
+import { KeybindingSetup } from '@bee-game-studio/ink'
 
 <KeybindingSetup
   loadBindings={() => parseUserKeybindings(configFile)}
@@ -74,7 +74,7 @@ Context provider that holds binding state and resolution logic. Automatically pr
 Register a handler for a keybinding action.
 
 ```tsx
-import { useKeybinding } from '@anthropic/ink'
+import { useKeybinding } from '@bee-game-studio/ink'
 
 function MyComponent() {
   useKeybinding('app:toggleTodos', () => {
@@ -112,7 +112,7 @@ function useKeybinding(
 Register multiple handlers in one hook (reduces `useInput` overhead).
 
 ```tsx
-import { useKeybindings } from '@anthropic/ink'
+import { useKeybindings } from '@bee-game-studio/ink'
 
 useKeybindings({
   'chat:submit': () => handleSubmit(),
@@ -133,7 +133,7 @@ Contexts allow the same key to perform different actions depending on what's act
 
 ```tsx
 // Register a context as active
-import { useRegisterKeybindingContext } from '@anthropic/ink'
+import { useRegisterKeybindingContext } from '@bee-game-studio/ink'
 
 function ThemePicker({ isOpen }) {
   useRegisterKeybindingContext('ThemePicker', isOpen)
@@ -167,7 +167,7 @@ When a chord prefix is pressed:
 ## KeybindingContext Hook
 
 ```tsx
-import { useKeybindingContext, useOptionalKeybindingContext } from '@anthropic/ink'
+import { useKeybindingContext, useOptionalKeybindingContext } from '@bee-game-studio/ink'
 
 const ctx = useKeybindingContext()
 // ctx.resolve(input, key, contexts)  → ResolveResult
@@ -195,7 +195,7 @@ import {
   keystrokeToDisplayString,
   chordToDisplayString,
   parseBindings,
-} from '@anthropic/ink'
+} from '@bee-game-studio/ink'
 ```
 
 ### `parseKeystroke(str)`
@@ -244,7 +244,7 @@ parseBindings([
 ## Match Functions
 
 ```tsx
-import { getKeyName, matchesKeystroke, matchesBinding } from '@anthropic/ink'
+import { getKeyName, matchesKeystroke, matchesBinding } from '@bee-game-studio/ink'
 ```
 
 ### `getKeyName(input, key)`
@@ -270,7 +270,7 @@ Check if raw input matches any keystroke in a binding's chord.
 ## Resolver Functions
 
 ```tsx
-import { resolveKey, resolveKeyWithChordState, getBindingDisplayText } from '@anthropic/ink'
+import { resolveKey, resolveKeyWithChordState, getBindingDisplayText } from '@bee-game-studio/ink'
 ```
 
 ### `resolveKey(input, key, contexts, bindings)`

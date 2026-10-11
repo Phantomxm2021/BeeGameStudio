@@ -265,6 +265,7 @@ describe('AcpAgent', () => {
       const res = await agent.initialize({} as any)
       expect(res.protocolVersion).toBeDefined()
       expect(res.agentInfo?.name).toBe('claude-code')
+      expect(res.agentInfo?.title).toBe('BGS')
       expect(typeof res.agentInfo?.version).toBe('string')
     })
 

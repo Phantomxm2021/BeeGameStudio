@@ -27,9 +27,6 @@ import {
 } from './shellConfig.js'
 import { jsonParse } from './slowOperations.js'
 
-const GCS_BUCKET_URL =
-  'https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases'
-
 class AutoUpdaterError extends ClaudeError {}
 
 export type InstallStatus =
@@ -61,7 +58,7 @@ export type MaxVersionConfig = {
  *
  * Versioning approach:
  * 1. For version requirements/compatibility (assertMinVersion), we use semver comparison that ignores build metadata
- * 2. For updates ('claude update'), we use exact string comparison to detect any change, including SHA
+ * 2. For updates, we use exact string comparison to detect any change, including SHA
  *    - This ensures users always get the latest build, even when only the SHA changes
  *    - The UI clearly shows both versions including build metadata
  *
@@ -82,11 +79,10 @@ export async function assertMinVersion(): Promise<void> {
       lt(MACRO.VERSION, versionConfig.minVersion)
     ) {
       console.error(`
-It looks like your version of Claude Code (${MACRO.VERSION}) needs an update.
+It looks like your version of BGS (${MACRO.VERSION}) needs an update.
 A newer version (${versionConfig.minVersion} or higher) is required to continue.
 
-To update, please run:
-    claude update
+Install a newer BGS release from your configured distribution source.
 
 This will ensure you have access to the latest features and improvements.
 `)
@@ -318,6 +314,7 @@ export async function checkGlobalInstallPermissions(): Promise<{
 export async function getLatestVersion(
   channel: ReleaseChannel,
 ): Promise<string | null> {
+  if (!MACRO.PACKAGE_URL) return null
   const npmTag = channel === 'stable' ? 'stable' : 'latest'
 
   // Run from home directory to avoid reading project-level .npmrc
@@ -352,6 +349,7 @@ export type NpmDistTags = {
  * This is used by the doctor command to show users what versions are available.
  */
 export async function getNpmDistTags(): Promise<NpmDistTags> {
+  if (!MACRO.PACKAGE_URL) return { latest: null, stable: null }
   // Run from home directory to avoid reading project-level .npmrc
   const result = await execFileNoThrowWithCwd(
     'npm',
@@ -383,16 +381,9 @@ export async function getNpmDistTags(): Promise<NpmDistTags> {
 export async function getLatestVersionFromGcs(
   channel: ReleaseChannel,
 ): Promise<string | null> {
-  try {
-    const response = await axios.get(`${GCS_BUCKET_URL}/${channel}`, {
-      timeout: 5000,
-      responseType: 'text',
-    })
-    return response.data.trim()
-  } catch (error) {
-    logForDebugging(`Failed to fetch ${channel} from GCS: ${error}`)
-    return null
-  }
+  // BGS has no configured binary release service. Do not query another
+  // product's distribution merely because native/package-manager mode is used.
+  return null
 }
 
 /**
@@ -424,7 +415,8 @@ export async function getVersionHistory(limit: number): Promise<string[]> {
 
   // Use native package URL when available to ensure we only show versions
   // that have native binaries (not all JS package versions have native builds)
-  const packageUrl = MACRO.NATIVE_PACKAGE_URL ?? MACRO.PACKAGE_URL
+  const packageUrl = MACRO.NATIVE_PACKAGE_URL || MACRO.PACKAGE_URL
+  if (!packageUrl) return []
 
   // Run from home directory to avoid reading project-level .npmrc
   const result = await execFileNoThrowWithCwd(
@@ -455,6 +447,9 @@ export async function getVersionHistory(limit: number): Promise<string[]> {
 export async function installGlobalPackage(
   specificVersion?: string | null,
 ): Promise<InstallStatus> {
+  // No distribution is configured. Do not remove aliases or invoke npm with
+  // an empty package name before reporting that installation is unavailable.
+  if (!MACRO.PACKAGE_URL) return 'install_failed'
   if (!(await acquireLock())) {
     logError(
       new AutoUpdaterError('Another process is currently installing an update'),
@@ -480,13 +475,13 @@ export async function installGlobalPackage(
       console.error(`
 Error: Windows NPM detected in WSL
 
-You're running Claude Code in WSL but using the Windows NPM installation from /mnt/c/.
+You're running BGS in WSL but using the Windows NPM installation from /mnt/c/.
 This configuration is not supported for updates.
 
 To fix this issue:
   1. Install Node.js within your Linux distribution: e.g. sudo apt install nodejs npm
   2. Make sure Linux NPM is in your PATH before the Windows version
-  3. Try updating again with 'claude update'
+  3. Retry installation from your configured BGS distribution source
 `)
       return 'install_failed'
     }
@@ -547,7 +542,7 @@ async function removeClaudeAliasesFromShellConfigs(): Promise<void> {
 
       if (hadAlias) {
         await writeFileLines(configFile, filtered)
-        logForDebugging(`Removed claude alias from ${configFile}`)
+        logForDebugging(`Removed BGS alias from ${configFile}`)
       }
     } catch (error) {
       // Don't fail the whole operation if one file can't be processed

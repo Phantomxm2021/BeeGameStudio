@@ -12,8 +12,10 @@ test('invalid browser config fails explicitly instead of selecting a personal br
   expect(browser.start()).toBe(first)
   await expect(first).rejects.toThrow('executable absolute path')
   expect(browser.status().status).toBe('not-running')
+  await expect(browser.restart()).rejects.toThrow('executable absolute path')
   await browser.close()
   await expect(browser.start()).rejects.toThrow('closed')
+  await expect(browser.restart()).rejects.toThrow('closed')
 })
 
 test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1')('real isolated browser opens an empty page through CDP and closes', async () => {
@@ -32,8 +34,23 @@ test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1')('real isolated browse
     })
     expect(answer.error).toBeUndefined()
     expect(answer.result.targetId).toBeTruthy()
+    ws.close(); ws = undefined
+    const restarted = await browser.restart()
+    expect(restarted.endpoint).not.toBe(result.endpoint)
+    expect((await browser.start()).endpoint).toBe(restarted.endpoint)
+    await expect(fetch(`http://${new URL(result.endpoint).host}/json/version`, { signal: AbortSignal.timeout(1000) })).rejects.toThrow()
   } finally { ws?.close(); await browser.close() }
   expect(browser.status().status).toBe('closed')
+}, 25000)
+
+test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1')('close during explicit restart cannot resurrect the owned browser', async () => {
+  const browser = createPreviewTestBrowser()
+  await browser.start()
+  const restart = browser.restart()
+  await browser.close()
+  await expect(restart).rejects.toThrow('closed')
+  expect(browser.status().status).toBe('closed')
+  await expect(browser.start()).rejects.toThrow('closed')
 }, 25000)
 
 test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1' || process.platform !== 'darwin')('a filesystem-sandboxed native client can use the host browser with network permission', async () => {

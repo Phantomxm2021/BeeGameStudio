@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getIsRemoteMode } from '../../bootstrap/state.js';
 import { useNotifications } from '../../context/notifications.js';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { logForDebugging } from '../../utils/debug.js';
 import { onPluginsAutoUpdated } from '../../utils/plugins/pluginAutoupdate.js';
 

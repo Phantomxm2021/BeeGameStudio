@@ -18,7 +18,6 @@ import { FILE_WRITE_TOOL_NAME } from '@bee-game-studio/builtin-tools/tools/FileW
 import type { Message } from '../types/message.js'
 import type { OrphanedPermission } from '../types/textInputTypes.js'
 import { logForDebugging } from './debug.js'
-import { isEnvTruthy } from './envUtils.js'
 import { isFsInaccessible } from './errors.js'
 import { getFileModificationTime, stripLineNumberPrefix } from './file.js'
 import { readFileSyncWithMetadata } from './fileRead.js'
@@ -34,6 +33,7 @@ import type {
 } from './permissions/PermissionPromptToolResultSchema.js'
 import type { ProcessUserInputContext } from './processUserInput/processUserInput.js'
 import { recordTranscript } from './sessionStorage.js'
+import { normalizeShellProgress } from './task/sdkProgress.js'
 
 export type PermissionPromptTool = Tool<
   ReturnType<typeof permissionToolInputSchema>,
@@ -103,12 +103,6 @@ export function isResultSuccessful(
   return stopReason === 'end_turn'
 }
 
-// Track last sent time for tool progress messages per tool use ID
-// Keep only the last 100 entries to prevent unbounded growth
-const MAX_TOOL_PROGRESS_TRACKING_ENTRIES = 100
-const TOOL_PROGRESS_THROTTLE_MS = 30000
-const toolProgressLastSentTime = new Map<string, number>()
-
 export function* normalizeMessage(message: Message): Generator<SDKMessage> {
   switch (message.type) {
     case 'assistant':
@@ -124,6 +118,7 @@ export function* normalizeMessage(message: Message): Generator<SDKMessage> {
           session_id: getSessionId(),
           uuid: _.uuid,
           error: _.error,
+          ...(_.isApiErrorMessage ? { isApiErrorMessage: true } : {}),
         }
       }
       return
@@ -152,6 +147,7 @@ export function* normalizeMessage(message: Message): Generator<SDKMessage> {
                 session_id: getSessionId(),
                 uuid: _.uuid,
                 error: _.error,
+                ...(_.isApiErrorMessage ? { isApiErrorMessage: true } : {}),
               }
               break
             case 'user':
@@ -177,46 +173,8 @@ export function* normalizeMessage(message: Message): Generator<SDKMessage> {
         progressData.type === 'bash_progress' ||
         progressData.type === 'powershell_progress'
       ) {
-        // Filter bash progress to send only one per minute
-        // Only emit for Claude Code Remote for now
-        if (
-          !isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
-          !process.env.CLAUDE_CODE_CONTAINER_ID
-        ) {
-          break
-        }
-
-        // Use parentToolUseID as the key since toolUseID changes for each progress message
-        const trackingKey = message.parentToolUseID as string
-        const now = Date.now()
-        const lastSent = toolProgressLastSentTime.get(trackingKey) || 0
-        const timeSinceLastSent = now - lastSent
-
-        // Send if at least 30 seconds have passed since last update
-        if (timeSinceLastSent >= TOOL_PROGRESS_THROTTLE_MS) {
-          // Remove oldest entry if we're at capacity (LRU eviction)
-          if (
-            toolProgressLastSentTime.size >= MAX_TOOL_PROGRESS_TRACKING_ENTRIES
-          ) {
-            const firstKey = toolProgressLastSentTime.keys().next().value
-            if (firstKey !== undefined) {
-              toolProgressLastSentTime.delete(firstKey)
-            }
-          }
-
-          toolProgressLastSentTime.set(trackingKey, now)
-          yield {
-            type: 'tool_progress',
-            tool_use_id: message.toolUseID as string,
-            tool_name:
-              progressData.type === 'bash_progress' ? 'Bash' : 'PowerShell',
-            parent_tool_use_id: message.parentToolUseID as string,
-            elapsed_time_seconds: progressData.elapsedTimeSeconds,
-            task_id: progressData.taskId,
-            session_id: getSessionId(),
-            uuid: message.uuid,
-          }
-        }
+        const progress = normalizeShellProgress(message)
+        if (progress) yield progress
       }
       break
     }

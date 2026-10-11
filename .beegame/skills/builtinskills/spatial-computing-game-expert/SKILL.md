@@ -15,4 +15,4 @@ Use spatial presence intentionally. An XR game may be embodied, controller-drive
 
 For a focused fix, inspect the affected interaction only. Do not add a fixed safety radius or rewrite the game around an arbitrary embodiment rule.
 
-Read only the relevant optional reference: `references/spatial-interaction-principles.md` for embodied interaction, `references/spatial-rule-architecture.md` for spatial rules, `references/spatial-session-pacing.md` for active-session pacing, or `references/physical-safety-framework.md` for physical risk.
+The essential interaction principles are covered above. Read only the relevant optional reference: `references/spatial-rule-architecture.md` for spatial rules, `references/spatial-session-pacing.md` for active-session pacing, or `references/physical-safety-framework.md` for physical risk.

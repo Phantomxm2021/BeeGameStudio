@@ -8,7 +8,7 @@ import type { VerificationStatus } from '../../hooks/useApiKeyVerification.js';
 import type { IDESelection } from '../../hooks/useIdeSelection.js';
 import { useSettings } from '../../hooks/useSettings.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { Box, Text, useInput } from '@anthropic/ink';
+import { Box, Text, useInput } from '@bee-game-studio/ink';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
 import { useAppState, useSetAppState } from '../../state/AppState.js';

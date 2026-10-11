@@ -209,6 +209,242 @@ describe('transcriptEventsToHistory', () => {
       output: 'Async agent launched successfully.\nagentId: task-1 (internal ID)\noutput_file: /tmp/task-1.output' }),
   ]
 
+  const childTool = (id: number, type: string, parent: string, toolUseID: string, toolName = 'Read') =>
+    nativeEvent(id, type, { parentToolUseID: parent, toolUseID, toolName,
+      input: toolName === 'Read' ? { file_path: `docs/${toolUseID}.md` } : { command: 'bun --version' },
+      ...(type === 'tool.started' ? {} : { output: `${toolUseID} result` }),
+    })
+
+  it('puts child tools in their own subagent details, preserving main tools, failures and snapshots', () => {
+    const events = [
+      ...launchEvents(),
+      nativeEvent(3, 'tool.started', { toolName: 'Agent', toolUseID: 'agent-2', input: { prompt: 'Write audio' } }),
+      childTool(4, 'tool.started', 'agent-1', 'read-1'),
+      childTool(5, 'tool.completed', 'agent-1', 'read-1'),
+      childTool(6, 'tool.failed', 'agent-2', 'bash-2', 'Bash'),
+      nativeEvent(7, 'tool.completed', { toolName: 'Bash', toolUseID: 'main-check', input: { command: 'bun test' }, output: 'passed' }),
+      nativeEvent(8, 'system.status', { type: 'system', subtype: 'task_progress', toolUseID: 'agent-1',
+        subagentActivity: { entries: [{ id: 'read-1', kind: 'tool', toolName: 'Read', status: 'completed' }], truncated: true } }),
+      nativeEvent(9, 'tool.completed', { toolName: 'Agent', toolUseID: 'agent-1', input: {}, output: 'Checked' }),
+    ]
+    const history = toChatDisplayMessages(normalizeChatHistory(transcriptEventsToHistory('project', events)))
+    expect(history.filter(message => message.type === 'tool').map(message => message.toolUseId))
+      .toEqual(['agent-1', 'agent-2', 'main-check'])
+    const first = history.find(message => message.toolUseId === 'agent-1')!
+    expect(first).toMatchObject({ toolStatus: 'completed', subagentPrompt: 'Check manifest', subagentOutput: 'Checked' })
+    expect(first.subagentActivity).toEqual({ entries: [{ id: 'read-1', kind: 'tool', toolName: 'Read',
+      filePath: 'docs/read-1.md', input: JSON.stringify({ file_path: 'docs/read-1.md' }, null, 2),
+      output: 'read-1 result', status: 'completed' }], truncated: true })
+    expect(history.find(message => message.toolUseId === 'agent-2')?.subagentActivity?.entries)
+      .toEqual([expect.objectContaining({ id: 'bash-2', status: 'failed', command: 'bun --version' })])
+  })
+
+  it('routes a history page starting mid-worker by its parent ID, including the snake_case alias', () => {
+    const event = childTool(1, 'tool.completed', 'agent-missing', 'read-mid')
+    const history = transcriptEventsToHistory('mid-page', [{ ...event,
+      payload: { ...event.payload, parentToolUseID: undefined, parent_tool_use_id: 'agent-missing' } }])
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ toolUseId: 'agent-missing', isSubagentTool: true, toolStatus: 'running',
+      subagentActivity: { entries: [expect.objectContaining({ id: 'read-mid', output: 'read-mid result' })] } })
+  })
+
+  it('keeps child text, approval records, compaction and tool images in the owning drawer', () => {
+    const parentToolUseID = 'agent-1'
+    const child = (id: number, type: string, payload: Record<string, unknown>, text: string) =>
+      ({ ...nativeEvent(id, type, { parentToolUseID, ...payload }), text })
+    const history = transcriptEventsToHistory('owned-events', [
+      ...launchEvents(),
+      child(3, 'assistant.partial', { messageId: 'child-note' }, 'Checking '),
+      child(4, 'assistant.partial', { messageId: 'child-note' }, 'layout'),
+      child(5, 'assistant.message', { message: { id: 'child-note', content: [{ type: 'text', text: 'Checking layout' }] } }, 'Checking layout'),
+      child(6, 'permission.requested', { toolUseID: 'bash-child', toolName: 'Bash', message: 'Approval reason' }, 'Approval reason'),
+      child(7, 'permission.resolved', { toolUseID: 'bash-child', toolName: 'Bash', decision: 'allow' }, 'Bash: allow'),
+      child(8, 'system.status', { type: 'system', subtype: 'status', status: 'compacting' }, 'system'),
+      child(9, 'system.status', { type: 'system', subtype: 'compact_boundary' }, 'system'),
+      child(10, 'tool.completed', { toolUseID: 'screenshot', toolName: 'Capture', output: 'Captured', attachments: [{
+        type: 'image', mediaType: 'image/png', filename: 'screen.png', storageId: '00000000-0000-0000-0000-000000000000-screen.png',
+      }] }, 'Capture'),
+      nativeEvent(11, 'assistant.message', { message: { id: 'main-note', content: [{ type: 'text', text: 'Parent summary' }] } }),
+    ]) as any[]
+    expect(history.map(message => message.toolUseId || message.content)).toEqual(['agent-1', 'Parent summary'])
+    const entries = history[0].subagentActivity.entries
+    expect(entries.filter((e: any) => e.kind === 'message' && e.text === 'Checking layout')).toHaveLength(1)
+    expect(entries).toContainEqual(expect.objectContaining({ kind: 'permission', status: 'allowed', message: 'Approval reason' }))
+    expect(entries).toContainEqual(expect.objectContaining({ kind: 'message', text: 'Context compacted' }))
+    expect(entries).not.toContainEqual(expect.objectContaining({ text: 'Context compacting' }))
+    expect(entries.find((e: any) => e.id === 'screenshot').attachments[0]).toMatchObject({ projectId: 'owned-events', filename: 'screen.png' })
+  })
+
+  it('routes nested workers and their failures inside the root drawer and deduplicates transcript text', () => {
+    const history = transcriptEventsToHistory('nested', [...launchEvents(),
+      childTool(3, 'tool.started', 'agent-1', 'nested-agent', 'Agent'),
+      { ...nativeEvent(4, 'assistant.message', { parent_tool_use_id: 'nested-agent', uuid: 'nested-uuid',
+        message: { id: 'nested-message', content: [{ type: 'text', text: 'Nested update' }] } }), text: 'Nested update' },
+      childTool(5, 'tool.failed', 'nested-agent', 'nested-read'),
+      nativeEvent(6, 'system.status', { type: 'system', subtype: 'task_notification', toolUseID: 'nested-agent',
+        toolName: 'Agent', parentToolUseID: 'agent-1', status: 'failed', summary: 'Nested failed' }),
+      nativeEvent(7, 'system.status', { type: 'system', subtype: 'task_progress', toolUseID: 'nested-agent',
+        toolName: 'Agent', parentToolUseID: 'agent-1', subagentActivity: {
+        entries: [{ id: 'message-nested-message', kind: 'message', text: 'Nested update' }], truncated: false,
+      } }),
+    ]) as any[]
+    expect(history).toHaveLength(1)
+    expect(history[0].toolUseId).toBe('agent-1')
+    expect(history[0].subagentActivity.entries).toEqual([
+      expect.objectContaining({ id: 'nested-agent', kind: 'tool', status: 'failed', output: 'Nested failed' }),
+      { id: 'nested-agent:message-nested-message', kind: 'message', text: 'Nested update' },
+      expect.objectContaining({ id: 'nested-read', status: 'failed' }),
+    ])
+  })
+
+  it('does not merge concurrent parent/child messages even if a provider reuses the same message ID', () => {
+    const message = (id: number, parent: string, text: string) => ({ ...nativeEvent(id, 'assistant.message', {
+      ...(parent ? { parent_tool_use_id: parent } : {}), message: { id: 'provider-id', content: [{ type: 'text', text }] },
+    }), text })
+    const history = transcriptEventsToHistory('same-native-id', [...launchEvents(),
+      nativeEvent(3, 'tool.started', { toolUseID: 'agent-2', toolName: 'Agent', input: { prompt: 'Another worker' } }),
+      message(4, 'agent-1', 'First worker'), message(5, 'agent-2', 'Second worker'), message(6, '', 'Main summary'),
+    ]) as any[]
+    expect(history.map(m => m.toolUseId || m.content)).toEqual(['agent-1', 'agent-2', 'Main summary'])
+    expect(history[0].subagentActivity.entries).toEqual([{ id: 'message-provider-id', kind: 'message', text: 'First worker' }])
+    expect(history[1].subagentActivity.entries).toEqual([{ id: 'message-provider-id', kind: 'message', text: 'Second worker' }])
+  })
+
+  it('keeps same-ID nested worker messages distinct across live output and snapshots', () => {
+    const history = transcriptEventsToHistory('nested-id-scope', [...launchEvents(),
+      childTool(3, 'tool.started', 'agent-1', 'nested-a', 'Agent'),
+      childTool(4, 'tool.started', 'agent-1', 'nested-b', 'Agent'),
+      ...['agent-1', 'nested-a', 'nested-b'].map((parent, index) => ({ ...nativeEvent(5 + index, 'assistant.message', {
+        parentToolUseID: parent, message: { id: 'reused', content: [{ type: 'text', text: parent }] },
+      }), text: parent })),
+      nativeEvent(8, 'system.status', { type: 'system', subtype: 'task_progress', toolUseID: 'nested-a',
+        toolName: 'Agent', parentToolUseID: 'agent-1', subagentActivity: {
+          truncated: false, entries: [{ id: 'message-reused', kind: 'message', text: 'nested-a' }],
+        } }),
+    ]) as any[]
+    expect(history).toHaveLength(1)
+    expect(history[0].subagentActivity.entries.filter((e: any) => e.kind === 'message').map((e: any) => e.text))
+      .toEqual(['agent-1', 'nested-a', 'nested-b'])
+  })
+
+  it('keeps canonical shell progress and image materialization errors inside the drawer', () => {
+    const history = transcriptEventsToHistory('shell-progress', [...launchEvents(),
+      nativeEvent(3, 'tool.progress', { type: 'tool_progress', tool_use_id: 'bash', tool_name: 'Bash',
+        parent_tool_use_id: 'agent-1', elapsed_time_seconds: 120 }),
+      nativeEvent(4, 'tool.completed', { toolUseID: 'image', toolName: 'Read', parentToolUseID: 'agent-1',
+        output: '', attachmentError: 'Tool image could not be stored for Chat.' }),
+    ]) as any[]
+    expect(history).toHaveLength(1)
+    expect(history[0].subagentActivity.entries).toEqual([
+      expect.objectContaining({ id: 'bash', toolName: 'Bash', elapsedTimeSeconds: 120, status: 'running' }),
+      expect.objectContaining({ id: 'image', status: 'completed', attachmentError: expect.stringContaining('could not be stored') }),
+    ])
+  })
+
+  it('does not complete nested background launch receipts, and closes them from native task results', () => {
+    const events = [...launchEvents(),
+      childTool(3, 'tool.started', 'agent-1', 'nested-agent', 'Agent'),
+      { ...childTool(4, 'tool.completed', 'agent-1', 'nested-agent', 'Agent'), payload: {
+        parentToolUseID: 'agent-1', toolUseID: 'nested-agent', toolName: 'Agent',
+        output: 'Async agent launched successfully.\nagentId: nested-task (internal ID)\noutput_file: /tmp/nested.output',
+      } },
+    ]
+    const started = transcriptEventsToHistory('nested-async', events) as any[]
+    expect(started).toHaveLength(1)
+    expect(started[0].subagentActivity.entries[0]).toMatchObject({ id: 'nested-agent', status: 'running' })
+    expect(started[0].subagentActivity.entries[0]).not.toHaveProperty('output')
+    const closed = transcriptEventsToHistory('nested-async', [...events, nativeEvent(5, 'tool.completed', {
+      parentToolUseID: 'agent-1', toolUseID: 'wait-nested', toolName: 'TaskOutput',
+      nativeBackgroundTaskResult: { toolUseID: 'nested-agent', status: 'stopped', result: 'Stopped' },
+    })]) as any[]
+    expect(closed).toHaveLength(1)
+    expect(closed[0].subagentActivity.entries[0]).toMatchObject({ id: 'nested-agent', status: 'cancelled', output: 'Stopped' })
+  })
+
+  it('still sends the live approval notification while keeping its explanation out of main chat', async () => {
+    const project = 'owned-permission-live'
+    authenticatedFetchMock.mockResolvedValueOnce(transcriptResponse({ events: launchEvents() }))
+    await beeGameAdapter.getChatHistory(project)
+    const events = [
+      nativeEvent(3, 'permission.requested', { parentToolUseID: 'agent-1', toolUseID: 'bash', toolName: 'Bash', message: 'Approval reason' }),
+      nativeEvent(4, 'permission.resolved', { parentToolUseID: 'agent-1', toolUseID: 'bash', toolName: 'Bash', decision: 'deny' }),
+    ]
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(new ReadableStream({ start(controller) {
+      events.forEach(event => controller.enqueue(new TextEncoder().encode(`id: ${event.id}\ndata: ${JSON.stringify({ events: [event] })}\n\n`)))
+      controller.close()
+    } })))
+    const onMessage = vi.fn()
+    await beeGameAdapter.streamMessages(project, 2, { onMessage, onCursor: vi.fn() }, new AbortController().signal)
+    const messages = onMessage.mock.calls.map(([message]) => message)
+    expect(messages.map(message => message.type)).toEqual(['tool_start', 'human_gate', 'tool_start'])
+    expect(messages[1]).toMatchObject({ requires_user_action: true, task_kind: 'subagent_permission_request' })
+    expect(messages.at(-1).subagent_activity.entries).toEqual([
+      expect.objectContaining({ id: 'permission-bash', status: 'denied', message: 'Approval reason' }),
+    ])
+    const history = transcriptEventsToHistory(project, [...launchEvents(), ...events]) as any[]
+    expect(history).toHaveLength(1)
+    // Missing ownership is never guessed from the most recent worker.
+    expect(transcriptEventsToHistory(project, [...launchEvents(), nativeEvent(5, 'permission.requested', { toolUseID: 'unknown' })])).toHaveLength(2)
+  })
+
+  it('does not mix sessions or turn completed tools back into running when an older snapshot arrives', () => {
+    const events = [...launchEvents(), childTool(3, 'tool.completed', 'agent-1', 'read-1'),
+      nativeEvent(4, 'system.status', { type: 'system', subtype: 'task_progress', toolUseID: 'agent-1',
+        subagentActivity: { entries: [{ id: 'read-1', kind: 'tool', toolName: 'Read', status: 'running' }], truncated: false } }),
+      { ...childTool(5, 'tool.completed', 'agent-1', 'other-session-read'), sessionId: 'other-session' },
+    ]
+    const history = transcriptEventsToHistory('session-scopes', events)
+    expect(history).toHaveLength(2)
+    expect(history[0]).toMatchObject({ subagentActivity: {
+      entries: [expect.objectContaining({ id: 'read-1', status: 'completed', output: 'read-1 result' })] } })
+    expect(history[1]).toMatchObject({ subagentActivity: {
+      entries: [expect.objectContaining({ id: 'other-session-read' })] } })
+  })
+
+  it('retains the structured terminal task result when a child tool result is delivered afterward', () => {
+    const history = transcriptEventsToHistory('terminal-routing', [...launchEvents(),
+      childTool(3, 'tool.started', 'agent-1', 'read-late'),
+      nativeEvent(4, 'tool.completed', { toolName: 'TaskOutput', toolUseID: 'wait',
+        nativeBackgroundTaskResult: { toolUseID: 'agent-1', status: 'failed', result: 'Worker failed' },
+        backgroundAgentInput: { prompt: 'Check manifest' } }),
+      childTool(5, 'tool.completed', 'agent-1', 'read-late'),
+    ])
+    expect(history).toHaveLength(1)
+    expect(history[0]).toMatchObject({ toolUseId: 'agent-1', toolStatus: 'failed', subagentOutput: 'Worker failed',
+      subagentActivity: { entries: [expect.objectContaining({ id: 'read-late', status: 'completed' })] } })
+  })
+
+  it('retains child activity across history, separate SSE frames and polling without emitting child tool rows', async () => {
+    const project = 'subagent-routing-live'
+    const initial = [...launchEvents(), childTool(3, 'tool.completed', 'agent-1', 'read-in-history')]
+    authenticatedFetchMock.mockResolvedValueOnce(transcriptResponse({ events: initial }))
+    await beeGameAdapter.getChatHistory(project)
+    const events = [childTool(4, 'tool.started', 'agent-1', 'bash-live', 'Bash'),
+      childTool(5, 'tool.completed', 'agent-1', 'bash-live', 'Bash')]
+    const body = new ReadableStream<Uint8Array>({ start(controller) {
+      for (const event of events) controller.enqueue(new TextEncoder().encode(`id: ${event.id}\ndata: ${JSON.stringify({ events: [event] })}\n\n`))
+      controller.close()
+    } })
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(body))
+    const onMessage = vi.fn(), onCursor = vi.fn()
+    await beeGameAdapter.streamMessages(project, 3, { onMessage, onCursor }, new AbortController().signal)
+    const updates = onMessage.mock.calls.map(([message]) => message)
+    expect(updates.map(message => message.tool_use_id)).toEqual(['agent-1', 'agent-1'])
+    expect(updates.at(-1)).toMatchObject({ tool_status: 'running', subagent_prompt: 'Check manifest',
+      subagent_activity: { entries: [expect.objectContaining({ id: 'read-in-history', status: 'completed' }),
+        expect.objectContaining({ id: 'bash-live', status: 'completed' })] } })
+    expect(onCursor).toHaveBeenLastCalledWith(5)
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ events: [
+      childTool(6, 'tool.failed', 'agent-1', 'read-polled'),
+    ] })))
+    const polled = await beeGameAdapter.pollMessages(project, 5)
+    expect(polled.lastEventId).toBe(6)
+    expect(polled.messages).toHaveLength(1)
+    expect(polled.messages[0].tool_use_id).toBe('agent-1')
+    expect(polled.messages[0].subagent_activity?.entries).toHaveLength(3)
+    expect(polled.messages[0].subagent_activity?.entries.at(-1)).toMatchObject({ id: 'read-polled', status: 'failed' })
+  })
+
   it('keeps asynchronous launch running, not completed, without showing the launch receipt as a result', () => {
     const history = transcriptEventsToHistory('project-1', launchEvents()) as Record<string, unknown>[]
     expect(history).toHaveLength(1)
@@ -410,6 +646,27 @@ describe('transcriptEventsToHistory', () => {
     expect(authenticatedFetchMock.mock.calls[0]?.[0]).toContain('limit=50')
     expect(authenticatedFetchMock.mock.calls[1]?.[0]).toContain('limit=300')
     expect(authenticatedFetchMock.mock.calls[1]?.[0]).toContain('before=99')
+  })
+
+  it('retains all subagent records and terminal status through pagination and subsequent live projection', async () => {
+    const { useChatStore } = await import('../store/chatStore')
+    useChatStore.getState().clearMessages()
+    const project = 'subagent-history-union'
+    const latest = [childTool(50, 'tool.completed', 'agent-1', 'read-new'),
+      nativeEvent(51, 'tool.completed', { toolUseID: 'agent-1', toolName: 'Agent', output: 'Done' })]
+    const older = [...launchEvents(), childTool(3, 'tool.completed', 'agent-1', 'read-old')]
+    authenticatedFetchMock.mockResolvedValueOnce(transcriptResponse({ events: latest, page: { hasMore: true, nextBeforeId: 50 } }))
+    authenticatedFetchMock.mockResolvedValueOnce(transcriptResponse({ events: older, page: { hasMore: false, nextBeforeId: null } }))
+    try {
+      useChatStore.getState().loadHistory(normalizeChatHistory(await beeGameAdapter.getChatHistory(project)))
+      useChatStore.getState().loadHistory(normalizeChatHistory((await beeGameAdapter.getOlderChatHistory(project)).messages))
+      expect(useChatStore.getState().messages[0]).toMatchObject({ toolStatus: 'completed', subagentOutput: 'Done' })
+      expect(useChatStore.getState().messages[0].subagentActivity?.entries.map(e => e.id)).toEqual(['read-old', 'read-new'])
+      // A reconnect can replay the latest page after the user loaded old pages.
+      useChatStore.getState().loadHistory(normalizeChatHistory(transcriptEventsToHistory(project, latest)))
+      expect(useChatStore.getState().messages[0].subagentActivity?.entries.map(e => e.id)).toEqual(['read-old', 'read-new'])
+      expect(useChatStore.getState().messages[0].toolStatus).toBe('completed')
+    } finally { useChatStore.getState().clearMessages() }
   })
 
   it('requests Scene/UI file metadata without downloading document bodies', async () => {

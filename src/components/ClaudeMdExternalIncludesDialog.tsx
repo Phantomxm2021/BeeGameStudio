@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
 import { logEvent } from 'src/services/analytics/index.js';
-import { Box, Dialog, Link, Text } from '@anthropic/ink';
+import { Box, Dialog, Link, Text } from '@bee-game-studio/ink';
 import type { ExternalClaudeMdInclude } from '../utils/claudemd.js';
 import { saveCurrentProjectConfig } from '../utils/config.js';
 import { Select } from './CustomSelect/index.js';
@@ -75,7 +75,7 @@ export function ClaudeMdExternalIncludesDialog({
       )}
 
       <Text dimColor>
-        Important: Only use Claude Code with files you trust. Accessing untrusted files may pose security risks{' '}
+        Important: Only use BGS with files you trust. Accessing untrusted files may pose security risks{' '}
         <Link url="https://code.claude.com/docs/en/security" />{' '}
       </Text>
 

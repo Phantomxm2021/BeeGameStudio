@@ -1,5 +1,5 @@
 /**
- * @anthropic/ink — Terminal React rendering framework
+ * @bee-game-studio/ink — Terminal React rendering framework
  *
  * Three-layer architecture:
  *   core/        — Rendering engine (reconciler, layout, terminal I/O, screen buffer)

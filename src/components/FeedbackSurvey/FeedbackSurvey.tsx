@@ -3,7 +3,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { FeedbackSurveyView, isValidResponseInput } from './FeedbackSurveyView.js';
 import type { TranscriptShareResponse } from './TranscriptSharePrompt.js';
 import { TranscriptSharePrompt } from './TranscriptSharePrompt.js';
@@ -126,20 +126,24 @@ function FeedbackSurveyThanks({
     },
   });
 
-  const feedbackCommand = process.env.USER_TYPE === 'ant' ? '/issue' : '/feedback';
+  const isInternal = process.env.USER_TYPE === 'ant';
+  const feedbackCommand = isInternal ? '/issue' : '/feedback';
+  const feedbackHint = isInternal
+    ? lastResponse === 'bad'
+      ? 'Use /issue to report model behavior issues.'
+      : `Use ${feedbackCommand} to share detailed feedback anytime.`
+    : 'Contact the BGS project maintainer; automated feedback upload is unavailable.';
 
   return (
     <Box marginTop={1} flexDirection="column">
       <Text color="success">Thanks for the feedback!</Text>
       {showFollowUp ? (
         <Text dimColor>
-          (Optional) Press [<Text color="ansi:cyan">1</Text>] to tell us what went well {' \u00b7 '}
+          (Optional) Press [<Text color="ansi:cyan">1</Text>] to {isInternal ? 'tell us what went well' : 'view feedback availability'} {' \u00b7 '}
           {feedbackCommand}
         </Text>
-      ) : lastResponse === 'bad' ? (
-        <Text dimColor>Use /issue to report model behavior issues.</Text>
       ) : (
-        <Text dimColor>Use {feedbackCommand} to share detailed feedback anytime.</Text>
+        <Text dimColor>{feedbackHint}</Text>
       )}
     </Box>
   );

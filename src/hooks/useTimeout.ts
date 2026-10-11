@@ -1,2 +1,2 @@
-// Re-export from @anthropic/ink hooks module
-export { useTimeout } from '@anthropic/ink'
+// Re-export from @bee-game-studio/ink hooks module
+export { useTimeout } from '@bee-game-studio/ink'

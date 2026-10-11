@@ -16,8 +16,8 @@ test('real CLI preserves command result identity for local commands and provider
   try {
     runtime = await createNativeCliProcessRunner().start({ sessionId: 'offline-command', cwd: root,
       env: { BEEGAME_CONFIG_DIR: join(root, 'config'), BEEGAME_MODEL_TYPE: 'anthropic', ANTHROPIC_API_KEY: 'offline',
-        ANTHROPIC_BASE_URL: `http://127.0.0.1:${server.port}`, ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-6',
-        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1' },
+        ANTHROPIC_BASE_URL: `http://127.0.0.1:${server.port}`, BGS_DEFAULT_BALANCED_MODEL: 'claude-sonnet-4-6',
+        BGS_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1' },
     })
     const results: Record<string, unknown>[] = []
     const submit = (prompt: string) => runtime!.submit({ prompt, signal: controller.signal,
@@ -85,8 +85,8 @@ fs.writeFileSync('checklist.md','- [ ] AC-1 Goal works\\n');fs.writeFileSync('pr
     runtime = await createNativeCliProcessRunner().start({ sessionId: 'offline-isolation', cwd: workspace,
       ...(isolated ? { isolatedTask: { workspacePath: workspace, readOnlyPaths: ['authority.md'] } } : {}),
       env: { BEEGAME_CONFIG_DIR: join(root, 'config'), BEEGAME_MODEL_TYPE: 'anthropic', ANTHROPIC_API_KEY: 'offline',
-        ANTHROPIC_BASE_URL: `http://127.0.0.1:${server.port}`, ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-6',
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-sonnet-4-6', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+        ANTHROPIC_BASE_URL: `http://127.0.0.1:${server.port}`, BGS_DEFAULT_BALANCED_MODEL: 'claude-sonnet-4-6',
+        BGS_DEFAULT_FAST_MODEL: 'claude-sonnet-4-6', BGS_DISABLE_NONESSENTIAL_TRAFFIC: '1',
         DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1', NPM_CONFIG_CACHE: '/host/private-cache', npm_config_cache: '/host/private-cache' },
     })
     const received: any[] = []
@@ -160,8 +160,8 @@ test('real CLI discovers Skills before a native child chooses its first tool', a
     runtime = await createNativeCliProcessRunner().start({ sessionId: 'offline-child-skills', cwd: workspace,
       env: { BEEGAME_CONFIG_DIR: join(root, 'config'), BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: skills, SKILL_SEARCH_ENABLED: '1',
         BEEGAME_MODEL_TYPE: 'anthropic', ANTHROPIC_API_KEY: 'offline', ANTHROPIC_BASE_URL: `http://127.0.0.1:${server.port}`,
-        ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-6', ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-sonnet-4-6',
-        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1' },
+        BGS_DEFAULT_BALANCED_MODEL: 'claude-sonnet-4-6', BGS_DEFAULT_FAST_MODEL: 'claude-sonnet-4-6',
+        BGS_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1' },
     })
     await runtime.submit({ prompt: 'Run the offline delegation fixture', signal: controller.signal,
       onMessage: () => {}, requestPermission: async () => ({ behavior: 'deny' }) })
@@ -170,7 +170,7 @@ test('real CLI discovers Skills before a native child chooses its first tool', a
       const content = request.messages.flatMap((message: any) =>
         Array.isArray(message.content) ? message.content.filter((block: any) => block.type === 'text').map((block: any) => block.text) : [],
       ).join('\n')
-      expect(content).toContain('<loaded-skill name="review-evidence"')
+      expect(content).toMatch(/<loaded-skill name="(?:bgs-builtins:)?review-evidence"/)
       expect(content).toContain('Read the original source behind the claim.')
     }
   } finally {

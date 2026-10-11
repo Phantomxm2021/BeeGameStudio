@@ -24,7 +24,7 @@ import {
   instances,
   supportsTabStatus,
   wrapForMultiplexer,
-} from '@anthropic/ink'
+} from '@bee-game-studio/ink'
 import { shutdownDatadog } from '../services/analytics/datadog.js'
 import { shutdown1PEventLogging } from '../services/analytics/firstPartyEventLogger.js'
 import {
@@ -441,7 +441,7 @@ export async function gracefulShutdown(
       try {
         await runCleanupFunctions()
       } catch {
-        // Silently ignore cleanup errors
+        process.stderr.write('BGS: shutdown cleanup incomplete; tracked resources may remain.\n')
       }
     })()
 
@@ -457,7 +457,7 @@ export async function gracefulShutdown(
     ])
     clearTimeout(cleanupTimeoutId)
   } catch {
-    // Silently handle timeout and other errors
+    process.stderr.write('BGS: shutdown cleanup did not finish within the exit budget.\n')
     clearTimeout(cleanupTimeoutId)
   }
 

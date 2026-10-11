@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo } from 'react';
-import { Box, Text, useTheme } from '@anthropic/ink';
+import { Box, Text, useTheme } from '@bee-game-studio/ink';
 import { getTheme } from '../../../utils/theme.js';
 import { env } from '../../../utils/env.js';
 import { shouldShowAlwaysAllowOptions } from '../../../utils/permissions/permissionsLoader.js';

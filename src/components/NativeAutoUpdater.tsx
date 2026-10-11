@@ -5,7 +5,7 @@ import { logForDebugging } from 'src/utils/debug.js';
 import { logError } from 'src/utils/log.js';
 import { useInterval } from 'usehooks-ts';
 import { useUpdateNotification } from '../hooks/useUpdateNotification.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import type { AutoUpdaterResult } from '../utils/autoUpdater.js';
 import { getMaxVersion, getMaxVersionMessage } from '../utils/autoUpdater.js';
 import { isAutoUpdaterDisabled } from '../utils/config.js';
@@ -74,6 +74,7 @@ export function NativeAutoUpdater({
   isUpdatingRef.current = isUpdating;
 
   const checkForUpdates = React.useCallback(async () => {
+    if (!MACRO.NATIVE_PACKAGE_URL) return;
     if (isUpdatingRef.current) {
       return;
     }

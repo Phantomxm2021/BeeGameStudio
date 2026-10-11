@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Dialog, Link, Text } from '@anthropic/ink';
+import { Box, Dialog, Link, Text } from '@bee-game-studio/ink';
 import { Select } from './CustomSelect/index.js';
 
 type Props = {

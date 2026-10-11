@@ -1,2 +1,2 @@
-// Re-export from @anthropic/ink theme module
-export { SearchBox } from '@anthropic/ink';
+// Re-export from @bee-game-studio/ink theme module
+export { SearchBox } from '@bee-game-studio/ink';

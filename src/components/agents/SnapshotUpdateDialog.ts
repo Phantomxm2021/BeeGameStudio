@@ -1,5 +1,5 @@
 import React from 'react'
-import { Dialog, Text } from '@anthropic/ink'
+import { Dialog, Text } from '@bee-game-studio/ink'
 import type { AgentMemoryScope } from '@bee-game-studio/builtin-tools/tools/AgentTool/agentMemory.js'
 import { Select } from '../CustomSelect/index.js'
 
@@ -36,7 +36,7 @@ export function SnapshotUpdateDialog({
           label: 'Merge snapshot into current memory',
           value: 'merge',
           description:
-            'Keep current memory and ask Claude to merge in the snapshot changes.',
+            'Keep current memory and ask BGS to merge in the snapshot changes.',
         },
         {
           label: 'Keep current memory',

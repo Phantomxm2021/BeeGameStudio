@@ -49,6 +49,37 @@ function options(overrides: Partial<RuntimeConfigurationClientFactoryOptions> = 
 }
 
 describe('public runtime configuration client', () => {
+  test.each(['0', 'false', 'off', 'no', ''])('disabled provider flags %j do not select a provider', async value => {
+    for (const prefix of ['BGS_USE_', 'CLAUDE_CODE_USE_']) {
+      const flags = Object.fromEntries(['OPENAI', 'GEMINI', 'GROK'].map(provider => [prefix + provider, value]))
+      const fixture = options({
+        repository: { async getRuntimeEnv() { return { ANTHROPIC_BASE_URL: 'https://fixture.example', ...flags } } },
+      })
+      const result = await createRuntimeConfigurationClient(fixture).resolve({ ownerId: 'owner-1' })
+      expect(result.env.BEEGAME_MODEL_TYPE).toBe('anthropic')
+    }
+  })
+
+  test.each(['openai', 'gemini', 'grok'])('enabled %s flag selects its provider', async provider => {
+    for (const prefix of ['BGS_USE_', 'CLAUDE_CODE_USE_']) {
+      const fixture = options({
+        repository: { async getRuntimeEnv() { return { [prefix + provider.toUpperCase()]: ' true ' } } },
+      })
+      const result = await createRuntimeConfigurationClient(fixture).resolve({ ownerId: 'owner-1' })
+      expect(result.env.BEEGAME_MODEL_TYPE).toBe(provider)
+    }
+  })
+
+  test('normalizes legacy keys per source without reversing explicit runtime precedence', async () => {
+    const fixture = options({
+      repository: { async getRuntimeEnv() { return { BGS_DEFAULT_BALANCED_MODEL: 'repository-model' } } },
+      runtime: { modelType: 'anthropic', env: { ANTHROPIC_DEFAULT_SONNET_MODEL: 'explicit-model' } },
+    })
+    const result = await createRuntimeConfigurationClient(fixture).resolve({ ownerId: 'owner-1' })
+    expect(result.env.BGS_DEFAULT_BALANCED_MODEL).toBe('explicit-model')
+    expect(result.env).not.toHaveProperty('ANTHROPIC_DEFAULT_SONNET_MODEL')
+  })
+
   test('diagnostics distinguish auth, refresh, HTTP, network and validation failures without secrets', async () => {
     const log = spyOn(console, 'error').mockImplementation(() => {})
     const warning = spyOn(console, 'warn').mockImplementation(() => {})

@@ -1,11 +1,5 @@
 import { LRUCache } from 'lru-cache'
 import { normalize } from 'path'
-import { createHash } from 'node:crypto'
-
-/** Content version exposed by a complete BGS draft Read and known native edits. */
-export function inspectedDraftHash(content: string): string {
-  return createHash('sha256').update(content.replace(/^\uFEFF/, '').replace(/\r(?=\n|$)/g, '').trimEnd()).digest('hex')
-}
 
 export type FileState = {
   content: string
@@ -18,9 +12,6 @@ export type FileState = {
   // Edit/Write must require an explicit Read first. `content` here holds the
   // RAW disk bytes (for getChangedFiles diffing), not what the model saw.
   isPartialView?: boolean
-  // Separate from offset/limit: Edit resets read-permission metadata but can
-  // preserve an inspected draft's version. Write never establishes inspection.
-  beegameInspectedHash?: string
 }
 
 // Default max entries for read file state caches

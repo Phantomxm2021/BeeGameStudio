@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import figures from 'figures';
 import * as React from 'react';
-import { color, Text } from '@anthropic/ink';
+import { color, Text } from '@bee-game-studio/ink';
 import type { MCPServerConnection } from '../services/mcp/types.js';
 import { getAccountInformation, isClaudeAISubscriber } from './auth.js';
 import { getLargeMemoryFiles, getMemoryFiles, MAX_MEMORY_CHARACTER_COUNT } from './claudemd.js';

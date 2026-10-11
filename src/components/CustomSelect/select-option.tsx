@@ -1,5 +1,5 @@
 import React, { type ReactNode } from 'react';
-import { ListItem } from '@anthropic/ink';
+import { ListItem } from '@bee-game-studio/ink';
 
 export type SelectOptionProps = {
   /**

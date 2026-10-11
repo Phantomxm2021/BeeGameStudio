@@ -1,6 +1,6 @@
 import React from 'react';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import type { SettingsJson } from '../../utils/settings/types.js';
 import { Select } from '../CustomSelect/index.js';
@@ -57,7 +57,7 @@ export function ManagedSettingsSecurityDialog({ settings, onAccept, onReject }: 
         <Select
           options={[
             { label: 'Yes, I trust these settings', value: 'accept' },
-            { label: 'No, exit Claude Code', value: 'exit' },
+            { label: 'No, exit BGS', value: 'exit' },
           ]}
           onChange={value => onChange(value as 'accept' | 'exit')}
           onCancel={() => onChange('exit')}

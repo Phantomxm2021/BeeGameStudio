@@ -19,8 +19,8 @@ export function getMacroDefines(): Record<string, string> {
   return {
     'MACRO.VERSION': JSON.stringify(pkg.version),
     'MACRO.BUILD_TIME': JSON.stringify(new Date().toISOString()),
-    'MACRO.FEEDBACK_CHANNEL': JSON.stringify(''),
-    'MACRO.ISSUES_EXPLAINER': JSON.stringify(''),
+    'MACRO.FEEDBACK_CHANNEL': JSON.stringify('your BGS project maintainer'),
+    'MACRO.ISSUES_EXPLAINER': JSON.stringify('contact the BGS project maintainer; automated feedback upload is unavailable'),
     'MACRO.NATIVE_PACKAGE_URL': JSON.stringify(''),
     'MACRO.PACKAGE_URL': JSON.stringify(''),
     'MACRO.VERSION_CHANGELOG': JSON.stringify(''),
@@ -100,3 +100,18 @@ export const DEFAULT_BUILD_FEATURES = [
   // strict completion/blocked audit. See src/services/goal.
   'GOAL',
 ] as const
+
+/** All build entry points share the same value-aware feature configuration. */
+export function getBuildFeatures(environment: Record<string, string | undefined> = process.env): string[] {
+  const enabled = new Set<string>(DEFAULT_BUILD_FEATURES)
+  for (const [key, value] of Object.entries(environment)) {
+    if (!key.startsWith('FEATURE_') || value === undefined) continue
+    const name = key.slice('FEATURE_'.length)
+    if (!name) continue
+    const normalized = value.trim().toLowerCase()
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) enabled.add(name)
+    else if (['', '0', 'false', 'no', 'off'].includes(normalized)) enabled.delete(name)
+    else throw new Error(`Invalid ${key} value; use 1 or 0`)
+  }
+  return [...enabled]
+}

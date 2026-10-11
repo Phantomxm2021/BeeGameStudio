@@ -10,6 +10,19 @@ import { openPreviewTestAccess } from './preview-test-access'
 
 const toolPath = fileURLToPath(new URL('./design-browser-inspection.mjs', import.meta.url))
 
+test('batch text samples are selected per source without losing unknown/non-text diagnostics', async () => {
+  const { partitionUiTextSamples } = await import(toolPath)
+  const sources = [
+    { path: 'first.json', doc: { data: { nodes: [{ id: 'root' }, { id: 'score', text: '0' }] } } },
+    { path: 'second.json', doc: { data: { nodes: [{ id: 'score' }, { id: 'status', text: 'Ready' }] } } },
+  ]
+  expect([...partitionUiTextSamples({ score: ['999'], status: ['Finished'] }, sources)]).toEqual([
+    ['first.json', ['score']], ['second.json', ['status']],
+  ])
+  for (const samples of [{ typo: ['x'] }, { root: ['x'] }, { score: [] }, { score: [3] }, []])
+    expect(() => partitionUiTextSamples(samples, sources)).toThrow('Text samples')
+})
+
 test('static sample inspection rejects invalid sources and viewports before opening a browser', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-static-sample-path-'))
   try {

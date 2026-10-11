@@ -9,7 +9,7 @@ import { join } from 'path'
 import { isFsInaccessible } from './errors.js'
 import { getLocalClaudePath } from './localInstaller.js'
 
-export const CLAUDE_ALIAS_REGEX = /^\s*alias\s+claude\s*=/
+export const CLAUDE_ALIAS_REGEX = /^\s*alias\s+(?:bee-game-studio|bee-game-studio-bun|ccb|ccb-bun)\s*=/
 
 type EnvLike = Record<string, string | undefined>
 
@@ -52,10 +52,10 @@ export function filterClaudeAliases(lines: string[]): {
     if (CLAUDE_ALIAS_REGEX.test(line)) {
       // Extract the alias target - handle spaces, quotes, and various formats
       // First try with quotes
-      let match = line.match(/alias\s+claude\s*=\s*["']([^"']+)["']/)
+      let match = line.match(/alias\s+(?:bee-game-studio|bee-game-studio-bun|ccb|ccb-bun)\s*=\s*["']([^"']+)["']/)
       if (!match) {
         // Try without quotes (capturing until end of line or comment)
-        match = line.match(/alias\s+claude\s*=\s*([^#\n]+)/)
+        match = line.match(/alias\s+(?:bee-game-studio|bee-game-studio-bun|ccb|ccb-bun)\s*=\s*([^#\n]+)/)
       }
 
       if (match && match[1]) {
@@ -123,7 +123,7 @@ export async function findClaudeAlias(
     for (const line of lines) {
       if (CLAUDE_ALIAS_REGEX.test(line)) {
         // Extract the alias target
-        const match = line.match(/alias\s+claude=["']?([^"'\s]+)/)
+        const match = line.match(/alias\s+(?:bee-game-studio|bee-game-studio-bun|ccb|ccb-bun)\s*=\s*["']?([^"'\s]+)/)
         if (match && match[1]) {
           return match[1]
         }

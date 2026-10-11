@@ -1,6 +1,4 @@
-import { emitNativeDiagnostic, nextNativeDiagnosticRequest, nativeErrorMetadata, nativeObserverHeaders, type NativeDiagnostic } from '@bee-game-studio/agent-workflow/native-diagnostics'
-import { applyThinkingPolicy, thinkingParameterMode } from '../../utils/apiThinking.js'
-import { createEvidenceResponseRecorder, recordContextChange, recordNativeEvidence, withEvidenceRequest } from '@bee-game-studio/agent-workflow/native-evidence'
+import { applyThinkingPolicy } from '../../utils/apiThinking.js'
 import type {
   BetaContentBlock,
   BetaContentBlockParam,
@@ -861,7 +859,6 @@ export async function* executeNonStreamingRequest(
     signal: AbortSignal
     initialConsecutive529Errors?: number
     querySource?: QuerySource
-    diagnostic?: Pick<NativeDiagnostic, 'actor' | 'originRequest'>
   },
   paramsFromContext: (context: RetryContext) => BetaMessageStreamParams,
   onAttempt: (attempt: number, start: number, maxOutputTokens: number) => void,
@@ -873,9 +870,6 @@ export async function* executeNonStreamingRequest(
   originatingRequestId?: string | null,
 ): AsyncGenerator<SystemAPIErrorMessage, BetaMessage> {
   const fallbackTimeoutMs = getNonstreamingFallbackTimeoutMs()
-  let fallbackRequest: number | undefined
-  const diagnostic = () => ({ ...retryOptions.diagnostic, request: fallbackRequest,
-    mode: 'non_streaming_fallback' as const, phase: 'query' as const })
   const generator = withRetry(
     () =>
       getAnthropicClient({
@@ -894,33 +888,16 @@ export async function* executeNonStreamingRequest(
         retryParams,
         MAX_NON_STREAMING_TOKENS,
       )
-      const evidenceRequest = nextNativeDiagnosticRequest()
-      fallbackRequest = evidenceRequest
-      const requestDiagnostic = { ...diagnostic(), event: 'request_start' as const, phase: 'headers' as const, attempt,
-        thinkingPolicy: context.thinkingConfig.type, thinkingParameter: thinkingParameterMode(adjustedParams.thinking) }
-      emitNativeDiagnostic(requestDiagnostic)
-      const evidenceIds = { requestId: evidenceRequest, requestAttempt: attempt }
-      const body = { ...adjustedParams, model: normalizeModelStringForAPI(adjustedParams.model) }
-      recordNativeEvidence('sdk_request', { mode: 'non_streaming_fallback', originatingRequestId, body }, evidenceIds)
 
       try {
-        const response = await withEvidenceRequest(evidenceIds, () => anthropic.beta.messages.create(
-          body,
+        return await anthropic.beta.messages.create(
+          { ...adjustedParams, model: normalizeModelStringForAPI(adjustedParams.model) },
           {
             signal: retryOptions.signal,
             timeout: fallbackTimeoutMs,
-            headers: nativeObserverHeaders(requestDiagnostic),
           },
-        ))
-        recordNativeEvidence('api_response', response, evidenceIds)
-        emitNativeDiagnostic({ ...diagnostic(), event: 'request_end', attempt, outcome: 'completed',
-          thinkingReturned: typeof response === 'object' && response !== null && 'content' in response &&
-            Array.isArray(response.content) && response.content.some(block => block.type === 'thinking' || block.type === 'redacted_thinking') })
-        return response
+        )
       } catch (err) {
-        emitNativeDiagnostic({ ...diagnostic(), event: 'request_end', attempt,
-          outcome: retryOptions.signal.aborted ? 'cancelled' : 'failed', ...nativeErrorMetadata(err) })
-        recordNativeEvidence('request_failed', { mode: 'non_streaming_fallback' }, evidenceIds)
         // User aborts are not errors — re-throw immediately without logging
         if (err instanceof APIUserAbortError) throw err
 
@@ -951,7 +928,6 @@ export async function* executeNonStreamingRequest(
       signal: retryOptions.signal,
       initialConsecutive529Errors: retryOptions.initialConsecutive529Errors,
       querySource: retryOptions.querySource,
-      diagnostic,
     },
   )
 
@@ -1889,6 +1865,7 @@ async function* queryModel(
   let partialMessage: BetaMessage | undefined
   const contentBlocks: (BetaContentBlock | ConnectorTextBlock)[] = []
   const textDeltas = new Map<number, string[]>()
+  const openContentBlocks = new Set<number>()
   let usage: NonNullableUsage = EMPTY_USAGE
   let costUSD = 0
   let stopReason: BetaStopReason | null = null
@@ -1899,10 +1876,6 @@ async function* queryModel(
   let research: unknown
   let isFastModeRequest = isFastMode // Keep separate state as it may change if falling back
   let isAdvisorInProgress = false
-  let diagnosticRequest = 0
-  const requestDiagnostic = () => ({ request: diagnosticRequest || undefined,
-    actor: options.agentId ?? 'main', mode: 'streaming' as const })
-  const responseEvidence = createEvidenceResponseRecorder(() => diagnosticRequest)
 
   try {
     queryCheckpoint('query_client_creation_start')
@@ -1934,13 +1907,6 @@ async function* queryModel(
         // awaits until response headers arrive, so this MUST be before the await
         // or the "Network TTFB" phase measurement is wrong.
         queryCheckpoint('query_api_request_sent')
-        diagnosticRequest = nextNativeDiagnosticRequest()
-        emitNativeDiagnostic({ ...requestDiagnostic(), event: 'request_start', attempt, phase: 'headers',
-          thinkingPolicy: thinkingConfig.type, thinkingParameter: thinkingParameterMode(params.thinking) })
-        recordContextChange('api_message_preparation', messages, params.messages, { requestId: diagnosticRequest })
-        recordNativeEvidence('sdk_request', { mode: 'streaming', querySource: options.querySource, requestedModel: options.model,
-          runtime: { version: MACRO.VERSION, buildTime: MACRO.BUILD_TIME },
-          body: { ...params, stream: true } }, { requestId: diagnosticRequest, requestAttempt: attempt })
         if (!options.agentId) {
           headlessProfilerCheckpoint('api_request_sent')
         }
@@ -1956,20 +1922,17 @@ async function* queryModel(
         // Use raw stream instead of BetaMessageStream to avoid O(n²) partial JSON parsing
         // BetaMessageStream calls partialParse() on every input_json_delta, which we don't need
         // since we handle tool input accumulation ourselves
-        const result = await withEvidenceRequest({ requestId: diagnosticRequest, requestAttempt: attempt }, () => anthropic.beta.messages
+        const result = await anthropic.beta.messages
           .create(
             { ...params, stream: true },
             {
               signal,
-              headers: { ...nativeObserverHeaders({ ...requestDiagnostic(), event: 'request_start', attempt }),
-                ...(clientRequestId ? { [CLIENT_REQUEST_ID_HEADER]: clientRequestId } : {}) },
+              ...(clientRequestId && { headers: { [CLIENT_REQUEST_ID_HEADER]: clientRequestId } }),
             },
           )
-          .withResponse())
+          .withResponse()
         queryCheckpoint('query_response_headers_received')
-        emitNativeDiagnostic({ ...requestDiagnostic(), event: 'response_headers', status: result.response.status, phase: 'headers' })
         streamRequestId = result.request_id
-        recordNativeEvidence('api_response_metadata', { providerRequestId: result.request_id, status: result.response.status }, { requestId: diagnosticRequest })
         streamResponse = result.response
         return result.data
       },
@@ -1980,7 +1943,6 @@ async function* queryModel(
         ...(isFastModeEnabled() ? { fastMode: isFastMode } : false),
         signal,
         querySource: options.querySource,
-        diagnostic: () => ({ ...requestDiagnostic(), phase: 'headers' }),
       },
     )
 
@@ -2001,6 +1963,7 @@ async function* queryModel(
     partialMessage = undefined
     contentBlocks.length = 0
     textDeltas.clear()
+    openContentBlocks.clear()
     usage = EMPTY_USAGE
     stopReason = null
     isAdvisorInProgress = false
@@ -2058,8 +2021,6 @@ async function* queryModel(
       let stallCount = 0
 
       for await (const part of providerStream) {
-        responseEvidence.consume(part)
-        if (isFirstChunk) emitNativeDiagnostic({ ...requestDiagnostic(), event: 'first_stream_event', phase: 'body' })
         const now = Date.now()
 
         // Detect and log streaming stalls (only after first event to avoid counting TTFB)
@@ -2114,6 +2075,7 @@ async function* queryModel(
             break
           }
           case 'content_block_start':
+            openContentBlocks.add(part.index)
             switch (part.content_block.type) {
               case 'tool_use':
                 contentBlocks[part.index] = {
@@ -2293,6 +2255,7 @@ async function* queryModel(
             break
           }
           case 'content_block_stop': {
+            openContentBlocks.delete(part.index)
             const contentBlock = contentBlocks[part.index]
             if (!contentBlock) {
               logEvent('tengu_streaming_error', {
@@ -2436,24 +2399,14 @@ async function* queryModel(
           ...(part.type === 'message_start' ? { ttftMs } : undefined),
         }
       }
-      // Detect when the stream completed without producing any assistant messages.
-      // This covers two proxy failure modes:
-      // 1. No events at all (!partialMessage): proxy returned 200 with non-SSE body
-      // 2. Partial events (partialMessage set but no content blocks completed AND
-      //    no stop_reason received): proxy returned message_start but stream ended
-      //    before content_block_stop and before message_delta with stop_reason
-      // BetaMessageStream had the first check in _endRequest() but the raw Stream
-      // does not - without it the generator silently returns no assistant messages,
-      // causing "Execution error" in -p mode.
-      // Note: We must check stopReason to avoid false positives. For example, with
-      // structured output (--json-schema), the model calls a StructuredOutput tool
-      // on turn 1, then on turn 2 responds with end_turn and no content blocks.
-      // That's a legitimate empty response, not an incomplete stream.
-      if (!partialMessage || (newMessages.length === 0 && !stopReason)) {
+      // Completed text blocks do not prove the response finished: a later tool
+      // block may be truncated. A terminal reason and closed blocks suffice;
+      // compatible providers may omit message_stop, and end_turn may be empty.
+      if (!partialMessage || !stopReason || openContentBlocks.size > 0) {
         logForDebugging(
           !partialMessage
             ? 'Stream completed without receiving message_start event - triggering non-streaming fallback'
-            : 'Stream completed with message_start but no content blocks completed - triggering non-streaming fallback',
+            : 'Stream ended without a terminal stop reason or with unfinished content blocks',
           { level: 'error' },
         )
         logEvent('tengu_stream_no_events', {
@@ -2462,7 +2415,7 @@ async function* queryModel(
           request_id: (streamRequestId ??
             'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         })
-        throw new Error('Stream ended without receiving any events')
+        throw new Error('Message stream ended before the response was complete')
       }
 
       // Log summary if any stalls occurred during streaming
@@ -2514,8 +2467,6 @@ async function* queryModel(
         responseHeaders = resp.headers
       }
     } catch (streamingError) {
-      emitNativeDiagnostic({ ...requestDiagnostic(), event: 'stream_error', phase: 'body',
-        outcome: signal.aborted ? 'cancelled' : 'failed', ...nativeErrorMetadata(streamingError) })
       if (streamingError instanceof ProviderStreamIdleError) {
         logForDiagnosticsNoPII(
           'error',
@@ -2573,6 +2524,12 @@ async function* queryModel(
       // starts a tool, then the non-streaming retry produces the same tool_use
       // and runs it again. See inc-4258.
       const disableFallback =
+        // Already-yielded tools may be executing. Re-generating the entire
+        // response could execute them twice, even when the provider hit EOF.
+        newMessages.some(message =>
+          Array.isArray(message.message.content) &&
+          message.message.content.some(block => block.type === 'tool_use'),
+        ) ||
         isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK) ||
         getFeatureValue_CACHED_MAY_BE_STALE(
           'tengu_disable_streaming_to_non_streaming_fallback',
@@ -2666,7 +2623,6 @@ async function* queryModel(
           ...(isFastModeEnabled() && { fastMode: isFastMode }),
           signal,
           initialConsecutive529Errors: is529Error(streamingError) ? 1 : 0,
-          diagnostic: { actor: options.agentId ?? 'main', originRequest: diagnosticRequest },
           querySource: options.querySource,
         },
         paramsFromContext,
@@ -2768,7 +2724,6 @@ async function* queryModel(
             thinkingConfig,
             ...(isFastModeEnabled() && { fastMode: isFastMode }),
             signal,
-            diagnostic: { actor: options.agentId ?? 'main', originRequest: diagnosticRequest },
           },
           paramsFromContext,
           (attempt, _startTime, tokens) => {
@@ -2921,10 +2876,6 @@ async function* queryModel(
     }
   } finally {
     stopSessionActivity('api_call')
-    // This is query cleanup, including fallback/cancellation, not proof of message_stop.
-    emitNativeDiagnostic({ ...requestDiagnostic(), event: 'stream_end', phase: 'query', recovered: Boolean(fallbackMessage),
-      thinkingReturned: contentBlocks.some(block => block.type === 'thinking' || block.type === 'redacted_thinking') })
-    responseEvidence.finish({ stopReason, usage, didFallBackToNonStreaming })
     // Must be in the finally block: if the generator is terminated early
     // via .return() (e.g. consumer breaks out of for-await-of, or query.ts
     // encounters an abort), code after the try/finally never executes.

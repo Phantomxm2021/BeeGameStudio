@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Box, Pane, Text, useTheme } from '@anthropic/ink';
+import { Box, Pane, Text, useTheme } from '@bee-game-studio/ink';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -144,8 +144,8 @@ export const callOnboarding: LocalJSXCommandCall = async (onDone, _context, args
     onDone(
       'MCP server setup:\n' +
         '  - `/mcp` — list configured MCP servers\n' +
-        '  - `claude mcp add <name> <command>` — add a server (in your shell)\n' +
-        '  - `claude mcp remove <name>` — remove a server\n' +
+        '  - `bee-game-studio mcp add <name> <command>` — add a server (in your shell)\n' +
+        '  - `bee-game-studio mcp remove <name>` — remove a server\n' +
         'Servers also load from `.mcp.json` in the workspace and from ' +
         '`~/.claude.json` globally.',
       { display: 'system' },

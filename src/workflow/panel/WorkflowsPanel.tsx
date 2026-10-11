@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Box, Dialog, Text, useAnimationFrame } from '@anthropic/ink';
-import type { Theme } from '@anthropic/ink';
+import { Box, Dialog, Text, useAnimationFrame } from '@bee-game-studio/ink';
+import type { Theme } from '@bee-game-studio/ink';
 import type { LocalJSXCommandContext, LocalJSXCommandOnDone } from '../../types/command.js';
 import { getWorkflowService } from '../service.js';
 import type { RunProgress } from '../progress/store.js';

@@ -1,4 +1,4 @@
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useBackgroundAgentTasks } from '../../hooks/useBackgroundAgentTasks.js';
 import { useElapsedTime } from '../../hooks/useElapsedTime.js';
 import { useAppState } from '../../state/AppState.js';

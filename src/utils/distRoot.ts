@@ -12,18 +12,17 @@ import * as path from 'path'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const distRoot = (() => {
-  const parts = __dirname.split(path.sep)
-  const distIdx = parts.lastIndexOf('dist')
-  if (distIdx !== -1) {
-    return parts.slice(0, distIdx + 1).join(path.sep)
+export function resolveDistRoot(directory: string): string {
+  let root = path.resolve(directory)
+  // A chunk directory belongs to its immediate build, whatever it is named.
+  // Never interpret an ancestor called src/dist as the current build layout.
+  while (path.basename(root) === 'chunks') root = path.dirname(root)
+  if (path.basename(root) === 'utils' && path.basename(path.dirname(root)) === 'src') {
+    return path.dirname(path.dirname(root))
   }
-  // Dev mode: from src/utils/ → project root
-  const srcIdx = parts.lastIndexOf('src')
-  if (srcIdx !== -1) {
-    return parts.slice(0, srcIdx).join(path.sep)
-  }
-  return __dirname
-})()
+  return root
+}
+
+const distRoot = resolveDistRoot(__dirname)
 
 export { distRoot }

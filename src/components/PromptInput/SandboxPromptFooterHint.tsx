@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
 import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
 

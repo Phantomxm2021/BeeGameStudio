@@ -9,7 +9,7 @@ import type { CommandResultDisplay } from '../../../commands.js';
 import { Select } from '../../../components/CustomSelect/select.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useSearchInput } from '../../../hooks/useSearchInput.js';
-import { type KeyboardEvent, Box, Text, useTerminalFocus } from '@anthropic/ink';
+import { type KeyboardEvent, Box, Text, useTerminalFocus } from '@bee-game-studio/ink';
 import { useKeybinding } from '../../../keybindings/useKeybinding.js';
 import { type AutoModeDenial, getAutoModeDenials } from '../../../utils/autoModeDenials.js';
 import type {
@@ -27,7 +27,7 @@ import {
 } from '../../../utils/permissions/permissions.js';
 import type { UnreachableRule } from '../../../utils/permissions/shadowedRuleDetection.js';
 import { jsonStringify } from '../../../utils/slowOperations.js';
-import { Pane, Tab, Tabs, useTabHeaderFocus, useTabsWidth } from '@anthropic/ink';
+import { Pane, Tab, Tabs, useTabHeaderFocus, useTabsWidth } from '@bee-game-studio/ink';
 import { SearchBox } from '../../SearchBox.js';
 import type { Option } from '../../ui/option.js';
 import { AddPermissionRules } from './AddPermissionRules.js';
@@ -213,9 +213,9 @@ function PermissionRulesTab({
       <Text>
         {
           {
-            allow: "Claude Code won't ask before using allowed tools.",
-            ask: 'Claude Code will always ask for confirmation before using these tools.',
-            deny: 'Claude Code will always reject requests to use denied tools.',
+            allow: "BGS won't ask before using allowed tools.",
+            ask: 'BGS will always ask for confirmation before using these tools.',
+            deny: 'BGS will always reject requests to use denied tools.',
           }[tab]
         }
       </Text>
@@ -670,7 +670,7 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
           </Tab>
           <Tab id="workspace" title="Workspace">
             <Box flexDirection="column">
-              <Text>Claude Code can read files in the workspace, and make edits when auto-accept edits is on.</Text>
+              <Text>BGS can read files in the workspace, and make edits when auto-accept edits is on.</Text>
               <WorkspaceTab
                 onExit={onExit}
                 toolPermissionContext={toolPermissionContext}

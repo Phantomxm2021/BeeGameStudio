@@ -1,6 +1,6 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { feature } from 'bun:bundle';
-import { type KeyboardEvent, Box, Text, useTheme, useThemeSetting, useTerminalFocus } from '@anthropic/ink';
+import { type KeyboardEvent, Box, Text, useTheme, useThemeSetting, useTerminalFocus } from '@bee-game-studio/ink';
 import * as React from 'react';
 import { useState, useCallback } from 'react';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
@@ -40,7 +40,7 @@ import { modelDisplayString, isOpus1mMergeEnabled } from '../../utils/model/mode
 import { isBilledAsExtraUsage } from '../../utils/extraUsage.js';
 import { ClaudeMdExternalIncludesDialog } from '../ClaudeMdExternalIncludesDialog.js';
 import { ChannelDowngradeDialog, type ChannelDowngradeChoice } from '../ChannelDowngradeDialog.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 import { Select } from '../CustomSelect/index.js';
 import { OutputStylePicker } from '../OutputStylePicker.js';
 import { LanguagePicker } from '../LanguagePicker.js';
@@ -50,7 +50,7 @@ import {
   getMemoryFiles,
   hasExternalClaudeMdIncludes,
 } from 'src/utils/claudemd.js';
-import { Byline, KeyboardShortcutHint, useTabHeaderFocus } from '@anthropic/ink';
+import { Byline, KeyboardShortcutHint, useTabHeaderFocus } from '@bee-game-studio/ink';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
 import { useIsInsideModal } from '../../context/modalContext.js';
 import { SearchBox } from '../SearchBox.js';

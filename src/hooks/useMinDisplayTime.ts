@@ -1,2 +1,2 @@
-// Re-export from @anthropic/ink hooks module
-export { useMinDisplayTime } from '@anthropic/ink'
+// Re-export from @bee-game-studio/ink hooks module
+export { useMinDisplayTime } from '@bee-game-studio/ink'

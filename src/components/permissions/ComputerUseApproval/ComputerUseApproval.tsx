@@ -4,12 +4,12 @@ import { DEFAULT_GRANT_FLAGS } from '@ant/computer-use-mcp/types';
 import figures from 'figures';
 import * as React from 'react';
 import { useMemo, useState } from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { execFileNoThrow } from '../../../utils/execFileNoThrow.js';
 import { plural } from '../../../utils/stringUtils.js';
 import type { OptionWithDescription } from '../../CustomSelect/select.js';
 import { Select } from '../../CustomSelect/select.js';
-import { Dialog } from '@anthropic/ink';
+import { Dialog } from '@bee-game-studio/ink';
 
 type ComputerUseApprovalProps = {
   request: CuPermissionRequest;
@@ -102,7 +102,7 @@ function ComputerUseTccPanel({
         </Box>
         <Text dimColor>
           Grant the missing permissions in System Settings, then select &quot;Try again&quot;. macOS may require you to
-          restart Claude Code after granting Screen Recording.
+          restart BGS after granting Screen Recording.
         </Text>
         <Select options={options} onChange={onChange} onCancel={onDone} />
       </Box>

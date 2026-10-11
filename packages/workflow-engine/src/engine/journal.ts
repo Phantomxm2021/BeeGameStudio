@@ -1,5 +1,12 @@
-import { createHash } from 'node:crypto'
-import { appendFile, mkdir, readFile, rm } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import {
+  appendFile,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises'
 import { join } from 'node:path'
 import type { JournalStore } from '../ports.js'
 import type { AgentRunParams, JournalEntry } from '../types.js'
@@ -43,8 +50,22 @@ export function createFileJournalStore(runsDir: string): JournalStore {
       await mkdir(join(runsDir, runId), { recursive: true })
       await appendFile(pathOf(runId), JSON.stringify(entry) + '\n', 'utf-8')
     },
-    async truncate(runId) {
-      await rm(join(runsDir, runId), { recursive: true, force: true })
+    async truncate(runId, retained = []) {
+      // Publish the retained prefix atomically. Deleting the run directory also
+      // deleted script.js and lost valid results on the next resume.
+      await mkdir(join(runsDir, runId), { recursive: true })
+      const target = pathOf(runId)
+      const temporary = target + '.' + randomUUID() + '.tmp'
+      try {
+        await writeFile(
+          temporary,
+          retained.map(entry => JSON.stringify(entry) + '\n').join(''),
+          'utf-8',
+        )
+        await rename(temporary, target)
+      } finally {
+        await rm(temporary, { force: true })
+      }
     },
   }
 }

@@ -1,6 +1,6 @@
 import { openSync } from 'fs'
 import { ReadStream } from 'tty'
-import type { RenderOptions } from '@anthropic/ink'
+import type { RenderOptions } from '@bee-game-studio/ink'
 import { isEnvTruthy } from './envUtils.js'
 import { logError } from './log.js'
 

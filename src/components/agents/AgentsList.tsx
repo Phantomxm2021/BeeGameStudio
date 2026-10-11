@@ -1,7 +1,7 @@
 import figures from 'figures';
 import * as React from 'react';
 import type { SettingSource } from 'src/utils/settings/constants.js';
-import { type KeyboardEvent, Box, Text } from '@anthropic/ink';
+import { type KeyboardEvent, Box, Text } from '@bee-game-studio/ink';
 import type { ResolvedAgent } from '@bee-game-studio/builtin-tools/tools/AgentTool/agentDisplay.js';
 import {
   AGENT_SOURCE_GROUPS,
@@ -11,7 +11,7 @@ import {
 } from '@bee-game-studio/builtin-tools/tools/AgentTool/agentDisplay.js';
 import type { AgentDefinition } from '@bee-game-studio/builtin-tools/tools/AgentTool/loadAgentsDir.js';
 import { count } from '../../utils/array.js';
-import { Dialog, Divider } from '@anthropic/ink';
+import { Dialog, Divider } from '@bee-game-studio/ink';
 import { getAgentSourceDisplayName } from './utils.js';
 
 type Props = {
@@ -210,7 +210,7 @@ export function AgentsList({ source, agents, onBack, onSelect, onCreateNew, chan
       <Dialog title={sourceTitle} subtitle="No agents found" onCancel={onBack} hideInputGuide>
         <Box flexDirection="column" gap={1} tabIndex={0} autoFocus onKeyDown={handleKeyDown}>
           {onCreateNew && <Box>{renderCreateNewOption()}</Box>}
-          <Text dimColor>No agents found. Create specialized subagents that Claude can delegate to.</Text>
+          <Text dimColor>No agents found. Create specialized subagents that BGS can delegate to.</Text>
           <Text dimColor>Each subagent has its own context window, custom system prompt, and specific tools.</Text>
           <Text dimColor>
             Try creating: Code Reviewer, Code Simplifier, Security Reviewer, Tech Lead, or UX Reviewer.

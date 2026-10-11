@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { z } from 'zod/v4';
 import { TOOL_SUMMARY_MAX_LENGTH } from 'src/constants/toolLimits.js';
 import type { ToolResultBlockParam, ToolUseContext, ValidationResult } from 'src/Tool.js';

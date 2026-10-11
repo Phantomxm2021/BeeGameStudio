@@ -8,7 +8,7 @@ import {
 } from 'src/services/analytics/index.js';
 import { sanitizeToolNameForAnalytics } from 'src/services/analytics/metadata.js';
 import type { ToolUseConfirm } from '../components/permissions/PermissionRequest.js';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import type { ToolPermissionContext, Tool as ToolType, ToolUseContext } from '../Tool.js';
 import {
   consumeSpeculativeClassifierCheck,

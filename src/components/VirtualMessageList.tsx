@@ -2,7 +2,7 @@ import type { RefObject } from 'react';
 import * as React from 'react';
 import { useCallback, useContext, useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore } from 'react';
 import { useVirtualScroll } from '../hooks/useVirtualScroll.js';
-import { Box, type DOMElement, type ScrollBoxHandle, type MatchPosition } from '@anthropic/ink';
+import { Box, type DOMElement, type ScrollBoxHandle, type MatchPosition } from '@bee-game-studio/ink';
 import { TextHoverColorContext } from './design-system/ThemedText.js';
 import { ScrollChromeContext } from './FullscreenLayout.js';
 

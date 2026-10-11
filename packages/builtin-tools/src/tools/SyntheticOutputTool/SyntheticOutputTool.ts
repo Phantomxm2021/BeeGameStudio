@@ -1,6 +1,5 @@
 import { Ajv, type ErrorObject } from 'ajv'
 import { focusSchemaErrors } from './schemaDiagnostics'
-import { structuredOutputSchemas, parseStructuredOutputContent } from './jsonEnvelope'
 import { z } from 'zod/v4'
 import type { Tool, ToolInputJSONSchema } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
@@ -130,14 +129,12 @@ function buildSyntheticOutputTool(
   jsonSchema: Record<string, unknown>,
 ): CreateResult {
   try {
-    const { wire, content } = structuredOutputSchemas(jsonSchema)
     const ajv = new Ajv({ allErrors: true })
-    const isValidSchema = ajv.validateSchema(wire)
+    const isValidSchema = ajv.validateSchema(jsonSchema)
     if (!isValidSchema) {
       return { error: ajv.errorsText(ajv.errors) }
     }
-    const validateSchema = ajv.compile(wire)
-    const validateContent = content ? new Ajv({ allErrors: true }).compile(content) : undefined
+    const validateSchema = ajv.compile(jsonSchema)
     function mismatch(schema: Record<string, unknown>, input: unknown, issues: ErrorObject[]): never {
       const focused = focusSchemaErrors(schema, input, issues).slice(0, 16)
       const errors = focused.map(e => `${e.instancePath || 'root'}: ${e.message}${e.keyword === 'additionalProperties' ? ' (' + JSON.stringify(e.params.additionalProperty) + ')' : ''}`).join(', ')
@@ -153,19 +150,11 @@ function buildSyntheticOutputTool(
     return {
       tool: {
         ...SyntheticOutputTool,
-        inputJSONSchema: wire as ToolInputJSONSchema,
+        inputJSONSchema: jsonSchema as ToolInputJSONSchema,
         async call(input) {
           const isValid = validateSchema(input)
           if (!isValid) {
-            mismatch(wire, input, validateSchema.errors ?? [])
-          }
-          // The original native retry/accounting loop must see inner failures,
-          // not acknowledge the outer string and let the host fail afterwards.
-          if (validateContent && content) {
-            const parsed = parseStructuredOutputContent(input)
-            if (!parsed.ok) mismatch(wire, input, [{ instancePath: '/payload_json', schemaPath: '#/properties/payload_json',
-              keyword: 'contentEncoding', params: {}, message: `must encode one valid JSON action object (${parsed.reason}); correct the JSON syntax, not the outer wrapper` }])
-            if (!validateContent(parsed.value)) mismatch(content, parsed.value, validateContent.errors ?? [])
+            mismatch(jsonSchema, input, validateSchema.errors ?? [])
           }
           return {
             data: 'Structured output provided successfully',

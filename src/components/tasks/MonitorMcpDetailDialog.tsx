@@ -1,7 +1,7 @@
 import React from 'react';
 import type { DeepImmutable } from 'src/types/utils.js';
 import { useElapsedTime } from '../../hooks/useElapsedTime.js';
-import { Box, Text, type KeyboardEvent } from '@anthropic/ink';
+import { Box, Text, type KeyboardEvent } from '@bee-game-studio/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { MonitorMcpTaskState } from '../../tasks/MonitorMcpTask/MonitorMcpTask.js';
 import { Byline } from '../design-system/Byline.js';

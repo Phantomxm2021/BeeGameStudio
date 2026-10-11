@@ -3,7 +3,7 @@ import React from 'react';
 import { FileEditToolDiff } from 'src/components/FileEditToolDiff.js';
 import { getCwd } from 'src/utils/cwd.js';
 import type { z } from 'zod/v4';
-import { Text } from '@anthropic/ink';
+import { Text } from '@bee-game-studio/ink';
 import { FileEditTool } from '@bee-game-studio/builtin-tools/tools/FileEditTool/FileEditTool.js';
 import { FilePermissionDialog } from '../FilePermissionDialog/FilePermissionDialog.js';
 import {

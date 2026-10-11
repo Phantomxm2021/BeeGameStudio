@@ -22,6 +22,9 @@ import { buildApiUrl } from '../../services/apiClient';
 import { WorkspaceShell } from '../Workspace/WorkspaceShell';
 import { WorkspacePreviewPanel } from '../Workspace/WorkspacePreviewPanel';
 import { WorkspaceDeploymentDialog } from '../Workspace/WorkspaceDeploymentDialog';
+import { ProductionReviewPanel } from './ProductionReviewPanel';
+import { Dialog, DialogContent, DialogTitle } from '../ui/dialog';
+import { CloseIconButton } from '../ui/CloseIconButton';
 import { ThemeToggle } from '../beui/motion/theme-toggle';
 import { AccountActionsMenu } from './Landing/AccountActionsMenu';
 import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from '../beui/registry/components/motion/popover-morph';
@@ -153,6 +156,7 @@ export function BeeGameLivePreviewPage({
   onSetLang,
   collaboration,
 }: BeeGameLivePreviewPageProps) {
+  const [isProductionReviewOpen, setProductionReviewOpen] = useState(false);
   const [isSettingsOpen, setSettingsOpen] = useState(false);
   const [isResourceLibraryOpen, setIsResourceLibraryOpen] = useState(() => isResourceLibraryRoute());
   const [isCreditStoreOpen, setCreditStoreOpen] = useState(false);
@@ -311,6 +315,7 @@ export function BeeGameLivePreviewPage({
         </div>
         <div className="workspace-header-actions ml-1 flex shrink-0 items-center gap-2 sm:ml-auto sm:gap-3">
           <ThemeToggle />
+          <Button variant="ghost" size="sm" disabled={isInteractionLocked || isWorkspaceBusy} onClick={() => setProductionReviewOpen(value => !value)}>{lang.startsWith('zh') ? '制作验收' : 'Production review'}</Button>
           <div data-testid="beegame-preview-deploy-control" className="flex h-10 min-w-10 shrink-0 items-stretch overflow-hidden rounded-full border border-[var(--border)] bg-[var(--surface-2)] min-[900px]:min-w-[204px]">
             <Button
               type="button"
@@ -428,6 +433,13 @@ export function BeeGameLivePreviewPage({
           await loadCurrentUser();
         }}
       />
+      {isProductionReviewOpen && <Dialog open onOpenChange={open => !open && setProductionReviewOpen(false)}>
+        <DialogContent className="max-h-[calc(100dvh-32px)] max-w-2xl overflow-y-auto p-5 text-foreground">
+          <CloseIconButton label={lang.startsWith('zh') ? '关闭' : 'Close'} onClick={() => setProductionReviewOpen(false)} className="absolute right-4 top-4" />
+          <DialogTitle className="pr-12">{lang.startsWith('zh') ? '制作验收' : 'Production review'}</DialogTitle>
+          <ProductionReviewPanel projectId={projectId} chinese={lang.startsWith('zh')} />
+        </DialogContent>
+      </Dialog>}
       <WorkspaceDeploymentDialog
         projectId={projectId}
         isOpen={isDeploymentDialogOpen}

@@ -10,6 +10,7 @@ import type {
   SessionModeState,
   SessionModelState,
 } from '@agentclientprotocol/sdk'
+import { RequestError } from '@agentclientprotocol/sdk'
 import type { Message } from '../../../types/message.js'
 import { QueryEngine } from '../../../QueryEngine.js'
 import type { QueryEngineConfig } from '../../../QueryEngine.js'
@@ -21,8 +22,8 @@ import { getCommands } from '../../../commands.js'
 import { getAgentDefinitionsWithOverrides } from '@bee-game-studio/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import {
   setOriginalCwd,
-  switchSession,
-  getSessionProjectDir,
+  setCwdState,
+  setProjectRoot,
 } from '../../../bootstrap/state.js'
 import type { SessionId } from '../../../types/ids.js'
 import { enableConfigs } from '../../../utils/config.js'
@@ -45,6 +46,7 @@ import {
 } from './permissionMode.js'
 import { buildConfigOptions } from './configOptions.js'
 import { readClientCapabilities } from './internalAccessors.js'
+import { withAcpProcessContext, switchAcpSession } from './processContext.js'
 
 /**
  * Resolve the effective `permissions.defaultMode` setting by walking the
@@ -66,22 +68,29 @@ async function createSession(
     forceNewId?: boolean
     sessionId?: string
     initialMessages?: Message[]
+    projectDir?: string | null
   } = {},
 ): Promise<NewSessionResponse> {
+  if (params.mcpServers?.length) {
+    throw RequestError.invalidParams(
+      { field: 'mcpServers' },
+      'Client-provided MCP servers are not supported by this ACP agent.',
+    )
+  }
   enableConfigs()
 
   const sessionId = opts.sessionId ?? randomUUID()
   const cwd = params.cwd
 
-  // Align the global session state so that transcript persistence,
-  // analytics, and cost tracking use the ACP session ID.
-  // Preserve the projectDir set by getOrCreateSession so that
-  // getSessionProjectDir() continues to resolve correctly.
-  const currentProjectDir = getSessionProjectDir()
-  switchSession(sessionId as SessionId, currentProjectDir)
+  // Fresh sessions derive their transcript path from their own cwd, not the
+  // previously active session. Resumed worktrees pass their resolved directory.
+  const projectDir = opts.projectDir ?? null
+  switchAcpSession(sessionId as SessionId, projectDir)
 
   // Set CWD for the session
   setOriginalCwd(cwd)
+  setCwdState(cwd)
+  setProjectRoot(cwd)
   const previousProcessCwd = process.cwd()
   let processCwdChanged = false
   try {
@@ -145,9 +154,6 @@ async function createSession(
         this.sessions.get(sessionId)?.appState.toolPermissionContext
           .isBypassPermissionsModeAvailable ?? false,
     )
-
-    // Parse MCP servers from ACP params
-    // MCP server config is handled separately in the tools system
 
     // bypassPermissions is exposed to ACP clients whenever the process itself allows it
     // (non-root or sandbox). The previous additional opt-in gate made the mode invisible
@@ -261,6 +267,7 @@ async function createSession(
       cancelled: false,
       cancelGeneration: 0,
       cwd,
+      projectDir,
       modes,
       models,
       configOptions,
@@ -281,6 +288,7 @@ async function createSession(
     }
 
     this.sessions.set(sessionId, session)
+    this.defaultSessionCwd = cwd
 
     // Return models even though SDK 0.19.2 marks it UNSTABLE. The schema does allow the field
     // (NewSessionResponse.models?: SessionModelState | null), and standard clients (Cursor/Zed/
@@ -304,5 +312,7 @@ async function createSession(
 // ── Prototype attachment ─────────────────────────────────────────
 
 Object.assign(AcpAgent.prototype, {
-  createSession,
+  createSession(this: AcpAgent, ...args: Parameters<typeof createSession>) {
+    return withAcpProcessContext(() => createSession.apply(this, args))
+  },
 })

@@ -10,9 +10,9 @@ import { getIsRemoteMode } from '../bootstrap/state.js';
 import type { Command } from '../commands.js';
 import { BLACK_CIRCLE } from '../constants/figures.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import type { ScrollBoxHandle } from '@anthropic/ink';
-import { useTerminalNotification } from '@anthropic/ink';
-import { Box, Text } from '@anthropic/ink';
+import type { ScrollBoxHandle } from '@bee-game-studio/ink';
+import { useTerminalNotification } from '@bee-game-studio/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
 import type { Screen } from '../screens/REPL.js';
 import type { Tools } from '../Tool.js';
@@ -52,7 +52,7 @@ import {
 } from '../utils/messages.js';
 import { plural } from '../utils/stringUtils.js';
 import { renderableSearchText } from '../utils/transcriptSearch.js';
-import { Divider } from '@anthropic/ink';
+import { Divider } from '@bee-game-studio/ink';
 import type { UnseenDivider } from './FullscreenLayout.js';
 import { LogoV2 } from './LogoV2/LogoV2.js';
 import { StreamingMarkdown } from './Markdown.js';
@@ -278,12 +278,12 @@ type Props = {
   onSearchMatchesChange?: (count: number, current: number) => void;
   /** Paint an existing DOM subtree to fresh Screen, scan. Element comes
    *  from the main tree (all real providers). Message-relative positions. */
-  scanElement?: (el: import('@anthropic/ink').DOMElement) => import('@anthropic/ink').MatchPosition[];
+  scanElement?: (el: import('@bee-game-studio/ink').DOMElement) => import('@bee-game-studio/ink').MatchPosition[];
   /** Position-based CURRENT highlight. positions stable (msg-relative),
    *  rowOffset tracks scroll. null clears. */
   setPositions?: (
     state: {
-      positions: import('@anthropic/ink').MatchPosition[];
+      positions: import('@bee-game-studio/ink').MatchPosition[];
       rowOffset: number;
       currentIdx: number;
     } | null,

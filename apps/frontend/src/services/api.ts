@@ -92,6 +92,7 @@ export interface ContextVisibilityPayload {
     role_tokens?: {
       mainAgent?: number
       otherSubagents?: number
+      unattributed?: number
     }
   }
   counters?: Record<string, number>

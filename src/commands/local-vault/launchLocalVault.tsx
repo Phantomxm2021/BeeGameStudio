@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Dialog, Text, useInput } from '@anthropic/ink';
+import { Box, Dialog, Text, useInput } from '@bee-game-studio/ink';
 import type { LocalJSXCommandCall } from '../../types/command.js';
 import { setSecret, getSecret, deleteSecret, listKeys, maskSecret } from '../../services/localVault/store.js';
 import { isValidKey } from '../../utils/localValidate.js';

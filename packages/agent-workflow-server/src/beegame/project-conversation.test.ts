@@ -3,13 +3,259 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BeeGameSessionManager, type BeeGameSessionRunnerStartInput } from './session-manager'
-import { sendProjectConversation, isProjectConversation } from './project-conversation'
+import { sendProjectConversation, isProjectConversation, projectSourceText, projectInitialInstruction } from './project-conversation'
 import { createNativeCliProcessRunner } from './native-cli-process-runner'
 import { fileURLToPath } from 'node:url'
 import { advanceProjectDeliveryAfterTurn, beginProjectDelivery, prepareProjectDesignReview, PROJECT_DOCUMENTS, projectDeliveryStatePath, readProjectDelivery, requestProjectDesignResolution } from './project-delivery'
 import { designBaselineFixture, designDocumentFixture, designHandoffFixture, uiLayoutFixture, writeDesignDocumentsFixture, writeDesignDocumentFixture } from './fixtures/layout-fixture'
 import { AUTHOR_BATCHES } from './project-author'
-import type { DesignReviewResult } from './design-handoff'
+import type { DesignReviewResult, DesignFinding } from './design-handoff'
+import { checkDesignHandoff, designSupportingFiles, designHandoffPath } from './design-handoff'
+import { parseNativeProjectTurn } from '@bee-game-studio/agent-workflow/native-direction-authors'
+
+test('original source input is readable without double-escaping and preserves its actual data', () => {
+  const source = { kind: 'brief', settings: { orientation: 'Portrait' }, requirements: ['Input', 'Sound', 'Retry'] }
+  const rendered = projectSourceText(JSON.stringify(source))
+  expect(JSON.parse(rendered)).toEqual(source)
+  expect(rendered.split('\n').length).toBeGreaterThan(5)
+  expect(projectSourceText('Original prose\nSecond line')).toBe('Original prose\nSecond line')
+})
+
+test('normal dispatcher Brief suffix is deduplicated without losing distinct instructions', () => {
+  const brief = JSON.stringify({ kind: 'confirmed_build_brief', idea: 'Original idea',
+    settings: { orientation: 'Landscape', inputs: ['Keyboard', 'Touch'] },
+    document_language: 'zh', game_user_visible_language: 'en', agent_response_language: 'ja', reference_files: ['retained.png'] })
+  const prefix = 'Start this project.\nEXTRA: support non-colour identification.'
+  expect(projectInitialInstruction(prefix + '\nConfirmed brief:\n' + brief, brief)).toBe(prefix)
+  expect(projectInitialInstruction(brief, brief)).toBe('')
+  for (const value of [prefix, prefix + '\nConfirmed brief:\n' + brief + '\nKeep this extra requirement.',
+    prefix + '\nConfirmed brief:\n' + brief.replace('Landscape', 'Portrait')])
+    expect(projectInitialInstruction(value, brief)).toBe(value)
+})
+
+test('GDD input excludes production guidance but preserves native capabilities and explicit saved handoff checks', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-gdd-scoped-input-')), workspace = join(root, 'project')
+  let closes = 0, prompt = ''
+  const manager = new BeeGameSessionManager({ async start(start) {
+    expect(start.systemContext).toContain('GDD owns the player promise')
+    expect(start.systemContext).not.toContain('Content binds resources')
+    expect(start.systemContext!.length).toBeLessThan(7000)
+    return { stop() {}, async submit(turn) {
+      prompt = JSON.stringify(turn.prompt)
+      const context = await readFile(join(workspace, '.beegame/tmp', session.id, 'context.md'), 'utf8')
+      expect(context).toContain('docs/GDD.md')
+      expect(context).toContain('acceptance')
+      expect(context).toContain('native completion check and host validate')
+      expect(context).not.toContain('Irrelevant production capability sentinel')
+      expect(context).not.toContain('designIssues:')
+      expect(context).not.toContain('--design-references')
+      expect(context).not.toContain('adds implementationItems:')
+      expect(prompt).not.toContain('Current project Preview test API:')
+      expect(prompt).not.toContain('Current resource library / image-generation entry:')
+      expect(turn.projectTurn?.authorDocument).toBe('GDD.md')
+      expect(turn.projectTurn?.milestoneResult).toBeUndefined()
+      expect(prompt).toContain('saved paths and unresolved dependencies/limits only')
+      expect(prompt).not.toContain('response containing your final owned Write/Edit batch')
+      expect(prompt).not.toMatch(/milestone-[\w-]+\.txt/)
+      await access(join(workspace, 'docs'))
+      // Guidance is scoped, not a tool/permission restriction or deleted capability.
+      expect(await Bun.file(join(workspace, '.beegame/tmp', session.id, 'assets.mjs')).exists()).toBe(true)
+      await writeDesignDocumentFixture(workspace, 'GDD.md')
+      await turn.onMessage({ type: 'result', subtype: 'success', result: 'complete\nSynthetic GDD delivery; actual quality not certified.' })
+    } }
+  } }, root)
+  const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+  try {
+    await beginProjectDelivery(workspace, root, 'Synthetic confirmed player promise')
+    await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id,
+      ownerId: 'owner', message: 'Start the confirmed project', initialBrief: {
+        displayText: 'Synthetic confirmed player promise', confirmedBriefContext: JSON.stringify({
+          kind: 'confirmed_build_brief', idea: 'Synthetic confirmed player promise', resource_library_usage: 'optional',
+          document_language: 'zh', game_user_visible_language: 'zh', agent_response_language: 'zh',
+        }) },
+      openCapabilities: () => ({ instruction: 'Irrelevant production capability sentinel',
+        resourceTools: { libraryBaseUrl: 'http://127.0.0.1:12345' }, close: async () => { closes++ } }) })
+    await manager.waitForSessionIdle(session.id)
+    expect(manager.transcript(session.id).filter(event => event.type === 'turn.failed')).toEqual([])
+    expect(prompt).toContain('complete GDD assignment and original requirements are supplied above')
+    expect((await readProjectDelivery(workspace, root))?.authorBatch).toBe(1)
+    expect(closes).toBe(1)
+    expect(manager.transcript(session.id).filter(event => event.type === 'turn.failed')).toEqual([])
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test('GDD deduplicates only identical confirmed input and preserves a distinct delivery instruction', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-gdd-original-input-')), workspace = join(root, 'project')
+  const original = JSON.stringify({ kind: 'confirmed_build_brief', idea: 'SYNTHETIC_ORIGINAL_IDEA',
+    settings: { orientation: 'Portrait' }, resource_library_usage: 'optional', document_language: 'zh',
+    game_user_visible_language: 'zh', agent_response_language: 'zh' })
+  const extra = 'DISTINCT_DELIVERY_INSTRUCTION: preserve the explicitly confirmed accessibility requirement.'
+  const inputs: string[] = []
+  const manager = new BeeGameSessionManager({ async start() { return { stop() {}, async submit(turn) {
+    const blocks = turn.prompt as Array<{ type: string; text: string }>
+    inputs.push(blocks[0]!.text)
+    await turn.onMessage({ type: 'result', subtype: 'success', result: 'blocked\nSynthetic unresolved decision.' })
+  } } } }, root)
+  try {
+    await mkdir(workspace)
+    await beginProjectDelivery(workspace, root, original)
+    const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+    for (const message of [original, extra]) {
+      await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id,
+        ownerId: 'owner', message, initialBrief: { displayText: 'Original player request', confirmedBriefContext: original } })
+      await manager.waitForSessionIdle(session.id)
+    }
+    expect(inputs[0]!.split('SYNTHETIC_ORIGINAL_IDEA')).toHaveLength(2)
+    expect(inputs[0]).toContain('"orientation": "Portrait"')
+    expect(inputs[0]).toContain('"document_language": "zh"')
+    expect(inputs[0]).not.toContain('\\"orientation\\"')
+    expect(inputs[1]).toContain(extra)
+    expect(manager.transcript(session.id).filter(event => event.type === 'turn.failed')).toEqual([])
+    expect((await readProjectDelivery(workspace, root))?.authorBatch ?? 0).toBe(0)
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test.each(['missing-document', 'bad-index', 'native-failed', 'child-only', 'stale-state'] as const)('GDD terminal completion cannot advance %s', async fault => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-gdd-terminal-boundary-')), workspace = join(root, 'project')
+  let progress: { shouldContinue: boolean; issues: string[] } | undefined
+  const manager = new BeeGameSessionManager({ async start() { return { stop() {}, async submit(turn) {
+    if (fault !== 'missing-document') await writeDesignDocumentFixture(workspace, 'GDD.md')
+    if (fault === 'bad-index') await writeFile(join(workspace, designHandoffPath('GDD.md')), '{"outputs":[]}')
+    if (fault === 'native-failed') throw new Error('Synthetic interrupted native execution')
+    if (fault === 'stale-state') {
+      const state = (await readProjectDelivery(workspace, root))!
+      await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, objective: 'A different authorized task' }))
+    }
+    await turn.onMessage({ type: 'result', subtype: 'success', result: 'complete\nSynthetic saved handoff.',
+      ...(fault === 'child-only' ? { parent_tool_use_id: 'child-tool' } : {}) })
+  } } } }, root)
+  try {
+    await mkdir(workspace)
+    await beginProjectDelivery(workspace, root, 'Synthetic original requirement')
+    const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+    await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id,
+      ownerId: 'owner', message: 'Run the current assignment', autoContinuation: true,
+      afterTurnSettled: value => { progress = value } })
+    await manager.waitForSessionIdle(session.id)
+    expect((await readProjectDelivery(workspace, root))?.authorBatch ?? 0).toBe(0)
+    expect((await readProjectDelivery(workspace, root))?.designDrafts).toBeUndefined()
+    if (fault !== 'native-failed') {
+      expect(progress?.shouldContinue).toBe(false)
+      expect(progress?.issues.length).toBeGreaterThan(0)
+    }
+    if (fault === 'child-only') expect(progress?.issues).toContain('The author milestone has no explicit completion result from this turn.')
+    if (fault === 'stale-state') expect(progress?.issues.join(' ')).toContain('Delivery changed during this turn')
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+import { CONTENT_CHECKER_ENTRY } from './content-checker-runtime'
+import { CONTENT_CONSUMER_PATH } from './scene-ui-content-authoring'
+
+test('explicitly authorized conversation dispatch preserves unrelated findings across repair groups', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-local-review-dispatch-')), workspace = join(root, 'project')
+  const scene: DesignFinding = { id: 'scene', severity: 'follow-up', action: 'correct', owner: 'LEVEL_SCENE_DESIGN.md',
+    documents: ['LEVEL_SCENE_DESIGN.md'], sources: [{ document: 'LEVEL_SCENE_DESIGN.md', section: 'Design' }],
+    impact: 'Synthetic scene correction before content', closeWhen: 'Correct the assigned source', neededBefore: 'content' }
+  const art: DesignFinding = { ...scene, id: 'art', owner: 'ART_DIRECTION.md', documents: ['ART_DIRECTION.md'],
+    sources: [{ document: 'ART_DIRECTION.md', section: 'Design' }], neededBefore: 'implementation' }
+  const optional: DesignFinding = { ...art, id: 'optional', owner: 'AUDIO_DESIGN.md', documents: ['AUDIO_DESIGN.md'],
+    sources: [{ document: 'AUDIO_DESIGN.md', section: 'Design' }], neededBefore: null }
+  let current = scene, phase: 'content' | 'implementation' = 'content'
+  const dispatched: string[] = []
+  const manager = new BeeGameSessionManager({ async start() { return { stop() {}, async submit(turn) {
+    const input = turn.projectTurn!
+    dispatched.push(current.id + ':' + input.reviewStep)
+    expect(input.reviewReceiptContext!.findings).toEqual([current])
+    expect(input.reviewReceiptContext!.nextConsumers).toEqual([phase])
+    expect(input.reviewReceiptContext!.affectedChange).toBe(input.reviewStep === 'verify')
+    expect(input.reviewDocuments).toContain(current.owner)
+    expect(input.reviewDocuments).not.toContain(optional.owner)
+    expect(input.reviewDocuments).not.toContain(current === scene ? art.owner : scene.owner)
+    if (input.reviewStep === 'revise') {
+      expect(input.reviewWritableDocuments).toContain(current.owner)
+      const path = join(workspace, 'docs', current.owner)
+      await writeFile(path, (await readFile(path, 'utf8')) + '\nSynthetic authorized correction in the assigned owner.\n')
+    } else expect(input.reviewWritableDocuments).toEqual([])
+    const result: DesignReviewResult = input.reviewStep === 'verify'
+      ? { step: 'verify', findings: [], resolved: [{ id: current.id, evidence: 'Checked the saved assigned correction' }],
+          resumeFrom: phase, resumeReason: 'Synthetic affected downstream phase requires the corrected owner source.' }
+      : { step: input.reviewStep!, findings: [current], resolved: [] }
+    await writeFile(input.reviewResultPath!, 'complete\n' + JSON.stringify(result))
+    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Synthetic review dispatch, not game certification' })
+  } } } }, root)
+  try {
+    await mkdir(workspace)
+    const initial = await beginProjectDelivery(workspace, root, 'Synthetic independent repair dispatch')
+    await writeDesignDocumentsFixture(workspace)
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...initial, phase,
+      designBaseline: { ...designBaselineFixture(workspace), followUps: [scene, art, optional] } }))
+    const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+    for (const finding of [scene, art]) {
+      current = finding
+      phase = finding === scene ? 'content' : 'implementation'
+      const previous = (await readProjectDelivery(workspace, root))!
+      // Exercise the later entry without pretending a synthetic Content turn shipped a game.
+      await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...previous, phase }))
+      await requestProjectDesignResolution(workspace, root, { mode: 'inspect', findings: [current], instruction: 'Synthetic explicit owner direction for this affected source.' })
+      for (const step of ['inspect', 'revise', 'verify']) {
+        await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id,
+          ownerId: 'owner', message: 'Synthetic ' + step, autoContinuation: true })
+        await manager.waitForSessionIdle(session.id)
+      }
+      const released = (await readProjectDelivery(workspace, root))!
+      expect(released.phase).toBe(phase)
+      expect(released.designRepair?.status).toBe('resolved')
+      expect(released.designBaseline?.followUps).toEqual(finding === scene ? [art, optional] : [optional])
+      expect(released.designBaseline?.documentVersions?.[finding.owner]).toBe('1.1')
+    }
+    expect(dispatched).toEqual(['scene:inspect', 'scene:revise', 'scene:verify', 'art:inspect', 'art:revise', 'art:verify'])
+    expect(manager.transcript(session.id).filter(event => event.type === 'turn.failed')).toEqual([])
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test.each([false, true])('acceptance reuses the stable browser helper and retains it after cleanup; nativeFailure=%s', async nativeFailure => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-stable-consumer-')), workspace = join(root, 'project')
+  const manager = new BeeGameSessionManager({ async start(start) {
+    return { stop() {}, async submit(turn) {
+      const prompt = JSON.stringify(turn.prompt)
+      expect(prompt).toContain(CONTENT_CONSUMER_PATH)
+      expect(prompt).not.toContain(`.beegame/tmp/${start.sessionId}/content-consumer.mjs`)
+      expect(await Bun.file(join(workspace, CONTENT_CONSUMER_PATH)).exists()).toBe(true)
+      if (nativeFailure) throw new Error('Synthetic native failure')
+      await turn.onMessage({ type: 'result', subtype: 'success', result: 'Synthetic acceptance turn, not game certification' })
+    } }
+  } }, root)
+  try {
+    await mkdir(workspace)
+    const state = await beginProjectDelivery(workspace, root, 'Synthetic helper persistence regression')
+    await writeDesignDocumentsFixture(workspace)
+    const before = await readFile(join(workspace, CONTENT_CONSUMER_PATH), 'utf8')
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state,
+      phase: 'acceptance', designBaseline: designBaselineFixture(workspace) }))
+    const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+    await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id,
+      ownerId: 'owner', message: 'Synthetic acceptance check' })
+    await manager.waitForSessionIdle(session.id)
+    expect(await readFile(join(workspace, CONTENT_CONSUMER_PATH), 'utf8')).toBe(before)
+    expect(await Bun.file(join(workspace, '.beegame/tmp', session.id, 'content-consumer.mjs')).exists()).toBe(false)
+    expect(manager.transcript(session.id).some(event => event.type === 'turn.failed')).toBe(nativeFailure)
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test('host-produced owner-linked Scene/UI revision paths are accepted by the native consumer', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-revision-scope-'))
+  try {
+    await writeDesignDocumentsFixture(root)
+    const documents = ['LEVEL_SCENE_DESIGN.md', 'UI_UX_SPEC.md']
+    const supporting = designSupportingFiles(root, documents)
+    expect(supporting).toContain('content/scenes/level.json')
+    expect(supporting.some(path => path.startsWith('content/ui/'))).toBe(true)
+    const input = { restartContext: true, reviewDocuments: documents, reviewStep: 'revise' as const,
+      reviewWorkspace: root, reviewResultPath: join(root, 'result.txt'), reviewWritableDocuments: documents,
+      reviewWritableFiles: [...documents.map(designHandoffPath), ...supporting],
+      reviewReceiptContext: { step: 'revise' as const, findings: [], sourceHeadings: {} } }
+    expect(parseNativeProjectTurn(input)).toBe(input)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
 
 async function idle(manager: BeeGameSessionManager, id: string) {
   for (let i = 0; i < 500 && manager.get(id)?.turnStatus !== 'idle'; i++)
@@ -20,8 +266,176 @@ async function idle(manager: BeeGameSessionManager, id: string) {
 async function completeMilestone(workspace: string, prompt: unknown) {
   const path = JSON.stringify(prompt).match(/\.beegame\/tmp\/[^\s]+\/milestone-[\w-]+\.txt/)?.[0]
   if (path) await writeFile(join(workspace, path), 'complete\n' + (JSON.stringify(prompt).includes('milestone: review.')
-    ? JSON.stringify({ step: 'inspect', findings: [], resolved: [] }) : ''))
+    ? JSON.stringify({ step: JSON.stringify(prompt).match(/Current step: (inspect|revise|verify)/)?.[1] ?? 'inspect', findings: [], resolved: [] }) : ''))
 }
+
+// Existing saved inspect tasks must resume unchanged after the new joint flow ships.
+async function prepareLegacyReview(workspace: string, root: string) {
+  const state = (await prepareProjectDesignReview(workspace, root))!
+  const { combined, writableDocuments, revisionDocuments, pendingCheckIssues, ...review } = state.designReview!
+  await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({
+    ...state, designReview: { ...review, step: 'inspect' },
+  }))
+}
+
+test.each(['answer', 'decline', 'owner-change', 'new-answer', 'joint-new-answer'] as const)('scheduled Revision Question completes the existing delivery handoff safely: %s', async outcome => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-question-delivery-')), workspace = join(root, 'project')
+  const finding: DesignReviewResult['findings'][number] = { id: 'F1', severity: 'blocker', action: 'decide', owner: 'user',
+    documents: ['GDD.md'], sources: [{ document: 'GDD.md', section: 'Design' }], impact: 'Proposed change affects confirmed scope', closeWhen: 'Record user direction and check affected source', neededBefore: 'resources' }
+  const originalFinding: DesignReviewResult['findings'][number] = { ...finding, id: 'original', action: 'correct', owner: 'GDD.md' }
+  const discovers = outcome === 'new-answer' || outcome === 'joint-new-answer'
+  const initialFindings = discovers ? [originalFinding] : [finding]
+  const finalFindings = discovers ? [originalFinding, finding] : [finding]
+  const manager = new BeeGameSessionManager({ async start() { return { stop() {}, async submit(turn) {
+    const input = turn.projectTurn!
+    if (input.reviewStep === 'revise') {
+      if (discovers) {
+        const path = join(workspace, 'docs/GDD.md')
+        await writeFile(path, (await readFile(path, 'utf8')) + '\nAuthorized correction before discovering a new decision.\n')
+      }
+      const decision = await turn.requestPermission({ toolUseID: 'design-choice', toolName: 'AskUserQuestion', message: 'Choose direction',
+        input: { questions: [{ header: 'F1', question: 'Preserve the confirmed feature?', options: [{ label: 'Preserve', description: 'Keeps scope' }, { label: 'Remove', description: 'Reduces scope' }] }],
+          metadata: { source: 'bgs-design-review:' + input.reviewRevision, ...(discovers ? { designFindings: [finding] } : {}) } } })
+      if (decision.behavior === 'allow') {
+        const path = join(workspace, 'docs/GDD.md')
+        await writeFile(path, (await readFile(path, 'utf8')) + '\nUser direction: preserve the confirmed feature.\n')
+        if (outcome === 'owner-change') {
+          const state = (await readProjectDelivery(workspace, root))!
+          await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state,
+            designReview: { ...state.designReview!, instruction: 'Different owner task, not the prepared Revision' } }))
+        }
+      }
+      await writeFile(input.reviewResultPath!, (decision.behavior === 'allow' ? 'complete\n' : 'blocked\n') + JSON.stringify({ step: 'revise', findings: finalFindings, resolved: [] }))
+    } else {
+      expect(input.reviewStep).toBe('verify')
+      expect(await readFile(join(workspace, 'docs/GDD.md'), 'utf8')).toContain('User direction: preserve the confirmed feature.')
+      await writeFile(input.reviewResultPath!, 'complete\n' + JSON.stringify({ step: 'verify', findings: [], resolved: finalFindings.map(f => ({ id: f.id, evidence: 'Read the saved direction in the affected source' })) }))
+    }
+    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Synthetic bounded step executed' })
+  } } } }, root)
+  try {
+    await mkdir(workspace)
+    const state = await beginProjectDelivery(workspace, root, 'Synthetic confirmed requirements')
+    await writeDesignDocumentsFixture(workspace)
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'review', authorBatch: 4 }))
+    if (outcome === 'joint-new-answer') await prepareProjectDesignReview(workspace, root)
+    else {
+      await prepareLegacyReview(workspace, root)
+      await advanceProjectDeliveryAfterTurn(workspace, root, { phase: 'review', status: 'complete', summary: '', review: { step: 'inspect', findings: initialFindings, resolved: [] } })
+    }
+    const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+    await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id, ownerId: 'owner', message: 'Scheduled Revision', autoContinuation: true })
+    for (let i = 0; i < 200 && !manager.pendingPermissionsForProject('owner', 'project', workspace).length; i++) await Bun.sleep(5)
+    expect(manager.pendingPermissionsForProject('owner', 'project', workspace)).toHaveLength(1)
+    expect((await readProjectDelivery(workspace, root))?.designReview?.step).toBe('revise')
+    manager.resolvePermission(session.id, 'design-choice', outcome === 'decline' ? { behavior: 'deny' }
+      : { behavior: 'allow', answers: { 'Preserve the confirmed feature?': 'Preserve' } })
+    await manager.waitForSessionIdle(session.id)
+    const revised = (await readProjectDelivery(workspace, root))!
+    expect(revised.designBaseline).toBeUndefined()
+    if (outcome === 'decline') {
+      expect(revised.designReview?.stopped).toBe(true)
+      expect(revised.designReview?.userDecisions).toBeUndefined()
+    } else if (outcome === 'owner-change') {
+      expect(revised.designReview?.step).toBe('revise')
+      expect(manager.transcript(session.id).some(event => event.text.includes('Delivery changed during this turn'))).toBe(true)
+    } else {
+      expect(revised.designReview?.step).toBe('verify')
+      expect(revised.designReview?.documentVersions?.['GDD.md']).toBe('1.1')
+      expect(revised.designReview?.userDecisions?.[0]?.answer).toBe('Preserve')
+      await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id, ownerId: 'owner', message: 'Scheduled Verify', autoContinuation: true })
+      await manager.waitForSessionIdle(session.id)
+      const released = (await readProjectDelivery(workspace, root))!
+      expect(released.phase).toBe('resources')
+      expect(released.designHistory?.map(h => h.step)).toEqual(outcome === 'joint-new-answer' ? ['revise', 'verify'] : ['inspect', 'revise', 'verify'])
+      expect(manager.transcript(session.id).some(event => event.text.includes('Delivery changed during this turn'))).toBe(false)
+    }
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test('implementation receives original reviewed task IDs and eight-owner sources; retry reuses the full recovery view', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-reviewed-tasks-')), workspace = join(root, 'project')
+  const prompts: string[] = [], contexts: string[] = []
+  let reviewedRevision: string
+  const manager = new BeeGameSessionManager({ async start(start) { return { stop() {}, async submit(turn) {
+    const prompt = JSON.stringify(turn.prompt)
+    prompts.push(prompt)
+    const context = await readFile(join(workspace, '.beegame/tmp', start.sessionId, 'context.md'), 'utf8')
+    contexts.push(context)
+    const checklist = JSON.parse(context.split('# Reviewed implementation checklist\n\n')[1]!.split('\n\n')[1]!)
+    expect(checklist.items.map((item: any) => item.id)).toEqual(PROJECT_DOCUMENTS.map(name => 'fixture-' + name.slice(0, -3)))
+    expect(checklist.items.flatMap((item: any) => item.requirements.map((ref: any) => ref.document))).toEqual([...PROJECT_DOCUMENTS])
+    expect(checklist.globalSources).toHaveLength(8)
+    expect(checklist.designRevision).toBe(reviewedRevision)
+    const result = prompt.match(/\.beegame\/tmp\/[^\s]+\/milestone-[\w-]+\.txt/)?.[0]!
+    await writeFile(join(workspace, result), 'blocked\nSynthetic unfinished implementation')
+    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Synthetic Todo is not release evidence' })
+  } } } }, root)
+  try {
+    await mkdir(workspace)
+    const state = await beginProjectDelivery(workspace, root, 'Synthetic reviewed task input')
+    await writeDesignDocumentsFixture(workspace)
+    // The real writing order differs from PROJECT_DOCUMENTS. Match saved
+    // per-source bytes, not the traversal order of an independently made digest.
+    const reversed = checkDesignHandoff(workspace, [...PROJECT_DOCUMENTS].reverse())
+    const baseline = { ...designBaselineFixture(workspace), revision: reversed.revision,
+      snapshots: reversed.snapshots, evidenceHashes: reversed.evidenceHashes }
+    reviewedRevision = baseline.revision
+    expect(reviewedRevision).not.toBe(designBaselineFixture(workspace).revision)
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'implementation', designBaseline: baseline }))
+    const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+    for (let turn = 0; turn < 2; turn++) {
+      await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id,
+        ownerId: 'owner', message: 'Synthetic task execution', autoContinuation: true })
+      await manager.waitForSessionIdle(session.id)
+    }
+    expect(manager.transcript(session.id).filter(event => event.type === 'turn.failed')).toEqual([])
+    expect(prompts[0]).toContain('fixture-AUDIO_DESIGN')
+    expect(prompts[1]).not.toContain('fixture-AUDIO_DESIGN')
+    expect(prompts[1]).toContain('Reviewed task checklist remains')
+    expect(contexts).toHaveLength(2)
+    expect((await readProjectDelivery(workspace, root))?.phase).toBe('implementation')
+    expect((await readProjectDelivery(workspace, root))?.designBaseline).toEqual(baseline)
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test.each(['missing-checklist', 'stale-baseline'] as const)('implementation %s stops without automatically dispatching design repair or rewriting its baseline', async fault => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-task-input-failure-')), workspace = join(root, 'project')
+  let nativeStarts = 0, capabilityStarts = 0
+  const manager = new BeeGameSessionManager({ async start() {
+    nativeStarts++
+    return { stop() {}, async submit(turn) {
+      expect(turn.projectTurn?.reviewDocuments).toEqual(['TECHNICAL_DESIGN.md'])
+      expect(turn.projectTurn?.reviewStep).toBe(fault === 'missing-checklist' ? 'revise' : 'inspect')
+      await turn.onMessage({ type: 'result', subtype: 'success', result: 'Synthetic pending review; no receipt' })
+    } }
+  } }, root)
+  try {
+    await mkdir(workspace)
+    const state = await beginProjectDelivery(workspace, root, 'Synthetic invalid task input')
+    await writeDesignDocumentsFixture(workspace)
+    let baseline = designBaselineFixture(workspace)
+    if (fault === 'missing-checklist') {
+      const tech = designHandoffFixture('TECHNICAL_DESIGN.md')
+      delete tech.implementationItems
+      await writeDesignDocumentFixture(workspace, 'TECHNICAL_DESIGN.md', tech)
+      // Simulate a legacy structural baseline, not a new checklist approval.
+      const old = checkDesignHandoff(workspace, PROJECT_DOCUMENTS, { technicalBaseline: true })
+      baseline = { ...baseline, revision: old.revision, snapshots: old.snapshots }
+    } else await writeFile(join(workspace, 'docs/TECHNICAL_DESIGN.md'), designDocumentFixture('TECHNICAL_DESIGN.md') + '\nUnreviewed change.\n')
+    const before = await readFile(join(workspace, designHandoffPath('TECHNICAL_DESIGN.md')), 'utf8')
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'implementation', designBaseline: baseline }))
+    const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+    await expect(sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id,
+      ownerId: 'owner', message: 'Synthetic invalid handoff', autoContinuation: true,
+      openCapabilities() { capabilityStarts++; return { instruction: 'Synthetic local capability', async close() {} } } })).rejects.toThrow()
+    await manager.waitForSessionIdle(session.id)
+    expect(nativeStarts).toBe(0)
+    expect(capabilityStarts).toBe(0)
+    expect((await readProjectDelivery(workspace, root))?.designBaseline).toEqual(baseline)
+    expect(await readFile(join(workspace, designHandoffPath('TECHNICAL_DESIGN.md')), 'utf8')).toBe(before)
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
 
 test('host routes cross-layer clearance to scoped UI revision despite an empty semantic receipt, then versions the actual repair', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-layer-revision-')), workspace = join(root, 'project')
@@ -34,7 +448,8 @@ test('host routes cross-layer clearance to scoped UI revision despite an empty s
     const step = turn.projectTurn!.reviewStep!
     steps.push(step)
     if (step === 'revise') {
-      expect(turn.projectTurn!.reviewDocuments).toEqual(['UI_UX_SPEC.md'])
+      expect(turn.projectTurn!.reviewDocuments).toEqual([...PROJECT_DOCUMENTS])
+      expect(turn.projectTurn!.reviewReadScope).toBeUndefined()
       expect(turn.projectTurn!.reviewWritableFiles).toContain('content/ui/expanded.json')
       const task = await readFile(turn.projectTurn!.reviewContextPath!, 'utf8')
       expect(task).toContain('intersects preserved content/ui/menu.json#reserved')
@@ -58,13 +473,13 @@ test('host routes cross-layer clearance to scoped UI revision despite an empty s
       designDocumentFixture('UI_UX_SPEC.md') + '\nPreserve the reserved region in the expanded state.\n[Expanded](../content/ui/expanded.json)\n')
     await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'review', authorBatch: AUTHOR_BATCHES.length - 1 }))
     const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
-    for (const step of ['inspect', 'revise', 'verify']) {
+    for (const step of ['revise', 'verify']) {
       await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id,
         ownerId: 'owner', message: 'Synthetic ' + step, autoContinuation: true })
       await manager.waitForSessionIdle(session.id)
       expect(manager.transcript(session.id).filter(event => event.type === 'turn.failed')).toEqual([])
     }
-    expect(steps).toEqual(['inspect', 'revise', 'verify'])
+    expect(steps).toEqual(['revise', 'verify'])
     const released = (await readProjectDelivery(workspace, root))!
     expect(released.phase).toBe('resources')
     expect(released.designBaseline!.documentVersions!['UI_UX_SPEC.md']).toBe('1.1')
@@ -83,26 +498,32 @@ test.each([
       steps.push(step)
       const task = await readFile(turn.projectTurn!.reviewContextPath!, 'utf8')
       expect(turn.projectTurn!.reviewReceiptContext!.findings).toEqual([])
-      if (step === 'inspect') {
-        expect(task).toContain('Host deterministic check status (not a semantic verdict)')
-        expect(task).toContain('Failure details go directly to the existing revision step')
-        expect(task).not.toContain('Host deterministic check result (not a semantic verdict)')
-        expect(task).not.toContain(fault === 'output-pointer'
-          ? 'BALANCE_DESIGN.md: output ready references an absent section' : 'docs/calc/missing.json')
-        // The actual draft/sidecar remain readable: this separates host
-        // diagnostics, not the authored source or its semantic problems.
+      expect(task).not.toContain('# Optional capabilities')
+      expect(task).not.toContain('Optional asset command:')
+      expect(task).not.toContain('Minimal new index envelope:')
+      expect(task).toContain('sourceReads supplies native Read arguments')
+      if (step === 'revise') {
+        expect(task).toContain('Host deterministic check result (not a semantic verdict)')
+        expect(task).toContain('Coverage:')
+        expect(task).toContain('Full result: .beegame/tmp/layout-reports/')
+        expect(task).toContain(fault === 'output-pointer'
+          ? 'BALANCE_DESIGN.md: output ready references an absent section' : 'missing.json')
+        // Inspect receives the same real errors as Revision, not a clean status.
         expect(task).toContain('docs/BALANCE_DESIGN.md; handoff: .beegame/design-handoffs/BALANCE_DESIGN.json')
       }
       if (step === 'revise') {
-        expect(turn.projectTurn!.reviewDocuments).toEqual(['BALANCE_DESIGN.md'])
-        expect(turn.projectTurn!.reviewWritableDocuments).toEqual(['BALANCE_DESIGN.md'])
-        expect(turn.projectTurn!.reviewWritableFiles).toEqual(['.beegame/design-handoffs/BALANCE_DESIGN.json'])
+        expect(turn.projectTurn!.reviewDocuments).toEqual([...PROJECT_DOCUMENTS])
+        expect(turn.projectTurn!.reviewWritableDocuments).toEqual([...PROJECT_DOCUMENTS])
+        expect(turn.projectTurn!.reviewReadScope).toBeUndefined()
+        expect(turn.projectTurn!.reviewWritableFiles).toEqual([
+          ...PROJECT_DOCUMENTS.map(designHandoffPath), 'content/scenes/level.json', 'content/ui/menu.json',
+        ])
         expect(task).toContain('Correct the supplied deterministic failures')
         expect(task).toContain('even if recorded findings are empty or labelled follow-up')
         expect(task).toContain('host records saved versions and evidence hashes')
         const authorizedLine = task.split('\n').find(line => line.startsWith('Authorized revision files (exact paths, not directory grants): '))!
         expect(JSON.parse(authorizedLine.slice(authorizedLine.indexOf(': ') + 2))).toEqual([
-          'docs/BALANCE_DESIGN.md', '.beegame/design-handoffs/BALANCE_DESIGN.json',
+          ...PROJECT_DOCUMENTS.map(name => 'docs/' + name), ...turn.projectTurn!.reviewWritableFiles!,
         ])
         expect(task).toContain(fault === 'output-pointer' ? 'output ready references an absent section' : 'missing.json')
         // Synthetic native agent stand-in repairs only its authorized fixture,
@@ -128,7 +549,7 @@ test.each([
     } : handoff, designDocumentFixture('BALANCE_DESIGN.md') + (fault === 'missing-calculation' ? '\n[Missing calculation](calc/missing.json)\n' : ''))
     await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'review', authorBatch: AUTHOR_BATCHES.length - 1 }))
     const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
-    const expectedSteps: DesignReviewResult['step'][] = repair ? ['inspect', 'revise', 'verify'] : ['inspect', 'revise']
+    const expectedSteps: DesignReviewResult['step'][] = repair ? ['revise', 'verify'] : ['revise']
     for (const step of expectedSteps) {
       await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id,
         ownerId: 'owner', message: 'Execute ' + step, autoContinuation: true })
@@ -180,23 +601,29 @@ test.each([false, true])('review without a conclusion cannot silently relaunch, 
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
-test('joint inspection receives all eight saved drafts and original requirements', async () => {
+test('joint review and repair receives all eight saved drafts, exact write scope and original requirements', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-joint-review-context-')), workspace = join(root, 'project')
   let observed = false
   const manager = new BeeGameSessionManager({ async start() {
     return { stop() {}, async submit(turn) {
       expect(turn.directionAuthors).toBeUndefined()
       expect(turn.projectTurn?.reviewDocuments).toEqual([...PROJECT_DOCUMENTS])
-      expect(turn.projectTurn?.reviewWritableDocuments).toEqual([])
-      expect(turn.projectTurn?.reviewWritableFiles).toEqual([])
+      expect(turn.projectTurn?.reviewWritableDocuments).toEqual([...PROJECT_DOCUMENTS])
+      expect(turn.projectTurn?.reviewWritableFiles).toContain('content/ui/menu.json')
+      expect(turn.projectTurn?.reviewReceiptContext?.combined).toBe(true)
+      expect(turn.projectTurn!.reviewReceiptContext!.nextConsumers).toEqual(['resources'])
       expect(Object.keys(turn.projectTurn!.reviewReceiptContext!.sourceHeadings).sort()).toEqual([...PROJECT_DOCUMENTS].sort())
       const task = await readFile(turn.projectTurn!.reviewContextPath!, 'utf8')
       for (const name of PROJECT_DOCUMENTS) expect(task).toContain('docs/' + name + '; handoff:')
-      expect(task).toContain('Host deterministic check status')
+      expect(task).toContain('Host deterministic check result')
       const pointers = JSON.parse(task.split('# Current saved handoff pointers (not a semantic verdict)\n\n')[1]!.split('\n\n')[1]!)
       expect(pointers.map((p: any) => p.document).sort()).toEqual([...PROJECT_DOCUMENTS].sort())
       expect(pointers.find((p: any) => p.document === 'GDD.md').outputs[0].acceptance).toEqual({ section: 'Design', method: 'test' })
       expect(pointers.every((p: any) => p.documentVersion === undefined && p.sha256 === undefined)).toBe(true)
+      const retained = JSON.parse(task.split('# Existing retained linked files (existence only)\n\n')[1]!.split('\n\n')[1]!)
+      expect(retained).toContain('docs/calc/observation.json')
+      expect(retained).not.toContain('calc/observation.json')
+      expect(task).toContain('relative to their source document, not the project root')
       expect(task).toContain('Fixture game')
       expect(task).toContain('ORIGINAL_CONFIRMED_CONTEXT')
       expect(task).toContain('Document ownership follows the original author responsibilities')
@@ -213,6 +640,9 @@ test('joint inspection receives all eight saved drafts and original requirements
     await mkdir(workspace)
     const state = await beginProjectDelivery(workspace, root, 'Fixture game')
     await writeDesignDocumentsFixture(workspace)
+    await mkdir(join(workspace, 'docs/calc'), { recursive: true })
+    await writeFile(join(workspace, 'docs/calc/observation.json'), '{"result":4}')
+    await writeFile(join(workspace, 'docs/GDD.md'), (await readFile(join(workspace, 'docs/GDD.md'), 'utf8')) + '\n[Observation](calc/observation.json)\n')
     await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'review', authorBatch: AUTHOR_BATCHES.length - 1 }))
     const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
     manager.appendUserMessage(session.id, 'Fixture game', { displayKind: 'confirmed_brief', confirmedBriefContext: 'ORIGINAL_CONFIRMED_CONTEXT' })
@@ -224,7 +654,7 @@ test('joint inspection receives all eight saved drafts and original requirements
     const released = (await readProjectDelivery(workspace, root))!
     expect(released.phase).toBe('resources')
     expect(Object.keys(released.designBaseline!.snapshots)).toHaveLength(8)
-    expect(released.designHistory?.map(item => item.step)).toEqual(['inspect'])
+    expect(released.designHistory?.map(item => item.step)).toEqual(['revise'])
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
@@ -340,6 +770,7 @@ test('resumed implementation receives current responsive semantics without rewri
       expect(JSON.stringify(turn.prompt)).toContain('correct the data while preserving valid formats and references')
       expect(await readFile(join(workspace, 'content/ui.json'), 'utf8')).toBe('authored content unchanged')
       expect(await readFile(join(workspace, '.beegame/delivery/content-contract.json'), 'utf8')).toBe('authority snapshot unchanged')
+      expect(await readFile(join(workspace, '.beegame/delivery/check-content.mjs'), 'utf8')).toBe(CONTENT_CHECKER_ENTRY)
       observed = true
       await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
     } }
@@ -351,6 +782,7 @@ test('resumed implementation receives current responsive semantics without rewri
     await writeFile(join(workspace, 'content/ui.json'), 'authored content unchanged')
     await writeFile(join(workspace, '.beegame/delivery/content-format.json'), '{}')
     await writeFile(join(workspace, '.beegame/delivery/content-contract.json'), 'authority snapshot unchanged')
+    await writeFile(join(workspace, '.beegame/delivery/check-content.mjs'), '// Legacy bundled checker fixture\n')
     await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({
       ...(await readProjectDelivery(workspace, root)), phase: 'implementation',
     }))
@@ -372,8 +804,8 @@ test.each([1, 4])('technical author batch %d retains format tools and original r
   const manager = new BeeGameSessionManager({ async start(start) {
     return { stop() {}, async submit(turn) {
       const context = await readFile(join(workspace, '.beegame/tmp', start.sessionId, 'context.md'), 'utf8')
-      expect(turn.projectTurn).toEqual({ restartContext: false })
-      expect(context).toContain(JSON.stringify(brief))
+      expect(turn.projectTurn).toEqual({})
+      expect(JSON.parse(context.split('# Original confirmed request\n\n')[1]!.split('\n\n')[0]!)).toEqual(JSON.parse(brief))
       {
         expect(turn.directionAuthors?.contextPath).toBe(join(workspace, '.beegame/tmp', start.sessionId, 'context.md'))
         expect(turn.directionAuthors!.batch).toBe(authorBatch)
@@ -385,7 +817,7 @@ test.each([1, 4])('technical author batch %d retains format tools and original r
         for (const [document, path] of Object.entries(turn.directionAuthors!.contextPaths!)) {
           scopedPaths.push(path)
           const scoped = await readFile(path, 'utf8')
-          expect(scoped).toContain(JSON.stringify(brief))
+          expect(JSON.parse(scoped.split('# Original confirmed request\n\n')[1]!.split('\n\n')[0]!)).toEqual(JSON.parse(brief))
           expect(scoped).toContain(owners[document as keyof typeof owners]!)
           for (const [other, role] of Object.entries(owners))
             if (other !== document) expect(scoped).not.toContain(role)
@@ -393,15 +825,44 @@ test.each([1, 4])('technical author batch %d retains format tools and original r
           expect(scoped).toContain('do not dispatch replacement authors')
           expect(scoped).not.toContain('Use available subagents to advance independent work')
           if (document === 'TECHNICAL_DESIGN.md') {
-            expect(scoped).toContain('--format coordinates runtimeConsumption')
-            const format = JSON.parse(await readFile(join(workspace, '.beegame/delivery/content-format.json'), 'utf8'))
-            const supplied = scoped.split('# Current platform runtime/data baseline')[1]!
-            const selected = JSON.parse(supplied.slice(supplied.indexOf('{'), supplied.indexOf('\n\nThese selected')))
-            expect(selected.values).toEqual({ coordinates: format.coordinates, runtimeConsumption: format.runtimeConsumption })
-            expect(supplied).not.toContain('"sceneVocabulary"')
-            expect(supplied).not.toContain('"vfxDocument"')
-            expect(scoped).toContain('already supplied')
+            if (authorBatch === 4) {
+              expect(scoped).not.toContain('# Current platform runtime/data baseline')
+              expect(scoped).not.toContain('Explain how the agreed release runs')
+              expect(scoped).not.toContain('Save your complete assigned draft')
+              expect(scoped).toContain('# Platform reference for unresolved integration questions')
+              expect(scoped).toContain('--format SECTION')
+              expect(scoped).toContain('--check-handoff-drafts docs/TECHNICAL_DESIGN.md --final-technical')
+              expect(scoped).toContain('Earlier owner requirement pointers for final task organization')
+              expect(scoped).toContain('read its newly saved docs/ASSET_PLAN.md')
+              expect(scoped).toContain('Add implementationItems')
+              expect(scoped).toContain('edit-drafts.mjs --json')
+              const pointers = JSON.parse(scoped.split('# Earlier owner requirement pointers for final task organization\n\n')[1]!.split('\n\n')[1]!)
+              expect(pointers.map((pointer: any) => pointer.document)).toEqual(PROJECT_DOCUMENTS.filter(name => name !== 'ASSET_PLAN.md'))
+            } else {
+              expect(scoped).toContain('--format coordinates runtimeConsumption')
+              const format = JSON.parse(await readFile(join(workspace, '.beegame/delivery/content-format.json'), 'utf8'))
+              const supplied = scoped.split('# Current platform runtime/data baseline')[1]!
+              const selected = JSON.parse(supplied.slice(supplied.indexOf('{'), supplied.indexOf('\n\nThese selected')))
+              expect(selected.values).toEqual({ coordinates: format.coordinates, runtimeConsumption: format.runtimeConsumption })
+              expect(supplied).not.toContain('"sceneVocabulary"')
+              expect(supplied).not.toContain('"vfxDocument"')
+              expect(scoped).toContain('already supplied')
+              expect(scoped).not.toContain('Earlier owner requirement pointers')
+              expect(scoped).not.toContain('--final-technical')
+            }
           } else {
+            if (document === 'ASSET_PLAN.md') {
+              expect(scoped).toContain('Saved upstream requirement locations')
+              expect(scoped).toContain('--read-design')
+              expect(scoped).not.toContain('Existing-draft edits')
+              const locations = JSON.parse(scoped.split('# Saved upstream requirement locations\n\n')[1]!.split('\n\n')[1]!)
+              expect(locations.length).toBeGreaterThan(0)
+              for (const location of locations) {
+                expect(location.sections.length).toBeGreaterThan(0)
+                expect(location.sections[0].offset).toBeGreaterThan(0)
+                expect(Object.keys(location).sort()).toEqual(['document', 'sections'])
+              }
+            }
             expect(scoped.length).toBeLessThan(context.length)
             expect(scoped).not.toContain('Content format reference:')
             expect(scoped).not.toContain('Current platform runtime/data baseline')
@@ -458,8 +919,36 @@ test.each([2, 3] as const)('author batch %d supplies document-local tools and so
           expect(text).not.toContain('Current platform runtime/data baseline')
         } else {
           expect(text).toContain('Supplied spatial command interface')
-          expect(text).toContain('Minimal UI draft')
+          expect(text).toContain(document === 'UI_UX_SPEC.md' ? 'Minimal UI draft' : 'Minimal Scene draft')
           expect(text).toContain('Selected coordinates/layout contract')
+          expect(text).toContain('Save all required actual sources and batch independent writes')
+          expect(text).not.toContain('First save one real representative source')
+          if (document === 'UI_UX_SPEC.md') {
+            expect(text).toContain('Saved upstream requirement locations')
+            expect(text).toContain('--read-design')
+            expect(text).toContain('edit-drafts.mjs --json')
+            expect(text).toContain('compose-drafts.mjs --json')
+            expect(text).toContain('readable report includes grouped failures')
+            expect(text).toContain('--design-layouts --draft --report --orientation Landscape --dimension 2D')
+            expect(text).toContain('saved full-result path')
+            expect(text).not.toContain('--scene-layouts')
+          } else {
+            expect(text).toContain('edit-drafts.mjs --json')
+            expect(text).toContain('compose-drafts.mjs --json')
+            expect(text).toContain('--scene-layouts --report')
+            expect(text).toContain('each at its own saved Camera viewport')
+            expect(text).toContain('--check-result')
+            expect(text).toContain('calculate({scenes,readText,readJson})')
+            const helper = Bun.spawn([process.execPath, '.beegame/delivery/calculate-balance.mjs', '--help'],
+              { cwd: workspace, stdout: 'pipe', stderr: 'pipe' })
+            const [code, output, errors] = await Promise.all([helper.exited, new Response(helper.stdout).text(), new Response(helper.stderr).text()])
+            expect({ code, errors }).toEqual({ code: 0, errors: '' })
+            expect(output).toContain('--scenes')
+          }
+          expect(text).toContain('--inspect-draft')
+          expect(text).not.toContain('"scope": "content-format-selection"')
+          expect(text).not.toContain('"sceneDocument": {')
+          expect(text).not.toContain('"uiDocument": {')
           expect(text).not.toContain('calculation appendix or scenario model is not required')
         }
       }
@@ -469,7 +958,7 @@ test.each([2, 3] as const)('author batch %d supplies document-local tools and so
   } }, root)
   try {
     await mkdir(workspace)
-    const state = await beginProjectDelivery(workspace, root, 'Fixture design objective')
+    const state = await beginProjectDelivery(workspace, root, JSON.stringify({ idea: 'Fixture design objective', settings: { orientation: 'Landscape', dimension: '2D' } }))
     await writeDesignDocumentsFixture(workspace)
     await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, authorBatch }))
     const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
@@ -683,7 +1172,7 @@ test('optional asset command exists only during a project turn', async () => {
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
-test('temporary source remains a diagnostic for the final joint review and cannot release', async () => {
+test('temporary source is rejected at author handoff before spending a joint review', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-temporary-source-handoff-'))
   const workspace = join(root, 'project')
   let contextPath = ''
@@ -714,16 +1203,11 @@ test('temporary source remains a diagnostic for the final joint review and canno
       await manager.waitForSessionIdle(session.id)
     }
     await send()
-    expect(progress?.shouldContinue).toBe(true)
-    expect((await readProjectDelivery(workspace, root))?.phase).toBe('review')
-    expect(await Bun.file(contextPath).exists()).toBe(false)
-    await send()
-    expect(progress?.shouldContinue).toBe(true)
-    expect((await readProjectDelivery(workspace, root))?.designReview).toMatchObject({ step: 'revise', writableDocuments: ['TECHNICAL_DESIGN.md'] })
-    await send()
     expect(progress?.shouldContinue).toBe(false)
+    expect((await readProjectDelivery(workspace, root))?.phase).toBe('author')
+    expect(await Bun.file(contextPath).exists()).toBe(false)
     expect(progress?.issues.join(' ')).toContain('platform-temporary')
-    expect((await readProjectDelivery(workspace, root))?.designReview?.stopped).toBe(true)
+    expect((await readProjectDelivery(workspace, root))?.designReview).toBeUndefined()
     expect((await readProjectDelivery(workspace, root))?.designBaseline).toBeUndefined()
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
@@ -738,6 +1222,7 @@ test('five author turns dispatch actual owners before one joint review in the sa
     starts.push(start)
     return { stop() {}, async submit(turn) {
       observedRestarts.push(turn.projectTurn?.restartContext ?? false)
+      expect(turn.projectTurn ?? {}).not.toHaveProperty('restartContext')
       const context = await readFile(join(workspace, '.beegame/tmp', start.sessionId, 'context.md'), 'utf8')
       const state = (await readProjectDelivery(workspace, root))!
       phases.push(state.phase!)
@@ -749,9 +1234,11 @@ test('five author turns dispatch actual owners before one joint review in the sa
         if (batch) {
           ownerBatches.push(turn.directionAuthors!.batch!)
           expect(Object.keys(turn.directionAuthors!.responsibilities).sort()).toEqual([...AUTHOR_BATCHES[batch]].sort())
-          for (const path of Object.values(turn.directionAuthors!.contextPaths!)) {
+          for (const [document, path] of Object.entries(turn.directionAuthors!.contextPaths!)) {
             const task = await readFile(path, 'utf8')
-            expect(task).toContain('saved prior drafts')
+            expect(task).toContain(batch === 4 && document === 'TECHNICAL_DESIGN.md'
+              ? 'Start from the saved technical baseline and the supplied owner-source pointers'
+              : 'saved prior drafts')
             expect(task).not.toContain('reviewed GDD')
           }
         } else expect(turn.directionAuthors).toBeUndefined()
@@ -761,11 +1248,12 @@ test('five author turns dispatch actual owners before one joint review in the sa
         }
       } else if (state.phase === 'review') {
         expect(turn.projectTurn?.reviewDocuments).toEqual([...PROJECT_DOCUMENTS])
-        expect(turn.projectTurn?.reviewStep).toBe('inspect')
+        expect(turn.projectTurn?.reviewStep).toBe('revise')
         expect(state.designHistory).toBeUndefined()
       }
       await completeMilestone(workspace, turn.prompt)
-      await turn.onMessage({ type: 'result', subtype: 'success', result: 'Synthetic scheduled work completed' })
+      await turn.onMessage({ type: 'result', subtype: 'success', result: turn.projectTurn?.authorDocument === 'GDD.md'
+        ? 'complete\nSynthetic GDD saved; downstream design remains pending.' : 'Synthetic scheduled work completed' })
     } }
   } }, root)
   try {
@@ -786,17 +1274,17 @@ test('five author turns dispatch actual owners before one joint review in the sa
     expect(batches).toEqual([0, 1, 2, 3, 4])
     expect(ownerBatches).toEqual([1, 2, 3, 4])
     expect(starts).toHaveLength(1)
-    expect(observedRestarts).toEqual([false, ...Array(6).fill(true)])
+    expect(observedRestarts).toEqual(Array(7).fill(false))
     const released = (await readProjectDelivery(workspace, root))!
     expect(released.phase).toBe('resources')
-    expect(released.designHistory?.map(item => item.step)).toEqual(['inspect'])
+    expect(released.designHistory?.map(item => item.step)).toEqual(['revise'])
     expect(released.designDrafts).toBeUndefined()
     expect(released.designBaseline?.documentVersions?.['TECHNICAL_DESIGN.md']).toBe('1.1')
     expect(Object.keys(released.designBaseline!.snapshots)).toHaveLength(8)
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
-test('visual authors receive the current sample/browser capabilities without loading them into unrelated writer contexts', async () => {
+test('new visual author tasks retain JSON layout tools without advertising standalone mockups or reference generation', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-visual-author-context-')), workspace = join(root, 'project')
   const captured = new Map<string, string>()
   const api = 'http://127.0.0.1:12345/' + 'a'.repeat(64)
@@ -825,17 +1313,52 @@ test('visual authors receive the current sample/browser capabilities without loa
     }
     for (const name of ['ART_DIRECTION.md', 'UI_UX_SPEC.md']) {
       const task = captured.get(name)!
-      expect(task).toContain('--visual-sample')
-      expect(task).toContain(api)
+      expect(task).not.toContain('--visual-sample')
+      expect(task).not.toContain(api)
       expect(task).not.toContain('Synthetic visual capability instructions')
-      expect(task).toContain('assets.mjs help')
+      expect(task).not.toContain('Optional image/reference command')
+      expect(task).toContain('Do not create standalone HTML/SVG mockups')
     }
+    expect(captured.get('UI_UX_SPEC.md')).toContain('content/ui/*.json')
+    expect(captured.get('UI_UX_SPEC.md')).toContain('--design-layouts')
     for (const name of ['TECHNICAL_DESIGN.md', 'AUDIO_DESIGN.md']) {
       const task = captured.get(name)!
       expect(task).not.toContain('--visual-sample')
       expect(task).not.toContain('Synthetic visual capability instructions')
     }
     expect(closed).toBe(2)
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test.each([false, true])('review advertises static inspection only for an existing linked legacy reference: %s', async existing => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-existing-visual-reference-')), workspace = join(root, 'project')
+  let task = ''
+  const manager = new BeeGameSessionManager({ async start() { return { stop() {}, async submit(turn) {
+    task = await readFile(turn.projectTurn!.reviewContextPath!, 'utf8')
+    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Synthetic task inspection only' })
+  } } } }, root)
+  try {
+    await mkdir(workspace)
+    const state = await beginProjectDelivery(workspace, root, 'Synthetic game')
+    await writeDesignDocumentsFixture(workspace)
+    if (existing) {
+      await mkdir(join(workspace, 'docs/visual/ART_DIRECTION'), { recursive: true })
+      await writeFile(join(workspace, 'docs/visual/ART_DIRECTION/old.html'), '<main>Existing reference</main>')
+      const art = join(workspace, 'docs/ART_DIRECTION.md')
+      await writeFile(art, await readFile(art, 'utf8') + '\n[Retained reference](visual/ART_DIRECTION/old.html)\n')
+    }
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'review' }))
+    const session = manager.start({ workspacePath: workspace, userId: 'owner', projectId: 'project' })
+    await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id, ownerId: 'owner',
+      message: 'Continue', autoContinuation: true, openCapabilities: () => ({ instruction: '',
+        previewBaseUrl: 'http://127.0.0.1:12345/' + 'a'.repeat(64), async close() {} }) })
+    await manager.waitForSessionIdle(session.id)
+    expect(task.includes('--visual-sample')).toBe(existing)
+    expect(task).toContain('--review-layouts')
+    if (existing) {
+      expect(task).toContain('docs/visual/ART_DIRECTION/old.html')
+      expect(await readFile(join(workspace, 'docs/visual/ART_DIRECTION/old.html'), 'utf8')).toBe('<main>Existing reference</main>')
+    }
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
@@ -849,6 +1372,22 @@ test('same-phase resource continuation reuses the existing milestone handoff', a
   const manager = new BeeGameSessionManager({ async start(start) {
     starts.push(start)
     return { stop() {}, async submit(turn) {
+      if (turn.projectTurn?.production) {
+        const contexts = turn.projectTurn.production.resourceContextPaths!
+        expect(parseNativeProjectTurn(turn.projectTurn)).toBeDefined()
+        expect(Object.keys(contexts)).toEqual(['visual', 'audio'])
+        for (const group of ['visual', 'audio'] as const) {
+          const text = await readFile(contexts[group]!, 'utf8')
+          expect(text).toContain('Build a small game')
+          expect(text).toContain('ASSET_PLAN.md')
+          expect(text).toContain(group === 'visual' ? 'ART_DIRECTION.md' : 'AUDIO_DESIGN.md')
+          expect(text).not.toContain('Production handoff preflight')
+          expect(text).not.toContain('bind-content.mjs')
+          expect(text).not.toContain('milestone-')
+          const full = await readFile(turn.projectTurn.production.contextPath, 'utf8')
+          expect(text.length).toBeLessThan(full.length)
+        }
+      }
       prompts.push(JSON.stringify(turn.prompt))
       dispatched.push(turn.directionAuthors !== undefined)
       restarted.push(turn.projectTurn?.restartContext ?? false)
@@ -878,6 +1417,7 @@ test('same-phase resource continuation reuses the existing milestone handoff', a
     // A user message is delivered naturally, not a forced new three-author run.
     expect(dispatched).toEqual([false, false, false])
     expect(restarted).toEqual([false, false, false])
+    await expect(readFile(join(workspace, '.beegame/tmp', session.id, 'resources-visual.context.md'))).rejects.toThrow()
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
@@ -1059,7 +1599,74 @@ test('restart restores the native UUID and request identity without delivery rec
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
-test('a user message resumes an interrupted delivery milestone after restart without repeating it', async () => {
+test.each(['failure', 'stop', 'unobserved-index', 'post-write-edit', 'failed-write'] as const)('Revision %s only resumes observed bytes and preserves document versions', async interruption => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-observed-revision-resume-')), workspace = join(root, 'project')
+  let attempts = 0
+  let activeSessionId = ''
+  const finding = { id: 'F1', severity: 'blocker' as const, action: 'correct' as const, owner: 'GDD.md' as const,
+    documents: ['GDD.md' as const], sources: [{ document: 'GDD.md' as const, section: 'Design' }],
+    impact: 'Synthetic missing clarification', closeWhen: 'Clarification saved', neededBefore: 'implementation' as const }
+  const runner = { async start() { return { stop() {}, async submit(turn: Parameters<import('./session-manager').BeeGameSessionRuntime['submit']>[0]) {
+    expect(turn.projectTurn?.reviewStep).toBe('revise')
+    if (++attempts === 1) {
+      const path = join(workspace, 'docs/GDD.md')
+      const content = (await readFile(path, 'utf8')) + '\nAuthorized partial revision.\n'
+      await turn.onMessage({ type: 'assistant', message: { id: 'fixture-write-message', role: 'assistant',
+        content: [{ type: 'tool_use', id: 'fixture-write', name: 'Write', input: { file_path: path, content } }] } })
+      await writeFile(path, content)
+      await turn.onMessage({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'fixture-write',
+        ...(interruption === 'failed-write' ? { is_error: true } : {}), content: 'Synthetic write result' }] } })
+      if (interruption === 'post-write-edit') await writeFile(path, content + '\nExternal edit after the tool result.\n')
+      if (interruption === 'unobserved-index') {
+        const indexPath = join(workspace, '.beegame/design-handoffs/GDD.json')
+        const index = JSON.parse(await readFile(indexPath, 'utf8'))
+        index.outputs[0].acceptance.method = 'inspection'
+        await writeFile(indexPath, JSON.stringify(index))
+      }
+      if (interruption === 'stop') {
+        const aborted = new Promise<void>(resolve => turn.signal.addEventListener('abort', () => resolve(), { once: true }))
+        manager.interruptTurn(activeSessionId)
+        await aborted
+        return
+      }
+      throw new Error('Synthetic interruption after saved write')
+    }
+    await writeFile(turn.projectTurn!.reviewResultPath!, 'complete\n' + JSON.stringify({ step: 'revise', findings: [finding], resolved: [] }))
+    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Resumed current revision only' })
+  } } } }
+  let manager = new BeeGameSessionManager(runner, root)
+  try {
+    await mkdir(workspace)
+    const state = await beginProjectDelivery(workspace, root, 'Synthetic interrupted revision')
+    await writeDesignDocumentsFixture(workspace)
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'review', authorBatch: 4 }))
+    await prepareLegacyReview(workspace, root)
+    await advanceProjectDeliveryAfterTurn(workspace, root, { phase: 'review', status: 'complete', summary: '', review: { step: 'inspect', findings: [finding], resolved: [] } })
+    const base = { workspacePath: workspace, userId: 'owner', projectId: 'project' }
+    const session = manager.start(base)
+    activeSessionId = session.id
+    await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id, ownerId: 'owner', message: 'Revise', autoContinuation: true })
+    await manager.waitForSessionIdle(session.id)
+    if (['unobserved-index', 'post-write-edit', 'failed-write'].includes(interruption)) {
+      expect((await readProjectDelivery(workspace, root))?.designReview?.interruptedWrite).toBeUndefined()
+      await expect(prepareProjectDesignReview(workspace, root)).rejects.toThrow('Design changed')
+      return
+    }
+    expect((await readProjectDelivery(workspace, root))?.designReview?.interruptedWrite).toBeDefined()
+    await manager.dispose()
+    manager = new BeeGameSessionManager(runner, root)
+    const restored = manager.start({ ...base, transcriptSessionId: session.id })
+    await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: restored.id, ownerId: 'owner', message: 'Continue', autoContinuation: true })
+    await manager.waitForSessionIdle(restored.id)
+    const finished = (await readProjectDelivery(workspace, root))!
+    expect(attempts).toBe(2)
+    expect(finished.designReview?.step).toBe('verify')
+    expect(finished.designReview?.documentVersions?.['GDD.md']).toBe('1.1')
+    expect(finished.designBaseline).toBeUndefined()
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test('explicit Continue resumes an interrupted delivery milestone after restart without repeating it', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-interrupted-delivery-resume-'))
   const workspace = join(root, 'project')
   const base = { workspacePath: workspace, userId: 'owner', projectId: 'project' }
@@ -1073,7 +1680,9 @@ test('a user message resumes an interrupted delivery milestone after restart wit
       const context = typeof turn.prompt === 'string' ? turn.prompt : JSON.stringify(turn.prompt)
       const resultPath = context.match(/\.beegame\/tmp\/[^\s]+\/milestone-[\w-]+\.txt/)?.[0]
       expect(resultPath).toBeTruthy()
-      await completeMilestone(workspace, turn.prompt)
+      await writeFile(turn.projectTurn!.reviewResultPath!, 'complete\n' + JSON.stringify({
+        step: turn.projectTurn!.reviewStep, findings: [], resolved: [],
+      }))
       await turn.onMessage({ type: 'result', subtype: 'success', result: 'Review finished' })
     } }
   } }
@@ -1098,12 +1707,45 @@ test('a user message resumes an interrupted delivery milestone after restart wit
     const restored = manager.start({ ...base, transcriptSessionId: session.id })
     expect(restored.id).toBe(session.id)
     await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: restored.id,
-      ownerId: 'owner', message: '继续' })
+      ownerId: 'owner', message: '继续', autoContinuation: true })
     await idle(manager, restored.id)
     expect((await readProjectDelivery(workspace, root))?.phase).toBe('resources')
     expect(starts[1]?.resumeSessionId).toBe('a28f9e61-96d5-4e38-981b-5acd25076508')
     expect(manager.transcript(restored.id).filter(event => event.type === 'user.message').at(-1)?.text).toBe('继续')
     expect(manager.transcript(restored.id).filter(event => event.type === 'turn.completed')).toHaveLength(1)
+  } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
+test.each(['failure', 'stop'] as const)('a diagnostic question after %s never dispatches the interrupted Review', async terminal => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-no-implicit-resume-')), workspace = join(root, 'game')
+  let turns = 0
+  const manager = new BeeGameSessionManager({ async start() { return { stop() {}, async submit(turn) {
+    if (++turns === 1) throw new Error('Synthetic interruption')
+    expect(turn.projectTurn?.reviewDocuments).toBeUndefined()
+    expect(turn.projectTurn?.authorDocument).toBeUndefined()
+    expect(turn.directionAuthors).toBeUndefined()
+    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Explanation only' })
+  } } } }, root)
+  try {
+    await mkdir(workspace)
+    const state = await beginProjectDelivery(workspace, root, 'Synthetic interrupted project')
+    await writeDesignDocumentsFixture(workspace)
+    await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify({ ...state, phase: 'review', authorBatch: 4 }))
+    const base = { workspacePath: workspace, userId: 'owner', projectId: 'project' }
+    const session = manager.start(base)
+    const input = { sessions: manager, deliveryDataRoot: root, sessionId: session.id, ownerId: 'owner' }
+    await sendProjectConversation({ ...input, message: 'Review', autoContinuation: true })
+    await manager.waitForSessionIdle(session.id)
+    if (terminal === 'stop') {
+      manager.stop(session.id)
+      await manager.waitForSessionIdle(session.id)
+      manager.start({ ...base, transcriptSessionId: session.id })
+    }
+    const before = await readProjectDelivery(workspace, root)
+    await sendProjectConversation({ ...input, message: '为什么停了？只分析，不要继续执行。' })
+    await manager.waitForSessionIdle(session.id)
+    expect(turns).toBe(2)
+    expect(await readProjectDelivery(workspace, root)).toEqual(before)
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
@@ -1180,19 +1822,24 @@ test('stop during preparation closes capabilities and does not launch a model or
   } finally { release(); await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
-test.each(['absent', 'blocked', 'complete'] as const)('GDD handoff honors the Agent result instead of draft existence: %s', async signal => {
+test.each(['absent', 'blocked', 'BLOCKED', 'complete', 'COMPLETE', 'CoMpLeTe', 'invalid', 'empty-blocked'] as const)('GDD handoff honors the Agent result instead of draft existence: %s', async signal => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-gdd-conclusion-'))
   const workspace = join(root, 'project')
   let progress: { shouldContinue: boolean; issues: string[] } | undefined
   let submissions = 0
-  const manager = new BeeGameSessionManager({ async start() {
+  const complete = signal.toLowerCase() === 'complete'
+  const blocked = signal.toLowerCase() === 'blocked'
+  const manager = new BeeGameSessionManager({ async start(start) {
     return { stop() {}, async submit(turn) {
       submissions++
-      const resultPath = JSON.stringify(turn.prompt).match(/\.beegame\/tmp\/[^\s]+\/milestone-[\w-]+\.txt/)?.[0]
-      expect(resultPath).toBeTruthy()
-      if (signal !== 'absent') await writeFile(join(workspace, resultPath!), signal === 'complete'
-        ? 'complete\n' : 'blocked\nCore rule conflict remains')
-      await turn.onMessage({ type: 'result', subtype: 'success', result: 'Normal native reply' })
+      expect(JSON.stringify(turn.prompt)).not.toMatch(/milestone-[\w-]+\.txt/)
+      expect(turn.projectTurn?.milestoneResult).toBeUndefined()
+      // A historical receipt or intermediate completion claim is not adopted.
+      const old = join(workspace, '.beegame/tmp', start.sessionId, 'milestone-old.txt')
+      await writeFile(old, 'complete\nOld work')
+      await turn.onMessage({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'complete\nEarlier claim' }] } })
+      await turn.onMessage({ type: 'result', subtype: 'success', result: signal === 'absent' ? 'Normal native reply'
+        : signal === 'invalid' ? 'PASS' : signal === 'empty-blocked' ? 'BLOCKED' : `${signal}\n${blocked ? 'Core rule conflict remains' : ''}` })
     } }
   } }, root)
   try {
@@ -1208,10 +1855,12 @@ test.each(['absent', 'blocked', 'complete'] as const)('GDD handoff honors the Ag
     })
     await manager.waitForSessionIdle(session.id)
     expect(submissions).toBe(1)
-    expect(progress?.shouldContinue).toBe(signal === 'complete')
+    expect(progress?.shouldContinue).toBe(complete)
     expect((await readProjectDelivery(workspace, root))?.phase).toBe('author')
-    expect((await readProjectDelivery(workspace, root))?.authorBatch ?? 0).toBe(signal === 'complete' ? 1 : 0)
-    if (signal === 'blocked') expect(progress?.issues).toEqual(['Core rule conflict remains'])
+    expect((await readProjectDelivery(workspace, root))?.authorBatch ?? 0).toBe(complete ? 1 : 0)
+    if (blocked) expect(progress?.issues).toEqual(['Core rule conflict remains'])
+    if (signal === 'invalid' || signal === 'absent') expect(progress?.issues).toEqual(['Author final response first line must be complete or blocked (case-insensitive).'])
+    if (signal === 'empty-blocked') expect(progress?.issues).toEqual(['Blocked author final response must include a reason after its status line.'])
     expect(await readFile(join(workspace, 'docs/GDD.md'), 'utf8')).toBe(designDocumentFixture('GDD.md'))
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
@@ -1225,6 +1874,7 @@ test.each(['author', 'revise'] as const)('ordinary project questions cannot fina
       expect(turn.directionAuthors).toBeUndefined()
       expect(turn.projectTurn?.reviewStep).toBeUndefined()
       expect(turn.projectTurn?.reviewResultPath).toBeUndefined()
+      expect(turn.projectTurn?.milestoneResult).toBeUndefined()
       expect(JSON.stringify(turn.prompt)).not.toContain('Record your author conclusion')
       await turn.onMessage({ type: 'result', subtype: 'success', result: 'The remaining task is still unfinished.' })
     } }
@@ -1257,23 +1907,22 @@ test.each(['author', 'revise'] as const)('ordinary project questions cannot fina
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
-test('Stop resumes the pending delivery once; later ordinary questions do not redispatch writers', async () => {
+test('explicit Continue after Stop resumes once; later ordinary questions do not redispatch writers', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-stop-delivery-boundary-')), workspace = join(root, 'project')
   let submissions = 0
   const manager = new BeeGameSessionManager({ async start() {
     return { stop() {}, async submit(turn) {
       submissions++
       const receipt = JSON.stringify(turn.prompt).match(/\.beegame\/tmp\/[^\s]+\/milestone-[\w-]+\.txt/)?.[0]
-      if (submissions < 3) expect(receipt).toBeTruthy()
+      expect(receipt).toBeUndefined()
       if (submissions === 2) {
         await writeDesignDocumentFixture(workspace, 'GDD.md', undefined,
           designDocumentFixture('GDD.md') + '\nRecovered complete draft\n')
-        await writeFile(join(workspace, receipt!), 'complete\n')
       } else if (submissions === 3) {
         expect(receipt).toBeUndefined()
         expect(turn.directionAuthors).toBeUndefined()
       }
-      await turn.onMessage({ type: 'result', subtype: 'success', result: 'Synthetic native answer' })
+      await turn.onMessage({ type: 'result', subtype: 'success', result: submissions === 2 ? 'complete\nRecovered saved GDD.' : 'Synthetic native answer' })
     } }
   } }, root)
   try {
@@ -1290,7 +1939,7 @@ test('Stop resumes the pending delivery once; later ordinary questions do not re
     await manager.waitForSessionIdle(session.id)
     manager.start({ ...base, transcriptSessionId: session.id })
     await sendProjectConversation({ sessions: manager, deliveryDataRoot: root, sessionId: session.id,
-      ownerId: 'owner', message: 'Finish the pending draft' })
+      ownerId: 'owner', message: 'Finish the pending draft', autoContinuation: true })
     await manager.waitForSessionIdle(session.id)
     expect((await readProjectDelivery(workspace, root))?.authorBatch).toBe(1)
     expect(await readFile(join(workspace, 'docs/GDD.md'), 'utf8')).toContain('v1.1')

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { use } from 'react';
-import { Box } from '@anthropic/ink';
+import { Box } from '@bee-game-studio/ink';
 import type { AgentDefinitionsResult } from '@bee-game-studio/builtin-tools/tools/AgentTool/loadAgentsDir.js';
 import { getMemoryFiles } from '../utils/claudemd.js';
 import { getGlobalConfig } from '../utils/config.js';

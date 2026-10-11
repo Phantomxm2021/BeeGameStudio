@@ -1,0 +1,76 @@
+{
+  "date": "2026-10-11",
+  "rfcVersion": "1.21",
+  "scope": "Standalone BGS debug Preview observation -> source-backed Review -> original owner Repair -> actual rebuild and measurement -> directed closure",
+  "productionFrontendChanged": false,
+  "claudeCodeSourceChanged": false,
+  "builtinToolsChanged": false,
+  "realProjectArtifactsChanged": false,
+  "paidModelsUsed": false,
+  "servicesRestarted": false,
+  "databaseDDLExecuted": false,
+  "runtimeDebugEnabled": false,
+  "protectedDiffSha256BeforeAndAfter": "1def2eee7cad28e6d33ce864a6e84068eb0b69c421330309d2bcbe53891fd995",
+  "implementation": {
+    "problem": "Existing Preview feedback and authorized review/repair APIs had no usable standalone debug interface after production frontend withdrawal.",
+    "solution": "Thin controls call existing authenticated APIs. Observe a specifically opened current measured Preview, preserve draft build/plan/Attempt identity, show actual current review sources/checks, explicitly authorize plans and separately execute tasks.",
+    "notAdded": ["workflow framework", "database table or migration", "model prompt rule", "paid retry", "production frontend entry", "new backend repair authority"],
+    "requirements": "Warn that current task specs are references only; changed requirements must explicitly replace historical repairOf/reviewOf/previewIssues, goals, inputs and checks. Do not silently cleanse or infer a new task plan.",
+    "unknownWriterAudit": "Native child and exit state are process-local. Persisted transcript/accounting session identities do not prove cross-reload process exit. Existing evidence-only recovery stays unchanged; missing quiescence proof cannot be unlocked by time or user assertion."
+  },
+  "syntheticEvidence": {
+    "realChecks": "Registered temporary UI JSON actually renders height 64px. Confirmed fixture requirement is 80px. Controlled fake provider reports F1 with actual source hash/quote, owner modifies only its authorized source, host runs test:rules, source-copy build, runtime-smoke and repair-verification, and sandbox Preview actually renders 80px. Directed source-backed follow-up closes F1 using the current successful repair Attempt. Static and editable measured exports succeed.",
+    "nativeSubmitCount": 4,
+    "nativeSubmits": ["initial explicit rebuild", "targeted review", "original owner repair and host remeasurement", "directed follow-up"],
+    "semanticReport": "Controlled fake native provider; not evidence of LLM detection competence, game aesthetics or gameplay quality.",
+    "unrelatedTask": "Independent notes task status/Attempt and file bytes remain unchanged.",
+    "history": "Initial failed review/report and actual observation are preserved. Repair success alone does not close review.",
+    "guards": ["no API call on shell load", "normal owner authentication", "cancel confirmation does not submit", "same observation request key and body is idempotent", "same key with changed body rejected", "stale observation draft rejected and retained", "all blocker IDs required", "repair writable scope unchanged", "old Preview rejected after repair plan and after requirement change", "old historical repair authority rejected for new requirements", "explicit new normal plan invalidates old qualification", "pause survives reload", "project/credential switch clears local drafts and evidence", "no client polling, automatic dispatch, retry or key rotation"]
+  },
+  "finalRegression": {
+    "v3": {
+      "passed": 158,
+      "failed": 0,
+      "assertions": 1367,
+      "files": 23,
+      "durationSeconds": 155.87,
+      "log": "/private/tmp/bgs-v3-preview-feedback-suite-final.log",
+      "sha256": "bb2d3f8ed31633f6a7191800dfd418e649880ab617d8a7b58f37d377afbb8148"
+    },
+    "focused": {
+      "passed": 16,
+      "failed": 0,
+      "assertions": 89,
+      "files": 3,
+      "durationSeconds": 7.57,
+      "overlapsV3Suite": true
+    },
+    "serverTypecheck": {
+      "exitCode": 2,
+      "diagnosticCount": 3556,
+      "workflowV3Diagnostics": 0,
+      "status": "Repository typecheck remains failing; log hash equals previous turn baseline",
+      "log": "/private/tmp/bgs-v3-preview-feedback-typecheck.log",
+      "sha256": "b06a3b6e247600fba24b1fa1fffa7c6ef3dc5d692b1b7ba6615fb74e9cea15fb"
+    },
+    "diffWhitespaceCheck": "passed"
+  },
+  "intermediateFailures": [
+    "Initial focused run: 15 pass / 1 fail. The browser scenario carried historical repair task metadata into its subsequent requirement change; backend correctly rejected historical-review-scope, but the old assertion expected success.",
+    "A diagnostic browser rerun failed at the same guard and exposed its exact HTTP 400 message. The final scenario asserts rejection and draft preservation, then explicitly authorizes normal tasks for the new requirement. No guard was weakened; original tool outputs retain both failures."
+  ],
+  "sourceHashes": {
+    "debug.html": "fa1f919d0f824b17b33c2a6abf0d8fd5ecd60c198368471a740af25e31cf0905",
+    "debug-client.js": "9909b107b7b434c5b1f1a02979edfa6b60ad05d860d48c711049b94ef89fb4f7",
+    "debug-browser.mjs": "277c49e5cd22483af7052cf6ba4321e3391c4044af7827da092cb706d700012a",
+    "debug-browser.test.ts": "7e140185412b1c4efc15e953fdd63378f4a095f6150555225a01034f581d0c1e"
+  },
+  "remainingUnverified": [
+    "Running services have not loaded this turn's code or enabled debug; test-server success is not production deployment.",
+    "Standalone debug complete interaction against remote database has not been exercised this turn.",
+    "Old or crashed writers without durable host quiescence proof remain unknown; external charged operations with lost response cannot be automatically repeated.",
+    "Full Scene interaction, Tilemap/3D/animation/font/audio consumption and complete game quality remain unverified.",
+    "Semantic reviewer competence and real paid-model cost are not established by the controlled report.",
+    "V3-07/08/09 remain partially complete; complete game delivery is still disabled."
+  ]
+}

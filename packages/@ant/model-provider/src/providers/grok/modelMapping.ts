@@ -1,3 +1,5 @@
+import { getSharedModelDefault } from '../../shared/modelDefaults.js'
+
 /**
  * Default mapping from Anthropic model names to Grok model names.
  *
@@ -66,8 +68,7 @@ export function resolveGrokModel(anthropicModel: string): string {
     const grokOverride = process.env[grokEnvVar]
     if (grokOverride) return grokOverride
 
-    const anthropicEnvVar = `ANTHROPIC_DEFAULT_${family.toUpperCase()}_MODEL`
-    const anthropicOverride = process.env[anthropicEnvVar]
+    const anthropicOverride = getSharedModelDefault(family)
     if (anthropicOverride) return anthropicOverride
   }
 

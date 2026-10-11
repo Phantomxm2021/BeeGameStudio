@@ -1,6 +1,6 @@
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
-import type { Theme } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
+import type { Theme } from '@bee-game-studio/ink';
 import type { Trigger } from './triggersApi.js';
 import { cronToHuman } from '../../utils/cron.js';
 

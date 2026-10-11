@@ -10,7 +10,7 @@ import type {
 import * as React from 'react';
 import type { Command } from '../commands.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box } from '@anthropic/ink';
+import { Box } from '@bee-game-studio/ink';
 import type { Tools } from '../Tool.js';
 import { type ConnectorTextBlock, isConnectorTextBlock } from '../types/connectorText.js';
 import type {

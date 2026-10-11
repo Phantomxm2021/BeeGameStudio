@@ -5,7 +5,7 @@ import {
 } from 'src/services/analytics/index.js';
 import { installOAuthTokens } from '../cli/handlers/auth.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { setClipboard, useTerminalNotification, Box, Link, Text, KeyboardShortcutHint } from '@anthropic/ink';
+import { setClipboard, useTerminalNotification, Box, Link, Text, KeyboardShortcutHint } from '@bee-game-studio/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { getSSLErrorHint } from '@ant/model-provider';
 import { sendNotification } from '../services/notifier.js';
@@ -286,7 +286,7 @@ export function ConsoleOAuthFlow({
         setOAuthStatus({ state: 'success' });
         void sendNotification(
           {
-            message: 'Claude Code login successful',
+            message: 'BGS login successful',
             notificationType: 'auth_success',
           },
           terminal,
@@ -438,7 +438,7 @@ function OAuthStatusMessage({
           <Text bold>
             {startingMessage
               ? startingMessage
-              : `Claude Code can be used with your Claude subscription or billed based on API usage through your Console account.`}
+              : `BGS can be used with your Claude subscription or billed based on API usage through your Anthropic Console account.`}
           </Text>
 
           <Text>Select login method:</Text>
@@ -536,9 +536,9 @@ function OAuthStatusMessage({
                     state: 'custom_platform',
                     baseUrl: process.env.ANTHROPIC_BASE_URL ?? '',
                     apiKey: process.env.ANTHROPIC_AUTH_TOKEN ?? '',
-                    haikuModel: process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? '',
-                    sonnetModel: process.env.ANTHROPIC_DEFAULT_SONNET_MODEL ?? '',
-                    opusModel: process.env.ANTHROPIC_DEFAULT_OPUS_MODEL ?? '',
+                    haikuModel: process.env.BGS_DEFAULT_FAST_MODEL ?? '',
+                    sonnetModel: process.env.BGS_DEFAULT_BALANCED_MODEL ?? '',
+                    opusModel: process.env.BGS_DEFAULT_STRONG_MODEL ?? '',
                     activeField: 'base_url',
                   });
                 } else if (value === 'openai_chat_api') {
@@ -679,9 +679,9 @@ function OAuthStatusMessage({
         }
 
         if (finalVals.api_key) env.ANTHROPIC_AUTH_TOKEN = finalVals.api_key;
-        if (finalVals.haiku_model) env.ANTHROPIC_DEFAULT_HAIKU_MODEL = finalVals.haiku_model;
-        if (finalVals.sonnet_model) env.ANTHROPIC_DEFAULT_SONNET_MODEL = finalVals.sonnet_model;
-        if (finalVals.opus_model) env.ANTHROPIC_DEFAULT_OPUS_MODEL = finalVals.opus_model;
+        if (finalVals.haiku_model) env.BGS_DEFAULT_FAST_MODEL = finalVals.haiku_model;
+        if (finalVals.sonnet_model) env.BGS_DEFAULT_BALANCED_MODEL = finalVals.sonnet_model;
+        if (finalVals.opus_model) env.BGS_DEFAULT_STRONG_MODEL = finalVals.opus_model;
         const { error } = updateSettingsForSource('userSettings', {
           modelType: 'anthropic',
           env,
@@ -1582,8 +1582,8 @@ function OAuthStatusMessage({
 
           <Box flexDirection="column" gap={1}>
             <Text>
-              Claude Code supports Amazon Bedrock, Microsoft Foundry, and Vertex AI. Set the required environment
-              variables, then restart Claude Code.
+              BGS supports Amazon Bedrock, Microsoft Foundry, and Vertex AI. Set the required environment
+              variables, then restart BGS.
             </Text>
 
             <Text>
@@ -1659,7 +1659,7 @@ function OAuthStatusMessage({
         <Box flexDirection="column" gap={1}>
           <Box>
             <Spinner />
-            <Text>Creating API key for Claude Code…</Text>
+            <Text>Creating API key for BGS…</Text>
           </Box>
         </Box>
       );

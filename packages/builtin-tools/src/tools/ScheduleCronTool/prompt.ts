@@ -26,7 +26,7 @@ export const DEFAULT_MAX_AGE_DAYS =
  *
  * The default is `true` — /loop is GA (announced in changelog). GrowthBook
  * is disabled for Bedrock/Vertex/Foundry and when DISABLE_TELEMETRY /
- * CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC are set; a `false` default would
+ * BGS_DISABLE_NONESSENTIAL_TRAFFIC are set; a `false` default would
  * break /loop for those users (GH #31759). The GB gate now serves purely as
  * a fleet-wide kill switch — flipping it to `false` stops already-running
  * schedulers on their next isKilled poll tick, not just new ones.
@@ -61,17 +61,17 @@ export const CRON_LIST_TOOL_NAME = 'CronList'
 export function buildCronCreateDescription(durableEnabled: boolean): string {
   return durableEnabled
     ? 'Schedule a prompt to run at a future time — either recurring on a cron schedule, or once at a specific time. Pass durable: true to persist to .claude/scheduled_tasks.json; otherwise session-only.'
-    : 'Schedule a prompt to run at a future time within this Claude session — either recurring on a cron schedule, or once at a specific time.'
+    : 'Schedule a prompt to run at a future time within this BGS session — either recurring on a cron schedule, or once at a specific time.'
 }
 
 export function buildCronCreatePrompt(durableEnabled: boolean): string {
   const durabilitySection = durableEnabled
     ? `## Durability
 
-By default (durable: false) the job lives only in this Claude session — nothing is written to disk, and the job is gone when Claude exits. Pass durable: true to write to .claude/scheduled_tasks.json so the job survives restarts. Only use durable: true when the user explicitly asks for the task to persist ("keep doing this every day", "set this up permanently"). Most "remind me in 5 minutes" / "check back in an hour" requests should stay session-only.`
+By default (durable: false) the job lives only in this BGS session — nothing is written to disk, and the job is gone when BGS exits. Pass durable: true to write to .claude/scheduled_tasks.json so the job survives restarts. Only use durable: true when the user explicitly asks for the task to persist ("keep doing this every day", "set this up permanently"). Most "remind me in 5 minutes" / "check back in an hour" requests should stay session-only.`
     : `## Session-only
 
-Jobs live only in this Claude session — nothing is written to disk, and the job is gone when Claude exits.`
+Jobs live only in this BGS session — nothing is written to disk, and the job is gone when BGS exits.`
 
   const durableRuntimeNote = durableEnabled
     ? 'Durable jobs persist to .claude/scheduled_tasks.json and survive session restarts — on next launch they resume automatically. One-shot durable tasks that were missed while the REPL was closed are surfaced for catch-up. Session-only jobs die with the process. '

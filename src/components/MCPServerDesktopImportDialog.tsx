@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { gracefulShutdown } from 'src/utils/gracefulShutdown.js';
 import { writeToStdout } from 'src/utils/process.js';
-import { Box, color, Text, useTheme, Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
+import { Box, color, Text, useTheme, Byline, Dialog, KeyboardShortcutHint } from '@bee-game-studio/ink';
 import { addMcpConfig, getAllMcpConfigs } from '../services/mcp/config.js';
 import type { ConfigScope, McpServerConfig, ScopedMcpServerConfig } from '../services/mcp/types.js';
 import { plural } from '../utils/stringUtils.js';

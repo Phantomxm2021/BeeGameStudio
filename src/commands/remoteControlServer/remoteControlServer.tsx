@@ -8,7 +8,7 @@ import { BRIDGE_LOGIN_INSTRUCTION } from '../../bridge/types.js';
 import { Dialog } from '../../components/design-system/Dialog.js';
 import { ListItem } from '../../components/design-system/ListItem.js';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text } from '@bee-game-studio/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import { buildCliLaunch, spawnCli } from '../../utils/cliLaunch.js';
 import type { ToolUseContext } from '../../Tool.js';

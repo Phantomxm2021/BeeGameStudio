@@ -127,7 +127,7 @@ export async function materializeAssetManifestAuthoringContract(
   return ASSET_MANIFEST_AUTHORING_CONTRACT_PATH
 }
 
-function renderAssetManifestAuthoringContract(): string {
+export function renderAssetManifestAuthoringContract(): string {
   const examples = assetManifestAuthoringExamples()
   const json = (value: unknown) => JSON.stringify(value, null, 2)
   return `# Asset Manifest authoring contract (v${CURRENT_ASSET_MANIFEST_VERSION})
@@ -136,6 +136,17 @@ This is the canonical resource registry interface for this project. Read this
 file before creating or registering runtime assets. It is an interface
 reference, not a request to use a particular tool, source, engine, or asset
 creation method.
+
+For locally authored or downloaded files, use bun .beegame/delivery/resources.mjs --help
+and its batch register operation. Supply source facts and file paths; the tool
+computes hashes and writes the canonical modules/index. Do not hand-fill hashes.
+Existing resource-library selection/import remains with its supplied tool.
+Visual/font and audio workers supply only their resource registration requests.
+The shared owner defines the project-wide target and actual requirement IDs in
+a separate register request with resources:[]; combine that configuration and
+worker requests with resources.mjs --register-from. Include every required
+supported runtime format, not just the formats produced by one worker.
+The data-only example below is not a PNG/audio/font target configuration.
 
 ## Deliverables
 

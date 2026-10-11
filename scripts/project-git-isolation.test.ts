@@ -17,7 +17,7 @@ test.skipIf(process.platform !== 'darwin')('implicit CLI Git queries cannot exec
   const oldEnv = { ...process.env }
   const oldCwd = process.cwd()
   Object.assign(process.env, access.environment, { BEEGAME_CONFIG_DIR: join(root, 'config'),
-    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', ANTHROPIC_API_KEY: 'PRIVATE_MODEL_FIXTURE' })
+    BGS_SUBPROCESS_ENV_SCRUB: '1', ANTHROPIC_API_KEY: 'PRIVATE_MODEL_FIXTURE' })
   process.chdir(workspace)
   const state = await import('../src/bootstrap/state')
   const { resetSettingsCache } = await import('../src/utils/settings/settingsCache')
