@@ -28,11 +28,17 @@ import {
 import { LandingView } from './components/Demiurge/LandingView';
 import type { Language } from './components/Demiurge/AgentsConfig';
 import { isResourceLibraryRoute } from './components/ResourceLibrary/resourceLibraryRoute';
+import i18n, { supportedI18nLanguages } from './i18n';
 
 const DashboardView = lazy(async () => {
   const module = await import('./components/Demiurge/DashboardView');
   return { default: module.DashboardView };
 });
+
+function getInitialLanguage(): Language {
+  const persistedLanguage = typeof window === 'undefined' ? null : window.localStorage.getItem('i18nextLng');
+  return supportedI18nLanguages.includes(persistedLanguage as Language) ? persistedLanguage as Language : 'zh';
+}
 
 function App() {
   const {
@@ -53,7 +59,7 @@ function App() {
   const { loadHistory } = useChatStore();
   const { showError, showSuccess } = useToastContext();
 
-  const [lang, setLang] = useState<Language>('zh');
+  const [lang, setLang] = useState<Language>(getInitialLanguage);
   const [isResourceRoute, setIsResourceRoute] = useState(() => isResourceLibraryRoute());
   const [authenticationRetryVersion, setAuthenticationRetryVersion] = useState(0);
   const [authenticationInitializationError, setAuthenticationInitializationError] = useState('');
@@ -62,6 +68,10 @@ function App() {
   const authenticationRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedProtectedDataUserRef = useRef<string | null>(null);
   const activeProject = projects.find(p => p.id === activeProjectId);
+
+  useEffect(() => {
+    void i18n.changeLanguage(lang);
+  }, [lang]);
 
   useEffect(() => {
     const syncResourceRoute = () => setIsResourceRoute(isResourceLibraryRoute());

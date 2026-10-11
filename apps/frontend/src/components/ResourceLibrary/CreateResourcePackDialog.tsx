@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { CreateResourcePackInput, ResourcePackSummary } from '../../services/resourceLibraryApi'
 import { ResourcePackFormDialog, type ResourcePackFormValues } from './ResourcePackFormDialog'
@@ -15,11 +14,8 @@ const initialValues: ResourcePackFormValues = {
 }
 
 export function CreateResourcePackDialog({ open, onClose, onCreate }: Props) {
-  const { t } = useTranslation()
-  const copy = useMemo(() => ({
-    title: translated(t, 'resourceLibrary.create', '创建 Pack'),
-    creating: translated(t, 'resourceLibrary.creating', '创建中…'),
-  }), [t])
+  const { t } = useTranslation('resourceLibrary')
+  const copy = { title: t('create'), creating: t('creating') }
   return <ResourcePackFormDialog
     open={open}
     title={copy.title}
@@ -51,10 +47,6 @@ export function CreateResourcePackDialog({ open, onClose, onCreate }: Props) {
   />
 }
 
-function translated(t: (key: string) => string, key: string, fallback: string): string {
-  const value = t(key)
-  return value === key ? fallback : value
-}
 
 function splitList(value: string): string[] {
   return [...new Set(value.split(',').map(item => item.trim()).filter(Boolean))]

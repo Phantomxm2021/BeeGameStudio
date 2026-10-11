@@ -4,6 +4,9 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, test, vi } from 'vitest'
 import type { ResourcePackSummary } from '../../services/resourceLibraryApi'
 import { EditResourcePackDialog } from './EditResourcePackDialog'
+import i18n from '../../i18n'
+
+const resourceText = (key: string) => i18n.t(`resourceLibrary:${key}`)
 
 const pack: ResourcePackSummary = {
   id: 'pack-1', name: 'Forest Pack',
@@ -17,9 +20,9 @@ describe('EditResourcePackDialog', () => {
 
     expect(screen.getByTestId('edit-pack-dialog')).toHaveClass('max-w-[640px]', 'max-h-[calc(100dvh-48px)]')
     expect(screen.getByTestId('resource-pack-content')).toHaveClass('overflow-y-auto')
-    expect(screen.getByRole('heading', { name: '编辑 Pack' })).toHaveClass('type-modal-title')
-    expect(screen.getByLabelText('名称')).toHaveClass('h-11', 'rounded-xl')
-    expect(screen.getByRole('button', { name: '保存 Pack' })).toHaveClass('h-11', 'type-button')
+    expect(screen.getByRole('heading', { name: resourceText('editPack') })).toHaveClass('type-modal-title')
+    expect(screen.getByLabelText(resourceText('name'))).toHaveClass('h-11', 'rounded-xl')
+    expect(screen.getByRole('button', { name: resourceText('update') })).toHaveClass('h-11', 'type-button')
   })
 
   test('uploads a selected cover before saving Pack metadata', async () => {
@@ -29,11 +32,11 @@ describe('EditResourcePackDialog', () => {
     const onSave = vi.fn(async () => { calls.push('metadata'); return { ...pack, name: 'Updated Forest' } })
     render(<EditResourcePackDialog open pack={pack} onClose={vi.fn()} onUploadCover={onUploadCover} onSave={onSave} />)
 
-    const name = screen.getByLabelText('名称')
+    const name = screen.getByLabelText(resourceText('name'))
     await user.clear(name)
     await user.type(name, 'Updated Forest')
-    await user.upload(screen.getByLabelText('上传封面'), new File(['cover'], 'new-cover.png', { type: 'image/png' }))
-    await user.click(screen.getByRole('button', { name: '保存 Pack' }))
+    await user.upload(screen.getByLabelText(resourceText('uploadCover')), new File(['cover'], 'new-cover.png', { type: 'image/png' }))
+    await user.click(screen.getByRole('button', { name: resourceText('update') }))
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ name: 'Updated Forest', primaryCategory: '2d-art', dimension: '2D', gameTypes: ['RPG'] })))
     expect(calls).toEqual(['cover', 'metadata'])
@@ -50,11 +53,11 @@ describe('EditResourcePackDialog', () => {
     const onSave = vi.fn().mockResolvedValue(pack)
     render(<EditResourcePackDialog open pack={pack} onClose={vi.fn()} onUploadCover={vi.fn()} onSave={onSave} />)
 
-    await user.type(screen.getByPlaceholderText('添加自定义风格'), 'Low Poly')
-    await user.click(screen.getAllByRole('button', { name: '添加' })[0])
-    await user.type(screen.getByPlaceholderText('添加自定义类型'), 'Survival')
-    await user.click(screen.getAllByRole('button', { name: '添加' })[1])
-    await user.click(screen.getByRole('button', { name: '保存 Pack' }))
+    await user.type(screen.getByPlaceholderText(resourceText('customStyle')), 'Low Poly')
+    await user.click(screen.getAllByRole('button', { name: resourceText('add') })[0])
+    await user.type(screen.getByPlaceholderText(resourceText('customGameType')), 'Survival')
+    await user.click(screen.getAllByRole('button', { name: resourceText('add') })[1])
+    await user.click(screen.getByRole('button', { name: resourceText('update') }))
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ styles: ['Pixel', 'Fantasy', 'Low Poly'], gameTypes: ['RPG', 'Survival'] })))
   })

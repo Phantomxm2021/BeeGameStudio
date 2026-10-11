@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import * as THREE from 'three'
 import { Palette, Pause, Play, Repeat2, Sun } from 'lucide-react'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
@@ -247,12 +249,13 @@ export async function applyBoundBaseColorTextures(
 export async function persistModelMetrics(
   onMetrics: (metrics: ModelMetrics) => void | Promise<void>,
   metrics: ModelMetrics,
+  fallbackMessage = '',
 ): Promise<Error | undefined> {
   try {
     await onMetrics(metrics)
     return undefined
   } catch (reason) {
-    return reason instanceof Error ? reason : new Error('Unable to save model metrics')
+    return reason instanceof Error ? reason : new Error(fallbackMessage)
   }
 }
 
@@ -425,7 +428,37 @@ export function createProceduralSkyScene(): { scene: THREE.Scene; sky: Sky } {
 
 export function normalizeModelPreviewError(reason: unknown): Error {
   if (reason instanceof Error) return reason
-  return new Error(typeof reason === 'string' && reason.trim() ? reason : 'Unknown model loading error')
+  return new Error(typeof reason === 'string' && reason.trim() ? reason : '')
+}
+
+type ModelPreviewErrorCode = 'fbxLoaderFailed' | 'unsupportedFormat' | 'downloadFbxFailed' | 'downloadDependencyFailed' | 'assimpConversionFailed'
+
+type ModelPreviewErrorDetails = {
+  primary?: string
+  fallback?: string
+  status?: number
+  reference?: string
+  reason?: string
+}
+
+class ModelPreviewLoadError extends Error {
+  constructor(readonly code: ModelPreviewErrorCode, readonly details: ModelPreviewErrorDetails = {}) {
+    super(code)
+    this.name = 'ModelPreviewLoadError'
+  }
+}
+
+function localizeModelPreviewError(reason: unknown, t: TFunction): Error {
+  if (!(reason instanceof ModelPreviewLoadError)) {
+    const normalized = normalizeModelPreviewError(reason)
+    return normalized.message ? normalized : new Error(t('model.unknownLoadError'))
+  }
+  if (reason.code === 'fbxLoaderFailed') return new Error(t('model.fbxLoaderFailed', { primary: reason.details.primary || t('model.unknownLoadError'), fallback: reason.details.fallback || t('model.unknownLoadError') }))
+  if (reason.code === 'unsupportedFormat') return new Error(t('model.unsupportedFormat'))
+  if (reason.code === 'downloadFbxFailed') return new Error(t('model.downloadFbxFailed', { status: reason.details.status ?? 0 }))
+  if (reason.code === 'downloadDependencyFailed') return new Error(t('model.downloadDependencyFailed', { status: reason.details.status ?? 0, reference: reason.details.reference || '' }))
+  const suffix = reason.details.reason ? `: ${reason.details.reason}` : ''
+  return new Error(`${t('model.assimpConversionFailed')}${suffix}`)
 }
 
 const neutralTextureDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL9WQAAAABJRU5ErkJggg=='
@@ -451,11 +484,11 @@ async function loadModel(url: string, extension: string, options: { sourcePath: 
       } catch (threeError) {
         const primary = normalizeModelPreviewError(threeError)
         const fallback = normalizeModelPreviewError(assimpError)
-        throw new Error(`FBX loader failed (${primary.message}); GLB preview conversion failed (${fallback.message})`)
+        throw new ModelPreviewLoadError('fbxLoaderFailed', { primary: primary.message, fallback: fallback.message })
       }
     }
   }
-  throw new Error('Unsupported model format')
+  throw new ModelPreviewLoadError('unsupportedFormat')
 }
 
 /**
@@ -471,13 +504,13 @@ async function loadFbxWithAssimp(
   onUnresolvedTexture: (reference: string) => void,
 ): Promise<LoadedModel> {
   const response = await fetch(url)
-  if (!response.ok) throw new Error(`Unable to download FBX (${response.status})`)
+  if (!response.ok) throw new ModelPreviewLoadError('downloadFbxFailed', { status: response.status })
   const [{ default: createAssimp }, bytes, dependencies] = await Promise.all([
     import('assimpjs'),
     response.arrayBuffer(),
     Promise.all(Object.entries(externalResourceUrls).map(async ([reference, dependencyUrl]) => {
       const dependency = await fetch(dependencyUrl)
-      if (!dependency.ok) throw new Error(`Unable to download model dependency (${dependency.status}): ${reference}`)
+      if (!dependency.ok) throw new ModelPreviewLoadError('downloadDependencyFailed', { status: dependency.status, reference })
       return [reference, new Uint8Array(await dependency.arrayBuffer())] as const
     })),
   ])
@@ -495,7 +528,7 @@ async function loadFbxWithAssimp(
   for (const [name, content] of virtualFiles) files.AddFile(name, content)
   const converted = assimp.ConvertFileList(files, 'glb2')
   if (!converted.IsSuccess() || converted.FileCount() < 1) {
-    throw new Error(converted.GetErrorCode() || 'Assimp could not convert this FBX')
+    throw new ModelPreviewLoadError('assimpConversionFailed', { reason: converted.GetErrorCode() || undefined })
   }
   const glb = converted.GetFile(0).GetContent()
   const glbBytes = new Uint8Array(glb.byteLength)
@@ -639,6 +672,9 @@ export function modelAnimations(object: THREE.Object3D): THREE.AnimationClip[] {
 }
 
 export function ModelPreview({ url, sourcePath, extension, materialTextureBindings = {}, textureUrls = {}, externalResourceUrls = {}, externalReferences = [], onMetrics, onMetricsError }: ModelPreviewProps) {
+  const { t } = useTranslation('resourceLibrary')
+  const translatorRef = useRef(t)
+  useEffect(() => { translatorRef.current = t }, [t])
   const host = useRef<HTMLDivElement>(null)
   const onMetricsRef = useRef(onMetrics)
   const onMetricsErrorRef = useRef(onMetricsError)
@@ -827,19 +863,19 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
         camera.lookAt(center)
         controls.update()
         if (onMetricsRef.current) {
-          void persistModelMetrics(onMetricsRef.current, calculateModelMetrics(loaded.object, [...unresolvedTextures], loaded.animations)).then(metricsError => {
+          void persistModelMetrics(onMetricsRef.current, calculateModelMetrics(loaded.object, [...unresolvedTextures], loaded.animations), translatorRef.current('model.saveMetricsFailed')).then(metricsError => {
             if (!metricsError || !active) return
-            setError('模型信息保存失败，请重试。')
+            setError(translatorRef.current('model.saveMetricsFailed'))
             onMetricsErrorRef.current?.(metricsError)
           })
         }
       })
       .catch(reason => {
         if (!active) return
-        const error = normalizeModelPreviewError(reason)
+        const error = localizeModelPreviewError(reason, translatorRef.current)
         console.error('Resource model preview failed', { extension, url, error })
         onMetricsErrorRef.current?.(error)
-        setError(`Model preview failed: ${error.message || 'Unknown model loading error'}`)
+        setError(`${translatorRef.current('errors.previewLoadFailed')}${error.message ? `: ${error.message}` : ''}`)
       })
 
     return () => {
@@ -901,11 +937,11 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
   return <div className="relative h-full min-h-64 w-full">
     <div ref={host} className="h-full min-h-64 w-full" />
     <div className="absolute left-1/2 top-3 z-10 inline-flex -translate-x-1/2 rounded-lg border border-white/[0.1] bg-zinc-950/80 p-1 shadow-lg backdrop-blur">
-      <button type="button" aria-label="Albedo preview" title="原色预览" onClick={() => setPreviewMode('albedo')} className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium transition ${previewMode === 'albedo' ? 'bg-white/[0.12] text-white' : 'text-zinc-500 hover:text-zinc-200'}`}>
-        <Palette className="h-3.5 w-3.5" />原色
+      <button type="button" aria-label={t('model.albedoAria')} title={t('model.albedoAria')} onClick={() => setPreviewMode('albedo')} className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium transition ${previewMode === 'albedo' ? 'bg-white/[0.12] text-white' : 'text-zinc-500 hover:text-zinc-200'}`}>
+        <Palette className="h-3.5 w-3.5" />{t('model.albedo')}
       </button>
-      <button type="button" aria-label="Studio lighting preview" title="工作室光照" onClick={() => setPreviewMode('lit')} className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium transition ${previewMode === 'lit' ? 'bg-white/[0.12] text-white' : 'text-zinc-500 hover:text-zinc-200'}`}>
-        <Sun className="h-3.5 w-3.5" />光照
+      <button type="button" aria-label={t('model.lightingAria')} title={t('model.lightingAria')} onClick={() => setPreviewMode('lit')} className={`flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] font-medium transition ${previewMode === 'lit' ? 'bg-white/[0.12] text-white' : 'text-zinc-500 hover:text-zinc-200'}`}>
+        <Sun className="h-3.5 w-3.5" />{t('model.lighting')}
       </button>
     </div>
     {animations.length > 0 ? (
@@ -913,26 +949,26 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
         <div className="flex items-center gap-2">
           <button
             type="button"
-            aria-label={isPlaying ? 'Pause animation' : 'Play animation'}
-            title={isPlaying ? 'Pause animation' : 'Play animation'}
+            aria-label={t(isPlaying ? 'model.pauseAnimation' : 'model.playAnimation')}
+            title={t(isPlaying ? 'model.pauseAnimation' : 'model.playAnimation')}
             onClick={togglePlayback}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-100 transition hover:bg-white/[0.1]"
           >
             {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
           </button>
           <select
-            aria-label="Model animation"
+            aria-label={t('model.animation')}
             value={selectedAnimation}
             onChange={event => setSelectedAnimation(Number(event.target.value))}
             className="type-caption-2 min-w-0 flex-1 truncate rounded-md border-0 bg-transparent px-1 py-1 text-zinc-200 outline-none"
           >
-            {animations.map((clip, index) => <option key={`${clip.uuid}:${index}`} value={index}>{clip.name || `Animation ${index + 1}`}</option>)}
+            {animations.map((clip, index) => <option key={`${clip.uuid}:${index}`} value={index}>{clip.name || `${t('model.animation')} ${index + 1}`}</option>)}
           </select>
           <span className="type-code-sm shrink-0 text-zinc-500">{formatAnimationTime(timelineTime)} / {formatAnimationTime(activeDuration)}</span>
           <button
             type="button"
-            aria-label={isLooping ? 'Disable animation loop' : 'Enable animation loop'}
-            title={isLooping ? 'Loop enabled' : 'Loop disabled'}
+            aria-label={t(isLooping ? 'model.disableLoop' : 'model.enableLoop')}
+            title={t(isLooping ? 'model.loopEnabled' : 'model.loopDisabled')}
             onClick={() => setIsLooping(value => !value)}
             className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition ${isLooping ? 'bg-white/[0.12] text-zinc-100' : 'text-zinc-500 hover:bg-white/[0.08] hover:text-zinc-200'}`}
           >
@@ -947,7 +983,7 @@ export function ModelPreview({ url, sourcePath, extension, materialTextureBindin
             max={Math.max(activeDuration, 0.01)}
             step={0.01}
             value={Math.min(timelineTime, activeDuration)}
-            aria-label="Animation timeline"
+            aria-label={t('model.timeline')}
             onChange={event => scrubTimeline(Number(event.target.value))}
             className="absolute inset-0 h-full w-full cursor-pointer appearance-none bg-transparent opacity-0"
           />

@@ -32,7 +32,7 @@ void i18n
   .use(initReactI18next)
   .init({
     resources,
-    ns: ['landing', 'settings', 'common', 'beegame'],
+    ns: ['landing', 'settings', 'common', 'beegame', 'resourceLibrary'],
     defaultNS: 'landing',
     fallbackLng: 'en',
     supportedLngs: supportedI18nLanguages,

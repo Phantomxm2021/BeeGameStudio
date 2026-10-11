@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, test, vi } from 'vitest'
 import React from 'react'
 import { CurationWorkbench, type ResourceCurationApi } from './CurationWorkbench'
 import type { ResourceCurationQueue } from '../../services/resourceLibraryApi'
+import i18n from '../../i18n'
 
 const queue: ResourceCurationQueue = {
   items: [
@@ -20,6 +21,29 @@ function apiWithQueue(): ResourceCurationApi {
 }
 
 describe('Resource Library curation workbench', () => {
+  test('translates curation controls when the active language changes', async () => {
+    await act(async () => { await i18n.changeLanguage('ja') })
+    try {
+      render(<CurationWorkbench packId="pack-1" api={apiWithQueue()} />)
+
+      expect(await screen.findByText('AI分析が完了すると用途タグを自動で書き込みます。')).toBeInTheDocument()
+      expect(screen.getByRole('tab', { name: 'AI処理' })).toBeInTheDocument()
+    } finally {
+      await act(async () => { await i18n.changeLanguage('zh') })
+    }
+  })
+
+  test('uses the active language for the curation dialog title', async () => {
+    await act(async () => { await i18n.changeLanguage('ja') })
+    try {
+      render(<CurationWorkbench packId="pack-1" api={apiWithQueue()} />)
+
+      expect(await screen.findByRole('dialog', { name: 'リソース整理' })).toBeInTheDocument()
+    } finally {
+      await act(async () => { await i18n.changeLanguage('zh') })
+    }
+  })
+
   test('shows resource processing as a durable AI tab', async () => {
     const user = userEvent.setup()
     const api = apiWithQueue() as ResourceCurationApi & { startSemanticCuration: ReturnType<typeof vi.fn>; getSemanticCurationJob: ReturnType<typeof vi.fn> }

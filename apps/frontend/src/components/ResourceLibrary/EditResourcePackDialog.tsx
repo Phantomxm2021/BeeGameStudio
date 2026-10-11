@@ -12,12 +12,8 @@ type Props = {
 }
 
 export function EditResourcePackDialog({ open, pack, onClose, onUploadCover, onSave }: Props) {
-  const { t } = useTranslation()
-  const copy = useMemo(() => ({
-    title: translated(t, 'resourceLibrary.editPack', '编辑 Pack'),
-    update: translated(t, 'resourceLibrary.update', '保存 Pack'),
-    updating: translated(t, 'resourceLibrary.updating', '保存中…'),
-  }), [t])
+  const { t } = useTranslation('resourceLibrary')
+  const copy = { title: t('editPack'), update: t('update'), updating: t('updating') }
   const initialValues = useMemo<ResourcePackFormValues>(() => ({
     name: pack.name,
     styles: [...pack.styles],
@@ -66,10 +62,6 @@ export function EditResourcePackDialog({ open, pack, onClose, onUploadCover, onS
   );
 }
 
-function translated(t: (key: string) => string, key: string, fallback: string): string {
-  const value = t(key)
-  return value === key ? fallback : value
-}
 
 function splitList(value: string): string[] {
   return [...new Set(value.split(',').map(item => item.trim()).filter(Boolean))]

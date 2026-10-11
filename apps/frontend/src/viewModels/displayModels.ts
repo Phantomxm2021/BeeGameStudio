@@ -383,7 +383,7 @@ const normalizeWorkflowDisplay = (
     runId,
     ...fields,
     nextAction:
-      nextActionValue === 'resume' || nextActionValue === 'retry'
+      nextActionValue === 'resume' || nextActionValue === 'retry' || nextActionValue === 'start_game_ir'
         ? nextActionValue
         : undefined,
     recoverable,

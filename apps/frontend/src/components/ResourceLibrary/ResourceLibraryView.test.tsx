@@ -7,6 +7,7 @@ import { buildSafePublishFix, ResourceLibraryView } from './ResourceLibraryView'
 import { closeResourcePackRoute } from './resourceLibraryRoute'
 import { ResourceLibraryApiError, type ResourceElement, type ResourcePackSummary } from '../../services/resourceLibraryApi'
 import { ToastProvider } from '../../contexts/ToastContext'
+import i18n from '../../i18n'
 
 const pack: ResourcePackSummary = { id: 'pack-1', name: 'Example Pack',
   styles: ['Stylized'], gameTypes: ['adventure'], dimension: '2D', primaryCategory: 'world-scene', categories: ['models'], version: '1.0.0', status: 'published', elementCount: 1 }
@@ -23,7 +24,24 @@ function renderResourceLibrary(view: ReactElement) {
 }
 
 describe('ResourceLibraryView workspace', () => {
-  afterEach(() => { cleanup(); closeResourcePackRoute() })
+  afterEach(async () => { cleanup(); closeResourcePackRoute(); await i18n.changeLanguage('zh') })
+
+  test('uses the active user language for the empty library action', async () => {
+    await i18n.changeLanguage('ja')
+    renderResourceLibrary(<ResourceLibraryView apiClient={{ ...api, listPacks: async () => [] }} />)
+
+    expect(await screen.findByRole('button', { name: 'パックを作成' })).toBeInTheDocument()
+  })
+
+  test('translates the library list title when the user changes language', async () => {
+    i18n.addResource('en', 'resourceLibrary', 'list.title', 'Localized resource packs')
+    i18n.addResource('zh', 'resourceLibrary', 'list.title', '本地化资源包')
+    await i18n.changeLanguage('en')
+    renderResourceLibrary(<ResourceLibraryView apiClient={{ ...api, listPacks: async () => [] }} />)
+    expect(await screen.findByText('Localized resource packs')).toBeInTheDocument()
+    await i18n.changeLanguage('zh')
+    expect(await screen.findByText('本地化资源包')).toBeInTheDocument()
+  })
 
   test('mounts the Pack workspace with the explorer and no obsolete recursive rows', async () => {
     const user = userEvent.setup()

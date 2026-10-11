@@ -47,6 +47,7 @@ import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.
 import { matchWildcardPattern } from 'src/utils/permissions/shellRuleMatching.js'
 import { validateInputForSettingsFileEdit } from 'src/utils/settings/validateEditTool.js'
 import { NOTEBOOK_EDIT_TOOL_NAME } from '../NotebookEditTool/constants.js'
+import { foundationRevisionPathGuard } from '../foundationRevisionPathGuard.js'
 import {
   FILE_EDIT_TOOL_NAME,
   FILE_UNEXPECTEDLY_MODIFIED_ERROR,
@@ -132,6 +133,8 @@ export const FileEditTool = buildTool({
   renderToolUseErrorMessage,
   async validateInput(input: FileEditInput, toolUseContext: ToolUseContext) {
     const { file_path, old_string, new_string, replace_all = false } = input
+    const revisionPathError = foundationRevisionPathGuard(file_path, 'Edit')
+    if (revisionPathError) return revisionPathError
     // Use expandPath for consistent path normalization (especially on Windows
     // where "/" vs "\" can cause readFileState lookup mismatches)
     const fullFilePath = expandPath(file_path)

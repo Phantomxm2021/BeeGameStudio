@@ -2237,6 +2237,26 @@ alter table public.beegame_storage_objects enable row level security;
 alter table public.beegame_storage_upload_intents enable row level security;
 alter table public.beegame_storage_migration_jobs enable row level security;
 
+-- Storage-object policies below use this helper. Keep it in the base schema
+-- because a fresh install reaches these policies before the incremental
+-- resource-ownership migration is applied.
+create or replace function public.beegame_can_manage_resource_pack(target_pack_id text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.beegame_is_platform_owner()
+      or exists (
+        select 1 from public.beegame_resource_packs pack
+        where pack.id = target_pack_id and pack.created_by = auth.uid()
+      );
+$$;
+
+revoke execute on function public.beegame_can_manage_resource_pack(text) from public;
+grant execute on function public.beegame_can_manage_resource_pack(text) to authenticated;
+
 drop policy if exists "storage object owner read" on public.beegame_storage_objects;
 create policy "storage object owner read" on public.beegame_storage_objects
   for select using (

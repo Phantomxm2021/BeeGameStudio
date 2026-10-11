@@ -429,6 +429,13 @@ export const beeGameAdapter = {
     )
   },
 
+  async startGameIrWorkflow(projectId: string): Promise<Record<string, unknown>> {
+    return postJson<Record<string, unknown>>(
+      `/api/projects/${encodeURIComponent(projectId)}/workflow/game-ir/start`,
+      { language: getCurrentUiLanguage() },
+    )
+  },
+
   async retryWorkflow(projectId: string): Promise<Record<string, unknown>> {
     return postJson<Record<string, unknown>>(
       `/api/projects/${encodeURIComponent(projectId)}/workflow/retry`,

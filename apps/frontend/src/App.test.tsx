@@ -19,6 +19,8 @@ const setToastCallbacks = vi.fn();
 const loadHistory = vi.fn();
 const showError = vi.fn();
 const showSuccess = vi.fn();
+let renderedLandingLanguage: string | undefined;
+let renderedDashboardLanguage: string | undefined;
 
 vi.mock('./store/projectStore', () => ({
   useProjectStore: () => ({
@@ -85,11 +87,11 @@ vi.mock('./components/Common/ErrorBoundary', () => ({
 }));
 
 vi.mock('./components/Demiurge/LandingView', () => ({
-  LandingView: () => <div data-testid="landing-view" />,
+  LandingView: ({ lang }: { lang: string }) => { renderedLandingLanguage = lang; return <div data-testid="landing-view" /> },
 }));
 
 vi.mock('./components/Demiurge/DashboardView', () => ({
-  DashboardView: () => <div data-testid="dashboard-view" />,
+  DashboardView: ({ lang }: { lang: string }) => { renderedDashboardLanguage = lang; return <div data-testid="dashboard-view" /> },
 }));
 
 describe('App view routing', () => {
@@ -105,7 +107,17 @@ describe('App view routing', () => {
       permissions: ['project.read'],
     });
     mockedAuthenticationStatus = 'authenticated';
+    renderedLandingLanguage = undefined;
+    renderedDashboardLanguage = undefined;
     window.history.pushState({}, '', '/');
+  });
+
+  it('restores the saved language after a browser refresh', async () => {
+    localStorage.setItem('i18nextLng', 'en');
+
+    render(<App />);
+
+    await waitFor(() => expect(renderedDashboardLanguage).toBe('en'));
   });
 
   it('restores an HttpOnly session without requiring a browser-readable token', async () => {
