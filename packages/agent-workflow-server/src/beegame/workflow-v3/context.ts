@@ -90,6 +90,22 @@ export function skillEvidence(events: ToolEvent[]): SkillUse[] {
   return [...uses.values()]
 }
 
+/** Recorded successful main-session loads in the same native lineage. This
+ * is not a claim that compaction retained the method or it was applied. Child
+ * loads are not transferable evidence for their parent or another child. */
+export function priorMainSkillLoads(run:Run,attemptId:string) {
+  const at=run.agentTurns?.findIndex(t=>t.attemptId===attemptId)??-1
+  if(at>=0 && run.agentTurns![at]!.message?.contextMode==='focused')
+    return {recordedMainLoads:[],contextPresence:'not-transferred',application:'unverified'}
+  const prior=at>=0?run.agentTurns!.slice(0,at):[]
+  const nativeId=prior.at(-1)?.nativeSessionId
+  const loaded=new Map<string,{name:string;attemptId:string;toolUseID:string}>()
+  if(nativeId)for(const turn of prior)if(turn.nativeSessionId===nativeId)
+    for(const skill of turn.skillUses??[])if(skill.status==='loaded'&&!skill.parentToolUseID)
+      loaded.set(skill.name,{name:skill.name,attemptId:turn.attemptId,toolUseID:skill.toolUseID})
+  return {recordedMainLoads:[...loaded.values()],contextPresence:'unverified',application:'unverified'}
+}
+
 export function skillUseCheck(attempt: Attempt, required: string[], uses: SkillUse[]): CheckResult {
   const missing = required.filter(name => !uses.some(use => use.name === name && use.status === 'loaded'))
   return { id: 'skill-use', version: CHECK_VERSIONS['skill-use'], status: missing.length ? 'unverified' : 'passed',

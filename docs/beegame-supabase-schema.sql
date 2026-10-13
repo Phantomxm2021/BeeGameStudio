@@ -196,6 +196,8 @@ create table if not exists public.beegame_sessions (
 );
 
 create table if not exists public.beegame_model_configs (
+  published boolean not null default true,
+  auth_methods jsonb not null default '["platform"]'::jsonb,
   id text primary key,
   owner_id uuid not null references auth.users(id) on delete cascade,
   name text not null,

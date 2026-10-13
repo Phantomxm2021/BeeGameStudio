@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DashboardRepository } from '../dashboard-repository'
-import { saveRuntimeSettingsConfig } from '../runtime-settings-store'
+import { saveRuntimeSettingsConfig, resolveRuntimeFeatureSettings } from '../runtime-settings-store'
 import { SupabaseDashboardStore } from '../supabase-dashboard-store'
 import { SupabaseRuntimeEnvClient } from '../supabase-runtime-env-client'
 
@@ -63,7 +63,7 @@ describe('DashboardRepository Supabase boundaries', () => {
 
       await expect(
         repository.loadRuntimeSettings(request, user),
-      ).resolves.toEqual({})
+      ).resolves.toEqual(resolveRuntimeFeatureSettings({}))
       await expect(
         repository.getRuntimeEnv(userRoot, user.id),
       ).resolves.not.toHaveProperty('SKILL_SEARCH_ENABLED')
@@ -154,7 +154,7 @@ describe('DashboardRepository Supabase boundaries', () => {
             env: {
               OPENAI_BASE_URL: 'https://provider.test/v1',
               FEATURE_MCP_SKILLS: '0',
-              BEEGAME_RUNTIME_SETTINGS_JSON: JSON.stringify({ skillSearchEnabled: true }),
+              BEEGAME_RUNTIME_SETTINGS_JSON: JSON.stringify({ skillSearchEnabled: true, verificationAgentEnabled: true }),
               BEEGAME_CONFIG_DIR: '/forged/other-user',
               NPM_CONFIG_CACHE: '/forged/other-user/npm-cache',
               NPM_CONFIG_USERCONFIG: '/forged/other-user/npmrc',
@@ -184,6 +184,9 @@ describe('DashboardRepository Supabase boundaries', () => {
       })
       expect(env.FEATURE_MCP_SKILLS).toBe('0')
       expect(env.SKILL_SEARCH_ENABLED).toBe('1')
+      expect(JSON.parse(env.BEEGAME_RUNTIME_SETTINGS_JSON!)).toMatchObject({
+        verificationAgentEnabled: true, agentTeamsEnabled: false,
+      })
       expect(env.BEEGAME_CONFIG_DIR).toBe(join(userRoot, '.runtime', 'app'))
       expect(env).not.toHaveProperty('CLAUDE_CONFIG_DIR')
       expect(env).not.toHaveProperty('BEEGAME_PROJECT_CONFIG_DIR_NAME')
@@ -433,13 +436,16 @@ describe('DashboardRepository Supabase boundaries', () => {
       await expect(
         repository.loadRuntimeSettings(request, user),
       ).resolves.toEqual({
+        ...resolveRuntimeFeatureSettings({}),
         skillSearchEnabled: true,
       })
       await expect(
         repository.saveRuntimeSettings(request, user, {
           webBrowserToolEnabled: true,
+          verificationAgentEnabled: true,
         }),
       ).resolves.toEqual({
+        ...resolveRuntimeFeatureSettings({ verificationAgentEnabled: true }),
         skillSearchEnabled: true,
         webBrowserToolEnabled: true,
       })

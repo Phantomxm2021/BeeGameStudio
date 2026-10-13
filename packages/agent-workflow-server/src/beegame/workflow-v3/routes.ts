@@ -13,18 +13,24 @@ import { staleTaskIds } from './checks'
 import { validateRepairPlans } from './review'
 import { readContentView } from './content-view'
 import type { MeasuredPreviewManager } from './measured-preview'
-import { exportMeasuredBuild, exportAgentMeasuredBuild, selectAgentMeasuredBuild } from './measured-build'
-import { measurementSummary } from './agent-measurement'
+import { exportMeasuredBuild, exportAgentMeasuredBuild, selectAgentMeasuredBuild, inspectAgentMeasurementInputs, measuredFiles } from './measured-build'
+import { mergeDeploymentRecords, type BeeGameDeploymentManager, type BeeGameDeploymentRecord } from '../deployment-manager'
+import { measurementSummary, activeUserTask, agentSkillFacts } from './agent-measurement'
 import { recordPreviewIssue, prepareIssueReview, prepareReviewedRepair } from './preview-issues'
 import { changeRequirements, contentOwners } from './changes'
 import { agentGoalSchema, agentMessageSchema, createAgentGoalExecutor } from './agent-goal'
 import type { AgentPreviewAccess, AgentImageAccess } from './agent-tools'
+import { auditEventPage } from './event-page'
+import type { HostExitReceipts } from './host-exit-receipt'
 
 const startSchema = z.object({ requestKey: z.string().min(1), chatSessionId: z.string().min(1),
   requirements: z.object({ text: z.string().trim().min(1), constraints: z.record(z.string(), z.unknown()), ids: z.array(z.string()).min(1) }).strict(),
 }).strict()
 export function registerV3Routes(app: Hono, input: {
-  store?: WorkflowStore; sessions: BeeGameSessionManager; preview?: MeasuredPreviewManager;
+  store?: WorkflowStore; sessions: BeeGameSessionManager; preview?: MeasuredPreviewManager; exitReceipts?: HostExitReceipts;
+  deployment?: () => BeeGameDeploymentManager;
+  persistDeployment?(request:Request, user:BeeGameUserContext, record:BeeGameDeploymentRecord):Promise<unknown>;
+  listDeployments?(request:Request, user:BeeGameUserContext, sessionId:string):Promise<BeeGameDeploymentRecord[] | undefined>;
   getUser(request: Request): BeeGameUserContext;
   getProject(request: Request, user: BeeGameUserContext, projectId: string): Promise<BeeGameProjectMetadata | undefined>;
   getAuthToken(request: Request): string | undefined;
@@ -38,9 +44,9 @@ export function registerV3Routes(app: Hono, input: {
   openAgentPreview?: (value: {request: Request; user: BeeGameUserContext; workspacePath: string; sessionId: string}) => AgentPreviewAccess | Promise<AgentPreviewAccess>;
   openAgentImage?: (value: {user: BeeGameUserContext; projectId: string; workspacePath: string}) => AgentImageAccess | Promise<AgentImageAccess>;
 }) {
-  const executor = input.store ? createV3Executor({ store: input.store, sessions: input.sessions }) : undefined
+  const executor = input.store ? createV3Executor({ store: input.store, sessions: input.sessions, exitReceipts:input.exitReceipts }) : undefined
   const agentExecutor = input.store ? createAgentGoalExecutor({ store: input.store, sessions: input.sessions,
-    resourceLibraryBaseUrl:input.resourceLibraryBaseUrl }) : undefined
+    resourceLibraryBaseUrl:input.resourceLibraryBaseUrl, exitReceipts:input.exitReceipts }) : undefined
   input.registerCleanup?.(async () => { await Promise.all([executor?.dispose(),agentExecutor?.dispose()]) })
   const prefix = '/api/projects/:id/workflow-v3'
   async function context(request: Request, projectId: string, mutate: boolean) {
@@ -67,7 +73,7 @@ export function registerV3Routes(app: Hono, input: {
       ? ctx.agentExecutor : ctx.executor
   }
   async function attemptEvents(run: Run, attempt: Pick<Attempt,'sessionId'|'attemptId'>) {
-    if (input.sessions.get(attempt.sessionId)) return { events: input.sessions.transcript(attempt.sessionId) }
+    if (input.sessions.get(attempt.sessionId)) return { events: input.sessions.transcriptFacts(attempt.sessionId) }
     try { return { events: await readSessionTranscriptFromDisk(attempt.sessionId, run.workspacePath) } }
     catch (error) {
       // A never-started attempt may have no transcript; corrupt/unavailable
@@ -79,19 +85,116 @@ export function registerV3Routes(app: Hono, input: {
   const previewSelection = z.object({ taskId: z.string().min(1), attemptId: z.string().min(1),
     planRevision: z.number().int().positive() }).strict()
   const agentSelection = z.object({measurementId:z.string().uuid(),requirementsRevision:z.string().min(1)}).strict()
+  // Adapt existing dashboard endpoints on the server. Never enter legacy
+  // scripts/acceptance restoration for a V3 project, or silently use older PASS.
+  for (const suffix of ['preview', 'preview/restart', 'deployment-readiness', 'deployments']) {
+    app.on(suffix === 'preview' ? ['GET','POST','DELETE'] : suffix === 'deployment-readiness' ? ['GET'] : suffix === 'deployments' ? ['GET','POST'] : ['POST'],
+      '/api/projects/:id/' + suffix, async (c, next) => {
+      try {
+        const user = input.getUser(c.req.raw), project = await input.getProject(c.req.raw, user, c.req.param('id')!)
+        if (!project) return next()
+        const stored = await input.store?.read(project.id, user.id)
+        if (!stored && project.runtime_snapshot?.workflow_protocol !== 'bgs.workflow.v3') return next()
+        c.header('Cache-Control', 'no-store')
+        const ctx = await current(c.req.raw, project.id, false)
+        const permission = c.req.method === 'GET' ? 'project.read' : suffix === 'deployments' ? 'deployment.manage' : 'preview.manage'
+        if (!hasBeeGamePermission(user, permission)) throw new WorkflowError('permission-denied', 'Operation permission denied', 403)
+        if (suffix === 'deployment-readiness' || suffix === 'deployments') {
+          const deployment = input.deployment?.()
+          if (!deployment) throw new WorkflowError('deployment-unavailable','V3 publishing is not configured',503)
+          if (suffix === 'deployments' && c.req.method === 'GET')
+            return c.json(mergeDeploymentRecords(await deployment.list(ctx.run.chatSessionId),
+              await input.listDeployments?.(c.req.raw,user,ctx.run.chatSessionId) ?? []))
+          try {
+            if (deployment.isPublishing(user.id,ctx.run.workspacePath))
+              throw new WorkflowError('deployment-busy','Publication is already running; inspect its record')
+            const requested = c.req.method === 'POST'
+              ? z.object({measurementId:z.string().uuid().optional(),requirementsRevision:z.string().optional()}).strict().parse(await input.readBody(c.req.raw))
+              : {}
+            const latest = ctx.run.agentTurns?.flatMap(t=>t.measurements ?? []).at(-1)
+            if (!latest) throw new WorkflowError('deployment-unverified','No measured build is available')
+            if (requested.measurementId && requested.measurementId !== latest.id ||
+                requested.requirementsRevision && requested.requirementsRevision !== ctx.run.requirements.revision)
+              throw new WorkflowError('revision-conflict','Deployment selection changed; read current readiness')
+            const busy = (run:Run) => input.sessions.hasActiveProjectTurn(run.ownerId,run.projectId,run.workspacePath)
+            const selected = await selectAgentMeasuredBuild(ctx.run,latest.id,busy(ctx.run),'publication')
+            await measuredFiles(ctx.run,selected)
+            if (c.req.method === 'GET') return c.json({allowed:true,issues:[],destination:deployment.destination,
+              measurementId:latest.id,requirementsRevision:ctx.run.requirements.revision,artifact:selected.artifact,
+              quality:'unverified',scope:'Eligible for explicit publication of measured bytes, not game-quality certification.'})
+            const validate = async () => {
+              const current = await ctx.store.read(project.id,user.id)
+              if (!current || current.id !== ctx.run.id || current.version !== ctx.run.version ||
+                  current.workspacePath !== ctx.run.workspacePath)
+                throw new WorkflowError('revision-conflict','Workflow changed while preparing publication')
+              const checked = await selectAgentMeasuredBuild(current,latest.id,busy(current),'publication')
+              if (checked.artifact.path !== selected.artifact.path || checked.artifact.sha256 !== selected.artifact.sha256)
+                throw new WorkflowError('measurement-stale','Selected deployment bytes changed')
+              await measuredFiles(current,checked)
+            }
+            // Selection above awaits file/database reads. Recheck synchronously
+            // with start so a concurrent request gets 409, not a generic 500.
+            if (deployment.isPublishing(user.id,ctx.run.workspacePath))
+              throw new WorkflowError('deployment-busy','Publication is already running; inspect its record')
+            return c.json(await deployment.start({sessionId:ctx.run.chatSessionId,userId:user.id,projectId:project.id,
+              workspacePath:ctx.run.workspacePath,authToken:input.getAuthToken(c.req.raw),
+              measured:{runId:ctx.run.id,measurementId:latest.id,artifact:selected.artifact,validate}},
+              input.persistDeployment ? record=>input.persistDeployment!(c.req.raw,user,record) : undefined),202)
+          } catch(error) {
+            if (suffix !== 'deployment-readiness') throw error
+            const detail = routeError(error)
+            if (detail.status !== 409) throw error
+            return c.json({allowed:false,issues:[detail.error],code:detail.code,destination:deployment.destination,quality:'unverified'})
+          }
+        }
+        if (!input.preview) throw new WorkflowError('preview-unavailable', 'Measured Preview is not configured', 503)
+        let state = await input.preview.status(project.id, user.id)
+        if (c.req.method === 'DELETE') {
+          if (state.preview) input.preview.close(project.id, user.id, state.preview.id)
+          state = {preview:null}
+        } else if (c.req.method === 'POST') {
+          const body = await input.readBody(c.req.raw)
+          z.object({}).strict().parse(body)
+          const latest = ctx.run.agentTurns?.flatMap(turn => turn.measurements ?? []).at(-1)
+          if (!latest) throw new WorkflowError('preview-unverified', 'No current measured build is available; no dev script was started')
+          // openAgent rechecks writer, requirements, sources and artifact identity.
+          // Restart does not rerun a build or model and reuses a valid capability.
+          state = {preview:await input.preview.openAgent(ctx.run, latest.id)}
+        }
+        return c.json({sessionId:ctx.run.chatSessionId,workspacePath:ctx.run.workspacePath,
+          status:state.preview ? 'running' : c.req.method === 'DELETE' ? 'stopped' : 'idle',
+          url:state.preview?.url ?? '',mode:'production',updatedAt:new Date().toISOString(),
+          message:state.preview ? state.preview.limitations.join(' ') : state.reason ?? 'No measured Preview is open'})
+      } catch (error) { const detail = routeError(error); return c.json(detail, detail.status) }
+    })
+  }
   app.get(prefix+'/agent/measurements/:measurement',async c=>{
     c.header('Cache-Control','no-store')
     try {
       const ctx=await current(c.req.raw,c.req.param('id')!,false),id=c.req.param('measurement')!
       const turn=ctx.run.agentTurns?.find(t=>t.measurements?.some(m=>m.id===id)),record=turn?.measurements?.find(m=>m.id===id)
       if(!turn || !record)throw new WorkflowError('measurement-not-found','No host measurement with this identity',404)
-      let freshness:{current:boolean;reason?:string;code?:string}={current:true}
+      // Input identity remains inspectable even when the writer/exit state
+      // forbids selection. Never turn those diagnostics into export permission.
+      const inputs=await inspectAgentMeasurementInputs(ctx.run,record)
+      let freshness={...inputs,inputsCurrent:inputs.current}
+      let selection:{eligible:boolean;code?:string;reason?:string}={eligible:true}
       try {await selectAgentMeasuredBuild(ctx.run,id,input.sessions.hasActiveProjectTurn(ctx.user.id,ctx.project.id,ctx.workspace))}
       catch(error) {
         if(!(error instanceof WorkflowError))throw error
-        freshness={current:false,reason:error.message,code:error.code}
+        selection={eligible:false,reason:error.message,code:error.code}
+        freshness={...freshness,current:false,reason:error.message,code:error.code}
       }
-      return c.json({...measurementSummary(record),freshness,
+      let previewSelection:{eligible:boolean;code?:string;reason?:string}={eligible:true}
+      try {await selectAgentMeasuredBuild(ctx.run,id,input.sessions.hasActiveProjectTurn(ctx.user.id,ctx.project.id,ctx.workspace),'preview')}
+      catch(error) {
+        if(!(error instanceof WorkflowError))throw error
+        previewSelection={eligible:false,reason:error.message,code:error.code}
+      }
+      const currentTurn=ctx.run.agentTurns!.at(-1)!
+      return c.json({...measurementSummary(record),freshness,selection,previewSelection,
+        task:activeUserTask(ctx.run,currentTurn),skills:agentSkillFacts(ctx.run,currentTurn),
+        measurementTask:{attemptId:turn.attemptId,requestKey:turn.requestKey,status:turn.status,requirementsRevision:turn.requirementsRevision},
         execution:{attemptId:turn.attemptId,sessionId:turn.sessionId,turnId:turn.turnId,nativeSessionId:turn.nativeSessionId,status:turn.status},
         currentRequirements:ctx.run.requirements})
     }catch(error){const detail=routeError(error);return c.json(detail,detail.status)}
@@ -186,7 +289,9 @@ export function registerV3Routes(app: Hono, input: {
       if (!run && value.project.runtime_snapshot?.workflow_protocol === 'bgs.workflow.v3')
         throw new WorkflowError('run-unavailable', 'Persisted V3 project has no available Run; do not use legacy execution.', 503)
       if (run && run.workspacePath !== value.workspace) throw new WorkflowError('workspace-changed', 'Run workspace binding changed')
-      return c.json({ run: run ?? null, writerLiveness: run ? writerExecutor({ ...value, run }).writerLiveness(run) : 'none' })
+      return c.json({ run: run ?? null, writerLiveness: run ? writerExecutor({ ...value, run }).writerLiveness(run) : 'none',
+        recoveryEvidence:run ? await writerExecutor({...value,run}).recoveryEvidence(run):'unavailable',
+        hostExitReceiptsConfigured:Boolean(input.exitReceipts) })
     }
     catch (error) { const detail = routeError(error); return c.json(detail, detail.status) }
   })
@@ -222,10 +327,8 @@ export function registerV3Routes(app: Hono, input: {
       return c.json({ run }, 201)
     } catch (error) { const detail = routeError(error); return c.json(detail, detail.status) }
   })
-  app.post(prefix+'/agent/goal', async c => {
-    c.header('Cache-Control','no-store')
-    try {
-      const ctx=await context(c.req.raw,c.req.param('id')!,true),body=agentGoalSchema.parse(await input.readBody(c.req.raw))
+  async function startAgentGoal(request: Request, projectId: string, value: unknown) {
+      const ctx=await context(request,projectId,true),body=agentGoalSchema.parse(value)
       const text=JSON.stringify(body.brief),constraints=body.brief.settings
       let run=await ctx.store.read(ctx.project.id,ctx.user.id)
       if(run && (run.workspacePath!==ctx.workspace || !run.agentTurns || run.requestKey!==body.requestKey ||
@@ -248,16 +351,21 @@ export function registerV3Routes(app: Hono, input: {
       }
       // Persist mode before any model dispatch; retry can reconcile this same
       // intake if mode persistence failed, never overwrite or create another Run.
-      await input.persistMode(c.req.raw,ctx.user,ctx.project,run)
+      await input.persistMode(request,ctx.user,ctx.project,run)
       const turn=await ctx.agentExecutor.start(run,{
         openImage:input.openAgentImage ? ()=>input.openAgentImage!({user:ctx.user,projectId:ctx.project.id,workspacePath:ctx.workspace}) : undefined,
         modelConfigId:chat.modelConfigId,language:body.brief.agent_response_language,
-        userDataRoot:input.getUserDataRoot?.(c.req.raw),
-        authToken:input.getAuthToken(c.req.raw),getValidAuthToken:input.getValidAuthToken(c.req.raw),
+        userDataRoot:input.getUserDataRoot?.(request),
+        authToken:input.getAuthToken(request),getValidAuthToken:input.getValidAuthToken(request),
         openPreview:hasBeeGamePermission(ctx.user,'preview.manage') && input.openAgentPreview ?
-          ()=>input.openAgentPreview!({request:c.req.raw,user:ctx.user,workspacePath:ctx.workspace,sessionId:body.chatSessionId}) : undefined,
+          ()=>input.openAgentPreview!({request,user:ctx.user,workspacePath:ctx.workspace,sessionId:body.chatSessionId}) : undefined,
       })
-      return c.json({turn,runId:run.id,deliveryEligible:false},202)
+      return {turn,runId:run.id,deliveryEligible:false}
+  }
+  app.post(prefix+'/agent/goal', async c => {
+    c.header('Cache-Control','no-store')
+    try {
+      return c.json(await startAgentGoal(c.req.raw,c.req.param('id')!,await input.readBody(c.req.raw)),202)
     } catch(error) {const detail=routeError(error);return c.json(detail,detail.status)}
   })
   app.post(prefix+'/agent/messages', async c => {
@@ -320,10 +428,25 @@ export function registerV3Routes(app: Hono, input: {
   })
   app.get(prefix+'/events', async c => {
     try {
-      const { run } = await current(c.req.raw, c.req.param('id')!, false)
+      const { run,agentExecutor } = await current(c.req.raw, c.req.param('id')!, false)
       if(run.agentTurns) {
-        const history=await attemptEvents(run,{sessionId:run.chatSessionId,attemptId:run.writer?.attemptId??run.agentTurns.at(-1)?.attemptId??run.id})
-        return c.json({runId:run.id,events:history.events,historyUnavailable:history.unavailable?[history.unavailable]:[]})
+        const query=z.object({limit:z.coerce.number().int().min(1).max(200).default(100),
+          beforeId:z.coerce.number().int().min(0).optional(),attemptId:z.string().min(1).optional()}).parse(c.req.query())
+        const attemptId=query.attemptId??run.agentTurns.find(t=>t.attemptId===run.writer?.attemptId)?.attemptId??run.agentTurns.at(-1)?.attemptId
+        const turn=run.agentTurns.find(t=>t.attemptId===attemptId)
+        if(!turn)throw new WorkflowError('attempt-missing','No such native attempt in this owned Run',404)
+        const turnId=turn.turnId??agentExecutor.runningTurnId(run,turn)
+        if(!turnId)return c.json({runId:run.id,attemptId,events:[],hasMore:false,nextBeforeId:null,
+          historyUnavailable:[],note:'Native turn has not been bound; no earlier Chat events substituted.'})
+        const selection={turnId,limit:query.limit,beforeId:query.beforeId}
+        try {
+          const page=input.sessions.get(run.chatSessionId) ? input.sessions.transcriptPage(run.chatSessionId,selection) :
+            auditEventPage(await readSessionTranscriptFromDisk(run.chatSessionId,run.workspacePath),selection)
+          return c.json({runId:run.id,attemptId,...page,historyUnavailable:[]})
+        } catch {
+          return c.json({runId:run.id,attemptId,events:[],hasMore:false,nextBeforeId:null,
+            historyUnavailable:[{attemptId,reason:'Saved native history unavailable; no older success substituted'}]})
+        }
       }
       const groups = await Promise.all(run.attempts.filter(attempt=>!attempt.sourceEdit).map(async attempt => {
         const history = await attemptEvents(run, attempt)
@@ -395,7 +518,7 @@ export function registerV3Routes(app: Hono, input: {
       return c.json({ run, dispatched: false, partialOutputsAccepted: false })
     } catch (error) { const detail = routeError(error); return c.json(detail, detail.status) }
   })
-  return { async contentView(request: Request, projectId: string, metadata: boolean) {
+  return { startAgentGoal, async contentView(request: Request, projectId: string, metadata: boolean) {
     const user = input.getUser(request)
     if (!hasBeeGamePermission(user, 'project.read')) throw new WorkflowError('permission-denied', 'Project permission denied', 403)
     const project = await input.getProject(request, user, projectId)

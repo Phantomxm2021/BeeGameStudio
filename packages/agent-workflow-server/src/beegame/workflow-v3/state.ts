@@ -9,6 +9,7 @@ const path = z.string().min(1).refine(value => !value.startsWith('/') && !value.
 export const projectPathSchema = path
 export const uiProbeSchema = z.object({ document: path, nodeId: z.string().trim().min(1), selector: z.string().trim().min(1),
   viewport: z.tuple([z.number().int().min(1).max(8192), z.number().int().min(1).max(8192)]),
+  deviceScaleFactor: z.number().finite().positive().optional(),
   steps: z.array(z.object({ click: z.string().trim().min(1) }).strict()).optional(),
 }).strict()
 export const taskSchema = z.object({
@@ -20,7 +21,9 @@ export const taskSchema = z.object({
   // A static web build, not an arbitrary URL or executable runtime driver.
   runtimeArtifact: path.optional(),
   editableProject: z.literal(true).optional(),
-  uiProbes: z.array(uiProbeSchema).min(1).optional(),
+  // Optional independent DOM root of a fixed logical UI canvas. This selects
+  // a measurement coordinate space, not a renderer or Agent technology choice.
+  uiProbes: z.array(uiProbeSchema.extend({coordinateRoot:z.string().trim().min(1).optional()})).min(1).optional(),
   pixelProbes: z.array(uiProbeSchema.extend({ componentId: z.string().trim().min(1).optional() })).min(1).optional(),
   audioProbes: z.array(uiProbeSchema.extend({
     componentId: z.string().trim().min(1),
@@ -70,7 +73,8 @@ export type Run = {
   agentTurns?: AgentTurn[];
   // User-authorized host saves; these are neither native turns nor Task plans.
   sourceEdits?: SourceEdit[];
-  // Task checks are not a release acceptance. V3-06 connects target-runtime evidence.
+  // Automatic quality acceptance remains false. Explicit user publication of
+  // measured bytes is a separate authorized operation, not a quality verdict.
   deliveryEligible: false; createdAt: string;
   // Durable user intent; neither settlement, replanning nor restart clears it.
   paused?: { at: string };
@@ -86,6 +90,9 @@ export type AgentTurn = {
   status: 'running' | 'ended' | 'failed' | 'interrupted'; startedAt: string; finishedAt?: string;
   turnId?: string; nativeSessionId?: string; usage?: unknown; skillUses?: SkillUse[];
   quiescedAt?: string; error?: string;
+  // Original host observed no native submission. Not inferred from missing
+  // history/UUID or an error string; permits a separately authorized new work.
+  notStarted?: true;
   // Original user request, not a host-authored execution/repair plan.
   message?: AgentMessage;
   requirementsRevision?: string;
@@ -97,6 +104,10 @@ export type AgentMeasurement = {
   requirementsRevision: string; startedAt: string; finishedAt?: string;
   sourceEditId?: string;
   reports: FileVersion[]; checks: CheckResult[]; error?: string;
+  // Explicit optional reuse of existing static-Web drivers, not a Task plan.
+  consumption?: Pick<TaskSpec, 'uiProbes'|'pixelProbes'|'audioProbes'> & {
+    checks: Array<'ui-data-consumption'|'pixel-data-consumption'|'font-data-consumption'|'audio-data-consumption'>;
+  };
 }
 export type SourceEdit = Pick<Attempt, 'attemptId' | 'fence' | 'workerId' | 'sessionId' | 'requestKey' |
   'startedAt' | 'finishedAt' | 'quiescedAt' | 'error'> & {
@@ -105,8 +116,9 @@ export type SourceEdit = Pick<Attempt, 'attemptId' | 'fence' | 'workerId' | 'ses
 }
 export type AgentMessage = {
   requestKey: string; runId: string; chatSessionId: string; expectedVersion: number;
-  requirementsRevision: string; intent: 'discuss' | 'change' | 'continue'; text: string;
+  requirementsRevision: string; intent: 'message' | 'discuss' | 'work' | 'change' | 'continue'; text: string;
   continuationOf?: string;
+  contextMode?: 'resume' | 'focused';
 }
 export function pauseRun(run: Run): Run {
   if (run.paused) return run

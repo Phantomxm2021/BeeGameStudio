@@ -57,6 +57,7 @@ export type BeeGameDevPlan = {
   nativeRuntimeBuild: {
     command: string[]
     cwd: string
+    env: Record<string, string>
   }
   ports: BeeGameDevPorts
   urls: {
@@ -123,10 +124,12 @@ export function buildBeeGameDevPlan(
     nativeRuntimeBuild: {
       command: [bunExecutable, 'run', 'build.ts'],
       cwd: input.cwd,
+      // Capabilities stay in the binary; the runtime settings panel selects usage.
+      env: {},
     },
     ports,
     urls,
-    processes: [
+    processes: ([
       {
         name: 'billing',
         command: [bunExecutable, 'packages/beegame-billing-server/src/index.ts'],
@@ -165,7 +168,11 @@ export function buildBeeGameDevPlan(
           ports,
         }),
       },
-    ],
+    ] satisfies BeeGameDevProcessPlan[]).map(process=>{
+      // This per-project authorization belongs only to the execution host.
+      if(process.name!=='runtime')delete process.env.BEEGAME_PROJECT_TOOL_READ_PATHS
+      return process
+    }),
   }
 }
 
@@ -245,6 +252,10 @@ export function buildRuntimeEnv(input: {
     NODE_ENV: input.baseEnv.NODE_ENV || 'development',
     AGENT_WORKFLOW_PORT: String(input.ports.runtime),
     AGENT_WORKFLOW_WORKSPACE_PATH: input.workspacePath,
+    // The local runtime serves measured V3 Preview on isolated *.localhost
+    // hosts. Production still requires its explicitly configured HTTPS origin.
+    BEEGAME_WORKFLOW_V3_PREVIEW_ORIGIN:
+      input.baseEnv.BEEGAME_WORKFLOW_V3_PREVIEW_ORIGIN || `http://localhost:${input.ports.runtime}`,
     BEEGAME_API_CORS_ORIGINS: appendApiCorsOrigin(
       input.baseEnv.BEEGAME_API_CORS_ORIGINS,
       `http://127.0.0.1:${input.ports.frontend}`,

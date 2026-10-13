@@ -196,7 +196,7 @@ export class BeeGamePreviewManager {
         ...record.snapshot,
         status: 'failed',
         url: '',
-        message: `${readiness.message} ${record.snapshot.message || ''}`.trim(),
+        message: `${readiness.message} Expected ${plan.url} from ${plan.entrypoint} script "${plan.script}". The process receives PORT=${plan.port}; arbitrary scripts must honor that port (BGS does not infer custom positional arguments or adopt another port). ${record.snapshot.message || ''}`.trim(),
         updatedAt: new Date().toISOString(),
       }
       return { ...record.snapshot }

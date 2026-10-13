@@ -64,6 +64,8 @@ type SupabaseFetch = (
 type JsonObject = Record<string, unknown>
 
 type SupabaseModelConfigRow = {
+  published?: boolean
+  auth_methods?: PublicModelConfig['authMethods']
   id: string
   owner_id: string
   name: string
@@ -362,22 +364,24 @@ export class SupabaseDashboardStore {
   async loadRlsVisibleModelRuntimeEnv(
     id: string,
   ): Promise<Record<string, string>> {
+    const selected = await this.loadRlsVisibleModelRuntimeConfig(id)
+    if (!selected) throw new Error(`Selected model config is not visible to the authenticated runtime (${id})`)
+    return selected.env
+  }
+
+  async loadRlsVisibleModelRuntimeConfig(id?: string): Promise<{ config: PublicModelConfig; env: Record<string, string> } | undefined> {
     const rows = await this.rest<SupabaseModelConfigRow[]>(
-      `/rest/v1/beegame_model_configs?id=eq.${q(id)}&select=*&limit=1`,
+      `/rest/v1/beegame_model_configs?${id ? `id=eq.${q(id)}` : 'is_default=eq.true'}&select=*&limit=1`,
     )
     const row = rows[0]
-    if (!row) {
-      throw new Error(
-        `Selected model config is not visible to the authenticated runtime (${id})`,
-      )
-    }
+    if (!row) return undefined
     const env = modelConfigRowToRuntimeEnv(row)
     if (Object.keys(env).length === 0) {
       throw new Error(
         `Selected model config uses an unsupported provider (${row.provider || 'empty'})`,
       )
     }
-    return env
+    return { config: rowToPublicModelConfig(row), env }
   }
 
   async createModelConfig(
@@ -395,6 +399,8 @@ export class SupabaseDashboardStore {
       base_url: input.baseUrl ?? null,
       api_key_ciphertext: encryptSecret(input.apiKey, 'model-config:api-key'),
       models: input.models,
+      published: input.published ?? true,
+      auth_methods: input.authMethods ?? ['platform'],
       is_default: false,
       created_at: now,
       updated_at: now,
@@ -427,6 +433,8 @@ export class SupabaseDashboardStore {
       )
     }
     if (input.models !== undefined) patch.models = input.models
+    if (input.published !== undefined) patch.published = input.published
+    if (input.authMethods !== undefined) patch.auth_methods = input.authMethods
     if (input.isDefault === false) patch.is_default = false
 
     const rows = await this.rest<SupabaseModelConfigRow[]>(
@@ -461,6 +469,8 @@ export class SupabaseDashboardStore {
           'model-config:api-key',
         ),
         models: record.models,
+        published: record.published ?? true,
+        auth_methods: record.authMethods ?? ['platform'],
         is_default: record.isDefault ? false : record.isDefault,
         created_at: record.createdAt,
         updated_at: record.updatedAt,
@@ -1374,6 +1384,8 @@ function rowToPublicModelConfig(
     ? decryptSecret(row.api_key_ciphertext, 'model-config:api-key')
     : ''
   return {
+    published: row.published ?? true,
+    authMethods: row.auth_methods ?? ['platform'],
     id: row.id,
     ownerId: row.owner_id,
     name: row.name,
@@ -1409,6 +1421,11 @@ function maskSecret(secret: string): string {
 
 const RUNTIME_BOOLEAN_FIELDS: Array<keyof RuntimeSettingsConfig> = [
   'autoMemoryEnabled',
+  'verificationAgentEnabled',
+  'agentTeamsEnabled',
+  'promptSuggestionEnabled',
+  'awaySummaryEnabled',
+  'coordinatorModeEnabled',
   'autoDreamEnabled',
   'skillSearchEnabled',
   'treeSitterBashEnabled',

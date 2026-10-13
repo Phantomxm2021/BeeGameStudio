@@ -7,7 +7,8 @@ import { runGameContentCommand } from './game-content-validation-cli'
 import { assetManifestAuthoringExamples } from './asset-manifest-authoring-contract'
 import { readBeeGameAssetManifestSync, writeBeeGameAssetManifest } from './asset-contracts'
 import { sceneLayoutFixture, uiLayoutFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
-import { projectContentAuthority } from './project-content-authority'
+import { projectContentAuthority, PROJECT_DOCUMENTS } from './project-content-authority'
+import { designHandoffPath } from './design-handoff'
 import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
 import { CONTENT_CHECKER_ENTRY, CURRENT_CONTENT_CHECKER_ENTRY, sharedContentChecker } from './content-checker-runtime'
 import { readContentView } from './workflow-v3/content-view'
@@ -136,12 +137,77 @@ test('prose revision does not churn autonomous runtime metadata; legacy baseline
   index.documentRevision = projectContentAuthority(root).documentRevision
   await writeFile(join(root, 'content/index.json'), JSON.stringify(index))
   expect((runGameContentCommand(root) as any).valid).toBe(true)
+  const identity=runGameContentCommand(root,['--authority']) as any
+  expect(identity).toMatchObject({designVerified:false,runtimeVerified:false,registry:{status:'current',
+    matches:{documentRevision:true,assetManifestRevision:true}}})
   const before = await readFile(join(root, 'content/index.json'), 'utf8')
   const doc = join(root, 'docs/UI_UX_SPEC.md')
   await writeFile(doc, (await readFile(doc, 'utf8')) + '\nClarify a test limitation; no runtime data changed.\n')
   expect((runGameContentCommand(root, ['--current']) as any).valid).toBe(true)
   expect((runGameContentCommand(root) as any).issues.join(' ')).toContain('documentRevision does not match authority')
+  const changed=runGameContentCommand(root,['--authority']) as any
+  expect(changed.registry).toMatchObject({status:'changed',documentRevision:index.documentRevision,
+    matches:{documentRevision:false,assetManifestRevision:true}})
+  expect(changed.documentRevision).not.toBe(index.documentRevision)
+  expect(changed.designVerified).toBe(false)
   expect(await readFile(join(root, 'content/index.json'), 'utf8')).toBe(before)
+})
+
+test('authority identity exposes absent/malformed/aliased registry without guessing or changing it',async()=>{
+  const {root}=await fixture();await writeDesignDocumentsFixture(root)
+  const file=join(root,'content/index.json'),original=await readFile(file)
+  await rm(file)
+  expect((runGameContentCommand(root,['--authority']) as any).registry.status).toBe('unregistered')
+  await expect(access(file)).rejects.toThrow()
+  await writeFile(file,'{broken')
+  expect((runGameContentCommand(root,['--authority']) as any).registry.status).toBe('unverified')
+  expect(await readFile(file,'utf8')).toBe('{broken')
+  await rm(file);await writeFile(join(root,'alias-target.json'),original)
+  await symlink(join(root,'alias-target.json'),file)
+  expect((runGameContentCommand(root,['--authority']) as any).registry).toMatchObject({status:'unverified',reason:'Content registry cannot contain symlinks'})
+})
+
+test('legacy identity inspection batches exact operands without changing hashing or claiming runtime coverage',async()=>{
+  const {root}=await fixture();await writeDesignDocumentsFixture(root)
+  const before=await readFile(join(root,'content/index.json'),'utf8')
+  const legacy=createHash('sha256')
+  const expected:{path:string;status:'present'|'missing';bytes?:number;sha256?:string}[]=[]
+  for(const name of PROJECT_DOCUMENTS) {
+    const path='docs/'+name,bytes=await readFile(join(root,path))
+    legacy.update(name).update('\0').update(bytes).update('\0')
+    expected.push({path,status:'present',bytes:bytes.length,sha256:hash(bytes)})
+    const handoff=designHandoffPath(name)
+    try {
+      const bytes=await readFile(join(root,handoff));legacy.update(bytes)
+      expected.push({path:handoff,status:'present',bytes:bytes.length,sha256:hash(bytes)})
+    } catch(error) {
+      if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error
+      legacy.update('missing-handoff');expected.push({path:handoff,status:'missing'})
+    }
+    legacy.update('\0')
+  }
+  const inspect=()=>runGameContentCommand(root,['--authority','--inputs']) as any
+  expect(runGameContentCommand(root,['--authority'])).not.toHaveProperty('identityInputs')
+  expect(()=>runGameContentCommand(root,['--authority','--inputs','extra'])).toThrow()
+  const initial=inspect()
+  expect(initial.documentRevision).toBe(legacy.digest('hex'))
+  expect(initial.identityInputs.documents).toEqual(expected)
+  expect(initial).toMatchObject({requiredForAutonomousCurrent:false,designVerified:false,runtimeVerified:false,
+    identityInputs:{runtimeSourcesIncluded:false,assetManifest:{indexPath:'assets/asset-manifest.json',
+      encoding:'JSON.stringify(parsed manifest including registered modules)',sha256:initial.assetManifestRevision}}})
+  const source=join(root,'content/scenes/level.json'),scene=JSON.parse(await readFile(source,'utf8'))
+  scene.name='Changed Scene source';await writeFile(source,JSON.stringify(scene))
+  expect(inspect().identityInputs).toEqual(initial.identityInputs)
+  expect(inspect().documentRevision).toBe(initial.documentRevision)
+  const path='docs/UI_UX_SPEC.md',file=join(root,path)
+  await writeFile(file,(await readFile(file,'utf8'))+'\nChanged prose only.\n')
+  const changed=inspect()
+  expect(changed.documentRevision).not.toBe(initial.documentRevision)
+  expect(changed.identityInputs.documents.filter((item:any,i:number)=>JSON.stringify(item)!==JSON.stringify(expected[i])))
+    .toEqual([{path,status:'present',bytes:(await readFile(file)).length,sha256:hash(await readFile(file))}])
+  await rm(join(root,designHandoffPath(PROJECT_DOCUMENTS[0]!)))
+  expect(inspect().identityInputs.documents).toContainEqual({path:designHandoffPath(PROJECT_DOCUMENTS[0]!),status:'missing'})
+  expect(await readFile(join(root,'content/index.json'),'utf8')).toBe(before)
 })
 
 test('current preflight retains actual registry, member integrity and geometry failures, never silently repairs', async () => {
@@ -212,5 +278,17 @@ test('published autonomous default works without docs; explicit legacy and ordin
   }
   expect((await run('current.mjs', ['--authority'])).code).toBe(1)
   expect((await run('legacy.mjs')).code).toBe(1)
-  expect((await run('current.mjs', ['--help'])).out).toContain('V3 autonomous entry defaults to --current')
+  const help = await run('current.mjs', ['--help'])
+  expect(help.code).toBe(0)
+  expect(help.out).toContain('(no command), --current')
+  expect(help.out).not.toContain('--check-handoff-drafts')
+  expect(help.out).not.toContain('--design-handoff n')
+  expect(help.out).not.toContain('.beegame/delivery/')
+  expect((await run('current.mjs', ['--legacy-help'])).out).toContain('--check-handoff-drafts')
+  expect((await run('current.mjs', ['--design-handoff-help'])).code).toBe(0)
+  expect((await run('legacy.mjs', ['--help'])).out).toContain('--design-handoff n')
+  const invalid=await run('current.mjs',['--unknown'])
+  expect(invalid.code).toBe(1)
+  expect(invalid.out).toContain('--help')
+  expect(invalid.out).not.toContain('--authority')
 }, 30000)

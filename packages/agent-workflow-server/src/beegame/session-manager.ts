@@ -45,16 +45,18 @@ import {
   readNativeBackgroundTaskUsage,
 } from './native-background-task-output'
 import { createNativeCliProcessRunner } from './native-cli-process-runner'
-import { createNativeSubagentChatEnricher, isNativeTaskLifecycle } from './native-subagent-chat'
+import { createNativeSubagentChatEnricher, isNativeTaskLifecycle, stoppedNativeTask } from './native-subagent-chat'
 import type { NativeDirectionAuthorInput, NativeProjectTurnInput } from '@bee-game-studio/agent-workflow/native-direction-authors'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { ChatJsonlReader } from './chat-jsonl-reader'
+import { auditEventPage, type EventPageSelection } from './workflow-v3/event-page'
 import { answeredQuestionInput } from './user-question'
 import { recordProjectDesignUserDecision, projectDesignQuestionContext } from './project-delivery'
 import { designReviewQuestionFindings } from '@bee-game-studio/agent-workflow/design-review-result'
 import { sanitizePath } from '../../../../src/utils/sessionStoragePortable'
 import { SessionUsageOutbox } from './session-usage-outbox'
+import { isPersonalModelId } from '../model-connections'
 
 export type BeeGameImageAttachment = {
   type: 'image'
@@ -462,6 +464,7 @@ type SessionRecord = {
   confirmedBriefContext?: string
   transcriptPath: string
   runner: BeeGameSessionRuntime | null
+  runnerNeedsRefresh?: boolean
   runtimeCleanupFailed?: boolean
   abortController: AbortController | null
   pendingPermissions: Map<string, PendingPermission>
@@ -473,6 +476,7 @@ type SessionRecord = {
   nativeTaskTurnIds: Map<string, string | undefined>
   /** Active native background tasks from live lifecycle notifications. */
   activeNativeTaskToolUseIds: Map<string, string>
+  terminalNativeTaskIds: Set<string>
   /** Tool-use blocks observed before their streamed JSON input is complete. */
   assistantPartialTextByMessage: Map<string, string>
   activeAssistantMessageId: string | null
@@ -510,6 +514,8 @@ export type StartBeeGameSessionInput = {
   transcriptSessionId?: string
   /** Resume a native CLI conversation without treating its UUID as a BGS transcript ID. */
   resumeNativeSessionId?: string
+  /** Explicit BGS execution-context choice; never erases the user Chat. */
+  freshNativeContext?: boolean
   userId: string
   authToken?: string
   getValidAuthToken?: (options?: {
@@ -570,6 +576,9 @@ export class BeeGameSessionManager {
   }
   private readonly sessions = new Map<string, SessionRecord>()
   private readonly subagentChat = new WeakMap<SessionRecord, ReturnType<typeof createNativeSubagentChatEnricher>>()
+  private readonly snapshotInputs = new WeakMap<SessionRecord, {
+    source: BeeGameEvent[]; processed: number; events: BeeGameEvent[]
+  }>()
   private readonly eventSubscribers = new Map<
     string,
     Set<BeeGameEventSubscriber>
@@ -619,6 +628,7 @@ export class BeeGameSessionManager {
   }
 
   start(input: StartBeeGameSessionInput): BeeGameSession {
+    if (input.freshNativeContext && input.resumeNativeSessionId) throw Error('Fresh native context cannot resume a native session')
     if (!isAbsolute(input.workspacePath)) {
       throw new Error('Workspace path must be absolute')
     }
@@ -628,6 +638,7 @@ export class BeeGameSessionManager {
       (!input.workflowExecution || Boolean(record.session.workflowExecution) || record.session.turnStatus !== 'idle'),
     )
     if (existingLease) {
+      if (input.freshNativeContext) throw Error('Stop the existing project runner before selecting a fresh native context')
       if (
         input.projectId &&
         existingLease.projectId === input.projectId &&
@@ -646,7 +657,7 @@ export class BeeGameSessionManager {
     const runtime = input.modelConfigId
       ? mapModelConfigToRuntime(input.modelConfigId)
       : undefined
-    if (input.modelConfigId && !runtime && !this.allowExternalRuntimeEnv) {
+    if (input.modelConfigId && !runtime && !this.allowExternalRuntimeEnv && !isPersonalModelId(input.modelConfigId)) {
       throw new Error('Model config not found')
     }
 
@@ -680,7 +691,7 @@ export class BeeGameSessionManager {
         ? { nativeSessionId: input.resumeNativeSessionId }
         : {}),
       ...(persistedRuntime?.nativeSessionId &&
-      !input.resumeNativeSessionId &&
+      !input.resumeNativeSessionId && !input.freshNativeContext &&
       resolveExistingPath(persistedRuntime.workspacePath) ===
         resolveExistingPath(cwd)
         ? { nativeSessionId: persistedRuntime.nativeSessionId }
@@ -708,6 +719,7 @@ export class BeeGameSessionManager {
       toolUses: new Map(),
       nativeTaskTurnIds: new Map(),
       activeNativeTaskToolUseIds: new Map(),
+      terminalNativeTaskIds: new Set(),
       assistantPartialTextByMessage: new Map(),
       activeAssistantMessageId: null,
       emittedAssistantMessageIds: new Set(),
@@ -978,8 +990,7 @@ export class BeeGameSessionManager {
   }> {
     const record = this.sessions.get(sessionId)
     if (!record) throw new Error('Session not found')
-    return liveProjectConversationEvents(record.events)
-      .filter(event => !isThinkingProtocolControlEvent(event))
+    return this.transcriptFacts(sessionId)
       .map(event => formatBeeGameEventForDisplay(event, record.language))
       .map(event => ({
         id: event.id,
@@ -989,6 +1000,21 @@ export class BeeGameSessionManager {
         ...(event.payload ? { payload: event.payload } : {}),
         createdAt: event.createdAt,
       }))
+  }
+
+  /** Full live-branch facts for host decisions; never display-summarized.
+   * Avoid formatting every SDK message just to locate Question outcomes. */
+  transcriptFacts(sessionId:string):readonly BeeGameEvent[] {
+    const record=this.sessions.get(sessionId)
+    if(!record)throw new Error('Session not found')
+    return liveProjectConversationEvents(record.events).filter(event=>!isThinkingProtocolControlEvent(event))
+  }
+
+  /** Read-only V3 debug view; avoid formatting/serializing all prior SDK events. */
+  transcriptPage(sessionId:string, selection:EventPageSelection) {
+    const record=this.sessions.get(sessionId)
+    if(!record)throw new Error('Session not found')
+    return auditEventPage(record.events,selection)
   }
 
   /** Display-only, durable milestone boundary; never changes the native Agent turn. */
@@ -1315,9 +1341,11 @@ export class BeeGameSessionManager {
    * Runtime feature changes apply by rebuilding only idle native runners.
    * Active BeeGame Studio turns are never interrupted or rescheduled by BeeGame.
    */
-  refreshIdleRunners(): number {
+  refreshIdleRunners(userId?: string): number {
     let refreshed = 0
     for (const record of this.sessions.values()) {
+      if (userId && record.userId !== userId) continue
+      record.runnerNeedsRefresh = true
       if (record.session.turnStatus !== 'idle' || !record.runner) continue
       void this.disposeRunner(record.runner, record)
       record.runner = null
@@ -1412,6 +1440,11 @@ export class BeeGameSessionManager {
       }
       record.redactVisible = createResponseRedactor(env)
       if (signal.aborted || record.session.status !== 'running') return
+      if (record.runnerNeedsRefresh) {
+        await this.disposeRunner(record.runner, record)
+        record.runner = null
+        record.runnerNeedsRefresh = false
+      }
       if (!record.runner) record.nativeAccountingEpoch = randomUUID()
       const accountingEpoch = record.nativeAccountingEpoch
       const runner =
@@ -1439,13 +1472,14 @@ export class BeeGameSessionManager {
             const message = notification.message ?? notification.backgroundMessage
             const taskId = message && getStringField(message, 'task_id')
             const toolUseId = message && (getStringField(message, 'tool_use_id') || getStringField(message, 'toolUseID'))
-            if (taskId && ['task_started', 'task_progress'].includes(String(message?.subtype))) {
+            if (taskId && !record.terminalNativeTaskIds.has(taskId) && ['task_started', 'task_progress'].includes(String(message?.subtype))) {
               record.nativeTaskTurnIds.set(taskId, record.currentTurnId ?? undefined)
               record.activeNativeTaskToolUseIds.set(taskId,
                 toolUseId || record.activeNativeTaskToolUseIds.get(taskId) || taskId)
             } else if (taskId && message?.subtype === 'task_notification' &&
               ['completed', 'failed', 'stopped', 'killed'].includes(getStringField(message, 'status'))) {
               record.activeNativeTaskToolUseIds.delete(taskId)
+              record.terminalNativeTaskIds.add(taskId)
               if (toolUseId) {
                 for (const [activeTaskId, activeToolUseId] of record.activeNativeTaskToolUseIds) {
                   if (activeToolUseId === toolUseId) record.activeNativeTaskToolUseIds.delete(activeTaskId)
@@ -1624,7 +1658,7 @@ export class BeeGameSessionManager {
         if (
           !submittedTurnId ||
           record.currentTurnId !== submittedTurnId ||
-          hasTurnEnded(record.events, submittedTurnId)
+          hasTurnEnded(this.runtimeSnapshotInputs(record), submittedTurnId)
         )
           return
         // Compatible streaming transports report authoritative usage on
@@ -2090,18 +2124,30 @@ export class BeeGameSessionManager {
     }
     let eventPayload = enrich({ type, payload }).payload as DashboardSDKMessage | undefined
     if (record.session.workflowExecution) eventPayload = { type, ...eventPayload, workflowExecution: record.session.workflowExecution }
+    const stoppedTask = stoppedNativeTask({ type, payload: eventPayload })
+    if (stoppedTask && record.activeNativeTaskToolUseIds.has(stoppedTask) &&
+        record.nativeTaskTurnIds.get(stoppedTask) === effectiveTurnId) {
+      record.activeNativeTaskToolUseIds.delete(stoppedTask)
+      record.terminalNativeTaskIds.add(stoppedTask)
+    }
     if (type === 'tool.completed' && eventPayload?.nativeBackgroundTask) {
       const launch = eventPayload.nativeBackgroundTask as Record<string, unknown>
       const taskId = typeof launch.taskId === 'string' ? launch.taskId : ''
       const toolUseId = getDashboardPayloadString(eventPayload, 'toolUseID')
-      if (taskId) record.activeNativeTaskToolUseIds.set(taskId, toolUseId || taskId)
+      if (taskId && !record.terminalNativeTaskIds.has(taskId)) {
+        record.nativeTaskTurnIds.set(taskId, effectiveTurnId)
+        record.activeNativeTaskToolUseIds.set(taskId, toolUseId || taskId)
+      }
     }
     if (type === 'tool.completed' && eventPayload?.nativeBackgroundTaskResult) {
       const result = eventPayload.nativeBackgroundTaskResult as Record<string, unknown>
       const toolUseId = typeof result.toolUseID === 'string' ? result.toolUseID : ''
       if (toolUseId) {
         for (const [taskId, activeToolUseId] of record.activeNativeTaskToolUseIds) {
-          if (activeToolUseId === toolUseId) record.activeNativeTaskToolUseIds.delete(taskId)
+          if (activeToolUseId === toolUseId) {
+            record.activeNativeTaskToolUseIds.delete(taskId)
+            record.terminalNativeTaskIds.add(taskId)
+          }
         }
       }
     }
@@ -2193,12 +2239,31 @@ export class BeeGameSessionManager {
       ...deriveRuntimeSnapshotFromEvents(
         record.session.id,
         record.session.cwd,
-        record.events,
+        this.runtimeSnapshotInputs(record),
         record.session.modelConfigId,
         { nativeSessionId: record.nativeSessionId },
       ),
       activeSubagentToolUseIds: [...record.activeNativeTaskToolUseIds.values()],
     }
+  }
+
+  private runtimeSnapshotInputs(record: SessionRecord): BeeGameEvent[] {
+    let index = this.snapshotInputs.get(record)
+    if (!index || index.source !== record.events || index.processed > record.events.length) {
+      index = {source: record.events, processed: 0, events: []}
+      this.snapshotInputs.set(record, index)
+    }
+    // Only a derived host-status index. Consecutive detail frames with the same
+    // turn have no usage/lifecycle/tool-count facts; keep their last boundary
+    // for latest turn/time/status. Never filter raw Chat, native input, approval
+    // evidence or billing checkpoints. Unknown event types are retained.
+    for (; index.processed < record.events.length; index.processed++) {
+      const event = record.events[index.processed]!, previous = index.events.at(-1)
+      if (previous && isSnapshotDetailFrame(event) && isSnapshotDetailFrame(previous) && event.turnId === previous.turnId)
+        index.events[index.events.length - 1] = event
+      else index.events.push(event)
+    }
+    return index.events
   }
 
   private readPersistedRuntimeSnapshot(
@@ -2217,6 +2282,10 @@ export class BeeGameSessionManager {
       return undefined
     }
   }
+}
+
+function isSnapshotDetailFrame(event: BeeGameEvent): boolean {
+  return event.type === 'assistant.partial' || event.type === 'assistant.thinking' || event.type === 'tool.progress'
 }
 
 function resolveExistingPath(path: string): string {
@@ -2954,6 +3023,7 @@ function deriveRuntimeSnapshotFromEvents(
   const usage = getLatestRuntimeUsage(events)
   const latest = events.at(-1)
   const turnDiagnostics = deriveLatestTurnDiagnostics(events)
+  const phaseName = deriveSnapshotPhaseName(events, options)
   return {
     sessionId,
     ...(options.nativeSessionId
@@ -2961,8 +3031,8 @@ function deriveRuntimeSnapshotFromEvents(
       : {}),
     workspacePath,
     ...(modelConfigId ? { modelConfigId } : {}),
-    phaseName: deriveSnapshotPhaseName(events, options),
-    phaseStatus: deriveSnapshotPhaseStatus(events, options),
+    phaseName,
+    phaseStatus: deriveSnapshotPhaseStatus(events, phaseName, options),
     activeSubagentToolUseIds: [],
     updatedAt: latest?.createdAt.toISOString() ?? new Date().toISOString(),
     usage,
@@ -2976,25 +3046,28 @@ function deriveSnapshotPhaseName(
   options: { recoveredFromTranscript?: boolean } = {},
 ): string {
   if (options.recoveredFromTranscript) return 'idle'
-  if (
-    events.some(
-      event =>
-        event.type === 'turn.started' && !hasTurnEnded(events, event.turnId),
-    )
-  ) {
-    return 'running'
+  // Snapshot persistence runs for every stream event. Searching the full
+  // history again for each prior turn made that hot path history × turns.
+  // Collect identities once; even a terminal preceding its start retains the
+  // existing semantics. This is observation only, never writer exit proof.
+  const started = new Set<string>(), ended = new Set<string>()
+  let sessionStarted = false, turnStarted = false
+  for (const event of events) {
+    if (event.type === 'session.started') sessionStarted = true
+    if (event.type === 'turn.started') {
+      turnStarted = true
+      if (event.turnId) started.add(event.turnId)
+    } else if (event.turnId && ['turn.completed','turn.empty','turn.failed','session.stopped','session.failed'].includes(event.type))
+      ended.add(event.turnId)
   }
-  if (
-    events.some(event => event.type === 'session.started') &&
-    !events.some(event => event.type === 'turn.started')
-  ) {
-    return 'starting'
-  }
+  for (const id of started) if (!ended.has(id)) return 'running'
+  if (sessionStarted && !turnStarted) return 'starting'
   return 'idle'
 }
 
 function deriveSnapshotPhaseStatus(
   events: BeeGameEvent[],
+  phaseName: string,
   options: { recoveredFromTranscript?: boolean } = {},
 ): string {
   const latest = events.at(-1)
@@ -3003,8 +3076,8 @@ function deriveSnapshotPhaseStatus(
   if (latest.type === 'permission.requested') return 'waiting_approval'
   if (latest.type === 'turn.failed' || latest.type === 'session.failed')
     return 'failed'
-  if (deriveSnapshotPhaseName(events, options) === 'starting') return 'starting'
-  if (deriveSnapshotPhaseName(events, options) === 'running') return 'running'
+  if (phaseName === 'starting') return 'starting'
+  if (phaseName === 'running') return 'running'
   return 'idle'
 }
 
@@ -4582,9 +4655,10 @@ export function mergeRuntimeEnv(
   const selectedEnvironment = {
     ...normalizeRuntimeEnvironment(additionalEnv),
     ...normalizeRuntimeEnvironment(runtime?.env ?? {}),
+    ...(additionalEnv.BGS_MODEL_CONNECTION_RESOLVED === '1' ? normalizeRuntimeEnvironment(additionalEnv) : {}),
   }
   const modelType =
-    runtime?.modelType ?? inferSelectedRuntimeModelType(selectedEnvironment)
+    additionalEnv.BGS_MODEL_CONNECTION_RESOLVED === '1' ? additionalEnv.BEEGAME_MODEL_TYPE : runtime?.modelType ?? inferSelectedRuntimeModelType(selectedEnvironment)
   return {
     ...selectedEnvironment,
     ...(modelType ? { BEEGAME_MODEL_TYPE: modelType } : {}),

@@ -112,6 +112,31 @@ describe('agentic resource exploration routes', () => {
     expect(JSON.stringify(body)).not.toContain('sourceUrl')
   })
 
+  test('catalog rejects unknown or malformed filters instead of silently browsing all packs', async () => {
+    const app=appFor({packs:[pack],elements:[element('ground','models/ground.glb',['terrain'])]})
+    for(const route of ['/api/resource-catalog/packs',`/api/resource-catalog/packs/${pack.id}/elements`]) {
+      for(const request of [{query:'train'},{filters:{query:'train'}},{filters:{formtas:['glb']}},
+        {filters:{limit:10}},{filters:{formats:'glb'}},{filters:{styles:null}},{filters:{formats:['']}},
+        {filters:{},limit:'2'},{filters:{},cursor:2}]) {
+        const response=await post(app,route,request)
+        expect(response.status).toBe(400)
+        expect(JSON.stringify(await response.json())).toMatch(/catalog|limit|cursor/)
+      }
+      expect((await post(app,route,{filters:{},limit:1})).status).toBe(200)
+    }
+  })
+
+  test('catalog pagination is honored and binds cursors to the exact filters', async () => {
+    const app=appFor({packs:[pack],elements:[element('a','models/a.glb',['terrain']),element('b','models/b.glb',['terrain'])]})
+    const route=`/api/resource-catalog/packs/${pack.id}/elements`,filters={formats:['glb']}
+    const first=await (await post(app,route,{filters,limit:1})).json()
+    expect(first.items).toHaveLength(1);expect(typeof first.nextCursor).toBe('string')
+    const second=await (await post(app,route,{filters,limit:1,cursor:first.nextCursor})).json()
+    expect(second.items).toHaveLength(1);expect(second.items[0].elementId).not.toBe(first.items[0].elementId)
+    const invalid=await post(app,route,{filters:{formats:['png']},limit:1,cursor:first.nextCursor})
+    expect(invalid.status).toBe(400)
+  })
+
   test('returns reusable elements only from the Pack chosen by the Agent', async () => {
     const app = appFor({ packs: [pack], elements: [{ ...element('ground', 'models/ground.glb', ['terrain']), specs: { contentHash: 'a'.repeat(64), boundsSizeY: 3, hasTextureCoordinates: true } }] })
     const response = await post(app, `/api/resource-catalog/packs/${pack.id}/elements`, {

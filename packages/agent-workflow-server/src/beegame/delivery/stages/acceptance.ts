@@ -18,20 +18,6 @@ export function checkAcceptanceFindings(workspace: string, baseline: DesignStage
   return checkReleasedDesignFindings(workspace, 'acceptance', baseline, findings)
 }
 
-export async function validateQualityReview(workspace: string, state: AcceptanceInput | undefined,
-  review: NonNullable<AcceptanceInput['qualityReview']>) {
-  if (!state || !['acceptance', 'complete'].includes(projectDeliveryPhase(state)))
-    throw new Error('Owner feedback requires an eight-document release candidate')
-  if (!['accepted', 'changes-required'].includes(review.decision) || !review.note.trim() || !review.reviewerId.trim() ||
-      review.revision !== await computeWorkspaceRevision(workspace))
-    throw new Error('Owner feedback needs a reviewer, note and current revision')
-  if (review.decision === 'accepted') {
-    const report = await readRuntimeAcceptanceReport(workspace, PROJECT_DELIVERY_REPORT_PATH)
-    if (!report || report.scope !== 'delivery' || report.status !== 'passed' || !await runtimeEvidenceIsCurrent(workspace, [report]))
-      throw new Error('Repair or verify the current release before recording acceptance feedback')
-  }
-}
-
 const PRODUCT_REPAIR_PREFIX = 'acceptance-product-failed:'
 
 /** Route only evidenced product failures. Environment/coverage gaps stay here. */
@@ -160,9 +146,6 @@ export async function checkAcceptanceGate(workspacePath: string, state: Acceptan
     if ((state.designBaseline.digestVersion ?? 1) < 2) issues.push('Legacy UI fingerprint requires affected inspection before current-version release.')
     if (issues.length) return { allowed: false, layer: 'revision', issues }
   }
-  if (state.qualityReview?.decision === 'changes-required' &&
-      state.qualityReview.revision === await computeWorkspaceRevision(workspacePath))
-    return { allowed: false, layer: 'delivery', issues: [state.qualityReview.note] }
   if (!state.accepted) {
     const report = await readRuntimeAcceptanceReport(workspacePath, PROJECT_DELIVERY_REPORT_PATH)
     return { allowed: false, layer: report?.status === 'blocked' ? 'report' : 'acceptance-record', issues: report?.status === 'blocked'

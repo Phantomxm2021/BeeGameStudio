@@ -9,7 +9,7 @@ import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-cont
 import { writeBeeGameAssetManifest } from '../asset-contracts'
 import type { TaskSpec } from './state'
 
-for(const mode of ['consume','parent','camera','ignore-parent','ignore-camera','ignore-position','ignore-size','wrong-position','ignore-image','hidden','no-fetch','stale-copy','missing-probe','atlas','wrong-frame','ui','missing-viewport','shared','3d'] as const){
+for(const mode of ['consume','hidpi','unscaled-backing','unscaled-backing-default','parent','camera','ignore-parent','ignore-camera','ignore-position','ignore-size','wrong-position','ignore-image','hidden','no-fetch','stale-copy','missing-probe','atlas','wrong-frame','ui','missing-viewport','shared','3d'] as const){
   test('actual Canvas source and image consumption: '+mode,async()=>{
     const root=await mkdtemp(join(tmpdir(),'bgs-v3-pixels-'))
     try{
@@ -57,6 +57,8 @@ for(const mode of ['consume','parent','camera','ignore-parent','ignore-camera','
       // Independent target game renderer. Never uses BGS preview or returns PASS.
       const script=mode==='no-fetch'?'':`const d=await fetch("/${path}").then(r=>r.json()),n=d.data.nodes.find(n=>n.id==="${isUi?'play':'board'}"),im=new Image();
         im.src="/${resource.root_path}";await im.decode();const c=document.querySelector("canvas"),ctx=c.getContext("2d");
+        ${['hidpi','unscaled-backing','unscaled-backing-default'].includes(mode)?'c.style.width="960px";c.style.height="540px";c.width=960*devicePixelRatio;c.height=540*devicePixelRatio;':''}
+        ${mode==='hidpi'?'ctx.scale(devicePixelRatio,devicePixelRatio);':''}
         const s=${isUi?'n.layout.size':'n.components[0].data.size'},p=${isUi?'n.layout.position||[0,0]':mode==='ignore-position'?'[-100,-50]':'[...n.transform.position]'};
         const scale=${isUi?'[1,1]':mode==='ignore-size'?'[1,1]':'[...(n.transform.scale||[1,1])]'};
         ${mode==='parent'?'const parent=d.data.nodes.find(x=>x.id===n.parentId);for(let i=0;i<2;i++){p[i]=parent.transform.position[i]+p[i]*parent.transform.scale[i];scale[i]*=parent.transform.scale[i]}':''}
@@ -69,12 +71,20 @@ for(const mode of ['consume','parent','camera','ignore-parent','ignore-camera','
       await writeFile(join(root,'dist/index.html'),'<style>body{margin:0}canvas{'+(mode==='hidden'?'display:none':'')+'}</style><canvas width="960" height="540"></canvas><script type="module">'+script+'</script>')
       const task:TaskSpec={id:'pixels',kind:'game.verify',goal:'Observe actual source/image use',dependsOn:[],requirementIds:['req.loop'],inputs:[],
         writablePaths:[],expectedOutputs:['dist/index.html'],runtimeArtifact:'dist',checks:['pixel-data-consumption'],
-        pixelProbes:[{document:path,nodeId:isUi?'play':'board',...(isUi?{}:{componentId:'sprite'}),selector:'canvas',viewport:[960,540]}]}
+        pixelProbes:[{document:path,nodeId:isUi?'play':'board',...(isUi?{}:{componentId:'sprite'}),selector:'canvas',viewport:[960,540],
+          ...(['hidpi','unscaled-backing'].includes(mode)?{deviceScaleFactor:2}:{})}]}
       if(mode==='missing-probe')task.pixelProbes![0]!.nodeId='missing'
       if(mode==='shared')task.pixelProbes!.push({...task.pixelProbes![0]!,nodeId:'other',componentId:'sprite-other'})
       const result=(await runChecks(root,task,[])).checks[0]!
-      const expected=['consume','atlas','ui','parent','camera'].includes(mode)?'passed':['ignore-position','ignore-size','wrong-position','ignore-parent','ignore-camera'].includes(mode)?'failed':'unverified'
+      const expected=['consume','hidpi','unscaled-backing-default','atlas','ui','parent','camera'].includes(mode)?'passed':['unscaled-backing','ignore-position','ignore-size','wrong-position','ignore-parent','ignore-camera'].includes(mode)?'failed':'unverified'
       expect(result.status,result.observation).toBe(expected)
+      if(['hidpi','unscaled-backing','unscaled-backing-default'].includes(mode)) {
+        const conditions=JSON.parse(result.observation).probes[0].conditions
+        expect(conditions.environment.devicePixelRatio).toBe(mode==='unscaled-backing-default'?1:2)
+        expect(conditions.environment.viewport).toEqual([960,540])
+        expect(conditions.activation).toEqual({kind:'locator-clicks',steps:[]})
+        expect(conditions.coverage).toContain('no complete gameplay')
+      }
       if(mode==='shared')expect(result.observation).toContain('Shared identical image/frame')
       expect(await Bun.file(join(root,path)).text()).toBe(body)
       const originalImage=await Bun.file(join(root,resource.root_path)).arrayBuffer(),packedImage=await Bun.file(join(root,'dist',resource.root_path)).arrayBuffer()

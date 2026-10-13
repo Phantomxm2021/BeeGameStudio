@@ -6,7 +6,10 @@ import { observeAudio } from './runtime-audio.mjs'
 
 let input = ''
 for await (const part of process.stdin) input += part
-const { endpoint, artifact, files, uiProbes } = JSON.parse(input)
+const { endpoint, artifact, files, uiProbes, entryUrl = 'http://bgs-runtime.invalid/index.html' } = JSON.parse(input)
+const entry = new URL(entryUrl), servingBase = new URL('.', entry)
+if (!['http:', 'https:'].includes(entry.protocol) || entry.username || entry.password || entry.search || entry.hash)
+  throw new Error('Expected a static publication entry URL')
 const url = new URL(endpoint)
 if (url.protocol !== 'ws:' || url.hostname !== '127.0.0.1') throw new Error('Expected the host-owned local test browser')
 const { chromium } = await import(process.env.BGS_PLAYWRIGHT_MODULE)
@@ -57,16 +60,20 @@ try {
   const allowed = new Map(files.map(file => [file.path, file]))
   async function observe(probe, variant, marker, suppressFont = false, silence = false) {
   const errors = [], missing = new Set(), unsupported = new Set(), requested = new Set()
-  const context = await browser.newContext({ viewport: { width: probe?.viewport[0] ?? 1280, height: probe?.viewport[1] ?? 720 }, serviceWorkers: 'block', acceptDownloads: false })
+  const context = await browser.newContext({ viewport: { width: probe?.viewport[0] ?? 1280, height: probe?.viewport[1] ?? 720 }, deviceScaleFactor: probe?.deviceScaleFactor ?? 1, serviceWorkers: 'block', acceptDownloads: false })
   try {
     await context.routeWebSocket('**/*', socket => { unsupported.add('non-static WebSocket'); socket.close() })
     await context.route('**/*', async route => {
       try {
         const url = new URL(route.request().url())
-        if (url.origin !== 'http://bgs-runtime.invalid' || !['GET', 'HEAD'].includes(route.request().method())) {
+        if (url.origin !== entry.origin || !['GET', 'HEAD'].includes(route.request().method())) {
           unsupported.add('external request or non-static method'); await route.abort(); return
         }
-        const path = decodeURIComponent(url.pathname).slice(1) || 'index.html'
+        if (!url.pathname.startsWith(servingBase.pathname)) {
+          missing.add(url.pathname+' (outside publication base '+servingBase.pathname+')')
+          await route.fulfill({ status: 404, body: 'Outside publication base' }); return
+        }
+        const path = decodeURIComponent(url.pathname.slice(servingBase.pathname.length)) || 'index.html'
         const expected = allowed.get(path)
         if (!expected) { missing.add(path); await route.fulfill({ status: 404, body: 'Not found' }); return }
         const real = await realpath(resolve(base, path)), rel = relative(base, real)
@@ -100,33 +107,127 @@ try {
     page.on('console', message => {
       // Only the exact, intentionally suppressed font request's 404 is expected.
       // Original-load errors and all other URLs remain actual driver observations.
-      if (suppressFont && message.location().url === 'http://bgs-runtime.invalid/'+probe.resource.path &&
+      if (suppressFont && message.location().url === new URL(probe.resource.path,servingBase).href &&
           message.text().startsWith('Failed to load resource:')) return
       if (message.type() === 'error' && errors.length < 20) errors.push(message.text().slice(0, 300))
     })
-    await page.goto('http://bgs-runtime.invalid/index.html', { waitUntil: 'networkidle', timeout: 15000 })
+    await page.goto(entry.href, { waitUntil: 'networkidle', timeout: 15000 })
+    const environment = await page.evaluate(() => ({viewport:[innerWidth,innerHeight],devicePixelRatio,
+      maxTouchPoints:navigator.maxTouchPoints,coarsePointer:matchMedia('(pointer: coarse)').matches,hover:matchMedia('(hover: hover)').matches}))
     if (probe?.mode === 'audio') {
       let observed
       try {
         for (const step of probe.steps ?? []) await page.locator(step.click).click({ timeout: 5000 })
         observed = await observeAudio(page, probe, requested)
       } catch { observed = { reason: 'Declared audio activation path unavailable' } }
-      return { ...observed, errors, missingFiles: [...missing], unsupported: [...unsupported], requestedFiles: [...requested] }
+      return { ...observed, environment, errors, missingFiles: [...missing], unsupported: [...unsupported], requestedFiles: [...requested] }
     }
-    let bounds, reason, pixels, font
+    let bounds, reason, pixels, font, textFit, physicalBounds, coordinateSpace
     if (probe) {
       try { for (const step of probe.steps ?? []) await page.locator(step.click).click({ timeout: 5000 }) }
       catch { reason = 'Declared UI activation path could not be observed; no arbitrary test JS was executed' }
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
       const locator = page.locator(probe.selector)
-      if (await locator.count() !== 1) reason = 'Selector must identify exactly one actual target UI element'
-      else bounds = await locator.evaluate(element => {
+      let count
+      try { count = await locator.count() }
+      catch (error) {
+        // A malformed selected UI input is not a browser crash. Retain other
+        // observations in the batch, but never swallow genuine driver failures.
+        if (probe.mode || !(error.name==='InvalidSelectorError' || /while parsing (?:css )?selector|Unknown engine/.test(error.message))) throw error
+        reason = 'Target selector is invalid; select one actual UI element: '+probe.selector
+      }
+      if (count !== undefined && count !== 1) reason = 'Selector must identify exactly one actual target UI element'
+      else if (count === 1) bounds = await locator.evaluate(element => {
         const r = element.getBoundingClientRect(), css = getComputedStyle(element)
         if (r.width <= 0 || r.height <= 0 || css.display === 'none' || css.visibility === 'hidden' || Number(css.opacity) === 0) return null
         return { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
       })
+      if (!probe.mode && bounds && !reason) {
+        // Opacity is not inherited in computed style; a positive client rect
+        // does not establish visibility through transparent ancestors.
+        const hiddenAncestor = await locator.evaluate(element => {
+          for(let parent=element.parentElement;parent;parent=parent.parentElement){
+            const css=getComputedStyle(parent)
+            if(css.display==='none' || css.visibility==='hidden' || css.visibility==='collapse' || Number(css.opacity)===0)return true
+          }
+          return false
+        })
+        if(hiddenAncestor) reason='Target UI ancestor is hidden; geometry alone cannot establish visible consumption'
+      }
       if (!requested.has(probe.document)) reason = 'Target build did not request the registered UI source; compiled or ignored data is unverified'
       if (!bounds && !reason) reason = 'Target element is hidden or has no measurable geometry'
+      if (probe.coordinateRoot && !probe.mode && bounds && !reason) {
+        const basis = await locator.evaluate((element, config) => {
+          let roots
+          try {roots=document.querySelectorAll(config.selector)}
+          catch {return {reason:'coordinateRoot is not a valid CSS selector'}}
+          if (roots.length!==1) return {reason:'coordinateRoot must select exactly one independent DOM root'}
+          const root=roots[0]
+          if (root===element || !root.contains(element)) return {reason:'coordinateRoot must be a strict ancestor, not the measured node or an unrelated surface'}
+          const css=getComputedStyle(root), width=parseFloat(css.width), height=parseFloat(css.height)
+          if (Math.abs(width-config.size[0])>.01 || Math.abs(height-config.size[1])>.01 || !Number.isFinite(width+height))
+            return {reason:'coordinateRoot untransformed dimensions differ from saved logical dimensions: expected '+config.size.join('x')+', observed '+width+'x'+height}
+          if (['borderLeftWidth','borderTopWidth','borderRightWidth','borderBottomWidth','paddingLeft','paddingTop','paddingRight','paddingBottom'].some(key=>parseFloat(css[key])!==0))
+            return {reason:'coordinateRoot border/padding changes the logical origin; select the actual unpadded source root'}
+          for(let parent=root;parent;parent=parent.parentElement){
+            const c=getComputedStyle(parent)
+            if(c.display==='none' || c.visibility==='hidden' || c.visibility==='collapse' || Number(c.opacity)===0)
+              return {reason:'coordinateRoot or its ancestor is hidden'}
+            if(parent.scrollLeft || parent.scrollTop) return {reason:'Scrolled coordinateRoot ancestors are outside this fixed-surface driver'}
+            const m=new DOMMatrixReadOnly(c.transform==='none'?undefined:c.transform)
+            if(!m.is2D || Math.abs(m.b)>.000001 || Math.abs(m.c)>.000001 || m.a<=0 || m.d<=0 ||
+                c.perspective!=='none' || c.rotate && !['none','0deg'].includes(c.rotate) ||
+                c.scale && c.scale!=='none' && c.scale.split(' ').some(v=>!Number.isFinite(Number(v)) || Number(v)<=0))
+              return {reason:'coordinateRoot supports positive axis-aligned scale/translation only; rotation, reflection or perspective is unverified'}
+          }
+          const r=root.getBoundingClientRect()
+          if(r.width<=0 || r.height<=0 || r.left<-.01 || r.top<-.01 || r.right>innerWidth+.01 || r.bottom>innerHeight+.01)
+            return {reason:'coordinateRoot is collapsed or extends outside the declared window'}
+          return {root:{left:r.left,top:r.top,right:r.right,bottom:r.bottom},scale:[r.width/config.size[0],r.height/config.size[1]],logicalViewport:config.size}
+        }, {selector:probe.coordinateRoot,size:probe.layoutViewport})
+        physicalBounds=bounds
+        if(basis.reason){reason=basis.reason;bounds=undefined}
+        else {
+          coordinateSpace=basis
+          const [sx,sy]=basis.scale
+          bounds={left:(bounds.left-basis.root.left)/sx,top:(bounds.top-basis.root.top)/sy,
+            right:(bounds.right-basis.root.left)/sx,bottom:(bounds.bottom-basis.root.top)/sy}
+        }
+      }
+      if (probe.checkTextFit && bounds && !reason) textFit = await locator.evaluate(element => {
+        const box=element.getBoundingClientRect(), outside=r=>r.left<box.left-1 || r.top<box.top-1 || r.right>box.right+1 || r.bottom>box.bottom+1
+        const overflow=[], walker=document.createTreeWalker(element,NodeFilter.SHOW_TEXT)
+        const visible=element=>{
+          for(let parent=element;parent;parent=parent.parentElement){
+            const css=getComputedStyle(parent)
+            if(css.display==='none' || css.visibility==='hidden' || css.visibility==='collapse' || Number(css.opacity)===0)return false
+          }
+          return true
+        }
+        let fragments=0, overflowCount=0, clippedCount=0
+        for(let node=walker.nextNode();node;node=walker.nextNode()) {
+          if(!node.textContent.trim() || !visible(node.parentElement))continue
+          const range=document.createRange();range.selectNodeContents(node)
+          for(const r of range.getClientRects()) {
+            if(!r.width || !r.height)continue
+            fragments++
+            // A fragment can fit the target box and still be cut by an outer
+            // clip. That is incomplete evidence, not a visible-text PASS.
+            let clipped=false
+            for(let parent=node.parentElement;parent;parent=parent.parentElement){
+              const css=getComputedStyle(parent),p=parent.getBoundingClientRect(), clips=v=>['hidden','clip','scroll','auto'].includes(v)
+              if((clips(css.overflowX) && (r.left<p.left-1 || r.right>p.right+1)) ||
+                (clips(css.overflowY) && (r.top<p.top-1 || r.bottom>p.bottom+1))){clipped=true;break}
+            }
+            if(clipped)clippedCount++
+            else if(outside(r)){overflowCount++;if(overflow.length<8)overflow.push({left:r.left,top:r.top,right:r.right,bottom:r.bottom})}
+          }
+        }
+        const pseudo=[element,...element.querySelectorAll('*')].some(child=>visible(child) &&
+          ['::before','::after'].some(part=>!['none','normal','""',"''"].includes(getComputedStyle(child,part).content)))
+        return {status:overflowCount?'failed':clippedCount || pseudo?'unverified':fragments?'passed':'not-applicable',
+          fragments,overflowCount,clippedCount,pseudo,overflow}
+      })
       if (probe.mode === 'font' && bounds && !reason) {
         await page.evaluate(() => document.fonts.ready.then(() => undefined))
         const details = await locator.evaluate(element => ({ text: element.textContent,
@@ -152,14 +253,15 @@ try {
       }
       if(probe.mode === 'pixels' && bounds && !reason){
         const canvas = await locator.evaluate(element=>({canvas:element.tagName==='CANVAS',width:element.width,height:element.height}))
-        if(!canvas.canvas || canvas.width!==probe.viewport[0] || canvas.height!==probe.viewport[1] ||
-            Math.abs(bounds.right-bounds.left-canvas.width)>1 || Math.abs(bounds.bottom-bounds.top-canvas.height)>1)
-          reason='Pixel probe needs an unscaled actual Canvas matching the declared viewport'
+        if(!canvas.canvas || canvas.width<=0 || canvas.height<=0 ||
+            Math.abs(bounds.right-bounds.left-probe.viewport[0])>1 || Math.abs(bounds.bottom-bounds.top-probe.viewport[1])>1)
+          reason='Pixel probe needs a visible Canvas CSS box matching the declared logical viewport; backing-store density may differ'
         else{
-          const screenshot=await locator.screenshot({animations:'disabled',timeout:5000})
+          // Authored regions and DOM boxes are CSS pixels, not backing-store pixels.
+          const screenshot=await locator.screenshot({animations:'disabled',timeout:5000,scale:'css'})
           const {data,info}=await sharp(screenshot).removeAlpha().raw().toBuffer({resolveWithObject:true})
           const regions=variant?.regions ?? probe.regions, mask=regions ? regionMask(info,regions) : undefined
-          pixels={sha256:createHash('sha256').update(screenshot).digest('hex'),
+          pixels={sha256:createHash('sha256').update(screenshot).digest('hex'),canvas,
             colors:probe.markers.map(value=>colorBounds(data,info,value.color,mask,regions))}
           if(!requested.has(probe.resource.path))reason='Actual target did not request the selected image member'
         }
@@ -182,7 +284,7 @@ try {
         return true
       })
     })
-    return { driver: 'host-owned Chromium; actual static build', viewport: probe?.viewport ?? [1280, 720], surfacePresent, bounds, pixels, font, reason,
+    return { driver: 'host-owned Chromium; actual static build', environment, viewport: probe?.viewport ?? [1280, 720], surfacePresent, bounds, physicalBounds, coordinateSpace, pixels, font, textFit, reason,
       requestedFiles: [...requested], missingFiles: [...missing], errors, unsupported: [...unsupported],
       limitations: 'Initial load/error smoke only. Container/text presence is NOT pixel/rendering proof. Fetching JSON is NOT proof its layout, hierarchy, resources or gameplay rules are consumed.' }
   } finally { await context.close() }
@@ -190,6 +292,9 @@ try {
   if (!uiProbes) console.log(JSON.stringify(await observe()))
   else {
     const results = [], errors = [], missing = new Set(), unsupported = new Set()
+    const conditions = (probe, observed) => ({environment:observed.environment,
+      activation:{kind:'locator-clicks',steps:probe.steps??[],...(probe.mode==='audio'?{playSteps:probe.playSteps,stopSteps:probe.stopSteps}:{})},
+      coverage:'Only this viewport, pixel density and declared activation path; no complete gameplay or visual-quality verdict'})
     for (const probe of uiProbes) {
       if (probe.mode === 'audio') {
         const before = await observe(probe), changed = []
@@ -204,7 +309,7 @@ try {
         const failed = observations.some(value => value.failed || value.errors.length || value.missingFiles.length) ||
           !reason && (!match(before, probe.before) || !changed.every(value => match(value.actual, value.expected)) || !match(restored, probe.before) || silent.audio.signal.peak > .00001)
         const status = failed ? 'failed' : reason ? 'unverified' : 'passed'
-        results.push({ document: probe.document, nodeId: probe.nodeId, componentId: probe.componentId, resource: probe.resource, status, reason,
+        results.push({ document: probe.document, nodeId: probe.nodeId, componentId: probe.componentId, resource: probe.resource, status, reason, conditions:conditions(probe,before),
           expectedBefore: probe.before, before: before.audio, changed: changed.map(value => ({property: value.property, expected: value.expected, actual: value.actual.audio})),
           silent: silent.audio, restored: restored.audio })
         for (const value of observations) { errors.push(...value.errors); value.missingFiles.forEach(file => missing.add(file)); value.unsupported.forEach(file => unsupported.add(file)) }
@@ -228,7 +333,7 @@ try {
           reason = 'Suppressing the selected font did not isolate its actual glyph usage and visible rendering'
         const status = originals.some(value => value.errors.length || value.missingFiles.length) ? 'failed' : reason ? 'unverified'
           : match(before,probe.before) && changed.every(value => match(value.actual,value.expected)) && match(restored,probe.before) ? 'passed' : 'failed'
-        results.push({document:probe.document,nodeId:probe.nodeId,viewport:probe.viewport,resource:probe.resource,status,reason,
+        results.push({document:probe.document,nodeId:probe.nodeId,viewport:probe.viewport,resource:probe.resource,status,reason,conditions:conditions(probe,before),
           expectedBefore:probe.before,before:before.font,changed:changed.map(value => ({property:value.property,expected:value.expected,actual:value.actual.font})),
           suppressed:{font:suppressed.font,errors:suppressed.errors,missingFiles:suppressed.missingFiles},restored:restored.font})
         for (const value of originals) { errors.push(...value.errors);value.missingFiles.forEach(file => missing.add(file)) }
@@ -257,7 +362,7 @@ try {
           changed.every(value=>match(markerBounds(value.actual),value.expected)) &&
           (!probe.regions || (before.pixels.colors[0].regionsMatch && other.pixels.colors[1].regionsMatch &&
             changed.every(value=>value.actual.pixels.colors[0].regionsMatch)))?'passed':'failed'
-        results.push({document:probe.document,nodeId:probe.nodeId,componentId:probe.componentId,tileId:probe.tileId,resource:probe.resource,viewport:probe.viewport,status,reason,
+        results.push({document:probe.document,nodeId:probe.nodeId,componentId:probe.componentId,tileId:probe.tileId,resource:probe.resource,viewport:probe.viewport,status,reason,conditions:conditions(probe,baseline),
           baseline:baseline.pixels,before:before.pixels,resourceChanged:other.pixels,
           changed:changed.map(value=>({property:value.property,expected:value.expected,actual:value.actual.pixels})),restored:restored.pixels,expectedBefore:probe.before})
         for(const value of observations){errors.push(...value.errors);value.missingFiles.forEach(file=>missing.add(file));value.unsupported.forEach(file=>unsupported.add(file))}
@@ -267,11 +372,32 @@ try {
       for (const variant of probe.variants) changed.push({ property: variant.property, expected: variant.expected, actual: await observe(probe, variant) })
       const restored = await observe(probe)
       const match = (actual, expected) => actual && Object.keys(expected).every(key => Math.abs(actual[key]-expected[key]) <= 1)
-      const reason = before.reason || changed.find(value=>value.actual.reason)?.actual.reason || restored.reason
       const observations = [before, ...changed.map(value=>value.actual), restored]
-      const status = reason ? 'unverified' : observations.some(value => value.errors.length || value.missingFiles.length) ? 'failed'
-        : match(before.bounds, probe.before) && changed.every(value=>match(value.actual.bounds,value.expected)) && match(restored.bounds, probe.before) ? 'passed' : 'failed'
-      results.push({ document: probe.document, nodeId: probe.nodeId, viewport: probe.viewport, status, reason,
+      // Do not refit a changed surface to make a wrong node match. The
+      // independent reference must stay stable through source perturbations.
+      const basisChanged = probe.coordinateRoot && before.coordinateSpace && observations.some(value=>value.coordinateSpace &&
+        (!match(value.coordinateSpace.root,before.coordinateSpace.root) ||
+          value.coordinateSpace.scale.some((scale,i)=>Math.abs(scale-before.coordinateSpace.scale[i])>.000001)))
+      const runtimeReason = before.reason || changed.find(value=>value.actual.reason)?.actual.reason || restored.reason ||
+        (basisChanged?'coordinateRoot changed during source perturbation/restoration; no target-based calibration is accepted':undefined)
+      const textFailure=observations.some(value=>value.textFit?.status==='failed'), textUnknown=observations.some(value=>value.textFit?.status==='unverified')
+      const mismatch = !match(before.bounds,probe.before) ? 'baseline' : changed.find(value=>!match(value.actual.bounds,value.expected))?.property ??
+        (!match(restored.bounds,probe.before)?'restored':undefined)
+      const geometryFailure = !runtimeReason && probe.variants.length>0 && mismatch
+      const textPhase = before.textFit?.status==='failed'?'baseline':changed.find(value=>value.actual.textFit?.status==='failed')?.property ?? 'restored'
+      const reason = textFailure ? 'Visible text exceeds node bounds at '+textPhase : runtimeReason ||
+        (geometryFailure ? 'Observed geometry differs from saved layout at '+mismatch+
+          (probe.coordinateRoot?' in saved logical UI pixels':' in window CSS pixels; a fixed source-sized surface may use an explicit independent coordinateRoot. This mismatch is not proof of the whole-game appearance.') : !probe.variants.length ?
+          'No observable saved layout property perturbation; baseline/restoration and text observations do not prove data consumption' :
+          textUnknown ? 'Complete visible text fit could not be established' : undefined)
+      const status = textFailure || geometryFailure ? 'failed' : runtimeReason || !probe.variants.length || textUnknown ? 'unverified' :
+        observations.some(value => value.errors.length || value.missingFiles.length) ? 'failed' : 'passed'
+      results.push({ document: probe.document, nodeId: probe.nodeId, viewport: probe.viewport, status, reason, conditions:conditions(probe,before),
+        coordinateDomain:probe.coordinateRoot?'saved logical UI pixels':'window CSS pixels',
+        ...(probe.coordinateRoot?{coordinateRoot:probe.coordinateRoot,layoutViewport:probe.layoutViewport,
+          mappings:observations.map(value=>({basis:value.coordinateSpace,physicalBounds:value.physicalBounds}))}:{}),
+        unobservedProperties:probe.unobservedProperties,
+        ...(probe.checkTextFit?{textFit:{before:before.textFit,changed:changed.map(value=>({property:value.property,actual:value.actual.textFit})),restored:restored.textFit}}:{}),
         before: before.bounds, changed: changed.map(value=>({ property:value.property,actual:value.actual.bounds,expected:value.expected })), restored: restored.bounds, expectedBefore: probe.before })
       for (const value of observations) {
         errors.push(...value.errors); value.missingFiles.forEach(file => missing.add(file)); value.unsupported.forEach(file => unsupported.add(file))

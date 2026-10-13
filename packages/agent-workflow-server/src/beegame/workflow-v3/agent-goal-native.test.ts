@@ -17,6 +17,7 @@ import { digest } from './state'
 // Actual native CLI and debug UI; only provider responses are scripted/offline.
 // This establishes transport/control, not autonomous model reasoning/game quality.
 test('full-goal independent debug drives real native plan, Skill, Question, failing check and repair',async()=>{
+  const focusedContinuation=process.env.BGS_TEST_FOCUSED_CONTINUATION==='1'
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-v3-agent-debug-')))
   const workspace=join(root,'projects/users/owner/agent-debug'),store=createLocalWorkflowStore(join(root,'host'))
   const browser=createPreviewTestBrowser(),native=createNativeCliProcessRunner(),cleanups:(()=>void|Promise<void>)[]=[]
@@ -60,7 +61,7 @@ test('full-goal independent debug drives real native plan, Skill, Question, fail
           ' && bun '+JSON.stringify(assets.replace('assets.mjs','handoff.mjs'))+' README.md rules.mjs --details':''),
         description:'Run actual optional BGS tool on synthetic inputs'}}
     }
-    else if(n===13 || n===15)call={name:'Read',input:{file_path:join(workspace,n===15?'rule.test.ts':'rules.mjs')}}
+    else if(n===13 || n===15 || n===26)call={name:'Read',input:{file_path:join(workspace,n===15?'rule.test.ts':'rules.mjs')}}
     else if(n===16)call={name:'Edit',input:{file_path:join(workspace,'rules.mjs'),old_string:'target = 3',new_string:'target = 4'}}
     else if(n===17)call={name:'Edit',input:{file_path:join(workspace,'rule.test.ts'),old_string:'toBe(3)',new_string:'toBe(4)'}}
     else if(n===18 || n===24) {
@@ -84,6 +85,7 @@ test('full-goal independent debug drives real native plan, Skill, Question, fail
     await mkdir(workspace,{recursive:true})
     await writeFile(join(workspace,'rule.test.ts'),"import{test,expect}from'bun:test';import{target}from'./rules.mjs';test('synthetic target',()=>expect(target).toBe(3));")
     await writeFile(join(workspace,'notes.txt'),'Independent fixture notes retained.')
+    await writeFile(join(workspace,'CLAUDE.md'),'# Project navigation\nGUIDE_DEBUG_ACTUAL_ENTRY\nRoute: actual synthetic Web consumer\nEntry: rules.mjs; Scene/UI: content/\nVerify: bun test rule.test.ts\n')
     await writeFile(join(workspace,'README.md'),'# Synthetic merged design record\nExisting gameplay, technology, art, audio, UI, scene, balance and resources references; transport fixture only, not a complete design or quality PASS.\n')
     await writeFile(join(workspace,'menu.json'),JSON.stringify(CONTENT_DRAFT_EXAMPLES.ui))
     await mkdir(join(workspace,'content/ui'),{recursive:true});await mkdir(join(workspace,'content/scenes'),{recursive:true})
@@ -140,18 +142,49 @@ test('full-goal independent debug drives real native plan, Skill, Question, fail
     const launched=Bun.spawn([node,fileURLToPath(new URL('./agent-goal-browser.mjs',import.meta.url))],{
       env:{PATH:process.env.PATH,BGS_PLAYWRIGHT_MODULE:sharedPlaywright().moduleUrl},stdin:'pipe',stdout:'pipe',stderr:'pipe'})
     driver=launched
-    launched.stdin.write(JSON.stringify({endpoint,origin:server.url.origin,brief}));launched.stdin.end()
+    launched.stdin.write(JSON.stringify({endpoint,origin:server.url.origin,brief,focusedContinuation}));launched.stdin.end()
     const timer=setTimeout(()=>driver?.kill(),105000)
     const [output,errors,code]=await Promise.all([new Response(launched.stdout).text(),new Response(launched.stderr).text(),launched.exited]);clearTimeout(timer)
     expect(code,errors).toBe(0);const observed=JSON.parse(output);expect(observed.passed).toBe(true)
     const run=(await store.read('agent-debug','owner'))!,turn=run.agentTurns![0]!
-    expect(requests).toHaveLength(25);expect(run.agentTurns).toHaveLength(5)
+    expect(requests).toHaveLength(28);expect(run.agentTurns).toHaveLength(7)
     // Real CLI transports stable responsibilities as system context, not a
     // growing duplicate in every user message. No model limit/history rewrite.
     expect(JSON.stringify(requests[0].system)).toContain('Professional coverage:')
     expect(JSON.stringify(requests[0].messages)).not.toContain('Professional coverage:')
     expect(JSON.stringify(requests[15].system)).toContain('Professional coverage:')
     expect(JSON.stringify(requests[15].messages)).not.toContain('Professional coverage:')
+    for(const request of requests) {
+      expect(JSON.stringify(request.system).split('GUIDE_DEBUG_ACTUAL_ENTRY')).toHaveLength(2)
+      expect(JSON.stringify(request.messages)).not.toContain('GUIDE_DEBUG_ACTUAL_ENTRY')
+    }
+    expect(JSON.stringify(requests[12].system)).not.toContain('Professional coverage:')
+    const latestFacts=requests[25].messages.flatMap((m:any)=>Array.isArray(m.content)?m.content:[])
+      .findLast((block:any)=>block.type==='text' && block.text.startsWith('Optional BGS project tools'))?.text
+      .split('BGS saved evidence (not game acceptance): ')[1]
+    const facts=JSON.parse(latestFacts)
+    expect(facts.task.requestKey).toBe(run.agentTurns![5]!.requestKey)
+    expect(facts.executionContext.mode).toBe('focused')
+    expect(JSON.stringify(facts.executionContext.answeredQuestions)).toContain('Blue')
+    expect(JSON.stringify(facts.executionContext.answeredQuestions)).toContain('Choose synthetic color?')
+    expect(JSON.stringify(requests[25].messages)).not.toContain('goal-tool-1')
+    expect(JSON.stringify(requests[25].messages)).not.toContain('## Gameplay Programmer')
+    expect(facts.task.intent).toBe('work')
+    expect(facts.task).not.toHaveProperty('text') // actual user block already carries it
+    expect(JSON.stringify(requests[25].messages)).toContain(run.agentTurns![5]!.message!.text)
+    expect(facts.executionContext.previousExecution).toMatchObject({attemptId:run.agentTurns![4]!.attemptId,
+      status:'ended',quiescedAt:run.agentTurns![4]!.quiescedAt,externalOutcomes:'not-inferred'})
+    expect(facts.skills.currentTurnUses).toEqual([])
+    expect(facts.measurement.freshness).toMatchObject({current:true,changes:{requirements:false,sources:[],reports:[]}})
+    expect(facts.reportSemantics).toBe('not-verified');expect(facts.quality).toBe('unverified')
+    expect(facts.project.commands).toHaveProperty('build')
+    expect(facts.project.rootFiles).toEqual(expect.arrayContaining(['rules.mjs','build.mjs','package.json']))
+    expect(facts.project.codeFiles).toEqual([]) // fixture maintains root code, not an invented src/ entry
+    expect(facts.skills).toMatchObject({recordedMainLoads:[],contextPresence:'not-transferred'})
+    expect(facts.skills.contextPresence).toBe('not-transferred');expect(facts.skills.application).toBe('unverified')
+    expect(facts.measurement.id).toBe(run.agentTurns![4]!.measurements!.at(-1)!.id)
+    expect(JSON.stringify(requests[25].messages)).toContain('not a requirement change')
+    expect(run.agentTurns![5]!.measurements).toBeUndefined()
     const runtime=(await readFile(join(workspace,'.beegame/logs/native-runtime.jsonl'),'utf8'))
       .trim().split('\n').map(line=>JSON.parse(line))
     expect(runtime.some(row=>row.type==='native_diagnostic' && row.diagnostic.event==='request_start' && row.diagnostic.evidenceSource==='cli_debug')).toBe(true)
@@ -161,9 +194,17 @@ test('full-goal independent debug drives real native plan, Skill, Question, fail
     expect(JSON.stringify(requests[10].messages)).toContain('content-format-section')
     expect(JSON.stringify(requests[11].messages)).toContain('layout-draft-inspection')
     expect(JSON.stringify(requests[11].messages)).toContain('agent-task-evidence-handoff')
+    expect(JSON.stringify(requests[11].messages)).toContain('currentTurnUses')
+    expect(JSON.stringify(requests[11].messages)).toContain('bgs-builtins:gameplay-programmer')
     const toolContext=requests[0].messages.flatMap((m:any)=>Array.isArray(m.content)?m.content:[])
       .find((block:any)=>block.type==='text' && block.text.startsWith('Optional BGS project tools'))?.text
-    expect(typeof toolContext).toBe('string');expect(toolContext.length).toBeLessThan(2600)
+    expect(typeof toolContext).toBe('string')
+    // Saved source names/task facts legitimately vary; do not impose a
+    // combined character budget or repeat the goal just to fit this fixture.
+    const startupFacts=JSON.parse(toolContext.split('BGS saved evidence (not game acceptance): ')[1])
+    expect(startupFacts.task).not.toHaveProperty('text')
+    expect(startupFacts.task.requestKey).toBe(turn.requestKey)
+    expect(startupFacts.skills.currentTurnEvidence).toBe('live-native-tool-events')
     expect(JSON.stringify(requests[11].messages)).toContain('managedPreviewTarget')
     expect(JSON.stringify(requests[11].messages)).toContain('productionWithoutBuild')
     expect(JSON.stringify(requests[18].messages)).toContain('managedPreviewTarget')
@@ -184,7 +225,7 @@ test('full-goal independent debug drives real native plan, Skill, Question, fail
     expect(JSON.stringify(requests[0].messages)).toContain('Plan and execute autonomously')
     expect(JSON.stringify(requests[0].system)).toContain('BALANCE_DESIGN.md')
     expect(JSON.stringify(requests[0].system)).toContain('ASSET_PLAN.md')
-    expect(JSON.stringify(requests[15].messages)).toContain('only affected domains')
+    expect(JSON.stringify(requests[15].messages)).not.toContain('only affected domains')
     expect(JSON.stringify(requests[15].messages)).toContain('User-authorized source saves since the preceding native turn')
     expect(JSON.stringify(requests[15].messages)).toContain('content/scenes/level.json')
     expect(JSON.stringify(requests)).not.toContain('offline-service-key-never-given-to-native')
@@ -193,15 +234,17 @@ test('full-goal independent debug drives real native plan, Skill, Question, fail
     expect(await readFile(join(workspace,'progress.txt'),'utf8')).toBe('complete')
     expect(await readFile(join(workspace,'notes.txt'),'utf8')).toBe('Independent fixture notes retained.')
     expect(run.deliveryEligible).toBe(false)
-    expect(new Set(run.agentTurns!.map(t=>t.nativeSessionId)).size).toBe(1)
-    expect(nativeStarts).toEqual([undefined,...Array(4).fill(turn.nativeSessionId)])
-    expect(nativeConfigs).toHaveLength(5)
+    expect(new Set(run.agentTurns!.slice(0,5).map(t=>t.nativeSessionId)).size).toBe(focusedContinuation?2:1)
+    expect(new Set(run.agentTurns!.map(t=>t.nativeSessionId)).size).toBe(focusedContinuation?3:2)
+    expect(run.agentTurns![6]!.nativeSessionId).toBe(run.agentTurns![5]!.nativeSessionId)
+    expect(nativeStarts).toEqual([undefined,...Array(3).fill(turn.nativeSessionId),focusedContinuation?undefined:turn.nativeSessionId,undefined,run.agentTurns![5]!.nativeSessionId])
+    expect(nativeConfigs).toHaveLength(7)
     expect(new Set(nativeConfigs).size).toBe(1)
     expect(nativeConfigs[0]).toBe(join(root,'dashboard','users','owner','.runtime','app'))
     expect(discussedSources?.[0]).toBe('export const target = 3;\n')
     expect(discussedSources?.[1]).toContain('toBe(3)')
     expect(discussedSources?.[2]).toBe('Independent fixture notes retained.')
-    expect(run.agentTurns!.map(t=>t.status)).toEqual(['ended','ended','ended','interrupted','ended'])
+    expect(run.agentTurns!.map(t=>t.status)).toEqual(['ended','ended','ended','interrupted','ended','ended','ended'])
     expect(run.requirementChanges).toHaveLength(2)
     expect(run.agentTurns![0]!.requirementsRevision).not.toBe(run.requirements.revision)
     expect(run.agentTurns![4]!.requirementsRevision).toBe(run.requirements.revision)
@@ -210,9 +253,17 @@ test('full-goal independent debug drives real native plan, Skill, Question, fail
     expect(JSON.stringify(requests[12].messages)).not.toContain('workflow_v3_repair')
     expect(JSON.stringify(requests[21].messages)).toContain('progress.txt')
     expect(JSON.stringify(requests[21].messages)).toContain('Do not blindly replay commands')
+    if(focusedContinuation) {
+      expect(JSON.stringify(requests[21].messages)).not.toContain('goal-tool-1')
+      expect(JSON.stringify(requests[21].messages)).not.toContain('## Gameplay Programmer')
+      expect(JSON.stringify(requests[21].messages)).toContain('Blue')
+      expect(JSON.stringify(requests[21].messages)).toContain(run.agentTurns![3]!.attemptId)
+    }
     console.log(JSON.stringify({agentGoalNativeDebug:true,...observed,requests:requests.length,
       goalPromptChars:agentGoalPrompt({...run,requirements:run.requirementChanges?.[0]?.before??run.requirements}).length,
       toolContextChars:toolContext.length,usage:turn.usage,paidModelCalls:0,
+      messageChars:{beforeFocused:JSON.stringify(requests[24].messages).length,
+        focused:JSON.stringify(requests[25].messages).length,followingResume:JSON.stringify(requests[27].messages).length},
       turnUsage:run.agentTurns!.map(t=>({intent:t.message?.intent??'goal',status:t.status,usage:t.usage})),
       professionalTools:['authenticated-library-catalog','pure-format-no-materialization','real-draft-layout',
         'managed-preview-current-source-3-to-4','real-browser-interaction','passive-recording','no-production-fallback','turn-revocation']}))

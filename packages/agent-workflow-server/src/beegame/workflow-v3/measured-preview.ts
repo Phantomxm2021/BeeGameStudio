@@ -47,7 +47,7 @@ export function createMeasuredPreview(input: {
     const run = await input.readRun(entry.projectId, entry.ownerId)
     if (!run || run.id !== entry.view.runId || run.workspacePath !== entry.workspace)
       throw new WorkflowError('preview-stale', 'Preview Run or workspace changed')
-    const selected = entry.view.measurementId ? await selectAgentMeasuredBuild(run,entry.view.measurementId,input.isBusy(run)) :
+    const selected = entry.view.measurementId ? await selectAgentMeasuredBuild(run,entry.view.measurementId,input.isBusy(run),'preview') :
       await selection(run, entry.view.taskId!, entry.view.attemptId)
     if (selected.artifact.path !== entry.view.artifact.path || selected.artifact.sha256 !== entry.view.artifact.sha256)
       throw new WorkflowError('preview-stale', 'Measured artifact changed; explicitly reopen after verification')
@@ -57,7 +57,7 @@ export function createMeasuredPreview(input: {
       if (disposed) throw new WorkflowError('preview-unavailable', 'Preview manager stopped', 503)
       if (!origin) throw new WorkflowError('preview-unavailable', 'Configure BEEGAME_WORKFLOW_V3_PREVIEW_ORIGIN and route its wildcard hosts to BGS; no dev-script fallback.', 503)
       if (run.planRevision !== planRevision) throw new WorkflowError('revision-conflict', 'Read the current plan before opening Preview')
-      const selected = measurementId ? await selectAgentMeasuredBuild(run,measurementId,input.isBusy(run)) : await selection(run, taskId!, attemptId)
+      const selected = measurementId ? await selectAgentMeasuredBuild(run,measurementId,input.isBusy(run),'preview') : await selection(run, taskId!, attemptId)
       const files = await measuredFiles(run, selected)
       const latest = await input.readRun(run.projectId, run.ownerId)
       if (disposed || !latest || latest.version !== run.version || input.isBusy(latest) || latest.writer)
@@ -80,7 +80,9 @@ export function createMeasuredPreview(input: {
       const url = new URL(origin); url.hostname = hostname
       const view: MeasuredPreview = { id: hostname.split('.')[0]!, runId: run.id, taskId, attemptId, planRevision, ...(measurementId?{measurementId}:{}),
         artifact: selected.artifact, url: url.toString(), limitations: [...(selected.smoke.coverage?.limitations ?? []),
-          'Sandbox Preview only. Loading is not game acceptance; no storage/same-origin privileges, HTML injection or new runtime verdict. Release remains disabled.'] }
+          ...(measurementId && 'turn' in selected && selected.turn.status !== 'ended'
+            ? ['The native turn did not succeed. This Preview only inspects current measured bytes; export and publication remain unavailable.'] : []),
+          'Sandbox Preview only. Loading is not game acceptance; no storage/same-origin privileges, HTML injection or new runtime verdict. Explicit user publication is separate.'] }
       const entry: Entry = { view, token, identity, projectId: run.projectId, ownerId: run.ownerId, workspace: run.workspacePath, files }
       byProject.set(key(run.projectId, run.ownerId), entry); byHost.set(hostname, entry)
       return view
@@ -88,7 +90,7 @@ export function createMeasuredPreview(input: {
   return {
     open,
     async openAgent(run:Run,measurementId:string) {
-      const selected=await selectAgentMeasuredBuild(run,measurementId,input.isBusy(run))
+      const selected=await selectAgentMeasuredBuild(run,measurementId,input.isBusy(run),'preview')
       return open(run,undefined,selected.turn.attemptId,run.planRevision,measurementId)
     },
     async status(projectId: string, ownerId: string): Promise<{ preview: MeasuredPreview | null; reason?: string }> {
@@ -110,7 +112,9 @@ export function createMeasuredPreview(input: {
       if (url.hostname === 'localhost') return undefined
       const headers = { 'Cache-Control': 'private, no-store', 'Referrer-Policy': 'no-referrer',
         'X-Content-Type-Options': 'nosniff', 'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS' }
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        'Access-Control-Expose-Headers': 'X-BeeGame-Preview-Mode',
+        'X-BeeGame-Preview-Mode': 'measured-static' }
       const failure = (status: number, message: string) => new Response(message, { status, headers })
       const entry = byHost.get(url.hostname)
       // A TLS reverse proxy may reach BGS over HTTP/a different internal port.

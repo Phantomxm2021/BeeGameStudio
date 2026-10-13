@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test'
-import { access, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, mkdtemp, realpath, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { openAgentTools } from './agent-tools'
@@ -33,8 +33,8 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     const source = await readFile(join(root, tools.directory, 'assets.mjs'), 'utf8')
     expect(source).not.toContain(token); expect(tools.turnContext).not.toContain(token)
     expect(tools.turnContext.length).toBeLessThan(2200)
-    expect(tools.turnContext).toContain('React/Canvas does not waive promised editable data')
-    expect(tools.turnContext).toContain('Runtime consumption needs separate evidence')
+    expect(tools.turnContext).not.toContain('React/Canvas does not waive promised editable data') // responsibility remains in the production system slot
+    expect(tools.turnContext).toContain('Tool availability is not runtime consumption or quality evidence')
     expect(tools.turnContext).toContain(tools.directory+'/consumer.mjs')
     const consumerHelp=await command(root,tools.directory,'consumer.mjs','--help')
     expect(consumerHelp.code).toBe(0)
@@ -135,7 +135,10 @@ test('a chosen consumer copy remains buildable without the temporary host tools'
   const tools=await openAgentTools({workspacePath:root,getAuthToken:()=>undefined})
   try {
     await mkdir(join(root,'src'))
-    await copyFile(join(root,tools.directory,'content-consumer.mjs'),join(root,'src/bgs-content-consumer.mjs'))
+    const installed=await command(root,tools.directory,'consumer.mjs','--install','src/bgs-content-consumer.mjs')
+    expect(installed.code,installed.stderr).toBe(0)
+    expect(JSON.parse(installed.stdout)).toMatchObject({alreadyPresent:false,runtimeVerified:false})
+    expect(JSON.parse((await command(root,tools.directory,'consumer.mjs','--install','src/bgs-content-consumer.mjs')).stdout).alreadyPresent).toBe(true)
     await writeFile(join(root,'src/main.js'),"import{readUiData}from'./bgs-content-consumer.mjs';window.readUiData=readUiData;")
     await writeFile(join(root,'package.json'),JSON.stringify({scripts:{build:'bun build.mjs'}}))
     await writeFile(join(root,'build.mjs'),"import{writeFile}from'node:fs/promises';const r=await Bun.build({entrypoints:['src/main.js'],outdir:'dist',target:'browser'});if(!r.success)throw Error('Synthetic build failed');await writeFile('dist/index.html','<!doctype html><script src=main.js></script>');")
@@ -149,6 +152,40 @@ test('a chosen consumer copy remains buildable without the temporary host tools'
 
 // Uses the module supplied by the V3 entry, not a hand-built replacement or a
 // real game. No personal Chrome profile, model or resource download is involved.
+test('consumer compatibility is batched/read-only and installation never overwrites or follows a link',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-v3-consumer-access-')))
+  const tools=await openAgentTools({workspacePath:root,getAuthToken:()=>undefined})
+  try {
+    const api=await command(root,tools.directory,'consumer.mjs','--api')
+    expect(api.code,api.stderr).toBe(0)
+    const reference=JSON.parse(api.stdout)
+    expect(reference.createProductionUiSurface.lifecycle).toContain('No update/setState')
+    expect(reference.documents.fetchStartupContentDocuments).toContain('document[] (not a Map)')
+    expect(reference.scene.sceneWorldTransforms2d).toContain('{poses: Map')
+    expect(api.stdout.length).toBeLessThan(4000)
+    const doc={schema:'beegame-content.v1',id:'menu',kind:'ui-screen',assetRefs:[],data:{rootId:'root',nodes:[
+      {id:'root',role:'screen-root'}, {id:'text',parentId:'root',role:'text',text:'Go',style:{align:'left',fontSize:18},layout:{size:[80,30]}},
+      {id:'button',parentId:'root',role:'button',data:{action:'legacy-action'},layout:{size:[80,30]}},
+    ]}}
+    const source=JSON.stringify(doc);await writeFile(join(root,'menu.json'),source)
+    const inspection=await command(root,tools.directory,'consumer.mjs','--inspect','menu.json')
+    expect(inspection.code,inspection.stderr).toBe(0)
+    expect(JSON.parse(inspection.stdout).results[0].support).toMatchObject({supported:false,issues:[],
+      projectSemantics:[{nodeId:'button',property:'data.action'}],runtimeVerified:false})
+    expect(await readFile(join(root,'menu.json'),'utf8')).toBe(source)
+    await mkdir(join(root,'src'));await writeFile(join(root,'src/custom.mjs'),'keep existing implementation')
+    expect((await command(root,tools.directory,'consumer.mjs','--install','src/custom.mjs')).code).toBe(1)
+    expect(await readFile(join(root,'src/custom.mjs'),'utf8')).toBe('keep existing implementation')
+    await symlink(join(root,'src/custom.mjs'),join(root,'src/link.mjs'))
+    expect((await command(root,tools.directory,'consumer.mjs','--install','src/link.mjs')).code).toBe(1)
+    await symlink(join(root,'src'),join(root,'alias'))
+    expect((await command(root,tools.directory,'consumer.mjs','--install','alias/new.mjs')).code).toBe(1)
+    await expect(access(join(root,'src/new.mjs'))).rejects.toThrow()
+    for(const path of ['../outside.mjs','.beegame/consumer.mjs','src/node_modules/module.mjs'])
+      expect((await command(root,tools.directory,'consumer.mjs','--install',path)).code).toBe(1)
+  }finally{await tools.close();await rm(root,{recursive:true,force:true})}
+},30000)
+
 test.skipIf(process.env.BGS_LAYOUT_BROWSER!=='1')('V3 consumer paints saved geometry/font mutations and applies the authored Camera',async()=>{
   const root=await mkdtemp(join(tmpdir(),'bgs-v3-consumer-browser-'))
   const tools=await openAgentTools({workspacePath:root,getAuthToken:()=>undefined})
@@ -167,7 +204,7 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER!=='1')('V3 consumer paints saved geom
       const data:any={rootId:'root',nodes:[
         {id:'root',role:'screen-root'},
         {id:'bar',parentId:'root',role:'container',layout:{anchorMin:[0,0],anchorMax:[1,0],sizeDelta:[0,48]}},
-        {id:'label',parentId:'bar',role:'text',text:'Score',style:{fontSize:20},layout:{anchor:'top-left',position:[8,4],size:[120,40]}},
+        {id:'label',parentId:'bar',role:'text',text:'Score',style:{fontSize:20,align:'left',verticalAlign:'top',lineHeight:22},layout:{anchor:'top-left',position:[8,4],size:[120,40]}},
         {id:'action',parentId:'root',role:'button',text:'Go',actions:{click:'go'},layout:{anchor:'top-right',position:[-5,8],size:[40,30]}},
       ]}
       const surface=await lib.createProductionUiSurface(host),viewport={width:600,height:300}
@@ -176,6 +213,8 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER!=='1')('V3 consumer paints saved geom
       const before=JSON.stringify(data);surface.render(data,viewport,options)
       const bar=()=>host.querySelector('[data-node-id="bar"]')!.getBoundingClientRect()
       const font=()=>getComputedStyle(host.querySelector('[data-node-id="label"]')!).fontSize
+      const labelStyle=getComputedStyle(host.querySelector('[data-node-id="label"]')!)
+      const alias={align:labelStyle.textAlign,vertical:labelStyle.alignItems,lineHeight:labelStyle.lineHeight}
       const first={height:bar().height,font:font(),x:host.querySelector('[data-node-id="action"]')!.getBoundingClientRect().x}
       ;(host.querySelector('[data-node-id="action"]') as HTMLElement).click()
       const preserved=JSON.stringify(data)===before
@@ -197,7 +236,7 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER!=='1')('V3 consumer paints saved geom
       const initial=sample();scene.nodes[0].transform.position[0]+=20;const moved=sample()
       scene.nodes[0].components[0].data.orthographicSize=3;const zoomed=sample()
       surface.dispose()
-      return {first,changed,preserved,hidden,clicks,initial,moved,zoomed}
+      return {first,changed,preserved,hidden,clicks,initial,moved,zoomed,alias}
     }
     // Node is also used by the existing production browser inspector. Bun's
     // WebSocket client cannot reliably complete Playwright's CDP handshake.
@@ -209,6 +248,7 @@ test.skipIf(process.env.BGS_LAYOUT_BROWSER!=='1')('V3 consumer paints saved geom
     const [output,errors,code]=await Promise.all([new Response(launched.stdout).text(),new Response(launched.stderr).text(),launched.exited])
     expect(code,errors).toBe(0);const result=JSON.parse(output)
     expect(result.first).toEqual({height:48,font:'20px',x:555})
+    expect(result.alias).toEqual({align:'left',vertical:'flex-start',lineHeight:'22px'})
     expect(result.changed).toEqual({height:72,font:'40px'})
     expect(result.preserved).toBe(true);expect(result.hidden).toBe(true);expect(result.clicks).toBe(1)
     expect(result.initial.red).toBe(255);expect(result.moved.red).toBe(255)
@@ -254,6 +294,54 @@ test('existing layout CLI computes precise expectations from current saved bytes
   }finally{await tools.close();await rm(root,{recursive:true,force:true})}
 },30000)
 
+test('Preview test entry uses Node, retains complete output, and cannot reuse a revoked capability', async () => {
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-test-entry-')))
+  const preview=openPreviewTestAccess({start:async()=>({status:'running'}),status:()=>({status:'idle'}),stop(){},
+    browser:{start:async()=>{throw Error('No browser requested')},status:()=>({status:'idle'}),close:async()=>{}} as any})
+  const tools=await openAgentTools({workspacePath:root,sessionId:'test-entry',getAuthToken:()=>undefined,openPreview:()=>preview})
+  const run=async(...args:string[])=>{
+    const child=Bun.spawn([Bun.which('node')!,join(root,tools.directory,'preview.mjs'),...args],{cwd:root,
+      env:{PATH:process.env.PATH,BEEGAME_CONTENT_CHECKER_MODULE:(await sharedContentChecker()).moduleUrl,
+        BEEGAME_PREVIEW_CAPABILITY_FILE:projectPreviewCapabilityPath(root,'test-entry')},stdout:'pipe',stderr:'pipe'})
+    const [stdout,stderr,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited])
+    return {code,stderr,result:JSON.parse(stdout)}
+  }
+  try {
+    await writeFile(join(root,'test.mjs'),`import {appendFile} from 'node:fs/promises';
+      await appendFile('calls.txt','once\\n');
+      console.log(JSON.stringify({node:!process.versions.bun,arg:process.argv[2],checks:[false]}));
+      console.log('x'.repeat(80000));console.error('actual failure details');process.exitCode=Number(process.argv[3]||0);`)
+    const first=await run('--run','test.mjs','literal;not-a-shell-command','7')
+    expect(first.code).toBe(1)
+    expect(first.result).toMatchObject({status:'exited',exitCode:7,runtime:'node',quality:'unverified'})
+    const stdout=await readFile(join(root,first.result.stdoutPath),'utf8')
+    expect(JSON.parse(stdout.split('\n')[0]!)).toEqual({node:true,arg:'literal;not-a-shell-command',checks:[false]})
+    expect(stdout.length).toBeGreaterThan(80000)
+    expect(await readFile(join(root,first.result.stderrPath),'utf8')).toContain('actual failure details')
+    expect(JSON.stringify(first.result).length).toBeLessThan(1500)
+    expect(first.result).not.toHaveProperty('passed')
+    for(let i=0;i<3;i++) {
+      const saved=JSON.parse(await readFile(join(root,first.result.reportPath),'utf8'))
+      expect(saved).toMatchObject({inputIdentity:'unverified',before:{status:'unverified'},after:{status:'unverified'}})
+      expect(saved.before.scriptSha256).toBe(saved.after.scriptSha256)
+      expect(saved.stdoutPath).toBe(first.result.stdoutPath)
+    }
+    expect(await readFile(join(root,'calls.txt'),'utf8')).toBe('once\n')
+    const second=await run('--run','test.mjs','same-test','0')
+    expect(second.code).toBe(0);expect(second.result.quality).toBe('unverified')
+    expect(second.result.reportPath).not.toBe(first.result.reportPath)
+    expect(await readFile(join(root,first.result.stdoutPath),'utf8')).toBe(stdout)
+    expect((await run('--inspect',first.result.reportPath)).result).toMatchObject({quality:'unverified',
+      freshness:{status:'unverified'},exitCode:7})
+    expect((await run('--inspect','../outside.json')).code).toBe(1)
+    await tools.close()
+    expect((await run('--inspect',first.result.reportPath)).result.exitCode).toBe(7)
+    const expired=await run('--run','test.mjs')
+    expect(expired.code).toBe(1);expect(expired.result.error).toContain('PREVIEW_CAPABILITY_EXPIRED')
+    expect(await readFile(join(root,'calls.txt'),'utf8')).toBe('once\nonce\n')
+  } finally {await tools.close();await rm(root,{recursive:true,force:true})}
+})
+
 test('tool preparation refuses linked parent before writing outside the project', async () => {
   const root=await mkdtemp(join(tmpdir(),'bgs-agent-tools-link-')), outside=await mkdtemp(join(tmpdir(),'bgs-agent-tools-outside-'))
   try {
@@ -280,6 +368,25 @@ test('optional Preview is published to the bound native session, lazy help works
     expect(tools.turnContext).not.toContain(preview.baseUrl)
     expect(tools.turnContext.length).toBeLessThan(2600)
     expect((await command(root,tools.directory,'preview.mjs','--help')).stdout).toContain('POST /preview')
+    const diagnostic=await command(root,tools.directory,'preview.mjs','--client')
+    expect(diagnostic.code).toBe(0)
+    const client=JSON.parse(diagnostic.stdout)
+    expect(client).toMatchObject({runtime:'node',playwrightModule:sharedPlaywright().moduleUrl,
+      environment:{helper:'BEEGAME_PREVIEW_TEST_MODULE',playwright:'BEEGAME_PLAYWRIGHT_MODULE',capability:'BEEGAME_PREVIEW_CAPABILITY_FILE'}})
+    expect(client.helperModule).toBe(new URL('../preview-test-client.mjs',import.meta.url).href)
+    expect(diagnostic.stdout).not.toContain(preview.baseUrl)
+    expect(diagnostic.stdout).not.toContain(path)
+    expect(Buffer.byteLength(diagnostic.stdout)).toBeLessThan(1500)
+    // A child script can resolve exports directly; no source read/copy, env
+    // dump, package installation, browser start or review verdict is required.
+    const node=Bun.spawn([Bun.which('node')!,'--input-type=module','-e',
+      'const {withPreviewPage,checkTextSeparation}=await import('+JSON.stringify(client.helperModule)+');'+
+      'const {chromium}=await import('+JSON.stringify(client.playwrightModule)+');'+
+      'console.log([typeof withPreviewPage,typeof checkTextSeparation,typeof chromium.connectOverCDP].join(","))'],
+      {cwd:root,env:{PATH:process.env.PATH},stdout:'pipe',stderr:'pipe'})
+    const [stdout,stderr,exit]=await Promise.all([new Response(node.stdout).text(),new Response(node.stderr).text(),node.exited])
+    expect(exit,stderr).toBe(0);expect(stdout.trim()).toBe('function,function,function')
+    expect((await command(root,tools.directory,'preview.mjs','--client','--help')).code).toBe(1)
     expect((await fetch(preview.baseUrl+'/status')).status).toBe(200)
     const first=tools.close();expect(tools.close()).toBe(first)
     let finished=false;void first.then(()=>{finished=true})

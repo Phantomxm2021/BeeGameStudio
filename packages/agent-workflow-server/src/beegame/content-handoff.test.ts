@@ -263,8 +263,13 @@ test('design-time format is not a fake authority; standalone checker and host ag
   const { root, workspace } = await fixture()
   try {
     const format = JSON.parse(await readFile(join(workspace, CONTENT_FORMAT_PATH), 'utf8'))
-    expect(format.index.documentRevision).toBeUndefined()
+    // The shared format example is a placeholder, never an approval/hash.
+    // This legacy materializer still supplies actual identity in its contract.
+    expect(format.index.documentRevision).toContain('<required compatibility field:')
+    expect(format.index.documentRevision).toContain('--package-metadata')
+    expect(format.index.documentRevision).not.toMatch(/^[a-f0-9]{64}$/)
     expect(format.revisionFields).toContain('BGS-supplied')
+    expect(format.revisionFields).toContain('none are available at design time')
     expect(format.runtimeConsumption.responsive).toContain('not permission to replace authored layout')
     expect(format.uiLayoutContract.textStyle).toContain('logical-pixel lengths, not unitless CSS multipliers')
     expect(format.runtimeConsumption.checks['ui-layout'].outcome).toContain('text alone is not layout verification')

@@ -1,6 +1,6 @@
 import { feature } from 'bun:bundle'
+import { isVerificationAgentEnabled } from 'src/utils/optionalRuntimeFeatures.js'
 import { getIsNonInteractiveSession } from 'src/bootstrap/state.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { CLAUDE_CODE_GUIDE_AGENT } from './built-in/claudeCodeGuideAgent.js'
 import { EXPLORE_AGENT } from './built-in/exploreAgent.js'
@@ -61,7 +61,7 @@ export function getBuiltInAgents(): AgentDefinition[] {
 
   if (
     feature('VERIFICATION_AGENT') &&
-    getFeatureValue_CACHED_MAY_BE_STALE('tengu_hive_evidence', false)
+    isVerificationAgentEnabled()
   ) {
     agents.push(VERIFICATION_AGENT)
   }

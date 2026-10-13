@@ -1,0 +1,71 @@
+{
+  "version": "1.93",
+  "recordedAt": "2026-10-12T19:18:08.309Z",
+  "deployedVersion": "1.91",
+  "deployed": false,
+  "issue": {
+    "classification": "BGS diagnostic/qualification coupling",
+    "reproduced": [
+      "inspect throws for source alias",
+      "inspect throws for EACCES source directory"
+    ],
+    "httpBefore": "Non-WorkflowError maps to generic 500 by route source; not recorded as an initial HTTP reproduction",
+    "fix": "Current file-inspection failures return negative freshness while preserving saved facts; Preview/export continue refusing"
+  },
+  "regression": {
+    "pass": 64,
+    "fail": 0,
+    "skip": 0,
+    "assertions": 686,
+    "typecheckPassed": true,
+    "diffCheckPassed": true,
+    "finalLog": "/private/tmp/bgs-v3-193-final-regression.log",
+    "redLog": "/private/tmp/bgs-v3-193-unreadable-reproduction.log",
+    "fixtureSetupFailureLog": "/private/tmp/bgs-v3-193-targeted-regression.log"
+  },
+  "checks": {
+    "unsafeSourcesHistoricalReadable": true,
+    "bridgeNonzeroWithReceipt": true,
+    "currentFalse": true,
+    "exportDenied409": true,
+    "foreignOwnershipDenied404": true,
+    "unrelatedPrivateBytesNotExposed": true,
+    "savedRunUnchanged": true
+  },
+  "sourceFingerprints": [
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/measured-build.ts",
+      "sha256": "1af5942a3524bc103292b8a282043e22bf12aeb0ec1d64371b968a02ea751d97"
+    },
+    {
+      "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts",
+      "sha256": "a0c499f2313590dd6eb4841d2df5a235a61f6e75daa18e3689f55ace24035bf1"
+    }
+  ],
+  "protectedFiles": {
+    "protectedFiles": 3207,
+    "protectedChanges": [],
+    "gameFiles": 201,
+    "gameChanges": [],
+    "checkedAt": "2026-10-12T19:14:58.969Z"
+  },
+  "normalNativeFixture": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-native-measurement-2fEVea",
+  "localScriptedProviderResponses": 9,
+  "externalPaidRequests": 0,
+  "productionWrites": 0,
+  "restarts": 0,
+  "remaining": [
+    "Real model eight-domain decisions/Skills and complete game/Scene/UI/resource quality",
+    "No trusted exit or unknown remote effects",
+    "Engine operations temporarily skipped",
+    "Formal frontend/publishing outside current authority",
+    "Net cost improvements last"
+  ],
+  "limitations": [
+    "Synthetic/local fault proof only",
+    "New fix not deployed",
+    "Does not certify actual game quality or true model use",
+    "Existing fixture cleanup retained logs but not all synthetic source files",
+    "Legacy Review compatibility regressions do not restore default Review workflow"
+  ]
+}

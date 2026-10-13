@@ -62,33 +62,24 @@ function deferred<T>() {
 }
 
 describe('RightSidebar tabs', () => {
-    it('edits a user message inline and submits the replacement from there', async () => {
+    it('preserves sent V3 messages and accepts a new correction instead of rewriting history', async () => {
         const onSendMessage = vi.fn().mockResolvedValue(true);
         render(<RightSidebar projectId="inline-edit" lang="en" progress={0} isLoading={false}
             messages={[{ id: 'user-edit-target', sender: 'user', content: 'Original request', timestamp: 1, rewindAvailable: true }]}
             onSendMessage={onSendMessage} waitingPermission={getWaitingPermissionState([])} />);
 
         const composerInput = screen.getByTestId('beegame-chat-input');
+        expect(screen.queryByLabelText('Message intent')).not.toBeInTheDocument();
         fireEvent.change(composerInput, { target: { value: 'Independent new prompt' } });
         expect(composerInput).toHaveClass('type-chat-body');
         expect(screen.getByTestId('beegame-chat-composer').parentElement).toHaveClass('shrink-0');
         expect(screen.getByTestId('beegame-chat-composer').parentElement).not.toHaveClass('pt-3', 'pb-3');
         const message = screen.getByTestId('beegame-user-message-user-edit-target');
         expect(within(message).getByText('Original request').closest('p')).toHaveClass('type-chat-body');
-        fireEvent.click(screen.getByRole('button', { name: 'Edit message' }));
-        const inlineInput = within(message).getByRole('textbox', { name: 'Edit message' });
-        expect(inlineInput).toHaveClass('type-chat-body');
-        expect(message.querySelector('[data-slot="message-bubble"]')).toBeNull();
-        expect(within(message).getByTestId('beegame-user-message-edit-input-user-edit-target')).toContainElement(inlineInput);
-        expect(inlineInput).toHaveValue('Original request');
-        expect(screen.getByTestId('beegame-chat-composer')).toContainElement(composerInput);
-        expect(composerInput).toHaveValue('Independent new prompt');
-
-        fireEvent.change(inlineInput, { target: { value: 'Corrected request' } });
-        fireEvent.click(within(message).getByRole('button', { name: 'Send edit' }));
-        await waitFor(() => expect(onSendMessage).toHaveBeenCalledWith('Corrected request', [], 'user-edit-target'));
-        await waitFor(() => expect(screen.getByTestId('beegame-chat-composer')).toContainElement(composerInput));
-        expect(composerInput).toHaveValue('Independent new prompt');
+        expect(screen.queryByRole('button', { name: 'Edit message' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+        await waitFor(() => expect(onSendMessage).toHaveBeenCalledWith('Independent new prompt', [], undefined));
+        expect(within(message).getByText('Original request')).toBeInTheDocument();
     });
 
     it('hides the edit action while the Agent is running', () => {
@@ -107,7 +98,7 @@ describe('RightSidebar tabs', () => {
             onSendMessage={vi.fn().mockResolvedValue(true)} onStopTask={vi.fn()}
             isLoading={false} waitingPermission={getWaitingPermissionState()} />);
         expect(getChatInput()).not.toHaveAttribute('readonly');
-        expect(screen.getByTestId('beegame-chat-attach-button')).toBeEnabled();
+        expect(screen.getByTestId('beegame-chat-attach-button')).toBeDisabled();
         expect(screen.queryByRole('button', { name: 'Stop task' })).not.toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument();
     });
@@ -837,7 +828,7 @@ describe('RightSidebar tabs', () => {
         expect(screen.queryByRole('button', { name: '最小化聊天' })).not.toBeInTheDocument();
     });
 
-    it('sends an uploaded screenshot attachment without requiring text', async () => {
+    it('does not offer the old attachment ingress while V3 upload is unavailable', async () => {
         const user = userEvent.setup();
         const onSendMessage = vi.fn();
 
@@ -859,31 +850,10 @@ describe('RightSidebar tabs', () => {
             />
         );
 
-        const image = new File(['png-bytes'], 'screen.png', { type: 'image/png' });
         const attachButton = screen.getByRole('button', { name: '上传附件' });
-        const input = document.getElementById('beegame-chat-attachment-upload') as HTMLInputElement;
-        const inputClick = vi.spyOn(input, 'click').mockImplementation(() => undefined);
+        expect(attachButton).toBeDisabled();
         await user.click(attachButton);
-        expect(inputClick).toHaveBeenCalledTimes(1);
-        await user.upload(input, image);
-
-        await waitFor(() => expect(screen.getByAltText('screen.png')).toBeInTheDocument());
-        const attachmentList = screen.getByTestId('beegame-chat-attachments');
-        expect(attachmentList).toHaveClass('justify-start');
-        expect(attachmentList).not.toHaveClass('px-4');
-        const attachmentPreview = screen.getByAltText('screen.png').closest('.chat-attachment-preview');
-        expect(attachmentPreview).toHaveClass('hover:border-[var(--ring)]', 'hover:ring-1', 'focus-within:ring-1');
-        expect(screen.getByRole('button', { name: 'Remove attachment' })).toHaveClass('chat-attachment-remove', 'bg-[var(--surface-1)]', 'text-[var(--text-primary)]');
-        await user.click(screen.getByRole('button', { name: 'Send message' }));
-
-        expect(onSendMessage).toHaveBeenCalledWith('', [
-            expect.objectContaining({
-                type: 'image',
-                mediaType: 'image/png',
-                filename: 'screen.png',
-            }),
-        ], undefined);
-        expect(onSendMessage.mock.calls[0][1][0].data).toEqual(expect.any(String));
+        expect(onSendMessage).not.toHaveBeenCalled();
     });
 
     it('sends an uploaded JSONL document attachment without rendering it as an image', async () => {

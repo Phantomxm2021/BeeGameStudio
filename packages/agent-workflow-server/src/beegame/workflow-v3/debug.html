@@ -9,7 +9,15 @@ section{background:white;border:1px solid #ccd2dd;padding:16px;margin:16px 0;bor
 label{display:block;margin:10px 0}input,select,textarea,button{font:inherit;padding:8px;box-sizing:border-box}input,textarea{width:100%}
 textarea{font:13px monospace;min-height:180px}button{margin:4px}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:500px;overflow:auto}
 #status{white-space:pre-wrap}iframe{width:100%;height:480px;border:1px solid #ccd2dd}a{margin:8px;display:inline-block}
+dialog{max-width:540px;width:calc(100% - 48px);border:1px solid #ccd2dd;border-radius:10px;padding:24px;color:inherit;background:white}
+dialog::backdrop{background:#20252d99}dialog h2{margin-top:0}dialog p{white-space:pre-wrap;overflow-wrap:anywhere}
 </style>
+<dialog id="action-confirm" aria-labelledby="action-confirm-title" aria-describedby="action-confirm-message">
+<h2 id="action-confirm-title">确认本次操作</h2>
+<p id="action-confirm-message"></p>
+<button id="action-confirm-cancel" type="button" autofocus>取消</button>
+<button id="action-confirm-accept" type="button">确认本次操作</button>
+</dialog>
 <h1>BGS V3 独立 Debug 验收</h1>
 <p>不是正式产品界面，不证明游戏品质。没有自动派发／轮询／重试。保存后必须重新构建、测量；历史通过不授予新版本资格。</p>
 <section>
@@ -17,7 +25,8 @@ textarea{font:13px monospace;min-height:180px}button{margin:4px}pre{white-space:
 <label>认证方式<select id="auth-mode"><option value="bearer">当前页 Access Token</option><option value="session">已有 BGS 登录态（HttpOnly Cookie）</option></select></label>
 <label>正常用户 Access Token（仅当前页内存；勿输入 service-role 密钥）<input id="token" type="password" autocomplete="off"></label>
 <p>已有登录态模式仅向本页同源 API 发送浏览器 Cookie，不读取、展示或复制凭据。未登录仍会被正常接口拒绝；此页不建立登录或管理员绕过。</p>
-<button id="load">读取 Run</button><button id="events">读取原始任务事件</button>
+<button id="load">读取 Run</button><button id="events">读取任务事件（自主模式分页）</button><button id="events-earlier">读取更早一页</button>
+<p>自主 Run 每页100条原生回合摘要，不合并整个 Chat；兼容 Task 模式保留原事件接口，没有更早页游标。长文本截取及 payload 摘要会明确标记；原始证据保留，当前权限与 Question 请用专用入口核对。读取期间仍可暂停，暂停不重发任务。</p>
 <button id="restore-chat">恢复项目所属 Chat（不执行）</button>
 <button id="sources">读取来源索引</button><button id="stop">暂停</button><button id="resume">明确恢复（不派发）</button>
 <button id="recover-writer">核对证据并收尾中断写者（不重试）</button>
@@ -39,11 +48,13 @@ textarea{font:13px monospace;min-height:180px}button{margin:4px}pre{white-space:
 </section>
 <section>
 <h2>同工程原生消息</h2>
-<label>本次授权<select id="message-intent"><option value="discuss">只讨论，不授权修改</option><option value="change">明确变更需求并修改</option><option value="continue">继续最近中断的工作</option></select></label>
+<label>本次授权<select id="message-intent"><option value="discuss">只讨论，不授权修改</option><option value="work">按现有目标检查／修复，不变更需求</option><option value="change">明确变更需求并修改</option><option value="continue">继续最近中断的工作</option></select></label>
+<label>执行上下文<select id="message-context"><option value="resume">保留当前原生上下文（默认）</option><option value="focused">聚焦上下文（work／change／continue；须已确认退出）</option></select></label>
+<p>聚焦模式保留工程和 Chat、当前需求、原始用户请求及已记录 Question 答复；不传旧模型／工具历史或已加载 Skill 正文。依赖旧讨论里的隐含决定时请选择保留上下文。不会替换中断续作、重发目标、继承旧权限或自动追加执行。</p>
 <label>用户消息<textarea id="message-text" aria-label="同工程用户消息" spellcheck="false"></textarea></label>
 <button id="prepare-message">按当前版本准备本次消息（不执行）</button>
 <button id="submit-message">确认发送同工程消息（可能付费）</button>
-<p>消息草稿绑定当前 Run、Chat 和版本。暂停后先明确恢复，再授权续作；恢复本身不执行。不会重发原始目标、自动重试或生成宿主修复计划。讨论意图不授权修改，但并非文件系统只读隔离。</p>
+<p>消息草稿绑定当前 Run、Chat 和版本。检查／修复不制造新需求版本；实际保存仍使旧测量过期。明确变更需求才更新需求版本。暂停后先明确恢复，再授权续作；恢复本身不执行。不会重发原始目标、自动重试或生成宿主修复计划。讨论意图不授权修改，但并非文件系统只读隔离。</p>
 </section>
 <section>
 <h2>当前原生 Question</h2>
@@ -85,15 +96,15 @@ textarea{font:13px monospace;min-height:180px}button{margin:4px}pre{white-space:
 <button id="preview">打开当前已测 Preview</button><button id="close-preview">关闭本页 Preview</button>
 <button id="static">下载已测静态包</button><button id="project-export">下载已测工程</button>
 <iframe id="preview-frame" title="已测构建 Preview" sandbox="allow-scripts" hidden></iframe><div id="downloads"></div>
-<p>只有宿主已持久化完整退出证据的中断结算可收尾，未验收成果不转为通过。无证据的旧写者及未知外部操作仍不解锁／重试；完整游戏与真实成本未验收。</p>
+<p>恢复证据来源显示在 Run 响应：persisted 为数据库已保存退出事实，original-host 为原宿主仍保留的亲自观察，host-receipt 为工程外经宿主验签且匹配当前写者的退出记录，unavailable 表示不能解锁。恢复须明确确认，不执行任务；服务重启不会把进程缺失当退出证据。记录缺失／损坏、宿主密钥或存储不可用仍不能恢复。未验收成果不转为通过，未知外部操作不自动重试。</p>
 </section>
 <section>
-<h2>Preview 观察 → 定向 Review／Repair</h2>
+<h2>Preview 观察 → 同工程处理（旧 Task 兼容入口）</h2>
 <button id="prepare-observation">从当前 Preview 准备问题草稿</button>
 <textarea id="observation-json" aria-label="Preview 观察 JSON" spellcheck="false"></textarea>
 <button id="submit-observation">确认保存观察（不派发）</button>
 <button id="observation-message">自主 Run：转入同工程消息草稿（不执行）</button>
-<p>自主 Agent 使用消息草稿：绑定实际测量和构建指纹，默认只讨论。需要修复时自行选择“明确变更需求并修改”，准备并确认发送；不创建宿主 Review／Repair Task。以下计划按钮仅用于兼容旧 Task Run。</p>
+<p>自主 Agent 使用消息草稿：绑定实际测量和构建指纹，默认只讨论。修复现有需求请选择“按现有目标检查／修复，不变更需求”；只有改变用户目标或承诺才选择“明确变更需求并修改”。核对授权后准备并确认发送；不创建宿主 Review／Repair Task。以下计划按钮仅用于兼容旧 Task Run。</p>
 <p>填写确认需求 ID、操作步骤、预期与实际表现。草稿固定本次构建身份；刷新不会绑定到新版本。保存的是用户观察，不是已证实缺陷。</p>
 <label>已保存观察<select id="issue"></select></label>
 <button id="issue-review">授权定向 Review 计划（不执行）</button>

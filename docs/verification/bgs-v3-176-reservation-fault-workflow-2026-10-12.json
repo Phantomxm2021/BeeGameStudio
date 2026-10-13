@@ -1,0 +1,216 @@
+{
+  "version": "1.76",
+  "date": "2026-10-12",
+  "status": "deployed; scoped workflow fault acceptance passed, full workflow not accepted",
+  "scope": "Remaining workflow correctness and failure/recovery paths; no cost optimization or paid production",
+  "confirmedBugs": [
+    {
+      "id": "B-176-01",
+      "rootCause": "The writer reservation can commit successfully while its response is lost. Source edit / legacy Task start / autonomous goal dispatch previously returned before tracking execution or recording its no-start exit, leaving an orphan writer although the original host never began file/native work.",
+      "reproduced": [
+        "/private/tmp/bgs-v3-176-reservation-repro.log",
+        "/private/tmp/bgs-v3-176-goal-claim-repro.log"
+      ],
+      "files": [
+        "packages/agent-workflow-server/src/beegame/workflow-v3/execution.ts",
+        "packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.ts"
+      ],
+      "fix": "On reservation error, the original living caller reads storage, matches the exact Run/attempt/fence/worker, records that work never started, and settles failed. No file/model execution replay and no inferred exit for foreign/restarted workers. Unavailable storage or unconfirmed identity remains unresolved.",
+      "boundary": "Original host, pre-execution only. Does not solve arbitrary hard crash, unavailable storage, uncertain external side effects or permit silent initial-goal replay."
+    },
+    {
+      "id": "B-176-02",
+      "rootCause": "settleSourceEdit used the saved-candidate handoff text even after a failed save/recovery.",
+      "files": [
+        "packages/agent-workflow-server/src/beegame/workflow-v3/changes.ts"
+      ],
+      "fix": "Nonpaused failed saves expose their real recorded error and require inspection, rather than falsely announcing a saved unmeasured candidate. Paused status and all older evidence remain intact."
+    }
+  ],
+  "remoteAcceptance": {
+    "log": "/private/tmp/bgs-v3-176-edit-fault-remote-final.log",
+    "checks": 44,
+    "passed": [
+      "race: independent processes",
+      "race: one CAS winner, no losing write",
+      "race: exactly one durable save reservation",
+      "race: save quiescence persisted",
+      "race: exact prior source archived",
+      "race: saved bytes retained",
+      "race: saved commit has no unresolved writer",
+      "race: explicit replay reads commit without another write",
+      "race: unrelated scene unchanged",
+      "race: unrelated notes unchanged",
+      "race: no model, Task, plan or game qualification",
+      "lost response: caller cannot claim success",
+      "lost-settlement-response: exactly one durable save reservation",
+      "lost-settlement-response: save quiescence persisted",
+      "lost-settlement-response: exact prior source archived",
+      "lost-settlement-response: saved bytes retained",
+      "lost-settlement-response: saved commit has no unresolved writer",
+      "lost-settlement-response: explicit replay reads commit without another write",
+      "lost-settlement-response: unrelated scene unchanged",
+      "lost-settlement-response: unrelated notes unchanged",
+      "lost-settlement-response: no model, Task, plan or game qualification",
+      "lost response: caller cannot claim success",
+      "lost-reservation-response: exactly one durable save reservation",
+      "lost reservation response: living original host records no-write exit instead of orphaning its writer",
+      "lost reservation response: no file write or automatic retry",
+      "lost-reservation-response: unrelated scene unchanged",
+      "lost-reservation-response: unrelated notes unchanged",
+      "lost-reservation-response: no model, Task, plan or game qualification",
+      "quiesced-crash: actual child checkpoint",
+      "quiesced-crash: exactly one durable save reservation",
+      "quiesced-crash: save quiescence persisted",
+      "quiesced-crash: exact prior source archived",
+      "quiesced-crash: saved bytes retained",
+      "quiesced crash: recovery releases writer without accepting/retrying",
+      "quiesced-crash: unrelated scene unchanged",
+      "quiesced-crash: unrelated notes unchanged",
+      "quiesced-crash: no model, Task, plan or game qualification",
+      "reserved-crash: actual child checkpoint",
+      "reserved-crash: exactly one durable save reservation",
+      "reserved crash: pause retained; missing exit never unlocks",
+      "reserved crash: original source untouched",
+      "reserved-crash: unrelated scene unchanged",
+      "reserved-crash: unrelated notes unchanged",
+      "reserved-crash: no model, Task, plan or game qualification"
+    ],
+    "fixtures": [
+      {
+        "projectId": "v3-edit-fault-0643da6b-cbf3-41aa-99ea-46aeda947a86",
+        "root": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-edit-fault-EZOaC1",
+        "scenario": "race",
+        "writerUnresolved": false
+      },
+      {
+        "projectId": "v3-edit-fault-e6eb263b-b6e5-458e-b071-c64ca31bec79",
+        "root": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-edit-fault-PkIEW4",
+        "scenario": "lost-settlement-response",
+        "writerUnresolved": false
+      },
+      {
+        "projectId": "v3-edit-fault-5085c9b6-cc08-422d-aae1-385c94c11eb9",
+        "root": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-edit-fault-oMIoKd",
+        "scenario": "lost-reservation-response",
+        "writerUnresolved": false
+      },
+      {
+        "projectId": "v3-edit-fault-e6b43894-2d59-4962-84cf-a0b1b50939c6",
+        "root": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-edit-fault-HhLF5U",
+        "scenario": "quiesced-crash",
+        "writerUnresolved": false
+      },
+      {
+        "projectId": "v3-edit-fault-bf1512d1-196f-48cc-a723-49685333fc2e",
+        "root": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-edit-fault-DTmW5r",
+        "scenario": "reserved-crash",
+        "writerUnresolved": true
+      }
+    ],
+    "modelCalls": 0,
+    "actualIndependentProcesses": true,
+    "realSigkillAtPersistedCheckpoint": true,
+    "originalsAndUnrelatedFilesPreserved": true,
+    "claimNoStartHandoffWording": "Latest failed-handoff wording separately covered by offline regression after this remote run, not retroactively asserted on retained records."
+  },
+  "regression": {
+    "primary": {
+      "pass": 74,
+      "fail": 0,
+      "files": 8,
+      "log": "/private/tmp/bgs-v3-176-workflow-regression-final.log"
+    },
+    "native": {
+      "pass": 3,
+      "fail": 0,
+      "files": 2,
+      "log": "/private/tmp/bgs-v3-176-native-regression.log",
+      "provider": "loopback controlled only",
+      "paidCalls": 0
+    },
+    "latestSourceHandoff": {
+      "pass": 13,
+      "fail": 0,
+      "files": 2,
+      "log": "/private/tmp/bgs-v3-176-source-handoff-final.log",
+      "overlapsPrimary": true
+    },
+    "neverStartedBoundary": {
+      "pass": 1,
+      "fail": 0,
+      "log": "/private/tmp/bgs-v3-176-no-start-boundary.log",
+      "overlapsPrimary": true
+    },
+    "distinctPass": 77,
+    "fail": 0,
+    "typecheckExit": 0,
+    "typecheckLog": "/private/tmp/bgs-v3-176-typecheck-final.log",
+    "diffCheckExit": 0,
+    "initialFixtureCorrection": "Local development storage explicitly supports one process only; the initial cross-process local CAS test failed. Cross-process race is correctly exercised only against the real remote RPC. Local cases cover actual child crashes and lost responses, not a fabricated claim of multiprocess local-store safety."
+  },
+  "deployment": {
+    "runtimePid": 29928,
+    "session": 67651,
+    "rootEnv": "bee-game-studio/.env.local",
+    "runtimePort": 62174,
+    "onlyRuntimeRestarted": true,
+    "frontendRebuilt": false,
+    "cliRebuilt": false,
+    "health200": [
+      62173,
+      62174,
+      62175,
+      62176,
+      62177
+    ],
+    "sourceHashes": {
+      "execution": "3ef8c6b5d6a7360b1ab969b2a2e8eb250f7cdbf874cae11ad239008bd003b384",
+      "agentGoal": "c0c1e9e7faf076161ab1c0bdf8db6e52a78ab5c65613a38d0598f80c7f23cd77",
+      "changes": "e7104e3e7c472c3fd44cffbd71204f47b43fdcd24e18689cb56265d5aafe1e3b"
+    },
+    "preflight": {
+      "remoteProjects": 32,
+      "normalRuntimeNativeChildren": 0,
+      "unresolvedSyntheticOnly": [
+        "v3-edit-fault-8741b8db-84ea-437f-80cd-15c1c6f1f522",
+        "v3-edit-fault-bf1512d1-196f-48cc-a723-49685333fc2e"
+      ],
+      "note": "These deliberately killed exact synthetic child processes are stopped, but lack durable quiescence in their own isolated roots. Their DB writers remain paused/unresolved; not deleted or unlocked."
+    },
+    "debug": {
+      "normalLogin": true,
+      "project": "v3-paid-a801f793-52cb-4874-8893-f5eaad8bf833",
+      "version": 121,
+      "paused": true,
+      "status": "blocked",
+      "readOnly": true,
+      "noTaskDispatch": true,
+      "screenshot": "/private/tmp/bgs-v3-176-deployed-debug.png",
+      "browserAlternative": "Extension debugger unattached; used supported native Chrome UI, no injected fetch/auth bypass."
+    }
+  },
+  "protections": {
+    "paidRuns": 0,
+    "manualRealGameEdits": 0,
+    "formalFrontendEdits": 0,
+    "claudeCodeSourceEdits": 0,
+    "builtinToolsEdits": 0,
+    "newReviewPrompt": 0,
+    "newAgentLimits": 0,
+    "engineOrRendererSpecified": 0,
+    "automaticExecutionRetries": 0,
+    "projectSettingsOrHooksOpened": false
+  },
+  "remaining": [
+    "Never-started initial native reservation is safely failed and has no UUID/history. Explicit follow-up currently rejects with conversation-unavailable. This is a verified remaining execution-recovery gap, not an end-to-end success claim; no silent original-goal replay introduced.",
+    "Hard kill before durable exit evidence intentionally retains a paused writer. Safe liveness/recovery is not complete; a missing process, PID or user statement alone is not exit evidence.",
+    "Remote tests kill at two persistence checkpoints, not every filesystem instruction or uncertain paid external operation.",
+    "Real eight-domain design, resources and game quality still need separately authorized real acceptance; no game was hand repaired.",
+    "Unity/Godot actual engineering and target delivery require applicable environment/requirements; no host-selected technical route.",
+    "Formal frontend/publish entry remains authorization-excluded.",
+    "1.75 remote downloaded ZIP byte identity still unverified; 1.76 dedicated local debug/native export regression does not replace that exact missing evidence.",
+    "No real Token reduction claimed; cost optimization is last."
+  ],
+  "nextInScope": "Audit the never-started request's explicit authorization/execution boundary; preserve current requirements and known project history, distinguish it from interrupted native continuation, and test with controlled model only. Do not add an automatic retry, hidden native UUID or stage pipeline."
+}

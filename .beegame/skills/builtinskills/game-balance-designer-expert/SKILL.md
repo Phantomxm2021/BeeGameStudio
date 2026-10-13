@@ -8,6 +8,7 @@ description: Diagnose or tune combat, movement difficulty, progression, rewards,
 Balance is the relationship between intended challenge and observed play, not a mandate to produce formulas for every feeling. Work on the systems the game actually has.
 
 - Define the affected player experience first: fairness, tension, mastery, choice, pacing, or resource pressure. Check player observations as well as numbers.
+- For an initial quantitative baseline or an experience-driven adjustment, use the applicable [tuning examples](references/scaling-curve-models.md). Identify the parameter that could cause the observed problem and a comparison that distinguishes it from a control, information or level-design defect; do not default to a growth curve.
 - When a rule depends on math, make its units, variables, bounds, and interaction order inspectable. For combat this may mean damage, mitigation, effective health, burst and recovery; for platforming it may mean movement speed, jump arc, reachable distance, and timing windows.
 - Compare a normal path with plausible edge cases or strong strategies. Test breakpoints, dominant choices, dead options, runaway loops, and recovery after failure only where they matter.
 - Tune the smallest meaningful parameter or relationship. Avoid arbitrary dominance thresholds, universal curve shapes, and adding a currency sink or cap without a demonstrated need.

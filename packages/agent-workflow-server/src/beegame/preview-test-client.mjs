@@ -69,8 +69,15 @@ export async function withPreviewPage({ apiUrl, mode, contextOptions = {}, befor
     // clicks a game control nor changes game state; render readiness is still
     // the caller's precondition. Preserve the original FrameLocator API.
     await iframe.evaluate(element => element.focus());
+    // Preview's isolation descriptor is not the browser's actual test environment.
+    // A fresh observation also works after caller-driven resize/state changes.
+    const observeEnvironment = () => gameFrame.evaluate(() => ({
+      viewport: { width: innerWidth, height: innerHeight }, devicePixelRatio,
+      maxTouchPoints: navigator.maxTouchPoints,
+      coarsePointer: matchMedia('(pointer: coarse)').matches, hover: matchMedia('(hover: hover)').matches,
+    }));
     const result = await inspect({ page, frame: page.frameLocator(preview.frameSelector), gameFrame,
-      environment: preview.environment, runtimeErrors, context, browser });
+      environment: preview.environment, observedEnvironment: await observeEnvironment(), observeEnvironment, runtimeErrors, context, browser });
     // Opt-in for tests claiming a clean runtime. A late user listener cannot
     // hide the helper's initial-load observations. Diagnostic callers keep the
     // original observe-only contract; this is not a gameplay/quality verdict.

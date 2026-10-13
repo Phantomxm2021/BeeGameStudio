@@ -1,0 +1,137 @@
+{
+  "version": "1.82",
+  "date": "2026-10-12",
+  "scope": "Deploy 1.81; normal authenticated independent debug long-history, continuous output and explicit pause/resume; local fixed provider only.",
+  "deployment": {
+    "initial": "1.81 runtime PID40892",
+    "current": "1.82 runtime PID42520",
+    "launcher": "/private/tmp/bgs-v3-deploy-182-runtime.ts",
+    "productionLog": "/private/tmp/bgs-v3-182-runtime.log",
+    "runtimeOnly": true,
+    "cliRebuilt": false,
+    "formalFrontendChanged": false,
+    "productionModelConfigurationChanged": false
+  },
+  "fixture": {
+    "projectId": "v3-host-stress-91df422b-13bf-49c1-8a0f-b39b5429cbbb",
+    "runId": "e508e81e-0632-4b79-98a4-11ace92b490e",
+    "realDatabase": true,
+    "normalHttpOnlyAuth": true,
+    "actualCLI": true,
+    "provider": "fail-closed fixed localhost fixture",
+    "nativeStarts": 2,
+    "localProviderCalls": 5,
+    "paidCalls": 0,
+    "goalAttempts": 1,
+    "explicitContinuations": 1,
+    "automaticDispatch": false,
+    "seedEvents": 90004,
+    "seedBytes": 60379830,
+    "seedExcludedFromNativeContext": true,
+    "initialStreamFrames": 72206,
+    "initialStreamCancelled": true,
+    "continuationStreamFrames": 5000,
+    "initialPauseAt": "2026-10-12T14:18:32.670Z",
+    "initialQuiescedAt": "2026-10-12T14:18:33.930Z",
+    "initialFinishedAt": "2026-10-12T14:18:39.117Z",
+    "continuationNativeSessionId": "cc615e4f-0c34-4f82-93d3-0f70e42a5607",
+    "sameNativeSession": true,
+    "finalVersion": 9,
+    "finalWriter": null,
+    "finalPaused": false,
+    "deliveryEligible": false,
+    "sourceWrites": "actual CLI Write/Read/Edit only",
+    "independentNotesUnchanged": true,
+    "seedUnchanged": true,
+    "healthDuringStream": {
+      "allStatus200": true,
+      "requests": 12,
+      "maxMs": 5.720875
+    },
+    "retained": true
+  },
+  "finalChecks": {
+    "seedSha256": "05ca40cb3f053ea355c3dbb5127f041fe2984855f6303914b4e8bde001e52661",
+    "seedUnchanged": true,
+    "fullTranscriptBytes": 108686789,
+    "fullTranscriptEvents": 167251,
+    "health": [
+      {
+        "port": 62173,
+        "status": 200
+      },
+      {
+        "port": 62174,
+        "status": 200
+      },
+      {
+        "port": 62175,
+        "status": 200
+      },
+      {
+        "port": 62176,
+        "status": 200
+      },
+      {
+        "port": 62177,
+        "status": 200
+      }
+    ]
+  },
+  "bug": {
+    "symptom": "running V3 event page empty",
+    "rootCause": "turnId assigned to durable AgentTurn only during settlement; events route required durable identity even though host onTurnAccepted had current turn identity",
+    "fix": "existing active map binds run/session/actual accepted turn; read-only accessor requires same local worker and current writer/fence. No cold-host/latest-Chat inference, added authority, database mutation or extra model request.",
+    "red": "/private/tmp/bgs-v3-182-live-events-red-approved.log",
+    "green": "/private/tmp/bgs-v3-182-live-events-green.log",
+    "liveDebugEvidence": {
+      "attemptId": "6282852d-39f2-4ccc-81c8-2a8674d41397",
+      "turnId": "beegame-turn-beegame_70165bf1ee0d4a6b97d1c3bbae00b52f-2",
+      "limit": 100,
+      "visibleFirstEventId": 165383,
+      "visibleText": "CONTROLLED_STREAM_3139",
+      "screenshot": "/private/tmp/bgs-v3-182-host-debug-live-events.png"
+    }
+  },
+  "regression": {
+    "distinctTests": 54,
+    "files": 7,
+    "failed": 0,
+    "assertions": 1009,
+    "logs": [
+      "/private/tmp/bgs-v3-182-event-recovery-regression.log",
+      "/private/tmp/bgs-v3-182-native-host-regression.log",
+      "/private/tmp/bgs-v3-182-typecheck.log"
+    ],
+    "typecheckPassed": true,
+    "diffCheckPassed": true,
+    "protectedPathsClean": [
+      "apps/frontend",
+      "src",
+      "packages/builtin-tools"
+    ]
+  },
+  "evidence": [
+    "/private/tmp/bgs-v3-181-host-debug-info.json",
+    "/private/tmp/bgs-v3-181-host-debug-final.json",
+    "/private/tmp/bgs-v3-182-host-debug-info.json",
+    "/private/tmp/bgs-v3-182-host-debug-final.json",
+    "/private/tmp/bgs-v3-182-host-debug-service-final.log",
+    "/private/tmp/bgs-v3-182-host-debug-completed.png"
+  ],
+  "limitations": [
+    "Synthetic host history is not a large accepted native model history / compression acceptance.",
+    "Fake provider outputs are not Agent planning, game quality, engine or token-savings evidence.",
+    "Two restored fixture startup reads failed TLS before server/model creation; same configured authenticated diagnostic later 200, no certificate validation bypass or proven certificate root cause.",
+    "Test-only disabled billing leaves isolated pending outbox warnings; no remote billing client or production settlement.",
+    "Three old unknown-writer fixtures remain locked; no fabricated exit or automatic retries.",
+    "Browser extension retained stale confirm metadata after native confirmation; native AX verified single executed continuation, no resend."
+  ],
+  "remaining": [
+    "Real eight-domain design/Skills depth, resource production and complete game/Scene/UI quality.",
+    "Actual Unity/Godot tool and target artifact evidence when applicable.",
+    "Formal frontend/product integration remains outside current authorization.",
+    "Missing exit facts and unknown external side effects remain unresolved.",
+    "Production token improvements last, not inferred from fake tests."
+  ]
+}

@@ -3,9 +3,13 @@ import {
   deleteModelConfig,
   listModelConfigs,
   updateModelConfig,
+  mapModelConfigToRuntime,
+  getModelConfig,
+  type ModelAuthMethod,
   type ModelProviderKind,
 } from '@bee-game-studio/agent-workflow'
 import { realpath } from 'node:fs/promises'
+import { PERSONAL_BYOK_ID, PERSONAL_CHATGPT_ID, PERSONAL_CLAUDE_ID, isPersonalModelId, personalModelAvailable, personalModelConfig, preferredModelId, resolveModelConnection } from './model-connections'
 import { loadLocalImageSettings, saveLocalImageSettings, selectImageConfig, updateImageSettings } from './image-generation/config-store'
 import type { ImageProviderKind } from './image-generation/config'
 import { resolve } from 'node:path'
@@ -47,6 +51,7 @@ import type { BeeGameDeploymentRecord } from './beegame/deployment-manager'
 import type { BeeGamePreviewSnapshot } from './beegame/preview-manager'
 import {
   loadRuntimeSettingsConfig,
+  resolveRuntimeFeatureSettings,
   mapRuntimeSettingsToEnv,
   saveRuntimeSettingsConfig,
   syncRuntimeSettingsToDedicatedRuntimeConfig,
@@ -159,6 +164,8 @@ export type {
   BeeGameBillingEventInput,
 } from '@bee-game-studio/beegame-billing-core/billing-ports'
 type CreateModelConfigInput = {
+  authMethods?: ModelAuthMethod[]
+  published?: boolean
   name: string
   provider: ModelProviderKind
   baseUrl?: string
@@ -176,6 +183,11 @@ const DEFAULT_MAX_PROJECTS_PER_USER = 100
 const RUNTIME_SETTINGS_ENV_KEY = 'BEEGAME_RUNTIME_SETTINGS_JSON'
 const RUNTIME_SETTING_FIELDS: Array<keyof RuntimeSettingsConfig> = [
   'autoMemoryEnabled',
+  'verificationAgentEnabled',
+  'agentTeamsEnabled',
+  'promptSuggestionEnabled',
+  'awaySummaryEnabled',
+  'coordinatorModeEnabled',
   'autoDreamEnabled',
   'skillSearchEnabled',
   'treeSitterBashEnabled',
@@ -502,9 +514,10 @@ export class DashboardRepository {
     _user: BeeGameUserContext,
   ): Promise<RuntimeSettingsConfig> {
     const supabase = this.supabaseForRequest(request)
-    return supabase
-      ? supabase.loadPlatformRuntimeSettings()
+    const saved = supabase
+      ? await supabase.loadPlatformRuntimeSettings()
       : this.loadLocalPlatformRuntimeSettings(request)
+    return { ...saved, ...resolveRuntimeFeatureSettings(saved) }
   }
 
   async loadImageGenerationConfig(request: Request, provider?: ImageProviderKind) {
@@ -528,22 +541,32 @@ export class DashboardRepository {
     input: RuntimeSettingsConfig,
   ): Promise<RuntimeSettingsConfig> {
     const supabase = this.supabaseForRequest(request)
-    return supabase
-      ? supabase.savePlatformRuntimeSettings(input)
+    const saved = supabase
+      ? await supabase.savePlatformRuntimeSettings(input)
       : saveRuntimeSettingsConfig(input, {
           dataDir: this.options.dashboardDataRoot,
         })
+    return { ...saved, ...resolveRuntimeFeatureSettings(saved) }
   }
 
-  async listModelConfigs(request: Request, user: BeeGameUserContext) {
+  async listModelConfigs(request: Request, user: BeeGameUserContext, management = false) {
     const supabase = this.supabaseForRequest(request)
+    let configs
     if (supabase) {
       const ownerId = this.getReadModelConfigOwnerId(user)
-      return ownerId
-        ? supabase.listPublicModelConfigs(ownerId)
-        : supabase.listRlsVisiblePublicModelConfigs()
-    }
-    return listModelConfigs(user.id)
+      configs = ownerId
+        ? await supabase.listPublicModelConfigs(ownerId)
+        : await supabase.listRlsVisiblePublicModelConfigs()
+    } else configs = listModelConfigs(this.getManageModelConfigOwnerId(user))
+    if (management) return configs
+    const root = this.options.getUserDataRoot(request)
+    const preferred = preferredModelId(root)
+    const personal = [PERSONAL_BYOK_ID, PERSONAL_CLAUDE_ID, PERSONAL_CHATGPT_ID]
+      .filter(id => personalModelAvailable(root, user.id, id))
+      .map(id => personalModelConfig(root, user.id, id)!)
+    const published = [...configs.filter(config => config.published !== false), ...personal]
+    if (preferred && published.some(config => config.id === preferred)) return published.map(config => ({ ...config, isDefault: config.id === preferred }))
+    return published
   }
 
   async createModelConfig(
@@ -557,7 +580,7 @@ export class DashboardRepository {
         this.getManageModelConfigOwnerId(user),
         input,
       )
-    const created = createModelConfig(user.id, input)
+    const created = createModelConfig(this.getManageModelConfigOwnerId(user), input)
     this.persistLocalModelConfigs()
     return created
   }
@@ -576,6 +599,7 @@ export class DashboardRepository {
         input,
       )
     }
+    if (!listModelConfigs(this.getManageModelConfigOwnerId(user)).some(config => config.id === id)) return undefined
     const updated = updateModelConfig(id, input)
     if (updated) this.persistLocalModelConfigs()
     return updated
@@ -592,6 +616,7 @@ export class DashboardRepository {
         this.getManageModelConfigOwnerId(user),
         id,
       )
+    if (!listModelConfigs(this.getManageModelConfigOwnerId(user)).some(config => config.id === id)) return false
     const deleted = deleteModelConfig(id)
     if (!deleted) return false
     this.persistLocalModelConfigs()
@@ -603,6 +628,7 @@ export class DashboardRepository {
     user: BeeGameUserContext,
     id: string,
   ): Promise<boolean> {
+    if (isPersonalModelId(id)) return personalModelAvailable(this.options.getUserDataRoot(request), user.id, id)
     const supabase = this.supabaseForRequest(request)
     if (supabase) {
       const ownerId = this.getReadModelConfigOwnerId(user)
@@ -610,7 +636,7 @@ export class DashboardRepository {
         ? supabase.hasModelConfig(ownerId, id)
         : supabase.hasRlsVisibleModelConfig(id)
     }
-    return listModelConfigs(user.id).some(config => config.id === id)
+    return listModelConfigs(this.getManageModelConfigOwnerId(user)).some(config => config.id === id)
   }
 
   async recordUsage(
@@ -787,27 +813,30 @@ export class DashboardRepository {
           'Supabase runtime env must be provided by RLS/RPC; the local runtime host does not use service-role Supabase credentials',
         )
       }
+      const selectedId = modelConfigId ?? preferredModelId(dataDir)
+      const personal = selectedId && isPersonalModelId(selectedId) ? personalModelConfig(dataDir, userId, selectedId) : undefined
+      if (personal && !personalModelAvailable(dataDir, userId, selectedId!)) throw new Error('Selected personal model is disconnected')
       const env = await client.loadRuntimeEnv({
         userId,
         dataDir,
         authToken: this.requireAuthToken(authToken),
-        ...(modelConfigId ? { modelConfigId } : {}),
+        ...(modelConfigId && !personal ? { modelConfigId } : {}),
       }).catch(error => {
         console.error('[BeeGame runtime dependency]', JSON.stringify({
           timestamp: new Date().toISOString(), step: 'runtime_env_rpc', ...safeErrorFacts(error),
         }))
         throw error
       })
-      const modelEnv = modelConfigId
-        ? await this.supabaseForAuthToken(
+      const selectedModel = personal ? { config: personal, env: {} } : await this.supabaseForAuthToken(
             authToken,
-          ).loadRlsVisibleModelRuntimeEnv(modelConfigId).catch(error => {
+          ).loadRlsVisibleModelRuntimeConfig(selectedId).catch(error => {
             console.error('[BeeGame runtime dependency]', JSON.stringify({
               timestamp: new Date().toISOString(), step: 'selected_model_config', ...safeErrorFacts(error),
             }))
             throw error
           })
-        : {}
+      if (selectedId && !selectedModel) throw new Error('Selected model is no longer available')
+      const selectedModelEnv = selectedModel ? resolveModelConnection(dataDir, selectedModel.config, selectedModel.env) : {}
       const runtimeSettings = this.syncRuntimeSettingsFromRuntimeEnv(env, dataDir)
       const webTools = await this.supabaseForAuthToken(authToken).loadWebTools(userId).catch(error => {
         console.error('[BeeGame runtime dependency]', JSON.stringify({
@@ -820,12 +849,13 @@ export class DashboardRepository {
       // Supabase owns logical runtime configuration (provider credentials and
       // platform feature flags). The runtime host owns physical isolation. Do
       // not allow an RPC payload to select another user's runtime config root.
-      const hostIsolationEnv = mapRuntimeSettingsToEnv({}, { dataDir })
+      const hostIsolationEnv = mapRuntimeSettingsToEnv(runtimeSettings, { dataDir })
       return {
         ...env,
-        ...modelEnv,
+        ...selectedModelEnv,
         ...mapWebToolsConfigToRuntimeEnv(webTools),
         ...hostToolEnv,
+        ...hostIsolationEnv,
         ...(runtimeSettings.skillSearchEnabled !== undefined
           ? { SKILL_SEARCH_ENABLED: runtimeSettings.skillSearchEnabled ? '1' : '0' } : {}),
         BEEGAME_CONFIG_DIR: hostIsolationEnv.BEEGAME_CONFIG_DIR,
@@ -839,11 +869,19 @@ export class DashboardRepository {
     if (userId) await this.materializeRemoteUserSkillsSafely(userId, dataDir)
     const webTools = loadWebToolsConfig({ dataDir })
     const platformEnv = this.mapLocalPlatformRuntimeSettingsToEnv(dataDir)
+    const selectedId = modelConfigId ?? preferredModelId(dataDir)
+    // Explicit model IDs are authorized at the request boundary. Defaults stay owner-scoped.
+    const personal = selectedId && isPersonalModelId(selectedId) ? personalModelConfig(dataDir, userId ?? '', selectedId) : undefined
+    if (personal && !personalModelAvailable(dataDir, userId ?? '', selectedId!)) throw new Error('Selected personal model is disconnected')
+    const selected = personal ?? (selectedId ? getModelConfig(selectedId) : userId ? listModelConfigs(userId).find(config => config.isDefault) : undefined)
+    if (selectedId && !selected) throw new Error('Selected model is no longer available')
+    const selectedModelEnv = selected ? resolveModelConnection(dataDir, selected, mapModelConfigToRuntime(selected.id)?.env ?? {}) : {}
     syncWebToolsToRuntimeConfig(webTools, { dataDir })
     return {
       ...mapWebToolsConfigToRuntimeEnv(webTools),
       ...hostToolEnv,
       ...platformEnv,
+      ...selectedModelEnv,
       BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: builtinSkillsDir,
     }
   }

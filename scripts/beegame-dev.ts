@@ -37,7 +37,7 @@ await assertFixedServicePortsAvailable()
 console.log('Building Bee Game Studio native runtime...')
 const nativeRuntimeBuild = Bun.spawnSync(plan.nativeRuntimeBuild.command, {
   cwd: plan.nativeRuntimeBuild.cwd,
-  env: process.env,
+  env: { ...process.env, ...plan.nativeRuntimeBuild.env },
   stdout: 'inherit',
   stderr: 'inherit',
 })

@@ -115,6 +115,8 @@ test('autonomous editor has a single CAS writer, refuses stale/paused scope, and
     failSettlement=false
     f.run=await executor.recover(f.run,identity)
     expect(f.run.sourceEdits![0]!.sourceEdit.status).toBe('failed');expect(f.run.writer).toBeUndefined()
+    expect(f.run.blockedReason).toContain('Source edit failed:')
+    expect(f.run.blockedReason).not.toContain('Saved candidates are unmeasured')
     await expect(executor.edit(f.run,f.run.sourceEdits![0]!.requestKey==='a'?a:b)).rejects.toThrow('historical/failed')
     f.run=await executor.stop(f.run)
     await expect(executor.edit(f.run,{...await editValue(f),requestKey:'paused'})).rejects.toThrow('resume')
@@ -133,6 +135,29 @@ test('an unresolved autonomous save cannot be released using a missing session o
     await expect(f.store.commit('p','owner',f.run.version,forged,'forged')).rejects.toThrow('retain its reserved writer')
     expect(digest(await readFile(join(f.root,edit.path)))).toBe(edit.beforeHash)
   }finally{await f.dispose()}
+})
+test('original host observes a completed save despite failed exit persistence; explicit recovery cannot rewrite sources or be inferred by a new host',async()=>{
+  const f=await fixture(true)
+  let outage=true
+  const store={read:f.store.read,async commit(...args:Parameters<typeof f.store.commit>){
+    if(args[4]==='writer.quiesced' && outage)throw Error('Synthetic exit write outage')
+    await f.store.commit(...args)
+  }}
+  const executor=createV3Executor({sessions:f.sessions,store}),other=createV3Executor({sessions:f.sessions,store:f.store})
+  try {
+    const body={...await editValue(f),requestKey:'exit-outage'},scene=await readFile(join(f.root,'content/scenes/level.json'))
+    await expect(executor.edit(f.run,body)).rejects.toThrow('exit write outage');await f.current()
+    expect(f.run.sourceEdits![0]!.quiescedAt).toBeUndefined()
+    expect(await executor.recoveryEvidence(f.run)).toBe('original-host');expect(await other.recoveryEvidence(f.run)).toBe('unavailable')
+    const saved=await readFile(join(f.root,'content/ui/menu.json'))
+    const identity={expectedVersion:f.run.version,attemptId:f.run.writer!.attemptId,fence:f.run.writer!.fence}
+    await expect(other.recover(f.run,identity)).rejects.toThrow('quiescence')
+    outage=false;f.run=await executor.recover(f.run,identity)
+    expect(f.run.writer).toBeUndefined();expect(f.run.sourceEdits![0]!.sourceEdit.status).toBe('failed')
+    expect(await readFile(join(f.root,'content/ui/menu.json'))).toEqual(saved)
+    expect(await readFile(join(f.root,'content/scenes/level.json'))).toEqual(scene);expect(f.starts).toBe(0)
+    expect(await executor.recoveryEvidence(f.run)).toBe('unavailable')
+  }finally{await executor.dispose();await other.dispose();await f.dispose()}
 })
 
 test('autonomous save API enforces owner permission, routes pause/recovery to host saves and never invokes native tools',async()=>{
@@ -172,6 +197,21 @@ test('autonomous save API enforces owner permission, routes pause/recovery to ho
   }finally{await Promise.all(cleanups.map(f=>f()));await f.dispose()}
 })
 
+test('legacy claim response loss closes only an original unstarted reservation without dispatch or source changes',async()=>{
+  const f=await fixture(),executor=createV3Executor({sessions:f.sessions,store:{read:f.store.read,async commit(...args){
+    await f.store.commit(...args)
+    if(args[4]==='attempt.claimed')throw Error('Synthetic claim response lost')
+  }}})
+  try {
+    const before=await readFile(join(f.root,'content/ui/menu.json'))
+    await expect(executor.start(f.run,'ui','lost-start',{})).rejects.toThrow('response lost')
+    await f.current();expect(f.run.writer).toBeUndefined();expect(f.run.attempts).toHaveLength(1)
+    expect(f.run.attempts[0]!.quiescedAt).toBeDefined();expect(f.run.attempts[0]!.error).toContain('before execution')
+    expect(f.run.tasks.ui!.status).not.toBe('succeeded')
+    expect(await readFile(join(f.root,'content/ui/menu.json'))).toEqual(before);expect(f.starts).toBe(0)
+    expect(await executor.start(f.run,'ui','lost-start',{})).toEqual(f.run.attempts[0])
+  }finally{await executor.dispose();await f.dispose()}
+})
 test('pause during source-save reservation prevents later replacement; archive aliases cannot create outside descendants',async()=>{
   const f=await fixture(true)
   const executor=createV3Executor({sessions:f.sessions,store:{read:f.store.read,async commit(...args){

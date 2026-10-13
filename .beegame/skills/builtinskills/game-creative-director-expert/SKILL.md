@@ -44,7 +44,7 @@ For a core mechanic, ask:
 - How does it reinforce the fantasy?
 - Is it serving play, expression, atmosphere, or a deliberate combination?
 
-Avoid mechanics without thematic justification.
+Keep mechanics that serve the intended play, expression, clarity or atmosphere. Not every useful rule needs a fictional justification, and thematic consistency alone does not make an interaction enjoyable.
 
 ---
 
@@ -71,4 +71,4 @@ Keep scope decisions and dependencies in the existing project documents or task 
 
 ## Reference Files
 
-Load `references/emotional-arc-framework.md` when mapping player emotional journey, session pacing, or long-term identity reinforcement.
+Read [experience and tradeoff examples](references/emotional-arc-framework.md) when establishing the player promise, choosing between competing treatments or mapping session pacing. The examples explain decisions, not required narrative arcs or production stages.

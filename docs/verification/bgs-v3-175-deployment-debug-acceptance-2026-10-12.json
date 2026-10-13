@@ -1,0 +1,198 @@
+{
+  "version": "1.75",
+  "date": "2026-10-12",
+  "status": "deployed-and-controlled-debug-verified",
+  "priority": "Workflow correctness first; cost optimization deferred",
+  "deployment": {
+    "rootEnv": "bee-game-studio/.env.local",
+    "runtimePort": 62174,
+    "runtimePid": 25438,
+    "runtimeSession": 29132,
+    "restartedOnly": "BGS runtime",
+    "otherServicesHealth200": [
+      62173,
+      62175,
+      62176,
+      62177
+    ],
+    "cliRebuilt": false,
+    "formalFrontendRebuilt": false
+  },
+  "changes": [
+    {
+      "kind": "independent-debug-guidance",
+      "result": "Existing-goal work/repair is distinct from actual requirement change; no automatic Review/Repair plan or dispatch."
+    },
+    {
+      "kind": "independent-debug-measurement-selection",
+      "rootCause": "load rebuilt options in oldest-first order with indistinguishable artifact/status labels, so opening current Preview defaulted to superseded receipt.",
+      "result": "Newest actual receipt first, unique ID/time shown. Failed/incomplete latest record never silently falls back to old success; history remains selectable. Host superseded-receipt rejection unchanged."
+    },
+    {
+      "kind": "independent-debug-question-display",
+      "rootCause": "Cached pending Question remained displayed after stop and a later native turn; host submission guard was already correct.",
+      "result": "On loaded writer/requirements/Run change or pause, clear incompatible cached Question. No permission granted, original questions/history unchanged."
+    },
+    {
+      "kind": "synthetic-test-provider-only",
+      "result": "Extended existing explicit remote-DB native-CLI fixture for work/change/actual Question answer and interrupted continue; fixed provider output is not a production runtime decision."
+    }
+  ],
+  "deployedReadOnlyAcceptance": {
+    "realPausedProject": "v3-paid-a801f793-52cb-4874-8893-f5eaad8bf833",
+    "version": 121,
+    "paused": true,
+    "writer": "none",
+    "eventPages": {
+      "rowsEach": 100,
+      "page1": [
+        94391,
+        94490
+      ],
+      "page2": [
+        94291,
+        94390
+      ],
+      "displayChars": [
+        34310,
+        34562
+      ],
+      "overlap": false
+    },
+    "questions": 0,
+    "noDispatch": true
+  },
+  "synthetic": {
+    "projectId": "v3-agent-edit-d40674ca-b28d-4ae7-9d20-dd9f50d57ef1",
+    "runId": "6b0c7d27-b8ae-4536-b261-01308a4f4c88",
+    "root": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-agent-edit-nIXtOM",
+    "normalAuth": true,
+    "realRemoteDatabase": true,
+    "nativeCli": true,
+    "model": "fixed loopback provider only",
+    "controlledProviderRequests": 22,
+    "paidCalls": 0,
+    "serviceStoppedAfterNoWriter": true,
+    "retained": true,
+    "finalVersion": 29,
+    "writer": "none",
+    "plans": [],
+    "tasks": {},
+    "quality": "unverified; deliveryEligible=false",
+    "nativeSessionId": "47f67aa7-52e7-4cd8-b314-be33bad0d1c7",
+    "originalRequirements": "7e2f9544-6396-4cdc-9ae6-d66768e91b2b",
+    "changedRequirements": "965f7100-cd54-4a07-bd5c-5ba021342039",
+    "turns": [
+      {
+        "intent": "goal",
+        "status": "ended",
+        "measurement": "659176a5-f69b-4740-9175-75faf5483f31"
+      },
+      {
+        "intent": "work",
+        "status": "ended",
+        "measurement": "cdf90a65-9721-4ea1-9eb7-8047adc1942c"
+      },
+      {
+        "intent": "change",
+        "status": "ended",
+        "measurement": "4bcc206f-343a-40b2-9b45-29c47809396b"
+      },
+      {
+        "intent": "work",
+        "status": "interrupted",
+        "quiescedAt": "2026-10-12T09:51:22.262Z"
+      },
+      {
+        "intent": "continue",
+        "status": "ended",
+        "measurement": "1862fbf8-c5bb-4af4-920a-4da59630957b"
+      }
+    ],
+    "evidence": {
+      "skillLoaded": "bgs-builtins:gameplay-programmer",
+      "savedHeight64MadeOldMeasurementStale": true,
+      "workKeptRequirements": true,
+      "previewHeights": [
+        52,
+        64,
+        72
+      ],
+      "buttonFeedback": "Clicked",
+      "question": "Choose the synthetic changed height?",
+      "actualAnswer": "72",
+      "progressBeforeStop": "partial",
+      "progressAfterContinue": "complete",
+      "sameNativeUuid": true,
+      "resumeDidNotDispatch": true,
+      "goalReplayed": false,
+      "notesSha256": "71b33e63d5444b23ab9df883e6a2fa6ce9297ab397c6560c96ce633946c2a197",
+      "unchangedSceneSha256": "9438fdba53e83acc70c85b617d74baba169c11a8eb1d18d3168d6cdda9b8fd11",
+      "export": {
+        "kind": "project",
+        "bytes": 11510,
+        "chromeShowedCompleted": true,
+        "archiveEntries": 15,
+        "byteIdentityVerified": false,
+        "note": "Browser download wait timed out/reset. Archive listing observed, later downloaded path unavailable; do not claim byte-for-byte receipt/source verification."
+      },
+      "screenshot": "/private/tmp/bgs-v3-175-debug-proof.png"
+    }
+  },
+  "validation": {
+    "regression": {
+      "pass": 31,
+      "fail": 0,
+      "expects": 324,
+      "files": 3,
+      "log": "/private/tmp/bgs-v3-175-regression-final.log"
+    },
+    "display": {
+      "pass": 2,
+      "fail": 0,
+      "expects": 10,
+      "files": 1,
+      "log": "/private/tmp/bgs-v3-175-display-final.log"
+    },
+    "nativeQuestionDiscovery": {
+      "pass": 4,
+      "fail": 0,
+      "expects": 210,
+      "files": 3,
+      "log": "/private/tmp/bgs-v3-175-native.log"
+    },
+    "distinctPass": 37,
+    "fail": 0,
+    "expects": 544,
+    "typecheckLog": "/private/tmp/bgs-v3-175-typecheck-final.log",
+    "typecheckExit": 0,
+    "jsSyntaxExit": 0,
+    "diffCheckExit": 0,
+    "initialFailures": "23 goal tests could not bind loopback port under sandbox. Same tests passed with local listening enabled; no assertions weakened.",
+    "databaseEnd": {
+      "projectsChecked": 23,
+      "unresolvedWriters": [],
+      "writes": 0
+    }
+  },
+  "protections": {
+    "paidRuns": 0,
+    "manualRealGameEdits": 0,
+    "formalFrontendEdits": 0,
+    "claudeCodeSourceEdits": 0,
+    "builtinToolsEdits": 0,
+    "newAgentLimits": 0,
+    "newReviewPrompt": 0,
+    "forcedEngineOrRenderer": 0,
+    "automaticRetries": 0
+  },
+  "remaining": [
+    "Real eight-domain design, resources and complete game-quality acceptance are still unpassed and not run this turn.",
+    "Production frontend/publish wiring is authorization-excluded.",
+    "Unity/Godot real project operations and exports require applicable environment/requirements; no engine route mandated.",
+    "Remote crash-during-edit/cross-process races and uncertain external operations not fully covered by this healthy-path remote fixture.",
+    "Host CPU hot-function issue not claimed resolved.",
+    "No genuine Token-saving measurement; fixed synthetic usage is not billing evidence.",
+    "Downloaded export byte-for-byte check remains unverified."
+  ]
+}

@@ -1,0 +1,130 @@
+{
+  "date": "2026-10-13",
+  "scope": "Round209: resolve four regression failures, related typing, and explicit V3 measured-static publication. Offline system acceptance only.",
+  "constraints": {
+    "paidExecution": false,
+    "realGameEdited": false,
+    "formalFrontendEdited": false,
+    "claudeCodeCoreEdited": false,
+    "serviceRestart": false,
+    "realCloudUpload": false,
+    "newReviewPrompt": false,
+    "agentLimitsAdded": false
+  },
+  "regressionRootCauses": [
+    {
+      "failure": "Bootstrap prompt assertion",
+      "cause": "Fixture expected obsolete literal responsibility/header wording.",
+      "repair": "Assert current gameplay responsibility/header contract; no production prompt changed."
+    },
+    {
+      "failure": "Two milestone completion cases",
+      "cause": "Fake authors returned generic delivery/PASS prose instead of the required terminal complete receipt; fake joint Review hardcoded inspect instead of the supplied revise step.",
+      "repair": "Update synthetic runner completion and receipt step from the actual turn. Retain exact expected phase traversal as legacy compatibility, not V3 or game-quality proof."
+    },
+    {
+      "failure": "Readiness after restart",
+      "cause": "Same fake author completion prevented fixture from ever creating accepted legacy delivery state.",
+      "repair": "Complete the synthetic fixture through the existing acceptance path; do not bypass readiness."
+    }
+  ],
+  "typecheck": {
+    "related": "Two new browser-test stream typing errors fixed by retaining the concrete Bun.spawn pipe-process type. Final root typecheck has no diagnostics in this turn's changed files.",
+    "rootCommand": "bun run typecheck",
+    "rootExitCode": 2,
+    "remainingDiagnostics": 6,
+    "remainingFile": "packages/agent-workflow-server/src/__tests__/model-connections.test.ts",
+    "remainingDetails": [
+      "Four inferred environment-result property errors",
+      "Fixture role member is not a BeeGameRole",
+      "Mock fetch lacks Bun fetch.preconnect"
+    ],
+    "boundary": "Unrelated model-connection work was preserved; full repository typecheck is NOT passing. Package-only typecheck additionally lacks root path mappings; its thousands of downstream diagnostics are not this repair's root-level result.",
+    "log": "/tmp/bgs-round209-root-types-verified.log"
+  },
+  "implemented": [
+    {
+      "area": "V3 ordinary deployment API",
+      "change": "Existing project deployment-readiness, deployments GET/POST select the latest ended/quiescent/current measured build, reject arbitrary artifact payloads and stale selection, preserve ownership/permissions, and reuse the existing deployment manager/persistence/publisher. No legacy acceptance restoration or model invocation."
+    },
+    {
+      "area": "Measured bytes",
+      "change": "Server-owned run/measurement/artifact identity in deployment input and persisted buildLog. No package script or rebuild. Original, copied and current selected evidence checked before publication; recheck after URL observation. Nonstandard explicit artifact folders supported."
+    },
+    {
+      "area": "Explicit publication versus quality",
+      "change": "User-requested deployment does not set deliveryEligible or certify game quality. Readiness, buildLog and completion message retain quality unverified. Existing Preview/export guards remain unchanged."
+    },
+    {
+      "area": "Failed artifact exposure",
+      "change": "Local public serving now requires a durable succeeded record; queued, failed, interrupted and unregistered copied folders cannot be served. Successful versions remain available after manager restart; legacy rollback/retention tests remain passing."
+    },
+    {
+      "area": "Publication URL base",
+      "change": "Reuse the existing isolated static browser observer against the copied bytes at the returned publication URL. Locally intercepted requests preserve actual origin/path semantics, identify a root-absolute reference outside the publication base, and keep the deployment failed. No HTML rewrite, game repair, new agent-facing check contract or model loop."
+    },
+    {
+      "area": "Concurrent submit",
+      "change": "Recheck active publication synchronously immediately before start after awaited selection reads. A duplicate gets 409; no duplicate publisher/model/build call."
+    }
+  ],
+  "offlineRegression": {
+    "combined": {
+      "passed": 126,
+      "failed": 0,
+      "skipped": 2,
+      "files": 14,
+      "log": "/tmp/bgs-round209-final-regression.log"
+    },
+    "lastConcurrencyRetest": {
+      "passed": 2,
+      "failed": 0,
+      "log": "/tmp/bgs-round209-publish-concurrency.log",
+      "counting": "Same two cases in combined suite; not additional unique passes."
+    },
+    "legacyFailures": {
+      "passed": 11,
+      "failed": 0,
+      "log": "/tmp/bgs-round209-legacy-final.log"
+    },
+    "publicationBaseAndRuntime": {
+      "passed": 70,
+      "failed": 0,
+      "log": "/tmp/bgs-round209-publication-base.log",
+      "counting": "Overlaps combined suite; do not sum."
+    },
+    "skipped": [
+      "managed dev and built production execute inside the Dashboard sandbox",
+      "V3 consumer paints saved geometry/font mutations and applies the authored Camera"
+    ],
+    "actualBrowser": "Synthetic local publication loaded its real /deployments/<id>/ URL, module and fetched JSON in Chromium and survived reload. Nested remote-URL semantics observed through local interception; no actual remote upload.",
+    "negativeCases": [
+      "viewer denied",
+      "arbitrary artifact payload denied",
+      "stale measurement selection denied",
+      "source edit invalidates readiness and submit",
+      "copy mismatch rejected",
+      "writer/eligibility revoked after copy rejected",
+      "publisher verification failure stays failed and local URL is 404",
+      "root-absolute module outside publication base names the missing path and fails without modifying source",
+      "duplicate submit returns 409 with one publisher invocation"
+    ],
+    "syntaxAndWhitespace": "runtime-browser.mjs node --check and modified-file git diff --check passed"
+  },
+  "selfAudit": [
+    "Not a return to fixed eight-document stages: old fixture repairs only maintain existing compatibility tests.",
+    "Publication URL observation addresses a distinct Preview-root versus deployment-subpath mismatch. It is host-side startup observation during explicit deployment, not mandatory Agent Review or an instruction to choose a runtime/framework.",
+    "Publisher upload is not atomic with browser/path observation or remote verification. Existing remote storage may contain failed uploads; no automatic deletion/retry or claim of rollback of remote objects. Local failed copies and metadata-gated Worker records are not marked successful.",
+    "Path observation is local interception of immutable copied files, not proof of CDN behavior, remote MIME/auth/caching or every later route/interaction. Existing publisher HTTP verification is retained.",
+    "No new database schema, workflow state machine, review prompt, paid loop or manual test-game edit.",
+    "Changes remain in the dirty integration worktree; unrelated frontend, Claude Code and model-account work preserved."
+  ],
+  "remaining": [
+    "Deploy/restart the runtime to adopt these changes; not performed this turn.",
+    "Actual configured remote publication and ordinary frontend behavior have not been exercised; fake publisher/offline HTTP/browser evidence does not prove cloud credentials or CDN configuration.",
+    "Six separate model-connection test type diagnostics remain; do not report full typecheck success.",
+    "Two optional integration tests remain skipped.",
+    "Game-quality coverage, lighting/Skills behavior and real token improvements remain unverified; no real project resumed.",
+    "Current publication support is the existing static-artifact host only, not native/server/engine publication. No Agent technology choice is imposed."
+  ]
+}

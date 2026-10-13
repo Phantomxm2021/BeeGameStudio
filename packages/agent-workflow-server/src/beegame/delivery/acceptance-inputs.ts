@@ -14,5 +14,4 @@ export type AcceptanceInput = DesignStageState & {
   // One identity in the existing state, not another task/retry store.
   lastProductFailureEvidence?: string
   accepted?: AcceptanceRecord
-  qualityReview?: { revision: string; reviewerId: string; decision: 'accepted' | 'changes-required'; note: string }
 }

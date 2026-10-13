@@ -2,6 +2,8 @@
 
 Use these contracts for VR, AR, MR, spatial computing, head-tracked, controller, hand, gesture, or room-scale experiences.
 
+Choose the actual platform and runtime first. Read the applicable [Apple, Meta and Unity source guidance](../../spatial-computing-game-expert/references/spatial-rule-architecture.md); those platforms' input APIs, permissions and locomotion facilities are not interchangeable.
+
 ## XR Rig Model
 
 Separate these transforms:
@@ -34,14 +36,7 @@ Contract:
 - Acceleration, maximum speed, and turn rate should be comfort-aware.
 - Moving while looking down must not move the player into the floor or reverse direction.
 
-Reference pattern:
-
-```ts
-const basisForward = flattenToGround(selectedBasis.forward);
-const basisRight = flattenToGround(selectedBasis.right);
-const move = normalize(basisForward * stickY + basisRight * stickX);
-xrRig.position += move * speed * dt;
-```
+Use a finite orthonormal ground basis and a strength-preserving input bound, as illustrated in [screen controls](screen-controls.md). Looking vertically can make a projected basis degenerate; use the declared stable heading rather than normalizing zero. Fixed-speed or quantized locomotion is an explicit design choice, not an accidental consequence of normalization. Apply requested motion through the runtime's actual collision and locomotion facility, not an unchecked direct rig translation. For Unity XRI, consult the installed package's providers and XR Origin handling.
 
 ## Teleport Locomotion
 
@@ -58,7 +53,7 @@ For `xr_teleport_locomotion`:
 For `xr_snap_turn` or smooth turn:
 - Rotate the rig/origin around the current head position projected to the floor.
 - Do not rotate only the camera.
-- Snap turn increments should be comfortable, commonly 30 or 45 degrees.
+- Choose snap increments and repeat/cancellation behavior from the target experience and user options; an example angle is not a comfort guarantee.
 - Smooth turn needs tunable speed and should be optional if comfort matters.
 
 ## Room-Scale MR
@@ -79,7 +74,7 @@ For `ar_world_anchored`:
 
 ## XR Comfort And Safety
 
-- Prefer teleport and snap turn for broad comfort unless smooth locomotion is specifically requested.
+- Consider teleport and snap turn as comfort options under the relevant platform guidance, while preserving the agreed game interaction and user preferences. They do not guarantee comfort and can introduce disorientation.
 - Avoid forced acceleration, camera shake, roll, and uncontrolled vertical motion.
 - Provide recenter/reset when feasible.
 - Keep UI readable at comfortable distance and scale.

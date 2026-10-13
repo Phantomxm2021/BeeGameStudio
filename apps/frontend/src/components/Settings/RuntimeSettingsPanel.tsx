@@ -23,6 +23,11 @@ function getRuntimeCapabilityItems(copy: RuntimeCapabilityCopy): RuntimeCapabili
   return [
     'autoMemoryEnabled',
     'autoDreamEnabled',
+    'verificationAgentEnabled',
+    'agentTeamsEnabled',
+    'promptSuggestionEnabled',
+    'awaySummaryEnabled',
+    'coordinatorModeEnabled',
     'skillSearchEnabled',
     'treeSitterBashEnabled',
     'webBrowserToolEnabled',

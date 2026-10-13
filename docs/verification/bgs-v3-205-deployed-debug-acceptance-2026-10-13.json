@@ -1,0 +1,58 @@
+{
+  "scope": "Deploy the 204 fixes; non-paid independent debug acceptance only. No automatic replay/retry, generated-game modifications, formal frontend or Claude Code source changes.",
+  "result": "partially-verified; debug acceptance stopped at a newly exposed API handoff gap",
+  "deployment": {
+    "runtimePid": 84409,
+    "runtimePort": 62174,
+    "launcher": "/private/tmp/bgs-v3-deploy-205-runtime.ts",
+    "log": "/private/tmp/bgs-v3-205-deployed-runtime.log",
+    "nativeBuild": "dist/build-4Xpeak",
+    "feature": "FEATURE_VERIFICATION_AGENT=0",
+    "publication": "Normal build with startup checks and atomic dist entry publication; previous generations retained",
+    "health": {"62173":200,"62174":200,"62175":200,"62176":200,"62177":200},
+    "frontendRebuilt": false,
+    "unaffectedServicesRestarted": false
+  },
+  "checks": [
+    {
+      "area": "Mandatory native verification off",
+      "status": "passed",
+      "evidence": "Actual deployed dist CLI + three fixed localhost model replies: no mandatory system verification instruction, no completed-Todo verification nudge, no registered verification role; general-purpose, Agent, Bash and Skill retained."
+    },
+    {
+      "area": "Tool handoff",
+      "status": "passed",
+      "evidence": "Actual deployed CLI Bash sandbox ran preview.mjs --run with Node; retained execution.json/stdout/stderr. Exit 0 with checks:[false] remained quality:unverified. Separate offline regression covered large output retention, literal arguments, nonzero exit and capability revocation."
+    },
+    {
+      "area": "Focused continuation",
+      "status": "offline-passed; full browser continuation not reached",
+      "evidence": "Agent-goal regression passed explicit focused continuation after interrupted exit, preserved workspace/requirement/previous attempt identity, did not pass resumeSessionId, retained prior user and Question facts, and did not automatically execute on resume. Deployed debug page exposes focused for work/change/continue.",
+      "limit": "The independent native/debug scenario stopped at the earlier evidence-classification assertion. This turn does not certify the entire browser-focused continuation path."
+    },
+    {
+      "area": "Evidence invalidation classification",
+      "status": "core-passed; debug-API-failed",
+      "evidence": "Core regression separates document/source, report, artifact and per-check identities without remeasurement. Native/debug test failed after synthetic source save because freshness.changes was absent.",
+      "rootCause": "GET /agent/measurements/:measurement in workflow-v3/routes.ts calls selectAgentMeasuredBuild and reconstructs freshness as current/code/reason. The selector performs inspection but returns no classification; its WorkflowError also carries only the refusal summary. Therefore changes/evidence are discarded on the read API, including successful selection, and early interrupted-turn rejection prevents input inspection altogether.",
+      "deployedReadOnlyObservation": "The real paused project's historical measurement was readable but returned only current:false, code:preview-unverified and a completed-turn requirement; execution:interrupted, quality:unverified.",
+      "nextCorrection": "Keep input-identity diagnostics separate from Preview/export eligibility. Preserve inspectAgentMeasurementInputs output in the read response even when selection is refused; keep current/eligibility negative and maintain authorization/writer checks. Do not relax exports or infer quality. Verify this at the API boundary, not only at the helper function.",
+      "implementedThisTurn": false
+    }
+  ],
+  "regression": {
+    "nativeAndDebug": {"passed":1,"failed":1,"log":"/private/tmp/bgs-v3-205-native-debug.log","automaticReruns":0},
+    "remainingOffline": {"passed":71,"failed":0,"skipped":1,"log":"/private/tmp/bgs-v3-205-offline.log"},
+    "launcher": {"passed":6,"failed":0,"log":"/private/tmp/bgs-v3-205-launcher.log"},
+    "skipped": "Opt-in saved geometry/font/Camera rendering test was not enabled in this batch; not a pass.",
+    "syntaxAndWhitespace": "Node syntax and git diff --check passed",
+    "harnessChanges": "Extended the existing independent debug fixture with an optional explicit focused-continuation scenario and API-level source/artifact assertions. No product source correction was made after the failure."
+  },
+  "realProject": {
+    "projectId": "v3-fresh-a44f123f-7289-459d-8a4e-6f2401c5ae23",
+    "beforeAndAfter": {"version":16,"turns":2,"writer":null,"lastStatus":"interrupted","pausedAt":"2026-10-13T01:56:09.449Z"},
+    "operations": "Only debug read Run and read historical measurement. No resume, prepared task, submit, repair or game-file write."
+  },
+  "paidModelCalls": 0,
+  "notClaimed": ["Full four-item debug acceptance", "Real-game quality acceptance", "Measured token savings", "Deployed fix for the newly found read-API classification gap"]
+}

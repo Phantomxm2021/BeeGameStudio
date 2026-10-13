@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { wrapCommandWithSandboxMacOS } from '@anthropic-ai/sandbox-runtime/dist/sandbox/macos-sandbox-utils.js'
@@ -14,6 +14,65 @@ import { CONTENT_CHECKER_PATH, materializeSceneUiFormat } from './scene-ui-conte
 import { sceneLayoutFixture, uiLayoutFixture } from './fixtures/layout-fixture'
 import { materializeBalanceCalculator } from './balance-calculation'
 import { nativeSessionOutputPath } from './native-runtime-process-path'
+
+test('host tool read grants are explicit per canonical project, never model/project settings or external writes',async()=>{
+  const key='BEEGAME_PROJECT_TOOL_READ_PATHS',prior=process.env[key]
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-host-tool-grant-')))
+  const project=join(root,'project'),other=join(root,'other'),tool=join(root,'tool')
+  const outputs=new Set<string>()
+  try {
+    await Promise.all([project,other,tool].map(path=>mkdir(path)))
+    await writeFile(join(tool,'reference.txt'),'TOOL_REFERENCE')
+    const config=JSON.stringify({[project]:[tool]})
+    delete process.env[key]
+    const untrusted=await projectExecutionAccess({workspacePath:project,sessionId:'grant',environment:{[key]:config}})
+    outputs.add(untrusted.nativeOutput)
+    expect(untrusted.settings.sandbox.filesystem.allowRead).not.toContain(tool)
+    process.env[key]=config
+    const granted=await projectExecutionAccess({workspacePath:project,sessionId:'grant',environment:{}})
+    outputs.add(granted.nativeOutput)
+    expect(granted.settings.sandbox.filesystem.allowRead).toContain(tool)
+    expect(granted.settings.sandbox.filesystem.allowWrite).not.toContain(tool)
+    expect(granted.settings.sandbox.allowUnsandboxedCommands).toBe(false)
+    expect(granted.settings.sandbox.enabled).toBe(true)
+    expect(granted.flags.slice(0,2)).toEqual(['--setting-sources','user'])
+    expect(await granted.isReferenceRead('Read',{file_path:join(tool,'reference.txt')})).toBe(false)
+    expect(granted.environment).not.toHaveProperty(key)
+    const unrelated=await projectExecutionAccess({workspacePath:other,sessionId:'grant',environment:{}})
+    outputs.add(unrelated.nativeOutput)
+    expect(unrelated.settings.sandbox.filesystem.allowRead).not.toContain(tool)
+    delete process.env[key]
+    const revoked=await projectExecutionAccess({workspacePath:project,sessionId:'grant',environment:{}})
+    expect(revoked.settings.sandbox.filesystem.allowRead).not.toContain(tool)
+    expect(await readFile(join(tool,'reference.txt'),'utf8')).toBe('TOOL_REFERENCE')
+  } finally {
+    if(prior===undefined)delete process.env[key];else process.env[key]=prior
+    for(const path of outputs)await rm(path,{recursive:true,force:true})
+    await rm(root,{recursive:true,force:true})
+  }
+})
+
+test('host tool read grants fail closed on malformed, broad, missing or aliased paths',async()=>{
+  const key='BEEGAME_PROJECT_TOOL_READ_PATHS',prior=process.env[key]
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-host-tool-validation-')))
+  const project=join(root,'project'),tool=join(root,'tool'),alias=join(root,'alias')
+  try {
+    await mkdir(project);await mkdir(tool);await symlink(tool,alias)
+    for(const invalid of ['{','[]','null',JSON.stringify({[project]:'not-an-array'}),
+      ...['/','/Applications',homedir(),root,project,'/dev/null','relative',alias,join(root,'missing'),tool+'/../tool',tool+'/*']
+        .map(path=>JSON.stringify({[project]:[path]}))]) {
+      process.env[key]=invalid
+      await expect(projectExecutionAccess({workspacePath:project,sessionId:'invalid',environment:{}})).rejects.toThrow('BEEGAME_PROJECT_TOOL_READ_PATHS')
+    }
+    process.env[key]=JSON.stringify({[join(root,'unrelated')]:['missing'],[project]:[]})
+    const unchanged=await projectExecutionAccess({workspacePath:project,sessionId:'empty',environment:{}})
+    expect(unchanged.settings.sandbox.filesystem.allowRead).not.toContain(tool)
+    await rm(unchanged.nativeOutput,{recursive:true,force:true})
+  } finally {
+    if(prior===undefined)delete process.env[key];else process.env[key]=prior
+    await rm(root,{recursive:true,force:true})
+  }
+})
 
 test('native project temp environment resolves inside the project before Bash tools run', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'project-temp-env-')))

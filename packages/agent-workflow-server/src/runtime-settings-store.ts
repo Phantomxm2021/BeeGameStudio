@@ -20,6 +20,11 @@ const CORE_RUNTIME_DIR = 'core'
 const TOOLING_RUNTIME_DIR = 'tooling'
 
 export type RuntimeSettingsConfig = {
+  verificationAgentEnabled?: boolean
+  agentTeamsEnabled?: boolean
+  promptSuggestionEnabled?: boolean
+  awaySummaryEnabled?: boolean
+  coordinatorModeEnabled?: boolean
   autoMemoryEnabled?: boolean
   autoDreamEnabled?: boolean
   skillSearchEnabled?: boolean
@@ -34,12 +39,47 @@ export type RuntimeSettingsStoreOptions = {
   dataDir?: string
 }
 
+// Defaults apply only inside BGS. Explicit saved values always win.
+export function resolveRuntimeFeatureSettings(config: RuntimeSettingsConfig) {
+  return {
+    autoMemoryEnabled: config.autoMemoryEnabled ?? false,
+    autoDreamEnabled: config.autoDreamEnabled ?? false,
+    verificationAgentEnabled: config.verificationAgentEnabled ?? false,
+    agentTeamsEnabled: config.agentTeamsEnabled ?? false,
+    promptSuggestionEnabled: config.promptSuggestionEnabled ?? false,
+    awaySummaryEnabled: config.awaySummaryEnabled ?? false,
+    coordinatorModeEnabled: config.coordinatorModeEnabled ?? false,
+  }
+}
+
+export function nativeRuntimeFeatureSettings(config: RuntimeSettingsConfig) {
+  const flags = resolveRuntimeFeatureSettings(config)
+  return {
+    autoMemoryEnabled: flags.autoMemoryEnabled,
+    autoDreamEnabled: flags.autoDreamEnabled,
+    promptSuggestionEnabled: flags.promptSuggestionEnabled,
+    env: {
+      BGS_DISABLE_AUTO_MEMORY: flags.autoMemoryEnabled ? '0' : '1',
+      CLAUDE_CODE_VERIFICATION_AGENT_ENABLED: flags.verificationAgentEnabled ? '1' : '0',
+      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED: flags.agentTeamsEnabled ? '0' : '1',
+      CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: flags.promptSuggestionEnabled ? '1' : '0',
+      CLAUDE_CODE_AWAY_SUMMARY_ENABLED: flags.awaySummaryEnabled ? '1' : '0',
+      CLAUDE_CODE_COORDINATOR_MODE: flags.coordinatorModeEnabled ? '1' : '0',
+    },
+  }
+}
+
 type StorePayload = {
   version: 1
   config: RuntimeSettingsConfig
 }
 
 const BOOLEAN_FIELDS: Array<keyof RuntimeSettingsConfig> = [
+  'verificationAgentEnabled',
+  'agentTeamsEnabled',
+  'promptSuggestionEnabled',
+  'awaySummaryEnabled',
+  'coordinatorModeEnabled',
   'autoMemoryEnabled',
   'autoDreamEnabled',
   'skillSearchEnabled',
@@ -107,6 +147,7 @@ export function mapRuntimeSettingsToEnv(
   const npmUserConfig = join(toolingDir, 'npmrc')
   mkdirSync(npmCacheDir, { recursive: true })
   const env: Record<string, string> = {
+    BEEGAME_RUNTIME_SETTINGS_JSON: JSON.stringify(resolveRuntimeFeatureSettings(config)),
     BEEGAME_CONFIG_DIR: getBeeGameRuntimeConfigDir(options),
     NPM_CONFIG_CACHE: npmCacheDir,
     npm_config_cache: npmCacheDir,
@@ -155,6 +196,8 @@ export function syncRuntimeSettingsToDedicatedRuntimeConfig(
     || (localBindingOverride !== '0' && process.env.NODE_ENV !== 'production')
   const next = {
     ...previous,
+    ...nativeRuntimeFeatureSettings(config),
+    env: { ...(isObject(previous.env) ? previous.env : {}), ...nativeRuntimeFeatureSettings(config).env },
     // BeeGame runs each Bee Game Studio session in a dedicated process and
     // workspace. Keep the remaining command boundary in Bee Game Studio's native
     // sandbox instead of granting broad Bash permissions from the dashboard.

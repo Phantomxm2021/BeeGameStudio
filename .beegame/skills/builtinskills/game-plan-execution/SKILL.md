@@ -1,11 +1,11 @@
 ---
 name: game-plan-execution
-description: Executing plans for game implementation in the same project session, verifying playable slices. 中文：执行游戏实现计划、逐步落地、运行验证。
+description: Execute or resume game implementation plans in the existing project, verifying playable slices and preserving completed work. 中文：执行游戏实现计划、同工程续作、运行验证。
 ---
 
 # Game Plan Execution
 
-Use when a project already has an implementation plan. Execute it in the existing project session. The plan captures prior decisions; source documents, observed behavior, and the user's latest instruction remain authoritative when they conflict.
+Use when a project already has an implementation plan. Preserve the existing project and completed work; this does not require one continuously growing conversation. The plan captures prior decisions; source documents, observed behavior, and the user's latest instruction remain authoritative when they conflict.
 
 ## Start or resume
 
@@ -23,7 +23,7 @@ For each task:
 4. If the check fails, decide whether the code, the test, or the plan is wrong. Trace the cause; do not repeat the same failed command without changing the relevant condition. Identify the responsible source and apply a correction only within the current task's editing scope, then rerun the affected check. If the source is outside that scope, report the evidence, impact and needed correction rather than changing it or working around it.
 5. Mark the task complete only with its evidence. Record any remaining gap and proceed to the next dependency-ready task without seeking routine approval after every slice.
 
-Keep narration and repeated source reading economical. Independent work may be delegated or parallelized when it truly has separate files and interfaces; neither per-task subagents nor per-task reviews are required. Stay in the same project session, and integrate delegated output before accepting it.
+Keep narration and repeated source reading economical. Independent work may be delegated or parallelized when authorized and it truly has separate files and interfaces; neither per-task subagents nor per-task reviews are required. Choose the working context from the task's actual dependencies, not a requirement to carry the whole project history. A fresh or delegated context needs the goal, affected sources, current partial work, dependency outputs and relevant evidence/limitations, not copied documents or an acceptance verdict. Integrate returned work before accepting it.
 
 ## Finish the implementation
 

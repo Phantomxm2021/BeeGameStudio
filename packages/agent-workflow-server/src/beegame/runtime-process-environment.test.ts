@@ -49,6 +49,14 @@ describe('native runtime process environment', () => {
     })
     expect(explicit.stdout.toString().trim()).toBe('production')
   })
+  test('host tool read grants do not leak through selected model env into native children',()=>{
+    const key='BEEGAME_PROJECT_TOOL_READ_PATHS',prior=process.env[key]
+    try {
+      process.env[key]='host-project-map'
+      expect(getSafeRuntimeProcessEnvironment()).not.toHaveProperty(key)
+      expect(nativeRuntimeEnvironment({[key]:'untrusted-model-map'})).not.toHaveProperty(key)
+    }finally{if(prior===undefined)delete process.env[key];else process.env[key]=prior}
+  })
   test('forwards an explicitly configured native fine-grained streaming capability', () => {
     process.env.CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING = '1'
 

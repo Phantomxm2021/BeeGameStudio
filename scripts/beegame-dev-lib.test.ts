@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { resolve } from 'node:path'
+import { getBuildFeatures } from './defines'
 import {
   buildBeeGameDevPlan,
   waitForBeeGameDevServices,
@@ -53,7 +54,13 @@ describe('BeeGame local dev launcher helpers', () => {
     expect(plan.nativeRuntimeBuild).toEqual({
       command: ['bun', 'run', 'build.ts'],
       cwd: '/repo',
+      env: {},
     })
+    const features = getBuildFeatures(plan.nativeRuntimeBuild.env)
+    for (const capability of ['VERIFICATION_AGENT', 'EXTRACT_MEMORIES', 'AWAY_SUMMARY', 'COORDINATOR_MODE'])
+      expect(features).toContain(capability)
+    for (const retained of ['WORKFLOW_SCRIPTS', 'GOAL', 'BUILTIN_EXPLORE_PLAN_AGENTS', 'TREE_SITTER_BASH'])
+      expect(features).toContain(retained)
     expect(plan.processes.map(process => process.name)).toEqual([
       'billing',
       'skills',
@@ -79,6 +86,7 @@ describe('BeeGame local dev launcher helpers', () => {
         SUPABASE_SERVICE_ROLE_KEY: 'generic-service-secret',
         BEEGAME_CREDIT_CONTROL_TOKEN: 'credit-token',
         BEEGAME_SKILLS_SERVICE_TOKEN: 'skills-token',
+        BEEGAME_PROJECT_TOOL_READ_PATHS: '{"/srv/beegame/projects/example":["/opt/example-tool"]}',
         NO_PROXY: '127.0.0.1',
         no_proxy: 'localhost',
       },
@@ -104,6 +112,7 @@ describe('BeeGame local dev launcher helpers', () => {
       BEEGAME_SKILLS_API_BASE_URL: 'http://127.0.0.1:62176',
       BEEGAME_RESOURCE_SERVER_URL: 'http://127.0.0.1:62177',
       BEEGAME_RESOURCE_SERVICE_TOKEN: 'beegame-local-resource-selection',
+      BEEGAME_WORKFLOW_V3_PREVIEW_ORIGIN: 'http://localhost:62174',
       BEEGAME_API_CORS_ORIGINS: 'http://127.0.0.1:62173',
       BEEGAME_CREDIT_CONTROL_TOKEN: 'credit-token',
       BEEGAME_SKILLS_SERVICE_TOKEN: 'skills-token',
@@ -112,6 +121,9 @@ describe('BeeGame local dev launcher helpers', () => {
     })
     expect(runtime?.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY).toBe('service-secret')
     expect(runtime?.env.SUPABASE_SERVICE_ROLE_KEY).toBe('generic-service-secret')
+    expect(runtime?.env.BEEGAME_PROJECT_TOOL_READ_PATHS).toBe('{"/srv/beegame/projects/example":["/opt/example-tool"]}')
+    for(const child of plan.processes.filter(process=>process.name!=='runtime'))
+      expect(child.env.BEEGAME_PROJECT_TOOL_READ_PATHS).toBeUndefined()
     expect(frontend?.env.BEEGAME_SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
     expect(frontend?.env.SUPABASE_SERVICE_ROLE_KEY).toBeUndefined()
     expect(frontend?.env).toMatchObject({
@@ -143,6 +155,20 @@ describe('BeeGame local dev launcher helpers', () => {
       no_proxy: 'localhost,project.supabase.co',
     })
     expect(frontend?.env.BEEGAME_RESOURCE_SERVICE_TOKEN).toBeUndefined()
+    expect(frontend?.env.BEEGAME_WORKFLOW_V3_PREVIEW_ORIGIN).toBeUndefined()
+  })
+
+  test('explicit V3 Preview origin remains authoritative for the runtime', () => {
+    const plan = buildBeeGameDevPlan([], {
+      cwd: '/repo',
+      env: {
+        AGENT_WORKFLOW_WORKSPACE_PATH: '/srv/beegame/projects',
+        BEEGAME_WORKFLOW_V3_PREVIEW_ORIGIN: 'https://preview.example.com',
+      },
+      ports: { runtime: 62174, frontend: 62173, billing: 62175, skills: 62176, resources: 62177 },
+    })
+    expect(plan.processes.find(process => process.name === 'runtime')?.env.BEEGAME_WORKFLOW_V3_PREVIEW_ORIGIN)
+      .toBe('https://preview.example.com')
   })
 
   test('rejects command-line and programmatic port overrides', () => {

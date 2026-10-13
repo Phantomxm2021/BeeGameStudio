@@ -1,6 +1,6 @@
 import { mkdir, realpath, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { tmpdir, homedir } from 'node:os'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { nativeTaskToolEnvironment } from '@bee-game-studio/agent-workflow/native-task-access'
 import { standardCliProvider } from '@bee-game-studio/agent-workflow/standard-cli-provider'
@@ -9,6 +9,42 @@ import { sharedPlaywright } from './shared-playwright'
 import { sharedSharp, sharedFont } from './shared-sharp'
 import { sharedContentChecker } from './content-checker-runtime'
 import { projectPreviewCapabilityPath } from './project-preview-capability'
+
+const TOOL_READ_PATHS='BEEGAME_PROJECT_TOOL_READ_PATHS'
+const within=(parent:string,path:string)=>{
+  const part=relative(parent,path)
+  return !isAbsolute(part) && part!=='..' && !part.startsWith('..'+sep)
+}
+
+/** Explicit operator grants, not paths from a brief, model env or project file.
+ * Only the current canonical workspace entry is consulted; there is no global
+ * engine discovery, write grant or per-command sandbox bypass. */
+async function hostToolReadPaths(root:string):Promise<string[]> {
+  const raw=process.env[TOOL_READ_PATHS]
+  if(raw===undefined)return []
+  const invalid=(reason:string)=>new Error(TOOL_READ_PATHS+': '+reason)
+  let value:unknown
+  try {value=JSON.parse(raw)}catch{throw invalid('expected a JSON object mapping canonical workspaces to read-only tool paths')}
+  if(!value || typeof value!=='object' || Array.isArray(value))throw invalid('expected a workspace map')
+  if(!Object.hasOwn(value,root))return []
+  const paths=(value as Record<string,unknown>)[root]
+  if(!Array.isArray(paths))throw invalid('current workspace entry must be an array')
+  const protectedRoots=[root,await realpath(homedir()),await realpath(tmpdir()),await realpath(process.cwd()),
+    ...(process.platform==='darwin'?['/Applications']:[])]
+  const result:string[]=[]
+  for(const path of paths) {
+    if(typeof path!=='string' || !isAbsolute(path) || resolve(path)!==path || /[\x00*?\[\]{}]/.test(path))
+      throw invalid('tool paths must be literal absolute canonical paths')
+    if(within(root,path) || protectedRoots.some(target=>within(path,target)))
+      throw invalid('tool path must be external and must not grant a broad host/project directory')
+    const canonical=await realpath(path).catch(()=>{throw invalid('configured tool path is unavailable')})
+    if(canonical!==path)throw invalid('tool path must not resolve through a link')
+    const kind=await stat(canonical)
+    if(!kind.isFile() && !kind.isDirectory())throw invalid('tool path must be a regular file or directory')
+    result.push(canonical)
+  }
+  return [...new Set(result)]
+}
 
 /** Host-file boundary for a whole project, not the document-task policy.
  * Tools, delegation and public networking remain native capabilities. */
@@ -20,6 +56,7 @@ export async function projectExecutionAccess(input: {
   toolResultsDirectory?: string
 }) {
   const root = await realpath(input.workspacePath)
+  const toolReadPaths=await hostToolReadPaths(root)
   const playwright = sharedPlaywright()
   const sharp = await sharedSharp()
   const font = await sharedFont()
@@ -96,7 +133,7 @@ export async function projectExecutionAccess(input: {
       enabled: true, failIfUnavailable: true, autoAllowBashIfSandboxed: !input.scopedTools,
       allowUnsandboxedCommands: false, excludedCommands: [],
       network: { allowedDomains: [], allowLocalBinding: true },
-      filesystem: { denyRead: ['/'], allowRead: [root, ...readPaths],
+      filesystem: { denyRead: ['/'], allowRead: [root, ...readPaths, ...toolReadPaths],
         allowWrite: [root, nativeOutput], denyWrite: [], allowGitConfig: true },
     },
   }

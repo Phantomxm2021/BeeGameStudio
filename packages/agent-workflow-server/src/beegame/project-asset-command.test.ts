@@ -63,6 +63,38 @@ test('project asset command browses facts and returns image cost without forcing
   }
 })
 
+test('catalog CLI preserves structured filters and pagination, rejects ignored parameters before network', async () => {
+  const root=await mkdtemp(join(tmpdir(),'bgs-catalog-parameters-'))
+  const received:unknown[]=[]
+  const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
+    received.push(await request.json());return Response.json({items:[],nextCursor:'page-two'})
+  }})
+  try {
+    const script=join(root,'assets.mjs')
+    await writeProjectAssetCommand(script,{libraryBaseUrl:`http://127.0.0.1:${server.port}`})
+    for(const command of [['catalog'],['elements','pack-1']]) {
+      for(const input of [undefined,{formats:['png']},{formats:['png'],limit:10,cursor:'page-two'},
+        {filters:{formats:['png']},limit:10,cursor:'page-two'}]) {
+        const result=await run(root,script,...command,...(input?[JSON.stringify(input)]:[]))
+        expect(result.stderr).toBe('');expect(result.code).toBe(0)
+        expect(received.at(-1)).toEqual(input===undefined?{filters:{}}:'filters' in input?input:
+          {filters:{formats:['png']},...('limit' in input?{limit:10,cursor:'page-two'}:{})})
+      }
+      const before=received.length
+      for(const input of [{query:'train'},{search:'audio'},{filters:{query:'train'}},{filters:{limit:10}},
+        {filters:{formats:'png'}},{formats:null},{formats:['']},{filters:{},formats:['png']},
+        {limit:0},{limit:'10'},{cursor:99},null,[],{filters:{formtas:['png']}}]) {
+        const result=await run(root,script,...command,JSON.stringify(input))
+        expect(result.code).not.toBe(0);expect(result.stderr).toMatch(/Catalog|catalog/)
+      }
+      expect(received.length).toBe(before)
+    }
+    const help=await run(root,script,'--help')
+    expect(help.stdout).toContain('No free-text query/search')
+    expect(help.stdout).toContain('nextCursor')
+  }finally{server.stop(true);await rm(root,{recursive:true,force:true})}
+})
+
 test('project asset command saves only successful images, returns hash and never overwrites', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-image-command-'))
   const image = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1])

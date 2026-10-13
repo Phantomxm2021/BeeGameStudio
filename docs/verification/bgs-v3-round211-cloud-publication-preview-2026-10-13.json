@@ -1,0 +1,62 @@
+{
+  "date": "2026-10-13",
+  "scope": "V3 Preview and actual R2/Supabase/public-domain publication, synthetic no-model acceptance",
+  "confirmedGap": {
+    "cause": "R2 verifyPublished checked only public index.html. A public game.js returning 404 still resolved verification, so manager could mark a version succeeded with missing assets.",
+    "reproduction": "New focused test failed against prior code: index matched, assets/game.js returned 404, verifyPublished resolved.",
+    "fix": "Verify HTTP status and exact bytes for every published file at its actual relative public URL; retain HTML MIME check for index.",
+    "effect": "Each asset is downloaded once during cloud publication verification. This adds network time/bandwidth proportional to published size; no Agent/model request or rebuild."
+  },
+  "checks": {
+    "rootTypecheck": "passed",
+    "r2Publisher": "4 passed, 0 failed; focused missing-asset test red before repair and green after",
+    "measuredPreview": "17 passed, 0 failed including real Chromium module/JSON/image, reload, revoke and isolation",
+    "deploymentManager": "30 passed, 0 failed including actual Chromium nested publication paths",
+    "projectDeploymentRoute": "1 passed in first local run",
+    "initialCombinedRun": "5 browser-related failures occurred only in restricted sandbox/parallel browser launch; tests passed when rerun serially with the allowed local Chromium environment.",
+    "cloud": {
+      "method": "Isolated synthetic project/session and measured static fixture through real BeeGameDeploymentManager, R2 publisher, Supabase deployment/object metadata, public Worker domain; service-role token used only in the isolated test.",
+      "publicationStatus": "succeeded",
+      "publicHost": "game.beegame.studio",
+      "publicFiles": {
+        "index.html": 200,
+        "game.js": 200,
+        "data.json": 200
+      },
+      "browser": "Chrome loaded the actual public HTTPS URL, fetched game.js and data.json, and click changed text from JSON: 7 to 点击成功: 7.",
+      "screenshot": "/private/tmp/bgs-round211-real-cloud-browser.png",
+      "projectId": "v3-cloud-debug-57341338-950a-4944-b228-89372a58f906",
+      "deploymentId": "deploy_396cb32a5c3343f6a60ef15992c2db54",
+      "cleanup": "Exactly four synthetic R2 objects deleted; project/session/deployment/object metadata all absent after cleanup; old URL returned 404.",
+      "script": "/private/tmp/bgs-round211-cloud-debug.ts",
+      "state": "/private/tmp/bgs-round211-cloud-debug-state.json"
+    },
+    "deployment": {
+      "runtimePid": 1588,
+      "port": 62174,
+      "baseline": "round211",
+      "sourcePublisherSha256": "e5678a838bcc30965424c8ef6fe95f90e3191583dfc7d0ef13a52145a45e2e3e",
+      "health": {
+        "62173": 200,
+        "62174": 200,
+        "62175": 200,
+        "62176": 200,
+        "62177": 200
+      },
+      "cliRebuilt": false,
+      "frontendRebuilt": false,
+      "otherServicesRestarted": false,
+      "existingRuns": 41,
+      "existingRunStateUnchanged": true,
+      "preexistingWriterLocks": 3,
+      "modelCalls": 0,
+      "paidTasksResumed": 0
+    }
+  },
+  "limits": [
+    "Preview browser proof is an independent synthetic local Run; the actual blocked game was not resumed or edited.",
+    "Cloud transport was exercised through real publisher/manager and real R2/Worker/DB using a synthetic fixture, while full logged-in V3 product route and real user-token authorization were not exercised against production.",
+    "The synthetic fixture has no Agent design or game-quality assessment; actual game quality and formal frontend integration remain unverified.",
+    "The isolated cloud fixture was removed after proof; its public URL is intentionally no longer a live demo."
+  ]
+}

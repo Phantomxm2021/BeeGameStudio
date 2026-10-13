@@ -105,6 +105,7 @@ function PreviewFrame({ title, url, frameRef, labels, viewport, onViewportChange
   viewport: PreviewViewport; onViewportChange: (viewport: PreviewViewport) => void;
 }) {
   const [state, setState] = useState<'loading' | 'loaded' | 'failed'>('loading');
+  const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [actionsExpanded, setActionsExpanded] = useState(false);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [viewportDialogOpen, setViewportDialogOpen] = useState(false);
@@ -148,10 +149,11 @@ function PreviewFrame({ title, url, frameRef, labels, viewport, onViewportChange
 
   useLayoutEffect(() => {
     if (paused) return;
-    // iframe.onload also fires for HTTP errors; only the injected bridge can
-    // confirm that the document and its initial modules have loaded.
+    // iframe.onload also fires for HTTP errors. Legacy sessions use the injected
+    // bridge; measured static Preview is confirmed by a successful HEAD probe.
     const expectedSession = decodeURIComponent(new URL(url, window.location.origin).pathname.split('/')[2] || '');
     const timer = setTimeout(() => setState('failed'), 30_000);
+    loadTimeoutRef.current = timer;
     let failed = false;
     const receive = (event: MessageEvent) => {
       if (!frameRef.current?.contentWindow || event.source !== frameRef.current.contentWindow) return;
@@ -172,11 +174,12 @@ function PreviewFrame({ title, url, frameRef, labels, viewport, onViewportChange
       if (event.data.type !== 'beegame.preview.lifecycle') return;
       if (event.data.status !== 'loaded' && event.data.status !== 'failed') return;
       clearTimeout(timer);
+      loadTimeoutRef.current = null;
       failed ||= event.data.status === 'failed';
       setState(failed ? 'failed' : 'loaded');
     };
     window.addEventListener('message', receive);
-    return () => { clearTimeout(timer); window.removeEventListener('message', receive); };
+    return () => { clearTimeout(timer); loadTimeoutRef.current = null; window.removeEventListener('message', receive); };
   }, [url, frameRef, paused]);
 
   const openFullscreen = () => {
@@ -202,6 +205,14 @@ function PreviewFrame({ title, url, frameRef, labels, viewport, onViewportChange
         ? 'relative shrink-0 bg-[var(--surface-1)] shadow-2xl ring-1 ring-[var(--border)]'
         : 'relative h-full w-full'} style={framedViewport ? { width: viewport.width * viewportScale, height: viewport.height * viewportScale } : undefined}>
         <iframe ref={frameRef} title={title} data-testid="beegame-live-preview-frame" src={url}
+          onLoad={() => { void fetch(url, { method: 'HEAD', mode: 'cors', cache: 'no-store' }).then(response => {
+            // Measured V3 Preview serves the exact artifact bytes, without the legacy injected bridge.
+            // iframe load alone is not enough: HTTP error documents also trigger it.
+            if (!response.ok || response.headers.get('X-BeeGame-Preview-Mode') !== 'measured-static') return;
+            if (loadTimeoutRef.current) clearTimeout(loadTimeoutRef.current);
+            loadTimeoutRef.current = null;
+            setState(current => current === 'loading' ? 'loaded' : current);
+          }).catch(() => undefined); }}
           onError={() => setState('failed')} sandbox={PREVIEW_IFRAME_SANDBOX}
           className={framedViewport ? 'absolute left-0 top-0 border-0 bg-transparent' : 'absolute inset-0 h-full w-full border-0 bg-transparent'}
           style={framedViewport ? { width: viewport.width, height: viewport.height, transform: `scale(${viewportScale})`, transformOrigin: 'top left' } : undefined} />

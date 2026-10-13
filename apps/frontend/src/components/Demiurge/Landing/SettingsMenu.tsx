@@ -1,16 +1,21 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { ModelConnectionsPanel, type ModelConnectionsHandle, type ModelConnectionsSaveState } from '../../Settings/ModelConnectionsPanel';
 import {
   BookOpenText,
   Cpu,
   FolderOpen,
   Globe,
   KeyRound,
+  Info,
+  MoreHorizontal,
+  Pencil,
   Network,
   Plus,
   Plus as FaPlus,
   ReceiptText,
   ShieldCheck,
   Ticket,
+  Trash2,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ImageGenerationSettingsPanel, type ImageSettingsHandle, type ImageSettingsState } from '../../Settings/ImageGenerationSettingsPanel';
@@ -20,10 +25,12 @@ import { normalizeI18nLanguage, useBeeGameText, useCommonText } from '../../../i
 import { getBeeGameWorkspaceSettings } from '../../../services/beeGameAdapter';
 import {
   createModelConfig,
+  deleteModelConfig,
   listModelConfigs,
   updateModelConfig,
   type ModelConfig,
   type ModelProviderKind,
+  type ModelAuthMethod,
 } from '../../../services/modelConfigApi';
 import { getWebToolsConfig, saveWebToolsConfig, type WebSearchAdapter } from '../../../services/webToolsApi';
 import {
@@ -83,6 +90,7 @@ import { UserSkillsSettingsPanel } from '../../Settings/UserSkillsSettingsPanel'
 import { ModelConfigPanel } from '../../Settings/ModelConfigPanel';
 import { WebToolsPanel } from '../../Settings/WebToolsPanel';
 import { Dialog, DialogContent } from '../../ui/dialog';
+import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from '../../beui/registry/components/motion/popover-morph';
 import { CloseIconButton } from '../../ui/CloseIconButton';
 import { Tabs, TabsList, TabsTrigger } from '../../beui/motion/tabs';
 import { ProjectSelect } from '../../beui/project-select';
@@ -117,7 +125,7 @@ interface SettingsMenuProps {
   canManageCredits?: boolean;
 }
 
-type SettingsSection = 'personal' | 'skills' | 'platform';
+type SettingsSection = 'personal' | 'connections' | 'skills' | 'platform';
 type SettingsTab = 'general' | 'runtime' | 'mcp' | 'skills' | 'model' | 'image' | 'invitations' | 'projects' | 'credit';
 type McpFormAnchor =
   | { kind: 'new'; rect: PopoverAnchorRect }
@@ -183,6 +191,9 @@ export function SettingsMenu({
     effectiveCanManageCredits;
   const [existingConfigs, setExistingConfigs] = useState<ModelConfig[]>([]);
   const [selectedModelConfigId, setSelectedModelConfigId] = useState('');
+  const [modelAction, setModelAction] = useState<'create' | 'details' | 'rename' | 'delete' | null>(null);
+  const [activeModelPopoverId, setActiveModelPopoverId] = useState<string | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(false);
   const [name, setName] = useState('');
   const [provider, setProvider] = useState<ModelProviderKind>('openai-compatible');
   const [baseUrl, setBaseUrl] = useState('');
@@ -192,10 +203,14 @@ export function SettingsMenu({
   const [strongModel, setStrongModel] = useState('');
   const [apiKeyPreview, setApiKeyPreview] = useState('');
   const [isDefault, setIsDefault] = useState(true);
+  const [published, setPublished] = useState(true);
+  const [authMethods, setAuthMethods] = useState<ModelAuthMethod[]>(['platform']);
   const [status, setStatus] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const imageSettingsRef = useRef<ImageSettingsHandle>(null);
   const [imageSettingsState, setImageSettingsState] = useState<ImageSettingsState>({ busy: false, canSave: false });
+  const modelConnectionsRef = useRef<ModelConnectionsHandle>(null);
+  const [modelConnectionSaveState, setModelConnectionSaveState] = useState<ModelConnectionsSaveState>({ visible: false, disabled: true, busy: false });
   const [workspacePath, setWorkspacePath] = useState('');
   const [workspaceStatus, setWorkspaceStatus] = useState('');
   const [webSearchAdapter, setWebSearchAdapter] = useState<WebSearchAdapter>('tavily');
@@ -251,6 +266,10 @@ export function SettingsMenu({
     if (!isOpen) return;
     let cancelled = false;
     if (effectiveCanManageModelConfig) {
+      setModelsLoading(true);
+      setModelAction(null);
+      setActiveModelPopoverId(null);
+      setApiKey('');
       void listModelConfigs()
         .then(configs => {
           if (cancelled) return;
@@ -266,14 +285,18 @@ export function SettingsMenu({
           setStrongModel(defaultConfig.models.strong || '');
           setApiKeyPreview(defaultConfig.apiKeyPreview || '');
           setIsDefault(defaultConfig.isDefault);
+          setPublished(defaultConfig.published ?? true);
+          setAuthMethods(defaultConfig.authMethods ?? ['platform']);
         })
         .catch(() => {
           if (!cancelled) {
             setExistingConfigs([]);
             setSelectedModelConfigId('');
             setApiKeyPreview('');
+            setStatus(lang.startsWith('zh') ? '无法读取模型配置，请关闭设置后重试。' : 'Could not load model configurations. Reopen Settings to try again.');
           }
-        });
+        })
+        .finally(() => { if (!cancelled) setModelsLoading(false); });
     }
     if (effectiveCanManageWorkspace) {
       void getBeeGameWorkspaceSettings()
@@ -435,14 +458,42 @@ export function SettingsMenu({
     userSkillsCopy.unavailable,
   ]);
 
+  const openModelConfig = (action: NonNullable<typeof modelAction>, config?: ModelConfig) => {
+    setSelectedModelConfigId(config?.id ?? ''); setName(config?.name ?? ''); setProvider(config?.provider ?? 'openai-compatible');
+    setBaseUrl(config?.baseUrl ?? ''); setApiKey(''); setApiKeyPreview(config?.apiKeyPreview ?? '');
+    setFastModel(config?.models.fast ?? ''); setBalancedModel(config?.models.balanced ?? ''); setStrongModel(config?.models.strong ?? '');
+    setIsDefault(config?.isDefault ?? existingConfigs.length === 0); setPublished(config?.published ?? true); setAuthMethods(config?.authMethods ?? ['platform']);
+    setStatus(''); setModelAction(action);
+  };
+  const closeModelConfig = () => { if (!isSaving) { setModelAction(null); setActiveModelPopoverId(null); setApiKey(''); setStatus(''); } };
+  const handleModelListAction = async () => {
+    if (!selectedModelConfigId || (modelAction === 'rename' && !name.trim())) return;
+    setIsSaving(true); setStatus('');
+    try {
+      if (modelAction === 'delete') {
+        const result = await deleteModelConfig(selectedModelConfigId);
+        if (!result.deleted) throw new Error(lang.startsWith('zh') ? '模型未删除，请刷新后核对。' : 'Model was not deleted. Refresh and check again.');
+        setExistingConfigs(current => current.filter(config => config.id !== selectedModelConfigId));
+      } else {
+        const saved = await updateModelConfig(selectedModelConfigId, { name: name.trim() });
+        setExistingConfigs(current => current.map(config => config.id === saved.id ? saved : config));
+      }
+      setModelAction(null);
+      setActiveModelPopoverId(null);
+    } catch (error) { setStatus(formatModelConfigError(error, text)); }
+    finally { setIsSaving(false); }
+  };
+
   const handleSaveModelConfig = async () => {
     setStatus('');
     setIsSaving(true);
     try {
       const payload = {
         name: name.trim() || 'BeeGame LLM',
+        published,
+        authMethods,
         provider,
-        ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+        baseUrl: baseUrl.trim(),
         ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
         models: {
           ...(fastModel.trim() ? { fast: fastModel.trim() } : {}),
@@ -458,7 +509,10 @@ export function SettingsMenu({
             apiKey: apiKey.trim(),
           });
       setSelectedModelConfigId(saved.id);
-      setExistingConfigs([saved, ...existingConfigs.filter(config => config.id !== saved.id)]);
+      setExistingConfigs(current => {
+        const others = current.filter(config => config.id !== saved.id).map(config => saved.isDefault ? { ...config, isDefault: false } : config);
+        return [...others, saved];
+      });
       setName(saved.name);
       setProvider(saved.provider);
       setBaseUrl(saved.baseUrl || '');
@@ -815,10 +869,11 @@ export function SettingsMenu({
   const sectionTabs = useMemo(
     () => [
       { id: 'personal' as const, label: text.settingsGeneral, icon: Globe },
+      ...(currentUser ? [{ id: 'connections' as const, label: lang.startsWith('zh') ? '模型连接' : 'Model connections', icon: KeyRound }] : []),
       ...(effectiveCanManageSkills ? [{ id: 'skills' as const, label: userSkillsCopy.tab, icon: BookOpenText }] : []),
       ...(hasPlatformSettings ? [{ id: 'platform' as const, label: adminCopy.platform, icon: ShieldCheck }] : []),
     ],
-    [adminCopy.platform, effectiveCanManageSkills, hasPlatformSettings, text.settingsGeneral, userSkillsCopy.tab],
+    [adminCopy.platform, currentUser, lang, effectiveCanManageSkills, hasPlatformSettings, text.settingsGeneral, userSkillsCopy.tab],
   );
   const platformTabs = useMemo(() => {
     return [
@@ -856,7 +911,7 @@ export function SettingsMenu({
     text.settingsModel,
   ]);
   const activeTabLabel =
-    activeSection === 'personal'
+    activeSection === 'connections' ? (lang.startsWith('zh') ? '模型连接' : 'Model connections') : activeSection === 'personal'
       ? text.settingsGeneral
       : activeSection === 'skills'
         ? userSkillsCopy.title
@@ -913,13 +968,13 @@ export function SettingsMenu({
                 ? true
                 : activeTab === 'credit'
                   ? true
-                  : isSavingCurrentTab || !balancedModel.trim() || (!selectedModelConfigId && !apiKey.trim());
+                  : isSavingCurrentTab || !authMethods.length || !balancedModel.trim() || (!selectedModelConfigId && authMethods.includes('platform') && !apiKey.trim());
 
   const handleSaveSettings = async () => {
     if (activeSection !== 'platform') return;
     if (activeTab === 'model') {
       const saved = await handleSaveModelConfig();
-      if (saved) onClose();
+      if (saved) { setModelAction(null); setActiveModelPopoverId(null); }
       return;
     }
     if (activeTab === 'runtime') {
@@ -996,8 +1051,91 @@ export function SettingsMenu({
     }
   }, [activeSection, activeTab, effectiveCanManageSkills, hasPlatformSettings, platformTabs]);
 
+  const modelConfigEditor = (
+    <>
+      <ModelConfigPanel
+        labels={{
+          provider: text.provider,
+          baseUrl: text.baseUrl,
+          apiKey: text.apiKey,
+          models: text.models,
+          fast: text.fast,
+          balanced: text.balanced,
+          strong: text.strong,
+          fastModel: text.fastModel,
+          balancedModel: text.balancedModel,
+          strongModel: text.strongModel,
+        }}
+        provider={provider}
+        baseUrl={baseUrl}
+        apiKey={apiKey}
+        fastModel={fastModel}
+        balancedModel={balancedModel}
+        strongModel={strongModel}
+        apiKeyPreview={apiKeyPreview}
+        savedPrefix={savedPrefix}
+        onProviderChange={value => { setProvider(value); setAuthMethods(current => current.filter(method => method === 'platform' || method === 'byok')); }}
+        onBaseUrlChange={setBaseUrl}
+        onApiKeyChange={setApiKey}
+        onFastModelChange={setFastModel}
+        onBalancedModelChange={setBalancedModel}
+        onStrongModelChange={setStrongModel}
+        onSubmit={event => {
+          event.preventDefault();
+          if (!isSaveDisabled) void handleSaveSettings();
+        }}
+      />
+      <div className="space-y-1 border-t border-border pt-4">
+        <div className="flex min-h-11 items-center justify-between gap-4 text-sm">
+          <span>{lang.startsWith('zh') ? '向普通用户发布' : 'Publish to users'}</span>
+          <Switch checked={published} onCheckedChange={setPublished} ariaLabel={lang.startsWith('zh') ? '向普通用户发布' : 'Publish to users'} size="sm" />
+        </div>
+        <div className="flex min-h-11 items-center justify-between gap-4 text-sm">
+          <span>{lang.startsWith('zh') ? '平台默认模型' : 'Platform default model'}</span>
+          <Switch checked={isDefault} onCheckedChange={setIsDefault} ariaLabel={lang.startsWith('zh') ? '平台默认模型' : 'Platform default model'} size="sm" />
+        </div>
+        <fieldset className="border-t border-border pt-3">
+          <legend className="text-sm text-muted-foreground">{lang.startsWith('zh') ? '允许的接入方式' : 'Allowed authentication methods'}</legend>
+          {(['platform', 'byok', ...(provider === 'anthropic-compatible' ? ['claude-subscription'] : provider === 'openai-compatible' ? ['chatgpt-subscription'] : [])] as ModelAuthMethod[]).map(method => {
+            const label = method === 'platform' ? (lang.startsWith('zh') ? '平台凭据' : 'Platform credentials') : method === 'byok' ? 'BYOK' : method === 'claude-subscription' ? 'Claude subscription' : 'ChatGPT subscription';
+            return <div key={method} className="flex min-h-11 items-center justify-between gap-4 text-sm">
+              <span>{label}</span>
+              <Switch checked={authMethods.includes(method)} onCheckedChange={checked => setAuthMethods(current => checked ? [...current, method] : current.filter(item => item !== method))} ariaLabel={label} size="sm" />
+            </div>;
+          })}
+        </fieldset>
+      </div>
+      {status ? <p role="status" className="mt-3 text-sm text-destructive">{status}</p> : null}
+      <div className="mt-5 flex justify-end gap-3">
+        <button type="button" disabled={isSaving} onClick={closeModelConfig} className="rounded-lg px-3 py-2 text-sm text-muted-foreground disabled:opacity-50">{lang.startsWith('zh') ? '取消' : 'Cancel'}</button>
+        <button type="button" disabled={isSaveDisabled} onClick={() => void handleSaveSettings()} className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{isSaving ? text.saving : text.saveSettings}</button>
+      </div>
+    </>
+  );
+  const modelActionTitle = modelAction === 'create' ? (lang.startsWith('zh') ? '添加模型配置' : 'Add model configuration')
+    : modelAction === 'details' ? (lang.startsWith('zh') ? '模型详情' : 'Model details')
+      : modelAction === 'rename' ? (lang.startsWith('zh') ? '编辑名称' : 'Edit name')
+        : (lang.startsWith('zh') ? '删除模型配置' : 'Delete model configuration');
+  const modelActionContent = modelAction ? (
+    <div data-testid="model-config-popover" className="max-h-[min(560px,calc(100dvh-2rem))] overflow-y-auto p-5 text-popover-foreground">
+      <h3 className="mb-3 text-lg font-semibold">{modelActionTitle}</h3>
+      {modelAction === 'delete' ? <p className="text-sm text-muted-foreground">{lang.startsWith('zh') ? `确认删除平台模型「${name}」？使用此配置的用户和后续任务将无法继续使用它。此操作不会删除项目。` : `Delete platform model “${name}”? Users and future tasks using this configuration will lose access to it. Projects will not be deleted.`}</p> : null}
+      {modelAction === 'rename' ? <form className="mt-4" onSubmit={event => { event.preventDefault(); if (!isSaving) void handleModelListAction(); }}>
+        <input autoFocus aria-label={lang.startsWith('zh') ? '模型显示名称' : 'Model display name'} maxLength={100} value={name} onChange={event => setName(event.target.value)} className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm" />
+      </form> : null}
+      {modelAction === 'create' || modelAction === 'details' ? modelConfigEditor : null}
+      {modelAction === 'rename' || modelAction === 'delete' ? <>
+        {status ? <p role="status" className="mt-3 text-sm text-destructive">{status}</p> : null}
+        <div className="mt-5 flex justify-end gap-3">
+          <button type="button" disabled={isSaving} onClick={closeModelConfig} className="rounded-lg px-3 py-2 text-sm text-muted-foreground disabled:opacity-50">{lang.startsWith('zh') ? '取消' : 'Cancel'}</button>
+          <button type="button" disabled={isSaving || (modelAction === 'rename' && !name.trim())} onClick={() => void handleModelListAction()} className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{isSaving ? text.saving : modelAction === 'delete' ? (lang.startsWith('zh') ? '删除' : 'Delete') : text.saveSettings}</button>
+        </div>
+      </> : null}
+    </div>
+  ) : null;
+
   return (
-    <Dialog open={isOpen} onOpenChange={open => { if (!open) onClose(); }}>
+    <Dialog open={isOpen} onOpenChange={open => { if (!open && !modelAction && !activeModelPopoverId) onClose(); }}>
       <DialogContent
         aria-label={t.settings}
         className="h-[min(680px,calc(100dvh-1rem))] w-[min(820px,calc(100vw-1rem))] max-w-none overflow-hidden p-0 text-foreground sm:h-[min(620px,calc(100dvh-2rem))] sm:w-[min(820px,calc(100vw-2rem))]"
@@ -1068,6 +1206,18 @@ export function SettingsMenu({
                   </div>
                   <h2 className="mt-2 text-xl font-semibold text-foreground">{activeTabLabel}</h2>
                 </div>
+                {activeSection === 'platform' && activeTab === 'model' && effectiveCanManageModelConfig ? (
+                  <MorphPopover open={modelAction === 'create'} onOpenChange={open => open ? openModelConfig('create') : closeModelConfig()}>
+                    <MorphPopoverTrigger>
+                      <button type="button" aria-label={lang.startsWith('zh') ? '添加模型配置' : 'Add model configuration'} title={lang.startsWith('zh') ? '添加模型配置' : 'Add model configuration'} disabled={modelsLoading || isSaving} className="mt-2 inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-transparent text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
+                        <Plus className="size-5" />
+                      </button>
+                    </MorphPopoverTrigger>
+                    <MorphPopoverContent side="bottom" align="end" ariaLabel={modelActionTitle} onOpenAutoFocus={content => content.focus()} className="w-[min(480px,calc(100vw-2rem))] rounded-xl border-border bg-popover shadow-xl">
+                      {modelAction === 'create' ? modelActionContent : null}
+                    </MorphPopoverContent>
+                  </MorphPopover>
+                ) : null}
                 {activeSection === 'platform' && activeTab === 'mcp' && effectiveCanManageMcp ? (
                   <div className="relative mt-2">
                     <button
@@ -1197,6 +1347,8 @@ export function SettingsMenu({
                 </div>
               ) : null}
 
+              {activeSection === 'connections' && currentUser ? <ModelConnectionsPanel key={currentUser.id} ref={modelConnectionsRef} language={lang} onSaveStateChange={setModelConnectionSaveState} /> : null}
+
               {activeSection === 'platform' && activeTab === 'general' ? (
                 <div className="divide-y divide-border">
                   {effectiveCanManageWorkspace ? (
@@ -1294,44 +1446,38 @@ export function SettingsMenu({
               ) : null}
 
               {activeSection === 'platform' && activeTab === 'model' && effectiveCanManageModelConfig ? (
-                <ModelConfigPanel
-                  labels={{
-                    provider: text.provider,
-                    baseUrl: text.baseUrl,
-                    apiKey: text.apiKey,
-                    models: text.models,
-                    fast: text.fast,
-                    balanced: text.balanced,
-                    strong: text.strong,
-                    fastModel: text.fastModel,
-                    balancedModel: text.balancedModel,
-                    strongModel: text.strongModel,
-                  }}
-                  provider={provider}
-                  baseUrl={baseUrl}
-                  apiKey={apiKey}
-                  fastModel={fastModel}
-                  balancedModel={balancedModel}
-                  strongModel={strongModel}
-                  apiKeyPreview={apiKeyPreview}
-                  savedPrefix={savedPrefix}
-                  onProviderChange={setProvider}
-                  onBaseUrlChange={setBaseUrl}
-                  onApiKeyChange={setApiKey}
-                  onFastModelChange={setFastModel}
-                  onBalancedModelChange={setBalancedModel}
-                  onStrongModelChange={setStrongModel}
-                  onSubmit={event => {
-                    event.preventDefault();
-                    if (!isSaveDisabled) void handleSaveSettings();
-                  }}
-                />
+                <>
+                {modelsLoading ? <p role="status" className="py-5 text-sm text-muted-foreground">{lang.startsWith('zh') ? '加载中…' : 'Loading…'}</p> : !existingConfigs.length && !status ? <p className="py-5 text-sm text-muted-foreground">{lang.startsWith('zh') ? '暂无模型配置，点击右上角 + 添加。' : 'No model configurations. Use + to add one.'}</p> : null}
+                <ul aria-label={lang.startsWith('zh') ? '模型配置列表' : 'Model configurations'} className="divide-y divide-border">
+                  {existingConfigs.map(config => <li key={config.id} className="flex min-h-16 items-center gap-3 py-3">
+                    <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium" title={config.name}>{config.name}</p><p className="mt-1 truncate text-xs text-muted-foreground">{config.provider}{config.isDefault ? (lang.startsWith('zh') ? ' · 默认' : ' · Default') : ''}{config.published === false ? (lang.startsWith('zh') ? ' · 未发布' : ' · Unpublished') : ''}</p></div>
+                    <MorphPopover
+                      open={activeModelPopoverId === config.id}
+                      onOpenChange={open => {
+                        if (open) { setActiveModelPopoverId(config.id); setModelAction(null); setStatus(''); }
+                        else closeModelConfig();
+                      }}
+                    >
+                      <MorphPopoverTrigger>
+                        <button type="button" aria-label={`${config.name} ${lang.startsWith('zh') ? '操作' : 'actions'}`} disabled={isSaving} onKeyDown={event => { if (event.key === 'ArrowDown') { event.preventDefault(); setActiveModelPopoverId(config.id); setModelAction(null); } }} className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-transparent text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"><MoreHorizontal className="size-5" /></button>
+                      </MorphPopoverTrigger>
+                      <MorphPopoverContent key={modelAction && selectedModelConfigId === config.id ? modelAction : 'menu'} side="bottom" align="end" ariaLabel={modelAction && selectedModelConfigId === config.id ? modelActionTitle : `${config.name} ${lang.startsWith('zh') ? '操作' : 'actions'}`} onOpenAutoFocus={content => content.focus()} className={`${modelAction && selectedModelConfigId === config.id ? 'w-[min(480px,calc(100vw-2rem))]' : 'w-44'} rounded-xl border-border bg-popover shadow-xl`}>
+                        {modelAction && selectedModelConfigId === config.id ? modelActionContent : <div role="menu" aria-label={`${config.name} ${lang.startsWith('zh') ? '操作' : 'actions'}`} className="p-1">
+                          <button type="button" role="menuitem" onClick={() => openModelConfig('rename', config)} className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent"><Pencil className="size-4" />{lang.startsWith('zh') ? '编辑名称' : 'Edit name'}</button>
+                          <button type="button" role="menuitem" onClick={() => openModelConfig('details', config)} className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent"><Info className="size-4" />{lang.startsWith('zh') ? '详情' : 'Details'}</button>
+                          <button type="button" role="menuitem" onClick={() => openModelConfig('delete', config)} className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm text-destructive hover:bg-accent"><Trash2 className="size-4" />{lang.startsWith('zh') ? '删除' : 'Delete'}</button>
+                        </div>}
+                      </MorphPopoverContent>
+                    </MorphPopover>
+                  </li>)}
+                </ul>
+                </>
               ) : null}
 
               {activeSection === 'platform' && activeTab === 'image' && effectiveCanManageModelConfig ? (
                 <ImageGenerationSettingsPanel ref={imageSettingsRef} language={lang} onStateChange={setImageSettingsState} onSaved={onClose} />
               ) : null}
-              {activeSection === 'platform' && activeTab === 'model' && status ? (
+              {activeSection === 'platform' && activeTab === 'model' && !modelAction && status ? (
                 <p role="status" className="mt-3 text-sm text-destructive">{status}</p>
               ) : null}
 
@@ -1383,20 +1529,21 @@ export function SettingsMenu({
                 />
               ) : null}
             </div>
-            {activeSection === 'platform' &&
+            {(activeSection === 'connections' && modelConnectionSaveState.visible || activeSection === 'platform' &&
+            activeTab !== 'model' &&
             activeTab !== 'mcp' &&
             activeTab !== 'projects' &&
             activeTab !== 'credit' &&
-            (activeTab !== 'general' || hasGeneralSaveAction) ? (
+            (activeTab !== 'general' || hasGeneralSaveAction)) ? (
               <div className="flex items-center justify-end border-t border-border bg-muted/30 px-6 py-4">
                 <button
                   type="button"
                   aria-label={text.saveSettings}
-                  onClick={handleSaveSettings}
-                  disabled={isSaveDisabled}
+                  onClick={activeSection === 'connections' ? () => modelConnectionsRef.current?.saveByok() : handleSaveSettings}
+                  disabled={activeSection === 'connections' ? modelConnectionSaveState.disabled : isSaveDisabled}
                   className="rounded-md border border-transparent bg-primary text-primary-foreground inline-flex h-11 items-center px-6 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {isSavingCurrentTab ? text.saving : text.saveSettings}
+                  {activeSection === 'connections' ? modelConnectionSaveState.busy ? text.saving : text.saveSettings : isSavingCurrentTab ? text.saving : text.saveSettings}
                 </button>
               </div>
             ) : null}
@@ -1576,8 +1723,13 @@ function parsePositiveInteger(value: string): number | null {
 
 function normalizeRuntimeSettings(config: RuntimeSettingsConfig): Required<RuntimeSettingsConfig> {
   return {
-    autoMemoryEnabled: config.autoMemoryEnabled ?? true,
-    autoDreamEnabled: config.autoDreamEnabled ?? true,
+    autoMemoryEnabled: config.autoMemoryEnabled ?? false,
+    autoDreamEnabled: config.autoDreamEnabled ?? false,
+    verificationAgentEnabled: config.verificationAgentEnabled ?? false,
+    agentTeamsEnabled: config.agentTeamsEnabled ?? false,
+    promptSuggestionEnabled: config.promptSuggestionEnabled ?? false,
+    awaySummaryEnabled: config.awaySummaryEnabled ?? false,
+    coordinatorModeEnabled: config.coordinatorModeEnabled ?? false,
     skillSearchEnabled: config.skillSearchEnabled ?? false,
     treeSitterBashEnabled: config.treeSitterBashEnabled ?? false,
     webBrowserToolEnabled: config.webBrowserToolEnabled ?? false,

@@ -1,6 +1,6 @@
 ---
 name: evidence-before-completion
-description: Verify game design claims, calculations, assumptions and revisions against original requirements. Use for design review and completion evidence, not for planning the design. 中文：设计评审、原文核查、数值推导、布局复核、修订验证、验收证据。
+description: Match design, revision, fix or delivery claims to actual source versions, checks and observations. Use for completion evidence, not project planning or an automatic review stage. 中文：完成依据、原文核查、修订验证、验收证据。
 ---
 
 # Evidence Before Completion
@@ -17,7 +17,7 @@ Use when assessing a design-review conclusion or claiming that a requested revis
 
 Choose methods, tools and delegation proportional to the actual claim. Preserve the requested scope; this Skill does not require extra design decisions, target devices, audit agents or approval stages.
 
-Document authoring does not require a separate self-review record or a dedicated checking subagent. Formal review/revision remains part of the project assignment; this Skill does not add another review pass or prescribe a separation of agents.
+Document authoring does not require a separate self-review record or a dedicated checking subagent. Use a formal review/revision only when the actual assignment calls for it; this Skill neither creates that stage nor prescribes a separation of agents.
 
 ## Read only what applies
 

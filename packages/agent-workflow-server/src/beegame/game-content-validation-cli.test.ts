@@ -14,6 +14,52 @@ import { CONTENT_CHECKER_ENTRY, sharedContentChecker } from './content-checker-r
 import { DESIGN_HANDOFF_INSTRUCTION, checkDesignHandoffDraft, designHandoffPath } from './design-handoff'
 import { sceneLayoutFixture, uiLayoutFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
 
+test('camera draft accepts the actual Scene envelope and standalone Camera; diagnoses the selected source without writes',()=>{
+  const root=mkdtempSync(join(tmpdir(),'bgs-camera-input-'))
+  try {
+    const scene=sceneLayoutFixture() as any
+    const camera=scene.data.nodes.find((n:any)=>n.id===scene.data.cameraNodeId).components.find((c:any)=>c.type==='camera').data
+    const bytes=JSON.stringify(scene)
+    writeFileSync(join(root,'scene.json'),bytes)
+    writeFileSync(join(root,'camera.json'),JSON.stringify({...camera,pixelsPerUnit:scene.data.settings.coordinateSystem.pixelsPerUnit}))
+    const inspect=(path:string)=>runGameContentCommand(root,['--camera-draft',path,'1280','720']) as any
+    const actual=inspect('scene.json')
+    expect(actual.view).toEqual(inspect('camera.json').view)
+    expect(actual.cameraNodeId).toBe(scene.data.cameraNodeId)
+    expect(actual.runtimeVerified).toBe(false)
+    expect(readFileSync(join(root,'scene.json'),'utf8')).toBe(bytes)
+    writeFileSync(join(root,'ui.json'),JSON.stringify(uiLayoutFixture()))
+    expect(()=>inspect('ui.json')).toThrow('ui.json: --camera-draft expects')
+    delete scene.data.cameraNodeId
+    scene.data.nodes.push({...structuredClone(scene.data.nodes[0]),id:'other-camera'})
+    writeFileSync(join(root,'ambiguous.json'),JSON.stringify(scene))
+    expect(()=>inspect('ambiguous.json')).toThrow('Choose one active authored Camera')
+    writeFileSync(join(root,'invalid.json'),'{}')
+    expect(()=>inspect('invalid.json')).toThrow('invalid.json: --camera-draft expects')
+  }finally{rmSync(root,{recursive:true,force:true})}
+})
+
+test('layout CLI returns selected node geometry once, with explicit spaces and unknown IDs',async()=>{
+  const root=mkdtempSync(join(tmpdir(),'bgs-layout-selected-'))
+  try {
+    const doc={schema:'beegame-content.v1',id:'menu',kind:'ui-screen',assetRefs:[],data:{rootId:'root',nodes:[
+      {id:'root',role:'screen-root'}, {id:'label',parentId:'root',role:'text',text:'Label',layout:{anchor:'top-left',position:[12,16],size:[100,30]}},
+      {id:'button',parentId:'root',role:'button',layout:{anchor:'top-right',position:[-8,12],size:[90,40]}},
+    ]}}
+    const bytes=JSON.stringify(doc);writeFileSync(join(root,'menu.json'),bytes)
+    await initializeUiLayout()
+    const args=['--layout-draft','menu.json','600','300','--nodes','label','button']
+    const result=formatGameContentResult(runGameContentCommand(root,args)) as any
+    expect(result.selectedGeometry.map((n:any)=>n.id)).toEqual(['label','button'])
+    expect(result.selectedGeometry[0].bounds).toMatchObject({left:12,top:16,right:112,bottom:46})
+    expect(result.geometrySpace).toContain('parent-local')
+    expect(result.nodes).toBeUndefined()
+    expect(()=>runGameContentCommand(root,[...args.slice(0,5),'unknown'])).toThrow('Available IDs: root, label, button')
+    expect(()=>runGameContentCommand(root,args.slice(0,5))).toThrow('Usage')
+    expect(readFileSync(join(root,'menu.json'),'utf8')).toBe(bytes)
+  }finally{rmSync(root,{recursive:true,force:true})}
+})
+
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
@@ -41,7 +87,8 @@ test('input identity follows saved sources/links, not a generator public copy, a
   expect(format.value.documentRevision).toContain('--authority')
   expect(format.value.assetManifestRevision).toContain('--authority')
   expect(CONTENT_CHECK_HELP).toContain('NOT JSON')
-  expect(CONTENT_CHECK_HELP).toContain('after final design/Manifest saves')
+  expect(CONTENT_CHECK_HELP).toContain('--authority [--inputs]')
+  expect(CONTENT_CHECK_HELP).toContain('legacy revision metadata')
   expect(CONTENT_CHECK_HELP).toContain('does not certify design or quality')
 })
 

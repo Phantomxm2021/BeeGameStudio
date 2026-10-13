@@ -7,6 +7,8 @@ description: Design or diagnose XR, AR, and MR gameplay involving body movement,
 
 Use spatial presence intentionally. An XR game may be embodied, controller-driven, or hybrid; do not force every action into a gesture or assume one room size, session length, or headset capability.
 
+For a new spatial interaction or a consequential platform assumption, read the applicable [official source and interaction guidance](references/spatial-rule-architecture.md): Apple for visionOS, Meta for its target devices/SDK, and Unity for the installed XR package when used. Reuse relevant guidance already loaded; do not load all platforms or prescribe an engine. Distinguish documented support, a design choice and an untested comfort hypothesis.
+
 - Identify the real device, seated/standing/room-scale mode, tracking and input methods, and what the player's body can safely do. State assumptions if the product has not chosen them.
 - Map the core action to physical position, reach, gaze, controllers, hands, voice, or conventional controls as appropriate. Account for occlusion, field of view, reaction time, boundaries, and tracking loss.
 - Define a clear response and recovery path for a spatial action. Choose visual, spatial audio, haptic, and object-motion feedback according to the mechanic; not every event needs every channel.

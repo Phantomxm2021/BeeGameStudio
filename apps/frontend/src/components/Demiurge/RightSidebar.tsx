@@ -453,12 +453,6 @@ export function RightSidebar({
         }
     };
 
-    const handleEditMessage = (message: ChatDisplayMessage) => {
-        if (isComposerLocked || isAgentWorking || waitingPermission.isBlockingChat || beeGamePermissionReview || !canSendMessage) return;
-        setEditDraft(message.content);
-        setEditingMessageId(message.id);
-    };
-
     const handleCancelEdit = () => {
         setEditingMessageId(null);
         setEditDraft('');
@@ -726,7 +720,7 @@ export function RightSidebar({
                                 onEditDraftChange={setEditDraft}
                                 onSend={handleSend}
                                 onSubmitEdit={() => handleSend(true)}
-                                onEditMessage={!isComposerLocked && !isAgentWorking && !waitingPermission.isBlockingChat && !beeGamePermissionReview && canSendMessage ? handleEditMessage : undefined}
+                                onEditMessage={undefined}
                                 editingMessageId={editingMessageId}
                                 onCancelEdit={handleCancelEdit}
                                 attachments={attachments}

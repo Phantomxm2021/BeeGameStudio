@@ -213,6 +213,8 @@ const MORPH_CLIP_TRANSITION = { duration: 0.32, ease: EASE_OUT } as const;
 
 export interface MorphPopoverContentProps {
   children: ReactNode;
+  ariaLabel?: string;
+  onOpenAutoFocus?: (content: HTMLDivElement) => void;
   side?: Side;
   align?: Align;
   /** Gap between trigger and panel, in px. Default 8. */
@@ -224,6 +226,8 @@ export interface MorphPopoverContentProps {
 
 export function MorphPopoverContent({
   children,
+  ariaLabel,
+  onOpenAutoFocus,
   side = "bottom",
   align = "end",
   sideOffset = 8,
@@ -234,6 +238,7 @@ export function MorphPopoverContent({
   const reduce = useReducedMotion() ?? false;
   const [portalReady, setPortalReady] = useState(false);
   const [contentReady, setContentReady] = useState(false);
+  const focusedOpenRef = useRef(false);
   const setContentNode = useCallback(
     (node: HTMLDivElement | null) => {
       ctx.contentRef.current = node;
@@ -248,16 +253,25 @@ export function MorphPopoverContent({
   );
 
   useEffect(() => setPortalReady(true), []);
-  const left = layout
+  const preferredLeft = layout
     ? align === "end"
       ? layout.trigger.left + layout.trigger.width - layout.content.width
       : layout.trigger.left
     : 0;
-  const top = layout
+  const preferredTop = layout
     ? side === "bottom"
       ? layout.trigger.top + layout.trigger.height + sideOffset
       : layout.trigger.top - layout.content.height - sideOffset
     : 0;
+  const left = layout ? Math.min(Math.max(12, preferredLeft), Math.max(12, window.innerWidth - layout.content.width - 12)) : 0;
+  const top = layout ? Math.min(Math.max(12, preferredTop), Math.max(12, window.innerHeight - layout.content.height - 12)) : 0;
+
+  useEffect(() => {
+    if (!ctx.open) { focusedOpenRef.current = false; return; }
+    if (!layout || focusedOpenRef.current || !ctx.contentRef.current) return;
+    focusedOpenRef.current = true;
+    onOpenAutoFocus?.(ctx.contentRef.current);
+  }, [ctx.open, ctx.contentRef, layout, onOpenAutoFocus]);
 
   // Both directions travel between the exact same hidden/show states. Exit
   // targets "hidden" directly instead of introducing separate choreography.
@@ -307,7 +321,16 @@ export function MorphPopoverContent({
             ref={setContentNode}
             id={ctx.contentId}
             role="dialog"
-            aria-labelledby={ctx.triggerId}
+            aria-label={ariaLabel}
+            aria-labelledby={ariaLabel ? undefined : ctx.triggerId}
+            tabIndex={onOpenAutoFocus ? -1 : undefined}
+            onKeyDownCapture={onOpenAutoFocus ? event => {
+              if (event.key !== "Escape" || ctx.contentRef.current?.querySelector('[aria-expanded="true"]')) return;
+              event.preventDefault();
+              event.stopPropagation();
+              ctx.setOpen(false);
+              document.getElementById(ctx.triggerId)?.focus();
+            } : undefined}
             variants={clip}
             style={{ borderRadius: radius }}
             className={cn(

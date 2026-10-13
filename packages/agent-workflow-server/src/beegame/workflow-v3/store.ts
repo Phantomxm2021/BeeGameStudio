@@ -64,6 +64,8 @@ export function assertCommit(projectId: string, actorId: string, version: number
     throw new WorkflowError('immutable-source','Native goal and diagnostic Task modes cannot be switched implicitly')
   if (next.agentTurns && (next.plans.length || next.attempts.length || Object.keys(next.tasks).length))
     throw new WorkflowError('invalid-commit','Native goal mode cannot contain host Task execution')
+  if(next.agentTurns?.some(t=>t.notStarted!==undefined && t.notStarted!==true))
+    throw new WorkflowError('invalid-exit-evidence','No-start proof must be the literal host fact, not a user string or false flag')
   const oldEdits = prior?.sourceEdits ?? [], edits = next.sourceEdits ?? []
   if (edits.length && !next.agentTurns || edits.length < oldEdits.length || edits.length > oldEdits.length + 1 ||
       new Set(edits.map(e => e.requestKey)).size !== edits.length || new Set(edits.map(e => e.attemptId)).size !== edits.length)
@@ -103,7 +105,13 @@ export function assertCommit(projectId: string, actorId: string, version: number
         prior.writer.workerId!==turn.workerId || next.writer.workerId!==turn.workerId ||
         prior.writer.fence!==turn.fence || next.writer.fence!==turn.fence))
       throw new WorkflowError('invalid-exit-evidence','Native quiescence must retain the current writer until settlement')
+    if (turn.notStarted && turn.status==='ended' || old.notStarted && (!turn.notStarted || turn.nativeSessionId!==old.nativeSessionId || turn.turnId || turn.measurements?.length) ||
+        turn.notStarted && !old.notStarted && (old.quiescedAt || !turn.quiescedAt || turn.status!=='running' || turn.turnId ||
+          turn.measurements?.length || turn.usage || turn.skillUses?.length))
+      throw new WorkflowError('invalid-exit-evidence','No-start proof must be recorded with original quiescence before execution, and remain immutable')
   }
+  if(next.agentTurns?.some(t=>t.notStarted && !prior?.agentTurns?.some(old=>old.attemptId===t.attemptId)))
+    throw new WorkflowError('invalid-exit-evidence','No-start proof cannot be prefilled on a new native reservation')
   if (prior) {
     const history = prior.requirementChanges ?? [], changes = next.requirementChanges ?? []
     if (history.some((change, i) => !sameJson(change,changes[i])))

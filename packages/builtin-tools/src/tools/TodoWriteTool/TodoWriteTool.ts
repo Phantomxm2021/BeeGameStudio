@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle'
+import { isVerificationAgentEnabled } from 'src/utils/optionalRuntimeFeatures.js'
 import { z } from 'zod/v4'
 import { getSessionId } from 'src/bootstrap/state.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { isTodoV2Enabled } from 'src/utils/tasks.js'
@@ -76,7 +76,7 @@ export const TodoWriteTool = buildTool({
     let verificationNudgeNeeded = false
     if (
       feature('VERIFICATION_AGENT') &&
-      getFeatureValue_CACHED_MAY_BE_STALE('tengu_hive_evidence', false) &&
+      isVerificationAgentEnabled() &&
       !context.agentId &&
       allDone &&
       todos.length >= 3 &&

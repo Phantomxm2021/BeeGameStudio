@@ -23,7 +23,7 @@ let checker: Promise<{ root: string; path: string; moduleUrl: string }> | undefi
  * Explicit legacy commands remain available; ordinary delivery is unchanged. */
 export const CURRENT_CONTENT_CHECKER_ENTRY = CONTENT_CHECKER_ENTRY.replace(
   'await runGameContentCli();',
-  'const args = process.argv.slice(2);\n  if (!args.length || (args.length === 1 && !args[0].startsWith("--"))) args.push("--current");\n  await runGameContentCli(args);',
+  'await runGameContentCli(process.argv.slice(2), { profile: "current" });',
 )
 export const CONTENT_BINDING_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'binding entry').replace('runGameContentCli', 'runContentBindingCli').replace('runGameContentCli', 'runContentBindingCli')
 export const MEDIA_PRODUCTION_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'media entry').replaceAll('runGameContentCli', 'runMediaProductionCli')
@@ -44,6 +44,10 @@ export function sharedContentChecker(): Promise<{ root: string; path: string; mo
     const root = await realpath(await mkdtemp(join(tmpdir(), 'beegame-checker-')))
     const path = join(root, 'check-content.mjs')
     await writeFile(path, source, { flag: 'wx', mode: 0o400 })
+    // Publish the small Node adapter beside existing host utilities. Bun's
+    // resolver needs directory reads; never grant the server source directory.
+    for (const name of ['preview-test-command.mjs', 'preview-test-client.mjs'])
+      await writeFile(join(root, name), await readFile(new URL('./'+name, import.meta.url)), { flag: 'wx', mode: 0o400 })
     const uiSource = new URL('../../../../apps/frontend/src/components/Workspace/uiStaticInspection.tsx', import.meta.url)
     const uiBuild = Bun.spawn([process.execPath, 'build', fileURLToPath(uiSource), '--target=browser', '--minify'], { stdout: 'pipe', stderr: 'pipe' })
     const [uiCode, uiScript, uiError] = await Promise.all([uiBuild.exited, new Response(uiBuild.stdout).text(), new Response(uiBuild.stderr).text()])

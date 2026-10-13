@@ -1,0 +1,248 @@
+{
+  "recordVersion": "1.92",
+  "deployedVersion": "1.91",
+  "recordedAt": "2026-10-12T19:06:56.952Z",
+  "deployed": {
+    "deployed": "runtime",
+    "pid": 57757,
+    "codeBaseline": "1.91",
+    "sourceHashes": [
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-browser.mjs",
+        "sha256": "9f246ef4ea35623ec51d9aed6b8f464f9ce4fdcf430674007619c78feefaf2e6"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/check-versions.ts",
+        "sha256": "3a4468ee98e22cc95d2178b997d4d5bca0e055cbad30dc0ac6b81972dc3986d2"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/ui-consumption.ts",
+        "sha256": "10a2a09da683695f00b174bc530e2eb4a503d25f923beaf6e1db13415b8587d2"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-checks.ts",
+        "sha256": "0cff343bf3b6dba00c1b35264377e0c0a443093119f12351a39838deb9930e09"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts",
+        "sha256": "881a73fc1ec8659650e84d32018910114996f921e98dfef0c6816fae741acc33"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts",
+        "sha256": "2ca985cbec7d6862198a8241459de1f7946c5cadedde90cfd1fd7d05a581bc9a"
+      }
+    ],
+    "uiVersion": "v3-ui-dom-consumption.5",
+    "cliRebuilt": false,
+    "frontendRebuilt": false,
+    "otherServicesRestarted": false,
+    "toolGrantsConfigured": false
+  },
+  "deployedRead": {
+    "runtimePid": 57757,
+    "codeBaseline": "1.91",
+    "sourceHashesMatch": true,
+    "sourceFiles": 6,
+    "normalLoginRead": true,
+    "historicalId": "e38ed843-ec73-4061-9204-7b10ffff2136",
+    "diagnostics": [
+      {
+        "checkId": "ui-data-consumption",
+        "document": "content/ui/title.json",
+        "nodeId": "card",
+        "viewport": [
+          1280,
+          720
+        ],
+        "status": "passed",
+        "unobservedProperties": []
+      },
+      {
+        "checkId": "ui-data-consumption",
+        "document": "content/ui/title.json",
+        "nodeId": "card",
+        "viewport": [
+          960,
+          540
+        ],
+        "status": "failed",
+        "reason": "Observed geometry differs from saved layout at baseline",
+        "unobservedProperties": []
+      },
+      {
+        "checkId": "ui-data-consumption",
+        "document": "content/ui/level-select.json",
+        "nodeId": "card",
+        "viewport": [
+          1280,
+          720
+        ],
+        "status": "passed",
+        "unobservedProperties": []
+      },
+      {
+        "checkId": "ui-data-consumption",
+        "document": "content/ui/level-select.json",
+        "nodeId": "card",
+        "viewport": [
+          960,
+          540
+        ],
+        "status": "failed",
+        "reason": "Observed geometry differs from saved layout at baseline",
+        "unobservedProperties": []
+      },
+      {
+        "checkId": "ui-data-consumption",
+        "document": "content/ui/hud.json",
+        "nodeId": "hud-bar",
+        "viewport": [
+          1280,
+          720
+        ],
+        "status": "passed",
+        "unobservedProperties": []
+      },
+      {
+        "checkId": "ui-data-consumption",
+        "document": "content/ui/hud.json",
+        "nodeId": "hint-bar",
+        "viewport": [
+          1280,
+          720
+        ],
+        "status": "passed",
+        "unobservedProperties": []
+      }
+    ],
+    "freshness": {
+      "current": false,
+      "reason": "A newer measurement exists for this artifact; inspect its actual result, including failure or interruption",
+      "code": "measurement-superseded"
+    },
+    "quality": "unverified",
+    "deliveryEligible": false
+  },
+  "synthetic": {
+    "nativeStarts": 1,
+    "localModelRequests": 9,
+    "paidCalls": 0,
+    "permissionExpiry": {
+      "capabilityRemoved": true,
+      "retiredBridgeRejected": true,
+      "unauthenticatedReadStatus": 401
+    },
+    "historical": {
+      "current": false,
+      "reason": "A newer measurement exists for this artifact; inspect its actual result, including failure or interruption",
+      "code": "measurement-superseded"
+    },
+    "current": {
+      "current": true
+    },
+    "actualModelSawDiagnosticCauses": true,
+    "nativeReadEdit": true,
+    "duplicateGoalDispatched": false,
+    "measurements": 2,
+    "turnStatus": "ended",
+    "quiesced": true,
+    "quality": "unverified",
+    "deliveryEligible": false,
+    "failedBatch": [
+      {
+        "document": "content/ui/menu.json",
+        "nodeId": "play",
+        "status": "passed"
+      },
+      {
+        "document": "content/ui/menu.json",
+        "nodeId": "hidden",
+        "status": "unverified",
+        "reason": "Target UI ancestor is hidden; geometry alone cannot establish visible consumption"
+      },
+      {
+        "document": "content/ui/menu.json",
+        "nodeId": "clipped",
+        "status": "unverified",
+        "reason": "Complete visible text fit could not be established"
+      },
+      {
+        "document": "content/ui/menu.json",
+        "nodeId": "play",
+        "status": "unverified",
+        "reason": "Target selector is invalid; select one actual UI element: ["
+      },
+      {
+        "document": "content/ui/menu.json",
+        "nodeId": "play",
+        "status": "passed"
+      }
+    ],
+    "limits": [
+      "Local store and synthetic owner",
+      "Scripted loopback provider, not model reasoning",
+      "Not game quality or production remote database acceptance"
+    ]
+  },
+  "rawFixture": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-native-measurement-3hA1qA",
+  "rawEvidence": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-native-measurement-3hA1qA/native-measurement-evidence.json",
+  "rawModelInputs": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-native-measurement-3hA1qA/transport-model-inputs.json",
+  "regression": {
+    "pass": 28,
+    "skip": 1,
+    "fail": 0,
+    "assertions": 400,
+    "typecheckPassed": true,
+    "diffCheckPassed": true
+  },
+  "fixtureObservationFailure": {
+    "log": "/private/tmp/bgs-v3-192-native-boundary-regression.log",
+    "reason": "Test inspected capability before native runner had populated execution environment; fixed observation to read existing published workspace/session capability. No production change."
+  },
+  "productionLocks": {
+    "projectsChecked": 40,
+    "unresolvedWriters": [
+      {
+        "projectId": "v3-edit-fault-8741b8db-84ea-437f-80cd-15c1c6f1f522",
+        "revision": 3
+      },
+      {
+        "projectId": "v3-edit-fault-bf1512d1-196f-48cc-a723-49685333fc2e",
+        "revision": 3
+      },
+      {
+        "projectId": "v3-host-restart-c4b3872f-5099-4535-a954-6134b8d8210b",
+        "revision": 2
+      }
+    ],
+    "writes": 0
+  },
+  "protectedFiles": {
+    "protectedFiles": 3207,
+    "protectedChanges": [],
+    "gameFiles": 201,
+    "gameChanges": [],
+    "checkedAt": "2026-10-12T19:05:54.208Z"
+  },
+  "productionRun": {
+    "projectId": "v3-paid-a801f793-52cb-4874-8893-f5eaad8bf833",
+    "version": 121,
+    "paused": true,
+    "writerLiveness": "none",
+    "readOnly": true
+  },
+  "modelTraffic": {
+    "successfulFixtures": 2,
+    "localScriptedMessages": 18,
+    "externalPaidRequests": 0
+  },
+  "screenshot": "/private/tmp/bgs-v3-192-debug-proof.jpg",
+  "temporaryDebugClosed": true,
+  "runtimeLeftRunning": true,
+  "boundaries": [
+    "Actual deployed normal-login history read; not a production paid Agent turn",
+    "Expiry/native loop verified in isolated normal HTTP app with local store and synthetic owner",
+    "No actual model reasoning, complete game quality, engine or formal frontend acceptance",
+    "No new production logic; added only regression observation for capability expiry"
+  ]
+}

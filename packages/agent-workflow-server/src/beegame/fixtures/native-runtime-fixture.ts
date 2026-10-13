@@ -113,6 +113,18 @@ for await (const chunk of Bun.stdin.stream()) {
       process.stderr.write('PRIVATE_HEADER_BODY\n')
       continue
     }
+    if (content === 'native-snapshot-stream-burst') {
+      const rows = [
+        {type:'user',uuid:message.uuid,isReplay:true,parent_tool_use_id:null,message:message.message},
+        {type:'stream_event',event:{type:'message_start',message:{id:'burst'}}},
+        {type:'stream_event',event:{type:'content_block_start',index:0,content_block:{type:'text',text:''}}},
+        ...Array.from({length:500},()=>({type:'stream_event',event:{type:'content_block_delta',index:0,
+          delta:{type:'text_delta',text:'synthetic delta '}}})),
+      ]
+      process.stdout.write(rows.map(row=>JSON.stringify(row)+'\n').join(''))
+      // Wait for explicit interruption, never generate a successful result.
+      continue
+    }
     if (content === 'native-diagnostics') {
       // Fragments, oversized noise, malformed frames and an unterminated final
       // frame exercise stderr framing without any provider request.

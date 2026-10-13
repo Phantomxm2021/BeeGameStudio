@@ -1,0 +1,99 @@
+{
+  "date": "2026-10-13",
+  "scope": "BGS task scope, explicit execution context selection and read-only evidence handoff",
+  "implementationDocumentVersion": "1.96",
+  "deployment": {"changed": false, "runningBaseline": "1.93", "paidReruns": 0},
+  "audit": {
+    "confirmedCauses": [
+      {"classification": "BGS task packaging", "evidence": "Paid turn 18 event 94495 retains the full user request but prepends only affected domains; agent-goal.ts added this to every production follow-up."},
+      {"classification": "BGS context eligibility", "evidence": "Focused work rejected every failed/interrupted preceding turn, including turns with durable finishedAt/quiescedAt and no writer."},
+      {"classification": "Agent delegation and conclusion", "evidence": "Paid event 96182 delegated only two old hash/geometry findings; the local PASS was generalized to full delivery by the parent. Skill tools were available."},
+      {"classification": "Evidence interface gap", "evidence": "handoff contained current task text but inspect only returned selected measurement facts; a child reading inspect lacked the actual current authorization."}
+    ],
+    "accepted": [
+      "Delete the generic narrowing sentence, preserve literal user scope and existing authorization constraints.",
+      "Allow explicitly requested focused work/change after a settled failed/interrupted turn only with the existing confirmed-exit, writer, history, owner and revision checks.",
+      "Keep previous failure/exit and unconfirmed native-tool identities as facts, not replay instructions or external success claims.",
+      "Expose current user task separately from selected measurement execution in existing handoff/inspect/owned history routes.",
+      "Expose live or saved native Skill event evidence separately from historical main loads; method application remains unverified."
+    ],
+    "rejected": [
+      "Automatically reset history, retry interrupted operations or send another model request.",
+      "Copy the full user request into startup facts when the actual user-message block already carries it.",
+      "Rewrite the native child assignment, force an eight-domain execution plan or auto-load the entire Skill catalog.",
+      "Turn file reads, Skill loads, hash agreement, builds or local reviewer PASS into semantic/game-quality acceptance."
+    ],
+    "compatibilityAndRisks": [
+      "Default resume and continue preserve the original native conversation; focused remains explicit work/change only.",
+      "Failed status no longer unconditionally prevents fresh authorized work; exit evidence still cannot be inferred from PID absence or a user assertion.",
+      "Fresh context does not preserve assistant-only implicit choices or prior Skill bodies. Unknown external outcomes remain unknown; retained tool identities do not certify remote completion.",
+      "Evidence replies add factual fields. Startup retains task identity only, with no repeated request text. Existing measurement IDs, checks, freshness, diagnostics and quality flags stay unchanged.",
+      "Live Skill calls and saved calls identify parent/child tool use, not correct use of the methods. Empty unrecorded data is labeled not-recorded-yet.",
+      "Existing Agent reasoning, tool selection and final prose can still be wrong; this implementation does not guarantee full eight-domain coverage or taste."
+    ]
+  },
+  "implementation": {
+    "systemFiles": [
+      "packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts"
+    ],
+    "sourceHashes": {
+      "agent-goal.ts": "4a15e29a58a418611d0797084a8cc505e53a63e1a36ea48c5b19824286a4471b",
+      "agent-measurement.ts": "55c901e778b8c5902e0fc62e1d42feaf74fbfebe1d273362aa2e9e73a50ce1cb",
+      "routes.ts": "97be794618b3e50bff066053d2e8669fb290d01db39b7591a1e38277d3b11225"
+    },
+    "testFiles": [
+      "packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.test.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal-native.test.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/project-guide-native.test.ts"
+    ],
+    "noChangesTo": ["formal frontend", "Claude Code source", "builtin-tools source", "project settings/hooks", "root environment", "actual game artifacts", "Agent turn/token/tool limits", "runtime selection", "semantic Review prompts"]
+  },
+  "verification": {
+    "localBoundary": {"passed": 78, "skipped": 1, "failed": 0, "assertions": 1053, "log": "/private/tmp/bgs-v3-197-delivery-boundary-regression.log"},
+    "nativeFullGoal": {"passed": true, "controlledRequests": 28, "log": "/private/tmp/bgs-v3-197-delivery-native-regression.log"},
+    "nativeChildCurrentTask": {"passed": true, "controlledRequests": 10, "assertions": 85, "log": "/private/tmp/bgs-v3-197-child-task-handoff-final.log"},
+    "truncatedFailureFeedback": {"passed": true, "assertions": 12, "log": "/private/tmp/bgs-v3-197-tail-task-format-regression.log", "note": "Same case as the boundary suite; do not count twice. A long failed-command output retains leading UI cause and trailing current task/Skill facts for this tested payload, not arbitrary-size output guarantees."},
+    "uniqueCases": {"passed": 80, "skipped": 1, "failed": 0},
+    "skip": "Existing optional legacy consumer test is disabled; this implementation does not require consumer migration.",
+    "typecheck": "passed",
+    "typecheckLog": "/private/tmp/bgs-v3-197-release-typecheck.log",
+    "diffCheck": "passed",
+    "finalNativeEvidenceRequests": 38,
+    "countsNote": "38 is the two final accepted native fixtures only. Prior controlled diagnostic repetitions also ran and are not counted as additional successful cases or claimed as zero model requests. External paid calls are zero; fixed usage is not real token savings.",
+    "diagnosticLogs": [
+      "/private/tmp/bgs-v3-197-task-context-regression.log",
+      "/private/tmp/bgs-v3-197-native-transport-regression.log",
+      "/private/tmp/bgs-v3-197-final-native-regression.log",
+      "/private/tmp/bgs-v3-197-child-task-handoff-regression.log"
+    ],
+    "diagnosticFailures": [
+      "Initial added fixtures attempted to settle in one commit / used wrong stop endpoint; corrected to normal two-step immutable exit settlement and existing stop/resume APIs, without weakening production checks.",
+      "A stale positive test assertion expected the deleted narrowing sentence; corrected its expectation.",
+      "The old combined startup character assertion conflated fixed tool help with variable saved task/source facts. Removed the combined budget assertion; added explicit no-duplicate-user-text and task identity assertions instead.",
+      "The extended child fixture initially left a prior workspace writer unresolved. Corrected the observed native exit and ordinary settlement before the second phase; no bypass of workspace fencing."
+    ]
+  },
+  "protection": {
+    "protectedSelectedFiles": 3207,
+    "protectedChanges": [],
+    "actualGameSelectedFiles": 201,
+    "changesRelativeToPrePaidBaseline": ["docs/UI_UX_SPEC.md", "content/index.json", "dist/content/index.json", "reports/browser/r31/ACCEPTANCE_V31.md"],
+    "note": "These four are the prior authorized native turn changes, not this system work. Current measured source/report/build/dependency inputs still match the paid final receipt.",
+    "projectRunVersion": 127,
+    "nativeTurnStatus": "ended",
+    "paidTurnUsageUnchanged": 6345634,
+    "measurement": "d153ce12-beb9-48f0-818a-d7db0cd26107",
+    "measurementInputs": "current; sources/reports/requirements/dependencies/build unchanged",
+    "evidence": "/private/tmp/bgs-v3-189-protected-file-check.json"
+  },
+  "unverified": [
+    "Deployment of this patch and live production HTTP combinations.",
+    "Real model adoption of the current task, professional Skills and complete design/quality coverage.",
+    "Existing actual game quality defects, full Scene/resource/audio behavior and human taste/play experience.",
+    "Unknown remote paid/engine outcomes; no automatic replay or inferred success.",
+    "Engines and formal frontend product integration remain outside this work. Cost optimization remains last."
+  ]
+}

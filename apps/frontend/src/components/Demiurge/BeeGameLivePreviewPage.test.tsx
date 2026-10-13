@@ -18,6 +18,13 @@ const props = {
 const live = { status: 'passed', build_url: '/previews/session/game/' };
 
 describe('dashboard header', () => {
+  it('does not expose the retired production-review action', () => {
+    render(<BeeGameLivePreviewPage {...props} />);
+    expect(screen.queryByRole('button', { name: '制作验收' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '播放预览' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '部署' })).toBeInTheDocument();
+  });
+
   it('shows agent activity and standby without calling either preview preparation', () => {
     const { rerender } = render(<BeeGameLivePreviewPage {...props} status="running" isAgentWorking />);
     expect(screen.getByText('Bee Game Studio工作中')).toBeInTheDocument();

@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { artifactDigest } from '../beegame/runtime-acceptance'
 import { computeWorkspaceRevision } from '../beegame/workspace-revision'
+import { createPreviewTestBrowser } from '../beegame/preview-test-browser'
+import { sharedPlaywright } from '../beegame/shared-playwright'
 import {
   BeeGameDeploymentManager,
   createSupabaseStorageDeploymentPublisher,
@@ -24,6 +26,96 @@ describe('BeeGameDeploymentManager', () => {
   afterEach(async () => {
     await rm(root, { recursive: true, force: true })
   })
+
+  test('published local bytes load HTML, module and JSON through their actual deployment URL in Chromium',async()=>{
+    workspace=await realpath(workspace)
+    await mkdir(join(workspace,'site'))
+    await writeFile(join(workspace,'site/index.html'),'<main id="value">loading</main><script type="module" src="./game.js"></script>')
+    await writeFile(join(workspace,'site/game.js'),'const v=await(await fetch("./data.json")).json();document.querySelector("#value").textContent="value="+v.value;')
+    await writeFile(join(workspace,'site/data.json'),'{"value":7}')
+    const manager=new BeeGameDeploymentManager({dataRoot:root,runner:async()=>{throw Error('No rebuild')}})
+    const artifact={path:'site',sha256:await artifactDigest(workspace,'site',true)}
+    const result=await manager.deploy({sessionId:'browser-fixture',workspacePath:workspace,
+      measured:{runId:'synthetic',measurementId:'synthetic',artifact,validate:async()=>{}}})
+    expect(result.status).toBe('succeeded')
+    const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
+      const file=await manager.readPublicFile(new URL(request.url).pathname)
+      return file?new Response(file.body,{headers:{'content-type':file.contentType}}):new Response('Not found',{status:404})
+    }})
+    const browser=createPreviewTestBrowser()
+    let child:ReturnType<typeof Bun.spawn>|undefined
+    try{
+      const {endpoint}=await browser.start()
+      const browserProcess=Bun.spawn([Bun.which('node')!,'--input-type=module','-e',`
+        const {chromium}=await import(process.env.CLIENT);
+        const browser=await chromium.connectOverCDP(process.env.ENDPOINT);
+        const context=await browser.newContext(),page=await context.newPage();
+        const errors=[];page.on('pageerror',e=>errors.push(e.message));
+        try{
+          await page.goto(process.env.URL);
+          await page.getByText('value=7',{exact:true}).waitFor({timeout:10000});
+          await page.reload();await page.getByText('value=7',{exact:true}).waitFor({timeout:10000});
+          if(errors.length)throw Error(JSON.stringify(errors));
+          console.log('published-module-json-pass');
+        }finally{await context.close();await browser.close()}
+      `],{env:{PATH:process.env.PATH,CLIENT:sharedPlaywright().moduleUrl,ENDPOINT:endpoint,
+        URL:server.url.origin+result.url},stdout:'pipe',stderr:'pipe'})
+      child=browserProcess
+      const timeout=setTimeout(()=>child?.kill(),20000)
+      try {
+        const [stdout,stderr,code]=await Promise.all([new Response(browserProcess.stdout).text(),new Response(browserProcess.stderr).text(),browserProcess.exited])
+        expect(code,stderr).toBe(0);expect(stdout).toContain('published-module-json-pass')
+      }finally{clearTimeout(timeout)}
+    }finally{child?.kill();await browser.close();server.stop(true)}
+  },30000)
+
+  test.each(['./game.js','/game.js'])(
+    'V3 publication checks the returned nested URL without rewriting asset references: %s',async script=>{
+      workspace=await realpath(workspace)
+      await mkdir(join(workspace,'site'))
+      await writeFile(join(workspace,'site/index.html'),'<main>Loading</main><script type="module" src="'+script+'"></script>')
+      await writeFile(join(workspace,'site/game.js'),'document.querySelector("main").textContent="Loaded"')
+      const artifact={path:'site',sha256:await artifactDigest(workspace,'site',true)}
+      const manager=new BeeGameDeploymentManager({dataRoot:root,runner:async()=>{throw Error('No rebuild')},
+        publisher:{async publishStaticDirectory(){return {url:'https://publication.invalid/nested/files/index.html'}}}})
+      const record=await manager.deploy({sessionId:'path-fixture',workspacePath:workspace,
+        measured:{runId:'fixture',measurementId:'fixture',artifact,validate:async()=>{}}})
+      expect(record.status,record.message).toBe(script.startsWith('./')?'succeeded':'failed')
+      if(script.startsWith('/')){
+        expect(record.message).toContain('/game.js (outside publication base /nested/files/)')
+        expect(await manager.readPublicFile('/deployments/'+record.id+'/')).toBeUndefined()
+      }
+      expect(await artifactDigest(workspace,'site',true)).toBe(artifact.sha256)
+    },30000)
+
+  test.each(['unchanged','modified','revoked-after-copy','publisher-failed'] as const)(
+    'V3 publishes the explicit measured directory without a package build script: %s',async mode=>{
+      workspace=await realpath(workspace)
+      const output=join(workspace,'web-output')
+      await mkdir(output)
+      await writeFile(join(output,'index.html'),'<main>Measured static fixture</main>')
+      const artifact={path:'web-output',sha256:await artifactDigest(workspace,'web-output',true)}
+      if(mode==='modified')await writeFile(join(output,'index.html'),'<main>Untested version</main>')
+      let validations=0,uploads=0
+      const manager=new BeeGameDeploymentManager({dataRoot:root,
+        runner:async()=>{throw Error('No build permitted')},
+        ...(mode==='publisher-failed'?{publisher:{async publishStaticDirectory(){
+          uploads++;throw Error('Synthetic publication failed')
+        }}}:{})})
+      const result=await manager.deploy({sessionId:'measured',workspacePath:workspace,
+        measured:{runId:'run',measurementId:'measurement',artifact,async validate(){
+          validations++;if(mode==='revoked-after-copy'&&validations===2)throw Error('Writer started')
+        }}})
+      expect(result.status).toBe(mode==='unchanged'?'succeeded':'failed')
+      expect(result.buildCommand).toBeUndefined()
+      const publicFile=await manager.readPublicFile('/deployments/'+result.id+'/')
+      if(mode==='unchanged'){
+        expect(await publicFile!.body.text()).toBe('<main>Measured static fixture</main>')
+        const restarted=new BeeGameDeploymentManager({dataRoot:root,runner:async()=>{throw Error('No rebuild')}})
+        expect(await(await restarted.readPublicFile('/deployments/'+result.id+'/'))!.body.text()).toContain('Measured static fixture')
+      }else expect(publicFile).toBeUndefined()
+      expect(uploads).toBe(mode==='publisher-failed'?1:0)
+    })
 
   test('retention preserves rollback bytes and later collects them when unreferenced', async () => {
     await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'node build.js' } }))

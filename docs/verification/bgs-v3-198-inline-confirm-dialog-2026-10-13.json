@@ -1,0 +1,16 @@
+{
+  "scope": "independent /debug/workflow-v3 only",
+  "rootCause": "Browser-native confirm blocks browser-control requests and can be cancelled when the debug window is backgrounded; confirmation was not reliably observable.",
+  "change": "Replace all eleven native confirm calls with one asynchronous in-page HTML dialog; preserve normal authenticated APIs, draft identity, explicit authorization and cancel semantics.",
+  "safety": ["No API request on dialog open, cancellation or Escape", "Focus defaults to cancel", "Busy guard excludes dialog controls and ignores duplicate action clicks", "Identity changes and page exit cancel the pending dialog", "No stored credentials or automatic retry", "User text renders with textContent"],
+  "regression": {"uniqueTestsPassed": 11, "browserTestsFailed": 0, "rootTypecheck": "passed: local tsc --noEmit -p tsconfig.json exited 0", "packageTypecheck": "failed: package config lacks root workspace aliases and imported Claude workflow code has unresolved workflow-engine/ink/src aliases; not repaired or treated as passed", "diffCheck": "passed after removing one test-driver trailing-whitespace line", "paidModelCalls": 0, "nativeFixture": "normal intake, Skill, Question, work/change/focused, interruption and exports with fixed loopback model responses"},
+  "logs": ["/private/tmp/bgs-v3-198-debug-dialog-regression.log", "/private/tmp/bgs-v3-198-debug-dialog-native-regression.log", "/private/tmp/bgs-v3-198-debug-dialog-agent-regression.log", "/private/tmp/bgs-v3-198-debug-dialog-final.log", "/private/tmp/bgs-v3-198-debug-dialog-typecheck.log"],
+  "screenshot": "/private/tmp/bgs-v3-198-inline-dialog.png",
+  "liveDebugScreenshot": "/private/tmp/bgs-v3-198-live-inline-dialog.png",
+  "liveDebugObservation": "Existing authenticated project Run read; recovery dialog opened and explicitly cancelled. cancelled:true returned; no recovery request or Agent interruption.",
+  "availability": "The existing runtime serves debug HTML/JS from disk per GET; a newly opened debug page contains the dialog without restarting the active paid Agent. Already open pages need refresh after checking no pending submission.",
+  "formalFrontendChanged": false,
+  "claudeCodeChanged": false,
+  "gameManuallyChanged": false,
+  "paidAcceptance": {"requestKey": "8fc0d093-4140-4d3e-a2ba-04acc545f6a7", "attemptId": "6ba29681-1155-4650-89c4-4942340eb398", "startedAt": "2026-10-12T20:53:37.592Z", "finishedAt": "2026-10-12T21:37:53.242Z", "intent": "work", "contextMode": "focused", "newMessages": 1, "status": "ended; full Skills/game-quality acceptance failed", "finalRunVersion": 136, "totalTokens": 16337297, "finalMeasurement": "9161f0b5-85e6-40a2-b315-591ad98b57b4", "freshnessCurrentAfterExit": true, "quality": "unverified", "deliveryEligible": false}
+}

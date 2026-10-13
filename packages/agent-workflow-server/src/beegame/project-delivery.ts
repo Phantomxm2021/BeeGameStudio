@@ -21,7 +21,7 @@ import { resourcesInstruction, checkResourceResult } from './delivery/stages/res
 import { contentInstruction, checkContentResult } from './delivery/stages/content'
 import { checkProductionDesign } from './delivery/design-protection'
 import { implementationInstruction, checkImplementationResult } from './delivery/stages/implementation'
-import { acceptanceInstruction, captureAcceptance, checkAcceptanceGate, advanceAcceptance, checkAcceptanceFindings, validateQualityReview } from './delivery/stages/acceptance'
+import { acceptanceInstruction, captureAcceptance, checkAcceptanceGate, advanceAcceptance, checkAcceptanceFindings } from './delivery/stages/acceptance'
 
 export { projectDeliveryPhase } from './delivery/phases'
 export type { ProjectDeliveryPhase } from './delivery/phases'
@@ -96,21 +96,9 @@ export function checkProjectDesignBaseline(workspace: string, state: ProjectDeli
     phase === 'complete' ? 'acceptance' : phase).issues
 }
 
-/** Preserve the frontend's owner feedback operation without changing stages,
- * dispatching a model, modifying game products or awarding acceptance. */
-export async function recordProjectQualityReview(workspace: string, dataRoot: string, review: {
-  revision: string; reviewerId: string; decision: 'accepted' | 'changes-required'; note: string
-}) {
-  return withStateMutation(workspace, dataRoot, async () => {
-    const state = await readProjectDelivery(workspace, dataRoot)
-    await validateQualityReview(workspace, state, review)
-    await save(workspace, dataRoot, { ...state!, qualityReview: review })
-  })
-}
-
 export async function projectRuntimeReview(workspace: string) {
   const report = await readRuntimeAcceptanceReport(workspace, PROJECT_DELIVERY_REPORT_PATH)
-  return report ? { scope: report.scope, status: report.status, summary: report.summary, sampleReviewCurrent: false } : undefined
+  return report ? { scope: report.scope, status: report.status, summary: report.summary } : undefined
 }
 
 export async function beginProjectDelivery(workspacePath: string, dataRoot: string, objective: string): Promise<ProjectDeliveryState> {

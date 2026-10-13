@@ -2,8 +2,37 @@
 // or repeat a mutation after failure; all authority stays in the normal API.
 const el = id => document.getElementById(id);
 const pretty = value => JSON.stringify(value, null, 2);
-let view, loaded, loadedConnection, connection, preview, questionView, questionConnection, observationConnection, observationSource, restoredChat, chatConnection, goalRequest, messageRequest, messageConnection, saveRequest, busy = false;
+let view, loaded, loadedConnection, connection, preview, questionView, questionConnection, observationConnection, observationSource, restoredChat, chatConnection, goalRequest, messageRequest, messageConnection, saveRequest, eventView, eventConnection, busy = false;
+let pendingActions = 0, actionSequence = 0, stopping = false;
 const urls = new Set();
+const pendingReads = new Set();
+let pendingConfirmation;
+function finishConfirmation(accepted) {
+  if (!pendingConfirmation) return;
+  const resolve = pendingConfirmation;
+  pendingConfirmation = undefined;
+  el('action-confirm').close();
+  resolve(accepted);
+}
+async function confirmAction(message) {
+  if (pendingConfirmation) throw Error('已有操作等待确认；不会另发请求');
+  const identity = credentials();
+  el('action-confirm-message').textContent = message + '\n\n项目：' + identity.project;
+  const answer = new Promise(resolve => { pendingConfirmation = resolve; });
+  try {
+    el('action-confirm-cancel').disabled = false;
+    el('action-confirm-accept').disabled = false;
+    el('action-confirm').showModal();
+    el('action-confirm-cancel').focus();
+    const accepted = await answer;
+    if (accepted && !sameIdentity(identity, credentials())) throw Error('确认期间项目或身份改变；没有发送旧操作');
+    return accepted;
+  } finally { finishConfirmation(false); }
+}
+el('action-confirm-cancel').addEventListener('click', () => finishConfirmation(false));
+el('action-confirm-accept').addEventListener('click', () => finishConfirmation(true));
+el('action-confirm').addEventListener('cancel', event => { event.preventDefault(); finishConfirmation(false); });
+el('action-confirm').addEventListener('close', () => { if (!el('action-confirm').open) finishConfirmation(false); });
 function credentials() {
   const project = el('project').value.trim(), authMode = el('auth-mode').value;
   const token = authMode === 'session' ? '' : el('token').value.trim();
@@ -19,8 +48,14 @@ function current() {
 }
 async function request(path, method = 'GET', body, binary = false) {
   const identity = credentials();
+  const readController = method === 'GET' ? new AbortController() : undefined;
+  if (readController) pendingReads.add(readController);
+  try {
   const response = await fetch('/api/projects/' + encodeURIComponent(identity.project) + path, {
     method, redirect: 'error', credentials: identity.authMode === 'session' ? 'same-origin' : 'omit',
+    // A stalled read must not hold the debug UI forever. This does not cancel,
+    // replay or impose a time limit on the native Agent or server mutations.
+    ...(readController ? { signal: AbortSignal.any([readController.signal, AbortSignal.timeout(15000)]) } : {}),
     headers: { ...(identity.authMode === 'session' ? {} : { Authorization: 'Bearer ' + identity.token }), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     ...(body ? { body: pretty(body) } : {}),
   });
@@ -36,6 +71,7 @@ async function request(path, method = 'GET', body, binary = false) {
   if (!sameIdentity(now, identity))
     throw Error('请求期间项目或身份改变；旧操作可能已执行，请单独核对，不自动重试');
   return result;
+  } finally { if (readController) pendingReads.delete(readController); }
 }
 function dropPreview() {
   preview = undefined;
@@ -47,7 +83,16 @@ function dropPreview() {
 function option(value, text) { const node = document.createElement('option'); node.value = value; node.textContent = text; return node; }
 async function load() {
   const result = await request('/workflow-v3');
+  if (sameIdentity(connection, credentials()) && view?.run?.id === result.run?.id && view?.run?.version > result.run?.version)
+    return { ignoredStaleRead: true, currentVersion: view.run.version };
   view = result; connection = credentials();
+  if (questionView && (result.run?.paused || questionView.runId !== result.run?.id ||
+      questionView.requirementsRevision !== result.run?.requirements?.revision ||
+      questionView.questions.some(q => q.attemptId !== result.run?.writer?.attemptId))) {
+    questionView = questionConnection = undefined;
+    el('question').replaceChildren(); showQuestion();
+  }
+  eventView = undefined; eventConnection = undefined;
   dropPreview();
   el('run').textContent = pretty(result);
   el('task').replaceChildren(...Object.values(result.run?.tasks || {}).filter(t => t.status !== 'superseded')
@@ -59,8 +104,11 @@ async function load() {
   el('review-attempt').replaceChildren(...reviews.map(a => option(a.attemptId, a.taskId + ' · ' + a.status)));
   if (reviews.some(a => a.attemptId === reviewId)) el('review-attempt').value = reviewId;
   showReview();
-  el('measurement').replaceChildren(...(result.run?.agentTurns || []).flatMap(turn => (turn.measurements || []).map(m =>
-    option(m.id, m.runtimeArtifact + ' · ' + (m.error || (m.finishedAt ? m.checks.map(c=>c.id+':'+c.status).join(', ') : '结果未知'))))));
+  // Default to the newest actual result, including failed/incomplete results;
+  // never silently select an earlier success. Historical receipts remain selectable.
+  el('measurement').replaceChildren(...(result.run?.agentTurns || []).flatMap(turn => turn.measurements || []).reverse().map(m =>
+    option(m.id, m.id + ' · ' + (m.finishedAt || m.startedAt || '时间未知') + ' · ' + m.runtimeArtifact + ' · ' +
+      (m.error || (m.finishedAt ? m.checks.map(c=>c.id+':'+c.status).join(', ') : '结果未知')))));
   if (el('review-attempt').value !== reviewId) el('finding-ids').value = '';
   // Leave loaded JSON/proposals and their ORIGINAL versions untouched.
   return result;
@@ -94,7 +142,7 @@ async function answerQuestion(decision) {
       questionView.runId !== run.id || questionView.planRevision !== run.planRevision || questionView.requirementsRevision !== run.requirements.revision)
     throw Error('请读取当前可答问题；旧来源、暂停或历史问题不能授权');
   const answers = decision === 'allow' ? JSON.parse(el('answers').value) : undefined;
-  if (!confirm(decision === 'allow' ? '确认这是你对所显示原生问题的答复？源变化时宿主会拒绝。' : '确认拒绝本次问题？不会默认授权。')) return { cancelled: true };
+  if (!await confirmAction(decision === 'allow' ? '确认这是你对所显示原生问题的答复？源变化时宿主会拒绝。' : '确认拒绝本次问题？不会默认授权。')) return { cancelled: true };
   const result = await request('/permissions/' + encodeURIComponent(question.toolUseID), 'POST', { decision, scope: 'once', ...(answers ? { answers } : {}) });
   if (!result.resolved || result.stale) throw Error('原生问题已失效；答复未被接收，保留草稿，请重新核对');
   question.canAnswer = false;
@@ -106,7 +154,17 @@ const actions = {
     if(!selection.measurementId)throw Error('此入口只核对自主 Agent 测量');
     return request('/workflow-v3/agent/measurements/'+encodeURIComponent(selection.measurementId));
   },
-  load, events: () => { current(); return request('/workflow-v3/events'); },
+  load, events: async () => {
+    current(); eventView = await request('/workflow-v3/events?limit=100'); eventConnection = { ...connection }; return eventView;
+  },
+  'events-earlier': async () => {
+    const run = current();
+    if (!eventView?.hasMore || eventView.nextBeforeId === null || eventView.runId !== run.id || !sameIdentity(eventConnection, connection))
+      throw Error('请先读取当前项目事件；没有可继续的历史页');
+    eventView = await request('/workflow-v3/events?limit=100&beforeId=' + encodeURIComponent(eventView.nextBeforeId) +
+      '&attemptId=' + encodeURIComponent(eventView.attemptId));
+    return eventView;
+  },
   'restore-chat': async () => {
     const result = await request('/session/ensure', 'POST', {});
     restoredChat = result.session; chatConnection = credentials();
@@ -120,7 +178,7 @@ const actions = {
   'submit-goal': async () => {
     if (!goalRequest || !sameIdentity(chatConnection, credentials())) throw Error('请先恢复 Chat 并准备接单身份');
     const brief = JSON.parse(el('goal-brief').value);
-    if (!confirm('把这份已确认完整目标交给原生 Agent 自主规划执行？可能产生模型费用；不是游戏验收。')) return { cancelled: true };
+    if (!await confirmAction('把这份已确认完整目标交给原生 Agent 自主规划执行？可能产生模型费用；不是游戏验收。')) return { cancelled: true };
     const result = await request('/workflow-v3/agent/goal', 'POST', { ...goalRequest, brief });
     await load(); return result;
   },
@@ -129,9 +187,15 @@ const actions = {
     if(!run.agentTurns || !restoredChat?.id || restoredChat.id!==run.chatSessionId || !sameIdentity(chatConnection,connection))
       throw Error('请读取 Agent Run 并恢复其所属 Chat');
     const intent=el('message-intent').value,text=el('message-text').value.trim();
+    const contextMode=el('message-context').value;
+    const previous=run.agentTurns.at(-1);
+    if(contextMode==='focused' && (!['work','change','continue'].includes(intent)||
+        !['ended','failed','interrupted'].includes(previous?.status)||!previous?.quiescedAt||!previous?.finishedAt))
+      throw Error('聚焦模式须确认上轮已退出并完成结算；中断续作请选择 continue。旧权限、工具历史和仅存在于对话中的隐含决定不会转移');
     if(!text) throw Error('请输入实际用户消息');
     messageRequest={requestKey:crypto.randomUUID(),runId:run.id,chatSessionId:run.chatSessionId,
       expectedVersion:run.version,requirementsRevision:run.requirements.revision,intent,text,
+      ...(contextMode==='focused'?{contextMode}:{}),
       ...(intent==='continue'?{continuationOf:run.agentTurns.at(-1)?.attemptId}:{})};
     messageConnection={...connection};
     return {...messageRequest,dispatched:false};
@@ -139,9 +203,10 @@ const actions = {
   'submit-message': async () => {
     current();
     if(!messageRequest || !sameIdentity(messageConnection,credentials())) throw Error('请先准备本项目当前版本的消息');
-    if(messageRequest.text!==el('message-text').value.trim() || messageRequest.intent!==el('message-intent').value)
+    if(messageRequest.text!==el('message-text').value.trim() || messageRequest.intent!==el('message-intent').value ||
+      (messageRequest.contextMode??'resume')!==el('message-context').value)
       throw Error('消息内容或授权改变，请重新准备；旧请求身份不能复用为新消息');
-    if(!confirm('确认发送此 '+messageRequest.intent+' 消息到原项目会话？可能产生模型费用；不会自动重复原始目标。')) return {cancelled:true};
+    if(!await confirmAction('确认发送此 '+messageRequest.intent+' 消息到原项目会话？可能产生模型费用；不会自动重复原始目标。')) return {cancelled:true};
     const result=await request('/workflow-v3/agent/messages','POST',messageRequest);
     await load();return result;
   },
@@ -153,7 +218,7 @@ const actions = {
   'create-run': async () => {
     const body = JSON.parse(el('proposal').value);
     if (!restoredChat?.id || !sameIdentity(chatConnection, credentials()) || body.chatSessionId !== restoredChat.id) throw Error('新 Run 必须使用本项目实际恢复的 Chat');
-    if (!confirm('确认这份全文需求，并创建新的 V3 Run？不覆盖已有 Run、不执行任务。')) return { cancelled: true };
+    if (!await confirmAction('确认这份全文需求，并创建新的 V3 Run？不覆盖已有 Run、不执行任务。')) return { cancelled: true };
     const result = await request('/workflow-v3/runs', 'POST', body); await load(); return result;
   },
   sources: () => { current(); return request('/workflow-v3/sources'); },
@@ -183,7 +248,7 @@ const actions = {
   'recover-writer': async () => {
     const run = current();
     if (!run.writer) throw Error('没有待收尾的写者');
-    if (!confirm('仅凭宿主完整退出证据收尾，部分成果不验收，不恢复暂停、不重试或重新收费。确认？')) return { cancelled: true };
+    if (!await confirmAction('仅凭宿主完整退出证据收尾，部分成果不验收，不恢复暂停、不重试或重新收费。确认？')) return { cancelled: true };
     const result = await request('/workflow-v3/recover-writer', 'POST', { expectedVersion: run.version, attemptId: run.writer.attemptId, fence: run.writer.fence });
     await load(); return result;
   },
@@ -217,7 +282,7 @@ const actions = {
     if (!sameIdentity(observationConnection, connection))
       throw Error('请先从本项目实际 Preview 准备观察；不能使用其他身份的草稿');
     const body = JSON.parse(el('observation-json').value);
-    if (!confirm('确认保存这份构建上的实际观察？不是缺陷裁决，不会自动派发。')) return { cancelled: true };
+    if (!await confirmAction('确认保存这份构建上的实际观察？不是缺陷裁决，不会自动派发。')) return { cancelled: true };
     const result = await request('/workflow-v3/preview-issues', 'POST', body); await load(); el('issue').value = result.issue.id; return result;
   },
   'observation-message': async () => {
@@ -232,14 +297,14 @@ const actions = {
     if(!measured.freshness.current)throw Error('该构建已非当前版本；保留原观察，重新核对实际版本，不自动重绑');
     el('message-text').value='请核查这份实际构建观察。它是用户观察，不是已证实缺陷；是否修改以本次消息授权为准。\n'+pretty({...source,steps:body.steps,expected:body.expected,observed:body.observed});
     // Preparing a draft never authorizes repair or dispatches a model. The user
-    // chooses discuss/change and prepares the normal version-bound message.
+    // chooses discuss/work/change and prepares the version-bound message.
     el('message-intent').value='discuss';messageRequest=undefined;
     return {prepared:'native-message-draft',dispatched:false,source};
   },
   'issue-review': async () => {
     const run = current(), id = el('issue').value;
     if (!run.previewIssues?.some(i => i.id === id)) throw Error('请选择已保存的实际观察');
-    if (!confirm('授权此观察的定向 Review 任务？只改计划，不执行或收费。')) return { cancelled: true };
+    if (!await confirmAction('授权此观察的定向 Review 任务？只改计划，不执行或收费。')) return { cancelled: true };
     const result = await request('/workflow-v3/preview-issues/' + encodeURIComponent(id) + '/review-plan', 'POST', { planRevision: run.planRevision });
     await load(); return result;
   },
@@ -248,7 +313,7 @@ const actions = {
     const attempt = run.attempts.find(a => a.attemptId === attemptId);
     if (!attempt?.review || run.tasks[attempt.taskId]?.attemptId !== attemptId) throw Error('请选择当前有来源的实际 Review 报告');
     const findingIds = JSON.parse(el('finding-ids').value);
-    if (!confirm('按此报告授权原所有者集中 Repair 及定向复核？不扩大职责，不自动执行。')) return { cancelled: true };
+    if (!await confirmAction('按此报告授权原所有者集中 Repair 及定向复核？不扩大职责，不自动执行。')) return { cancelled: true };
     const result = await request('/workflow-v3/preview-issues/' + encodeURIComponent(attemptId) + '/repair-plan', 'POST', { planRevision: run.planRevision, findingIds });
     await load(); return result;
   },
@@ -291,15 +356,15 @@ const actions = {
     return { prepared: 'requirements', dispatched: false,
       note: '当前任务仅作参考。新需求不能继承历史 repairOf/reviewOf/previewIssues；请显式重拟任务、目标、输入与检查，旧修订授权不能转为新版本授权。宿主不自动清洗或猜测新计划。' };
   },
-  plan: async () => { current(); if (!confirm('确认候选计划的范围与版本？不会自动执行。')) return { cancelled: true };
+  plan: async () => { current(); if (!await confirmAction('确认候选计划的范围与版本？不会自动执行。')) return { cancelled: true };
     const result = await request('/workflow-v3/plan', 'PUT', JSON.parse(el('proposal').value)); await load(); return result; },
-  requirements: async () => { current(); if (!confirm('确认变更全文需求和任务范围？当前资格将失效，需要重新构建／测量。')) return { cancelled: true };
+  requirements: async () => { current(); if (!await confirmAction('确认变更全文需求和任务范围？当前资格将失效，需要重新构建／测量。')) return { cancelled: true };
     const result = await request('/workflow-v3/requirements', 'POST', JSON.parse(el('proposal').value)); await load(); return result; },
   'new-key': () => { el('request-key').value = crypto.randomUUID(); return { prepared: 'request-key', dispatched: false }; },
   execute: async () => {
     const run = current(), taskId = el('task').value, requestKey = el('request-key').value.trim();
     if (!taskId || !requestKey) throw Error('请选择任务并明确准备请求身份；失败后不自动换 key');
-    if (!confirm('执行任务 ' + taskId + '，可能产生模型／资源费用。确认本次授权？')) return { cancelled: true };
+    if (!await confirmAction('执行任务 ' + taskId + '，可能产生模型／资源费用。确认本次授权？')) return { cancelled: true };
     const result = await request('/workflow-v3/tasks/' + encodeURIComponent(taskId) + '/execute', 'POST', { planRevision: run.planRevision, requestKey });
     await load(); return result;
   },
@@ -321,18 +386,34 @@ for (const [id, kind] of [['static', 'static'], ['project-export', 'project']]) 
   el('downloads').append(link); return { kind, bytes: blob.size, note: '点击链接下载；仅已有实际测量资格' };
 };
 for (const [id, action] of Object.entries(actions)) el(id).addEventListener('click', async () => {
-  if (busy) return;
-  busy = true; document.querySelectorAll('button').forEach(b => b.disabled = true);
+  const isStop = id === 'stop';
+  if (isStop ? stopping : busy) return;
+  if (isStop) {
+    stopping = true;
+    // Free hung diagnostic connections before sending a normal user pause.
+    // Never abort/replay a save, permission answer or model dispatch request.
+    for (const controller of pendingReads) controller.abort();
+  }
+  busy = true; pendingActions++;
+  const sequence = ++actionSequence;
+  const controls = () => document.querySelectorAll('button').forEach(b => {
+    if (!b.closest('#action-confirm')) b.disabled = b.id === 'stop' ? stopping : busy;
+  });
+  controls();
   el('status').textContent = '执行 ' + id;
   el('result').textContent = '';
-  try { el('result').textContent = pretty(await action()); el('status').textContent = '完成 ' + id; }
-  catch (error) { el('status').textContent = error.message; }
-  finally { busy = false; document.querySelectorAll('button').forEach(b => b.disabled = false); }
+  try {
+    const result = await action();
+    if (sequence === actionSequence) { el('result').textContent = pretty(result); el('status').textContent = '完成 ' + id; }
+  }
+  catch (error) { if (sequence === actionSequence) el('status').textContent = error.message; }
+  finally { pendingActions--; busy = pendingActions > 0; if (isStop) stopping = false; controls(); }
 });
 el('document').addEventListener('change', showDocument);
 el('question').addEventListener('change', showQuestion);
 el('review-attempt').addEventListener('change', () => { showReview(); el('finding-ids').value = ''; });
 for (const id of ['project', 'token', 'auth-mode']) el(id).addEventListener('input', () => {
+  finishConfirmation(false);
   view = loaded = loadedConnection = connection = questionView = questionConnection = observationConnection = restoredChat = chatConnection = goalRequest = messageRequest = messageConnection = undefined; dropPreview(); el('run').textContent = ''; el('result').textContent = '';
   el('message-text').value = '';
   el('evidence-path').value = '';
@@ -341,4 +422,4 @@ for (const id of ['project', 'token', 'auth-mode']) el(id).addEventListener('inp
   el('document').replaceChildren(); el('document-json').value = ''; el('proposal').value = ''; el('request-key').value = '';
   el('observation-json').value = ''; el('issue').replaceChildren(); el('review-attempt').replaceChildren(); el('review-detail').textContent = ''; el('finding-ids').value = '';
 });
-window.addEventListener('pagehide', () => { dropPreview(); el('token').value = ''; view = loaded = loadedConnection = connection = questionView = questionConnection = observationConnection = restoredChat = chatConnection = goalRequest = messageRequest = messageConnection = undefined; });
+window.addEventListener('pagehide', () => { finishConfirmation(false); dropPreview(); el('token').value = ''; view = loaded = loadedConnection = connection = questionView = questionConnection = observationConnection = restoredChat = chatConnection = goalRequest = messageRequest = messageConnection = undefined; });

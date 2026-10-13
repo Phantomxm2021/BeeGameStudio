@@ -7,6 +7,8 @@ description: Design or fix XR, AR, and MR interfaces involving spatial layout, g
 
 Make spatial information stable and usable on the target device. There is no universal near/mid/far distance, maximum layer count, gesture duration, or default input method.
 
+For a new spatial composition or substantive input change, choose the applicable Apple/Meta/Unity guidance from [official platform sources](../spatial-computing-game-expert/references/spatial-rule-architecture.md), then use the relevant layout/gesture reference below. A system window, a hand-tracked interaction and a Unity world-space Canvas need different handling; do not copy desktop pixel minima or another platform's gesture defaults into all XR.
+
 - Start from the current user task and available gaze, hand, controller, voice, or touch input. Keep focus ownership and transitions predictable when methods coexist.
 - Place controls according to viewing distance, text size, field of view, reach, and occlusion. Choose head, body, world, or object anchoring for the task; provide a way to recover from misplaced or lost UI.
 - Use depth to express priority, not merely to fit more panels. Reduce competing surfaces and bright motion that distract from the player or surroundings.

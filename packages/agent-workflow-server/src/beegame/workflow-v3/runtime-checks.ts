@@ -41,7 +41,7 @@ export async function staticArtifactFiles(root: string, folder: string): Promise
 
 export const STATIC_ARTIFACT_CHECK_VERSION = CHECK_VERSIONS['runtime-smoke']
 export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'delivery-package' | 'ui-data-consumption' | 'pixel-data-consumption' | 'font-data-consumption' | 'audio-data-consumption', task: Pick<TaskSpec, 'runtimeArtifact'|'expectedOutputs'|'uiProbes'|'pixelProbes'|'audioProbes'>,
-  inputs: FileVersion[], constraints: Record<string, unknown>, signal?: AbortSignal): Promise<CheckResult> {
+  inputs: FileVersion[], constraints: Record<string, unknown>, signal?: AbortSignal, uiScope: 'registered'|'selected' = 'registered'): Promise<CheckResult> {
   const result: CheckResult = { id, version: CHECK_VERSIONS[id], inputs: [...inputs], status: 'unverified',
     observation: 'Declare runtimeArtifact for a static web build with index.html. Server/native/XR runtimes are not supported by this driver.',
     createdAt: new Date().toISOString() }
@@ -55,7 +55,7 @@ export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'deli
     result.inputs = [...new Map([...inputs, ...versions].map(file => [file.path, file])).values()]
     result.coverage = { files: paths, limitations: [
       'Measured static build only; not published deployment, server/native/XR behavior or installation/export completeness.',
-      'No proof of gameplay, original requirement coverage, aesthetics/audio quality or formal content consumption. Release remains disabled.',
+      'No proof of gameplay, original requirement coverage, aesthetics/audio quality or formal content consumption. Explicit user publication is separate.',
     ] }
     if (id === 'delivery-package') {
       // Same bytes is a packaging check, NOT data-use proof or design authority.
@@ -105,12 +105,10 @@ export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'deli
       result.status = 'passed'; result.observation = 'Host checked actual static package registry, structure, resource closure and identical packaged source bytes. Not runtime data consumption or game delivery acceptance.'
     } else if (id === 'ui-data-consumption') {
       let probes: PreparedUiProbe[]
-      try { probes = await prepareUiProbes(root, task, result) }
+      try { probes = await prepareUiProbes(root, task, result, uiScope) }
       catch (error) { result.observation = error instanceof Error ? error.message : 'Unsupported UI consumption input'; return result }
-      result.coverage = { files: [...new Set(probes.map(probe => probe.document))], limitations: [
-        'Representative registered UI node position/size at declared viewports and click paths only; not all nodes, interactions, occlusion, pixel aesthetics or responsive variants.',
-        'No Canvas/Scene hierarchy/Tilemap/resource/audio data-use proof; no compiled source mutation or complete release acceptance.',
-      ] }
+      // prepareUiProbes records the selected scope and unobserved screens;
+      // do not replace it with an implicit whole-registry coverage claim.
       await observeStaticBuild(root, artifact, paths, result, signal, probes)
     } else if (id === 'pixel-data-consumption') {
       let probes: PreparedPixelProbe[]
@@ -154,7 +152,19 @@ export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'deli
   return result
 }
 
-async function observeStaticBuild(root: string, artifact: string, paths: string[], result: CheckResult, signal?: AbortSignal, uiProbes?: (PreparedUiProbe | PreparedPixelProbe | PreparedFontProbe | PreparedAudioProbe)[]) {
+/** Check URL relocation using copied bytes, not a rebuild or another Agent turn.
+ * Requests are intercepted locally; this does not verify remote HTTP or gameplay. */
+export async function observeStaticPublication(root: string, artifact: string, entryUrl: string): Promise<void> {
+  const paths = await staticArtifactFiles(root, artifact)
+  const result: CheckResult = {id:'runtime-smoke',version:STATIC_ARTIFACT_CHECK_VERSION,
+    inputs:await Promise.all(paths.map(path=>readVersion(root,path))),status:'unverified',
+    observation:'Publication path loading not yet observed',createdAt:new Date().toISOString()}
+  await observeStaticBuild(root,artifact,paths,result,undefined,undefined,entryUrl)
+  if(result.status !== 'passed') throw new Error('Publication URL loading '+result.status+': '+result.observation)
+  if(!await versionsMatch(root,result.inputs)) throw new Error('Publication copy changed during observation')
+}
+
+async function observeStaticBuild(root: string, artifact: string, paths: string[], result: CheckResult, signal?: AbortSignal, uiProbes?: (PreparedUiProbe | PreparedPixelProbe | PreparedFontProbe | PreparedAudioProbe)[], entryUrl?: string) {
   const owned = createPreviewTestBrowser()
   let child: ReturnType<typeof spawn> | undefined
   const abort = () => { void owned.close().catch(() => undefined) }
@@ -189,7 +199,7 @@ async function observeStaticBuild(root: string, artifact: string, paths: string[
         else resolvePromise(output)
       })
       if (signal?.aborted) stop()
-      else child.stdin!.end(JSON.stringify({ endpoint, artifact: resolve(root, artifact), files, uiProbes }))
+      else child.stdin!.end(JSON.stringify({ endpoint, artifact: resolve(root, artifact), files, uiProbes, entryUrl }))
     })
     const actual = JSON.parse(observation) as { surfacePresent: boolean; errors: string[]; missingFiles: string[]; unsupported: string[]; probes?: { status: string }[] }
     result.status = actual.unsupported.length ? 'unverified' : actual.errors.length || actual.missingFiles.length ? 'failed'

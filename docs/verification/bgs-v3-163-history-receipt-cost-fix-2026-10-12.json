@@ -1,0 +1,115 @@
+{
+  "version": "bgs-v3-163-offline.1",
+  "scope": "Deep read-only native history/cost investigation and minimal BGS receipt/settlement fixes. No paid rerun or deployment.",
+  "evidence": {
+    "baseline": "bgs-v3-161-paid-acceptance-2026-10-12.json",
+    "requestLedger": "bgs-v3-161-paid-requests-2026-10-12.jsonl",
+    "nativeTranscriptLocator": "bgs-v3-150-paid-acceptance-2026-10-11.json:evidence.nativeTranscript",
+    "inspection": "Read native transcript JSONL; follow parentUuid from the first paid-161 main request back to its actual compact_boundary. Whole-file images/abandoned history are not counted as current model text. No writes or execution in the real game.",
+    "paidTokens": {
+      "requests": 38,
+      "total": 3382847,
+      "main": {"requests": 22, "ordinaryInput": 281198, "cachedInput": 2688920, "output": 10910, "total": 2981028},
+      "child": {"requests": 16, "ordinaryInput": 62564, "cachedInput": 330824, "output": 8431, "total": 401819},
+      "mainInputTotal": 2970118,
+      "mainInputShareOfAllTokensApprox": 0.878,
+      "caveat": "Cached Tokens are still provider-reported consumption, not equal-priced to ordinary input. This ledger does not separately meter old-history, system prompt, tool catalog and current task. 2970118 is all main input, NOT an exact old-history-only count."
+    },
+    "compression": {
+      "successfulAutoBoundaries": [
+        {"at": "2026-10-11T06:33:26.283Z", "preTokens": 170314},
+        {"at": "2026-10-11T07:51:35.822Z", "preTokens": 169394},
+        {"at": "2026-10-11T10:24:13.757Z", "preTokens": 168046},
+        {"at": "2026-10-11T12:45:04.500Z", "preTokens": 167524}
+      ],
+      "boundariesInPaid161": 0,
+      "activeAncestryBeforeFirstPaid161Request": {
+        "records": 383,
+        "from": "2026-10-11T12:45:04.500Z",
+        "to": "2026-10-11T22:06:32.512Z",
+        "compactSummaryChars": 21548,
+        "toolCalls": {"TodoWrite": 11, "Bash": 69, "Edit": 23, "Grep": 2, "Write": 6, "Read": 5, "Agent": 4, "SendMessage": 2, "Skill": 1},
+        "toolResultTextChars": {"TodoWrite": 1760, "Bash": 38371, "Edit": 5208, "Grep": 1058, "Write": 1468, "Read": 4755, "Agent": 3684, "SendMessage": 1074, "Skill": 47},
+        "imageBlocks": 0,
+        "thinkingCharsInStoredChain": 18035
+      },
+      "conclusion": "Compression demonstrably succeeded before this round. It protects the context window, not per-task cost. Same-UUID follow-ups resumed the compacted summary plus newly accumulated work. No proof that compression stalled in paid161. Transcript character counts are not provider Tokens, and stored thinking is not proof of identical wire payload."
+    }
+  },
+  "classification": [
+    {
+      "issue": "Small tasks use the same long native conversation",
+      "classification": "BGS continuation policy plus native history/Agent operating choices; not proven native compression bug",
+      "code": "agent-goal.ts execute/dispatch preserves previous nativeSessionId and validates persisted conversation; session-manager.ts resumes that UUID. confirmedBriefContext is host metadata, not another user prompt copy.",
+      "cost": "First main input 127482; final main input 142296. Four Todo requests cost 541940 and two production completion replies cost 281086 (subsets of the total).",
+      "status": "NOT SOLVED by receipt fixes. No silent history reset, native threshold override, forced delegation or new prompt rule was introduced."
+    },
+    {
+      "issue": "Reading only task/receipt facts nevertheless required arbitrary source paths",
+      "classification": "BGS interface design defect; actual child first handoff command failed before retry with explicit files",
+      "fix": "Existing handoff.mjs accepts no files, returning current task/navigation/latest receipt/freshness. Optional source paths remain checked. no-sources-requested explicitly does not certify coverage. Existing --details still controls full requirement/source/observation output; no new default prose.",
+      "status": "Implemented and tested offline; no assertion of a real Token reduction."
+    },
+    {
+      "issue": "Measurement inspection only searched the active turn; context omitted the query request key",
+      "classification": "BGS interface inconsistency; reproduced with a valid earlier-turn receipt, not claimed to explain all historical reruns",
+      "fix": "--inspect accepts an exact measurement ID or unique request key across this bound Run, returns originating attempt and turn status. Reused request keys are explicitly ambiguous; no arbitrary PASS selection. Normal measurement response inspects its exact new ID. Context exposes the existing request key. No request execution semantics or authority changed.",
+      "status": "Implemented and tested offline; no new state field or model call."
+    },
+    {
+      "issue": "Settlement treated a follow-up with no new measurement as no measured evidence",
+      "classification": "BGS settlement defect; reproduced against unchanged prior source/build/report inputs",
+      "fix": "Settlement inspects the latest actual Run receipt, including incomplete/failure, instead of only the current turn. Unchanged evidence may remain current without another build. Requirement/source/report/dependency/artifact drift stays stale. No current-turn receipt fabricated and game quality remains unverified.",
+      "status": "Implemented and tested offline."
+    },
+    {
+      "issue": "Parent/child repeated build/headless and model issued extra Todo/finals",
+      "classification": "Observed Agent operation/evidence-selection problem, not proven BGS automatic retry",
+      "evidence": "Parent headless at 22:07:34, again with build at 22:08:50, again to save evidence at 22:09:05; child build/headless at 22:11:19-31. BGS measurement independently builds a source copy; repeated ordinary tests do not replace quality observation.",
+      "status": "BGS does not intercept or forbid native operations. Query/settlement fixes remove host-induced opportunities but cannot guarantee model batching, delegation scope or judgement."
+    }
+  ],
+  "regression": {
+    "status": "passed-offline; no paid usage",
+    "final": {"pass": 129, "fail": 0, "skip": 0, "expects": 1616, "files": 12, "seconds": 53.04,
+      "log": "/private/tmp/bgs-v3-163-final-regression.log",
+      "environment": {"BEEGAME_TEST_REAL_BROWSER": "1", "BGS_LAYOUT_BROWSER": "1"}},
+    "coverage": [
+      "Existing native CLI/fake local model and independent debug workflow, parent/child root-guide propagation, real browser interaction, resume original UUID, unchanged work requirements and no replay",
+      "Actual later-turn CLI inspection of an earlier receipt with no model/build/browser replay or store commit; originating attempt/status retained",
+      "No-file handoff, optional selected-source path security, detailed output on demand, expired capability rejection",
+      "Cross-turn reused key ambiguity, exact ID lookup, superseded/unfinished/failed latest receipt never replaced by an older PASS",
+      "Settlement carries current old receipt without fabricating current-turn measurement; requirement/source/report/dependency/artifact freshness and quality-unverified retained",
+      "Original content schema, layouts, binding identities, Skill plugins, project single-file loading and user settings-only/no hooks"
+    ],
+    "typecheck": {"command": "bun run typecheck", "exit": 0, "log": "/private/tmp/bgs-v3-163-final-typecheck.log"},
+    "diffCheck": {"exit": 0},
+    "earlierValidation": [
+      "Initial targeted run 48 pass, 1 browser skip, 0 fail; final run enables both browser flags and has no skips. Not added to final test count.",
+      "First package-only tsc command lacked repository aliases and exposed one duplicate test import introduced this turn. Removed that duplicate and used the canonical root bun run typecheck; final passed. Native source was not changed to address alias errors."
+    ]
+  },
+  "integrity": {
+    "formalFrontend": {"files": 825, "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"},
+    "nativeSrc": {"files": 2445, "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"},
+    "builtinTools": {"files": 383, "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"},
+    "hashMethod": "Existing bgs-v3-155-final-audit.mjs public nonhidden file hashing; excludes node_modules/transcripts, not a claim about all hidden files.",
+    "oldExport": {"files": 51, "sourceFiles": 38, "buildFiles": 13, "allCurrentBytesMatch": true},
+    "realGuide": {"bytes": 3553, "sha256": "5d0971e87f671b8badbc90d9655546adad7c13767b7eae44ea45c54b50d24476", "unchanged": true},
+    "paidRuns": 0,
+    "deployments": 0,
+    "manualGameChanges": 0,
+    "nativeSourceChanges": 0,
+    "formalFrontendChanges": 0,
+    "projectSettingsOrHooksEnabled": false,
+    "additionalPromptRules": 0,
+    "agentLimitsAdded": 0
+  },
+  "remaining": [
+    "Observed long-history input amplification is not resolved or measured as improved. Offline correctness cannot predict a real cost percentage.",
+    "No model transport guarantee that the Agent adopts facts, uses focused delegation, avoids repeated native operations or makes correct game-quality judgements.",
+    "Changing same-native-UUID continuation into automatic isolated sessions would change the established conversation/recovery contract; not silently implemented as a cost fix.",
+    "Current receipt scope remains source-copy build and initial static browser load, not full gameplay/audio/UI quality acceptance.",
+    "Runtime remains 1.61; local 1.62/1.63 fixes have not been deployed or paid-tested."
+  ]
+}

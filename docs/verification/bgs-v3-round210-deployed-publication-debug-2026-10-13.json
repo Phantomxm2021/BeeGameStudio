@@ -1,0 +1,115 @@
+{
+  "date": "2026-10-13",
+  "scope": "Round210: six remaining type diagnostics, deployment and independent no-model Preview/V3 local publication acceptance.",
+  "constraints": {
+    "paidCalls": 0,
+    "paidTasksResumed": false,
+    "formalFrontendEdited": false,
+    "claudeCodeCoreEdited": false,
+    "realGameEdited": false,
+    "newPrompts": false,
+    "agentLimitsAdded": false
+  },
+  "fixes": [
+    {
+      "file": "packages/agent-workflow-server/src/model-connections.ts",
+      "diagnostics": 4,
+      "cause": "Inferred spread-object return omitted dynamic environment keys.",
+      "repair": "Declare resolveModelConnection return Record<string,string>; credential behavior unchanged."
+    },
+    {
+      "file": "packages/agent-workflow-server/src/__tests__/model-connections.test.ts",
+      "diagnostics": 1,
+      "cause": "Fixture role member is not a BeeGameRole.",
+      "repair": "Use viewer, matching existing least-privilege fallback."
+    },
+    {
+      "file": "packages/agent-workflow-server/src/__tests__/model-connections.test.ts",
+      "diagnostics": 1,
+      "cause": "Mock fetch lacked Bun fetch.preconnect.",
+      "repair": "Provide structural preconnect mock instead of unsafe cast."
+    }
+  ],
+  "regression": {
+    "rootTypecheck": {
+      "command": "bun run typecheck",
+      "exitCode": 0,
+      "log": "/tmp/bgs-round210-typecheck-final.log"
+    },
+    "combined": {
+      "passed": 87,
+      "failed": 0,
+      "assertions": 808,
+      "files": 5,
+      "log": "/tmp/bgs-round210-regression.log"
+    },
+    "accountSubset": {
+      "passed": 10,
+      "failed": 0,
+      "includedInCombined": true,
+      "log": "/tmp/bgs-round210-model-connections.log"
+    }
+  },
+  "deployment": {
+    "runtimePid": 98612,
+    "port": 62174,
+    "baseline": "round210",
+    "log": "/tmp/bgs-round210-deployed-runtime.log",
+    "retainedCli": "dist/build-87UNUF/cli.js",
+    "cliRebuilt": false,
+    "formalFrontendRebuilt": false,
+    "health": "All five existing services 62173–62177 returned 200.",
+    "concurrencyBoundary": "Account-naming changes arrived after deployment in model-connections.ts. Preserved, not claimed deployed. Independent acceptance matched 11 publication-relevant source files to deployment; custom synthetic user resolver does not exercise account naming."
+  },
+  "productionSafety": {
+    "runsCompared": 41,
+    "allRunStatesUnchanged": true,
+    "preexistingWriterLocksRetained": 3,
+    "nativeProcessesStarted": 0,
+    "before": "/tmp/bgs-round210-state-before.json",
+    "after": "/tmp/bgs-round210-state-final.json"
+  },
+  "debug": {
+    "script": "/private/tmp/bgs-round210-debug.ts",
+    "log": "/tmp/bgs-round210-debug-verified.log",
+    "result": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-round210-debug-dFdpbC/result.json",
+    "passed": true,
+    "paidCalls": 0,
+    "nativeCalls": 0,
+    "rebuildCallsDuringPreviewOrPublish": 0,
+    "measurements": 1,
+    "publications": 1,
+    "countScope": "Successful isolated fixture only; earlier failed fixture had its own measurement/publication.",
+    "checks": {
+      "preview": 200,
+      "restartReusesUrl": true,
+      "publishedHtmlModuleJson": 200,
+      "viewer": 403,
+      "duplicate": 409,
+      "staleHistory": 200,
+      "stalePreview": 409,
+      "revokedPreview": 404,
+      "staleDeploy": 409,
+      "staleExport": 409,
+      "oldPublicationAfterSourceEdit": 200,
+      "runUnchanged": true
+    },
+    "browser": "Actual Preview iframe and standalone local publication both loaded module/JSON and responded to button click.",
+    "screenshot": "/private/tmp/bgs-round210-published-browser.jpg",
+    "quality": "unverified"
+  },
+  "auditCorrections": [
+    "Initial fixture asserted 409 after a new Preview request had already revoked the stale URL. Reordered fixture to observe first 409 then 404; no production guard weakened. Original failed log retained at /tmp/bgs-round210-debug.log.",
+    "A subsequent fingerprint check stopped before fixture execution because concurrent account naming changed. Scoped comparison explicitly to 11 publication-relevant files, retaining visibility of excluded change.",
+    "Temporary debug publication iframe with allow-scripts only stayed Loading because of opaque-origin module/CORS behavior. Standalone published page was separately tested successfully; do not claim that sandbox iframe passed or weaken production CORS.",
+    "Production debug real-project Preview click produced no observable result; direct readiness browser navigation was blocked by browser. Production real-project Preview rejection is not claimed verified; synthetic normal API checks passed.",
+    "Final browser cleanup found publication tab already absent. Previously saved screenshot and completed interaction evidence retained."
+  ],
+  "remaining": [
+    "Actual remote upload/CDN configuration and formal frontend user flow not verified.",
+    "Independent debug uses real local API/measurement/publication modules with synthetic store and source, not production database writes or autonomous Agent authoring.",
+    "Game quality, lighting, Skills and paid token improvements remain unverified.",
+    "Three pre-existing unresolved writer locks remain unchanged, not silently cleared.",
+    "Only existing static-artifact publication is covered, not native/server/engine delivery."
+  ]
+}

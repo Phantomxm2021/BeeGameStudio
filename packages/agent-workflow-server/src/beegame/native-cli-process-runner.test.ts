@@ -8,6 +8,7 @@ import { createRuntimeObservability } from './runtime-observability'
 import {
   createNativeCliProcessRunner,
   nativeRuntimeEnvironment,
+  withRuntimeFeatureSettings,
   nativeRuntimeCommand,
   appendWorkingFilesInstruction,
   nativeWorkflowCommand,
@@ -20,6 +21,28 @@ import {
 const fixturePath = fileURLToPath(
   new URL('./fixtures/native-runtime-fixture.ts', import.meta.url),
 )
+
+test('feature switches reach both launch scopes without altering sandbox or hooks', () => {
+  for (const sources of ['user', '']) {
+    const settings = { sandbox: { enabled: true }, disableAllHooks: true, env: { KEEP: 'yes' } }
+    const flags = ['--setting-sources', sources, '--settings', JSON.stringify(settings)]
+    for (const enabled of [false, true]) {
+      const result = withRuntimeFeatureSettings(flags, { BEEGAME_RUNTIME_SETTINGS_JSON: JSON.stringify({
+        autoMemoryEnabled: enabled, autoDreamEnabled: enabled, verificationAgentEnabled: enabled,
+        agentTeamsEnabled: enabled, promptSuggestionEnabled: enabled,
+      }) })
+      const saved = JSON.parse(result[3]!)
+      expect(saved.sandbox).toEqual(settings.sandbox)
+      expect(saved.disableAllHooks).toBe(true)
+      expect(saved.env.KEEP).toBe('yes')
+      expect(saved.autoDreamEnabled).toBe(enabled)
+      expect(saved.env.CLAUDE_CODE_VERIFICATION_AGENT_ENABLED).toBe(enabled ? '1' : '0')
+      expect(saved.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED).toBe(enabled ? '0' : '1')
+      expect(result[1]).toBe(sources)
+    }
+    expect(JSON.parse(flags[3]!)).toEqual(settings)
+  }
+})
 
 test('standard CLI debug is passive, cancellation remains normal and raw stderr never becomes a public error', async () => {
   const cwd=await mkdtemp(join(tmpdir(),'native-standard-debug-'))
@@ -610,6 +633,26 @@ describe('native CLI process runner', () => {
     const env = nativeRuntimeEnvironment({ BEEGAME_MODEL_TYPE: 'anthropic', BGS_USE_OPENAI: '1' })
     expect(env.BEEGAME_MODEL_TYPE).toBeUndefined()
     expect(env.BGS_USE_OPENAI).toBe('0')
+  })
+
+  test('BGS environment preserves explicit settings instead of forcibly disabling capabilities', () => {
+    const selected = {
+      ANTHROPIC_AUTH_TOKEN: 'selected-token',
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED: '0',
+      CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: '1',
+    }
+    const env = nativeRuntimeEnvironment(selected)
+    expect(env.BGS_DISABLE_AUTO_MEMORY).toBe('0')
+    expect(env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED).toBe('0')
+    expect(env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION).toBe('1')
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe('selected-token')
+    expect(env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBeUndefined()
+    expect(env.BGS_SIMPLE).toBeUndefined()
+    expect(env.CLAUDE_CODE_DISABLE_LOCAL_GATES).toBeUndefined()
+    expect(selected.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe('0')
+    expect(selected.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED).toBe('0')
+    expect(selected.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION).toBe('1')
   })
 
   test('reports the selected model and sanitized launch contract to passive observability', async () => {

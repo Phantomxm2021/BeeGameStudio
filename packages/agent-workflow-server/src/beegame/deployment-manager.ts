@@ -116,6 +116,12 @@ type DeploymentInput = {
   authToken?: string
   /** Server-owned acceptance snapshot; never taken from the request body. */
   acceptance?: { revision: string; artifacts: Array<{ path: string; sha256: string }> }
+  /** Server-selected V3 bytes, not author acceptance or request-supplied hashes.
+   * Publish never builds; revalidate the selection before exposing its copy. */
+  measured?: {
+    runId: string; measurementId: string; artifact: { path: string; sha256: string }
+    validate(): Promise<void>
+  }
 }
 
 export function mergeDeploymentRecords(...groups: BeeGameDeploymentRecord[][]): BeeGameDeploymentRecord[] {
@@ -186,7 +192,10 @@ export class BeeGameDeploymentManager {
   start(input: DeploymentInput, persistRecord?: (record: BeeGameDeploymentRecord) => Promise<unknown>): Promise<BeeGameDeploymentRecord> {
     const key = `${input.userId ?? ''}:${resolve(input.workspacePath)}`
     const existing = this.active.get(key)
-    if (existing) return existing
+    if (existing) {
+      if (input.measured) throw new Error('Publication already in progress; inspect the existing deployment, do not start another.')
+      return existing
+    }
     let queued!: (record: BeeGameDeploymentRecord) => void
     let failed!: (error: unknown) => void
     const accepted = new Promise<BeeGameDeploymentRecord>((resolve, reject) => { queued = resolve; failed = reject })
@@ -314,10 +323,13 @@ export class BeeGameDeploymentManager {
       if (this.publisher?.verifyPublished && !persistRecord) {
         throw new Error('Worker publishing requires deployment record persistence before public verification')
       }
-      const acceptedWorkspaceRevision = await computeWorkspaceRevision(workspacePath)
+      if (input.measured && input.acceptance) throw new Error('Select exactly one deployment evidence contract')
+      await input.measured?.validate()
+      const acceptedWorkspaceRevision = input.measured ? undefined : await computeWorkspaceRevision(workspacePath)
       if (input.acceptance && input.acceptance.revision !== acceptedWorkspaceRevision)
         throw new Error('Project source changed after acceptance; verify before publishing.')
-      const plan = createDeploymentPlan(workspacePath)
+      const plan: DeploymentPlan = input.measured ? { supported:true, cwd:workspacePath,
+        entrypoint:input.measured.artifact.path + '/index.html', command:[] } : createDeploymentPlan(workspacePath)
       if (!plan.supported) {
         record = this.fail(record, plan.message)
         await this.saveRecord(record)
@@ -327,14 +339,17 @@ export class BeeGameDeploymentManager {
 
       record = {
         ...record,
-        status: 'building',
-        ...(!input.acceptance ? { buildCommand: plan.command.join(' ') } : {}),
+        status: input.measured ? 'publishing' : 'building',
+        ...(!input.acceptance && !input.measured ? { buildCommand: plan.command.join(' ') } : {}),
         entrypoint: plan.entrypoint,
         updatedAt: new Date().toISOString(),
       }
       await this.saveRecord(record)
 
-      const result = input.acceptance ? { exitCode: 0, stdout: 'Publishing the accepted build without rebuilding.', stderr: '' } : await this.runner(plan.command, {
+      const result = input.measured ? {exitCode:0,stderr:'',stdout:JSON.stringify({protocol:'bgs.workflow.v3',
+        runId:input.measured.runId,measurementId:input.measured.measurementId,artifact:input.measured.artifact,
+        quality:'unverified',operation:'User-requested publication of measured bytes; no rebuild or quality certification.'})} :
+        input.acceptance ? { exitCode: 0, stdout: 'Publishing the accepted build without rebuilding.', stderr: '' } : await this.runner(plan.command, {
         cwd: plan.cwd,
         env: buildDeploymentEnv(),
       })
@@ -349,7 +364,7 @@ export class BeeGameDeploymentManager {
         return record
       }
       if (
-        (await computeWorkspaceRevision(workspacePath)) !==
+        !input.measured && (await computeWorkspaceRevision(workspacePath)) !==
         acceptedWorkspaceRevision
       ) {
         record = this.fail(
@@ -361,7 +376,13 @@ export class BeeGameDeploymentManager {
         return record
       }
 
-      const outputDir = await this.findOutputDir(plan.cwd, workspacePath)
+      const outputDir = input.measured ? resolve(workspacePath,input.measured.artifact.path) : await this.findOutputDir(plan.cwd, workspacePath)
+      if (input.measured) {
+        if (!isInsideOrEqual(outputDir,workspacePath) || outputDir === workspacePath || await realpath(outputDir) !== outputDir)
+          throw new Error('Measured output must be a canonical project subdirectory')
+        if (await artifactDigest(workspacePath,input.measured.artifact.path,true) !== input.measured.artifact.sha256)
+          throw new Error('Measured deployment artifact changed')
+      }
       const artifactPath = join(this.deploymentsRoot, id, 'site')
       record = {
         ...record,
@@ -377,6 +398,11 @@ export class BeeGameDeploymentManager {
       await mkdir(artifactPath, { recursive: true })
       await cp(outputDir, artifactPath, { recursive: true })
       await validateDeploymentArtifact(artifactPath)
+      if (input.measured) {
+        if (await artifactDigest(dirname(artifactPath),basename(artifactPath),true) !== input.measured.artifact.sha256)
+          throw new Error('Copied deployment differs from the measured artifact')
+        await input.measured.validate()
+      }
       if (input.acceptance) {
         const covered: string[] = []
         for (const artifact of input.acceptance.artifacts) {
@@ -411,6 +437,14 @@ export class BeeGameDeploymentManager {
           })
         : undefined
       const deployedAt = new Date().toISOString()
+      if (input.measured) {
+        const {observeStaticPublication} = await import('./workflow-v3/runtime-checks')
+        await observeStaticPublication(dirname(artifactPath),basename(artifactPath),
+          new URL(published?.url ?? this.publicUrl(id),'http://bgs-runtime.invalid').href)
+        // Observation can take time; a newly active writer must not inherit the
+        // earlier eligibility check. No model/build is dispatched here.
+        await input.measured.validate()
+      }
       record = {
         ...record,
         status: 'succeeded',
@@ -420,7 +454,9 @@ export class BeeGameDeploymentManager {
         ...(published?.manifestStorageObjectId
           ? { manifestStorageObjectId: published.manifestStorageObjectId }
           : {}),
-        message: published?.message ?? 'Static deployment published',
+        message: input.measured
+          ? 'User-requested measured build published without rebuilding; game quality remains unverified.'
+          : published?.message ?? 'Static deployment published',
         updatedAt: deployedAt,
         deployedAt,
       }
@@ -494,6 +530,11 @@ export class BeeGameDeploymentManager {
     const parts = normalized.split('/').filter(Boolean)
     if (parts[0] !== 'deployments' || !parts[1]) return undefined
     const deploymentId = safeSegment(parts[1])
+    // The copy exists before publication validation finishes. A known opaque
+    // URL must not expose a queued, failed or interrupted artifact.
+    await this.ready
+    if (!(await this.loadRecords()).some(record => record.id === deploymentId && record.status === 'succeeded'))
+      return undefined
     const rest = parts.slice(2).join('/') || 'index.html'
     const requestedPath = resolve(this.deploymentsRoot, deploymentId, 'site', rest)
     const siteRoot = resolve(this.deploymentsRoot, deploymentId, 'site')

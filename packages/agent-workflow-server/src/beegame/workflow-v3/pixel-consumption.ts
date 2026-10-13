@@ -17,7 +17,7 @@ import type { PreparedUiProbe } from './ui-consumption'
 type ImageBinding = { nodeId: string; componentId?: string; assetRef: string; member?: string; atlasMember?: string; frame?: string;
   tilemap?: { tileId: string; path: string; tiles: TileSetData } }
 type Bounds = PreparedUiProbe['before']
-export type PreparedPixelProbe = Omit<PreparedUiProbe,'variants'> & { mode: 'pixels';
+export type PreparedPixelProbe = Omit<PreparedUiProbe,'variants'|'checkTextFit'|'unobservedProperties'> & { mode: 'pixels';
   resource: { path: string; sha256: string }; markers: { body: string; color: number[] }[];
   regions?: Bounds[]; tileId?: string;
   variants: { property: string; replacement: string; expected: Bounds; path?: string; regions?: Bounds[] }[] }

@@ -189,7 +189,7 @@ test.each(['missing', 'contract', 'capability', 'documentation', 'section', 'dup
   }),
 )
 
-test('the supplied new-index envelope validates and does not infer legacy from a missing version', () => fixture(async workspace => {
+test('the supplied new-index envelope validates and rejects version 1', () => fixture(async workspace => {
   const sample = DESIGN_HANDOFF_INSTRUCTION.split('Minimal new index envelope: ')[1]!.split('. Replace example')[0]!
   const envelope = JSON.parse(sample)
   envelope.outputs[0].section = 'Design'
@@ -201,7 +201,7 @@ test('the supplied new-index envelope validates and does not infer legacy from a
   expect(checkDesignHandoffDraft(workspace, 'GDD.md').issues.join(' ')).toContain('document')
   envelope.version = 1
   await writeFile(join(workspace, designHandoffPath('GDD.md')), JSON.stringify(envelope))
-  expect(checkDesignHandoffDraft(workspace, 'GDD.md').valid).toBe(true)
+  expect(checkDesignHandoffDraft(workspace, 'GDD.md').valid).toBe(false)
 }))
 
 test('save-time index checking catches field errors without demanding host versions or sibling delivery', () => fixture(async (workspace, put) => {
@@ -284,7 +284,7 @@ test('minimal output index is consumed by runtime acceptance without business mi
   expect(await readFile(join(workspace, designHandoffPath('GDD.md')), 'utf8')).toBe(before)
   expect(DESIGN_HANDOFF_INSTRUCTION).toContain('Authors do not calculate or synchronize versions/hashes')
 }))
-test('legacy v1 reads only actual consumer fields, explicitly abandons mirror certification and never rewrites files', () => fixture(async workspace => {
+test('version 1 sidecars are rejected without rewriting files', () => fixture(async workspace => {
   const legacy = { ...designHandoffFixture('GDD.md'), version: 1, readiness: false, states: [{ transitions: false }],
     events: false, parameters: false, resources: false, inputs: false, consumes: [{ document: 'UI_UX_SPEC.md', id: 'invented' }],
     pending: [{ owner: 'user', neededBefore: 'resources' }], limits: false, platformFacts: false }
@@ -293,9 +293,9 @@ test('legacy v1 reads only actual consumer fields, explicitly abandons mirror ce
   const body = await readFile(join(workspace, 'docs/GDD.md'), 'utf8')
   const sidecar = await readFile(join(workspace, designHandoffPath('GDD.md')), 'utf8')
   const check = checkDesignHandoff(workspace, ['GDD.md'], { nextConsumers: ['resources'] })
-  expect(check.valid).toBe(true)
-  expect(check.note).toContain('ignored and not certified')
-  expect(readDesignAcceptanceRequirements(workspace).filter(source => source.document === 'GDD.md')).toHaveLength(1)
+  expect(check.valid).toBe(false)
+  expect(check.issues.join(' ')).toContain('version')
+  expect(() => readDesignAcceptanceRequirements(workspace)).toThrow()
   expect(await readFile(join(workspace, 'docs/GDD.md'), 'utf8')).toBe(body)
   expect(await readFile(join(workspace, designHandoffPath('GDD.md')), 'utf8')).toBe(sidecar)
 }))

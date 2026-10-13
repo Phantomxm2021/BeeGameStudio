@@ -41,6 +41,7 @@ describe('WorkspacePreviewPanel', () => {
   }));
   it('ends loading with a retryable error when the iframe never reports document readiness', () => {
     vi.useFakeTimers();
+    const head = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 503 }));
     render(<WorkspacePreviewPanel {...live} />);
     const frame = screen.getByTitle('Preview');
     fireEvent.load(frame); // a 503 HTML response can also fire this event
@@ -51,6 +52,21 @@ describe('WorkspacePreviewPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reload preview' }));
     expect(screen.getByTitle('Preview')).toBeTruthy();
     expect(screen.getByRole('status')).toBeTruthy();
+    head.mockRestore();
+  });
+  it('accepts measured static Preview only after its iframe loads and a HEAD probe confirms the measured origin', async () => {
+    const head = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, {
+      status: 200, headers: { 'X-BeeGame-Preview-Mode': 'measured-static' },
+    }));
+    try {
+      render(<WorkspacePreviewPanel {...live} />);
+      const frame = screen.getByTitle('Preview');
+      expect(screen.getByRole('status')).toBeTruthy();
+      fireEvent.load(frame);
+      await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(head).toHaveBeenCalledWith(live.embeddedPreviewUrl, { method: 'HEAD', mode: 'cors', cache: 'no-store' });
+    } finally { head.mockRestore(); }
   });
   it('accepts readiness only from this frame and session, and surfaces subsequent errors', () => {
     vi.useFakeTimers();

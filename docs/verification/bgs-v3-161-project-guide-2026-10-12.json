@@ -1,0 +1,199 @@
+{
+  "version": "1.61",
+  "date": "2026-10-12",
+  "scope": "BGS project CLAUDE.md template and single-file reference loading",
+  "status": "implemented; offline verified; not deployed",
+  "sourceHead": "58f5ca489",
+  "runningVersion": "1.57",
+  "constraints": {
+    "paidModelCalls": 0,
+    "realGameWrites": 0,
+    "formalFrontendChanges": 0,
+    "claudeCodeSourceChanges": 0,
+    "builtinToolsChanges": 0,
+    "projectSettingsOrHooksEnabled": false,
+    "serviceRestart": false
+  },
+  "implementation": {
+    "template": {
+      "file": "packages/agent-workflow-server/src/beegame/workflow-v3/project-guide.ts",
+      "bytes": 591,
+      "access": "existing checker --format projectGuide",
+      "sections": [
+        "Current route",
+        "Design sources",
+        "Actual entry points",
+        "Run and verify"
+      ],
+      "preloaded": false,
+      "createsProjectFile": false,
+      "oldContentFormatSupported": true
+    },
+    "responsibility": "Prompt retains duties/permissions and Skill requirements; Skills retain methods; CLAUDE.md is actual project navigation only, not duplicate design decisions, progress, PASS, logs, secrets or temporary capability paths.",
+    "load": {
+      "path": "CLAUDE.md at authorized workspace root",
+      "statuses": [
+        "loaded",
+        "missing",
+        "empty",
+        "unavailable"
+      ],
+      "maxBytes": 65536,
+      "overflow": "visible unavailable; never truncated",
+      "regularUtf8Only": true,
+      "symlinks": false,
+      "parentOrNestedSearch": false,
+      "includeExpansion": false,
+      "settingsParsing": false,
+      "commandExecution": false,
+      "cache": false,
+      "loadedIdentity": "raw bytes and SHA-256 included in reference"
+    },
+    "transport": {
+      "chain": [
+        "prepareTurn",
+        "readProjectGuide",
+        "existing systemContext",
+        "existing native appendSystemPrompt",
+        "ordinary same-workspace child"
+      ],
+      "production": "existing responsibilities plus distinct reference",
+      "discussion": "reference only; no new production context/tools",
+      "userHistoryCopies": 0,
+      "settingsFlags": [
+        "--setting-sources",
+        "user"
+      ],
+      "permissionChange": false
+    },
+    "refresh": "Next turn rereads file and refreshes existing runner, preserving native UUID/history. Changes within current turn are not hot-loaded; normal delegates can receive relevant source pointers. No watcher, automatic retry or additional model phase.",
+    "source": "Guide is included in actual measured/exportable build source. Editing it invalidates old measurement; no exclusion rule, automatic rebuild or requirement-version change."
+  },
+  "regression": {
+    "command": "BEEGAME_TEST_REAL_BROWSER=1 BGS_LAYOUT_BROWSER=1 bun test packages/agent-workflow-server/src/beegame/workflow-v3/project-guide.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/project-guide-native.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal-native.test.ts packages/agent-workflow-server/src/beegame/project-execution-access.test.ts packages/agent-workflow-server/src/beegame/current-content-validation.test.ts packages/agent-workflow-server/src/beegame/game-content-validation-cli.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.test.ts packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts packages/agent-workflow-server/src/beegame/content-handoff.test.ts",
+    "pass": 117,
+    "fail": 0,
+    "skip": 0,
+    "expectations": 1495,
+    "seconds": 50.76,
+    "log": "/private/tmp/bgs-v3-161-final-regression.log",
+    "postTypeFixRecheck": {
+      "command": "BEEGAME_TEST_REAL_BROWSER=1 bun test packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.test.ts",
+      "pass": 16,
+      "fail": 0,
+      "expectations": 219,
+      "seconds": 16.38,
+      "log": "/private/tmp/bgs-v3-161-measure-guide-final.log",
+      "overlapsFullSuite": true
+    },
+    "typecheck": {
+      "command": "bun run typecheck",
+      "exit": 0,
+      "log": "/private/tmp/bgs-v3-161-typecheck.log"
+    },
+    "diffCheck": {
+      "command": "git diff --check",
+      "integrationExit": 0,
+      "planningRepositoryExit": 0
+    },
+    "initialFailures": "Typecheck exposed lost narrowing when merging unknown saved format and optional freshness access in new test; corrected implementation/test without weakening checks.",
+    "negativeCases": [
+      "root-only lookup",
+      "parent/nested/rules ignored",
+      "include target ignored",
+      "guide commands not executed",
+      "project Stop hook not executed",
+      "missing/delete/empty refresh",
+      "external/dangling symlink rejection",
+      "directory/binary/invalid UTF-8/oversized unavailable",
+      "changed guide invalidates saved measurement without rebuilding"
+    ]
+  },
+  "nativeVerification": {
+    "ordinaryChild": {
+      "requests": 8,
+      "paidModelCalls": 0,
+      "phases": 2,
+      "parentRequestsPerPhase": 2,
+      "childRequestsPerPhase": 2,
+      "currentReferenceCopiesPerSystem": 1,
+      "userHistoryGuideCopies": 0,
+      "sameNativeUuid": true,
+      "changedGuideSeenOnResume": true,
+      "guideBytes": 74,
+      "referenceChars": 350,
+      "systemContextAddedChars": 352,
+      "firstParentSystemChars": 34339,
+      "firstChildSystemChars": 9334
+    },
+    "debug": {
+      "requests": 27,
+      "turns": 6,
+      "paidModelCalls": 0,
+      "goalPromptChars": 708,
+      "toolContextChars": 2556,
+      "currentReferenceCopiesPerSystem": 1,
+      "userHistoryGuideCopies": 0,
+      "coverage": [
+        "normal goal",
+        "discussion",
+        "authorized same-project change",
+        "interruption and continuation",
+        "work",
+        "existing Skill and Question",
+        "Scene/UI consumption",
+        "actual measurement",
+        "preview and export"
+      ]
+    },
+    "totalControlledRequests": 35,
+    "usage": "Fake-provider token counters are scripted, not actual model usage or costs."
+  },
+  "cost": {
+    "units": "characters and raw bytes, NOT actual Token savings",
+    "maintenanceInstructionChars": 262,
+    "syntheticGuideBytes": 74,
+    "referenceWithSeparatorChars": 352,
+    "missingReferenceChars": 153,
+    "templateDefaultInputChars": 0,
+    "additionalModelRoundTrips": 0,
+    "caveat": "System reference is sent on each request. Cache hit and net Token reduction unverified; no claim of free/one-time input or solved long-history costs."
+  },
+  "integrity": {
+    "method": "Read-only public-tree hash check excluding private/node_modules; previous real exported archive and sources checked without edits.",
+    "log": "/private/tmp/bgs-v3-161-integrity.json",
+    "protectedTrees": [
+      {
+        "path": "apps/frontend",
+        "files": 825,
+        "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"
+      },
+      {
+        "path": "src",
+        "files": 2445,
+        "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"
+      },
+      {
+        "path": "packages/builtin-tools",
+        "files": 383,
+        "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"
+      }
+    ],
+    "archive": {
+      "path": "/Users/nswell/Downloads/bgs-v3-project (1).zip",
+      "bytes": 369424,
+      "sha256": "db95b8b6ebbc6a5e4c784dcf3d36518ee698764e1f87b954c2330794a2cf8e9b",
+      "files": 51,
+      "sourceFiles": 38,
+      "allReceiptAndCurrentHashesMatch": true,
+      "newDownload": false
+    }
+  },
+  "limits": [
+    "Ordinary general-purpose same-workspace child tested; arbitrary remote, cross-project and isolated-worktree inheritance not verified.",
+    "Actual model adoption, accurate guide maintenance, real Skill coverage, game quality and net Token savings not verified.",
+    "Reference labeling is not a semantic prompt-injection guarantee; hard permissions remain unchanged.",
+    "No automatic guide initialization in real game projects; normal authorized Agent maintains it after facts established.",
+    "No live paid validation, deployment or real test project repair in this task."
+  ]
+}

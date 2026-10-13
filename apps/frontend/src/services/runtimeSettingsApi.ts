@@ -1,6 +1,11 @@
 import apiClient from './apiClient';
 
 export type RuntimeSettingsConfig = {
+  verificationAgentEnabled?: boolean;
+  agentTeamsEnabled?: boolean;
+  promptSuggestionEnabled?: boolean;
+  awaySummaryEnabled?: boolean;
+  coordinatorModeEnabled?: boolean;
   autoMemoryEnabled?: boolean;
   autoDreamEnabled?: boolean;
   skillSearchEnabled?: boolean;

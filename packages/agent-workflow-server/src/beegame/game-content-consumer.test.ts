@@ -6,6 +6,17 @@ import { uiAnchor, uiLocalMatrix } from './game-content-consumer'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { productionUiStyle, inspectProductionUiSupport } from '../../../scene-editor/src/production-surface'
+
+test('shared production styles honor documented aliases without mutating or silently choosing conflicting values',()=>{
+  const style={align:'right',verticalAlign:'bottom',fontSize:22,lineHeight:26}
+  expect(productionUiStyle(style,'label')).toEqual({textAlign:'right',verticalAlign:'bottom',fontSize:22,lineHeight:26})
+  expect(style).toEqual({align:'right',verticalAlign:'bottom',fontSize:22,lineHeight:26})
+  expect(()=>productionUiStyle({align:'left',textAlign:'right'},'label')).toThrow('label/align and textAlign')
+  expect(()=>productionUiStyle({verticalAlign:'baseline'},'label')).toThrow('label/verticalAlign')
+  expect(inspectProductionUiSupport({rootId:'root',nodes:[{id:'root',role:'screen-root'},
+    {id:'label',parentId:'root',role:'text',style:{gradient:['red','blue']}}]}).issues[0]).toMatchObject({nodeId:'label',property:'style'})
+})
 
 const scene = { schema: 'beegame-content.v1', id: 'level', kind: 'scene-2d', assetRefs: [],
   data: { nodes: [{ id: 'root', transform: { position: [10, 20, 0] } }], settings: { width: 1280 } } }

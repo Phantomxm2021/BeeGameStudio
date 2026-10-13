@@ -6,9 +6,12 @@ import { Hono } from 'hono'
 import { createPreviewCapabilityManager } from '../../auth/preview-capability'
 import { BeeGameAuthUnavailableError } from '../../auth/user-context'
 import { createMeasuredPreview } from './measured-preview'
-import { createRun, publishPlan, claimTask, finishTask, V3_PROTOCOL, type TaskSpec, type CheckResult } from './state'
+import { createRun, publishPlan, claimTask, finishTask, V3_PROTOCOL, type TaskSpec, type CheckResult, type AgentTurn, type AgentMeasurement } from './state'
 import { readVersion, runChecks } from './checks'
 import { artifactDigest } from '../runtime-acceptance'
+import { projectFiles } from './editable-project'
+import { EDITABLE_BUILD_CHECK_VERSION } from './check-versions'
+import { exportAgentMeasuredBuild, selectAgentMeasuredBuild } from './measured-build'
 import { staticArtifactFiles, STATIC_ARTIFACT_CHECK_VERSION } from './runtime-checks'
 import { registerV3Routes } from './routes'
 import { BeeGameSessionManager } from '../session-manager'
@@ -52,6 +55,75 @@ export async function previewFixture(origin = 'http://localhost:4567', actualChe
     dispose: async () => { manager.dispose(); await rm(root, { recursive: true, force: true }) } }
 }
 
+test.each(['failed', 'interrupted'] as const)('settled %s native turn permits measured-byte inspection and explicit publication, never export', async status => {
+  const f = await previewFixture()
+  let manager: ReturnType<typeof createMeasuredPreview> | undefined
+  let sessions: BeeGameSessionManager | undefined
+  try {
+    await writeFile(join(f.root, 'package.json'), '{"scripts":{"build":"fixture"}}')
+    const run = createRun({ projectId: 'native-preview', ownerId: 'owner', workspacePath: f.root,
+      chatSessionId: 'chat', requestKey: 'goal', text: 'Inspect measured build', constraints: {}, ids: ['goal'] })
+    run.status = 'blocked'
+    const artifact = { path: 'dist', sha256: await artifactDigest(f.root, 'dist', true) }
+    const files = await projectFiles(f.root, 'dist', [])
+    const runtimeFiles = await staticArtifactFiles(f.root, 'dist')
+    const now = new Date().toISOString()
+    const build: CheckResult = { id: 'build', version: EDITABLE_BUILD_CHECK_VERSION, status: 'passed',
+      inputs: files, createdAt: now, observation: 'Synthetic source-copy evidence', artifacts: [artifact],
+      projectBuild: { version: EDITABLE_BUILD_CHECK_VERSION, files, excludedReports: [], artifact, runtime: 'fixture' } }
+    const smoke: CheckResult = { id: 'runtime-smoke', version: STATIC_ARTIFACT_CHECK_VERSION, status: 'passed',
+      inputs: await Promise.all(runtimeFiles.map(path => readVersion(f.root, path))), createdAt: now,
+      observation: 'Synthetic static smoke evidence', artifacts: [artifact], coverage: { files: runtimeFiles, limitations: [] } }
+    const measurement: AgentMeasurement = { id: crypto.randomUUID(), requestKey: 'build-1', runtimeArtifact: 'dist',
+      reportPaths: [], requirementsRevision: run.requirements.revision, startedAt: now, finishedAt: now,
+      reports: [], checks: [build, smoke] }
+    const turn: AgentTurn = { attemptId: crypto.randomUUID(), requestKey: 'goal', sessionId: 'chat', workerId: 'worker',
+      fence: 1, status, startedAt: now, finishedAt: now, quiescedAt: now,
+      error: 'Native settlement failed after measurement', measurements: [measurement] }
+    run.agentTurns = [turn]
+    let current = run
+    manager = createMeasuredPreview({ origin: 'http://localhost:4567', capabilities: createPreviewCapabilityManager(),
+      readRun: async () => current, isBusy: () => false })
+    await expect(selectAgentMeasuredBuild(run, measurement.id)).rejects.toThrow('completed native turn')
+    expect((await selectAgentMeasuredBuild(run, measurement.id, false, 'publication')).artifact).toEqual(artifact)
+    await expect(exportAgentMeasuredBuild(run, measurement.id, { read: async () => current, busy: () => false })).rejects.toThrow('completed native turn')
+    sessions = new BeeGameSessionManager({ async start() { throw Error('Preview must not start an Agent') } }, join(f.root, 'sessions'))
+    const app = new Hono()
+    let publications = 0
+    registerV3Routes(app, { store: { read: async () => current, async commit() { throw Error('Preview must not change the Run') } },
+      preview: manager, sessions, getUser: () => ({ id: 'owner', role: 'owner' }),
+      getProject: async () => ({ id: run.projectId, root_path: f.root } as any),
+      getAuthToken: () => undefined, getValidAuthToken: () => undefined, assertNoLegacyRun: async () => {},
+      persistMode: async () => {}, readBody: request => request.json(),
+      deployment: () => ({ destination: 'remote', isPublishing: () => false, list: async () => [],
+        start: async (input: any) => { await input.measured.validate(); publications++; return { id: 'synthetic', status: 'queued' } },
+      } as any) })
+    const readiness = await app.request('/api/projects/'+run.projectId+'/deployment-readiness')
+    expect(await readiness.json()).toMatchObject({ allowed: true, measurementId: measurement.id, quality: 'unverified' })
+    const publish = await app.request('/api/projects/'+run.projectId+'/deployments', { method: 'POST', body: '{}' })
+    expect(publish.status).toBe(202)
+    expect(publications).toBe(1)
+    const response = await app.request('/api/projects/'+run.projectId+'/preview', { method: 'POST', body: '{}' })
+    expect(response.status).toBe(200)
+    const previewState = await response.json()
+    expect(previewState.mode).toBe('production')
+    const preview = (await manager.status(run.projectId, run.ownerId)).preview!
+    expect(preview.limitations.join(' ')).toContain('native turn did not succeed')
+    expect((await manager.handle(new Request(preview.url)))?.status).toBe(200)
+    current = { ...run, writer: { attemptId: 'other', fence: 2, workerId: 'worker' } }
+    expect((await (await app.request('/api/projects/'+run.projectId+'/deployment-readiness')).json()).allowed).toBe(false)
+    expect((await manager.handle(new Request(preview.url)))?.status).toBe(409)
+    expect((await manager.status(run.projectId, run.ownerId)).preview).toBeNull()
+    current = run
+    const reopened = await manager.openAgent(run, measurement.id)
+    await writeFile(join(f.root, 'rules.json'), '{"expected":8}')
+    expect((await manager.handle(new Request(reopened.url)))?.status).toBe(409)
+    expect((await (await app.request('/api/projects/'+run.projectId+'/deployment-readiness')).json()).allowed).toBe(false)
+    expect((await app.request('/api/projects/'+run.projectId+'/deployments', { method: 'POST', body: '{}' })).status).toBe(409)
+    expect(publications).toBe(1)
+  } finally { await sessions?.dispose(); manager?.dispose(); await f.dispose() }
+})
+
 test('measured bytes, root paths, MIME and explicit stop; no workspace/API/script fallback', async () => {
   const f = await previewFixture()
   try {
@@ -63,9 +135,13 @@ test('measured bytes, root paths, MIME and explicit stop; no workspace/API/scrip
       expect(await response.text()).toBe(await Bun.file(join(f.root, 'dist', path || 'index.html')).text())
       expect(response.headers.get('cache-control')).toContain('no-store')
       expect(response.headers.get('access-control-allow-origin')).toBe('*')
+      expect(response.headers.get('x-beegame-preview-mode')).toBe('measured-static')
     }
     expect((await f.manager.handle(new Request(p.url+'main.js')))!.headers.get('content-type')).toContain('javascript')
-    expect((await f.manager.handle(new Request(p.url, { method: 'HEAD' })))!.headers.get('content-length')).toBeTruthy()
+    const head = (await f.manager.handle(new Request(p.url, { method: 'HEAD' })))!
+    expect(head.headers.get('content-length')).toBeTruthy()
+    expect(head.headers.get('x-beegame-preview-mode')).toBe('measured-static')
+    expect(head.headers.get('access-control-expose-headers')).toContain('X-BeeGame-Preview-Mode')
     expect((await f.manager.handle(new Request(p.url, { method: 'HEAD' })))!.body).toBeNull()
     expect((await f.manager.handle(new Request(p.url, { method: 'OPTIONS' })))!.status).toBe(204)
     expect((await f.manager.handle(new Request(p.url, { method: 'POST' })))!.status).toBe(405)
@@ -256,6 +332,9 @@ test('full BGS app opens the selected measured attempt, serves unchanged bytes a
       attemptId: f.run.tasks.build!.attemptId, planRevision: f.run.planRevision }) })
     expect(response.status, await response.clone().text()).toBe(200)
     const p = (await response.json()).preview
+    const runtime = await app.request('/api/projects/'+f.run.projectId+'/runtime-state')
+    expect(runtime.status).toBe(200)
+    expect((await runtime.json()).build_report).toMatchObject({ status: 'passed', build_url: p.url })
     auth = 'unavailable'
     const html = await app.request(p.url)
     expect(html.status).toBe(200)
@@ -263,8 +342,10 @@ test('full BGS app opens the selected measured attempt, serves unchanged bytes a
     expect((await app.request(p.url+'api/projects')).status).toBe(404)
     auth = 'yes'
     expect((await app.request(path, { method: 'DELETE', body: JSON.stringify({ id: p.id }) })).status).toBe(200)
+    expect((await (await app.request('/api/projects/'+f.run.projectId+'/runtime-state')).json()).build_report).toBeNull()
     expect((await app.request(p.url)).status).toBe(404)
-    expect((await app.request('/api/projects/'+f.run.projectId+'/preview', { method: 'POST' })).status).toBe(409)
+    expect((await app.request('/api/projects/'+f.run.projectId+'/preview', { method: 'POST', body:'{}' })).status).toBe(409)
+    expect((await app.request('/api/projects/'+f.run.projectId+'/preview', { method: 'POST', body:'bad-json' })).status).toBe(400)
     expect(commits).toBe(0); expect(native).toBe(0); expect(legacy).toBe(0)
   } finally { for (const fn of cleanups) await fn(); await f.dispose() }
 })

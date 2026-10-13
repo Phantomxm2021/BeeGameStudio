@@ -240,9 +240,13 @@ test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1')('optional preview hel
     const access = await projectExecutionAccess({ workspacePath: workspace, sessionId: 'fixture', environment: {} })
     const script = `
       const { withPreviewPage } = await import(process.env.BEEGAME_PREVIEW_TEST_MODULE);
-      const options = { apiUrl: process.env.FIXTURE_API, mode:'production', contextOptions:{viewport:{width:640,height:360},hasTouch:true} };
-      await withPreviewPage(options, async ({page,frame,gameFrame,environment}) => {
+      const options = { apiUrl: process.env.FIXTURE_API, mode:'production', contextOptions:{viewport:{width:640,height:360},hasTouch:true,deviceScaleFactor:2} };
+      await withPreviewPage(options, async ({page,frame,gameFrame,environment,observedEnvironment,observeEnvironment}) => {
         if(environment.origin!=='opaque') throw Error('environment was lost');
+        if(observedEnvironment.devicePixelRatio!==2 || observedEnvironment.maxTouchPoints<1) throw Error('actual environment was lost');
+        if(observedEnvironment.viewport.width!==640) throw Error('actual viewport was lost');
+        await page.setViewportSize({width:800,height:450});
+        if((await observeEnvironment()).viewport.width!==800) throw Error('environment observation stayed stale after resize');
         await page.keyboard.press('ArrowUp');
         if(await gameFrame.evaluate(()=>window.lastKey)!=='ArrowUp') throw Error('keyboard missed the game iframe');
         const storage=await gameFrame.evaluate(()=>{try{localStorage.getItem('fixture');return 'available'}catch(e){return e.name}});

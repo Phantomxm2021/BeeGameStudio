@@ -210,6 +210,36 @@
         "note": "큰 구현과 검증에 적합합니다. 단순 작업은 보통 단일 에이전트로 유지됩니다."
       },
       "items": {
+        "verificationAgentEnabled": {
+          "label": "Independent Verification",
+          "description": "Require a verifier for non-trivial changes and enable completion reminders.",
+          "note": "Off by default. Saves apply on the next task; ordinary Agent and testing remain available.",
+          "scope": "newSession"
+        },
+        "agentTeamsEnabled": {
+          "label": "Agent Teams",
+          "description": "Enable teams and teammate collaboration.",
+          "note": "Off by default. Applies on the next task; ordinary subagents do not require this.",
+          "scope": "newSession"
+        },
+        "promptSuggestionEnabled": {
+          "label": "Input Suggestions",
+          "description": "Generate suggested next messages with the model.",
+          "note": "Off by default. Applies on the next task and may add model calls.",
+          "scope": "newSession"
+        },
+        "awaySummaryEnabled": {
+          "label": "Away Summary (CLI)",
+          "description": "Enable automatic away summaries and /recap in the interactive CLI.",
+          "note": "Off by default. No away-summary UI in BGS headless chat; does not add a BGS chat panel.",
+          "scope": "newSession"
+        },
+        "coordinatorModeEnabled": {
+          "label": "Coordinator Mode",
+          "description": "Start new sessions as a coordinator that delegates work.",
+          "note": "Off by default. New sessions only; resumed sessions retain their original mode. Enable Agent Teams for team tools.",
+          "scope": "newSession"
+        },
         "autoMemoryEnabled": {
           "label": "runtime.autoMemory",
           "description": "선호, 프로젝트 결정, 자주 쓰는 맥락을 기억합니다.",

@@ -7,6 +7,9 @@ import type { SecureStorage } from './types.js'
  * Get the appropriate secure storage implementation for the current platform
  */
 export function getSecureStorage(): SecureStorage {
+  // BGS connections are stored in the authenticated user's dedicated config
+  // directory. Never prefer a host Keychain account over that selected account.
+  if (process.env.BGS_MODEL_CONNECTION_RESOLVED === '1' && process.env.BEEGAME_CONFIG_DIR) return plainTextStorage
   if (process.platform === 'darwin') {
     return createFallbackStorage(macOsKeychainStorage, plainTextStorage)
   }

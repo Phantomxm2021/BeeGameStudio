@@ -7,6 +7,7 @@ import { CONTENT_COORDINATE_CONTRACT, UI_ANCHORS, UI_PAINT_PHASES } from '../../
 import { CONTENT_RUNTIME_CONTRACT } from './content-runtime-contract'
 import { bundleContentConsumer } from './game-content-consumer-cli'
 import type { BeeGameAssetManifest } from './asset-contracts'
+import { PROJECT_GUIDE_TEMPLATE } from './workflow-v3/project-guide'
 import {
   BEEGAME_CONTENT_DOCUMENT_SCHEMA,
   BEEGAME_CONTENT_INDEX,
@@ -151,6 +152,7 @@ export function buildSceneUiContentAuthoringAuthority(
 /** Pure schema/reference, never a project version or authoring authority. */
 export function sceneUiContentFormat() {
   return {
+        projectGuide: PROJECT_GUIDE_TEMPLATE,
         strict: true,
         coordinates: CONTENT_COORDINATE_CONTRACT,
         runtimeConsumption: CONTENT_RUNTIME_CONTRACT,

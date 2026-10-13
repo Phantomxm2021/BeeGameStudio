@@ -63,9 +63,36 @@ const provider = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
   const body:any = await request.json(), run = await store.read(projectId,source.owner_id)
   if(!run?.writer || !run.agentTurns?.some(t=>t.attemptId===run.writer!.attemptId))return new Response('No active synthetic native turn',{status:409})
   const attemptId=run.writer.attemptId,n=(counts.get(attemptId)??0)+1;counts.set(attemptId,n)
+  const turn=run.agentTurns.find(t=>t.attemptId===attemptId)!,intent=turn.message?.intent??'goal'
+  const checkpoint='Synthetic interruption checkpoint?'
+  const question='Choose the synthetic changed height?'
   let call:{name:string;input:unknown}|undefined
-  if(n<=2)call={name:'Read',input:{file_path:join(root,n===1?'content/ui/menu.json':'content/scenes/level.json')}}
-  if(n===3) {
+  const measuring=intent==='continue'?n===3:intent==='change'?n===5:n===4
+  if(intent==='discuss') {
+    // No reads, writes or measurement for the synthetic discussion response.
+  } else if(intent==='work' && turn.message?.text.startsWith('Synthetic interruption:')) {
+    if(n===1)call={name:'Write',input:{file_path:join(root,'progress.txt'),content:'partial'}}
+    else if(n===2)call={name:'AskUserQuestion',input:{questions:[{header:'Pause',question:checkpoint,multiSelect:false,
+      options:[{label:'Continue',description:'Synthetic continuation'},{label:'Wait',description:'Synthetic wait'}]}]}}
+  } else if(intent==='continue') {
+    if(n===1)call={name:'Read',input:{file_path:join(root,'progress.txt')}}
+    else if(n===2)call={name:'Edit',input:{file_path:join(root,'progress.txt'),old_string:'partial',new_string:'complete'}}
+  } else if(intent==='change') {
+    if(n===1)call={name:'AskUserQuestion',input:{questions:[{header:'Height',question,multiSelect:false,
+      options:[{label:'72',description:'72 logical pixels'},{label:'88',description:'88 logical pixels'}]}]}}
+    else if(n===2)call={name:'Read',input:{file_path:join(root,'content/ui/menu.json')}}
+    else if(n===3) {
+      const text=JSON.stringify(body.messages),selected=['72','88'].filter(value=>text.includes('\\"'+question+'\\"=\\"'+value+'\\"'))
+      if(selected.length!==1)return new Response('No actual synthetic Question answer; no invented revision',{status:409})
+      const document=JSON.parse(await readFile(join(root,'content/ui/menu.json'),'utf8'))
+      document.data.nodes.find((node:{id:string})=>node.id==='play').layout.size[1]=Number(selected[0])
+      call={name:'Write',input:{file_path:join(root,'content/ui/menu.json'),content:JSON.stringify(document)}}
+    } else if(n===4)call={name:'Read',input:{file_path:join(root,'content/scenes/level.json')}}
+  } else {
+    if(n===1)call={name:'Skill',input:{skill:'bgs-builtins:gameplay-programmer'}}
+    else if(n===2||n===3)call={name:'Read',input:{file_path:join(root,n===2?'content/ui/menu.json':'content/scenes/level.json')}}
+  }
+  if(measuring && intent!=='discuss' && !turn.message?.text.startsWith('Synthetic interruption:')) {
     const entry=[...JSON.stringify(body.messages).matchAll(/\.beegame\/tmp\/goal-tools-[A-Za-z0-9_-]+\/measure\.mjs/g)].at(-1)?.[0]
     if(!entry)return new Response('Actual measurement entry missing',{status:409})
     call={name:'Bash',input:{command:'bun '+JSON.stringify(entry)+' --request '+JSON.stringify(attemptId)+' --artifact dist --report docs/README.md',

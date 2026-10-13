@@ -1,5 +1,6 @@
 // Dedicated synthetic browser regression; never attaches to the user's Chrome.
 import assert from 'node:assert/strict';
+import {answerDebugConfirmation} from './debug-confirm-browser-helper.mjs';
 const { chromium } = await import(process.env.BGS_PLAYWRIGHT_MODULE);
 const { endpoint, origin } = JSON.parse(await new Promise(resolve => {
   let text = ''; process.stdin.on('data', bytes => text += bytes); process.stdin.on('end', () => resolve(text));
@@ -11,7 +12,9 @@ try {
   let apiCalls = 0, lastAuthHeader; page.on('request', r => { if (r.url().includes('/api/')) { apiCalls++; lastAuthHeader=Boolean(r.headers().authorization); } });
   await page.goto(origin + '/debug/workflow-v3');
   assert.equal(apiCalls, 0, 'opening the shell must not read or mutate a project');
-  const click = async id => { await page.locator('#' + id).click(); await page.locator('#' + id).waitFor({ state: 'visible' });
+  let confirmation;
+  const click = async id => { await page.locator('#' + id).click();
+    if (confirmation !== undefined) { const accepted = confirmation; confirmation = undefined; await answerDebugConfirmation(page, accepted); } await page.locator('#' + id).waitFor({ state: 'visible' });
     await page.waitForFunction(id => !document.getElementById(id).disabled, id); };
   const result = async () => JSON.parse(await page.locator('#result').innerText());
   const run = async () => (JSON.parse(await page.locator('#run').innerText())).run;
@@ -34,8 +37,25 @@ try {
   assert.equal(bootstrap.chatSessionId,'chat');assert.equal(bootstrap.requirements.text,'');assert.deepEqual(bootstrap.requirements.ids,[]);
   bootstrap.requirements={text:'Synthetic request',constraints:{},ids:['req.play']};
   await page.locator('#proposal').fill(JSON.stringify(bootstrap));
-  page.once('dialog',d=>d.dismiss());const declinedRunCalls=apiCalls;await click('create-run');assert.equal(apiCalls,declinedRunCalls);
-  page.once('dialog',d=>d.accept());await click('create-run');assert.match(await page.locator('#status').innerText(),/HTTP 409.*run-exists/);
+  const beforeConfirmation = apiCalls;
+  await page.locator('#create-run').click();
+  await page.locator('#action-confirm').waitFor({state:'visible'});
+  assert.equal(apiCalls,beforeConfirmation,'Opening the page dialog cannot mutate or bill');
+  assert.match(await page.locator('#action-confirm-message').innerText(),/项目：p/);
+  await page.screenshot({path:'/private/tmp/bgs-v3-198-inline-dialog.png'});
+  assert.equal(await page.evaluate(()=>document.activeElement.id),'action-confirm-cancel');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(()=>!document.getElementById('create-run').disabled);
+  assert.equal((await result()).cancelled,true);assert.equal(apiCalls,beforeConfirmation,'Escape must not send the request');
+  await page.locator('#create-run').click();
+  await page.locator('#action-confirm').waitFor({state:'visible'});
+  await page.evaluate(()=>document.getElementById('create-run').click());
+  assert.equal(await page.locator('dialog[open]').count(),1,'Duplicate click cannot queue another dialog');
+  await answerDebugConfirmation(page,false);
+  await page.waitForFunction(()=>!document.getElementById('create-run').disabled);
+  assert.equal(apiCalls,beforeConfirmation);
+  confirmation = false;const declinedRunCalls=apiCalls;await click('create-run');assert.equal(apiCalls,declinedRunCalls);
+  confirmation = true;await click('create-run');assert.match(await page.locator('#status').innerText(),/HTTP 409.*run-exists/);
   assert.deepEqual(await run(),existingRun,'new Run action cannot overwrite existing history');
   bootstrap.chatSessionId='invented';await page.locator('#proposal').fill(JSON.stringify(bootstrap));
   const invalidChatCalls=apiCalls;await click('create-run');assert.equal(apiCalls,invalidChatCalls);
@@ -77,9 +97,9 @@ try {
   await page.locator('#task').selectOption('game'); await click('new-key');
   const key = await page.locator('#request-key').inputValue();
   // Declining execution spends nothing, accepting is a single invocation.
-  page.once('dialog', d => d.dismiss()); const noCall = apiCalls; await click('execute');
+  confirmation = false; const noCall = apiCalls; await click('execute');
   assert.equal(apiCalls, noCall); assert.equal((await result()).cancelled, true);
-  page.once('dialog', d => d.accept()); await click('execute');
+  confirmation = true; await click('execute');
   assert.equal((await result()).attempt.requestKey, key);
   // Explicit read-only test observation, not polling/retry in the client.
   const deadline = Date.now() + 30000;
@@ -111,19 +131,19 @@ try {
   observation.requirementIds=['req.play']; observation.steps='Open Preview and inspect the play button';
   observation.expected='Confirmed height is 80px'; observation.observed='Rendered height is 64px';
   await page.locator('#observation-json').fill(JSON.stringify(observation));
-  page.once('dialog',d=>d.dismiss()); const cancelIssue=apiCalls;await click('submit-observation');assert.equal(apiCalls,cancelIssue);
-  page.once('dialog',d=>d.accept());await click('submit-observation');
+  confirmation = false; const cancelIssue=apiCalls;await click('submit-observation');assert.equal(apiCalls,cancelIssue);
+  confirmation = true;await click('submit-observation');
   const issue=(await result()).issue;assert.equal((await result()).dispatched,false);
-  page.once('dialog',d=>d.accept());await click('submit-observation');assert.equal((await result()).issue.id,issue.id);
+  confirmation = true;await click('submit-observation');assert.equal((await result()).issue.id,issue.id);
   observation.observed='Different observation with the same request key';
-  await page.locator('#observation-json').fill(JSON.stringify(observation));page.once('dialog',d=>d.accept());await click('submit-observation');
+  await page.locator('#observation-json').fill(JSON.stringify(observation));confirmation = true;await click('submit-observation');
   assert.match(await page.locator('#status').innerText(),/HTTP 409.*duplicate-request/);
   observation.observed='Rendered height is 64px';await page.locator('#observation-json').fill(JSON.stringify(observation));
-  page.once('dialog',d=>d.accept());await click('issue-review');assert.equal((await result()).dispatched,false);
+  confirmation = true;await click('issue-review');assert.equal((await result()).dispatched,false);
   assert.equal((await run()).tasks.game.status,'succeeded');assert.deepEqual((await run()).tasks.notes,before.tasks.notes);
   const reviewTask='preview-review.'+issue.id;
   const executeTask=async id=>{
-    await page.locator('#task').selectOption(id);await click('new-key');page.once('dialog',d=>d.accept());await click('execute');
+    await page.locator('#task').selectOption(id);await click('new-key');confirmation = true;await click('execute');
     const deadline=Date.now()+30000;
     while(true){const data=await(await fetch(origin+'/api/projects/p/workflow-v3',{headers:{Authorization:'Bearer synthetic-owner'}})).json();
       if(!data.run.writer)break;assert.ok(Date.now()<deadline,'synthetic task did not settle');await new Promise(resolve=>setTimeout(resolve,150));}
@@ -134,15 +154,15 @@ try {
   assert.equal(firstReview.status,'failed',JSON.stringify(firstReview));assert.equal(firstReview.review.findings[0].ownerTaskId,'game');
   await page.locator('#review-attempt').selectOption(firstReview.attemptId);
   assert.match(await page.locator('#review-detail').innerText(),/64px/);
-  await page.locator('#finding-ids').fill('[]');page.once('dialog',d=>d.accept());await click('issue-repair');
+  await page.locator('#finding-ids').fill('[]');confirmation = true;await click('issue-repair');
   assert.match(await page.locator('#status').innerText(),/HTTP 400.*invalid-repair/);assert.equal((await run()).planRevision,reviewed.planRevision);
-  await page.locator('#finding-ids').fill('["F1"]');page.once('dialog',d=>d.accept());await click('issue-repair');
+  await page.locator('#finding-ids').fill('["F1"]');confirmation = true;await click('issue-repair');
   assert.equal((await result()).dispatched,false);const repairPlan=await run();assert.equal(repairPlan.tasks.game.status,'pending');
   assert.deepEqual(repairPlan.tasks.game.spec.writablePaths,before.tasks.game.spec.writablePaths);assert.deepEqual(repairPlan.tasks.notes,before.tasks.notes);
   const rejectedPreview=await browser.newPage();assert.equal((await rejectedPreview.goto(oldPreview)).status(),409);await rejectedPreview.close();
   // Refresh must not silently bind an old draft to this new plan or build.
   const staleObservation={...observation,requestKey:crypto.randomUUID()};
-  await page.locator('#observation-json').fill(JSON.stringify(staleObservation));page.once('dialog',d=>d.accept());const staleIssueCalls=apiCalls;await click('submit-observation');
+  await page.locator('#observation-json').fill(JSON.stringify(staleObservation));confirmation = true;const staleIssueCalls=apiCalls;await click('submit-observation');
   assert.match(await page.locator('#status').innerText(),/HTTP 409/);assert.equal(apiCalls,staleIssueCalls+1);
   assert.deepEqual(JSON.parse(await page.locator('#observation-json').inputValue()),staleObservation);
   await executeTask('game');const repaired=await run(),repairAttempt=repaired.attempts.find(a=>a.attemptId===repaired.tasks.game.attemptId);
@@ -163,7 +183,7 @@ try {
   await click('prepare-change');
   const proposal = JSON.parse(await page.locator('#proposal').inputValue()); proposal.requirements.text = 'Changed synthetic goal';
   await page.locator('#proposal').fill(JSON.stringify(proposal));
-  page.once('dialog', d => d.accept()); await click('requirements');
+  confirmation = true; await click('requirements');
   assert.match(await page.locator('#status').innerText(),/HTTP 400 historical-review-scope/);
   assert.equal((await run()).requirements.revision,closed.requirements.revision);
   assert.deepEqual(JSON.parse(await page.locator('#proposal').inputValue()),proposal,'invalid authority draft must not be automatically cleaned');
@@ -171,7 +191,7 @@ try {
   // rather than carrying forward old findings, repair goals or review checks.
   proposal.tasks=Object.values(before.tasks).map(t=>t.spec);
   await page.locator('#proposal').fill(JSON.stringify(proposal));
-  page.once('dialog',d=>d.accept());await click('requirements');
+  confirmation = true;await click('requirements');
   assert.equal(await page.locator('#status').innerText(),'完成 requirements');
   assert.equal((await result()).dispatched, false); assert.equal((await result()).requiresRebuild, true);
   const changed = await run();
@@ -184,7 +204,7 @@ try {
   // Explicit stale proposal is rejected, kept intact, never auto re-versioned.
   proposal.requirements.text = 'Stale synthetic goal'; proposal.requestKey = crypto.randomUUID();
   await page.locator('#proposal').fill(JSON.stringify(proposal));
-  page.once('dialog', d => d.accept()); const beforeConflict = apiCalls; await click('requirements');
+  confirmation = true; const beforeConflict = apiCalls; await click('requirements');
   assert.match(await page.locator('#status').innerText(), /HTTP 409/); assert.equal(apiCalls, beforeConflict + 1);
   await click('stop'); await page.reload();
   assert.equal(await page.locator('#token').inputValue(), '');
@@ -195,6 +215,14 @@ try {
   assert.equal(await page.locator('#run').innerText(), '');
   assert.equal(await page.locator('#observation-json').inputValue(),'');assert.equal(await page.locator('#review-detail').innerText(),'');
   await click('save'); assert.match(await page.locator('#status').innerText(), /先读取/);
+  await page.locator('#project').fill('p');await click('restore-chat');await click('prepare-run');
+  const identityChangeCalls=apiCalls;
+  await page.locator('#create-run').click();await page.locator('#action-confirm').waitFor({state:'visible'});
+  // An external identity change cannot move a pending authorization to another project.
+  await page.evaluate(()=>{const input=document.getElementById('project');input.value='other';input.dispatchEvent(new Event('input',{bubbles:true}));});
+  await page.waitForFunction(()=>!document.getElementById('create-run').disabled);
+  assert.equal((await result()).cancelled,true);assert.equal(apiCalls,identityChangeCalls);
+  assert.equal(await page.locator('dialog[open]').count(),0);
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({passed:true, coverage:['no-auto-call','normal-auth','source-edit','stale-draft','local-invalidation','fresh-build-and-measure','export','measured-sandbox-preview','stale-preview-rejected','observation-idempotency','explicit-review-plan','original-owner-repair','actual-rule-build-runtime','source-backed-followup','unrelated-task-preserved','requirement-change','pause-reload','no-auto-retry','credential-isolation'], limits:['synthetic native provider and semantic report','no game quality or real model cost']}));
 } finally { await browser.close(); }

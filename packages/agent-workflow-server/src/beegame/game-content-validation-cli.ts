@@ -17,7 +17,8 @@ import { resolveSceneCameraView, type SceneCameraInput } from '../../../scene-ed
 import { auditBeeGameContentPackage, parseBeeGameContentIndex, contentDraftStructureIssues, type BeeGameContentPackage } from './game-content-package'
 import type { BeeGameContentIndex } from './game-content-schema'
 import { parseBeeGameContentDocument } from './game-content-schema'
-import { projectContentAuthority } from './project-content-authority'
+import { projectContentAuthority, inspectProjectContentAuthority } from './project-content-authority'
+import { PROJECT_GUIDE_TEMPLATE, projectGuideTemplate } from './workflow-v3/project-guide'
 import { inspectUiLayout, inspectUiLayoutBoundaries, summarizeUiLayoutInspection, type UiLayoutInspectionOptions } from '../../../scene-editor/src/ui-layout-inspection'
 import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
 import { checkDesignLayouts, checkReviewDesignLayouts } from './design-layout-check'
@@ -286,6 +287,27 @@ export const CONTENT_DRAFT_EXAMPLES = {
   } },
 }
 
+export const CURRENT_CONTENT_CHECK_HELP = `Usage: bun <supplied-check-content-entry> [workspace] [command] [--details]
+  (no command), --current   Check saved index/content and real resource references; not design agreement, runtime or quality acceptance
+  --package-metadata FILE ... Read first-index compatibility fields from saved Scene/UI/VFX and actual Manifest; no writes
+  --format [SECTION ...]    List format sections or read selected sections together; projectGuide is optional navigation, not a new design contract
+  --check-drafts FILE ...   Check saved draft structure together; resource bindings remain pending
+  --inspect-draft FILE [--node ID | --pointer /json/pointer] ... Read exact draft fields together
+  --layout-draft FILE W H [--game-view ID --camera FILE] Inspect UI/Scene geometry without an index
+  --camera-draft FILE W H   Inspect a Camera input or the authored Camera in a scene-2d document
+  --scene-layouts [W H ...] [--report] Batch saved Scenes at authored viewports, or explicit viewport pairs
+  --design-layouts [--draft] [--report] Check saved UI geometry; --draft only defers missing TileSet bounds
+  --layout FILE W H [--nodes ID ...] Inspect registered content-relative layout; requires content/index.json
+  --inspect [FILE [--node ID]] Read registered content
+  --scene-point FILE NODE W H Derive saved Scene world/logical-screen coordinates; not rendered pixels
+  --read-design JSON        Batch exact sections: [{"document":"GDD.md","sections":["Exact heading"]}]
+  --review-sources FILE ... [--details] Batch saved source hashes/headings; --details adds text, not a semantic review
+  --legacy-help             Explicit compatibility reference for old delivery/batch/handoff commands
+FILE is workspace-relative unless stated otherwise. Use --format for actual fields, not the generated runtime bundle.
+--report produces human-readable text and a saved JSON report path; omit it for JSON. --details retains full observations.
+Checks inspect selected saved inputs only. They do not create design records or certify complete gameplay/visual quality.
+`
+
 export const CONTENT_CHECK_HELP = `Usage: bun .beegame/delivery/check-content.mjs [workspace] [command] [--details]
   --help                    Commands, minimal inputs and result shapes (no files required)
   --current                 Check saved index/content and real resource references; no eight-document authority required
@@ -307,6 +329,7 @@ export const CONTENT_CHECK_HELP = `Usage: bun .beegame/delivery/check-content.mj
                            Also accepts docs/NAME.md; no other directories, absolute paths or traversal
   --format [section-name ...] List actual format sections or read selected sections together; no index/resources required
                            Example: bun .beegame/delivery/check-content.mjs --format coordinates
+                           --format projectGuide batches saved source paths/declared commands into an optional CLAUDE.md scaffold; no writes or execution.
   --layout-draft file w h    Inspect workspace-relative UI/Scene draft; no index/resources required
     [--game-view node-id --camera workspace-relative-camera-or-scene.json]
     [--appendix]             Optional Markdown geometry export; no separate appendix is required
@@ -323,6 +346,7 @@ export const CONTENT_CHECK_HELP = `Usage: bun .beegame/delivery/check-content.mj
     [--orientation Landscape|Portrait] [--dimension 2D|3D|VR|AR]
                            Pass confirmed settings to match the host. Batch results: issues, diagnostics, coverage, inputs.
   --layout file w h          Inspect content-relative registered UI/Scene; requires content/index.json
+    [--nodes ID ...]         Return selected resolved UI rectangles in one call, without all-node details
   --inspect [file [--node id]]  Read registered content or one exact authored node
   --inspect-draft file [--node id | --pointer /json/pointer] ...
                            Read draft overview or exact nodes/fields together; no index/resources required
@@ -335,9 +359,10 @@ export const CONTENT_CHECK_HELP = `Usage: bun .beegame/delivery/check-content.mj
                            Derive one active node origin's world/logical-screen coordinates from saved Scene hierarchy and Camera
                            Workspace-relative Scene JSON; no index/resources required. Uses saved numeric values, not prose or rendered pixels.
                            Geometry only, not visual/input acceptance; compare a tight actual observation and convert logical pixels through the real canvas box.
-  --authority               Read current content revision metadata after final design/Manifest saves.
-                           Use these values in content/index.json before build/measurement, never guessed hashes.
-                           Later source edits invalidate them; this command does not certify design or quality.
+  --authority [--inputs]    Read legacy revision metadata compared with the saved registry; --inputs batches its hashed operands.
+                           Returns computed hashes and registry.status/matches; do not guess hash algorithms.
+                           Legacy compatibility identity only; --current does not require its document tag to match.
+                           Later source edits change identity; this command does not certify design or quality.
   (no command)              Legacy delivery entry checks the eight-document baseline. V3 autonomous entry defaults to --current.
                            Explicit --authority and handoff checks remain legacy; no command certifies runtime or quality.
 
@@ -539,7 +564,19 @@ function runGameContentCommandImpl(workspacePath: string, args: string[] = []) {
       parameters.splice(at, 2)
     }
   }
-  return runContentCommand(workspacePath, parameters, confirmed, details)
+  const selectedAt=parameters.indexOf('--nodes')
+  const selected=selectedAt>=0?parameters.splice(selectedAt).slice(1):[]
+  if(selectedAt>=0 && (!['--layout','--layout-draft'].includes(parameters[0]??'') || !selected.length ||
+    selected.some(id=>id.startsWith('--')) || new Set(selected).size!==selected.length))
+    throw Error('Usage: --layout[--draft] file width height [--game-view ID --camera file] --nodes ID ... [--details]')
+  const result=runContentCommand(workspacePath, parameters, confirmed, details)
+  if(selectedAt<0)return result
+  if(!('nodes' in result) || !Array.isArray(result.nodes))throw Error('--nodes needs resolved UI node geometry')
+  const missing=selected.filter(id=>!result.nodes.some((node:any)=>node.id===id))
+  if(missing.length)throw Error('Unknown layout nodes: '+missing.join(', ')+'. Available IDs: '+result.nodes.map((node:any)=>node.id).join(', '))
+  return {...result,selectedGeometry:result.nodes.filter((node:any)=>selected.includes(node.id)).map((node:any)=>({
+    id:node.id,parentId:node.parentId,active:node.active,layout:node.layout,pivot:node.pivot,bounds:node.bounds,corners:node.corners,
+  })),geometrySpace:'bounds/corners: host logical pixels; layout.position/size: resolved parent-local allocation'}
 }
 
 function runContentCommand(workspacePath: string, args: string[], confirmed?: { orientation?: unknown; dimension?: unknown }, details = false) {
@@ -652,13 +689,18 @@ function runContentCommand(workspacePath: string, args: string[], confirmed?: { 
       format = sceneUiContentFormat()
     }
     if (!format || typeof format !== 'object' || Array.isArray(format)) throw new Error('Invalid content format')
-    if (args.length === 1) return { ok: true, scope: 'content-format-sections', sections: Object.keys(format) }
+    // Navigation is independent of old saved Scene/UI format references.
+    const reference={...format,projectGuide:PROJECT_GUIDE_TEMPLATE}
+    if (args.length === 1) return { ok: true, scope: 'content-format-sections', sections: Object.keys(reference) }
     const sections = [...new Set(args.slice(1))]
     for (const section of sections)
-      if (!Object.hasOwn(format, section)) throw new Error(`Unknown content format section: ${section}; example: --format coordinates`)
+      if (!Object.hasOwn(reference, section)) throw new Error(`Unknown content format section: ${section}; example: --format coordinates`)
+    const navigation=sections.includes('projectGuide')?projectGuideTemplate(workspacePath):undefined
+    if(navigation)reference.projectGuide=navigation.value
     if (sections.length > 1) return { ok: true, scope: 'content-format-selection',
-      values: Object.fromEntries(sections.map(section => [section, (format as Record<string, unknown>)[section]])) }
-    return { ok: true, scope: 'content-format-section', section: args[1], value: (format as Record<string, unknown>)[args[1]!] }
+      values: Object.fromEntries(sections.map(section => [section, (reference as Record<string, unknown>)[section]])) }
+    return { ok: true, scope: 'content-format-section', section: args[1], value: (reference as Record<string, unknown>)[args[1]!],
+      ...(navigation?{issues:navigation.facts.issues,verified:navigation.facts.verified}: {}) }
   }
   if (args[0] === '--design-references') {
     let batch: number | undefined, document: string | undefined
@@ -686,10 +728,22 @@ function runContentCommand(workspacePath: string, args: string[], confirmed?: { 
     if ((!connected && args.length !== 4) || !args[1])
       throw new Error(`Usage: ${args[0]} workspace-relative-file width height${args[0] === '--layout-draft' ? ' [--game-view node-id --camera workspace-relative-camera-file]' : ''}`)
     const source = readWorkspaceDraft(workspacePath, args[1])
-    if (args[0] === '--camera-draft') return {
-      ok: true, scope: 'camera-framing-draft-inspection', runtimeVerified: false, viewport,
-      note: 'Camera framing only; does not project objects, verify gameplay occlusion or establish XR comfort.',
-      view: resolveSceneCameraView(source as SceneCameraInput, viewport),
+    if (args[0] === '--camera-draft') {
+      try {
+        let camera = source as SceneCameraInput, cameraNodeId: string | undefined
+        if (source && typeof source === 'object' && ('kind' in source || 'schema' in source)) {
+          const document = parseBeeGameContentDocument(source)
+          if (document.kind !== 'scene-2d') throw new Error('Expected a scene-2d document or standalone Camera input')
+          const selected = sceneCameraInput2d(document.data)
+          camera = selected.input; cameraNodeId = selected.nodeId
+        }
+        return { ok: true, scope: 'camera-framing-draft-inspection', runtimeVerified: false, viewport,
+          ...(cameraNodeId ? { cameraNodeId } : {}),
+          note: 'Camera framing only; does not project objects, verify gameplay occlusion or establish XR comfort.',
+          view: resolveSceneCameraView(camera, viewport) }
+      } catch (error) {
+        throw new Error(`${args[1]}: --camera-draft expects a standalone Camera input or a scene-2d document with an active authored Camera: ${error instanceof Error ? error.message : String(error)}`)
+      }
     }
     const document = parseBeeGameContentDocument(source)
     const issues = contentDraftStructureIssues(args[1], document)
@@ -717,16 +771,15 @@ function runContentCommand(workspacePath: string, args: string[], confirmed?: { 
     } : {}
     return inspectGameContent(workspacePath, args[1], undefined, viewport, options)
   }
-  if (args.length === 1 && args[0] === '--authority') {
-    const { manifest: _manifest, ...authority } = projectContentAuthority(workspacePath)
-    return { ok: true, scope: 'content-authority', ...authority }
+  if (args[0] === '--authority' && (args.length === 1 || args.length === 2 && args[1] === '--inputs')) {
+    return inspectProjectContentAuthority(workspacePath,args.length===2)
   }
   if (args.length === 1 && args[0] === '--current') return validateGameContent(workspacePath, true)
   if (args.length === 0) return validateGameContent(workspacePath)
   if (args[0] !== '--inspect' ||
       !(args.length === 1 || args.length === 2 ||
         (args.length === 4 && args[2] === '--node' && args[3] && !args[1]?.startsWith('--'))))
-    throw new Error('Usage: [workspace] [--authority | --review-layouts | --design-layouts | --inspect [content-relative-file [--node id]] | --layout file width height | --layout-draft file width height [--game-view node-id --camera camera-file] | --camera-draft file width height]')
+    throw new Error('Usage: [workspace] [command]; run the supplied entry with --help for its interface. Unknown command or invalid arguments. Inspection accepts --inspect [content-relative-file [--node id]].')
   return inspectGameContent(workspacePath, args[1], args[3])
 }
 
@@ -736,10 +789,17 @@ function writeCliOutput(text: string): Promise<void> {
   })
 }
 
-export async function runGameContentCli(args = process.argv.slice(2)) {
+export async function runGameContentCli(args = process.argv.slice(2), options: { profile?: 'current' } = {}) {
   args = [...args]
   const workspace = resolve(args[0] && !args[0].startsWith('--') ? args.shift()! : process.cwd())
   try {
+    if (options.profile === 'current') {
+      if (!args.length) args.push('--current')
+      if (args.length === 1 && args[0] === '--help') {
+        await writeCliOutput(CURRENT_CONTENT_CHECK_HELP); process.exitCode = 0; return
+      }
+      if (args.length === 1 && args[0] === '--legacy-help') args = ['--help']
+    }
     const report = args.includes('--report')
     if (report) {
       if (!['--design-layouts', '--review-layouts', '--scene-layouts'].includes(args[0] ?? '') || args.filter(arg => arg === '--report').length !== 1)

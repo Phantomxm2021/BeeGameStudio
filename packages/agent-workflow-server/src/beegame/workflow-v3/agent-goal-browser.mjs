@@ -1,15 +1,15 @@
 // Controlled test browser, not user Chrome; all mutations use real debug/API.
 import assert from 'node:assert/strict';
+import {answerDebugConfirmation} from './debug-confirm-browser-helper.mjs';
 const {chromium}=await import(process.env.BGS_PLAYWRIGHT_MODULE);
-const {endpoint,origin,brief}=JSON.parse(await new Promise(resolve=>{let s='';process.stdin.on('data',b=>s+=b);process.stdin.on('end',()=>resolve(s));}));
+const {endpoint,origin,brief,focusedContinuation=false}=JSON.parse(await new Promise(resolve=>{let s='';process.stdin.on('data',b=>s+=b);process.stdin.on('end',()=>resolve(s));}));
 const browser=await chromium.connectOverCDP(endpoint);
 try {
   const page=await browser.newPage(),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   await page.goto(origin+'/debug/workflow-v3');
   const click=async(id,confirm=false)=>{
-    if(confirm)page.once('dialog',d=>d.accept());
-    await page.locator('#'+id).click();
+    await page.locator('#'+id).click(); if (confirm) await answerDebugConfirmation(page);
     await page.waitForFunction(id=>!document.getElementById(id).disabled,id);
     assert.ok((await page.locator('#status').innerText()).startsWith('完成'),await page.locator('#status').innerText());
   };
@@ -125,7 +125,18 @@ try {
   const ui=JSON.parse(await page.locator('#document-json').inputValue());ui.data.nodes[1].layout.size[1]=64;
   await page.locator('#document-json').fill(JSON.stringify(ui));await click('save');
   assert.equal((await result()).unmeasured,true);
-  assert.equal((await api('workflow-v3/agent/measurements/'+firstMeasurement.id)).freshness.current,false,'saving source must invalidate old measurement before any model call');
+  await click('read-measurement');const sourceChanged=await result();
+  assert.equal(sourceChanged.freshness.current,false,'saving source must invalidate old measurement before any model call');
+  assert.equal(sourceChanged.freshness.changes.artifact,false);
+  assert.equal(sourceChanged.freshness.evidence.artifactMatches,true);
+  assert.equal(sourceChanged.freshness.evidence.exportableSourcesMatch,false);
+  assert.ok(sourceChanged.freshness.changes.sources.includes('content/ui/menu.json'));
+  assert.ok(sourceChanged.freshness.changes.checkInputs.includes('build'));
+  assert.equal(sourceChanged.freshness.evidence.checks.find(c=>c.id==='runtime-smoke').inputsMatch,true);
+  for(const id of ['project-export','preview']) {
+    await page.locator('#'+id).click();await page.waitForFunction(id=>!document.getElementById(id).disabled,id);
+    assert.ok(!(await page.locator('#status').innerText()).startsWith('完成'),'changed sources cannot export/open as current');
+  }
   await page.locator('#document').selectOption('scenes/level.json');
   const scene=JSON.parse(await page.locator('#document-json').inputValue());scene.data.nodes[1].transform.position[0]=30;
   await page.locator('#document-json').fill(JSON.stringify(scene));await click('save');
@@ -169,20 +180,42 @@ try {
   await click('questions');assert.equal((await result()).questions.length,0);
   await click('resume');assert.equal((await result()).dispatched,false);
   await prepareMessage('continue','Inspect the partial progress checkpoint, complete it, and verify the changed target without replaying earlier work');
+  if(focusedContinuation) {
+    await page.locator('#message-context').selectOption('focused');await click('prepare-message');
+  }
   await click('submit-message',true);const continued=await waitTurn(5);
   assert.equal(continued.requirements.revision,stopped.requirements.revision);
-  assert.equal(new Set(continued.agentTurns.map(t=>t.nativeSessionId)).size,1);
+  assert.equal(new Set(continued.agentTurns.map(t=>t.nativeSessionId)).size,focusedContinuation?2:1);
+  assert.equal(continued.agentTurns[4].message.contextMode??'resume',focusedContinuation?'focused':'resume');
   assert.equal(continued.deliveryEligible,false);assert.deepEqual(continued.tasks,{});assert.deepEqual(continued.plans,[]);
   await page.locator('#measurement').selectOption(continued.agentTurns[4].measurements.at(-1).id);
   await click('read-measurement');assert.equal((await result()).freshness.current,true);
   await click('project-export');assert.ok((await result()).bytes>0);
   await click('submit-message',true);assert.equal((await result()).turn.attemptId,continued.agentTurns[4].attemptId);
+  await prepareMessage('work','Check the current confirmed target and existing evidence, without changing the requirements');
+  await page.locator('#message-context').selectOption('focused');await click('prepare-message');
+  await click('submit-message',true);const maintained=await waitTurn(6);
+  assert.deepEqual(maintained.requirements,continued.requirements);
+  assert.equal(maintained.requirementChanges.length,continued.requirementChanges.length);
+  assert.equal(maintained.planRevision,continued.planRevision);
+  assert.equal(maintained.agentTurns[5].message.intent,'work');
+  assert.equal(maintained.agentTurns[5].message.contextMode,'focused');
+  assert.notEqual(maintained.agentTurns[5].nativeSessionId,continued.agentTurns[4].nativeSessionId);
+  assert.equal(maintained.agentTurns[5].measurements,undefined,'No automatic remeasure for unchanged work');
+  await page.locator('#measurement').selectOption(continued.agentTurns[4].measurements.at(-1).id);
+  await click('read-measurement');assert.equal((await result()).freshness.current,true);
+  await click('submit-message',true);assert.equal((await result()).turn.attemptId,maintained.agentTurns[5].attemptId);
+  await page.locator('#message-context').selectOption('resume');
+  await prepareMessage('discuss','Explain the maintained project without changing anything');
+  await click('submit-message',true);const focusedDiscussion=await waitTurn(7);
+  assert.equal(focusedDiscussion.agentTurns[6].nativeSessionId,maintained.agentTurns[5].nativeSessionId);
   assert.deepEqual(errors,[]);
-  console.log(JSON.stringify({passed:true,answered,permissionTools:[...tools],
+  console.log(JSON.stringify({passed:true,answered,focusedContinuation,permissionTools:[...tools],
     coverage:['whole-confirmed-goal','real-native-plan-skill-question','native-write-failed-check-repair-recheck',
       'idempotent-goal-intake','no-host-Task','no-stage-auto-continuation','pause-resume-no-dispatch',
       'same-native-history-discussion','authorized-change-actual-edit-and-retest','partial-work-interruption-explicit-continuation',
-      'same-native-UUID','old-version-not-accepted','same-message-no-second-execution',
+      focusedContinuation?'fresh-native-UUID-on-explicit-focused-continuation':'same-native-UUID-on-continuation','focused-native-context-no-old-tool-history','resume-focused-context','old-version-not-accepted','same-message-no-second-execution','existing-goal-work-preserves-requirements-and-receipt',
+      'debug-source-vs-artifact-check-input-classification','stale-source-preview-export-refused',
       'read-only-merged-design-record','missing-report-not-stale-result','changed-requirements-not-old-evidence',
       'native-measurement-without-Task','debug-measured-Preview-and-project-export','changed-and-continued-build-remeasured',
       'autonomous-ui-scene-editor','source-save-invalidates-old-measurement','no-editor-model-dispatch','rebuilt-json-consumed-by-browser'],

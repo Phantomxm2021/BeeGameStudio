@@ -20,6 +20,7 @@ export type PreparedFontProbe = NonNullable<TaskSpec['uiProbes']>[number] & {
  * observed in the game's build, not inferred from CSS names or font downloads. */
 export async function prepareFontProbes(root: string, task: Pick<TaskSpec, 'uiProbes'|'runtimeArtifact'>, result: CheckResult): Promise<PreparedFontProbe[]> {
   if (!task.uiProbes?.length) throw Error('Declare actual static DOM font selectors in uiProbes')
+  if (task.uiProbes.some(probe=>probe.coordinateRoot)) throw Error('coordinateRoot is supported by ui-data-consumption only; font probes observe authored CSS font sizes, not logical geometry')
   result.inputs.push(await readVersion(root, 'content/index.json'))
   const index = contentIndexSchema.parse(JSON.parse(await readFile(resolve(root, 'content/index.json'), 'utf8')))
   const entries = index.documents?.filter(entry => entry.kind.startsWith('ui-')) ?? []

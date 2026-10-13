@@ -1,0 +1,796 @@
+{
+  "version": "bgs-v3-168-paid.1",
+  "status": "interrupted-by-user",
+  "project": {
+    "name": "磁轨调度",
+    "id": "v3-paid-a801f793-52cb-4874-8893-f5eaad8bf833",
+    "runId": "bedaee26-a2a7-4997-adf2-688eb3a79a61",
+    "nativeSessionId": "a81cfeaf-b023-43c6-ad73-d5a94c6b60ed",
+    "chatSessionId": "beegame_b266ce1d42ab4e41bb4e45a6f985eb09"
+  },
+  "authorization": "One real same-project work acceptance after deploying 1.68; no additional message/project/paid retry, added role/Review prompt, Agent limit, formal frontend/native edit, settings/hooks change or manual game repair.",
+  "deployment": {
+    "deployed": "runtime",
+    "pid": 10292,
+    "source": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+    "version": "1.68",
+    "sourceHashes": [
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.ts",
+        "sha256": "faf133da01789b9e09c9efc2dc42e12204271844693453d0dc324b57848dd737"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/project-guide.ts",
+        "sha256": "495bf440c059b7550c0a3609c3dc269b278324c83a4f7b4f5a44a56cbc1c835c"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-measurement.ts",
+        "sha256": "bc2e079b9de22ac19b62c0f26047f20e986d860ce3910383e3b7deee4ab33e8a"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts",
+        "sha256": "8025bf58ca61d79298c720449c9bea5e8e6cc6b969e236c4446aabc068d51ce7"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/measured-build.ts",
+        "sha256": "0162a78739bf77ff40ad681098443899bb5f26a89cedf21786ec9a6c3ee8b897"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts",
+        "sha256": "c1b67962344eee8071ab6ee810772abe9de48895edd37e23870f5d091c06ea02"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/check-versions.ts",
+        "sha256": "8181d851e5cc5bc51326d1ff4bc27f3a2127fe48e786d393bdad40f836d43de4"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-checks.ts",
+        "sha256": "0cff343bf3b6dba00c1b35264377e0c0a443093119f12351a39838deb9930e09"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/runtime-browser.mjs",
+        "sha256": "1108ddc68ec149d643dad5c7385e5a8e11d80a8a8cc18738fd7796560a1e9949"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/ui-consumption.ts",
+        "sha256": "92a580d87af4d1bd2161d449f77f0a1670ae8c47afbe156373e4067e4c127d77"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/workflow-v3/pixel-consumption.ts",
+        "sha256": "8cc01df050667b817911761cd87e9684b29e18df30d0b81876bda6ea300c1907"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/scene-ui-content-authoring.ts",
+        "sha256": "8a4d61c286dcbf1cc2b510c80ef2375ab34b009c3d3ffdaba18c9e1d1d3f7cc3"
+      },
+      {
+        "path": "packages/agent-workflow-server/src/beegame/game-content-validation-cli.ts",
+        "sha256": "c7b31524deccebf070af9cb6b47f6d6500901df80d892c525218373863c5e377"
+      }
+    ],
+    "nativeRebuilt": false,
+    "frontendRebuilt": false,
+    "health": [
+      {
+        "name": "frontend",
+        "status": "200",
+        "exit": 0
+      },
+      {
+        "name": "runtime",
+        "status": "200",
+        "exit": 0
+      },
+      {
+        "name": "billing",
+        "status": "200",
+        "exit": 0
+      },
+      {
+        "name": "skills",
+        "status": "200",
+        "exit": 0
+      },
+      {
+        "name": "resources",
+        "status": "200",
+        "exit": 0
+      }
+    ],
+    "typecheckExit": 0,
+    "typecheckLog": "/private/tmp/bgs-v3-168-predeploy-typecheck.log",
+    "previousWriter": "none; ended; runtime PID3574 had no children before replacing it"
+  },
+  "submission": {
+    "requestKey": "06339e99-37ae-456e-9baa-69fc64ec275d",
+    "attemptId": "b36ab913-f8d4-437c-9499-6f9814d7bd0f",
+    "workerId": "3af6ec61-7829-40e8-bbf2-b287461df72f",
+    "fence": 16,
+    "intent": "work",
+    "expectedVersion": 102,
+    "requirementsRevision": "ab09c1ef-26be-4af5-8ca5-716e4135f6bf",
+    "startedAt": "2026-10-12T04:50:38.449Z",
+    "text": "按当前确认目标，在现有「磁轨调度」工程完成本轮交付验收及必要修订，核对适用探针的属性选择、错误定位、实际证据覆盖及游戏品质，保留证据和未验证项。只执行这一轮，不自动追加收费消息或项目。",
+    "acceptedMessages": 1,
+    "method": "Normal debug and existing HttpOnly login session. DOM confirmation timed out in background; foreground native confirmation accepted the same prepared request. No second submit/draft, no API auth bypass."
+  },
+  "sourceBefore": [
+    {
+      "path": "bun.lock",
+      "sha256": "cd7f60aef306513e095d7d1478d449985dffdeec79464af96f1031d07fa2d040"
+    },
+    {
+      "path": "CLAUDE.md",
+      "sha256": "5d0971e87f671b8badbc90d9655546adad7c13767b7eae44ea45c54b50d24476"
+    },
+    {
+      "path": "content/index.json",
+      "sha256": "29ec798ef833c059b236a30bb06b2697bb58b238b8eeca9fc3770aa0ed16a643"
+    },
+    {
+      "path": "content/scenes/level-1.json",
+      "sha256": "990424e68d4e750799dfe5ba5af75f89f1c163369529afb89df09a8cec3f013d"
+    },
+    {
+      "path": "content/scenes/level-2.json",
+      "sha256": "07a463e85fce599296339f6ea7fb0ee631783576bd9236a5a81af34453562022"
+    },
+    {
+      "path": "content/scenes/level-3.json",
+      "sha256": "3f5cb30ec6b7be0fda59add01bcec3b2f3c19ef9217adc9863611e684fdc6af6"
+    },
+    {
+      "path": "content/ui/ending.json",
+      "sha256": "3766cd152dbd02482d63db5b1fb98fb0cd45970b409beee5faa64893b2dcaeee"
+    },
+    {
+      "path": "content/ui/fail.json",
+      "sha256": "a4bbb18bb30a456f047ae8e1267ce75ec29c9eb03e7c150b3ce6a5aac22c7226"
+    },
+    {
+      "path": "content/ui/hud.json",
+      "sha256": "b67165894e4c5d27a3712d60d4a8e9183a260cb2be2ff071fe69edd7291573d6"
+    },
+    {
+      "path": "content/ui/level-select.json",
+      "sha256": "9df195020bda8f6672d8488e09cdf0f11b0317b0b58ad8b9266cfc2497f76630"
+    },
+    {
+      "path": "content/ui/success.json",
+      "sha256": "721f7a0b2d011ee8f826d855d63753bc55ac5e7fb27ef7766fd446c933e6046b"
+    },
+    {
+      "path": "content/ui/title.json",
+      "sha256": "42306189d3bd140d15dd4f15c67837401e556d5d7c6e6c170b0d089205706449"
+    },
+    {
+      "path": "docs/ART_DIRECTION.md",
+      "sha256": "44d0552b29468ab961ffbb303c36566b3ef90de55b61170863ef49045f36ec88"
+    },
+    {
+      "path": "docs/ASSET_PLAN.md",
+      "sha256": "9b002d0f64f7ddfa18d78984c5a01778c54846c3066e5217f665fab344a6db75"
+    },
+    {
+      "path": "docs/AUDIO_DESIGN.md",
+      "sha256": "87d9536effb59f8e9eefba959d31b1a42c411edda4fdd6a2cf30baafc83eb5c4"
+    },
+    {
+      "path": "docs/BALANCE_DESIGN.md",
+      "sha256": "d325aac3fc72aba0205874b18a8806658dc81ec12605b3a2dd8dbe5faa02fa9e"
+    },
+    {
+      "path": "docs/GDD.md",
+      "sha256": "777226a3da2d4672a77474a66079b62d7863d045c93b27fa7c8a0da9b76b0eda"
+    },
+    {
+      "path": "docs/LEVEL_SCENE_DESIGN.md",
+      "sha256": "763f5b1c7875d489054d5ff07e18744db5126d8e5d4c69137e11f47ca67bed10"
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "5688687b1ba9a7db4c6d7124852517331baf87b307d725ecbcd610a1af92436d"
+    },
+    {
+      "path": "docs/TECHNICAL_DESIGN.md",
+      "sha256": "5a7d36b6370c83118a8f04579ce06ecd4597ab60f9690a2834bce405f21ae82b"
+    },
+    {
+      "path": "docs/UI_UX_SPEC.md",
+      "sha256": "d8f9c161199190cce80a50232e1bd9d89c2b2239f1098494220ba638ca5292e0"
+    },
+    {
+      "path": "index.html",
+      "sha256": "d798ec27a484d11c067958ddcf1b830d0fef6292231a903cc26fbc6a9c1a0799"
+    },
+    {
+      "path": "package.json",
+      "sha256": "a6e112c7e8f286c451503c014307fe598bc9eec86adb4344a4ac26c50af00398"
+    },
+    {
+      "path": "src/audio.ts",
+      "sha256": "0247da888558cda91bdb5a69ff50eca8b089b1c33df5ccd3e0268f7ef945b529"
+    },
+    {
+      "path": "src/content.ts",
+      "sha256": "e73fc9ec02b906cec7bf33625ae4297fd022f409ee7fbf7847239fe99882d0ac"
+    },
+    {
+      "path": "src/game.ts",
+      "sha256": "a37af585da1f6e2cf20e92ae32c4fb906484721b72cc91b3ec1c54f1427b003b"
+    },
+    {
+      "path": "src/main.ts",
+      "sha256": "0dc39610e5d9892f6a229cc08d4e9fec77b21d80b4ea2435add63ddabc405c42"
+    },
+    {
+      "path": "src/render.ts",
+      "sha256": "7f8108b74f2e9495a0bb789f1593d757870b1ba6039ff37fbfba79daf9e61eb7"
+    },
+    {
+      "path": "src/sim.ts",
+      "sha256": "6a7cff98d7ad50eed228c4819d11c7ffe1be2d6ee3f2428e1555ad98d0d27205"
+    },
+    {
+      "path": "src/storage.ts",
+      "sha256": "dfd9adbe96ba5c5fdf1e836ca24af4a8653f1250d095a3042a37c2c7bfe68905"
+    },
+    {
+      "path": "src/styles.css",
+      "sha256": "5fc640bdf2a04cdb087e95f5f6dd2730515e7a6f23ac21e597dc33f44235c1c0"
+    },
+    {
+      "path": "src/types.ts",
+      "sha256": "7009d7a731d39fec9826f177f2065b2a3ea46acfe41876b35046ae0ad1f26000"
+    },
+    {
+      "path": "tests/browser-feedback.mjs",
+      "sha256": "bf293124dcb63806700417f959ccae37bf541285e8097bf58ab372318a7a00d8"
+    },
+    {
+      "path": "tests/browser-fullflow.mjs",
+      "sha256": "b37dde80f6d37dd44e243ca6837f73ce9048a08c59dfd86f34debf842ee0666b"
+    },
+    {
+      "path": "tests/browser-saved-audio.mjs",
+      "sha256": "f69d507cc6029603bbe4af7b8d81d7c288f5a82248637658ac43d0c3a3eb3219"
+    },
+    {
+      "path": "tests/browser-verify.mjs",
+      "sha256": "23db3859b3c0f7ef22474fa833309bafdd0552a0fff919cbe19b25e3c133b9f9"
+    },
+    {
+      "path": "tests/headless-sim.ts",
+      "sha256": "9b9c87453519acc87dffee178cfa0f09f5492f8acc04fa946fcfa28dff7549b0"
+    },
+    {
+      "path": "tsconfig.json",
+      "sha256": "08316fe7b2133d3aaacdfd5eb393b0d7cb49c0fc9d69eb839c7d1bea81a9a61f"
+    },
+    {
+      "path": "vite.config.ts",
+      "sha256": "ea3af12244844b18d90e0594d4e4226274d6d54a2c97edc6b22cee26d8f7421e"
+    }
+  ],
+  "skillsBefore": {
+    "files": 48,
+    "sha256": "498243cb891080d6cf2b7d207b380f9d352e64b02588737f316f2044b8e12dff",
+    "items": [
+      {
+        "path": "README.md",
+        "sha256": "6fc69aeaa597048da144076d92714ab74ce019ed8df352d26261f73559d0d987"
+      },
+      {
+        "path": "beegame-interaction-contracts/SKILL.md",
+        "sha256": "bdc0113e88ba3d8c74d3cd3b79872acdec28c12ab3eadfdb323a2176f980ec42"
+      },
+      {
+        "path": "beegame-interaction-contracts/references/interaction-acceptance.md",
+        "sha256": "2da5e3e76d74a779d904023d2f3b83569ca085f7a6b8fc8a30ccd824657168b9"
+      },
+      {
+        "path": "beegame-interaction-contracts/references/screen-controls.md",
+        "sha256": "08f2d62b5f3b69c0f50339256f3de7e81b8fdb6a61b05ee8b88e81ec7c37b840"
+      },
+      {
+        "path": "beegame-interaction-contracts/references/xr-locomotion.md",
+        "sha256": "9ae360c34fdb8890a5127a901b966e1a9eb02daed6d077d1b0fc6d90d9f8966d"
+      },
+      {
+        "path": "evidence-before-completion/SKILL.md",
+        "sha256": "3d3972539570b8e8d13c0bf031f414e55659718ee27d97958d9f9b9e02093508"
+      },
+      {
+        "path": "game-art-director-expert/SKILL.md",
+        "sha256": "103f112411bff91c630223c8117598498580caee401aede15b925d17da929220"
+      },
+      {
+        "path": "game-art-director-expert/references/color-language-system.md",
+        "sha256": "4e28945ad944f68f7b9874e4f1200087b4980572163c9b5bc6f2d56b86cdbf15"
+      },
+      {
+        "path": "game-art-director-expert/references/composition-studies.png",
+        "sha256": "08c5a81d5824fc787f14d915675b1ef1c44edc47babc32172bb91721772a2148"
+      },
+      {
+        "path": "game-art-director-expert/references/composition-studies.svg",
+        "sha256": "4f94c2198914a77c60d12b0c2055e08fc15f74a4a30f41a70b716868f3e09599"
+      },
+      {
+        "path": "game-art-director-expert/references/lighting-mood-framework.md",
+        "sha256": "95d44efd5fa4fc6be906f9a3c2420c8ac502aa8dfe03af6bfc61f85d0af6f0fe"
+      },
+      {
+        "path": "game-art-director-expert/references/shape-language-framework.md",
+        "sha256": "79d4c087bac47255ffa5d99e984e7b3ec6f57970c71c03940bf67ad25c1fd190"
+      },
+      {
+        "path": "game-art-director-expert/references/ui-visual-hierarchy.md",
+        "sha256": "a6c5b35fdbb8d2d4a6a66b33d6f6863cb64a9477160ec041995ff66655843c8d"
+      },
+      {
+        "path": "game-audio-designer/SKILL.md",
+        "sha256": "904eb85355e7df3e9012393f77fe9b944d56f35303ba50ee729015f6d1235745"
+      },
+      {
+        "path": "game-audio-designer/references/sound-composition.md",
+        "sha256": "e802deb7ccd05aee473a78073e9d9250c74e4feada1fb2f319f6bb38c7c2a9df"
+      },
+      {
+        "path": "game-balance-designer-expert/SKILL.md",
+        "sha256": "5760e0ca6b30945ead3b39c5d6c5bc29109d779fed4fb1db436e01da6adae357"
+      },
+      {
+        "path": "game-balance-designer-expert/references/economy-balancing-spec.md",
+        "sha256": "2dca8f661c81d1ba3d9d0555adc071d749d298d0c37650028baaca14bf594349"
+      },
+      {
+        "path": "game-balance-designer-expert/references/scaling-curve-models.md",
+        "sha256": "aebd5d4f9a7a7e47a59327c96654e2d8cf09b40e758dbf638c6cbc21c0a08332"
+      },
+      {
+        "path": "game-content-pipeline-engineer/SKILL.md",
+        "sha256": "55311f0eeb9b9a9e6e7f3fe7996934e0cb7260b7c7062476e1dab83f9b6b2626"
+      },
+      {
+        "path": "game-content-pipeline-engineer/references/resource-selection.md",
+        "sha256": "f72d8059904edb05e3dcf8e45eea6c75fb2c86e998f6061d87816faee412b713"
+      },
+      {
+        "path": "game-creative-director-expert/SKILL.md",
+        "sha256": "c9c2da881d988c0c6c4557ee73550a8cccaa5b6a04c4ab78faed6d9de0069ea5"
+      },
+      {
+        "path": "game-creative-director-expert/references/emotional-arc-framework.md",
+        "sha256": "622498567d14eafa6567fbf188e3b8c2f70e666d547e28df499f52e40aab5f0a"
+      },
+      {
+        "path": "game-design-check/SKILL.md",
+        "sha256": "49b7c8a205c4d2ea66949f312a642443be7d927cdcbd6d513e0696ab03773192"
+      },
+      {
+        "path": "game-design-check/references/document-checks.md",
+        "sha256": "6445614da84c92098fc7810ffffcc5ddd30d3a00a9a24fefee66d714d181633b"
+      },
+      {
+        "path": "game-design-check/references/saved-content-checks.md",
+        "sha256": "2d4c67c90d88b1d73b5174dec088c043d703e10a56f4cf48bef55bd5401c24ba"
+      },
+      {
+        "path": "game-feel-designer/SKILL.md",
+        "sha256": "b72d5d6b6f2a7e4b4ff5f75a074e97b8298f7d39cf347762f161e71e2bb78f4b"
+      },
+      {
+        "path": "game-implementation-planning/SKILL.md",
+        "sha256": "4aa24a9b6b2275cc5c8d8cb2aa62a8b2aa04ac5be197eccac972e2480341c6a1"
+      },
+      {
+        "path": "game-level-designer-expert/SKILL.md",
+        "sha256": "133ea155e0b5b6634513f9a0a3ed24fb83bcf96ebb5106a907c91371d5647f21"
+      },
+      {
+        "path": "game-level-designer-expert/references/encounter-design-patterns.md",
+        "sha256": "6021fb8d4ed2866545dcff2b56349bbc921fa9c71a0a858bf0f160e585c625b2"
+      },
+      {
+        "path": "game-plan-execution/SKILL.md",
+        "sha256": "edd1f2bd31ebb3119d7bd40a10d681c37c509cb4ed6679d153e1302245b8565d"
+      },
+      {
+        "path": "game-playtest-performance/SKILL.md",
+        "sha256": "2a7bc99c1d70ee8a41d313b861a0860d994d34f9092ed0f6996ab65f197a30a7"
+      },
+      {
+        "path": "game-systems-designer-expert/SKILL.md",
+        "sha256": "c2129a40e88a0cee70dc34040923ecd06bd17b5b870ffc6882540e78451f897c"
+      },
+      {
+        "path": "game-systems-designer-expert/references/core-loop-contract.md",
+        "sha256": "807c3a90cf21b1161c8dd074c8a2603db30779fbb613277cef4c690950302792"
+      },
+      {
+        "path": "game-systems-designer-expert/references/parameter-boundary-model.md",
+        "sha256": "9375225dfaedd21c25a36876caf961fda9fb77a12d77c1c3e0ba6b2dcf0d6dca"
+      },
+      {
+        "path": "game-systems-designer-expert/references/state-machine-rules-boundary.md",
+        "sha256": "828005b128a1cf22ee6b744494fab6f379491543eda7052d652e2552c06b941a"
+      },
+      {
+        "path": "game-technical-artist/SKILL.md",
+        "sha256": "0ed2f50eb06c01b7e036e24c0c79fe0a2e75617d9f18c09a9373ee6e1c964564"
+      },
+      {
+        "path": "game-ui-ux-designer/SKILL.md",
+        "sha256": "4ce0555a8bba2f553d2a17f4a2aa6fdb4e72363512765e3466a1b71a9ac24d32"
+      },
+      {
+        "path": "game-ui-ux-designer/references/layout-calculation.md",
+        "sha256": "ee7bd833e7a6b9c7af79d0e14b905db36c740303dc1ba8ae1954c055d1ae491e"
+      },
+      {
+        "path": "gameplay-programmer/SKILL.md",
+        "sha256": "b4df5ca247391d2369cb720186cb10cbc9bb6a582360b2a19f55e5b3f80214de"
+      },
+      {
+        "path": "root-cause-debugging/SKILL.md",
+        "sha256": "5739fada76ead379560428f678a80d44f5758c61b0058b5a3c9557d3fce763e6"
+      },
+      {
+        "path": "spatial-computing-game-expert/SKILL.md",
+        "sha256": "16010ed5787ab645fb12a70022cc260ac569221008a8f233882c5bd1e019d0ac"
+      },
+      {
+        "path": "spatial-computing-game-expert/references/physical-safety-framework.md",
+        "sha256": "f5a18995fb0f9d5ab813b54b4ff3337cb0be0daa1a422803345a4c624c37bfe9"
+      },
+      {
+        "path": "spatial-computing-game-expert/references/spatial-rule-architecture.md",
+        "sha256": "f1199d8df37d71f5333aa5ffa79f39ba9787ab61515c40f7efda6a0e51e5bbf8"
+      },
+      {
+        "path": "spatial-computing-game-expert/references/spatial-session-pacing.md",
+        "sha256": "afc6b3bab67544e94854868c90db37cec0b09c16344a37685a784cdad62ed849"
+      },
+      {
+        "path": "spatial-computing-ux-designer-expert/SKILL.md",
+        "sha256": "6323543630a37fab049d31f14046625d20967c21d6cd00d068866a58f208097f"
+      },
+      {
+        "path": "spatial-computing-ux-designer-expert/references/depth-layering-framework.md",
+        "sha256": "cc692b2816dbba5ba98f07f1a08db5b5bcd305da6bdd70f76b9a4419be14d1cf"
+      },
+      {
+        "path": "spatial-computing-ux-designer-expert/references/gesture-ergonomics-model.md",
+        "sha256": "58fc8454d25d55c3e4089bc859d0aba45d4b5b5cf0dbeaf4446b18a39e9c93c8"
+      },
+      {
+        "path": "spatial-computing-ux-designer-expert/references/spatial-cognitive-load-system.md",
+        "sha256": "6408b755f65eb9274a61fae677eb831dc5dce43b4e739c79f990d1bb42c6dd07"
+      }
+    ]
+  },
+  "comparisonCaveat": "Pre-existing Skills edits from other work are preserved/fingerprinted. This turn did not edit Skills or prompts. No causal attribution of all quality/token changes to the probe fix.",
+  "audit": {
+    "complete": false,
+    "scope": [
+      "Actual applicable probe properties/version/error localization",
+      "Coverage sufficiency and known/new quality gaps",
+      "Provider per-request ledger versus BGS settlement"
+    ],
+    "wholeGamePassed": false
+  },
+  "stopped": {
+    "requestedByUser": true,
+    "pausedAt": "2026-10-12T05:12:58.943Z",
+    "nativeTerminalAt": "2026-10-12T05:12:59.913Z",
+    "outcome": "aborted",
+    "stopReason": "user_pause",
+    "finishedAt": "2026-10-12T05:13:01.769Z",
+    "runVersion": 114,
+    "runStatus": "blocked",
+    "writer": null,
+    "writerLiveness": "none",
+    "paused": true,
+    "noNativeChildren": true
+  },
+  "usage": {
+    "model": "ark-code-latest",
+    "sdk": {
+      "total_tokens": 6027915,
+      "prompt_tokens": 150346,
+      "cache_read_tokens": 5844256,
+      "completion_tokens": 33313,
+      "cache_creation_tokens": 0
+    },
+    "persistedProviderRequests": {
+      "requests": 59,
+      "total": 5904146,
+      "input": 149270,
+      "cached": 5721576,
+      "output": 33300,
+      "roles": {
+        "main": {
+          "requests": 59,
+          "tokens": 5904146
+        }
+      }
+    },
+    "interruptedStreamNotPersisted": {
+      "total": 123769,
+      "input": 1076,
+      "cached": 122680,
+      "output": 13,
+      "evidence": "SDK settlement minus 59 deduplicated persisted request entries; native request_start/response_headers/first_stream_event at 05:12:52–56 then user_pause terminal. No persisted response ID or finished response for this partial stream; not a fabricated provider ledger row."
+    },
+    "firstMainInput": 68266,
+    "lastPersistedMainInput": 122986,
+    "onlyTodoTokens": 359436,
+    "onlyTodoRequests": 4,
+    "compactionRequests": 0,
+    "childRequests": 0
+  },
+  "sourceAfter": [
+    {
+      "path": "bun.lock",
+      "sha256": "cd7f60aef306513e095d7d1478d449985dffdeec79464af96f1031d07fa2d040"
+    },
+    {
+      "path": "CLAUDE.md",
+      "sha256": "5d0971e87f671b8badbc90d9655546adad7c13767b7eae44ea45c54b50d24476"
+    },
+    {
+      "path": "content/index.json",
+      "sha256": "29ec798ef833c059b236a30bb06b2697bb58b238b8eeca9fc3770aa0ed16a643"
+    },
+    {
+      "path": "content/scenes/level-1.json",
+      "sha256": "990424e68d4e750799dfe5ba5af75f89f1c163369529afb89df09a8cec3f013d"
+    },
+    {
+      "path": "content/scenes/level-2.json",
+      "sha256": "07a463e85fce599296339f6ea7fb0ee631783576bd9236a5a81af34453562022"
+    },
+    {
+      "path": "content/scenes/level-3.json",
+      "sha256": "3f5cb30ec6b7be0fda59add01bcec3b2f3c19ef9217adc9863611e684fdc6af6"
+    },
+    {
+      "path": "content/ui/ending.json",
+      "sha256": "3766cd152dbd02482d63db5b1fb98fb0cd45970b409beee5faa64893b2dcaeee"
+    },
+    {
+      "path": "content/ui/fail.json",
+      "sha256": "a4bbb18bb30a456f047ae8e1267ce75ec29c9eb03e7c150b3ce6a5aac22c7226"
+    },
+    {
+      "path": "content/ui/hud.json",
+      "sha256": "12abdf18f78cfa1dab61e91361d52a250782d806f65fb276b302cde63dfd68ca"
+    },
+    {
+      "path": "content/ui/level-select.json",
+      "sha256": "9df195020bda8f6672d8488e09cdf0f11b0317b0b58ad8b9266cfc2497f76630"
+    },
+    {
+      "path": "content/ui/success.json",
+      "sha256": "721f7a0b2d011ee8f826d855d63753bc55ac5e7fb27ef7766fd446c933e6046b"
+    },
+    {
+      "path": "content/ui/title.json",
+      "sha256": "42306189d3bd140d15dd4f15c67837401e556d5d7c6e6c170b0d089205706449"
+    },
+    {
+      "path": "docs/ART_DIRECTION.md",
+      "sha256": "44d0552b29468ab961ffbb303c36566b3ef90de55b61170863ef49045f36ec88"
+    },
+    {
+      "path": "docs/ASSET_PLAN.md",
+      "sha256": "9b002d0f64f7ddfa18d78984c5a01778c54846c3066e5217f665fab344a6db75"
+    },
+    {
+      "path": "docs/AUDIO_DESIGN.md",
+      "sha256": "87d9536effb59f8e9eefba959d31b1a42c411edda4fdd6a2cf30baafc83eb5c4"
+    },
+    {
+      "path": "docs/BALANCE_DESIGN.md",
+      "sha256": "d325aac3fc72aba0205874b18a8806658dc81ec12605b3a2dd8dbe5faa02fa9e"
+    },
+    {
+      "path": "docs/GDD.md",
+      "sha256": "777226a3da2d4672a77474a66079b62d7863d045c93b27fa7c8a0da9b76b0eda"
+    },
+    {
+      "path": "docs/LEVEL_SCENE_DESIGN.md",
+      "sha256": "763f5b1c7875d489054d5ff07e18744db5126d8e5d4c69137e11f47ca67bed10"
+    },
+    {
+      "path": "docs/README.md",
+      "sha256": "5688687b1ba9a7db4c6d7124852517331baf87b307d725ecbcd610a1af92436d"
+    },
+    {
+      "path": "docs/TECHNICAL_DESIGN.md",
+      "sha256": "5a7d36b6370c83118a8f04579ce06ecd4597ab60f9690a2834bce405f21ae82b"
+    },
+    {
+      "path": "docs/UI_UX_SPEC.md",
+      "sha256": "f4c887404f9544134d6307f109496abae199b8627638fe8930a18564d411b201"
+    },
+    {
+      "path": "index.html",
+      "sha256": "d798ec27a484d11c067958ddcf1b830d0fef6292231a903cc26fbc6a9c1a0799"
+    },
+    {
+      "path": "package.json",
+      "sha256": "a6e112c7e8f286c451503c014307fe598bc9eec86adb4344a4ac26c50af00398"
+    },
+    {
+      "path": "src/audio.ts",
+      "sha256": "0247da888558cda91bdb5a69ff50eca8b089b1c33df5ccd3e0268f7ef945b529"
+    },
+    {
+      "path": "src/content.ts",
+      "sha256": "7aecfab36fa15b396a4b0bad1eced8aae73e14d96b4a791fc5f22a848aac2682"
+    },
+    {
+      "path": "src/game.ts",
+      "sha256": "a37af585da1f6e2cf20e92ae32c4fb906484721b72cc91b3ec1c54f1427b003b"
+    },
+    {
+      "path": "src/main.ts",
+      "sha256": "0dc39610e5d9892f6a229cc08d4e9fec77b21d80b4ea2435add63ddabc405c42"
+    },
+    {
+      "path": "src/render.ts",
+      "sha256": "7f8108b74f2e9495a0bb789f1593d757870b1ba6039ff37fbfba79daf9e61eb7"
+    },
+    {
+      "path": "src/sim.ts",
+      "sha256": "6a7cff98d7ad50eed228c4819d11c7ffe1be2d6ee3f2428e1555ad98d0d27205"
+    },
+    {
+      "path": "src/storage.ts",
+      "sha256": "dfd9adbe96ba5c5fdf1e836ca24af4a8653f1250d095a3042a37c2c7bfe68905"
+    },
+    {
+      "path": "src/styles.css",
+      "sha256": "5fc640bdf2a04cdb087e95f5f6dd2730515e7a6f23ac21e597dc33f44235c1c0"
+    },
+    {
+      "path": "src/types.ts",
+      "sha256": "7009d7a731d39fec9826f177f2065b2a3ea46acfe41876b35046ae0ad1f26000"
+    },
+    {
+      "path": "tests/browser-feedback.mjs",
+      "sha256": "bf293124dcb63806700417f959ccae37bf541285e8097bf58ab372318a7a00d8"
+    },
+    {
+      "path": "tests/browser-fullflow.mjs",
+      "sha256": "b37dde80f6d37dd44e243ca6837f73ce9048a08c59dfd86f34debf842ee0666b"
+    },
+    {
+      "path": "tests/browser-saved-audio.mjs",
+      "sha256": "f69d507cc6029603bbe4af7b8d81d7c288f5a82248637658ac43d0c3a3eb3219"
+    },
+    {
+      "path": "tests/browser-verify.mjs",
+      "sha256": "23db3859b3c0f7ef22474fa833309bafdd0552a0fff919cbe19b25e3c133b9f9"
+    },
+    {
+      "path": "tests/headless-sim.ts",
+      "sha256": "9b9c87453519acc87dffee178cfa0f09f5492f8acc04fa946fcfa28dff7549b0"
+    },
+    {
+      "path": "tsconfig.json",
+      "sha256": "08316fe7b2133d3aaacdfd5eb393b0d7cb49c0fc9d69eb839c7d1bea81a9a61f"
+    },
+    {
+      "path": "vite.config.ts",
+      "sha256": "ea3af12244844b18d90e0594d4e4226274d6d54a2c97edc6b22cee26d8f7421e"
+    }
+  ],
+  "changes": [
+    {
+      "path": "content/ui/hud.json",
+      "before": "b67165894e4c5d27a3712d60d4a8e9183a260cb2be2ff071fe69edd7291573d6",
+      "after": "12abdf18f78cfa1dab61e91361d52a250782d806f65fb276b302cde63dfd68ca"
+    },
+    {
+      "path": "docs/UI_UX_SPEC.md",
+      "before": "d8f9c161199190cce80a50232e1bd9d89c2b2239f1098494220ba638ca5292e0",
+      "after": "f4c887404f9544134d6307f109496abae199b8627638fe8930a18564d411b201"
+    },
+    {
+      "path": "src/content.ts",
+      "before": "e73fc9ec02b906cec7bf33625ae4297fd022f409ee7fbf7847239fe99882d0ac",
+      "after": "7aecfab36fa15b396a4b0bad1eced8aae73e14d96b4a791fc5f22a848aac2682"
+    }
+  ],
+  "protectedTrees": [
+    {
+      "path": "apps/frontend",
+      "files": 825,
+      "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"
+    },
+    {
+      "path": "src",
+      "files": 2445,
+      "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"
+    },
+    {
+      "path": "packages/builtin-tools",
+      "files": 383,
+      "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"
+    }
+  ],
+  "results": {
+    "measurements": [
+      {
+        "id": "b8e9fea1-7c35-4740-8488-00dd1d23d63e",
+        "key": "maglev-v31-diag-flexchild",
+        "ui": "failed",
+        "node": "content/ui/title.json#title-tip",
+        "properties": [
+          "size"
+        ],
+        "unobserved": [
+          "position: flow overrides or below tolerance"
+        ],
+        "textFit": "targeted; passed; geometry mutation differs (flex shrink)"
+      },
+      {
+        "id": "4725892c-f5ac-49e4-a81b-db36719a75d6",
+        "key": "maglev-v31-diag-stretch",
+        "ui": "failed",
+        "node": "content/ui/hud.json#hud-bar",
+        "properties": [
+          "position",
+          "sizeDelta"
+        ],
+        "baseline": {
+          "actual": {
+            "top": 0,
+            "bottom": 56
+          },
+          "expected": {
+            "top": 28,
+            "bottom": 84
+          }
+        }
+      },
+      {
+        "id": "e38ed843-ec73-4061-9204-7b10ffff2136",
+        "key": "maglev-v31-consumption-probes",
+        "ui": "failed",
+        "scope": "6 probes; 1280 HUD passed, 960 title/select layout mismatch"
+      },
+      {
+        "id": "44ab5d7c-3f15-439c-aa67-4ecb9ce84e1a",
+        "key": "maglev-v31-consumption-final",
+        "ui": "passed",
+        "scope": "4 container probes @1280x720: title card, level-select card, hud-bar, hint-bar; not dynamic text or whole game"
+      }
+    ],
+    "checker": "v3-ui-dom-consumption.3",
+    "finalReceiptFreshness": {
+      "current": false,
+      "code": "preview-unverified",
+      "reason": "Select a completed native turn with actual source-build and runtime-smoke evidence, not an author PASS or incomplete/failed turn"
+    },
+    "quality": "unverified",
+    "deliveryEligible": false,
+    "partialRevision": "Normal Agent changed content.ts, hud.json, UI_UX_SPEC header v2.6; paused before complete record synchronization/final measurement/delivery. HUD previously presented visual kept by coordinated contract correction; no manual developer game edits.",
+    "qualityFindings": [
+      "New r31/h-k-2star.png visibly reproduces gray star overlapping stats; src/game.ts and styles.css unchanged; not final exact Preview acceptance after interruption.",
+      "Audio filtered-noise/context-suspend/max2voice promises vs implementation, camera test wrong x540 vs saved x560, numerical proof overclaim and missing technical test reference unchanged.",
+      "960x540 was removed from final probes with author claiming non-target; TECH explicitly commits minimum usable viewport960x540. Whole-frame scaling may be a valid design, but lack of contract/coordinate interpretation must not be passed as resolved."
+    ],
+    "limits": [
+      "No full final Preview/playthrough or subjective listening/fun acceptance after user pause.",
+      "Only geometry/text observations actually selected; final4 role containers did not exercise new text-fit feature; failed title-tip diagnostic did exercise it.",
+      "Malformed node/property preparation error not exercised in this paid round; offline test only.",
+      "No proof all game defects identified; no net token reduction or causal A/B (existing Skills changes preserved)."
+    ],
+    "stopScreenshot": "/private/tmp/bgs-v3-168-stopped-debug.jpg",
+    "newQualityCounterexample": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/v3-agent-acceptance--1b167e40f20a/reports/browser/r31/h-k-2star.png"
+  }
+}

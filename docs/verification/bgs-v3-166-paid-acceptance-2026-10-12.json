@@ -1,0 +1,300 @@
+{
+  "version": "bgs-v3-166-paid.2",
+  "status": "completed-quality-not-passed",
+  "authorization": "One real same-project work acceptance after deployment; no automatic paid rerun, added Review prompt, Agent limits, native/formal frontend edits or manual test-game repair.",
+  "deployment": {
+    "version": "1.66",
+    "runtimePid": 3574,
+    "launcher": "/private/tmp/bgs-v3-deploy-166-runtime.ts",
+    "health": {
+      "frontend": 200,
+      "runtime": 200,
+      "billing": 200,
+      "skills": 200,
+      "resources": 200
+    },
+    "nativeRebuilt": false,
+    "frontendRebuilt": false,
+    "typecheckExit": 0,
+    "typecheckLog": "/private/tmp/bgs-v3-166-predeploy-typecheck.log",
+    "oldWriter": "none; previous turn ended; no native child process before runtime replacement"
+  },
+  "project": {
+    "name": "磁轨调度",
+    "id": "v3-paid-a801f793-52cb-4874-8893-f5eaad8bf833",
+    "runId": "bedaee26-a2a7-4997-adf2-688eb3a79a61",
+    "chatSessionId": "beegame_b266ce1d42ab4e41bb4e45a6f985eb09",
+    "nativeSessionId": "a81cfeaf-b023-43c6-ad73-d5a94c6b60ed"
+  },
+  "submission": {
+    "requestKey": "172e1458-770f-4c6e-962c-b9fee0806ecc",
+    "attemptId": "b107522d-070d-4aa7-8aae-2ab00285eae9",
+    "intent": "work",
+    "expectedVersion": 89,
+    "requirementsRevision": "ab09c1ef-26be-4af5-8ca5-716e4135f6bf",
+    "startedAt": "2026-10-12T03:39:03.619Z",
+    "text": "按当前确认目标，在现有「磁轨调度」工程做本轮交付验收及必要修订，核对适用消费检查的实际使用与覆盖、设计与实际游戏品质，并保留真实证据和未验证项。只做这一轮，不自动追加付费消息或项目。",
+    "acceptedMessages": 1,
+    "method": "Normal independent Chrome debug work submission; background confirmation needed native foreground handling; actual running turn verified before any further action. No confirmation bypass or repeated submission."
+  },
+  "audit": {
+    "complete": true,
+    "wholeGamePassed": false,
+    "scope": [
+      "Consumption checks actually used/applicable and their retained coverage",
+      "Known and newly observed game/design quality gaps",
+      "Provider per-request usage and BGS settlement"
+    ],
+    "method": "Read-only original sources and logs, final exact measurement and independent Preview; no test-game patch or author verdict certification",
+    "consumptionCapabilityActuallyUsed": true,
+    "qualityLeakImproved": false,
+    "netTokenReduction": false
+  },
+  "protectedBaseline": {
+    "formalFrontend": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785",
+    "nativeSrc": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a",
+    "builtinTools": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23",
+    "rolePromptFile": "faf133da01789b9e09c9efc2dc42e12204271844693453d0dc324b57848dd737",
+    "originalGameExport51FilesStillMatch": true
+  },
+  "terminal": {
+    "runVersion": 102,
+    "runStatus": "blocked",
+    "turnStatus": "ended",
+    "writer": null,
+    "paused": null,
+    "quiescedAt": "2026-10-12T04:07:20.667Z",
+    "finishedAt": "2026-10-12T04:07:21.741Z",
+    "nativeOutcome": "success",
+    "nativeFinishedAt": "2026-10-12T04:07:19.254Z",
+    "additionalPaidMessages": 0
+  },
+  "measurement": {
+    "id": "aac1bdcc-3820-4772-93b3-268440a60e03",
+    "requestKey": "maglev-v30-acceptance-20261012",
+    "freshness": {
+      "current": true
+    },
+    "quality": "unverified",
+    "deliveryEligible": false,
+    "measuredSourceFiles": 39,
+    "artifactSha256": "612bdf39476ff82adb1eea8ac347b0de10130e5ea5281451a15bdc48f8ab997f",
+    "checkStatuses": {
+      "build": "passed",
+      "runtime-smoke": "passed",
+      "ui-data-consumption": "passed"
+    },
+    "uiCheckVersion": "v3-ui-dom-consumption.2",
+    "probes": [
+      {
+        "document": "content/ui/title.json",
+        "node": "card",
+        "role": "container",
+        "viewport": [
+          1280,
+          720
+        ]
+      },
+      {
+        "document": "content/ui/level-select.json",
+        "node": "card",
+        "role": "container",
+        "viewport": [
+          1280,
+          720
+        ]
+      }
+    ],
+    "textFitExecuted": false,
+    "limitations": [
+      "Four other registered screens and title/level-select at 960x540 unobserved; no whole-game/pixel/font/audio quality proof."
+    ],
+    "nonApplicable": [
+      "pixel: procedural Canvas without image/tile binding",
+      "font: system fonts without custom font binding",
+      "audio: WebAudio synthesis, not encoded HTML audio"
+    ],
+    "attempts": [
+      {
+        "id": "ff36cc24-ebcc-4768-bf06-61e2b9a1ade2",
+        "status": "unverified",
+        "reason": "Flex node position perturbation below tolerance; no specific file/node in error"
+      },
+      {
+        "id": "1da8531f-9dcb-40b6-aa1f-c7a4847d525b",
+        "status": "unverified",
+        "reason": "Some anchored/stretch node lacks layout.size; error does not locate failing probe"
+      },
+      {
+        "id": "dfd62835-16c7-4b83-bd2f-dbda732fb1aa",
+        "status": "passed",
+        "scope": "Title card only"
+      },
+      {
+        "id": "3b96b9e1-dd35-4da3-89da-d135aa6371df",
+        "status": "passed",
+        "scope": "Title/level-select cards only"
+      }
+    ]
+  },
+  "usage": {
+    "requests": 73,
+    "totalTokens": 4126684,
+    "inputTokens": 341145,
+    "cacheReadInputTokens": 3737536,
+    "cacheCreationInputTokens": 0,
+    "outputTokens": 48003,
+    "roles": {
+      "compact": {
+        "requests": 1,
+        "tokens": 176168
+      },
+      "main": {
+        "requests": 44,
+        "tokens": 2645096
+      },
+      "child": {
+        "requests": 28,
+        "tokens": 1305420
+      }
+    },
+    "bgsSettlement": {
+      "prompt_tokens": 341145,
+      "cache_read_tokens": 3737536,
+      "cache_creation_tokens": 0,
+      "completion_tokens": 48003,
+      "total_tokens": 4126684
+    },
+    "settlementDifference": 0,
+    "stages": [
+      {
+        "name": "原生自动压缩",
+        "requests": 1,
+        "tokens": 176168
+      },
+      {
+        "name": "交接／能力发现／准备",
+        "requests": 9,
+        "tokens": 417048
+      },
+      {
+        "name": "来源核对、检查与构建/无头测试",
+        "requests": 5,
+        "tokens": 261176
+      },
+      {
+        "name": "消费探针试错、查询及适用性核对",
+        "requests": 20,
+        "tokens": 1234502
+      },
+      {
+        "name": "报告、最终测量、委派与后台中间回复",
+        "requests": 6,
+        "tokens": 433199
+      },
+      {
+        "name": "独立复核子代理",
+        "requests": 28,
+        "tokens": 1305420
+      },
+      {
+        "name": "主会话再查、等待和收尾",
+        "requests": 4,
+        "tokens": 299171
+      }
+    ],
+    "stageMethod": "Exclusive groups allocated by actual request purpose/time window; not token-by-token attribution to tool or history. Cached tokens are not equally priced to ordinary input.",
+    "priorTotal": 3372731,
+    "increasePercent": 22.354376912952745,
+    "mainInputStart": 42813,
+    "mainInputEnd": 75069,
+    "compaction": {
+      "requests": 1,
+      "input": 161323,
+      "cacheRead": 3896,
+      "output": 10949,
+      "total": 176168,
+      "completed": true,
+      "bgsForced": false
+    },
+    "todoContainingRequests": {
+      "count": 11,
+      "tokens": 563952,
+      "pureTodoTokens": 395969,
+      "note": "Subset; mixed-tool requests not solely Todo expense."
+    },
+    "model": "ark-code-latest",
+    "ledger": "docs/verification/bgs-v3-166-paid-requests-2026-10-12.jsonl"
+  },
+  "integrity": {
+    "sourceComparison": {
+      "before": 39,
+      "after": 39,
+      "changed": [],
+      "removed": []
+    },
+    "protectedTreesUnchanged": true,
+    "rolePromptUnchanged": true,
+    "originalArchive51FilesUnchanged": true,
+    "manualGameRepairs": false,
+    "settingsHooksChanged": false
+  },
+  "qualityFindings": [
+    {
+      "id": "Q1",
+      "status": "reproduced-current-preview",
+      "fact": "Two-star dim span escapes fixed-height parent and overlaps operation stats; 7-operation L1 reproduced through real mouse actions; no runtime/debug mutation.",
+      "screenshot": "/private/tmp/bgs-v3-166-final-preview-two-star.jpg",
+      "parentY": 274.1388854980469,
+      "parentHeight": 55.22222900390625,
+      "dimY": 329.3611145019531,
+      "dimHeight": 55.22222900390625,
+      "detectedByAuthor": false,
+      "detectedByChild": false
+    },
+    {
+      "id": "Q2",
+      "status": "not-closed",
+      "fact": "AUDIO promises same-kind max two voices, filtered-noise hum/mute suspension; actual unchanged audio lacks these; waveform and gain mute do not verify promises."
+    },
+    {
+      "id": "Q3",
+      "status": "not-closed",
+      "fact": "Camera mutation test assumes s1 x540 instead saved x560; expected screen x664 not640."
+    },
+    {
+      "id": "Q4",
+      "status": "not-closed",
+      "fact": "BALANCE feasible replay is not optimum/all-actions proof; TECH points to nonexistent tests/playwright-content.mjs."
+    }
+  ],
+  "causalFindings": [
+    {
+      "kind": "BGS probe interface limitation",
+      "fact": "Requires both observable position and size with explicit layout.size, rejects ordinary flex/stretch nodes; aggregate errors omit failing node/file; author reduced scope to containers."
+    },
+    {
+      "kind": "Agent task selection / LLM judgment",
+      "fact": "Reused PASS suites and delegated mostly receipt arithmetic/applicability/hash/test reproduction; neither main nor child Read an image; no professional promise closure. Independent execution is not independent coverage."
+    },
+    {
+      "kind": "BGS runtime responsiveness anomaly; exact hot function unlocated",
+      "fact": "PID3574 listener alive, CPU100%, runtime health timeout while billing200; sample main thread active/JIT unsymbolized. stdout gaps94-96s and main query/TaskOutput waits; later natural success and health200/CPU0.1%. Not permanent compaction hang.",
+      "sample": "/private/tmp/bgs-v3-166-runtime-sample.txt",
+      "eventCount": 26645,
+      "stdoutBytes": 7556004,
+      "maxStdoutGapMs": 257091,
+      "pauseAttempt": "One UI pause click timed out/detached; no actual pause confirmed; final paused=null/ended. No process stop/restart/retry."
+    }
+  ],
+  "report": "docs/verification/bgs-v3-166-paid-acceptance-2026-10-12.md",
+  "followup": {
+    "paidWorkStopped": true,
+    "additionalImplementation": false,
+    "next": [
+      "Offline replay/profile to locate exact synchronous hot path, not guess from unsigned JIT sample.",
+      "Locate errors per node/property and check only observable layout properties; do not modify game data for checker.",
+      "Evidence sufficiency remains independent of PASS; no extra Review prompt/framework/limits or automatic paid experiment."
+    ]
+  }
+}

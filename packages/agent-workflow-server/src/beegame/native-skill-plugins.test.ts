@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { prepareNativeSkillPlugins } from './native-skill-plugins'
 import { bgsBuiltinSkillName } from '@bee-game-studio/agent-workflow/native-direction-authors'
 import { getAllowedSettingSources, getInlinePlugins, setAllowedSettingSources, setInlinePlugins } from '../../../../src/bootstrap/state'
@@ -79,4 +79,55 @@ test('invalid explicit catalog is an actionable startup error, not a silent empt
   await writeFile(join(root, 'file'), 'Not a catalog')
   await expect(prepareNativeSkillPlugins({ BEEGAME_NATIVE_BUILTIN_SKILLS_DIR: join(root, 'file') }))
     .rejects.toThrow('must be a directory')
+})
+
+test('the copied Collection preserves all independent Skill names and resolves shared references', async () => {
+  const source=await realpath(new URL('../../../../.beegame/skills/builtinskills/',import.meta.url))
+  const catalog=join(root,'packaged/skills/builtinskills')
+  // The runtime post-build step copies this same directory recursively.
+  await cp(source,catalog,{recursive:true})
+  const names=(await readdir(catalog,{withFileTypes:true})).filter(entry=>entry.isDirectory()&&
+    entry.name!=='references').map(entry=>entry.name).sort()
+  expect(names).toHaveLength(20)
+  const navigator=await readFile(join(catalog,'README.md'),'utf8')
+  const linkedNames=[...navigator.matchAll(/\]\(([^/()]+)\/SKILL\.md\)/g)].map(match=>match[1]!).sort()
+  expect(linkedNames).toEqual(names)
+  plugins=await prepareNativeSkillPlugins({BEEGAME_NATIVE_BUILTIN_SKILLS_DIR:catalog},false)
+  expect(plugins.flags).toHaveLength(2)
+  setInlinePlugins(plugins.flags.filter((_,index)=>index%2===1))
+  const commands=await getSkillToolCommands(root)
+  const builtinCommands=commands.filter(command=>command.name.startsWith('bgs-builtins:'))
+  expect(builtinCommands.map(command=>command.name).sort()).toEqual(names.map(name=>'bgs-builtins:'+name).sort())
+  const markdown=[join(catalog,'README.md')]
+  for(const name of names) {
+    const skill=builtinCommands.find(command=>command.name==='bgs-builtins:'+name)
+    if(!skill||skill.type!=='prompt')throw Error('Missing independent Skill '+name)
+    expect(skill.skillRoot).toBe(join(catalog,name))
+    expect((await skill.getPromptForCommand('',{} as any)).length).toBeGreaterThan(0)
+    expect(await readFile(join(catalog,name,'SKILL.md'))).toEqual(await readFile(join(source,name,'SKILL.md')))
+    markdown.push(join(catalog,name,'SKILL.md'))
+    for(const file of await readdir(join(catalog,name,'references')).catch((error:NodeJS.ErrnoException)=>{
+      if(error.code==='ENOENT')return [] as string[]
+      throw error
+    }))if(file.endsWith('.md'))markdown.push(join(catalog,name,'references',file))
+  }
+  const shared=new Set<string>()
+  for(const file of markdown) {
+    const text=await readFile(file,'utf8')
+    const links=[...text.matchAll(/\]\(([^)]+)\)/g)].map(match=>match[1]!)
+      .concat([...text.matchAll(/`(references\/[A-Za-z0-9_./-]+\.md)`/g)].map(match=>match[1]!))
+    for(const link of new Set(links)) {
+      if(/^(https?:|#)/.test(link))continue
+      const target=resolve(dirname(file),link.split('#')[0]!),path=relative(catalog,target)
+      expect(path.startsWith('..')).toBe(false)
+      expect((await stat(target)).isFile()).toBe(true)
+      expect(await readFile(target)).toEqual(await readFile(join(source,path)))
+      shared.add(path)
+    }
+  }
+  expect(shared.has('game-art-director-expert/references/ui-visual-hierarchy.md')).toBe(true)
+  expect(shared.has('game-art-director-expert/references/composition-studies.png')).toBe(true)
+  expect(shared.has('game-ui-ux-designer/references/layout-calculation.md')).toBe(true)
+  expect(shared.has('spatial-computing-game-expert/references/spatial-rule-architecture.md')).toBe(true)
+  expect(getAllowedSettingSources()).toEqual([])
 })

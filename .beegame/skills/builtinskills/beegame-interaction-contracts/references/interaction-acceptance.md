@@ -7,6 +7,7 @@ Use these checks before declaring a BeeGame playable. Pick the checks matching t
 - The player can start, move/interact, recover from mistakes, and restart or continue.
 - Controls match displayed instructions.
 - Input remains stable after camera rotation, viewport resize, pause/resume, and scene reset.
+- When analog strength is part of the design, a light stick input remains weaker than full input, diagonal input respects the intended limit, and release stops the requested movement. Test camera headings and degenerate planar projections where applicable.
 - Controls are not inverted unless the game exposes an intentional inversion setting.
 - No required action depends on a hidden developer-only key.
 
@@ -29,7 +30,7 @@ Use these checks before declaring a BeeGame playable. Pick the checks matching t
 
 - Up/down/left/right inputs match the visual plane.
 - If the camera rotates, movement follows the declared camera-relative or world-relative rule consistently.
-- Aiming and movement are independent only for twin-stick profiles.
+- Independent aiming and movement follow the actual declared input scheme; mouse, touch and other valid schemes are not rejected because of a profile name.
 
 ## Side-Scroller
 

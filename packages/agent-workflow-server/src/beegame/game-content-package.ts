@@ -63,15 +63,6 @@ export type BeeGameContentPackageAudit = Readonly<{
   package?: BeeGameContentPackage
 }>
 
-export type BeeGameContentReadyReceipt = Readonly<{
-  schemaVersion: 'game-content-ready.v2'
-  contentRevision: string
-  documentRevision: string
-  assetManifestRevision: string
-  indexPath: typeof BEEGAME_CONTENT_INDEX
-  contentIds: readonly string[]
-}>
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -890,26 +881,6 @@ export function saveBeeGameContentDocument(input: {
     input.authority,
   ).contentRevision
   return { ...saved, contentRevision }
-}
-
-/** Accept only a complete package; the receipt contains no second copy of it. */
-export function acceptBeeGameContentPackage(
-  workspacePath: string,
-  authority: BeeGameContentAuthority,
-): BeeGameContentReadyReceipt {
-  const audit = auditBeeGameContentPackage(workspacePath, authority)
-  if (!audit.package)
-    throw new Error(
-      `Game Content Package is invalid: ${audit.issues.join('; ')}`,
-    )
-  return Object.freeze({
-    schemaVersion: 'game-content-ready.v2',
-    contentRevision: audit.package.digest,
-    documentRevision: audit.package.index.documentRevision,
-    assetManifestRevision: audit.package.index.assetManifestRevision,
-    indexPath: BEEGAME_CONTENT_INDEX,
-    contentIds: audit.package.documents.map(document => document.id),
-  })
 }
 
 /** Recompute durable package bytes during recovery without inventing source facts. */

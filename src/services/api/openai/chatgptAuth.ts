@@ -1,6 +1,6 @@
 import { chmod, mkdir, readFile, unlink, writeFile } from 'fs/promises'
 import { homedir } from 'os'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import { logForDebugging } from 'src/utils/debug.js'
 
 const ISSUER = 'https://auth.openai.com'
@@ -145,9 +145,8 @@ async function readStoredAuth(path: string): Promise<ChatGPTAuthTokens | null> {
   }
 }
 
-async function saveStoredAuth(tokens: ChatGPTAuthTokens): Promise<void> {
-  const path = authFilePath()
-  await mkdir(getClaudeConfigHomeDirLocal(), { recursive: true })
+async function saveStoredAuth(tokens: ChatGPTAuthTokens, path = authFilePath()): Promise<void> {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 })
   const body: StoredAuthFile = {
     auth_mode: 'chatgpt',
     tokens: {
@@ -317,10 +316,14 @@ async function refreshTokens(
 export async function completeChatGPTDeviceLogin(
   deviceCode: ChatGPTDeviceCode,
   signal?: AbortSignal,
+  // null lets an embedding host atomically persist into its own user store.
+  storagePath?: string | null,
 ): Promise<ChatGPTAuthTokens> {
   const code = await pollForAuthorizationCode(deviceCode, signal)
+  signal?.throwIfAborted()
   const tokens = await exchangeAuthorizationCode(code)
-  await saveStoredAuth(tokens)
+  signal?.throwIfAborted()
+  if (storagePath !== null) await saveStoredAuth(tokens, storagePath)
   return tokens
 }
 
@@ -338,7 +341,7 @@ export async function removeChatGPTAuth(): Promise<void> {
 
 export async function getValidChatGPTAuth(): Promise<ChatGPTAuth> {
   let tokens = await readStoredAuth(authFilePath())
-  if (!tokens) {
+  if (!tokens && process.env.BGS_SUBPROCESS_ENV_SCRUB !== '1') {
     tokens = await readStoredAuth(codexAuthFilePath())
     if (tokens) {
       logForDebugging('[OpenAI] Using ChatGPT auth from Codex auth.json')

@@ -1,0 +1,252 @@
+{
+  "version": "1.81",
+  "date": "2026-10-12",
+  "status": "offline-host-stall-root-causes-fixed-not-deployed",
+  "runtimeBaselineStillDeployed": "1.78",
+  "scope": {
+    "paidModelCalls": 0,
+    "productionServiceRestarts": 0,
+    "databaseWrites": 0,
+    "manualRealProjectWrites": 0,
+    "formalFrontendEdits": 0,
+    "claudeCodeSrcEdits": 0,
+    "builtinToolsEdits": 0,
+    "agentLimitsAdded": 0,
+    "promptsAdded": 0,
+    "nativeCompressionChanges": 0,
+    "newDependencies": 0,
+    "newProductionAPIs": 0
+  },
+  "evidence": {
+    "incidentLogs": [
+      "docs/verification/bgs-v3-166-paid-acceptance-2026-10-12.json",
+      "docs/verification/bgs-v3-170-paid-acceptance-2026-10-12.json"
+    ],
+    "historicalUnsignedSamples": [
+      "/private/tmp/bgs-v3-166-runtime-sample.txt",
+      "/private/tmp/bgs-v3-170-stall-sample.txt"
+    ],
+    "originalTranscript": {
+      "path": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/v3-agent-acceptance--1b167e40f20a/transcripts/v3-agent-acceptance-1b167e40f20a__7b5f404a.jsonl",
+      "bytes": 62136250,
+      "events": 94491,
+      "sha256": "8f97916a033079b3b9930be9763ea7c3b71f2ab0a23651bd138ac305b1fcd78f"
+    },
+    "originalTranscriptUnchanged": true,
+    "method": "Read retained Chat bytes; inject dated events into an isolated synthetic SessionManager record; call actual private snapshot/append methods. No original Run or source repair.",
+    "profiler": "Bun --cpu-prof --cpu-prof-md",
+    "beforeProfile": "/private/tmp/bgs-v3-181-host-before.cpuprofile.md",
+    "afterProfile": "/private/tmp/bgs-v3-181-host-final.cpuprofile.md"
+  },
+  "confirmedProblems": [
+    {
+      "id": "H-01",
+      "classification": "BGS host implementation / synchronous nested history scans",
+      "path": "session-manager.ts deriveRuntimeSnapshotFromEvents -> deriveSnapshotPhaseName -> hasTurnEnded",
+      "cause": "Each appended stream event persisted a snapshot. Phase calculation scanned all events for every previous turn, and phaseStatus called it again twice. Offline profile showed 69.3% inclusive samples on this nested phase path.",
+      "fix": "Collect started/ended turn identities in one linear pass, compute phase once and reuse it. Preserve terminal-before-start/missing-turn-ID/failed/waiting-approval/recovered behavior. Status is not writer exit proof."
+    },
+    {
+      "id": "H-02",
+      "classification": "BGS host implementation / repeated work on non-statistical stream details",
+      "cause": "Even the linear phase patch still recomputed full usage/roles over all preceding detail events for every new text fragment.",
+      "fix": "Per-session weak append-only snapshot-input index coalesces only consecutive assistant.partial/assistant.thinking/tool.progress of the same turn to their last boundary. All lifecycle, permission, accounting, tools and unknown types remain. Original events/transcripts/Agent history unchanged; same index speeds stale-turn guard.",
+      "addedComplexityReason": "Linear phase alone left this replay at 1.91s/100 appends; a 19-line method + weak reference index avoids known repeated detail scans without rewriting accounting or introducing a scheduler/authority store.",
+      "boundaries": "This is a derived host status index, not Agent context compaction, raw Chat filtering or a recovery fact. All accounting checkpoints and full Question provenance remain authoritative."
+    },
+    {
+      "id": "H-03",
+      "classification": "BGS native transport adapter / event-loop starvation",
+      "cause": "Ordered stdout consumption awaited callbacks that often resolved immediately; microtasks drained queued frames before timers/HTTP. With the first two fixes present, the real adapter/fixture still delivered all 500 frames before loopback health or explicit interrupt.",
+      "fix": "One setImmediate yield after each ordered native message in the BGS adapter. No frame count limit, dropped output, reordered native frames, retry, business stage or provider/Claude Code query-loop edit.",
+      "sideEffect": "Control callbacks can now interleave with frame processing; small host scheduling overhead. EOF draining, permissions, background ownership, cancellation and final stderr accounting regressed."
+    }
+  ],
+  "measurements": {
+    "sameReplay": {
+      "events": 90000,
+      "newAppends": 100,
+      "beforeMs": 7118.016208000001,
+      "linearOnlyMs": 1913.866084,
+      "afterMs": 475.88091700000007,
+      "beforeTimerDelayMs": 7122.631166000001,
+      "afterTimerDelayMs": 483.64370899999994,
+      "logBefore": "/private/tmp/bgs-v3-181-host-before.log",
+      "logLinear": "/private/tmp/bgs-v3-181-host-linear.log",
+      "logFinal": "/private/tmp/bgs-v3-181-host-final.log",
+      "limits": "Snapshot/append synchronous host work plus a timer, not end-to-end production/model/Token cost or an SLA."
+    },
+    "fullHistoryParity": [
+      {
+        "events": 1000,
+        "indexEvents": 72,
+        "exactSnapshot": true,
+        "usage": {
+          "prompt_tokens": 34842,
+          "completion_tokens": 2871,
+          "cache_read_tokens": 57968,
+          "cache_creation_tokens": 0,
+          "total_tokens": 95681
+        },
+        "turnUsage": {
+          "prompt_tokens": 34842,
+          "completion_tokens": 2871,
+          "cache_read_tokens": 57968,
+          "cache_creation_tokens": 0,
+          "total_tokens": 95681
+        }
+      },
+      {
+        "events": 10000,
+        "indexEvents": 1101,
+        "exactSnapshot": true,
+        "usage": {
+          "prompt_tokens": 308617,
+          "completion_tokens": 101607,
+          "cache_read_tokens": 10162104,
+          "cache_creation_tokens": 0,
+          "total_tokens": 10572328
+        },
+        "turnUsage": {
+          "prompt_tokens": 161190,
+          "completion_tokens": 31227,
+          "cache_read_tokens": 6021584,
+          "cache_creation_tokens": 0,
+          "total_tokens": 6214001
+        }
+      },
+      {
+        "events": 50000,
+        "indexEvents": 6140,
+        "exactSnapshot": true,
+        "usage": {
+          "prompt_tokens": 2555631,
+          "completion_tokens": 422441,
+          "cache_read_tokens": 59261176,
+          "cache_creation_tokens": 0,
+          "total_tokens": 62239248
+        },
+        "turnUsage": {
+          "prompt_tokens": 235746,
+          "completion_tokens": 36201,
+          "cache_read_tokens": 8372560,
+          "cache_creation_tokens": 0,
+          "total_tokens": 8644507
+        }
+      },
+      {
+        "events": 90000,
+        "indexEvents": 10380,
+        "exactSnapshot": true,
+        "usage": {
+          "prompt_tokens": 4772230,
+          "completion_tokens": 670007,
+          "cache_read_tokens": 92398376,
+          "cache_creation_tokens": 0,
+          "total_tokens": 97840613
+        },
+        "turnUsage": {
+          "prompt_tokens": 165236,
+          "completion_tokens": 14655,
+          "cache_read_tokens": 2063480,
+          "cache_creation_tokens": 0,
+          "total_tokens": 2243371
+        }
+      },
+      {
+        "events": 94491,
+        "indexEvents": 10917,
+        "exactSnapshot": true,
+        "usage": {
+          "prompt_tokens": 5114110,
+          "completion_tokens": 710393,
+          "cache_read_tokens": 96309496,
+          "cache_creation_tokens": 0,
+          "total_tokens": 102133999
+        },
+        "turnUsage": {
+          "prompt_tokens": 507116,
+          "completion_tokens": 55041,
+          "cache_read_tokens": 5974600,
+          "cache_creation_tokens": 0,
+          "total_tokens": 6536757
+        }
+      }
+    ],
+    "queuedStdoutHTTP": {
+      "queuedFrames": 500,
+      "syntheticPriorEvents": 50002,
+      "beforeFramesAtHealth": 500,
+      "afterFramesAtHealth": 3,
+      "afterFramesAtExplicitPause": 5,
+      "originalRawPriorEventsPreserved": true,
+      "afterNativeTurn": "idle/interrupted; no success result",
+      "logRed": "/private/tmp/bgs-v3-181-stdout-red.log",
+      "logGreen": "/private/tmp/bgs-v3-181-stdout-final.log",
+      "limits": "Real BGS manager/native adapter and loopback probe, but fixed CLI fixture, not the production dashboard/API, paid model or external engine."
+    }
+  },
+  "regression": {
+    "hostTransport": {
+      "files": 9,
+      "pass": 81,
+      "fail": 0,
+      "assertions": 484,
+      "seconds": 5.92,
+      "log": "/private/tmp/bgs-v3-181-session-regression-final.log"
+    },
+    "nativeDebugRecovery": {
+      "files": 3,
+      "pass": 10,
+      "fail": 0,
+      "assertions": 332,
+      "seconds": 30.05,
+      "log": "/private/tmp/bgs-v3-181-native-debug-recovery.log",
+      "controlledLocalProviderRequests": 36,
+      "paidCalls": 0
+    },
+    "distinct": {
+      "pass": 91,
+      "fail": 0,
+      "files": 12,
+      "assertions": 816
+    },
+    "targetRepeat": {
+      "pass": 5,
+      "fail": 0,
+      "assertions": 268,
+      "log": "/private/tmp/bgs-v3-181-stdout-final.log",
+      "overlapNotAdded": true
+    },
+    "typecheck": {
+      "exit": 0,
+      "log": "/private/tmp/bgs-v3-181-typecheck-final.log"
+    },
+    "diffCheck": 0,
+    "protectedGitPathsClean": [
+      "apps/frontend",
+      "src",
+      "packages/builtin-tools"
+    ]
+  },
+  "redTests": {
+    "phase": "/private/tmp/bgs-v3-181-phase-red.log",
+    "detailRescan": "/private/tmp/bgs-v3-181-stream-red.log",
+    "stdoutStarvation": "/private/tmp/bgs-v3-181-stdout-red.log",
+    "correctedInstrumentation": "Type-only read counting originally missed short-circuit turn-ID comparisons. Added actual turnId getter operations, preserving functional assertions; no production behavior changed to fit the test.",
+    "approvalTimeout": "The first loopback test permission review timed out before a process started. Tool permitted one diagnostic retry; not a BGS execution/model retry."
+  },
+  "filesChangedThisTurn": [
+    "packages/agent-workflow-server/src/beegame/session-manager.ts",
+    "packages/agent-workflow-server/src/beegame/native-cli-process-runner.ts",
+    "packages/agent-workflow-server/src/beegame/fixtures/native-runtime-fixture.ts",
+    "packages/agent-workflow-server/src/beegame/session-snapshot-performance.test.ts"
+  ],
+  "remaining": [
+    "Not deployed; normal runtime code remains 1.78. No paid rerun or actual stalled project's recovery/work was initiated.",
+    "The original unsymbolized incident sample alone cannot prove these were the only cause of every historical stall; this replay proves concrete host defects under the retained history and native queued-frame conditions.",
+    "Cold transcript parsing, extremely large individual frames, long-term growth of meaningful events, filesystem stalls, external tools/providers and whole-machine failures are not all certified.",
+    "No native context reduction, real Token savings, full eight-domain game/Scene/UI/assets/art/audio quality, engine deliverability or formal frontend completion claimed.",
+    "Further checks must follow concrete evidence, not arbitrary history/turn limits, prompt stacking or a new workflow framework."
+  ]
+}

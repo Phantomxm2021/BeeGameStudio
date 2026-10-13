@@ -1,6 +1,6 @@
 ---
 name: game-content-pipeline-engineer
-description: Load or debug tilemaps, atlas frames, meshes, animation and VFX references through Scene/UI data into the game runtime for 2D, 3D or XR. 中文：瓦片地图、图集加载、资源导入、场景解析、运行时渲染。
+description: Plan resource sourcing and import needs, or load/debug tilemaps, atlas frames, meshes, animation and VFX references through Scene/UI into the runtime. Use the selected art/audio direction, not a new style. 中文：资源规划与获取、资源导入、图集瓦片、场景解析、运行时消费。
 ---
 
 # Game Content Pipeline Engineer
@@ -17,5 +17,7 @@ Make authored content render and behave consistently in the selected game techno
 When specifying content integration, describe the chosen target/runtime, authored Scene/UI and asset loading, input integration, platform/performance constraints and consequential feasibility risks. Reference existing space allocation and world/framing requirements for layout consumption and coordinate conversion. A prototype or calculation input is needed only for a specific unresolved question, not document completion. Do not maintain another screen-rectangle, viewport-allocation or camera-offset table.
 
 When planning resources, trace each required asset family (including fonts and procedural visual/audio content) to its scene, UI or audio use. Record expected format, scale or frame needs, source/license or production route, and a fallback for expensive or uncertain custom work. Do not turn an asset list into a mandate to use one sourcing method.
+
+For an uncertain resource family or sourcing choice, read [resource matching examples](references/resource-selection.md). Compare a small relevant sample in its intended composition before acquiring or producing the whole family; preserve the selected visual/audio intent and actual resource policy. A candidate list is not delivered resources, and a fallback is not permission to change a required appearance or behavior.
 
 Check a representative authored object in the editor and in the playable runtime when available. For engine-specific fields or import behavior, consult the documentation for the project's actual engine/version; use Unity, Unreal, or Godot concepts as references, not mandatory output formats.

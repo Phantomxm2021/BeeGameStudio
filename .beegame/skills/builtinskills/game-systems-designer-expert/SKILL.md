@@ -5,23 +5,23 @@ description: Use for gameplay rules, core loops, progression, economy structure,
 
 # Game Systems Designer
 
-## 0. Overview
+## Player-facing rules
 
-This skill focuses on **structural integrity and scalability**.
-
-It ensures systems are coherent, balanced, and extensible.
+Make the repeatable player action clear, coherent and worth doing. Start with the goal, legal actions, constraints, information and resulting feedback, not scalability or a catalogue of progression systems. Explain what changes on repetition: a new situation, a choice, skill expression, discovery or creative expression. A reward counter alone does not establish that value.
 
 ---
 
 ## 1. Core Loop Architecture
 
-For a game with progression, identify the loops that actually exist:
+Identify the loops that actually exist, including games without progression:
 
 - Primary loop
 - Secondary loop
 - Meta progression loop
 
 Check whether the loops support the intended player experience; not every game needs a secondary or meta loop.
+
+For a new core loop or a consequential mechanic change, read [core-loop examples](references/core-loop-contract.md). Compare an actual player situation, available actions and consequences before adding another system. Treat interesting play as a hypothesis to check in a small playable interaction when available, not a conclusion from a complete rules document.
 
 ---
 

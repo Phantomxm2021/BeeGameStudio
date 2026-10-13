@@ -1,0 +1,15 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>BGS 新项目验收准备</title>
+<style>body{font:16px system-ui;max-width:850px;margin:40px auto}pre{white-space:pre-wrap;overflow-wrap:anywhere}button{padding:12px}</style>
+<h1>全新项目验收准备</h1><p>仅使用现有项目创建 API 和浏览器已有登录态。此页不执行模型、不写游戏文件、不读取凭据；创建后从独立 V3 debug 接单。</p>
+<pre id="draft"></pre><button id="create">创建这一个空项目（不执行模型）</button><pre id="result"></pre>
+<script type="module">
+const id='v3-fresh-'+crypto.randomUUID();
+const project={id,name:'萤光守夜',created_at:Date.now(),root_path:'/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/firefly-nightwatch--'+id};
+document.getElementById('draft').textContent=JSON.stringify(project,null,2);
+document.getElementById('create').onclick=async()=>{
+ document.getElementById('create').disabled=true;
+ try{const response=await fetch('/api/projects',{method:'POST',credentials:'same-origin',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify(project)});
+ const value=await response.json();document.getElementById('result').textContent=JSON.stringify({httpStatus:response.status,result:value,modelDispatched:false},null,2);
+ }catch(error){document.getElementById('result').textContent='结果未确认，不自动重试：'+error.message;}
+};
+</script></html>

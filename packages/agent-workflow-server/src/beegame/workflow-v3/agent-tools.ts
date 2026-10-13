@@ -7,7 +7,8 @@ import type { openPreviewTestAccess } from '../preview-test-access'
 import { publishProjectPreviewCapability } from '../project-preview-capability'
 import type { createAgentMeasurement } from './agent-measurement'
 import type { openImageGenerationAccess } from '../../image-generation/access'
-import { bundleContentConsumer, contentConsumerHelp } from '../game-content-consumer-cli'
+import { bundleContentConsumer, contentConsumerCommand } from '../game-content-consumer-cli'
+import { sharedPlaywright } from '../shared-playwright'
 
 export type AgentPreviewAccess = ReturnType<typeof openPreviewTestAccess>
 export type AgentImageAccess = ReturnType<typeof openImageGenerationAccess>
@@ -66,9 +67,14 @@ export async function openAgentTools(input: {
           return new Response('Not found',{status:404})
         try {
           const body=await request.json()
+          if (body && typeof body === 'object' && 'executionInputs' in body) {
+            if (Object.keys(body).length !== 1 || body.executionInputs !== true)
+              throw Error('Execution input inspection accepts executionInputs:true only')
+            return Response.json(await input.measurement!.executionInputs(), {headers:{'Cache-Control':'no-store'}})
+          }
           if(body && typeof body==='object' && 'handoffPaths' in body) {
             if(Object.keys(body).some(key=>!['handoffPaths','details'].includes(key)) ||
-              !Array.isArray(body.handoffPaths) || !body.handoffPaths.length ||
+              !Array.isArray(body.handoffPaths) ||
               body.handoffPaths.some((path:unknown)=>typeof path!=='string') ||
               (body.details!==undefined && typeof body.details!=='boolean'))
               throw Error('Handoff accepts explicit handoffPaths and optional boolean details only')
@@ -82,18 +88,19 @@ export async function openAgentTools(input: {
             return Response.json(await input.measurement!.inspect(body.inspectRequestKey,body.details),{headers:{'Cache-Control':'no-store'}})
           }
           const record=await input.measurement!.measure(body)
-          return Response.json(await input.measurement!.inspect(record.requestKey),{headers:{'Cache-Control':'no-store'}})
+          return Response.json(await input.measurement!.inspect(record.id),{headers:{'Cache-Control':'no-store'}})
         } catch(error) {
           return Response.json({error:error instanceof Error?error.message:'Measurement failed; no automatic retry'},{status:409})
         }
       }})
       revokeMeasurement=await publishProjectPreviewCapability(root,input.sessionId,measurementServer.url.origin+'/'+token,'measurement')
-      const help='Optional static-Web source-copy build + browser smoke. Run from this project: bun <this-entry> --request <stable-id> --artifact <public-build-folder> [--report <existing-design-or-test-report>]... . Explicitly runs saved package.json build and replaces only that build folder. Does not install dependencies or execute a model. reports/ is validation evidence, excluded from the build copy and editable sources; game/build inputs belong outside it. Selected --report files are hashed separately and edits still invalidate their receipt. Finalize selected reports before measurement; receipt IDs/hashes already live in BGS, so do not append them to measured files. Response starts with current input freshness, not game acceptance. bun <this-entry> --inspect <stable-id> [--details] rereads saved evidence and current inputs without a build, browser or model call; details returns saved observations, not another test. Repeating the original request also inspects without replay; changed inputs require an intended new request. Native/SSR runtimes, gameplay coverage, report semantics and quality are NOT certified.';
+      const help='Optional static-Web source-copy build + browser smoke: node <this-entry> --request <stable-id> --artifact <public-build-folder> [--report <existing-file>]... . Runs saved package.json build, replaces only that build folder. Does not install dependencies or execute a model. reports/ is evidence excluded from source copies; game/build inputs belong outside it. Selected reports are separately hashed; edits invalidate their receipt. Finalize them first; do not append receipt IDs/hashes to measured files. --inspect <measurement-ID-or-unique-request-key> [--details] reads any saved receipt in this Run and current freshness without build/browser/model work. Reused keys require the exact measurement ID from handoff; details reads observations, not another test. A same-turn request retry inspects without replay; changed inputs need an intended new request. Native/SSR, gameplay, report semantics and quality are NOT certified.';
+      const consumptionHelp='Optional --consumption-json JSON reuses actual static-Web drivers without a Task. A valid scoped example: {"checks":["ui-data-consumption"],"uiProbes":[{"document":"content/ui/menu.json","nodeId":"play","selector":"#play","viewport":[1280,720]}]}. UI checks saved DOM geometry and visible text fit on selected nodes/states; unselected registry screens/viewports remain explicitly outside coverage. Optional UI-only coordinateRoot:"#logical-root" selects an independent unpadded DOM ancestor for a fixed logical canvas scaled/letterboxed into the window; logical dimensions come from saved root referenceResolution/layout.size. Its positive axis-aligned mapping must remain stable through perturbation/restoration. Without coordinateRoot, geometry is compared in window CSS pixels. Unsupported roots remain unverified; mapping is not proof of intended whole-frame adaptation. Optional steps:[{click:selector}] reach actual states, not a gameplay solver. pixel-data-consumption uses pixelProbes with componentId for bound static 2D images/Tilemaps; procedural Canvas graphics are unsupported. font-data-consumption uses uiProbes for explicitly bound custom-font plain DOM text; system fonts/rich text are unsupported. audio-data-consumption uses audioProbes with componentId, playSteps and stopSteps for encoded HTML audio bindings; WebAudio synthesis/concurrency/listening are unsupported. Select applicable inputs only. Probes change isolated responses, not project sources. --inspect ID [--details] records coverage and unmeasured drivers; geometry/asset causality is not complete gameplay or quality.';
       await writeFile(resolve(directory,'measure.mjs'),[
         'import {realpath,readFile} from "node:fs/promises";',
-        'const help='+JSON.stringify(help)+';',
+        'const help='+JSON.stringify(help+'\n'+consumptionHelp+'\n--artifact is project-relative (e.g. dist), not an absolute path. Probes accept optional deviceScaleFactor (positive number, default 1); receipts record observed browser conditions and the declared click path. Other pixel densities and unselected gameplay remain untested.')+';',
         'const args=process.argv.slice(2); if(args.length===1 && args[0]==="--help"){console.log(help);process.exit(0)}',
-        'const inspecting=args[0]==="--inspect";if(inspecting && !(args[1]?.trim() && !args[1].startsWith("--") && (args.length===2 || args.length===3 && args[2]==="--details")))throw Error(help);const body=inspecting ? {inspectRequestKey:args[1],details:args.length===3} : {reportPaths:[]}; if(!inspecting){for(let i=0;i<args.length;i+=2){const key=args[i],value=args[i+1]; if(!value || !value.trim() || value.startsWith("--"))throw Error(help); if(key==="--report")body.reportPaths.push(value); else if(key==="--request" && !body.requestKey)body.requestKey=value; else if(key==="--artifact" && !body.runtimeArtifact)body.runtimeArtifact=value; else throw Error(help)} if(!body.requestKey || !body.runtimeArtifact)throw Error(help)}',
+        'const inspecting=args[0]==="--inspect";if(inspecting && !(args[1]?.trim() && !args[1].startsWith("--") && (args.length===2 || args.length===3 && args[2]==="--details")))throw Error(help);const body=inspecting ? {inspectRequestKey:args[1],details:args.length===3} : {reportPaths:[]}; if(!inspecting){for(let i=0;i<args.length;i+=2){const key=args[i],value=args[i+1]; if(!value || !value.trim() || value.startsWith("--"))throw Error(help); if(key==="--report")body.reportPaths.push(value); else if(key==="--request" && !body.requestKey)body.requestKey=value; else if(key==="--artifact" && !body.runtimeArtifact)body.runtimeArtifact=value; else if(key==="--consumption-json" && !("consumption" in body))body.consumption=JSON.parse(value); else throw Error(help)} if(!body.requestKey || !body.runtimeArtifact)throw Error(help)}',
         'if(await realpath(process.cwd())!=='+JSON.stringify(root)+')throw Error("Measurement belongs to another workspace");',
         'if(!process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE)throw Error("No active BGS measurement capability");',
         'const capability=JSON.parse(await readFile(process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE,"utf8"));',
@@ -107,9 +114,9 @@ export async function openAgentTools(input: {
       // start measurement or manufacture an author-written review assignment.
       await writeFile(resolve(directory,'handoff.mjs'),[
         'import {realpath,readFile} from "node:fs/promises";',
-        'const help="Read-only task/evidence handoff: bun <this-entry> FILE ... [--details]. Explicit public project-relative design/source/test/report files only. Default: latest measurement/freshness first, current task/requirements and selected file hashes. --details includes current requirement text, selected text/section locations and saved check observations/history. No build, tests, model, writes or quality verdict.";',
+        'const help="Read-only task/evidence handoff: node <this-entry> [FILE ...] [--details]. With no files: task, source navigation and latest measurement/freshness; no source coverage. Files must be explicit public project-relative design/source/test/report paths. --details includes current requirement text, selected source text and saved observations/history. No build, tests, model, writes or quality verdict.";',
         'const args=process.argv.slice(2);if(args.length===1 && args[0]==="--help"){console.log(help);process.exit(0)}',
-        'const details=args.at(-1)==="--details";const paths=details?args.slice(0,-1):args;if(!paths.length || paths.some(p=>p.startsWith("--")))throw Error(help);',
+        'const details=args.at(-1)==="--details";const paths=details?args.slice(0,-1):args;if(paths.some(p=>p.startsWith("--")))throw Error(help);',
         'if(await realpath(process.cwd())!=='+JSON.stringify(root)+')throw Error("Handoff belongs to another workspace");',
         'if(!process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE)throw Error("No active BGS turn capability");',
         'const capability=JSON.parse(await readFile(process.env.BEEGAME_MEASUREMENT_CAPABILITY_FILE,"utf8"));',
@@ -132,8 +139,18 @@ export async function openAgentTools(input: {
       revokePreview = await publishProjectPreviewCapability(root, input.sessionId, preview.baseUrl)
       // Long usage is available on demand, not repeated in every model input.
       await writeFile(resolve(directory, 'preview.mjs'),
-        'if (process.argv.length !== 3 || process.argv[2] !== "--help") { console.error("Use --help for the current optional Preview API"); process.exit(1); }\nconsole.log(' +
-        JSON.stringify(preview.instruction) + ');\n', { flag: 'wx', mode: 0o600 })
+        'const args=process.argv.slice(2);\n'+
+        'if(args[0]==="--inspect" && args.length===2){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {inspectPreviewTest}=await import(new URL("./preview-test-command.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));console.log(JSON.stringify(await inspectPreviewTest(args[1]),null,2));}catch(error){console.log(JSON.stringify({error:error.message,quality:"unverified"}));process.exitCode=1;}} else '+
+        'if(args[0]==="--run" && args[1]){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {runPreviewTest}=await import(new URL("./preview-test-command.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));const result=await runPreviewTest(args[1],args.slice(2));console.log(JSON.stringify(result,null,2));if(result.exitCode!==0)process.exitCode=1;}catch(error){console.log(JSON.stringify({status:"error",error:error.message,execution:"unconfirmed; inspect retained files before any new execution",quality:"unverified"}));process.exitCode=1;}}\n'+
+        'else if(args.length===1 && args[0]==="--client")console.log('+JSON.stringify(JSON.stringify({
+          runtime:'node',helperModule:new URL('../preview-test-client.mjs',import.meta.url).href,
+          playwrightModule:sharedPlaywright().moduleUrl,
+          environment:{helper:'BEEGAME_PREVIEW_TEST_MODULE',playwright:'BEEGAME_PLAYWRIGHT_MODULE',capability:'BEEGAME_PREVIEW_CAPABILITY_FILE'},
+          runCommand:'node '+JSON.stringify(entry('preview.mjs'))+' --run <project-test.mjs> [args...]',
+          scope:'Existing test tooling only; no browser, build, test or model executed. Capability still requires the active project turn.',
+        })) +');\n'+
+        'else if(args.length===1 && args[0]==="--help")console.log('+JSON.stringify('Optional --run <project-test.mjs> [args...] executes once with Node, retaining stdout/stderr and execution.json. --inspect <execution.json> reads the saved receipt and current input identity without executing it. Exit code is not test quality; scripts choose assertions and use the existing helper for current access.\n'+preview.instruction)+');\n'+
+        'else {console.error("Use --help for the Preview API, --client for Node helper/module paths, or --run <project-test.mjs> [args...]");process.exitCode=1;}\n', { flag: 'wx', mode: 0o600 })
     }
     await writeProjectAssetCommand(resolve(directory, 'assets.mjs'), {
       ...(library ? { libraryBaseUrl: library.baseUrl } : {}),
@@ -148,22 +165,20 @@ export async function openAgentTools(input: {
     // The bundle stays out of model context; the Agent chooses whether to use it.
     await writeFile(resolve(directory, 'content-consumer.mjs'), await bundleContentConsumer(), { flag: 'wx', mode: 0o600 })
     await writeFile(resolve(directory, 'consumer.mjs'),
-      'if(process.argv.length!==3 || process.argv[2]!=="--help"){console.error("Use --help for the optional Web consumer API");process.exit(1)}\nconsole.log('+
-      JSON.stringify(contentConsumerHelp(entry('content-consumer.mjs')))+');\n', { flag: 'wx', mode: 0o600 })
+      contentConsumerCommand(root, entry('content-consumer.mjs')), { flag: 'wx', mode: 0o600 })
     return {
       directory: relative(root, directory),
       turnContext: [
-        'Optional BGS project tools (run from the project root; use these actual entries, not legacy delivery paths):',
-        ...(input.measurement ? ['Static Web measurement/export: bun '+JSON.stringify(entry('measure.mjs'))+' --help; --inspect <request-id> reads without rerunning. Finalize reports first; receipt stays in BGS. Not quality acceptance.'] : []),
-        ...(input.measurement ? ['Read-only task/evidence: bun '+JSON.stringify(entry('handoff.mjs'))+' FILE ... [--details]. Current task/requirements, selected sources, saved measurement; no new work or acceptance.'] : []),
-        'Assets: bun ' + JSON.stringify(entry('assets.mjs')) + ' --help (library catalog/download and local hashing). ' + libraryState,
-        'Content: bun ' + JSON.stringify(entry('check-content.mjs')) + ' (default: actual package/resources); --authority reads current design/asset revision hashes; --help for format/drafts/layout/source batches; --scene-point FILE NODE W H for saved coordinates. BGS JSON only; React/Canvas does not waive promised editable data. Runtime consumption needs separate evidence. Optional Web consumer: bun '+JSON.stringify(entry('consumer.mjs'))+' --help.',
-        'Batch binding (BGS JSON only): bun '+JSON.stringify(entry('bind-content.mjs'))+' --help. --inspect supplies current hashes/IDs; --current mapping.json preserves design and checks real content/asset operands without a legacy document release.',
-        'Media: bun ' + JSON.stringify(entry('media.mjs')) + ' --help (image processing/atlas). Resources: bun ' + JSON.stringify(entry('resources.mjs')) + ' --help (explicit audio recipes, fonts, registration). Actual inputs and existing safety/source contracts remain required.',
-        preview ? 'Browser Preview (Web only): bun ' + JSON.stringify(entry('preview.mjs')) + ' --help. Run helper scripts with node, not bun; uses BEEGAME_PREVIEW_TEST_MODULE/BEEGAME_PREVIEW_CAPABILITY_FILE. Not a build or quality verdict. Engine-native CLI/MCP stays separate.' : 'Managed browser Preview is unavailable; native tools remain available. Do not claim a managed runtime check.',
-        'Tools do not choose a plan or certify quality. Legacy --authority/handoff/binding requires actual design sources, not fabricated approvals.',
-        image ? 'AI images: assets.mjs cost/generate --help; billed identity and recovery apply. Keep a stable requestId; unknown outcomes are not new purchases. Opening the bridge does not charge.' : 'AI image generation is unavailable; do not report a generation as performed.',
-        'Bridges expire at turn end; credentials stay in BGS. Native execution supplies shared runtime; exports alone do not.',
+        'Optional BGS project tools (project root; --help):',
+        ...(input.measurement ? ['Static Web source-copy build and smoke measurement (no separate prebuild): node '+JSON.stringify(entry('measure.mjs'))+' --help; --inspect reads without rerunning.'] : []),
+        ...(input.measurement ? ['Read-only task/evidence: node '+JSON.stringify(entry('handoff.mjs'))+' [FILE ...] [--details]; task facts, optional sources.'] : []),
+        'Assets: bun ' + JSON.stringify(entry('assets.mjs')) + ' --help (catalog/download, local hashes). ' + libraryState,
+        'Content: bun ' + JSON.stringify(entry('check-content.mjs')) + ' --help; --format projectGuide batches source navigation. --authority is identity, not design approval. Web consumer: bun '+JSON.stringify(entry('consumer.mjs'))+' --help.',
+        'Batch binding (BGS JSON): bun '+JSON.stringify(entry('bind-content.mjs'))+' --help; --inspect gives saved hashes/IDs.',
+        'Media: bun ' + JSON.stringify(entry('media.mjs')) + ' --help (images/atlas). Resources: bun ' + JSON.stringify(entry('resources.mjs')) + ' --help (audio, fonts, registration). Existing safety/source contracts apply.',
+        preview ? 'Browser Preview (Web only): node ' + JSON.stringify(entry('preview.mjs')) + ' --help / --client / --run <test.mjs> [args...] (Node, retained output). Native CLI/MCP separate.' : 'Managed browser Preview is unavailable; native tools remain available.',
+        image ? 'AI images: assets.mjs cost/generate --help; keep a stable requestId for recovery. Opening the bridge does not charge.' : 'AI image generation is unavailable.',
+        'Bridges expire at turn end; credentials stay in BGS. Tool availability is not runtime consumption or quality evidence.',
       ].join('\n'),
       // Retain tiny adapters as execution evidence, not game deliverables.
       // Revocation closes the bridge; do not delete Agent-created files.

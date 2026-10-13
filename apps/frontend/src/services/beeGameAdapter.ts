@@ -44,6 +44,51 @@ export type BeeGameQueuedMessage = {
   attachmentCount: number
 }
 
+type V3Run = {
+  id: string
+  version: number
+  planRevision: number
+  chatSessionId: string
+  requirements: { revision: string }
+  paused?: { at: string }
+  writer?: { attemptId: string }
+  agentTurns?: Array<{
+    attemptId: string
+    status: 'running' | 'ended' | 'failed' | 'interrupted'
+    notStarted?: boolean
+  }>
+}
+
+async function currentV3Run(projectId: string): Promise<V3Run> {
+  const { run } = await getJson<{ run: V3Run | null }>(
+    `/api/projects/${encodeURIComponent(projectId)}/workflow-v3`,
+  )
+  if (!run?.agentTurns)
+    throw new Error('此项目没有 V3 Agent 任务；旧交付不能从聊天入口继续。')
+  return run
+}
+
+async function sendV3Message(projectId: string, sessionId: string, input: {
+  text: string
+  intent?: 'continue'
+  requestKey: string
+  continuationOf?: string
+}): Promise<{ turn: { attemptId: string }; runId: string }> {
+  const run = await currentV3Run(projectId)
+  if (run.chatSessionId !== sessionId)
+    throw new Error('项目会话与 V3 任务不一致，请重新打开项目。')
+  return postJson(`/api/projects/${encodeURIComponent(projectId)}/workflow-v3/agent/messages`, {
+    requestKey: input.requestKey,
+    runId: run.id,
+    chatSessionId: run.chatSessionId,
+    expectedVersion: run.version,
+    requirementsRevision: run.requirements.revision,
+    ...(input.intent ? { intent: input.intent } : {}),
+    text: input.text,
+    ...(input.continuationOf ? { continuationOf: input.continuationOf } : {}),
+  })
+}
+
 type BeeGameEvent = {
   id: number
   sessionId: string
@@ -566,34 +611,35 @@ export const beeGameAdapter = {
   }): Promise<SendMessageResponse> {
     const handle = await ensureProjectSession(data.project_id)
     const { session } = handle
-    const language = getCurrentUiLanguage()
-    const result = await sendBeeGameInput(session.id, data.content, {
-      clientMessageId: data.client_message_id,
-      supersedesMessageId: data.supersedes_message_id,
-      language,
-      attachments: data.attachments,
+    if (data.supersedes_message_id)
+      throw new Error('V3 对话不能改写已发送消息；请发送一条新的更正。')
+    if (data.attachments?.length)
+      throw new Error('V3 后续消息暂不支持附件；请先移除附件再发送。')
+    const result = await sendV3Message(data.project_id, session.id, {
+      text: data.content,
+      requestKey: data.client_message_id ?? crypto.randomUUID(),
     })
     return {
       command_id: session.id,
-      task_id: session.id,
-      state: result.queued ? 'queued' : 'running',
-      trace_id: data.client_message_id || session.id,
+      task_id: result.turn.attemptId,
+      state: 'running',
+      trace_id: data.client_message_id || result.turn.attemptId,
     }
   },
 
   async listQueuedMessages(projectId: string): Promise<BeeGameQueuedMessage[]> {
-    const result = await getJson<{ messages: BeeGameQueuedMessage[] }>(
-      `/api/projects/${encodeURIComponent(projectId)}/queued-messages`,
-    )
-    return result.messages
+    await currentV3Run(projectId)
+    return []
   },
 
   async deleteQueuedMessage(projectId: string, messageId: string): Promise<void> {
-    await deleteJson(`/api/projects/${encodeURIComponent(projectId)}/queued-messages/${encodeURIComponent(messageId)}`)
+    void projectId; void messageId
+    throw new Error('V3 不使用旧消息队列。')
   },
 
   async steerQueuedMessage(projectId: string, messageId: string): Promise<void> {
-    await postJson(`/api/projects/${encodeURIComponent(projectId)}/queued-messages/${encodeURIComponent(messageId)}/steer`, {})
+    void projectId; void messageId
+    throw new Error('V3 不使用旧消息队列。')
   },
 
   async continueTask(data: {
@@ -602,19 +648,29 @@ export const beeGameAdapter = {
   }): Promise<ContinueTaskResponse> {
     const handle = await ensureProjectSession(data.project_id)
     const { session } = handle
-    const language = getCurrentUiLanguage()
-    await postJson(
-      `/api/beegame-sessions/${encodeURIComponent(session.id)}/continue`,
-      {
-        language,
-      },
-    )
+    let run = await currentV3Run(data.project_id)
+    if (run.writer) throw new Error('原任务尚未确认停止，不能发起续作。')
+    if (run.paused) {
+      await postJson(`/api/projects/${encodeURIComponent(data.project_id)}/workflow-v3/resume`, {
+        planRevision: run.planRevision,
+      })
+      run = await currentV3Run(data.project_id)
+    }
+    const last = run.agentTurns?.at(-1)
+    if (!last || !['failed', 'interrupted'].includes(last.status) || last.notStarted)
+      throw new Error('没有可续作的已中断 V3 回合；请明确发送新的执行请求。')
+    const result = await sendV3Message(data.project_id, session.id, {
+      text: '继续上一次已中断的任务。',
+      intent: 'continue',
+      requestKey: crypto.randomUUID(),
+      continuationOf: last.attemptId,
+    })
     return {
       command_id: session.id,
-      resume_task_id: session.id,
+      resume_task_id: result.turn.attemptId,
       resume_mode: 'resume',
       state: 'resuming',
-      trace_id: session.id,
+      trace_id: result.turn.attemptId,
     }
   },
 
@@ -622,21 +678,11 @@ export const beeGameAdapter = {
     project_id: string
     kind: 'deployment_failure_repair'
   }): Promise<SendMessageResponse> {
-    const handle = await ensureProjectSession(data.project_id)
-    const language = getCurrentUiLanguage()
-    await postJson(
-      `/api/beegame-sessions/${encodeURIComponent(handle.session.id)}/action`,
-      {
-        kind: data.kind,
-        language,
-      },
-    )
-    return {
-      command_id: handle.session.id,
-      task_id: handle.session.id,
-      state: 'running',
-      trace_id: handle.session.id,
-    }
+    if (data.kind !== 'deployment_failure_repair') throw new Error('不支持的 V3 项目操作。')
+    return this.sendMessage({
+      project_id: data.project_id,
+      content: '检查最近一次部署失败的实际错误，并仅在必要时修复当前工程，再重新验证。',
+    })
   },
 
   async stopTask(data: {
@@ -644,21 +690,15 @@ export const beeGameAdapter = {
     project_id?: string
   }): Promise<StopTaskResponse> {
     const projectId = String(data.project_id || '').trim()
-    const sessionId = resolveStopSessionId(data)
-    const stopped = projectId
-      ? await postJson<BeeGameSession>(
-          `/api/projects/${encodeURIComponent(projectId)}/stop`,
-          {},
-        )
-      : await postJson<BeeGameSession>(
-          `/api/beegame-sessions/${encodeURIComponent(sessionId)}/stop`,
-          {},
-        )
+    if (!projectId) throw new Error('停止 V3 任务需要项目 ID。')
+    const stopped = await postJson<{ run: V3Run; stopping: boolean }>(
+      `/api/projects/${encodeURIComponent(projectId)}/workflow-v3/stop`, {},
+    )
     return {
-      command_id: stopped.id || sessionId,
-      task_id: stopped.id || sessionId,
-      state: stopped.status === 'stopped' ? 'stopped' : 'stop_requested',
-      trace_id: stopped.id || sessionId,
+      command_id: stopped.run.id,
+      task_id: stopped.run.id,
+      state: stopped.stopping ? 'stop_requested' : 'stopped',
+      trace_id: stopped.run.id,
     }
   },
 
@@ -871,44 +911,29 @@ export const beeGameAdapter = {
   },
 
   async getArtifacts(projectId: string): Promise<BeeGameArtifact[]> {
-    let artifactIndex: BeeGameProjectArtifactIndex | undefined
-    try {
-      artifactIndex = await fetchProjectArtifactIndex(projectId)
-    } catch (error) {
-      // Older servers may not expose the project-scoped index yet. Keep the
-      // event-derived fallback for those servers, but never hide auth or
-      // transport failures behind an empty artifact list.
-      if (!isNotFoundError(error)) throw error
-    }
+    const artifactIndex = await fetchProjectArtifactIndex(projectId)
 
     let eventResult: BeeGameProjectEvents | undefined
-    if (artifactIndex?.sessionId) {
+    if (artifactIndex.sessionId) {
       try {
         eventResult = await fetchProjectEvents(projectId)
       } catch (error) {
         if (!isSessionNotFoundError(error)) throw error
       }
-    } else if (!artifactIndex) {
-      try {
-        eventResult = await fetchProjectEvents(projectId)
-      } catch (error) {
-        if (isSessionNotFoundError(error)) return []
-        throw error
-      }
     }
 
-    const workspacePath = artifactIndex?.workspacePath || eventResult?.workspacePath
+    const workspacePath = artifactIndex.workspacePath || eventResult?.workspacePath
     if (!workspacePath) return []
     const binding = {
       projectId,
       workspacePath,
-      ...(artifactIndex?.sessionId || eventResult?.sessionId
-        ? { sessionId: artifactIndex?.sessionId || eventResult?.sessionId }
+      ...(artifactIndex.sessionId || eventResult?.sessionId
+        ? { sessionId: artifactIndex.sessionId || eventResult?.sessionId }
         : {}),
     }
     return [
       ...mergeArtifactsByPath([
-        ...(artifactIndex?.artifacts || [])
+        ...artifactIndex.artifacts
           .filter(artifact => !isInternalRuntimeArtifact(artifact))
           .map(artifact =>
             discoveredArtifactToPanelArtifact(binding, artifact),
@@ -1195,23 +1220,10 @@ async function ensureProjectSession(
   }
 }
 
-function resolveStopSessionId(data: {
-  task_id: string
-  project_id?: string
-}): string {
-  return String(data.task_id || '').trim()
-}
-
 function isSessionNotFoundError(error: unknown): boolean {
   if (!(error instanceof Error)) return false
   const message = error.message.toLowerCase()
   return message === 'session not found' || message === 'not found'
-}
-
-function isNotFoundError(error: unknown): boolean {
-  if (isSessionNotFoundError(error)) return true
-  if (!(error instanceof Error)) return false
-  return (error as Error & { status?: number }).status === 404
 }
 
 function isDeleteAlreadyGoneError(error: unknown): boolean {
@@ -1295,34 +1307,6 @@ async function getResponseErrorMessage(response: Response): Promise<string> {
       return `Request failed with status ${response.status}: ${text.slice(0, 180)}`
   }
   return `Request failed with status ${response.status}`
-}
-
-async function sendBeeGameInput(
-  sessionId: string,
-  text: string,
-  display?: {
-    clientMessageId?: string
-    supersedesMessageId?: string
-    language?: BeeGameLanguage
-    attachments?: ChatAttachmentPayload[]
-  },
-): Promise<BeeGameSession & { queued?: boolean; queueId?: string }> {
-  return postJson(
-    `/api/beegame-sessions/${encodeURIComponent(sessionId)}/input`,
-    {
-      text,
-      ...(display?.clientMessageId
-        ? { clientMessageId: display.clientMessageId }
-        : {}),
-      ...(display?.supersedesMessageId
-        ? { supersedesMessageId: display.supersedesMessageId }
-        : {}),
-      ...(display?.language ? { language: display.language } : {}),
-      ...(display?.attachments?.length
-        ? { attachments: display.attachments }
-        : {}),
-    },
-  )
 }
 
 function fetchProjectEvents(

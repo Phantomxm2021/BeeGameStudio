@@ -23,6 +23,7 @@ import { mkdir, realpath } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { closeSessionTestBrowsers } from './native-test-browser-cleanup'
 import { projectExecutionAccess } from './project-execution-access'
+import { nativeRuntimeFeatureSettings, type RuntimeSettingsConfig } from '../runtime-settings-store'
 import { prepareNativeSkillPlugins } from './native-skill-plugins'
 import { WritingWorkflowRuntime } from './writing-workflow-runtime'
 import { standardCliDebugDiagnostic, withStandardCliDiagnostics } from './standard-cli-debug'
@@ -204,7 +205,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
       // bodies. Do not alter provider, timeout or retry configuration.
       if (command.includes('--debug-to-stderr')) childEnvironment.ANTHROPIC_LOG = input.env.ANTHROPIC_LOG ?? 'info'
       const child = Bun.spawn([...appendWorkingFilesInstruction(command, scratchPath),
-        ...(skillPlugins?.flags ?? []), ...(taskAccess?.flags ?? projectAccess!.flags)], {
+        ...(skillPlugins?.flags ?? []), ...withRuntimeFeatureSettings(taskAccess?.flags ?? projectAccess!.flags, input.env)], {
         cwd: taskAccess?.root ?? projectAccess!.root,
         env: childEnvironment,
         stdin: 'pipe',
@@ -335,6 +336,11 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
           )
         }
         await this.onMessage(message)
+        // A pipe can already contain hundreds of frames. Awaiting an immediately
+        // resolved message callback only queues microtasks, starving HTTP pause,
+        // permission replies and health until the whole burst drains. Yield to
+        // host I/O without dropping/reordering frames or capping native work.
+        await new Promise<void>(resolve => setImmediate(resolve))
       }
     } catch (error) {
       this.failActiveTurn(toError(error))
@@ -789,7 +795,26 @@ export function nativeRuntimeEnvironment(
   // if an alternate caller mistakenly supplies them in the selected env.
   delete environment.BEEGAME_SUPABASE_SERVICE_ROLE_KEY
   delete environment.SUPABASE_SERVICE_ROLE_KEY
+  // The host's per-project authorization map is not native/model configuration.
+  delete environment.BEEGAME_PROJECT_TOOL_READ_PATHS
+  delete environment.BEEGAME_RUNTIME_SETTINGS_JSON
   return environment
+}
+
+export function withRuntimeFeatureSettings(flags: string[], environment: Record<string, string>): string[] {
+  const config: RuntimeSettingsConfig = environment.BEEGAME_RUNTIME_SETTINGS_JSON
+    ? JSON.parse(environment.BEEGAME_RUNTIME_SETTINGS_JSON) : {}
+  const native = nativeRuntimeFeatureSettings(config)
+  const result = [...flags]
+  const index = result.indexOf('--settings')
+  if (index < 0) throw new Error('BGS runtime settings require the existing inline settings argument')
+  const previous = JSON.parse(result[index + 1]!)
+  // Use the existing flag settings source, so user env cannot silently undo
+  // the dashboard selection. Managed policy keeps its normal precedence.
+  result[index + 1] = JSON.stringify({
+    ...previous, ...native, env: { ...previous.env, ...native.env },
+  })
+  return result
 }
 
 async function* ndjsonLines(

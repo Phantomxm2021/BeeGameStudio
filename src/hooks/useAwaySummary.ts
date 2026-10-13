@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle'
+import { isAwaySummaryEnabled } from '../utils/optionalRuntimeFeatures.js'
 import { useEffect, useRef } from 'react'
 import { getTerminalFocusState, subscribeTerminalFocus } from '@bee-game-studio/ink'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { generateAwaySummary } from '../services/awaySummary.js'
 import type { Message } from '../types/message.js'
 import { createAwaySummaryMessage } from '../utils/messages.js'
@@ -44,10 +44,7 @@ export function useAwaySummary(
   isLoadingRef.current = isLoading
 
   // 3P default: false
-  const gbEnabled = getFeatureValue_CACHED_MAY_BE_STALE(
-    'tengu_sedge_lantern',
-    false,
-  )
+  const gbEnabled = isAwaySummaryEnabled()
   useEffect(() => {
     if (!feature('AWAY_SUMMARY')) return
     if (!gbEnabled) return

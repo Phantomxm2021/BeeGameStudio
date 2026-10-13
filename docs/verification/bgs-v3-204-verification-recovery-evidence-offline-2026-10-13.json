@@ -1,0 +1,53 @@
+{
+  "scope": "Implement the audited native-verification configuration, explicit focused continuation, test entry and evidence freshness changes. Offline synthetic verification only; no paid rerun, generated-game edits, formal frontend edits or Claude Code source changes.",
+  "basis": "bgs-v3-203-paused-cost-root-audit-2026-10-13.json",
+  "changes": [
+    {
+      "area": "Native mandatory verification",
+      "implementation": "BGS dev launcher's native build environment sets the existing FEATURE_VERIFICATION_AGENT=0 build option. No core prompt, native Todo or Agent implementation edits. No agent/tool caps or permission bypass.",
+      "files": ["scripts/beegame-dev-lib.ts", "scripts/beegame-dev.ts"],
+      "verified": "An isolated full CLI build and three fixed localhost model responses confirmed the mandatory system instruction and Todo completion nudge were absent from actual requests/results; initialization omitted verification but retained general-purpose, Agent, Bash and Skill.",
+      "sideEffect": "Removes the built-in verification role together with its mandatory policy. Agent may still voluntarily verify or delegate using general-purpose. Old history is not rewritten.",
+      "deployment": "Isolated build at /private/tmp/bgs-native-no-verifier-F0NfdI/cli-bun.js. Live dist and services were not replaced/restarted. Normal BGS launcher will apply the build setting on next deployment. Ad hoc native builds must also use the explicit feature configuration."
+    },
+    {
+      "area": "Long-history recovery",
+      "implementation": "Allow explicit continue + focused using the existing fresh-context mechanism and saved facts. Default remains resume; same workspace, requirement identity, prior user requests, Question answers, unresolved tool identities and historical evidence remain available. The independent debug selector now accepts settled interrupted/failed turns too.",
+      "files": ["packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.ts", "packages/agent-workflow-server/src/beegame/workflow-v3/debug-client.js", "packages/agent-workflow-server/src/beegame/workflow-v3/debug.html"],
+      "verified": "Resume/focused continuations, pause, wrong continuation identity, missing/corrupt history, unknown exits, duplicate authorization, retained files and no implicit model dispatch covered by synthetic tests.",
+      "limits": "No automatic context reset. Assistant-only implicit decisions, loaded Skill bodies and old permission grants are not transferred. Long histories can still recur within a long turn."
+    },
+    {
+      "area": "Tool/test handoff",
+      "implementation": "Optional preview.mjs --run <project-test.mjs> [args...] runs the selected script once with Node and current preview capability. Each execution retains separate stdout, stderr and execution.json; the CLI returns paths and process status, not a quality verdict. Raw output is not parsed as JSON. Existing tests are not rewritten or automatically migrated.",
+      "files": ["packages/agent-workflow-server/src/beegame/preview-test-command.mjs", "packages/agent-workflow-server/src/beegame/content-checker-runtime.ts", "packages/agent-workflow-server/src/beegame/workflow-v3/agent-tools.ts"],
+      "verified": "Actual native Bash sandbox, Node selection, literal arguments, nonzero exit, full 80KB output retention, read-only result retrieval, preservation of earlier runs, false checks with exit0 remaining quality-unverified, and rejection after capability revocation.",
+      "auditCorrection": "Direct Bun import from an individually allowlisted server file failed in the actual sandbox. Published the adapter and existing helper into the already-scoped private utility directory instead; no server-directory read grant was added.",
+      "limits": "Optional adapter; raw Agent Bash operations and old endpoint-bound scripts remain possible. Execution diagnostics are private, not automatically accepted public game evidence. No retry or assertion/quality inference."
+    },
+    {
+      "area": "Evidence freshness",
+      "implementation": "Read-only inspection distinguishes source/dependency identity, actual artifact bytes, report changes and each saved check's input identity. Source-only changes no longer imply that the old runtime artifact changed. Preview/export still refuse changed source packages; no blanket docs exclusion, automatic rerun, dependency framework or cross-version result cache.",
+      "files": ["packages/agent-workflow-server/src/beegame/workflow-v3/measured-build.ts"],
+      "verified": "Separate document/report/artifact mutation, old receipt retention, export refusal, unchanged runtime-smoke identity after docs-only change, checker/version and source fault regression, no new measurement or store write during inspection.",
+      "limits": "Matching identities describe the originally measured artifact and conditions, not a new source-to-build mapping, changed requirements, a new execution, test semantics or game quality."
+    }
+  ],
+  "regression": {
+    "primary": {"files":13,"passed":103,"failed":0,"skipped":2,"assertions":1304,"log":"/private/tmp/bgs-v3-204-regression.log"},
+    "optInBrowser": {"passed":2,"failed":0,"assertions":99,"log":"/private/tmp/bgs-v3-204-browser.log","coverage":["managed development and production preview","saved geometry/font/Camera browser regression"]},
+    "combined": {"passed":105,"failed":0,"remainingSkipped":0},
+    "nativeBuild": {"feature":"FEATURE_VERIFICATION_AGENT=0","bundledFiles":1240,"liveDeploymentChanged":false},
+    "typecheck": {"passed":false,"diagnostics":3556,"log":"/private/tmp/bgs-v3-204-typecheck.log","note":"Cross-package source aliases and other repository-wide diagnostics. No diagnostics named this turn's changed files. No baseline-difference claim or unrelated core repair."},
+    "syntaxAndWhitespace": "Node syntax checks for the new adapter/debug client and git diff --check passed.",
+    "initialFailures": ["Sandboxed test harness could not open localhost ports; rerun with permission for local synthetic services only.", "New test initially tried to inspect a revoked capability after settlement; corrected test to use the host read-only inspection API.", "Source-copy build proof is stored separately from CheckResult.inputs; included that actual proof in build input-identity reporting.", "Direct host adapter import failed in real sandbox; corrected publication without broadening permissions."],
+    "paidModelCalls": 0
+  },
+  "notClaimed": [
+    "Live services are not yet using these changes; no service restart was performed.",
+    "No real-game quality, complete player-flow, Skills application or token reduction has been reaccepted.",
+    "No repair to firefly-nightwatch or magnet-dispatch game outputs was made.",
+    "No guarantee that a model will adopt optional tools, avoid small operations or stop voluntarily reviewing.",
+    "No claim that historical compaction was broken or that full repository typechecking passes."
+  ]
+}

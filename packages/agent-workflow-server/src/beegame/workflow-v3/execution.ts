@@ -8,9 +8,11 @@ import { bindingOperands, executeTaskBindings } from './binding'
 import { reviewQuestionGuard, type ReviewDecision } from './review'
 import { editSchema, prepareSourceEdit, writeSourceEdit } from './source-edit'
 import { findSourceEdit, reserveSourceEdit, settleSourceEdit } from './changes'
+import { saveHostExitReceipt, type HostExitReceipts, type HostExitFacts } from './host-exit-receipt'
 
-export function createV3Executor(input: { store: WorkflowStore; sessions: BeeGameSessionManager }) {
+export function createV3Executor(input: { store: WorkflowStore; sessions: BeeGameSessionManager; exitReceipts?: HostExitReceipts }) {
   const workerId = randomUUID(), pending = new Set<Promise<unknown>>(), active = new Map<string, { sessionId: string; controller: AbortController }>()
+  const observedExits=new Map<string,{runId:string;at:string;audit?:Parameters<typeof finishTask>[3]}>()
   let disposing = false
   return {
     async edit(run: Run, value: unknown) {
@@ -39,7 +41,15 @@ export function createV3Executor(input: { store: WorkflowStore; sessions: BeeGam
       const next = reserveSourceEdit(run, { path: edit.path, before: edit.beforeHash, after: edit.afterHash, workerId,
         requestKey: body.requestKey ?? randomUUID(), requestHash })
       // Durable invalidation + exclusive writer precede any source replacement.
-      await input.store.commit(run.projectId, run.ownerId, run.version, next, 'source-edit.reserved')
+      try { await input.store.commit(run.projectId, run.ownerId, run.version, next, 'source-edit.reserved') }
+      catch (error) {
+        // A commit can succeed while its response is lost. This ORIGINAL live
+        // host knows writeSourceEdit has not run; verify its exact reservation
+        // and record that no-write exit, never replay the write or guess that
+        // an unknown/restarted worker has exited.
+        await settleUnstartedReservation(next)
+        throw error
+      }
       const attempt = findSourceEdit(next, next.writer!.attemptId)!, controller = new AbortController()
       active.set(attempt.attemptId, { sessionId: attempt.sessionId, controller })
       if (disposing) controller.abort()
@@ -60,7 +70,7 @@ export function createV3Executor(input: { store: WorkflowStore; sessions: BeeGam
           const current = await input.store.read(run.projectId, run.ownerId)
           if (!current || current.id !== run.id) throw new WorkflowError('run-missing', 'Run disappeared during edit settlement')
           const result = settleSourceEdit(current, attempt.attemptId, attempt.fence, failure ? failure instanceof WorkflowError ? failure.message : 'Source edit filesystem operation failed; reload saved candidates. No task acceptance.' : undefined)
-          try { await input.store.commit(run.projectId, run.ownerId, current.version, result, 'source-edit.settled'); settled = result; break }
+          try { await input.store.commit(run.projectId, run.ownerId, current.version, result, 'source-edit.settled');observedExits.delete(attempt.attemptId); settled = result; break }
           catch (error) { if (rebase || !(error instanceof WorkflowError) || error.code !== 'revision-conflict') throw error }
         }
         if (failure) throw failure
@@ -74,6 +84,14 @@ export function createV3Executor(input: { store: WorkflowStore; sessions: BeeGam
     writerLiveness(run: Run): 'none' | 'local-active' | 'unknown' {
       return !run.writer ? 'none' : run.writer.workerId === workerId && active.has(run.writer.attemptId) ? 'local-active' : 'unknown'
     },
+    async recoveryEvidence(run:Run) {
+      const attempt=run.writer && findSourceEdit(run,run.writer.attemptId)
+      const matches=attempt && run.writer?.fence===attempt.fence && run.writer.workerId===attempt.workerId
+      if(!matches)return 'unavailable'
+      if(attempt.quiescedAt)return 'persisted'
+      if(attempt.workerId===workerId && observedExits.get(attempt.attemptId)?.runId===run.id)return 'original-host'
+      try {return await input.exitReceipts?.read(run)?'host-receipt':'unavailable'} catch {return 'unavailable'}
+    },
     async recover(run: Run, identity: { expectedVersion: number; attemptId: string; fence: number }) {
       if (disposing) throw new WorkflowError('worker-stopping', 'Worker is shutting down')
       const current = await input.store.read(run.projectId, run.ownerId)
@@ -84,12 +102,21 @@ export function createV3Executor(input: { store: WorkflowStore; sessions: BeeGam
       if (active.has(identity.attemptId) || input.sessions.hasActiveProjectTurn(run.ownerId, run.projectId, run.workspacePath))
         throw new WorkflowError('workspace-busy', 'The writer is still active; recovery cannot stop or replace it')
       const attempt = findSourceEdit(current, identity.attemptId)
-      if (!attempt?.quiescedAt || attempt.workerId !== current.writer.workerId || attempt.fence !== identity.fence)
+      if (!attempt || attempt.workerId !== current.writer.workerId || attempt.fence !== identity.fence)
         throw new WorkflowError('writer-unresolved', 'No durable host quiescence evidence. Verify/stop the original writer; elapsed time, missing session and user claims cannot unlock it')
+      if(!attempt.quiescedAt) {
+        const original=attempt.workerId===workerId && observedExits.get(attempt.attemptId)?.runId===run.id
+        const receipt=original?undefined:await input.exitReceipts?.read(current)
+        if(!original && !receipt)
+          throw new WorkflowError('writer-unresolved','No durable host quiescence evidence or original-host observation; missing session and user claims cannot unlock it')
+        await recordQuiescence(current,attempt,original?observedExits.get(attempt.attemptId)!.audit:undefined,receipt)
+      }
+      const quiet=(await input.store.read(run.projectId,run.ownerId))!
       const error = 'Recovered interrupted settlement from host quiescence evidence. Partial candidates retained, not accepted; external outcomes remain unverified. No automatic retry.'
-      const next = attempt.sourceEdit ? settleSourceEdit(current, attempt.attemptId, attempt.fence, error) :
-        finishTask(current, attempt.attemptId, attempt.fence, { error }, true)
-      await input.store.commit(run.projectId, run.ownerId, current.version, next, 'writer.recovered')
+      const next = attempt.sourceEdit ? settleSourceEdit(quiet, attempt.attemptId, attempt.fence, error) :
+        finishTask(quiet, attempt.attemptId, attempt.fence, { error }, true)
+      await input.store.commit(run.projectId, run.ownerId, quiet.version, next, 'writer.recovered')
+      observedExits.delete(attempt.attemptId)
       return next
     },
     async start(run: Run, taskId: string, requestKey: string, options: { modelConfigId?: string; language?: BeeGameSessionLanguage; authToken?: string; getValidAuthToken?: (o?: { forceRefresh?: boolean }) => Promise<string | undefined> }) {
@@ -106,7 +133,8 @@ export function createV3Executor(input: { store: WorkflowStore; sessions: BeeGam
       if (run.paused) throw new WorkflowError('run-paused', 'Explicitly resume this user-paused Run before starting new work')
       await assertFreshDependencies(run, task)
       const next = claimTask(run, { taskId, requestKey, workerId, sessionId: 'beegame_'+randomUUID().replaceAll('-', ''), inputVersions: await bindInputs(run, task) })
-      await input.store.commit(run.projectId, run.ownerId, run.version, next, 'attempt.claimed')
+      try { await input.store.commit(run.projectId, run.ownerId, run.version, next, 'attempt.claimed') }
+      catch (error) { await settleUnstartedReservation(next); throw error }
       const attempt = next.attempts.at(-1)!
       const controller = new AbortController(); active.set(attempt.attemptId, { sessionId: attempt.sessionId, controller })
       if (disposing) controller.abort()
@@ -138,21 +166,51 @@ export function createV3Executor(input: { store: WorkflowStore; sessions: BeeGam
       disposing = true
       for (const task of active.values()) { task.controller.abort(); if (input.sessions.get(task.sessionId)) input.sessions.stop(task.sessionId, 'workflow_v3_worker_stop') }
       await Promise.allSettled([...pending])
+      observedExits.clear()
     },
   }
-  async function recordQuiescence(run: Run, attempt: Pick<Attempt, 'attemptId' | 'fence'>, audit?: Parameters<typeof finishTask>[3]) {
+  async function settleUnstartedReservation(run: Run) {
+    const writer=run.writer!
+    observedExits.set(writer.attemptId,{runId:run.id,at:new Date().toISOString()})
+    await saveHostExitReceipt(input.exitReceipts,run,{quiescedAt:observedExits.get(writer.attemptId)!.at})
+    const current=await input.store.read(run.projectId,run.ownerId)
+    if(!current || current.id!==run.id || current.writer?.attemptId!==writer.attemptId ||
+        current.writer.fence!==writer.fence || current.writer.workerId!==workerId){observedExits.delete(writer.attemptId);return}
+    const attempt=findSourceEdit(current,writer.attemptId)!
+    await recordQuiescence(current,attempt)
+    for(let i=0;i<2;i++) {
+      const quiet=await input.store.read(run.projectId,run.ownerId)
+      if(!quiet || quiet.id!==run.id)throw new WorkflowError('run-missing','Reserved operation disappeared before no-start settlement')
+      const error='Reservation response failed before execution. Original host confirmed no file/tool work started; no automatic retry.'
+      const next=attempt.sourceEdit?settleSourceEdit(quiet,attempt.attemptId,attempt.fence,error):
+        finishTask(quiet,attempt.attemptId,attempt.fence,{error},true)
+      try {await input.store.commit(run.projectId,run.ownerId,quiet.version,next,attempt.sourceEdit?'source-edit.settled':'attempt.settled');observedExits.delete(attempt.attemptId);return}
+      catch(e){if(i || !(e instanceof WorkflowError) || e.code!=='revision-conflict')throw e}
+    }
+  }
+  async function recordQuiescence(run: Run, attempt: Pick<Attempt, 'attemptId' | 'fence'>, audit?: Parameters<typeof finishTask>[3], receipt?:HostExitFacts) {
+    // Called only after this host's actual filesystem/native cleanup, or a
+    // known no-start failure. Retain that observation if DB persistence fails;
+    // A signed host receipt can preserve this fact across a restart; missing
+    // receipts never manufacture an observation or justify a forced release.
+    if(!receipt && !observedExits.has(attempt.attemptId))observedExits.set(attempt.attemptId,{runId:run.id,at:new Date().toISOString(),audit:structuredClone(audit)})
+    const exit=observedExits.get(attempt.attemptId)
+    const facts:HostExitFacts=receipt ?? {quiescedAt:exit!.at,...Object.fromEntries(
+      ['usage','nativeSessionId','turnId','accountingEpochs','skillUses','decisions'].flatMap(k=>
+        audit?.[k as keyof typeof audit]===undefined?[]:[[k,audit[k as keyof typeof audit]]]))}
+    if(!receipt)await saveHostExitReceipt(input.exitReceipts,run,facts)
     for (let rebase = 0; rebase < 2; rebase++) {
       const current = await input.store.read(run.projectId, run.ownerId)
       if (!current || current.id !== run.id || current.writer?.attemptId !== attempt.attemptId ||
-          current.writer.fence !== attempt.fence || current.writer.workerId !== workerId)
+          current.writer.fence !== attempt.fence || current.writer.workerId !== (receipt?run.writer!.workerId:workerId))
         throw new WorkflowError('stale-attempt', 'Stopped operation no longer owns the current writer')
       const next = structuredClone(current), record = findSourceEdit(next, attempt.attemptId)!
       if (record.quiescedAt) return
       // Keep actual accounting/question provenance across settlement failure,
       // but do not retain passed checks as a recovery acceptance shortcut.
-      if (audit) for (const key of ['usage','nativeSessionId','turnId','accountingEpochs','skillUses','decisions'] as const)
-        if (audit[key] !== undefined) Object.assign(record, { [key]: audit[key] })
-      record.quiescedAt = new Date().toISOString(); next.version++
+      for (const key of ['usage','nativeSessionId','turnId','accountingEpochs','skillUses','decisions'] as const)
+        if (facts[key] !== undefined) Object.assign(record, { [key]: facts[key] })
+      record.quiescedAt = facts.quiescedAt; next.version++
       try { await input.store.commit(run.projectId, run.ownerId, current.version, next, 'writer.quiesced'); return }
       catch (error) { if (rebase || !(error instanceof WorkflowError) || error.code !== 'revision-conflict') throw error }
     }
@@ -231,7 +289,7 @@ export function createV3Executor(input: { store: WorkflowStore; sessions: BeeGam
       if (!current) throw new WorkflowError('run-missing', 'Run disappeared during settlement')
       if (signal.aborted) result.error = 'Task cancelled; partial outputs retained, not accepted.'
       const next = finishTask(current, attempt.attemptId, attempt.fence, result, stopped)
-      try { await input.store.commit(run.projectId, run.ownerId, current.version, next, 'attempt.settled'); return }
+      try { await input.store.commit(run.projectId, run.ownerId, current.version, next, 'attempt.settled');observedExits.delete(attempt.attemptId); return }
       catch (error) { if (rebase || !(error instanceof WorkflowError) || error.code !== 'revision-conflict') throw error }
     }
   }

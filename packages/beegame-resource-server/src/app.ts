@@ -579,11 +579,21 @@ function parseCatalogRequest(value: unknown): ResourceCatalogRequest {
     throw new ResourceRequestValidationError('Resource catalog request must be an object')
   }
   const record = value as Record<string, unknown>
+  const requestKeys = ['filters', 'limit', 'cursor']
+  const unknownRequest = Object.keys(record).filter(key => !requestKeys.includes(key))
+  if (unknownRequest.length) throw new ResourceRequestValidationError('Unknown resource catalog request fields: '+unknownRequest.join(', ')+'. Use {filters:{...},limit,cursor}; free-text query/search is not supported.')
   const filtersValue = record.filters
   if (filtersValue !== undefined && (!filtersValue || typeof filtersValue !== 'object' || Array.isArray(filtersValue))) {
     throw new ResourceRequestValidationError('Resource catalog filters must be an object')
   }
   const filters = (filtersValue ?? {}) as Record<string, unknown>
+  const filterKeys = ['packIds','dimensions','primaryCategories','categories','styles','gameTypes','packTags','usageTags','assetKinds','capabilities','formats']
+  const unknownFilters = Object.keys(filters).filter(key => !filterKeys.includes(key))
+  if (unknownFilters.length) throw new ResourceRequestValidationError('Unknown resource catalog filters: '+unknownFilters.join(', ')+'. Supported filter arrays: '+filterKeys.join(', ')+'. Put limit/cursor outside filters; free-text query/search is not supported.')
+  for (const [key, list] of Object.entries(filters)) {
+    if (!Array.isArray(list) || list.some(item => typeof item !== 'string' || !item.trim()))
+      throw new ResourceRequestValidationError('Resource catalog filters.'+key+' must be an array of nonempty strings')
+  }
   const packIds = stringList(filters.packIds)
   const dimensions = validatedEnumList(filters.dimensions, RESOURCE_DIMENSIONS, 'Resource catalog dimensions') as ResourceDimension[] | undefined
   const primaryCategories = validatedEnumList(filters.primaryCategories, RESOURCE_PACK_PRIMARY_CATEGORIES, 'Resource catalog primaryCategories') as ResourcePack['primaryCategory'][] | undefined

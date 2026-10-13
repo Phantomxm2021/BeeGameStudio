@@ -86,13 +86,13 @@ export function checkDesignHandoffDraft(workspace: string, name: string, options
 }
 
 export const DESIGN_INDEX_INSTRUCTION = `Keep decisions, dependencies, open questions, limits and human-readable tables in docs/<NAME>.md. Save only the downstream index at .beegame/design-handoffs/<NAME without .md>.json; do not embed bgs-handoff JSON in prose.
-Minimal new index envelope: {"outputs":[{"id":"owned-outcome","section":"Exact saved heading","acceptance":{"section":"Exact saved acceptance heading","method":"test"}}],"evidence":[]}. Replace example IDs/headings with actual owned outcomes. Do not add a top-level document/path field; the sidecar filename identifies its document. Only final TECHNICAL_DESIGN owns implementationItems; other authors do not add them. Preserve existing valid fields when editing. Legacy compatibility requires an explicit version:1; an absent version means a current draft, not a legacy index. A section uses its full saved heading, including numbering. The host canonicalizes a uniquely matching title differing only by leading chapter numbering; missing or ambiguous titles remain invalid. The host adds metadata only after validation; it does not discard invalid fields or repair malformed indexes.
+Minimal new index envelope: {"outputs":[{"id":"owned-outcome","section":"Exact saved heading","acceptance":{"section":"Exact saved acceptance heading","method":"test"}}],"evidence":[]}. Replace example IDs/headings with actual owned outcomes. Do not add a top-level document/path field; the sidecar filename identifies its document. Only final TECHNICAL_DESIGN owns implementationItems; other authors do not add them. Preserve existing valid fields when editing. Only version 2 is accepted; an absent version means a current draft. A section uses its full saved heading, including numbering. The host canonicalizes a uniquely matching title differing only by leading chapter numbering; missing or ambiguous titles remain invalid. The host adds metadata only after validation; it does not discard invalid fields or repair malformed indexes.
 Write outputs:[{id,section,acceptance?:{section,method:"test"|"target-runtime"|"inspection"}}] and, where retained evidence is needed, evidence:[{id,kind:"contract"|"documentation"|"capability",path:workspace-relative retained file,source,section?:actual prose heading,pointer?:JSON pointer,expected?:value}]. IDs are local to their document. Headings point to the authoritative decisions and expectations; do not copy their rules into JSON. Do not mirror states, events, parameters, resources, inputs, consumes, pending, limits, platformFacts or readiness in the index. The host sets format version 2, document header/documentVersion and evidence sha256 after an authorized completed write. It advances versions on material changes to prose, the index or referenced retained evidence; unchanged documents keep their version. Authors do not calculate or synchronize versions/hashes.
-Register every necessary owned release outcome in outputs with acceptance pointing to an actual prose heading explaining conditions/actions, observable expected results and necessary boundaries/recovery. Keep explanatory prose out of the required checklist. Use an independently checkable behavior, page/state interaction, professional treatment or technical integration, not "implement all gameplay/UI" or one item per function, constant or sentence. Existing v1/v2 indexes remain readable but their coarse or unindexed expectations are not certified as a new complete checklist. Use test for deterministic rules/calculations, target-runtime for actual presentation/input/audio and end-to-end play, inspection for directly examinable resources or retained provenance. Prose review is not runtime evidence; no completed runtime check is required while authoring.`
+Register every necessary owned release outcome in outputs with acceptance pointing to an actual prose heading explaining conditions/actions, observable expected results and necessary boundaries/recovery. Keep explanatory prose out of the required checklist. Use an independently checkable behavior, page/state interaction, professional treatment or technical integration, not "implement all gameplay/UI" or one item per function, constant or sentence. Existing version 2 indexes remain readable but their coarse or unindexed expectations are not certified as a new complete checklist. Use test for deterministic rules/calculations, target-runtime for actual presentation/input/audio and end-to-end play, inspection for directly examinable resources or retained provenance. Prose review is not runtime evidence; no completed runtime check is required while authoring.`
 
 export const DESIGN_HANDOFF_INSTRUCTION = DESIGN_INDEX_INSTRUCTION + `
 Only the final TECHNICAL_DESIGN author adds implementationItems:[{id,section,dependsOn:[existing task IDs],requirementRefs:[{document:actual design filename,id:owned output ID}]}] to its existing index. New tasks state dependsOn explicitly (empty when independent); existing indexes without it remain readable but do not assert independence. Each section points to one concise task paragraph in TECHNICAL_DESIGN.md: deliverable goal, prerequisite task IDs, authoritative professional references, needed data inputs, observable completion conditions and verification method. Reference owner acceptance instead of copying it; add only task-specific integration expectations. Choose independently implementable and verifiable work units: foundational capabilities and end-to-end integration are both valid. Split independently failing work, not every constant or function; a whole player journey need not be one giant task. Retain shared constraints once and an end-to-end journey check. Cover every registered required output, including technical ones. Do not invent dependencies before specialists finish, another delivery-plan file, a task database, fixed command sequence or runtime verification. Joint Review compares original confirmed requirements, necessary professional decisions and task meaning; the program checks declared coverage, references and dependencies, not semantic completeness.
-Contract evidence checks its JSON pointer against expected. Capability evidence retains an actual JSON observation {observation:"target-runtime",check,passed:true,expected,observed}; expected and observed must agree. Documentation retains source bytes with an HTTPS source URL and precise source location. Live content/ui and content/scenes JSON are design sources, not immutable evidence: link them from their owning UI_UX_SPEC.md or LEVEL_SCENE_DESIGN.md sections, because Content completes bindings in the same files. Host-generated hashes bind bytes, not source authority, observation authenticity or semantic adequacy. Unsupported consequential assumptions, their owner, needed-by point and authorized fallback remain in prose for the joint review. User decisions must trace to actual user authorization. Legacy version 1 sidecars are read only for outputs and evidence; their retired business mirrors are not checked or treated as certified.`
+Contract evidence checks its JSON pointer against expected. Capability evidence retains an actual JSON observation {observation:"target-runtime",check,passed:true,expected,observed}; expected and observed must agree. Documentation retains source bytes with an HTTPS source URL and precise source location. Live content/ui and content/scenes JSON are design sources, not immutable evidence: link them from their owning UI_UX_SPEC.md or LEVEL_SCENE_DESIGN.md sections, because Content completes bindings in the same files. Host-generated hashes bind bytes, not source authority, observation authenticity or semantic adequacy. Unsupported consequential assumptions, their owner, needed-by point and authorized fallback remain in prose for the joint review. User decisions must trace to actual user authorization. Version 1 sidecars are rejected instead of silently converted.`
 
 function hash(body: string | Buffer) { return createHash('sha256').update(body).digest('hex') }
 function readRetained(workspace: string, path: string) {
@@ -280,17 +280,6 @@ export function designSupportingBytesDigest(path: string, bytes: Buffer, digestV
     return hash(bytes)
   }
 }
-/** Read legacy indexes without certifying or retaining their retired business mirrors. */
-function consumerHandoff(raw: unknown): unknown {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || (raw as any).version !== 1) return raw
-  const legacy = raw as Record<string, any>
-  return { version: 2, ...(legacy.documentVersion !== undefined ? { documentVersion: legacy.documentVersion } : {}),
-    outputs: Array.isArray(legacy.outputs) ? legacy.outputs.map((output: any) => {
-      if (!output || typeof output !== 'object' || Array.isArray(output)) return output
-      return { id: output.id, section: output.section, ...(output.acceptance !== undefined ? { acceptance: output.acceptance } : {}) }
-    }) : legacy.outputs,
-    ...(legacy.evidence !== undefined ? { evidence: legacy.evidence } : {}) }
-}
 function documentHandoff(workspace: string, name: DesignDocument, body: string) {
   const { blocks, headings } = documentStructure(body)
   if (blocks.length) throw new Error('Move inline bgs-handoff to ' + designHandoffPath(name) + '; preserve prose decisions')
@@ -303,7 +292,7 @@ function documentHandoff(workspace: string, name: DesignDocument, body: string) 
 
 // A malformed evidence record must not hide an independently invalid output pointer.
 function diagnosticHandoff(name: DesignDocument, raw: unknown, issues: string[]): Partial<DesignHandoff> {
-  const current = consumerHandoff(raw), parsed = handoffSchema.safeParse(current)
+  const current = raw, parsed = handoffSchema.safeParse(current)
   if (parsed.success) return parsed.data
   issues.push(...handoffShapeIssues(name, current, parsed.error))
   if (!current || typeof current !== 'object' || Array.isArray(current)) return {}
@@ -341,7 +330,7 @@ function handoffShapeIssues(name: DesignDocument, raw: unknown, error: z.ZodErro
   })
 }
 function parseHandoff(name: DesignDocument, raw: unknown): DesignHandoff {
-  const current = consumerHandoff(raw), parsed = handoffSchema.safeParse(current)
+  const current = raw, parsed = handoffSchema.safeParse(current)
   if (!parsed.success) throw Error(handoffShapeIssues(name, current, parsed.error).join('; '))
   return parsed.data
 }
@@ -448,8 +437,7 @@ function evidenceDigest(workspace: string, evidence: DesignHandoff['evidence'][n
   return hash(bytes)
 }
 
-/** Index/evidence integrity only. Prose decisions and dependencies need semantic review.
- * The old options remain source compatible; none enables retired mirror checks. */
+/** Index/evidence integrity only. Prose decisions and dependencies need semantic review. */
 export function checkDesignHandoff(workspace: string, documents: readonly DesignDocument[], _options: {
   nextConsumers?: readonly string[]; technicalBaseline?: boolean; inputs?: readonly string[]; digestVersion?: 1 | 2
 } = {}) {
@@ -513,7 +501,7 @@ export function checkDesignHandoff(workspace: string, documents: readonly Design
   issues.push(...implementationIssues(indexes, completeDesign))
   return { valid: !issues.length, issues, snapshots, evidenceHashes, documentVersions, digestVersion: _options.digestVersion ?? DESIGN_DIGEST_VERSION,
     revision: hash(JSON.stringify([snapshots, evidenceHashes])),
-    note: 'Checks output/acceptance pointers, local IDs and retained evidence bytes/declared observations. Legacy v1 is read-only compatible for outputs/evidence; retired readiness, states, events, parameters, resources, inputs, consumes, platformFacts, pending and limits are ignored and not certified. Prose completeness, dependencies, source authority, observation authenticity, semantic adequacy and experience quality remain review/owner judgments.' }
+    note: 'Checks output/acceptance pointers, local IDs and retained evidence bytes/declared observations. Version 1 and retired business mirrors are rejected. Prose completeness, dependencies, source authority, observation authenticity, semantic adequacy and experience quality remain review/owner judgments.' }
 }
 
 // Version lines are host metadata, excluded only from material-change detection.
@@ -539,7 +527,7 @@ function stable(value: any): any {
   return Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])]))
 }
 function materialHandoff(raw: unknown) {
-  const current = consumerHandoff(raw)
+  const current = raw
   if (!current || typeof current !== 'object' || Array.isArray(current)) return current
   const { version: _format, documentVersion: _version, ...index } = current as Record<string, any>
   if (Array.isArray(index.evidence)) index.evidence = index.evidence.map(evidence => {
@@ -564,7 +552,7 @@ function materialDocument(workspace: string, name: DesignDocument) {
   try { raw = sidecar ? JSON.parse(sidecar.toString('utf8')) : undefined }
   catch { raw = { malformedIndex: hash(sidecar!) } }
   const evidence: Array<[string, string]> = []
-  const refs = (consumerHandoff(raw) as { evidence?: unknown } | undefined)?.evidence
+  const refs = (raw as { evidence?: unknown } | undefined)?.evidence
   if (Array.isArray(refs)) for (const ref of refs) if (typeof ref?.path === 'string') {
     try { evidence.push([ref.path, hash(readRetained(workspace, ref.path))]) }
     catch (error) { evidence.push([ref.path, String(error)]) }

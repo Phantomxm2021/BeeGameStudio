@@ -6,6 +6,25 @@ export type ModelProviderKind =
   | 'gemini'
   | 'grok'
 
+export type ModelAuthMethod = 'platform' | 'byok' | 'claude-subscription' | 'chatgpt-subscription'
+
+export function modelAuthMethods(provider: ModelProviderKind): ModelAuthMethod[] {
+  return ['platform', 'byok', ...(provider === 'anthropic-compatible'
+    ? ['claude-subscription' as const] : provider === 'openai-compatible'
+      ? ['chatgpt-subscription' as const] : [])]
+}
+
+export function validateModelAccess(provider: ModelProviderKind, methods: unknown): ModelAuthMethod[] {
+  if (!['anthropic-compatible', 'openai-compatible', 'gemini', 'grok'].includes(provider)) {
+    throw new Error('Unsupported model provider')
+  }
+  if (methods === undefined) return ['platform']
+  if (!Array.isArray(methods) || !methods.length || methods.some(method => !modelAuthMethods(provider).includes(method))) {
+    throw new Error('Choose at least one authentication method supported by this provider')
+  }
+  return [...new Set(methods)]
+}
+
 export type ModelTierMap = {
   fast?: string
   balanced?: string
@@ -13,6 +32,8 @@ export type ModelTierMap = {
 }
 
 export type PublicModelConfig = {
+  published?: boolean
+  authMethods?: ModelAuthMethod[]
   id: string
   ownerId: string
   name: string
@@ -27,6 +48,8 @@ export type PublicModelConfig = {
 }
 
 export type ModelConfigInput = {
+  published?: boolean
+  authMethods?: ModelAuthMethod[]
   name: string
   provider: ModelProviderKind
   baseUrl?: string
@@ -38,7 +61,7 @@ export type ModelConfigInput = {
 export type ModelConfigUpdate = Partial<
   Pick<
     ModelConfigInput,
-    'name' | 'provider' | 'baseUrl' | 'apiKey' | 'models'
+    'name' | 'provider' | 'baseUrl' | 'apiKey' | 'models' | 'published' | 'authMethods'
   > & {
     isDefault: boolean
     clearSecret: boolean
@@ -78,6 +101,8 @@ export function resetModelConfigs(): void {
 
 export function exportModelConfigSnapshot(): ModelConfigSnapshotRecord[] {
   return [...configs.values()].map(config => ({
+    published: config.published ?? true,
+    authMethods: config.authMethods ?? ['platform'],
     id: config.id,
     ownerId: config.ownerId,
     name: config.name,
@@ -97,6 +122,8 @@ export function importModelConfigSnapshot(
   configs.clear()
   for (const config of snapshot) {
     configs.set(config.id, {
+      published: config.published ?? true,
+      authMethods: validateModelAccess(config.provider, config.authMethods),
       id: config.id,
       ownerId: config.ownerId,
       name: config.name,
@@ -117,6 +144,8 @@ export function createModelConfig(
 ): PublicModelConfig {
   const now = new Date()
   const record: StoredModelConfig = {
+    published: input.published ?? true,
+    authMethods: validateModelAccess(input.provider, input.authMethods),
     id: `llm_${randomUUID().replaceAll('-', '')}`,
     ownerId,
     name: input.name,
@@ -156,6 +185,9 @@ export function updateModelConfig(
   const record = configs.get(id)
   if (!record) return undefined
 
+  const methods = validateModelAccess(patch.provider ?? record.provider, patch.authMethods ?? record.authMethods)
+  record.authMethods = methods
+  if (patch.published !== undefined) record.published = patch.published
   if (patch.name !== undefined) record.name = patch.name
   if (patch.provider !== undefined) record.provider = patch.provider
   if (patch.baseUrl !== undefined) {
@@ -257,6 +289,8 @@ function clearOwnerDefaults(ownerId: string): void {
 
 function toPublicConfig(record: StoredModelConfig): PublicModelConfig {
   return {
+    published: record.published ?? true,
+    authMethods: [...(record.authMethods ?? ['platform'])],
     id: record.id,
     ownerId: record.ownerId,
     name: record.name,

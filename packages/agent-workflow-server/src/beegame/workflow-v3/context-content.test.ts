@@ -3,12 +3,29 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRun, publishPlan, claimTask, finishTask, V3_PROTOCOL, type TaskSpec } from './state'
-import { taskContext, sourceIndex, skillEvidence, skillUseCheck } from './context'
+import { taskContext, sourceIndex, skillEvidence, skillUseCheck, priorMainSkillLoads } from './context'
 import { runChecks, versionsMatch } from './checks'
 import { uiLayoutFixture, sceneLayoutFixture } from '../fixtures/layout-fixture'
 import { auditAssetContract } from '../asset-contract-audit'
 import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
 import { writeBeeGameAssetManifest } from '../asset-contracts'
+
+test('historical Skill evidence preserves same-session successful loads without inventing current/child application',()=>{
+  const run=createRun({projectId:'history',ownerId:'owner',workspacePath:'/unused',chatSessionId:'chat',requestKey:'goal',text:'Goal',constraints:{},ids:['goal']})
+  const turn=(id:string,native:string|undefined,skills:any[])=>({attemptId:id,requestKey:id,sessionId:'chat',workerId:'worker',
+    fence:1,status:'ended' as const,startedAt:'past',nativeSessionId:native,skillUses:skills})
+  const load=(name:string,toolUseID:string)=>({name,toolUseID,eventId:1,status:'loaded' as const})
+  run.agentTurns=[turn('first','native-a',[load('design','old'),{...load('child-method','child'),parentToolUseID:'delegate'},
+    {...load('failed-method','failed'),status:'failed'}]),turn('other','native-b',[load('not-in-lineage','other')]),
+    turn('recent','native-a',[load('design','recent')]),turn('current',undefined,[load('not-historical','current')]),
+    turn('future','native-a',[load('future','future')])]
+  const before=structuredClone(run),result=priorMainSkillLoads(run,'current')
+  expect(result).toEqual({recordedMainLoads:[{name:'design',attemptId:'recent',toolUseID:'recent'}],
+    contextPresence:'unverified',application:'unverified'})
+  expect(priorMainSkillLoads(run,'first').recordedMainLoads).toEqual([])
+  expect(priorMainSkillLoads(run,'unknown').recordedMainLoads).toEqual([])
+  expect(run).toEqual(before)
+})
 
 const task: TaskSpec = { id: 'ui', kind: 'game.develop', goal: 'Deliver the confirmed UI', dependsOn: [], requirementIds: ['req.loop'], inputs: [],
   writablePaths: ['content/**'], expectedOutputs: ['content/ui/menu.json'], checks: ['content-structure', 'content-layout', 'content-resources'] }

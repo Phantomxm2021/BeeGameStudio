@@ -170,8 +170,9 @@ function mergeRuntimeEnvironment(
   const selectedEnvironment = {
     ...normalizeRuntimeEnvironment(additionalEnv),
     ...normalizeRuntimeEnvironment(runtime?.env ?? {}),
+    ...(additionalEnv.BGS_MODEL_CONNECTION_RESOLVED === '1' ? normalizeRuntimeEnvironment(additionalEnv) : {}),
   }
-  const modelType = runtime?.modelType ?? inferSelectedRuntimeModelType(selectedEnvironment)
+  const modelType = additionalEnv.BGS_MODEL_CONNECTION_RESOLVED === '1' ? additionalEnv.BEEGAME_MODEL_TYPE : runtime?.modelType ?? inferSelectedRuntimeModelType(selectedEnvironment)
   return {
     ...selectedEnvironment,
     ...(modelType ? { BEEGAME_MODEL_TYPE: modelType } : {}),

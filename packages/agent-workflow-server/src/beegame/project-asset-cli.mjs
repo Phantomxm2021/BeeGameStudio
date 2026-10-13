@@ -11,9 +11,13 @@ import {
 } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 
+const catalogFilterKeys = ['packIds','dimensions','primaryCategories','categories','styles','gameTypes','packTags','usageTags','assetKinds','capabilities','formats']
+const catalogUsage = 'Catalog accepts structured filter arrays: '+catalogFilterKeys.join(', ')+
+  '. No free-text query/search. Use {"filters":{"formats":["png"]},"limit":10,"cursor":"<returned nextCursor>"}; flat filter arrays with limit/cursor also work.'
+
 const usage = `Usage: bun <this-file> <command> [arguments]
-  catalog [filters-json]                 Browse library packs and available facets
-  elements <pack-id> [filters-json]      Browse a selected pack's elements
+  catalog [request-json]                Browse library packs and available facets
+  elements <pack-id> [request-json]      Browse a selected pack's elements
   pack <pack-id>                         Read license, version and pack metadata
   element <pack-id> <element-id>         Read element and dependency metadata
   fetch <pack-id> <element-id> <assets/path>  Download one selected library file
@@ -25,6 +29,7 @@ const usage = `Usage: bun <this-file> <command> [arguments]
 For compatible small AI-generated elements, prefer one shared sheet request; use atlas to register inspected rectangles. generate returns an image, not frame metadata. atlas does not pack separate images. Split generation for a concrete visual/use need, preserving planned atlas delivery.
 For decoded image crop/resize/composition and packing separate sprites, use ${TOOL_CONFIG.mediaCommand ?? 'bun .beegame/delivery/media.mjs'} --help. Its JSON request supports named crop regions, explicit filtering/padding and compatible atlas output; no package installation or custom PNG encoder is needed.
 The same atlas delivery applies to retrieved and procedural static sprites. Procedural drawing can write a shared PNG and exact rectangles directly. Dynamic text and live geometry need not become images.
+${catalogUsage}
 Commands are optional. You choose the source and asset design. No command updates the Manifest.`
 
 function id(value) {
@@ -33,12 +38,26 @@ function id(value) {
   return value
 }
 
-function filters(value) {
-  if (value === undefined) return {}
-  const parsed = JSON.parse(value)
+function catalogRequest(value) {
+  const parsed = value === undefined ? {} : JSON.parse(value)
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-    throw new Error('Filters must be a JSON object')
-  return parsed
+    throw new Error('Catalog request must be a JSON object. '+catalogUsage)
+  const nested = Object.hasOwn(parsed, 'filters')
+  const allowed = nested ? ['filters','limit','cursor'] : [...catalogFilterKeys,'limit','cursor']
+  const unknown = Object.keys(parsed).filter(key => !allowed.includes(key))
+  if (unknown.length) throw new Error('Unknown catalog request fields: '+unknown.join(', ')+'. '+catalogUsage)
+  const filters = nested ? parsed.filters : Object.fromEntries(Object.entries(parsed).filter(([key]) => catalogFilterKeys.includes(key)))
+  if (!filters || typeof filters !== 'object' || Array.isArray(filters)) throw new Error('Catalog filters must be an object. '+catalogUsage)
+  for (const [key, values] of Object.entries(filters)) {
+    if (!catalogFilterKeys.includes(key)) throw new Error('Unknown catalog filter: '+key+'. '+catalogUsage)
+    if (!Array.isArray(values) || values.some(value => typeof value !== 'string' || !value.trim()))
+      throw new Error('Catalog filters.'+key+' must be an array of nonempty strings. '+catalogUsage)
+  }
+  if (parsed.limit !== undefined && (!Number.isInteger(parsed.limit) || parsed.limit < 1 || parsed.limit > 64))
+    throw new Error('Catalog limit must be an integer from 1 to 64, outside filters. '+catalogUsage)
+  if (parsed.cursor !== undefined && typeof parsed.cursor !== 'string')
+    throw new Error('Catalog cursor must be a string, outside filters. '+catalogUsage)
+  return { filters, ...(parsed.limit !== undefined ? {limit:parsed.limit}:{}), ...(parsed.cursor !== undefined ? {cursor:parsed.cursor}:{}) }
 }
 
 async function jsonRequest(url, init) {
@@ -143,16 +162,18 @@ async function main() {
   )
     throw new Error('Built-in resource library is unavailable for this turn')
   if (command === 'catalog') {
+    if (args.length > 1) throw new Error(usage)
     console.log(
       JSON.stringify(
         await jsonRequest(base + '/api/resource-catalog/packs', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ filters: filters(args[0]) }),
+          body: JSON.stringify(catalogRequest(args[0])),
         }),
       ),
     )
   } else if (command === 'elements') {
+    if (args.length > 2) throw new Error(usage)
     console.log(
       JSON.stringify(
         await jsonRequest(
@@ -160,7 +181,7 @@ async function main() {
           {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ filters: filters(args[1]) }),
+            body: JSON.stringify(catalogRequest(args[1])),
           },
         ),
       ),

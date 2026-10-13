@@ -18,7 +18,7 @@
  * same GrowthBook flag so the two surfaces stay in sync.
  */
 import { feature } from 'bun:bundle'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { isAwaySummaryEnabled } from '../../utils/optionalRuntimeFeatures.js'
 import type {
   Command,
   LocalCommandCall,
@@ -76,7 +76,7 @@ const recap = {
    */
   isEnabled: (): boolean => {
     if (!feature('AWAY_SUMMARY')) return false
-    return getFeatureValue_CACHED_MAY_BE_STALE('tengu_sedge_lantern', true)
+    return isAwaySummaryEnabled(true)
   },
   supportsNonInteractive: false,
   isHidden: false,

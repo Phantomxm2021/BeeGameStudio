@@ -4,11 +4,13 @@ import type { ComponentProps } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SettingsMenu } from './SettingsMenu';
+import { useSystemStore } from '../../../store/systemStore';
 import { getImageGenerationSettings, saveImageGenerationSettings } from '../../../services/imageGenerationApi';
 vi.mock('../../../services/imageGenerationApi', () => ({ getImageGenerationSettings: vi.fn(), saveImageGenerationSettings: vi.fn() }));
 
 const {
     createModelConfig,
+    deleteModelConfig,
     createMcpServer,
     deleteMcpServer,
     discoverActiveMcpServers,
@@ -18,6 +20,7 @@ const {
     getRuntimeSettings,
     getInvitationPublicSettings,
     listModelConfigs,
+    listModelCatalog,
     listInvitations,
     listMcpServers,
     saveRuntimeSettings,
@@ -29,6 +32,7 @@ const {
     updateInvitation,
     updateMcpServer,
     updateModelConfig,
+    saveModelConnection,
     getCreditSummary,
     getBillingCreditPacks,
     getBillingEvents,
@@ -44,6 +48,7 @@ const {
     showSuccess,
 } = vi.hoisted(() => ({
     createModelConfig: vi.fn(),
+    deleteModelConfig: vi.fn(),
     createInvitation: vi.fn(),
     createMcpServer: vi.fn(),
     deleteInvitation: vi.fn(),
@@ -56,6 +61,7 @@ const {
     getRuntimeSettings: vi.fn(),
     listInvitations: vi.fn(),
     listModelConfigs: vi.fn(),
+    listModelCatalog: vi.fn(),
     listMcpServers: vi.fn(),
     saveInvitationSettings: vi.fn(),
     saveRuntimeSettings: vi.fn(),
@@ -64,6 +70,7 @@ const {
     updateInvitation: vi.fn(),
     updateMcpServer: vi.fn(),
     updateModelConfig: vi.fn(),
+    saveModelConnection: vi.fn(),
     getCreditSummary: vi.fn(),
     getBillingCreditPacks: vi.fn(),
     getBillingEvents: vi.fn(),
@@ -85,8 +92,11 @@ const desktopBridge = {
 
 vi.mock('../../../services/modelConfigApi', () => ({
     createModelConfig,
+    deleteModelConfig,
     listModelConfigs,
+    listModelCatalog,
     updateModelConfig,
+    saveModelConnection,
 }));
 
 vi.mock('../../../services/beeGameAdapter', () => ({
@@ -237,6 +247,7 @@ describe('SettingsMenu model settings', () => {
         showError.mockReset();
         showSuccess.mockReset();
         createModelConfig.mockReset();
+        deleteModelConfig.mockReset();
         updateModelConfig.mockReset();
         updateMcpServer.mockReset();
     getCreditSummary.mockReset();
@@ -379,6 +390,33 @@ describe('SettingsMenu model settings', () => {
         expect(screen.queryByRole('button', { name: '选择工作路径' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
+    });
+
+    it('saves BYOK from the shared bottom-right footer, not inside the scroll area', async () => {
+        useSystemStore.setState({ currentUser: { id: 'fixture-user', role: 'viewer', permissions: [] } });
+        listModelCatalog.mockResolvedValue([
+            { id: 'official', name: 'Bee Game Studio LLM', provider: 'anthropic-compatible', models: { balanced: 'official' }, apiKeyPreview: '', isDefault: true, authMethods: ['platform'], connection: { method: 'platform', hasKey: false, isPreferred: false, claudeConnected: false, chatgptConnected: false } },
+            { id: 'personal-byok', name: 'BYOK', provider: 'anthropic-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: { method: 'platform', hasKey: false, isPreferred: false, claudeConnected: false, chatgptConnected: false } },
+        ]);
+        saveModelConnection.mockResolvedValue({ method: 'byok', hasKey: true, isPreferred: true, claudeConnected: false, chatgptConnected: false });
+        try {
+            renderSettings();
+            await userEvent.click(screen.getByRole('tab', { name: '模型连接' }));
+            await userEvent.click(screen.getByRole('button', { name: '连接方式' }));
+            await userEvent.click(screen.getByRole('option', { name: 'BYOK' }));
+            await userEvent.type(screen.getByLabelText('接口 URL'), 'https://example.com/v1');
+            await userEvent.type(screen.getByLabelText('API Key'), 'fixture-secret');
+            await userEvent.type(screen.getByLabelText('快速模型'), 'fast');
+            await userEvent.type(screen.getByLabelText('均衡模型'), 'balanced');
+            await userEvent.type(screen.getByLabelText('强力模型'), 'strong');
+            const save = screen.getByRole('button', { name: '保存设置' });
+            expect(screen.getByTestId('settings-modal-scroll-area')).not.toContainElement(save);
+            expect(save.parentElement).toHaveClass('justify-end');
+            await userEvent.click(save);
+            await waitFor(() => expect(saveModelConnection).toHaveBeenCalledWith('personal-byok', 'byok', 'fixture-secret', true, { provider: 'anthropic-compatible', baseUrl: 'https://example.com/v1', models: { fast: 'fast', balanced: 'balanced', strong: 'strong' } }));
+        } finally {
+            useSystemStore.setState({ currentUser: null });
+        }
     });
 
     it('exposes the persisted theme toggle in General settings', async () => {
@@ -852,8 +890,11 @@ describe('SettingsMenu model settings', () => {
 
         expect(screen.getByRole('tab', { name: '能力' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.queryByRole('switch', { name: 'Subagents' })).not.toBeInTheDocument();
-        expect(screen.getByRole('switch', { name: '自动记忆' })).toBeChecked();
-        expect(screen.getByRole('switch', { name: '自动整理' })).toBeChecked();
+        expect(screen.getByRole('switch', { name: '自动记忆' })).not.toBeChecked();
+        expect(screen.getByRole('switch', { name: '自动整理' })).not.toBeChecked();
+        for (const name of ['独立 Verification', 'Agent Teams', '输入建议', '离开摘要（CLI）', 'Coordinator 模式']) {
+            expect(screen.getByRole('switch', { name })).not.toBeChecked();
+        }
         expect(screen.getByRole('switch', { name: 'Skill Search' })).not.toBeChecked();
         expect(screen.getByText('记住偏好、项目决策和常用上下文。')).toBeInTheDocument();
         expect(screen.queryByText('好处: 跨会话保留偏好、项目决策和常用上下文。')).not.toBeInTheDocument();
@@ -1049,9 +1090,16 @@ describe('SettingsMenu model settings', () => {
 
         await userEvent.click(await screen.findByRole('switch', { name: 'Skill Search' }));
         await userEvent.click(screen.getByRole('switch', { name: 'Bash AST 解析' }));
+        await userEvent.click(screen.getByRole('switch', { name: '独立 Verification' }));
+        await userEvent.click(screen.getByRole('switch', { name: 'Agent Teams' }));
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
         await waitFor(() => expect(saveRuntimeSettings).toHaveBeenCalledWith({
+            verificationAgentEnabled: true,
+            agentTeamsEnabled: true,
+            promptSuggestionEnabled: false,
+            awaySummaryEnabled: false,
+            coordinatorModeEnabled: false,
             autoMemoryEnabled: true,
             autoDreamEnabled: true,
             skillSearchEnabled: true,
@@ -1111,11 +1159,26 @@ describe('SettingsMenu model settings', () => {
         await openPlatformSettingsTab('模型');
 
         expect(screen.queryByText('BeeGame LLM')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument();
+        const addModel = screen.getByRole('button', { name: '添加模型配置' });
+        expect(addModel).toHaveClass('rounded-full', 'bg-transparent');
+        await userEvent.click(addModel);
+        expect(screen.getByRole('dialog', { name: '添加模型配置' })).toContainElement(screen.getByTestId('model-config-popover'));
         expect(screen.queryByLabelText('配置名称')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('模型显示名称')).not.toBeInTheDocument();
         expect(screen.queryByLabelText('设为默认模型')).not.toBeInTheDocument();
         expect(screen.getByLabelText('Fast 模型')).toBeInTheDocument();
         expect(screen.getByLabelText('Balanced 模型')).toBeInTheDocument();
         expect(screen.getByLabelText('Strong 模型')).toBeInTheDocument();
+        expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+        const publicationSwitch = screen.getByRole('switch', { name: '向普通用户发布' });
+        expect(publicationSwitch).toBeChecked();
+        await userEvent.click(publicationSwitch);
+        expect(publicationSwitch).not.toBeChecked();
+        await userEvent.click(publicationSwitch);
+        expect(screen.getByRole('switch', { name: '平台默认模型' })).toBeChecked();
+        expect(screen.getByRole('switch', { name: '平台凭据' })).toBeChecked();
+        expect(screen.getByRole('switch', { name: 'BYOK' })).not.toBeChecked();
 
         await userEvent.type(screen.getByLabelText('Base URL'), 'https://api.example.com/v1');
         await userEvent.type(screen.getByLabelText('API Key'), 'sk-secret');
@@ -1125,6 +1188,8 @@ describe('SettingsMenu model settings', () => {
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
         await waitFor(() => expect(createModelConfig).toHaveBeenCalledWith({
+            published: true,
+            authMethods: ['platform'],
             name: 'BeeGame LLM',
             provider: 'openai-compatible',
             baseUrl: 'https://api.example.com/v1',
@@ -1148,6 +1213,7 @@ describe('SettingsMenu model settings', () => {
 
         renderSettings();
         await openPlatformSettingsTab('模型');
+        await userEvent.click(screen.getByRole('button', { name: '添加模型配置' }));
         await userEvent.type(screen.getByLabelText('Base URL'), 'https://provider.example.com/v1');
         await userEvent.type(screen.getByLabelText('API Key'), 'sk-secret');
         await userEvent.type(screen.getByLabelText('Balanced 模型'), 'model-balanced');
@@ -1189,7 +1255,11 @@ describe('SettingsMenu model settings', () => {
         renderSettings();
         await openPlatformSettingsTab('模型');
 
+        fireEvent.keyDown(await screen.findByRole('button', { name: 'Existing LLM 操作' }), { key: 'ArrowDown' });
+        await userEvent.click(await screen.findByRole('menuitem', { name: '详情' }));
+        expect(screen.getByRole('dialog', { name: '模型详情' })).toContainElement(screen.getByTestId('model-config-popover'));
         const apiKeyInput = await screen.findByLabelText('API Key');
+        expect(screen.queryByLabelText('模型显示名称')).not.toBeInTheDocument();
         expect(apiKeyInput).toHaveAttribute('placeholder', '已保存：sk-...saved');
         expect(apiKeyInput).toHaveValue('');
 
@@ -1199,6 +1269,8 @@ describe('SettingsMenu model settings', () => {
         await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
 
         await waitFor(() => expect(updateModelConfig).toHaveBeenCalledWith('llm_existing', {
+            published: true,
+            authMethods: ['platform'],
             name: 'Existing LLM',
             provider: 'openai-compatible',
             baseUrl: 'https://api.saved.test/v1',
@@ -1210,6 +1282,71 @@ describe('SettingsMenu model settings', () => {
             isDefault: true,
         }));
         expect(createModelConfig).not.toHaveBeenCalled();
+    });
+
+    it('closes the model popover with Escape while keeping settings open', async () => {
+        listModelConfigs.mockResolvedValueOnce([{
+            id: 'llm_existing',
+            name: 'Existing LLM',
+            provider: 'openai-compatible',
+            models: { balanced: 'model-balanced' },
+            isDefault: true,
+        }]);
+        renderSettings();
+        await openPlatformSettingsTab('模型');
+        fireEvent.keyDown(await screen.findByRole('button', { name: 'Existing LLM 操作' }), { key: 'ArrowDown' });
+        await userEvent.click(await screen.findByRole('menuitem', { name: '详情' }));
+        const details = screen.getByRole('dialog', { name: '模型详情' });
+        fireEvent.keyDown(details, { key: 'Escape' });
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: '模型详情' })).not.toBeInTheDocument());
+        expect(screen.getByTestId('settings-modal-shell')).toBeInTheDocument();
+    });
+
+    it('renames only the selected platform model and deletes only after confirmation', async () => {
+        const model = { id: 'model-a', name: 'Model A', provider: 'openai-compatible', models: { balanced: 'model' }, apiKeyPreview: 'sk-...key', isDefault: true };
+        listModelConfigs.mockResolvedValue([model, { ...model, id: 'model-b', name: 'Model B', isDefault: false }]);
+        updateModelConfig.mockResolvedValue({ ...model, name: 'Renamed' });
+        deleteModelConfig.mockResolvedValue({ deleted: true });
+        renderSettings();
+        await openPlatformSettingsTab('模型');
+        const actions = await screen.findByRole('button', { name: 'Model A 操作' });
+        expect(actions).toHaveClass('bg-transparent');
+        expect(screen.queryByLabelText('模型配置')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument();
+        fireEvent.keyDown(actions, { key: 'ArrowDown' });
+        const renameAction = await screen.findByRole('menuitem', { name: '编辑名称' });
+        expect(document.querySelector('[data-morph-popover-portal]')).toContainElement(renameAction);
+        await userEvent.click(renameAction);
+        expect(screen.getByRole('dialog', { name: '编辑名称' })).toContainElement(screen.getByTestId('model-config-popover'));
+        await userEvent.clear(screen.getByLabelText('模型显示名称'));
+        await userEvent.type(screen.getByLabelText('模型显示名称'), 'Renamed');
+        await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
+        await waitFor(() => expect(updateModelConfig).toHaveBeenCalledWith('model-a', { name: 'Renamed' }));
+        fireEvent.keyDown(await screen.findByRole('button', { name: 'Renamed 操作' }), { key: 'ArrowDown' });
+        await userEvent.click(await screen.findByRole('menuitem', { name: '删除' }));
+        expect(screen.getByRole('dialog', { name: '删除模型配置' })).toContainElement(screen.getByTestId('model-config-popover'));
+        expect(deleteModelConfig).not.toHaveBeenCalled();
+        await userEvent.click(screen.getByRole('button', { name: '取消' }));
+        expect(deleteModelConfig).not.toHaveBeenCalled();
+        fireEvent.keyDown(screen.getByRole('button', { name: 'Renamed 操作' }), { key: 'ArrowDown' });
+        await userEvent.click(await screen.findByRole('menuitem', { name: '删除' }));
+        await userEvent.click(screen.getByRole('button', { name: '删除', exact: true }));
+        await waitFor(() => expect(screen.queryByRole('button', { name: 'Renamed 操作' })).not.toBeInTheDocument());
+        expect(deleteModelConfig).toHaveBeenCalledWith('model-a');
+        expect(screen.getByRole('button', { name: 'Model B 操作' })).toBeInTheDocument();
+    });
+
+    it('keeps the model item and reports an error when deletion fails', async () => {
+        listModelConfigs.mockResolvedValue([{ id: 'model-a', name: 'Model A', provider: 'openai-compatible', models: { balanced: 'model' }, apiKeyPreview: '', isDefault: true }]);
+        deleteModelConfig.mockResolvedValue({ deleted: false });
+        renderSettings();
+        await openPlatformSettingsTab('模型');
+        fireEvent.keyDown(await screen.findByRole('button', { name: 'Model A 操作' }), { key: 'ArrowDown' });
+        await userEvent.click(await screen.findByRole('menuitem', { name: '删除' }));
+        await userEvent.click(screen.getByRole('button', { name: '删除', exact: true }));
+        expect(await screen.findByRole('status')).toHaveTextContent('模型未删除');
+        await userEvent.click(screen.getByRole('button', { name: '取消' }));
+        expect(screen.getByRole('button', { name: 'Model A 操作' })).toBeInTheDocument();
     });
 
     it('shows API key only for search providers that need one and saves them from the footer', async () => {

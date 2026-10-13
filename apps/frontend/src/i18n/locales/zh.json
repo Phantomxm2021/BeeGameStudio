@@ -493,6 +493,36 @@
         "note": "适合较复杂的构建和验证；简单任务通常不会主动使用。"
       },
       "items": {
+        "verificationAgentEnabled": {
+          "label": "独立 Verification",
+          "description": "非简单修改要求独立审计，并启用完成时的审计提醒。",
+          "note": "默认关闭。保存后下一任务生效；普通 Agent 和测试能力保留。",
+          "scope": "newSession"
+        },
+        "agentTeamsEnabled": {
+          "label": "Agent Teams",
+          "description": "启用团队与队友协作能力。",
+          "note": "默认关闭。保存后下一任务生效；普通子代理不依赖此开关。",
+          "scope": "newSession"
+        },
+        "promptSuggestionEnabled": {
+          "label": "输入建议",
+          "description": "让模型生成下一条消息的建议。",
+          "note": "默认关闭。保存后下一任务生效，可能增加模型调用。",
+          "scope": "newSession"
+        },
+        "awaySummaryEnabled": {
+          "label": "离开摘要（CLI）",
+          "description": "启用交互式 CLI 的离开摘要与 /recap。",
+          "note": "默认关闭。BGS 无头 Chat 不展示离开摘要；不会新增聊天面板。",
+          "scope": "newSession"
+        },
+        "coordinatorModeEnabled": {
+          "label": "Coordinator 模式",
+          "description": "新会话使用协调者角色分派工作。",
+          "note": "默认关闭。仅新会话生效，续作保留原模式；团队工具还需开启 Agent Teams。",
+          "scope": "newSession"
+        },
         "autoMemoryEnabled": {
           "label": "自动记忆",
           "description": "记住偏好、项目决策和常用上下文。",

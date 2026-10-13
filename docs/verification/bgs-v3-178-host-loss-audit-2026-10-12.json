@@ -1,0 +1,41 @@
+{
+  "version": "1.78",
+  "date": "2026-10-12",
+  "phase": "pre-implementation-audit",
+  "decision": "Minimal host exit receipt, not forced takeover or a supervisor framework",
+  "confirmedRoot": "1.77 retains observed exit only in volatile executor memory until remote CAS succeeds. Host loss after cleanup and failed remote persistence destroys recoverable factual evidence.",
+  "selected": {
+    "write": "After successful owned cleanup/no-start observation, before remote quiescence persistence, save a signed atomic receipt in host data directory outside project workspace.",
+    "read": "Explicit same-attempt recovery only: verify signature, complete owner/project/Run/workspace/chat/request/worker/fence binding, current revision and no active local writer.",
+    "settle": "Replay factual persistence and fail/interrupted settlement only. Never replay native, edit, checks or external operations.",
+    "key": "Reuse existing host config encryption key with HMAC domain separation; no new project settings/hooks/key provisioning. Missing/rotated key means no usable host receipt."
+  },
+  "rejected": [
+    "Elapsed-time/PID/session/transcript-terminal inference: does not prove all owned cleanup completed.",
+    "User checkbox or admin force release: assertions are not exit evidence.",
+    "Automatic model retries or runtime takeover: could duplicate unresolved side effects.",
+    "Supervisor/lease/heartbeat framework: not needed to preserve an already observed fact; still cannot prove unknown external completion."
+  ],
+  "sideEffects": [
+    "Host-local receipts require original trusted storage and signing key; new machine without them cannot recover.",
+    "Local write failure cannot invalidate successful remote settlement: retain original-host observation, report unavailable local receipt, attempt existing factual remote persistence once as before.",
+    "Receipts contain exit/accounting identities, never game files, credentials, passed checks or quality verdicts; no automatic deletion.",
+    "Key compromise/whole-host compromise is outside cryptographic record trust; normal native environment does not inherit host encryption key.",
+    "Existing old orphan writers have no newly manufactured receipt and remain blocked."
+  ],
+  "verification": [
+    "Actual SIGKILL after local receipt before remote persistence, then reconstruct with same trusted host root/key and explicitly recover without repeated work.",
+    "Crash before receipt, missing/corrupt/wrong signature, mismatched identities/fence/Run, unknown external outcomes remain blocked.",
+    "Cleanup failure/active writer never emits usable exit receipt.",
+    "No-start receipt retains proof and later requires new authorization, not continue.",
+    "Source-save receipt recovery preserves saved/untouched bytes, pause and unaccepted result.",
+    "Normal native/debug/Question/change and store invariants regression; protected frontend/native files unchanged."
+  ],
+  "constraints": {
+    "paidCalls": 0,
+    "autoRetry": false,
+    "costLast": true,
+    "manualGameEdits": false,
+    "engineSelected": false
+  }
+}

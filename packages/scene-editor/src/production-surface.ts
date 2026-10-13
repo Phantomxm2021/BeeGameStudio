@@ -17,13 +17,50 @@ export type SurfaceAssets = ReadonlyMap<string, SurfaceImage>
 export const PRODUCTION_SURFACE_CAPABILITIES = {
   uiRoles: ['screen-root', 'hud-root', 'container', 'text', 'shape', 'image', 'sprite', 'button', 'tab', 'keycap', 'toast'],
   uiStyles: ['background', 'backgroundColor', 'color', 'border', 'borderColor', 'borderWidth', 'borderStyle',
-    'borderRadius', 'boxShadow', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'opacity'],
+    'borderRadius', 'boxShadow', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'textAlign', 'opacity', 'align', 'verticalAlign'],
   sceneComponents: ['camera', 'sprite-renderer', 'image', 'text', 'rect-transform',
     'box-collider-2d', 'circle-collider-2d', 'capsule-collider-2d', 'polygon-collider-2d'],
 } as const
 const uiRoles = new Set<string>(PRODUCTION_SURFACE_CAPABILITIES.uiRoles)
 const cssFields = new Set<string>(PRODUCTION_SURFACE_CAPABILITIES.uiStyles)
 const pxFields = new Set(['borderWidth', 'borderRadius', 'fontSize', 'lineHeight', 'letterSpacing'])
+
+/** Document vocabulary, not a second layout algorithm. CSS aliases are retained
+ * for existing consumers; conflicting aliases cannot silently choose a side. */
+export function productionUiStyle(style: Record<string, unknown> = {}, nodeId: string) {
+  const result = { ...style }
+  if (result.align !== undefined) {
+    if (!['left', 'center', 'right'].includes(String(result.align))) throw Error('Unsupported production UI style: ' + nodeId + '/align')
+    if (result.textAlign !== undefined && result.textAlign !== result.align) throw Error('Conflicting production UI style: ' + nodeId + '/align and textAlign')
+    result.textAlign = result.align
+    delete result.align
+  }
+  if (result.verticalAlign !== undefined && !['top', 'middle', 'center', 'bottom'].includes(String(result.verticalAlign)))
+    throw Error('Unsupported production UI style: ' + nodeId + '/verticalAlign')
+  for (const [key, value] of Object.entries(result))
+    if (!cssFields.has(key) || (typeof value !== 'string' && typeof value !== 'number'))
+      throw Error('Unsupported production UI style: ' + nodeId + '/' + key)
+  return result
+}
+
+/** Read-only static compatibility, not rendering or gameplay acceptance. */
+export function inspectProductionUiSupport(data: UiData) {
+  const issues: Array<{nodeId: string; property: string; reason: string}> = []
+  const projectSemantics: Array<{nodeId: string; property: string}> = []
+  for (const node of data.nodes) {
+    const fail = (property: string, reason: string) => issues.push({nodeId: node.id, property, reason})
+    if (!uiRoles.has(node.role)) fail('role', 'Unsupported shared surface role: ' + node.role)
+    try { productionUiStyle(node.style, node.id) } catch (error) { fail('style', String(error)) }
+    for (const field of ['frame', 'member', 'visibleWhen']) if (node.data?.[field] !== undefined)
+      fail('data.' + field, 'Not interpreted by the shared surface')
+    if (node.data?.clipChildren === true) fail('data.clipChildren', 'Not implemented by the shared surface')
+    for (const key of Object.keys(node.actions ?? {})) if (key !== 'click') fail('actions.' + key, 'Only click is supported')
+    for (const key of Object.keys(node.bindings ?? {})) if (!['text', 'enabled'].includes(key)) fail('bindings.' + key, 'Only text/enabled are supported')
+    for (const key of ['action', 'variant']) if (node.data?.[key] !== undefined) projectSemantics.push({nodeId: node.id, property: 'data.' + key})
+  }
+  return {supported: issues.length === 0 && projectSemantics.length === 0, issues, projectSemantics,
+    runtimeVerified: false, note: 'Static shared-surface compatibility only; fonts/assets, actual actions/state, geometry and appearance require execution. Project metadata is not silently translated.'}
+}
 
 /** A deliberately limited browser surface, not a gameplay engine. Unsupported
  * roles/styles/components fail explicitly; callers cannot mistake partial paint
@@ -59,7 +96,7 @@ export async function createProductionUiSurface(host: HTMLElement) {
         for (const key of Object.keys(node.actions ?? {}))
           if (key !== 'click') throw new Error(`Unsupported production UI action: ${node.id}/${key}`)
         if (node.actions?.click && !options.onAction) throw new Error(`No action handler: ${node.id}`)
-        const bound = { ...node }
+        const bound = { ...node, style: productionUiStyle(node.style, node.id) }
         for (const [property, stateKey] of Object.entries(node.bindings ?? {})) {
           if (!options.state || !Object.hasOwn(options.state, stateKey)) throw new Error(`Missing UI state binding: ${node.id}/${stateKey}`)
           const value = options.state[stateKey]
@@ -73,7 +110,7 @@ export async function createProductionUiSurface(host: HTMLElement) {
       const byId = new Map(nodes.map(node => [node.id, node]))
       const geometry = inspectUiLayout(source, data.rootId, viewport, options)
       const rectangles = new Map(geometry.map(node => [node.id, node]))
-      const inherited = ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'color', 'textAlign']
+      const inherited = ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'color', 'textAlign', 'verticalAlign']
       const styleOf = (node: UiNode): Record<string, unknown> => {
         const chain: UiNode[] = []; let current: UiNode | undefined = node
         while (current) { chain.unshift(current); current = current.parentId ? byId.get(current.parentId) : undefined }
@@ -111,6 +148,7 @@ export async function createProductionUiSurface(host: HTMLElement) {
         element.style.transform = `matrix(${(right[0] - origin[0]) / width},${(right[1] - origin[1]) / width},${(bottom[0] - origin[0]) / height},${(bottom[1] - origin[1]) / height},${origin[0]},${origin[1]})`
         const style = styleOf(node)
         for (const [key, value] of Object.entries(style)) {
+          if (key === 'verticalAlign') continue // applied to the text's own flex alignment below
           if (!cssFields.has(key) || (typeof value !== 'string' && typeof value !== 'number'))
             throw new Error(`Unsupported production UI style: ${node.id}/${key}`)
           element.style.setProperty(key.replace(/[A-Z]/g, letter => '-' + letter.toLowerCase()),
@@ -119,7 +157,7 @@ export async function createProductionUiSurface(host: HTMLElement) {
         if (node.text !== undefined) {
           element.textContent = node.text
           element.style.display = 'flex'
-          element.style.alignItems = 'center'
+          element.style.alignItems = style.verticalAlign === 'top' ? 'flex-start' : style.verticalAlign === 'bottom' ? 'flex-end' : 'center'
           element.style.justifyContent = style.textAlign === 'left' ? 'flex-start' : style.textAlign === 'right' ? 'flex-end' : 'center'
         }
         if (node.assetRef) {

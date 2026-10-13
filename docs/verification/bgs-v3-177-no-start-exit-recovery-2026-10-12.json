@@ -1,0 +1,199 @@
+{
+  "schema": "bgs-verification-record",
+  "version": "1.77",
+  "date": "2026-10-12",
+  "scope": "Explicit new authorization after a proven unsubmitted request; original-host recovery when observed exit persistence fails. Not a paid run or full game-quality acceptance.",
+  "roots": [
+    {
+      "problem": "Reservation committed but response lost before native submission; no valid conversation exists to continue.",
+      "fix": "Original host records immutable literal notStarted proof after matching Run, attempt, fence and worker. A separately authorized new work request may start; continue and duplicate goal cannot dispatch."
+    },
+    {
+      "problem": "Cleanup completed but exit facts could not be persisted; original host knew exit while store did not.",
+      "fix": "Retain original-host process-local observation. Explicit recovery may persist the same observed facts and settle without execution. New hosts cannot manufacture these facts."
+    },
+    {
+      "problem": "A user change committed with a never-started native request was not present in native message history.",
+      "fix": "Pass the literal previously authorized but unsubmitted change data with the new authorized request; preserve requirement revision and native baseline. No replay of old commands, Review prompt, or responsibility additions."
+    }
+  ],
+  "implementation": {
+    "productionFiles": [
+      "packages/agent-workflow-server/src/beegame/workflow-v3/state.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/store.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/agent-goal.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/execution.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts",
+      "packages/agent-workflow-server/src/beegame/workflow-v3/debug.html"
+    ],
+    "noNewSqlOrStages": true,
+    "recoveryEvidence": [
+      "persisted",
+      "original-host",
+      "unavailable"
+    ],
+    "invariants": [
+      "Proof cannot be prefilled, removed or reclassified into an accepted native turn.",
+      "Only exact original host and writer identity may persist process-local observed exit.",
+      "Successful owned cleanup required; timeout, PID absence, error text or user assertions do not prove exit.",
+      "Dispose/reconstruction discards process-local observations.",
+      "Recover settles interrupted/failed; no automatic native call, file-write replay or quality PASS.",
+      "Never-started work uses a fresh native identity only if no prior valid native baseline exists.",
+      "Previously valid baseline identity, native history, permissions, ownership, version and active-worker checks remain in force."
+    ]
+  },
+  "regression": {
+    "core": {
+      "tests": 67,
+      "failures": 0,
+      "assertions": 815,
+      "files": 7,
+      "log": "/private/tmp/bgs-v3-177-regression-final.log"
+    },
+    "native": {
+      "tests": 2,
+      "failures": 0,
+      "assertions": 165,
+      "files": 2,
+      "log": "/private/tmp/bgs-v3-177-native-final.log",
+      "provider": "fixed loopback provider, real native CLI"
+    },
+    "reconstructedDebug": {
+      "tests": 1,
+      "failures": 0,
+      "assertions": 18,
+      "overlapsNative": true,
+      "log": "/private/tmp/bgs-v3-177-debug-reconstruct.log",
+      "controlledProviderRequests": 4,
+      "appReconstructions": 1,
+      "screenshot": "/private/tmp/bgs-v3-177-debug-controlled.png",
+      "coverage": [
+        "persisted no-start proof survives app reconstruction",
+        "duplicate goal and pause/resume do not submit",
+        "explicit authorized work starts exactly once",
+        "real native Skill and Question roundtrip",
+        "exit persistence failure surfaced as original-host",
+        "explicit recovery performs no additional native start or provider call"
+      ]
+    },
+    "distinctTests": 69,
+    "failures": 0,
+    "typecheck": {
+      "passed": true,
+      "log": "/private/tmp/bgs-v3-177-typecheck-final.log"
+    },
+    "diffCheck": true,
+    "initialFindings": [
+      "Assertion-bearing fixture could not be structured-cloned; read a clean stored snapshot instead.",
+      "Initial missing authorized-change handoff assertion failed; production factual handoff repaired, assertion retained.",
+      "Standalone remote harness lacked normal macros, then used an incomplete confirmed brief; both harness defects fixed without weakening production validation.",
+      "Browser driver handle required narrower type for piped process handles; corrected test typing."
+    ]
+  },
+  "remoteDatabase": {
+    "results": [
+      {
+        "scenario": "no-start",
+        "projectId": "v3-native-fault-db-5c9f09f7-a688-4b0d-83f9-de5f67b73489",
+        "root": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-native-fault-db-t0HH4f",
+        "version": 7,
+        "starts": 1,
+        "simulatedNativeSubmissions": 1,
+        "modelCalls": 0,
+        "status": "blocked",
+        "writer": "none",
+        "retained": true,
+        "passed": true
+      },
+      {
+        "scenario": "exit-write-outage",
+        "projectId": "v3-native-fault-db-fa1360ad-3751-4a50-8c60-ffa8cdd22f90",
+        "root": "/private/var/folders/77/bcfcrwjj1yg90qkfj3pbnyr00000gn/T/bgs-v3-native-fault-db-EpOzw0",
+        "version": 4,
+        "starts": 1,
+        "simulatedNativeSubmissions": 1,
+        "modelCalls": 0,
+        "status": "blocked",
+        "writer": "none",
+        "retained": true,
+        "passed": true
+      }
+    ],
+    "modelCalls": 0,
+    "limits": [
+      "Real remote RPC and persistence; this script simulates native lifecycle, with no native model request.",
+      "Local dedicated debug uses actual CLI and fixed fake provider, not the real database; these are separate evidence layers."
+    ],
+    "log": "/private/tmp/bgs-v3-177-remote-complete.log",
+    "failedHarnessLogs": [
+      "/private/tmp/bgs-v3-177-remote.log",
+      "/private/tmp/bgs-v3-177-remote-final.log"
+    ],
+    "failedSyntheticRecordsRetained": true
+  },
+  "deployment": {
+    "codeBaseline": "1.77",
+    "runtimePid": 32278,
+    "launcher": "/private/tmp/bgs-v3-deploy-177-runtime.ts",
+    "runtimePort": 62174,
+    "session": 18010,
+    "rootEnvUsed": true,
+    "productionModelAndBillingUnchanged": true,
+    "runtimeOnlyRestart": true,
+    "health": [
+      {
+        "port": 62173,
+        "status": 200
+      },
+      {
+        "port": 62174,
+        "status": 200
+      },
+      {
+        "port": 62175,
+        "status": 200
+      },
+      {
+        "port": 62176,
+        "status": 200
+      },
+      {
+        "port": 62177,
+        "status": 200
+      }
+    ],
+    "cliRebuilt": false,
+    "formalFrontendRebuilt": false,
+    "preflight": {
+      "checkedRemoteProjects": 36,
+      "normalNativeChildren": 0,
+      "unknownSyntheticWritersRetained": [
+        "v3-edit-fault-8741b8db-84ea-437f-80cd-15c1c6f1f522",
+        "v3-edit-fault-bf1512d1-196f-48cc-a723-49685333fc2e"
+      ]
+    },
+    "normalUserBrowserAcceptance": "Not performed in this round; Chrome had only a blank tab. Dedicated controlled debug screenshot is synthetic, not the paused game."
+  },
+  "protections": {
+    "paidModelCalls": 0,
+    "automaticRetries": 0,
+    "formalFrontendEdits": 0,
+    "claudeCodeCoreEdits": 0,
+    "actualGameArtifactEdits": 0,
+    "projectSettingsOrHooksOpened": false,
+    "reviewPromptAdded": false,
+    "agentLimitsAdded": false,
+    "engineOrRendererSelected": false,
+    "costOptimizationDeferred": true
+  },
+  "remaining": [
+    "Original host death before durable exit proof and loss of process-local observation still leave an unknown writer; no force unlock.",
+    "Legacy error-only no-start records are not automatically reclassified or manually given synthetic proof.",
+    "Owned native/filesystem cleanup is not proof every external paid, MCP or engine operation completed; uncertain remote outcomes remain unverified.",
+    "Corrupt/unavailable/nonempty contradictory history, active work and cleanup rejection remain blocking.",
+    "The 1.75 real downloaded ZIP byte identity remains unverified; current regressions do not retro-prove it.",
+    "Actual eight-domain design, asset production, complete Scene/UI consumption and whole-game quality are not accepted by these tests.",
+    "Actual Unity/Godot execution and export depend on real requirements and available tooling, not host route selection.",
+    "Formal frontend and publishing remain excluded; real token reduction is not claimed from fake-provider usage."
+  ]
+}

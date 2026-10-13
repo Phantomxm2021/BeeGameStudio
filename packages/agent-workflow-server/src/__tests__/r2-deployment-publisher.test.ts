@@ -36,6 +36,21 @@ function metadataFetch(events: Array<Record<string, unknown>>, publicHtml = '<ma
 }
 
 describe('R2 deployment publisher', () => {
+  test('rejects a public page whose referenced asset is missing', async () => {
+    const publisher = createR2DeploymentPublisher({
+      baseUrl: 'https://supabase.test', anonKey: 'anon-key', bucket: 'delivery-data',
+      publicBaseUrl: 'https://games.test', driver: { provider: 'r2' } as ProjectStorageDriver,
+      fetchImpl: (async input => String(input).endsWith('/assets/game.js')
+        ? new Response('Not found', { status: 404 })
+        : new Response('<script type="module" src="./assets/game.js"></script>',
+          { headers: { 'content-type': 'text/html; charset=utf-8' } })) as typeof fetch,
+    })
+    await expect(publisher.verifyPublished!('https://games.test/deployments/test/files/index.html', [
+      { path: 'index.html', bytes: async () => new TextEncoder().encode('<script type="module" src="./assets/game.js"></script>'), text: async () => '' },
+      { path: 'assets/game.js', bytes: async () => new TextEncoder().encode('start()'), text: async () => '' },
+    ])).rejects.toThrow('assets/game.js')
+  })
+
   test('rejects a public domain returning another website with HTTP 200', async () => {
     const deleted: string[] = []
     const sizes = new Map<string, number>()

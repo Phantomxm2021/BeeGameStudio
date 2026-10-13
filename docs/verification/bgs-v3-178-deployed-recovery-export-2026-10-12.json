@@ -1,0 +1,343 @@
+{
+  "version": "1.79",
+  "date": "2026-10-12",
+  "runtimeCodeBaseline": "1.78",
+  "status": "deployed-and-normal-auth-debug-recovery-verified-not-game-acceptance",
+  "deployment": {
+    "launcher": "/private/tmp/bgs-v3-deploy-178-runtime.ts",
+    "initial178Pid": 34980,
+    "postRestart178Pid": 35277,
+    "launcherPid": 35262,
+    "session": 85445,
+    "runtimeOnly": true,
+    "rootEnvUsed": true,
+    "nativeRebuilt": false,
+    "frontendRebuilt": false,
+    "productionModelBillingUnchanged": true,
+    "original177StoppedAfterNoNativeChildren": true,
+    "checkedRemoteProjectsBefore": 36,
+    "knownIsolatedLocksBefore": 2,
+    "checkedRemoteProjectsAfterProvision": 39,
+    "unresolvedBeforeRestart": 5,
+    "allNewTestChildrenKilledAndAwaited": true,
+    "restartDidNotSettleOrDispatch": true,
+    "finalUnresolved": 3,
+    "oldTwoNoProofLocksUnchanged": true,
+    "health": [
+      {
+        "port": 62173,
+        "status": 200
+      },
+      {
+        "port": 62174,
+        "status": 200
+      },
+      {
+        "port": 62175,
+        "status": 200
+      },
+      {
+        "port": 62176,
+        "status": 200
+      },
+      {
+        "port": 62177,
+        "status": 200
+      }
+    ],
+    "noNativeChildrenAfterAcceptance": true
+  },
+  "normalBrowser": {
+    "url": "http://127.0.0.1:62174/debug/workflow-v3",
+    "browser": "user Chrome, NSWells (Private), extension 4",
+    "normalHttpOnlyCookie": true,
+    "credentialsNotReadOrCopied": true,
+    "serviceKeyNotEntered": true,
+    "acceptedRecoverRequests": 2,
+    "rejectedRecoverRequests": 1,
+    "automaticRequestRetries": 0,
+    "screenshots": [
+      "/private/tmp/bgs-v3-178-deployed-recovery.png",
+      "/private/tmp/bgs-v3-178-deployed-recovery-refused.png"
+    ],
+    "interruption": "CDP confirmation/focus timed out. Native AX verified the exact existing recovery dialog and accepted it; no duplicate click/submission."
+  },
+  "recovery": {
+    "setupScript": "scripts/verify-workflow-v3-host-restart.ts",
+    "fixtureSetup": "New explicitly synthetic metadata, initial Run and UI/Scene data; only source metadata owner/workspace reused. Not real idea intake or game quality.",
+    "execution": "Real remote RPC and BGS source-save/not-started executors; native runner refuses any model. Receipt saved in real trusted host data root using existing key. Exact original children SIGKILLed at checkpoint; normal runtime restarted afterwards.",
+    "log": "/private/tmp/bgs-v3-178-host-restart-remote.log",
+    "fixtures": [
+      {
+        "scenario": "source-exit",
+        "projectId": "v3-host-restart-ca6f9eae-e4de-4379-aa01-e0a817523fdd",
+        "root": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/bgs-v3-host-restart-JtdOQr",
+        "runId": "e375c2b7-5a71-4ecc-ae0f-ade11fdb2142",
+        "version": 2,
+        "writer": {
+          "fence": 1,
+          "workerId": "d8d29707-bc92-43ca-ae78-a2317f8bf70e",
+          "attemptId": "1cfd576f-408c-441c-9ecc-f1c3a78ff7d8"
+        },
+        "originalPid": 35152,
+        "originalHostKilled": true,
+        "databaseQuiescence": false,
+        "hostReceipt": true,
+        "exitFacts": {
+          "quiescedAt": "2026-10-12T12:06:20.333Z"
+        },
+        "before": [
+          {
+            "path": "content/ui/menu.json",
+            "sha256": "7b3d0065e648a9c3d17c8f4677afc05efce672be6a76f4a0391c8b0f0d915692"
+          },
+          {
+            "path": "content/scenes/level.json",
+            "sha256": "9438fdba53e83acc70c85b617d74baba169c11a8eb1d18d3168d6cdda9b8fd11"
+          },
+          {
+            "path": "notes.txt",
+            "sha256": "a803fddcbcfc7866f7111f623bfa6b4f87c4871a2825af321aa8a1f6323e97be"
+          }
+        ],
+        "after": [
+          {
+            "path": "content/ui/menu.json",
+            "sha256": "27b46ff21580ca98032e9d6962be0d70d9379c1f74b7e2e9a397c9a5238df9b0"
+          },
+          {
+            "path": "content/scenes/level.json",
+            "sha256": "9438fdba53e83acc70c85b617d74baba169c11a8eb1d18d3168d6cdda9b8fd11"
+          },
+          {
+            "path": "notes.txt",
+            "sha256": "a803fddcbcfc7866f7111f623bfa6b4f87c4871a2825af321aa8a1f6323e97be"
+          }
+        ],
+        "modelCalls": 0,
+        "retained": true
+      },
+      {
+        "scenario": "no-start-exit",
+        "projectId": "v3-host-restart-5239b738-971c-47f4-8c25-98a1d7ba9350",
+        "root": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/bgs-v3-host-restart-dxcVTi",
+        "runId": "117142c2-b5ca-4665-a015-e9d6635394c8",
+        "version": 2,
+        "writer": {
+          "fence": 1,
+          "workerId": "7284c3e4-a2ce-414f-bbc5-394b902ab909",
+          "attemptId": "a70e8ad3-bf34-4960-b81c-4899d29711c6"
+        },
+        "originalPid": 35170,
+        "originalHostKilled": true,
+        "databaseQuiescence": false,
+        "hostReceipt": true,
+        "exitFacts": {
+          "quiescedAt": "2026-10-12T12:06:21.973Z",
+          "notStarted": true
+        },
+        "before": [
+          {
+            "path": "content/ui/menu.json",
+            "sha256": "7b3d0065e648a9c3d17c8f4677afc05efce672be6a76f4a0391c8b0f0d915692"
+          },
+          {
+            "path": "content/scenes/level.json",
+            "sha256": "9438fdba53e83acc70c85b617d74baba169c11a8eb1d18d3168d6cdda9b8fd11"
+          },
+          {
+            "path": "notes.txt",
+            "sha256": "a803fddcbcfc7866f7111f623bfa6b4f87c4871a2825af321aa8a1f6323e97be"
+          }
+        ],
+        "after": [
+          {
+            "path": "content/ui/menu.json",
+            "sha256": "7b3d0065e648a9c3d17c8f4677afc05efce672be6a76f4a0391c8b0f0d915692"
+          },
+          {
+            "path": "content/scenes/level.json",
+            "sha256": "9438fdba53e83acc70c85b617d74baba169c11a8eb1d18d3168d6cdda9b8fd11"
+          },
+          {
+            "path": "notes.txt",
+            "sha256": "a803fddcbcfc7866f7111f623bfa6b4f87c4871a2825af321aa8a1f6323e97be"
+          }
+        ],
+        "modelCalls": 0,
+        "retained": true
+      },
+      {
+        "scenario": "before-exit",
+        "projectId": "v3-host-restart-c4b3872f-5099-4535-a954-6134b8d8210b",
+        "root": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/bgs-v3-host-restart-Ap7lVO",
+        "runId": "4476acd2-0042-42be-b403-5233109222f2",
+        "version": 2,
+        "writer": {
+          "fence": 1,
+          "workerId": "38e51e49-97d2-40e2-bfc4-d5efd582919d",
+          "attemptId": "140cffa7-0e5b-4102-b9f7-fb70384b136e"
+        },
+        "originalPid": 35174,
+        "originalHostKilled": true,
+        "databaseQuiescence": false,
+        "hostReceipt": false,
+        "before": [
+          {
+            "path": "content/ui/menu.json",
+            "sha256": "7b3d0065e648a9c3d17c8f4677afc05efce672be6a76f4a0391c8b0f0d915692"
+          },
+          {
+            "path": "content/scenes/level.json",
+            "sha256": "9438fdba53e83acc70c85b617d74baba169c11a8eb1d18d3168d6cdda9b8fd11"
+          },
+          {
+            "path": "notes.txt",
+            "sha256": "a803fddcbcfc7866f7111f623bfa6b4f87c4871a2825af321aa8a1f6323e97be"
+          }
+        ],
+        "after": [
+          {
+            "path": "content/ui/menu.json",
+            "sha256": "7b3d0065e648a9c3d17c8f4677afc05efce672be6a76f4a0391c8b0f0d915692"
+          },
+          {
+            "path": "content/scenes/level.json",
+            "sha256": "9438fdba53e83acc70c85b617d74baba169c11a8eb1d18d3168d6cdda9b8fd11"
+          },
+          {
+            "path": "notes.txt",
+            "sha256": "a803fddcbcfc7866f7111f623bfa6b4f87c4871a2825af321aa8a1f6323e97be"
+          }
+        ],
+        "modelCalls": 0,
+        "retained": true
+      }
+    ],
+    "observedFinal": [
+      {
+        "scenario": "source-exit",
+        "projectId": "v3-host-restart-ca6f9eae-e4de-4379-aa01-e0a817523fdd",
+        "version": 4,
+        "writer": null,
+        "status": "failed",
+        "paused": false,
+        "sameSourceBytes": true,
+        "modelCalls": 0,
+        "passed": true
+      },
+      {
+        "scenario": "no-start-exit",
+        "projectId": "v3-host-restart-5239b738-971c-47f4-8c25-98a1d7ba9350",
+        "version": 5,
+        "writer": null,
+        "status": "interrupted",
+        "paused": true,
+        "sameSourceBytes": true,
+        "modelCalls": 0,
+        "passed": true
+      },
+      {
+        "scenario": "before-exit",
+        "projectId": "v3-host-restart-c4b3872f-5099-4535-a954-6134b8d8210b",
+        "version": 2,
+        "writer": {
+          "fence": 1,
+          "workerId": "38e51e49-97d2-40e2-bfc4-d5efd582919d",
+          "attemptId": "140cffa7-0e5b-4102-b9f7-fb70384b136e"
+        },
+        "status": "running",
+        "paused": false,
+        "sameSourceBytes": true,
+        "modelCalls": 0,
+        "passed": true
+      }
+    ],
+    "preserved": "Source save retains exact original archive; current UI candidate, all Scenes and independent note bytes unchanged during recovery. Pause on no-start retained. No-proof case version/writer unchanged.",
+    "limits": [
+      "No actual native model was started in these three faults.",
+      "This verifies real DB + real process SIGKILL + deployed normal-auth recovery; it does not claim SIGKILL while an actual native/MCP/engine operation was active.",
+      "No old writer proof backfill or forced unlock."
+    ]
+  },
+  "export": {
+    "passed": true,
+    "readOnly": true,
+    "projectId": "v3-agent-edit-d40674ca-b28d-4ae7-9d20-dd9f50d57ef1",
+    "runId": "6b0c7d27-b8ae-4536-b261-01308a4f4c88",
+    "version": 29,
+    "measurementId": "1862fbf8-c5bb-4af4-920a-4da59630957b",
+    "archive": "/Users/nswell/Downloads/bgs-v3-project.zip",
+    "archiveBytes": 11510,
+    "archiveSha256": "3f183bb40c6da739bb8595fc3f79a3acdfcc10520302731ba199b69c76edd0fb",
+    "archiveModifiedAt": "2026-10-12T12:20:05.549Z",
+    "entries": 15,
+    "receiptFiles": 14,
+    "exactSourceFiles": 10,
+    "crcChecked": true,
+    "allReceiptFileBytesMatch": true,
+    "sameMeasuredSourcesAndOutput": true,
+    "modelCalls": 0,
+    "sourceWrites": 0,
+    "rebuilds": 0,
+    "deliveryEligible": false,
+    "limits": [
+      "This newly downloaded archive, not the unavailable historical 1.75 download.",
+      "Source/output byte identity only; no dependency-install/rebuild or game-quality verdict."
+    ],
+    "normalBrowserAuthenticated": true,
+    "currentMeasurementFreshness": true,
+    "runStayedVersion29": true,
+    "verifier": "scripts/verify-workflow-v3-export-bytes.ts",
+    "log": "/private/tmp/bgs-v3-178-deployed-export-bytes-final.log",
+    "downloadEvent": "Browser download-event API timed out; no repeated download. Located exact requested filename in Downloads, verified current modification time, 11510 bytes, correct measurement and all hashes.",
+    "initialVerifierFailure": "Root script could not resolve server-only exceljs dependency; resolved from existing server package without installation.",
+    "historical175DownloadStillUnverified": true
+  },
+  "transport": {
+    "initialFinalRead": "Raw fetch encountered UNKNOWN_CERTIFICATE_VERIFICATION_ERROR; no mutation. Failed log preserved: /private/tmp/bgs-v3-178-deployed-final-state-verified.log.",
+    "correction": "Verifiers use existing createTLSAwareFetch and existing root-env client/CA configuration, matching normal service. No certificate validation disabling, new trust or settings changes. No fault provisioning or execution repeated.",
+    "finalReadLog": "/private/tmp/bgs-v3-178-deployed-final-state-tls.log"
+  },
+  "validation": {
+    "offlineTests": 34,
+    "files": 5,
+    "failures": 0,
+    "assertions": 352,
+    "log": "/private/tmp/bgs-v3-178-deployed-regression.log",
+    "typecheckPassed": true,
+    "typecheckLog": "/private/tmp/bgs-v3-178-deployed-script-typecheck-final.log",
+    "typecheckExitCode": 0,
+    "diffCheckPassed": true,
+    "scope": "Recovery, debug auth and editable-export/legacy feedback safeguards only; compatible Review tests are not a restored default Review workflow.",
+    "earlier178Tests": 78,
+    "notAddedToCurrentCountBecauseOverlap": true
+  },
+  "protections": {
+    "paidModelCalls": 0,
+    "automaticModelToolRetry": 0,
+    "formalFrontendChanges": 0,
+    "claudeCodeChanges": 0,
+    "actualGameManualChanges": 0,
+    "projectSettingsHooksOpened": false,
+    "productionChangesThisTurn": 0,
+    "newVerificationScripts": 2,
+    "engineRendererSelected": false,
+    "reviewPromptAdded": false,
+    "agentLimitsAdded": false,
+    "costOptimizationDeferred": true
+  },
+  "realProject": {
+    "version": 121,
+    "paused": true,
+    "writer": null
+  },
+  "remaining": [
+    "Original host gone before any trustworthy observed exit/receipt: safe refusal remains; no universal reconstruction.",
+    "External uncertain MCP/paid/engine side effects, loss of trusted disk/key and whole-machine crash still unaccepted.",
+    "Historical 1.75 unavailable ZIP not retro-proven; this new download's byte identity passed.",
+    "Real eight-domain design/Skills depth, resource production, complete Scene/UI consumption and whole-game taste/play quality remain unaccepted.",
+    "Unity/Godot actual tools, runtime and export require applicable real environment; host does not choose route.",
+    "Formal frontend/product publishing excluded. No billed-token reduction inferred; cost work last."
+  ]
+}

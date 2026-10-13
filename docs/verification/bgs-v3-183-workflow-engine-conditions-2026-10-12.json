@@ -1,0 +1,88 @@
+{
+  "version": "1.83-document-record",
+  "date": "2026-10-12",
+  "deployedRuntime": "1.82",
+  "productionCodeChanged": false,
+  "regression": {
+    "passed": 105,
+    "failed": 0,
+    "files": 12,
+    "assertions": 1376,
+    "typecheckPassed": true,
+    "logs": [
+      "/private/tmp/bgs-v3-183-workflow-regression.log",
+      "/private/tmp/bgs-v3-183-boundary-regression.log",
+      "/private/tmp/bgs-v3-183-consumer-browser-final.log",
+      "/private/tmp/bgs-v3-183-typecheck.log"
+    ],
+    "distinctCount": "82 + 22 + one previously skipped consumer browser test; repeated test files not added",
+    "controlledProviderRequests": 28,
+    "paidModelCalls": 0
+  },
+  "health": [
+    {
+      "port": 62173,
+      "status": 200
+    },
+    {
+      "port": 62174,
+      "status": 200
+    },
+    {
+      "port": 62175,
+      "status": 200
+    },
+    {
+      "port": 62176,
+      "status": 200
+    },
+    {
+      "port": 62177,
+      "status": 200
+    }
+  ],
+  "engine": {
+    "unity": {
+      "path": "/Applications/Unity/Hub/Editor/6000.4.0f1/Unity.app/Contents/MacOS/Unity",
+      "hostHeadlessVersion": "6000.4.0f1 (exit 0)",
+      "sandboxReadExit": 1,
+      "sandboxVersionExit": 134,
+      "reason": "SketchUpAPI.framework blocked by sandbox",
+      "log": "/private/tmp/bgs-v3-183-engine-condition.log",
+      "method": "Existing projectExecutionAccess + macOS sandbox wrapper; actual executable, no full native Agent/engine development run",
+      "cause": "Whole-project denyRead / and fixed allowRead omit Unity.app frameworks; project override disallows unsandboxed fallback",
+      "scope": "Proven environment/integration gap, not an engine version bug or authorized reason to broaden access"
+    },
+    "godot": "Not found in current PATH or /Applications/Godot.app; no exhaustive machine inventory",
+    "mcp": "No Unity/Godot tools in this session inventory; not proof BGS native MCP configuration is empty",
+    "projectCreated": false,
+    "licenseChanged": false,
+    "permissionsExpanded": false
+  },
+  "initialProbeFailures": [
+    {
+      "log": "/private/tmp/bgs-v3-183-content-browser.log",
+      "cause": "Wrong test file/name matched zero tests; subsequently ran correct agent-tools.test.ts with BGS_LAYOUT_BROWSER=1. No product modification."
+    },
+    {
+      "log": "/private/tmp/bgs-v3-183-unity-help.log",
+      "cause": "Nonheadless -help stalled on restricted desktop XPC; stopped only owned PID43122. Headless version returned normally. Not used as root-cause evidence."
+    }
+  ],
+  "boundaries": {
+    "formalFrontendChanged": false,
+    "claudeCodeChanged": false,
+    "projectArtifactEdits": 0,
+    "settingsOrHooksOpened": false,
+    "automaticRetries": false,
+    "enginePrescribed": false
+  },
+  "remaining": [
+    "Current core workflow connected; synthetic/controlled regression does not certify arbitrary game quality.",
+    "Actual eight-domain design, resources, Scene/UI/full-player-flow quality require normal authorized Agent execution and observations.",
+    "Unity needs bounded authorized tool access and actual project/licensing/build evidence; Godot environment absent in checked locations. No implicit Web substitution or engine framework.",
+    "Missing exit facts and unknown external operations retain refusal.",
+    "Formal frontend remains outside authorization; cost optimization last."
+  ],
+  "next": "Before implementing engine access, identify the actual target and explicitly authorized tool/install/runtime paths; audit existing permission mechanisms rather than granting all Applications/home or disabling sandbox."
+}

@@ -210,6 +210,36 @@
         "note": "Bom para builds e verificações maiores. Tarefas simples geralmente ficam com um agente."
       },
       "items": {
+        "verificationAgentEnabled": {
+          "label": "Independent Verification",
+          "description": "Require a verifier for non-trivial changes and enable completion reminders.",
+          "note": "Off by default. Saves apply on the next task; ordinary Agent and testing remain available.",
+          "scope": "newSession"
+        },
+        "agentTeamsEnabled": {
+          "label": "Agent Teams",
+          "description": "Enable teams and teammate collaboration.",
+          "note": "Off by default. Applies on the next task; ordinary subagents do not require this.",
+          "scope": "newSession"
+        },
+        "promptSuggestionEnabled": {
+          "label": "Input Suggestions",
+          "description": "Generate suggested next messages with the model.",
+          "note": "Off by default. Applies on the next task and may add model calls.",
+          "scope": "newSession"
+        },
+        "awaySummaryEnabled": {
+          "label": "Away Summary (CLI)",
+          "description": "Enable automatic away summaries and /recap in the interactive CLI.",
+          "note": "Off by default. No away-summary UI in BGS headless chat; does not add a BGS chat panel.",
+          "scope": "newSession"
+        },
+        "coordinatorModeEnabled": {
+          "label": "Coordinator Mode",
+          "description": "Start new sessions as a coordinator that delegates work.",
+          "note": "Off by default. New sessions only; resumed sessions retain their original mode. Enable Agent Teams for team tools.",
+          "scope": "newSession"
+        },
         "autoMemoryEnabled": {
           "label": "runtime.autoMemory",
           "description": "Lembra preferências, decisões de projeto e contexto útil.",

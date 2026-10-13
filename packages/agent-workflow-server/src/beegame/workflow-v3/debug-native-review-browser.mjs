@@ -1,12 +1,13 @@
 // Owned test Chromium only; never attaches to user Chrome or a paid model.
 import assert from 'node:assert/strict';
+import {answerDebugConfirmation} from './debug-confirm-browser-helper.mjs';
 const {chromium}=await import(process.env.BGS_PLAYWRIGHT_MODULE);
 const {endpoint,origin,task,notesTask}=JSON.parse(await new Promise(resolve=>{let s='';process.stdin.on('data',b=>s+=b);process.stdin.on('end',()=>resolve(s));}));
 const browser=await chromium.connectOverCDP(endpoint);
 try{
   const page=await browser.newPage(),errors=[],permissionTools=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(origin+'/debug/workflow-v3');
-  const click=async(id,confirmed=false)=>{if(confirmed)page.once('dialog',d=>d.accept());await page.locator('#'+id).click();await page.waitForFunction(id=>!document.getElementById(id).disabled,id);};
+  const click=async(id,confirmed=false)=>{await page.locator('#'+id).click(); if (confirmed) await answerDebugConfirmation(page);await page.waitForFunction(id=>!document.getElementById(id).disabled,id);};
   const result=async()=>JSON.parse(await page.locator('#result').innerText()),current=async()=>JSON.parse(await page.locator('#run').innerText()).run;
   const api=async suffix=>{const r=await fetch(origin+'/api/projects/native-debug/'+suffix,{headers:{Authorization:'Bearer synthetic-owner'}});assert.equal(r.status,200);return r.json();};
   await page.locator('#project').fill('native-debug');await page.locator('#token').fill('synthetic-owner');await click('restore-chat');await click('prepare-run');

@@ -1,0 +1,34 @@
+{
+  "scope": "Repair lost measurement input diagnostics at the read API, then offline regression and one independent native/debug acceptance. No paid models, production-game edits, formal frontend or Claude Code changes, automatic workflow retry, or relaxed Preview/export gates.",
+  "basis": "bgs-v3-205-deployed-debug-acceptance-2026-10-13.json",
+  "rootCause": "The read route reconstructed freshness from the Preview selection result/error and discarded the existing source/report/artifact/check input comparisons. Selection also refuses interrupted or busy runs before comparing inputs.",
+  "fix": {
+    "file": "packages/agent-workflow-server/src/beegame/workflow-v3/routes.ts",
+    "behavior": "Preserve inspectAgentMeasurementInputs diagnostics in freshness. inputsCurrent describes the observed input comparison. Keep the existing selectAgentMeasuredBuild refusal as current:false/code/reason, and expose selection.eligible separately. A matching old artifact does not authorize Preview/export or imply quality.",
+    "unchanged": ["Preview and export routes/gates", "mandatory native permission and writer checks", "measurement storage", "saved evidence", "LLM prompts and execution limits"],
+    "tradeoff": "The read route uses both existing read-only inspection and the existing selection function. For a selectable or stale completed measurement this repeats input inspection. No new cache, shared acceptance token, automatic build or retry was introduced."
+  },
+  "offlineRegression": {
+    "initialBatch": {"passed":60,"failed":1,"log":"/private/tmp/bgs-v3-206-offline.log"},
+    "fixtureCorrection": "The new API test initially used viewer, which correctly received 403 for preview.manage before reaching stale-selection refusal. Changed only the synthetic test user to owner and explicitly verified 409 gate refusals; no real account or product permission change.",
+    "correctedApiTest": {"passed":1,"failed":0,"assertions":40,"log":"/private/tmp/bgs-v3-206-api-corrected-fixture.log"},
+    "uniquePassed": 61,
+    "coverage": ["fresh input diagnostics", "interrupted turn with matching inputs remains ineligible", "busy writer remains ineligible", "source/report/artifact classifications", "alias inspection failure stays historical", "Preview/export refusals", "foreign ownership refusal", "inspection does not write store/rebuild/dispatch", "focused and resume continuation boundaries"]
+  },
+  "independentDebug": {
+    "passed": true,
+    "runs": 1,
+    "automaticRetries": 0,
+    "log": "/private/tmp/bgs-v3-206-native-debug.log",
+    "setup": "Isolated temporary project, local workflow store, actual BGS server routes and independent debug page, controlled Chromium, existing deployed dist CLI, localhost fixed model replies only.",
+    "requests": 28,
+    "assertions": 160,
+    "coverage": ["source-save classifications visible through debug read API", "changed source rejects Preview and project export", "explicit pause does not dispatch on resume", "focused interrupted continuation creates fresh native UUID", "same workspace and partial results preserved", "requirements and answered Question retained", "old tool history and loaded Skill body omitted", "duplicate request identity does not execute twice", "continued work rebuilds and measures before Preview/export", "subsequent resume uses the focused session"],
+    "limits": ["fixed provider replies do not establish autonomous model adoption or game quality", "local store rather than Supabase concurrency", "fixture usage numbers are synthetic, not token-saving evidence"]
+  },
+  "finalChecks": {"nodeSyntax":"passed","gitDiffCheck":"passed","fullRepoTypecheck":"not rerun"},
+  "deployment": "New route loaded in the isolated debug server. Existing service on 62174 was not restarted; production deployment of this API correction is still pending. No CLI rebuild required for this server-only change.",
+  "paidModelCalls": 0,
+  "realProjectOperations": 0,
+  "notClaimed": ["real-game quality acceptance", "actual token reduction", "production runtime deployment of this correction"]
+}

@@ -5,7 +5,8 @@ import { STATIC_ARTIFACT_CHECK_VERSION, staticArtifactFiles } from './runtime-ch
 import { createZipArchive } from '../session-manager'
 import { digest, WorkflowError, type Run, type CheckResult, type FileVersion, type AgentMeasurement } from './state'
 import { projectFiles, projectDependencies, sameFiles, changedProjectPaths } from './editable-project'
-import { EDITABLE_BUILD_CHECK_VERSION } from './check-versions'
+import { EDITABLE_BUILD_CHECK_VERSION, CHECK_VERSIONS } from './check-versions'
+import { artifactDigest } from '../runtime-acceptance'
 
 /** One source of measurement selection for Preview, feedback and export. */
 export async function selectMeasuredBuild(run: Run, taskId: string, attemptId: string, busy = false) {
@@ -19,7 +20,8 @@ export async function selectMeasuredBuild(run: Run, taskId: string, attemptId: s
   await assertFreshDependencies(run, { ...task.spec, dependsOn: [taskId] })
   return { task, attempt, smoke, artifact }
 }
-export async function selectAgentMeasuredBuild(run: Run, measurementId: string, busy = false) {
+export async function selectAgentMeasuredBuild(run: Run, measurementId: string, busy = false,
+  purpose: 'delivery' | 'preview' | 'publication' = 'delivery') {
   if(run.writer || busy)throw new WorkflowError('workspace-busy','Wait for the native writer and owned tools to stop')
   const turn=run.agentTurns?.find(t=>t.measurements?.some(m=>m.id===measurementId))
   const measurement=turn?.measurements?.find(m=>m.id===measurementId)
@@ -29,9 +31,16 @@ export async function selectAgentMeasuredBuild(run: Run, measurementId: string, 
   const build=measurement?.checks.find(c=>c.id==='build' && c.version===EDITABLE_BUILD_CHECK_VERSION && c.status==='passed')
   const smoke=measurement?.checks.find(c=>c.id==='runtime-smoke' && c.version===STATIC_ARTIFACT_CHECK_VERSION && c.status==='passed')
   const proof=build?.projectBuild, artifact=smoke?.artifacts?.find(a=>a.path===measurement?.runtimeArtifact)
-  if(!turn?.quiescedAt || turn.status!=='ended' || !measurement?.finishedAt || measurement.error ||
+  // Preview and explicit publication select measured bytes, not the author's
+  // turn verdict. A settled failed/interrupted turn may still contain a current
+  // build. Editable/static export retains the successful-turn requirement.
+  const settled = turn?.status === 'ended' || purpose !== 'delivery' &&
+    (turn?.status === 'failed' || turn?.status === 'interrupted')
+  if(!turn?.quiescedAt || !settled || !measurement?.finishedAt || measurement.error ||
       !build || !smoke || !proof || !artifact || proof.artifact.sha256!==artifact.sha256 || !smoke.coverage?.files.length)
-    throw new WorkflowError('preview-unverified','Select a completed native turn with actual source-build and runtime-smoke evidence, not an author PASS or incomplete/failed turn')
+    throw new WorkflowError('preview-unverified',purpose === 'delivery'
+      ? 'Select a completed native turn with actual source-build and runtime-smoke evidence, not an author PASS or incomplete/failed turn'
+      : 'Select a settled native turn with completed source-build and runtime-smoke evidence; an active writer, author PASS or failed measurement is insufficient')
   const freshness=await inspectAgentMeasurementInputs(run,measurement)
   if(!freshness.current)
     throw new WorkflowError(freshness.code,freshness.reason)
@@ -51,31 +60,54 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
   if(!measurement.finishedAt || measurement.error || !build || !smoke || !proof || !artifact ||
       proof.artifact.sha256!==artifact.sha256 || !smoke.coverage?.files.length)
     return fail('preview-unverified','Measurement is incomplete or failed; inspect saved checks. No automatic rebuild or retry.')
+  const consumption=measurement.consumption?.checks??[]
+  const incomplete=consumption.filter(id=>!measurement.checks.some(c=>c.id===id && c.status==='passed' && c.version===CHECK_VERSIONS[id]))
+  if(incomplete.length)return fail('preview-unverified','Requested consumption checks have not passed: '+incomplete.join(', ')+'. Build/smoke is not consumption proof.')
   const requirementsChanged=measurement.requirementsRevision!==run.requirements.revision
   const sourceSaveChanged=measurement.sourceEditId!==run.sourceEdits?.at(-1)?.attemptId
-  // Identify the actual stale report instead of forcing source/registry
-  // exploration. A missing report is stale too; never strip a receipt footer
-  // or ignore edited evidence to make it pass.
-  const changedReports=[]
-  for(const report of measurement.reports)
-    if(!await versionsMatch(run.workspacePath,[report]))changedReports.push(report.path)
-  const changedSources=changedProjectPaths(proof.files,await projectFiles(run.workspacePath,artifact.path,proof.excludedReports))
-  const dependenciesChanged=proof.dependencySha256!==await projectDependencies(run.workspacePath)
-  const buildOrArtifactChanged=!await checkIsCurrent(run.workspacePath,build,{editableProject:true}) || !await checkIsCurrent(run.workspacePath,smoke)
-  const changes={requirements:requirementsChanged,authorizedSourceSave:sourceSaveChanged,
-    sources:changedSources,reports:changedReports,dependencies:dependenciesChanged,buildOrArtifact:buildOrArtifactChanged}
-  // A new requirement must not hide concurrent source/report changes. Return
-  // the whole deterministic comparison once, rather than forcing mtime guesses
-  // and another request for each successive stale cause. No build is executed.
-  const reasons=[
-    ...(changedReports.length?['Reports changed or are missing: '+changedReports.join(', ')+'. Finalize evidence before measuring; the receipt is already saved in BGS, not in these files.']:[]),
-    ...(requirementsChanged || sourceSaveChanged?['Requirements or an authorized source save changed; remeasure affected results']:[]),
-    ...(changedSources.length?['Exportable sources changed: '+changedSources.join(', ')]:[]),
-    ...(dependenciesChanged?['Installed dependencies changed']:[]),
-    ...(buildOrArtifactChanged?['Build inputs or measured artifact changed']:[]),
-  ]
-  return {current:!reasons.length,code:reasons.length?'measurement-stale':'current',changes,
-    reason:reasons.length?reasons.join('; '):'Source/build/report inputs match now; this is not game-quality acceptance or permission to ignore later edits.'}
+  // Input reads may fail (permissions, aliases, concurrent filesystem changes).
+  // Keep saved evidence inspectable with an explicitly negative freshness;
+  // Preview/export still reject it. This does not catch caller auth/writer errors.
+  try {
+    // Identify the actual stale report instead of forcing source/registry
+    // exploration. A missing report is stale too; never strip a receipt footer
+    // or ignore edited evidence to make it pass.
+    const changedReports=[]
+    for(const report of measurement.reports)
+      if(!await versionsMatch(run.workspacePath,[report]))changedReports.push(report.path)
+    const changedSources=changedProjectPaths(proof.files,await projectFiles(run.workspacePath,artifact.path,proof.excludedReports))
+    const dependenciesChanged=proof.dependencySha256!==await projectDependencies(run.workspacePath)
+    // Export identity and observed runtime evidence are different facts. A
+    // source-only edit must not be described as changed runtime bytes. These
+    // comparisons do not accept a new build or rerun/reuse any test.
+    const checkInputs=await Promise.all([build,smoke,...consumption.map(id=>measurement.checks.find(c=>c.id===id)!)].map(async check=>({
+      id:check.id,savedStatus:check.status,inputsMatch:(check.id!=='build'||!changedSources.length&&!dependenciesChanged) && await checkIsCurrent(run.workspacePath,check,
+        check.id==='build'?{editableProject:true}:undefined),
+    })))
+    const artifactMatches=await artifactDigest(run.workspacePath,artifact.path,true).then(hash=>hash===artifact.sha256,()=>false)
+    const buildOrArtifactChanged=!artifactMatches || checkInputs.some(check=>!check.inputsMatch)
+    const changes={requirements:requirementsChanged,authorizedSourceSave:sourceSaveChanged,
+      sources:changedSources,reports:changedReports,dependencies:dependenciesChanged,buildOrArtifact:buildOrArtifactChanged,
+      artifact:!artifactMatches,checkInputs:checkInputs.filter(check=>!check.inputsMatch).map(check=>check.id)}
+    // A new requirement must not hide concurrent source/report changes. Return
+    // the whole deterministic comparison once, rather than forcing mtime guesses
+    // and another request for each successive stale cause. No build is executed.
+    const reasons=[
+      ...(changedReports.length?['Reports changed or are missing: '+changedReports.join(', ')+'. Finalize evidence before measuring; the receipt is already saved in BGS, not in these files.']:[]),
+      ...(requirementsChanged || sourceSaveChanged?['Requirements or an authorized source save changed; remeasure affected results']:[]),
+      ...(changedSources.length?['Exportable sources changed: '+changedSources.join(', ')]:[]),
+      ...(dependenciesChanged?['Installed dependencies changed']:[]),
+      ...(!artifactMatches?['Measured artifact bytes changed or are unreadable']:[]),
+      ...(changes.checkInputs.length?['Saved check inputs or checker versions differ: '+changes.checkInputs.join(', ')]:[]),
+    ]
+    return {current:!reasons.length,code:reasons.length?'measurement-stale':'current',changes,
+      evidence:{artifactMatches,exportableSourcesMatch:!changedSources.length&&!dependenciesChanged,checks:checkInputs,
+        scope:'Saved input identity only; matching checks describe the recorded artifact and conditions, not current source-to-build correspondence, new requirements, a new execution or game quality. Changed sources still require a verified build before export.'},
+      reason:reasons.length?reasons.join('; '):'Source/build/report inputs match now; this is not game-quality acceptance or permission to ignore later edits.'}
+  } catch(error) {
+    return fail('measurement-inspection-failed','Current inputs could not be inspected; saved checks are historical, not current acceptance: '+
+      (error instanceof Error?error.message:String(error)))
+  }
 }
 export async function measuredFiles(run: Run, selected: {artifact: FileVersion; smoke: CheckResult}) {
   const files = new Map<string, string>()
@@ -104,10 +136,14 @@ export async function exportAgentMeasuredBuild(run:Run,measurementId:string,
   const selected=await selectAgentMeasuredBuild(run,measurementId,guard.busy(run))
   return exportSelection(run,selected,selected.build.projectBuild,selected.build.projectBuild!.excludedReports,
     {attemptId:selected.turn.attemptId,measurementId,requirementsRevision:selected.measurement.requirementsRevision,
-      reports:selected.measurement.reports},guard,kind,()=>selectAgentMeasuredBuild(run,measurementId,guard.busy(run)),true)
+      reports:selected.measurement.reports,...(selected.measurement.consumption?{
+        consumption:selected.measurement.consumption,consumptionChecks:selected.measurement.checks.filter(c=>
+          selected.measurement.consumption!.checks.some(id=>id===c.id)).map(({inputs:_inputs,...check})=>check)}: {})},
+    guard,kind,()=>selectAgentMeasuredBuild(run,measurementId,guard.busy(run)),true)
 }
 async function exportSelection(run:Run,selected:{smoke:CheckResult;artifact:FileVersion},proof:CheckResult['projectBuild'],
-  reports:string[],identity:{attemptId:string;taskId?:string;planRevision?:number;measurementId?:string;requirementsRevision?:string;reports?:FileVersion[]},
+  reports:string[],identity:{attemptId:string;taskId?:string;planRevision?:number;measurementId?:string;requirementsRevision?:string;reports?:FileVersion[];
+    consumption?:AgentMeasurement['consumption'];consumptionChecks?:Array<Omit<CheckResult,'inputs'>>},
   guard:{read():Promise<Run|undefined>;busy(run:Run):boolean},kind:'static'|'project',validate:()=>Promise<unknown>,editable:boolean) {
   const files = await measuredFiles(run, selected), entries = []
   const verifySources = async () => {

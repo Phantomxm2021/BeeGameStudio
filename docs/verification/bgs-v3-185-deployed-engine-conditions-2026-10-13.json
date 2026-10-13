@@ -1,0 +1,166 @@
+{
+  "version": "1.85-record",
+  "date": "2026-10-13",
+  "productionCodeChanged": false,
+  "deployment": {
+    "baseline": "1.84",
+    "runtimePid": 46885,
+    "launcherPid": 46884,
+    "launcher": "/private/tmp/bgs-v3-deploy-184-runtime.ts",
+    "log": "/private/tmp/bgs-v3-184-deployed-runtime.log",
+    "rootEnvironmentChanged": false,
+    "toolGrantsConfigured": false,
+    "cliRebuilt": false,
+    "frontendRebuilt": false,
+    "onlyRuntimeRestarted": true,
+    "health": [
+      {
+        "port": 62173,
+        "status": 200
+      },
+      {
+        "port": 62174,
+        "status": 200
+      },
+      {
+        "port": 62175,
+        "status": 200
+      },
+      {
+        "port": 62176,
+        "status": 200
+      },
+      {
+        "port": 62177,
+        "status": 200
+      }
+    ],
+    "preflight": {
+      "projects": 40,
+      "activeNativeChildren": 0,
+      "unchangedUnknownLocks": [
+        [
+          "v3-edit-fault-8741b8db-84ea-437f-80cd-15c1c6f1f522",
+          3
+        ],
+        [
+          "v3-edit-fault-bf1512d1-196f-48cc-a723-49685333fc2e",
+          3
+        ],
+        [
+          "v3-host-restart-c4b3872f-5099-4535-a954-6134b8d8210b",
+          2
+        ]
+      ],
+      "writes": 0
+    }
+  },
+  "engineProbe": {
+    "method": "Actual installed Unity, existing BGS projectExecutionAccess and OS sandbox. Independent new temporary fixtures; engine commands only, no manual game/engine source.",
+    "script": "/private/tmp/bgs-v3-185-unity-project-probe.ts",
+    "command": "-batchmode -nographics -quit -createProject <new-fixture> -logFile <fixture>/logs/Editor.log -upmLogFile <fixture>/logs/upm.log",
+    "network": "Denied",
+    "extraWriteGrants": 0,
+    "attempts": [
+      {
+        "scope": "executable + Frameworks",
+        "result": "exit 0, no project created, cannot find Rosetta helper",
+        "evidence": "/private/tmp/bgs-v3-185-unity-project-result.json"
+      },
+      {
+        "scope": "plus exact UnityRosettaHelper.app read-only",
+        "result": "exit 0, no project created, same missing helper diagnostic",
+        "evidence": "/private/tmp/bgs-v3-185-unity-project-rosetta-result.json"
+      },
+      {
+        "scope": "exact Unity.app read-only bounded comparison",
+        "result": "exit 0, no project created, Editor reports Rosetta 2 not installed",
+        "evidence": "/private/tmp/bgs-v3-185-unity-project-bundle-result.json"
+      }
+    ],
+    "retained": true,
+    "automaticProductionRetry": false,
+    "scopeChanges": "Evidence-led independent diagnostic variants, not replay of a game or paid task.",
+    "note": "Whole app read-only comparison improves startup diagnostic but is not proof of final minimal full-editor grant. No claim of complete engine operation.",
+    "postcondition": "No engine-project artifacts created in any variant; exit 0 is not success.",
+    "childrenRemaining": 0
+  },
+  "hostRosetta": {
+    "architecture": "arm64",
+    "command": "/usr/bin/arch -x86_64 /usr/bin/true",
+    "result": "Bad CPU type in executable outside sandbox",
+    "trueBinary": "Universal binary includes x86_64",
+    "unityRosettaHelper": "x86_64-only",
+    "receipt": "com.apple.pkg.RosettaUpdateAuto not found",
+    "rosettaSharedRuntimePath": "/Library/Apple/usr/share/rosetta absent",
+    "conclusion": "No currently usable Rosetta 2 runtime; not established as BGS license/cache failure",
+    "installedOrRepaired": false
+  },
+  "license": {
+    "phaseReached": false,
+    "licenseFilesRead": false,
+    "licenseChanged": false,
+    "activationPerformed": false,
+    "externalConnectionGranted": false,
+    "entitlementValidity": "unverified",
+    "decision": "Resolve OS prerequisite before selecting the actual licensing files/client/IPC needed by intended operations; no blanket home/license-folder grant."
+  },
+  "cache": {
+    "phaseReached": false,
+    "runtimeValidated": false,
+    "decision": "Prefer per-invocation project-local caches/logs using existing writable workspace, not host user cache/config modifications. No platform default environment or engine choice added.",
+    "officialOptions": [
+      "UPM_CACHE_ROOT for UPM global cache",
+      "ASSETSTORE_CACHE_PATH for distinct Asset Store cache",
+      "-giCustomCacheLocation for GI cache",
+      "-logFile and -upmLogFile for explicit logs"
+    ],
+    "scope": "Official Unity 6.0 documented methods only; not yet executed/verified by this installed 6.4 editor."
+  },
+  "regression": {
+    "passed": 19,
+    "failed": 0,
+    "assertions": 179,
+    "files": 4,
+    "controlledProviderRequests": 5,
+    "paidCalls": 0,
+    "log": "/private/tmp/bgs-v3-185-deployed-boundary-regression.log",
+    "typecheckPassed": true,
+    "typecheckLog": "/private/tmp/bgs-v3-185-typecheck.log",
+    "diffCheckPassed": true,
+    "protectedPathsClean": [
+      "apps/frontend",
+      "src",
+      "packages/builtin-tools"
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.unity.com/en-us/engine/6000.0/manual/unity-editor/command-line-arguments/editor",
+      "used": "createProject/log arguments, version does not launch Editor, GI cache option"
+    },
+    {
+      "url": "https://docs.unity3d.com/cn/6000.0/Manual/upm-config-cache.html",
+      "used": "per-invocation UPM_CACHE_ROOT; prior cache retained"
+    },
+    {
+      "url": "https://docs.unity3d.com/cn/6000.0/Manual/upm-config-cache-as.html",
+      "used": "Asset Store cache separate and ASSETSTORE_CACHE_PATH"
+    }
+  ],
+  "remaining": [
+    "OS Rosetta prerequisite requires separately authorized installation, not automatic acceptance of terms.",
+    "Actual licensing, caches, project initialization/edit/build/runtime remain unverified.",
+    "Godot still not in current PATH/common app path; no installation or silent route substitution.",
+    "MCP/remote effects and complete gameplay/eight-domain/resources/Scene/UI quality are not certified; cost optimization last."
+  ],
+  "boundaries": {
+    "projectArtifactsManuallyPatched": 0,
+    "formalFrontendChanged": false,
+    "claudeCodeChanged": false,
+    "settingsHooksOpened": false,
+    "agentLimited": false,
+    "enginePrescribed": false,
+    "paidCalls": 0
+  }
+}

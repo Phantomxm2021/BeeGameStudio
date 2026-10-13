@@ -117,6 +117,7 @@ export function settleSourceEdit(run: Run, attemptId: string, fence: number, err
   delete next.writer; next.version++
   next.status = next.paused || next.agentTurns ? 'blocked' : 'running'
   next.blockedReason = next.paused ? 'User pause retained. Edited candidates and old measurements are not accepted.' :
+    error ? 'Source edit failed: '+error+' Inspect actual saved sources and this edit record; no save/game acceptance or automatic retry.' :
     next.agentTurns ? 'Source edit ended. Saved candidates are unmeasured; explicitly ask the Agent to reconcile, rebuild and measure. No automatic dispatch.' :
     'Saved edit is an unmeasured candidate. Execute affected owner tasks and rebuild/measure; no automatic dispatch.'
   return next

@@ -13,6 +13,14 @@ test('every declared checker and host-only evidence has one current driver ident
   }
   for (const id of ['author-PASS', '__proto__', 'toString'])
     expect(isCurrentCheckVersion({ id, version: 'v3-slice.1' })).toBe(false)
+  // Old outer-box-only UI evidence cannot certify the new text-fit contract.
+  expect(isCurrentCheckVersion({id:'ui-data-consumption',version:'v3-ui-dom-consumption.1'})).toBe(false)
+  expect(isCurrentCheckVersion({id:'ui-data-consumption',version:'v3-ui-dom-consumption.2'})).toBe(false)
+  expect(isCurrentCheckVersion({id:'ui-data-consumption',version:'v3-ui-dom-consumption.3'})).toBe(false)
+  expect(isCurrentCheckVersion({id:'ui-data-consumption',version:'v3-ui-dom-consumption.4'})).toBe(false)
+  expect(isCurrentCheckVersion({id:'pixel-data-consumption',version:'v3-canvas-image-consumption.2'})).toBe(false)
+  expect(await checkIsCurrent('/path-not-accessed-for-empty-input', {id:'ui-data-consumption',version:'v3-ui-dom-consumption.1',
+    status:'passed',inputs:[],observation:'Old synthetic receipt',createdAt:'earlier'})).toBe(false)
 })
 
 test('build evidence must match the owning task mode, not any recognized build version', () => {

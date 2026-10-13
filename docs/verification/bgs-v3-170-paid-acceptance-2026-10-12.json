@@ -1,0 +1,831 @@
+{
+  "version": "1.72-paid-stop-audit",
+  "status": "user-stopped-partial-not-accepted",
+  "observedAt": "2026-10-12T07:54:00Z",
+  "deployment": {
+    "version": "1.70",
+    "pid": 16896,
+    "ttySession": 85744,
+    "typecheckExit": 0,
+    "nativeRebuilt": false,
+    "frontendRebuilt": false
+  },
+  "services": [
+    {
+      "name": "runtime",
+      "status": "200",
+      "exit": 0
+    },
+    {
+      "name": "frontend",
+      "status": "200",
+      "exit": 0
+    },
+    {
+      "name": "billing",
+      "status": "200",
+      "exit": 0
+    },
+    {
+      "name": "skills",
+      "status": "200",
+      "exit": 0
+    },
+    {
+      "name": "resources",
+      "status": "200",
+      "exit": 0
+    }
+  ],
+  "request": {
+    "attemptId": "beec4eb7-96c2-4f9a-ae02-36143aee60e7",
+    "requestKey": "617da805-d88b-4369-90d4-fe58b2edb15c",
+    "startedAt": "2026-10-12T06:04:15.521Z",
+    "continuationOf": "b36ab913-f8d4-437c-9499-6f9814d7bd0f",
+    "contextMode": "resume",
+    "expectedVersion": 115
+  },
+  "boundary": {
+    "previousAttempt": "b36ab913-f8d4-437c-9499-6f9814d7bd0f",
+    "previousVersion": 114,
+    "pausedAt": "2026-10-12T05:12:58.943Z",
+    "quiescedAt": "2026-10-12T05:13:00.804Z",
+    "focusedPreflight": "聚焦模式只能用于已结束任务后的 work／change；中断任务应先核对并明确续作",
+    "preflightDispatches": 0
+  },
+  "scope": {
+    "paidMessages": 1,
+    "automaticAdditionalMessages": 0,
+    "manualGameChanges": 0,
+    "formalFrontendChanges": 0,
+    "claudeCodeChanges": 0,
+    "promptChanges": 0,
+    "agentLimits": 0,
+    "focusedSuccessTested": false
+  },
+  "latestObservedRun": {
+    "version": 121,
+    "status": "blocked",
+    "writer": null,
+    "writerLiveness": "none",
+    "paused": {
+      "at": "2026-10-12T07:53:04.574Z"
+    },
+    "turn": {
+      "attemptId": "beec4eb7-96c2-4f9a-ae02-36143aee60e7",
+      "status": "failed",
+      "error": "EPIPE: broken pipe, send",
+      "finishedAt": "2026-10-12T07:44:21.961Z",
+      "quiescedAt": "2026-10-12T07:44:20.176Z",
+      "nativeSessionId": "a81cfeaf-b023-43c6-ad73-d5a94c6b60ed",
+      "usage": {
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 5974600,
+        "completion_tokens": 55041,
+        "prompt_tokens": 507116,
+        "total_tokens": 6536757
+      }
+    },
+    "stop": {
+      "requestedByUser": true,
+      "normalUiInitiallyUnavailable": true,
+      "fallback": "SIGINT only PID 16981 after exact project cwd/parent and no children confirmed",
+      "nativeProcessExited": true,
+      "servicesRestarted": false,
+      "normalApiPauseConfirmed": true,
+      "normalRuntimeHealthAfter": 200
+    },
+    "screenshot": "/private/tmp/bgs-v3-170-stopped-final.jpg"
+  },
+  "usage": {
+    "total": 6536757,
+    "ordinaryInput": 507116,
+    "cachedInput": 5974600,
+    "output": 55041,
+    "cacheCreation": 0,
+    "providerRequests": 82,
+    "syntheticZeroUsageRows": 1,
+    "roles": {
+      "main": {
+        "requests": 20,
+        "tokens": 2247442
+      },
+      "child": {
+        "requests": 62,
+        "tokens": 4289315
+      }
+    },
+    "childPercent": 65.61839456476659,
+    "cachePercent": 91.40006275282988,
+    "sdkAccountingMatchesLedger": true,
+    "difference": 0,
+    "stages": [
+      {
+        "stage": "主会话：盘点与补齐设计记录",
+        "role": "main",
+        "range": [
+          1,
+          7
+        ],
+        "requests": 7,
+        "tokens": 749563
+      },
+      {
+        "stage": "主会话：完整流程复跑与分段读取结果",
+        "role": "main",
+        "range": [
+          8,
+          11
+        ],
+        "requests": 4,
+        "tokens": 442946
+      },
+      {
+        "stage": "主会话：Todo／报告／构建／测量／委派／阶段汇报",
+        "role": "main",
+        "range": [
+          12,
+          18
+        ],
+        "requests": 7,
+        "tokens": 809656
+      },
+      {
+        "stage": "主会话：复核返回后的计划与未完成修订",
+        "role": "main",
+        "range": [
+          19,
+          20
+        ],
+        "requests": 2,
+        "tokens": 245277
+      },
+      {
+        "stage": "子代理：源码／权威哈希排查／构建及确定性测试",
+        "role": "child",
+        "range": [
+          1,
+          20
+        ],
+        "requests": 20,
+        "tokens": 826481
+      },
+      {
+        "stage": "子代理：浏览器入口探索与首次几何探查",
+        "role": "child",
+        "range": [
+          21,
+          31
+        ],
+        "requests": 11,
+        "tokens": 671888
+      },
+      {
+        "stage": "子代理：读取回执、哈希与已有证据",
+        "role": "child",
+        "range": [
+          32,
+          38
+        ],
+        "requests": 7,
+        "tokens": 559297
+      },
+      {
+        "stage": "子代理：套件重跑、文档与图像复核",
+        "role": "child",
+        "range": [
+          39,
+          44
+        ],
+        "requests": 6,
+        "tokens": 533222
+      },
+      {
+        "stage": "子代理：再次追查权威哈希、bundle和截图",
+        "role": "child",
+        "range": [
+          45,
+          50
+        ],
+        "requests": 6,
+        "tokens": 538402
+      },
+      {
+        "stage": "子代理：额外套件／探针／反复摘取结果及结论",
+        "role": "child",
+        "range": [
+          51,
+          62
+        ],
+        "requests": 12,
+        "tokens": 1160025
+      }
+    ],
+    "subsets": {
+      "mainSummaryThreeRequests": 332703,
+      "childHelperExplorationFiveRequests": 286331,
+      "childEvidenceSummaryFourRequests": 336916,
+      "childEndingExtractionFourRequests": 389739,
+      "todoOnly": [
+        {
+          "role": "main",
+          "time": "2026-10-12T06:09:03.185Z",
+          "tokens": 112032
+        },
+        {
+          "role": "main",
+          "time": "2026-10-12T06:11:08.931Z",
+          "tokens": 116058
+        },
+        {
+          "role": "child",
+          "time": "2026-10-12T06:12:01.219Z",
+          "tokens": 19144
+        },
+        {
+          "role": "child",
+          "time": "2026-10-12T07:22:03.551Z",
+          "tokens": 71127
+        },
+        {
+          "role": "child",
+          "time": "2026-10-12T07:37:23.355Z",
+          "tokens": 100336
+        },
+        {
+          "role": "main",
+          "time": "2026-10-12T07:39:21.507Z",
+          "tokens": 122267
+        }
+      ],
+      "todoTotal": 540964,
+      "notAdditionalTotals": true
+    },
+    "context": {
+      "mainFirst": 102752,
+      "mainLast": 122496,
+      "childFirst": 18705,
+      "childLast": 100518,
+      "noPaidFocusedMode": true,
+      "compactionProviderRequestsObserved": 0,
+      "note": "Input context including cached input; not exact old-history byte allocation. Cached input has distinct pricing and is not all avoidable waste."
+    }
+  },
+  "findings": [
+    {
+      "id": "C1",
+      "result": "not-adopted",
+      "fact": "Normal Agent explicitly confirmed no vendored/imported shared module; continues src/content.ts. No --inspect/--install adoption in observed Agent requests."
+    },
+    {
+      "id": "C2",
+      "result": "compatibility-gap",
+      "fact": "Independent read-only --inspect of all nine documents: six style.align start/end values rejected despite align being listed as supported; project data.action/data.variant requires adapters.",
+      "evidence": {
+        "results": [
+          {
+            "path": "content/ui/title.json",
+            "sha256": "42306189d3bd140d15dd4f15c67837401e556d5d7c6e6c170b0d089205706449",
+            "kind": "ui-screen",
+            "support": {
+              "supported": false,
+              "issues": [],
+              "projectSemantics": [
+                {
+                  "nodeId": "card",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "btn-start",
+                  "property": "data.action"
+                },
+                {
+                  "nodeId": "btn-start",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "btn-levels",
+                  "property": "data.action"
+                },
+                {
+                  "nodeId": "btn-levels",
+                  "property": "data.variant"
+                }
+              ],
+              "runtimeVerified": false,
+              "note": "Static shared-surface compatibility only; fonts/assets, actual actions/state, geometry and appearance require execution. Project metadata is not silently translated."
+            }
+          },
+          {
+            "path": "content/ui/hud.json",
+            "sha256": "12abdf18f78cfa1dab61e91361d52a250782d806f65fb276b302cde63dfd68ca",
+            "kind": "ui-hud",
+            "support": {
+              "supported": false,
+              "issues": [
+                {
+                  "nodeId": "hud-level",
+                  "property": "style",
+                  "reason": "Error: Unsupported production UI style: hud-level/align"
+                },
+                {
+                  "nodeId": "hud-subtitle",
+                  "property": "style",
+                  "reason": "Error: Unsupported production UI style: hud-subtitle/align"
+                },
+                {
+                  "nodeId": "hud-time",
+                  "property": "style",
+                  "reason": "Error: Unsupported production UI style: hud-time/align"
+                }
+              ],
+              "projectSemantics": [
+                {
+                  "nodeId": "game-view",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "hud-bar",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "hud-level",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "btn-mute",
+                  "property": "data.action"
+                },
+                {
+                  "nodeId": "btn-mute",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "btn-restart",
+                  "property": "data.action"
+                },
+                {
+                  "nodeId": "btn-restart",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "btn-menu",
+                  "property": "data.action"
+                },
+                {
+                  "nodeId": "btn-menu",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "hint-bar",
+                  "property": "data.variant"
+                }
+              ],
+              "runtimeVerified": false,
+              "note": "Static shared-surface compatibility only; fonts/assets, actual actions/state, geometry and appearance require execution. Project metadata is not silently translated."
+            }
+          },
+          {
+            "path": "content/ui/success.json",
+            "sha256": "721f7a0b2d011ee8f826d855d63753bc55ac5e7fb27ef7766fd446c933e6046b",
+            "kind": "ui-screen",
+            "support": {
+              "supported": false,
+              "issues": [],
+              "projectSemantics": [
+                {
+                  "nodeId": "card",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "success-stars",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "btn-success-retry",
+                  "property": "data.action"
+                },
+                {
+                  "nodeId": "btn-success-retry",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "btn-next",
+                  "property": "data.action"
+                },
+                {
+                  "nodeId": "btn-next",
+                  "property": "data.variant"
+                }
+              ],
+              "runtimeVerified": false,
+              "note": "Static shared-surface compatibility only; fonts/assets, actual actions/state, geometry and appearance require execution. Project metadata is not silently translated."
+            }
+          },
+          {
+            "path": "content/ui/fail.json",
+            "sha256": "a4bbb18bb30a456f047ae8e1267ce75ec29c9eb03e7c150b3ce6a5aac22c7226",
+            "kind": "ui-screen",
+            "support": {
+              "supported": false,
+              "issues": [],
+              "projectSemantics": [
+                {
+                  "nodeId": "card",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "btn-fail-menu",
+                  "property": "data.action"
+                },
+                {
+                  "nodeId": "btn-fail-menu",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "btn-fail-retry",
+                  "property": "data.action"
+                },
+                {
+                  "nodeId": "btn-fail-retry",
+                  "property": "data.variant"
+                }
+              ],
+              "runtimeVerified": false,
+              "note": "Static shared-surface compatibility only; fonts/assets, actual actions/state, geometry and appearance require execution. Project metadata is not silently translated."
+            }
+          },
+          {
+            "path": "content/ui/ending.json",
+            "sha256": "3766cd152dbd02482d63db5b1fb98fb0cd45970b409beee5faa64893b2dcaeee",
+            "kind": "ui-screen",
+            "support": {
+              "supported": false,
+              "issues": [],
+              "projectSemantics": [
+                {
+                  "nodeId": "card",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "btn-ending-title",
+                  "property": "data.action"
+                },
+                {
+                  "nodeId": "btn-ending-title",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "btn-ending-replay",
+                  "property": "data.action"
+                },
+                {
+                  "nodeId": "btn-ending-replay",
+                  "property": "data.variant"
+                }
+              ],
+              "runtimeVerified": false,
+              "note": "Static shared-surface compatibility only; fonts/assets, actual actions/state, geometry and appearance require execution. Project metadata is not silently translated."
+            }
+          },
+          {
+            "path": "content/ui/level-select.json",
+            "sha256": "9df195020bda8f6672d8488e09cdf0f11b0317b0b58ad8b9266cfc2497f76630",
+            "kind": "ui-screen",
+            "support": {
+              "supported": false,
+              "issues": [
+                {
+                  "nodeId": "level-1",
+                  "property": "style",
+                  "reason": "Error: Unsupported production UI style: level-1/align"
+                },
+                {
+                  "nodeId": "level-2",
+                  "property": "style",
+                  "reason": "Error: Unsupported production UI style: level-2/align"
+                },
+                {
+                  "nodeId": "level-3",
+                  "property": "style",
+                  "reason": "Error: Unsupported production UI style: level-3/align"
+                }
+              ],
+              "projectSemantics": [
+                {
+                  "nodeId": "card",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "level-1",
+                  "property": "data.action"
+                },
+                {
+                  "nodeId": "level-1",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "level-2",
+                  "property": "data.action"
+                },
+                {
+                  "nodeId": "level-2",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "level-3",
+                  "property": "data.action"
+                },
+                {
+                  "nodeId": "level-3",
+                  "property": "data.variant"
+                },
+                {
+                  "nodeId": "btn-back-title",
+                  "property": "data.action"
+                },
+                {
+                  "nodeId": "btn-back-title",
+                  "property": "data.variant"
+                }
+              ],
+              "runtimeVerified": false,
+              "note": "Static shared-surface compatibility only; fonts/assets, actual actions/state, geometry and appearance require execution. Project metadata is not silently translated."
+            }
+          },
+          {
+            "path": "content/scenes/level-1.json",
+            "sha256": "990424e68d4e750799dfe5ba5af75f89f1c163369529afb89df09a8cec3f013d",
+            "kind": "scene-2d",
+            "support": {
+              "nodeCount": 11,
+              "geometryAvailable": true,
+              "staticRenderingOnly": true,
+              "runtimeVerified": false
+            }
+          },
+          {
+            "path": "content/scenes/level-2.json",
+            "sha256": "07a463e85fce599296339f6ea7fb0ee631783576bd9236a5a81af34453562022",
+            "kind": "scene-2d",
+            "support": {
+              "nodeCount": 17,
+              "geometryAvailable": true,
+              "staticRenderingOnly": true,
+              "runtimeVerified": false
+            }
+          },
+          {
+            "path": "content/scenes/level-3.json",
+            "sha256": "3f5cb30ec6b7be0fda59add01bcec3b2f3c19ef9217adc9863611e684fdc6af6",
+            "kind": "scene-2d",
+            "support": {
+              "nodeCount": 24,
+              "geometryAvailable": true,
+              "staticRenderingOnly": true,
+              "runtimeVerified": false
+            }
+          }
+        ],
+        "capabilities": {
+          "uiRoles": [
+            "screen-root",
+            "hud-root",
+            "container",
+            "text",
+            "shape",
+            "image",
+            "sprite",
+            "button",
+            "tab",
+            "keycap",
+            "toast"
+          ],
+          "uiStyles": [
+            "background",
+            "backgroundColor",
+            "color",
+            "border",
+            "borderColor",
+            "borderWidth",
+            "borderStyle",
+            "borderRadius",
+            "boxShadow",
+            "fontFamily",
+            "fontSize",
+            "fontWeight",
+            "lineHeight",
+            "letterSpacing",
+            "textAlign",
+            "opacity",
+            "align",
+            "verticalAlign"
+          ],
+          "sceneComponents": [
+            "camera",
+            "sprite-renderer",
+            "image",
+            "text",
+            "rect-transform",
+            "box-collider-2d",
+            "circle-collider-2d",
+            "capsule-collider-2d",
+            "polygon-collider-2d"
+          ]
+        },
+        "runtimeVerified": false
+      }
+    },
+    {
+      "id": "Q1",
+      "result": "quality-failed",
+      "fact": "r31/h-k-2star.png still shows gray star over result statistics; src/game.ts and styles.css unchanged.",
+      "evidence": "reports/browser/r31/h-k-2star.png"
+    },
+    {
+      "id": "Q2",
+      "result": "unsupported-scope-claim",
+      "fact": "Report calls 960x540 non-target, while saved UI targetViewports and Technical design require it. Probe coordinate-space mismatch does not establish game defect or justify removing viewport coverage."
+    },
+    {
+      "id": "Q3",
+      "result": "authority-mismatch-under-investigation",
+      "fact": "Child found registry documentRevision 993aabfc vs current computed 684dc1e2; conflicts with author's unchanged-identity claim. No final result."
+    },
+    {
+      "id": "Q4",
+      "result": "unresolved",
+      "fact": "Audio design/implementation mismatch, camera-test expected coordinate and absent test reference remain unchanged; local suite summaries do not close them."
+    }
+  ],
+  "sources": {
+    "files": 39,
+    "changes": [
+      {
+        "path": "docs/TECHNICAL_DESIGN.md",
+        "sha256": "23b32784898bc49b5d10551118b32f4d39fbc0d4ad4c2366c6521c61901195d0"
+      },
+      {
+        "path": "docs/UI_UX_SPEC.md",
+        "sha256": "ecbcb848815d628be52ccf1b03cd9648d4445aeede00dd3e5d1b26e42698f59e"
+      }
+    ],
+    "codeAndContentUnchangedThisContinuation": true,
+    "manualGameChanges": 0
+  },
+  "integrity": {
+    "protectedTrees": [
+      {
+        "path": "apps/frontend",
+        "files": 825,
+        "sha256": "4aa386377b6f1e0dd07e5021f5917fb8fa8550df77621bd7fdc2be713e139785"
+      },
+      {
+        "path": "src",
+        "files": 2445,
+        "sha256": "f0ac89007a99be0ea54c4694be335a4ca9fb14a1d60a70eb60c6847a2356ff0a"
+      },
+      {
+        "path": "packages/builtin-tools",
+        "files": 383,
+        "sha256": "d979b1137ab5945b9c12ef13ad71ea0df6a899a759161853d8074359b8c77f23"
+      }
+    ],
+    "matchesPredeployment": true,
+    "formalFrontendAndClaudeSourceUnchanged": true
+  },
+  "blocker": {
+    "resolved": "User stopped the run. Native exited, host quiesced/finished, normal API paused Run v121 with no writer. No automatic restart or replay.",
+    "remaining": "Exact host CPU hot function not established; shared adoption, full quality and focused cost reduction not passed."
+  },
+  "remaining": [
+    "No further paid runs or system implementation authorized by this stop-and-analyze request.",
+    "Next plan should prioritize scoped reusable evidence, exact tool input/source attribution, existing batch operations and practical context isolation; no more Review prompt or hard Agent limits.",
+    "Debug history should not be loaded unbounded to resolve current permissions; preserve the complete record on disk."
+  ],
+  "interimRecord": {
+    "observedAt": "2026-10-12T06:28:00Z",
+    "status": "not-complete-browser-control-blocked",
+    "usage": {
+      "requests": 33,
+      "total": 2517889,
+      "input": 177945,
+      "cached": 2321352,
+      "output": 18592,
+      "roles": {
+        "main": {
+          "requests": 19,
+          "tokens": 2002165
+        },
+        "child": {
+          "requests": 14,
+          "tokens": 515724
+        }
+      },
+      "providerRequests": 32,
+      "syntheticZeroUsageRows": 1,
+      "finalSdkUsage": null,
+      "provisional": true,
+      "stages": [
+        {
+          "label": "盘点并补齐设计记录（主请求1–7）",
+          "requests": 7,
+          "tokens": 749563
+        },
+        {
+          "label": "完整流程复测和重复读结果（主请求8–11）",
+          "requests": 4,
+          "tokens": 442946
+        },
+        {
+          "label": "Todo／报告／构建测量／委派／阶段汇报（主请求12–18）",
+          "requests": 7,
+          "tokens": 809656
+        },
+        {
+          "label": "子代理复核（仍在运行）",
+          "requests": 14,
+          "tokens": 515724
+        }
+      ],
+      "mainInputContext": {
+        "first": 102752,
+        "last": 118028
+      },
+      "childInputContext": {
+        "first": 18705,
+        "last": 48325
+      }
+    }
+  },
+  "permissionResponses": [
+    {
+      "toolUseID": "call_pvfacjckmnh9esnmxsiunole",
+      "agentId": "a98f6d79c9c0cd4eb",
+      "requestEventId": 90180,
+      "requestAt": "2026-10-12T06:16:59.814Z",
+      "reason": "Shell expansion syntax in paths requires manual approval",
+      "blockedPath": "$PV",
+      "decision": "deny",
+      "message": "尚未核实删除目标及既有内容，本次不授权删除。",
+      "resolved": true,
+      "newTaskSubmitted": false
+    },
+    {
+      "toolUseID": "call_kcxgqgc2h7thqpis3i66vyst",
+      "agentId": "a98f6d79c9c0cd4eb",
+      "requestEventId": 90763,
+      "requestAt": "2026-10-12T07:27:55.036Z",
+      "reason": "Shell expansion syntax in paths requires manual approval",
+      "blockedPath": "$A",
+      "decision": "deny",
+      "message": "删除路径仍使用未核实的变量，本次不授权删除这些目录。",
+      "resolved": true,
+      "newTaskSubmitted": false
+    }
+  ],
+  "costAttribution": [
+    {
+      "category": "Agent task strategy",
+      "confirmed": "One autonomously selected verification child performed 62 requests and 4,289,315 tokens. Broad at-least coverage task re-ran suites, re-read summaries, explored legacy metadata and helper paths; parent then planned another review-until-PASS but it did not execute before stop. BGS did not schedule fixed Review/Revision tasks.",
+      "evidence": "One Agent tool call; Run plans empty. Parent request 19 Todo; child ledger 1–62."
+    },
+    {
+      "category": "Native context amplification",
+      "confirmed": "Normal continued parent starts at 102,752 input and reaches 122,496; child starts fresh at 18,705 but reaches 100,518. Each small model request replays applicable history. No automatic compression provider request recorded. This is standard context accounting, not incorrect billing.",
+      "evidence": "Provider IDs deduplicated, fragments max-usage, exact SDK ledger match."
+    },
+    {
+      "category": "Mechanical operations and repeat retrieval",
+      "confirmed": "Main reads one fullflow result in three requests (332,703 tokens); child reads browser summaries in four (336,916), extracts independent ending/win data in four (389,739); six Todo-only requests 540,964. These are whole request costs including input, not tool text costs.",
+      "evidence": "Exact per-request ledger indices."
+    },
+    {
+      "category": "Tool handoff granularity plus model over-exploration",
+      "confirmed": "Child helper discovery/copy/implementation/env/help takes five requests 286,331. Authority command gives computed/saved operands and explicitly says legacy tag does not block autonomous --current; caller nevertheless mandates consistency and spends repeated isolated-copy/version/hash experiments on it. Hashed source constituents/change attribution are not returned.",
+      "evidence": "project-content-authority.ts projectContentAuthority/inspectProjectContentAuthority; Agent assignment and actual command sequence."
+    },
+    {
+      "category": "BGS display/responsiveness bugs, not direct model-token source",
+      "confirmed": "/workflow-v3/events returns the whole live transcript, not the attempt slice, then debug pretty-prints it. Observed ~90K events, Chrome 2.9GB and CDP unresponsive; full durable transcript ends at 94,491 events/59MB. Runtime PID16896 later >99% CPU and health timeout prevented normal pause. Sample collected; exact hot JS function not symbolized/proven. Recovered after task was interrupted.",
+      "evidence": "routes.ts attemptEvents and events handler; session-manager transcript(); debug-client events/request/pretty; browser AX memory; /private/tmp/bgs-v3-170-stall-sample.txt"
+    }
+  ],
+  "additionalEvidenceFinding": {
+    "id": "Q5",
+    "result": "invalid-perturbation-proof",
+    "fact": "Child hash sensitivity experiment claims par 5->99 changed Scene, but JSON.stringify result contains \"par\":5, while replacement looks for \"par\": 5. Independent read-only string check confirms replacement changes nothing. Legacy hash scope can be established from BGS source; this experiment itself does not prove Scene change was tested.",
+    "sceneWasManuallyModified": false
+  },
+  "qualityResult": {
+    "overall": "not-passed",
+    "sharedConsumer": "not-vendored-or-imported; independent compatibility still rejects six align:start/end values",
+    "ui": "Four containers at 1280 mechanically measured; dynamic two-star overlap still in saved screenshot and unchanged CSS/game source",
+    "smallViewport": "Scaling explains geometry mismatch but does not justify report's non-target claim; saved requirements still include 960x540",
+    "childVerdict": "FAIL for stale legacy identity and imprecise prose; no child fix of game quality",
+    "authorRevisionAfterVerdict": "Planned, then interrupted; final source check does not show the last attempted edit applied",
+    "focusedAcceptance": "Not tested; this explicit interrupted continuation correctly stayed resume",
+    "measurementId": "a30d74b4-04c0-4f2f-aa55-c3a3592036ec",
+    "freshnessAfterStop": "Not independently read after stop; no delivery certification"
+  }
+}

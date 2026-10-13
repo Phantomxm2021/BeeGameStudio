@@ -1,12 +1,13 @@
 import {test,expect} from 'bun:test'
-import {mkdtemp,mkdir,writeFile,readFile,rm,realpath,symlink} from 'node:fs/promises'
+import {mkdtemp,mkdir,writeFile,readFile,rm,realpath,symlink,chmod} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {createRequire} from 'node:module'
 import {Hono} from 'hono'
-import {createRun,digest,type AgentTurn} from './state'
+import {createRun,digest,type AgentTurn,type SkillUse} from './state'
 import {createLocalWorkflowStore} from './store'
-import {createAgentMeasurement} from './agent-measurement'
+import {createAgentMeasurement,measurementSummary,measurementRequest} from './agent-measurement'
+import {formatError} from '../../../../../src/utils/toolErrors'
 import {openAgentTools} from './agent-tools'
 import {selectAgentMeasuredBuild,exportAgentMeasuredBuild,inspectAgentMeasurementInputs} from './measured-build'
 import {buildEditableProject} from './editable-project'
@@ -19,6 +20,9 @@ import {uiLayoutFixture} from '../fixtures/layout-fixture'
 import {createV3Executor} from './execution'
 import {readContentView} from './content-view'
 import {agentTurnHandoffReason} from './agent-goal'
+import {openPreviewTestAccess} from '../preview-test-access'
+import {sharedContentChecker} from '../content-checker-runtime'
+import {createAgentWorkflowApp} from '../../app'
 
 const JSZip=createRequire(import.meta.resolve('exceljs'))('jszip')
 const builder="import{cp,mkdir}from'node:fs/promises';await mkdir('dist',{recursive:true});await cp('src/index.html','dist/index.html');"
@@ -48,6 +52,438 @@ async function fixture(script=builder,previousTurns:AgentTurn[]=[]) {
     async close(){await measurement.close();await rm(root,{recursive:true,force:true})}}
 }
 const request={requestKey:'measure-1',runtimeArtifact:'dist',reportPaths:['README.md']}
+
+test.each([false,true])('V3 ordinary deployment publishes exact measured bytes without rebuilding; publisher failure=%s',async failPublication=>{
+  const f=await fixture(),cleanups:Array<()=>void|Promise<void>>=[]
+  let calls=0,builds=0,native=0
+  let role:'owner'|'viewer'='owner'
+  try {
+    const record=await f.measurement.measure(request)
+    expect(record.error).toBeUndefined()
+    await f.settle()
+    const app=createAgentWorkflowApp({currentUserResolver:async()=>({id:'owner',role}),workflowV3Store:f.store,
+      dashboardDataRoot:join(f.root,'dashboard'),defaultWorkspacePath:f.root,modelConfigStore:false,skillsConfig:false,
+      sessionRunner:{async start(){native++;throw Error('No native execution')}},
+      deploymentRunner:async()=>{builds++;throw Error('Do not rebuild')},
+      deploymentPublisher:{async publishStaticDirectory(input){
+        calls++
+        expect(await input.files.find(x=>x.path==='index.html')!.text()).toBe(await readFile(join(f.workspace,'dist/index.html'),'utf8'))
+        return {url:'https://offline.invalid/deployment/'}
+      },async verifyPublished(){if(failPublication)throw Error('Synthetic delivery host failed')}},
+      registerCleanup:fn=>cleanups.push(fn)})
+    const post=(path:string,body:unknown={})=>app.request(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
+    expect((await post('/api/projects',{id:'measure',name:'Synthetic measured publication',root_path:f.workspace,created_at:Date.now()})).status).toBe(200)
+    const readiness=await(await app.request('/api/projects/measure/deployment-readiness')).json()
+    expect(readiness).toMatchObject({allowed:true,measurementId:record.id,quality:'unverified',destination:'remote'})
+    role='viewer'
+    expect((await post('/api/projects/measure/deployments')).status).toBe(403)
+    role='owner'
+    expect((await post('/api/projects/measure/deployments',{artifact:{path:'../private',sha256:'fake'}})).status).toBe(400)
+    expect((await post('/api/projects/measure/deployments',{measurementId:crypto.randomUUID()})).status).toBe(409)
+    const start=await post('/api/projects/measure/deployments',{measurementId:record.id,requirementsRevision:f.run.requirements.revision})
+    expect(start.status).toBe(202)
+    const queued=await start.json()
+    expect((await post('/api/projects/measure/deployments')).status).toBe(409)
+    let result:any
+    for(let n=0;n<1000;n++){
+      const history=await(await app.request('/api/projects/measure/deployments')).json()
+      result=history.find((r:any)=>r.id===queued.id)
+      if(['succeeded','failed'].includes(result?.status))break
+      await Bun.sleep(10)
+    }
+    expect(result?.status).toBe(failPublication?'failed':'succeeded')
+    expect(JSON.parse(result.buildLog)).toMatchObject({protocol:'bgs.workflow.v3',measurementId:record.id,quality:'unverified'})
+    expect(calls).toBe(1);expect(builds).toBe(0);expect(native).toBe(0)
+    if(failPublication)expect((await app.request('/deployments/'+queued.id+'/')).status).toBe(404)
+    await writeFile(join(f.workspace,'src/index.html'),'Source edit after publication')
+    expect((await(await app.request('/api/projects/measure/deployment-readiness')).json()).allowed).toBe(false)
+    expect((await post('/api/projects/measure/deployments')).status).toBe(409)
+    expect(calls).toBe(1)
+    expect((await f.current()).deliveryEligible).toBe(false)
+  }finally{for(const cleanup of cleanups.reverse())await cleanup();await f.close()}
+},30000)
+
+test('execution identity observes saved sources and builds without running or claiming acceptance',async()=>{
+  const f=await fixture()
+  try {
+    const first=await f.measurement.executionInputs()
+    await mkdir(join(f.workspace,'dist'));await writeFile(join(f.workspace,'dist/index.html'),'Built bytes')
+    const second=await f.measurement.executionInputs()
+    expect(first.files.some(x=>x.path==='src/index.html')).toBe(true)
+    expect(second.files.some(x=>x.path==='dist/index.html')).toBe(true)
+    expect(second.files).not.toEqual(first.files)
+    expect((await f.current()).agentTurns![0]!.measurements).toBeUndefined()
+    await f.measurement.close()
+    await expect(f.measurement.executionInputs()).rejects.toThrow('closed')
+  } finally {await f.close()}
+})
+
+test('Node test receipts retain before/after identities and inspect later drift without executing again',async()=>{
+  const f=await fixture()
+  const preview=openPreviewTestAccess({start:async()=>({status:'idle'}),status:()=>({status:'idle'}),stop(){},
+    browser:{start:async()=>{throw Error('No browser requested')},status:()=>({status:'idle'}),close:async()=>{}} as any})
+  const tools=await openAgentTools({workspacePath:f.workspace,sessionId:'identity-test',getAuthToken:()=>undefined,
+    measurement:f.measurement,openPreview:()=>preview})
+  const run=async(...args:string[])=>{
+    const child=Bun.spawn([Bun.which('node')!,join(f.workspace,tools.directory,'preview.mjs'),...args],{cwd:f.workspace,
+      env:{PATH:process.env.PATH,BEEGAME_CONTENT_CHECKER_MODULE:(await sharedContentChecker()).moduleUrl,
+        BEEGAME_PREVIEW_CAPABILITY_FILE:projectPreviewCapabilityPath(f.workspace,'identity-test'),
+        BEEGAME_MEASUREMENT_CAPABILITY_FILE:projectPreviewCapabilityPath(f.workspace,'identity-test','measurement')},
+      stdout:'pipe',stderr:'pipe'})
+    const result=JSON.parse(await new Response(child.stdout).text())
+    expect(await child.exited).toBe(0)
+    return result
+  }
+  try {
+    await writeFile(join(f.workspace,'test.mjs'),"console.log('one execution')")
+    const executed=await run('--run','test.mjs')
+    expect(executed).toMatchObject({inputIdentity:'unchanged-at-boundaries',quality:'unverified'})
+    expect((await run('--inspect',executed.reportPath)).freshness.status).toBe('unchanged-at-boundaries')
+    await writeFile(join(f.workspace,'src/index.html'),'Changed source')
+    expect((await run('--inspect',executed.reportPath)).freshness).toMatchObject({status:'changed',changedPaths:['src/index.html']})
+    expect(await readFile(join(f.workspace,executed.stdoutPath),'utf8')).toBe('one execution\n')
+    const retained=JSON.parse(await readFile(join(f.workspace,executed.reportPath),'utf8'))
+    expect(retained.before.inputs.files).toEqual(retained.after.inputs.files)
+    expect(measurementRequest.parse({...request,reportPaths:[executed.reportPath]}).reportPaths).toEqual([executed.reportPath])
+    for (const path of ['.beegame/settings.json','.beegame/tmp/preview-test-a/../secret','../secret'])
+      expect(measurementRequest.safeParse({...request,reportPaths:[path]}).success).toBe(false)
+    expect((await f.current()).agentTurns![0]!.measurements).toBeUndefined()
+    await writeFile(join(f.workspace,'test.mjs'),"import{writeFile}from'node:fs/promises';await writeFile('src/index.html','Changed during test')")
+    expect((await run('--run','test.mjs')).inputIdentity).toBe('changed')
+    await tools.close()
+    expect((await run('--inspect',executed.reportPath)).freshness.status).toBe('unverified')
+  } finally {await tools.close();await f.close()}
+})
+
+test('source, report and artifact identity changes stay distinct without accepting a changed export or rerunning checks',async()=>{
+  const f=await fixture()
+  try {
+    await mkdir(join(f.workspace,'docs'));await writeFile(join(f.workspace,'docs/notes.md'),'Original design')
+    const record=await f.measurement.measure(request),run=await f.settle(),version=run.version
+    await writeFile(join(f.workspace,'docs/notes.md'),'Revised design')
+    const source=await inspectAgentMeasurementInputs(run,record)
+    expect(source).toMatchObject({current:false,changes:{sources:['docs/notes.md'],artifact:false,checkInputs:['build']},
+      evidence:{artifactMatches:true,exportableSourcesMatch:false,checks:[
+        {id:'build',savedStatus:'passed',inputsMatch:false},{id:'runtime-smoke',savedStatus:'passed',inputsMatch:true}]}})
+    await expect(selectAgentMeasuredBuild(run,record.id)).rejects.toThrow('Exportable sources changed')
+    expect(measurementSummary(record).quality).toBe('unverified')
+    await writeFile(join(f.workspace,'README.md'),'Revised report')
+    expect(await inspectAgentMeasurementInputs(run,record)).toMatchObject({current:false,
+      changes:{reports:['README.md'],artifact:false},evidence:{artifactMatches:true}})
+    await writeFile(join(f.workspace,'dist/index.html'),'<html>Actual runtime edit</html>')
+    const runtime=await inspectAgentMeasurementInputs(run,record)
+    expect(runtime).toMatchObject({current:false,changes:{artifact:true,checkInputs:['build','runtime-smoke']},
+      evidence:{artifactMatches:false}})
+    expect(runtime.reason).toContain('Measured artifact bytes changed')
+    expect((await f.current()).version).toBe(version)
+    expect((await f.current()).agentTurns![0]!.measurements).toEqual([record])
+    await expect(exportAgentMeasuredBuild(run,record.id,{read:f.current,busy:()=>false})).rejects.toThrow()
+  } finally {await f.close()}
+},30000)
+
+test('measurement read API separates Preview inspection from delivery selection on a settled interrupted turn',async()=>{
+  const f=await fixture(),sessions=new BeeGameSessionManager({async start(){throw Error('Read must not dispatch')}},join(f.root,'sessions'))
+  let preview:ReturnType<typeof createMeasuredPreview>|undefined
+  try {
+    await mkdir(join(f.workspace,'docs'));await writeFile(join(f.workspace,'docs/notes.md'),'Original design')
+    const record=await f.measurement.measure(request),saved=await f.settle()
+    let view=structuredClone(saved),owned=true
+    const store={...f.store,read:async()=>structuredClone(view)}
+    preview=createMeasuredPreview({origin:'http://localhost:12345',capabilities:createPreviewCapabilityManager(),readRun:store.read,isBusy:()=>false})
+    const app=new Hono(),path='/api/projects/measure/workflow-v3'
+    registerV3Routes(app,{store,sessions,preview,getUser:()=>({id:'owner',role:'owner'}),
+      getProject:async()=>owned?({id:'measure',root_path:f.workspace} as any):undefined,getAuthToken:()=>undefined,getValidAuthToken:()=>undefined,
+      assertNoLegacyRun:async()=>{},persistMode:async()=>{},readBody:r=>r.json()})
+    const inspect=async()=>{
+      const r=await app.request(path+'/agent/measurements/'+record.id)
+      expect(r.status).toBe(200);expect(r.headers.get('cache-control')).toBe('no-store')
+      const body=await r.json();expect(body.quality).toBe('unverified');return body
+    }
+    const refused=async()=>{
+      for(const endpoint of ['preview','export']) {
+        const r=await app.request(path+'/'+endpoint,{method:'POST',headers:{'content-type':'application/json'},
+          body:JSON.stringify({measurementId:record.id,requirementsRevision:view.requirements.revision,...(endpoint==='export'?{kind:'project'}:{})})})
+        expect(r.status).toBe(409)
+      }
+      const ordinary=await app.request('/api/projects/measure/preview',{method:'POST',
+        headers:{'content-type':'application/json'},body:'{}'})
+      expect(ordinary.status).toBe(409)
+    }
+    expect(await inspect()).toMatchObject({freshness:{current:true,inputsCurrent:true,evidence:{artifactMatches:true}},selection:{eligible:true}})
+    const ordinary=await app.request('/api/projects/measure/preview',{method:'POST',
+      headers:{'content-type':'application/json'},body:'{}'})
+    expect(ordinary.status).toBe(200)
+    expect(await ordinary.json()).toMatchObject({status:'running',mode:'production'})
+    expect((await (await app.request('/api/projects/measure/preview')).json()).status).toBe('running')
+    expect((await (await app.request('/api/projects/measure/deployment-readiness')).json())).toMatchObject({
+      code:'deployment-unavailable'})
+    expect((await app.request('/api/projects/measure/deployments',{method:'POST',body:'{}'})).status).toBe(503)
+    expect((await (await app.request('/api/projects/measure/preview',{method:'DELETE'})).json()).status).toBe('stopped')
+    // A settled interrupted turn may be inspected without becoming exportable.
+    view.agentTurns![0]!.status='interrupted'
+    expect(await inspect()).toMatchObject({freshness:{current:false,inputsCurrent:true,code:'preview-unverified',evidence:{artifactMatches:true}},
+      selection:{eligible:false},previewSelection:{eligible:true}})
+    const inspectedPreview=await app.request('/api/projects/measure/preview',{method:'POST',
+      headers:{'content-type':'application/json'},body:'{}'})
+    expect(inspectedPreview.status).toBe(200)
+    expect((await inspectedPreview.json()).message).toContain('native turn did not succeed')
+    expect((await app.request(path+'/export',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({measurementId:record.id,requirementsRevision:view.requirements.revision,kind:'project'})})).status).toBe(409)
+    expect((await (await app.request('/api/projects/measure/preview',{method:'DELETE'})).json()).status).toBe('stopped')
+    view.writer={attemptId:f.turn.attemptId,workerId:f.turn.workerId,fence:f.turn.fence}
+    expect(await inspect()).toMatchObject({freshness:{current:false,inputsCurrent:true,code:'workspace-busy',changes:{artifact:false}},selection:{eligible:false}})
+    await refused()
+    view=structuredClone(saved)
+    await writeFile(join(f.workspace,'docs/notes.md'),'Revised design')
+    expect(await inspect()).toMatchObject({freshness:{current:false,inputsCurrent:false,
+      changes:{sources:['docs/notes.md'],artifact:false,checkInputs:['build']},
+      evidence:{artifactMatches:true,checks:[{id:'build',inputsMatch:false},{id:'runtime-smoke',inputsMatch:true}]}},selection:{eligible:false}})
+    await refused()
+    await writeFile(join(f.workspace,'README.md'),'Revised report')
+    expect(await inspect()).toMatchObject({freshness:{changes:{reports:['README.md'],artifact:false},evidence:{artifactMatches:true}}})
+    await writeFile(join(f.workspace,'dist/index.html'),'<html>Changed runtime</html>')
+    expect(await inspect()).toMatchObject({freshness:{changes:{artifact:true,checkInputs:['build','runtime-smoke']},evidence:{artifactMatches:false}}})
+    await refused()
+    // Unreadable/aliased source inputs remain historical diagnostics, not PASS.
+    await symlink(join(f.workspace,'docs/notes.md'),join(f.workspace,'alias.md'))
+    expect(await inspect()).toMatchObject({freshness:{current:false,inputsCurrent:false,code:'measurement-inspection-failed'},selection:{eligible:false}})
+    await refused()
+    owned=false;expect((await app.request(path+'/agent/measurements/'+record.id)).status).toBe(404)
+    expect(await f.current()).toEqual(saved) // reads never persist/rebuild or dispatch
+  }finally{preview?.dispose();await sessions.dispose();await f.close()}
+},30000)
+
+test('inspection separates the active user task and live Skill facts from a historical measured turn without rerunning it',async()=>{
+  const f=await fixture()
+  let active:ReturnType<typeof createAgentMeasurement>|undefined
+  let tools:Awaited<ReturnType<typeof openAgentTools>>|undefined
+  try {
+    const record=await f.measurement.measure(request),exiting=await f.current()
+    const exitingTurn=exiting.agentTurns![0]!
+    exitingTurn.quiescedAt='exited';exitingTurn.nativeSessionId='same-lineage'
+    exitingTurn.skillUses=[{name:'old-general-method',toolUseID:'old-skill',eventId:1,status:'loaded'}]
+    exiting.version++;await f.store.commit(exiting.projectId,exiting.ownerId,exiting.version-1,exiting,'fixture.quiesced')
+    const settled=await f.current()
+    settled.agentTurns![0]!.status='failed';settled.agentTurns![0]!.error='Retained native failure';settled.agentTurns![0]!.finishedAt='finished'
+    delete settled.writer;settled.version++
+    await f.store.commit(settled.projectId,settled.ownerId,settled.version-1,settled,'fixture.failed')
+    const next=await f.current(),original=next.agentTurns![0]!
+    const message={requestKey:'full-acceptance',runId:next.id,chatSessionId:next.chatSessionId,expectedVersion:next.version,
+      requirementsRevision:next.requirements.revision,intent:'work' as const,
+      text:'Inspect all eight domains, professional methods and the complete player journey; preserve unrelated sources.'}
+    const turn:AgentTurn={...f.turn,attemptId:'active-turn',requestKey:message.requestKey,fence:2,message,skillUses:[]}
+    delete turn.measurements
+    next.agentTurns!.push(turn);next.writer={attemptId:turn.attemptId,workerId:turn.workerId,fence:2};next.fence=2;next.version++
+    await f.store.commit(next.projectId,next.ownerId,next.version-1,next,'fixture.new-task')
+    let liveUses:SkillUse[]=[]
+    active=createAgentMeasurement({run:next,turn,store:f.store,skillUses:()=>liveUses})
+    const before=await f.current(),context=await active.context(),handoff=await active.handoff()
+    const {text:_text,...taskIdentity}=handoff.task
+    expect(context.task).toEqual(taskIdentity)
+    expect(context.task).toMatchObject({scope:'active-user-turn',attemptId:turn.attemptId})
+    expect(JSON.stringify(context)).not.toContain(message.text)
+    const inspected=await active.inspect(record.id)
+    expect(inspected.task).toEqual(handoff.task)
+    expect((await active.inspect(record.id,true)).task).toEqual(handoff.task)
+    expect(inspected.attemptId).toBe(original.attemptId)
+    expect(inspected.measurementTask).toMatchObject({attemptId:original.attemptId,status:'failed',requestKey:original.requestKey})
+    expect(inspected.skills).toMatchObject({currentTurnUses:[],currentTurnEvidence:'live-native-tool-events',
+      recordedMainLoads:[{name:'old-general-method'}],application:'unverified'})
+    liveUses=[{name:'domain-method',toolUseID:'child-skill',eventId:2,parentToolUseID:'delegated',status:'unverified'}]
+    expect((await active.inspect(record.id)).skills.currentTurnUses[0]?.status).toBe('unverified')
+    liveUses=[{...liveUses[0]!,eventId:3,status:'loaded'}]
+    tools=await openAgentTools({workspacePath:f.workspace,sessionId:'chat',getAuthToken:()=>undefined,measurement:active})
+    const command=Bun.spawn([process.execPath,join(f.workspace,tools.directory,'measure.mjs'),'--inspect',record.id],{cwd:f.workspace,
+      env:{...process.env,BEEGAME_MEASUREMENT_CAPABILITY_FILE:projectPreviewCapabilityPath(f.workspace,'chat','measurement')},stdout:'pipe',stderr:'pipe'})
+    const result=JSON.parse(await new Response(command.stdout).text())
+    expect(await command.exited).toBe(0)
+    expect(result.task.text).toBe(message.text)
+    expect(result.skills.currentTurnUses).toEqual(liveUses)
+    expect(result.skills.application).toBe('unverified')
+    expect(result.checkScope.unmeasuredConsumptionChecks).toHaveLength(4)
+    expect(result.quality).toBe('unverified');expect(result.deliveryEligible).toBe(false)
+    expect(result.freshness.current).toBe(true)
+    expect(await f.current()).toEqual(before)
+    // History remains useful after the ephemeral native bridge is revoked.
+    const activeExit=structuredClone(before);activeExit.agentTurns!.at(-1)!.quiescedAt='active-exit'
+    activeExit.agentTurns!.at(-1)!.skillUses=structuredClone(liveUses);activeExit.version++
+    await f.store.commit(activeExit.projectId,activeExit.ownerId,activeExit.version-1,activeExit,'fixture.active-quiesced')
+    const ended=await f.current();ended.agentTurns!.at(-1)!.status='ended';ended.agentTurns!.at(-1)!.finishedAt='active-finished'
+    delete ended.writer;ended.version++
+    await f.store.commit(ended.projectId,ended.ownerId,ended.version-1,ended,'fixture.active-ended')
+    const sessions=new BeeGameSessionManager({async start(){throw Error('History must not execute')}},join(f.root,'sessions'))
+    try {
+      const app=new Hono();registerV3Routes(app,{store:f.store,sessions,getUser:()=>({id:'owner',role:'owner'}),
+        getProject:async()=>({id:'measure',root_path:f.workspace} as any),getAuthToken:()=>undefined,getValidAuthToken:()=>undefined,
+        assertNoLegacyRun:async()=>{},persistMode:async()=>{},readBody:r=>r.json()})
+      const response=await app.request('/api/projects/measure/workflow-v3/agent/measurements/'+record.id)
+      expect(response.status).toBe(200)
+      const historical=await response.json()
+      expect(historical.task).toEqual(result.task)
+      expect(historical.measurementTask).toEqual(result.measurementTask)
+      expect(historical.skills).toMatchObject({currentTurnUses:liveUses,currentTurnEvidence:'saved-native-tool-events',application:'unverified'})
+      expect(historical.quality).toBe('unverified');expect(historical.deliveryEligible).toBe(false)
+      expect(await f.current()).toEqual(ended)
+    }finally{await sessions.dispose()}
+    await active.close();await expect(active.inspect(record.id)).rejects.toThrow('expired')
+  }finally{await tools?.close();await active?.close();await f.close()}
+},30000)
+
+test('native failed-command formatting retains front-loaded UI identities and causes; full geometry stays on demand',()=>{
+  const observation=JSON.stringify({driver:'synthetic host observation',probes:[{document:'content/ui/menu.json',nodeId:'hidden',viewport:[1024,576],
+    status:'unverified',reason:'Target UI ancestor is hidden',changed:[{geometry:'X'.repeat(15000)}]},
+    {document:'content/ui/menu.json',nodeId:'clipped',viewport:[1024,576],status:'unverified',reason:'Complete visible text fit could not be established',
+      textFit:{before:{status:'unverified',clippedCount:1,overflowCount:0},changed:[],restored:{status:'unverified',clippedCount:1}}}],errors:[],missingFiles:[],unsupported:[]})
+  const record:any={id:'saved',requestKey:'bad',requirementsRevision:'r',runtimeArtifact:'dist',reportPaths:[],reports:[],
+    checks:[{id:'ui-data-consumption',status:'unverified',observation}],consumption:{checks:['ui-data-consumption']}}
+  const before=JSON.stringify(record),compact=measurementSummary(record,false),details=measurementSummary(record,true)
+  expect(Object.keys(compact)[0]).toBe('id')
+  expect(compact.checkStatuses).toEqual([{id:'ui-data-consumption',status:'unverified'}])
+  expect(compact.diagnostics?.map(p=>p.nodeId)).toEqual(['hidden','clipped'])
+  expect(compact.diagnostics?.[1]?.textFit.before.clippedCount).toBe(1)
+  expect('observation' in compact.checks[0]! ? compact.checks[0].observation : undefined).not.toContain('X'.repeat(100))
+  expect('observation' in details.checks[0]! ? details.checks[0].observation : undefined).toBe(observation)
+  const output=formatError(Object.assign(new Error('Exit code 1'),{stdout:JSON.stringify({...details,
+    task:{scope:'active-user-turn',text:'CURRENT_FULL_ACCEPTANCE_REQUEST'},
+    skills:{currentTurnUses:[],currentTurnEvidence:'live-native-tool-events',application:'unverified'}},null,2)}))
+  expect(output).toContain('characters truncated')
+  expect(output).toContain('Target UI ancestor is hidden');expect(output).toContain('clippedCount')
+  expect(output.indexOf('Target UI ancestor is hidden')).toBeLessThan(output.indexOf('characters truncated'))
+  expect(output).toContain('CURRENT_FULL_ACCEPTANCE_REQUEST')
+  expect(output).toContain('currentTurnUses')
+  expect(JSON.stringify(record)).toBe(before)
+  const error:any={...record,checks:[{id:'ui-data-consumption',status:'unverified',observation:'UI probe file#node [source]: source unavailable'}]}
+  const plain=measurementSummary(error,false).checks[0]!
+  expect('observation' in plain ? plain.observation : undefined).toBe(error.checks[0].observation)
+})
+
+test('compact inspection retains every batch identity and failure while omitting passed text-fit detail',()=>{
+  const probes=Array.from({length:12},(_,i)=>({document:'content/ui/menu.json',nodeId:'node-'+i,viewport:[1280,720],
+    status:i===7?'failed':'passed',reason:i===7?'Visible text exceeds node bounds':undefined,
+    conditions:{environment:{devicePixelRatio:2}},textFit:{before:{status:i===7?'failed':'passed',overflowCount:i===7?1:0}},
+    changed:[{geometry:'x'.repeat(3000)}]}))
+  const record:any={id:'batch',requestKey:'request',requirementsRevision:'r',runtimeArtifact:'dist',reports:[],
+    checks:[{id:'ui-data-consumption',status:'failed',observation:JSON.stringify({probes})}]}
+  const compact=measurementSummary(record,false)
+  expect(compact.diagnostics).toHaveLength(12)
+  expect(compact.diagnostics![0].textFit).toBeUndefined()
+  expect(compact.diagnostics![7]).toMatchObject({nodeId:'node-7',reason:'Visible text exceeds node bounds',
+    textFit:{before:{overflowCount:1}},conditions:{environment:{devicePixelRatio:2}}})
+  expect(JSON.stringify(compact).length).toBeLessThan(JSON.stringify(measurementSummary(record,true)).length/2)
+  const full=measurementSummary(record,true).checks[0]!
+  expect('observation' in full).toBe(true)
+  if('observation' in full)expect(JSON.parse(full.observation).probes).toEqual(probes)
+})
+
+test('task context exposes current comparison before optional tool parsing; does not build or accept report semantics',async()=>{
+  const f=await fixture()
+  try {
+    expect((await f.measurement.context()).measurement).toBeNull()
+    const record=await f.measurement.measure(request),before=await f.current()
+    const context=await f.measurement.context()
+    expect(context.measurement).toMatchObject({id:record.id,requestKey:record.requestKey,freshness:{current:true,changes:{requirements:false,sources:[],reports:[]}}})
+    expect(context).toMatchObject({quality:'unverified',reportSemantics:'not-verified',deliveryEligible:false})
+    expect(context.project).toMatchObject({testFiles:[],codeFiles:['src/index.html'],commands:{build:'bun build.mjs'}})
+    expect(context.skills).toEqual({recordedMainLoads:[],contextPresence:'unverified',application:'unverified',currentTurnUses:[],currentTurnEvidence:'not-recorded-yet'})
+    expect(context.checkScope.runtimeSmoke).toBe('initial static-browser load only')
+    const handoff=await f.measurement.handoff()
+    expect(handoff.checkScope.consumptionOption).toBe('--consumption-json')
+    expect(handoff.checkScope.availableConsumptionChecks).toContain('ui-data-consumption')
+    expect(handoff.checkScope.consumptionSupport.pixel).toContain('not procedural Canvas')
+    expect(handoff.checkScope.consumptionSupport.audio).toContain('not WebAudio')
+    expect(handoff.checkScope.unmeasuredConsumptionChecks).toEqual([...handoff.checkScope.availableConsumptionChecks])
+    expect(JSON.stringify(context)).not.toContain('LONG_BUILD_LOG')
+    expect(await f.current()).toEqual(before)
+    await writeFile(join(f.workspace,'src/index.html'),'<h1>Changed runtime</h1>')
+    const changed=await f.measurement.context()
+    expect(changed.measurement?.freshness).toMatchObject({current:false,changes:{sources:['src/index.html']}})
+    expect(await readFile(join(f.workspace,'dist/index.html'),'utf8')).not.toContain('Changed runtime')
+    await symlink(join(f.workspace,'README.md'),join(f.workspace,'src','linked.html'))
+    const unsafe=await f.measurement.context()
+    expect(unsafe.measurement?.freshness).toMatchObject({current:false,code:'measurement-inspection-failed'})
+    expect(unsafe.deliveryEligible).toBe(false)
+    expect(await f.current()).toEqual(before)
+    await f.measurement.close()
+    await expect(f.measurement.context()).rejects.toThrow('expired')
+  }finally{await f.close()}
+},30000)
+
+for(const fault of ['source-alias','unreadable-directory'] as const)test('saved measurement remains inspectable without certifying '+fault,async()=>{
+  const f=await fixture()
+  const tools=await openAgentTools({workspacePath:f.workspace,sessionId:'chat',getAuthToken:()=>undefined,measurement:f.measurement})
+  try {
+    const measured=await f.measurement.measure(request),before=await f.current()
+    expect(measured.checks.every(c=>c.status==='passed')).toBe(true)
+    if(fault==='source-alias'){
+      await writeFile(join(f.root,'outside.txt'),'UNRELATED_PRIVATE_SOURCE')
+      await symlink(join(f.root,'outside.txt'),join(f.workspace,'src','linked.html'))
+    }
+    else await chmod(join(f.workspace,'src'),0)
+    const inspected=await f.measurement.inspect(measured.id,true)
+    expect(inspected.freshness).toMatchObject({current:false,code:'measurement-inspection-failed'})
+    expect(inspected.freshness.reason).toContain(fault==='source-alias'?'aliases':'EACCES')
+    expect(inspected.checks.map(c=>c.status)).toEqual(['passed','passed'])
+    expect(inspected.deliveryEligible).toBe(false)
+    expect(JSON.stringify(inspected)).not.toContain('UNRELATED_PRIVATE_SOURCE')
+    const handoff=await f.measurement.handoff()
+    expect(handoff.measurement?.id).toBe(measured.id)
+    expect(handoff.measurement?.freshness.current).toBe(false)
+    expect(handoff.blockedReason).toContain('measurement-inspection-failed')
+    expect(JSON.stringify(handoff)).not.toContain('UNRELATED_PRIVATE_SOURCE')
+    const command=Bun.spawn([process.execPath,join(f.workspace,tools.directory,'measure.mjs'),'--inspect',measured.id],{cwd:f.workspace,
+      env:{...process.env,BEEGAME_MEASUREMENT_CAPABILITY_FILE:projectPreviewCapabilityPath(f.workspace,'chat','measurement')},stdout:'pipe',stderr:'pipe'})
+    const feedback=JSON.parse(await new Response(command.stdout).text())
+    expect(await command.exited).toBe(1)
+    expect(feedback.id).toBe(measured.id)
+    expect(feedback.freshness).toMatchObject({current:false,code:'measurement-inspection-failed'})
+    expect(await f.current()).toEqual(before)
+    const settled=await f.settle()
+    await expect(exportAgentMeasuredBuild(settled,measured.id,{read:f.current,busy:()=>false},'project')).rejects.toThrow()
+  }finally{await chmod(join(f.workspace,'src'),0o755);await tools.close();await f.close()}
+},30000)
+
+test('owned HTTP history survives unreadable current inputs; export and other ownership remain refused',async()=>{
+  const f=await fixture(),sessions=new BeeGameSessionManager({async start(){throw Error('No model dispatch')}},join(f.root,'sessions'))
+  let owned=true
+  const app=new Hono()
+  registerV3Routes(app,{store:f.store,sessions,getUser:()=>({id:'owner',role:'viewer'}),
+    getProject:async()=>owned?({id:'measure',root_path:f.workspace} as any):undefined,getAuthToken:()=>undefined,getValidAuthToken:()=>undefined,
+    assertNoLegacyRun:async()=>{},persistMode:async()=>{},readBody:r=>r.json()})
+  try{
+    const measured=await f.measurement.measure(request),run=await f.settle(),before=await f.current()
+    await chmod(join(f.workspace,'src'),0)
+    const prefix='/api/projects/measure/workflow-v3'
+    const response=await app.request(prefix+'/agent/measurements/'+measured.id)
+    expect(response.status).toBe(200)
+    const body=await response.json()
+    expect(body.id).toBe(measured.id);expect(body.checks.map((c:any)=>c.status)).toEqual(['passed','passed'])
+    expect(body.freshness).toMatchObject({current:false,code:'measurement-inspection-failed'})
+    expect(body.freshness.reason).toContain('EACCES')
+    expect(body.deliveryEligible).toBe(false);expect(body.quality).toBe('unverified')
+    const exported=await app.request(prefix+'/export',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({measurementId:measured.id,requirementsRevision:run.requirements.revision,kind:'project'})})
+    expect(exported.status).toBe(409)
+    expect((await exported.json()).code).toBe('measurement-inspection-failed')
+    owned=false;expect((await app.request(prefix+'/agent/measurements/'+measured.id)).status).toBe(404)
+    expect(await f.current()).toEqual(before)
+  }finally{await chmod(join(f.workspace,'src'),0o755);await sessions.dispose();await f.close()}
+},30000)
+
+test('project navigation remains a measured source; guide edits do not silently reuse an old build receipt',async()=>{
+  const f=await fixture()
+  try {
+    const file=join(f.workspace,'CLAUDE.md')
+    await writeFile(file,'# Project navigation\nEntry: src/index.html\n')
+    const measured=await f.measurement.measure(request),before=await f.current()
+    expect(measured.checks.find(c=>c.id==='build')!.projectBuild!.files.some(p=>p.path==='CLAUDE.md')).toBe(true)
+    expect((await f.measurement.context()).measurement?.freshness?.current).toBe(true)
+    await writeFile(file,'# Project navigation\nEntry: src/index.html\nRun: actual existing command\n')
+    expect((await f.measurement.context()).measurement?.freshness).toMatchObject({current:false,
+      changes:{requirements:false,sources:['CLAUDE.md']}})
+    expect(await f.current()).toEqual(before)
+    expect(await readFile(join(f.workspace,'dist/index.html'),'utf8')).toContain('Actual fixture')
+  }finally{await f.close()}
+},30000)
 
 test('one handoff diagnoses simultaneous requirement, report and source drift without mtime guessing',async()=>{
   const f=await fixture()
@@ -108,6 +544,9 @@ test('handoff returns the exact latest user task and full current requirements, 
     expect(result.requirements.text).toBe(text)
     expect(result.requirements.text).toContain('muted-by-default')
     expect(result.measurement).toBeNull();expect(result.quality).toBe('unverified')
+    expect(result.checkScope.unmeasuredConsumptionChecks).toEqual([...result.checkScope.availableConsumptionChecks])
+    expect(result.project.commands).toEqual({build:'bun build.mjs'})
+    expect(result.skills.application).toBe('unverified')
     expect(live).toEqual(before)
   }finally{await handoff.close();await f.close()}
 })
@@ -153,7 +592,13 @@ test('handoff is read-only and returns current source bytes and newest interrupt
       const result=await command(f.workspace,path)
       expect(result.code).toBe(1);expect(JSON.parse(result.stdout).sources.valid).toBe(false)
     }
-    expect((await command(f.workspace)).code).toBe(1)
+    const noFiles=await command(f.workspace)
+    expect(noFiles.code).toBe(0)
+    expect(JSON.parse(noFiles.stdout)).toMatchObject({sources:{scope:'no-sources-requested',sources:[]},
+      measurement:{id:'unfinished',freshness:{current:false}},quality:'unverified',deliveryEligible:false})
+    const taskOnly=JSON.parse((await command(f.workspace,'--details')).stdout)
+    expect(taskOnly.requirements.text).toBe(before.requirements.text)
+    expect((await command(f.workspace,'--unknown')).code).toBe(1)
     expect((await command(f.root,'README.md')).stderr).toContain('another workspace')
     expect(await f.current()).toEqual(before)
     await expect(readFile(join(f.workspace,'dist/index.html'))).rejects.toThrow()
@@ -162,6 +607,67 @@ test('handoff is read-only and returns current source bytes and newest interrupt
     await expect(f.measurement.handoff(['README.md'])).rejects.toThrow('expired')
   }finally{await tools.close();await f.close()}
 })
+
+test('later turn inspects prior receipts without replay, source selection or inventing current-turn evidence',async()=>{
+  const f=await fixture()
+  let reader:ReturnType<typeof createAgentMeasurement>|undefined
+  let tools:Awaited<ReturnType<typeof openAgentTools>>|undefined
+  try {
+    const measured=await f.measurement.measure(request),before=await f.current()
+    const artifactBefore=await readFile(join(f.workspace,'dist/index.html'),'utf8')
+    const live=structuredClone(before),previous=live.agentTurns![0]!
+    previous.status='ended';previous.quiescedAt=new Date().toISOString()
+    const next:AgentTurn={...f.turn,attemptId:'followup',requestKey:'followup',fence:2,measurements:undefined}
+    live.agentTurns!.push(next);live.writer={attemptId:next.attemptId,workerId:next.workerId,fence:next.fence}
+    const unchanged=structuredClone(live)
+    reader=createAgentMeasurement({run:live,turn:next,store:{...f.store,async read(){return live},
+      async commit(){throw Error('Readonly inspection must never save or build')}}})
+    const byId=await reader.inspect(measured.id),byKey=await reader.inspect(measured.requestKey)
+    expect(byKey).toEqual(byId)
+    expect(byId).toMatchObject({id:measured.id,attemptId:previous.attemptId,turnStatus:'ended',freshness:{current:true},
+      quality:'unverified',deliveryEligible:false})
+    expect((await reader.context()).measurement?.requestKey).toBe(measured.requestKey)
+    expect((await reader.handoff()).sources).toMatchObject({scope:'no-sources-requested',sources:[]})
+    expect(await agentTurnHandoffReason(live,next)).toContain('measured inputs are current')
+    expect(live).toEqual(unchanged)
+    tools=await openAgentTools({workspacePath:f.workspace,sessionId:'chat',getAuthToken:()=>undefined,measurement:reader})
+    const command=async(entry:string,...args:string[])=>{
+      const child=Bun.spawn([process.execPath,join(f.workspace,tools!.directory,entry),...args],{cwd:f.workspace,
+        env:{...process.env,BEEGAME_MEASUREMENT_CAPABILITY_FILE:projectPreviewCapabilityPath(f.workspace,'chat','measurement')},stdout:'pipe',stderr:'pipe'})
+      return {stdout:await new Response(child.stdout).text(),stderr:await new Response(child.stderr).text(),code:await child.exited}
+    }
+    const viaCLI=await command('measure.mjs','--inspect',measured.id)
+    expect(viaCLI.code).toBe(0)
+    expect(JSON.parse(viaCLI.stdout)).toEqual(byId)
+    const taskCLI=await command('handoff.mjs')
+    expect(taskCLI.code).toBe(0)
+    expect(JSON.parse(taskCLI.stdout).measurement.id).toBe(measured.id)
+    expect(live).toEqual(unchanged)
+    await expect(reader.inspect('another-run-measurement')).rejects.toThrow('No saved measurement in this Run')
+    live.requirements.revision='changed-requirement'
+    expect((await reader.inspect(measured.id)).freshness).toMatchObject({current:false,changes:{requirements:true}})
+    expect(await agentTurnHandoffReason(live,next)).toContain('measurement-stale')
+    // Pending/failed latest evidence cannot fall back to an earlier success.
+    const pending={...measured,id:'interrupted-receipt',finishedAt:undefined,checks:[],error:'Interrupted'}
+    next.measurements=[pending]
+    await expect(reader.inspect(measured.requestKey)).rejects.toThrow('multiple turns')
+    expect((await reader.inspect(measured.id)).freshness.code).toBe('measurement-superseded')
+    expect((await reader.inspect(pending.id)).freshness.code).toBe('preview-unverified')
+    expect((await reader.handoff()).measurement?.id).toBe(pending.id)
+    expect(await agentTurnHandoffReason(live,next)).toContain('preview-unverified')
+    const ambiguousCLI=await command('measure.mjs','--inspect',measured.requestKey)
+    expect(ambiguousCLI.code).toBe(1)
+    expect(ambiguousCLI.stdout).toContain('multiple turns')
+    const interruptedCLI=await command('measure.mjs','--inspect',pending.id)
+    expect(interruptedCLI.code).toBe(1)
+    expect(JSON.parse(interruptedCLI.stdout).freshness.code).toBe('preview-unverified')
+    expect(await readFile(join(f.workspace,'dist/index.html'),'utf8')).toBe(artifactBefore)
+    expect(await f.current()).toEqual(before)
+    await tools.close()
+    expect((await command('handoff.mjs')).code).toBe(1)
+    await expect(reader.inspect(measured.id)).rejects.toThrow('expired')
+  }finally{await tools?.close();await reader?.close();await f.close()}
+},30000)
 
 test('handoff and inspection put freshness before verbose sources/logs; details is readonly and on demand',async()=>{
   const previous:AgentTurn={attemptId:'previous',requestKey:'previous',sessionId:'chat',workerId:'worker',fence:0,
@@ -237,6 +743,7 @@ test('native-turn capability records real build/report/smoke; dedup, export and 
     expect(first.code,first.stdout+first.stderr).toBe(0)
     const record=JSON.parse(first.stdout),version=(await f.current()).version
     expect(record.checks.map((c:any)=>c.status)).toEqual(['passed','passed']);expect(record.quality).toBe('unverified')
+    expect(record.checkScope.unmeasuredConsumptionChecks).toHaveLength(4)
     expect(record.freshness.current).toBe(true)
     expect(record.note).toContain('not in measured source/report files')
     expect(record.reports[0].path).toBe('README.md')

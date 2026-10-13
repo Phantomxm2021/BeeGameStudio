@@ -13,11 +13,35 @@ import { join } from 'node:path'
 
 import {
   cleanupRuntimeLayout,
+  loadRuntimeSettingsConfig,
+  saveRuntimeSettingsConfig,
+  nativeRuntimeFeatureSettings,
   mapRuntimeSettingsToEnv,
   syncRuntimeSettingsToDedicatedRuntimeConfig,
 } from '../runtime-settings-store'
 
 describe('runtime settings store', () => {
+  test('optional capabilities persist both directions and default off without losing unrelated settings', () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'bgs-feature-settings-'))
+    try {
+      const keys = ['autoMemoryEnabled', 'autoDreamEnabled', 'verificationAgentEnabled',
+        'agentTeamsEnabled', 'promptSuggestionEnabled', 'awaySummaryEnabled', 'coordinatorModeEnabled']
+      expect(nativeRuntimeFeatureSettings({}).env.CLAUDE_CODE_VERIFICATION_AGENT_ENABLED).toBe('0')
+      for (const enabled of [true, false]) {
+        const flags = Object.fromEntries(keys.map(key => [key, enabled]))
+        saveRuntimeSettingsConfig(flags, { dataDir })
+        expect(loadRuntimeSettingsConfig({ dataDir })).toEqual(flags)
+        const env = mapRuntimeSettingsToEnv(flags, { dataDir })
+        expect(JSON.parse(env.BEEGAME_RUNTIME_SETTINGS_JSON!)).toEqual(flags)
+        syncRuntimeSettingsToDedicatedRuntimeConfig(flags, { dataDir })
+        const saved = JSON.parse(readFileSync(join(env.BEEGAME_CONFIG_DIR!, 'settings.json'), 'utf8'))
+        expect(saved.autoDreamEnabled).toBe(enabled)
+        expect(saved.env.CLAUDE_CODE_VERIFICATION_AGENT_ENABLED).toBe(enabled ? '1' : '0')
+        expect(saved.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS_DISABLED).toBe(enabled ? '0' : '1')
+        expect(saved.env.BGS_DISABLE_AUTO_MEMORY).toBe(enabled ? '0' : '1')
+      }
+    } finally { rmSync(dataDir, { recursive: true, force: true }) }
+  })
   test('migrates legacy runtime directories to the hidden runtime layout', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'beegame-runtime-layout-'))
     try {
@@ -186,6 +210,7 @@ describe('runtime settings store', () => {
         join(dataDir, '.runtime', 'app', 'settings.json'),
         'utf8',
       ))).toEqual({
+        ...nativeRuntimeFeatureSettings({ autoMemoryEnabled: false, autoDreamEnabled: true }),
         sandbox: {
           enabled: true,
           autoAllowBashIfSandboxed: true,
@@ -223,6 +248,7 @@ describe('runtime settings store', () => {
         join(dataDir, '.runtime', 'app', 'settings.json'),
         'utf8',
       ))).toEqual({
+        ...nativeRuntimeFeatureSettings({}),
         sandbox: {
           enabled: false,
           autoAllowBashIfSandboxed: false,

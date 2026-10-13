@@ -12,6 +12,48 @@ import { deriveCurrentProjectTodos } from '../utils/projectTodos'
 
 const authenticatedFetchMock = vi.mocked(authenticatedFetch)
 
+it('routes ordinary project chat through V3 without asking the user for an intent', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    session: { id: 'chat-1', cwd: '/workspace', status: 'running', turnStatus: 'idle' },
+  })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+    id: 'run-1', version: 7, planRevision: 2, chatSessionId: 'chat-1',
+    requirements: { revision: 'revision-1' }, agentTurns: [{ attemptId: 'first', status: 'ended' }],
+  } })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    runId: 'run-1', turn: { attemptId: 'next' },
+  }), { status: 202 }))
+  const result = await beeGameAdapter.sendMessage({ project_id: 'project', content: 'Why is level two hard?',
+    client_message_id: 'client-1' })
+  expect(result.task_id).toBe('next')
+  expect(authenticatedFetchMock.mock.calls.map(([url]) => url)).toEqual([
+    '/api/projects/project/session/ensure',
+    '/api/projects/project/workflow-v3',
+    '/api/projects/project/workflow-v3/agent/messages',
+  ])
+  expect(JSON.parse(authenticatedFetchMock.mock.calls[2]![1]!.body as string)).toEqual({
+    requestKey: 'client-1', runId: 'run-1', chatSessionId: 'chat-1',
+    expectedVersion: 7, requirementsRevision: 'revision-1',
+    text: 'Why is level two hard?',
+  })
+})
+
+it('requires the current project artifact index instead of reconstructing an older server response', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Index unavailable' }), { status: 404 }))
+  await expect(beeGameAdapter.getArtifacts('project')).rejects.toThrow('Index unavailable')
+  expect(authenticatedFetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/projects/project/artifact-index'])
+})
+
+it('returns the project package from the current artifact index without needing a transcript', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ workspacePath: '/workspace/game', artifacts: [] })))
+  const artifacts = await beeGameAdapter.getArtifacts('project')
+  expect(artifacts).toEqual([expect.objectContaining({ name: 'game.zip', package_download: true })])
+  expect(authenticatedFetchMock).toHaveBeenCalledTimes(1)
+})
+
 it('keeps delivery handoff failures visible after the successful Agent turn', () => {
   const history = transcriptEventsToHistory('project', [
     { id: 1, sessionId: 'session', turnId: 'turn', type: 'turn.completed', text: '',
