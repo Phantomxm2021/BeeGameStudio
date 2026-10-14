@@ -540,6 +540,9 @@ export async function registerBeeGameLocalResources(
     for (const id of input.fulfills ?? existing?.fulfills ?? [])
       if (!requirementIds.has(id)) batchIssues.push(`resource ${input.id}.fulfills: unknown requirement ID ${id}; use an ID from requirements, not a display name/resource ID`)
     const paths = uniqueStrings(input.file_paths.map(normalizedProjectPath))
+    if ((AUDIO_FILE_EXTENSIONS.has(extname(input.root_path).toLowerCase()) || input.asset_kind?.startsWith('audio')) &&
+        !AUDIO_ASSET_KINDS.has(input.asset_kind ?? ''))
+      batchIssues.push(`resource ${input.id}.asset_kind: unsupported audio type ${input.asset_kind ?? '(missing)'}; use audio-clip for encoded files, audio-cue/audio-bank for structured definitions (music/ambience/voice are also supported).`)
     const audio = validateAuthoredProgrammaticAudio(root, input, normalizedProjectPath(input.root_path), paths)
     programmatic.set(input, audio)
     if (!audio) for (const path of paths) {
@@ -985,6 +988,12 @@ function validateResource(
   const assetKind = trimmedString(value.asset_kind)
   if (value.asset_kind !== undefined && !assetKind)
     issues.push(`${path}.asset_kind must be a trimmed non-empty string.`)
+  // Existing encoded-audio records remain readable, without rewriting their
+  // type or content-addressed modules. New registration stays strict above.
+  const legacyEncodedAudio = assetKind === 'audio' && AUDIO_FILE_EXTENSIONS.has(extname(rootPath).toLowerCase())
+  if ((AUDIO_FILE_EXTENSIONS.has(extname(rootPath).toLowerCase()) || assetKind?.startsWith('audio')) &&
+      !AUDIO_ASSET_KINDS.has(assetKind ?? '') && !legacyEncodedAudio)
+    issues.push(`${path}.asset_kind: unsupported audio type ${assetKind ?? '(missing)'}; use audio-clip for encoded files or a canonical audio-cue/audio-bank/music/ambience/voice type.`)
   if (value.usage_tags !== undefined)
     validateDescriptiveTags(value.usage_tags, `${path}.usage_tags`, issues)
   if (value.capabilities !== undefined)

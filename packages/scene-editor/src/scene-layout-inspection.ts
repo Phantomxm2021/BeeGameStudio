@@ -1,4 +1,4 @@
-import { affine2d, compose2d, point2d, rectLayout, type Affine2D } from './content-coordinates'
+import { affine2d, canvasReferenceSize, compose2d, point2d, rectLayout, type Affine2D } from './content-coordinates'
 import { parseGridData, parseTilemapData, tileRect, validateTilemapGrid, type TileSetData } from './tilemap-data'
 import { resolveSceneCameraView, sceneCameraAspectRange, type SceneCameraInput, type SceneViewportSize } from './scene-camera'
 
@@ -49,7 +49,10 @@ export function sceneWorldTransforms2d(nodes: readonly SceneSpatialNode[]) {
     if (rect) {
       const parentRect = parent && rects.get(parent.id)
       const parentData = parent?.components?.find(c => c.type === 'rect-transform')?.data
-      const calculated = rectLayout(parentRect?.size ?? [0, 0], pair(parentData?.pivot, [0, 0]),
+      const canvas = node.components?.find(c => c.type === 'canvas' && c.data?.enabled !== false)?.data
+      const reference = !parentRect && (canvas?.renderMode === 'screen-space-overlay' || canvas?.renderMode === 'screen-space-camera')
+        ? canvasReferenceSize(canvas.referenceResolution) : undefined
+      const calculated = rectLayout(parentRect?.size ?? reference ?? [0, 0], pair(parentData?.pivot, [0, 0]),
         pair(rect.anchorMin, [0, 0]), pair(rect.anchorMax, [1, 1]), pair(rect.pivot, [.5, .5]),
         pair(rect.anchoredPosition, [0, 0]), pair(rect.sizeDelta, [0, 0]))
       rects.set(node.id, calculated); offset = calculated.position

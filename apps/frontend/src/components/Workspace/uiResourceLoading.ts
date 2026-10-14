@@ -1,4 +1,5 @@
 import { uiAtlasImages } from './uiAtlas';
+import { editorAtlasPath } from './editorAssetLoading';
 import { uiFontKey } from '../../../../../packages/scene-editor/src/ui-font-reference';
 
 export type UiResource = { id: string; root_path: string; file_paths: string[] };
@@ -29,12 +30,12 @@ export async function loadUiImage(resource: UiResource, path: string, read: Read
   if (resource.file_paths.filter(file => UI_IMAGE.test(file) && stem(file) === member).length === 1) aliases.push(member);
   const entries: Array<readonly [string, string]> = aliases.map(alias => [`${resource.id}:${alias}`, url]);
   if (path === resource.root_path) entries.push([resource.id, url]);
-  const sidecar = resource.file_paths.find(file => file === path.replace(/\.[^.]+$/, '.json'));
+  const sidecar = editorAtlasPath(resource, path);
   if (sidecar) {
     const frames = await uiAtlasImages(url, JSON.parse(await (await read(sidecar)).text()), signal, objectUrls);
     for (const [frame, cropped] of Object.entries(frames)) {
       for (const alias of aliases) entries.push([`${resource.id}:${alias}#${frame}`, cropped]);
-      if (path === resource.root_path) entries.push([`${resource.id}#${frame}`, cropped]);
+      if (path === resource.root_path || sidecar === resource.root_path) entries.push([`${resource.id}#${frame}`, cropped]);
     }
   }
   return entries;

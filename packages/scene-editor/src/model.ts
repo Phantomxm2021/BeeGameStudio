@@ -32,7 +32,7 @@ export type ParticleSystemRendererComponent = ComponentBase<'particle-system-ren
 export type Light2DComponent = ComponentBase<'light-2d'> & { light: LightData; properties: Record<string, unknown> }
 export type LightComponent = ComponentBase<'light'> & { light: LightData; properties: Record<string, unknown> }
 export type CameraComponent = ComponentBase<'camera'> & { orthographic: boolean; orthographicSize?: number; nearClip?: number; farClip?: number; properties: Record<string, unknown> }
-export type CanvasComponent = ComponentBase<'canvas'> & { renderMode: 'screen-space-overlay' | 'screen-space-camera' | 'world-space'; properties: Record<string, unknown> }
+export type CanvasComponent = ComponentBase<'canvas'> & { renderMode: 'screen-space-overlay' | 'screen-space-camera' | 'world-space'; /** Derived editor-unit reference size; authored pixels remain in properties. */ referenceSize?: Vec2; properties: Record<string, unknown> }
 export type CanvasRendererComponent = ComponentBase<'canvas-renderer'> & { properties: Record<string, unknown> }
 /** Unity RectTransform data for UI GameObjects. Coordinates are expressed in the
  * same editor units as Transform; anchors/pivot are normalized in the parent rect. */

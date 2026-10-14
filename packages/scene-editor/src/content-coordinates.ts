@@ -21,7 +21,7 @@ export const CONTENT_COORDINATE_CONTRACT = {
   rotation: 'All persisted Transform.rotation and UI layout.rotation angles are radians. 3D uses XYZ Euler order. Positive 2D/UI rotation is clockwise in the y-down plane. A y-up editor reverses the 2D Z angle at import and export, not in saved Content.',
   ui: 'Screen UI uses top-left logical pixels regardless of scene dimension. Root referenceResolution is a design reference, not a fixed host-window size: the screen root uses the actual viewport. layout.anchor is a named string from uiAnchors (for example center), not an [x,y] array; the listed pairs describe its normalized meaning. data.anchor optionally overrides the pivot as {x,y}, with {x:0,y:0} top-left and {x:1,y:1} bottom-right. layout.position is a parent-local offset from layout.anchor. The child pivot defaults to the same anchor, never implicitly [0,0]; a centered panel uses position [0,0], not a second half-size subtraction. For stretch, provide layout.anchorMin and anchorMax together (normalized parent coordinates), and layout.sizeDelta; resolved size = parentSize * (anchorMax-anchorMin) + sizeDelta. The same pivot and position offset apply after stretching. Local top-left = parentSize * anchor + resolved position - resolved size * pivot; rotate/scale around the pivot. Nested DOM uses local coordinates, never already accumulated world coordinates.',
   uiPaint: 'For each enabled node paint its background/border first, then its own content (text, image or control graphics), then child nodes in document order. Later siblings paint over earlier siblings. A background is never a later overlay above the node content. Disabled nodes suppress their whole subtree.',
-  rectTransform: 'Scene RectTransform uses the same top-left anchor/pivot convention as UI. size = parentRectSize * (anchorMax-anchorMin) + sizeDelta. Its pivot position = parentRectSize * (anchorMin+(anchorMax-anchorMin)*pivot-parentPivot) + anchoredPosition; add Transform.position once. A root rect has no parent rectangle. This is a Content convention, not implicit target-engine RectTransform semantics.',
+  rectTransform: 'Scene RectTransform uses the same top-left anchor/pivot convention as UI. size = parentRectSize * (anchorMax-anchorMin) + sizeDelta. Its pivot position = parentRectSize * (anchorMin+(anchorMax-anchorMin)*pivot-parentPivot) + anchoredPosition; add Transform.position once. A root rect has no parent rectangle, except a screen-space Canvas with explicit referenceResolution {width,height}: its editor/reference layout uses that top-left reference frame as the parent rectangle. A real parent RectTransform takes precedence. World-space Canvas keeps its authored rect size. Reference layout is not runtime host/camera adaptation. This is a Content convention, not implicit target-engine RectTransform semantics.',
   vfx: 'Emitter positions, zones, collider offsets and local effect geometry use their owning scene/UI coordinate space and inherit its transform once. Screen effects use logical pixels; 3D effects use world units. Texture/atlas rectangles always use top-left image pixels.',
 } as const
 
@@ -104,4 +104,14 @@ export function rectLayout(parentSize: readonly number[], parentPivot: readonly 
     size: [0, 1].map(i => parentSize[i]*(max[i]-min[i])+delta[i]) as [number, number],
     position: [0, 1].map(i => parentSize[i]*(min[i]+(max[i]-min[i])*pivot[i]-parentPivot[i])+offset[i]) as [number, number],
   }
+}
+
+/** Explicit Canvas reference frame in logical pixels; never guess from an image. */
+export function canvasReferenceSize(value: unknown): [number, number] | undefined {
+  if (value === undefined) return undefined
+  const size = value as { width?: unknown; height?: unknown } | null
+  if (!size || typeof size.width !== 'number' || typeof size.height !== 'number' ||
+      !Number.isFinite(size.width) || !Number.isFinite(size.height) || size.width <= 0 || size.height <= 0)
+    throw new Error('Canvas referenceResolution requires positive finite width and height')
+  return [size.width, size.height]
 }

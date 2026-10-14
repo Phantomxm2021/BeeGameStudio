@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { canonicalJson, rendererOrder, type SceneAsset } from '@beegame/scene-editor';
 import type { BeeGameSceneContentDocument } from '../../services/beeGameAdapter';
 import { editorDocumentToSceneContent, sceneContentToEditorDocument } from './sceneContentAdapter';
+import { editorRect, rectTransform } from '../../../../../packages/scene-editor/src/rect-transform';
+import { sceneWorldTransforms2d } from '../../../../../packages/scene-editor/src/scene-layout-inspection';
+import { nodeWorldMatrix } from '../../../../../packages/scene-editor/src/selection-transform';
 
 const HASH = 'a'.repeat(64);
 const assets: Record<string, SceneAsset> = {
@@ -25,6 +28,40 @@ function scene(): BeeGameSceneContentDocument {
 }
 
 describe('Unity-style scene adapter', () => {
+  it.each([1, 100])('resolves screen Canvas reference bounds at %s pixels per unit without changing authored rects', pixelsPerUnit => {
+    for (const renderMode of ['screen-space-overlay', 'screen-space-camera', 'world-space']) {
+      const rect = { anchorMin: [0, 0], anchorMax: [1, 1], pivot: [.5, .5], anchoredPosition: [0, 0], sizeDelta: [0, 0] };
+      const input: BeeGameSceneContentDocument = { schema: 'beegame-content.v1', id: 'canvas-scene', kind: 'scene-2d', assetRefs: [], data: {
+        settings: { coordinateSystem: { width: 960, height: 540, pixelsPerUnit } }, nodes: [
+          { id: 'canvas', components: [
+            { id: 'canvas-component', type: 'canvas', data: { renderMode, referenceResolution: { width: 960, height: 540 } } },
+            { id: 'canvas-rect', type: 'rect-transform', data: rect },
+          ] },
+          { id: 'background', parentId: 'canvas', components: [
+            { id: 'background-rect', type: 'rect-transform', data: rect },
+            { id: 'image', type: 'image', data: { color: '#ffffff' } },
+          ] },
+        ],
+      } };
+      const before = structuredClone(input);
+      const editor = sceneContentToEditorDocument({ document: input, documentRevision: HASH, foundationDocumentRevision: HASH, assetManifestRevision: HASH });
+      const screen = renderMode !== 'world-space';
+      const size = screen ? [960 / pixelsPerUnit, 540 / pixelsPerUnit] : [0, 0];
+      expect(editorRect(editor.nodes.canvas, editor.nodes)?.size).toEqual(size);
+      expect(editorRect(editor.nodes.background, editor.nodes)).toEqual({ size, position: [0, 0] });
+      const position = nodeWorldMatrix(editor, 'background').elements.slice(12, 14);
+      expect(position).toEqual(screen ? [0, 0] : [-480 / pixelsPerUnit, 270 / pixelsPerUnit]);
+      const canonical = sceneWorldTransforms2d(input.data.nodes);
+      expect(canonical.rects.get('background')?.size).toEqual(screen ? [960, 540] : [0, 0]);
+      expect(canonical.poses.get('background')?.slice(4)).toEqual(screen ? [480, 270] : [0, 0]);
+      const canvas = editor.nodes.canvas;
+      expect(rectTransform(canvas, editor.nodes, rectTransform(canvas, editor.nodes), true)).toEqual(canvas.transform);
+      const saved = editorDocumentToSceneContent(editor, input);
+      expect(saved.data.nodes.map(node => node.components)).toEqual(input.data.nodes.map(node => node.components));
+      expect(input).toEqual(before);
+    }
+  });
+
   it('preserves authored camera identity, reference aspect and framing independently of the map size', () => {
     const input=scene();input.data.cameraNodeId='camera'
     input.data.settings={coordinateSystem:{origin:'top-left',units:'logical-pixels',width:2400,height:1600,pixelsPerUnit:100}}

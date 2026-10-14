@@ -326,16 +326,16 @@ describe('UiEditorOverlay', () => {
     expect(saved.assetRef).toBeUndefined();
     expect(saved.data?.image).toEqual({ assetRef: 'RES-UI', member: 'button', type: 'simple', preserveAspect: true });
   });
-  it.each([false,true])('loads exact image paths without colliding basenames (atlas=%s)', async atlas => {
+  it.each([[false, false, '.json'], [true, false, '.json'], [true, true, '.json'], [true, true, '.atlas.json']] as const)('loads exact image paths without colliding basenames (atlas=%s, JSON root=%s, suffix=%s)', async (atlas, jsonRoot, suffix) => {
     const doc = { ...uiDocument, data: { rootId: 'root', nodes: [
       uiDocument.data.nodes[0],
-      {id:'first',role:'image',parentId:'root',assetRef:'RES-UI',layout:{size:[32,32]},data:{member:'art/a/icon.png',...(atlas?{frame:'idle'}:{})}},
+      {id:'first',role:'image',parentId:'root',assetRef:'RES-UI',layout:{size:[32,32]},data:{...(!jsonRoot?{member:'art/a/icon.png'}:{}),...(atlas?{frame:'idle'}:{})}},
       {id:'second',role:'image',parentId:'root',assetRef:'RES-UI',layout:{size:[32,32]},data:{member:'art/b/icon.png',...(atlas?{frame:'idle'}:{})}},
     ] }};
     vi.spyOn(beeGameAdapter,'getProjectGameContent').mockResolvedValue({state:'ready',documents:[{path:'content/ui/title.json',revision:'a'.repeat(64),document:doc as typeof uiDocument}]});
     vi.spyOn(beeGameAdapter,'getProjectAssets').mockResolvedValue({contract_state:'ready',version:9,requirements:[],resources:[{
-      id:'RES-UI',status:'verified',root_path:'art/a/icon.png',
-      file_paths:['art/a/icon.png','art/b/icon.png',...(atlas?['art/a/icon.json','art/b/icon.json']:[])],source:{type:'agent-authored'},
+      id:'RES-UI',status:'verified',root_path:jsonRoot?`art/a/icon${suffix}`:'art/a/icon.png',
+      file_paths:['art/a/icon.png','art/b/icon.png',...(atlas?[`art/a/icon${suffix}`,`art/b/icon${suffix}`]:[])],source:{type:'agent-authored'},
     }]});
     const urls=new WeakMap<Blob,string>();
     vi.spyOn(beeGameAdapter,'loadProjectAssetFile').mockImplementation(async(_project,_resource,path)=>{

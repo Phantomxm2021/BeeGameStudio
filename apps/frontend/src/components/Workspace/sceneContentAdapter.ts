@@ -1,4 +1,4 @@
-import { spriteSheetSelection, parseGridData, parseTilemapData, parseTilemapRendererData, validateTilemapGrid } from '@beegame/scene-editor';
+import { canvasReferenceSize, spriteSheetSelection, parseGridData, parseTilemapData, parseTilemapRendererData, validateTilemapGrid } from '@beegame/scene-editor';
 import type { MaterialOverride, SceneAsset, SceneComponent, SceneDocument, SceneNode, Transform } from '@beegame/scene-editor';
 import type { BeeGameContentNode, BeeGameSceneContentDocument } from '../../services/beeGameAdapter';
 
@@ -158,7 +158,10 @@ function toEditorComponent(input: { node: BeeGameContentNode; component: Canonic
     const orthographicSize = finite(data.orthographicSize, viewport ? finite(viewport.height, 720) / 2 / metrics.pixelsPerUnit : 3.6);
     return { id, type: 'camera', enabled, orthographic, orthographicSize, ...(typeof data.nearClip === 'number' ? { nearClip: data.nearClip } : {}), ...(typeof data.farClip === 'number' ? { farClip: data.farClip } : {}), properties: data };
   }
-  if (component.type === 'canvas') return { id, type: 'canvas', enabled, renderMode: ['screen-space-overlay', 'screen-space-camera', 'world-space'].includes(String(data.renderMode)) ? data.renderMode as 'screen-space-overlay' | 'screen-space-camera' | 'world-space' : 'world-space', properties: data };
+  if (component.type === 'canvas') {
+    const reference = canvasReferenceSize(data.referenceResolution);
+    return { id, type: 'canvas', enabled, renderMode: ['screen-space-overlay', 'screen-space-camera', 'world-space'].includes(String(data.renderMode)) ? data.renderMode as 'screen-space-overlay' | 'screen-space-camera' | 'world-space' : 'world-space', ...(reference ? { referenceSize: [reference[0] / unit, reference[1] / unit] as [number, number] } : {}), properties: data };
+  }
   if (component.type === 'rect-transform') {
     const min = vec2(data.anchorMin, [0, 0]), max = vec2(data.anchorMax, [1, 1]), pivot = vec2(data.pivot, [.5, .5]);
     const offset = vec2(data.anchoredPosition, [0, 0]), size = vec2(data.sizeDelta, [0, 0]);

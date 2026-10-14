@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SceneDocument } from '@beegame/scene-editor';
 import { beeGameAdapter, type BeeGameSceneContentDocument } from '../../services/beeGameAdapter';
@@ -149,20 +149,39 @@ describe('SceneEditorOverlay loading experience', () => {
     expect(await screen.findByText(/atlas frame unavailable: ground/)).toBeInTheDocument();
   });
 
-  it('attaches each atlas by exact sibling path, not a colliding basename',async()=>{
+  it.each([['.json', 'a'], ['.atlas.json', 'b']])('attaches JSON-root atlases by exact sibling path (%s, root=%s), not a colliding basename',async (suffix, root)=>{
     const {document}=tilemapFixture();
     document.assetRefs=['ART'];
-    document.data.nodes=[{id:'root',components:[]}];
+    document.data.nodes=[{id:'root',components:[{id:'sprite',type:'sprite-renderer',assetRef:'ART',data:{frame:'idle'}}]}];
     vi.spyOn(beeGameAdapter,'getProjectAssets').mockResolvedValue({contract_state:'ready',version:9,requirements:[],resources:[{
-      id:'ART',status:'verified',root_path:'a/icon.png',file_paths:['a/icon.png','a/icon.json','b/icon.png','b/icon.json'],source:{type:'agent-authored'},
+      id:'ART',status:'verified',root_path:`${root}/icon${suffix}`,file_paths:['a/icon.png',`a/icon${suffix}`,'b/icon.png',`b/icon${suffix}`],source:{type:'agent-authored'},
     }]});
     vi.spyOn(beeGameAdapter,'loadProjectAssetFile').mockImplementation(async(_project,_id,path)=>path.endsWith('.json')
       ?new Blob([JSON.stringify({frames:{idle:{frame:{x:0,y:0,w:path.startsWith('a/')?16:32,h:16}}}})],{type:'application/json'})
       :new Blob(['image'],{type:'image/png'}));
     render(<SceneEditorOverlay projectId="images" onClose={vi.fn()}/>);
     const editor=JSON.parse((await screen.findByTestId('scene-data')).textContent!) as SceneDocument;
-    expect(editor.assets.ART.spriteSheet).toEqual({frames:{idle:{x:0,y:0,width:16,height:16}}});
+    expect(editor.assets.ART.path).toBe(`${root}/icon.png`);
+    expect(editor.assets.ART.spriteSheet).toEqual({frames:{idle:{x:0,y:0,width:root==='a'?16:32,height:16}}});
     expect(editor.assets['ART:b/icon.png'].spriteSheet).toEqual({frames:{idle:{x:0,y:0,width:32,height:16}}});
+    expect(editor.nodes.root.components[0]).toMatchObject({assetId:'ART',frame:{x:0,y:0,width:root==='a'?16:32,height:16}});
+  });
+
+  it('keeps an asset failure visible when another prerequisite finishes later', async () => {
+    let finishContent!: (value: any) => void;
+    let signal: AbortSignal | undefined;
+    vi.spyOn(beeGameAdapter, 'getProjectGameContent').mockImplementation((_id, requestSignal) => {
+      signal = requestSignal;
+      return new Promise(resolve => { finishContent = resolve; });
+    });
+    vi.spyOn(beeGameAdapter, 'getProjectAssets').mockRejectedValue(new Error('Invalid asset manifest'));
+    render(<SceneEditorOverlay projectId="failed-assets" onClose={vi.fn()} />);
+    expect(await screen.findByText('Invalid asset manifest')).toBeInTheDocument();
+    await act(async () => { finishContent({state:'ready',documents:[]}); });
+    expect(screen.getByText('Could not open scene')).toBeInTheDocument();
+    expect(screen.getByText('Invalid asset manifest')).toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(signal?.aborted).toBe(true);
   });
 
   it('Escape cancels pending loads before the editor mounts', () => {

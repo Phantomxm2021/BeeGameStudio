@@ -12,7 +12,7 @@ import {
 } from './sceneContentAdapter';
 import { EditorLoadingView, type EditorLoadState } from './EditorLoadingView';
 import './SceneEditorOverlay.css';
-import { mapEditorAssets } from './editorAssetLoading';
+import { editorAtlasPath, mapEditorAssets } from './editorAssetLoading';
 
 const loadSceneEditor = async () => {
   const module = await import('@beegame/scene-editor');
@@ -238,10 +238,12 @@ export function SceneEditorOverlay({ projectId, onClose, initialDocumentPath }: 
           }
           for (const path of previewPaths) {
             const assetId = members[path];
-            const table = tables[path.replace(/\.[^.]+$/, '.json')];
+            const metadataPath = editorAtlasPath(resource, path);
+            const table = metadataPath ? tables[metadataPath] : undefined;
             if (assetId && table) assets[assetId].spriteSheet = table;
           }
-          const rootPath = preferredScenePreviewPath(resource.root_path, previewPaths);
+          const rootPath = previewPaths.find(path => editorAtlasPath(resource, path) === resource.root_path)
+            ?? preferredScenePreviewPath(resource.root_path, previewPaths);
           const rootMemberId = rootPath ? members[rootPath] : undefined;
           if (rootMemberId && !assets[resource.id].tileSet) assets[resource.id] = { ...assets[rootMemberId], id: resource.id };
           assetMembers[resource.id] = members;
@@ -303,6 +305,7 @@ export function SceneEditorOverlay({ projectId, onClose, initialDocumentPath }: 
       })
       .catch(error => {
         if (active && !isAbortError(error)) {
+          controller.abort();
           setLoadState({ status: 'error', progress: 0, label: 'Could not open scene', detail: error instanceof Error ? error.message : String(error) });
         }
       });

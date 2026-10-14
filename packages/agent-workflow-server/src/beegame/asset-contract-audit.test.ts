@@ -1,9 +1,65 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, readFile, writeFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { auditAssetContract } from './asset-contract-audit'
 import sharp from 'sharp'
+import { audioProbeWav } from './workflow-v3/audio-consumption'
+import { registerBeeGameAuthoredResources, readBeeGameAssetManifest, readBeeGameAssetManifestSync, toCanonicalBeeGameAssetManifest } from './asset-contracts'
+
+test('encoded authored audio rejects generic audio type before registration and accepts canonical audio-clip', async () => {
+  const root = await mkdtemp(join(tmpdir(),'bgs-audio-kind-')); workspaces.push(root)
+  const value=manifest(); value.resources=[]; value.project_target!.asset_format_capabilities=['wav']
+  await writeBeeGameAssetManifest(root,value)
+  await mkdir(join(root,'assets/runtime'),{recursive:true})
+  const path='assets/runtime/tone.wav'
+  await writeFile(join(root,path),audioProbeWav(false))
+  const input={id:'tone',root_path:path,file_paths:[path],provisional:false,reason:'Synthetic encoded tone',selection_reason:['test'],asset_kind:'audio'}
+  await expect(registerBeeGameAuthoredResources(root,[input])).rejects.toThrow('unsupported audio type audio; use audio-clip')
+  expect((await readBeeGameAssetManifest(root)).resources).toHaveLength(0)
+  const registered=await registerBeeGameAuthoredResources(root,[{...input,asset_kind:'audio-clip'}])
+  expect(registered.resources[0]!.asset_kind).toBe('audio-clip')
+  expect(registered.resources[0]!.status).toBe('verified')
+  const invalid=structuredClone(registered); invalid.resources[0]!.asset_kind='audio'
+  expect(parseCanonicalBeeGameAssetManifest(invalid).resources[0]!.asset_kind).toBe('audio')
+  for (const kind of [undefined, 'audio-unknown']) {
+    invalid.resources[0]!.asset_kind = kind
+    expect(()=>parseCanonicalBeeGameAssetManifest(invalid)).toThrow('unsupported audio type')
+  }
+  invalid.resources[0]!.asset_kind='music'
+  expect(parseCanonicalBeeGameAssetManifest(invalid).resources[0]!.asset_kind).toBe('music')
+  const composite=manifest()
+  composite.resources[0]!.asset_kind='data'
+  composite.resources[0]!.file_paths.push('assets/runtime/embedded.wav')
+  expect(parseCanonicalBeeGameAssetManifest(composite).resources[0]!.asset_kind).toBe('data')
+})
+
+test('reads legacy encoded audio without rewriting the manifest or relaxing new registration', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-legacy-audio-')); workspaces.push(root)
+  const value = manifest()
+  const resource = value.resources[0]!
+  resource.asset_kind = 'audio-clip'
+  resource.root_path = 'assets/runtime/tone.wav'
+  resource.file_paths = [resource.root_path]
+  await writeBeeGameAssetManifest(root, value)
+  const indexPath = join(root, 'assets/asset-manifest.json')
+  const indexBefore = await readFile(indexPath, 'utf8')
+  const modulePath = join(root, JSON.parse(indexBefore).modules.resources[0])
+  const legacy = JSON.parse(await readFile(modulePath, 'utf8'))
+  legacy.asset_kind = 'audio'
+  const moduleBefore = JSON.stringify(legacy)
+  await writeFile(modulePath, moduleBefore)
+
+  const loaded = await readBeeGameAssetManifest(root)
+  expect(loaded.resources[0]!.asset_kind).toBe('audio')
+  expect(readBeeGameAssetManifestSync(root)).toEqual(loaded)
+  expect(toCanonicalBeeGameAssetManifest(loaded).resources[0]!.asset_kind).toBe('audio')
+  expect(await readFile(indexPath, 'utf8')).toBe(indexBefore)
+  expect(await readFile(modulePath, 'utf8')).toBe(moduleBefore)
+  legacy.root_path = 'assets/runtime/tone.json'
+  legacy.file_paths = [legacy.root_path]
+  expect(() => parseCanonicalBeeGameAssetManifest({ ...loaded, resources: [legacy] })).toThrow('unsupported audio type audio')
+})
 
 test('rejects editor-incompatible atlas rectangles and actual PNG overflow at resource acceptance', async () => {
   const workspace = await mkdtemp(join(tmpdir(), 'atlas-contract-'))

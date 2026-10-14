@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { affine2d, compose2d, point2d, rectLayout, uiAnchor, uiLocalMatrix, uiPaintOrder, UI_PAINT_CONFORMANCE_FIXTURE } from './content-coordinates'
+import { affine2d, canvasReferenceSize, compose2d, point2d, rectLayout, uiAnchor, uiLocalMatrix, uiPaintOrder, UI_PAINT_CONFORMANCE_FIXTURE } from './content-coordinates'
 import { editorRect, rectTransform } from './rect-transform'
 import { identityTransform, makeFixture, type SceneNode } from './model'
 import { nodeWorldMatrix, transformSelection } from './selection-transform'
@@ -45,10 +45,19 @@ describe('Content coordinates', () => {
     expect(rectLayout([200,100],[.5,.5],[1,0],[1,0],[0,0],[-10,20],[40,10])).toEqual({ size:[40,10], position:[90,-30] })
     expect(rectLayout([200,100],[.5,.5],[0,0],[1,1],[.5,.5],[0,0],[-20,-10])).toEqual({ size:[180,90], position:[0,0] })
   })
+  it('requires explicit valid Canvas reference dimensions', () => {
+    expect(canvasReferenceSize(undefined)).toBeUndefined()
+    expect(canvasReferenceSize({width:960,height:540})).toEqual([960,540])
+    for (const value of [null, {}, {width:0,height:540}, {width:960,height:-1}, {width:Infinity,height:540}])
+      expect(() => canvasReferenceSize(value)).toThrow('Canvas referenceResolution')
+  })
   it('uses the same rect offset in world matrices and selection edits', () => {
     const parent: SceneNode = { id:'p', name:'p', parentId:null, children:['c'], active:true, locked:false, tags:[], transform:identityTransform(), components:[{ id:'pr',type:'rect-transform',enabled:true,anchorMin:[0,0],anchorMax:[0,0],pivot:[.5,.5],anchoredPosition:[0,0],sizeDelta:[2,1],properties:{} }] }
     const child: SceneNode = { ...parent, id:'c', name:'c', parentId:'p', children:[], components:[{ id:'cr',type:'rect-transform',enabled:true,anchorMin:[1,1],anchorMax:[1,1],pivot:[0,1],anchoredPosition:[-.1,-.2],sizeDelta:[.4,.1],properties:{} }] }
     const nodes = {p:parent,c:child}
+    expect(editorRect(child,nodes)).toEqual({size:[.4,.1],position:[.9,.3]})
+    // A nested Canvas does not replace its real parent rect with a second screen frame.
+    child.components.push({id:'cc',type:'canvas',enabled:true,renderMode:'screen-space-overlay',referenceSize:[960,540],properties:{}})
     expect(editorRect(child,nodes)).toEqual({size:[.4,.1],position:[.9,.3]})
     const doc = { ...makeFixture(), rootIds:['p'], nodes }
     expect(nodeWorldMatrix(doc,'c').elements.slice(12,15)).toEqual([.9,.3,0])

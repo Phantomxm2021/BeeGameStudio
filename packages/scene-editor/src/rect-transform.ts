@@ -9,8 +9,11 @@ export function editorRect(node: SceneNode, nodes: Record<string, SceneNode>, pa
   if (path.has(node.id)) throw new Error('Invalid rect hierarchy')
   const parent = node.parentId ? nodes[node.parentId] : undefined
   const parentRect = parent && componentOf(parent, 'rect-transform')
-  const parentSize = parent && parentRect ? editorRect(parent, nodes, new Set(path).add(node.id))?.size ?? [0, 0] : [0, 0]
-  return rectLayout(parentSize, parentRect?.pivot ?? [0, 0], rect.anchorMin, rect.anchorMax, rect.pivot, rect.anchoredPosition, rect.sizeDelta)
+  const canvas = componentOf(node, 'canvas')
+  const reference = canvas?.enabled && canvas.renderMode !== 'world-space' ? canvas.referenceSize : undefined
+  const parentSize = parent && parentRect ? editorRect(parent, nodes, new Set(path).add(node.id))?.size ?? [0, 0] : reference ?? [0, 0]
+  // The virtual screen frame starts at top-left, hence [0,1] in editor y-up units.
+  return rectLayout(parentSize, parentRect?.pivot ?? (reference ? [0, 1] : [0, 0]), rect.anchorMin, rect.anchorMax, rect.pivot, rect.anchoredPosition, rect.sizeDelta)
 }
 
 /** Apply/remove the rect offset once, both for rendering and transform tools. */
