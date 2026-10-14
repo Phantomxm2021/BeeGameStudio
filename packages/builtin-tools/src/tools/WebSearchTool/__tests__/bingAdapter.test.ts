@@ -502,7 +502,7 @@ describe('BingSearchAdapter.search', () => {
     await expect(adapter.search('test', {})).rejects.toThrow('Network error')
   })
 
-  test('encodes query parameter in URL', async () => {
+  test('encodes query and uses only q and form parameters in URL', async () => {
     const axiosGet = mock(() => Promise.resolve({ data: SAMPLE_HTML }))
     mock.module('axios', () => ({
       default: {
@@ -519,5 +519,9 @@ describe('BingSearchAdapter.search', () => {
 
     const calledUrl = (axiosGet.mock.calls as string[][])[0][0]
     expect(calledUrl).toContain('q=hello%20world%20%26%20special%3Dchars')
+    const searchParams = new URL(calledUrl).searchParams
+    expect(searchParams.get('q')).toBe('hello world & special=chars')
+    expect(searchParams.get('form')).toBe('QBRE')
+    expect([...searchParams.keys()]).toEqual(['q', 'form'])
   })
 })

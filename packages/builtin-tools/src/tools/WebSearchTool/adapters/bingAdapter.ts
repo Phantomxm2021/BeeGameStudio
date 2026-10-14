@@ -44,7 +44,7 @@ export class BingSearchAdapter implements WebSearchAdapter {
 
     onProgress?.({ type: 'query_update', query })
 
-    const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&setmkt=en-US`
+    const url = `https://www.bing.com/search?q=${encodeURIComponent(query)}&form=QBRE`
 
     const abortController = new AbortController()
     if (signal) {
