@@ -1,6 +1,6 @@
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
-import { bundleContentConsumer } from '../game-content-consumer-cli'
+import { bundleContentConsumer, CONTENT_CONSUMER_API } from '../game-content-consumer-cli'
 import { digest, WorkflowError, type Run } from './state'
 
 // Only exact host records are ignored. A README, imported source, unknown dot
@@ -77,16 +77,19 @@ export default { base: './', publicDir: false, plugins: [{
 `,
     'content/index.json':json(index),'content/scenes/main.json':json(scene),'content/ui/hud.json':json(ui),
     'src/bgs-content-consumer.mjs':await bundleContentConsumer(),
+    'src/bgs-content-api.json':json(CONTENT_CONSUMER_API),
     'src/game.js':`// Connection sample only. Implement the current playable slice here.
+// Read ./bgs-content-api.json for the shared API, not the compiled consumer.
 // Keep tunable gameplay values in scene.settings (or one imported config),
 // and expose HUD values through this state rather than duplicating constants.
 export function createGame({ canvas, scene }) {
-  const state = { status: 'BGS · …' };
+  let resets = 0;
+  const state = { status: 'BGS · 0' };
   return {
     state,
     update(dt) { /* Add simulation; dt is seconds. */ },
     draw(ctx, viewport) { /* Add dynamic drawing; consume scene nodes/camera. */ },
-    action(action, nodeId) { if (action === 'reset') state.status = 'BGS · …'; },
+    action(action, nodeId) { if (action === 'reset') state.status = 'BGS · ' + ++resets; },
     dispose() { /* Remove any game-owned input/audio subscriptions. */ },
   };
 }

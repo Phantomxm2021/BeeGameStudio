@@ -9,6 +9,7 @@ import { createRun, type AgentTurn } from './state'
 import { assertCommit } from './store'
 import { agentGoalPrompt, focusedExecutionFacts } from './agent-goal'
 import { sharedPlaywright } from '../shared-playwright'
+import { CONTENT_CONSUMER_API } from '../game-content-consumer-cli'
 
 const brief = {creation_mode:'creative',build_source:null,game_user_visible_language:'zh',
   settings:{platform:'Web',engine:'React',dimension:'2D',orientation:'Landscape'}}
@@ -45,6 +46,8 @@ test('starter installs once, recovers exact partial writes, preserves edits and 
   try {
     await installWebStarter(f.run)
     const before=await readFile(join(f.root,'src/game.js'),'utf8')
+    expect(JSON.parse(await readFile(join(f.root,'src/bgs-content-api.json'),'utf8'))).toEqual(CONTENT_CONSUMER_API)
+    expect(before).toContain('./bgs-content-api.json')
     await rm(join(f.root,'src/style.css'))
     await installWebStarter(f.run)
     expect(await readFile(join(f.root,'src/game.js'),'utf8')).toBe(before)
@@ -115,13 +118,8 @@ test('built starter consumes edited scene/UI data and dispatches actions through
     await mkdir(join(f.root,'node_modules'))
     for(const name of ['react','react-dom','vite'])
       await symlink(dirname(require.resolve(name+'/package.json')),join(f.root,'node_modules',name))
-    // A synthetic game callback verifies the extension point; no project answers.
-    await writeFile(join(f.root,'src/game.js'),`export function createGame({scene}) {
-      const state={status:String(scene.settings.value)};
-      return {state,update(){},draw(){},action(){state.status=String(Number(state.status)+1)},dispose(){}};
-    }`)
+    // Exercise the shipped example itself, not a replacement game callback.
     const scene=JSON.parse(await readFile(join(f.root,'content/scenes/main.json'),'utf8'))
-    scene.data.settings.value=7
     scene.data.nodes[1].components[0].data.color='#224466'
     await writeFile(join(f.root,'content/scenes/main.json'),JSON.stringify(scene))
     const build=Bun.spawn([process.execPath,join(dirname(require.resolve('vite/package.json')),'bin/vite.js'),'build'],
@@ -142,19 +140,20 @@ test('built starter consumes edited scene/UI data and dispatches actions through
     page.on('pageerror',(e:Error)=>errors.push(e.message))
     await page.goto('http://127.0.0.1:'+server.port+'/nested/')
     await page.locator('[data-node-id=status]').waitFor()
-    expect(await page.locator('[data-node-id=status]').innerText()).toBe('7')
+    expect(await page.locator('[data-node-id=status]').innerText()).toBe('BGS · 0')
     const pixel=()=>page.locator('canvas').evaluate((c:any)=>Array.from(c.getContext('2d').getImageData(480,270,1,1).data))
     expect(await pixel()).toEqual([34,68,102,255])
     await page.locator('[data-node-id=reset]').click()
-    await page.waitForFunction(()=>document.querySelector('[data-node-id=status]')?.textContent==='8')
+    await page.waitForFunction(()=>document.querySelector('[data-node-id=status]')?.textContent==='BGS · 1')
+    await page.locator('[data-node-id=reset]').click()
+    await page.waitForFunction(()=>document.querySelector('[data-node-id=status]')?.textContent==='BGS · 2')
     const ui=JSON.parse(await readFile(join(f.root,'dist/content/ui/hud.json'),'utf8'))
     ui.data.nodes[1].style.fontSize=30
     await writeFile(join(f.root,'dist/content/ui/hud.json'),JSON.stringify(ui))
-    scene.data.settings.value=11
     scene.data.nodes[1].components[0].data.color='#663322'
     await writeFile(join(f.root,'dist/content/scenes/main.json'),JSON.stringify(scene))
     await page.reload()
-    await page.waitForFunction(()=>document.querySelector('[data-node-id=status]')?.textContent==='11')
+    await page.waitForFunction(()=>document.querySelector('[data-node-id=status]')?.textContent==='BGS · 0')
     expect(await page.locator('[data-node-id=status]').evaluate((el:Element)=>getComputedStyle(el).fontSize)).toBe('30px')
     expect(await pixel()).toEqual([102,51,34,255])
     expect(errors).toEqual([])
