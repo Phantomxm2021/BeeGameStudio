@@ -371,19 +371,19 @@ for await (const chunk of Bun.stdin.stream()) {
       )
       continue
     }
-    if (content === 'permission' || content === 'question' || content === 'child-permission') {
+    if (content === 'permission' || content === 'question' || content === 'child-permission' || content === 'permission-no-reason') {
       process.stdout.write(
         `${JSON.stringify({
           type: 'control_request',
           request_id: 'permission-1',
           request: {
             subtype: 'can_use_tool',
-            tool_name: content === 'question' ? 'AskUserQuestion' : 'Write',
+            tool_name: content === 'question' ? 'AskUserQuestion' : content === 'permission-no-reason' ? 'Bash' : 'Write',
             tool_use_id: 'tool-1',
             ...(content === 'child-permission' ? { agent_id: 'native-child' } : {}),
-            decision_reason: 'Target requires explicit authorization',
+            decision_reason: content === 'permission-no-reason' ? '' : 'Target requires explicit authorization',
             blocked_path: 'docs/GDD.md',
-            input: content === 'question'
+            input: content === 'permission-no-reason' ? { command: 'rm -rf specific-synthetic-output' } : content === 'question'
               ? { questions: [{ question: 'Which style?', header: 'Style', options: [{ label: 'Pixel', description: 'Pixel art' }, { label: 'Vector', description: 'Vector art' }], multiSelect: false }] }
               : { file_path: 'docs/GDD.md', content: 'test' },
             permission_suggestions: [

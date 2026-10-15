@@ -3,17 +3,6 @@ import { join } from 'node:path'
 import { PROJECT_DOCUMENTS } from '../project-content-authority'
 import { checkDesignHandoff, designHandoffPath, readDesignAcceptanceRequirements, type DesignDocument, type DesignHandoff } from '../design-handoff'
 
-/** A pre-upgrade saved inspection, for compatibility tests only. New flow
- * tests must call prepareProjectDesignReview directly instead. */
-export async function prepareLegacyDesignReviewFixture(workspace: string, root: string) {
-  const { prepareProjectDesignReview, projectDeliveryStatePath } = await import('../project-delivery')
-  const state = (await prepareProjectDesignReview(workspace, root))!
-  const { combined, writableDocuments, revisionDocuments, pendingCheckIssues, ...review } = state.designReview!
-  const legacy = { ...state, designReview: { ...review, step: 'inspect' as const } }
-  await writeFile(projectDeliveryStatePath(workspace, root), JSON.stringify(legacy))
-  return legacy
-}
-
 export function uiLayoutFixture(height = 52) {
   return { schema: 'beegame-content.v1', id: 'menu', kind: 'ui-screen', assetRefs: [], data: {
     rootId: 'root', nodes: [

@@ -429,7 +429,7 @@ with selectable_elements as (
     e.pack_id,
     e.status,
     e.usage_tags_mode,
-    e.usage_tags,
+    case when e.usage_tags_mode = 'override' then e.usage_tags else '{}'::text[] end as usage_tags,
     e.asset_kind,
     e.specs,
     e.dependencies,
@@ -440,8 +440,8 @@ with selectable_elements as (
     e.path
   from public.beegame_resource_elements e
   where e.status = 'ready'
-    and e.usage_tags_mode = 'override'
-    and cardinality(e.usage_tags) > 0
+    -- Browsing is technical availability, not semantic requirement matching.
+    and e.usage_tags_mode <> 'manual-only'
     and e.asset_kind is not null
     and length(coalesce(e.specs ->> 'contentHash', '')) = 64
     and not exists (
@@ -2442,9 +2442,20 @@ begin
         returning * into charge;
     end if;
   else
-    created := true;
     if p_action <> 'reserve' or p_amount <= 0 or p_budget < p_amount
       then raise exception 'Image reservation required'; end if;
+    -- The wallet lock also serializes renamed retries of an unresolved image.
+    -- Return the original receipt without creating a hold or authorizing work.
+    select * into charge from public.beegame_image_charges
+      where user_id = p_user_id and project_id = p_project_id
+        and digest = p_digest and state = 'reserved'
+      order by updated_at, request_id limit 1;
+    if found then
+      return jsonb_build_object('created', false, 'state', charge.state,
+        'reservedCreditsMicro', charge.reserved_credits_micro, 'chargedCreditsMicro', charge.charged_credits_micro,
+        'metadata', charge.metadata, 'blockedByRequestId', charge.request_id);
+    end if;
+    created := true;
     insert into public.beegame_usage_wallets (user_id) values (p_user_id) on conflict do nothing;
     select * into wallet from public.beegame_usage_wallets where user_id = p_user_id for update;
     if wallet.included_credits_micro - wallet.consumed_credits_micro - wallet.reserved_credits_micro < p_amount

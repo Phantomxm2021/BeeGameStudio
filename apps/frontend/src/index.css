@@ -96,6 +96,8 @@
 }
 
 @layer utilities {
+  /* Entry only: never delay route cleanup or transform canvas/iframe ancestors. */
+  .page-enter { animation: page-enter 200ms var(--motion-easing); }
   .transition-theme { transition: background-color 120ms var(--motion-easing), border-color 120ms var(--motion-easing), color 120ms var(--motion-easing); }
   .truncate-2-lines { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .truncate-3-lines { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
@@ -106,12 +108,18 @@
   .workspace-loading-beam { animation: workspace-loading-sweep 1.8s ease-in-out infinite; }
 }
 
+@keyframes page-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @keyframes workspace-loading-sweep {
   from { transform: translateX(-110%); }
   to { transform: translateX(310%); }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .page-enter { animation: none; }
   *, *::before, *::after {
     scroll-behavior: auto !important;
     animation-duration: 1ms !important;

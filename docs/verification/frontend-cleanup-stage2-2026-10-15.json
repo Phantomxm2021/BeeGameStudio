@@ -1,0 +1,99 @@
+{
+  "date": "2026-10-15",
+  "scope": "Second incremental frontend engineering cleanup",
+  "changes": [
+    {
+      "file": "apps/frontend/src/hooks/useChat.ts",
+      "behavior": "Publish latest callbacks in a layout effect instead of render. Use the committed project ID for edited-message history requests and preserve the existing generation guard."
+    },
+    {
+      "file": "apps/frontend/src/hooks/useUserSkillsSettings.ts",
+      "behavior": "Own skills loading, import, enable/disable, delete, and list normalization separately from the settings menu. Load only while the authorized skills section is visible; cancel late list results on section exit."
+    },
+    {
+      "file": "apps/frontend/src/components/Demiurge/Landing/SettingsMenu.tsx",
+      "behavior": "Delegate skills operations to the new hook, correct translation/tab dependencies, remove the unused success callback and replace explicit any in model error formatting."
+    },
+    {
+      "file": "apps/frontend/src/components/Workspace/UiEditorOverlay.tsx",
+      "behavior": "Track preview width and height as explicit memo dependencies; preserve layout semantics."
+    },
+    {
+      "file": "apps/frontend/src/components/Demiurge/LandingView.test.tsx",
+      "behavior": "Align stale history-dialog height assertions with the current 680px component contract and its existing dedicated test."
+    }
+  ],
+  "regressionCoverage": [
+    "The stable chat transport handler uses the new project ID after a project switch.",
+    "An edited-history response from a previous project is not committed after switching.",
+    "Private skills are loaded on opening their section rather than on opening general settings."
+  ],
+  "verification": {
+    "typecheck": {
+      "command": "bun run typecheck",
+      "passed": true
+    },
+    "tests": {
+      "total": 225,
+      "passed": 225,
+      "failed": 0,
+      "pending": 0,
+      "files": [
+        {
+          "file": "hooks/useChat.test.ts",
+          "status": "passed",
+          "total": 41,
+          "failures": []
+        },
+        {
+          "file": "components/Demiurge/LandingView.test.tsx",
+          "status": "passed",
+          "total": 71,
+          "failures": []
+        },
+        {
+          "file": "components/Workspace/UiEditorOverlay.test.tsx",
+          "status": "passed",
+          "total": 43,
+          "failures": []
+        },
+        {
+          "file": "components/Demiurge/Landing/ProjectHistoryModal.test.tsx",
+          "status": "passed",
+          "total": 31,
+          "failures": []
+        },
+        {
+          "file": "components/Demiurge/Landing/SettingsMenu.test.tsx",
+          "status": "passed",
+          "total": 39,
+          "failures": []
+        }
+      ]
+    },
+    "changedSettingsLint": "SettingsMenu.tsx and useUserSkillsSettings.ts pass ESLint with current rules.",
+    "productionLintBefore": {
+      "errors": 94,
+      "warnings": 21
+    },
+    "productionLintAfter": {
+      "productionFiles": 238,
+      "errors": 92,
+      "warnings": 15
+    },
+    "productionBuild": {
+      "passed": true,
+      "output": "/private/tmp/bgs-frontend-stage2.pjnBFD/dist",
+      "warning": "Existing chunks over 1000 kB remain; no claimed bundle or performance improvement."
+    },
+    "whitespaceDiffCheck": "Passed"
+  },
+  "preservation": {
+    "priorUncommittedChanges": "Preserved; exact pre-turn versions of modified existing files saved before edits.",
+    "backup": "/private/tmp/bgs-frontend-stage2.pjnBFD/before.tar",
+    "kittyProject": "Untouched",
+    "dependencyManifestsAndLocks": "Unchanged in this turn",
+    "existingFeatureRetirement": "No additional features or assets removed"
+  },
+  "remaining": "Whole-frontend ESLint still reports 92 errors and 15 warnings. This increment resolves specific callback and dependency problems, not all frontend technical debt. Verification used mocked component/hook tests and an isolated production build; no live browser acceptance or deployment."
+}

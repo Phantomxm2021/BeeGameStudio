@@ -1,29 +1,34 @@
 import { randomUUID } from 'node:crypto'
-import { realpath } from 'node:fs/promises'
+import { access, readFile, realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { z } from 'zod/v4'
 import { buildEditableProject, projectFiles, projectDependencies, sameFiles, AGENT_EVIDENCE_DIRECTORY } from './editable-project'
 import { runArtifactCheck } from './runtime-checks'
+import { runContentCheck } from './content-checks'
+import { contentIndexSchema } from '../game-content-schema'
 import { readVersion, versionsMatch } from './checks'
-import { projectPathSchema, taskSchema, WorkflowError, type AgentTurn, type Run, type AgentMeasurement, type SkillUse } from './state'
+import { projectPathSchema, taskSchema, isInitialSliceTurn, WorkflowError, type AgentTurn, type Run, type AgentMeasurement, type SkillUse, type CheckResult } from './state'
+import { CHECK_VERSIONS } from './check-versions'
 import { sameJson, type WorkflowStore } from './store'
 import { inspectAgentMeasurementInputs } from './measured-build'
 import { reviewSourceSnapshot } from '../design-source-reading'
 import { projectNavigationSnapshot } from './project-guide'
 import { priorMainSkillLoads } from './context'
 
-export const AGENT_CONSUMPTION_CHECKS = ['ui-data-consumption','pixel-data-consumption','font-data-consumption','audio-data-consumption'] as const
+export const AGENT_CONSUMPTION_CHECKS = ['ui-data-consumption','scene-data-consumption','pixel-data-consumption','font-data-consumption','audio-data-consumption'] as const
 export const AGENT_CONSUMPTION_SUPPORT = {
   ui:'Selected registered DOM geometry/text-fit in window CSS pixels or an explicit source-sized coordinateRoot; not intended frame adaptation, all states or sibling occlusion',
-  pixel:'Bound static 2D images/Tilemaps, not procedural Canvas, dynamic graphics or 3D',
+  scene:'Selected registered 2D Scene node changes a stable Canvas screenshot when disabled in the served JSON; not proof of correct geometry, all nodes/states or visual quality',
+  pixel:'Bound static 2D images/Tilemaps in a visible Canvas; not DOM/CSS images, procedural Canvas, dynamic graphics or 3D',
   font:'Bound custom-font plain DOM text, not system fonts, rich text or Canvas',
   audio:'Encoded HTML audio bindings, not WebAudio synthesis, concurrency or listening',
 } as const
-export const consumptionRequest = taskSchema.pick({uiProbes:true,pixelProbes:true,audioProbes:true}).extend({
+export const consumptionRequest = taskSchema.pick({uiProbes:true,sceneProbes:true,pixelProbes:true,audioProbes:true}).extend({
   checks:z.array(z.enum(AGENT_CONSUMPTION_CHECKS)).min(1),
 }).superRefine((value,ctx)=>{
   if(new Set(value.checks).size!==value.checks.length)ctx.addIssue({code:'custom',message:'Select each consumption check once'})
   for(const [field,checks] of [['uiProbes',['ui-data-consumption','font-data-consumption']],
+    ['sceneProbes',['scene-data-consumption']],
     ['pixelProbes',['pixel-data-consumption']],['audioProbes',['audio-data-consumption']]] as const) {
     const selected=checks.some(check=>value.checks.includes(check))
     if(selected!==Boolean(value[field]?.length))ctx.addIssue({code:'custom',path:[field],
@@ -39,6 +44,53 @@ export const measurementRequest = z.object({
   consumption:consumptionRequest.optional(),
 }).strict()
 export type MeasurementRequest = z.infer<typeof measurementRequest>
+
+/** Use the existing deterministic checkers when a Web project declares BGS
+ * content. Missing content is not guessed for older/source-only projects; a
+ * present but invalid registry is a concrete failure, not a silent skip. */
+export async function registeredContentChecks(root: string, constraints: Record<string, unknown>, required = false): Promise<CheckResult[]> {
+  const manifestChecks = async () => await access(resolve(root,'assets/asset-manifest.json')).then(
+    async () => [await runContentCheck(root,'content-resources',{expectedOutputs:[]},[],constraints)], () => [])
+  let indexVersion
+  try { indexVersion = await readVersion(root, 'content/index.json') }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [
+      ...(required ? [{id:'content-structure' as const,version:CHECK_VERSIONS['content-structure'],status:'failed' as const,inputs:[],
+        observation:'Required editable Scene/UI content is missing: content/index.json.',createdAt:new Date().toISOString()}] : []),
+      ...await manifestChecks()]
+    return [{id:'content-structure',version:CHECK_VERSIONS['content-structure'],status:'unverified',inputs:[],
+      observation:'Content registry cannot be read safely: '+String(error),createdAt:new Date().toISOString()},
+      ...await manifestChecks()]
+  }
+  let files: string[]
+  try {
+    const index = contentIndexSchema.parse(JSON.parse(await readFile(resolve(root, 'content/index.json'), 'utf8')))
+    const entries = index.documents ?? []
+    const paths = entries.map(entry => entry.path)
+    const valid = entries.length > 0 && new Set(paths).size === paths.length &&
+      new Set(entries.map(entry => entry.id)).size === entries.length &&
+      new Set(index.files).size === index.files.length &&
+      index.files.length === paths.length && index.files.every(path => paths.includes(path)) &&
+      entries.some(entry => entry.id === index.entryScene && entry.kind === 'scene-'+index.dimension && entry.loadPhase === 'startup') &&
+      entries.every(entry => entry.kind === 'vfx' ||
+        /^(scenes|ui)\//.test(entry.path) && entry.path.endsWith('.json') && projectPathSchema.safeParse('content/'+entry.path).success &&
+        (entry.path.startsWith('scenes/') ? entry.kind.startsWith('scene-') : entry.kind.startsWith('ui-')))
+    if (!valid) throw Error('Content registry paths, IDs, kinds or files disagree')
+    if (required && !entries.some(entry => entry.kind === 'ui-screen' || entry.kind === 'ui-hud'))
+      throw Error('Required editable UI document is missing from the registry')
+    files = entries.filter(entry => entry.kind !== 'vfx').map(entry => 'content/'+entry.path)
+    if (!files.length) return [{id:'content-structure',version:CHECK_VERSIONS['content-structure'],status:'unverified',
+      inputs:[indexVersion],observation:'No registered Scene/UI documents to check',createdAt:new Date().toISOString()}]
+  } catch (error) {
+    return [{id:'content-structure',version:CHECK_VERSIONS['content-structure'],status:'failed',inputs:[indexVersion],
+      observation:'Invalid content/index.json: '+String(error),createdAt:new Date().toISOString()},
+      ...await manifestChecks()]
+  }
+  const checks: CheckResult[] = []
+  for (const id of ['content-structure','content-layout','content-resources'] as const)
+    checks.push(await runContentCheck(root,id,{expectedOutputs:files},[indexVersion],constraints))
+  return checks
+}
 
 // Capability and observed scope are facts, not another execution instruction.
 // Expose them through the already-used handoff/inspect, including when the
@@ -56,6 +108,7 @@ function measurementCheckScope(record?: AgentMeasurement) {
 // Shared by existing entry points; no inferred plan, domains or write scope.
 export function activeUserTask(run:Run,turn:AgentTurn) {
   return {scope:'active-user-turn',attemptId:turn.attemptId,requestKey:turn.requestKey,intent:turn.message?.intent??'goal',
+    ...(isInitialSliceTurn(run,turn) ? {deliveryScope:'playable-slice'} : {}),
     source:turn.message?'user-message':'requirements',requirementsRevision:turn.requirementsRevision,
     text:turn.message?.text??run.requirements.text,continuationOf:turn.message?.continuationOf}
 }
@@ -124,8 +177,9 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
       record.reports=await Promise.all(request.reportPaths.map(path=>readVersion(root,path)))
       const requirements={path:'requirement:'+run.requirements.revision,sha256:run.requirements.sha256}
       const build=await buildEditableProject(root,{editableProject:true,runtimeArtifact:request.runtimeArtifact,
-        writablePaths:[request.runtimeArtifact+'/**']},[requirements,...record.reports],[AGENT_EVIDENCE_DIRECTORY],controller.signal,true)
+        writablePaths:[request.runtimeArtifact+'/**']},[requirements,...record.reports],[AGENT_EVIDENCE_DIRECTORY],controller.signal)
       record.checks.push(build)
+      record.checks.push(...await registeredContentChecks(root,run.requirements.constraints,run.creation?.editableContent))
       if(build.status==='passed' && build.projectBuild) {
         record.checks.push(await runArtifactCheck(root,'runtime-smoke',{runtimeArtifact:request.runtimeArtifact,expectedOutputs:[]},
           [requirements,...record.reports],run.requirements.constraints,controller.signal))
@@ -244,6 +298,9 @@ export function createAgentMeasurement(input: { run: Run; turn: AgentTurn; store
     measure(raw: unknown) {
       if(controller.signal.aborted)throw new WorkflowError('measurement-closed','Measurement capability has expired')
       if(work)throw new WorkflowError('measurement-busy','A measurement is already running; inspect it rather than replaying')
+      const consumption=raw && typeof raw==='object' && !Array.isArray(raw) ? (raw as Record<string,unknown>).consumption : undefined
+      if(consumption && typeof consumption==='object' && !Array.isArray(consumption) && Object.hasOwn(consumption,'steps'))
+        throw new WorkflowError('measurement-input','consumption.steps is not valid: put steps inside the relevant uiProbes item, for example uiProbes:[{document,nodeId,selector,viewport,steps:[{click:"#start"}]}]. No measurement was started.',400)
       const request=measurementRequest.parse(raw)
       work=execute(request).finally(()=>{work=undefined})
       return work
@@ -263,6 +320,8 @@ function uiObservationFeedback(id:string, observation:string) {
       clippedCount:value.clippedCount,pseudo:value.pseudo}:undefined
     const probes=actual.probes.map((p:any)=>({document:p.document,nodeId:p.nodeId,viewport:p.viewport,status:p.status,reason:p.reason,
       conditions:p.conditions,
+      ...(p.controlSize?{controlSize:p.controlSize}:{}),
+      ...(p.enabled?{enabled:p.enabled}:{}),
       ...(p.status==='passed'?{}:{
       coordinateDomain:p.coordinateDomain,unobservedProperties:p.unobservedProperties,
       ...(p.textFit?{textFit:{before:fit(p.textFit.before),changed:p.textFit.changed?.map((v:any)=>({property:v.property,actual:fit(v.actual)})),
@@ -276,6 +335,25 @@ function uiObservationFeedback(id:string, observation:string) {
 export function measurementSummary(record: AgentMeasurement, details = true) {
   const feedback=record.checks.map(c=>uiObservationFeedback(c.id,c.observation))
   const diagnostics=feedback.flatMap((value,i)=>value?.probes.map((probe:any)=>({checkId:record.checks[i]!.id,...probe}))??[])
+  const registered=record.checks.find(c=>c.id==='content-structure')?.coverage?.files ?? []
+  const sampled=new Set(record.checks.filter(c=>AGENT_CONSUMPTION_CHECKS.some(id=>id===c.id) && c.status==='passed')
+    .flatMap(c=>c.coverage?.files??[]))
+  const bindingCheck=record.checks.find(c=>c.id==='content-resources')
+  const bindingInventory=bindingCheck?.coverage?.uiNodeBindings
+  // Preserve individual host observations and their scope; a layout PASS is
+  // never promoted to image use, nor a sampled node to a whole-screen PASS.
+  const uiObservations=record.checks.flatMap(check=>{
+    if (!['ui-data-consumption','scene-data-consumption','pixel-data-consumption','font-data-consumption','audio-data-consumption'].includes(check.id)) return []
+    try {
+      const observation=JSON.parse(check.observation)
+      if (!Array.isArray(observation?.probes)) return []
+      return observation.probes.filter((probe:any)=>probe && typeof probe.document==='string' && typeof probe.nodeId==='string' &&
+        ['passed','failed','unverified','execution-error'].includes(probe.status)).map((probe:any)=>({
+          document:probe.document,nodeId:probe.nodeId,checkId:check.id,checkStatus:check.status,status:probe.status,
+          viewport:probe.viewport,reason:probe.reason,resource:probe.resource,
+        }))
+    } catch { return [] } // Preparation failures are retained in checks, not observations.
+  })
   // Native failed-command formatting keeps head/tail, not the middle of large
   // stdout. Keep receipt identity first, then all selected probe diagnostics before bulky scope/geometry;
   // --details still returns exact saved observations, including historical ones.
@@ -285,11 +363,23 @@ export function measurementSummary(record: AgentMeasurement, details = true) {
     runtimeArtifact:record.runtimeArtifact,reports:record.reports,
     reportEvidence:'Explicit attachment identities only. Execution receipts describe their recorded boundaries; attachment at build time does not rerun tests or certify coverage/quality.',
     checkScope:measurementCheckScope(record),
+    resourceStructureCoverage:bindingCheck?.coverage?.assetContract ?? null,
+    sceneBindingCoverage:{sourceCheckStatus:bindingCheck?.status ?? 'unverified',
+      nodes:bindingCheck?.coverage?.sceneNodeBindings?.map(node=>({...node,
+        observations:uiObservations.filter((probe:any)=>probe.document===node.document && probe.nodeId===node.nodeId)})) ?? null,
+      limitation:'Empty observations mean no saved node-level runtime evidence, not a working assembly. Component/behavior metadata is declared structure only. 3D/native-engine/XR device behavior, spatial interaction and comfort remain unverified by the current browser probes.'},
+    uiBindingCoverage:{sourceCheckStatus:bindingCheck?.status ?? 'unverified',nodes:bindingInventory?.map(node=>({...node,
+      observations:uiObservations.filter((probe:any)=>probe.document===node.document && probe.nodeId===node.nodeId)})) ?? null,
+      limitation:'Null means no saved node inventory; an empty observations list means no node-level runtime evidence in this receipt. Layout/text-fit observations do not verify image/frame consumption. No binding does not prove procedural intent. Compare required screens with the design reference; omitted elements and visual fidelity remain unverified.'},
+    ...(registered.length?{contentRuntimeEvidence:{registeredDocuments:registered,
+      sampledDocuments:registered.filter(path=>sampled.has(path)),unprobedDocuments:registered.filter(path=>!sampled.has(path)),
+      limitation:'A passed consumption check samples selected nodes or bindings only; it does not prove all Scene/UI nodes, states or visual quality.'}}:{}),
     checks:record.checks.map(({id,status,observation,coverage,artifacts},i)=>({id,status,
       ...(coverage?{coverage}:{}),
       ...(details?{observation,artifacts,limitations:coverage?.limitations}:status!=='passed'?{
         observation:feedback[i]?JSON.stringify(feedback[i]):observation}:{})})),
     sourceExclusions:record.checks.find(c=>c.id==='build')?.projectBuild?.excludedReports,
+    packageComposition:record.checks.find(c=>c.id==='build')?.projectBuild?.packageComposition ?? null,
     measuredSourceFiles:record.checks.find(c=>c.id==='build')?.projectBuild?.files.length,
     ...(record.consumption?{consumption:details?record.consumption:{checks:record.consumption.checks}}:{}),
     deliveryEligible:false,quality:'unverified',note:record.consumption?

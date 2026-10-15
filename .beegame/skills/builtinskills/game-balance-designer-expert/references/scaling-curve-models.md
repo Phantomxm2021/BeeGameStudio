@@ -18,6 +18,8 @@ Illustrative assumptions, not release values: target health is 120 HP; each conf
 
 Test the smallest relevant relationship and keep the actual runtime values authoritative. A useful reference is [Mindustry's unit definitions](https://github.com/Anuken/Mindustry/blob/master/core/src/mindustry/content/UnitTypes.java), where health, speed, weapon timing and effects coexist in real content. Inspect the actual runtime units/rules before drawing conclusions; copying its numbers does not establish balance for another game.
 
+When a real defeat-time question needs a script, use the game's existing confirmed-hit samples rather than another combat simulator. A minimal project-owned calculation can subtract each actual applied damage value from the actual initial health and return the first sample's timestamp at which health reaches zero. Preserve chronological order, units, mitigation semantics, healing and other relevant state changes from the source. An input-attempt log is not a confirmed-hit log; absent samples cannot establish defeat time. Keep the small calculation with its real inputs and limitations in the existing test/report. A fixed-damage formula such as `(ceil(health/damage)-1)*interval + firstHitTime` applies only to the explicitly stated no-miss/no-heal constant-cadence case. Reachability questions similarly reuse actual movement/collision rules and current Scene geometry checks. Share a helper only after the same concrete calculation recurs; do not add a universal battle/economy/level solver to complete the Skill catalog.
+
 ## Growth forms, only where progression exists
 
 | Form | Useful property | Watch for |

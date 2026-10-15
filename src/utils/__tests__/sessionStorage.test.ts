@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { randomUUID } from 'node:crypto'
+import { preserveCompactContext } from '../../services/compact/preservedContext.js'
+import type { Message } from '../../types/message.js'
 
 const MAX_CACHED_ENTRIES = 200 // mirrors MAX_CACHED_SESSION_FILES in sessionStorage.ts
 
@@ -9,6 +12,7 @@ const {
   getSessionMessages,
   getSessionMessagesCache,
   clearSessionMessagesCache,
+  loadTranscriptFile,
 } = await import('../sessionStorage.js')
 
 function asUuid(s: string): any {
@@ -53,6 +57,116 @@ function sessionFilePath(sessionId: string): string {
   // null in tests, files live at `${tempDir}/projects/${sessionId}.jsonl`.
   return join(tempDir, 'projects', `${sessionId}.jsonl`)
 }
+
+test('resume uses the compacted Write segment without resurrecting the original body', async () => {
+  const original: Message[] = [
+    {
+      type: 'assistant',
+      uuid: randomUUID(),
+      message: {
+        id: 'write-round',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'write-1',
+            name: 'Write',
+            input: { file_path: '/test.txt', content: 'ORIGINAL WRITE BODY' },
+          },
+        ],
+      },
+    },
+    {
+      type: 'user',
+      uuid: randomUUID(),
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'write-1',
+            content: 'File created successfully at: /test.txt',
+          },
+        ],
+      },
+    },
+    {
+      type: 'assistant',
+      uuid: randomUUID(),
+      message: {
+        id: 'next-round',
+        content: [{ type: 'text', text: 'Continue verification' }],
+      },
+    },
+    {
+      type: 'user',
+      uuid: randomUUID(),
+      message: { role: 'user', content: 'Do not pay again' },
+    },
+  ]
+  original[1]!.sourceToolAssistantUUID = original[0]!.uuid
+  original[1]!.parentUuid = original[0]!.uuid
+  const file = sessionFilePath('write-compact-resume')
+  const p = preserveCompactContext(original, file)
+  const boundaryUuid = randomUUID()
+  const summaryUuid = randomUUID()
+  const entries = [
+    ...original,
+    {
+      type: 'system',
+      subtype: 'compact_boundary',
+      uuid: boundaryUuid,
+      compactMetadata: {
+        trigger: 'auto',
+        preTokens: 1000,
+        preservedSegment: {
+          headUuid: p.messagesToKeep[0]!.uuid,
+          anchorUuid: summaryUuid,
+          tailUuid: p.messagesToKeep.at(-1)!.uuid,
+        },
+      },
+    },
+    ...p.historicalMessages,
+    {
+      type: 'user',
+      uuid: summaryUuid,
+      isCompactSummary: true,
+      message: { role: 'user', content: 'Continue task' },
+    },
+    ...p.messagesToKeep,
+  ]
+  // Serialize the same sequential chain used by insertMessageChain. An old
+  // explicit parent would override it, which this regression must detect.
+  writeFileSync(
+    file,
+    entries
+      .map((message, index) =>
+        JSON.stringify({
+          parentUuid:
+            message.uuid === boundaryUuid
+              ? null
+              : (entries[index - 1]?.uuid ?? null),
+          ...message,
+        }),
+      )
+      .join('\n') + '\n',
+  )
+  const loaded = await loadTranscriptFile(file)
+  for (const message of p.messagesToKeep) {
+    expect(loaded.messages.get(message.uuid)?.message?.content).toEqual(
+      message.message?.content,
+    )
+  }
+  expect(JSON.stringify([...loaded.messages.values()])).not.toContain(
+    'ORIGINAL WRITE BODY',
+  )
+  expect(loaded.messages.has(original[0]!.uuid)).toBe(false)
+  expect(loaded.messages.get(p.messagesToKeep[0]!.uuid)?.parentUuid).toBe(
+    summaryUuid,
+  )
+  expect(loaded.messages.get(p.messagesToKeep[1]!.uuid)?.parentUuid).toBe(
+    p.messagesToKeep[0]!.uuid,
+  )
+})
 
 describe('getSessionMessagesCache', () => {
   test('returns the same Map instance across calls', () => {

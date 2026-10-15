@@ -2,7 +2,8 @@ import { expect, test } from 'bun:test'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { extractNativeToolImages, materializeBeeGameAttachments, prepareBeeGamePromptInput } from './session-manager'
+import sharp from 'sharp'
+import { extractNativeToolImages, materializeBeeGameAttachments, preferOriginalReadImage, prepareBeeGamePromptInput } from './session-manager'
 import { readChatAttachment } from './chat-attachments'
 
 test('captures actual tool image bytes, not arbitrary paths or another tool result', () => {
@@ -13,6 +14,35 @@ test('captures actual tool image bytes, not arbitrary paths or another tool resu
   ] } }
   expect(extractNativeToolImages(message, 'screenshot')).toEqual([{ type: 'image', mediaType: 'image/png', data: 'aW1hZ2U=' }])
   expect(extractNativeToolImages(message, 'missing')).toEqual([])
+})
+
+test('Chat stores the original project image for a completed Read, not its model-sized preview', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'beegame-image-preview-test-'))
+  const outside = await mkdtemp(join(tmpdir(), 'beegame-image-outside-test-'))
+  try {
+    const source = join(workspace, 'board.png')
+    const original = await sharp({ create: { width: 1536, height: 1024, channels: 4, background: '#17212c' } }).png().toBuffer()
+    const preview = await sharp(original).resize(384, 256).png().toBuffer()
+    const images = [{ type: 'image' as const, mediaType: 'image/png' as const, data: preview.toString('base64') }]
+    await writeFile(source, original)
+    const display = await preferOriginalReadImage(workspace, { toolName: 'Read', input: { file_path: source } }, images)
+    expect(Buffer.compare(Buffer.from(display[0]!.data, 'base64'), original)).toBe(0)
+    const saved = await materializeBeeGameAttachments(workspace, display)
+    const response = await readChatAttachment(workspace, saved[0]!.storageId)
+    expect(await sharp(Buffer.from(await response.arrayBuffer())).metadata()).toMatchObject({ width: 1536, height: 1024 })
+
+    const outsideSource = join(outside, 'outside.png')
+    await writeFile(outsideSource, original)
+    await symlink(outsideSource, join(workspace, 'outside.png'))
+    expect(await preferOriginalReadImage(workspace, { toolName: 'Read', input: { file_path: outsideSource } }, images)).toBe(images)
+    expect(await preferOriginalReadImage(workspace, { toolName: 'Read', input: { file_path: join(workspace, 'outside.png') } }, images)).toBe(images)
+    expect(await preferOriginalReadImage(workspace, { toolName: 'Bash', input: { file_path: source } }, images)).toBe(images)
+    await writeFile(source, Buffer.concat([original, Buffer.alloc(10 * 1024 * 1024)]))
+    expect(await preferOriginalReadImage(workspace, { toolName: 'Read', input: { file_path: source } }, images)).toBe(images)
+  } finally {
+    await rm(workspace, { recursive: true, force: true })
+    await rm(outside, { recursive: true, force: true })
+  }
 })
 
 test('failed uploads roll back only their own files, preserving historical attachments', async () => {

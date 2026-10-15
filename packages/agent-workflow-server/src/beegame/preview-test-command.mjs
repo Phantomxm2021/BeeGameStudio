@@ -2,7 +2,49 @@ import { open, mkdir, mkdtemp, realpath, writeFile, readFile } from 'node:fs/pro
 import { createHash } from 'node:crypto';
 import { relative, resolve, join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { resolvePreviewApi } from './preview-test-client.mjs';
+import { resolvePreviewApi, withPreviewPage } from './preview-test-client.mjs';
+
+/** One first-load observation without a project-authored test driver. It is a
+ * diagnostic image, never a gameplay, design or source-version verdict. */
+export async function capturePreviewSnapshot(mode, width, height, visit = withPreviewPage) {
+  if (!['development', 'production'].includes(mode) ||
+      ![width, height].every(value => Number.isInteger(value) && value > 0 && value <= 4096))
+    throw Error('Expected --snapshot development|production <viewport-width> <viewport-height> (1..4096)');
+  const root = await realpath(process.cwd());
+  const api = await resolvePreviewApi();
+  const status = await fetch(api + '/status', { redirect: 'error' });
+  if (!status.ok) throw Error('PREVIEW_CAPABILITY_EXPIRED: Current preview access is unavailable');
+  let parent = root;
+  for (const name of ['.beegame', 'tmp']) {
+    parent = join(parent, name);
+    await mkdir(parent, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+    if (await realpath(parent) !== parent) throw Error('Snapshot directory must not resolve through a link');
+  }
+  const directory = await mkdtemp(join(parent, 'preview-snapshot-'));
+  const imagePath = relative(root, join(directory, 'screen.png'));
+  const reportPath = relative(root, join(directory, 'observation.json'));
+  let report = { status: 'error', mode, viewport: [width, height], startedAt: new Date().toISOString(),
+    reportPath, quality: 'unverified', note: 'First-load visual/runtime observation only. No gameplay, aesthetics, content consumption or source freshness certified.' };
+  try {
+    const observation = await visit({ mode, contextOptions: { viewport: { width, height } } },
+      async ({ page, gameFrame, observedEnvironment, runtimeErrors, runtimeErrorDetails }) => {
+        await gameFrame.waitForLoadState('load');
+        const image = await page.screenshot({ fullPage: false });
+        return { image, observedEnvironment, runtimeErrors: { ...runtimeErrors }, runtimeErrorDetails };
+      });
+    await writeFile(join(root, imagePath), observation.image, { flag: 'wx', mode: 0o600 });
+    report = { ...report, status: 'observed', finishedAt: new Date().toISOString(), imagePath,
+      imageSha256: createHash('sha256').update(observation.image).digest('hex'),
+      observedEnvironment: observation.observedEnvironment, runtimeErrors: observation.runtimeErrors,
+      runtimeErrorDetails: observation.runtimeErrorDetails };
+  } catch (error) {
+    report = { ...report, finishedAt: new Date().toISOString(),
+      error: String(error instanceof Error ? error.message : error).replace(/https?:\/\/\S+/g, '[url]').slice(0, 500),
+      runtimeErrors: error?.runtimeErrors, runtimeErrorDetails: error?.runtimeErrorDetails };
+  }
+  await writeFile(join(root, reportPath), JSON.stringify(report, null, 2), { flag: 'wx', mode: 0o600 });
+  return report;
+}
 
 async function executionInputs(root, file) {
   const scriptSha256 = createHash('sha256').update(await readFile(file)).digest('hex');

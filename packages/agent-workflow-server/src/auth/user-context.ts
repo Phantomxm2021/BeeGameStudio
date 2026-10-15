@@ -503,6 +503,7 @@ const VIEWER_PERMISSIONS = new Set<BeeGamePermission>([
   'project.read',
   'project.export',
   'skills.manage',
+  'mcp.manage',
 ])
 
 const REVIEWER_PERMISSIONS = new Set<BeeGamePermission>([

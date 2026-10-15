@@ -9,10 +9,6 @@
 .ui-editor-tree-chevron { width: 18px; height: 20px; display: grid; place-items: center; padding: 2px !important; border: 0 !important; color: #71717a; }
 .ui-editor-row-actions button { width: 21px; height: 21px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 3px; background: transparent; color: #b7c3d2; }
 .ui-editor-floating-toolbar { position: absolute; top: 16px; left: calc(var(--ui-panel-width) + 32px); right: calc(var(--ui-panel-width) + 32px); z-index: 12; width: max-content; max-width: calc(100% - (var(--ui-panel-width) + 32px) * 2); margin: 0 auto; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; padding: 6px 8px; border: 1px solid #ffffff18; border-radius: 11px; background: linear-gradient(135deg, #ffffff0d, #ffffff02), #19191fb8; box-shadow: inset 0 1px #ffffff16, 0 5px 18px #0003, 0 1px 2px #0003; backdrop-filter: blur(24px) saturate(125%); -webkit-backdrop-filter: blur(24px) saturate(125%); }
-.ui-editor-floating-toolbar .ui-editor-select-field { display: flex; align-items: center; gap: 6px; white-space: nowrap; color: #a7a7b1; }
-.ui-editor-floating-toolbar .ui-editor-select-trigger { min-width: 118px; height: 30px; border-radius: 7px; }
-.ui-editor-viewport-size { display: flex; align-items: center; gap: 5px; color: #a7a7b1; }
-.ui-editor-viewport-size .ui-editor-input { width: 64px; }
 .ui-editor-responsive-profile { display: grid; gap: 7px; padding-top: 10px; border-top: 1px solid #ffffff12; }
 .ui-editor-section > small { color: #9ca0ac; line-height: 1.45; }
 .ui-editor-panel-toggle { position: absolute; top: 26px; z-index: 15; width: 24px; height: 26px; display: grid; place-items: center; padding: 3px; border: 0; color: #a9b1bf; transition: left .24s ease, right .24s ease; }
@@ -139,7 +135,7 @@
 @media (prefers-reduced-motion: reduce) { .ui-editor-panel,.ui-editor-panel-toggle { transition: none; } }
 
 /* Portals live outside the dark editor; never inherit the light home theme. */
-.ui-editor-popup,.ui-editor-select-content,.ui-editor-asset-dialog {
+.ui-editor-popup,.ui-editor-select-content,.ui-editor-asset-dialog,.ui-editor-viewport-dialog {
   color-scheme: dark;
   --background: #181a20;
   --card: #181a20;
@@ -149,6 +145,20 @@
   --muted-foreground: #9ba2af;
   --destructive: #f87171;
 }
+.ui-editor-viewport-dialog { max-width: 420px; background: #181a20; color: #e4e4eb; border-color: #ffffff20; }
+.ui-editor-viewport-dialog-header { display: flex; align-items: flex-start; gap: 12px; }
+.ui-editor-viewport-dialog-header > div { flex: 1; }
+.ui-editor-viewport-dialog-header h2 { font-size: 16px; line-height: 24px; }
+.ui-editor-viewport-dialog-header p { font-size: 12px; line-height: 18px; }
+.ui-editor-viewport-options { display: grid; gap: 6px; margin-top: 20px; }
+.ui-editor-viewport-option { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid #ffffff12; border-radius: 8px; cursor: pointer; font-size: 13px; }
+.ui-editor-viewport-option > label { flex: 1; display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.ui-editor-viewport-option:hover { background: #ffffff06; }
+.ui-editor-viewport-option:has(input:checked) { border-color: #68aeed80; background: #3285ce1c; }
+.ui-editor-viewport-option input { accent-color: #68aeed; }
+.ui-editor-viewport-option small { margin-left: auto; color: #9ba2af; font-size: 12px; font-variant-numeric: tabular-nums; }
+.ui-editor-viewport-size { display: flex; align-items: center; gap: 6px; margin-left: auto; color: #9ba2af; font-size: 12px; }
+.ui-editor-viewport-size .ui-editor-input { width: 72px; }
 .ui-editor-popup { z-index: 245 !important; min-width: 220px; max-width: min(320px, calc(100vw - 24px)); max-height: calc(100dvh - 40px); overflow: auto; border: 1px solid #ffffff20; border-radius: 12px; padding: 6px; background: #181a20; color: #e4e4eb; box-shadow: 0 12px 36px #0007; font: 14px/20px "SF Pro Text", "PingFang SC", -apple-system, sans-serif; outline: none; }
 .ui-editor-menu { transform-origin: var(--transform-origin); transition: opacity .12s, transform .12s; }
 .ui-editor-menu[data-starting-style],.ui-editor-menu[data-ending-style] { opacity: 0; transform: scale(.98); }

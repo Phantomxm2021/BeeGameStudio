@@ -59,7 +59,7 @@ try {
   assert.equal(state.run.writer,undefined);assert.equal(state.run.agentTurns[1].status,'interrupted');
   assert.ok(state.run.agentTurns[1].quiescedAt);assert.equal(state.run.agentTurns.length,2);
   assert.equal(state.run.requirements.revision,initial.requirements.revision);assert.equal(state.run.deliveryEligible,false);
-  assert.deepEqual(state.run.tasks,{});assert.equal(state.recoveryEvidence,'unavailable');
+  assert.equal(['plans','tasks','attempts'].some(key=>key in state.run),false);assert.equal(state.recoveryEvidence,'unavailable');
   await page.locator('#load').scrollIntoViewIfNeeded();await page.screenshot({path:recoverAfterRestart?'/private/tmp/bgs-v3-178-debug-controlled.png':'/private/tmp/bgs-v3-177-debug-controlled.png'});
   console.log(JSON.stringify({passed:true,answered,limitations:'Controlled native transport only; not game quality or a real remote database'}));
 }finally{await browser.close();}

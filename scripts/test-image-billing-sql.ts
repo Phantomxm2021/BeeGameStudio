@@ -1,11 +1,15 @@
 // Isolated PostgreSQL (PGlite) validation; never reads ENV credentials or connects to a live DB.
 // BEEGAME_TEST_PGLITE_MODULE=/path/to/@electric-sql/pglite/dist/index.js bun scripts/test-image-billing-sql.ts
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 const modulePath = process.env.BEEGAME_TEST_PGLITE_MODULE
 if (!modulePath) throw new Error('Set BEEGAME_TEST_PGLITE_MODULE to an isolated PGlite installation')
 const { PGlite } = await import(modulePath)
-const db = new PGlite()
+const temporary = mkdtempSync(join(tmpdir(), 'bgs-image-billing-sql-'))
+const dataDir = join(temporary, 'database')
+let db = new PGlite(dataDir)
 try {
   await db.exec(`
     create schema auth;
@@ -38,8 +42,23 @@ try {
   assert.equal((await apply('reserve', 90)).created, true)
   assert.equal((await apply('reserve', 90)).created, false)
   assert.deepEqual(await wallet(), { consumed: 0, reserved: 90 })
+  const renamed = await apply('reserve', 5, 'renamed')
+  assert.equal(renamed.blockedByRequestId, 'request')
+  assert.equal(renamed.created, false)
+  const concurrent = await Promise.all(['renamed-2', 'renamed-3'].map(id => apply('reserve', 5, id)))
+  assert.ok(concurrent.every(receipt => receipt.blockedByRequestId === 'request'))
+  await db.exec(migration)
+  assert.equal((await apply('reserve', 5, 'renamed-after-reload')).blockedByRequestId, 'request')
+  await db.close()
+  db = new PGlite(dataDir)
+  await db.exec("set request.jwt.claim.role = 'service_role'")
+  assert.equal((await apply('reserve', 5, 'renamed-after-restart')).blockedByRequestId, 'request')
+  assert.equal((await db.query('select count(*)::int as count from beegame_image_charges')).rows[0].count, 1)
+  assert.deepEqual(await wallet(), { consumed: 0, reserved: 90 })
+  assert.equal((await apply('reserve', 5, 'different-art', 100, 'different-digest')).created, true)
+  await apply('release', 0, 'different-art', 100, 'different-digest')
   await assert.rejects(apply('reserve', 90, 'request', 100, 'different'), /conflict/)
-  await assert.rejects(apply('reserve', 20, 'another'), /Insufficient/)
+  await assert.rejects(apply('reserve', 20, 'another', 100, 'different-art'), /Insufficient/)
   await assert.rejects(db.exec('update beegame_usage_wallets set consumed_credits_micro = 20'), /beegame_wallet_image_reservation/)
   assert.deepEqual(await wallet(), { consumed: 0, reserved: 90 })
   await assert.rejects(apply('settle', 91), /exceeds/)
@@ -62,4 +81,4 @@ try {
   assert.deepEqual(await wallet(), { consumed: 70, reserved: 0 })
   assert.equal((await db.query('select included_credits_micro::int as included from beegame_usage_wallets')).rows[0].included, 200)
   console.log('Atomic grant preserves both consumed credits and image holds.')
-} finally { await db.close() }
+} finally { await db.close(); rmSync(temporary, { recursive: true, force: true }) }

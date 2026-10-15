@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { nativeTaskToolEnvironment } from '@bee-game-studio/agent-workflow/native-task-access'
 import { standardCliProvider } from '@bee-game-studio/agent-workflow/standard-cli-provider'
 import { nativeSessionTemporaryPath, nativeSessionOutputPath } from './native-runtime-process-path'
-import { sharedPlaywright } from './shared-playwright'
+import { sharedPlaywright, preparePreviewRecorder } from './shared-playwright'
 import { sharedSharp, sharedFont } from './shared-sharp'
 import { sharedContentChecker } from './content-checker-runtime'
 import { projectPreviewCapabilityPath } from './project-preview-capability'
@@ -61,7 +61,7 @@ export async function projectExecutionAccess(input: {
   const sharp = await sharedSharp()
   const font = await sharedFont()
   const checker = await sharedContentChecker()
-  const previewClient = new URL('./preview-test-client.mjs', import.meta.url)
+  const previewClient = new URL('./preview-test-client.mjs', checker.moduleUrl)
   const previewClientPath = await realpath(fileURLToPath(previewClient))
   const temporary = nativeSessionTemporaryPath(root, input.sessionId)
   const nativeOutput = nativeSessionOutputPath(root, input.sessionId, await realpath(tmpdir()))
@@ -76,6 +76,7 @@ export async function projectExecutionAccess(input: {
   await mkdir(templates, { recursive: true, mode: 0o700 })
   if (await realpath(temporary) !== temporary || await realpath(templates) !== templates)
     throw new Error('Project execution directories must remain inside the workspace')
+  await preparePreviewRecorder(resolve(temporary, 'browsers'))
   const environment: Record<string, string> = {
     ...nativeTaskToolEnvironment(temporary),
     CLAUDE_CODE_TMPDIR: nativeOutput,

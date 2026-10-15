@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 
 import { LandingView } from './LandingView';
 import { ToastProvider } from '../../contexts/ToastContext';
+import { resourceLibraryApi } from '../../services/resourceLibraryApi';
 
 // Workflow tests use the accessible reduced-motion path; the animated reveal is
 // verified separately with a controlled frame clock in AvatarDialogue.test.tsx.
@@ -630,6 +631,37 @@ beforeEach(() => {
 });
 
 describe('LandingView bootstrap submission', () => {
+  it('replays the home fade after resource navigation without remounting the idea draft', async () => {
+    const listPacks = vi.spyOn(resourceLibraryApi, 'listPacks').mockResolvedValue([]);
+    const originalUrl = window.location.href;
+    try {
+      const { container } = await renderLanding();
+      const page = container.firstElementChild;
+      const input = screen.getByRole('textbox');
+      fireEvent.change(input, { target: { value: 'Keep this draft' } });
+      expect(page).toHaveClass('page-enter');
+      await act(async () => {
+        window.history.pushState({}, '', '/?resourceLibrary=1');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+      await screen.findByRole('dialog');
+      expect(page).not.toHaveClass('page-enter');
+      await act(async () => {
+        window.history.replaceState({}, '', '/');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      });
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(container.firstElementChild).toBe(page);
+      expect(page).toHaveClass('page-enter');
+      expect(screen.getByRole('textbox')).toBe(input);
+      expect(input).toHaveValue('Keep this draft');
+      expect(listPacks).toHaveBeenCalledTimes(1);
+    } finally {
+      listPacks.mockRestore();
+      window.history.replaceState({}, '', originalUrl);
+    }
+  });
+
   it('keeps the idea home header controls without a sound button', async () => {
     await renderLanding();
 
@@ -1011,6 +1043,8 @@ describe('LandingView bootstrap submission', () => {
     await selectScreenOrientation('横屏');
     await confirmBrief();
     expect(screen.getByTestId('confirmed-brief')).toBeInTheDocument();
+    expect(screen.getByTestId('confirmed-brief')).not.toHaveTextContent('平台 AI 生图')
+    expect(screen.getByTestId('confirmed-brief')).not.toHaveTextContent('不再逐张确认')
     fireEvent.click(screen.getByRole('button', { name: '开始构建' }));
     await waitFor(() => expect(onStart).toHaveBeenCalledOnce());
     expect(onStart.mock.calls[0][2]).toMatchObject({
@@ -2027,6 +2061,7 @@ describe('LandingView bootstrap submission', () => {
     expect(send).toHaveAttribute('aria-hidden', 'false');
     expect(mode).toHaveAttribute('aria-hidden', 'true');
     expect(mode).toHaveAttribute('tabindex', '-1');
+    expect(mode).toHaveAttribute('hidden');
     expect(send).toBeEnabled();
     fireEvent.change(input, { target: { value: '' } });
     expect(group).toHaveAttribute('data-send-detached', 'true');
@@ -2204,7 +2239,7 @@ describe('LandingView bootstrap submission', () => {
 
     const emptyDialog = screen.getByRole('dialog', { name: 'History Projects' });
     const emptyContent = emptyDialog.querySelector('.scrollbar-premium');
-    expect(emptyDialog).toHaveClass('h-[min(620px,calc(100dvh-2rem))]');
+    expect(emptyDialog).toHaveClass('h-[min(680px,calc(100dvh-2rem))]');
     expect(emptyContent).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');
 
     emptyRender.unmount();
@@ -2221,7 +2256,7 @@ describe('LandingView bootstrap submission', () => {
 
     const populatedDialog = screen.getByRole('dialog', { name: 'History Projects' });
     const populatedContent = populatedDialog.querySelector('.scrollbar-premium');
-    expect(populatedDialog).toHaveClass('h-[min(620px,calc(100dvh-2rem))]');
+    expect(populatedDialog).toHaveClass('h-[min(680px,calc(100dvh-2rem))]');
     expect(populatedContent).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');
   });
 });

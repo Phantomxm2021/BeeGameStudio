@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { mapStoredModelConfigToRuntime, validateModelAccess, type ModelAuthMethod, type ModelProviderKind, type ModelTierMap, type PublicModelConfig } from '@bee-game-studio/agent-workflow'
+import { getOauthConfig, OAUTH_BETA_HEADER } from '../../../src/constants/oauth'
 import { decryptSecret, encryptSecret } from './security/secret-crypto'
 
 type Connection = { method: ModelAuthMethod; provider?: ModelProviderKind; secret?: string; endpoint?: string; baseUrl?: string; models?: ModelTierMap; disabled?: boolean }
@@ -67,6 +68,39 @@ export function connectionStatus(root: string, config: PublicModelConfig) {
     ...(connection?.secret ? { baseUrl: connection.baseUrl ?? config.baseUrl, models: connection.models ?? config.models } : {}),
     claudeConnected: hasAccount(root, 'claude'),
     chatgptConnected: hasAccount(root, 'chatgpt') }
+}
+
+export type ClaudeSubscriptionUsage = { fiveHourUsedPercent?: number; sevenDayUsedPercent?: number }
+
+/** Read the authenticated user's Claude subscription usage without exposing their token. */
+export async function fetchClaudeSubscriptionUsage(root: string, fetchImpl: typeof fetch = fetch): Promise<ClaudeSubscriptionUsage | null> {
+  let token: string | undefined
+  let expiresAt: number | undefined
+  try {
+    const stored = JSON.parse(readFileSync(join(root, '.runtime/app/.credentials.json'), 'utf8'))
+    token = stored.claudeAiOauth?.accessToken
+    expiresAt = stored.claudeAiOauth?.expiresAt
+  } catch { return null }
+  if (!token || (typeof expiresAt === 'number' && expiresAt <= Date.now())) return null
+
+  const response = await fetchImpl(`${getOauthConfig().BASE_API_URL}/api/oauth/usage`, {
+    headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': OAUTH_BETA_HEADER },
+    signal: AbortSignal.timeout(5000),
+  })
+  if (!response.ok) throw new Error('Claude subscription usage is unavailable')
+  const value = await response.json() as Record<string, unknown>
+  const percentage = (window: unknown): number | undefined => {
+    if (!window || typeof window !== 'object') return undefined
+    const used = (window as { utilization?: unknown }).utilization
+    return typeof used === 'number' && Number.isFinite(used) && used >= 0 && used <= 100 ? used : undefined
+  }
+  const fiveHourUsedPercent = percentage(value.five_hour)
+  const sevenDayUsedPercent = percentage(value.seven_day)
+  if (fiveHourUsedPercent === undefined && sevenDayUsedPercent === undefined) return null
+  return {
+    ...(fiveHourUsedPercent !== undefined ? { fiveHourUsedPercent } : {}),
+    ...(sevenDayUsedPercent !== undefined ? { sevenDayUsedPercent } : {}),
+  }
 }
 export function saveConnection(root: string, config: PublicModelConfig, method: ModelAuthMethod, key?: string, preferred = false, byok?: { baseUrl?: string; models?: ModelTierMap }) {
   const allowed = validateModelAccess(config.provider, config.authMethods)

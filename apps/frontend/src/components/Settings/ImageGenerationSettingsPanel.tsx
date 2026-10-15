@@ -1,7 +1,8 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
+import { forwardRef, useEffect, useEffectEvent, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
 import { getImageGenerationSettings, saveImageGenerationSettings, type ImageGenerationSettings } from '../../services/imageGenerationApi';
 import { ProjectSelect } from '../beui/project-select';
 import { Switch } from '../ui/switch';
+import { useToastContext } from '../../contexts/ToastContext';
 
 type Provider = ImageGenerationSettings['provider'];
 type Draft = { config: ImageGenerationSettings; apiKey: string; upstreamApiKey: string };
@@ -18,6 +19,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 export const ImageGenerationSettingsPanel = forwardRef<ImageSettingsHandle, {
   language: string; onStateChange?: (state: ImageSettingsState) => void; onSaved?: () => void;
 }>(function ImageGenerationSettingsPanel({ language, onStateChange, onSaved }, ref) {
+  const { showError } = useToastContext();
   const zh = language.startsWith('zh');
   const [selected, setSelected] = useState<Provider>();
   const [drafts, setDrafts] = useState<Partial<Record<Provider, Draft>>>({});
@@ -25,13 +27,16 @@ export const ImageGenerationSettingsPanel = forwardRef<ImageSettingsHandle, {
   const [error, setError] = useState('');
   const form = useRef<HTMLFormElement>(null);
   const saving = useRef(false);
+  const reportLoadError = useEffectEvent(() => {
+    setError(zh ? '无法加载生图配置，请检查服务状态。' : 'Unable to load image settings.');
+  });
   useEffect(() => {
     let active = true;
     getImageGenerationSettings().then(config => {
       if (active) { setDrafts({ [config.provider]: draftOf(config) }); setSelected(config.provider); }
-    }).catch(() => { if (active) setError(zh ? '无法加载生图配置，请检查服务状态。' : 'Unable to load image settings.'); });
+    }).catch(() => { if (active) reportLoadError(); });
     return () => { active = false; };
-  }, [zh]);
+  }, []);
   const draft = selected ? drafts[selected] : undefined;
   const config = draft?.config;
   useEffect(() => { onStateChange?.({ busy, canSave: Boolean(config) && !busy }); }, [busy, config, onStateChange]);
@@ -53,7 +58,7 @@ export const ImageGenerationSettingsPanel = forwardRef<ImageSettingsHandle, {
       setDrafts(current => ({ ...current, [saved.provider]: draftOf(saved) }));
       return true;
     } catch {
-      setError(zh ? '保存失败，请检查配置、加密密钥和服务状态。' : 'Save failed; check configuration and service status.');
+      showError(zh ? '保存失败，请检查配置、加密密钥和服务状态。' : 'Save failed; check configuration and service status.');
       return false;
     } finally { saving.current = false; setBusy(false); }
   };

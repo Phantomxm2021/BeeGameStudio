@@ -31,6 +31,8 @@ Depends on: <earlier task, if any>
 
 For example, “render the first authored scene” can consume its scene document and atlas-frame references, produce a scene loader/renderer interface, and be checked by a frame-selection test plus an actual first-screen inspection. That is one useful slice. “Create folders” is not.
 
+For a consequential audiovisual uncertainty, let the next useful slice expose the actual resource, scene/UI and action feedback together before duplicating that treatment across similar content. Inspect the uncertainty while it is still cheap to correct, not only after bulk implementation. This does not add a prototype/approval stage, require all resources up front or replace final scope coverage.
+
 Keep code and checks proportional: deterministic gameplay or parser logic should have focused tests; visual composition, responsive UI, controls, and animation need a representative running view. Do not prescribe a test framework or engine that the project has not chosen. Avoid drafting full function bodies when a contract, file location, and observable check are enough.
 
 ## Review the plan before using it

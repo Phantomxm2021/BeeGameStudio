@@ -117,6 +117,7 @@ import {
 } from '../tokenEstimation.js'
 import type { SDKStatus } from '../../entrypoints/agentSdkTypes.js'
 import { groupMessagesByApiRound } from './grouping.js'
+import { preserveCompactContext } from './preservedContext.js'
 import {
   getCompactPrompt,
   getCompactUserSummaryMessage,
@@ -538,6 +539,10 @@ export async function compactConversation(
       throw new Error(summary)
     }
 
+    const transcriptPath = getTranscriptPath()
+    const { historicalMessages, messagesToKeep } =
+      preserveCompactContext(messages, transcriptPath)
+
     // Store the current file state before clearing
     let preCompactReadFileState = cacheToObject(context.readFileState)
 
@@ -558,6 +563,7 @@ export async function compactConversation(
         preCompactReadFileState,
         context,
         POST_COMPACT_MAX_FILES_TO_RESTORE,
+        messagesToKeep,
       ),
       createAsyncAgentAttachmentsIfNeeded(context),
     ])
@@ -588,25 +594,23 @@ export async function compactConversation(
     }
 
     // Compaction ate prior delta attachments. Re-announce from the current
-    // state so the model has tool/instruction context on the first
-    // post-compact turn. Empty message history → diff against nothing →
-    // announces the full set.
+    // state, excluding deltas already present in the retained working tail.
     for (const att of getDeferredToolsDeltaAttachment(
       context.options.tools,
       context.options.mainLoopModel,
-      [],
+      messagesToKeep,
       { callSite: 'compact_full' },
     )) {
       postCompactFileAttachments.push(createAttachmentMessage(att))
     }
-    for (const att of getAgentListingDeltaAttachment(context, [])) {
+    for (const att of getAgentListingDeltaAttachment(context, messagesToKeep)) {
       postCompactFileAttachments.push(createAttachmentMessage(att))
     }
     for (const att of getMcpInstructionsDeltaAttachment(
       context.options.mcpClients,
       context.options.tools,
       context.options.mainLoopModel,
-      [],
+      messagesToKeep,
     )) {
       postCompactFileAttachments.push(createAttachmentMessage(att))
     }
@@ -637,13 +641,14 @@ export async function compactConversation(
       ].sort()
     }
 
-    const transcriptPath = getTranscriptPath()
     const summaryMessages: UserMessage[] = [
+      ...historicalMessages,
       createUserMessage({
         content: getCompactUserSummaryMessage(
           summary,
           suppressFollowUpQuestions,
           transcriptPath,
+          messagesToKeep.length > 0,
         ),
         isCompactSummary: true,
         isVisibleInTranscriptOnly: true,
@@ -664,6 +669,7 @@ export async function compactConversation(
     const truePostCompactTokenCount = roughTokenCountEstimationForMessages([
       boundaryMarker,
       ...summaryMessages,
+      ...messagesToKeep,
       ...postCompactFileAttachments,
       ...hookMessages,
     ] as Parameters<typeof roughTokenCountEstimationForMessages>[0])
@@ -765,8 +771,13 @@ export async function compactConversation(
       .join('\n')
 
     return {
-      boundaryMarker,
+      boundaryMarker: annotateBoundaryWithPreservedSegment(
+        boundaryMarker,
+        summaryMessages.at(-1)!.uuid,
+        messagesToKeep,
+      ),
       summaryMessages,
+      messagesToKeep,
       attachments: postCompactFileAttachments,
       hookResults: hookMessages,
       userDisplayMessage: combinedUserDisplayMessage || undefined,

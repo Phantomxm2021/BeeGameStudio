@@ -9,24 +9,25 @@ import {createLocalWorkflowStore} from './store'
 import {createAgentMeasurement,measurementSummary,measurementRequest} from './agent-measurement'
 import {formatError} from '../../../../../src/utils/toolErrors'
 import {openAgentTools} from './agent-tools'
-import {selectAgentMeasuredBuild,exportAgentMeasuredBuild,inspectAgentMeasurementInputs} from './measured-build'
+import {selectAgentMeasuredBuild,exportAgentMeasuredBuild,inspectAgentMeasurementInputs,discussionMessagesSinceMeasurement} from './measured-build'
 import {buildEditableProject} from './editable-project'
 import {createMeasuredPreview} from './measured-preview'
 import {createPreviewCapabilityManager} from '../../auth/preview-capability'
 import {registerV3Routes} from './routes'
 import {BeeGameSessionManager} from '../session-manager'
 import {projectPreviewCapabilityPath} from '../project-preview-capability'
-import {uiLayoutFixture} from '../fixtures/layout-fixture'
+import {uiLayoutFixture,sceneLayoutFixture} from '../fixtures/layout-fixture'
 import {createV3Executor} from './execution'
 import {readContentView} from './content-view'
 import {agentTurnHandoffReason} from './agent-goal'
 import {openPreviewTestAccess} from '../preview-test-access'
 import {sharedContentChecker} from '../content-checker-runtime'
 import {createAgentWorkflowApp} from '../../app'
+import {writeBeeGameAssetManifest} from '../asset-contracts'
 
 const JSZip=createRequire(import.meta.resolve('exceljs'))('jszip')
 const builder="import{cp,mkdir}from'node:fs/promises';await mkdir('dist',{recursive:true});await cp('src/index.html','dist/index.html');"
-async function fixture(script=builder,previousTurns:AgentTurn[]=[]) {
+async function fixture(script=builder,previousTurns:AgentTurn[]=[],requireEditable=false) {
   const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-agent-measure-'))),workspace=join(root,'project')
   await mkdir(join(workspace,'src'),{recursive:true})
   await writeFile(join(workspace,'package.json'),JSON.stringify({scripts:{build:'bun build.mjs'}}))
@@ -35,6 +36,7 @@ async function fixture(script=builder,previousTurns:AgentTurn[]=[]) {
   await writeFile(join(workspace,'README.md'),'Merged eight-domain fixture; semantics not verified')
   const store=createLocalWorkflowStore(join(root,'host'))
   const run=createRun({projectId:'measure',ownerId:'owner',workspacePath:workspace,chatSessionId:'chat',requestKey:'goal',text:'Fixture',constraints:{},ids:['goal']})
+  if(requireEditable)run.creation={initialDelivery:'playable-slice',editableContent:true}
   const turn:AgentTurn={attemptId:crypto.randomUUID(),requestKey:'goal',sessionId:'chat',workerId:'worker',fence:1,status:'running',startedAt:new Date().toISOString(),requirementsRevision:run.requirements.revision}
   run.agentTurns=[...previousTurns,turn];run.fence=1;run.writer={attemptId:turn.attemptId,workerId:turn.workerId,fence:turn.fence}
   await store.commit(run.projectId,run.ownerId,0,run,'fixture')
@@ -52,6 +54,89 @@ async function fixture(script=builder,previousTurns:AgentTurn[]=[]) {
     async close(){await measurement.close();await rm(root,{recursive:true,force:true})}}
 }
 const request={requestKey:'measure-1',runtimeArtifact:'dist',reportPaths:['README.md']}
+
+test('required editable content cannot be omitted behind a successful build; diagnostic preview remains available',async()=>{
+  const f=await fixture(builder,[],true)
+  try {
+    const record=await f.measurement.measure(request)
+    expect(record.checks.find(c=>c.id==='build')?.status).toBe('passed')
+    expect(record.checks.find(c=>c.id==='runtime-smoke')?.status).toBe('passed')
+    expect(record.checks.find(c=>c.id==='content-structure')).toMatchObject({status:'failed',
+      observation:'Required editable Scene/UI content is missing: content/index.json.'})
+    const run=await f.settle()
+    await expect(selectAgentMeasuredBuild(run,record.id,false,'delivery')).rejects.toThrow('content/index.json')
+    await expect(selectAgentMeasuredBuild(run,record.id,false,'preview')).resolves.toBeDefined()
+  }finally{await f.close()}
+},30000)
+
+test('measurement audits registered requirements even in source-only projects without BGS Scene/UI JSON',async()=>{
+  const f=await fixture()
+  try {
+    await writeBeeGameAssetManifest(f.workspace,{version:9,resources:[],requirements:[
+      {id:'required-model',required:true,acquisition_profile:{dimensions:['3D'],asset_kinds:['model'],styles:[]}},
+    ]})
+    const record=await f.measurement.measure(request)
+    const resources=record.checks.find(check=>check.id==='content-resources')
+    expect(resources?.status).toBe('failed')
+    expect(resources?.coverage?.assetContract?.requirements.map(row=>row.id)).toEqual(['required-model'])
+    expect(resources?.inputs.some(file=>file.path.startsWith('assets/manifest/requirements/') && /^[a-f0-9]{64}$/.test(file.sha256))).toBe(true)
+    expect(measurementSummary(record,false).resourceStructureCoverage?.requirements[0]?.id).toBe('required-model')
+  }finally{await f.close()}
+},30000)
+
+test.each([true,false])('measurement checks registered Scene/UI without rejecting intentional unbound visuals; invalid layout=%s',async invalid=>{
+  const f=await fixture()
+  try {
+    await mkdir(join(f.workspace,'content/ui'),{recursive:true})
+    await mkdir(join(f.workspace,'content/scenes'),{recursive:true})
+    const ui=uiLayoutFixture() as any
+    if(invalid)delete ui.data.nodes[0].data.orientation
+    await writeFile(join(f.workspace,'content/ui/menu.json'),JSON.stringify(ui))
+    await writeFile(join(f.workspace,'content/scenes/level.json'),JSON.stringify(sceneLayoutFixture()))
+    await writeFile(join(f.workspace,'content/index.json'),JSON.stringify({schema:'beegame-content-package.v2',id:'fixture',
+      dimension:'2d',documentRevision:'a'.repeat(64),assetManifestRevision:'b'.repeat(64),entryScene:'level',
+      sceneModel:'game-object-v2',files:['scenes/level.json','ui/menu.json'],documents:[
+        {id:'level',path:'scenes/level.json',kind:'scene-2d',loadPhase:'startup'},
+        {id:'menu',path:'ui/menu.json',kind:'ui-screen',loadPhase:'startup'}]}))
+    const record=await f.measurement.measure(request),run=await f.settle()
+    expect(record.error).toBeUndefined()
+    expect(record.checks.map(check=>[check.id,check.status])).toEqual([
+      ['build','passed'],['content-structure','passed'],['content-layout',invalid?'failed':'passed'],
+      ['content-resources','unverified'],['runtime-smoke','passed']])
+    expect(measurementSummary(record).contentRuntimeEvidence).toMatchObject({
+      sampledDocuments:[],unprobedDocuments:['content/scenes/level.json','content/ui/menu.json']})
+    const composition=record.checks[0]!.projectBuild!.packageComposition!
+    expect(composition).toMatchObject({fileCount:1,totalBytes:Buffer.byteLength(await readFile(join(f.workspace,'dist/index.html'))),
+      productionMaterials:{status:'unverified',candidates:null}})
+    expect(measurementSummary(record,false).packageComposition).toEqual(composition)
+    expect(run.agentTurns![0]!.measurements![0]!.checks[0]!.projectBuild!.packageComposition).toEqual(composition)
+    expect(measurementSummary(record,false).uiBindingCoverage.nodes).toEqual(
+      ui.data.nodes.map((node:any)=>({document:'content/ui/menu.json',nodeId:node.id,role:node.role,
+        bindings:[],resolution:'not-declared',issues:[],observations:[]})))
+    if(invalid)expect(record.checks.find(check=>check.id==='content-layout')?.observation).toContain('root.data.orientation')
+    expect((await selectAgentMeasuredBuild(run,record.id,false,'preview')).measurement.id).toBe(record.id)
+    if(invalid) {
+      await expect(selectAgentMeasuredBuild(run,record.id,false,'publication')).rejects.toThrow('content-layout failed')
+      expect(await agentTurnHandoffReason(run,run.agentTurns![0]!)).toContain('content-layout failed')
+    } else expect((await selectAgentMeasuredBuild(run,record.id,false,'publication')).measurement.id).toBe(record.id)
+  }finally{await f.close()}
+},30000)
+
+test('a saved but invalid content registry cannot disappear behind a passing build and smoke',async()=>{
+  const f=await fixture()
+  try {
+    await mkdir(join(f.workspace,'content'),{recursive:true})
+    await writeFile(join(f.workspace,'content/index.json'),JSON.stringify({schema:'beegame-content-package.v2',id:'fixture',
+      dimension:'2d',documentRevision:'a'.repeat(64),assetManifestRevision:'b'.repeat(64),entryScene:'missing',
+      sceneModel:'game-object-v2',files:['ui/menu.json'],documents:[
+        {id:'menu',path:'ui/menu.json',kind:'ui-screen',loadPhase:'startup'}]}))
+    const record=await f.measurement.measure(request),run=await f.settle()
+    expect(record.checks.map(check=>[check.id,check.status])).toEqual([
+      ['build','passed'],['content-structure','failed'],['runtime-smoke','passed']])
+    expect(record.checks[1]?.observation).toContain('Content registry paths, IDs, kinds or files disagree')
+    await expect(selectAgentMeasuredBuild(run,record.id,false,'publication')).rejects.toThrow('content-structure failed')
+  }finally{await f.close()}
+},30000)
 
 test.each([false,true])('V3 ordinary deployment publishes exact measured bytes without rebuilding; publisher failure=%s',async failPublication=>{
   const f=await fixture(),cleanups:Array<()=>void|Promise<void>>=[]
@@ -100,6 +185,88 @@ test.each([false,true])('V3 ordinary deployment publishes exact measured bytes w
     expect((await post('/api/projects/measure/deployments')).status).toBe(409)
     expect(calls).toBe(1)
     expect((await f.current()).deliveryEligible).toBe(false)
+  }finally{for(const cleanup of cleanups.reverse())await cleanup();await f.close()}
+},30000)
+
+test('publication may confirm only settled plain chat after measurement, never changed source or explicit requirements',async()=>{
+  const f=await fixture(),cleanups:Array<()=>void|Promise<void>>=[]
+  let published=0
+  try {
+    const record=await f.measurement.measure(request)
+    await f.settle()
+    const app=createAgentWorkflowApp({currentUserResolver:async()=>({id:'owner',role:'owner'}),workflowV3Store:f.store,
+      dashboardDataRoot:join(f.root,'dashboard'),defaultWorkspacePath:f.root,modelConfigStore:false,skillsConfig:false,
+      sessionRunner:{async start(){throw Error('No native execution')}},
+      deploymentPublisher:{async publishStaticDirectory(){published++;return {url:'https://offline.invalid/deployment/'}},
+        async verifyPublished(){}},registerCleanup:fn=>cleanups.push(fn)})
+    const post=(body:unknown)=>app.request('/api/projects/measure/deployments',{
+      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
+    await app.request('/api/projects',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({id:'measure',name:'Synthetic discussion confirmation',root_path:f.workspace,created_at:Date.now()})})
+    const appendMessage=async(intent:'message'|'change',key:string,text:string)=>{
+      const old=await f.current(),next=structuredClone(old),before=old.requirements
+      const afterText=before.text+'\n'+text
+      const after={...before,revision:crypto.randomUUID(),text:afterText,
+        sha256:digest(JSON.stringify({text:afterText,constraints:before.constraints,ids:before.ids}))}
+      const now=new Date().toISOString()
+      next.version++;next.fence++;next.planRevision++;next.requirements=after
+      next.requirementChanges=[...(next.requirementChanges??[]),{requestKey:key,actorId:'owner',at:now,before,after}]
+      next.agentTurns!.push({attemptId:crypto.randomUUID(),requestKey:key,sessionId:'chat',workerId:'worker',fence:next.fence,
+        status:'ended',startedAt:now,finishedAt:now,quiescedAt:now,requirementsRevision:after.revision,
+        message:{requestKey:key,runId:next.id,chatSessionId:'chat',expectedVersion:old.version,
+          requirementsRevision:before.revision,intent,text}})
+      await f.store.commit(next.projectId,next.ownerId,old.version,next,'agent.turn-claimed')
+      return next
+    }
+    const discussed=await appendMessage('message','question-1','What was tested?')
+    const pending=await inspectAgentMeasurementInputs(discussed,record)
+    expect(pending).toMatchObject({current:false,code:'discussion-confirmation-required',
+      changes:{requirements:true,sources:[],reports:[],artifact:false}})
+    expect(pending.reason).toContain('Confirm that it did not change the game')
+    expect(await agentTurnHandoffReason(discussed,discussed.agentTurns!.at(-1)!)).toContain('discussion-confirmation-required')
+    expect((await inspectAgentMeasurementInputs(discussed,record,['question-1'])).current).toBe(true)
+    const attached=structuredClone(discussed)
+    attached.agentTurns!.at(-1)!.message!.attachmentDigests=[{filename:'requirements.txt',mediaType:'text/plain',sha256:'hash'}]
+    expect(discussionMessagesSinceMeasurement(attached,record)).toBeNull()
+    const unfinished=structuredClone(discussed)
+    unfinished.agentTurns!.at(-1)!.status='failed'
+    expect(discussionMessagesSinceMeasurement(unfinished,record)).toBeNull()
+    const readiness=await(await app.request('/api/projects/measure/deployment-readiness')).json()
+    expect(readiness).toMatchObject({allowed:false,confirmationRequired:{measurementId:record.id,
+      requirementsRevision:discussed.requirements.revision,messages:[{requestKey:'question-1',text:'What was tested?'}]}})
+    expect((await post({measurementId:record.id,requirementsRevision:discussed.requirements.revision})).status).toBe(409)
+    expect((await post({measurementId:record.id,requirementsRevision:discussed.requirements.revision,
+      discussionConfirmation:{messageRequestKeys:['wrong-message']}})).status).toBe(409)
+    expect(published).toBe(0)
+    const confirmation={measurementId:record.id,requirementsRevision:discussed.requirements.revision,
+      discussionConfirmation:{messageRequestKeys:['question-1']}}
+    const started=await post(confirmation)
+    expect(started.status).toBe(202)
+    const deploymentId=(await started.json()).id
+    let saved:any
+    for(let i=0;i<100;i++) {
+      saved=(await(await app.request('/api/projects/measure/deployments')).json()).find((item:any)=>item.id===deploymentId)
+      if(saved?.status==='succeeded')break
+      await Bun.sleep(10)
+    }
+    expect(saved?.status).toBe('succeeded')
+    expect(JSON.parse(saved.buildLog)).toMatchObject({discussionConfirmation:{
+      requirementsRevision:discussed.requirements.revision,messageRequestKeys:['question-1']}})
+    expect(published).toBe(1)
+    await writeFile(join(f.workspace,'src/index.html'),'Changed after confirmation')
+    const drift=await(await app.request('/api/projects/measure/deployment-readiness')).json()
+    expect(drift.allowed).toBe(false)
+    expect(drift.confirmationRequired).toBeUndefined()
+    expect((await inspectAgentMeasurementInputs(discussed,record)).code).toBe('measurement-stale')
+    expect((await post(confirmation)).status).toBe(409)
+    await writeFile(join(f.workspace,'src/index.html'),'<html><body><h1>Actual fixture</h1><button>Play</button></body></html>')
+    const changed=await appendMessage('change','change-1','Change the goal')
+    expect((await inspectAgentMeasurementInputs(changed,record)).code).toBe('measurement-stale')
+    const blocked=await(await app.request('/api/projects/measure/deployment-readiness')).json()
+    expect(blocked.allowed).toBe(false)
+    expect(blocked.confirmationRequired).toBeUndefined()
+    expect((await post({...confirmation,requirementsRevision:changed.requirements.revision})).status).toBe(409)
+    expect(published).toBe(1)
   }finally{for(const cleanup of cleanups.reverse())await cleanup();await f.close()}
 },30000)
 
@@ -162,9 +329,11 @@ test('source, report and artifact identity changes stay distinct without accepti
     const record=await f.measurement.measure(request),run=await f.settle(),version=run.version
     await writeFile(join(f.workspace,'docs/notes.md'),'Revised design')
     const source=await inspectAgentMeasurementInputs(run,record)
-    expect(source).toMatchObject({current:false,changes:{sources:['docs/notes.md'],artifact:false,checkInputs:['build']},
+    expect(source).toMatchObject({current:false,changes:{sources:['docs/notes.md'],artifact:false,checkInputs:[]},
       evidence:{artifactMatches:true,exportableSourcesMatch:false,checks:[
-        {id:'build',savedStatus:'passed',inputsMatch:false},{id:'runtime-smoke',savedStatus:'passed',inputsMatch:true}]}})
+        {id:'build',savedStatus:'passed',inputsMatch:true},{id:'runtime-smoke',savedStatus:'passed',inputsMatch:true}]}})
+    expect(source.reason).toContain('Exportable sources changed: docs/notes.md')
+    expect(source.reason).not.toContain('Saved check inputs or checker versions differ')
     await expect(selectAgentMeasuredBuild(run,record.id)).rejects.toThrow('Exportable sources changed')
     expect(measurementSummary(record).quality).toBe('unverified')
     await writeFile(join(f.workspace,'README.md'),'Revised report')
@@ -219,6 +388,10 @@ test('measurement read API separates Preview inspection from delivery selection 
       code:'deployment-unavailable'})
     expect((await app.request('/api/projects/measure/deployments',{method:'POST',body:'{}'})).status).toBe(503)
     expect((await (await app.request('/api/projects/measure/preview',{method:'DELETE'})).json()).status).toBe('stopped')
+    // Retained capture evidence/host drivers are not exportable sources.
+    await mkdir(join(f.workspace,'.beegame/tmp'),{recursive:true})
+    await writeFile(join(f.workspace,'.beegame/tmp/capture-observation.json'),'{}')
+    expect((await inspect()).freshness.inputsCurrent).toBe(true)
     // A settled interrupted turn may be inspected without becoming exportable.
     view.agentTurns![0]!.status='interrupted'
     expect(await inspect()).toMatchObject({freshness:{current:false,inputsCurrent:true,code:'preview-unverified',evidence:{artifactMatches:true}},
@@ -234,10 +407,17 @@ test('measurement read API separates Preview inspection from delivery selection 
     expect(await inspect()).toMatchObject({freshness:{current:false,inputsCurrent:true,code:'workspace-busy',changes:{artifact:false}},selection:{eligible:false}})
     await refused()
     view=structuredClone(saved)
+    await mkdir(join(f.workspace,'tests'))
+    await writeFile(join(f.workspace,'tests/capture.mjs'),'// Added after measurement')
+    const stalePreview=await app.request('/api/projects/measure/preview',{method:'POST',
+      headers:{'content-type':'application/json'},body:'{}'})
+    expect(stalePreview.status).toBe(409)
+    expect(await stalePreview.json()).toMatchObject({code:'measurement-stale',error:'Exportable sources changed: tests/capture.mjs'})
+    await rm(join(f.workspace,'tests'),{recursive:true})
     await writeFile(join(f.workspace,'docs/notes.md'),'Revised design')
     expect(await inspect()).toMatchObject({freshness:{current:false,inputsCurrent:false,
-      changes:{sources:['docs/notes.md'],artifact:false,checkInputs:['build']},
-      evidence:{artifactMatches:true,checks:[{id:'build',inputsMatch:false},{id:'runtime-smoke',inputsMatch:true}]}},selection:{eligible:false}})
+      changes:{sources:['docs/notes.md'],artifact:false,checkInputs:[]},
+      evidence:{artifactMatches:true,checks:[{id:'build',inputsMatch:true},{id:'runtime-smoke',inputsMatch:true}]}},selection:{eligible:false}})
     await refused()
     await writeFile(join(f.workspace,'README.md'),'Revised report')
     expect(await inspect()).toMatchObject({freshness:{changes:{reports:['README.md'],artifact:false},evidence:{artifactMatches:true}}})
@@ -300,7 +480,7 @@ test('inspection separates the active user task and live Skill facts from a hist
     expect(result.task.text).toBe(message.text)
     expect(result.skills.currentTurnUses).toEqual(liveUses)
     expect(result.skills.application).toBe('unverified')
-    expect(result.checkScope.unmeasuredConsumptionChecks).toHaveLength(4)
+    expect(result.checkScope.unmeasuredConsumptionChecks).toHaveLength(5)
     expect(result.quality).toBe('unverified');expect(result.deliveryEligible).toBe(false)
     expect(result.freshness.current).toBe(true)
     expect(await f.current()).toEqual(before)
@@ -361,11 +541,15 @@ test('compact inspection retains every batch identity and failure while omitting
   const probes=Array.from({length:12},(_,i)=>({document:'content/ui/menu.json',nodeId:'node-'+i,viewport:[1280,720],
     status:i===7?'failed':'passed',reason:i===7?'Visible text exceeds node bounds':undefined,
     conditions:{environment:{devicePixelRatio:2}},textFit:{before:{status:i===7?'failed':'passed',overflowCount:i===7?1:0}},
+    controlSize:{unit:'CSS pixels',minimum:[44,44],before:[100,28],restored:[100,28]},
+    enabled:{beforeVisible:true,disabledVisible:false,restoredVisible:true},
     changed:[{geometry:'x'.repeat(3000)}]}))
   const record:any={id:'batch',requestKey:'request',requirementsRevision:'r',runtimeArtifact:'dist',reports:[],
     checks:[{id:'ui-data-consumption',status:'failed',observation:JSON.stringify({probes})}]}
   const compact=measurementSummary(record,false)
   expect(compact.diagnostics).toHaveLength(12)
+  expect(compact.diagnostics![7].controlSize).toEqual(probes[7]!.controlSize)
+  expect(compact.diagnostics![0].enabled).toEqual(probes[0]!.enabled)
   expect(compact.diagnostics![0].textFit).toBeUndefined()
   expect(compact.diagnostics![7]).toMatchObject({nodeId:'node-7',reason:'Visible text exceeds node bounds',
     textFit:{before:{overflowCount:1}},conditions:{environment:{devicePixelRatio:2}}})
@@ -389,7 +573,7 @@ test('task context exposes current comparison before optional tool parsing; does
     const handoff=await f.measurement.handoff()
     expect(handoff.checkScope.consumptionOption).toBe('--consumption-json')
     expect(handoff.checkScope.availableConsumptionChecks).toContain('ui-data-consumption')
-    expect(handoff.checkScope.consumptionSupport.pixel).toContain('not procedural Canvas')
+    expect(handoff.checkScope.consumptionSupport.pixel).toContain('not DOM/CSS images, procedural Canvas')
     expect(handoff.checkScope.consumptionSupport.audio).toContain('not WebAudio')
     expect(handoff.checkScope.unmeasuredConsumptionChecks).toEqual([...handoff.checkScope.availableConsumptionChecks])
     expect(JSON.stringify(context)).not.toContain('LONG_BUILD_LOG')
@@ -617,7 +801,9 @@ test('later turn inspects prior receipts without replay, source selection or inv
     const artifactBefore=await readFile(join(f.workspace,'dist/index.html'),'utf8')
     const live=structuredClone(before),previous=live.agentTurns![0]!
     previous.status='ended';previous.quiescedAt=new Date().toISOString()
-    const next:AgentTurn={...f.turn,attemptId:'followup',requestKey:'followup',fence:2,measurements:undefined}
+    const next:AgentTurn={...f.turn,attemptId:'followup',requestKey:'followup',fence:2,measurements:undefined,
+      message:{requestKey:'followup',runId:live.id,chatSessionId:live.chatSessionId,expectedVersion:live.version,
+        requirementsRevision:live.requirements.revision,intent:'work',text:'Inspect the existing measured project'}}
     live.agentTurns!.push(next);live.writer={attemptId:next.attemptId,workerId:next.workerId,fence:next.fence}
     const unchanged=structuredClone(live)
     reader=createAgentMeasurement({run:live,turn:next,store:{...f.store,async read(){return live},
@@ -700,17 +886,21 @@ test('a saved autonomous edit invalidates earlier measurements even if external 
   const executor=createV3Executor({store:f.store,sessions})
   try {
     await mkdir(join(f.workspace,'content/ui'),{recursive:true})
+    await mkdir(join(f.workspace,'content/scenes'),{recursive:true})
     const original=JSON.stringify(uiLayoutFixture())
     await writeFile(join(f.workspace,'content/ui/menu.json'),original)
+    await writeFile(join(f.workspace,'content/scenes/level.json'),JSON.stringify(sceneLayoutFixture()))
     await writeFile(join(f.workspace,'content/index.json'),JSON.stringify({schema:'beegame-content-package.v2',id:'fixture',dimension:'2d',
-      documentRevision:'a'.repeat(64),assetManifestRevision:'b'.repeat(64),entryScene:'level',sceneModel:'game-object-v2',files:['ui/menu.json'],
-      documents:[{path:'ui/menu.json',id:'menu',kind:'ui-screen',loadPhase:'startup'}]}))
+      documentRevision:'a'.repeat(64),assetManifestRevision:'b'.repeat(64),entryScene:'level',sceneModel:'game-object-v2',
+      files:['scenes/level.json','ui/menu.json'],documents:[
+        {path:'scenes/level.json',id:'level',kind:'scene-2d',loadPhase:'startup'},
+        {path:'ui/menu.json',id:'menu',kind:'ui-screen',loadPhase:'startup'}]}))
     const measured=await f.measurement.measure(request),run=await f.settle()
     expect((await selectAgentMeasuredBuild(run,measured.id)).measurement.id).toBe(measured.id)
     const snapshot=await readContentView(f.workspace)
     if(snapshot.state!=='draft')throw Error('Missing fixture')
     const document=JSON.parse(original);document.data.nodes[1].layout.size[1]=64
-    await executor.edit(run,{requestKey:'edit',path:'ui/menu.json',expectedRevision:snapshot.documents[0]!.revision,document,
+    await executor.edit(run,{requestKey:'edit',path:'ui/menu.json',expectedRevision:snapshot.documents.find(item=>item.path==='ui/menu.json')!.revision,document,
       workflow:{version:run.version,planRevision:run.planRevision,requirementsRevision:run.requirements.revision}})
     await expect(selectAgentMeasuredBuild(await f.current(),measured.id)).rejects.toThrow('changed')
     // Deliberate synthetic external byte restoration tests the historical
@@ -743,11 +933,13 @@ test('native-turn capability records real build/report/smoke; dedup, export and 
     expect(first.code,first.stdout+first.stderr).toBe(0)
     const record=JSON.parse(first.stdout),version=(await f.current()).version
     expect(record.checks.map((c:any)=>c.status)).toEqual(['passed','passed']);expect(record.quality).toBe('unverified')
-    expect(record.checkScope.unmeasuredConsumptionChecks).toHaveLength(4)
+    expect(record.checkScope.unmeasuredConsumptionChecks).toHaveLength(5)
     expect(record.freshness.current).toBe(true)
     expect(record.note).toContain('not in measured source/report files')
     expect(record.reports[0].path).toBe('README.md')
     const live=await f.current()
+    live.agentTurns![0]!.message={requestKey:'authorized-work',runId:live.id,chatSessionId:live.chatSessionId,
+      expectedVersion:live.version,requirementsRevision:live.requirements.revision,intent:'work',text:'Measure the saved project'}
     expect(await agentTurnHandoffReason(live,live.agentTurns![0]!)).toContain('measured inputs are current')
     expect(await agentTurnHandoffReason(live,live.agentTurns![0]!)).toContain('Game-quality acceptance remains unverified')
     expect(JSON.parse((await command('--inspect','measure-1')).stdout).freshness.current).toBe(true)
@@ -767,11 +959,11 @@ test('native-turn capability records real build/report/smoke; dedup, export and 
     expect((await f.current()).version).toBe(version)
     await expect(selectAgentMeasuredBuild(await f.current(),record.id)).rejects.toThrow('writer')
     const run=await f.settle()
-    expect(run.tasks).toEqual({});expect(run.plans).toEqual([]);expect(run.attempts).toEqual([])
+    expect(['plans','tasks','attempts'].some(key=>key in run)).toBe(false)
     const preview=createMeasuredPreview({origin:'http://localhost:12345',capabilities:createPreviewCapabilityManager(),readRun:f.current,isBusy:()=>false})
     try {
       const opened=await preview.openAgent(run,record.id)
-      expect(opened.taskId).toBeUndefined();expect(opened.measurementId).toBe(record.id)
+      expect(opened.measurementId).toBe(record.id)
       const response=await preview.handle(new Request(opened.url));expect(response!.status).toBe(200)
       expect(await response!.text()).toContain('Actual fixture')
       const zip=await JSZip.loadAsync((await exportAgentMeasuredBuild(run,record.id,{read:f.current,busy:()=>false},'project')).data)
@@ -840,7 +1032,7 @@ test('report exclusions are build operands, not a retroactive acceptance of old 
     await writeFile(join(f.workspace,'reports/result.txt'),'Evidence')
     const measured=await f.measurement.measure(request)
     // Actual old-style source-copy build retained every exportable report file.
-    const legacyBuild=await buildEditableProject(f.workspace,{editableProject:true,runtimeArtifact:'dist',writablePaths:['dist/**']},measured.checks[0]!.inputs,[],undefined,true)
+    const legacyBuild=await buildEditableProject(f.workspace,{editableProject:true,runtimeArtifact:'dist',writablePaths:['dist/**']},measured.checks[0]!.inputs,[])
     expect(legacyBuild.status).toBe('passed')
     const legacy={...measured,id:'legacy',checks:[legacyBuild,measured.checks[1]!]}
     const oldRun=structuredClone(await f.current());oldRun.agentTurns![0]!.measurements=[legacy]
@@ -900,7 +1092,10 @@ test('post-measure receipt edit is identified by read-only inspection; original 
     expect((await f.current()).agentTurns![0]!.measurements).toEqual(saved.agentTurns![0]!.measurements)
     expect(await readFile(join(f.workspace,'dist/index.html'))).toEqual(artifact)
     const run=await f.settle()
-    expect(await agentTurnHandoffReason(run,run.agentTurns![0]!)).toContain('measurement-stale: Reports changed or are missing: README.md')
+    const authorizedTurn={...run.agentTurns![0]!,message:{requestKey:'authorized-work',runId:run.id,
+      chatSessionId:run.chatSessionId,expectedVersion:run.version,requirementsRevision:run.requirements.revision,
+      intent:'work' as const,text:'Measure the saved project'}}
+    expect(await agentTurnHandoffReason(run,authorizedTurn)).toContain('measurement-stale: Reports changed or are missing: README.md')
     await expect(selectAgentMeasuredBuild(run,original.id)).rejects.toThrow('README.md')
     for(const kind of ['static','project'] as const)
       await expect(exportAgentMeasuredBuild(run,original.id,{read:f.current,busy:()=>false},kind)).rejects.toThrow('README.md')

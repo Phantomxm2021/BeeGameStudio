@@ -46,6 +46,15 @@ describe('MarkdownRenderer structured output', () => {
     expect(document.querySelector('pre code')?.textContent).toBe(content);
   });
 
+  it('wraps genuine JSON inside a user bubble without a dark code surface', () => {
+    const content = JSON.stringify({ note: '一段很长的用户原始 JSON 内容' });
+    const { container } = render(<MarkdownRenderer content={content} bubble />);
+    const pre = container.querySelector('pre');
+    expect(pre).toHaveClass('whitespace-pre-wrap', 'break-all', '!bg-transparent', 'text-[currentColor]');
+    expect(pre?.querySelector('code')).toHaveClass('!bg-transparent', '!text-[currentColor]');
+    expect(pre?.textContent).toBe(content);
+  });
+
   it('does not guess whether visible JSON is internal based on its field names', () => {
     const content = JSON.stringify({
       workerType: 'resource-curator',

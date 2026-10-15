@@ -5,6 +5,7 @@ import type { ResourcePackPrimaryCategory, ResourcePackSummary } from '../../ser
 import { CONFIGURED_PRODUCTION_SETTING_OPTIONS } from '../../config/productionSettingOptions'
 import { Dialog, DialogContent, DialogTitle } from '../ui/dialog'
 import { ProjectSelect } from '../beui/project-select'
+import { useToastContext } from '../../contexts/ToastContext'
 
 export type ResourcePackFormValues = {
   name: string
@@ -56,11 +57,11 @@ export function ResourcePackFormDialog({
   finalFocus,
 }: Props) {
   const { t } = useTranslation('resourceLibrary')
+  const { showError } = useToastContext()
   const [values, setValues] = useState<ResourcePackFormValues>(() => cloneValues(initialValues))
   const [cover, setCover] = useState<File | null>(null)
   const [customStyle, setCustomStyle] = useState('')
   const [customGameType, setCustomGameType] = useState('')
-  const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -69,7 +70,6 @@ export function ResourcePackFormDialog({
     setCover(null)
     setCustomStyle('')
     setCustomGameType('')
-    setError('')
   }, [open, initialValues])
 
   const styleOptions = useMemo(() => [
@@ -95,16 +95,15 @@ export function ResourcePackFormDialog({
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!values.name.trim() || values.styles.length === 0 || values.gameTypes.length === 0 || !values.primaryCategory) {
-      setError(t('createRequired'))
+      showError(t('createRequired'))
       return
     }
     setSaving(true)
-    setError('')
     try {
       await onSubmit({ ...values, name: values.name.trim() }, cover)
       onClose()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : submitLabel)
+      showError(cause instanceof Error ? cause.message : submitLabel)
     } finally {
       setSaving(false)
     }
@@ -122,7 +121,6 @@ export function ResourcePackFormDialog({
         <fieldset className="m-0 grid min-w-0 gap-3 border-0 p-0"><legend className="type-label block p-0 text-foreground">{t('style')} <span className="type-caption ml-1 font-normal text-muted-foreground">{t('multiSelect')}</span></legend><div className="flex flex-wrap gap-3">{styleOptions.map(option => <button key={option} type="button" aria-pressed={values.styles.includes(option)} onClick={() => toggleListValue('styles', option)} className={chipClass(values.styles.includes(option))}>{option}</button>)}</div><div className="flex gap-3"><input value={customStyle} onChange={event => setCustomStyle(event.target.value)} className="min-w-0 max-w-full border border-input bg-background type-input h-10 min-w-0 flex-1 rounded-xl px-3" placeholder={t('customStyle')} /><button type="button" className="rounded-md border border-border bg-secondary text-secondary-foreground type-button h-10 px-4" onClick={() => addCustomValue('styles', customStyle, () => setCustomStyle(''))}>{t('add')}</button></div></fieldset>
         <fieldset className="m-0 grid min-w-0 gap-3 border-0 p-0"><legend className="type-label block p-0 text-foreground">{t('gameTypes')} <span className="type-caption ml-1 font-normal text-muted-foreground">{t('multiSelect')}</span></legend><div className="flex flex-wrap gap-3">{gameTypeOptions.map(option => <button key={option} type="button" aria-pressed={values.gameTypes.includes(option)} onClick={() => toggleListValue('gameTypes', option)} className={chipClass(values.gameTypes.includes(option))}>{option}</button>)}</div><div className="flex gap-3"><input value={customGameType} onChange={event => setCustomGameType(event.target.value)} className="min-w-0 max-w-full border border-input bg-background type-input h-10 min-w-0 flex-1 rounded-xl px-3" placeholder={t('customGameType')} /><button type="button" className="rounded-md border border-border bg-secondary text-secondary-foreground type-button h-10 px-4" onClick={() => addCustomValue('gameTypes', customGameType, () => setCustomGameType(''))}>{t('add')}</button></div></fieldset>
       </div>
-      {error ? <p role="alert" className="relative z-10 mt-5 rounded-xl border border-destructive/40 bg-destructive/10 p-3 type-footnote text-destructive">{error}</p> : null}
       <footer className="relative z-10 mt-6 flex shrink-0 justify-end"><button disabled={saving} className="rounded-md border border-transparent bg-primary text-primary-foreground type-button h-11 px-6 disabled:cursor-not-allowed disabled:opacity-50">{saving ? submittingLabel : submitLabel}</button></footer>
     </form>
     </DialogContent>

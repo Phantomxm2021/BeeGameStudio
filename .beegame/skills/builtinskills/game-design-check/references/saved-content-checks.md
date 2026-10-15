@@ -4,7 +4,7 @@ Read only for an assigned geometry/integration question using these actual input
 
 ## Linked Scene/UI geometry
 
-Use current saved owner-linked content and the current supplied check entry. A linked Scene's identities, hierarchy, placement, collision and Camera must agree with the space requirements. Scene schema/Camera checks and visibility in the UI's actual allocated game-view establish different properties. Missing resource-dependent bounds or unsupported dynamic/3D/XR framing need a disclosed needed-by check, not guessed dimensions or semantic PASS.
+Use current saved owner-linked content and the current supplied check entry; resolve its actual path from the active task and read `--help`. `--check-drafts`, `--layout-draft`, `--design-layouts` and `--scene-layouts` answer different saved-source questions. Source coverage and agreement with prose still require inspecting the actual design. A linked Scene's identities, hierarchy, placement, collision and Camera must agree with the space requirements. Scene schema/Camera checks and visibility in the UI's actual allocated game-view establish different properties. Missing resource-dependent bounds or unsupported dynamic/3D/XR framing need a disclosed needed-by check, not guessed dimensions or semantic PASS.
 
 For an assigned BGS UI geometry check, use the actual linked files and the applicable [layout calculation guidance](../../game-ui-ux-designer/references/layout-calculation.md) for fields, projection, coexisting-layer links and calculator usage. Reuse that guidance if already loaded; do not maintain a second layout contract here. Continue the same files into integration, not a separate test composition.
 
@@ -14,6 +14,6 @@ In authorized revision, correct the same sources and affected prose, then recalc
 
 ## Only when legacy handoff inputs are supplied
 
-Handoff indexes point to authoritative prose and necessary acceptance expectations, not duplicate design. Use host results for the inspected versions. `--design-handoff N` or `--design-references --author-batch N` applies only when that legacy scope and entry are supplied; consult help for the concrete structural question. Do not create indexes, batches, delivery files or receipts merely to invoke these commands.
+Handoff indexes point to authoritative prose and necessary acceptance expectations, not duplicate design. Use results for the inspected versions and the commands actually supplied for that legacy assignment. The current autonomous tools do not require a batch handoff or release sequence. Do not create indexes, batches, delivery files or receipts merely to invoke an old command.
 
 Preserve existing version/hash metadata. Inspect actual producer/consumer meaning and source conditions; neither matching IDs/headings nor different professional names establishes semantic agreement/conflict. A retained hash binds the declared source identity, not truth. Do not populate irrelevant tables or infer platform absence from a tool-scope rejection. A structural correction repairs a real contract violation without selecting a missing owner decision.

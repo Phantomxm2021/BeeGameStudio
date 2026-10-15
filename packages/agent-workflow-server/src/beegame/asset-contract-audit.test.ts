@@ -109,6 +109,25 @@ import {
 
 const workspaces: string[] = []
 
+test('resource enum errors expose exact short values or the existing contract without coercion', () => {
+  const value = manifest()
+  const profile = value.requirements[0]!.acquisition_profile
+  Object.assign(profile, { dimensions: ['2d'] })
+  const before = JSON.stringify(value)
+  expect(() => parseCanonicalBeeGameAssetManifest(value)).toThrow('requirements[0].acquisition_profile.dimensions')
+  expect(() => parseCanonicalBeeGameAssetManifest(value)).toThrow('Allowed: 2D, 3D, agnostic.')
+  expect(JSON.stringify(value)).toBe(before)
+  Object.assign(profile, { dimensions: ['2D'], asset_kinds: ['audio'] })
+  expect(() => parseCanonicalBeeGameAssetManifest(value)).toThrow('Use resources.mjs --contract for the exact allowed values.')
+  Object.assign(profile, { asset_kinds: ['data'] })
+  Object.assign(value.resources[0]!, { dimension: '2d' })
+  expect(() => parseCanonicalBeeGameAssetManifest(value)).toThrow('resources[0].dimension must be a canonical resource dimension (case-sensitive). Allowed: 2D, 3D, agnostic.')
+  Object.assign(value.resources[0]!, { dimension: '2D' })
+  expect(() => parseCanonicalBeeGameAssetManifest(value)).not.toThrow()
+  Object.assign(value.requirements[0]!, { acquisition_profile: null })
+  expect(() => parseCanonicalBeeGameAssetManifest(value)).toThrow('acquisition_profile must be an object with dimensions, asset_kinds and styles arrays')
+})
+
 test('encoded ambience accepts JSON sidecars but JSON-only synthesis remains provisional', () => {
   const value = manifest()
   const resource = value.resources[0]!

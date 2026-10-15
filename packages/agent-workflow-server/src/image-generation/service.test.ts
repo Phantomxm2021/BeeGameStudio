@@ -11,6 +11,110 @@ import { imageChargeCreditsMicro, fixedImageChargeCreditsMicro, CLOUDFLARE_INITI
 import { ImageProviderError } from './provider'
 import { openImageGenerationAccess } from './access'
 import { ImageConfigurationError } from './runtime-config'
+import { compileUiReferenceBoard } from './ui-reference-board.mjs'
+import { writeBeeGameAssetManifest, type BeeGameAssetManifest } from '../beegame/asset-contracts'
+
+test.each(['platform', 'byok'] as const)('resource intent rejects new incompatible requests before billing/provider and does not alter recovery: %s', async source => {
+  const root = mkdtempSync(join(tmpdir(), 'image-resource-intent-'))
+  const billing = fakeBilling()
+  let calls = 0
+  const service = new ImageGenerationService(new ImageAttemptStore(join(root,'host'), { generate: async (_config, request) => {
+    calls++
+    expect(request).not.toHaveProperty('purpose')
+    expect(request).not.toHaveProperty('requirementIds')
+    return { bytes: await png(), model: config.model, mimeType: 'image/png', usage }
+  } }), billing.client)
+  const manifest: BeeGameAssetManifest = { version: 9, resources: [], requirements: [
+    { id: 'surface', acquisition_profile: { dimensions: ['3D'], asset_kinds: ['texture'], styles: [] } },
+    { id: 'actor', acquisition_profile: { dimensions: ['3D'], asset_kinds: ['model'], styles: [], capabilities: ['rigged'] } },
+    { id: 'licensed', acquisition_profile: { dimensions: ['2D'], asset_kinds: ['image'], styles: [],
+      sourcing_policy: {allowed_source_kinds:['resource-library'],license_constraints:['licensed'],responsible_party:'author',handoff_criteria:['usable file']} } },
+  ] }
+  await writeBeeGameAssetManifest(root, manifest)
+  const access = openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: root, source,
+    loadConfig: async () => config, service })
+  const send = (metadata: object) => fetch(access.endpoint, {method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({requestId:'production',prompt:'Surface artwork',...metadata})})
+  try {
+    for (const metadata of [{}, {purpose:'production'}, {purpose:'production',requirementIds:['absent']},
+      {purpose:'production',requirementIds:['actor']}, {purpose:'production',requirementIds:['licensed']},
+      {purpose:'reference',requirementIds:['surface']}, {purpose:'experiment',requirementIds:['surface']}]) {
+      const response = await send(metadata)
+      expect(response.status).toBe(422)
+      expect(await response.json()).toMatchObject({code:'resource-intent'})
+    }
+    expect(calls).toBe(0)
+    expect(billing.actions).toEqual([])
+    const valid = await send({purpose:'production',requirementIds:['surface']})
+    expect(valid.status).toBe(200)
+    const bytes = await valid.arrayBuffer()
+    expect(calls).toBe(1)
+    expect(readFileSync(join(root,'assets/ai-generation-prompts.md'),'utf8')).toContain('surface')
+    // A changed Manifest and missing/new metadata cannot invalidate paid bytes.
+    await writeBeeGameAssetManifest(root,{...manifest,requirements:[]})
+    const recovered = await send({})
+    expect(recovered.status).toBe(200)
+    expect(await recovered.arrayBuffer()).toEqual(bytes)
+    const rebound = await send({purpose:'production',requirementIds:['removed']})
+    expect(rebound.status).toBe(200)
+    await rebound.arrayBuffer()
+    expect(calls).toBe(1)
+    expect(billing.actions).toEqual(source === 'byok' ? [] : ['reserve','settle','reserve','settle','reserve','settle'])
+  } finally { await access.close(); rmSync(root,{recursive:true,force:true}) }
+})
+
+test('a pre-metadata paid receipt is recoverable through the new bridge', async () => {
+  const root = mkdtempSync(join(tmpdir(),'image-legacy-intent-'))
+  const billing = fakeBilling()
+  let calls = 0
+  const service = new ImageGenerationService(new ImageAttemptStore(root,{generate:async()=>{
+    calls++; return {bytes:await png(),model:config.model,mimeType:'image/png',usage}
+  }}),billing.client)
+  await service.generate(input) // Historical request: no resource-intent metadata.
+  const access = openImageGenerationAccess({userId:'owner',projectId:'project',workspacePath:root,loadConfig:async()=>config,service})
+  try {
+    const response=await fetch(access.endpoint,{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({requestId:input.requestId,prompt:input.request.prompt})})
+    expect(response.status).toBe(200); await response.arrayBuffer()
+    expect(calls).toBe(1)
+  } finally { await access.close();rmSync(root,{recursive:true,force:true}) }
+})
+
+test('host compiles UI board before billing, records the actual prompt and rejects invalid inventory/orientation', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'image-ui-board-'))
+  const billing = fakeBilling(), received: unknown[] = []
+  let configurations = 0
+  const service = new ImageGenerationService(new ImageAttemptStore(root, { generate: async (_config, request) => {
+    received.push(request)
+    return { bytes: await png(), model: config.model, mimeType: 'image/png', usage }
+  } }), billing.client)
+  const access = openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: root,
+    screenOrientation: 'Landscape', requiredQuality: 'low', loadConfig: async () => { configurations++; return cloudflareConfig }, service })
+  const input = { purpose: 'reference', requestId: 'ui-board', uiReference: { viewport: { width: 1280, height: 720 },
+    style: 'Readable flat UI', screens: ['play', 'pause', 'result'].map(id => ({ id, description: `Full ${id} screen with HUD` })) } }
+  const submit = (body: unknown) => fetch(access.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  try {
+    for (const body of [
+      { ...input, prompt: 'custom collage' },
+      { ...input, uiReference: { ...input.uiReference, viewport: { width: 720, height: 1280 } } },
+      { ...input, uiReference: { ...input.uiReference, rows: 2 } },
+      { ...input, uiReference: { ...input.uiReference, screens: [input.uiReference.screens[0], input.uiReference.screens[0]] } },
+    ]) expect((await submit(body)).status).toBe(400)
+    expect(received).toEqual([])
+    expect(billing.actions).toEqual([])
+    expect(configurations).toBe(0)
+    const response = await submit(input)
+    expect(response.status).toBe(200)
+    await response.arrayBuffer()
+    const expected = compileUiReferenceBoard(input).request
+    expect(received).toHaveLength(1)
+    expect(received[0]).toMatchObject({ prompt: expected.prompt, size: '1024x1536', quality: 'low', background: 'opaque' })
+    expect(received[0]).not.toHaveProperty('uiReference')
+    const record = readFileSync(join(root, 'assets/ai-generation-prompts.md'), 'utf8')
+    expect(record).toContain(JSON.stringify(expected.prompt))
+    expect(billing.actions).toEqual(['reserve', 'settle'])
+  } finally { await access.close(); rmSync(root, { recursive: true, force: true }) }
+})
 
 test('closing image access drains an in-flight paid outcome before workspace quiescence',async()=>{
   const root=mkdtempSync(join(tmpdir(),'image-access-drain-'))
@@ -21,7 +125,7 @@ test('closing image access drains an in-flight paid outcome before workspace qui
   }}),fakeBilling().client)
   const access=openImageGenerationAccess({userId:'owner',projectId:'synthetic',workspacePath:root,loadConfig:async()=>config,service})
   try {
-    const response=fetch(access.endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({requestId:'one',prompt:'synthetic'})})
+    const response=fetch(access.endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({purpose:'experiment',requestId:'one',prompt:'synthetic'})})
     await started
     let drained=false;const closing=access.close().then(()=>{drained=true})
     await Bun.sleep(20);expect(drained).toBe(false)
@@ -47,7 +151,7 @@ test('access exposes safe failure facts and identifies a replay without another 
   const url = access.endpoint
   try {
     const request = () => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ requestId: 'error-1', prompt: 'private prompt' }) })
+      body: JSON.stringify({ purpose: 'experiment', requestId: 'error-1', prompt: 'private prompt' }) })
     const first = await request()
     expect(first.status).toBe(502)
     const details = await first.json() as any
@@ -81,7 +185,7 @@ test('configuration failure is recorded without submitting upstream', async () =
   try {
     const url = access.endpoint
     const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ requestId: 'config-1', prompt: 'an icon' }) })
+      body: JSON.stringify({ purpose: 'experiment', requestId: 'config-1', prompt: 'an icon' }) })
     const details = await response.json() as any
     expect(details).toMatchObject({ stage: 'configuration', promptRecord: 'recorded',
       code: 'database-http', source: 'service-platform', databaseHttpStatus: 403, serviceHttpStatus: 503 })
@@ -109,7 +213,7 @@ test('record write failure does not discard a paid PNG or trigger regeneration',
   try {
     const url = access.endpoint
     const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ requestId: 'write-1', prompt: 'an icon' }) })
+      body: JSON.stringify({ purpose: 'experiment', requestId: 'write-1', prompt: 'an icon' }) })
     expect(response.status).toBe(200)
     expect(response.headers.get('x-image-prompt-record')).toBe('failed')
     expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(8)
@@ -138,11 +242,11 @@ test('delivery image access keeps every generation at low quality', async () => 
     expect((await fetch(`${access.endpoint}?quality=medium`)).status).toBe(200)
     expect(await (await fetch(`${access.endpoint}?quality=medium`)).json()).toMatchObject({ available: false })
     const rejected = await fetch(access.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ requestId: 'wrong-quality', prompt: 'an icon', quality: 'medium' }) })
+      body: JSON.stringify({ purpose: 'experiment', requestId: 'wrong-quality', prompt: 'an icon', quality: 'medium' }) })
     expect(rejected.status).toBe(422)
     expect(qualities).toHaveLength(0)
     const accepted = await fetch(access.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ requestId: 'low-quality', prompt: 'an icon' }) })
+      body: JSON.stringify({ purpose: 'experiment', requestId: 'low-quality', prompt: 'an icon' }) })
     expect(accepted.status).toBe(200)
     expect(qualities).toEqual(['low'])
   } finally { access.close(); rmSync(root, { recursive: true, force: true }) }
@@ -150,6 +254,30 @@ test('delivery image access keeps every generation at low quality', async () => 
 const usage = { input_tokens: 100, output_tokens: 200, total_tokens: 300,
   input_tokens_details: { text_tokens: 100, image_tokens: 0 }, output_tokens_details: { text_tokens: 0, image_tokens: 200 } }
 const input = { ownerId: 'owner', projectId: 'project', requestId: 'image-1', config, request: { prompt: 'an icon' } }
+test('a renamed unresolved billing receipt blocks upstream work and exposes the original ID', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'image-unresolved-retry-'))
+  let providerCalls = 0
+  const actions: string[] = []
+  const billing: ImageBillingClient = { async apply(_user, request) {
+    actions.push(request.action)
+    return { created: false, state: 'reserved', blockedByRequestId: 'original',
+      reservedCreditsMicro: 100, chargedCreditsMicro: 0, metadata: {} }
+  } }
+  const service = new ImageGenerationService(new ImageAttemptStore(root, { generate: async () => {
+    providerCalls++
+    return { bytes: await png(), model: config.model, mimeType: 'image/png', usage }
+  } }), billing)
+  const access = openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: root,
+    loadConfig: async () => config, service })
+  try {
+    const response = await fetch(access.endpoint, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ purpose: 'experiment', requestId: 'renamed', prompt: 'an icon' }) })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ code: 'unresolved-image-request', requestId: 'renamed', recoveryRequestId: 'original' })
+    expect(providerCalls).toBe(0)
+    expect(actions).toEqual(['reserve'])
+  } finally { await access.close(); rmSync(root, { recursive: true, force: true }) }
+})
 function fakeBilling() {
   let receipt: ImageBillingReceipt | undefined
   const actions: string[] = []
@@ -342,7 +470,7 @@ test('received image survives missing usage and settlement failure without anoth
       const url = access.endpoint
       for (let replay = 0; replay < 2; replay++) {
         const response = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ requestId: 'image-1', prompt: 'an icon' }) })
+          body: JSON.stringify({ purpose: 'experiment', requestId: 'image-1', prompt: 'an icon' }) })
         expect(response.status).toBe(200)
         expect(response.headers.get('x-image-billing-state')).toBe('pending')
         expect(response.headers.has('x-image-credits-micro')).toBe(false)
@@ -363,7 +491,7 @@ test('image capability binds identity, reports cost without secrets, and rejects
   } }), billing.client)
   const access = openImageGenerationAccess({ userId: 'owner', projectId: 'project', workspacePath: root, loadConfig: async () => config, service })
   const url = access.endpoint
-  const body = JSON.stringify({ requestId: 'image-1', prompt: 'an icon' })
+  const body = JSON.stringify({ purpose: 'experiment', requestId: 'image-1', prompt: 'an icon' })
   const headers = { 'content-type': 'application/json' }
   try {
     expect(access.instruction).not.toContain(config.apiKey)
@@ -375,7 +503,7 @@ test('image capability binds identity, reports cost without secrets, and rejects
     expect(await (await fetch(url)).text()).not.toContain(config.apiKey)
     expect(existsSync(join(root, 'assets/ai-generation-prompts.md'))).toBe(false)
     expect((await fetch(url, { method: 'POST', headers: { ...headers, origin: 'http://evil.test' }, body })).status).toBe(404)
-    expect((await fetch(url, { method: 'POST', headers, body: JSON.stringify({ requestId: 'x', prompt: 'x', userId: 'other' }) })).status).toBe(400)
+    expect((await fetch(url, { method: 'POST', headers, body: JSON.stringify({ purpose: 'experiment', requestId: 'x', prompt: 'x', userId: 'other' }) })).status).toBe(400)
     const response = await fetch(url, { method: 'POST', headers, body })
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toBe('image/png')
@@ -419,7 +547,7 @@ test('Cloudflare reference request reads only a project image before billing', a
     })
     const send = (requestId: string, referenceImagePath: string) => fetch(access.endpoint, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ requestId, prompt: 'matching UI elements', referenceImagePath }),
+      body: JSON.stringify({ purpose: 'experiment', requestId, prompt: 'matching UI elements', referenceImagePath }),
     })
     const denied = await send('denied', '../secret.png')
     expect(denied.status).toBe(400)

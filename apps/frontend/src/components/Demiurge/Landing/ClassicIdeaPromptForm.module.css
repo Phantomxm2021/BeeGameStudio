@@ -229,9 +229,8 @@
     transition: opacity 150ms ease, color 160ms ease;
 }
 
-/* Like Bencho's mic, the picker only fades: no travel or layout shift
-   competes with typing or the liquid action separating. */
-.modeButton[data-hidden="true"] { opacity: 0; pointer-events: none; }
+/* When the picker is hidden, return its width to the textarea. */
+.modeButton[hidden] { display: none; }
 .modeButton:hover { color: var(--composer-muted); }
 .modeButton svg { width: 15px; height: 15px; flex: 0 0 auto; }
 .modeChevron { margin-left: 1px; color: var(--composer-muted); transition: transform 160ms ease; }

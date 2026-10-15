@@ -12,6 +12,7 @@ import {
 import { Button } from '../../beui/project-button';
 import { CloseIconButton } from '../../ui/CloseIconButton';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../ui/dialog';
+import { useToastContext } from '../../../contexts/ToastContext';
 
 interface CreditStoreModalProps {
   isOpen: boolean;
@@ -39,6 +40,7 @@ type CreditStoreTierKey = 'starter' | 'builder' | 'pro' | 'studio';
 const CREDIT_STORE_TIERS: CreditStoreTierKey[] = ['starter', 'builder', 'pro', 'studio'];
 
 export function CreditStoreModal({ isOpen, lang, onClose }: CreditStoreModalProps) {
+  const { showError } = useToastContext();
   const { i18n } = useTranslation('beegame');
   const copy = getCreditStoreCopy((key, options) => (
     i18n.getFixedT(normalizeI18nLanguage(lang), 'beegame')(key, options)
@@ -82,7 +84,7 @@ export function CreditStoreModal({ isOpen, lang, onClose }: CreditStoreModalProp
       const session = await createStripeCheckoutSession(priceId);
       window.open(session.url, '_self');
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : copy.checkoutUnavailable);
+      showError(error instanceof Error ? error.message : copy.checkoutUnavailable);
       setCheckoutPriceId('');
     }
   };

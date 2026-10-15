@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import sharp from 'sharp'
 import { writeProjectAssetCommand } from './project-asset-command'
 import { parseSpriteSheet, readUiData, spriteSheetSelection } from './game-content-consumer'
@@ -22,6 +23,42 @@ async function run(cwd: string, script: string, ...args: string[]) {
   ])
   return { stdout, stderr, code }
 }
+
+test('UI board CLI plans offline, quotes the computed canvas and submits structured inventory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-ui-board-'))
+  const received: unknown[] = []
+  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    if (request.method === 'GET') {
+      received.push(Object.fromEntries(new URL(request.url).searchParams))
+      return Response.json({ available: true, provider: 'openai' })
+    }
+    received.push(await request.json())
+    return new Response(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1]), { headers: { 'content-type': 'image/png' } })
+  } })
+  try {
+    const script = join(root, 'assets.mjs'), file = join(root, 'request.json')
+    const input = { purpose: 'reference', requestId: 'ui-board', uiReference: { viewport: { width: 720, height: 1280 },
+      style: 'Flat colorful UI', screens: ['play', 'pause', 'result'].map(id => ({ id, description: `Complete ${id} screen and HUD` })) } }
+    await writeFile(file, JSON.stringify(input))
+    await writeProjectAssetCommand(script, {})
+    const planned = await run(root, script, 'ui-board-plan', file)
+    expect(planned.code).toBe(0)
+    const plan = JSON.parse(planned.stdout)
+    expect(plan.layout).toMatchObject({ columns: 3, rows: 1 })
+    expect(plan.request).toMatchObject({ size: '1536x1024', quality: 'low', background: 'opaque' })
+    expect(received).toEqual([])
+    await writeProjectAssetCommand(script, { imageEndpoint: `http://127.0.0.1:${server.port}/generate` })
+    await writeFile(file, JSON.stringify({ ...input, uiReference: { ...input.uiReference, columns: 2 } }))
+    expect((await run(root, script, 'generate', file, 'assets/invalid.png')).code).not.toBe(0)
+    expect(received).toEqual([])
+    await writeFile(file, JSON.stringify(input))
+    const generated = await run(root, script, 'generate', file, 'assets/board.png')
+    expect(generated.code).toBe(0)
+    expect(received).toEqual([{ quality: 'low', size: '1536x1024' }, input])
+    expect(JSON.parse(generated.stdout).requestedLayout).toEqual(plan.layout)
+    expect(JSON.parse(generated.stdout).note).toContain('none is certified')
+  } finally { server.stop(true); await rm(root, { recursive: true, force: true }) }
+})
 
 test('project asset command browses facts and returns image cost without forcing a source', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-assets-command-'))
@@ -92,21 +129,73 @@ test('catalog CLI preserves structured filters and pagination, rejects ignored p
     const help=await run(root,script,'--help')
     expect(help.stdout).toContain('No free-text query/search')
     expect(help.stdout).toContain('nextCursor')
+    expect(help.stdout).toContain('Honor explicit user source choices')
+    expect(help.stdout).toContain('first consider suitable supplied or built-in licensed resources')
+    expect(help.stdout).toContain('not as the default for all core art')
+    expect(help.stdout).not.toContain('AI generation is the primary route')
   }finally{server.stop(true);await rm(root,{recursive:true,force:true})}
+})
+
+test('library fetch requires a stored hash, checks bytes and removes mismatches without overwriting', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-library-download-hash-'))
+  const bytes = 'synthetic library asset'
+  const hash = createHash('sha256').update(bytes).digest('hex')
+  try {
+    const script = join(root, 'assets.mjs'), preload = join(root, 'fake-transport.mjs')
+    await writeProjectAssetCommand(script, { libraryBaseUrl: 'https://library.test' })
+    // Offline transport only; production CLI validation, file writes and cleanup run unchanged.
+    for (const [name, storedHash] of [['missing', undefined], ['invalid', 'g'.repeat(64)], ['mismatch', 'a'.repeat(64)], ['valid', hash]] as const) {
+      await writeFile(preload, `
+        globalThis.fetch = async input => {
+          const url = new URL(input);
+          if (url.origin === 'https://asset.test') {
+            if (${JSON.stringify(name)} === 'missing' || ${JSON.stringify(name)} === 'invalid')
+              throw Error('Unexpected download before hash validation');
+            return new Response(${JSON.stringify(bytes)});
+          }
+          if (url.origin !== 'https://library.test') throw Error('Unexpected external request');
+          if (url.pathname.endsWith('/resource-url')) return Response.json({url:'https://asset.test/file'});
+          if (url.pathname.includes('/elements/')) return Response.json({element:{specs:${JSON.stringify({ contentHash: storedHash })}}});
+          return Response.json({pack:{license:'CC0'}});
+        };
+      `)
+      const child = Bun.spawn([process.execPath, '--preload', preload, script, 'fetch', 'pack', 'element', 'assets/sample.bin'], { cwd: root, stdout: 'pipe', stderr: 'pipe' })
+      const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+      if (name === 'valid') {
+        expect(code).toBe(0)
+        expect(JSON.parse(stdout)).toMatchObject({ source: 'resource-library', sha256: hash })
+        expect(await readFile(join(root, 'assets/sample.bin'), 'utf8')).toBe(bytes)
+        const again = Bun.spawn([process.execPath, '--preload', preload, script, 'fetch', 'pack', 'element', 'assets/sample.bin'], { cwd: root, stdout: 'pipe', stderr: 'pipe' })
+        expect(await again.exited).not.toBe(0)
+        expect(await readFile(join(root, 'assets/sample.bin'), 'utf8')).toBe(bytes)
+      } else {
+        expect(code).not.toBe(0)
+        expect(stderr).toContain(name === 'mismatch' ? 'hash does not match' : 'valid stored content hash')
+        expect(await Bun.file(join(root, 'assets/sample.bin')).exists()).toBe(false)
+      }
+    }
+  } finally { await rm(root, { recursive: true, force: true }) }
 })
 
 test('project asset command saves only successful images, returns hash and never overwrites', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-image-command-'))
   const image = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1])
   let calls = 0
+  let quotes = 0
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
-      if (request.method === 'GET') return Response.json({ available: true, provider: 'openai', maxRequestCredits: 3 })
+      if (request.method === 'GET') {
+        quotes++
+        return Response.json({ available: true, provider: 'openai', maxRequestCredits: 3 })
+      }
       calls++
-      const body = (await request.json()) as { requestId: string; size?: string; referenceImagePath?: string }
+      const body = (await request.json()) as { requestId: string; purpose?: string; requirementIds?: string[]; background?: string; size?: string; referenceImagePath?: string }
       if (body.requestId === 'asset-1') {
+        expect(body.purpose).toBe('production')
+        expect(body.requirementIds).toEqual(['sprite-part'])
+        expect(body.background).toBe('opaque')
         expect(body.size).toBe('1536x1024')
         expect(body.referenceImagePath).toBe('assets/generated/board.png')
       }
@@ -128,9 +217,23 @@ test('project asset command saves only successful images, returns hash and never
       imageEndpoint: `http://127.0.0.1:${server.port}/generate`,
     })
     const request = join(root, 'request.json')
+    for (const [invalid, message] of [
+      [{ background: 'white' }, /background must be one of: auto, opaque, transparent/],
+      [{ quality: 'ultra' }, /quality must be one of:/],
+      [{ size: '2048x2048' }, /size must be one of:/],
+      [{ backgroun: 'opaque' }, /Unknown image request fields: backgroun/],
+    ] as const) {
+      await writeFile(request, JSON.stringify({ requestId: 'invalid', prompt: 'a sprite', ...invalid }))
+      const result = await run(root, script, 'generate', request, 'assets/invalid.png')
+      expect(result.code).not.toBe(0)
+      expect(result.stderr).toMatch(message)
+    }
+    expect(quotes).toBe(0)
+    expect(calls).toBe(0)
+    await expect(readFile(join(root, 'assets/invalid.png'))).rejects.toMatchObject({ code: 'ENOENT' })
     await writeFile(
       request,
-      JSON.stringify({ requestId: 'asset-1', prompt: 'a sprite', size: '1536x1024',
+      JSON.stringify({ requestId: 'asset-1', purpose: 'production', requirementIds: ['sprite-part'], prompt: 'a sprite', background: 'opaque', size: '1536x1024',
         referenceImagePath: 'assets/generated/board.png' }),
     )
     const first = await run(

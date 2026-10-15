@@ -2,9 +2,10 @@ import { test, expect } from 'bun:test'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createRun, publishPlan, claimTask, finishTask, V3_PROTOCOL, type TaskSpec } from './state'
-import { taskContext, sourceIndex, skillEvidence, skillUseCheck, priorMainSkillLoads } from './context'
-import { runChecks, versionsMatch } from './checks'
+import { createRun, type TaskSpec } from './state'
+import { skillEvidence, priorMainSkillLoads } from './context'
+import { versionsMatch } from './checks'
+import { runChecks } from './checker-test-driver'
 import { uiLayoutFixture, sceneLayoutFixture } from '../fixtures/layout-fixture'
 import { auditAssetContract } from '../asset-contract-audit'
 import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
@@ -30,26 +31,12 @@ test('historical Skill evidence preserves same-session successful loads without 
 const task: TaskSpec = { id: 'ui', kind: 'game.develop', goal: 'Deliver the confirmed UI', dependsOn: [], requirementIds: ['req.loop'], inputs: [],
   writablePaths: ['content/**'], expectedOutputs: ['content/ui/menu.json'], checks: ['content-structure', 'content-layout', 'content-resources'] }
 
-test('task context is local, pointers are derived and native successful loads are required when requested', () => {
-  const original = createRun({ projectId: 'fixture', ownerId: 'owner', workspacePath: '/tmp/fixture', chatSessionId: 'chat', requestKey: 'create',
-    text: 'UNIQUE_ORIGINAL_REQUEST', constraints: {}, ids: ['req.loop'] })
-  const planned = publishPlan(original, { protocol: V3_PROTOCOL, baseRevision: 0, requirementsRevision: original.requirements.revision,
-    tasks: [{ ...task, skills: ['bgs-builtins:game-ui-ux-designer'] }, { ...task, id: 'audio', goal: 'UNRELATED_AUDIO_GOAL', expectedOutputs: ['content/audio.json'] }] })
-  const claimed = claimTask(planned, { taskId: 'ui', requestKey: 'start', workerId: 'worker', sessionId: 'native-task', inputVersions: [] })
-  const attempt = claimed.attempts[0]!, text = taskContext(claimed, attempt)
-  expect(text.match(/UNIQUE_ORIGINAL_REQUEST/g)).toHaveLength(1)
-  expect(text).not.toContain('UNRELATED_AUDIO_GOAL')
-  expect(text).not.toContain('authorDocument'); expect(text).not.toContain('production')
-  expect(sourceIndex(claimed, 'ui')).toHaveLength(1)
+test('Skill evidence records completion without treating a failed load as success', () => {
   const started = { id: 1, type: 'tool.started', payload: { toolName: 'Skill', toolUseID: 'skill-1', parentToolUseID: 'child', input: { skill: 'bgs-builtins:game-ui-ux-designer' } } }
   const failed = skillEvidence([started, { id: 2, type: 'tool.failed', payload: { toolUseID: 'skill-1' } }])
   expect(failed[0]?.status).toBe('failed')
-  expect(skillUseCheck(attempt, claimed.tasks.ui!.spec.skills!, failed).status).toBe('unverified')
   const loaded = skillEvidence([started, { id: 3, type: 'tool.completed', payload: { toolUseID: 'skill-1' } }])
   expect(loaded[0]).toMatchObject({ status: 'loaded', parentToolUseID: 'child', eventId: 3 })
-  expect(skillUseCheck(attempt, claimed.tasks.ui!.spec.skills!, loaded).status).toBe('passed')
-  const checks = task.checks.map(id => ({ id, version: 'fixture', status: 'passed' as const, inputs: [], observation: 'fixture', createdAt: 'fixture' }))
-  expect(finishTask(claimed, attempt.attemptId, attempt.fence, { checks, skillUses: loaded }, true).tasks.ui?.status).toBe('blocked')
 })
 
 test('scoped content checks need no eight documents, catch overflow, distinguish unbound drafts and preserve unrelated files', async () => {
@@ -120,6 +107,20 @@ test('resource checks bind actual manifest modules and members, reject stale res
     expect((await runChecks(root, { ...task, checks: ['content-resources'] }, [])).checks[0]!.status).toBe('failed')
     await rm(join(root, 'assets/runtime/example/resource.json'))
     expect((await runChecks(root, { ...task, checks: ['content-resources'] }, [])).checks[0]!.status).toBe('unverified')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('an embedded assetRef with an empty declaration is a resource error, not a resource-free draft', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-v3-undeclared-resource-'))
+  try {
+    await mkdir(join(root, 'content/ui'), { recursive: true })
+    const ui = uiLayoutFixture() as any
+    ui.assetRefs = []
+    ui.data.nodes[1].data = { image: { assetRef: 'missing-art' } }
+    await writeFile(join(root, 'content/ui/menu.json'), JSON.stringify(ui))
+    const result = (await runChecks(root, { ...task, checks: ['content-resources'] }, [])).checks[0]!
+    expect(result.status).toBe('failed')
+    expect(result.observation).toContain('uses undeclared assetRef missing-art')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 

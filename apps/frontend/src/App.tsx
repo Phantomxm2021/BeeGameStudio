@@ -10,15 +10,13 @@ import ErrorBoundary from './components/Common/ErrorBoundary';
 import { WorkspaceLoadingPage } from './components/Common/WorkspaceLoadingPage';
 import { useProjectStore } from './store/projectStore';
 import { applyThemeToDocument, useSystemStore } from './store/systemStore';
-import { useChatStore } from './store/chatStore';
 import { useToastContext } from './contexts/ToastContext';
-import { setToastErrorCallback, api } from './services/api';
+import { setToastErrorCallback } from './services/api';
 import {
   AUTHENTICATION_REQUIRED_EVENT,
   hasEnvAuthToken,
   isAuthenticationServiceUnavailable,
 } from './services/apiClient';
-import { normalizeChatHistory } from './utils/chatHistory';
 import { authRetryDelay } from './services/authRetry';
 import type { StartProjectResult } from './types/project';
 import type { BeeGameBuildBrief } from './services/beeGameAdapter';
@@ -74,7 +72,6 @@ function App() {
     currentUser: state.currentUser,
     isDark: state.isDark,
   })));
-  const loadHistory = useChatStore((state) => state.loadHistory);
   const { showError, showSuccess } = useToastContext();
 
   const [lang, setLang] = useState<Language>(getInitialUiLanguage);
@@ -85,8 +82,6 @@ function App() {
   const [isResourceRoute, setIsResourceRoute] = useState(() => isResourceLibraryRoute());
   const [authenticationRetryVersion, setAuthenticationRetryVersion] = useState(0);
   const [authenticationInitializationError, setAuthenticationInitializationError] = useState('');
-  const loadedHistoryProjectRef = useRef<{ projectId: string; loadHistory: typeof loadHistory } | null>(null);
-  const [historyReadyProjectId, setHistoryReadyProjectId] = useState<string | null>(null);
   const authenticationInitializationStartedRef = useRef<typeof loadCurrentUser | null>(null);
   const authenticationRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedProtectedDataUserRef = useRef<{ userId: string; loadProjects: typeof loadProjects } | null>(null);
@@ -203,45 +198,6 @@ function App() {
     });
   }, [authenticationStatus, currentUser?.id, loadProjects, showError]);
 
-  // Load chat history when active project changes
-  useEffect(() => {
-    let cancelled = false;
-    const loadChatHistory = async () => {
-      if (!activeProjectId || !activeProject) {
-        loadedHistoryProjectRef.current = null;
-        setHistoryReadyProjectId(null);
-        return;
-      }
-      if (loadedHistoryProjectRef.current?.projectId === activeProjectId &&
-          loadedHistoryProjectRef.current.loadHistory === loadHistory) return;
-      const requestProjectId = activeProjectId;
-
-      try {
-        const history = await api.getChatHistory(requestProjectId) as unknown;
-        // A project switch can happen while the request is in flight. The
-        // cleanup guard prevents late history from being committed to the
-        // next project, even when the store has not rendered yet.
-        const latestProjectId = useProjectStore.getState().activeProjectId;
-        if (cancelled || latestProjectId !== requestProjectId) return;
-        const normalized = normalizeChatHistory(history);
-        const currentMessages = useChatStore.getState().messages;
-        const hasStreamingMessages = currentMessages.some((msg) => msg.id?.startsWith('streaming-'));
-
-        // Keep locally injected bootstrap/system hints until backend has real history.
-        if (!hasStreamingMessages && (normalized.length > 0 || currentMessages.length === 0)) {
-          loadHistory(normalized);
-        }
-        loadedHistoryProjectRef.current = { projectId: requestProjectId, loadHistory };
-        setHistoryReadyProjectId(requestProjectId);
-      } catch (error) {
-        if (!cancelled) console.error('[App] Failed to load chat history:', error);
-      }
-    };
-
-    loadChatHistory();
-    return () => { cancelled = true; };
-  }, [activeProjectId, activeProject, loadHistory]);
-
   const handleStartProject = async (
     _projectName: string,
     _clarification?: Record<string, string>,
@@ -282,7 +238,6 @@ function App() {
       {isDashboardVisible ? (
         <Suspense fallback={<WorkspaceLoadingPage />}>
           <DashboardView
-            chatHistoryReady={historyReadyProjectId === activeProjectId}
             projectId={activeProjectId!}
             projectName={activeProject?.name || 'Untitled Project'}
             lang={lang}

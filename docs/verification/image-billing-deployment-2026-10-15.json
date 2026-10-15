@@ -1,0 +1,82 @@
+{
+  "date": "2026-10-15",
+  "scope": "User-authorized deployment of image billing SQL to the existing production database, followed by rollback-only database verification. No generation, game edits or application deployment.",
+  "database": "https://bgs.phantominfra.com/project/default",
+  "compatibility": {
+    "queryUrl": "https://bgs.phantominfra.com/project/default/sql/9522905e-8824-4d68-bf0b-5ad9fb137152",
+    "verified": [
+      "Existing image charge and wallet columns, types, defaults, primary keys and foreign keys match the function requirements",
+      "Wallet reservation and image charge constraints are already present and validated",
+      "Function signature and JSON receipt base fields remain unchanged",
+      "SECURITY DEFINER, search_path=public and service_role-only execution permissions are retained",
+      "Existing caller uses created=false for recovery-only behavior; the new caller additionally recognizes blockedByRequestId",
+      "No custom triggers exist on the two billing tables; auth.users has a trigger, so no synthetic auth user was created"
+    ],
+    "previousFunctionDefinitionMd5": "27f60392410367948c4501e0482fc6a9"
+  },
+  "deployment": {
+    "queryUrl": "https://bgs.phantominfra.com/project/default/sql/5eb1e4aa-0325-44bd-966e-c29576ed3e93",
+    "source": "docs/image-generation-billing-migration-2026-09-20.sql",
+    "sourceFileSha256": "2793998664720284dab33415e719747b2dea0e5575b27741b06dcfa17696816f",
+    "deployedObject": "public.beegame_image_billing(uuid,text,text,text,text,bigint,bigint,jsonb)",
+    "method": "Extract the exact CREATE OR REPLACE FUNCTION statement from the validated local source. In one transaction, check the previous definition hash, replace this function, verify the new body hash and commit. lock_timeout=3s; statement_timeout=15s.",
+    "pastedSqlMatched": true,
+    "deploymentSqlSha256": "34273cddf127fe44cab931fe66194b70d8fe8fae667c4ec5fcedfb482bb52b9e",
+    "committedBodyMd5": "fac151c2aaede53eb11d7a2b2d991338",
+    "tablesConstraintsPrivilegesRecreated": false,
+    "creditGrantFunctionChanged": false,
+    "result": "billing_function_deployed"
+  },
+  "verification": {
+    "queryUrl": "https://bgs.phantominfra.com/project/default/sql/c498aaeb-665c-4b2e-a808-c3c0d9f7fe6c",
+    "sqlSha256": "123d64df1e45e62b672ac0a12b31f34b3070089e08002c7e047c3ccdd043a6c8",
+    "method": "Select one existing wallet with sufficient available micro-Credits without outputting its identity or balances. Hold its existing wallet advisory lock, capture its complete row, and call the deployed RPC under the service_role JWT claim with unique synthetic project IDs. All reserve/settle/release writes occur inside a subtransaction explicitly rolled back by a dedicated exception. Compare the full wallet row and absence of synthetic rows after rollback. Temporary result rows are also discarded by outer ROLLBACK. No provider endpoint is called.",
+    "passed": [
+      "authorization_enforced",
+      "different_content_allowed",
+      "different_project_allowed",
+      "first_reservation_created",
+      "host_only_acl",
+      "one_hold_only",
+      "released_does_not_block_new_intent",
+      "renamed_request_blocked",
+      "same_id_idempotent",
+      "second_renamed_request_blocked",
+      "settled_does_not_block_new_intent",
+      "settlement_idempotent",
+      "synthetic_ledger_rows_absent",
+      "wallet_fully_restored",
+      "wallet_not_double_reserved"
+    ],
+    "renamedReceipt": {
+      "created": false,
+      "state": "reserved",
+      "blockedByRequestId": "original"
+    },
+    "screenshot": "/private/tmp/bgs-image-billing-dedupe-verified-2026-10-15.png"
+  },
+  "independentReadOnlyPostflight": {
+    "queryUrl": "https://bgs.phantominfra.com/project/default/sql/a203f385-2610-48e6-b51a-56a0b8b95dfa",
+    "passed": [
+      "deployed_source_matches",
+      "host_only_acl_retained",
+      "security_definer_search_path_retained",
+      "credit_grant_function_unchanged",
+      "no_verification_ledger_rows",
+      "production_table_rls_retained"
+    ],
+    "unchangedCreditGrantDefinitionMd5": "1f4f6d32eec9c36202d12df74010eaef",
+    "screenshot": "/private/tmp/bgs-image-billing-deployed-2026-10-15.png"
+  },
+  "boundaries": {
+    "providerCalls": 0,
+    "modelCalls": 0,
+    "gameArtifactsModified": false,
+    "persistentTestLedgerOrBalanceChanges": false,
+    "applicationCodeDeployed": false,
+    "servicesRestarted": false,
+    "liveMultiConnectionRaceTested": false,
+    "httpGenerationRouteTestedThisTurn": false,
+    "notes": "Actual database sequential behavior and transaction rollback were verified. This is not a new full application or game acceptance, nor a claim of live multi-connection race coverage. Existing unresolved ledger entries were not reconciled, released or refunded."
+  }
+}

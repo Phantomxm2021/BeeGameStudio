@@ -740,6 +740,10 @@
     "customStyle": "사용자 지정 스타일 추가",
     "customGameType": "사용자 지정 장르 추가",
     "create": "팩 만들기",
+    "createMoreInfo": "추가 정보",
+    "createContinue": "계속",
+    "createBack": "기본 정보로 돌아가기",
+    "createAddTag": "태그 추가",
     "creating": "만드는 중…",
     "createRequired": "이름, 스타일, 게임 장르를 입력하고 주요 분류를 선택하세요.",
     "update": "팩 저장",
@@ -771,6 +775,7 @@
     "list": {
       "all": "모든 리소스 팩",
       "search": "리소스 팩 검색",
+      "filter": "필터",
       "empty": "리소스 팩이 없습니다",
       "emptyHint": "팩을 만들어 게임 에셋을 정리하세요.",
       "previous": "이전",

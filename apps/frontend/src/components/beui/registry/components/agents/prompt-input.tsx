@@ -69,6 +69,7 @@ export interface PromptInputProps extends Omit<
   stopLabel?: string;
   /** Allow an empty prompt when the surrounding adapter has attachments to submit. */
   allowEmptySubmit?: boolean;
+  compact?: boolean;
   minRows?: number;
   maxRows?: number;
   /** Applies the same typography to the textarea and its hidden size-measurement mirror. */
@@ -95,6 +96,7 @@ export function PromptInput({
   submitLabel = "Send prompt",
   stopLabel = "Stop generating",
   allowEmptySubmit = false,
+  compact = false,
   minRows = 2,
   maxRows = 8,
   textClassName = "type-input",
@@ -139,16 +141,18 @@ export function PromptInput({
   const resizeTextarea = useCallback(() => {
     const textarea = textareaRef.current;
     const measurement = measurementRef.current;
-    if (!textarea || !measurement || textarea.value !== currentValue) return;
+    if (!textarea || (!compact && !measurement) || textarea.value !== currentValue) return;
+
+    if (compact) textarea.style.height = "auto";
 
     const lineHeight = 24;
     const nextHeight = Math.min(
-      Math.max(measurement.scrollHeight, minRows * lineHeight),
+      Math.max(compact ? textarea.scrollHeight : measurement!.scrollHeight, minRows * lineHeight),
       maxRows * lineHeight,
     );
     const height = `${nextHeight}px`;
     if (textarea.style.height !== height) textarea.style.height = height;
-  }, [currentValue, maxRows, minRows]);
+  }, [compact, currentValue, maxRows, minRows]);
 
   useLayoutEffect(() => {
     resizeTextarea();
@@ -200,18 +204,20 @@ export function PromptInput({
     <form
       onSubmit={submit}
       className={cn(
-        "relative w-full rounded-[10px] border border-border/80 bg-background p-2 transition-colors focus-within:border-foreground/25",
+        "relative w-full border border-border/80 bg-background transition-colors focus-within:border-foreground/25",
+        compact ? "flex min-h-12 items-end gap-2 rounded-[24px] px-2 py-1.5" : "rounded-[10px] p-2",
         disabled && "opacity-60",
         className,
       )}
     >
-      <div
+      {!compact ? <div
         ref={measurementRef}
         aria-hidden="true"
         className={cn(textClassName, "pointer-events-none invisible absolute inset-x-2 top-0 whitespace-pre-wrap px-2 [overflow-wrap:break-word]")}
       >
         {`${currentValue}\u200b`}
-      </div>
+      </div> : null}
+      {compact ? leadingAction : null}
       <textarea
         ref={textareaRef}
         value={currentValue}
@@ -222,10 +228,10 @@ export function PromptInput({
         {...textareaProps}
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={handleKeyDown}
-        className={cn(textClassName, "scrollbar-hide block w-full resize-none overflow-y-auto bg-transparent px-2 pt-1.5 text-foreground outline-none placeholder:text-muted-foreground/55")}
+        className={cn(textClassName, "scrollbar-hide block resize-none overflow-y-auto bg-transparent text-foreground outline-none placeholder:text-muted-foreground/55", compact ? "min-w-0 flex-1 px-1 py-0" : "w-full px-2 pt-1.5")}
       />
 
-      <div className="mt-1 flex min-h-8 items-center gap-1">
+      <div className={cn("flex min-h-8 items-center gap-1", compact ? "shrink-0" : "mt-1")}>
         {actions.length ? (
           <MorphPopover open={actionsOpen} onOpenChange={setActionsOpen}>
             <MorphPopoverTrigger>
@@ -285,7 +291,7 @@ export function PromptInput({
             </MorphPopoverContent>
           </MorphPopover>
         ) : null}
-        {leadingAction}
+        {!compact ? leadingAction : null}
         {models.length ? (
           <Select
             value={currentModelValue}

@@ -2,11 +2,28 @@ import { test, expect } from 'bun:test'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { runChecks, checkIsCurrent } from './checks'
+import { checkIsCurrent } from './checks'
+import { runChecks } from './checker-test-driver'
 import type { TaskSpec } from './state'
 
 const task: TaskSpec = { id: 'smoke', kind: 'game.verify', goal: 'Observe actual static build', dependsOn: [], requirementIds: ['req.loop'], inputs: [],
   writablePaths: [], expectedOutputs: ['dist/index.html'], checks: ['runtime-smoke'], runtimeArtifact: 'dist' }
+
+for (const orientation of ['Landscape','Portrait']) test('Web Touch smoke always observes a phone: '+orientation, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-phone-smoke-'))
+  try {
+    await mkdir(join(root, 'dist'))
+    await writeFile(join(root, 'dist/index.html'), '<body><button>Start</button><script>if(innerWidth<900)throw Error("phone-only failure")</script>')
+    const result = (await runChecks(root,task,[],undefined,{platform:'Web',inputs:['Touch'],orientation})).checks[0]!
+    expect(result.status,result.observation).toBe('failed')
+    const phone=JSON.parse(result.observation).phone
+    expect(phone.viewport).toEqual(orientation==='Portrait'?[390,844]:[844,390])
+    expect(phone.environment.maxTouchPoints).toBeGreaterThan(0)
+    expect(phone.errors).toContain('phone-only failure')
+    const desktop=(await runChecks(root,task,[],undefined,{platform:'Web',inputs:['Keyboard'],orientation})).checks[0]!
+    expect(desktop.status,desktop.observation).toBe('passed')
+  } finally { await rm(root,{recursive:true,force:true}) }
+},30000)
 
 for (const kind of ['surface', 'script-error', 'missing-resource', 'external', 'websocket', 'empty'] as const) {
   test('actual host Chromium static build: '+kind, async () => {

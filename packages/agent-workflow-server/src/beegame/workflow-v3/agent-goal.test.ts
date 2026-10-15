@@ -1,15 +1,61 @@
 import { test, expect } from 'bun:test'
 import { Hono } from 'hono'
-import { mkdtemp, realpath, writeFile, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, writeFile, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { BeeGameSessionManager, type BeeGameSessionSubmitInput } from '../session-manager'
 import { registerV3Routes } from './routes'
 import { createLocalWorkflowStore, createRemoteWorkflowStore, assertCommit, type WorkflowStore } from './store'
-import { createAgentGoalExecutor, agentGoalPrompt, agentMessagePrompt, agentProfessionalContext, focusedExecutionFacts } from './agent-goal'
+import { createAgentGoalExecutor, agentGoalPrompt, agentMessagePrompt, agentProfessionalContext, agentProfessionalContextForRun, focusedExecutionFacts } from './agent-goal'
 import { createRun, type Run } from './state'
 import { openPreviewTestAccess } from '../preview-test-access'
 import type { AgentPreviewAccess, AgentImageAccess } from './agent-tools'
+
+test('resource guidance removes AI default and reuses existing requirements and runtime evidence', () => {
+  for (const prompt of [agentProfessionalContext, agentProfessionalContextForRun({} as Run)]) {
+    expect(prompt).not.toContain('By default use the available AI image bridge')
+    expect(prompt).toContain('purpose: production and existing requirementIds')
+    expect(prompt).toContain('do not add a second assembly document')
+    expect(prompt).toContain('absent device evidence stays unverified')
+    expect(prompt).toContain('not as the default for all core art')
+  }
+})
+
+test('focus-loss requirement covers countdown without host pause or acceptance claims', () => {
+  for (const prompt of [agentProfessionalContext, agentProfessionalContextForRun({} as Run)]) {
+    expect(prompt).toContain('When the project requires pause on focus loss')
+    expect(prompt).toContain('losing focus must stop countdown progress')
+    expect(prompt).toContain('preview.mjs --countdown-blur-sample')
+    expect(prompt).toContain('Sampling completion is not pause/resume acceptance')
+    expect(prompt).toContain('Preview must not pause the game on its behalf')
+  }
+})
+
+test('ended native goal exposes independent host evidence, never author acceptance',async()=>{
+  const f=await fixture()
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    const events=f.sessions.transcript(run.chatSessionId)
+    const host=events.find(event=>event.payload?.subtype==='host_evidence')!
+    expect(host).toBeDefined()
+    expect(host.type).toBe('system.status')
+    expect(host.payload).toMatchObject({execution:'ended',quality:'unverified',deliveryEligible:false,checkStatuses:[]})
+    expect(host.payload!.unmeasured).toContain('audio-data-consumption')
+    expect(host.turnId).toBe(run.agentTurns![0]!.turnId)
+    expect(run.deliveryEligible).toBe(false)
+    expect(run.status).toBe('blocked')
+    const facts={attemptId:'synthetic-report',execution:'ended',measurementId:'scoped-receipt',
+      checkStatuses:[{id:'build',status:'passed'},{id:'audio-data-consumption',status:'unverified'}],
+      unmeasured:['ui-data-consumption'],note:'Only saved host facts, not 0-assertion author report'}
+    f.sessions.recordHostEvidence(run.chatSessionId,facts)
+    f.sessions.recordHostEvidence(run.chatSessionId,facts)
+    const evidence=f.sessions.transcript(run.chatSessionId).filter(event=>event.payload?.attemptId==='synthetic-report')
+    expect(evidence).toHaveLength(1)
+    expect(evidence[0]!.payload).toMatchObject({quality:'unverified',deliveryEligible:false,checkStatuses:facts.checkStatuses})
+    expect(evidence[0]!.text).toContain('audio-data-consumption')
+  } finally {await f.close()}
+})
 
 test('image bridge binds real goal owner/project, never opens for discussion or duplicate intake',async()=>{
   const calls:any[]=[];let closes=0
@@ -19,7 +65,8 @@ test('image bridge binds real goal owner/project, never opens for discussion or 
   })
   try {
     await f.call('/agent/goal','POST',f.body);let run=await f.wait(r=>Boolean(r.agentTurns![0]?.finishedAt))
-    expect(calls).toEqual([{user:{id:'owner',role:'owner'},projectId:'goal-project',workspacePath:f.root}])
+    expect(calls).toEqual([{user:{id:'owner',role:'owner'},projectId:'goal-project',workspacePath:f.root,
+      visualHandoffVersion:1,screenOrientation:'Landscape'}])
     expect(closes).toBe(1)
     await f.call('/agent/goal','POST',f.body);expect(calls).toHaveLength(1)
     const make=(intent:string)=>({requestKey:intent,runId:run.id,chatSessionId:run.chatSessionId,expectedVersion:run.version,
@@ -27,20 +74,41 @@ test('image bridge binds real goal owner/project, never opens for discussion or 
     await f.call('/agent/messages','POST',make('discuss'));run=await f.wait(r=>Boolean(r.agentTurns![1]?.finishedAt))
     expect(calls).toHaveLength(1)
     await f.call('/agent/messages','POST',make('change'));await f.wait(r=>Boolean(r.agentTurns![2]?.finishedAt))
-    expect(calls).toHaveLength(2);expect(closes).toBe(2)
+    expect(calls).toHaveLength(2);expect(calls[1].visualHandoffVersion).toBe(1);expect(closes).toBe(2)
+  }finally{await f.close()}
+})
+
+test('default Chat message uses the database-authorized requirement-change event',async()=>{
+  const f=await fixture()
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    const response=await f.call('/agent/messages','POST',{
+      requestKey:'ordinary-chat-1',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,
+      text:'Which checks passed? Do not change files.',
+    })
+    expect(response.status).toBe(202)
+    const after=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(after.requirementChanges).toHaveLength(1)
+    expect(after.agentTurns?.[1]?.message?.intent).toBe('message')
+    expect(f.events.filter(event=>event==='requirements.changed')).toHaveLength(1)
   }finally{await f.close()}
 })
 
 
 async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false,resourceLibraryBaseUrl?:string,
   openAgentPreview?:(value:any)=>AgentPreviewAccess,openAgentImage?:(value:any)=>AgentImageAccess, extraEvents=0,
-  faults:{claimResponses?:number;exitWrites?:boolean;exitFailures?:number}={}) {
-  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-v3-goal-unit-')))
-  const local=createLocalWorkflowStore(join(root,'host')), submissions:BeeGameSessionSubmitInput[]=[]
+  faults:{claimResponses?:number;exitWrites?:boolean;exitFailures?:number}={},libraryAuthToken?:string,blankProject=false) {
+  const container=await realpath(await mkdtemp(join(tmpdir(),'bgs-v3-goal-unit-')))
+  const root=blankProject?join(container,'project'):container
+  if(blankProject)await mkdir(root)
+  const local=createLocalWorkflowStore(join(container,'host')), submissions:BeeGameSessionSubmitInput[]=[], events:string[]=[]
   const store:WorkflowStore={read:local.read,commit:async(...args)=>{
     if(failSettlement && args[4]==='agent.turn-settled') throw new Error('Synthetic settlement outage')
     if(faults.exitWrites && args[4]==='agent.writer-quiesced'){faults.exitFailures=(faults.exitFailures??0)+1;throw Error('Synthetic exit persistence outage')}
     await local.commit(...args)
+    events.push(args[4])
     if((faults.claimResponses??0)>0 && ['agent.turn-claimed','requirements.changed'].includes(args[4])) {
       faults.claimResponses!--;throw Error('Synthetic committed claim response lost')
     }
@@ -59,7 +127,7 @@ async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false
       await input.onMessage({type:'result',subtype:'success',session_id:nativeId,
         total_cost_usd:0,usage:{input_tokens:40,output_tokens:8},modelUsage:{synthetic:{inputTokens:40,outputTokens:8}},result:'Synthetic end, not game acceptance'} as any)
     },stop(){},
-  }}},join(root,'native'),async userDataRoot=>({BEEGAME_CONFIG_DIR:userDataRoot ?? join(root,'wrong-shared-config')}),{},true)
+  }}},join(container,'native'),async userDataRoot=>({BEEGAME_CONFIG_DIR:userDataRoot ?? join(root,'wrong-shared-config')}),{},true)
   const userDataRoot=join(root,'owner-config')
   const chat=sessions.start({workspacePath:root,projectId:'goal-project',userId:'owner',userDataRoot})
   let persistFails=false, owner='owner'
@@ -69,7 +137,7 @@ async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false
     openAgentPreview,
     openAgentImage,
     getProject:async(_r,u)=>u.id==='owner'?{id:'goal-project',name:'Synthetic',root_path:root,created_at:0}:undefined,
-    getAuthToken:()=>undefined,getValidAuthToken:()=>undefined,getUserDataRoot:()=>userDataRoot,assertNoLegacyRun:async()=>{},
+    getAuthToken:()=>libraryAuthToken,getValidAuthToken:()=>undefined,getUserDataRoot:()=>userDataRoot,assertNoLegacyRun:async()=>{},
     persistMode:async()=>{if(persistFails)throw Error('Synthetic mode write failure')},readBody:r=>r.json(),registerCleanup:fn=>cleanup.push(fn)})
   const body={requestKey:'confirmed-goal-1',chatSessionId:chat.id,
     brief:{kind:'confirmed_build_brief',idea:'Synthetic goal; preserve chosen engine',selected_option:{title:'One choice',loop:'collect-return'},
@@ -81,9 +149,39 @@ async function fixture(mode:'normal'|'fail'|'wait'='normal',failSettlement=false
     for(let i=0;i<300;i++){const run=await local.read('goal-project','owner');if(run && check(run))return run;await Bun.sleep(5)}
     throw Error('Synthetic goal did not settle: '+JSON.stringify(await local.read('goal-project','owner')))
   }
-  return {root,store:local,sessions,submissions,starts,body,call,wait,setMode:(v:typeof mode)=>{mode=v},setOwner:(v:string)=>{owner=v},setPersistFailure:(v:boolean)=>{persistFails=v},
-    close:async()=>{await Promise.all(cleanup.map(fn=>fn()));await sessions.dispose();await rm(root,{recursive:true,force:true})}}
+  return {root,store:local,sessions,submissions,starts,events,body,call,wait,setMode:(v:typeof mode)=>{mode=v},setOwner:(v:string)=>{owner=v},setPersistFailure:(v:boolean)=>{persistFails=v},
+    close:async()=>{await Promise.all(cleanup.map(fn=>fn()));await sessions.dispose();await rm(container,{recursive:true,force:true})}}
 }
+
+test('blank confirmed Web intake starts connected, stops after one slice turn and never reinstalls on follow-up',async()=>{
+  const f=await fixture('normal',false,undefined,undefined,undefined,0,{},undefined,true)
+  Object.assign(f.body.brief,{creation_mode:'creative',build_source:null,
+    settings:{platform:'Web',engine:'React',dimension:'2D',orientation:'Landscape'}})
+  try {
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(run.creation).toEqual({initialDelivery:'playable-slice',editableContent:true,webStarter:'react-canvas-2d-v1'})
+    const initialMessage = f.sessions.transcript(run.chatSessionId).find(event => event.type === 'user.message')!
+    expect(initialMessage, run.blockedReason).toBeDefined()
+    expect(initialMessage.payload?.displayText).toBe(f.body.brief.idea)
+    expect(JSON.parse(String(initialMessage.payload?.confirmedBriefContext))).toEqual(f.body.brief)
+    expect(await readFile(join(f.root,'content/index.json'),'utf8')).toContain('scenes/main.json')
+    expect(JSON.stringify(f.submissions[0]!.prompt)).toContain('then end this turn for user feedback')
+    expect(run.blockedReason).toContain('not full-game completion')
+    expect(f.submissions).toHaveLength(1)
+    // Identical intake is read-only even after the model has authored new files.
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    expect(f.submissions).toHaveLength(1)
+    await writeFile(join(f.root,'src/game.js'),'// retained user work')
+    expect((await f.call('/agent/messages','POST',{requestKey:'feedback',runId:run.id,
+      chatSessionId:run.chatSessionId,expectedVersion:run.version,requirementsRevision:run.requirements.revision,
+      intent:'work',text:'After playtesting, continue only the requested slice correction.'})).status).toBe(202)
+    run=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(f.submissions).toHaveLength(2)
+    expect(await readFile(join(f.root,'src/game.js'),'utf8')).toBe('// retained user work')
+    expect(run.creation?.initialDelivery).toBe('playable-slice')
+  }finally{await f.close()}
+},30000)
 
 test('running autonomous events use the actual host-accepted turn, not a previous Chat turn or an unbound cold host',async()=>{
   const f=await fixture('normal',false,undefined,undefined,undefined,240)
@@ -147,40 +245,78 @@ test('autonomous debug events are paged by actual attempt without changing nativ
   }finally{await f.close()}
 })
 
-test('whole goal enters normal native conversation without host Tasks, stage flags or automatic continuation',async()=>{
+test('initial goal continues through visual direction without host Tasks or a second authorization',async()=>{
   const f=await fixture()
   try {
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
     const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
     expect(f.submissions).toHaveLength(1)
     const submit=f.submissions[0]!
-    expect(submit.directionAuthors).toBeUndefined();expect(submit.projectTurn).toBeUndefined()
     expect(submit.language).toBe('zh')
     expect(submit.confirmedBriefContext).toBe(JSON.stringify(f.body.brief))
-    expect(JSON.stringify(submit.prompt)).toContain('Plan and execute autonomously')
+    expect(JSON.stringify(submit.prompt)).toContain('first save the current slice decisions in the existing design records')
+    expect(JSON.stringify(submit.prompt)).toContain('lowest-cost adequate representation')
+    expect(JSON.stringify(submit.prompt)).toContain('continue through implementation and actual runtime checks')
+    expect(JSON.stringify(submit.prompt)).not.toContain('first assignment ends at visual-direction handoff')
     expect(JSON.stringify(submit.prompt)).not.toContain('Professional coverage:')
     expect(f.starts[0].systemContext).toContain(agentProfessionalContext)
     expect(f.starts[0].systemContext).toContain('No root project guide exists')
+    expect(f.starts[0].systemContext).toContain('Current BGS tools directory')
+    expect(f.starts[0].systemContext).toContain('node measure.mjs, handoff.mjs')
     expect(f.starts[0].systemContext).not.toContain('Maintain root CLAUDE.md')
     expect(JSON.stringify(submit.prompt)).toContain('project-navigation-sources')
     expect(Array.isArray(submit.prompt)).toBe(true)
     expect((submit.prompt as {type:string;text:string}[])[0]!.text).toContain('Optional BGS project tools')
     expect((submit.prompt as {type:string;text:string}[]).at(-1)!.text).toContain(JSON.stringify(f.body.brief))
-    expect(Object.keys(run.tasks)).toHaveLength(0);expect(run.plans).toEqual([]);expect(run.attempts).toEqual([])
+    expect(['plans','tasks','attempts'].some(key=>key in run)).toBe(false)
     expect(run.agentTurns![0]).toMatchObject({sessionId:f.body.chatSessionId,status:'ended',
       usage:expect.objectContaining({prompt_tokens:40,completion_tokens:8})})
     expect(run.agentTurns![0]!.quiescedAt).toBeDefined();expect(run.writer).toBeUndefined();expect(run.deliveryEligible).toBe(false)
+    expect(run.blockedReason).toContain('target-runtime evidence remain unverified')
+    expect(run.blockedReason).not.toContain('Visual boards')
     expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202);expect(f.submissions).toHaveLength(1)
     expect((await f.call('/agent/goal','POST',reverseKeys(f.body))).status).toBe(202)
     expect(f.submissions).toHaveLength(1)
     expect((await f.call('/agent/goal','POST',{...f.body,brief:{...f.body.brief,idea:'different'}})).status).toBe(409)
-    expect((await f.call('/plan','PUT',{})).status).toBe(409)
+    expect((await f.call('/plan','PUT',{})).status).toBe(404)
     const events=await (await f.call('/events')).json()
     expect(events.events.some((e:any)=>e.type==='turn.completed')).toBe(true)
     expect(events.events.every((e:any)=>!e.workflowExecution)).toBe(true)
     expect(await readFile(join(f.root,'candidate.txt'),'utf8')).toBe('Synthetic partial candidate')
   }finally{await f.close()}
 })
+test('new goal receives the real catalog before native submission, once, without replacing user source choices',async()=>{
+  const calls:unknown[]=[]
+  const upstream=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
+    calls.push({path:new URL(request.url).pathname,body:await request.json(),submissions:f.submissions.length})
+    return Response.json({total:1,items:[{packId:'fixture-audio',packName:'Existing audio',dimension:'agnostic',
+      primaryCategory:'audio',readyElementCount:54,formats:['ogg'],styles:[],tags:[],license:'CC0'}]})
+  }})
+  const f=await fixture('normal',false,upstream.url.origin,undefined,undefined,0,{},'synthetic-user')
+  f.body.brief.idea='Synthetic goal: use the user-supplied character; AI only for the requested background.'
+  try {
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    let run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    expect(calls).toEqual([{path:'/api/resource-catalog/packs',body:{limit:32},submissions:0}])
+    const initial=JSON.stringify(f.submissions[0]!.prompt)
+    expect(initial).toContain('fixture-audio')
+    expect(initial).toContain(f.body.brief.idea)
+    expect(initial).toContain('Preserve explicit user source choices')
+    expect(JSON.parse(run.requirements.text)).toEqual(f.body.brief)
+    expect((await f.call('/agent/goal','POST',f.body)).status).toBe(202)
+    for(const intent of ['discuss','work','change'] as const) {
+      const turnCount=run.agentTurns!.length
+      expect((await f.call('/agent/messages','POST',{requestKey:'followup-'+intent,runId:run.id,
+        chatSessionId:run.chatSessionId,expectedVersion:run.version,requirementsRevision:run.requirements.revision,
+        intent,text:'Synthetic follow-up; preserve the source choice'})).status).toBe(202)
+      run=await f.wait(r=>Boolean(r.agentTurns?.[turnCount]?.finishedAt))
+      expect(JSON.stringify(f.submissions[turnCount]!.prompt)).not.toContain('Initial built-in resource catalog')
+    }
+    expect(calls).toHaveLength(1)
+    expect(f.submissions).toHaveLength(4)
+  }finally{await f.close();upstream.stop(true)}
+})
+
 test('same-project discussion/change reuse native history; one CAS changes revision, duplicates never dispatch again',async()=>{
   const f=await fixture()
   try {
@@ -197,6 +333,7 @@ test('same-project discussion/change reuse native history; one CAS changes revis
     expect(JSON.stringify(f.submissions[1]!.prompt)).toContain('answer only')
     expect(JSON.stringify(f.submissions[1]!.prompt)).not.toContain('GDD.md')
     expect(f.starts[1].systemContext).not.toContain('Professional coverage:')
+    expect(f.starts[1].systemContext).not.toContain('Current BGS tools directory')
     expect(f.starts[1].systemContext).toContain('No root project guide exists')
     const change=message('change-1','change','Change the target to four, preserve unrelated notes and rerun the rule test')
     const [a,b]=await Promise.all([f.call('/agent/messages','POST',change),f.call('/agent/messages','POST',change)])
@@ -207,7 +344,7 @@ test('same-project discussion/change reuse native history; one CAS changes revis
     expect(run.requirementChanges).toHaveLength(1);expect(run.requirementChanges![0]!.before).toEqual(original)
     expect(JSON.parse(run.requirements.text).authorized_user_changes).toEqual([{requestKey:'change-1',text:change.text}])
     expect(run.agentTurns![2]!.requirementsRevision).toBe(run.requirements.revision)
-    expect(run.tasks).toEqual({});expect(run.plans).toEqual([]);expect(run.deliveryEligible).toBe(false)
+    expect(['plans','tasks','attempts'].some(key=>key in run)).toBe(false);expect(run.deliveryEligible).toBe(false)
     expect((await f.call('/agent/messages','POST',change)).status).toBe(202)
     expect((await f.call('/agent/messages','POST',{...change,text:'Another change'})).status).toBe(409)
     expect((await f.call('/agent/messages','POST',{...change,requestKey:'stale-change'})).status).toBe(409)
@@ -218,6 +355,11 @@ test('same-project discussion/change reuse native history; one CAS changes revis
     expect(JSON.stringify(f.submissions[2]!.prompt)).not.toContain('only affected domains')
     expect(JSON.stringify(f.submissions[2]!.prompt)).not.toContain('Professional coverage:')
     expect(f.starts[2].systemContext).toContain(agentProfessionalContext)
+    const locator = /Current BGS tools directory \(relative to project root\): ("[^"]+")/
+    const firstDirectory = f.starts[0].systemContext.match(locator)[1]
+    const currentDirectory = f.starts[2].systemContext.match(locator)[1]
+    expect(currentDirectory).not.toBe(firstDirectory)
+    expect(f.starts[2].systemContext).not.toContain(firstDirectory)
     const edited=structuredClone(run);edited.version++;edited.agentTurns![2]!.message!.text='Rewritten authorization'
     expect(()=>assertCommit(run.projectId,run.ownerId,run.version,edited,run)).toThrow('history')
   }finally{await f.close()}
@@ -249,7 +391,27 @@ test('formal natural-language chat preserves the exact request without a UI inte
   } finally {await f.close()}
 })
 
-test('authorized existing-goal work preserves requirements and native history; no synthetic change or retry',async()=>{
+test('V3 attachments reach the native turn without storing base64 in the Run',async()=>{
+  const f=await fixture()
+  try {
+    await f.call('/agent/goal','POST',f.body)
+    const run=await f.wait(r=>Boolean(r.agentTurns?.[0]?.finishedAt))
+    const request={requestKey:'chat-file',runId:run.id,chatSessionId:run.chatSessionId,
+      expectedVersion:run.version,requirementsRevision:run.requirements.revision,
+      text:'',attachments:[{type:'file',mediaType:'text/plain',filename:'note.txt',data:Buffer.from('A design note').toString('base64')}]}
+    expect((await f.call('/agent/messages','POST',request)).status).toBe(202)
+    const saved=await f.wait(r=>Boolean(r.agentTurns?.[1]?.finishedAt))
+    expect(saved.agentTurns![1]!.message?.attachmentDigests).toHaveLength(1)
+    expect(JSON.stringify(saved)).not.toContain(request.attachments[0]!.data)
+    expect(JSON.stringify(f.submissions[1]!.prompt)).toContain('note.txt')
+    expect((await f.call('/agent/messages','POST',{...request,
+      attachments:[{...request.attachments[0],data:Buffer.from('Different note').toString('base64')}] })).status).toBe(409)
+    expect((await f.call('/agent/messages','POST',{...request,requestKey:'invalid-file',
+      attachments:[{...request.attachments[0],data:'not-base64'}] })).status).toBe(400)
+  } finally {await f.close()}
+})
+
+test('first follow-up preserves requirements and resumes native history unless focused was requested',async()=>{
   const f=await fixture()
   try {
     await f.call('/agent/goal','POST',f.body)
@@ -262,6 +424,7 @@ test('authorized existing-goal work preserves requirements and native history; n
     expect(run.requirements).toEqual(original);expect(run.requirementChanges).toBeUndefined()
     expect(run.planRevision).toBe(planRevision)
     expect(f.starts[1].resumeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
+    expect(run.agentTurns![1]!.nativeSessionId).toBe(run.agentTurns![0]!.nativeSessionId)
     expect(JSON.stringify(f.submissions[1]!.prompt)).toContain('not a requirement change')
     expect(JSON.stringify(f.submissions[1]!.prompt)).toContain('BGS saved evidence')
     expect(JSON.stringify(f.submissions[1]!.prompt)).toContain('reportSemantics')
@@ -318,7 +481,7 @@ test('focused work is explicit and retains Chat/sources but does not resume the 
     expect(f.starts[1].resumeSessionId).toBeUndefined()
     expect(run.agentTurns![1]!.nativeSessionId).not.toBe(native)
     expect(run.chatSessionId).toBe(chat);expect(run.requirements).toEqual(original)
-    expect(run.plans).toEqual([]);expect(run.tasks).toEqual({})
+    expect(['plans','tasks','attempts'].some(key=>key in run)).toBe(false)
     expect(JSON.stringify(f.submissions[1]!.prompt)).toContain('saved-user-inputs-and-current-requirements')
     const facts=JSON.parse((f.submissions[1]!.prompt as Array<{text:string}>)[0]!.text.split('BGS saved evidence (not game acceptance): ')[1]!)
     expect(JSON.parse(facts.executionContext.requirements.text)).toEqual(f.body.brief)
@@ -436,15 +599,50 @@ test('focused facts retain literal user decisions and answered Questions, never 
   expect(facts.answeredQuestions[1]).not.toHaveProperty('answers')
 })
 
+// Contract regression only: these assertions cannot prove a model follows the order.
+test.each([1, undefined] as const)('production order records current decisions before work without an all-document gate: %s', visualHandoffVersion => {
+  const run={visualHandoffVersion,requirements:{text:'ORIGINAL_CONFIRMED_GOAL'}} as Run
+  const context=agentProfessionalContextForRun(run), goal=agentGoalPrompt(run)
+  expect(context).toContain('Before implementing or producing resources for the current slice, save its concrete decisions')
+  expect(context).toContain('controls, core loop, progression/failure rules, initial values affecting the interaction')
+  expect(context).toContain('required screens/states/actions, and resource representation')
+  expect(context).toContain('A concise merged record is sufficient; mark unresolved assumptions for validation')
+  expect(context).toContain('not completion of all eight records')
+  expect(context).toContain('a todo list or chat declaration is not a saved design record')
+  expect(context).toContain('lowest-cost representation adequate for that validation')
+  expect(context).toContain('Use the observations to update only affected decisions and determine subsequent resource production')
+  for(const prompt of [context,goal]) {
+    expect(prompt).not.toContain('do not wait for all eight design records')
+    expect(prompt).not.toContain('start with a representative playable interaction and its needed resources')
+    expect(prompt).not.toContain('complete the applicable eight-domain design records before visual production')
+  }
+  if(visualHandoffVersion===1) {
+    expect(context).toContain('do not produce a complete asset set first and document the design afterward')
+    expect(context).toContain('limit production to what the experiment needs')
+    expect(context).toContain('does not replace gameplay validation or authorize bulk production')
+    expect(context).toContain('Temporary representations are for validation, not substitutes for required final artwork')
+    expect(goal).toContain('first save the current slice decisions in the existing design records')
+    expect(goal).toContain('this does not require completing all eight documents')
+    expect(goal).toContain('lowest-cost adequate representation')
+    expect(goal).toContain('recorded, scoped validation need')
+  }
+})
+
 test('professional responsibilities stay complete in stable system context, not repeated in user history', () => {
-  const run={requirements:{text:'ORIGINAL_CONFIRMED_GOAL'}} as Run
+  const run={visualHandoffVersion:1,requirements:{text:'ORIGINAL_CONFIRMED_GOAL'}} as Run
   const message={intent:'change',text:'Change only movement speed'} as Parameters<typeof agentMessagePrompt>[0]
   const prompts=[agentGoalPrompt(run),agentMessagePrompt(message),agentMessagePrompt({...message,intent:'continue'})]
   for(const prompt of [agentProfessionalContext]) {
     for(const name of ['GDD.md','TECHNICAL_DESIGN.md','ART_DIRECTION.md','AUDIO_DESIGN.md','UI_UX_SPEC.md',
       'LEVEL_SCENE_DESIGN.md','BALANCE_DESIGN.md','ASSET_PLAN.md']) expect(prompt).toContain(name)
     expect(prompt).toContain('not stages')
+    expect(prompt).toContain('every registered resource file_paths entry and dependency local_path')
+    expect(prompt).toContain('dynamic and on-demand resources must remain available')
+    expect(prompt).toContain('Do not copy the entire assets directory by default')
+    expect(prompt).toContain('Inspect packageComposition in the existing measurement report')
+    expect(prompt).toContain('do not auto-delete source files')
     expect(prompt).toContain('merged')
+    expect(prompt).toContain('headings alone are not coverage')
     expect(prompt).toContain('native Skill tool')
     expect(prompt).toContain('Before making design decisions or drafting each affected domain')
     expect(prompt).toContain('explicitly include this Skill-use requirement in the author assignment')
@@ -454,12 +652,68 @@ test('professional responsibilities stay complete in stable system context, not 
     expect(prompt).not.toContain('gameplay/GDD.md')
     expect(prompt).toContain('Preserve existing paths/references')
     expect(prompt).toContain('concrete decisions, reasons')
-    expect(prompt).toContain('representative real game view')
+    expect(prompt).toContain('before multiplying similar scenes, screens or assets')
+    expect(prompt).toContain('representative playable and visible interaction')
+    expect(prompt).not.toContain('complete the applicable eight-domain design records before visual production')
+    expect(prompt).toContain('not completion of all eight records')
+    expect(prompt).toContain('not as a blanket prerequisite for the playable slice')
+    expect(prompt).toContain('assets/visual/ui-board.png')
+    expect(prompt).toContain('assets/visual/scene-board.png')
+    expect(prompt).toContain('assets/visual/design-board.png')
+    expect(prompt).toContain('Do not assign an image count from the number of objects')
+    expect(prompt).toContain('complete screen layouts and key states with readable hierarchy, spacing and style')
+    expect(prompt).toContain('isolated button or icon studies alone do not establish a UI layout')
+    expect(prompt).toContain('Use the structured uiReference input')
+    expect(prompt).toContain('Run assets.mjs ui-board-plan')
+    expect(prompt).toContain('read-only quote for the actual low-quality variant')
+    expect(prompt).toContain('plan a shared transparent sheet request')
+    expect(prompt).toContain('An atlas assembled after many separate generations does not save generation cost')
+    expect(prompt).toContain('screens and distinct layout states in the current slice')
+    expect(prompt).toContain('confirmed Landscape or Portrait setting')
+    expect(prompt).toContain('project reference viewport width and height')
+    expect(prompt).toContain('computed equal-cell grid')
+    expect(prompt).toContain('use the inspected UI design board only as appearance guidance via referenceImagePath')
+    expect(prompt).toContain('request a separate shared PNG sheet with background: transparent')
+    expect(prompt).toContain('background: transparent')
+    expect(prompt).toContain('fixed-order shelf packer with no rotation or trim')
+    expect(prompt).toContain('Registration alone is not packing')
+    expect(prompt).toContain('each distinct scene type')
+    expect(prompt).toContain('obtain a read-only quote')
+    expect(prompt).toContain('respecting user exclusions and the configured project image budget')
+    expect(prompt).toContain('do not ask for redundant per-image or visual-direction approval')
+    expect(prompt).toContain('an unavailable AI bridge alone does not rule out suitable existing references')
+    expect(prompt).toContain('revise only affected records')
+    expect(prompt).toContain('not gameplay authority, exact UI coordinates or production atlas')
+    expect(prompt).toContain('a temporary stop from a prior turn is not a permanent asset prohibition')
+    expect(prompt).toContain('choose a suitable source per item, not a mandatory source-by-source tour')
+    expect(prompt).toContain('For common sounds, icons and environment assets, first consider suitable supplied or built-in licensed resources')
+    expect(prompt).toContain('web resources only after verifying usage rights')
+    expect(prompt).toContain('Simple buttons and geometric effects may be procedural')
+    expect(prompt).toContain('a button role does not justify replacing its distinctive artwork with generic CSS')
+    expect(prompt).toContain('include the need in the existing Manifest requirements')
+    expect(prompt).toContain('Do not create a second inventory document or require a separate UI atlas file')
+    expect(prompt).toContain('button artwork through existing data.image references')
+    expect(prompt).toContain('layout evidence does not verify image/frame use')
+    expect(prompt).toContain('structural success cannot establish visual restoration')
+    expect(prompt).not.toContain('AI generation is the primary route')
+    expect(prompt).toContain('Honor explicit user source choices')
+    expect(prompt).toContain('prefer an existing complete animation when suitable')
+    expect(prompt).toContain('Empty usageTags means unclassified, not unavailable')
+    expect(prompt).toContain('Record actual candidate/download evidence')
+    expect(prompt).toContain('fallback requiring a concrete blocker and user authorization')
+    expect(prompt).toContain('record source files and rights, or the renderer path for procedural work, without fake assetRefs')
+    expect(prompt).toContain('observe each required resource in its reachable game state; unobserved use stays unverified')
+    expect(prompt).toContain('finalize editable Scene/UI JSON after the needed production visuals')
+    expect(prompt).toContain('including relevant visual nodes and asset bindings, not just settings')
+    expect(prompt.indexOf('assets/visual/ui-board.png')).toBeLessThan(prompt.indexOf('Make and inspect each slice of production resources'))
+    expect(prompt.indexOf('Make and inspect each slice of production resources')).toBeLessThan(prompt.indexOf('finalize editable Scene/UI JSON'))
+    expect(prompt).toContain('compare actual screenshots')
+    expect(prompt).toContain('unverified aesthetic judgment')
     expect(prompt).toContain('React/Canvas does not waive')
     expect(prompt).toContain('actual runtime must consume the saved data')
     expect(prompt).toContain('Unity/Godot use native scene/UI data')
     expect(prompt).toContain('obtain migration authorization')
-    expect(prompt).toContain('Missing services are not empty catalogs')
+    expect(prompt).toContain('disclose that specific blocker')
     expect(prompt).toContain('actual runtime')
     expect(prompt).toContain('unverified')
     expect(prompt).toContain('single source')
@@ -470,6 +724,18 @@ test('professional responsibilities stay complete in stable system context, not 
   }
   for(const prompt of prompts)expect(prompt).not.toContain('Professional coverage:')
   expect(prompts[0]).toContain('ORIGINAL_CONFIRMED_GOAL')
+  expect(prompts[0]).toContain('complete-screen UI layout references and distinct scene/prop references')
+  expect(prompts[0]).toContain('selected screen/state list determine the equal-cell grid')
+  expect(prompts[0]).toContain('continue through implementation and actual runtime checks')
+  expect(prompts[0]).not.toContain('first assignment ends')
+  expect(agentGoalPrompt({...run,visualHandoffVersion:undefined})).toContain('Develop the game from this complete confirmed goal')
+  expect(agentProfessionalContextForRun(run)).toContain('assets/visual/ui-board.png')
+  expect(agentProfessionalContextForRun({...run,visualHandoffVersion:undefined})).not.toContain('assets/visual/ui-board.png')
+  expect(agentProfessionalContextForRun({...run,visualHandoffVersion:undefined})).not.toContain('referenceImagePath')
+  expect(agentProfessionalContextForRun({...run,visualHandoffVersion:undefined})).not.toContain('prior fixed two-board instruction')
+  expect(agentProfessionalContextForRun({...run,visualHandoffVersion:undefined})).toContain('For each needed runtime resource')
+  expect(agentProfessionalContextForRun({...run,visualHandoffVersion:undefined})).toContain('a temporary stop from a prior turn is not a permanent asset prohibition')
+  expect(agentProfessionalContextForRun({...run,visualHandoffVersion:undefined})).toContain('content/scenes/*.json')
   expect(prompts[1]).not.toContain('ORIGINAL_CONFIRMED_GOAL')
   expect(prompts[1]).not.toContain('only affected domains')
   expect(prompts[2]).toContain('Do not blindly replay')
@@ -545,7 +811,7 @@ test('reconstructed worker resumes persisted native UUID and pause intent withou
     expect(starts[0].resumeSessionId).toBe(interrupted.nativeSessionId)
     expect(run.agentTurns![0]).toEqual(interrupted)
     expect(run.agentTurns![1]!.nativeSessionId).toBe(interrupted.nativeSessionId)
-    expect(JSON.stringify(submissions[0]!.prompt)).not.toContain('Develop the game from this complete confirmed goal')
+    expect(JSON.stringify(submissions[0]!.prompt)).not.toContain('first assignment ends at visual-direction handoff')
     expect(await readFile(join(f.root,'candidate.txt'),'utf8')).toBe(partial)
     expect(sessions.transcript(run.chatSessionId).some(e=>e.type==='user.message' && JSON.stringify(e).includes(f.body.brief.idea))).toBe(true)
   }finally{await executor.dispose();await sessions.dispose();await f.close()}
@@ -800,7 +1066,7 @@ test('proven no-start requires a new explicit work request; duplicate goal, paus
     expect(ended.requirements).toEqual(run.requirements);expect(ended.id).toBe(run.id)
     expect(f.submissions).toHaveLength(1);expect(f.starts[0].resumeSessionId).toBeUndefined()
     expect(JSON.stringify(f.submissions[0]!.prompt)).toContain(body.text)
-    expect(JSON.stringify(f.submissions[0]!.prompt)).not.toContain('Develop the game from this complete confirmed goal')
+    expect(JSON.stringify(f.submissions[0]!.prompt)).not.toContain('first assignment ends at visual-direction handoff')
     expect((await f.call('/agent/messages','POST',request)).status).toBe(202);expect(f.submissions).toHaveLength(1)
     const forged=structuredClone(ended);forged.version++;delete forged.agentTurns![0]!.notStarted
     await expect(f.store.commit(run.projectId,run.ownerId,ended.version,forged,'forged')).rejects.toThrow('history')
@@ -852,7 +1118,7 @@ test('lost change claim response preserves the authorized requirement change wit
     expect(after.requirements.revision).not.toBe(before.requirements.revision)
     expect(after.requirementChanges![0]!.before).toEqual(before.requirements)
     expect(after.requirementChanges![0]!.after).toEqual(after.requirements)
-    expect(after.plans).toEqual([]);expect(after.tasks).toEqual({});expect(f.submissions).toHaveLength(1)
+    expect(['plans','tasks','attempts'].some(key=>key in after)).toBe(false);expect(f.submissions).toHaveLength(1)
     expect(await executor.message(after,message,{})).toEqual(after.agentTurns![1])
     expect(f.submissions).toHaveLength(1)
     expect(after.agentTurns![1]!.notStarted).toBe(true)

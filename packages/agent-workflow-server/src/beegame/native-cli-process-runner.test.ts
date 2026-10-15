@@ -11,9 +11,7 @@ import {
   withRuntimeFeatureSettings,
   nativeRuntimeCommand,
   appendWorkingFilesInstruction,
-  nativeWorkflowCommand,
   nativePromptContent,
-  nativeAssignmentPrompt,
   prepareNativeSessionTemporaryDirectory,
   publicArtifactApprovalMessage,
 } from './native-cli-process-runner'
@@ -66,44 +64,6 @@ test('standard CLI debug is passive, cancellation remains normal and raw stderr 
     expect(rows.find(row=>row.type==='turn_terminal').compaction.status).toBe('unfinished')
     expect(text).not.toContain('PRIVATE')
   } finally {clearTimeout(timeout);controller.abort();await runtime.dispose?.();await rm(cwd,{recursive:true,force:true})}
-})
-
-test('workflow tasks refresh only standard native prompt/session flags and preserve selected executable/settings', () => {
-  const input = { sessionId: 'host', cwd: process.cwd(), env: {}, systemContext: 'Worker ownership',
-    nativeSessionId: '01234567-1234-4234-8234-123456789abc' }
-  const command = ['bun', '/selected/cli.js', '--print', '--append-system-prompt', 'Parent ownership',
-    '--setting-sources', 'user', '--resume=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa']
-  const task = nativeWorkflowCommand(command, input)
-  expect(task.slice(0, 2)).toEqual(command.slice(0, 2))
-  expect(task).toContain('--session-id=' + input.nativeSessionId)
-  expect(task.some(value => value.startsWith('--resume='))).toBe(false)
-  expect(task[task.indexOf('--append-system-prompt') + 1]).toContain('Worker ownership')
-  expect(task[task.indexOf('--append-system-prompt') + 1]).not.toContain('Parent ownership')
-  expect(task.slice(task.indexOf('--setting-sources'), task.indexOf('--setting-sources') + 2)).toEqual(['--setting-sources', 'user'])
-  expect(command[4]).toBe('Parent ownership')
-})
-
-test('GDD uses a standard Skill invocation with intact task text, without private native role metadata', () => {
-  expect(nativeAssignmentPrompt('Confirmed original task', { authorDocument: 'GDD.md' })).toEqual([
-    { type: 'text', text: '/bgs-builtins:game-systems-designer-expert Confirmed original task' },
-  ])
-  expect(nativeAssignmentPrompt('Ordinary user task')).toEqual(nativePromptContent('Ordinary user task'))
-})
-
-test('standard GDD invocation preserves image blocks and leaves caller input unchanged', () => {
-  const image = { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/png' as const, data: 'fixture' } }
-  const prompt = [image, { type: 'text' as const, text: 'Use this reference.' }]
-  expect(nativeAssignmentPrompt(prompt, { authorDocument: 'GDD.md' })).toEqual([
-    image, { type: 'text', text: '/bgs-builtins:game-systems-designer-expert Use this reference.' },
-  ])
-  expect(prompt[1]).toEqual({ type: 'text', text: 'Use this reference.' })
-  const context = { type: 'text' as const, text: 'Host requirements' }
-  expect(nativeAssignmentPrompt([context, ...prompt], { authorDocument: 'GDD.md' })).toEqual([
-    context, image, { type: 'text', text: '/bgs-builtins:game-systems-designer-expert Use this reference.' },
-  ])
-  expect(nativeAssignmentPrompt([context, image], { authorDocument: 'GDD.md' })).toEqual([
-    context, image, { type: 'text', text: '/bgs-builtins:game-systems-designer-expert' },
-  ])
 })
 
 function startRuntime() {
@@ -220,26 +180,6 @@ describe('native CLI process runner', () => {
       expect(messages).toHaveLength(1)
       expect(messages[0]).toMatchObject({ type: 'result' })
     } finally { await runtime.dispose?.(); await rm(cwd, { recursive: true, force: true }) }
-  })
-  test('ordinary native stdin does not carry BGS writing-owner metadata', async () => {
-    const runtime = await startRuntime()
-    const messages: Record<string, unknown>[] = []
-    const directionAuthors = { contextPath: join(process.cwd(), 'context.md'), responsibilities: {
-      'TECHNICAL_DESIGN.md': 'Technical ownership', 'ART_DIRECTION.md': 'Art ownership', 'AUDIO_DESIGN.md': 'Audio ownership',
-    }, contextPaths: {
-      'TECHNICAL_DESIGN.md': join(process.cwd(), 'technical.context.md'),
-      'ART_DIRECTION.md': join(process.cwd(), 'art.context.md'),
-      'AUDIO_DESIGN.md': join(process.cwd(), 'audio.context.md'),
-    } }
-    const turn = { prompt: 'direction-author-metadata', signal: new AbortController().signal,
-      onMessage: (message: Record<string, unknown>) => { messages.push(message) },
-      requestPermission: async () => ({ behavior: 'deny' as const }) }
-    try {
-      await runtime.submit({ ...turn, directionAuthors })
-      await runtime.submit(turn)
-      expect(messages.filter(message => message.type === 'result').map(message => message.directionAuthors))
-        .toEqual([null, null])
-    } finally { await runtime.dispose?.() }
   })
   test('captures fragmented safe stderr diagnostics without changing visible results', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'native-diagnostic-'))
@@ -465,9 +405,11 @@ describe('native CLI process runner', () => {
   })
 
   test('passes preferred response language without changing the native tool inventory', () => {
-    const command = nativeRuntimeCommand({ sessionId: 'language', cwd: process.cwd(), env: {}, language: 'zh' })
+    const command = nativeRuntimeCommand({ sessionId: 'language', cwd: process.cwd(), env: {}, language: 'zh',
+      systemContext: 'Current BGS tools directory: .beegame/tmp/goal-tools-fixture' })
     expect(command[command.indexOf('--append-system-prompt') + 1]).toContain('User response language: zh')
     expect(command).not.toContain('--tools')
+    expect(command[command.indexOf('--append-system-prompt') + 1]).toContain('Current BGS tools directory: .beegame/tmp/goal-tools-fixture')
     expect(command[command.indexOf('--append-system-prompt') + 1]).toContain('thinking/reasoning summaries')
   })
 
@@ -939,6 +881,34 @@ describe('native CLI process runner', () => {
       subtype: 'success',
     })
     runtime.dispose?.()
+  })
+
+  test('empty native decision reason still produces a nonempty approval explanation', async () => {
+    const runtime = await startRuntime()
+    let requested: {toolName:string;message:string;input:Record<string,unknown>} | undefined
+    try {
+      await runtime.submit({prompt:'permission-no-reason',signal:new AbortController().signal,
+        onMessage:()=>undefined,requestPermission:async request=>{
+          requested=request
+          return {behavior:'deny',source:'user'}
+        }})
+      expect(requested?.toolName).toBe('Bash')
+      expect(requested?.message).toBe('Bash requires permission.')
+      expect(requested?.input.command).toBe('rm -rf specific-synthetic-output')
+    } finally {runtime.dispose?.()}
+  })
+
+  test('empty native reason is also nonempty at the scoped tool policy boundary', async () => {
+    let policyMessage = ''
+    const runtime = await createNativeCliProcessRunner({command:[process.execPath,fixturePath]}).start({
+      sessionId:'blank-reason-policy',cwd:process.cwd(),env:{},
+      toolPolicy:async request=>{policyMessage=request.message;return undefined},
+    })
+    try {
+      await runtime.submit({prompt:'permission-no-reason',signal:new AbortController().signal,
+        onMessage:()=>undefined,requestPermission:async()=>({behavior:'deny',source:'user'})})
+      expect(policyMessage).toBe('Bash requires permission.')
+    } finally {runtime.dispose?.()}
   })
 
   test('preserves native child identity on the permission authority request', async () => {

@@ -1,7 +1,7 @@
 import type { Hono } from 'hono'
 import type { DashboardRepository } from './dashboard-repository'
 import type { BeeGameUserContext } from './auth/user-context'
-import { connectionStatus, disconnectAccount, disconnectConnection, ModelConnectionLogins, PERSONAL_BYOK_ID, PERSONAL_CHATGPT_ID, PERSONAL_CLAUDE_ID, personalModelConfig, saveConnection } from './model-connections'
+import { connectionStatus, disconnectAccount, disconnectConnection, fetchClaudeSubscriptionUsage, ModelConnectionLogins, PERSONAL_BYOK_ID, PERSONAL_CHATGPT_ID, PERSONAL_CLAUDE_ID, personalModelConfig, saveConnection } from './model-connections'
 import type { ModelAuthMethod, ModelProviderKind } from '@bee-game-studio/agent-workflow'
 
 export function registerModelConnectionRoutes(app: Hono, options: {
@@ -34,6 +34,13 @@ export function registerModelConnectionRoutes(app: Hono, options: {
   app.get('/api/model-catalog', async c => c.json((await catalog(c.req.raw)).map(config => ({
     ...config, apiKeyPreview: '', connection: connectionStatus(options.getRoot(c.req.raw), config),
   }))))
+  app.get('/api/model-accounts/claude/usage', async c => {
+    try {
+      return c.json({ usage: await fetchClaudeSubscriptionUsage(options.getRoot(c.req.raw)) })
+    } catch {
+      return c.json({ error: 'Claude subscription usage is unavailable' }, 502)
+    }
+  })
   app.put('/api/model-connections/:id', async c => {
     try {
       const body = await c.req.json()

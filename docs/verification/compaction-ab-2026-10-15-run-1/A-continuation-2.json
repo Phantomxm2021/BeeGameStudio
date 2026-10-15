@@ -1,0 +1,49 @@
+{
+  "arm": "A",
+  "phase": "continuation-2",
+  "elapsedMs": 5281,
+  "requestId": "021792040594163f0b662e0a22462bcc30964e8c71cc766743693",
+  "message": {
+    "type": "message",
+    "id": "021792040594163f0b662e0a22462bcc30964e8c71cc766743693",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "call_a26tdyr3ql5e4cs6xyr0iet2",
+        "name": "ReadTranscript",
+        "input": {
+          "query": "main.jsx",
+          "offset": 0
+        }
+      },
+      {
+        "type": "tool_use",
+        "id": "call_yxnm02jcnqhdyqxtie8xr0z8",
+        "name": "ReadTranscript",
+        "input": {
+          "query": "styles.css",
+          "offset": 0
+        }
+      },
+      {
+        "type": "tool_use",
+        "id": "call_0l1z03pvgy4oc61dtrtzz4td",
+        "name": "ReadTranscript",
+        "input": {
+          "query": "App.jsx",
+          "offset": 0
+        }
+      }
+    ],
+    "model": "auto",
+    "stop_reason": "tool_use",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 11699,
+      "output_tokens": 121,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 5944
+    }
+  }
+}

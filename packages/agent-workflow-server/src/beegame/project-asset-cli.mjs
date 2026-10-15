@@ -14,6 +14,7 @@ import { dirname, relative, resolve } from 'node:path'
 const catalogFilterKeys = ['packIds','dimensions','primaryCategories','categories','styles','gameTypes','packTags','usageTags','assetKinds','capabilities','formats']
 const catalogUsage = 'Catalog accepts structured filter arrays: '+catalogFilterKeys.join(', ')+
   '. No free-text query/search. Use {"filters":{"formats":["png"]},"limit":10,"cursor":"<returned nextCursor>"}; flat filter arrays with limit/cursor also work.'
+  + ' Catalog returns items, total, facets and optional nextCursor. readyElementCount counts technically browsable files, not proven matches. Empty usageTags means unclassified, not unavailable; inspect or audition before choosing a game role.'
 
 const usage = `Usage: bun <this-file> <command> [arguments]
   catalog [request-json]                Browse library packs and available facets
@@ -23,12 +24,16 @@ const usage = `Usage: bun <this-file> <command> [arguments]
   fetch <pack-id> <element-id> <assets/path>  Download one selected library file
   inspect <assets/path> [assets/path ...] Hash local assets in one call; no provenance/quality inference
   cost [quality] [size]                 Show availability and the Cloudflare Credit quote
-  generate <request.json> <assets/path>  Generate from {requestId,prompt,background?,quality?,size?,referenceImagePath?}
+  ui-board-plan <request.json>          Read-only: compute equal-cell grid and full prompt, no network or billing
+  generate <request.json> <assets/path>  Generate from {requestId,purpose,prompt,requirementIds?,background?,quality?,size?,referenceImagePath?}
+                                         background: auto|opaque|transparent; quality: auto|low|medium|high|xhigh|max; size: 1024x1024|1024x1536|1536x1024
+New requests use purpose: reference|experiment|production. Production includes existing Manifest requirementIds for PNG-compatible parts; register needs with resources: [] before files exist. References/experiments do not fulfill requirements. PNG may supply a 3D/XR texture, not a model, rig or runtime behavior. Missing metadata is accepted only for recovery of an existing paid attempt.
+For UI reference boards replace prompt with uiReference: {viewport:{width,height},style,screens:[{id,description},...]}. Read the project UI specification for reference dimensions and the complete screen/state inventory. Each description covers one complete screen with its HUD; style/content must not include board placement. Do not supply rows, columns, a separate count or free-form board layout. The system computes equal-size cells from the viewport and list length. Omit size to select the supported canvas giving the largest proportional panels. Inspect ui-board-plan, quote its returned size at low, then generate using the SAME STRUCTURED request file, not the compiled prompt. The host recompiles that request before generation. A plan does not certify the image's layout or the inventory's completeness.
   atlas <assets/sheet.png> <assets/frames.json> <assets/runtime/name.png>
                                          Publish named rectangles as a PNG + same-basename atlas JSON
 For compatible small AI-generated elements, prefer one shared sheet request; use atlas to register inspected rectangles. generate returns an image, not frame metadata. atlas does not pack separate images. Split generation for a concrete visual/use need, preserving planned atlas delivery.
 For decoded image crop/resize/composition and packing separate sprites, use ${TOOL_CONFIG.mediaCommand ?? 'bun .beegame/delivery/media.mjs'} --help. Its JSON request supports named crop regions, explicit filtering/padding and compatible atlas output; no package installation or custom PNG encoder is needed.
-The same atlas delivery applies to retrieved and procedural static sprites. Procedural drawing can write a shared PNG and exact rectangles directly. Dynamic text and live geometry need not become images.
+Honor explicit user source choices. For common sounds, icons and environment assets, first consider suitable supplied or built-in licensed resources. Prefer existing complete animations when suitable; a generated sheet does not guarantee temporal continuity. Consider AI generation for distinctive artwork when existing candidates do not fit, not as the default for all core art. Use focused web sourcing for a concrete gap, verifying rights and download/format feasibility; stop when a suitable candidate is found. These are source choices, not a mandatory source-by-source tour. Procedurally replacing required core artwork remains a fallback requiring a concrete blocker and user authorization; simple controls, geometric effects and an explicitly chosen procedural aesthetic are different. The same atlas format supports retrieved and generated assets. Dynamic text and live geometry need not become images.
 ${catalogUsage}
 Commands are optional. You choose the source and asset design. No command updates the Manifest.`
 
@@ -58,6 +63,35 @@ function catalogRequest(value) {
   if (parsed.cursor !== undefined && typeof parsed.cursor !== 'string')
     throw new Error('Catalog cursor must be a string, outside filters. '+catalogUsage)
   return { filters, ...(parsed.limit !== undefined ? {limit:parsed.limit}:{}), ...(parsed.cursor !== undefined ? {cursor:parsed.cursor}:{}) }
+}
+
+function imageRequest(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('Image request must be a JSON object')
+  const allowed = ['requestId', 'purpose', 'requirementIds', 'prompt', 'uiReference', 'background', 'quality', 'size', 'referenceImagePath']
+  const unknown = Object.keys(value).filter(key => !allowed.includes(key))
+  if (unknown.length) throw new Error('Unknown image request fields: ' + unknown.join(', '))
+  for (const [key, max] of [['requestId', 200], ['prompt', 32000]]) {
+    if (key === 'prompt' && value.uiReference !== undefined) continue
+    if (typeof value[key] !== 'string' || !value[key].trim() || value[key].trim().length > max)
+      throw new Error('Image request ' + key + ' must be a nonempty string of at most ' + max + ' characters')
+  }
+  for (const [key, options] of [
+    ['purpose', ['reference', 'experiment', 'production']],
+    ['background', ['auto', 'opaque', 'transparent']],
+    ['quality', ['auto', 'low', 'medium', 'high', 'xhigh', 'max']],
+    ['size', ['1024x1024', '1024x1536', '1536x1024']],
+  ]) {
+    if (value[key] !== undefined && !options.includes(value[key]))
+      throw new Error('Image request ' + key + ' must be one of: ' + options.join(', '))
+  }
+  if (value.referenceImagePath !== undefined &&
+    (typeof value.referenceImagePath !== 'string' || !value.referenceImagePath.trim() ||
+      value.referenceImagePath.length > 512 || !value.referenceImagePath.startsWith('assets/') ||
+      value.referenceImagePath.split(/[\\/]/).includes('..')))
+    throw new Error('Image request referenceImagePath must be a project-relative path under assets/')
+  if (value.uiReference !== undefined) compileUiReferenceBoard(value)
+  return value
 }
 
 async function jsonRequest(url, init) {
@@ -210,6 +244,9 @@ async function main() {
           '/resource-url',
       ),
     ])
+    const expectedHash = (element.element ?? element).specs?.contentHash
+    if (typeof expectedHash !== 'string' || !/^[a-f0-9]{64}$/.test(expectedHash))
+      throw new Error('Library element requires a valid stored content hash before download')
     const url = new URL(location.url)
     if (url.protocol !== 'https:' || url.username || url.password)
       throw new Error('Library returned an invalid download URL')
@@ -224,12 +261,7 @@ async function main() {
         output,
         reservedFile,
       )
-      const expectedHash = (element.element ?? element).specs?.contentHash
-      if (
-        typeof expectedHash === 'string' &&
-        /^[a-f0-9]{64}$/.test(expectedHash) &&
-        file.sha256 !== expectedHash
-      )
+      if (file.sha256 !== expectedHash)
         throw new Error(
           'Downloaded file hash does not match the selected library element',
         )
@@ -300,6 +332,10 @@ async function main() {
       await imageFile.close()
       if (!published) await unlink(output.target).catch(() => undefined)
     }
+  } else if (command === 'ui-board-plan') {
+    const request = imageRequest(JSON.parse(await readFile(args[0], 'utf8')))
+    if (request.uiReference === undefined) throw Error('ui-board-plan requires uiReference')
+    console.log(JSON.stringify(compileUiReferenceBoard(request), null, 2))
   } else if (command === 'cost') {
     if (!TOOL_CONFIG.imageEndpoint)
       throw new Error('AI image generation is unavailable for this turn')
@@ -310,24 +346,15 @@ async function main() {
   } else if (command === 'generate') {
     if (!TOOL_CONFIG.imageEndpoint)
       throw new Error('AI image generation is unavailable for this turn')
-    const request = JSON.parse(await readFile(args[0], 'utf8'))
-    if (
-      typeof request.requestId !== 'string' ||
-      !request.requestId.trim() ||
-      typeof request.prompt !== 'string' ||
-      !request.prompt.trim() ||
-      (request.referenceImagePath !== undefined &&
-        (typeof request.referenceImagePath !== 'string' ||
-          !request.referenceImagePath.startsWith('assets/') ||
-          request.referenceImagePath.split(/[\\/]/).includes('..')))
-    )
-      throw new Error('Request file needs requestId and prompt')
+    const submittedRequest = imageRequest(JSON.parse(await readFile(args[0], 'utf8')))
+    const board = submittedRequest.uiReference === undefined ? undefined : compileUiReferenceBoard(submittedRequest)
+    const request = board?.request ?? submittedRequest
     const quoteUrl = new URL(TOOL_CONFIG.imageEndpoint)
     if (request.quality) quoteUrl.searchParams.set('quality', request.quality)
     if (request.size) quoteUrl.searchParams.set('size', request.size)
     const quote = await jsonRequest(quoteUrl)
     if (!quote.available) throw new Error('AI image generation unavailable: ' + (quote.unavailableReason ?? 'check model, credentials and billing'))
-    if (quote.provider === 'cloudflare') {
+    if (quote.provider === 'cloudflare' && quote.billingSource !== 'external') {
       if (!Number.isSafeInteger(quote.quotedCreditsMicro) || quote.quotedCreditsMicro <= 0)
         throw new Error('Cloudflare image has no fixed Credit price for this quality and size')
       console.error('Image price: ' + quote.quotedCreditsMicro / 1_000_000 + ' Credits; reserving before generation')
@@ -340,7 +367,7 @@ async function main() {
       const response = await fetch(TOOL_CONFIG.imageEndpoint, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(request),
+        body: JSON.stringify(submittedRequest),
         signal: AbortSignal.timeout(180_000),
       })
       const file = await saveBytes(response, output, reservedFile)
@@ -352,7 +379,8 @@ async function main() {
           requestId: request.requestId,
           chargedCreditsMicro: response.headers.get('x-image-credits-micro'),
           billingState: response.headers.get('x-image-billing-state'),
-          note: 'Inspect the actual image and register the selected file in the Manifest.',
+          ...(board ? { requestedLayout: board.layout } : {}),
+          note: board ? board.note : 'Inspect the actual image and register the selected file in the Manifest.',
         }),
       )
     } finally {

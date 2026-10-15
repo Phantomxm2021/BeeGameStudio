@@ -14,14 +14,17 @@ export function DevProjectPurgePanel({ lang, onDeleted }: { lang: Language; onDe
   const [plan, setPlan] = useState<Plan>()
   const [pending, setPending] = useState(false)
   const [message, setMessage] = useState('')
+  // Opening history must not probe a destructive developer feature by default.
+  const optedIn = import.meta.env.DEV && import.meta.env.VITE_BEEGAME_ENABLE_DEV_PROJECT_PURGE === '1'
   useEffect(() => {
+    if (!optedIn) return
     let cancelled = false
     void authenticatedFetch(path).then(response => {
       if (!cancelled) setEnabled(response.ok)
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [])
-  if (!enabled) return null
+  }, [optedIn])
+  if (!optedIn || !enabled) return null
 
   const prepare = async () => {
     setPending(true); setMessage(''); setPlan(undefined)

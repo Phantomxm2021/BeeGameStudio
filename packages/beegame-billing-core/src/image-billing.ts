@@ -22,6 +22,8 @@ export type ImageBillingInput = {
 }
 export type ImageBillingReceipt = {
   created: boolean
+  /** A different ID matched an unresolved request; this receipt authorizes no new work. */
+  blockedByRequestId?: string
   state: 'reserved' | 'settled' | 'released'
   reservedCreditsMicro: number
   chargedCreditsMicro: number
@@ -52,6 +54,10 @@ export function createImageBillingClient(config: BeeGameBillingConfig, fetchImpl
     })
     if (!response.ok) throw new Error(`Image billing unavailable (${response.status}); no automatic retry`)
     const receipt = await response.json() as ImageBillingReceipt
+    if (receipt.blockedByRequestId !== undefined &&
+      (typeof receipt.blockedByRequestId !== 'string' || !receipt.blockedByRequestId.trim() ||
+       receipt.blockedByRequestId.length > 256 || receipt.created !== false || receipt.state !== 'reserved'))
+      throw new Error('Invalid blocked image billing receipt')
     if (!['reserved', 'settled', 'released'].includes(receipt.state)
       || typeof receipt.created !== 'boolean'
       || ![receipt.reservedCreditsMicro, receipt.chargedCreditsMicro].every(v => Number.isSafeInteger(v) && v >= 0)

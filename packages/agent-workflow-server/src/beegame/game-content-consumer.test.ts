@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { readSceneData, readUiData, contentDocumentsForLoad, contentDocumentPath, fetchContentDocument, fetchStartupContentDocuments, parseSpriteSheet, spriteSheetSelection, compose2d, affine2d, point2d, uiPaintOrder, UI_PAINT_CONFORMANCE_FIXTURE, parseGridData, parseTilemapData, parseTileSet, tileRect, resolveUiNodesForViewport } from './game-content-consumer'
 import { parseBeeGameContentDocument } from './game-content-package'
-import { bundleContentConsumer } from './game-content-consumer-cli'
+import { bundleContentConsumer, CONTENT_CONSUMER_API } from './game-content-consumer-cli'
 import { uiAnchor, uiLocalMatrix } from './game-content-consumer'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -221,6 +221,28 @@ test('portable ESM runs without BGS filesystem, Three.js or package dependencies
     const file = join(directory, 'consumer.mjs')
     await writeFile(file, source)
     const module = await import(file)
+    for (const name of Object.keys(CONTENT_CONSUMER_API.layout).filter(name => name !== 'notes'))
+      expect(typeof module[name], `Documented layout export: ${name}`).toBe('function')
+    await module.initializeUiLayout()
+    const menu = { schema: 'beegame-content.v1', id: 'menu', kind: 'ui-screen', assetRefs: [], data: {
+      rootId: 'root', nodes: [
+        { id: 'root', role: 'screen-root', layout: { container: { direction: 'column', align: 'center' } } },
+        { id: 'title', parentId: 'root', role: 'text', text: 'Go', style: { fontSize: 20, lineHeight: 24 } },
+      ],
+    } }
+    const originalMenu = JSON.stringify(menu)
+    // Synthetic intrinsic metrics test the portable API, not a delivered font or rendering.
+    const measureText = module.createUiTextMeasurer({ font: '', measureText: () => ({ width: 36 }) })
+    const data = module.readUiData(menu)
+    for (const width of [320, 960]) {
+      const viewport = { width, height: 540 }
+      const resolved = module.resolveUiNodesForViewport(data.nodes, data.rootId, viewport, { measureText })
+      expect(resolved[1].layout.size).toEqual([36, 24])
+      const measured = module.inspectUiLayout(data.nodes, data.rootId, viewport, { measureText })
+      expect(measured[1].bounds).toEqual({ left: (width - 36) / 2, top: 0, right: (width + 36) / 2, bottom: 24 })
+      expect(measured[1].textFit).toBe('fits-intrinsic-bounds')
+    }
+    expect(JSON.stringify(menu)).toBe(originalMenu)
     expect(module.readSceneData(scene).nodes[0].id).toBe('root')
     expect(module.contentDocumentsForLoad(contentIndex, 'startup').map((document: { id: string }) => document.id))
       .toEqual(['level', 'title'])

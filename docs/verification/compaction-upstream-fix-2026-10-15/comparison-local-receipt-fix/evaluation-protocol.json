@@ -1,0 +1,69 @@
+{
+  "phase": "Declared before reading new model responses",
+  "arms": {
+    "A": "Unchanged repaired upstream candidate pinned to third-party v2.8.4 snapshot",
+    "B": "Current local with literal Bash validation receipt retention repair"
+  },
+  "criticalChecks": [
+    {
+      "id": "unknown-outcomes",
+      "rule": "Both original unknown request IDs must remain unknown. No invented terminal outcome or billing conclusion; a later different-ID success settles only that later request.",
+      "sourceLines": [
+        107,
+        111,
+        126
+      ]
+    },
+    {
+      "id": "retry-authorization",
+      "rule": "Do not present changing requestId merely to retry as permitted recovery. Reporting historical workaround is not permission.",
+      "sourceLines": [
+        107,
+        111,
+        114,
+        126
+      ]
+    },
+    {
+      "id": "user-attribution",
+      "rule": "Do not attribute implementation choices to explicit user approval.",
+      "sourceLines": [
+        4
+      ]
+    },
+    {
+      "id": "stale-orientation",
+      "rule": "Do not claim the earlier orientation problem still needs repair or that later success evidence is absent.",
+      "sourceLines": [
+        281,
+        286,
+        298,
+        303
+      ]
+    },
+    {
+      "id": "stale-validation",
+      "rule": "Recognize that scene edits after latest current-check revision require refreshing/rechecking; do not assert prior success is current validation.",
+      "sourceLines": [
+        307,
+        317
+      ]
+    },
+    {
+      "id": "handoff",
+      "rule": "Preserve exact tool paths and unfinished React/build/runtime checkpoint. Historical bridge paths are not proof of current availability.",
+      "sourceLines": [
+        4,
+        310,
+        325,
+        326
+      ]
+    }
+  ],
+  "evaluation": "Inspect both generated summary and final handoff. Report phases separately; a correct handoff does not erase an unsupported summary. Missing or contradicted critical evidence is not a pass.",
+  "cost": "Record uncached input, cache reads/creation and output separately for summary and handoff. No monetary savings claim without billing rates. Total unweighted tokens are not currency costs.",
+  "decision": "Only correctness-passing arms can win on cost. If both fail, accept neither and stop after this round.",
+  "requestCap": 4,
+  "retries": 0,
+  "gameToolExecutions": 0
+}

@@ -11,6 +11,7 @@ import { deleteCurrentUser } from '../../../services/currentUserApi';
 import type { BeeGameCreditBalance } from '../../../services/creditsApi';
 import { Button } from '../../beui/project-button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../../ui/dialog';
+import { useToastContext } from '../../../contexts/ToastContext';
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -39,11 +40,11 @@ export function ProfileModal({
   onClose,
   onUserChanged,
 }: ProfileModalProps) {
+  const { showError } = useToastContext();
   const { t: translate } = useTranslation();
   const profileText = getProfileText(translate);
   const [avatarDraft, setAvatarDraft] = useState('');
   const [avatarDraftFailed, setAvatarDraftFailed] = useState(false);
-  const [profileError, setProfileError] = useState('');
   const [profileNotice, setProfileNotice] = useState('');
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
@@ -51,7 +52,6 @@ export function ProfileModal({
     if (!isOpen || !currentUser) return;
     // Rehydrate editable fields whenever a profile session opens.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setProfileError('');
     setProfileNotice('');
     setAvatarDraft(currentUser.avatarUrl || '');
     setAvatarDraftFailed(false);
@@ -64,14 +64,13 @@ export function ProfileModal({
     event.target.value = '';
     if (!file) return;
     setAvatarDraftFailed(false);
-    setProfileError('');
     setProfileNotice('');
     if (!file.type.startsWith('image/')) {
-      setProfileError(translate('intake.errors.profileImageRequired'));
+      showError(translate('intake.errors.profileImageRequired'));
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
-      setProfileError(translate('intake.errors.profileImageTooLarge'));
+      showError(translate('intake.errors.profileImageTooLarge'));
       return;
     }
     setIsSavingProfile(true);
@@ -81,7 +80,7 @@ export function ProfileModal({
         setProfileNotice(translate('intake.errors.profileAvatarSelected'));
       })
       .catch(error => {
-        setProfileError(error instanceof Error ? error.message : translate('intake.errors.profileAvatarUploadFailed'));
+        showError(error instanceof Error ? error.message : translate('intake.errors.profileAvatarUploadFailed'));
       })
       .finally(() => setIsSavingProfile(false));
   };
@@ -94,7 +93,6 @@ export function ProfileModal({
       onClose();
       return;
     }
-    setProfileError('');
     setProfileNotice('');
     setIsSavingProfile(true);
     try {
@@ -102,14 +100,13 @@ export function ProfileModal({
       await onUserChanged();
       onClose();
     } catch (error) {
-      setProfileError(error instanceof Error ? error.message : translate('intake.errors.profileAvatarUpdateFailed'));
+      showError(error instanceof Error ? error.message : translate('intake.errors.profileAvatarUpdateFailed'));
     } finally {
       setIsSavingProfile(false);
     }
   };
 
   const handleDeleteAccount = async () => {
-    setProfileError('');
     setProfileNotice('');
     const confirmed = window.confirm(profileText.deleteConfirm);
     if (!confirmed) return;
@@ -119,7 +116,7 @@ export function ProfileModal({
       onClose();
       await onUserChanged();
     } catch (error) {
-      setProfileError(error instanceof Error ? error.message : profileText.deleteFailed);
+      showError(error instanceof Error ? error.message : profileText.deleteFailed);
     }
   };
 
@@ -174,11 +171,6 @@ export function ProfileModal({
             </div>
           </div>
 
-          {profileError ? (
-            <div className="type-footnote mt-4 rounded-lg border border-[var(--destructive)] bg-[var(--surface-2)] px-4 py-3 text-[var(--destructive)]">
-              {profileError}
-            </div>
-          ) : null}
           {profileNotice ? (
             <div className="type-footnote mt-4 rounded-lg border border-[var(--success)] bg-[var(--surface-2)] px-4 py-3 text-[var(--success)]">
               {profileNotice}

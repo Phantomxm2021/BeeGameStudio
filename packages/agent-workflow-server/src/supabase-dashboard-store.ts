@@ -127,6 +127,16 @@ type SupabaseProjectRow = {
   updated_at: string
 }
 
+function toProjectMetadata(row: SupabaseProjectRow): BeeGameProjectMetadata {
+  return {
+    id: row.id,
+    name: row.name,
+    ...(row.root_path ? { root_path: row.root_path } : {}),
+    created_at: new Date(row.created_at).getTime(),
+    ...normalizeProjectRuntimeSnapshot(row.runtime_snapshot),
+  }
+}
+
 type SupabaseSessionRow = {
   id: string
   project_id: string
@@ -789,13 +799,28 @@ export class SupabaseDashboardStore {
     const rows = await this.rest<SupabaseProjectRow[]>(
       `/rest/v1/beegame_projects?owner_id=eq.${q(ownerId)}&select=*&order=created_at.desc,updated_at.desc`,
     )
-    return rows.map(row => ({
-      id: row.id,
-      name: row.name,
-      ...(row.root_path ? { root_path: row.root_path } : {}),
-      created_at: new Date(row.created_at).getTime(),
-      ...normalizeProjectRuntimeSnapshot(row.runtime_snapshot),
-    }))
+    return rows.map(toProjectMetadata)
+  }
+
+  async listProjectsPage(ownerId: string, offset: number, limit: number, search = ''): Promise<{ items: BeeGameProjectMetadata[]; total: number | null }> {
+    const filter = search.trim()
+      ? `&or=${q(`(name.ilike.*${search.replace(/[,*()\\]/g, ' ')}*,root_path.ilike.*${search.replace(/[,*()\\]/g, ' ')}*)`)}`
+      : ''
+    const response = await this.restResponse(
+      `/rest/v1/beegame_projects?owner_id=eq.${q(ownerId)}&select=*&order=created_at.desc,updated_at.desc&offset=${offset}&limit=${limit}${filter}`,
+      { headers: { Prefer: 'count=exact' } },
+    )
+    const rows = await response.json() as SupabaseProjectRow[]
+    const totalText = response.headers.get('content-range')?.split('/')[1]
+    const total = totalText && /^\d+$/.test(totalText) ? Number(totalText) : null
+    return { items: rows.map(toProjectMetadata), total }
+  }
+
+  async getProject(ownerId: string, id: string): Promise<BeeGameProjectMetadata | undefined> {
+    const rows = await this.rest<SupabaseProjectRow[]>(
+      `/rest/v1/beegame_projects?owner_id=eq.${q(ownerId)}&id=eq.${q(id)}&select=*&limit=1`,
+    )
+    return rows[0] ? toProjectMetadata(rows[0]) : undefined
   }
 
   async upsertProject(
@@ -1292,6 +1317,12 @@ export class SupabaseDashboardStore {
   }
 
   private async rest<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const response = await this.restResponse(path, init)
+    if (response.status === 204) return undefined as T
+    return (await response.json()) as T
+  }
+
+  private async restResponse(path: string, init: RequestInit = {}): Promise<Response> {
     const response = await this.fetchRestRequest(`${this.baseUrl}${path}`, {
       ...init,
       headers: {
@@ -1307,8 +1338,7 @@ export class SupabaseDashboardStore {
         `Supabase request failed: ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`,
       ), { status: response.status })
     }
-    if (response.status === 204) return undefined as T
-    return (await response.json()) as T
+    return response
   }
 
   /**

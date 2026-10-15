@@ -2,7 +2,6 @@ import { readFileSync, realpathSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fromMarkdown } from 'mdast-util-from-markdown'
 import { createHash } from 'node:crypto'
-import { AUTHOR_BATCHES } from './project-author'
 import { PROJECT_DOCUMENTS } from './project-content-authority'
 
 type MarkdownNode = {
@@ -10,23 +9,13 @@ type MarkdownNode = {
   position?: { start: { line: number } }; children?: MarkdownNode[]
 }
 
-/** Explicit design sources, not their semantics. Planned resources are checked at resource delivery. */
-export function checkDesignDocumentReferences(workspacePath: string, authorBatch?: number, document?: string) {
-  if (authorBatch !== undefined && (!Number.isInteger(authorBatch) || !AUTHOR_BATCHES[authorBatch]))
-    throw new Error('Invalid author batch')
+/** Explicit design sources, not their semantics. Planned resources are checked separately. */
+export function checkDesignDocumentReferences(workspacePath: string, document?: string) {
   const root = realpathSync(workspacePath)
-  const batchFiles = authorBatch === undefined ? PROJECT_DOCUMENTS
-    : [...new Set(AUTHOR_BATCHES.slice(0, authorBatch + 1).flat())]
-  if (document !== undefined && (!PROJECT_DOCUMENTS.some(name => name === document) || !batchFiles.includes(document as typeof PROJECT_DOCUMENTS[number])))
-    throw new Error('Document is not assigned to this reference-check scope')
-  const files = document === undefined ? batchFiles : [document]
-  const future = new Set(authorBatch === undefined ? [] : AUTHOR_BATCHES.slice(authorBatch + 1).flat()
-    .filter(name => !batchFiles.includes(name)).map(name => join('docs', name)))
-  // A local draft check may depend on an unfinished sibling. The host's
-  // final batch check never uses this allowance or the narrowed source scope.
-  const parallel = new Set(document !== undefined && authorBatch !== undefined
-    ? AUTHOR_BATCHES[authorBatch]!.filter(name => name !== document).map(name => join('docs', name)) : [])
-  const revision = createHash('sha256').update(JSON.stringify({ authorBatch, document }))
+  if (document !== undefined && !PROJECT_DOCUMENTS.some(name => name === document))
+    throw new Error('Unknown design document')
+  const files = document === undefined ? PROJECT_DOCUMENTS : [document]
+  const revision = createHash('sha256').update(JSON.stringify({ document }))
   const issues: string[] = [], pendingReferences: string[] = [], uncitedDocuments: string[] = []
   let checkedReferences = 0
   const retainedFiles = new Set<string>()
@@ -130,10 +119,7 @@ export function checkDesignDocumentReferences(workspacePath: string, authorBatch
           continue
         }
         if (!documentReference) continue // Persistent resource/contract checks belong to their existing validators.
-        // Only an output genuinely assigned to a later batch may be absent. It is not current authority.
-        if ((future.has(relative(root, target)) || parallel.has(relative(root, target))) && inside(realpathSync(dirname(target))))
-          pendingReferences.push(`${location}: ${relative(root, target)} is assigned ${parallel.has(relative(root, target)) ? 'in parallel' : 'later'}, not delivered authority`)
-        else issues.push(`${location}: document reference does not exist and is not assigned later: ${reference.path}`)
+        issues.push(`${location}: document reference does not exist: ${reference.path}`)
       }
     }
     if (!documentReferences) uncitedDocuments.push(`docs/${name}`)
@@ -142,5 +128,5 @@ export function checkDesignDocumentReferences(workspacePath: string, authorBatch
     retainedFiles: [...retainedFiles].sort(),
     checkedDocuments: files.map(name => `docs/${name}`), inputRevision: revision.digest('hex'),
     pendingReferences: [...new Set(pendingReferences)], uncitedDocuments,
-    note: 'Checks explicit local Markdown document references, retained file links outside planned assets/content and scheduled future documents; rejects links to platform-temporary files regardless of extension. Evidence existence is not evidence correctness. Unlinked titles, bare paths, section contents, decision ownership and semantic agreement remain unverified; no citations is not authority closure.' }
+    note: 'Checks explicit local Markdown document references and retained file links outside planned assets/content; rejects links to platform-temporary files regardless of extension. Evidence existence is not evidence correctness. Unlinked titles, bare paths, section contents, decision ownership and semantic agreement remain unverified; no citations is not authority closure.' }
 }

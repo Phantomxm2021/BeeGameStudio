@@ -70,3 +70,5 @@ export const readModelLogin = (id: string): Promise<{ status: 'pending' | 'compl
 export const completeModelLogin = (id: string, code: string): Promise<unknown> => apiClient.post(`/api/model-logins/${encodeURIComponent(id)}`, { code });
 export const cancelModelLogin = (id: string): Promise<unknown> => apiClient.delete(`/api/model-logins/${encodeURIComponent(id)}`);
 export const disconnectModelAccount = (provider: 'claude' | 'chatgpt'): Promise<unknown> => apiClient.delete(`/api/model-accounts/${provider}`);
+export type ClaudeSubscriptionUsage = { fiveHourUsedPercent?: number; sevenDayUsedPercent?: number };
+export const readClaudeSubscriptionUsage = (): Promise<{ usage: ClaudeSubscriptionUsage | null }> => apiClient.get('/api/model-accounts/claude/usage');

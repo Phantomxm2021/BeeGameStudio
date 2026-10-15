@@ -3,13 +3,12 @@ import { constants } from 'node:fs'
 import { mkdir, realpath, lstat, open, link, unlink } from 'node:fs/promises'
 import { join, relative, isAbsolute, sep } from 'node:path'
 import { z } from 'zod/v4'
-import { digest, WorkflowError, type Run, type AgentTurn, type Attempt } from './state'
+import { digest, WorkflowError, type Run, type AgentTurn } from './state'
 import { sameJson } from './store'
 
 // Exit facts only: never checks, outputs, an acceptance verdict or a request
 // to replay. Signature key stays in the host; project files are not evidence.
-export type HostExitFacts = Pick<AgentTurn, 'quiescedAt' | 'notStarted' | 'turnId' | 'nativeSessionId' | 'usage' | 'skillUses'> &
-  Pick<Attempt, 'accountingEpochs' | 'decisions'>
+export type HostExitFacts = Pick<AgentTurn, 'quiescedAt' | 'notStarted' | 'turnId' | 'nativeSessionId' | 'usage' | 'skillUses'>
 export type HostExitReceipts = {
   save(run: Run, facts: HostExitFacts): Promise<void>
   read(run: Run): Promise<HostExitFacts | undefined>
@@ -17,8 +16,7 @@ export type HostExitReceipts = {
 const factsSchema = z.object({
   quiescedAt: z.string().datetime(), notStarted: z.literal(true).optional(),
   turnId: z.string().optional(), nativeSessionId: z.string().optional(), usage: z.unknown().optional(),
-  skillUses: z.array(z.unknown()).optional(), accountingEpochs: z.array(z.string()).optional(),
-  decisions: z.array(z.unknown()).optional(),
+  skillUses: z.array(z.unknown()).optional(),
 }).strict()
 const invalid = () => new WorkflowError('exit-receipt-invalid',
   'Host exit receipt is unreadable, untrusted or belongs to another writer; no unlock or automatic retry', 503)
@@ -32,19 +30,17 @@ export function createHostExitReceipts(input: { dataRoot: string; key?: Uint8Arr
   const binding = (run: Run) => {
     const writer = run.writer
     const record = writer && (run.sourceEdits?.find(a => a.attemptId === writer.attemptId) ??
-      run.agentTurns?.find(a => a.attemptId === writer.attemptId) ?? run.attempts.find(a => a.attemptId === writer.attemptId))
+      run.agentTurns?.find(a => a.attemptId === writer.attemptId))
     if (!writer || !record || record.status !== 'running' || writer.fence !== record.fence || writer.workerId !== record.workerId)
       throw invalid()
     return { runId: run.id, projectId: run.projectId, ownerId: run.ownerId, workspacePath: run.workspacePath,
       chatSessionId: run.chatSessionId, attemptId: record.attemptId, workerId: record.workerId, fence: record.fence,
       sessionId: record.sessionId, requestKey: record.requestKey, startedAt: record.startedAt,
       requirementsRevision: 'requirementsRevision' in record ? record.requirementsRevision : run.requirements.revision,
-      taskId: 'taskId' in record ? record.taskId : undefined,
-      planRevision: 'planRevision' in record ? record.planRevision : undefined,
       sourceEdit: 'sourceEdit' in record ? record.sourceEdit && {path:record.sourceEdit.path,before:record.sourceEdit.before,
         after:record.sourceEdit.after,archive:record.sourceEdit.archive} : undefined,
       kind: run.sourceEdits?.some(a=>a.attemptId===record.attemptId) ? 'source-edit' :
-        run.agentTurns?.some(a=>a.attemptId===record.attemptId) ? 'agent' : 'task' }
+        'agent' }
   }
   const rootFor = async (run: Run, create=false) => {
     // Resolve the existing host parent before creating anything: a configured

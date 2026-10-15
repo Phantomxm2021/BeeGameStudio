@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { ToastProvider, useToastContext } from '../../contexts/ToastContext';
+import { Dialog, DialogContent, DialogTitle } from '../ui/dialog';
 
 function Actions() {
   const { showSuccess, showError, showWarning, dismissAll, toasts } = useToastContext();
@@ -36,5 +38,16 @@ describe('global BeUI toast integration', () => {
     fireEvent.click(screen.getByText('Many'));
     expect(screen.getByTestId('count')).toHaveTextContent('6');
     expect(screen.getAllByRole('listitem')).toHaveLength(4);
+  });
+
+  it('shows a global error above an open settings-style dialog', async () => {
+    render(<ToastProvider><Dialog open><DialogContent><DialogTitle>Settings</DialogTitle><Actions /></DialogContent></Dialog></ToastProvider>);
+    fireEvent.click(screen.getByRole('button', { name: 'Error' }));
+    const toast = await screen.findByText('Failed');
+    expect(toast.closest('ol')).toHaveClass('z-[10000]');
+    expect(screen.getByRole('dialog')).not.toContainElement(toast);
+    expect(toast.closest('[aria-hidden="true"], [inert]')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss toast' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 });

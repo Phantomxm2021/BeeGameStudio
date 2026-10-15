@@ -5,7 +5,7 @@ import type { ImageGenerationConfig } from './config'
 
 /** Human-readable observations only. Never read by billing, recovery or asset loading. */
 export function createImagePromptRecord(workspacePath: string, capabilityPath: string) {
-  return (request: { requestId: string; prompt: string; quality?: string; background?: string; size?: string; referenceImagePath?: string },
+  return (request: { requestId: string; prompt: string; quality?: string; background?: string; size?: string; referenceImagePath?: string; purpose?: string; requirementIds?: string[] },
     config: ImageGenerationConfig | undefined, observation: Record<string, unknown>): boolean => {
     try {
       const root = realpathSync(workspacePath)
@@ -22,6 +22,7 @@ export function createImagePromptRecord(workspacePath: string, capabilityPath: s
       const end = `<!-- /image-request:${id} -->`
       // Whitelist config fields; never serialize keys, endpoint, billing or raw upstream errors.
       const snapshot = { requestId: request.requestId, prompt: request.prompt,
+        purpose: request.purpose, requirementIds: request.requirementIds,
         background: request.background ?? 'auto',
         size: request.size ?? config?.size ?? 'unknown',
         ...(request.referenceImagePath ? { referenceImagePath: request.referenceImagePath } : {}),

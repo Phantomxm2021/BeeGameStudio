@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { projectRuntimeDisplayReason } from './project-runtime-display'
 import { normalizeRuntimeEnvironment } from '../../../../src/utils/runtimeEnvironment'
 import { isEnvTruthy } from '../../../../src/utils/envUtils'
 import {
@@ -24,10 +25,12 @@ import {
 import {
   basename,
   dirname,
+  extname,
   isAbsolute,
   join,
   relative,
   resolve,
+  sep,
 } from 'node:path'
 import {
   mapModelConfigToRuntime,
@@ -46,14 +49,11 @@ import {
 } from './native-background-task-output'
 import { createNativeCliProcessRunner } from './native-cli-process-runner'
 import { createNativeSubagentChatEnricher, isNativeTaskLifecycle, stoppedNativeTask } from './native-subagent-chat'
-import type { NativeDirectionAuthorInput, NativeProjectTurnInput } from '@bee-game-studio/agent-workflow/native-direction-authors'
 import { isSupabaseRuntimeEnvAuthError } from '../supabase-runtime-env-client'
 import type { BeeGameNativeTaskNotification } from './native-task-notification'
 import { ChatJsonlReader } from './chat-jsonl-reader'
 import { auditEventPage, type EventPageSelection } from './workflow-v3/event-page'
 import { answeredQuestionInput } from './user-question'
-import { recordProjectDesignUserDecision, projectDesignQuestionContext } from './project-delivery'
-import { designReviewQuestionFindings } from '@bee-game-studio/agent-workflow/design-review-result'
 import { sanitizePath } from '../../../../src/utils/sessionStoragePortable'
 import { SessionUsageOutbox } from './session-usage-outbox'
 import { isPersonalModelId } from '../model-connections'
@@ -295,7 +295,6 @@ export type BeeGameSessionRunnerStartInput = {
   /** Optional private execution directory; Chat and billing retain project identity. */
   isolatedTask?: { workspacePath: string; readOnlyPaths: string[] }
   /** Platform evidence root exposed only through read-only contract facts. */
-  deliveryEvidenceDataRoot?: string
   resumeSessionId?: string
   /** Host-owned workflow task identity supplied through standard --session-id. */
   nativeSessionId?: string
@@ -380,9 +379,6 @@ const RUNTIME_MODEL_ENV_KEYS = new Set([
 
 export type BeeGameSessionSubmitInput = {
   prompt: BeeGamePromptInput
-  /** Fixed writing-owner dispatch for the existing Author-2 batch. */
-  directionAuthors?: NativeDirectionAuthorInput
-  projectTurn?: NativeProjectTurnInput
   /** Refreshed each turn, including when the native process is reused. */
   language?: BeeGameSessionLanguage
   /** User-confirmed context exposed read-only to platform contract tools. */
@@ -490,7 +486,6 @@ type SessionRecord = {
   nextEventId: number
   nextTurnIndex: number
   currentTurnId: string | null
-  currentProjectTurn?: NativeProjectTurnInput
   /** Provider-cumulative usage captured before the active turn starts. */
   currentTurnStartingUsage?: BeeGameRuntimeSnapshot['usage']
   /** The complete active model turn, including final event/usage callbacks. */
@@ -1041,6 +1036,30 @@ export class BeeGameSessionManager {
       { type: 'system.status', subtype: 'delivery_error', ...(category ? { category } : {}) })
   }
 
+  /** Display-only host snapshot, independent of the author's final answer. */
+  recordHostEvidence(sessionId: string, facts: {
+    attemptId: string; turnId?: string; execution: string; measurementId?: string;
+    checkStatuses: { id: string; status: string }[]; unmeasured: readonly string[]; note: string;
+  }): void {
+    const record = this.sessions.get(sessionId)
+    if (!record) return
+    if (record.events.some(event => event.payload?.subtype === 'host_evidence' && event.payload?.attemptId === facts.attemptId)) return
+    const note = projectRuntimeDisplayReason(facts.note)?.detail ?? ''
+    const zh = record.language === 'zh'
+    const statuses: Record<string, string> = {passed:'通过',failed:'失败',unverified:'未验证','execution-error':'执行错误'}
+    const text = [
+      zh ? 'BGS 宿主检查｜本轮执行已结束，不等于游戏验收通过' : 'BGS host evidence | Execution ended, not game acceptance',
+      (zh ? '执行状态：' : 'Execution: ')+facts.execution,
+      facts.measurementId ? (zh ? '已保存测量（非整体验收）：' : 'Saved measurement (not acceptance): ')+facts.measurementId : (zh ? '没有宿主测量记录。' : 'No host measurement.'),
+      ...facts.checkStatuses.map(check => check.id+': '+(zh ? statuses[check.status] ?? check.status : check.status)),
+      ...(facts.unmeasured.length ? [(zh ? '未测量：' : 'Not measured: ')+facts.unmeasured.join(', ')] : []),
+      zh ? '以上是回合结束时的有限范围检查；不证明玩法、审美或完整覆盖。作者测试报告的断言数量和语义未经宿主认证；游戏质量仍未验证。后续改动需重新检查证据有效性。'
+        : 'Turn-end scoped checks only, not gameplay, aesthetics or complete coverage. Author report assertions/semantics are not host-certified; game quality remains unverified. Later edits require freshness inspection.',
+      note,
+    ].join('\n')
+    this.append(record, 'system.status', text, {type:'system.status',subtype:'host_evidence',...facts,note,quality:'unverified',deliveryEligible:false}, facts.turnId)
+  }
+
   /** Persist a user message for the chat surface without starting a model turn. */
   appendUserMessage(
     sessionId: string,
@@ -1075,7 +1094,7 @@ export class BeeGameSessionManager {
       attachments?: BeeGameAttachment[]
       confirmedBriefContext?: string
       onTurnAccepted?: (turnId: string) => void
-      prepareTurn?: () => Promise<{ systemContext?: string; turnContext?: string; directionAuthors?: NativeDirectionAuthorInput; projectTurn?: NativeProjectTurnInput; close?: () => Promise<void> }>
+      prepareTurn?: () => Promise<{ systemContext?: string; turnContext?: string; close?: () => Promise<void> }>
       onTurnSettled?: () => Promise<void>
       onTurnReady?: () => void | Promise<void>
       usageExternallyAccounted?: boolean
@@ -1192,8 +1211,6 @@ export class BeeGameSessionManager {
           finally { await close?.() }
           settlementSucceeded = true
         },
-        context?.directionAuthors,
-        context?.projectTurn,
       ).finally(() => {
         if (record.activeTurn === activeTurn) record.activeTurn = undefined
       })
@@ -1423,10 +1440,7 @@ export class BeeGameSessionManager {
     record: SessionRecord,
     prompt: BeeGamePromptInput,
     settle?: () => Promise<void>,
-    directionAuthors?: NativeDirectionAuthorInput,
-    projectTurn?: NativeProjectTurnInput,
   ): Promise<void> {
-    record.currentProjectTurn = projectTurn
     let turnRunner: BeeGameSessionRuntime | null = null
     try {
       const signal = record.abortController?.signal
@@ -1453,7 +1467,6 @@ export class BeeGameSessionManager {
           sessionId: record.session.id,
           systemContext: record.systemContext,
           ...(record.isolatedTask ? { isolatedTask: record.isolatedTask } : {}),
-          deliveryEvidenceDataRoot: this.dashboardDataRoot,
           ...(record.nativeSessionId
             ? { resumeSessionId: record.nativeSessionId }
             : {}),
@@ -1517,8 +1530,6 @@ export class BeeGameSessionManager {
         runner,
         prompt,
         signal,
-        directionAuthors,
-        projectTurn,
       )
       try {
         if (signal.aborted && record.session.status === 'running') {
@@ -1576,7 +1587,7 @@ export class BeeGameSessionManager {
         // Remote billing is accounting, not worker lifecycle authority. A
         // slow or unavailable billing service must not keep a completed native
         // turn (and therefore the whole workflow) in the running state.
-        void this.recordTerminalUsage(record, terminalTurnId)
+        void this.recordUsageSnapshot(record, terminalTurnId)
       }
       if (record.session.status === 'running') {
         record.session.turnStatus = 'idle'
@@ -1584,7 +1595,6 @@ export class BeeGameSessionManager {
       // These files back durable Chat references; a finished turn must not
       // delete earlier user uploads or tool screenshots from the same store.
       record.currentTurnId = null
-      record.currentProjectTurn = undefined
       record.currentTurnStartingUsage = undefined
       record.assistantPartialTextByMessage.clear()
       record.activeAssistantMessageId = null
@@ -1633,16 +1643,12 @@ export class BeeGameSessionManager {
     runner: BeeGameSessionRuntime,
     prompt: BeeGamePromptInput,
     signal: AbortSignal,
-    directionAuthors?: NativeDirectionAuthorInput,
-    projectTurn?: NativeProjectTurnInput,
   ): Promise<void> {
     const submittedTurnId = record.currentTurnId
     const accountingEpoch = record.nativeAccountingEpoch
     let executionError: Error | undefined
     await runner.submit({
       prompt,
-      ...(directionAuthors ? { directionAuthors } : {}),
-      ...(projectTurn ? { projectTurn } : {}),
       ...(record.language ? { language: record.language } : {}),
       ...(record.confirmedBriefContext
         ? { confirmedBriefContext: record.confirmedBriefContext }
@@ -1720,7 +1726,8 @@ export class BeeGameSessionManager {
           const images = extractNativeToolImages(message, String(toolEvent.payload?.toolUseID ?? ''))
           if (images.length) {
             try {
-              const attachments = await materializeBeeGameAttachments(record.session.cwd, images)
+              const displayImages = await preferOriginalReadImage(record.session.cwd, toolEvent.payload, images)
+              const attachments = await materializeBeeGameAttachments(record.session.cwd, displayImages)
               toolEvent.payload = { ...toolEvent.payload, attachments: attachments.map(({ relativePath: _path, ...reference }) => reference) }
             } catch {
               toolEvent.payload = { ...toolEvent.payload, attachmentError: 'Tool image could not be stored for Chat.' }
@@ -1728,15 +1735,21 @@ export class BeeGameSessionManager {
           }
           this.append(record, toolEvent.type, toolEvent.text, toolEvent.payload)
         }
+        // A completed native assistant message is an authoritative model-usage
+        // checkpoint. The terminal snapshot still catches late usage and turns
+        // that end without an assistant message.
+        if (message.type === 'assistant' && !record.currentTurnUsageExternallyAccounted)
+          void this.recordUsageSnapshot(record, submittedTurnId, true)
       },
       requestPermission: request => this.requestPermission(record, request),
     })
     if (executionError) throw executionError
   }
 
-  private async recordTerminalUsage(
+  private async recordUsageSnapshot(
     record: SessionRecord,
     turnId: string,
+    checkpoint = false,
   ): Promise<void> {
     if (!this.usageBillingBackend.recordUsage) return
     const providerCumulativeUsage = this.deriveRuntimeSnapshot(record).usage
@@ -1745,7 +1758,7 @@ export class BeeGameSessionManager {
       record.currentTurnStartingUsage ?? emptyRuntimeUsage(),
     )
     if (turnDeltaUsage.total_tokens <= 0) return
-    const terminalEvent = [...record.events]
+    const terminalEvent = checkpoint ? undefined : [...record.events]
       .reverse()
       .find(event =>
         event.turnId === turnId &&
@@ -1760,19 +1773,19 @@ export class BeeGameSessionManager {
       )
     const terminalDigest = createHash('sha256')
       .update(JSON.stringify({
-        type: terminalEvent?.type ?? 'turn_terminal',
+        type: checkpoint ? 'assistant_checkpoint' : terminalEvent?.type ?? 'turn_terminal',
         text: terminalEvent?.text ?? '',
         turnDeltaUsage,
       }))
       .digest('hex')
     const billingAuthority = `${record.session.id}:${turnId}`
-    const idempotencyKey = `usage-terminal:${billingAuthority}:${terminalDigest}`
+    const idempotencyKey = `usage-${checkpoint ? 'checkpoint' : 'terminal'}:${billingAuthority}:${terminalDigest}`
     if (idempotencyKey === record.usageLastCommittedKey) return
     const deliveryPhase = record.events.findLast(event =>
       event.type === 'system.status' && event.payload?.subtype === 'delivery_phase')?.payload?.phase
     const write = {
       turnId,
-      sourceMessageType: terminalEvent?.type ?? 'turn_terminal',
+      sourceMessageType: checkpoint ? 'assistant_checkpoint' : terminalEvent?.type ?? 'turn_terminal',
       // runtime_snapshot is session cumulative; the billing authority computes
       // its own delta. Sending a turn delta here subtracts usage a second time.
       usage: providerCumulativeUsage,
@@ -1954,9 +1967,7 @@ export class BeeGameSessionManager {
       return { behavior: 'deny', source: 'policy',
         message: 'Session stopped before permission was resolved' }
     }
-    const reviewTurn = record.currentProjectTurn
     const turnId = record.currentTurnId
-    const designQuestion = request.toolName === 'AskUserQuestion' && reviewTurn?.reviewStep !== undefined
     let workflowQuestion: Record<string, unknown> | undefined
     if (request.toolName === 'AskUserQuestion' && record.workflowQuestionGuard) {
       try { workflowQuestion = await record.workflowQuestionGuard(request) }
@@ -1964,17 +1975,6 @@ export class BeeGameSessionManager {
         this.append(record, 'workflow.question.rejected', 'Workflow question is not bound to current authorized findings', { type: 'workflow.question.rejected', toolUseID: request.toolUseID, message: toErrorMessage(error) })
         return { behavior: 'deny', source: 'policy', message: toErrorMessage(error) }
       }
-    }
-    let questionSourceRevision: string | undefined
-    if (designQuestion) {
-      try {
-        if (reviewTurn.reviewStep !== 'revise' || !reviewTurn.reviewRevision ||
-            (request.input.metadata as { source?: unknown } | undefined)?.source !== 'bgs-design-review:' + reviewTurn.reviewRevision ||
-            request.input.answers !== undefined) throw new Error('Question is not bound to this design revision.')
-        const context = await projectDesignQuestionContext(record.session.cwd, this.dashboardDataRoot, reviewTurn.reviewRevision)
-        designReviewQuestionFindings(request.input, context)
-        questionSourceRevision = context.sourceRevision
-      } catch (error) { return { behavior: 'deny', source: 'policy', message: toErrorMessage(error) } }
     }
     if (request.toolName === 'SandboxNetworkAccess') {
       const host = typeof request.input.host === 'string' ? request.input.host.trim().toLowerCase() : ''
@@ -2054,14 +2054,6 @@ export class BeeGameSessionManager {
         ...(request.blockedPath ? { blockedPath: request.blockedPath } : {}),
       })
     })
-    if (designQuestion && decision.behavior === 'allow') {
-      try {
-        if (record.currentTurnId !== turnId || record.currentProjectTurn !== reviewTurn || record.abortController?.signal.aborted)
-          throw new Error('Design question belongs to an interrupted turn.')
-        await recordProjectDesignUserDecision(record.session.cwd, this.dashboardDataRoot, reviewTurn.reviewRevision!,
-          request.toolUseID, decision.updatedInput!, questionSourceRevision)
-      } catch (error) { return { behavior: 'deny', source: 'policy', message: toErrorMessage(error) } }
-    }
     if (workflowQuestion && decision.behavior === 'allow') {
       try {
         if (record.currentTurnId !== turnId || record.abortController?.signal.aborted)
@@ -2658,6 +2650,41 @@ export function extractNativeToolImages(message: DashboardSDKMessage, toolUseId:
       return [{ type: 'image', mediaType: source.media_type, data: source.data }]
     })
   })
+}
+
+// The Read tool may downsample an image for the model's token budget. Save a
+// bounded snapshot of its project source for Chat, without changing what the
+// model receives. The source may have changed since Read; this is display data,
+// not evidence that the model saw identical bytes.
+export async function preferOriginalReadImage(
+  workspace: string,
+  tool: unknown,
+  images: BeeGameImageAttachment[],
+): Promise<BeeGameImageAttachment[]> {
+  const event = tool && typeof tool === 'object' ? tool as Record<string, unknown> : undefined
+  const input = event?.input as { file_path?: unknown } | undefined
+  if (event?.toolName !== 'Read' || typeof input?.file_path !== 'string' || images.length !== 1) return images
+  try {
+    const root = await realpath(workspace)
+    const path = await realpath(input.file_path)
+    const within = relative(root, path)
+    if (!within || isAbsolute(within) || within === '..' || within.startsWith(`..${sep}`)) return images
+    const mediaType = IMAGE_ATTACHMENT_TYPES[extname(path).toLowerCase()]?.[0]
+    if (mediaType !== 'image/png' && mediaType !== 'image/jpeg' && mediaType !== 'image/webp') return images
+    const info = await stat(path)
+    if (!info.isFile() || info.size === 0 || info.size > MAX_BEEGAME_ATTACHMENT_BYTES) return images
+    const bytes = await readFile(path)
+    if (bytes.length === 0 || bytes.length > MAX_BEEGAME_ATTACHMENT_BYTES) return images
+    const valid = mediaType === 'image/png'
+      ? bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+      : mediaType === 'image/jpeg'
+        ? bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+        : bytes.length >= 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP'
+    if (!valid) return images
+    return [{ type: 'image', mediaType, data: bytes.toString('base64'), filename: basename(path) }]
+  } catch {
+    return images
+  }
 }
 
 export async function materializeBeeGameAttachments(

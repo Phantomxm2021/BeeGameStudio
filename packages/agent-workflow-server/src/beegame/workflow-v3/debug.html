@@ -26,9 +26,9 @@ dialog::backdrop{background:#20252d99}dialog h2{margin-top:0}dialog p{white-spac
 <label>正常用户 Access Token（仅当前页内存；勿输入 service-role 密钥）<input id="token" type="password" autocomplete="off"></label>
 <p>已有登录态模式仅向本页同源 API 发送浏览器 Cookie，不读取、展示或复制凭据。未登录仍会被正常接口拒绝；此页不建立登录或管理员绕过。</p>
 <button id="load">读取 Run</button><button id="events">读取任务事件（自主模式分页）</button><button id="events-earlier">读取更早一页</button>
-<p>自主 Run 每页100条原生回合摘要，不合并整个 Chat；兼容 Task 模式保留原事件接口，没有更早页游标。长文本截取及 payload 摘要会明确标记；原始证据保留，当前权限与 Question 请用专用入口核对。读取期间仍可暂停，暂停不重发任务。</p>
+<p>Agent Run 每页100条原生回合摘要，不合并整个 Chat；旧 Task Run 已停用，不能从此页继续执行。长文本截取及 payload 摘要会明确标记；原始证据保留，当前权限与 Question 请用专用入口核对。读取期间仍可暂停，暂停不重发任务。</p>
 <button id="restore-chat">恢复项目所属 Chat（不执行）</button>
-<button id="sources">读取来源索引</button><button id="stop">暂停</button><button id="resume">明确恢复（不派发）</button>
+<button id="stop">暂停</button><button id="resume">明确恢复（不派发）</button>
 <button id="recover-writer">核对证据并收尾中断写者（不重试）</button>
 <pre id="run"></pre>
 </section>
@@ -77,41 +77,21 @@ dialog::backdrop{background:#20252d99}dialog h2{margin-top:0}dialog p{white-spac
 <p>只编辑已经注册、有权所有者的文档。不会生成内容、伪造检查或自动重建。</p>
 </section>
 <section>
-<h2>显式计划／需求变更</h2>
-<button id="prepare-run">从已恢复 Chat 准备新 Run 草稿</button><button id="create-run">确认创建新 Run（不执行）</button>
-<button id="prepare-plan">载入当前计划作为候选</button><button id="prepare-change">载入当前需求作为候选</button>
-<textarea id="proposal" aria-label="计划或需求变更 JSON" spellcheck="false"></textarea>
-<button id="plan">提交候选计划</button><button id="requirements">确认提交需求变更</button>
-<p>核对全文需求、任务范围和版本后提交；接口拒绝时保留草稿，不刷新后偷偷重试。</p>
-<p>新项目须先恢复所属 Chat，再填写新 Run 草稿中的完整需求和 ID。已有 Run 不能覆盖；恢复 Chat 不恢复暂停、不启动任务。</p>
-</section>
-<section>
 <h2>执行／已测构建</h2>
 <label>自主 Agent 实际测量（非 Task）<select id="measurement"></select></label>
 <button id="read-measurement">核对测量／报告版本（只读）</button>
 <p>自主 Run 的预览／下载使用选中测量。只有实际调用按需 measure.mjs 后才有记录；无记录不会补造 Task 或自动构建。</p>
-<label>当前任务<select id="task"></select></label>
-<label>本次执行请求身份<input id="request-key" autocomplete="off"></label>
-<button id="new-key">准备新请求身份</button><button id="execute">执行选中任务（可能付费，需再次确认）</button>
 <button id="preview">打开当前已测 Preview</button><button id="close-preview">关闭本页 Preview</button>
 <button id="static">下载已测静态包</button><button id="project-export">下载已测工程</button>
 <iframe id="preview-frame" title="已测构建 Preview" sandbox="allow-scripts" hidden></iframe><div id="downloads"></div>
 <p>恢复证据来源显示在 Run 响应：persisted 为数据库已保存退出事实，original-host 为原宿主仍保留的亲自观察，host-receipt 为工程外经宿主验签且匹配当前写者的退出记录，unavailable 表示不能解锁。恢复须明确确认，不执行任务；服务重启不会把进程缺失当退出证据。记录缺失／损坏、宿主密钥或存储不可用仍不能恢复。未验收成果不转为通过，未知外部操作不自动重试。</p>
 </section>
 <section>
-<h2>Preview 观察 → 同工程处理（旧 Task 兼容入口）</h2>
+<h2>Preview 观察 → 同工程消息</h2>
 <button id="prepare-observation">从当前 Preview 准备问题草稿</button>
 <textarea id="observation-json" aria-label="Preview 观察 JSON" spellcheck="false"></textarea>
-<button id="submit-observation">确认保存观察（不派发）</button>
 <button id="observation-message">自主 Run：转入同工程消息草稿（不执行）</button>
-<p>自主 Agent 使用消息草稿：绑定实际测量和构建指纹，默认只讨论。修复现有需求请选择“按现有目标检查／修复，不变更需求”；只有改变用户目标或承诺才选择“明确变更需求并修改”。核对授权后准备并确认发送；不创建宿主 Review／Repair Task。以下计划按钮仅用于兼容旧 Task Run。</p>
-<p>填写确认需求 ID、操作步骤、预期与实际表现。草稿固定本次构建身份；刷新不会绑定到新版本。保存的是用户观察，不是已证实缺陷。</p>
-<label>已保存观察<select id="issue"></select></label>
-<button id="issue-review">授权定向 Review 计划（不执行）</button>
-<label>当前有报告的 Review<select id="review-attempt"></select></label><pre id="review-detail"></pre>
-<label>集中修订的 finding IDs（JSON 数组；需包含全部阻断项）<input id="finding-ids" autocomplete="off" placeholder='["F1"]'></label>
-<button id="issue-repair">授权原所有者 Repair／定向复核计划（不执行）</button>
-<p>逐任务执行仍需上方显式授权。观察不等于缺陷；修订通过不等于问题已关闭，必须重新构建测量并由有来源的定向复核确认。争议不自动循环，无关任务不重做。</p>
+<p>观察草稿绑定实际测量和构建指纹，默认只讨论。填写操作步骤、预期与实际表现；它不是已证实缺陷。确认后通过同工程消息交给 Agent，修改后重新构建和测量。</p>
 </section>
 <section><h2>最近响应／失败诊断</h2><p id="status" role="status">未发起请求</p><pre id="result"></pre></section>
 <script src="/debug/workflow-v3/client.js"></script>

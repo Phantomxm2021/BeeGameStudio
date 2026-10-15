@@ -1,0 +1,97 @@
+{
+  "observedAt": "2026-10-14T20:34:24.397Z",
+  "catalogToPngDownload": true,
+  "hiddenAudioCatalogTotal": 0,
+  "hiddenAudioDirectDownload": true,
+  "samples": [
+    {
+      "packName": "kenney_1-bit-pack",
+      "packId": "pack-dbec6738-6f25-411a-b382-359c35db5eda",
+      "elementId": "pack-dbec6738-6f25-411a-b382-359c35db5eda-10b14eca-b95e-4a55-ad84-4aa257c83980",
+      "path": "assets/catalog-sample.png",
+      "bytes": 23606,
+      "sha256": "a170748de557329ed875a88490461e216c12b32e1dc34d41d16ad4803d9c5956",
+      "expectedHash": "a170748de557329ed875a88490461e216c12b32e1dc34d41d16ad4803d9c5956",
+      "hashMatches": true,
+      "license": "CC0",
+      "magic": "89504e470d0a1a0a",
+      "usageTags": [
+        "character",
+        "npc",
+        "creature",
+        "prop",
+        "weapon-equipment",
+        "building",
+        "environment",
+        "terrain",
+        "vegetation",
+        "scene",
+        "level-map",
+        "tile"
+      ],
+      "usageTagsMode": "override"
+    },
+    {
+      "packName": "kenney_casino-audio",
+      "packId": "pack-e32164e1-0b55-4ccd-8114-79405c691368",
+      "elementId": "pack-e32164e1-0b55-4ccd-8114-79405c691368-c9e18d6c-5e61-468c-8b54-b92a34b459ce",
+      "path": "assets/direct-audio.ogg",
+      "bytes": 12489,
+      "sha256": "7a9758ccad8899baef1b9f60b4064e4baa724a548293832fdaea07e6e07e638d",
+      "expectedHash": "7a9758ccad8899baef1b9f60b4064e4baa724a548293832fdaea07e6e07e638d",
+      "hashMatches": true,
+      "license": "CC0",
+      "magic": "4f67675300020000",
+      "usageTags": [],
+      "usageTagsMode": "inherit"
+    }
+  ],
+  "requests": [
+    {
+      "method": "POST",
+      "path": "/api/resource-catalog/packs",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/resource-catalog/packs/pack-dbec6738-6f25-411a-b382-359c35db5eda/elements",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource-packs/pack-dbec6738-6f25-411a-b382-359c35db5eda",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource-packs/pack-dbec6738-6f25-411a-b382-359c35db5eda/elements/pack-dbec6738-6f25-411a-b382-359c35db5eda-10b14eca-b95e-4a55-ad84-4aa257c83980/resource-url",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource-packs/pack-dbec6738-6f25-411a-b382-359c35db5eda/elements/pack-dbec6738-6f25-411a-b382-359c35db5eda-10b14eca-b95e-4a55-ad84-4aa257c83980",
+      "status": 200
+    },
+    {
+      "method": "POST",
+      "path": "/api/resource-catalog/packs/pack-e32164e1-0b55-4ccd-8114-79405c691368/elements",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource-packs/pack-e32164e1-0b55-4ccd-8114-79405c691368",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource-packs/pack-e32164e1-0b55-4ccd-8114-79405c691368/elements/pack-e32164e1-0b55-4ccd-8114-79405c691368-c9e18d6c-5e61-468c-8b54-b92a34b459ce",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/resource-packs/pack-e32164e1-0b55-4ccd-8114-79405c691368/elements/pack-e32164e1-0b55-4ccd-8114-79405c691368-c9e18d6c-5e61-468c-8b54-b92a34b459ce/resource-url",
+      "status": 200
+    }
+  ],
+  "scope": "Normal authenticated live service and real project asset CLI; isolated temporary folder; no project or library mutation, model or image call"
+}

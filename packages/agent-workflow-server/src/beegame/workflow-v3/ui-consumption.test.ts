@@ -2,11 +2,12 @@ import { test, expect } from 'bun:test'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { runChecks, checkIsCurrent } from './checks'
+import { checkIsCurrent } from './checks'
+import { runChecks } from './checker-test-driver'
 import { uiLayoutFixture } from '../fixtures/layout-fixture'
 import type { TaskSpec } from './state'
 
-for (const mode of ['consume', 'ignore', 'wrong', 'position-only', 'size-only', 'hidden', 'omit', 'stale-copy', 'missing-screen', 'missing-viewport', 'tiny', 'overflow', 'clipped', 'hidden-text', 'wrapped', 'pseudo', 'unknown-node', 'hidden-ancestor', 'ancestor-clipped', 'invalid-target-selector'] as const) {
+for (const mode of ['consume', 'ignore-enabled', 'remove-disabled', 'disabled-crash', 'disabled-missing-resource', 'disabled-activation', 'ignore', 'wrong', 'position-only', 'size-only', 'hidden', 'omit', 'stale-copy', 'missing-screen', 'missing-viewport', 'tiny', 'overflow', 'clipped', 'hidden-text', 'wrapped', 'pseudo', 'unknown-node', 'hidden-ancestor', 'ancestor-clipped', 'invalid-target-selector', 'source-inactive'] as const) {
   test('actual target UI source mutation: '+mode, async () => {
     const root = await mkdtemp(join(tmpdir(), 'bgs-v3-ui-consumption-'))
     try {
@@ -14,6 +15,7 @@ for (const mode of ['consume', 'ignore', 'wrong', 'position-only', 'size-only', 
       ui.data.nodes[0]!.data!.targetViewports = [[1280,720]]
       if (mode === 'missing-viewport') ui.data.nodes[0]!.data!.targetViewports = [[1280,720],[720,1280]]
       if (mode === 'tiny') Object.assign(ui.data.nodes[1]!.layout,{scale:[0.01,0.01]})
+      if (mode === 'source-inactive') Object.assign(ui.data.nodes[1]!,{enabled:false})
       ui.data.nodes[0]!.layout.size = [1280, 720]
       await mkdir(join(root, 'content/ui'), { recursive: true }); await mkdir(join(root, 'dist/content/ui'), { recursive: true })
       const body = JSON.stringify(ui)
@@ -30,6 +32,10 @@ for (const mode of ['consume', 'ignore', 'wrong', 'position-only', 'size-only', 
         (mode === 'omit' ? '' : 'fetch("/content/ui/menu.json").then(r=>r.json()).then(d=>{const n=d.data.nodes.find(n=>n.id==="play"), b=document.querySelector("#play"), s='+
         (['ignore','position-only'].includes(mode) ? '[200,52]' : 'n.layout.size')+',p='+(['ignore','size-only'].includes(mode) ? '[0,0]' : 'n.layout.position||[0,0]')+';'+
         'b.style.width=s[0]+"px";b.style.height=s[1]+"px";b.style.left=(640-s[0]/2+p[0]'+(mode === 'wrong' ? '*2' : '')+')+"px";b.style.top=(360-s[1]/2+p[1])+"px";'+
+        (mode === 'ignore-enabled' ? '' : 'if(n.enabled===false){'+
+          (mode === 'remove-disabled' || mode === 'disabled-crash' ? 'b.remove();' : 'b.style.display="none";')+
+          (mode === 'disabled-crash' ? 'throw Error("Disabled render failed");' : '')+
+          (mode === 'disabled-missing-resource' ? 'fetch("/missing.json");' : '')+'}')+
         (mode === 'hidden' ? 'b.style.display="none";' : '')+
         (['overflow','clipped'].includes(mode) ? 'b.style.padding="0";b.style.fontSize="20px";b.style.lineHeight="52px";b.innerHTML="<span style=display:block>First row</span><span style=display:block>Second row</span>";'+(mode==='clipped'?'b.style.overflow="hidden";':'') : '')+
         (mode==='hidden-text' ? 'b.innerHTML="Play<span style=display:none;position:absolute;top:200px>Hidden text</span>";' : '')+
@@ -42,6 +48,8 @@ for (const mode of ['consume', 'ignore', 'wrong', 'position-only', 'size-only', 
         writablePaths: [], expectedOutputs: ['dist/index.html'], checks: ['ui-data-consumption'], runtimeArtifact: 'dist',
         uiProbes: [{ document: 'content/ui/menu.json', nodeId: 'play', selector: '#play', viewport: [1280,720] }] }
       if(mode==='unknown-node')task.uiProbes!.push({document:'content/ui/menu.json',nodeId:'missing',selector:'#missing',viewport:[1280,720]})
+      if(mode==='source-inactive')task.uiProbes![0]!.steps=[{click:'#play'}]
+      if(mode==='disabled-activation')task.uiProbes![0]!.steps=[{click:'#play'}]
       // One malformed runtime selector must not discard a separate valid
       // observation in the same batch, or lose the source/node identity.
       if(mode==='invalid-target-selector')task.uiProbes!.push({...task.uiProbes![0]!,selector:'['})
@@ -49,8 +57,15 @@ for (const mode of ['consume', 'ignore', 'wrong', 'position-only', 'size-only', 
       // Tiny skips the sub-tolerance size mutation, but its observable position
       // remains. This fixture renderer ignores scale: baseline mismatch is a
       // demonstrated failure, not a reason to discard the whole probe.
-      expect(result.status, result.observation).toBe(['consume','hidden-text','wrapped'].includes(mode) ? 'passed' : ['ignore','wrong','position-only','size-only','overflow','tiny'].includes(mode) ? 'failed' : 'unverified')
+      expect(result.status, result.observation).toBe(['consume','remove-disabled','hidden-text','wrapped'].includes(mode) ? 'passed' : ['ignore-enabled','disabled-crash','disabled-missing-resource','ignore','wrong','position-only','size-only','overflow','tiny'].includes(mode) ? 'failed' : 'unverified')
       expect(await Bun.file(join(root,'content/ui/menu.json')).text()).toBe(body)
+      if(mode!=='stale-copy')expect(await Bun.file(join(root,'dist/content/ui/menu.json')).text()).toBe(body)
+      if(['consume','remove-disabled','ignore-enabled'].includes(mode)){
+        const probe=JSON.parse(result.observation).probes[0]
+        expect(probe.enabled).toEqual({beforeVisible:true,disabledVisible:mode==='ignore-enabled',restoredVisible:true})
+        if(mode==='ignore-enabled')expect(probe.reason).toContain('enabled=false is ignored')
+      }
+      if(mode==='disabled-activation')expect(JSON.parse(result.observation).probes[0].reason).toContain('activation path')
       if(mode==='missing-screen')expect(result.observation).toContain('omit registered UI')
       if(mode==='missing-viewport')expect(result.observation).toContain('omit authored target viewports')
       if(mode==='overflow')expect(JSON.parse(result.observation).probes[0].textFit.before).toMatchObject({status:'failed'})
@@ -74,6 +89,11 @@ for (const mode of ['consume', 'ignore', 'wrong', 'position-only', 'size-only', 
       }
       if(mode==='unknown-node'){
         expect(result.observation).toContain('content/ui/menu.json#missing @ 1280x720 [node]')
+        expect(result.coverage?.files).toEqual([])
+      }
+      if(mode==='source-inactive'){
+        expect(result.observation).toContain('content/ui/menu.json#play @ 1280x720 [layout]')
+        expect(result.observation).toContain('Click steps change the runtime DOM, not saved-layout eligibility')
         expect(result.coverage?.files).toEqual([])
       }
       if (mode === 'consume') {
@@ -119,7 +139,7 @@ test('UI causality uses observable properties, not forced anchored boxes: '+mode
       (stretch?'const s='+(mode==='stretch-ignore'?'[200,52]':'[1280+n.layout.sizeDelta[0],n.layout.sizeDelta[1]]')+
         ',p=n.layout.position||[0,0];b.style.left=p[0]+"px";b.style.top=p[1]+"px";':
         'const s='+(mode==='flow-ignore'?'[200,52]':'n.layout.size')+';')+
-      'b.style.width=s[0]+"px";b.style.height=s[1]+"px";})</script>'
+      'b.style.width=s[0]+"px";b.style.height=s[1]+"px";if(n.enabled===false)b.style.display="none";})</script>'
     await writeFile(join(root,'dist/index.html'),html)
     const task:TaskSpec={id:'observable',kind:'game.verify',goal:'Synthetic layout causality',dependsOn:[],requirementIds:['req'],
       inputs:[],writablePaths:[],expectedOutputs:['dist/index.html'],checks:['ui-data-consumption'],runtimeArtifact:'dist',

@@ -351,7 +351,7 @@ test('malformed evidence does not hide independently invalid acceptance pointers
 }))
 test('explicit prose references remain independently checked after consumes is removed', () => fixture(async workspace => {
   await writeFile(join(workspace, 'docs/GDD.md'), designDocumentFixture('GDD.md') + '\n[Missing source](UNASSIGNED_DESIGN.md)\n')
-  expect(checkDesignDocumentReferences(workspace, 4).valid).toBe(false)
+  expect(checkDesignDocumentReferences(workspace, 'GDD.md').valid).toBe(false)
 }))
 test('numeric document version comparison stays available for released-baseline guards', () => {
   expect(designDocumentVersion('# Design\n- 版本：v1.9.2\n')).toBe('1.9.2')
@@ -495,7 +495,7 @@ test('only existing explicitly cited calculation files enter scoped writes and r
   expect(() => designCalculationFiles(workspace, ['BALANCE_DESIGN.md'])).toThrow('must not be a symlink')
   await writeFile(join(workspace, 'docs/BALANCE_DESIGN.md'), designDocumentFixture('BALANCE_DESIGN.md') + '\n[Missing](calc/missing.json)\n')
   expect(designCalculationFiles(workspace, ['BALANCE_DESIGN.md'])).toEqual([])
-  expect(checkDesignDocumentReferences(workspace, 2).valid).toBe(false)
+  expect(checkDesignDocumentReferences(workspace, 'BALANCE_DESIGN.md').valid).toBe(false)
 }))
 
 test('visual references bind the owner version and revision without granting a consumer writes to its art source', () => fixture(async workspace => {

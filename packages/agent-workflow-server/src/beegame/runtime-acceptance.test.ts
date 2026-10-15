@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readRuntimeAcceptanceReport, runtimeEvidenceIsCurrent } from './runtime-acceptance'
 import { bundleAcceptanceChecker } from './acceptance-check-bundle'
-import { advanceProjectDeliveryAfterTurn, beginProjectDelivery, projectDeliveryStatePath, PROJECT_DELIVERY_REPORT_PATH } from './project-delivery'
 import { designDocumentFixture, designHandoffFixture, designRequirementChecksFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
 import { designHandoffPath, finalizeDesignDocuments, snapshotDesignDocuments } from './design-handoff'
 
@@ -317,14 +316,6 @@ test.each(['scene-2d', 'scene-3d'] as const)('%s resource and geometry verificat
       expect(JSON.parse(run.stdout.toString())).toMatchObject({ diagnostic: report?.diagnostic,
         check: 'report-content-evidence', publishReadiness: 'not-checked' })
       expect(await readFile(join(workspace, 'content/world.json'), 'utf8')).toBe(source)
-      const host = join(workspace, 'host')
-      const state = await beginProjectDelivery(workspace, host, 'Fixture')
-      await writeFile(projectDeliveryStatePath(workspace, host), JSON.stringify({ ...state, phase: 'acceptance' }))
-      await writeFile(join(workspace, PROJECT_DELIVERY_REPORT_PATH), await readFile(join(workspace, 'acceptance.json')))
-      expect(await advanceProjectDeliveryAfterTurn(workspace, host)).toMatchObject({
-        phase: 'acceptance', shouldContinue: true, diagnostic: { category: 'report-invalid' },
-      })
-      expect((await advanceProjectDeliveryAfterTurn(workspace, host))?.shouldContinue).toBe(false)
     }
   } finally { await rm(workspace, { recursive: true, force: true }) }
 })

@@ -3,8 +3,8 @@ import { CHECK_IDS, type CheckResult } from './state'
 import { CHECK_VERSIONS, EDITABLE_BUILD_CHECK_VERSION, currentCheckVersion, isCurrentCheckVersion } from './check-versions'
 import { checkIsCurrent } from './checks'
 
-test('every declared checker and host-only evidence has one current driver identity; unknown/obsolete versions cannot be reused', async () => {
-  for (const id of [...CHECK_IDS, 'skill-use', 'content-binding'] as const) {
+test('every declared checker has one current driver identity; unknown/obsolete versions cannot be reused', async () => {
+  for (const id of CHECK_IDS) {
     const check: CheckResult = { id, version: CHECK_VERSIONS[id], status: 'passed', inputs: [], observation: 'Synthetic version fixture, not acceptance', createdAt: '2026-10-11T00:00:00Z' }
     expect(isCurrentCheckVersion(check)).toBe(true)
     expect(await checkIsCurrent('/path-not-accessed-for-empty-input', check)).toBe(true)
@@ -18,6 +18,8 @@ test('every declared checker and host-only evidence has one current driver ident
   expect(isCurrentCheckVersion({id:'ui-data-consumption',version:'v3-ui-dom-consumption.2'})).toBe(false)
   expect(isCurrentCheckVersion({id:'ui-data-consumption',version:'v3-ui-dom-consumption.3'})).toBe(false)
   expect(isCurrentCheckVersion({id:'ui-data-consumption',version:'v3-ui-dom-consumption.4'})).toBe(false)
+  expect(await checkIsCurrent('/path-not-accessed-for-empty-input', {id:'ui-data-consumption',version:'v3-ui-dom-consumption.6',
+    status:'passed',inputs:[],observation:'No enabled visibility evidence',createdAt:'earlier'})).toBe(false)
   expect(isCurrentCheckVersion({id:'pixel-data-consumption',version:'v3-canvas-image-consumption.2'})).toBe(false)
   expect(await checkIsCurrent('/path-not-accessed-for-empty-input', {id:'ui-data-consumption',version:'v3-ui-dom-consumption.1',
     status:'passed',inputs:[],observation:'Old synthetic receipt',createdAt:'earlier'})).toBe(false)

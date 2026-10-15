@@ -12,7 +12,7 @@ export class ImageServiceError extends Error {
 export class ImageGenerationService {
   constructor(private readonly attempts: ImageAttemptStore, private readonly billing: ImageBillingClient) {}
 
-  async generate(input: ImageAttemptInput) {
+  async generate(input: ImageAttemptInput, source: 'platform' | 'byok' = 'platform') {
     const observe = async <T>(stage: string, operation: () => Promise<T>): Promise<T> => {
       const started = Date.now()
       const identity = { projectId: input.projectId, requestId: input.requestId, stage }
@@ -28,10 +28,18 @@ export class ImageGenerationService {
         throw error instanceof ImageAttemptError ? error : new ImageServiceError(stage)
       }
     }
-    const pricing = imagePricingSchema.parse(input.config.billing)
-    if (pricing.model !== input.config.model) throw new Error('Image pricing does not match the configured model')
     if ((input.request.referenceImage || input.request.size) && input.config.provider !== 'cloudflare')
       throw new ImageReferenceError('provider-unsupported')
+    // Read-only preflight before any new wallet reservation or provider call.
+    // Missing/corrupt paid output still cannot resubmit: recoverOnly below stays unchanged.
+    this.attempts.validateNewRequest(input)
+    if (source === 'byok') {
+      if (!input.config.apiKey) throw new Error('Personal image API key is required')
+      const result = await observe('generate-or-recover', () => this.attempts.generate(input))
+      return { ...result, chargedCreditsMicro: null, billingState: 'external' as const }
+    }
+    const pricing = imagePricingSchema.parse(input.config.billing)
+    if (pricing.model !== input.config.model) throw new Error('Image pricing does not match the configured model')
     const quality = input.request.quality ?? input.config.quality
     const size = input.request.size ?? input.config.size
     let fixedQuote: number | undefined
@@ -54,6 +62,8 @@ export class ImageGenerationService {
         ...(fixedQuote === undefined ? {} : { fixedQuoteCreditsMicro: fixedQuote, quality, size }) },
     }
     const receipt = await observe('reserve', () => this.billing.apply(input.ownerId, base))
+    if (receipt.blockedByRequestId)
+      throw new ImageAttemptError('conflict', undefined, undefined, 'unresolved-image-request', true, receipt.blockedByRequestId)
     if (receipt.state === 'released') throw new Error('Image request was released; a new intentional attempt needs a new request ID')
     // Settlement uses the frozen reservation price, not a later administrator edit.
     // Reservations created before the markup change retain their original 1x

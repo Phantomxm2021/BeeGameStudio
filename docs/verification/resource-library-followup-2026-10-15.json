@@ -1,0 +1,508 @@
+{
+  "date": "2026-10-15",
+  "scope": "Follow-up audit and minimal local system fixes after the main resource-library repair. No generated game project edits, library metadata edits, paid generation, or semantic jobs.",
+  "operationalFollowup": {
+    "symptom": "Opening a Resource Pack showed Resource processing is not configured.",
+    "cause": "The audit resource service was left running with BEEGAME_RESOURCE_PROCESSING_ENABLED=0. Pack opening still reads the latest inspection job, which returned 503.",
+    "action": "Verified zero queued or running processing jobs, then restarted only the resource service with its normal development environment.",
+    "resourceServicePid": 54781,
+    "health": { "status": "ok", "processingEnabled": true },
+    "frontendReadStatus": { "packs": 200, "packDetail": 200, "inspectionJob": 200, "semanticJob": 200 },
+    "pendingJobsAfterRestart": 0,
+    "paidProcessingTriggered": false,
+    "note": "The live.resourceService object below records the earlier audit-time paused state, not the final operating state."
+  },
+  "changes": [
+    {
+      "area": "Sourcing policy",
+      "rootCause": "Workflow prompt, asset CLI help and technical-art guidance explicitly privileged AI core artwork; production checklist incorrectly required AI curation and discouraged paginated browsing.",
+      "fix": "Align existing guidance: honor explicit source choices; consider suitable supplied/library common assets and complete animation; focused web sourcing for gaps; AI for distinctive unmet needs. Record actual evidence in existing resource plans, not a new framework.",
+      "limit": "Guidance does not deterministically prove source selection, aesthetics, or game reuse. Live workflow runtime was not restarted by this follow-up."
+    },
+    {
+      "area": "Download integrity",
+      "rootCause": "CLI skipped SHA-256 validation when stored contentHash was missing or malformed.",
+      "fix": "Require canonical stored SHA-256 before payload download; always compare downloaded bytes; retain mismatch cleanup and exclusive creation.",
+      "redGreen": "Offline CLI regression failed on the pre-fix missing-hash path; now covers missing/invalid hash, mismatch cleanup, successful verified download and overwrite refusal."
+    },
+    {
+      "area": "Catalog count consistency",
+      "rootCause": "SQL summary counted 11 roots in two packs that existing TypeScript element readiness rejected for unmapped external references.",
+      "fix": "Remove public catalog summary shortcut; pack list and pack detail reuse existing element readiness. Keep dependency checks and original metadata unchanged.",
+      "redGreen": "Regression with a valid prefixed binding plus unresolved basename and an intentionally unusable SQL summary failed before this change and passes now.",
+      "tradeoff": "Unfiltered catalog now reads published-pack metadata and is slower. No new cache, index or SQL rule duplication added."
+    }
+  ],
+  "live": {
+    "resourceService": {
+      "url": "http://127.0.0.1:62177",
+      "pid": 53689,
+      "health": "ok",
+      "processingEnabled": false
+    },
+    "before": {
+      "observedAt": "2026-10-14T20:53:30.626Z",
+      "mismatches": [
+        {
+          "packId": "pack-c3f4f3fa-8342-4c92-a3a6-a6143dc42d7c",
+          "packName": "kenney_blocky-characters_20",
+          "summary": 36,
+          "elements": 35,
+          "equal": false
+        },
+        {
+          "packId": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39",
+          "packName": "kenney_tower-defense-kit",
+          "summary": 161,
+          "elements": 151,
+          "equal": false
+        }
+      ]
+    },
+    "after": {
+      "observedAt": "2026-10-14T20:58:34.599Z",
+      "totalPacks": 25,
+      "allCountsEqual": true,
+      "counts": [
+        {
+          "packId": "pack-dbec6738-6f25-411a-b382-359c35db5eda",
+          "packName": "kenney_1-bit-pack",
+          "summary": 8,
+          "elements": 8,
+          "equal": true
+        },
+        {
+          "packId": "pack-17f73049-5e03-444b-80a3-cdd1cfb736f8",
+          "packName": "kenney_blaster-kit_2.1",
+          "summary": 41,
+          "elements": 41,
+          "equal": true
+        },
+        {
+          "packId": "pack-c3f4f3fa-8342-4c92-a3a6-a6143dc42d7c",
+          "packName": "kenney_blocky-characters_20",
+          "summary": 35,
+          "elements": 35,
+          "equal": true
+        },
+        {
+          "packId": "pack-e32164e1-0b55-4ccd-8114-79405c691368",
+          "packName": "kenney_casino-audio",
+          "summary": 54,
+          "elements": 54,
+          "equal": true
+        },
+        {
+          "packId": "pack-782c8417-c7fd-45d4-8f9f-2d25b9e61e51",
+          "packName": "kenney_castle-kit",
+          "summary": 77,
+          "elements": 77,
+          "equal": true
+        },
+        {
+          "packId": "pack-c4f22486-090b-4749-940a-08ef6c0ab220",
+          "packName": "kenney_factory-kit_3.0",
+          "summary": 287,
+          "elements": 287,
+          "equal": true
+        },
+        {
+          "packId": "pack-4b5438e5-0df9-4a13-8ce5-35eb30b57888",
+          "packName": "kenney_food-kit",
+          "summary": 401,
+          "elements": 401,
+          "equal": true
+        },
+        {
+          "packId": "pack-a228e79a-4508-4884-a55f-8989f97803e4",
+          "packName": "kenney_impact-sounds",
+          "summary": 130,
+          "elements": 130,
+          "equal": true
+        },
+        {
+          "packId": "pack-315c3e8b-ee58-4236-aaac-4451b135c56a",
+          "packName": "kenney_micro-roguelike",
+          "summary": 2,
+          "elements": 2,
+          "equal": true
+        },
+        {
+          "packId": "pack-e872fee8-146e-4d92-8cbb-4e392bfb6093",
+          "packName": "kenney_mini-characters",
+          "summary": 53,
+          "elements": 53,
+          "equal": true
+        },
+        {
+          "packId": "pack-56491f3e-24c1-41e5-ac5b-bacea4e56b88",
+          "packName": "kenney_modular-cave-kit_1.0",
+          "summary": 81,
+          "elements": 81,
+          "equal": true
+        },
+        {
+          "packId": "pack-c5d6dd09-55fd-4464-9265-706eff25fc9a",
+          "packName": "kenney_modular-dungeon-kit_1.0",
+          "summary": 81,
+          "elements": 81,
+          "equal": true
+        },
+        {
+          "packId": "pack-786ff795-33b5-44ce-96b8-e2e5156f4c24",
+          "packName": "kenney_nature-kit",
+          "summary": 329,
+          "elements": 329,
+          "equal": true
+        },
+        {
+          "packId": "pack-53e5652f-29ff-49d3-8e8a-52a8b49cfb12",
+          "packName": "kenney_pirate-kit",
+          "summary": 145,
+          "elements": 145,
+          "equal": true
+        },
+        {
+          "packId": "pack-2301374a-63b1-4a8e-9b5d-32e7ce26912a",
+          "packName": "kenney_platformer-kit",
+          "summary": 307,
+          "elements": 307,
+          "equal": true
+        },
+        {
+          "packId": "pack-9eb68feb-a73a-4c3f-9803-3e1940206924",
+          "packName": "kenney_sci-fi-sounds",
+          "summary": 73,
+          "elements": 73,
+          "equal": true
+        },
+        {
+          "packId": "pack-2791da03-2deb-46b2-8ea4-67e31fe76692",
+          "packName": "kenney_space-station-kit",
+          "summary": 195,
+          "elements": 195,
+          "equal": true
+        },
+        {
+          "packId": "pack-105d5a0d-5180-42ec-978a-3578f6340ea9",
+          "packName": "kenney_survival-kit",
+          "summary": 81,
+          "elements": 81,
+          "equal": true
+        },
+        {
+          "packId": "pack-a47a9dfb-c029-4631-a073-878b24d7e2ca",
+          "packName": "kenney_tiny-dungeon",
+          "summary": 1,
+          "elements": 1,
+          "equal": true
+        },
+        {
+          "packId": "pack-9c10e750-6e11-4de7-ad95-fc13a757c0be",
+          "packName": "kenney_tiny-farm",
+          "summary": 1,
+          "elements": 1,
+          "equal": true
+        },
+        {
+          "packId": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39",
+          "packName": "kenney_tower-defense-kit",
+          "summary": 151,
+          "elements": 151,
+          "equal": true
+        },
+        {
+          "packId": "pack-66a7b462-11f5-4d65-b48c-b98fd49fd8de",
+          "packName": "kenney_train-kit",
+          "summary": 207,
+          "elements": 207,
+          "equal": true
+        },
+        {
+          "packId": "pack-6de95aa0-b49b-4761-9d57-69586cfac80b",
+          "packName": "kenney_ui-pack-adventure",
+          "summary": 128,
+          "elements": 128,
+          "equal": true
+        },
+        {
+          "packId": "pack-bab2cb64-5f78-40c2-a71f-c24a0e238b72",
+          "packName": "kenney_watercraft-pack",
+          "summary": 47,
+          "elements": 47,
+          "equal": true
+        },
+        {
+          "packId": "pack-83aa8881-2946-47f0-bcac-4c04df741537",
+          "packName": "Starter-Kit-FPS",
+          "summary": 29,
+          "elements": 29,
+          "equal": true
+        }
+      ],
+      "requests": 28,
+      "allRequests200": true
+    },
+    "latency": {
+      "measurement": "Three sequential actual CLI catalog calls per version; includes CLI/bridge/Supabase round trip, limit 64; small observation, not a load benchmark.",
+      "beforeMs": [
+        532,
+        397,
+        375
+      ],
+      "afterMs": [
+        3297,
+        2586,
+        2886
+      ]
+    },
+    "downloads": {
+      "observedAt": "2026-10-14T20:53:30.626Z",
+      "samples": [
+        {
+          "pack": "kenney_casino-audio",
+          "elementId": "pack-e32164e1-0b55-4ccd-8114-79405c691368-c9e18d6c-5e61-468c-8b54-b92a34b459ce",
+          "path": "assets/sample.ogg",
+          "bytes": 12489,
+          "sha256": "7a9758ccad8899baef1b9f60b4064e4baa724a548293832fdaea07e6e07e638d",
+          "hashMatches": true,
+          "decodeExit": 0,
+          "license": "CC0",
+          "unclassified": true
+        },
+        {
+          "pack": "kenney_micro-roguelike",
+          "elementId": "pack-315c3e8b-ee58-4236-aaac-4451b135c56a-624fbbbb-8b65-4a65-b4e2-c635fb210c00",
+          "path": "assets/sample.png",
+          "bytes": 3070,
+          "sha256": "fe7f2f3b25135175382109ace76a1e31fb7baefdfe9724784ac11db4bbdda0e5",
+          "hashMatches": true,
+          "decodeExit": 0,
+          "license": "CC0",
+          "unclassified": false
+        }
+      ],
+      "route": "Current-source temporary assets CLI -> short-lived authenticated read-only bridge -> live resource service -> signed R2 URL -> local SHA-256 comparison -> ffmpeg decode",
+      "requests": 38,
+      "allRequests200": true,
+      "outputDirectory": "/private/tmp/bgs-resource-followup.Jovbdt"
+    },
+    "dependencyEvidence": [
+      {
+        "packId": "pack-c3f4f3fa-8342-4c92-a3a6-a6143dc42d7c",
+        "packName": "kenney_blocky-characters_20",
+        "excluded": [
+          {
+            "id": "pack-c3f4f3fa-8342-4c92-a3a6-a6143dc42d7c-a9a014d6-e9bb-4e70-8843-927f85d3976c",
+            "path": "Character-FBX/character-r.fbx",
+            "blockers": [
+              "external_dependency_unmapped"
+            ],
+            "externalReferences": "[\"Textures/texture-r.png\"]",
+            "unresolvedTextureReferences": "texture-r.png",
+            "dependencyBindings": [
+              {
+                "kind": "image",
+                "referencePath": "Textures/texture-r.png",
+                "dependencyElementId": "pack-c3f4f3fa-8342-4c92-a3a6-a6143dc42d7c-d29f0812-4345-4f6e-9a0e-c87c34e7ee53"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "packId": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39",
+        "packName": "kenney_tower-defense-kit",
+        "excluded": [
+          {
+            "id": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-5b8ef128-7fc9-40c3-a006-bfde63cf4553",
+            "path": "FBX/detail-dirt.fbx",
+            "blockers": [
+              "external_dependency_unmapped"
+            ],
+            "externalReferences": "[\"Textures/colormap.png\"]",
+            "unresolvedTextureReferences": "colormap.png",
+            "dependencyBindings": [
+              {
+                "kind": "image",
+                "referencePath": "Textures/colormap.png",
+                "dependencyElementId": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-5be591bf-747a-46d9-a3e9-029144b37f1e"
+              }
+            ]
+          },
+          {
+            "id": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-09117bcf-970a-434a-92a4-06b7d6d590f2",
+            "path": "FBX/enemy-ufo-beam-burst.fbx",
+            "blockers": [
+              "external_dependency_unmapped"
+            ],
+            "externalReferences": "[\"Textures/colormap.png\"]",
+            "unresolvedTextureReferences": "colormap.png",
+            "dependencyBindings": [
+              {
+                "kind": "image",
+                "referencePath": "Textures/colormap.png",
+                "dependencyElementId": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-5be591bf-747a-46d9-a3e9-029144b37f1e"
+              }
+            ]
+          },
+          {
+            "id": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-58f56d0f-ab16-4085-ab81-488914c587bb",
+            "path": "FBX/enemy-ufo-beam.fbx",
+            "blockers": [
+              "external_dependency_unmapped"
+            ],
+            "externalReferences": "[\"Textures/colormap.png\"]",
+            "unresolvedTextureReferences": "colormap.png",
+            "dependencyBindings": [
+              {
+                "kind": "image",
+                "referencePath": "Textures/colormap.png",
+                "dependencyElementId": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-5be591bf-747a-46d9-a3e9-029144b37f1e"
+              }
+            ]
+          },
+          {
+            "id": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-37e9f334-1c11-40fd-897a-d48504d3c9cf",
+            "path": "FBX/snow-tile-slope.fbx",
+            "blockers": [
+              "external_dependency_unmapped"
+            ],
+            "externalReferences": "[\"Textures/colormap.png\"]",
+            "unresolvedTextureReferences": "colormap.png",
+            "dependencyBindings": [
+              {
+                "kind": "image",
+                "referencePath": "Textures/colormap.png",
+                "dependencyElementId": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-5be591bf-747a-46d9-a3e9-029144b37f1e"
+              }
+            ]
+          },
+          {
+            "id": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-e9b9ffbb-2d75-4dab-adad-0059c2c009cc",
+            "path": "FBX/snow-wood-structure-high-part.fbx",
+            "blockers": [
+              "external_dependency_unmapped"
+            ],
+            "externalReferences": "[\"Textures/colormap.png\"]",
+            "unresolvedTextureReferences": "colormap.png",
+            "dependencyBindings": [
+              {
+                "kind": "image",
+                "referencePath": "Textures/colormap.png",
+                "dependencyElementId": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-5be591bf-747a-46d9-a3e9-029144b37f1e"
+              }
+            ]
+          },
+          {
+            "id": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-1ec9df75-0667-41fd-a5eb-23b29b3301cf",
+            "path": "FBX/tile-bump.fbx",
+            "blockers": [
+              "external_dependency_unmapped"
+            ],
+            "externalReferences": "[\"Textures/colormap.png\"]",
+            "unresolvedTextureReferences": "colormap.png",
+            "dependencyBindings": [
+              {
+                "kind": "image",
+                "referencePath": "Textures/colormap.png",
+                "dependencyElementId": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-5be591bf-747a-46d9-a3e9-029144b37f1e"
+              }
+            ]
+          },
+          {
+            "id": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-258b2da9-3b2e-4439-b23d-3b41f0a353ad",
+            "path": "FBX/tower-round-roof-c.fbx",
+            "blockers": [
+              "external_dependency_unmapped"
+            ],
+            "externalReferences": "[\"Textures/colormap.png\"]",
+            "unresolvedTextureReferences": "colormap.png",
+            "dependencyBindings": [
+              {
+                "kind": "image",
+                "referencePath": "Textures/colormap.png",
+                "dependencyElementId": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-5be591bf-747a-46d9-a3e9-029144b37f1e"
+              }
+            ]
+          },
+          {
+            "id": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-05e574bc-db2a-4ab9-b2b9-301655ffb777",
+            "path": "FBX/tower-round-top-a.fbx",
+            "blockers": [
+              "external_dependency_unmapped"
+            ],
+            "externalReferences": "[\"Textures/colormap.png\"]",
+            "unresolvedTextureReferences": "colormap.png",
+            "dependencyBindings": [
+              {
+                "kind": "image",
+                "referencePath": "Textures/colormap.png",
+                "dependencyElementId": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-5be591bf-747a-46d9-a3e9-029144b37f1e"
+              }
+            ]
+          },
+          {
+            "id": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-0b0656df-de1e-435d-8859-471031d62c91",
+            "path": "FBX/wood-structure-high.fbx",
+            "blockers": [
+              "external_dependency_unmapped"
+            ],
+            "externalReferences": "[\"Textures/colormap.png\"]",
+            "unresolvedTextureReferences": "colormap.png",
+            "dependencyBindings": [
+              {
+                "kind": "image",
+                "referencePath": "Textures/colormap.png",
+                "dependencyElementId": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-5be591bf-747a-46d9-a3e9-029144b37f1e"
+              }
+            ]
+          },
+          {
+            "id": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-a2c6876b-6219-4874-a983-f0ebebdf1f9f",
+            "path": "FBX/wood-structure-part.fbx",
+            "blockers": [
+              "external_dependency_unmapped"
+            ],
+            "externalReferences": "[\"Textures/colormap.png\"]",
+            "unresolvedTextureReferences": "colormap.png",
+            "dependencyBindings": [
+              {
+                "kind": "image",
+                "referencePath": "Textures/colormap.png",
+                "dependencyElementId": "pack-5c028dbf-265a-413e-9ae6-3640c1c65f39-5be591bf-747a-46d9-a3e9-029144b37f1e"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "verification": {
+    "coreServerSchema": {
+      "tests": 78,
+      "failed": 0
+    },
+    "cliAndBridge": {
+      "tests": 9,
+      "failed": 0
+    },
+    "selectedWorkflowGoal": {
+      "tests": 7,
+      "failed": 0,
+      "filteredOut": 34
+    },
+    "resourceServerTypecheck": "passed",
+    "cliSyntax": "passed",
+    "diffWhitespace": "passed",
+    "networkTestNote": "Loopback tests required sandbox approval; initial sandbox port failures were environmental. These are mocked tests, not paid model runs."
+  },
+  "limitations": [
+    "Source-policy changes require workflow runtime reload before claiming current-process adoption; no existing project was resumed or modified.",
+    "Real downloads validate two single-file assets only, not multi-file dependency integration, source suitability, aesthetics or game runtime consumption.",
+    "Eleven model roots remain excluded pending separate validation of their texture-reference metadata; no data repair or readiness relaxation was performed.",
+    "Legacy SQL aggregate remains for compatibility and is not the authoritative public API availability count.",
+    "Catalog latency increased from about 0.4 seconds to 2.6-3.3 seconds on the current 25-pack library; scale and concurrent-load behavior remain unmeasured.",
+    "Main-thread changes and unrelated dirty files were preserved; earlier zero-count repair evidence is in resource-library-catalog-2026-10-15.json."
+  ]
+}

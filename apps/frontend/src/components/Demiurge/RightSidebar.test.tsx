@@ -8,6 +8,8 @@ import { beeGameAdapter } from '../../services/beeGameAdapter';
 import * as apiClient from '../../services/apiClient';
 import { getWaitingPermissionState } from '../../utils/waitingPermission';
 
+const showErrorMock = vi.hoisted(() => vi.fn());
+
 vi.mock('../../store/systemStore', () => ({
     useSystemStore: () => ({
         tasks: [],
@@ -15,7 +17,7 @@ vi.mock('../../store/systemStore', () => ({
 }));
 
 vi.mock('../../contexts/ToastContext', () => ({
-    useToastContext: () => ({ showSuccess: vi.fn(), showError: vi.fn() }),
+    useToastContext: () => ({ showSuccess: vi.fn(), showError: showErrorMock }),
 }));
 
 vi.mock('../../services/api', () => ({
@@ -98,7 +100,7 @@ describe('RightSidebar tabs', () => {
             onSendMessage={vi.fn().mockResolvedValue(true)} onStopTask={vi.fn()}
             isLoading={false} waitingPermission={getWaitingPermissionState()} />);
         expect(getChatInput()).not.toHaveAttribute('readonly');
-        expect(screen.getByTestId('beegame-chat-attach-button')).toBeDisabled();
+        expect(screen.getByTestId('beegame-chat-attach-button')).toBeEnabled();
         expect(screen.queryByRole('button', { name: 'Stop task' })).not.toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Send message' })).toBeInTheDocument();
     });
@@ -446,6 +448,17 @@ describe('RightSidebar tabs', () => {
         expect(window.location.href).toBe(before);
         expect(screen.queryByRole('dialog', { name: /Editor/ })).not.toBeInTheDocument();
         open.mockRestore();
+    });
+
+    it('shows the actual file-list failure reason instead of hiding it behind a generic error', async () => {
+        vi.mocked(beeGameAdapter.getProjectGameContentFileList).mockRejectedValueOnce(
+            new Error('Saved content changed while loading'),
+        );
+        render(<RightSidebar projectId="proj_1" lang="zh" messages={[]} progress={0} onSendMessage={vi.fn()} isLoading={false}
+            waitingPermission={getWaitingPermissionState([])} />);
+        fireEvent.click(screen.getByRole('tab', { name: /^Artifacts/ }));
+        fireEvent.click(screen.getByRole('button', { name: 'UI', exact: true }));
+        expect(await screen.findByRole('alert')).toHaveTextContent('Saved content changed while loading');
     });
 
     it('shows durable foundation completion in the deliverables tab count before opening it', () => {
@@ -828,7 +841,7 @@ describe('RightSidebar tabs', () => {
         expect(screen.queryByRole('button', { name: '最小化聊天' })).not.toBeInTheDocument();
     });
 
-    it('does not offer the old attachment ingress while V3 upload is unavailable', async () => {
+    it('offers attachments in the ordinary V3 composer', async () => {
         const user = userEvent.setup();
         const onSendMessage = vi.fn();
 
@@ -851,7 +864,7 @@ describe('RightSidebar tabs', () => {
         );
 
         const attachButton = screen.getByRole('button', { name: '上传附件' });
-        expect(attachButton).toBeDisabled();
+        expect(attachButton).toBeEnabled();
         await user.click(attachButton);
         expect(onSendMessage).not.toHaveBeenCalled();
     });
@@ -1174,6 +1187,26 @@ describe('RightSidebar tabs', () => {
         expect(screen.queryByRole('button', { name: '让 Agent 探索资源' })).not.toBeInTheDocument();
         expect(api.requestProjectAction).not.toHaveBeenCalled();
         expect(onSendMessage).not.toHaveBeenCalled();
+    });
+
+    it('shows a global error when a project resource upload fails', async () => {
+        vi.mocked(api.uploadProjectAsset).mockRejectedValueOnce(new Error('Upload failed'));
+        render(<RightSidebar
+            projectId="proj_upload_error"
+            lang="zh"
+            messages={[]}
+            progress={0}
+            onSendMessage={vi.fn()}
+            isLoading={false}
+            waitingPermission={getWaitingPermissionState([])}
+        />);
+
+        fireEvent.click(screen.getByRole('tab', { name: /^Artifacts/ }));
+        fireEvent.click(screen.getByRole('button', { name: '资源' }));
+        const file = new File(['audio'], 'game.mp3', { type: 'audio/mpeg' });
+        await userEvent.setup().upload(await screen.findByLabelText('添加资源'), file);
+
+        await waitFor(() => expect(showErrorMock).toHaveBeenCalledWith('资源上传失败，请重试。'));
     });
 
     it('shows an empty asset contract message when a restored project has no manifest', async () => {

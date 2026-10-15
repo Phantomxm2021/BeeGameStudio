@@ -5,6 +5,18 @@ import { createImageBillingClient, validImageBillingInput } from '../image-billi
 import type { BeeGameBillingRouteRepository } from '../billing-ports'
 
 const input = { projectId: 'project', requestId: 'image', digest: 'digest', action: 'reserve' as const, amountCreditsMicro: 100, projectBudgetCreditsMicro: 500 }
+test('remote billing preserves unresolved original request identity and rejects contradictory receipts', async () => {
+  const receipt = {created:false,state:'reserved',blockedByRequestId:'original',reservedCreditsMicro:100,chargedCreditsMicro:0,metadata:{}}
+  let actual: Record<string, unknown> = receipt
+  const client=createImageBillingClient({mode:'remote',usageBillingMode:'realtime',remoteApiBaseUrl:'http://local',creditControlToken:'test'},
+    async()=>Response.json(actual))
+  expect(await client.apply('user',input)).toEqual(receipt)
+  for(const override of [{created:true},{state:'settled'},{blockedByRequestId:''}]) {
+    actual={...receipt,...override}
+    await expect(client.apply('user',input)).rejects.toThrow('Invalid blocked image billing receipt')
+  }
+})
+
 test('image billing validates integer amounts and never exposes service errors or retries', async () => {
   expect(validImageBillingInput(input)).toBe(true)
   expect(validImageBillingInput({ ...input, amountCreditsMicro: 0.5 })).toBe(false)

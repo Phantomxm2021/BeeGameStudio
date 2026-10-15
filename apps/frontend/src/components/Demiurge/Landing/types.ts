@@ -4,7 +4,7 @@ export type Translate = (key: string, options?: Record<string, unknown>) => stri
 export type AuthMode = 'login' | 'register' | 'resetPassword' | 'verifyEmail';
 
 export type IntakeCopy = {
-  modal: { chooseOption: string; productionSettings: string; confirmBuildBrief: string; startBuild: string; close: string };
+  modal: { chooseOption: string; productionSettings: string; confirmBuildBrief: string; startBuild: string; buildBillingNotice: string; close: string };
   optionCard: { mode: string; gameplay: string };
   fields: { platform: string; engine: string; dimension: string; orientation: string; genre: string; style: string; inputs: string; notes: string; presentation: string; type: string; resourceLibrary: string; selectPlaceholder: string };
   resourceLibraryUsage: Record<BeeGameIntakeSettings['resourceLibraryUsage'], string>;

@@ -22,6 +22,7 @@ import type {
 } from './types'
 import { normalizeResourceTechnicalFacts } from './technical-facts'
 import { evaluateResourceElementSelectionReadiness } from './publish-readiness'
+import { resolveEffectiveResourceMetadata } from './metadata-policy'
 
 /**
  * Browse published Packs without assigning project-specific game roles.
@@ -34,11 +35,12 @@ export function browseResourceCatalogPacks(
   request: ResourceCatalogRequest,
 ): ResourceCatalogPage<ResourceCatalogPack> {
   const catalogRequest = resolveCatalogRequest(request, 'packs')
+  elements = elements.map(resolveEffectiveResourceMetadata)
   const published = packs.filter(pack => pack.status === 'published')
   const readyByPack = new Map<string, ResourceElement[]>()
   for (const element of elements) {
     const pack = published.find(candidate => candidate.id === element.packId)
-    if (!pack || !isCatalogSelectableElement(pack, element, elements)) continue
+    if (!pack || !isCatalogBrowsableElement(pack, element, elements)) continue
     const list = readyByPack.get(element.packId) ?? []
     list.push(element)
     readyByPack.set(element.packId, list)
@@ -88,12 +90,13 @@ export function browseResourcePackElements(
   request: ResourceCatalogRequest,
 ): ResourceCatalogPage<ResourceCatalogElement> {
   const catalogRequest = resolveCatalogRequest(request, `pack-elements:${packId}`)
+  elements = elements.map(resolveEffectiveResourceMetadata)
   const published = packs.filter(pack => pack.status === 'published')
   const packById = new Map(published.map(pack => [pack.id, pack]))
   const available = elements
     .filter(element => {
       const pack = packById.get(element.packId)
-      return Boolean(pack && element.packId === packId && isCatalogSelectableElement(pack, element, elements))
+      return Boolean(pack && element.packId === packId && isCatalogBrowsableElement(pack, element, elements))
     })
   const eligible = available
     .filter(element => elementMatches(element, packById.get(element.packId)!, catalogRequest.filters))
@@ -257,11 +260,12 @@ export function matchResourceRequirements(
   }
 }
 
-function candidateCoversObligation(
-  candidate: ResourceRequirementCandidate,
+export function candidateCoversObligation(
+  candidate: { assetKind?: string; usageTags: readonly string[]; capabilities: readonly string[];
+    relations: readonly { kind: string }[]; contentProfile?: { components: readonly { kind: string }[] } },
   obligation: ResourceCoverageObligation,
 ): boolean {
-  if (obligation.assetKinds?.length && (!candidate.assetKind || !obligation.assetKinds.includes(candidate.assetKind))) return false
+  if (obligation.assetKinds?.length && (!candidate.assetKind || !obligation.assetKinds.some(kind => kind === candidate.assetKind))) return false
   if (obligation.usageTags?.length && !intersects(obligation.usageTags, candidate.usageTags)) return false
   if (obligation.capabilities?.length && !obligation.capabilities.every(capability => candidate.capabilities.includes(capability))) return false
   if (obligation.relationKinds?.length && !obligation.relationKinds.every(kind => candidate.relations.some(relation => relation.kind === kind))) return false
@@ -551,13 +555,16 @@ function isCursorPayload(value: unknown): value is {
   )
 }
 
-function isCatalogSelectableElement(
+function isCatalogBrowsableElement(
   pack: ResourcePack,
   element: ResourceElement,
   elements: readonly ResourceElement[],
 ): boolean {
-  if (element.usageTagsMode === 'inherit' || element.usageTagsMode === 'manual-only') return false
-  return evaluateResourceElementSelectionReadiness(pack, element, elements).selectionReady
+  if (element.usageTagsMode === 'manual-only') return false
+  // Browsing a known file does not certify its game role. Missing semantic
+  // tags must not hide otherwise ready audio/images; matching remains strict.
+  return evaluateResourceElementSelectionReadiness(pack, element, elements)
+    .blocking.every(issue => issue.code === 'usage_tags_missing')
 }
 
 function includesFormat(formats: readonly string[], path: string): boolean {

@@ -4,9 +4,6 @@ export { runDraftEditsCli } from './draft-edits'
 export { runComposeDraftCli } from './draft-composition'
 import { readDesignSections, reviewSourceSnapshot } from './design-source-reading'
 import { sceneUiContentFormat } from './scene-ui-content-authoring'
-import { checkContentHandoff } from './delivery/stages/content'
-import { checkResourceHandoff } from './delivery/stages/resources'
-import { productionCheckInputSchema } from '@bee-game-studio/agent-workflow/production-check-input'
 import { createHash } from 'node:crypto'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import type { BeeGameAssetManifest } from './asset-contracts'
@@ -17,16 +14,13 @@ import { resolveSceneCameraView, type SceneCameraInput } from '../../../scene-ed
 import { auditBeeGameContentPackage, parseBeeGameContentIndex, contentDraftStructureIssues, type BeeGameContentPackage } from './game-content-package'
 import type { BeeGameContentIndex } from './game-content-schema'
 import { parseBeeGameContentDocument } from './game-content-schema'
-import { projectContentAuthority, inspectProjectContentAuthority } from './project-content-authority'
 import { PROJECT_GUIDE_TEMPLATE, projectGuideTemplate } from './workflow-v3/project-guide'
 import { inspectUiLayout, inspectUiLayoutBoundaries, summarizeUiLayoutInspection, type UiLayoutInspectionOptions } from '../../../scene-editor/src/ui-layout-inspection'
 import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layout'
 import { checkDesignLayouts, checkReviewDesignLayouts } from './design-layout-check'
 import { checkDesignDocumentReferences } from './design-document-references'
-import { checkDesignHandoff, checkDesignHandoffDraft, DESIGN_HANDOFF_INSTRUCTION } from './design-handoff'
-import { AUTHOR_BATCHES } from './project-author'
 import { formatLayoutReport, retainLayoutReport } from './layout-report'
-import { isViewportPair, layoutCameraSource, readUiLayoutCamera } from './ui-layout-audit'
+import { isViewportPair, layoutCameraSource, readUiLayoutCamera, type LayoutConstraints } from './ui-layout-audit'
 import type { UiResponsiveNode, UiViewport } from '../../../scene-editor/src/ui-responsive'
 import { point2d } from '../../../scene-editor/src/content-coordinates'
 
@@ -43,7 +37,7 @@ function inspectUiGeometry(data: { nodes: readonly UiResponsiveNode[]; rootId: s
         sceneInspectionSpace: 'game-view-local logical pixels; gameView.bounds locates the allocated UI region' } : {}) } : {}) }
 }
 
-/** Package checks only. Full stage preflight is --content-handoff. */
+/** Package checks only; runtime and design quality need separate evidence. */
 const validationScope = {
   scope: 'content-contract-and-references',
   runtimeVerified: false,
@@ -82,32 +76,27 @@ export function summarizeContentLoadFootprint(
   }
 }
 
-export function validateGameContent(workspacePath: string, currentPackage = false) {
+export function validateGameContent(workspacePath: string) {
   const started = performance.now()
   let authority
   try {
-    if (currentPackage) {
-      // This is a content/resource preflight, not a legacy design release.
-      // Preserve the saved compatibility tag; do not invent an eight-document
-      // authority or make every prose edit a runtime index edit. Source/report
-      // freshness remains the measurement/export layer's responsibility.
-      const index = parseBeeGameContentIndex(readWorkspaceDraft(workspacePath, 'content/index.json'))
-      const manifest = readBeeGameAssetManifestSync(workspacePath)
-      authority = { documentRevision: index.documentRevision, manifest,
-        assetManifestRevision: createHash('sha256').update(JSON.stringify(manifest)).digest('hex') }
-    } else authority = projectContentAuthority(workspacePath)
+    // Source/report freshness remains the measurement/export layer's responsibility.
+    const index = parseBeeGameContentIndex(readWorkspaceDraft(workspacePath, 'content/index.json'))
+    const manifest = readBeeGameAssetManifestSync(workspacePath)
+    authority = { documentRevision: index.documentRevision, manifest,
+      assetManifestRevision: createHash('sha256').update(JSON.stringify(manifest)).digest('hex') }
   }
   catch (error) {
-    const missingIndex = currentPackage && (error as NodeJS.ErrnoException).code === 'ENOENT' &&
+    const missingIndex = (error as NodeJS.ErrnoException).code === 'ENOENT' &&
       (error as NodeJS.ErrnoException).path?.endsWith(`${sep}content${sep}index.json`)
     return { ...validationScope, valid: false,
-      issues: [`${currentPackage ? 'Saved content/index.json or Asset Manifest' : 'Current documents or Asset Manifest'} are unavailable: ${error instanceof Error ? error.message : String(error)}${missingIndex ? '. For first-index compatibility fields use --package-metadata content/scenes/FILE.json content/ui/FILE.json ... with your saved files, then author the registry; this does not create an index or approve design.' : ''}`],
+      issues: [`Saved content/index.json or Asset Manifest are unavailable: ${error instanceof Error ? error.message : String(error)}${missingIndex ? '. For first-index metadata use --package-metadata content/scenes/FILE.json content/ui/FILE.json ... with your saved files, then author the registry; this does not create an index or approve design.' : ''}`],
       contentCount: 0, elapsedMs: Math.round(performance.now() - started) }
   }
   const audit = auditBeeGameContentPackage(workspacePath, authority)
-  const issues = currentPackage ? audit.issues.map(issue => issue.startsWith('content/index.json: assetManifestRevision does not match authority.')
+  const issues = audit.issues.map(issue => issue.startsWith('content/index.json: assetManifestRevision does not match the supplied Manifest revision.')
     ? 'content/index.json: assetManifestRevision differs from the actual Manifest. Use registry.assetManifestRevision from this result after saving the real resources; update only the affected index metadata, then build/measure. This is not a design authority or quality verdict.'
-    : issue) : audit.issues
+    : issue)
   // The host audit diagnoses missing/malformed indexes. Do not replace its
   // error with an unrelated "accepted manifest required" precondition.
   const nativeIndex = audit.valid
@@ -120,10 +109,9 @@ export function validateGameContent(workspacePath: string, currentPackage = fals
     ...validationScope,
     valid: audit.valid,
     issues,
-    ...(currentPackage ? { designVerified: false,
-      note: 'Current registered content and real resources only. documentRevision is a saved compatibility tag, NOT a verified design baseline. No source files are changed. Design agreement, runtime use and quality remain unverified.',
-      registry: { assetManifestRevision: authority.assetManifestRevision } }
-      : { authority: { documentRevision: authority.documentRevision, assetManifestRevision: authority.assetManifestRevision } }),
+    designVerified: false,
+    note: 'Current registered content and real resources only. documentRevision is a saved tag, NOT a verified design baseline. No source files are changed. Design agreement, runtime use and quality remain unverified.',
+    registry: { assetManifestRevision: authority.assetManifestRevision },
     contentCount: audit.package?.documents.length ?? 0,
     ...(loadFootprint ? { loadFootprint } : {}),
     elapsedMs: Math.round(performance.now() - started),
@@ -302,98 +290,12 @@ export const CURRENT_CONTENT_CHECK_HELP = `Usage: bun <supplied-check-content-en
   --scene-point FILE NODE W H Derive saved Scene world/logical-screen coordinates; not rendered pixels
   --read-design JSON        Batch exact sections: [{"document":"GDD.md","sections":["Exact heading"]}]
   --review-sources FILE ... [--details] Batch saved source hashes/headings; --details adds text, not a semantic review
-  --legacy-help             Explicit compatibility reference for old delivery/batch/handoff commands
 FILE is workspace-relative unless stated otherwise. Use --format for actual fields, not the generated runtime bundle.
 --report produces human-readable text and a saved JSON report path; omit it for JSON. --details retains full observations.
 Checks inspect selected saved inputs only. They do not create design records or certify complete gameplay/visual quality.
 `
 
-export const CONTENT_CHECK_HELP = `Usage: bun .beegame/delivery/check-content.mjs [workspace] [command] [--details]
-  --help                    Commands, minimal inputs and result shapes (no files required)
-  --current                 Check saved index/content and real resource references; no eight-document authority required
-                           Keeps the index documentRevision compatibility tag; does NOT verify design agreement or runtime/quality
-                           Actual Manifest revision/member checks remain required; never guess hashes or update files to silence errors
-  --package-metadata FILE ...
-                           Read real first-index compatibility fields from explicit content/scenes, content/ui or content/vfx JSON and actual Manifest
-                           No index/eight documents required, no files written. Returns inputs and indexMetadata, not design/quality approval.
-  --content-handoff input.json
-                           Full Content saved-source preflight using the current host-supplied input; not runtime/visual acceptance
-  --resources-handoff input.json
-                           Resource production preflight with confirmed policy/design; not binding, font-fit or runtime acceptance
-  --design-references [--author-batch n] [--document NAME.md]
-                           Local draft scope allows pending parallel owners; final batch check omits --document
-  --design-handoff n        Check critical delivery tables/evidence for author batch n; not semantic acceptance
-  --design-handoff-help     Read the small consumer-facing table contract, not a whole-document schema
-  --check-handoff-drafts NAME.md ... [--final-technical]
-                           Check owned outcomes/pointers/evidence without host versions; final-technical checks completed cross-document task coverage
-                           Also accepts docs/NAME.md; no other directories, absolute paths or traversal
-  --format [section-name ...] List actual format sections or read selected sections together; no index/resources required
-                           Example: bun .beegame/delivery/check-content.mjs --format coordinates
-                           --format projectGuide batches saved source paths/declared commands into an optional CLAUDE.md scaffold; no writes or execution.
-  --layout-draft file w h    Inspect workspace-relative UI/Scene draft; no index/resources required
-    [--game-view node-id --camera workspace-relative-camera-or-scene.json]
-    [--appendix]             Optional Markdown geometry export; no separate appendix is required
-  --camera-draft file w h    Inspect camera framing only
-  --scene-layouts [w h ...] [--report]
-                           With no sizes, checks each Scene at its own saved Camera viewport (no cross-product).
-                           Explicit sizes apply to every Scene. Later UI-linked framing remains mandatory.
-                           Discover all saved content/scenes/*.json recursively; batch structure and 2D framing, no shell filename loops
-                           Sizes are intended Scene viewports, not proof of final UI game-view composition or gameplay rules
-  --design-layouts [--draft] Check saved UI geometry; --draft defers missing TileSet visual bounds only, never final Content
-  --review-layouts          Check linked Scene drafts and UI geometry before Review release; no index/resources required
-    --report               Human-readable text, NOT JSON; includes the saved full JSON path under .beegame/tmp/layout-reports
-                           Omit --report for machine-readable JSON. Check results identify current saved source paths/hashes; no public/content copy is selected.
-    [--orientation Landscape|Portrait] [--dimension 2D|3D|VR|AR]
-                           Pass confirmed settings to match the host. Batch results: issues, diagnostics, coverage, inputs.
-  --layout file w h          Inspect content-relative registered UI/Scene; requires content/index.json
-    [--nodes ID ...]         Return selected resolved UI rectangles in one call, without all-node details
-  --inspect [file [--node id]]  Read registered content or one exact authored node
-  --inspect-draft file [--node id | --pointer /json/pointer] ...
-                           Read draft overview or exact nodes/fields together; no index/resources required
-  --check-drafts file ...     Check saved draft structure together; resource bindings remain pending
-  --read-design JSON          Read exact current design sections in one request: [{document:"GDD.md",sections:["Exact heading"]}]
-  --review-sources FILE ... [--details]
-                           Read current hashes/headings for explicit design/source/test/report files in one batch; --details adds exact text
-                           No recursive repository/history scan, file writes or semantic PASS. Missing files remain visible.
-  --scene-point FILE NODE WIDTH HEIGHT
-                           Derive one active node origin's world/logical-screen coordinates from saved Scene hierarchy and Camera
-                           Workspace-relative Scene JSON; no index/resources required. Uses saved numeric values, not prose or rendered pixels.
-                           Geometry only, not visual/input acceptance; compare a tight actual observation and convert logical pixels through the real canvas box.
-  --authority [--inputs]    Read legacy revision metadata compared with the saved registry; --inputs batches its hashed operands.
-                           Returns computed hashes and registry.status/matches; do not guess hash algorithms.
-                           Legacy compatibility identity only; --current does not require its document tag to match.
-                           Later source edits change identity; this command does not certify design or quality.
-  (no command)              Legacy delivery entry checks the eight-document baseline. V3 autonomous entry defaults to --current.
-                           Explicit --authority and handoff checks remain legacy; no command certifies runtime or quality.
-
-Minimal UI draft (save as a workspace-relative JSON file):
-${JSON.stringify(CONTENT_DRAFT_EXAMPLES.ui)}
-Camera draft: ${JSON.stringify(CONTENT_DRAFT_EXAMPLES.camera)}
-Minimal Scene draft: ${JSON.stringify(CONTENT_DRAFT_EXAMPLES.scene)}
-Commands: --layout-draft menu.json 960 540; --camera-draft camera.json 960 540.
-Use the actual checker entry supplied in the project context; legacy command paths above are examples, not a requirement to create another wrapper.
-Full fields and Scene component examples: --format (section list), then --format SECTION. A saved .beegame/delivery/content-format.json is used when present; otherwise the current runtime provides the pure format reference, never project authority.
-
-Results: ok means inspection executed, not that geometry/design passed. UI diagnostics list
-outsideViewport, outsideParent, outsideContentArea, outsideCameraView, belowMinimumControlSize,
-overlapCandidates and textFit; inspect boundaryChecks too. Connected UI includes gameView
-{nodeId,bounds,viewport}, cameraView and sceneInspection.requiredVisibility.
-Scene drafts use the same structure/identity/Camera rules as Review; only unavailable resource bindings are deferred.
-Scene results contain view, requiredVisibility and concise diagnostics for cropped/unknown geometry.
-Default output omits full computed nodes; --details includes all computed rectangles and projections.
-UI batch: diagnostics[] gives source, node, viewport, kind, closeWhen and geometry for
-each measured failure. geometry.bounds/corners are host logical pixels; geometry.parent
-contains childCorners, bounds and contentBounds in parent-local logical pixels. Do not
-compare different spaces. Occlusion includes both actual polygons; Scene visibility
-includes the failing Scene nodes and camera view. Input failures may have no geometry.
-UI --details adds measurements:[{source,scene?,viewport,nodes}]; batch nodes are NOT
-at the top level. Scene --scene-layouts returns files, issues, inspections and coverage;
-each inspections item identifies source and viewport. An unverified result is not PASS.
-Computed nodes are diagnostics, NOT authored role/style/text or renderable game objects.
-Browser helper inspectUiLayout returns a node array; inspectUiLayoutInBrowser returns
-{viewport,nodes,textMeasurements,note}. Match computed id to the original source node for
-authored content; bounds are host-space, layout is local. Neither helper renders a screen.
-No files are changed. Unmeasured fonts, occlusion, gameplay and visual quality remain unverified.`
+export const CONTENT_CHECK_HELP = CURRENT_CONTENT_CHECK_HELP
 
 /** Diagnose argv boundaries before interpreting an input or platform capability. */
 function commandViewport(args: string[]): UiViewport {
@@ -521,35 +423,18 @@ function locatesContentInputs(args: string[]) {
     '--layout-draft', '--camera-draft', '--inspect-draft', '--check-drafts', '--scene-point'].includes(args[0] ?? '')
 }
 
-export function runGameContentCommand(workspacePath: string, args: string[] = []) {
-  const result = runGameContentCommandImpl(workspacePath, args)
+export function runGameContentCommand(workspacePath: string, args: string[] = [], confirmed?: LayoutConstraints) {
+  const result = runGameContentCommandImpl(workspacePath, args, confirmed)
   if (locatesContentInputs(args))
     return { ...result, inputLocation: contentInputLocation(workspacePath, args, result) }
   return result
 }
 
-function runGameContentCommandImpl(workspacePath: string, args: string[] = []) {
-  if (args[0] === '--content-handoff' || args[0] === '--resources-handoff') {
-    if (args.length !== 2) throw new Error('Usage: ' + args[0] + ' host-supplied-input.json')
-    const root = realpathSync(workspacePath), path = realpathSync(resolve(root, args[1]!))
-    const part = relative(root, path)
-    if (isAbsolute(part) || part === '..' || part.startsWith('..' + sep)) throw new Error('Content handoff input must stay inside the workspace.')
-    return (args[0] === '--content-handoff' ? checkContentHandoff : checkResourceHandoff)(
-      root, productionCheckInputSchema.parse(JSON.parse(readFileSync(path, 'utf8'))))
-  }
-  if (args.length === 1 && args[0] === '--design-handoff-help') return { ok: true, scope: 'design-handoff-help', instruction: DESIGN_HANDOFF_INSTRUCTION }
-  if (args[0] === '--design-handoff') {
-    const batch = Number(args[1]) - 1
-    if (args.length !== 2 || !Number.isInteger(batch) || !AUTHOR_BATCHES[batch]) throw new Error('Usage: --design-handoff 1-based-batch-number')
-    return { scope: 'design-handoff', runtimeVerified: false,
-      ...checkDesignHandoff(workspacePath, [...new Set(AUTHOR_BATCHES.slice(0, batch + 1).flat())], {
-        technicalBaseline: batch < AUTHOR_BATCHES.length - 1, nextConsumers: AUTHOR_BATCHES[batch + 1] ?? ['resources'],
-      }) }
-  }
+function runGameContentCommandImpl(workspacePath: string, args: string[] = [], hostConstraints?: LayoutConstraints) {
   if (args.length === 1 && args[0] === '--help') return { ok: true, scope: 'help', help: CONTENT_CHECK_HELP }
   const details = args.at(-1) === '--details'
   const parameters = details ? args.slice(0, -1) : [...args]
-  const confirmed: { orientation?: string; dimension?: string } = {}
+  const confirmed: LayoutConstraints = { ...hostConstraints }
   if (['--review-layouts', '--design-layouts'].includes(parameters[0] ?? '')) {
     for (const [flag, key, values] of [
       ['--orientation', 'orientation', ['Landscape', 'Portrait']],
@@ -560,6 +445,8 @@ function runGameContentCommandImpl(workspacePath: string, args: string[] = []) {
       const value = parameters[at + 1]
       if (!value || !(values as readonly string[]).includes(value) || parameters.lastIndexOf(flag) !== at)
         throw new Error(`Invalid ${flag}; expected ${values.join('|')}`)
+      if (hostConstraints?.[key] !== undefined && hostConstraints[key] !== value)
+        throw new Error(`${flag} differs from the confirmed project target`)
       confirmed[key] = value
       parameters.splice(at, 2)
     }
@@ -579,7 +466,7 @@ function runGameContentCommandImpl(workspacePath: string, args: string[] = []) {
   })),geometrySpace:'bounds/corners: host logical pixels; layout.position/size: resolved parent-local allocation'}
 }
 
-function runContentCommand(workspacePath: string, args: string[], confirmed?: { orientation?: unknown; dimension?: unknown }, details = false) {
+function runContentCommand(workspacePath: string, args: string[], confirmed?: LayoutConstraints, details = false) {
   if (args[0] === '--review-sources') return reviewSourceSnapshot(workspacePath, args.slice(1), details)
   if (args[0] === '--scene-point') {
     if (args.length !== 5 || !args[2] || !isViewportPair([Number(args[3]), Number(args[4])]))
@@ -651,19 +538,6 @@ function runContentCommand(workspacePath: string, args: string[], confirmed?: { 
       coverage: { viewports, targets, basis: viewports.length ? 'explicit-common-viewports' : 'saved-camera-per-scene', unverified }, runtimeVerified: false,
       note: 'Saved Scene structure and explicit draft viewport geometry only. These sizes are not proof of the eventual UI game-view. Joint Review checks actual UI-linked framing. Rules, traversal and solvability remain unverified.' }
   }
-  if (args[0] === '--check-handoff-drafts') {
-    if (args.length < 2) throw new Error('Usage: --check-handoff-drafts NAME.md ... (also accepts docs/NAME.md)')
-    const finalTechnical = args.at(-1) === '--final-technical'
-    const names = args.slice(1, finalTechnical ? -1 : undefined)
-    if (!names.length || names.some(name => name.startsWith('--')) || finalTechnical &&
-        !names.some(name => name === 'TECHNICAL_DESIGN.md' || name === 'docs/TECHNICAL_DESIGN.md'))
-      throw new Error('Usage: --check-handoff-drafts NAME.md ... [--final-technical]; final-technical requires TECHNICAL_DESIGN.md')
-    const checks = [...new Set(names)].map(name => checkDesignHandoffDraft(workspacePath, name, { finalTechnical }))
-    const issues = checks.flatMap(check => check.issues)
-    const availableRequirements = checks.flatMap(check => check.availableRequirements ?? [])
-    return { valid: !issues.length, issues, runtimeVerified: false, scope: 'handoff-draft-structure',
-      ...(availableRequirements.length ? { availableRequirements } : {}) }
-  }
   if (args[0] === '--check-drafts') {
     if (args.length < 2 || args.slice(1).some(path => path.startsWith('--'))) throw new Error('Usage: --check-drafts workspace-relative-file ...')
     const files = [...new Set(args.slice(1))], issues: string[] = []
@@ -703,14 +577,13 @@ function runContentCommand(workspacePath: string, args: string[], confirmed?: { 
       ...(navigation?{issues:navigation.facts.issues,verified:navigation.facts.verified}: {}) }
   }
   if (args[0] === '--design-references') {
-    let batch: number | undefined, document: string | undefined
+    let document: string | undefined
     for (let i = 1; i < args.length; i += 2) {
-      if (args[i] === '--author-batch' && batch === undefined && /^[1-9]\d*$/.test(args[i + 1] ?? '')) batch = Number(args[i + 1]) - 1
-      else if (args[i] === '--document' && document === undefined && args[i + 1]) document = args[i + 1]
-      else throw new Error('Usage: --design-references [--author-batch 1-based-batch-number] [--document NAME.md]')
+      if (args[i] === '--document' && document === undefined && args[i + 1]) document = args[i + 1]
+      else throw new Error('Usage: --design-references [--document NAME.md]')
     }
     return { scope: 'design-document-references', runtimeVerified: false,
-      ...checkDesignDocumentReferences(workspacePath, batch, document) }
+      ...checkDesignDocumentReferences(workspacePath, document) }
   }
   if (args.length === 1 && args[0] === '--review-layouts') return {
     ...checkReviewDesignLayouts(workspacePath, confirmed, true, details), runtimeVerified: false, scope: 'review-layout-geometry',
@@ -771,10 +644,7 @@ function runContentCommand(workspacePath: string, args: string[], confirmed?: { 
     } : {}
     return inspectGameContent(workspacePath, args[1], undefined, viewport, options)
   }
-  if (args[0] === '--authority' && (args.length === 1 || args.length === 2 && args[1] === '--inputs')) {
-    return inspectProjectContentAuthority(workspacePath,args.length===2)
-  }
-  if (args.length === 1 && args[0] === '--current') return validateGameContent(workspacePath, true)
+  if (args.length === 1 && args[0] === '--current') return validateGameContent(workspacePath)
   if (args.length === 0) return validateGameContent(workspacePath)
   if (args[0] !== '--inspect' ||
       !(args.length === 1 || args.length === 2 ||
@@ -789,7 +659,7 @@ function writeCliOutput(text: string): Promise<void> {
   })
 }
 
-export async function runGameContentCli(args = process.argv.slice(2), options: { profile?: 'current' } = {}) {
+export async function runGameContentCli(args = process.argv.slice(2), options: { profile?: 'current'; confirmed?: LayoutConstraints } = {}) {
   args = [...args]
   const workspace = resolve(args[0] && !args[0].startsWith('--') ? args.shift()! : process.cwd())
   try {
@@ -798,7 +668,6 @@ export async function runGameContentCli(args = process.argv.slice(2), options: {
       if (args.length === 1 && args[0] === '--help') {
         await writeCliOutput(CURRENT_CONTENT_CHECK_HELP); process.exitCode = 0; return
       }
-      if (args.length === 1 && args[0] === '--legacy-help') args = ['--help']
     }
     const report = args.includes('--report')
     if (report) {
@@ -806,13 +675,13 @@ export async function runGameContentCli(args = process.argv.slice(2), options: {
         throw new Error('--report is supported once for --design-layouts, --review-layouts or --scene-layouts')
       args.splice(args.indexOf('--report'), 1)
     }
-    if (args[0] === '--layout' || args[0] === '--layout-draft' || args[0] === '--design-layouts' || args[0] === '--review-layouts' || args[0] === '--content-handoff') await initializeUiLayout()
+    if (args[0] === '--layout' || args[0] === '--layout-draft' || args[0] === '--design-layouts' || args[0] === '--review-layouts') await initializeUiLayout()
     if (args.at(-1) === '--appendix') {
       await writeCliOutput(generateUiLayoutAppendix(resolve(workspace), args.slice(0, -1)))
       process.exitCode = 0
       return
     }
-    const result = runGameContentCommand(resolve(workspace), args)
+    const result = runGameContentCommand(resolve(workspace), args, options.confirmed)
     if (report && 'scope' in result && result.scope === 'scene-layout-batch' &&
         'inspections' in result && Array.isArray(result.inspections) &&
         typeof result.valid === 'boolean' && Array.isArray(result.issues)) {

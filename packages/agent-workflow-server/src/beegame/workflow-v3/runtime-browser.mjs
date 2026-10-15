@@ -6,7 +6,7 @@ import { observeAudio } from './runtime-audio.mjs'
 
 let input = ''
 for await (const part of process.stdin) input += part
-const { endpoint, artifact, files, uiProbes, entryUrl = 'http://bgs-runtime.invalid/index.html' } = JSON.parse(input)
+const { endpoint, artifact, files, uiProbes, requiredViewport, entryUrl = 'http://bgs-runtime.invalid/index.html' } = JSON.parse(input)
 const entry = new URL(entryUrl), servingBase = new URL('.', entry)
 if (!['http:', 'https:'].includes(entry.protocol) || entry.username || entry.password || entry.search || entry.hash)
   throw new Error('Expected a static publication entry URL')
@@ -58,9 +58,9 @@ function colorBounds(data, info, color, mask, regions) {
 try {
   const base = await realpath(artifact)
   const allowed = new Map(files.map(file => [file.path, file]))
-  async function observe(probe, variant, marker, suppressFont = false, silence = false) {
+  async function observe(probe, variant, marker, suppressFont = false, silence = false, smokeViewport) {
   const errors = [], missing = new Set(), unsupported = new Set(), requested = new Set()
-  const context = await browser.newContext({ viewport: { width: probe?.viewport[0] ?? 1280, height: probe?.viewport[1] ?? 720 }, deviceScaleFactor: probe?.deviceScaleFactor ?? 1, serviceWorkers: 'block', acceptDownloads: false })
+  const context = await browser.newContext({ viewport: { width: probe?.viewport[0] ?? smokeViewport?.[0] ?? 1280, height: probe?.viewport[1] ?? smokeViewport?.[1] ?? 720 }, hasTouch: Boolean(smokeViewport || probe?.hasTouch), deviceScaleFactor: probe?.deviceScaleFactor ?? 1, serviceWorkers: 'block', acceptDownloads: false })
   try {
     await context.routeWebSocket('**/*', socket => { unsupported.add('non-static WebSocket'); socket.close() })
     await context.route('**/*', async route => {
@@ -122,7 +122,7 @@ try {
       } catch { observed = { reason: 'Declared audio activation path unavailable' } }
       return { ...observed, environment, errors, missingFiles: [...missing], unsupported: [...unsupported], requestedFiles: [...requested] }
     }
-    let bounds, reason, pixels, font, textFit, physicalBounds, coordinateSpace
+    let bounds, reason, pixels, scene, font, textFit, physicalBounds, coordinateSpace
     if (probe) {
       try { for (const step of probe.steps ?? []) await page.locator(step.click).click({ timeout: 5000 }) }
       catch { reason = 'Declared UI activation path could not be observed; no arbitrary test JS was executed' }
@@ -135,6 +135,22 @@ try {
         // observations in the batch, but never swallow genuine driver failures.
         if (probe.mode || !(error.name==='InvalidSelectorError' || /while parsing (?:css )?selector|Unknown engine/.test(error.message))) throw error
         reason = 'Target selector is invalid; select one actual UI element: '+probe.selector
+      }
+      // A disabled node may be removed or hidden. Do not interpret a failed
+      // activation/load or an ambiguous selector as successful disappearance.
+      if (!probe.mode && variant?.property === 'enabled') {
+        if (count > 1) reason = 'Disabled target selector is ambiguous'
+        const visible = count === 0 ? false : count === 1 ? await locator.evaluate(element => {
+          const r = element.getBoundingClientRect()
+          if (r.width <= 0 || r.height <= 0) return false
+          for (let parent = element; parent; parent = parent.parentElement) {
+            const css = getComputedStyle(parent)
+            if (css.display === 'none' || css.visibility === 'hidden' || css.visibility === 'collapse' || Number(css.opacity) === 0) return false
+          }
+          return true
+        }) : undefined
+        if (!requested.has(probe.document)) reason = 'Target build did not request the registered source'
+        return { visible, reason, environment, errors, missingFiles:[...missing], unsupported:[...unsupported] }
       }
       if (count !== undefined && count !== 1) reason = 'Selector must identify exactly one actual target UI element'
       else if (count === 1) bounds = await locator.evaluate(element => {
@@ -154,8 +170,17 @@ try {
         })
         if(hiddenAncestor) reason='Target UI ancestor is hidden; geometry alone cannot establish visible consumption'
       }
-      if (!requested.has(probe.document)) reason = 'Target build did not request the registered UI source; compiled or ignored data is unverified'
+      if (!requested.has(probe.document)) reason = 'Target build did not request the registered source; compiled or ignored data is unverified'
       if (!bounds && !reason) reason = 'Target element is hidden or has no measurable geometry'
+      if (probe.mode === 'scene' && bounds && !reason) {
+        const canvas = await locator.evaluate(element => ({canvas:element.tagName==='CANVAS',width:element.width,height:element.height}))
+        if (!canvas.canvas || canvas.width<=0 || canvas.height<=0)
+          reason = 'Scene causality needs one visible actual Canvas; no renderer is supplied by the checker'
+        else {
+          const screenshot = await locator.screenshot({animations:'disabled',timeout:5000,scale:'css'})
+          scene = {sha256:createHash('sha256').update(screenshot).digest('hex'),canvas}
+        }
+      }
       if (probe.coordinateRoot && !probe.mode && bounds && !reason) {
         const basis = await locator.evaluate((element, config) => {
           let roots
@@ -284,18 +309,42 @@ try {
         return true
       })
     })
-    return { driver: 'host-owned Chromium; actual static build', environment, viewport: probe?.viewport ?? [1280, 720], surfacePresent, bounds, physicalBounds, coordinateSpace, pixels, font, textFit, reason,
+    return { driver: 'host-owned Chromium; actual static build', environment, viewport: probe?.viewport ?? smokeViewport ?? [1280, 720], surfacePresent, bounds, physicalBounds, coordinateSpace, pixels, scene, font, textFit, reason,
       requestedFiles: [...requested], missingFiles: [...missing], errors, unsupported: [...unsupported],
       limitations: 'Initial load/error smoke only. Container/text presence is NOT pixel/rendering proof. Fetching JSON is NOT proof its layout, hierarchy, resources or gameplay rules are consumed.' }
   } finally { await context.close() }
   }
-  if (!uiProbes) console.log(JSON.stringify(await observe()))
+  if (!uiProbes) {
+    const desktop = await observe()
+    if (!requiredViewport) console.log(JSON.stringify(desktop))
+    else {
+      const phone = await observe(undefined, undefined, undefined, false, false, requiredViewport)
+      console.log(JSON.stringify({...desktop, surfacePresent: desktop.surfacePresent && phone.surfacePresent,
+        errors: [...desktop.errors, ...phone.errors], missingFiles: [...desktop.missingFiles, ...phone.missingFiles],
+        unsupported: [...desktop.unsupported, ...phone.unsupported], phone,
+        limitations: desktop.limitations+' Host-required phone initial load only; control minima and other states require bound UI probes and remain unverified here.'}))
+    }
+  }
   else {
     const results = [], errors = [], missing = new Set(), unsupported = new Set()
     const conditions = (probe, observed) => ({environment:observed.environment,
       activation:{kind:'locator-clicks',steps:probe.steps??[],...(probe.mode==='audio'?{playSteps:probe.playSteps,stopSteps:probe.stopSteps}:{})},
       coverage:'Only this viewport, pixel density and declared activation path; no complete gameplay or visual-quality verdict'})
     for (const probe of uiProbes) {
+      if (probe.mode === 'scene') {
+        const baseline = await observe(probe), repeated = await observe(probe), changed = await observe(probe,probe.variants[0]), restored = await observe(probe)
+        const observations = [baseline,repeated,changed,restored]
+        let reason = observations.find(value => value.reason)?.reason
+        if (!reason && (baseline.scene.sha256 !== repeated.scene.sha256 || baseline.scene.sha256 !== restored.scene.sha256))
+          reason = 'Original Canvas is not stable across repeated/restored loads; node causality cannot be isolated'
+        if (!reason && baseline.scene.sha256 === changed.scene.sha256)
+          reason = 'Disabling the selected saved Scene node did not change the observed Canvas; node use is unverified'
+        const status = observations.some(value => value.errors.length || value.missingFiles.length) ? 'failed' : reason ? 'unverified' : 'passed'
+        results.push({document:probe.document,nodeId:probe.nodeId,viewport:probe.viewport,status,reason,conditions:conditions(probe,baseline),
+          baseline:baseline.scene,repeated:repeated.scene,changed:changed.scene,restored:restored.scene})
+        for (const value of observations) {errors.push(...value.errors);value.missingFiles.forEach(file=>missing.add(file));value.unsupported.forEach(file=>unsupported.add(file))}
+        continue
+      }
       if (probe.mode === 'audio') {
         const before = await observe(probe), changed = []
         for (const variant of probe.variants) changed.push({ property: variant.property, expected: variant.expected, actual: await observe(probe, variant) })
@@ -370,33 +419,48 @@ try {
       }
       const before = await observe(probe), changed = []
       for (const variant of probe.variants) changed.push({ property: variant.property, expected: variant.expected, actual: await observe(probe, variant) })
+      const disabled = await observe(probe, {property:'enabled', replacement:probe.disabledSource})
       const restored = await observe(probe)
       const match = (actual, expected) => actual && Object.keys(expected).every(key => Math.abs(actual[key]-expected[key]) <= 1)
-      const observations = [before, ...changed.map(value=>value.actual), restored]
+      const geometryObservations = [before, ...changed.map(value=>value.actual), restored]
+      const observations = [...geometryObservations, disabled]
+      // Do not compare minima in the inverse-scaled reference coordinate space.
+      // Only original/restored controls matter: mutations deliberately alter size.
+      const controlSizes = probe.minimumControlSize ? [before, restored].map(value => {
+        const box = value.physicalBounds ?? value.bounds
+        return box && !value.reason ? [box.right-box.left, box.bottom-box.top] : undefined
+      }) : undefined
+      const controlFailure = controlSizes?.some(size => size && size.some((value, i) => value + .01 < probe.minimumControlSize[i]))
       // Do not refit a changed surface to make a wrong node match. The
       // independent reference must stay stable through source perturbations.
       const basisChanged = probe.coordinateRoot && before.coordinateSpace && observations.some(value=>value.coordinateSpace &&
         (!match(value.coordinateSpace.root,before.coordinateSpace.root) ||
           value.coordinateSpace.scale.some((scale,i)=>Math.abs(scale-before.coordinateSpace.scale[i])>.000001)))
-      const runtimeReason = before.reason || changed.find(value=>value.actual.reason)?.actual.reason || restored.reason ||
+      const runtimeReason = before.reason || changed.find(value=>value.actual.reason)?.actual.reason || restored.reason || disabled.reason ||
         (basisChanged?'coordinateRoot changed during source perturbation/restoration; no target-based calibration is accepted':undefined)
+      const enabledFailure = !runtimeReason && !disabled.errors.length && !disabled.missingFiles.length &&
+        !disabled.unsupported.length && disabled.visible === true
       const textFailure=observations.some(value=>value.textFit?.status==='failed'), textUnknown=observations.some(value=>value.textFit?.status==='unverified')
       const mismatch = !match(before.bounds,probe.before) ? 'baseline' : changed.find(value=>!match(value.actual.bounds,value.expected))?.property ??
         (!match(restored.bounds,probe.before)?'restored':undefined)
       const geometryFailure = !runtimeReason && probe.variants.length>0 && mismatch
       const textPhase = before.textFit?.status==='failed'?'baseline':changed.find(value=>value.actual.textFit?.status==='failed')?.property ?? 'restored'
-      const reason = textFailure ? 'Visible text exceeds node bounds at '+textPhase : runtimeReason ||
+      const reason = controlFailure ? 'Actual CSS control size is below declared minimumControlSize '+probe.minimumControlSize.join('x') : textFailure ? 'Visible text exceeds node bounds at '+textPhase : runtimeReason ||
+        (enabledFailure ? 'Saved enabled=false is ignored: target remains visible' : undefined) ||
         (geometryFailure ? 'Observed geometry differs from saved layout at '+mismatch+
           (probe.coordinateRoot?' in saved logical UI pixels':' in window CSS pixels; a fixed source-sized surface may use an explicit independent coordinateRoot. This mismatch is not proof of the whole-game appearance.') : !probe.variants.length ?
           'No observable saved layout property perturbation; baseline/restoration and text observations do not prove data consumption' :
           textUnknown ? 'Complete visible text fit could not be established' : undefined)
-      const status = textFailure || geometryFailure ? 'failed' : runtimeReason || !probe.variants.length || textUnknown ? 'unverified' :
+      const status = controlFailure || textFailure || geometryFailure || enabledFailure ? 'failed' : runtimeReason || !probe.variants.length || textUnknown || disabled.unsupported.length ? 'unverified' :
         observations.some(value => value.errors.length || value.missingFiles.length) ? 'failed' : 'passed'
       results.push({ document: probe.document, nodeId: probe.nodeId, viewport: probe.viewport, status, reason, conditions:conditions(probe,before),
         coordinateDomain:probe.coordinateRoot?'saved logical UI pixels':'window CSS pixels',
         ...(probe.coordinateRoot?{coordinateRoot:probe.coordinateRoot,layoutViewport:probe.layoutViewport,
-          mappings:observations.map(value=>({basis:value.coordinateSpace,physicalBounds:value.physicalBounds}))}:{}),
+          mappings:geometryObservations.map(value=>({basis:value.coordinateSpace,physicalBounds:value.physicalBounds}))}:{}),
+        enabled:{beforeVisible:Boolean(before.bounds && !before.reason),disabledVisible:disabled.visible,
+          restoredVisible:Boolean(restored.bounds && !restored.reason),...(disabled.reason?{reason:disabled.reason}:{})},
         unobservedProperties:probe.unobservedProperties,
+        ...(controlSizes?{controlSize:{unit:'CSS pixels',minimum:probe.minimumControlSize,before:controlSizes[0],restored:controlSizes[1]}}:{}),
         ...(probe.checkTextFit?{textFit:{before:before.textFit,changed:changed.map(value=>({property:value.property,actual:value.actual.textFit})),restored:restored.textFit}}:{}),
         before: before.bounds, changed: changed.map(value=>({ property:value.property,actual:value.actual.bounds,expected:value.expected })), restored: restored.bounds, expectedBefore: probe.before })
       for (const value of observations) {
@@ -405,6 +469,6 @@ try {
     }
     console.log(JSON.stringify({ driver: 'host-owned Chromium; actual target build; in-memory source response mutation',
       probes: results, errors, missingFiles: [...missing], unsupported: [...unsupported],
-      limitations: 'Declared DOM geometry/text-font, static Canvas image/Tilemap or HTML audio probes only; response-only changes/restoration. Decoded audio capture ignores volume/mute: native properties checked separately, no final output/listening/loop-boundary proof. Not collisions, sorting, animation, 3D/Canvas fonts/Web Audio/full gameplay acceptance.' }))
+      limitations: 'Selected Scene-node visible causality, declared DOM geometry/text-font, static Canvas image/Tilemap or HTML audio probes only; response-only changes/restoration. Scene causality does not prove correct shape/placement or all nodes. Decoded audio capture ignores volume/mute: native properties checked separately, no final output/listening/loop-boundary proof. Not collisions, sorting, animation, 3D/Canvas fonts/Web Audio/full gameplay acceptance.' }))
   }
 } finally { await browser.close() }

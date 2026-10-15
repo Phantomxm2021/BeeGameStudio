@@ -7,11 +7,13 @@ import { artifactDigest } from '../runtime-acceptance'
 import { contentIndexSchema, contentDocumentSchema } from '../game-content-schema'
 import { createPreviewTestBrowser } from '../preview-test-browser'
 import { sharedPlaywright } from '../shared-playwright'
+import { requiredTouchViewport } from '../ui-layout-audit'
 import { readVersion, versionsMatch } from './checks'
 import { runContentCheck } from './content-checks'
 import type { TaskSpec, FileVersion, CheckResult } from './state'
 import { prepareUiProbes, type PreparedUiProbe } from './ui-consumption'
 import { preparePixelProbes, type PreparedPixelProbe } from './pixel-consumption'
+import { prepareSceneProbes, type PreparedSceneProbe } from './scene-consumption'
 import { prepareFontProbes, type PreparedFontProbe } from './font-consumption'
 import { prepareAudioProbes, type PreparedAudioProbe } from './audio-consumption'
 import { sharedSharp } from '../shared-sharp'
@@ -40,7 +42,7 @@ export async function staticArtifactFiles(root: string, folder: string): Promise
 }
 
 export const STATIC_ARTIFACT_CHECK_VERSION = CHECK_VERSIONS['runtime-smoke']
-export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'delivery-package' | 'ui-data-consumption' | 'pixel-data-consumption' | 'font-data-consumption' | 'audio-data-consumption', task: Pick<TaskSpec, 'runtimeArtifact'|'expectedOutputs'|'uiProbes'|'pixelProbes'|'audioProbes'>,
+export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'delivery-package' | 'ui-data-consumption' | 'scene-data-consumption' | 'pixel-data-consumption' | 'font-data-consumption' | 'audio-data-consumption', task: Pick<TaskSpec, 'runtimeArtifact'|'expectedOutputs'|'uiProbes'|'sceneProbes'|'pixelProbes'|'audioProbes'>,
   inputs: FileVersion[], constraints: Record<string, unknown>, signal?: AbortSignal, uiScope: 'registered'|'selected' = 'registered'): Promise<CheckResult> {
   const result: CheckResult = { id, version: CHECK_VERSIONS[id], inputs: [...inputs], status: 'unverified',
     observation: 'Declare runtimeArtifact for a static web build with index.html. Server/native/XR runtimes are not supported by this driver.',
@@ -105,10 +107,19 @@ export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'deli
       result.status = 'passed'; result.observation = 'Host checked actual static package registry, structure, resource closure and identical packaged source bytes. Not runtime data consumption or game delivery acceptance.'
     } else if (id === 'ui-data-consumption') {
       let probes: PreparedUiProbe[]
-      try { probes = await prepareUiProbes(root, task, result, uiScope) }
+      try { probes = await prepareUiProbes(root, task, result, uiScope, requiredTouchViewport(constraints)) }
       catch (error) { result.observation = error instanceof Error ? error.message : 'Unsupported UI consumption input'; return result }
       // prepareUiProbes records the selected scope and unobserved screens;
       // do not replace it with an implicit whole-registry coverage claim.
+      await observeStaticBuild(root, artifact, paths, result, signal, probes)
+    } else if (id === 'scene-data-consumption') {
+      let probes: PreparedSceneProbe[]
+      try { probes = await prepareSceneProbes(root, task, result) }
+      catch (error) { result.observation = error instanceof Error ? error.message : 'Unsupported Scene consumption input'; return result }
+      result.coverage = { files: [...new Set(probes.map(probe => probe.document))], limitations: [
+        'Selected visible 2D Scene node only: disabling that node in a served JSON response must change a stable actual Canvas screenshot.',
+        'No proof of correct position, shape, resources, other nodes/states, gameplay or visual quality. An unchanged or unstable image remains unverified.',
+      ] }
       await observeStaticBuild(root, artifact, paths, result, signal, probes)
     } else if (id === 'pixel-data-consumption') {
       let probes: PreparedPixelProbe[]
@@ -138,7 +149,7 @@ export async function runArtifactCheck(root: string, id: 'runtime-smoke' | 'deli
       ] }
       await observeStaticBuild(root, artifact, paths, result, signal, probes)
     } else {
-      await observeStaticBuild(root, artifact, paths, result, signal)
+      await observeStaticBuild(root, artifact, paths, result, signal, undefined, undefined, requiredTouchViewport(constraints))
     }
     if (result.status === 'passed' && (!await versionsMatch(root, result.inputs) ||
         await artifactDigest(root, artifact, true) !== result.artifacts[0]!.sha256)) {
@@ -164,7 +175,7 @@ export async function observeStaticPublication(root: string, artifact: string, e
   if(!await versionsMatch(root,result.inputs)) throw new Error('Publication copy changed during observation')
 }
 
-async function observeStaticBuild(root: string, artifact: string, paths: string[], result: CheckResult, signal?: AbortSignal, uiProbes?: (PreparedUiProbe | PreparedPixelProbe | PreparedFontProbe | PreparedAudioProbe)[], entryUrl?: string) {
+async function observeStaticBuild(root: string, artifact: string, paths: string[], result: CheckResult, signal?: AbortSignal, uiProbes?: (PreparedUiProbe | PreparedSceneProbe | PreparedPixelProbe | PreparedFontProbe | PreparedAudioProbe)[], entryUrl?: string, requiredViewport?: [number, number]) {
   const owned = createPreviewTestBrowser()
   let child: ReturnType<typeof spawn> | undefined
   const abort = () => { void owned.close().catch(() => undefined) }
@@ -199,7 +210,7 @@ async function observeStaticBuild(root: string, artifact: string, paths: string[
         else resolvePromise(output)
       })
       if (signal?.aborted) stop()
-      else child.stdin!.end(JSON.stringify({ endpoint, artifact: resolve(root, artifact), files, uiProbes, entryUrl }))
+      else child.stdin!.end(JSON.stringify({ endpoint, artifact: resolve(root, artifact), files, uiProbes, entryUrl, requiredViewport }))
     })
     const actual = JSON.parse(observation) as { surfacePresent: boolean; errors: string[]; missingFiles: string[]; unsupported: string[]; probes?: { status: string }[] }
     result.status = actual.unsupported.length ? 'unverified' : actual.errors.length || actual.missingFiles.length ? 'failed'

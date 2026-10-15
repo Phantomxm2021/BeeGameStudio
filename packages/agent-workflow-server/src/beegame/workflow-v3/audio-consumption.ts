@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { resolve, extname } from 'node:path'
 import { contentIndexSchema, contentDocumentSchema } from '../game-content-schema'
-import { readBeeGameAssetManifestSync } from '../asset-contracts'
+import { readBeeGameAssetManifestSync, isReadableAudioResource, AUDIO_FILE_EXTENSIONS } from '../asset-contracts'
 import { readRegisteredResourceFile } from '../tilemap-contract'
 import { runContentCheck } from './content-checks'
 import { readVersion } from './checks'
@@ -62,8 +62,11 @@ export async function prepareAudioProbes(root: string, task: Pick<TaskSpec, 'aud
       throw Error('HTML audio probe requires assetRef and explicit data.volume (0..1) / data.loop: ' + probe.document + '#' + probe.componentId)
     if (data.member !== undefined && typeof data.member !== 'string') throw Error('Audio member must be an exact registered path')
     const file = readRegisteredResourceFile(root, manifest, component.assetRef, data.member as string | undefined)
-    if (!/\.(wav|mp3|ogg|m4a|aac|flac|webm)$/i.test(file.path) || !manifest.resources.some(value => value.id === component.assetRef && value.asset_kind?.startsWith('audio-')))
-      throw Error('Encoded registered audio required; synthesis/banks without an encoded member need another driver')
+    const registered = manifest.resources.find(value => value.id === component.assetRef)
+    if (!registered || !isReadableAudioResource(registered.asset_kind, registered.root_path))
+      throw Error('Unsupported audio asset_kind '+(registered?.asset_kind ?? '(missing)')+'; register encoded audio as audio-clip or another canonical audio type')
+    if (!AUDIO_FILE_EXTENSIONS.has(extname(file.path).toLowerCase()))
+      throw Error('Unsupported audio member format '+extname(file.path)+'; this driver needs an encoded audio file. Structured synthesis without an encoded member is unverified')
     const source = await readVersion(root, probe.document), packed = await readVersion(root, task.runtimeArtifact + '/' + probe.document)
     const resource = await readVersion(root, file.path), packedAudio = await readVersion(root, task.runtimeArtifact + '/' + file.path)
     result.inputs.push(source, packed, resource, packedAudio)

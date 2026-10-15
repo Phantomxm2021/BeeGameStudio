@@ -3,7 +3,6 @@ import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } 
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { prepareNativeSkillPlugins } from './native-skill-plugins'
-import { bgsBuiltinSkillName } from '@bee-game-studio/agent-workflow/native-direction-authors'
 import { getAllowedSettingSources, getInlinePlugins, setAllowedSettingSources, setInlinePlugins } from '../../../../src/bootstrap/state'
 import { clearCommandsCache, getSkillToolCommands } from '../../../../src/commands'
 import { clearSkillCaches, getSkillDirCommands } from '../../../../src/skills/loadSkillsDir'
@@ -50,7 +49,6 @@ test('standard plugins supply built-in and selected user Skills with settings di
   expect(skill.skillRoot).toBe(join(builtins, 'game-level-designer-expert'))
   expect(JSON.stringify(await skill.getPromptForCommand('', {} as any))).toContain('Read references/check.md')
   expect(commands.map(command => command.name)).toContain('bgs-user:user-specialist')
-  expect(bgsBuiltinSkillName('game-level-designer-expert', commands.map(command => command.name))).toBe(skill.name)
   expect(getAllowedSettingSources()).toEqual([])
   for (let index = 1; index < plugins.flags.length; index += 2) {
     const directory = plugins.flags[index]!

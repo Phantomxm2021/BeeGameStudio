@@ -3,24 +3,18 @@ import { mkdtemp, mkdir, readFile, writeFile, realpath, rm, symlink } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
-import { createRun, publishPlan, claimTask, finishTask, V3_PROTOCOL, digest, pauseRun, type Run, type TaskSpec } from './state'
+import { createRun, digest, pauseRun, type Run } from './state'
 import { createLocalWorkflowStore, assertCommit } from './store'
 import { createV3Executor } from './execution'
-import { changeRequirements, reserveSourceEdit, settleSourceEdit } from './changes'
+import { reserveSourceEdit, settleSourceEdit } from './changes'
 import { prepareSourceEdit, writeSourceEdit } from './source-edit'
-import { bindInputs, runChecks, assertFreshDependencies } from './checks'
 import { readContentView } from './content-view'
-import { selectMeasuredBuild, exportMeasuredBuild } from './measured-build'
 import { registerV3Routes } from './routes'
 import { BeeGameSessionManager } from '../session-manager'
 import { uiLayoutFixture, sceneLayoutFixture } from '../fixtures/layout-fixture'
 import { createAgentWorkflowApp } from '../../app'
 
-const owner = (id:string,path:string):TaskSpec => ({id,kind:'game.develop',goal:'Maintain formal '+id,dependsOn:[],requirementIds:['req.play'],
-  inputs:[path],writablePaths:[path],expectedOutputs:[path],checks:['content-schema']})
-const game:TaskSpec = {id:'game',kind:'game.develop',goal:'Build current sources and measure',dependsOn:['ui','scene'],requirementIds:['req.play'],inputs:[],
-  writablePaths:['dist/**'],expectedOutputs:['dist/index.html'],checks:['build','runtime-smoke'],runtimeArtifact:'dist',editableProject:true}
-async function fixture(autonomous=false) {
+async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(),'bgs-v3-change-'))), data = join(root,'.beegame/store')
   for (const dir of ['content/ui','content/scenes','src']) await mkdir(join(root,dir),{recursive:true})
   await writeFile(join(root,'package.json'),JSON.stringify({scripts:{build:'bun run build.mjs'}}))
@@ -33,25 +27,14 @@ async function fixture(autonomous=false) {
       {path:'ui/menu.json',id:'menu',kind:'ui-screen',loadPhase:'startup'},{path:'scenes/level.json',id:'level',kind:'scene-2d',loadPhase:'startup'}]}))
   await writeFile(join(root,'notes.json'),'{}')
   let run = createRun({projectId:'p',ownerId:'owner',workspacePath:root,chatSessionId:'chat',requestKey:'run',text:'Fixture requirements',constraints:{},ids:['req.play']})
-  if(autonomous)run.agentTurns=[]
+  run.agentTurns=[]
   const store = createLocalWorkflowStore(data)
   await store.commit('p','owner',0,run,'run.created')
-  const tasks:TaskSpec[] = [owner('ui','content/ui/menu.json'),owner('scene','content/scenes/level.json'),
-    {id:'notes',kind:'game.develop',goal:'Independent saved note',dependsOn:[],requirementIds:['req.play'],inputs:[],writablePaths:['notes.json'],expectedOutputs:['notes.json'],checks:['artifact-json']},game]
-  if(!autonomous) {
-    const next = publishPlan(run,{protocol:V3_PROTOCOL,baseRevision:0,requirementsRevision:run.requirements.revision,tasks})
-    await store.commit('p','owner',run.version,next,'plan.published');run=next
-  }
   let starts=0
   const sessions = new BeeGameSessionManager({async start(){starts++;throw Error('No provider permitted')}},data,async()=>({}),{},true)
   const executor = createV3Executor({store,sessions})
   return { root,store,sessions,executor,get starts(){return starts},get run(){return run},set run(value:Run){run=value},
     async current(){run=(await store.read('p','owner'))!;return run},
-    async check(id:string){const spec=run.tasks[id]!.spec, claimed=claimTask(run,{taskId:id,requestKey:crypto.randomUUID(),workerId:'synthetic-check',sessionId:'synthetic',inputVersions:await bindInputs(run,spec)})
-      await store.commit('p','owner',run.version,claimed,'attempt.claimed');const attempt=claimed.attempts.at(-1)!
-      const result=await runChecks(root,spec,attempt.inputVersions,undefined,run.requirements.constraints,{run:claimed,attempt})
-      expect(result.checks.map(c=>[c.id,c.status,c.observation])).toEqual(result.checks.map(c=>[c.id,'passed',expect.any(String)]))
-      run=finishTask(claimed,attempt.attemptId,claimed.fence,result,true);await store.commit('p','owner',claimed.version,run,'attempt.settled')},
     async dispose(){await executor.dispose();await sessions.dispose();await rm(root,{recursive:true,force:true})} }
 }
 function workflow(run:Run){return {version:run.version,planRevision:run.planRevision,requirementsRevision:run.requirements.revision}}
@@ -66,11 +49,10 @@ async function editValue(f:Awaited<ReturnType<typeof fixture>>,path='ui/menu.jso
   return {path,expectedRevision:entry.revision,document,workflow:workflow(f.run)}
 }
 function changeValue(run:Run,text='New confirmed fixture goal') {return {expectedVersion:run.version,requirementsRevision:run.requirements.revision,
-  requestKey:crypto.randomUUID(),requirements:{text,constraints:run.requirements.constraints,ids:run.requirements.ids},
-  tasks:Object.values(run.tasks).filter(t=>t.status!=='superseded').map(t=>t.spec)} }
+  requestKey:crypto.randomUUID(),requirements:{text,constraints:run.requirements.constraints,ids:run.requirements.ids}} }
 
 test('autonomous UI/Scene saves retain exact originals, preserve native history, deduplicate and never create Tasks or dispatch a model',async()=>{
-  const f=await fixture(true)
+  const f=await fixture()
   try {
     const initial=structuredClone(f.run),original=await readFile(join(f.root,'content/ui/menu.json'))
     const body={...await editValue(f),requestKey:'ui-save'}
@@ -83,7 +65,7 @@ test('autonomous UI/Scene saves retain exact originals, preserve native history,
     expect(record.quiescedAt).toBeDefined();expect(f.run.writer).toBeUndefined()
     expect(await readFile(join(f.root,record.sourceEdit.archive))).toEqual(original)
     expect(f.run.agentTurns).toEqual(initial.agentTurns);expect(f.run.requirements).toEqual(initial.requirements)
-    expect(f.run.planRevision).toBe(0);expect(f.run.tasks).toEqual({});expect(f.run.attempts).toEqual([]);expect(f.run.plans).toEqual([])
+    expect(f.run.planRevision).toBe(0);expect(['plans','tasks','attempts'].some(key=>key in f.run)).toBe(false)
     const version=f.run.version
     expect(await f.executor.edit(f.run,body)).toMatchObject({replayed:true})
     expect((await f.current()).version).toBe(version);expect(f.run.sourceEdits).toHaveLength(1)
@@ -99,7 +81,7 @@ test('autonomous UI/Scene saves retain exact originals, preserve native history,
 })
 
 test('autonomous editor has a single CAS writer, refuses stale/paused scope, and recovers only a drained save after settlement failure',async()=>{
-  const f=await fixture(true)
+  const f=await fixture()
   let failSettlement=true
   const executor=createV3Executor({sessions:f.sessions,store:{read:f.store.read,async commit(...args){
     if(args[4]==='source-edit.settled' && failSettlement)throw Error('Synthetic storage outage')
@@ -125,7 +107,7 @@ test('autonomous editor has a single CAS writer, refuses stale/paused scope, and
 })
 
 test('an unresolved autonomous save cannot be released using a missing session or fabricated quiescence',async()=>{
-  const f=await fixture(true)
+  const f=await fixture()
   try {
     const edit=await prepareSourceEdit(f.run,{...await editValue(f),requestKey:'lost'})
     const reserved=reserveSourceEdit(f.run,{path:edit.path,before:edit.beforeHash,after:edit.afterHash,workerId:'lost',requestKey:'lost',requestHash:'synthetic'})
@@ -137,7 +119,7 @@ test('an unresolved autonomous save cannot be released using a missing session o
   }finally{await f.dispose()}
 })
 test('original host observes a completed save despite failed exit persistence; explicit recovery cannot rewrite sources or be inferred by a new host',async()=>{
-  const f=await fixture(true)
+  const f=await fixture()
   let outage=true
   const store={read:f.store.read,async commit(...args:Parameters<typeof f.store.commit>){
     if(args[4]==='writer.quiesced' && outage)throw Error('Synthetic exit write outage')
@@ -161,7 +143,7 @@ test('original host observes a completed save despite failed exit persistence; e
 })
 
 test('autonomous save API enforces owner permission, routes pause/recovery to host saves and never invokes native tools',async()=>{
-  const f=await fixture(true),app=new Hono(),cleanups:Array<()=>Promise<void>>=[]
+  const f=await fixture(),app=new Hono(),cleanups:Array<()=>Promise<void>>=[]
   let role:'owner'|'viewer'='owner',owned=true,failSettlement=false
   const store={read:f.store.read,async commit(...args:Parameters<typeof f.store.commit>){
     if(args[4]==='source-edit.settled' && failSettlement)throw Error('Synthetic API settlement outage')
@@ -197,23 +179,8 @@ test('autonomous save API enforces owner permission, routes pause/recovery to ho
   }finally{await Promise.all(cleanups.map(f=>f()));await f.dispose()}
 })
 
-test('legacy claim response loss closes only an original unstarted reservation without dispatch or source changes',async()=>{
-  const f=await fixture(),executor=createV3Executor({sessions:f.sessions,store:{read:f.store.read,async commit(...args){
-    await f.store.commit(...args)
-    if(args[4]==='attempt.claimed')throw Error('Synthetic claim response lost')
-  }}})
-  try {
-    const before=await readFile(join(f.root,'content/ui/menu.json'))
-    await expect(executor.start(f.run,'ui','lost-start',{})).rejects.toThrow('response lost')
-    await f.current();expect(f.run.writer).toBeUndefined();expect(f.run.attempts).toHaveLength(1)
-    expect(f.run.attempts[0]!.quiescedAt).toBeDefined();expect(f.run.attempts[0]!.error).toContain('before execution')
-    expect(f.run.tasks.ui!.status).not.toBe('succeeded')
-    expect(await readFile(join(f.root,'content/ui/menu.json'))).toEqual(before);expect(f.starts).toBe(0)
-    expect(await executor.start(f.run,'ui','lost-start',{})).toEqual(f.run.attempts[0])
-  }finally{await executor.dispose();await f.dispose()}
-})
 test('pause during source-save reservation prevents later replacement; archive aliases cannot create outside descendants',async()=>{
-  const f=await fixture(true)
+  const f=await fixture()
   const executor=createV3Executor({sessions:f.sessions,store:{read:f.store.read,async commit(...args){
     await f.store.commit(...args)
     if(args[4]==='source-edit.reserved') {
@@ -236,122 +203,7 @@ test('pause during source-save reservation prevents later replacement; archive a
   }finally{await executor.dispose();await f.dispose()}
 })
 
-test('formal UI and Scene saves invalidate actual owners/consumers before writing; old preview/export rejected; actual rebuild has new measurement',async()=>{
-  const f=await fixture()
-  try {
-    for(const id of ['ui','scene','notes','game'])await f.check(id)
-    const old=f.run,oldAttempt=old.tasks.game!.attemptId!,oldArtifact=(await selectMeasuredBuild(old,'game',oldAttempt)).artifact.sha256
-    const note=f.run.tasks.notes!,scene=f.run.tasks.scene!,original=await readFile(join(f.root,'content/ui/menu.json'))
-    const noChange=await f.executor.edit(f.run,{...(await editValue(f)),document:JSON.parse(original.toString('utf8'))})
-    expect(noChange.workflow).toEqual(workflow(old));expect((await f.current()).version).toBe(old.version)
-    expect(f.run.tasks.game!.attemptId).toBe(oldAttempt);expect(f.run.attempts).toEqual(old.attempts)
-    const value=await editValue(f),saved=await f.executor.edit(f.run,value);await f.current()
-    expect(saved.unmeasured).toBe(true);expect(saved.workflow).toEqual(workflow(f.run));expect(f.run.tasks.ui!.status).toBe('pending')
-    expect(await readContentView(f.root)).toMatchObject({state:'draft',contentRevision:saved.contentRevision})
-    expect(f.run.tasks.game!.status).toBe('pending');expect(f.run.tasks.notes).toEqual(note);expect(f.run.tasks.scene).toEqual(scene)
-    const record=f.run.attempts.at(-1)!
-    expect(record.sourceEdit?.status).toBe('saved');expect(record.status).toBe('blocked');expect(record.checks).toBeUndefined();expect(f.run.writer).toBeUndefined()
-    expect(await readFile(join(f.root,record.sourceEdit!.archive))).toEqual(original)
-    expect(f.run.attempts.find(a=>a.attemptId===oldAttempt)).toEqual(old.attempts.find(a=>a.attemptId===oldAttempt))
-    await expect(selectMeasuredBuild(f.run,'game',oldAttempt)).rejects.toThrow('current successful attempt')
-    await expect(exportMeasuredBuild(f.run,'game',oldAttempt,{read:()=>f.current(),busy:()=>false})).rejects.toThrow()
-    await expect(f.executor.edit(f.run,value)).rejects.toThrow('Run/requirements changed')
-    await f.check('ui');await f.check('game')
-    const fresh=(await selectMeasuredBuild(f.run,'game',f.run.tasks.game!.attemptId!))
-    expect(fresh.artifact.sha256).not.toBe(oldArtifact);expect(fresh.attempt.attemptId).not.toBe(oldAttempt)
-    expect(JSON.parse(await readFile(join(f.root,'dist/content/ui/menu.json'),'utf8')).data.nodes[1].layout.size[1]).toBe(64)
-    const sceneValue=await editValue(f,'scenes/level.json');await f.executor.edit(f.run,sceneValue);await f.current()
-    expect(f.run.tasks.scene!.status).toBe('pending');expect(f.run.tasks.ui!.status).toBe('succeeded');expect(f.run.tasks.notes).toEqual(note)
-    await f.check('scene');await f.check('game')
-    expect((await exportMeasuredBuild(f.run,'game',f.run.tasks.game!.attemptId!,{read:()=>f.current(),busy:()=>false},'project')).kind).toBe('project')
-    expect(f.starts).toBe(0)
-  } finally {await f.dispose()}
-},30000)
-
-test('confirmed requirement changes are append-only user scope, invalidate every qualification even if artifact bytes identical, no automatic execution',async()=>{
-  const f=await fixture()
-  try {
-    for(const id of ['ui','scene','notes','game'])await f.check(id)
-    const original=f.run,oldAttempt=original.tasks.game!.attemptId!,oldArtifact=(await selectMeasuredBuild(f.run,'game',oldAttempt)).artifact
-    const body=changeValue(f.run),next=changeRequirements(f.run,body)
-    expect(next.version).toBe(original.version+1);expect(next.requirements.revision).not.toBe(original.requirements.revision)
-    expect(next.requirementChanges![0]!.before).toEqual(original.requirements);expect(next.requirementChanges![0]!.after).toEqual(next.requirements)
-    expect(next.attempts).toEqual(original.attempts);expect(Object.values(next.tasks).every(t=>t.status==='pending'&&!t.attemptId)).toBe(true)
-    await f.store.commit('p','owner',f.run.version,next,'requirements.changed');f.run=next
-    expect(changeRequirements(next,body)).toBe(next)
-    expect(()=>changeRequirements(next,{...body,tasks:body.tasks.map(t=>({...t,goal:t.goal+' widened'}))})).toThrow('different task plan')
-    await expect(selectMeasuredBuild(next,'game',oldAttempt)).rejects.toThrow()
-    const forged=structuredClone(next);forged.tasks.game=original.tasks.game!
-    await expect(assertFreshDependencies(forged,{...game,dependsOn:['game']})).rejects.toThrow('evidence changed')
-    expect(()=>assertCommit('p','owner',next.version,{...next,version:next.version+1,requirementChanges:[]},next)).toThrow('history')
-    for(const id of ['ui','scene','notes','game'])await f.check(id)
-    const fresh=await selectMeasuredBuild(f.run,'game',f.run.tasks.game!.attemptId!)
-    expect(fresh.artifact).toEqual(oldArtifact);expect(fresh.attempt.attemptId).not.toBe(oldAttempt)
-    expect(fresh.smoke.inputs.find(v=>v.path.startsWith('requirement:'))).toEqual({path:'requirement:'+next.requirements.revision,sha256:next.requirements.sha256})
-    expect((await createLocalWorkflowStore(join(f.root,'.beegame/store')).read('p','owner'))!.requirementChanges).toEqual(next.requirementChanges)
-    const second=changeRequirements(f.run,changeValue(f.run,'Third authorized goal'));expect(second.requirementChanges![1]!.before).toEqual(f.run.requirements)
-    await f.store.commit('p','owner',f.run.version,second,'requirements.changed');expect(f.starts).toBe(0)
-  } finally {await f.dispose()}
-},30000)
-
-test('a measured source-copy build is invalidated by its actually built JSON even when the task omitted that dependency',async()=>{
-  const f=await fixture()
-  try {
-    const tasks=Object.values(f.run.tasks).map(t=>t.spec.id==='game'?{...t.spec,dependsOn:[]}:t.spec)
-    const planned=publishPlan(f.run,{protocol:V3_PROTOCOL,baseRevision:f.run.planRevision,requirementsRevision:f.run.requirements.revision,tasks})
-    await f.store.commit('p','owner',f.run.version,planned,'plan.published');f.run=planned
-    await f.check('ui');await f.check('game');const old=f.run.tasks.game!.attemptId!
-    expect(f.run.attempts.find(a=>a.attemptId===old)!.checks![0]!.projectBuild!.files.map(v=>v.path)).toContain('content/ui/menu.json')
-    await f.executor.edit(f.run,await editValue(f));await f.current()
-    expect(f.run.plans.at(-1)!.impact?.game).toContain('ui');expect(f.run.tasks.game!.status).toBe('pending')
-    await expect(selectMeasuredBuild(f.run,'game',old)).rejects.toThrow('current successful attempt')
-  }finally{await f.dispose()}
-},30000)
-
-test('missing rebuild authority, invalid scope/identity, stale hashes, aliases and writer contention never overwrite a candidate',async()=>{
-  const f=await fixture()
-  try {
-    const body=await editValue(f),original=await readFile(join(f.root,'content/ui/menu.json'))
-    for(const modified of [{...body,path:'../src/index.html'}, {...body,expectedRevision:'0'.repeat(64)}, {...body,document:{...body.document,id:'changed'}},
-      {...body,workflow:{...body.workflow,requirementsRevision:'stale'}}])await expect(f.executor.edit(f.run,modified)).rejects.toThrow()
-    const missing=structuredClone(f.run);delete missing.tasks.ui
-    await expect(f.executor.edit(missing,body)).rejects.toThrow('owns this registered source')
-    const noBuild=structuredClone(f.run);delete noBuild.tasks.game!.spec.editableProject
-    await expect(f.executor.edit(noBuild,body)).rejects.toThrow('needs an editableProject')
-    expect(()=>changeRequirements(noBuild,changeValue(noBuild))).toThrow('needs an editableProject')
-    const writer={...f.run,writer:{attemptId:crypto.randomUUID(),workerId:'other',fence:1}}
-    await expect(f.executor.edit(writer,body)).rejects.toThrow('current writer')
-    expect(()=>changeRequirements(writer,changeValue(writer))).toThrow('writer')
-    const prior=await f.current();expect(prior.version).toBe(body.workflow.version);expect(prior.attempts).toHaveLength(0)
-    expect(await readFile(join(f.root,'content/ui/menu.json'))).toEqual(original)
-    await rm(join(f.root,'content/ui/menu.json'));await writeFile(join(f.root,'source.json'),original);await symlink(join(f.root,'source.json'),join(f.root,'content/ui/menu.json'))
-    await expect(f.executor.edit(f.run,body)).rejects.toThrow('symlinks');expect(f.starts).toBe(0)
-  } finally {await f.dispose()}
-})
-
-test('cancelled/interrupted edit never preserves old acceptance; durable lease/history survive restart, pause retained, no blind rollback or retry',async()=>{
-  const f=await fixture()
-  try {
-    const value=await editValue(f),edit=await prepareSourceEdit(f.run,value),reserved=reserveSourceEdit(f.run,{path:edit.path,before:edit.beforeHash,after:edit.afterHash,workerId:'lost-worker',requestKey:'edit'})
-    await f.store.commit('p','owner',f.run.version,reserved,'source-edit.reserved');f.run=reserved
-    const restored=(await createLocalWorkflowStore(join(f.root,'.beegame/store')).read('p','owner'))!
-    expect(f.executor.writerLiveness(restored)).toBe('unknown');await expect(f.executor.resume(restored)).rejects.toThrow('writer')
-    expect(()=>publishPlan(restored,{...restored.plans.at(-1)!.plan,baseRevision:restored.planRevision})).toThrow('Previous writer')
-    const signal=new AbortController();signal.abort();await expect(writeSourceEdit(restored,restored.writer!.attemptId,edit,signal.signal)).rejects.toThrow('cancelled')
-    expect(digest(await readFile(join(f.root,edit.path)))).toBe(edit.beforeHash)
-    const paused=pauseRun(restored);await f.store.commit('p','owner',restored.version,paused,'run.paused')
-    // Only after the host operation has actually exited, not elapsed time.
-    expect(()=>settleSourceEdit(paused,paused.writer!.attemptId,paused.writer!.fence)).toThrow('drain')
-    const quiet=structuredClone(paused);quiet.version++;quiet.attempts.at(-1)!.quiescedAt=new Date().toISOString()
-    await f.store.commit('p','owner',paused.version,quiet,'writer.quiesced')
-    const settled=settleSourceEdit(quiet,quiet.writer!.attemptId,quiet.writer!.fence,'Host edit exited after cancellation')
-    await f.store.commit('p','owner',quiet.version,settled,'source-edit.settled');f.run=settled
-    expect(settled.paused).toEqual(paused.paused);expect(settled.writer).toBeUndefined();expect(settled.tasks.ui!.status).toBe('pending')
-    expect(settled.attempts.at(-1)!.sourceEdit?.status).toBe('failed');expect(f.starts).toBe(0)
-  } finally {await f.dispose()}
-})
-
-test('actual app routes expose only authorized formal editor saves; changed requirements need current user plan; legacy publish stays closed',async()=>{
+test('actual app routes expose authorized editor saves while retired requirements route stays closed',async()=>{
   const f=await fixture(),data=join(f.root,'.beegame/dashboard'),user:{id:string;role:'owner'|'viewer'}={id:'owner',role:'owner'},cleanups:Array<()=>Promise<void>|void>=[]
   const app=createAgentWorkflowApp({defaultWorkspacePath:f.root,dashboardDataRoot:data,currentUser:user,
     sessionRunner:{async start(){throw Error('No native provider permitted')}},workflowV3Store:f.store,registerCleanup:fn=>cleanups.push(fn)})
@@ -362,17 +214,14 @@ test('actual app routes expose only authorized formal editor saves; changed requ
     expect(created.status).toBe(200)
     const view=await app.request('/api/projects/p/game-content');expect(view.status).toBe(200)
     const snapshot=await view.json();expect(snapshot.readOnly).toBe(false);expect(snapshot.editing.paths).toContain('ui/menu.json')
-    const value=await editValue(f),saved=await app.request('/api/projects/p/game-content/document',{method:'PUT',...json(value)})
+    const value=await editValue(f),saved=await app.request('/api/projects/p/game-content/document',{method:'PUT',...json({...value,requestKey:'formal-ui-save'})})
     expect(saved.status).toBe(200);expect((await saved.json()).unmeasured).toBe(true);await f.current()
-    const events=await app.request('/api/projects/p/workflow-v3/events');expect(events.status).toBe(200);expect((await events.json()).events).toEqual([])
     expect((await app.request('/api/projects/p/game-content/publish',{method:'POST',...json({contentRevision:'a'.repeat(64)})})).status).toBe(409)
     user.role='viewer';expect((await (await app.request('/api/projects/p/game-content')).json()).readOnly).toBe(true)
     expect((await app.request('/api/projects/p/game-content/document',{method:'PUT',...json(await editValue(f))})).status).toBe(403)
-    expect((await app.request('/api/projects/p/workflow-v3/requirements',{method:'POST',...json(changeValue(f.run))})).status).toBe(403)
-    user.role='owner';const change=changeValue(f.run)
-    const changed=await app.request('/api/projects/p/workflow-v3/requirements',{method:'POST',...json(change)})
-    expect(changed.status).toBe(200);expect((await changed.json()).dispatched).toBe(false);await f.current()
-    expect((await app.request('/api/projects/p/workflow-v3/requirements',{method:'POST',...json(change)})).status).toBe(200)
+    expect((await app.request('/api/projects/p/workflow-v3/requirements',{method:'POST',...json(changeValue(f.run))})).status).toBe(404)
+    user.role='owner'
+    expect((await app.request('/api/projects/p/workflow-v3/requirements',{method:'POST',...json(changeValue(f.run))})).status).toBe(404)
     expect(f.starts).toBe(0)
   }finally{for(const cleanup of cleanups.reverse())await cleanup();await f.dispose()}
 })

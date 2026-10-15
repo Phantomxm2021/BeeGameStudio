@@ -1,8 +1,10 @@
 # Resource library production checklist
 
 The resource library is administered through the resource service. Project
-workflows consume only the service's selection API; they never receive
-Supabase service-role credentials or direct Storage permissions.
+workflows browse its catalog and fetch selected files through the short-lived
+resource bridge and `assets.mjs`; structured requirement matching is a separate
+capability. Workflows never receive Supabase service-role credentials or direct
+Storage permissions.
 
 ## Apply database changes
 
@@ -64,30 +66,43 @@ assets.
 
 ## Acceptance checks
 
-1. Sign in as an authorized resource administrator and create a draft Pack.
-2. Upload or re-inspect a file. Confirm technical facts and dependency bindings
-   come from the inspector. Run the single durable AI semantic job; every
-   validated decision writes that element's usage tags directly. Pack and
-   folder semantic defaults do not exist in the active schema or API. A failed
-   item remains visible in the same processing list for retry.
-3. Publish a ready Pack and call the Agent catalog API. Confirm an unrelated
-   invalid element does not hide a valid root, a root with an unavailable
-   dependency is excluded, and a multi-file requirement returns one bounded
-   bundle with exact element identities.
-4. Start a new project that prefers Resource Library usage. Confirm the Agent
-   imports useful independent resources from the returned bundle, creates
-   standalone provisional files only for a service-proven `no-match`, and
-   records all of them in the v8 `assets/asset-manifest.json` inventory.
-5. Confirm the Agent writes non-overlapping JSON resource mappings and YAML
-   world/scene descriptions, and the resource-content gate validates every
-   requirement and resource reference before implementation.
-6. Repeat steps 1–4 as a non-administrator and a different Pack owner; RLS and
-   service-layer ownership checks must reject unauthorized mutations.
+1. Use an authorized account and a published Pack. For discovery/download checks,
+   use existing library data and an isolated temporary output directory; do not
+   create a game project or start generation/semantic processing.
+2. Browse Packs and elements with structured filters and returned cursors.
+   Responses use `items`, `total`, `facets` and optional `nextCursor`.
+   Confirm missing usage tags do not hide technically browsable files, while
+   failed/hidden files, invalid hashes, unavailable dependencies and explicit
+   `manual-only` exclusions remain blocked from catalog browsing. Check Pack
+   totals, filtered results and element lists on the same data. The service
+   derives these from the existing element-readiness check; the legacy SQL
+   aggregate is not an authoritative availability count because it omits
+   unresolved external-reference checks. This removes the summary shortcut,
+   not the dependency check. Measure catalog latency against the current library
+   before adding any replacement optimization.
+3. Inspect the selected file's license and dependency metadata. Download through
+   the actual bridge/CLI and verify its SHA-256 against the stored content hash;
+   decode or preview it with existing tools. A single-file `fetch` does not fetch
+   dependencies. For a multi-file resource, retrieve and verify the required
+   files and their relative bindings before claiming the bundle is usable.
+4. Keep semantic matching strict: an unclassified file may be browsed but is not
+   a confirmed role match. AI visual curation is optional, separately authorized
+   work, not a browsing prerequisite; it does not classify audio. Never fill tags
+   merely to make a count or test pass.
+5. Actual game reuse is a separate, user-authorized acceptance check. Record the
+   source and selected files in the existing resource plan/Manifest, verify
+   applicable saved Scene/UI bindings and observe the resource in its reachable
+   game state. Download/decode success does not establish suitability, aesthetics
+   or runtime consumption. Do not claim this check from an isolated download.
+6. Use offline permission tests or separately authorized accounts to confirm
+   unauthorized access/mutations are rejected. Do not weaken RLS, ownership or
+   signing boundaries to make discovery succeed.
 
 ## Development cutover evidence
 
 The current development cutover removes the obsolete semantic-suggestion
-column and uses the durable AI processing job as the only semantic write path.
+column. The durable AI processing job writes supported visual semantic decisions;
+authorized manual element editing remains available.
 Each successful visual decision is persisted directly to the element row;
 failed items remain retryable and are never represented as a second pending
 semantic state. New-project end-to-end acceptance remains a separate check and
@@ -100,14 +115,27 @@ has not been marked complete.
 - Element selection readiness is evaluated per logical root and its dependency
   closure. Pack publication metadata remains a lifecycle gate, but an
   unrelated invalid root cannot suppress a valid root from matching.
-- Matching returns only `matched` bundles or `no-match` plus structured
-  diagnostics. Workflow must select one returned bundle; it must not rebuild
-  candidates, paginate the catalog, or create a second discovery path.
+- Catalog browsing and semantic matching answer different questions. Catalog
+  `readyElementCount` counts technically browsable files, not confirmed matches.
+  Missing tags remain empty; inspect or audition before assigning a game role.
+  Matching returns `matched` bundles or `no-match` plus diagnostics. A no-match
+  is not an empty-library claim, and an access failure is neither result.
+  Browse relevant facets and paginate as needed, without downloading the whole
+  catalog or starting another discovery framework.
 - The curation queue is a read-only projection of ready elements without
   element-owned semantic tags. AI writes element-owned usage tags with
   `usage_tags_mode = override`; manual-only elements are excluded. Pack/folder
   semantic defaults are removed, so unclassified elements have no effective
-  usage tags and never enter matching.
+  usage tags and never enter semantic matching, but can appear in the catalog
+  when technical checks pass. Do not launch paid curation merely to browse them.
+- Honor the user's chosen source. For common sounds, icons and environment
+  resources, first consider suitable supplied/library files; for continuous
+  motion, prefer a suitable complete animation. Consider AI for distinctive
+  artwork when existing candidates do not fit. Focus web sourcing on a concrete
+  gap and verify rights/formats; stop at a suitable candidate. These are choices,
+  not a compulsory library/web/AI sequence. Keep actual source evidence and
+  consequential rejection reasons in the existing resource plan. Judge success
+  by usable integrated assets, quality, total cost and time, not query counts.
 - The browser upload queue persists resumable task metadata locally. A refresh
   requires the user to resume the task, rather than silently uploading files.
 - Storage reconciliation is evaluated during the publish gate. Missing objects

@@ -15,12 +15,14 @@ function DialogOverlay({ className, ...props }: ComponentProps<typeof DialogPrim
   return <DialogPrimitive.Backdrop className={cn("fixed inset-0 z-[240] bg-black/38 backdrop-blur-[2px] transition-opacity duration-[var(--motion-dialog)] data-[ending-style]:opacity-0 data-[starting-style]:opacity-0", className)} {...props} />
 }
 
-function DialogContent({ className, children, ...props }: ComponentProps<typeof DialogPrimitive.Popup>) {
+function DialogContent({ className, children, backdropProps, ...props }: ComponentProps<typeof DialogPrimitive.Popup> & {
+  backdropProps?: ComponentProps<typeof DialogPrimitive.Backdrop>;
+}) {
   return (
     <DialogPortal>
-      <DialogOverlay />
+      <DialogOverlay {...backdropProps} />
       <DialogPrimitive.Popup
-        className={cn("fixed left-1/2 top-1/2 z-[241] max-h-[calc(100dvh-2rem)] w-[calc(100%_-_2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-popover p-6 text-popover-foreground shadow-[0_8px_24px_rgb(0_0_0/24%)] outline-none transition-[opacity,transform] duration-[var(--motion-dialog)] data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0 data-[starting-style]:scale-[0.98] data-[starting-style]:opacity-0", className)}
+        className={cn("fixed left-1/2 top-1/2 z-[241] max-h-[calc(100dvh-2rem)] w-[calc(100%_-_2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-popover p-6 text-popover-foreground shadow-[0_8px_24px_rgb(0_0_0/24%)] outline-none transition-[opacity,transform,scale] duration-[var(--motion-dialog)] data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0 data-[starting-style]:scale-[0.98] data-[starting-style]:opacity-0 motion-reduce:data-[ending-style]:scale-100 motion-reduce:data-[starting-style]:scale-100", className)}
         {...props}
       >
         {children}

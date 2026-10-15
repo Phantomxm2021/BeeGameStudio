@@ -1,11 +1,11 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { PreviewCapabilityManager } from '../../auth/preview-capability'
-import { selectMeasuredBuild, selectAgentMeasuredBuild, measuredFiles } from './measured-build'
+import { selectAgentMeasuredBuild, measuredFiles } from './measured-build'
 import { digest, WorkflowError, type Run } from './state'
 
 export type MeasuredPreview = {
-  id: string; runId: string; taskId?: string; attemptId: string; planRevision: number; measurementId?: string
+  id: string; runId: string; attemptId: string; measurementId: string
   artifact: { path: string; sha256: string }; url: string; limitations: string[]
 }
 type Entry = { view: MeasuredPreview; token: string; identity: string; projectId: string; ownerId: string
@@ -37,9 +37,6 @@ export function createMeasuredPreview(input: {
     if (byProject.get(key(entry.projectId, entry.ownerId)) === entry) byProject.delete(key(entry.projectId, entry.ownerId))
     input.capabilities.revokeSession(entry.identity)
   }
-  async function selection(run: Run, taskId: string, attemptId: string) {
-    return selectMeasuredBuild(run, taskId, attemptId, input.isBusy(run))
-  }
   async function validate(entry: Entry) {
     const capability = input.capabilities.resolveRoute(entry.token)
     if (capability?.sessionId !== entry.identity || capability.userId !== entry.ownerId)
@@ -47,23 +44,21 @@ export function createMeasuredPreview(input: {
     const run = await input.readRun(entry.projectId, entry.ownerId)
     if (!run || run.id !== entry.view.runId || run.workspacePath !== entry.workspace)
       throw new WorkflowError('preview-stale', 'Preview Run or workspace changed')
-    const selected = entry.view.measurementId ? await selectAgentMeasuredBuild(run,entry.view.measurementId,input.isBusy(run),'preview') :
-      await selection(run, entry.view.taskId!, entry.view.attemptId)
+    const selected = await selectAgentMeasuredBuild(run,entry.view.measurementId,input.isBusy(run),'preview')
     if (selected.artifact.path !== entry.view.artifact.path || selected.artifact.sha256 !== entry.view.artifact.sha256)
       throw new WorkflowError('preview-stale', 'Measured artifact changed; explicitly reopen after verification')
     return run
   }
-  async function open(run: Run, taskId: string | undefined, attemptId: string, planRevision: number, measurementId?:string): Promise<MeasuredPreview> {
+  async function open(run: Run, measurementId: string): Promise<MeasuredPreview> {
       if (disposed) throw new WorkflowError('preview-unavailable', 'Preview manager stopped', 503)
       if (!origin) throw new WorkflowError('preview-unavailable', 'Configure BEEGAME_WORKFLOW_V3_PREVIEW_ORIGIN and route its wildcard hosts to BGS; no dev-script fallback.', 503)
-      if (run.planRevision !== planRevision) throw new WorkflowError('revision-conflict', 'Read the current plan before opening Preview')
-      const selected = measurementId ? await selectAgentMeasuredBuild(run,measurementId,input.isBusy(run),'preview') : await selection(run, taskId!, attemptId)
+      const selected = await selectAgentMeasuredBuild(run,measurementId,input.isBusy(run),'preview')
       const files = await measuredFiles(run, selected)
       const latest = await input.readRun(run.projectId, run.ownerId)
       if (disposed || !latest || latest.version !== run.version || input.isBusy(latest) || latest.writer)
         throw new WorkflowError('preview-stale', 'Workflow changed while opening Preview; refresh')
       const prior = byProject.get(key(run.projectId, run.ownerId))
-      if (prior && prior.view.taskId === taskId && prior.view.attemptId === attemptId && prior.view.measurementId === measurementId &&
+      if (prior && prior.view.attemptId === selected.turn.attemptId && prior.view.measurementId === measurementId &&
           prior.view.artifact.sha256 === selected.artifact.sha256) {
         try {
           await validate(prior)
@@ -78,9 +73,9 @@ export function createMeasuredPreview(input: {
       const token = input.capabilities.issueRouteId(identity, run.ownerId)
       const hostname = digest(token).slice(0, 48)+'.'+origin.hostname
       const url = new URL(origin); url.hostname = hostname
-      const view: MeasuredPreview = { id: hostname.split('.')[0]!, runId: run.id, taskId, attemptId, planRevision, ...(measurementId?{measurementId}:{}),
+      const view: MeasuredPreview = { id: hostname.split('.')[0]!, runId: run.id, attemptId:selected.turn.attemptId, measurementId,
         artifact: selected.artifact, url: url.toString(), limitations: [...(selected.smoke.coverage?.limitations ?? []),
-          ...(measurementId && 'turn' in selected && selected.turn.status !== 'ended'
+          ...(selected.turn.status !== 'ended'
             ? ['The native turn did not succeed. This Preview only inspects current measured bytes; export and publication remain unavailable.'] : []),
           'Sandbox Preview only. Loading is not game acceptance; no storage/same-origin privileges, HTML injection or new runtime verdict. Explicit user publication is separate.'] }
       const entry: Entry = { view, token, identity, projectId: run.projectId, ownerId: run.ownerId, workspace: run.workspacePath, files }
@@ -88,11 +83,7 @@ export function createMeasuredPreview(input: {
       return view
   }
   return {
-    open,
-    async openAgent(run:Run,measurementId:string) {
-      const selected=await selectAgentMeasuredBuild(run,measurementId,input.isBusy(run),'preview')
-      return open(run,undefined,selected.turn.attemptId,run.planRevision,measurementId)
-    },
+    openAgent: open,
     async status(projectId: string, ownerId: string): Promise<{ preview: MeasuredPreview | null; reason?: string }> {
       const entry = byProject.get(key(projectId, ownerId))
       if (!entry) return { preview: null }

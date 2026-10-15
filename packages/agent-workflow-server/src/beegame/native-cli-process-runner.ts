@@ -25,7 +25,6 @@ import { closeSessionTestBrowsers } from './native-test-browser-cleanup'
 import { projectExecutionAccess } from './project-execution-access'
 import { nativeRuntimeFeatureSettings, type RuntimeSettingsConfig } from '../runtime-settings-store'
 import { prepareNativeSkillPlugins } from './native-skill-plugins'
-import { WritingWorkflowRuntime } from './writing-workflow-runtime'
 import { standardCliDebugDiagnostic, withStandardCliDiagnostics } from './standard-cli-debug'
 import {
   createRuntimeObservability,
@@ -54,28 +53,10 @@ export function createNativeCliProcessRunner(options: {
 } = {}): BeeGameSessionRunner {
   return {
     async start(input) {
-      const command = options.command ?? nativeRuntimeCommand(input)
-      const start = (task: BeeGameSessionRunnerStartInput) => NativeCliProcessRuntime.start(task,
-        options.command && command.includes('--print') ? nativeWorkflowCommand(command, task)
-          : options.command ?? nativeRuntimeCommand(task), options.observabilityFactory ?? createRuntimeObservability)
-      // Non-CLI test transports remain ordinary transports. Production uses
-      // standard --print sessions, with business scheduling in this host.
-      return command.includes('--print') ? new WritingWorkflowRuntime(input, start) : start(input)
+      return NativeCliProcessRuntime.start(input, options.command ?? nativeRuntimeCommand(input),
+        options.observabilityFactory ?? createRuntimeObservability)
     },
   }
-}
-
-/** Preserve explicitly selected executable/settings, refresh standard session
- * and prompt options per task instead of retaining the parent's role prompt. */
-export function nativeWorkflowCommand(command: string[], input: BeeGameSessionRunnerStartInput): string[] {
-  const standard = nativeRuntimeCommand(input)
-  const prompt = standard[standard.indexOf('--append-system-prompt') + 1]!
-  const index = command.indexOf('--append-system-prompt')
-  if (index < 0 || index + 1 >= command.length) throw Error('Workflow CLI requires a standard append-system-prompt option')
-  const refreshed = command.map((value, position) => position === index + 1 ? prompt : value)
-  return [...refreshed.filter(argument => !/^--(?:resume|session-id)=/.test(argument)),
-    ...(input.resumeSessionId ? [`--resume=${input.resumeSessionId}`] : input.nativeSessionId ? [`--session-id=${input.nativeSessionId}`] : []),
-    ...(input.nativeTools ? ['--tools', input.nativeTools.join(',')] : [])]
 }
 
 export function nativeRuntimeCommand(
@@ -291,7 +272,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
         parent_tool_use_id: null,
         message: {
           role: 'user',
-          content: nativeAssignmentPrompt(input.prompt, input.projectTurn),
+          content: nativePromptContent(input.prompt),
         },
       })
     })
@@ -559,7 +540,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
     if (this.sessionInput.toolPolicy && toolName && toolUseID) {
       const scoped = await this.sessionInput.toolPolicy({
         toolName, toolUseID, input: toolInput,
-        message: decisionReason ?? `${toolName} requires permission.`,
+        message: decisionReason.trim() || `${toolName} requires permission.`,
         ...(agentId ? { agentId } : {}),
       })
       if (this.disposed || this.activeTurn !== turn) return
@@ -598,7 +579,7 @@ class NativeCliProcessRuntime implements BeeGameSessionRuntime {
           toolUseID,
           toolName,
           message: publicArtifactApprovalMessage(toolName, toolInput, this.sessionInput.env.BEEGAME_ARTIFACTS_URL ?? this.sessionInput.env.CLAUDE_ARTIFACTS_URL)
-            ?? decisionReason ?? `${toolName} requires permission.`,
+            || decisionReason.trim() || `${toolName || 'Native tool'} requires permission.`,
           input: toolInput,
           ...(decisionReason ? { decisionReason } : {}),
           ...(blockedPath ? { blockedPath } : {}),
@@ -765,21 +746,6 @@ export function nativePromptContent(prompt: BeeGamePromptInput): unknown {
   // Language and capability discovery belong to system context, never to a
   // fabricated second user message. Language changes restart/resume the CLI.
   return typeof prompt === 'string' ? [{ type: 'text', text: prompt }] : prompt
-}
-
-/** GDD is an ordinary native turn. Invoke its explicitly supplied plugin Skill
- * through the public slash-command interface; native core needs no role flag.
- * The host retains assignment metadata for saved-output acceptance. */
-export function nativeAssignmentPrompt(prompt: BeeGamePromptInput, turn?: BeeGameSessionSubmitInput['projectTurn']) {
-  if (turn?.authorDocument !== 'GDD.md') return nativePromptContent(prompt)
-  const blocks = typeof prompt === 'string' ? [{ type: 'text' as const, text: prompt }] : prompt
-  const command = '/bgs-builtins:game-systems-designer-expert'
-  // Native array input parses only its final text block. Earlier blocks
-  // (platform facts/images) remain source context, not command arguments.
-  const index = blocks.length - 1
-  if (blocks[index]?.type !== 'text') return [...blocks, { type: 'text', text: command }]
-  return blocks.map((block, position) => position === index && block.type === 'text'
-    ? { ...block, text: command + ' ' + block.text } : block)
 }
 
 export function nativeRuntimeEnvironment(

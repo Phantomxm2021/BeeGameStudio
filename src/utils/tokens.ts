@@ -253,7 +253,10 @@ export function tokenCountWithEstimation(messages: readonly Message[]): number {
   while (i >= 0) {
     const message = messages[i]
     const usage = message ? getTokenUsage(message) : undefined
-    if (message && usage) {
+    // Resume clears stale pre-compact usage to zero. That is not a measured
+    // empty context: using it as an anchor hides the summary and preserved
+    // prefix. Keep accounting unchanged; only ignore it for context estimation.
+    if (message && usage && getTokenCountFromUsage(usage) > 0) {
       // Walk back past any earlier sibling records split from the same API
       // response (same message.id) so interleaved tool_results between them
       // are included in the estimation slice.

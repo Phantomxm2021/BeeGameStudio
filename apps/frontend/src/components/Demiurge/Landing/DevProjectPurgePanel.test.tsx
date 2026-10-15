@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DevProjectPurgePanel } from './DevProjectPurgePanel'
 import { authenticatedFetch } from '../../../services/apiClient'
 import i18n, { supportedI18nLanguages } from '../../../i18n'
@@ -7,9 +7,26 @@ import i18n, { supportedI18nLanguages } from '../../../i18n'
 vi.mock('../../../services/apiClient', () => ({ authenticatedFetch: vi.fn() }))
 const request = vi.mocked(authenticatedFetch)
 const plan = { projectCount: 2, projects: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] }
-beforeEach(() => { request.mockReset() })
+beforeEach(() => {
+  request.mockReset()
+  vi.stubEnv('DEV', true)
+  vi.stubEnv('VITE_BEEGAME_ENABLE_DEV_PROJECT_PURGE', '1')
+})
+afterEach(() => { vi.unstubAllEnvs() })
 
 describe('development project purge panel', () => {
+  it.each([undefined, '', '0', 'true'])('does not probe the purge endpoint without explicit opt-in (%s)', value => {
+    vi.stubEnv('VITE_BEEGAME_ENABLE_DEV_PROJECT_PURGE', value)
+    const { container } = render(<DevProjectPurgePanel lang="en" onDeleted={vi.fn()} />)
+    expect(request).not.toHaveBeenCalled()
+    expect(container).toBeEmptyDOMElement()
+  })
+  it('does not probe the purge endpoint in a production build even when opted in', () => {
+    vi.stubEnv('DEV', false)
+    const { container } = render(<DevProjectPurgePanel lang="en" onDeleted={vi.fn()} />)
+    expect(request).not.toHaveBeenCalled()
+    expect(container).toBeEmptyDOMElement()
+  })
   it('is hidden when the server feature is disabled', async () => {
     request.mockResolvedValue(new Response('', { status: 404 }))
     const { container } = render(<DevProjectPurgePanel lang="en" onDeleted={vi.fn()} />)

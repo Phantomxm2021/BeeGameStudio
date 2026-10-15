@@ -91,6 +91,23 @@ test('joint Review uses the same required Scene inside the allocated UI game-vie
   expect(checkReviewDesignLayouts(f.root).valid).toBe(true)
 })
 
+test('target viewport shape errors identify positive pairs without changing inputs or accepting invalid sizes', () => {
+  const f = fixture(), ui = uiLayoutFixture() as any
+  for (const targets of [undefined, [], [{ width: 960, height: 540 }], [[0, 540]]]) {
+    ui.data.nodes[0].data.targetViewports = targets
+    f.save(ui)
+    const before = readFileSync(f.path, 'utf8')
+    const result = checkDesignLayouts(f.root)
+    expect(result.valid).toBe(false)
+    expect(result.issues.join(' ')).toContain('root.data.targetViewports must be a non-empty array of positive [width, height] pairs')
+    expect(result.issues.join(' ')).toContain('not {width, height} objects')
+    expect(readFileSync(f.path, 'utf8')).toBe(before)
+  }
+  ui.data.nodes[0].data.targetViewports = [[960, 540]]
+  f.save(ui)
+  expect(checkDesignLayouts(f.root).valid).toBe(true)
+})
+
 test('a wrong UI viewport ID reports its source field once, not one generic error per target', () => {
   const f = sceneDraft(), ui = uiLayoutFixture() as any
   ui.data.nodes[0].data.targetViewports = [[960, 540], [1280, 720]]
@@ -548,6 +565,34 @@ test('declared minima are project-specific and apply after parent scale and rota
   Object.assign(ui.data.nodes[1]!.layout!, { rotation: 0, size: [80, 80], scale: [.5, .5] })
   save(ui)
   expect(checkDesignLayouts(root).issues.join(' ')).toContain('[40,40]')
+})
+
+test('confirmed touch targets share the layout calculator even when omitted, without editing saved data', () => {
+  for (const orientation of ['Landscape', 'Portrait']) {
+    const { root, path, save } = fixture(), ui = uiLayoutFixture() as any
+    const reference = orientation === 'Landscape' ? [1280, 720] : [720, 1280]
+    const phone = orientation === 'Landscape' ? [844, 390] : [390, 844]
+    Object.assign(ui.data.nodes[0].data, { orientation, referenceResolution: reference, targetViewports: [reference] })
+    ui.data.nodes[0].layout.size = reference
+    Object.assign(ui.data.nodes[1].layout, { anchor: 'top-left', position: [reference[0] - 150, 30], size: [100, 60] })
+    save(ui)
+    const before = readFileSync(path, 'utf8')
+    const confirmed = { platform: 'Web', inputs: ['Touch'], orientation }
+    expect(checkDesignLayouts(root).valid).toBe(true)
+    expect(checkDesignLayouts(root, { ...confirmed, inputs: ['Keyboard/mouse'] }).valid).toBe(true)
+    const result = checkDesignLayouts(root, confirmed, false, true)
+    expect(result.valid).toBe(false)
+    expect(result.coverage.targets[0]!.viewports).toContainEqual(phone)
+    expect(result.diagnostics.some(item => item.viewport?.join('x') === phone.join('x'))).toBe(true)
+    expect(readFileSync(path, 'utf8')).toBe(before)
+    expect((runGameContentCommand(root, ['--design-layouts'], confirmed) as any).valid).toBe(false)
+    expect(() => runGameContentCommand(root, ['--design-layouts', '--orientation', orientation === 'Portrait' ? 'Landscape' : 'Portrait'], confirmed))
+      .toThrow('differs from the confirmed project target')
+    // The existing anchor calculation solves the defect; no new layout engine.
+    Object.assign(ui.data.nodes[1].layout, { anchor: 'top-right', position: [-20, 30] })
+    save(ui)
+    expect(checkDesignLayouts(root, confirmed).valid).toBe(true)
+  }
 })
 
 test('missing final input, unusable declarations and opposite-direction targets cannot be accepted', () => {

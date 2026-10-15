@@ -1,0 +1,40 @@
+{
+  "arm": "A",
+  "phase": "continuation-1",
+  "elapsedMs": 2847,
+  "requestId": "021792040591302f0b662e0a22462bcc30964e8c71cc766232af9",
+  "message": {
+    "type": "message",
+    "id": "021792040591302f0b662e0a22462bcc30964e8c71cc766232af9",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "call_s6q1jqj38w796m1op0nyvvv8",
+        "name": "ReadTranscript",
+        "input": {
+          "query": "engine.js",
+          "offset": 0
+        }
+      },
+      {
+        "type": "tool_use",
+        "id": "call_od96q30dywu0nvfguwv6fyvf",
+        "name": "ReadTranscript",
+        "input": {
+          "query": "vite.config",
+          "offset": 0
+        }
+      }
+    ],
+    "model": "auto",
+    "stop_reason": "tool_use",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 6581,
+      "output_tokens": 84,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    }
+  }
+}

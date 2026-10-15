@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { loadUiFont } from './uiResourceLoading';
+import { loadUiFont } from '../../../../../packages/scene-editor/src/ui-preview/uiResourceLoading';
 import { uiFontKey } from '../../../../../packages/scene-editor/src/ui-font-reference';
-import { uiNodeStyle } from './UiContentRenderer';
+import { uiNodeStyle } from '../../../../../packages/scene-editor/src/ui-preview/UiContentRenderer';
 import type { BeeGameUiContentNode } from '../../services/beeGameAdapter';
 
 afterEach(() => vi.unstubAllGlobals());

@@ -3,6 +3,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { PromptInput } from './prompt-input';
 
 describe('PromptInput primary action', () => {
+  it('keeps the compact composer on one row with the leading action before the text', () => {
+    render(<PromptInput compact minRows={1} leadingAction={<button type="button">Attach</button>} />);
+    const input = screen.getByRole('textbox');
+    expect(input).toHaveAttribute('rows', '1');
+    expect(input.closest('form')).toHaveClass('flex', 'items-end', 'rounded-[24px]');
+    expect(input.previousElementSibling).toHaveTextContent('Attach');
+  });
+
   it('shows one disabled Send action when idle and the draft is empty', () => {
     render(<PromptInput value="" onSubmit={vi.fn()} onStop={vi.fn()} allowSubmitWhileLoading />);
     expect(screen.getByRole('button', { name: 'Send prompt' })).toBeDisabled();

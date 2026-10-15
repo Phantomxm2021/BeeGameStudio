@@ -11,7 +11,7 @@ try {
   const moduleUrl = process.env.BEEGAME_CONTENT_CHECKER_MODULE;
   if (!moduleUrl) throw new Error('Content checker runtime is unavailable. Run this command in the BGS project execution environment.');
   const { runGameContentCli } = await import(moduleUrl);
-  await runGameContentCli();
+  await runGameContentCli(process.argv.slice(2), { profile: 'current' });
 } catch (error) {
   console.log(JSON.stringify({ valid: false, issues: [error instanceof Error ? error.message : String(error)] }));
   process.exitCode = 1;
@@ -19,12 +19,7 @@ try {
 `
 
 let checker: Promise<{ root: string; path: string; moduleUrl: string }> | undefined
-/** Autonomous default is the real package, not the legacy document release.
- * Explicit legacy commands remain available; ordinary delivery is unchanged. */
-export const CURRENT_CONTENT_CHECKER_ENTRY = CONTENT_CHECKER_ENTRY.replace(
-  'await runGameContentCli();',
-  'await runGameContentCli(process.argv.slice(2), { profile: "current" });',
-)
+export const CURRENT_CONTENT_CHECKER_ENTRY = CONTENT_CHECKER_ENTRY
 export const CONTENT_BINDING_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'binding entry').replace('runGameContentCli', 'runContentBindingCli').replace('runGameContentCli', 'runContentBindingCli')
 export const MEDIA_PRODUCTION_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'media entry').replaceAll('runGameContentCli', 'runMediaProductionCli')
 export const RESOURCE_PRODUCTION_ENTRY = CONTENT_CHECKER_ENTRY.replace('checker entry', 'resource entry').replaceAll('runGameContentCli', 'runResourceProductionCli')
@@ -46,9 +41,9 @@ export function sharedContentChecker(): Promise<{ root: string; path: string; mo
     await writeFile(path, source, { flag: 'wx', mode: 0o400 })
     // Publish the small Node adapter beside existing host utilities. Bun's
     // resolver needs directory reads; never grant the server source directory.
-    for (const name of ['preview-test-command.mjs', 'preview-test-client.mjs'])
+    for (const name of ['preview-test-command.mjs', 'preview-test-client.mjs', 'preview-play-capture.mjs', 'sprite-sample.mjs'])
       await writeFile(join(root, name), await readFile(new URL('./'+name, import.meta.url)), { flag: 'wx', mode: 0o400 })
-    const uiSource = new URL('../../../../apps/frontend/src/components/Workspace/uiStaticInspection.tsx', import.meta.url)
+    const uiSource = new URL('../../../scene-editor/src/ui-preview/uiStaticInspection.tsx', import.meta.url)
     const uiBuild = Bun.spawn([process.execPath, 'build', fileURLToPath(uiSource), '--target=browser', '--minify'], { stdout: 'pipe', stderr: 'pipe' })
     const [uiCode, uiScript, uiError] = await Promise.all([uiBuild.exited, new Response(uiBuild.stdout).text(), new Response(uiBuild.stderr).text()])
     if (uiCode !== 0 || !uiScript) throw Error('Cannot prepare shared UI inspector: ' + uiError)

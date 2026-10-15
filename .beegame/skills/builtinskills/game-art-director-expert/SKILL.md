@@ -28,7 +28,8 @@ When reviewing a direction, check that visual choices and interface requirements
 Judge composition and finish at a useful player-facing scale: deliberate proportions and quiet space, coherent type/icon/line/material treatment, controlled emphasis and decoration, and recognizable game identity without sacrificing readability. Inspect the smallest useful complete screen/scene sample before propagating an uncertain treatment across an asset family. Use an available render or authorized image tool when appropriate; a diagram tests hierarchy, not final finish. If the selected focal subject disappears or loses prominence in layout, correct the affected design rather than decorating the wrong composition. State unavailable observations; neither user silence nor an aesthetic score establishes acceptance. This is a working method, not a new mandatory production stage or review loop.
 
 Read only the relevant optional reference:
-- `references/color-language-system.md` for semantic color and hierarchy.
-- `references/shape-language-framework.md` for silhouettes and asset families.
-- `references/lighting-mood-framework.md` for visibility and atmosphere.
+- `references/color-language-system.md` when choosing material/color relationships, world/UI emphasis or transient versus persistent state prominence.
+- `references/shape-language-framework.md` when making an asset family concrete through silhouette, proportion, material detail, viewing angle or actor facing.
+- `references/lighting-mood-framework.md` when choosing spatial/material depth, illumination versus state indication or a consequential lighting change.
 - `references/ui-visual-hierarchy.md` for concrete reference analysis and composition examples; use its original diagrams as explanations, not game templates.
+- [The canal-crossing scene exercise](../game-level-designer-expert/references/encounter-design-patterns.md#worked-scene-reasoning-a-canal-crossing) when a spatial composition must relate player action, camera framing and environment identity; compare its choices and costs, not its theme or implied layout as defaults.

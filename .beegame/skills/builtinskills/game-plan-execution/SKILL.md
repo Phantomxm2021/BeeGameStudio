@@ -25,6 +25,14 @@ For each task:
 
 Keep narration and repeated source reading economical. Independent work may be delegated or parallelized when authorized and it truly has separate files and interfaces; neither per-task subagents nor per-task reviews are required. Choose the working context from the task's actual dependencies, not a requirement to carry the whole project history. A fresh or delegated context needs the goal, affected sources, current partial work, dependency outputs and relevant evidence/limitations, not copied documents or an acceptance verdict. Integrate returned work before accepting it.
 
+## Read retained results before new execution
+
+Group independent reads and corrections for the same established cause without mixing unrelated changes or hiding a failing operation. If tool output is truncated or a final filter returns no matches, read the saved result and the actual process status before treating it as a test failure or executing again. Do not rerun merely to count checks or retrieve a missing field.
+
+For BGS Preview, resolve the current supplied entry and its help. `--run` retains an `execution.json`, `stdoutPath` and `stderrPath`; `--inspect <execution.json>` reads that receipt and current boundary identity without running the test. Read the relevant saved output for assertion meaning: exit zero and unchanged identity do not prove correct coverage. Changed inputs or a host freshness rejection still require the appropriate new check; do not relabel old evidence. Expired access needs current authorized capability, not a copied URL or relaxed permissions.
+
+Prefer the existing readable layout report/full JSON and measurement inspection when those answer the question. Keep a concise status and decisive diagnostics in the handoff, with paths to full evidence; do not copy entire logs or Skill bodies into project guides. Saving request roundtrips is useful, but not a reason to skip necessary source reading or observations. Context caching and history recovery are host concerns, not repaired by another Skill rule.
+
 ## Finish the implementation
 
 Run the relevant integrated build and tests, then inspect a representative playable path including the actual scene/UI, resource consumption, controls, responsive layout, and the requested end condition. Compare the result with the plan and source requirements. A unit-test pass is not proof of a complete game. Report passed evidence and remaining gaps; use `evidence-before-completion` when making the final claim.

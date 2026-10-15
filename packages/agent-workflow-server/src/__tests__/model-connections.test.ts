@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, mkdirSync, writeFileSync, rmSync
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createModelConfig, exportModelConfigSnapshot, importModelConfigSnapshot, resetModelConfigs, validateModelAccess } from '@bee-game-studio/agent-workflow'
-import { connectionStatus, disconnectAccount, disconnectConnection, ModelConnectionLogins, PERSONAL_BYOK_ID, PERSONAL_CHATGPT_ID, personalModelAvailable, personalModelConfig, preferredModelId, resolveModelConnection, saveConnection } from '../model-connections'
+import { connectionStatus, disconnectAccount, disconnectConnection, fetchClaudeSubscriptionUsage, ModelConnectionLogins, PERSONAL_BYOK_ID, PERSONAL_CHATGPT_ID, personalModelAvailable, personalModelConfig, preferredModelId, resolveModelConnection, saveConnection } from '../model-connections'
 import { mergeRuntimeEnv } from '../beegame/session-manager'
 import { createAgentWorkflowApp } from '../app'
 import { getUserDashboardDataRoot } from '../local-runtime-service'
@@ -104,6 +104,23 @@ test('subscription runtime excludes API keys and custom endpoints; logout fails 
   expect(() => resolveModelConnection(root, { ...config, published: false }, {})).toThrow()
   disconnectAccount(root, 'chatgpt')
   expect(() => resolveModelConnection(root, config, { OPENAI_API_KEY: 'platform' })).toThrow('disconnected')
+})
+
+test('Claude usage reads only the selected user credential and validates returned percentages', async () => {
+  const alice = join(root, 'alice')
+  mkdirSync(join(alice, '.runtime/app'), { recursive: true })
+  writeFileSync(join(alice, '.runtime/app/.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'alice-token', expiresAt: Date.now() + 60_000 } }))
+  const seen: { authorization?: string | null } = {}
+  const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+    seen.authorization = new Headers(init?.headers).get('Authorization')
+    return Response.json({ five_hour: { utilization: 42 }, seven_day: { utilization: 18 } })
+  }) as typeof fetch
+  expect(await fetchClaudeSubscriptionUsage(alice, fetchImpl)).toEqual({ fiveHourUsedPercent: 42, sevenDayUsedPercent: 18 })
+  expect(seen.authorization).toBe('Bearer alice-token')
+  expect(await fetchClaudeSubscriptionUsage(join(root, 'bob'), fetchImpl)).toBeNull()
+  expect(seen.authorization).toBe('Bearer alice-token')
+  const invalid = (async () => Response.json({ five_hour: { utilization: 130 }, seven_day: { utilization: null } })) as unknown as typeof fetch
+  expect(await fetchClaudeSubscriptionUsage(alice, invalid)).toBeNull()
 })
 
 test('independent ChatGPT subscription uses account credentials without a published model', async () => {

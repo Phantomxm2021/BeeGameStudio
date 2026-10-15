@@ -15,6 +15,18 @@ export function sameJson(a: unknown, b: unknown): boolean {
   const value = (x: unknown) => x === undefined ? undefined : JSON.parse(JSON.stringify(x))
   return isDeepStrictEqual(value(a), value(b))
 }
+type RetiredTaskFields = { plans?: unknown; tasks?: unknown; attempts?: unknown }
+function emptyRetiredTaskFields(run: Run): boolean {
+  const { plans, tasks, attempts } = run as Run & RetiredTaskFields
+  return (plans === undefined || Array.isArray(plans) && plans.length === 0) &&
+    (tasks === undefined || tasks !== null && typeof tasks === 'object' && !Array.isArray(tasks) && Object.keys(tasks).length === 0) &&
+    (attempts === undefined || Array.isArray(attempts) && attempts.length === 0)
+}
+function currentAgentRun(run: Run): Run {
+  if (!Array.isArray(run.agentTurns) || !emptyRetiredTaskFields(run)) return run
+  const { plans: _plans, tasks: _tasks, attempts: _attempts, ...current } = run as Run & RetiredTaskFields
+  return current as Run
+}
 // Explicit single-process development backend. Never a fallback for a missing DB migration.
 const queues = new Map<string, Promise<void>>()
 export function createLocalWorkflowStore(dataRoot: string): WorkflowStore {
@@ -29,7 +41,7 @@ export function createLocalWorkflowStore(dataRoot: string): WorkflowStore {
     async read(projectId, actorId) {
       const value = await load(projectId)
       if (value && value.run.ownerId !== actorId) throw new WorkflowError('project-forbidden', 'Workflow belongs to another project owner', 403)
-      return value?.run
+      return value?.run ? currentAgentRun(value.run) : undefined
     },
     async commit(projectId, actorId, expectedVersion, next, event) {
       const file = filename(projectId), lock = join(root, 'workflow-v3')+':'+next.workspacePath, prior = queues.get(lock) ?? Promise.resolve()
@@ -60,10 +72,12 @@ export function assertCommit(projectId: string, actorId: string, version: number
     throw new WorkflowError('invalid-commit', 'Invalid identity or revision', 400)
   if (prior && (prior.id !== next.id || prior.chatSessionId !== next.chatSessionId || prior.workspacePath !== next.workspacePath))
     throw new WorkflowError('immutable-source', 'Run identity and original requirements cannot be overwritten')
-  if (prior && Boolean(prior.agentTurns) !== Boolean(next.agentTurns))
-    throw new WorkflowError('immutable-source','Native goal and diagnostic Task modes cannot be switched implicitly')
-  if (next.agentTurns && (next.plans.length || next.attempts.length || Object.keys(next.tasks).length))
-    throw new WorkflowError('invalid-commit','Native goal mode cannot contain host Task execution')
+  if (prior && !sameJson(prior.creation, next.creation))
+    throw new WorkflowError('immutable-source', 'Observed project creation facts cannot be rewritten')
+  if (prior && (!Array.isArray(prior.agentTurns) || !emptyRetiredTaskFields(prior)))
+    throw new WorkflowError('task-mode-retired', 'This older Task Run is read-only; it cannot be migrated implicitly')
+  if (!Array.isArray(next.agentTurns) || 'plans' in next || 'tasks' in next || 'attempts' in next)
+    throw new WorkflowError('invalid-commit','Only Agent Runs without host Task execution are writable')
   if(next.agentTurns?.some(t=>t.notStarted!==undefined && t.notStarted!==true))
     throw new WorkflowError('invalid-exit-evidence','No-start proof must be the literal host fact, not a user string or false flag')
   const oldEdits = prior?.sourceEdits ?? [], edits = next.sourceEdits ?? []
@@ -121,25 +135,9 @@ export function assertCommit(projectId: string, actorId: string, version: number
         changes.slice(0,-1).some(c => c.requestKey === last.requestKey) || !sameJson(last.before,prior.requirements) ||
         !sameJson(last.after,next.requirements) || next.requirements.revision === prior.requirements.revision ||
         next.requirements.sha256 !== digest(JSON.stringify({text:next.requirements.text,constraints:next.requirements.constraints,ids:next.requirements.ids})) ||
-        next.planRevision !== prior.planRevision+1 || Object.values(next.tasks).some(t => t.status !== 'superseded' && (t.status !== 'pending' || t.attemptId))
+        next.planRevision !== prior.planRevision+1
       : changes.length !== history.length)
-      throw new WorkflowError('immutable-source', 'Original requirements cannot be overwritten. Authorized changes need an append-only before/after record and a fresh unaccepted task plan')
-  }
-  if (prior?.previewIssues?.some(issue => !sameJson(next.previewIssues?.find(i => i.id === issue.id),issue)))
-    throw new WorkflowError('immutable-observation', 'Saved Preview observations cannot be rewritten or removed')
-  if (prior?.attempts.some(old => old.quiescedAt && !next.attempts.some(a => a.attemptId === old.attemptId)))
-    throw new WorkflowError('immutable-exit-evidence', 'Host quiescence history cannot be removed')
-  if (prior) for (const attempt of next.attempts) {
-    const old = prior.attempts.find(a => a.attemptId === attempt.attemptId)
-    if (old?.quiescedAt && (attempt.quiescedAt !== old.quiescedAt || attempt.workerId !== old.workerId ||
-        attempt.fence !== old.fence || attempt.sessionId !== old.sessionId || attempt.runId !== old.runId ||
-        attempt.taskId !== old.taskId || attempt.planRevision !== old.planRevision))
-      throw new WorkflowError('immutable-exit-evidence', 'Host quiescence evidence cannot be rewritten')
-    if (attempt.quiescedAt && !old?.quiescedAt && (old?.status !== 'running' ||
-        prior.writer?.attemptId !== attempt.attemptId || prior.writer.fence !== attempt.fence ||
-        prior.writer.workerId !== attempt.workerId || next.writer?.attemptId !== attempt.attemptId ||
-        next.writer.fence !== attempt.fence || next.writer.workerId !== attempt.workerId || attempt.status !== 'running'))
-      throw new WorkflowError('invalid-exit-evidence', 'Quiescence must address the retained current writer')
+      throw new WorkflowError('immutable-source', 'Original requirements cannot be overwritten. Authorized changes need an append-only before/after record')
   }
 }
 export function createRemoteWorkflowStore(config: { url: string; serviceKey: string; fetchImpl?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> }): WorkflowStore {
@@ -163,7 +161,7 @@ export function createRemoteWorkflowStore(config: { url: string; serviceKey: str
       if (detail.message === 'workflow_project_forbidden') throw new WorkflowError('project-forbidden', 'Project access denied', 403)
       if (detail.message === 'workflow_immutable_source') throw new WorkflowError('immutable-source',
         name === 'beegame_workflow_v3_commit' && (payload as { p_event?: string }).p_event === 'requirements.changed'
-          ? 'Authorized requirement change rejected by the database. Verify 20261010020000_workflow_v3_authorized_changes.sql is applied and the append-only history/current task plan is valid; do not retry or overwrite the original requirements.'
+          ? 'Authorized requirement change rejected by the database. Verify 20261010020000_workflow_v3_authorized_changes.sql is applied and the append-only requirement history is valid; do not retry or overwrite the original requirements.'
           : 'Original requirements and Run identity cannot be overwritten')
       if (detail.message === 'workflow_invalid_commit' || detail.message === 'workflow_invalid_workspace') throw new WorkflowError('invalid-commit', 'Invalid workflow identity, revision or workspace binding', 400)
       throw new WorkflowError('workflow-storage-unavailable', 'V3 database operation failed ('+response.status+'); verify migration and server configuration', 503)
@@ -171,7 +169,10 @@ export function createRemoteWorkflowStore(config: { url: string; serviceKey: str
     return response.json()
   }
   return {
-    async read(projectId, actorId) { return await call('beegame_workflow_v3_read', { p_project_id: projectId, p_actor_id: actorId }) ?? undefined },
+    async read(projectId, actorId) {
+      const run = await call('beegame_workflow_v3_read', { p_project_id: projectId, p_actor_id: actorId })
+      return run ? currentAgentRun(run) : undefined
+    },
     async commit(projectId, actorId, expectedVersion, next, event) {
       // Existing RPC atomically checks identity/revision/writer and requirement
       // changes, but predates native-turn history. Reuse the same application

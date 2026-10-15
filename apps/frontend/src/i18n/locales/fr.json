@@ -740,6 +740,10 @@
     "customStyle": "Ajouter un style",
     "customGameType": "Ajouter un type de jeu",
     "create": "Créer un pack",
+    "createMoreInfo": "Informations complémentaires",
+    "createContinue": "Continuer",
+    "createBack": "Retour aux informations de base",
+    "createAddTag": "Ajouter un tag",
     "creating": "Création…",
     "createRequired": "Saisissez un nom, un style et un type de jeu, puis choisissez une catégorie principale.",
     "update": "Enregistrer le pack",
@@ -771,6 +775,7 @@
     "list": {
       "all": "Tous les packs de ressources",
       "search": "Rechercher des packs",
+      "filter": "Filtrer",
       "empty": "Aucun pack de ressources",
       "emptyHint": "Créez un pack pour organiser les ressources du jeu.",
       "previous": "Précédent",

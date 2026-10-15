@@ -10,7 +10,7 @@ import { projectPreviewCapabilityPath } from '../project-preview-capability'
 import { createPreviewTestBrowser } from '../preview-test-browser'
 import { sharedPlaywright } from '../shared-playwright'
 import { buildEditableProject } from './editable-project'
-import { sceneLayoutFixture } from '../fixtures/layout-fixture'
+import { sceneLayoutFixture, uiLayoutFixture } from '../fixtures/layout-fixture'
 import { createHash } from 'node:crypto'
 
 async function command(root: string, directory: string, name: string, ...args: string[]) {
@@ -21,6 +21,29 @@ async function command(root: string, directory: string, name: string, ...args: s
   const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
   return { stdout, stderr, code }
 }
+test('materialized layout command retains confirmed device scope without model-supplied flags', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-layout-target-tools-'))
+  const tools = await openAgentTools({ workspacePath: root, getAuthToken: () => undefined,
+    constraints: { platform: 'Web', inputs: ['Touch'], orientation: 'Landscape', dimension: '2D' } })
+  try {
+    const ui = uiLayoutFixture() as any
+    Object.assign(ui.data.nodes[0].data, { referenceResolution: [1280, 720], targetViewports: [[1280, 720]] })
+    ui.data.nodes[0].layout.size = [1280, 720]
+    Object.assign(ui.data.nodes[1].layout, { anchor: 'top-left', position: [1100, 30], size: [100, 60] })
+    await mkdir(join(root, 'content/ui'), { recursive: true })
+    const path = join(root, 'content/ui/menu.json'), bytes = JSON.stringify(ui)
+    await writeFile(path, bytes)
+    const check = await command(root, tools.directory, 'check-content.mjs', '--design-layouts', '--details')
+    expect(check.code).toBe(1)
+    const result = JSON.parse(check.stdout)
+    expect(result.coverage.targets[0].viewports).toContainEqual([844, 390])
+    expect(await readFile(path, 'utf8')).toBe(bytes)
+    const conflict = await command(root, tools.directory, 'check-content.mjs', '--design-layouts', '--orientation', 'Portrait')
+    expect(conflict.code).toBe(1)
+    expect(conflict.stdout).toContain('differs from the confirmed project target')
+  } finally { await tools.close(); await rm(root, { recursive: true, force: true }) }
+})
+
 test('autonomous tools use actual auth and drafts without stages, documents or invented authority', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-agent-tools-'))
   const calls: string[] = []; let token = 'synthetic-user-a'
@@ -36,6 +59,14 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
     expect(tools.turnContext).not.toContain('React/Canvas does not waive promised editable data') // responsibility remains in the production system slot
     expect(tools.turnContext).toContain('Tool availability is not runtime consumption or quality evidence')
     expect(tools.turnContext).toContain(tools.directory+'/consumer.mjs')
+    // Even with all compactable turn text discarded, the system locator is
+    // sufficient to invoke current adapters; it contains no bridge secret.
+    const located = JSON.parse(tools.systemContext.match(/root\): ("[^"]+")/)![1]!)
+    expect(located).toBe(tools.directory)
+    expect(tools.systemContext).not.toContain(token)
+    expect(tools.systemContext).not.toContain('node preview.mjs') // unavailable here
+    expect(tools.systemContext.length).toBeLessThan(600)
+    expect((await command(root, located, 'resources.mjs', '--help')).code).toBe(0)
     const consumerHelp=await command(root,tools.directory,'consumer.mjs','--help')
     expect(consumerHelp.code).toBe(0)
     expect(consumerHelp.stdout).toContain(tools.directory+'/content-consumer.mjs')
@@ -114,20 +145,140 @@ test('autonomous tools use actual auth and drafts without stages, documents or i
   } finally { await tools.close(); upstream.stop(true); await rm(root, { recursive: true, force: true }) }
 }, 30000)
 
+test('initial catalog is one bounded metadata read, not selection, download or generation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-initial-catalog-'))
+  const calls: { path: string; method: string; body: unknown; auth: string | null }[] = []
+  const pack = { packId: 'audio-pack', packName: 'Audio pack', dimension: 'agnostic', primaryCategory: 'audio',
+    readyElementCount: 54, formats: ['ogg'], styles: ['Sci-fi'], tags: ['SFX'], license: 'CC0',
+    description: 'DO_NOT_COPY_FULL_METADATA', usageTags: [] }
+  const upstream = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request) {
+    calls.push({path:new URL(request.url).pathname,method:request.method,body:await request.json(),auth:request.headers.get('authorization')})
+    return Response.json({items:[pack],total:40,nextCursor:'next-page',facets:{}})
+  }})
+  const tools = await openAgentTools({workspacePath:root,libraryBaseUrl:upstream.url.origin,
+    getAuthToken:()=> 'synthetic-catalog-token',readInitialCatalog:true})
+  try {
+    expect(calls).toEqual([{path:'/api/resource-catalog/packs',method:'POST',body:{limit:32},auth:'Bearer synthetic-catalog-token'}])
+    expect(tools.turnContext).toContain('Initial built-in resource catalog')
+    expect(tools.turnContext).toContain('"total":40')
+    expect(tools.turnContext).toContain('"nextCursor":"next-page"')
+    expect(tools.turnContext).toContain('"readyElementCount":54')
+    expect(tools.turnContext).toContain('"packId":"audio-pack"')
+    expect(tools.turnContext).toContain('does not require adoption')
+    expect(tools.turnContext).toContain('Preserve explicit user source choices')
+    expect(tools.turnContext).not.toContain('DO_NOT_COPY_FULL_METADATA')
+    expect(tools.turnContext).not.toContain('synthetic-catalog-token')
+    await expect(access(join(root,'assets'))).rejects.toThrow()
+  } finally { await tools.close();upstream.stop(true);await rm(root,{recursive:true,force:true}) }
+})
+
+test('initial catalog distinguishes an observed empty page from failed or invalid responses', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-initial-catalog-error-'))
+  let reply = () => Response.json({items:[],total:0,facets:{}})
+  const upstream = Bun.serve({hostname:'127.0.0.1',port:0,fetch:()=>reply()})
+  try {
+    for (const [response, expected] of [
+      [()=>Response.json({items:[],total:0,facets:{}}),'"total":0'],
+      [()=>Response.json({error:'PRIVATE_UPSTREAM_DETAIL'},{status:503}),'unavailable (HTTP 503)'],
+      [()=>new Response('PRIVATE_UPSTREAM_DETAIL'),'unavailable'],
+      [()=>Response.json({items:[]}), 'unavailable'],
+    ] as const) {
+      reply=response
+      const tools=await openAgentTools({workspacePath:root,libraryBaseUrl:upstream.url.origin,getAuthToken:()=> 'synthetic',readInitialCatalog:true})
+      try {
+        expect(tools.turnContext).toContain(expected)
+        expect(tools.turnContext).not.toContain('PRIVATE_UPSTREAM_DETAIL')
+        if(expected!=='"total":0') {
+          expect(tools.turnContext).toContain('not an empty catalog')
+          expect(tools.turnContext).not.toContain('"total":0')
+        }
+      } finally {await tools.close()}
+    }
+  } finally {upstream.stop(true);await rm(root,{recursive:true,force:true})}
+})
+
+test('a stalled initial catalog times out without retrying or blocking tool preparation', async () => {
+  const root=await mkdtemp(join(tmpdir(),'bgs-initial-catalog-timeout-'))
+  let release!:()=>void, calls=0
+  const stalled=new Promise<void>(resolve=>{release=resolve})
+  const upstream=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(){
+    calls++;await stalled;return Response.json({items:[],total:0})
+  }})
+  try {
+    const tools=await openAgentTools({workspacePath:root,libraryBaseUrl:upstream.url.origin,getAuthToken:()=> 'synthetic',readInitialCatalog:true})
+    try {
+      expect(calls).toBe(1)
+      expect(tools.turnContext).toContain('request failed, timed out, or returned invalid data')
+      expect(tools.turnContext).not.toContain('"total":0')
+    } finally {await tools.close()}
+  } finally {release();upstream.stop(true);await rm(root,{recursive:true,force:true})}
+},10_000)
+
 test('missing credentials and invalid configuration do not become empty catalogs or block pure tools', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-agent-tools-unavailable-'))
   const upstream = Bun.serve({ hostname:'127.0.0.1', port:0, fetch:()=>{ throw Error('No unauthenticated upstream call allowed') } })
-  const tools = await openAgentTools({ workspacePath:root, libraryBaseUrl:upstream.url.origin, getAuthToken:()=>undefined })
+  const tools = await openAgentTools({ workspacePath:root, libraryBaseUrl:upstream.url.origin, getAuthToken:()=>undefined,readInitialCatalog:true })
   try {
+    expect(tools.turnContext).toContain('Initial built-in resource catalog: unavailable (HTTP 503)')
     const failed = await command(root,tools.directory,'assets.mjs','catalog')
     expect(failed.code).toBe(1); expect(failed.stderr).toContain('not an empty search result')
-    const invalid = await openAgentTools({workspacePath:root,libraryBaseUrl:'file:///not-a-service',getAuthToken:()=>undefined})
+    const invalid = await openAgentTools({workspacePath:root,libraryBaseUrl:'file:///not-a-service',getAuthToken:()=>undefined,readInitialCatalog:true})
     try {
       expect(invalid.turnContext).toContain('could not start')
+      expect(invalid.turnContext).toContain('Initial built-in resource catalog: unavailable.')
       expect((await command(root,invalid.directory,'check-content.mjs','--format','coordinates')).code).toBe(0)
       expect((await command(root,invalid.directory,'assets.mjs','catalog')).code).toBe(1)
     } finally { await invalid.close() }
   } finally { await tools.close(); upstream.stop(true); await rm(root,{recursive:true,force:true}) }
+},30000)
+
+test('image quote is read-only and a generated visual proposal is saved for later inspection', async () => {
+  const root=await mkdtemp(join(tmpdir(),'bgs-agent-image-proposal-'))
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==','base64')
+  let quotes=0,generated=0
+  const bridge=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(request){
+    if(request.method==='GET'){
+      quotes++
+      return Response.json({available:true,provider:'fixture',billingSource:'external'})
+    }
+    generated++
+    return new Response(png,{headers:{'content-type':'image/png'}})
+  }})
+  const tools=await openAgentTools({workspacePath:root,getAuthToken:()=>undefined,
+    openImage:()=>({endpoint:bridge.url.origin+'/generate',instruction:'fixture image bridge',close:async()=>{}})})
+  try {
+    expect(tools.turnContext).toContain('not yet verified available')
+    expect(quotes).toBe(0)
+    expect(generated).toBe(0)
+    const quote=await command(root,tools.directory,'assets.mjs','cost')
+    expect(quote.code,quote.stderr).toBe(0)
+    expect(JSON.parse(quote.stdout).available).toBe(true)
+    expect(quotes).toBe(1)
+    await writeFile(join(root,'visual-request.json'),JSON.stringify({requestId:'visual-proposal-1',prompt:'Fixture play and UI view'}))
+    const saved=await command(root,tools.directory,'assets.mjs','generate','visual-request.json','assets/concepts/visual-target.png')
+    expect(saved.code,saved.stderr).toBe(0)
+    expect(JSON.parse(saved.stdout)).toMatchObject({path:'assets/concepts/visual-target.png',
+      sha256:createHash('sha256').update(png).digest('hex')})
+    expect(await readFile(join(root,'assets/concepts/visual-target.png'))).toEqual(png)
+    expect(generated).toBe(1)
+  }finally{await tools.close();bridge.stop(true);await rm(root,{recursive:true,force:true})}
+},30000)
+
+test('an open image bridge does not falsely claim its default quote is usable',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'bgs-agent-image-unavailable-'))
+  let generated=0
+  const bridge=Bun.serve({hostname:'127.0.0.1',port:0,fetch(request){
+    if(request.method==='GET')return Response.json({available:false})
+    generated++
+    return new Response('not available',{status:503})
+  }})
+  const tools=await openAgentTools({workspacePath:root,getAuthToken:()=>undefined,
+    openImage:()=>({endpoint:bridge.url.origin+'/generate',instruction:'fixture image bridge',close:async()=>{}})})
+  try {
+    expect(tools.turnContext).toContain('not yet verified available')
+    expect(generated).toBe(0)
+    expect(JSON.parse((await command(root,tools.directory,'assets.mjs','cost')).stdout).available).toBe(false)
+  }finally{await tools.close();bridge.stop(true);await rm(root,{recursive:true,force:true})}
 },30000)
 
 test('a chosen consumer copy remains buildable without the temporary host tools',async()=>{
@@ -142,7 +293,7 @@ test('a chosen consumer copy remains buildable without the temporary host tools'
     await writeFile(join(root,'src/main.js'),"import{readUiData}from'./bgs-content-consumer.mjs';window.readUiData=readUiData;")
     await writeFile(join(root,'package.json'),JSON.stringify({scripts:{build:'bun build.mjs'}}))
     await writeFile(join(root,'build.mjs'),"import{writeFile}from'node:fs/promises';const r=await Bun.build({entrypoints:['src/main.js'],outdir:'dist',target:'browser'});if(!r.success)throw Error('Synthetic build failed');await writeFile('dist/index.html','<!doctype html><script src=main.js></script>');")
-    const built=await buildEditableProject(root,{editableProject:true,runtimeArtifact:'dist',writablePaths:['dist/**']},[],[],undefined,true)
+    const built=await buildEditableProject(root,{editableProject:true,runtimeArtifact:'dist',writablePaths:['dist/**']},[],[])
     expect(built.status,built.observation).toBe('passed')
     expect(built.projectBuild!.files.some(f=>f.path==='src/bgs-content-consumer.mjs')).toBe(true)
     expect(built.projectBuild!.files.some(f=>f.path.startsWith('.beegame/'))).toBe(false)
@@ -162,7 +313,10 @@ test('consumer compatibility is batched/read-only and installation never overwri
     expect(reference.createProductionUiSurface.lifecycle).toContain('No update/setState')
     expect(reference.documents.fetchStartupContentDocuments).toContain('document[] (not a Map)')
     expect(reference.scene.sceneWorldTransforms2d).toContain('{poses: Map')
-    expect(api.stdout.length).toBeLessThan(4000)
+    const consumer = await import(join(root, tools.directory, 'content-consumer.mjs'))
+    for (const name of Object.keys(reference.layout).filter(name => name !== 'notes'))
+      expect(typeof consumer[name], `Discoverable layout export: ${name}`).toBe('function')
+    expect(api.stdout.length).toBeLessThan(6000)
     const doc={schema:'beegame-content.v1',id:'menu',kind:'ui-screen',assetRefs:[],data:{rootId:'root',nodes:[
       {id:'root',role:'screen-root'}, {id:'text',parentId:'root',role:'text',text:'Go',style:{align:'left',fontSize:18},layout:{size:[80,30]}},
       {id:'button',parentId:'root',role:'button',data:{action:'legacy-action'},layout:{size:[80,30]}},
@@ -307,6 +461,29 @@ test('Preview test entry uses Node, retains complete output, and cannot reuse a 
     return {code,stderr,result:JSON.parse(stdout)}
   }
   try {
+    for (const invalid of [
+      {readySelector:'#ready',key:'ArrowRight',holdMs:100,observeMs:100,callback:'window.fastForward()'},
+      {readySelector:'#ready',key:'Control+R',holdMs:100,observeMs:100},
+      {readySelector:'#ready',key:'ArrowRight',holdMs:0,observeMs:100},
+      {readySelector:'#ready',key:'ArrowRight',holdMs:5000,observeMs:120000},
+      {readySelector:'#ready',key:'ArrowRight',holdMs:100,observeMs:100,viewport:{width:640,height:360,isMobile:true}},
+    ]) {
+      const rejected=await run('--keyboard-sample',JSON.stringify(invalid))
+      expect(rejected.code).toBe(1)
+      expect(rejected.result).toMatchObject({status:'error',quality:'unverified'})
+      expect(rejected.result.error).not.toContain('No browser requested')
+    }
+    const countdownOptions = { startSelector:'#start', countdownSelector:'#countdown', playingSelector:'#playing', countdownMs:1500 }
+    for (const invalid of [
+      {...countdownOptions,callback:'pauseGame()'}, {...countdownOptions,countdownMs:0},
+      {...countdownOptions,countdownMs:30001}, {...countdownOptions,observeMs:0},
+      {...countdownOptions,countdownSelector:''}, {...countdownOptions,viewport:{width:640,height:0}},
+    ]) {
+      const rejected=await run('--countdown-blur-sample',JSON.stringify(invalid))
+      expect(rejected.code).toBe(1)
+      expect(rejected.result).toMatchObject({status:'error',quality:'unverified'})
+      expect(rejected.result.error).not.toContain('No browser requested')
+    }
     await writeFile(join(root,'test.mjs'),`import {appendFile} from 'node:fs/promises';
       await appendFile('calls.txt','once\\n');
       console.log(JSON.stringify({node:!process.versions.bun,arg:process.argv[2],checks:[false]}));
@@ -331,6 +508,27 @@ test('Preview test entry uses Node, retains complete output, and cannot reuse a 
     expect(second.code).toBe(0);expect(second.result.quality).toBe('unverified')
     expect(second.result.reportPath).not.toBe(first.result.reportPath)
     expect(await readFile(join(root,first.result.stdoutPath),'utf8')).toBe(stdout)
+    expect((await run('--snapshot','development','0','540')).result.error).toContain('Expected --snapshot')
+    const moduleUrl=new URL('../preview-test-command.mjs',import.meta.url).href
+    const snapshotChild=Bun.spawn([Bun.which('node')!,'--input-type=module','-e',
+      `const {capturePreviewSnapshot}=await import(${JSON.stringify(moduleUrl)});
+       const result=await capturePreviewSnapshot('development',960,540,async(options,inspect)=>inspect({
+         page:{screenshot:async()=>Buffer.from('synthetic-image')},
+         gameFrame:{waitForLoadState:async()=>{}},
+         observedEnvironment:{viewport:{width:960,height:540}},
+         runtimeErrors:{pageErrors:1,consoleErrors:0,failedRequests:0,httpErrors:0}}));
+       console.log(JSON.stringify(result));`],{cwd:root,
+      env:{PATH:process.env.PATH,BEEGAME_PREVIEW_CAPABILITY_FILE:projectPreviewCapabilityPath(root,'test-entry')},
+      stdout:'pipe',stderr:'pipe'})
+    const [snapshotOut,snapshotErr,snapshotExit]=await Promise.all([
+      new Response(snapshotChild.stdout).text(),new Response(snapshotChild.stderr).text(),snapshotChild.exited])
+    expect(snapshotExit,snapshotErr).toBe(0)
+    const snapshot=JSON.parse(snapshotOut)
+    expect(snapshot).toMatchObject({status:'observed',quality:'unverified',viewport:[960,540],
+      runtimeErrors:{pageErrors:1},observedEnvironment:{viewport:{width:960,height:540}}})
+    expect(await readFile(join(root,snapshot.imagePath),'utf8')).toBe('synthetic-image')
+    expect(JSON.parse(await readFile(join(root,snapshot.reportPath),'utf8')).imageSha256).toBe(snapshot.imageSha256)
+    expect(snapshot.reportPath).toMatch(/^\.beegame\/tmp\/preview-snapshot-[^/]+\/observation\.json$/)
     expect((await run('--inspect',first.result.reportPath)).result).toMatchObject({quality:'unverified',
       freshness:{status:'unverified'},exitCode:7})
     expect((await run('--inspect','../outside.json')).code).toBe(1)
@@ -341,6 +539,35 @@ test('Preview test entry uses Node, retains complete output, and cannot reuse a 
     expect(await readFile(join(root,'calls.txt'),'utf8')).toBe('once\nonce\n')
   } finally {await tools.close();await rm(root,{recursive:true,force:true})}
 })
+
+test.skipIf(process.env.BGS_LAYOUT_BROWSER!=='1')('one Preview snapshot observes the real isolated game frame without a project test script', async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'bgs-visual-snapshot-')))
+  const game=Bun.serve({hostname:'127.0.0.1',port:0,fetch:()=>new Response(
+    '<!doctype html><style>body{margin:0;background:#153148;color:white}</style><h1>Visible game</h1><script>throw Error("synthetic boot failure")</script>',
+    {headers:{'content-type':'text/html'}})})
+  let state={status:'idle',url:''}
+  const preview=openPreviewTestAccess({start:async()=>state={status:'running',url:game.url.origin},
+    status:()=>state,stop(){},browser:createPreviewTestBrowser()})
+  const tools=await openAgentTools({workspacePath:root,sessionId:'visual-snapshot',getAuthToken:()=>undefined,openPreview:()=>preview})
+  try {
+    const child=Bun.spawn([Bun.which('node')!,join(root,tools.directory,'preview.mjs'),'--snapshot','development','640','360'],
+      {cwd:root,env:{PATH:process.env.PATH,BEEGAME_CONTENT_CHECKER_MODULE:(await sharedContentChecker()).moduleUrl,
+        BEEGAME_PREVIEW_CAPABILITY_FILE:projectPreviewCapabilityPath(root,'visual-snapshot'),
+        BEEGAME_PLAYWRIGHT_MODULE:sharedPlaywright().moduleUrl},stdout:'pipe',stderr:'pipe'})
+    const [stdout,stderr,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited])
+    expect(code,stderr+'\n'+stdout).toBe(0)
+    const report=JSON.parse(stdout)
+    expect(report).toMatchObject({status:'observed',quality:'unverified',viewport:[640,360]})
+    expect(report.runtimeErrors.pageErrors).toBeGreaterThan(0)
+    expect(report.runtimeErrorDetails.pageErrors).toContainEqual({name:'Error',message:'synthetic boot failure'})
+    const png=await readFile(join(root,report.imagePath))
+    expect(png.subarray(0,8).toString('hex')).toBe('89504e470d0a1a0a')
+    expect(png.readUInt32BE(16)).toBe(640)
+    expect(png.readUInt32BE(20)).toBe(360)
+    expect(JSON.parse(await readFile(join(root,report.reportPath),'utf8')).imageSha256).toBe(report.imageSha256)
+    expect(JSON.parse(await readFile(join(root,report.reportPath),'utf8')).runtimeErrorDetails).toEqual(report.runtimeErrorDetails)
+  }finally{await tools.close();game.stop(true);await rm(root,{recursive:true,force:true})}
+},30000)
 
 test('tool preparation refuses linked parent before writing outside the project', async () => {
   const root=await mkdtemp(join(tmpdir(),'bgs-agent-tools-link-')), outside=await mkdtemp(join(tmpdir(),'bgs-agent-tools-outside-'))
@@ -368,24 +595,26 @@ test('optional Preview is published to the bound native session, lazy help works
     expect(tools.turnContext).not.toContain(preview.baseUrl)
     expect(tools.turnContext.length).toBeLessThan(2600)
     expect((await command(root,tools.directory,'preview.mjs','--help')).stdout).toContain('POST /preview')
+    expect((await command(root,tools.directory,'preview.mjs','--help')).stdout).toContain('--snapshot development|production')
     const diagnostic=await command(root,tools.directory,'preview.mjs','--client')
     expect(diagnostic.code).toBe(0)
     const client=JSON.parse(diagnostic.stdout)
     expect(client).toMatchObject({runtime:'node',playwrightModule:sharedPlaywright().moduleUrl,
       environment:{helper:'BEEGAME_PREVIEW_TEST_MODULE',playwright:'BEEGAME_PLAYWRIGHT_MODULE',capability:'BEEGAME_PREVIEW_CAPABILITY_FILE'}})
-    expect(client.helperModule).toBe(new URL('../preview-test-client.mjs',import.meta.url).href)
+    expect(client.helperModule).toBe(new URL('./preview-test-client.mjs',(await sharedContentChecker()).moduleUrl).href)
+    expect(client.playCapture).toContain('withPlayCapture')
     expect(diagnostic.stdout).not.toContain(preview.baseUrl)
     expect(diagnostic.stdout).not.toContain(path)
     expect(Buffer.byteLength(diagnostic.stdout)).toBeLessThan(1500)
     // A child script can resolve exports directly; no source read/copy, env
     // dump, package installation, browser start or review verdict is required.
     const node=Bun.spawn([Bun.which('node')!,'--input-type=module','-e',
-      'const {withPreviewPage,checkTextSeparation}=await import('+JSON.stringify(client.helperModule)+');'+
+      'const {withPreviewPage,withPlayCapture,checkTextSeparation}=await import('+JSON.stringify(client.helperModule)+');'+
       'const {chromium}=await import('+JSON.stringify(client.playwrightModule)+');'+
-      'console.log([typeof withPreviewPage,typeof checkTextSeparation,typeof chromium.connectOverCDP].join(","))'],
+      'console.log([typeof withPreviewPage,typeof withPlayCapture,typeof checkTextSeparation,typeof chromium.connectOverCDP].join(","))'],
       {cwd:root,env:{PATH:process.env.PATH},stdout:'pipe',stderr:'pipe'})
     const [stdout,stderr,exit]=await Promise.all([new Response(node.stdout).text(),new Response(node.stderr).text(),node.exited])
-    expect(exit,stderr).toBe(0);expect(stdout.trim()).toBe('function,function,function')
+    expect(exit,stderr).toBe(0);expect(stdout.trim()).toBe('function,function,function,function')
     expect((await command(root,tools.directory,'preview.mjs','--client','--help')).code).toBe(1)
     expect((await fetch(preview.baseUrl+'/status')).status).toBe(200)
     const first=tools.close();expect(tools.close()).toBe(first)

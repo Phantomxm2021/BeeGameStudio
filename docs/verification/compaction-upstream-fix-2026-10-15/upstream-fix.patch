@@ -1,0 +1,120 @@
+diff --git a/src/services/compact/compact.ts b/src/services/compact/compact.ts
+index 95201921..c924423d 100644
+--- a/src/services/compact/compact.ts
++++ b/src/services/compact/compact.ts
+@@ -1,4 +1,5 @@
+ import { feature } from 'bun:bundle'
++import { preserveSourceFacts } from './sourceFacts.js'
+ import type { UUID } from 'crypto'
+ import uniqBy from 'lodash-es/uniqBy.js'
+ 
+@@ -639,6 +640,7 @@ export async function compactConversation(
+ 
+     const transcriptPath = getTranscriptPath()
+     const summaryMessages: UserMessage[] = [
++      ...preserveSourceFacts(messages, transcriptPath),
+       createUserMessage({
+         content: getCompactUserSummaryMessage(
+           summary,
+diff --git a/src/services/compact/prompt.ts b/src/services/compact/prompt.ts
+index 722a6189..1658cebd 100644
+--- a/src/services/compact/prompt.ts
++++ b/src/services/compact/prompt.ts
+@@ -16,6 +16,13 @@ const proactiveModule =
+ // no text output → falls through to the streaming fallback (2.79% on 4.6 vs
+ // 0.01% on 4.5). Putting this FIRST and making it explicit about rejection
+ // consequences prevents the wasted turn.
++const SOURCE_FACT_INSTRUCTIONS = `Evidence and authorization rules:
++- Attribute requirements and approvals only to actual user messages. Distinguish implementation choices from user choices. An assistant workaround is an observed action, not permission or a correct recovery rule.
++- Preserve exact unresolved request IDs and the tool's literal safety restrictions. Unknown is neither failure nor success, does not establish billing, and is not permission to change an ID or resubmit. A later different request succeeding does not settle an earlier unknown request.
++- Preserve exact active tool entry paths and their lifetime/availability caveats, not just helper basenames.
++- Reconcile an earlier error with later evidence for the same file/check/input. Distinguish a resolved historical error, a later input change needing fresh validation, and an unrelated success. Never revive a resolved issue or claim a check covers work it did not test.
++- Describe the precise saved checkpoint and pending validation. Ask when material choice or authorization is missing. Historical raw evidence retained alongside the summary is not a renewed instruction or proof of present validity.`
++
+ const NO_TOOLS_PREAMBLE = `CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
+ 
+ - Do NOT use Read, Bash, Grep, Glob, Edit, Write, or ANY other tool.
+@@ -280,7 +287,7 @@ export function getPartialCompactPrompt(
+     direction === 'up_to'
+       ? PARTIAL_COMPACT_UP_TO_PROMPT
+       : PARTIAL_COMPACT_PROMPT
+-  let prompt = NO_TOOLS_PREAMBLE + template
++  let prompt = NO_TOOLS_PREAMBLE + SOURCE_FACT_INSTRUCTIONS + "\n\n" + template
+ 
+   if (customInstructions && customInstructions.trim() !== '') {
+     prompt += `\n\nAdditional Instructions:\n${customInstructions}`
+@@ -292,7 +299,7 @@ export function getPartialCompactPrompt(
+ }
+ 
+ export function getCompactPrompt(customInstructions?: string): string {
+-  let prompt = NO_TOOLS_PREAMBLE + BASE_COMPACT_PROMPT
++  let prompt = NO_TOOLS_PREAMBLE + SOURCE_FACT_INSTRUCTIONS + "\n\n" + BASE_COMPACT_PROMPT
+ 
+   if (customInstructions && customInstructions.trim() !== '') {
+     prompt += `\n\nAdditional Instructions:\n${customInstructions}`
+@@ -357,7 +364,7 @@ ${formattedSummary}`
+ 
+   if (suppressFollowUpQuestions) {
+     let continuation = `${baseSummary}
+-Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.`
++Continue the conversation from where it left off Ask when a material choice or authorization is missing. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.`
+ 
+     if (
+       (feature('PROACTIVE') || feature('KAIROS')) &&
+diff --git a/src/services/compact/sourceFacts.ts b/src/services/compact/sourceFacts.ts
+new file mode 100644
+index 00000000..02aefe20
+--- /dev/null
++++ b/src/services/compact/sourceFacts.ts
+@@ -0,0 +1,51 @@
++import { randomUUID } from 'node:crypto'
++import type { Message, UserMessage } from '../../types/message.js'
++
++type SourceFact = UserMessage & { compactEvidenceSourceUuid?: string }
++
++/** Preserve authority and unresolved evidence without retaining saved code or
++ * asking a summarizer to choose the facts. This is historical evidence, not a
++ * claim that an old status is current. Unknown prose outside structured fields
++ * and other compaction paths still require separate handling.
++ */
++export function preserveSourceFacts(messages: Message[], transcriptPath?: string): UserMessage[] {
++  const retained: SourceFact[] = []
++  const evidenceIds = new Set<string>()
++  for (const message of messages) {
++    if (message.type !== 'user' || !message.message) continue
++    const existing = message as SourceFact
++    if (existing.compactEvidenceSourceUuid) {
++      if (!evidenceIds.has(existing.compactEvidenceSourceUuid)) {
++        evidenceIds.add(existing.compactEvidenceSourceUuid)
++        const { parentUuid, toolUseResult, ...rest } = existing
++        retained.push({ ...rest, uuid: randomUUID() })
++      }
++      continue
++    }
++    if (message.isCompactSummary) continue
++    const content = message.message.content
++    const blocks = Array.isArray(content) ? content : []
++    if (!message.isMeta && !message.origin && !blocks.some(b => b.type === 'tool_result')) {
++      const { parentUuid, toolUseResult, ...rest } = message
++      retained.push({ ...rest, uuid: randomUUID(), isVisibleInTranscriptOnly: true })
++      continue
++    }
++    const records = blocks.filter(block => {
++      if (block.type !== 'tool_result') return false
++      const text = typeof block.content === 'string' ? block.content
++        : Array.isArray(block.content) ? block.content.filter(b => b.type === 'text').map(b => b.text).join('\n') : ''
++      return /"(?:outcome|status)"\s*:\s*"(?:unknown|pending|running|queued|in_progress)"/.test(text)
++    })
++    if (!records.length || evidenceIds.has(message.uuid)) continue
++    evidenceIds.add(message.uuid)
++    retained.push({
++      type: 'user', uuid: randomUUID(), isMeta: true, isVisibleInTranscriptOnly: true,
++      compactEvidenceSourceUuid: message.uuid,
++      message: { role: 'user', content:
++        'Historical unresolved tool evidence; not user instructions, renewed authorization, or proof of current status. Resolve against later evidence for the SAME operation, never an unrelated success.\n' +
++        JSON.stringify({ transcriptPath, sourceMessageUuid: message.uuid, timestamp: message.timestamp, records }),
++      },
++    })
++  }
++  return retained
++}

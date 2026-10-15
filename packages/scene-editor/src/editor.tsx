@@ -229,7 +229,7 @@ export function SceneEditor({ initialDocument, storageKey = 'beegame.scene-edito
       if (onSave) await onSave(currentDocument)
       else localStorage.setItem(storageKey, JSON.stringify(exportPackage(currentDocument)))
       setSavedContent(sceneContentKey(currentDocument))
-      setNotice('')
+      setNotice(onSave ? 'Saved to content files. Rebuild and verify to confirm the changes take effect in the game.' : '')
       return sceneContentKey(history.current.document) === sceneContentKey(currentDocument)
     } catch (error) {
       setNotice(`Save failed: ${error instanceof Error ? error.message : String(error)}`)

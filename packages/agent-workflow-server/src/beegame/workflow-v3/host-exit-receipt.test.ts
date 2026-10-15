@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomBytes, createHmac } from 'node:crypto'
 import { Hono } from 'hono'
-import { createRun, pauseRun, publishPlan, V3_PROTOCOL, type Run } from './state'
+import { createRun, pauseRun, type Run } from './state'
 import { createLocalWorkflowStore } from './store'
 import { createHostExitReceipts, type HostExitReceipts } from './host-exit-receipt'
 import { createAgentGoalExecutor } from './agent-goal'
@@ -197,39 +197,4 @@ test('receipt write outage does not block normal database settlement; native cle
       else {expect(writes).toBe(1);expect(run.writer).toBeUndefined();expect(run.agentTurns![0]!.status).toBe('ended')}
     }finally{await executor.dispose();await sessions.dispose();await f.close()}
   }
-})
-
-test('compatible task recovery restores only accounting facts, not passed checks or acceptance',async()=>{
-  const f=await fixture(false);let calls=0,outage=true,exitWrites=0
-  await writeFile(join(f.workspace,'rules.json'),'{}')
-  const planned=publishPlan(f.run,{protocol:V3_PROTOCOL,baseRevision:0,requirementsRevision:f.run.requirements.revision,
-    tasks:[{id:'rules',kind:'game.develop',goal:'Synthetic rule file',dependsOn:[],requirementIds:['req.play'],inputs:[],
-      writablePaths:['rules.json'],expectedOutputs:['rules.json'],checks:['artifact-json']}]})
-  await f.store.commit(planned.projectId,planned.ownerId,f.run.version,planned,'planned')
-  const store={read:f.store.read,async commit(...args:Parameters<typeof f.store.commit>){
-    if(outage && args[4]==='writer.quiesced'){exitWrites++;throw Error('Synthetic database outage')}
-    await f.store.commit(...args)
-  }}
-  const sessions=new BeeGameSessionManager({async start(input){input.onNativeSessionId?.('11111111-2222-4333-8444-555555555555');return {
-    stop(){},async dispose(){},async submit(turn){calls++;await writeFile(join(f.workspace,'rules.json'),'{"candidate":true}')
-      await turn.onMessage({type:'result',subtype:'success',session_id:'11111111-2222-4333-8444-555555555555',
-        usage:{input_tokens:5,output_tokens:2},result:'Synthetic task'} as any)}
-  }}},join(f.root,'task-native'),async()=>({}),{},true)
-  const original=createV3Executor({store,sessions,exitReceipts:f.receipts()}),restarted=createV3Executor({store:f.store,sessions:f.sessions,exitReceipts:f.receipts()})
-  try {
-    await original.start(planned,'rules','one-request',{})
-    for(let i=0;i<400 && !exitWrites;i++)await Bun.sleep(5)
-    expect(exitWrites).toBe(1);await original.dispose()
-    let run=await f.current();expect(run.writer).toBeDefined();expect(run.attempts[0]!.quiescedAt).toBeUndefined()
-    const facts=(await f.receipts().read(run))!;expect(facts.nativeSessionId).toBeDefined();expect(facts).not.toHaveProperty('checks')
-    const otherTask=structuredClone(run);otherTask.attempts[0]!.taskId='another-task'
-    expect(await f.receipts().read(otherTask)).toBeUndefined()
-    expect(await restarted.recoveryEvidence(run)).toBe('host-receipt');outage=false
-    run=await restarted.recover(run,identity(run))
-    expect(run.writer).toBeUndefined();expect(run.tasks.rules!.status).toBe('failed');expect(run.attempts[0]!.checks).toBeUndefined()
-    expect(run.attempts[0]!.nativeSessionId).toBe(facts.nativeSessionId);expect(run.deliveryEligible).toBe(false)
-    expect(await readFile(join(f.workspace,'rules.json'),'utf8')).toBe('{"candidate":true}')
-    expect(await readFile(join(f.workspace,'untouched.txt'),'utf8')).toBe('Retained independent synthetic result')
-    expect(calls).toBe(1);expect(f.calls).toBe(0)
-  }finally{await original.dispose();await restarted.dispose();await sessions.dispose();await f.close()}
 })

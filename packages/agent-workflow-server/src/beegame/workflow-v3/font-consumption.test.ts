@@ -2,8 +2,9 @@ import { test, expect } from 'bun:test'
 import { mkdtemp, mkdir, writeFile, readFile, cp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { runChecks, checkIsCurrent } from './checks'
-import { createRun, publishPlan, type TaskSpec } from './state'
+import { checkIsCurrent } from './checks'
+import { runChecks } from './checker-test-driver'
+import { type TaskSpec } from './state'
 import { uiLayoutFixture } from '../fixtures/layout-fixture'
 import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
 import { writeBeeGameAssetManifest } from '../asset-contracts'
@@ -57,6 +58,7 @@ for (const mode of ['consume', 'combined-probes', 'explicit-member', 'inherited-
         b.style.fontSize=size+'px';const p=n.layout.position||[0,0],s=n.layout.size;
         Object.assign(b.style,{width:s[0]+'px',height:s[1]+'px',left:(innerWidth/2-s[0]/2+p[0])+'px',top:(innerHeight/2-s[1]/2+p[1])+'px'});
         ${mode === 'combined-probes' ? "const c=d.data.nodes.find(n=>n.id==='close'), e=document.createElement('button');e.id='close';e.textContent='Close';Object.assign(e.style,{width:c.layout.size[0]+'px',height:c.layout.size[1]+'px',left:(innerWidth/2-c.layout.size[0]/2+c.layout.position[0])+'px',top:(innerHeight/2-c.layout.size[1]/2+c.layout.position[1])+'px'});document.body.append(e);" : ''}
+        for(const node of d.data.nodes){if(node.enabled===false)document.getElementById(node.id)?.remove();}
         ${mode === 'unrelated-error' ? "console.error('Independent renderer error');" : ''}`
       await writeFile(join(root,'dist/index.html'),'<style>body{margin:0}button{position:absolute;box-sizing:border-box;border:0;padding:0;white-space:nowrap;background:white;color:black}</style><button id="play"></button><script type="module">'+script+'</script>')
       const viewport:[number,number] = mode==='responsive' ? [720,1280] : mode.startsWith('compact-default') ? [600,720] : [1280,720]
@@ -87,13 +89,3 @@ for (const mode of ['consume', 'combined-probes', 'explicit-member', 'inherited-
     }finally{await rm(root,{recursive:true,force:true})}
   },30000)
 }
-
-test('font consumer reuses uiProbes with explicit runtime/check authorization; missing operands cannot publish',()=>{
-  const run=createRun({projectId:'fixture',ownerId:'owner',workspacePath:'/synthetic',chatSessionId:'chat',requestKey:'font',text:'Static font',constraints:{},ids:['req.text']})
-  const task={id:'font',kind:'game.develop',goal:'Check font',dependsOn:[],requirementIds:['req.text'],inputs:[],writablePaths:['dist/**'],expectedOutputs:['dist/index.html'],
-    checks:['font-data-consumption'],runtimeArtifact:'dist',uiProbes:[{document:'content/ui/menu.json',nodeId:'play',selector:'#play',viewport:[1280,720]}]}
-  const plan={protocol:run.protocol,baseRevision:0,requirementsRevision:run.requirements.revision,tasks:[task]}
-  expect(publishPlan(run,plan).tasks.font!.spec.checks).toContain('font-data-consumption')
-  expect(()=>publishPlan(run,{...plan,tasks:[{...task,uiProbes:undefined}]})).toThrow('font-data-consumption requires')
-  expect(()=>publishPlan(run,{...plan,tasks:[{...task,runtimeArtifact:undefined}]})).toThrow('runtimeArtifact')
-})

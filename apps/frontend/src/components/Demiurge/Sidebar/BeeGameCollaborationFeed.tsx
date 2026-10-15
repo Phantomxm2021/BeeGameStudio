@@ -1,5 +1,5 @@
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ArrowLeft, Bot, Check, ChevronDown, CircleCheck, Copy, FileText, LoaderCircle, Minus, Pencil, Send, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Bot, Check, ChevronDown, CircleCheck, Copy, FileText, Hourglass, ImageIcon, LoaderCircle, Minus, Monitor, Pencil, Send, X } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { type ChatDisplayMessage, type ChatDisplaySource } from '../../../viewModels/displayModels';
 import { MarkdownRenderer } from './ChatMarkdownContent';
@@ -87,6 +87,7 @@ type NormalizedTool = {
     artifactId?: string;
     kind: ToolKind;
     timestamp: number;
+    startedAt?: number;
     turnId?: string;
     toolUseId?: string;
     isSubagent?: boolean;
@@ -122,6 +123,7 @@ const isContextUpdateMessage = (message: ChatDisplayMessage): boolean => {
         message.taskKind === 'context_compaction' || raw.task_kind === 'context_compaction' ||
         message.taskKind === 'delivery_phase' || raw.task_kind === 'delivery_phase' ||
         message.taskKind === 'delivery_error' || raw.task_kind === 'delivery_error' ||
+        message.taskKind === 'host_evidence' || raw.task_kind === 'host_evidence' ||
         message.taskKind === 'session_lifecycle' || raw.task_kind === 'session_lifecycle';
 };
 
@@ -142,11 +144,6 @@ const getToolKind = (toolName?: string): ToolKind => {
 const isHiddenPresentationTool = (toolName?: string): boolean => (
     String(toolName || '').trim().toLowerCase() === 'structuredoutput'
 );
-
-const isLocalSearchTool = (tool: NormalizedTool): boolean => {
-    const normalized = tool.name.trim().toLowerCase();
-    return normalized === 'search' || normalized === 'grep' || normalized === 'glob';
-};
 
 const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null => {
     const content = String(message.content || '');
@@ -179,6 +176,7 @@ const normalizeToolMessage = (message: ToolFeedMessage): NormalizedTool | null =
         artifactId: String(message.artifactId || message.artifact_id || '').trim() || undefined,
         kind,
         timestamp: Number(message.timestamp || 0),
+        startedAt: status === 'running' ? message.timestamp : undefined,
         turnId: message.turnId || message.turn_id,
         toolUseId: message.toolUseId,
         isSubagent: Boolean(message.isSubagentTool),
@@ -220,48 +218,46 @@ function formatStructuredPatch(value: unknown): string {
     return lines.join('\n').trim();
 }
 
-function getUnifiedDiffStats(diff?: string): Pick<Extract<AgentActivityItem, { type: 'tool' }>, 'additions' | 'deletions'> {
-    if (!diff) return {};
-    let additions = 0;
-    let deletions = 0;
-    for (const line of diff.split('\n')) {
-        if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')) continue;
-        if (line.startsWith('+')) additions += 1;
-        if (line.startsWith('-')) deletions += 1;
-    }
-    return {
-        ...(additions > 0 ? { additions } : {}),
-        ...(deletions > 0 ? { deletions } : {}),
-    };
-}
-
-function getActivityToolAction(tool: NormalizedTool): string {
-    if (tool.kind === 'read') return 'read';
-    if (tool.kind === 'write') return 'edit';
-    if (tool.kind === 'edit') return 'edit';
-    if (tool.kind === 'search') return 'search';
-    return 'run';
-}
-
 function toActivityItem(
     part: Extract<ResponsePart, { kind: 'thinking' | 'tool' }>,
+    lang: Language,
+    streamingMessageId: string | null,
+    onOpenTool: (tool: NormalizedTool) => void,
 ): AgentActivityItem {
     if (part.kind === 'thinking') {
         return {
             id: `activity-thinking-${part.message.id}`,
-            type: 'text',
-            content: displayText(part.message.thought || part.message.content || 'Thinking'),
+            type: 'trace',
+            kind: 'thinking',
+            icon: <Hourglass className="size-4" />,
+            label: part.message.completionReason
+                ? (lang === 'zh' ? '思考已中断' : 'Thought · interrupted')
+                : (lang === 'zh' ? '思考' : 'Thought'),
+            content: <ThinkingActivityText part={part} lang={lang}
+                working={matchesStreamingMessage(part.message, streamingMessageId)} />,
         };
     }
-    // This feed has one compact activity presentation for every tool kind.
-    // Keeping search as a `tool` as well prevents a search + command batch
-    // from silently becoming beUI's generic "mixed" activity.
+    const tool = part.tool;
+    const description = tool.input && typeof tool.input === 'object' && 'description' in tool.input
+        && typeof tool.input.description === 'string' ? tool.input.description.trim() : '';
+    const imageOutput = tool.attachments?.some(attachment => attachment.type === 'image');
+    const action = tool.kind === 'read' ? (lang === 'zh' ? '读取' : 'Read')
+        : tool.kind === 'write' ? (lang === 'zh' ? '写入' : 'Write')
+        : tool.kind === 'edit' ? (lang === 'zh' ? '编辑' : 'Edit')
+        : tool.kind === 'search' ? (lang === 'zh' ? '搜索' : 'Search') : '';
+    const target = tool.detail.replace(/^(?:Target|Command):\s*/, '');
+    const title = description || (target ? `${action ? `${action} ` : ''}${target}`
+        : imageOutput ? (lang === 'zh' ? '图片输出' : 'Image output') : tool.name);
+    const outcome = tool.completionReason === 'stopped' ? (lang === 'zh' ? '已停止' : 'Stopped')
+        : tool.completionReason === 'incomplete' ? (lang === 'zh' ? '未完成' : 'Incomplete')
+        : tool.status === 'failed' ? (lang === 'zh' ? '失败' : 'Failed') : '';
     return {
-        id: `activity-tool-${part.tool.id}`,
-        type: 'tool',
-        action: getActivityToolAction(part.tool),
-        target: displayText(part.tool.detail || part.tool.name),
-        ...getUnifiedDiffStats(part.tool.diff),
+        id: `activity-tool-${tool.id}`,
+        type: 'trace',
+        kind: 'run',
+        icon: imageOutput ? <ImageIcon className="size-4" /> : <Monitor className="size-4" />,
+        label: <>{displayText(title)}{outcome && <span className={tool.status === 'failed' && !tool.completionReason ? 'text-destructive' : 'text-muted-foreground'}> · {outcome}</span>}</>,
+        onSelect: () => onOpenTool(tool),
     };
 }
 
@@ -295,7 +291,7 @@ function parseDiffLines(diff: string): FileDiffLine[] {
 type ResponsePart =
     | { kind: 'thinking'; message: ChatDisplayMessage; timestamp: number; durationMs?: number; turnId?: string; activityGroupId?: string }
     | { kind: 'tool'; tool: NormalizedTool; timestamp: number; turnId?: string; activityGroupId?: string }
-    | { kind: 'agent'; message: ChatDisplayMessage; timestamp: number; turnId?: string };
+    | { kind: 'agent'; message: ChatDisplayMessage; sourceMessageId: string; timestamp: number; turnId?: string };
 
 type AgentResponseTurn = {
     kind: 'response';
@@ -344,6 +340,7 @@ const mergeToolPart = (
                 before: tool.before ?? current.before,
                 after: tool.after ?? current.after,
                 timestamp: Math.max(current.timestamp, tool.timestamp),
+                startedAt: current.startedAt ?? tool.startedAt,
                 status: tool.status === 'running' ? current.status : tool.status,
             },
             timestamp: Math.max(existing.part.timestamp, tool.timestamp),
@@ -395,6 +392,7 @@ const appendAssistantContentBlocks = (
         if (block.type === 'text') {
             turn.parts.push({
                 kind: 'agent',
+                sourceMessageId: message.messageId || message.id,
                 message: { ...message, id: blockId, content: block.text || '', type: 'text' },
                 timestamp: messageTimestamp(message),
                 turnId: message.turnId || message.turn_id,
@@ -576,7 +574,7 @@ const buildFeedEntries = (messages: ChatDisplayMessage[]): FeedEntry[] => {
 
         if (isAgentMessage(message)) {
             const turn = ensureTurn(message.id, message.turnId || message.turn_id);
-            turn.parts.push({ kind: 'agent', message, timestamp: messageTimestamp(message), turnId: message.turnId || message.turn_id });
+            turn.parts.push({ kind: 'agent', message, sourceMessageId: message.messageId || message.id, timestamp: messageTimestamp(message), turnId: message.turnId || message.turn_id });
         }
     }
 
@@ -600,6 +598,21 @@ const hasLaterAgentResponseInTurn = (entries: FeedEntry[], entryIndex: number): 
     return false;
 };
 
+// Only the trailing assistant message is a final reply. Text before another
+// thought/tool remains process commentary, including within mixed blocks.
+const splitResponseParts = (parts: ResponsePart[], completed: boolean) => {
+    const last = parts.at(-1);
+    let finalStart = parts.length;
+    if (completed && last?.kind === 'agent') {
+        while (finalStart > 0) {
+            const part = parts[finalStart - 1];
+            if (part.kind !== 'agent' || part.sourceMessageId !== last.sourceMessageId) break;
+            finalStart -= 1;
+        }
+    }
+    return { activity: parts.slice(0, finalStart), final: parts.slice(finalStart) };
+};
+
 export const BeeGameCollaborationFeed = memo(({
     messages,
     lang = 'en',
@@ -617,6 +630,9 @@ export const BeeGameCollaborationFeed = memo(({
     const text = useBeeGameText(lang);
     const [detail, setDetail] = useState<AgentRunDetail | null>(null);
     const entries = useMemo(() => buildFeedEntries(messages), [messages]);
+    const latestResponseIndex = entries.reduce((last, entry, index) => entry.kind === 'response' ? index : last, -1);
+    const latestUserIndex = entries.reduce((last, entry, index) => entry.kind === 'user' ? index : last, -1);
+    const activeResponseIndex = latestResponseIndex > latestUserIndex ? latestResponseIndex : -1;
     const latestUserMessageId = [...entries].reverse().find(entry => entry.kind === 'user')?.message.id;
     const currentDetail = useMemo(() => {
         if (!detail) return null;
@@ -685,17 +701,20 @@ export const BeeGameCollaborationFeed = memo(({
                     >
                         <MessageContent>
                             {(() => {
-                                const responseText = entry.parts
+                                const streaming = entry.parts.some(part => part.kind === 'tool'
+                                    ? part.tool.status === 'running' : matchesStreamingMessage(part.message, streamingMessageId));
+                                const completedAt = entry.parts.flatMap(part => part.kind !== 'tool' && part.message.turnCompletedAt
+                                    ? [part.message.turnCompletedAt] : []).at(-1);
+                                const working = !completedAt && (streaming || (isLoading && entryIndex === activeResponseIndex));
+                                const { activity, final } = splitResponseParts(entry.parts, !working && !hasLaterResponseInTurn);
+                                const responseText = final
                                     .filter((part): part is Extract<ResponsePart, { kind: 'agent' }> => part.kind === 'agent')
                                     .map((part) => displayText(part.message.content.trim()))
                                     .filter(Boolean)
                                     .join('\n\n');
-                                const sources = entry.parts.flatMap((part) => part.kind === 'agent' ? getMessageSources(part.message) : [])
+                                const sources = final.flatMap((part) => part.kind === 'agent' ? getMessageSources(part.message) : [])
                                     .filter((source, sourceIndex, allSources) => allSources.findIndex((candidate) => (candidate.id || candidate.url || `${candidate.title}:${candidate.domain || ''}`) === (source.id || source.url || `${source.title}:${source.domain || ''}`)) === sourceIndex);
-                                const status = entry.parts.some((part) => (
-                                    (part.kind === 'tool' && part.tool.status === 'running') ||
-                                    ((part.kind === 'thinking' || part.kind === 'agent') && matchesStreamingMessage(part.message, streamingMessageId))
-                                )) ? 'streaming' as const : 'complete' as const;
+                                const status = working ? 'streaming' as const : 'complete' as const;
                                 const response = <StreamingResponse
                                     status={status}
                                     copyText={responseText || undefined}
@@ -707,14 +726,18 @@ export const BeeGameCollaborationFeed = memo(({
                                     className="w-full"
                                     contentClassName="text-[var(--text-primary)]"
                                 >
-                                    <ResponseParts
-                                        parts={entry.parts}
+                                    {activity.length > 0 && <ActivityTimeline
+                                        parts={activity}
+                                        working={working}
+                                        completedAt={completedAt}
                                         lang={lang}
                                         streamingMessageId={streamingMessageId}
                                         onOpenSubagent={(tool) => openDetail({ kind: 'subagent', tool })}
                                         onOpenTool={(tool) => openDetail({ kind: 'tool', tool })}
                                         onPreviewArtifact={onPreviewArtifact}
-                                    />
+                                    />}
+                                    <ResponseParts parts={final} lang={lang} streamingMessageId={streamingMessageId}
+                                        onPreviewArtifact={onPreviewArtifact} />
                                 </StreamingResponse>;
                                 return response;
                             })()}
@@ -723,7 +746,7 @@ export const BeeGameCollaborationFeed = memo(({
                     )}
                 </Fragment>;
             })}
-            {isLoading && !hasStreamingMessage ? <Message data-testid="beegame-loading-message" from="assistant" className="mb-3 min-w-0"><MessageContent><ReasoningText phrases={[text.thinkingActive || text.aiProcessing || '']} variant="scramble" /></MessageContent></Message> : null}
+            {isLoading && !hasStreamingMessage && activeResponseIndex < 0 ? <Message data-testid="beegame-loading-message" from="assistant" className="mb-3 min-w-0"><MessageContent><ReasoningText phrases={[text.thinkingActive || text.aiProcessing || '']} variant="scramble" /></MessageContent></Message> : null}
         </MessageGroup>
         <Drawer
             open={Boolean(detail)}
@@ -761,25 +784,92 @@ function ToolResultDetail({ tool, lang }: { tool: NormalizedTool; lang: Language
     </ToolResult>;
 }
 
-function ThinkingActivity({ part, lang, working }: { part: Extract<ResponsePart, { kind: 'thinking' }>; lang: Language; working: boolean }) {
+function ActivityTimeline({ parts, working, completedAt, lang, streamingMessageId, onOpenTool, onOpenSubagent, onPreviewArtifact }: {
+    parts: ResponsePart[];
+    working: boolean;
+    completedAt?: number;
+    lang: Language;
+    streamingMessageId: string | null;
+    onOpenTool: (tool: NormalizedTool) => void;
+    onOpenSubagent: (tool: NormalizedTool) => void;
+    onPreviewArtifact?: (id: string, title: string, content?: string) => void;
+}) {
     const [now, setNow] = useState(Date.now);
-    const thought = displayText(part.message.thought || part.message.content || '');
-    const visibleThought = useSmoothStreamText(thought, working);
     useEffect(() => {
         if (!working) return;
         const timer = setInterval(() => setNow(Date.now()), 1000);
         return () => clearInterval(timer);
     }, [working]);
-    const elapsed = working ? Math.max(0, now - part.timestamp) : part.durationMs;
+    // Use observed start/end times, never the sum of thinking durations.
+    // Completed-only legacy tools have no known start, so omit their timer.
+    const first = parts[0];
+    const last = parts.at(-1);
+    const startedAt = first?.kind === 'tool' ? first.tool.startedAt : first?.timestamp;
+    const endedAt = working ? now : completedAt ?? (last?.kind === 'tool' ? last.tool.timestamp
+        : last?.kind === 'thinking' && last.durationMs !== undefined ? last.timestamp + last.durationMs : undefined);
+    const elapsed = startedAt !== undefined && endedAt !== undefined && Number.isFinite(startedAt)
+        && Number.isFinite(endedAt) && startedAt > 0 && endedAt >= startedAt ? endedAt - startedAt : undefined;
+    const seconds = Math.floor((elapsed ?? 0) / 1000);
     const duration = elapsed === undefined ? '' : elapsed < 1000
         ? (lang === 'zh' ? '少于 1 秒' : 'less than 1s')
-        : (lang === 'zh' ? `${Math.floor(elapsed / 1000)} 秒` : `${Math.floor(elapsed / 1000)}s`);
-    return <AgentActivity items={[{ id: part.message.id, type: 'text', content: <MarkdownRenderer
-        content={visibleThought} messageId={part.message.id} lang={lang} /> }]}
-        contentType="text" status={working ? 'working' : 'complete'}
-        activeLabel={`${lang === 'zh' ? '正在思考' : 'Thinking'}${duration ? ` · ${duration}` : ''}`}
-        summary={`${part.message.completionReason ? (lang === 'zh' ? '思考已中断' : 'Thinking interrupted') : (lang === 'zh' ? '已思考' : 'Thought')}${duration ? ` · ${duration}` : ''}`}
-        defaultOpen={false} className="w-full text-[var(--text-secondary)]" />;
+        : seconds < 60 ? (lang === 'zh' ? `${seconds} 秒` : `${seconds}s`)
+        : lang === 'zh' ? `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+    const outcomes = parts.map(part => part.kind === 'tool'
+        ? part.tool.completionReason || (part.tool.status === 'failed' ? 'failed' : undefined)
+        : part.message.completionReason);
+    const outcomeSummary = (['failed', 'stopped', 'incomplete'] as const).flatMap(state => {
+        const count = outcomes.filter(outcome => outcome === state).length;
+        const label = lang === 'zh' ? { failed: '次失败', stopped: '次已停止', incomplete: '次未完成' }[state] : state;
+        return count ? [`${count} ${label}`] : [];
+    }).join(' · ');
+    const label = working ? (lang === 'zh' ? `正在执行${duration ? ` · ${duration}` : ''}` : `Working${duration ? ` for ${duration}` : ''}`)
+        : duration ? (lang === 'zh' ? `执行用时 ${duration}` : `Worked for ${duration}`)
+        : (lang === 'zh' ? '活动记录' : 'Activity');
+    const heading = <>{label}{outcomeSummary && <span className="ml-2 text-xs">· {outcomeSummary}</span>}</>;
+    return <AgentActivity
+        items={parts.flatMap((part, index): AgentActivityItem[] => {
+            if (part.kind === 'agent') return [{ id: `activity-message-${part.message.id}`, type: 'text',
+                content: <ResponseParts parts={[part]} lang={lang} streamingMessageId={streamingMessageId} onPreviewArtifact={onPreviewArtifact} /> }];
+            const isSubagent = (candidate: ResponsePart | undefined): boolean =>
+                candidate?.kind === 'tool' && Boolean(candidate.tool.isSubagent || candidate.tool.kind === 'subagent');
+            if (part.kind === 'tool' && isSubagent(part)) {
+                if (isSubagent(parts[index - 1])) return [];
+                const subagents = [part.tool];
+                for (let next = index + 1; next < parts.length; next += 1) {
+                    const candidate = parts[next];
+                    if (candidate.kind !== 'tool' || !isSubagent(candidate)) break;
+                    subagents.push(candidate.tool);
+                }
+                return [{ id: `activity-subagent-${part.tool.id}`, type: 'text',
+                    content: <div className="my-1 flex max-w-full flex-wrap items-center gap-2" data-testid="beegame-subagent-row">
+                        {subagents.map(tool => <SubagentToolSummary key={tool.id} tool={tool} lang={lang} onOpen={() => onOpenSubagent(tool)} />)}
+                    </div>,
+                }];
+            }
+            const items = [toActivityItem(part, lang, streamingMessageId, onOpenTool)];
+            if (part.kind === 'tool') {
+                const tool = part.tool;
+                if (tool.attachments?.length) items.push({ id: `activity-media-${tool.id}`, type: 'text',
+                    content: <div className="chat-image-gallery" role="group" aria-label={lang === 'zh' ? '工具输出素材' : 'Tool media'}>
+                        {tool.attachments.map((attachment, index) => <ChatAttachmentView key={index} attachment={attachment} lang={lang} animateReveal />)}
+                    </div> });
+                if (tool.diff) {
+                    const lines = parseDiffLines(tool.diff);
+                    items.push({ id: `activity-diff-${tool.id}`, type: 'text', content: <FileDiff file={displayText(tool.detail || tool.name)}
+                        lines={lines} status={tool.status === 'running' ? 'streaming' : 'complete'} defaultOpen={false}
+                        copyText={lines.map(line => line.content).join('\n')} /> });
+                }
+            }
+            return items;
+        })}
+        status={working ? 'working' : 'complete'} activeLabel={heading} summary={heading}
+        className="w-full text-[var(--text-secondary)]" />;
+}
+
+function ThinkingActivityText({ part, lang, working }: { part: Extract<ResponsePart, { kind: 'thinking' }>; lang: Language; working: boolean }) {
+    const thought = displayText(part.message.thought || part.message.content || '');
+    const visibleThought = useSmoothStreamText(thought, working);
+    return <MarkdownRenderer content={visibleThought} messageId={part.message.id} lang={lang} />;
 }
 
 function subagentStatus(tool: NormalizedTool, lang: Language) {
@@ -941,94 +1031,16 @@ function ResponseParts({
     parts,
     lang,
     streamingMessageId,
-    onOpenSubagent,
-    onOpenTool,
     onPreviewArtifact,
 }: {
     parts: ResponsePart[];
     lang: Language;
     streamingMessageId: string | null;
-    onOpenSubagent: (tool: NormalizedTool) => void;
-    onOpenTool: (tool: NormalizedTool) => void;
     onPreviewArtifact?: (id: string, title: string, content?: string) => void;
 }) {
     const rendered: ReactNode[] = [];
-    for (let index = 0; index < parts.length; index += 1) {
-        const part = parts[index];
-        if (part.kind === 'tool' && (part.tool.isSubagent || part.tool.kind === 'subagent')) {
-            const subagentParts: Extract<ResponsePart, { kind: 'tool' }>[] = [part];
-            while (index + 1 < parts.length) {
-                const next = parts[index + 1];
-                if (next.kind !== 'tool' || (!next.tool.isSubagent && next.tool.kind !== 'subagent')) break;
-                subagentParts.push(next);
-                index += 1;
-            }
-            rendered.push(<div key={`subagents-${part.tool.id}`} className="my-1 flex max-w-full flex-wrap items-center gap-2" data-testid="beegame-subagent-row">
-                {subagentParts.map(({ tool }) => <SubagentToolSummary key={tool.id} tool={tool} lang={lang} onOpen={() => onOpenSubagent(tool)} />)}
-            </div>);
-            continue;
-        }
-        if (part.kind === 'thinking') {
-            rendered.push(<ThinkingActivity
-                key={`thinking-activity-${part.message.id}`}
-                part={part} lang={lang} working={matchesStreamingMessage(part.message, streamingMessageId)}
-            />);
-            continue;
-        }
-        if (part.kind === 'tool') {
-            const segmentStartIndex = index;
-            const activityGroupId = part.activityGroupId;
-            const activityTurnId = part.turnId;
-            const belongsToToolGroup = (candidate: ResponsePart) => {
-                if (candidate.kind !== 'tool' || candidate.tool.isSubagent || candidate.tool.kind === 'subagent') return false;
-                if (activityGroupId) return candidate.activityGroupId === activityGroupId;
-                return !candidate.activityGroupId && candidate.turnId === activityTurnId;
-            };
-            while (index < parts.length && belongsToToolGroup(parts[index])) index += 1;
-            index -= 1;
-            const toolParts = parts.slice(segmentStartIndex, index + 1).filter(
-                (candidate): candidate is Extract<ResponsePart, { kind: 'tool' }> => belongsToToolGroup(candidate),
-            );
-            const stoppedCount = toolParts.filter(candidate => candidate.tool.completionReason === 'stopped').length;
-            const incompleteCount = toolParts.filter(candidate => candidate.tool.completionReason === 'incomplete').length;
-            const failedCount = toolParts.filter(candidate => candidate.tool.status === 'failed' &&
-                candidate.tool.completionReason !== 'stopped' && candidate.tool.completionReason !== 'incomplete').length;
-            const outcomeSummary = [
-                failedCount ? (lang === 'zh' ? `${failedCount} 次失败` : `${failedCount} failed`) : '',
-                stoppedCount ? (lang === 'zh' ? `${stoppedCount} 次已停止` : `${stoppedCount} stopped`) : '',
-                incompleteCount ? (lang === 'zh' ? `${incompleteCount} 次未完成` : `${incompleteCount} incomplete`) : '',
-            ].filter(Boolean).join(' · ');
-            const status: 'working' | 'complete' = toolParts.some((candidate) => candidate.tool.status === 'running')
-                ? 'working'
-                : 'complete';
-            const localSearchOnly = toolParts.length > 0 && toolParts.every((candidate) => isLocalSearchTool(candidate.tool));
-            // Tool calls deliberately go straight to the beUI AgentActivity
-            // component. Thinking is a separate lifecycle, not an extra item
-            // in a synthetic mixed activity.
-            rendered.push(<AgentActivity
-                key={`tool-activity-${segmentStartIndex}`}
-                items={toolParts.map((candidate) => ({ ...toActivityItem(candidate), target: <button type="button"
-                    className={`text-left hover:underline ${candidate.tool.status === 'failed' ? 'text-[var(--destructive)]' : ''}`}
-                    onClick={() => onOpenTool(candidate.tool)}>{displayText(candidate.tool.detail || candidate.tool.name)}</button> }))}
-                status={status}
-                activeLabel={localSearchOnly ? (lang === 'zh' ? '正在搜索文件' : 'Searching files') : undefined}
-                summary={outcomeSummary ? `${lang === 'zh' ? `${toolParts.length} 次工具调用` : `${toolParts.length} tool calls`} · ${outcomeSummary}` : localSearchOnly ? (lang === 'zh' ? '已搜索文件' : 'Searched files') : undefined}
-                defaultOpen={status === 'working'}
-                className="w-full text-[var(--text-secondary)]"
-            />);
-            const images = toolParts.flatMap(({ tool }) => (tool.attachments || []).map((attachment, attachmentIndex) =>
-                <ChatAttachmentView key={`tool-image-${tool.id}-${attachmentIndex}`} attachment={attachment} lang={lang} animateReveal />));
-            if (images.length) rendered.push(<div key={`tool-images-${part.tool.id}`} className="chat-image-gallery" role="group"
-                aria-label={lang === 'zh' ? '工具输出素材' : 'Tool media'}>{images}</div>);
-            const artifactTools = toolParts
-                .map((candidate) => candidate.tool)
-                .filter((tool) => Boolean(tool.diff));
-            artifactTools.forEach((tool) => {
-                const lines = parseDiffLines(tool.diff!);
-                rendered.push(<FileDiff key={`agent-file-diff-${tool.id}`} file={displayText(tool.detail || tool.name)} lines={lines} status={tool.status === 'running' ? 'streaming' : 'complete'} defaultOpen={false} copyText={lines.map((line) => line.content).join('\n')} />);
-            });
-            continue;
-        }
+    for (const part of parts) {
+        if (part.kind !== 'agent') continue;
         const presentation = messagePresentation(part.message);
         if (presentation === 'artifact' && part.message.artifactId && onPreviewArtifact) {
             const title = displayText(part.message.documentTitle || (lang === 'zh' ? '项目产物' : 'Project artifact'));
@@ -1167,6 +1179,11 @@ const deliveryPhaseLabels: Record<string, Record<string, string>> = {
 };
 
 function ContextUpdateSeparator({ message, text, lang }: { message: ChatDisplayMessage; text: BeeGameText; lang: Language }) {
+    if (message.taskKind === 'host_evidence') return (
+        <aside data-testid="beegame-host-evidence" aria-label="BGS host evidence" className="my-2 rounded border border-[var(--border-subtle)] p-3 text-sm whitespace-pre-wrap">
+            {displayText(message.content)}
+        </aside>
+    );
     const labels = deliveryPhaseLabels[lang] || deliveryPhaseLabels.en;
     const label = message.taskKind === 'delivery_error' ? displayText(message.content)
         : message.taskKind === 'delivery_phase' ? labels[message.content] || message.content

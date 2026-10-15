@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 let latestWebSocketOptions: {
+  enabled?: boolean;
   onMessage?: (message: any) => void;
   onOpen?: () => void | Promise<void>;
   onClose?: () => void;
@@ -184,6 +185,78 @@ describe('useChat clarification gate handling', () => {
         value.mockClear();
       }
     });
+  });
+
+  it('refreshes edited messages for the current project without changing the transport handler', async () => {
+    vi.mocked(api.getChatHistory).mockResolvedValueOnce([]);
+    const { rerender } = renderHook(({ projectId }) => useChat({ projectId }), {
+      initialProps: { projectId: 'proj_1' },
+    });
+    const handler = latestWebSocketOptions.onMessage;
+    rerender({ projectId: 'proj_2' });
+    await waitFor(() => expect(latestWebSocketOptions.enabled).toBe(true));
+    vi.mocked(api.getChatHistory).mockClear();
+    chatStoreState.loadHistory.mockClear();
+    expect(latestWebSocketOptions.onMessage).toBe(handler);
+
+    await act(async () => {
+      latestWebSocketOptions.onMessage?.({
+        type: 'agent_message', sender: 'user', content: 'Edited idea',
+        supersedes_message_id: 'old-message', message_id: 'edited-message', task_id: 'task-2',
+      });
+    });
+
+    expect(api.getChatHistory).toHaveBeenCalledWith('proj_2');
+    expect(api.getChatHistory).not.toHaveBeenCalledWith('proj_1');
+    expect(chatStoreState.loadHistory).toHaveBeenCalledWith([]);
+  });
+
+  it('ignores an edited-history response after the project changes', async () => {
+    let finish!: (history: unknown[]) => void;
+    const { rerender } = renderHook(({ projectId }) => useChat({ projectId }), {
+      initialProps: { projectId: 'proj_1' },
+    });
+    await waitFor(() => expect(latestWebSocketOptions.enabled).toBe(true));
+    vi.mocked(api.getChatHistory).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    act(() => latestWebSocketOptions.onMessage?.({
+      type: 'agent_message', sender: 'user', content: 'Edited idea',
+      supersedes_message_id: 'old-message', message_id: 'edited-message', task_id: 'task-1',
+    }));
+    rerender({ projectId: 'proj_2' });
+    await act(async () => { finish([{ id: 'obsolete-edit', content: 'Old edit', sender: 'user', timestamp: 100 }]); });
+    expect(chatStoreState.loadHistory).not.toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'obsolete-edit' })]),
+    );
+  });
+
+  it('waits for history to establish the cursor before enabling the event transport', async () => {
+    let finish!: (history: unknown[]) => void;
+    vi.mocked(api.getChatHistory).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    renderHook(() => useChat({ projectId: 'proj_1' }));
+    expect(latestWebSocketOptions.enabled).toBe(false);
+    await act(async () => { finish([]); });
+    expect(latestWebSocketOptions.enabled).toBe(true);
+  });
+
+  it('does not commit reconnect history after leaving and returning to the same project', async () => {
+    const { rerender } = renderHook(({ projectId }) => useChat({ projectId }), {
+      initialProps: { projectId: 'proj_1' },
+    });
+    await act(async () => { await latestWebSocketOptions.onOpen?.(); });
+    let finishHistory!: (history: unknown[]) => void;
+    vi.mocked(api.getChatHistory).mockImplementationOnce(() => new Promise(resolve => { finishHistory = resolve; }));
+    let sync: void | Promise<void>;
+    act(() => { sync = latestWebSocketOptions.onOpen?.(); });
+    await waitFor(() => expect(finishHistory).toBeDefined());
+    rerender({ projectId: 'proj_2' });
+    rerender({ projectId: 'proj_1' });
+    await act(async () => {
+      finishHistory([{ id: 'obsolete-reconnect', sender: 'beegame', content: 'Old history', timestamp: 100 }]);
+      await sync;
+    });
+    expect(chatStoreState.loadHistory).not.toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'obsolete-reconnect' })]),
+    );
   });
 
   it('coalesces duplicate stop requests while waiting for backend confirmation', async () => {
@@ -401,6 +474,16 @@ describe('useChat clarification gate handling', () => {
     );
     expect(systemStoreState.loadTokenUsage).not.toHaveBeenCalled();
     expect(onTaskEvent).toHaveBeenCalledWith('usage', { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130 });
+  });
+
+  it('refreshes billing only after a confirmed debit event', () => {
+    const onTaskEvent = vi.fn();
+    renderHook(() => useChat({ projectId: 'proj_1', onTaskEvent }));
+    act(() => latestWebSocketOptions.onMessage?.({
+      type: 'billing_update', task_id: 'pipe_1', project_id: 'proj_1',
+    }));
+    expect(onTaskEvent).toHaveBeenCalledWith('billing_update', expect.any(Object));
+    expect(systemStoreState.updateTokenUsage).not.toHaveBeenCalled();
   });
 
   it('restores loading state when reconnect sync finds an already running BeeGame project status', async () => {
@@ -731,6 +814,8 @@ describe('useChat clarification gate handling', () => {
       }),
     );
     const { result, unmount } = renderHook(() => useChat({ projectId: 'proj_1' }));
+    await waitFor(() => expect(latestWebSocketOptions.enabled).toBe(true));
+    vi.mocked(api.getChatHistory).mockClear();
 
     let sendPromise: Promise<boolean> | undefined;
     act(() => {

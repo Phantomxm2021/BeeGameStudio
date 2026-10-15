@@ -57,6 +57,9 @@ export interface AgentActivityTrace {
   label: ReactNode;
   detail?: ReactNode;
   icon?: ReactNode;
+  /** Inline disclosure content, or open an existing detail panel. */
+  content?: ReactNode;
+  onSelect?: () => void;
 }
 
 export type AgentActivityItem =
@@ -69,17 +72,19 @@ export type AgentActivityItem =
 export type AgentActivityContentType = AgentActivityItem["type"] | "mixed";
 
 export interface AgentActivityProps {
+  /** Timeline keeps a bounded, user-scrollable log and can collapse while working. */
+  variant?: "default" | "timeline";
   /** Chronological activity entries. Append or update items as events stream. */
   items: AgentActivityItem[];
   /** Expected activity kind before the first streamed item arrives. */
   contentType?: AgentActivityContentType;
-  /** Current run phase. Active runs always stay expanded. */
+  /** Current run phase. Only the default variant forces active runs open. */
   status?: AgentActivityStatus;
   /** Elapsed run time, in seconds. Used by the step-only summary. */
   duration?: number;
-  /** Controlled expanded state used after the run completes. */
+  /** Controlled expanded state; also applies while working in a timeline. */
   open?: boolean;
-  /** Initial expanded state used after the run completes. */
+  /** Initial expanded state. */
   defaultOpen?: boolean;
   /** Called when the completed activity disclosure changes state. */
   onOpenChange?: (open: boolean) => void;
@@ -99,7 +104,7 @@ export interface AgentActivityProps {
     summary: ReactNode;
     duration: number;
   }) => ReactNode;
-  /** Maximum visible activity height before the stream begins gliding. */
+  /** Maximum visible height; timelines scroll within this cap (default 208px). */
   maxHeight?: number;
   className?: string;
   contentClassName?: string;

@@ -202,7 +202,9 @@ export const MarkdownRenderer = memo(({ content, messageId = 'unknown', bubble =
             <div className={`min-w-0 max-w-full select-text break-words ${bubble ? 'text-background' : 'text-[var(--text-primary)]'} [overflow-wrap:anywhere]`}>
                 <div className={`mt-1`}>
                     {renderAsJson ? (
-                        <pre className="type-code max-w-full overflow-x-auto rounded-lg bg-[var(--surface-3)] p-3"><code>{content}</code></pre>
+                        <pre className={`type-code max-w-full rounded-lg p-3 ${bubble
+                            ? 'whitespace-pre-wrap break-all !bg-transparent text-[currentColor]'
+                            : 'overflow-x-auto bg-[var(--surface-3)]'}`}><code className={bubble ? '!bg-transparent !text-[currentColor]' : undefined}>{content}</code></pre>
                     ) : renderAsCsv && csvData ? (
                         <div className="my-6 w-full min-w-0 max-w-full overflow-x-auto rounded-lg border border-[var(--border)]">
 	                            <table className="type-chat-body w-full border-collapse">

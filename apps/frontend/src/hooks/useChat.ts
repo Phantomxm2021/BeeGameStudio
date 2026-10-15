@@ -10,9 +10,10 @@
  * Requirements: 1.1, 1.2, 1.3, 6.1, 6.2, 6.3, 6.4, 6.5, 7.1, 7.2
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useProjectEventPolling } from './useProjectEventPolling'
+import { useProjectSession } from './useProjectSession'
 import { useChatStore } from '../store/chatStore'
 import { useProjectStore } from '../store/projectStore'
 import { useSystemStore } from '../store/systemStore'
@@ -231,13 +232,11 @@ export const useChat = ({
     updateTokenUsage,
     updateLastP2PRoute,
     loadCurrentUser,
-    setIsSyncing,
   } = useSystemStore(
     useShallow(state => ({
       updateTokenUsage: state.updateTokenUsage,
       updateLastP2PRoute: state.updateLastP2PRoute,
       loadCurrentUser: state.loadCurrentUser,
-      setIsSyncing: state.setIsSyncing,
     })),
   )
   const waitingPermission = getWaitingPermissionState(pendingPermissions)
@@ -290,6 +289,10 @@ export const useChat = ({
     await store.loadProjectRuntimeState(projectId)
   }, [projectId])
 
+  const { historyReady, synchronize: syncAfterReconnect, onTransportOpen } = useProjectSession({
+    projectId, enabled: eventsEnabled, refreshRuntime: refreshProjectVisibility,
+  })
+
   const emitWaitingPermissionBlock = useCallback(
     (message: string) => {
       setIsLoading(false)
@@ -322,18 +325,20 @@ export const useChat = ({
     refreshProjectVisibility,
   })
 
-  // Update refs on every render
-  latestRefs.current = {
-    projectId,
-    onError,
-    onTaskComplete,
-    onTaskEvent,
-    showToastError,
-    showToastSuccess,
-    permissionState,
-    loadCurrentUser,
-    refreshProjectVisibility,
-  }
+  // Publish callbacks only after commit, before the transport effects run.
+  useLayoutEffect(() => {
+    latestRefs.current = {
+      projectId,
+      onError,
+      onTaskComplete,
+      onTaskEvent,
+      showToastError,
+      showToastSuccess,
+      permissionState,
+      loadCurrentUser,
+      refreshProjectVisibility,
+    }
+  })
 
   /**
    * Handle incoming runtime events
@@ -420,8 +425,9 @@ export const useChat = ({
             setCurrentSender(message.sender)
             if (message.sender === 'user' && message.supersedes_message_id) {
               const generation = lifecycleRef.current.generation
-              void api.getChatHistory(projectId).then(history => {
-                if (lifecycleRef.current.mounted && lifecycleRef.current.projectId === projectId &&
+              const requestProjectId = refs.projectId
+              void api.getChatHistory(requestProjectId).then(history => {
+                if (lifecycleRef.current.mounted && lifecycleRef.current.projectId === requestProjectId &&
                     lifecycleRef.current.generation === generation)
                   loadHistory(normalizeChatHistory(history))
               }).catch(error => console.warn('[useChat] Could not refresh edited conversation:', error))
@@ -828,6 +834,10 @@ export const useChat = ({
 
           break
 
+        case 'billing_update':
+          refs.onTaskEvent?.('billing_update', message)
+          break
+
         case 'p2p_route':
           // Peer-to-peer routing event
           if (message.data) {
@@ -885,48 +895,6 @@ export const useChat = ({
   )
 
   /**
-   * Synchronize all state with backend after event transport reconnects
-   * Requirements: 7.2
-   */
-  const syncAfterReconnect = useCallback(async () => {
-    if (!projectId) return
-
-    setIsSyncing(true)
-
-    try {
-      // BeeGame has one server-owned runtime-state snapshot.
-      await refreshProjectVisibility()
-      const projectStatus = useProjectStore.getState().projectStatus
-      if (projectStatus?.project_id === projectId && isProjectExecutionActive(projectStatus)) {
-        setCurrentTaskId(currentTaskId || projectId)
-        setIsLoading(true)
-        setCanContinue(false)
-      }
-
-      // Sync chat history only after the authoritative runtime state.
-      const { isStreaming } = useChatStore.getState()
-      if (!isStreaming) {
-        const history = (await api.getChatHistory(projectId)) as unknown
-        const messages = normalizeChatHistory(history)
-        const currentMessages = useChatStore.getState().messages
-        if (messages.length > 0 || currentMessages.length === 0) {
-          loadHistory(messages)
-        }
-      }
-    } catch (error) {
-      console.error('[useChat] Failed to synchronize state:', error)
-    } finally {
-      setIsSyncing(false)
-    }
-  }, [
-    projectId,
-    currentTaskId,
-    loadHistory,
-    setIsSyncing,
-    refreshProjectVisibility,
-  ])
-
-  /**
    * Handle runtime event transport disconnect
    */
   const handleTransportClose = useCallback(() => {
@@ -956,10 +924,10 @@ export const useChat = ({
   // Initialize the reconnect-safe runtime event transport
   const { state: wsState, reconnect } = useProjectEventPolling({
     projectId,
-    enabled: eventsEnabled,
+    enabled: eventsEnabled && historyReady,
     onMessage: handleProjectEventMessage,
     onClose: handleTransportClose,
-    onOpen: syncAfterReconnect, // Trigger sync on connect/reconnect
+    onOpen: onTransportOpen,
     showToastError,
   })
 

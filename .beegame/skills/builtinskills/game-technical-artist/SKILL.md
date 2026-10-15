@@ -1,6 +1,6 @@
 ---
 name: game-technical-artist
-description: Implement or repair real-time game animation, VFX, materials, shaders and camera presentation against art and feedback designs. Use for dynamic visual execution, not art direction or resource loading alone. 中文：技术美术、动画制作、特效实现、材质着色器、镜头表现、动态视觉。
+description: Produce AI sprite-sheet animation or implement and repair real-time game animation, VFX, materials, shaders and camera presentation against art and feedback designs. Use for dynamic visual execution, not art direction or resource loading alone. 中文：技术美术、AI精灵图动画、动画制作、特效实现、材质着色器、镜头表现、动态视觉。
 ---
 
 # Game Technical Artist
@@ -9,7 +9,13 @@ Make the approved visual and feedback intent work in the actual runtime. Use the
 
 ## Choose a workable representation
 
-Choose sprite frames, transform/property animation, procedural drawing, particles, materials, shaders or rigged animation by the actual visual purpose and supported technology. A simple shape or restrained tween may be sufficient. Use existing engine facilities where they satisfy the requirement; do not add a custom effects system or shader merely to demonstrate sophistication.
+Separate artwork production from runtime animation. Honor explicit user source choices. Prefer existing complete animations when suitable; a generated sheet does not guarantee distinct poses or temporal continuity. For common resources, first consider suitable supplied or built-in licensed resources. Consider AI generation for distinctive artwork when existing candidates do not fit, not as the default for all core art. Code processes and plays that artwork. Procedurally replacing required core artwork remains a fallback requiring a concrete blocker and user authorization, not a way to avoid image charges or satisfy an invented budget. An explicitly requested procedural aesthetic is a different user choice. Simple controls and geometric effects may be procedural without replacing core art.
+
+Choose sprite frames, transform/property animation, particles, materials, shaders or rigged animation by the actual visual purpose and supported technology. Not every 2D object needs frame animation; a restrained tween of suitable artwork may be sufficient. Use existing engine facilities where they satisfy the requirement; do not add a custom effects system or shader merely to demonstrate sophistication.
+
+When producing or repairing AI-generated frame animation, read [AI sprite animation](references/ai-sprite-animation.md). It connects the existing image, crop/atlas and Preview tools; it does not introduce another generation service or an automatic paid retry loop.
+
+For an uncertain 2D motion representation or an effect that runs but misses its intended meaning, read the relevant [implementation comparisons](references/motion-implementation.md). Use their causal choices and observation questions, not fixed durations, frame counts or a universal effects framework.
 
 Preserve authored hierarchy, scale, pivots, anchors, depth/order, transparency and resource references. Resource import and data consumption must remain consistent with the content pipeline. Express editable visual choices through supported authored fields or appropriate project-owned parameters; do not invent platform component types or recreate Scene/UI layouts as a parallel code-owned composition. Report an unsupported requirement and its consequence rather than silently dropping it.
 
@@ -30,3 +36,5 @@ Describe required frames, materials, editable bindings and consequential runtime
 When the runtime is available, inspect meaningful moments and the motion between them in the complete composition, including applicable repeated events and cancellation. Judge continuity, contact alignment, readability and visual intent, not just file validity or successful effect invocation. Inspect supported scale/input conditions and reduced-motion alternatives where required. If only assets or static previews exist, state which integration and motion checks remain unverified.
 
 Measure actual rendering or memory cost before optimizing. Investigate overdraw, particle counts, texture/material changes, allocation or shader work as applicable; pooling and batching are options for a demonstrated need, not prerequisites. Do not silently degrade required visual feedback to meet an invented budget.
+
+For a measured bottleneck or consequential representation-cost choice, read [runtime cost tradeoffs](references/runtime-cost-tradeoffs.md): static reuse, update frequency, fill/filter cost, resource lifetime and comparable observation. A routine visual fix needs no profiling stage.

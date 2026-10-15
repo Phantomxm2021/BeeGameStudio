@@ -28,3 +28,22 @@ export const getImageGenerationSettings = (provider?: ImageGenerationSettings['p
 export const saveImageGenerationSettings = (
   input: Omit<ImageGenerationSettings, 'hasApiKey' | 'hasUpstreamApiKey'> & { apiKey?: string; upstreamApiKey?: string },
 ): Promise<ImageGenerationSettings> => apiClient.put('/api/image-generation/settings', input);
+
+export interface PersonalImageConnection {
+  source: 'platform' | 'byok';
+  provider: ImageGenerationSettings['provider'];
+  baseUrl: string;
+  model: string;
+  hasApiKey: boolean;
+  hasUpstreamApiKey: boolean;
+}
+export const getPersonalImageConnection = (): Promise<PersonalImageConnection> =>
+  apiClient.get('/api/image-generation/connection');
+export const savePersonalImageConnection = (input: {
+  source: PersonalImageConnection['source'];
+  provider?: PersonalImageConnection['provider'];
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  upstreamApiKey?: string;
+}): Promise<PersonalImageConnection> => apiClient.put('/api/image-generation/connection', input);

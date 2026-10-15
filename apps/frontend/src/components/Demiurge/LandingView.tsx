@@ -28,6 +28,8 @@ import { ProfileModal } from './Landing/ProfileModal';
 import { SettingsMenu } from './Landing/SettingsMenu';
 import { LandingSiteMenu, type LandingPage } from './Landing/LandingSiteMenu';
 import { AuthDialog } from './Landing/AuthDialog';
+import type { AuthMode, AuthFeedbackDialog, LegalDocumentKind, LegalDocumentBundle, Translate } from './Landing/types';
+import { createLandingIntakeCopy } from './Landing/intakeCopy';
 import { ConfirmedBrief, IntakeOptionCards, IntakeSettingsForm } from './Landing/IntakePanels';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '../ui/dialog';
 import {
@@ -62,6 +64,24 @@ import {
 } from '../../services/supabaseAuthApi';
 import { getInvitationPublicSettings } from '../../services/invitationApi';
 import type { ChatAttachmentPayload } from '../../services/api';
+import {
+  readPendingAuthIdeaState,
+  readPendingIdeaDraftState,
+  writePendingIdeaDraftState,
+  clearPendingIdeaDraftState,
+  readPendingIntakeFlowState,
+  writePendingIntakeFlowState,
+  clearPendingIntakeFlowState,
+  readPendingRealtimeBillingIdea,
+  writePendingRealtimeBillingIdea,
+  clearPendingRealtimeBillingIdea,
+  writePendingAuthIdeaState,
+  clearPendingAuthIdeaState,
+  clearIntakeRecoveryState,
+  type PendingIdeaDraftState,
+  type PendingIntakeFlowState,
+  type RestorableIntakePhase,
+} from './Landing/intakeRecovery';
 
 const ResourceLibraryPage = lazy(async () => {
   const module = await import('../ResourceLibrary/ResourceLibraryView');
@@ -74,215 +94,16 @@ const AVATAR_HOME_ENABLED = false;
 type IntakePhase =
   | 'idle'
   | 'generating_options'
-  | 'options_ready'
-  | 'configuring_details'
-  | 'confirming_brief'
+  | RestorableIntakePhase
   | 'starting_build';
 
 
-export type IntakeCopy = {
-  modal: {
-    chooseOption: string;
-    productionSettings: string;
-    confirmBuildBrief: string;
-    startBuild: string;
-    close: string;
-  };
-  optionCard: {
-    mode: string;
-    gameplay: string;
-  };
-  fields: {
-    platform: string;
-    engine: string;
-    dimension: string;
-    orientation: string;
-    genre: string;
-    style: string;
-    inputs: string;
-    notes: string;
-    presentation: string;
-    type: string;
-    resourceLibrary: string;
-    selectPlaceholder: string;
-  };
-  resourceLibraryUsage: Record<BeeGameIntakeSettings['resourceLibraryUsage'], string>;
-  actions: {
-    chooseAgain: string;
-    confirmBrief: string;
-    edit: string;
-    building: string;
-    startBuild: string;
-    continue: string;
-    backToLogin: string;
-    cancel: string;
-    confirmGenerate: string;
-    confirmBuild: string;
-  };
-  starting: {
-    title: string;
-    description: string;
-  };
-  errors: {
-    missingPlatformModel: string;
-    projectStartFailed: string;
-    authNotConfigured: string;
-    missingEmailPassword: string;
-    missingDisplayName: string;
-    termsRequired: string;
-    missingProductionSettings: string;
-  };
-  placeholders: {
-    notes: string;
-  };
-  profile: {
-    displayNameFallback: string;
-    emailFallback: string;
-    balance: string;
-    consumed: string;
-    deleteAccount: string;
-    deleteConfirm: string;
-    deleteFailed: string;
-    finish: string;
-    saving: string;
-  };
-  auth: {
-    oauthDivider: string;
-    signingIn: string;
-    sendReset: string;
-    registerAndContinue: string;
-    signInAndContinue: string;
-    oauthFailed: string;
-    successTitle: string;
-    errorTitle: string;
-    loginSuccess: string;
-    registerSuccess: string;
-    resetEmailSent: string;
-    feedbackClose: string;
-    forgotPassword: string;
-    acceptTermsAria: string;
-    acceptTermsPrefix: string;
-    termsLabel: string;
-    privacyLabel: string;
-    acceptTermsConnector: string;
-    acceptTermsSuffix: string;
-  };
-};
 
-export type Translate = (key: string, options?: Record<string, unknown>) => string;
 
-export type AuthMode = 'login' | 'register' | 'resetPassword' | 'verifyEmail';
 
-const createLandingIntakeCopy = (translate: Translate): IntakeCopy => ({
-  modal: {
-    chooseOption: translate('modal.chooseOption'),
-    productionSettings: translate('modal.productionSettings'),
-    confirmBuildBrief: translate('modal.confirmBuildBrief'),
-    startBuild: translate('modal.startBuild'),
-    close: translate('modal.close'),
-  },
-  optionCard: {
-    mode: translate('optionCard.mode'),
-    gameplay: translate('optionCard.gameplay'),
-  },
-  fields: {
-    platform: translate('fields.platform'),
-    engine: translate('fields.engine'),
-    dimension: translate('fields.dimension'),
-    orientation: translate('fields.orientation'),
-    genre: translate('fields.genre'),
-    style: translate('fields.style'),
-    inputs: translate('fields.inputs'),
-    notes: translate('fields.notes'),
-    presentation: translate('fields.presentation'),
-    type: translate('fields.type'),
-    resourceLibrary: translate('fields.resourceLibrary'),
-    selectPlaceholder: translate('fields.selectPlaceholder'),
-  },
-  resourceLibraryUsage: {
-    optional: translate('resourceLibraryUsage.optional'),
-    preferred: translate('resourceLibraryUsage.preferred'),
-    required: translate('resourceLibraryUsage.required'),
-  },
-  actions: {
-    chooseAgain: translate('actions.chooseAgain'),
-    confirmBrief: translate('actions.confirmBrief'),
-    edit: translate('actions.edit'),
-    building: translate('actions.building'),
-    startBuild: translate('actions.startBuild'),
-    continue: translate('actions.continue'),
-    backToLogin: translate('actions.backToLogin'),
-    cancel: translate('actions.cancel'),
-    confirmGenerate: translate('actions.confirmGenerate'),
-    confirmBuild: translate('actions.confirmBuild'),
-  },
-  starting: {
-    title: translate('starting.title'),
-    description: translate('starting.description'),
-  },
-  errors: {
-    missingPlatformModel: translate('errors.missingPlatformModel'),
-    projectStartFailed: translate('errors.projectStartFailed'),
-    authNotConfigured: translate('errors.authNotConfigured'),
-    missingEmailPassword: translate('errors.missingEmailPassword'),
-    missingDisplayName: translate('errors.missingDisplayName'),
-    termsRequired: translate('errors.termsRequired'),
-    missingProductionSettings: translate('errors.missingProductionSettings'),
-  },
-  placeholders: {
-    notes: translate('placeholders.notes'),
-  },
-  profile: {
-    displayNameFallback: translate('profile.displayNameFallback'),
-    emailFallback: translate('profile.emailFallback'),
-    balance: translate('profile.balance'),
-    consumed: translate('profile.consumed'),
-    deleteAccount: translate('profile.deleteAccount'),
-    deleteConfirm: translate('profile.deleteConfirm'),
-    deleteFailed: translate('profile.deleteFailed'),
-    finish: translate('profile.finish'),
-    saving: translate('profile.saving'),
-  },
-  auth: {
-    oauthDivider: translate('auth.oauthDivider'),
-    signingIn: translate('auth.signingIn'),
-    sendReset: translate('auth.sendReset'),
-    registerAndContinue: translate('auth.registerAndContinue'),
-    signInAndContinue: translate('auth.signInAndContinue'),
-    oauthFailed: translate('auth.oauthFailed'),
-    successTitle: translate('auth.feedback.successTitle'),
-    errorTitle: translate('auth.feedback.errorTitle'),
-    loginSuccess: translate('auth.feedback.loginSuccess'),
-    registerSuccess: translate('auth.feedback.registerSuccess'),
-    resetEmailSent: translate('auth.feedback.resetEmailSent'),
-    feedbackClose: translate('auth.feedback.close'),
-    forgotPassword: translate('auth.forgotPassword'),
-    acceptTermsAria: translate('auth.acceptTermsAria'),
-    acceptTermsPrefix: translate('auth.acceptTermsPrefix'),
-    termsLabel: translate('auth.termsLabel'),
-    privacyLabel: translate('auth.privacyLabel'),
-    acceptTermsConnector: translate('auth.acceptTermsConnector'),
-    acceptTermsSuffix: translate('auth.acceptTermsSuffix'),
-  },
-});
 
-type LegalDocumentKind = 'terms' | 'privacy';
 
-export type AuthFeedbackDialog = {
-  kind: 'success' | 'error';
-  title: string;
-  message: string;
-};
 
-type LegalDocumentBundle = Record<
-  LegalDocumentKind,
-  {
-    title: string;
-    updatedAt: string;
-    intro: string;
-    sections: Array<{ title: string; body: string }>;
-  }
->;
 
 interface LandingViewProps {
   onStart: (
@@ -350,255 +171,11 @@ function normalizeEngine(value: string | undefined): string {
   return value === 'Unreal Engine' ? 'Unreal' : value || '';
 }
 
-const pendingAuthIdeaStorageKey = 'beegame.pendingAuthIdea.v1';
-const pendingIdeaDraftStorageKey = 'beegame.pendingIdeaDraft.v1';
-const pendingIntakeFlowStorageKey = 'beegame.pendingIntakeFlow.v1';
-const pendingRealtimeBillingStorageKey = 'beegame.pendingRealtimeBilling.v1';
-const pendingAuthIdeaMaxAgeMs = 30 * 60 * 1000;
-const pendingIntakeFlowMaxAgeMs = 30 * 60 * 1000;
-
-type RestorableIntakePhase = Extract<IntakePhase, 'options_ready' | 'configuring_details' | 'confirming_brief'>;
-
-type PendingAuthIdeaState = {
-  idea: string;
-  creationMode?: CreationMode;
-  referenceNames?: string[];
-  createdAt: number;
-};
-
-type PendingIdeaDraftState = {
-  idea: string;
-  creationMode?: CreationMode;
-  referenceNames?: string[];
-  createdAt: number;
-};
-
-type PendingIntakeFlowState = {
-  creationMode?: CreationMode;
-  referenceNames?: string[];
-  phase: RestorableIntakePhase;
-  idea: string;
-  language: Language;
-  options: BeeGameIntakeOption[];
-  selectedOption?: BeeGameIntakeOption;
-  settings?: BeeGameIntakeSettings;
-  createdAt: number;
-};
-
 type InputMenuPosition = {
   left: number;
   top: number;
   width: number;
 };
-
-function readPendingAuthIdeaState(): PendingAuthIdeaState | null {
-  try {
-    const raw = sessionStorage.getItem(pendingAuthIdeaStorageKey);
-    if (!raw) return null;
-    const value = JSON.parse(raw) as unknown;
-    if (!isPendingAuthIdeaState(value)) return null;
-    if (Date.now() - value.createdAt > pendingAuthIdeaMaxAgeMs) {
-      clearPendingAuthIdeaState();
-      return null;
-    }
-    return value;
-  } catch {
-    return null;
-  }
-}
-
-function readPendingIdeaDraftState(): PendingIdeaDraftState | null {
-  try {
-    const raw = sessionStorage.getItem(pendingIdeaDraftStorageKey);
-    if (!raw) return null;
-    const value = JSON.parse(raw) as unknown;
-    if (!isPendingIdeaDraftState(value)) return null;
-    if (Date.now() - value.createdAt > pendingIntakeFlowMaxAgeMs) {
-      clearPendingIdeaDraftState();
-      return null;
-    }
-    return value;
-  } catch {
-    return null;
-  }
-}
-
-function writePendingIdeaDraftState(idea: string, creationMode: CreationMode, referenceNames: string[]): void {
-  const normalizedIdea = idea.trim();
-  try {
-    if (!normalizedIdea && !referenceNames.length) {
-      clearPendingIdeaDraftState();
-      return;
-    }
-    sessionStorage.setItem(
-      pendingIdeaDraftStorageKey,
-      JSON.stringify({
-        idea: normalizedIdea,
-        creationMode,
-        referenceNames,
-        createdAt: Date.now(),
-      }),
-    );
-  } catch {
-    // Best-effort draft recovery only.
-  }
-}
-
-function clearPendingIdeaDraftState(): void {
-  try {
-    sessionStorage.removeItem(pendingIdeaDraftStorageKey);
-  } catch {
-    // Ignore storage failures; this cache never drives server state.
-  }
-}
-
-function readPendingIntakeFlowState(): PendingIntakeFlowState | null {
-  try {
-    const raw = sessionStorage.getItem(pendingIntakeFlowStorageKey);
-    if (!raw) return null;
-    const value = JSON.parse(raw) as unknown;
-    if (!isPendingIntakeFlowState(value)) {
-      clearPendingIntakeFlowState();
-      return null;
-    }
-    if (Date.now() - value.createdAt > pendingIntakeFlowMaxAgeMs) {
-      clearPendingIntakeFlowState();
-      return null;
-    }
-    return value;
-  } catch {
-    clearPendingIntakeFlowState();
-    return null;
-  }
-}
-
-function writePendingIntakeFlowState(value: Omit<PendingIntakeFlowState, 'createdAt'>): void {
-  try {
-    sessionStorage.setItem(
-      pendingIntakeFlowStorageKey,
-      JSON.stringify({
-        ...value,
-        createdAt: Date.now(),
-      }),
-    );
-  } catch {
-    // Best-effort UI recovery only. Confirmed builds still go through server state.
-  }
-}
-
-function clearPendingIntakeFlowState(): void {
-  try {
-    sessionStorage.removeItem(pendingIntakeFlowStorageKey);
-  } catch {
-    // Ignore storage failures; this cache never drives server state.
-  }
-}
-
-function readPendingRealtimeBillingIdea(): string {
-  try {
-    const raw = sessionStorage.getItem(pendingRealtimeBillingStorageKey);
-    if (!raw) return '';
-    const value = JSON.parse(raw) as unknown;
-    if (!isRecord(value) || typeof value.idea !== 'string' || typeof value.createdAt !== 'number') return '';
-    if (Date.now() - value.createdAt > pendingIntakeFlowMaxAgeMs) {
-      sessionStorage.removeItem(pendingRealtimeBillingStorageKey);
-      return '';
-    }
-    return value.idea.trim();
-  } catch {
-    return '';
-  }
-}
-
-function writePendingRealtimeBillingIdea(idea: string): void {
-  try {
-    sessionStorage.setItem(
-      pendingRealtimeBillingStorageKey,
-      JSON.stringify({ idea: idea.trim(), createdAt: Date.now() }),
-    );
-  } catch {
-    // Best-effort recovery for a browser refresh.
-  }
-}
-
-function clearPendingRealtimeBillingIdea(): void {
-  try {
-    sessionStorage.removeItem(pendingRealtimeBillingStorageKey);
-  } catch {
-    // Ignore storage failures; the in-memory flow remains authoritative.
-  }
-}
-
-function writePendingAuthIdeaState(idea: string, creationMode: CreationMode, referenceNames: string[]): void {
-  const normalizedIdea = idea.trim();
-  if (!normalizedIdea) return;
-  try {
-    sessionStorage.setItem(
-      pendingAuthIdeaStorageKey,
-      JSON.stringify({
-        idea: normalizedIdea,
-        creationMode,
-        referenceNames,
-        createdAt: Date.now(),
-      }),
-    );
-  } catch {
-    // OAuth redirects unload the page; this is best-effort recovery only.
-  }
-}
-
-function clearPendingAuthIdeaState(): void {
-  try {
-    sessionStorage.removeItem(pendingAuthIdeaStorageKey);
-  } catch {
-    // Ignore storage failures; the in-memory login flow can still continue.
-  }
-}
-
-function clearIntakeRecoveryState(): void {
-  clearPendingIdeaDraftState();
-  clearPendingIntakeFlowState();
-}
-
-function isPendingAuthIdeaState(value: unknown): value is PendingAuthIdeaState {
-  return (
-    isRecord(value) &&
-    typeof value.idea === 'string' &&
-    value.idea.trim().length > 0 &&
-    typeof value.createdAt === 'number' &&
-    Number.isFinite(value.createdAt)
-  );
-}
-
-function isPendingIdeaDraftState(value: unknown): value is PendingIdeaDraftState {
-  return (
-    isRecord(value) &&
-    typeof value.idea === 'string' &&
-    typeof value.createdAt === 'number' &&
-    Number.isFinite(value.createdAt)
-  );
-}
-
-function isPendingIntakeFlowState(value: unknown): value is PendingIntakeFlowState {
-  if (!isRecord(value)) return false;
-  const phase = value.phase;
-  if (phase !== 'options_ready' && phase !== 'configuring_details' && phase !== 'confirming_brief') return false;
-  if (typeof value.idea !== 'string' || value.idea.trim().length === 0) return false;
-  if (!Array.isArray(value.options) || (value.creationMode === 'blueprint' ? value.options.length !== 0 : value.options.length !== 3)) return false;
-  if (typeof value.language !== 'string') return false;
-  if (typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt)) return false;
-  if (
-    (phase === 'configuring_details' || phase === 'confirming_brief') &&
-    (!isRecord(value.selectedOption) || !isRecord(value.settings))
-  ) {
-    return false;
-  }
-  return true;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
   const reducedMotion = Boolean(useReducedMotion());
@@ -1381,7 +958,7 @@ export function LandingView({ onStart, lang, onSetLang }: LandingViewProps) {
     <div
       key="landing"
       lang={lang}
-      className={`absolute inset-0 z-50 flex flex-col overflow-y-auto ${landingPage === 'home' ? `${avatarStyles.home} bg-background text-foreground` : 'bg-[#c97843] text-white'} opacity-100 transition-opacity duration-300 dark:bg-black ${isTransitioning ? 'opacity-0' : ''}`}
+      className={`absolute inset-0 z-50 flex flex-col overflow-y-auto ${isResourceLibraryOpen ? '' : 'page-enter'} ${landingPage === 'home' ? `${avatarStyles.home} bg-background text-foreground` : 'bg-[#c97843] text-white'} opacity-100 transition-opacity duration-300 dark:bg-black ${isTransitioning ? 'opacity-0' : ''}`}
     >
       {landingPage !== 'home' ? <LandingImageBackground /> : null}
       {landingPage === 'home' ? <IdeaHomeBackdrop /> : null}

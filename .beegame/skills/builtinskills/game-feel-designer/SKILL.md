@@ -7,7 +7,11 @@ description: Design or tune game control response, action rhythm, gameplay feedb
 
 Make an action's response and consequence perceptible, satisfying and consistent with the game. Start with the actual player actions, gameplay rules, pacing, art/audio direction and target input devices. A quiet puzzle, precision platformer and heavy combat game need different responses; spectacle is not a substitute for readable control.
 
+For a new feel direction or a player-facing action that works but feels generic, use the optional [comparative feel studies](references/comparative-feel-studies.md) to examine a relevant external example and a captured moment from the actual game. Choose a useful relationship, state what does not transfer, and judge the resulting motion and sound in play. Do not load the studies for a narrow timing or event-binding fix.
+
 ## Response and rhythm
+
+For controller response, stopping/turning or action-tolerance decisions, read [control response and intent](references/control-response.md). Distinguish input, simulation, spatial context and representation before choosing a parameter; an isolated feedback-effect change does not need controller retuning.
 
 Separate acknowledgment of an input from execution of an action, confirmed contact and its consequence where those distinctions matter. Feedback must follow the real gameplay fact: an attempted action is not a hit, and a cosmetic effect is not proof of damage or success. Identify the event, affected subject and outcome information each consequential cue needs from gameplay.
 
@@ -26,3 +30,5 @@ Account for the game's actual event rate: repeated or simultaneous cues may need
 Trace coordinated cues to the same gameplay event, timing and lifecycle requirements. Reference the existing decision sources instead of redefining a rule in multiple places. Identify unresolved event or parameter dependencies; do not invent contact facts or timings before their source exists.
 
 During planning, explain the intended effect and tuning uncertainties without claiming it feels good in an unbuilt game. When implementation or tuning is requested, observe representative play with the intended input: check response, misses versus confirmed outcomes, dense events and relevant interruption/recovery. Evaluate perceived control and readability, not just whether effect code runs. Compare changes against the player's intended experience and actual rules; keep only adjustments that serve that purpose.
+
+When stills cannot answer a continuity/cadence question, the existing playtest Skill's [optional capture method](../game-playtest-performance/references/play-capture.md) can retain the actual player-path clip and accessible audio-bus signal. Use its coverage/clock limits and existing Skill-load facts; a loaded method or successful recording is not evidence that the action feels good.

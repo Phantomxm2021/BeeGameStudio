@@ -2,6 +2,10 @@ import { test, expect } from 'bun:test'
 import { Hono } from 'hono'
 import { registerV3Routes } from './routes'
 import { BeeGameSessionManager } from '../session-manager'
+import { createRun } from './state'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 test('read-only mode discovery distinguishes legacy, persisted V3 unavailable and missing owned project without starting a runtime',async()=>{
   let starts=0, mode='legacy'
@@ -19,6 +23,9 @@ test('read-only mode discovery distinguishes legacy, persisted V3 unavailable an
     expect((await app.request('/api/projects/project/workflow-v3')).status).toBe(503)
     expect((await app.request('/api/projects/project/workflow-v3/stop',{method:'POST'})).status).toBe(503)
     mode='missing';expect((await app.request('/api/projects/project/workflow-v3')).status).toBe(404)
+    for (const [path, method] of [['runs', 'POST'], ['plan', 'PUT'], ['requirements', 'POST'], ['tasks/game/execute', 'POST'],
+      ['preview-issues', 'POST'], ['preview-issues/observation/review-plan', 'POST'], ['preview-issues/attempt/repair-plan', 'POST']] as const)
+      expect((await app.request('/api/projects/project/workflow-v3/' + path, { method })).status).toBe(404)
     expect(starts).toBe(0)
   }finally{await sessions.dispose()}
 })
@@ -33,4 +40,47 @@ test('a configured store with a missing persisted V3 Run does not silently expos
     const response=await app.request('/api/projects/project/workflow-v3')
     expect(response.status).toBe(503);expect((await response.json()).code).toBe('run-unavailable')
   }finally{await sessions.dispose()}
+})
+test('persisted Task Run is rejected by status, reads and controls without dispatch or mutation',async()=>{
+  const root='/private/tmp',run=createRun({projectId:'project',ownerId:'owner',workspacePath:root,chatSessionId:'chat',
+    requestKey:'old',text:'Legacy task',constraints:{},ids:['goal']})
+  delete run.agentTurns
+  let starts=0,commits=0
+  const sessions=new BeeGameSessionManager({async start(){starts++;throw Error('No native runtime permitted')}},root,async()=>({}),{},true)
+  const app=new Hono()
+  registerV3Routes(app,{store:{read:async()=>run,commit:async()=>{commits++;throw Error('No mutation permitted')}},
+    sessions,getUser:()=>({id:'owner',role:'owner'}),
+    getProject:async()=>({id:'project',name:'Synthetic',root_path:root,created_at:0,runtime_snapshot:{workflow_protocol:'bgs.workflow.v3'}} as any),
+    getAuthToken:()=>undefined,getValidAuthToken:()=>undefined,assertNoLegacyRun:async()=>{},persistMode:async()=>{},readBody:async r=>r.json()})
+  try {
+    for (const [path,method] of [['','GET'],['/events','GET'],['/questions','GET'],['/stop','POST'],['/resume','POST']] as const) {
+      const response=await app.request('/api/projects/project/workflow-v3'+path,{method,headers:{'content-type':'application/json'},body:method==='POST'?'{}':undefined})
+      expect(response.status).toBe(409)
+      expect((await response.json()).code).toBe('task-mode-retired')
+    }
+    expect(starts).toBe(0);expect(commits).toBe(0)
+  } finally {await sessions.dispose()}
+})
+
+test('ordinary Preview distinguishes missing host measurement from browser-test receipts without starting a build', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-preview-diagnostic-')))
+  const run = createRun({projectId:'project',ownerId:'owner',workspacePath:root,chatSessionId:'chat',
+    requestKey:'create',text:'Synthetic game',constraints:{},ids:['goal']})
+  let starts = 0
+  const sessions = new BeeGameSessionManager({async start(){starts++;throw Error('No native runtime permitted')}},root,async()=>({}),{},true)
+  const app = new Hono()
+  registerV3Routes(app,{store:{read:async()=>run,commit:async()=>{throw Error('No mutation permitted')}},sessions,
+    preview:{status:async()=>({preview:null}),openAgent:async()=>{starts++;throw Error('No preview start permitted')}} as any,
+    getUser:()=>({id:'owner',role:'owner'}),getProject:async()=>({id:'project',name:'Synthetic',root_path:root,created_at:0} as any),
+    getAuthToken:()=>undefined,getValidAuthToken:()=>undefined,assertNoLegacyRun:async()=>{},persistMode:async()=>{},readBody:async r=>r.json()})
+  try {
+    const response = await app.request('/api/projects/project/preview',{method:'POST',headers:{'content-type':'application/json'},body:'{}'})
+    expect(response.status).toBe(409)
+    const result = await response.json()
+    expect(result.code).toBe('preview-unverified')
+    expect(result.error).toContain('host-measured build')
+    expect(result.error).toContain('execution.json is not a measurement')
+    expect(result.error).not.toContain('no dev script was started')
+    expect(starts).toBe(0)
+  } finally { await sessions.dispose(); await rm(root,{recursive:true,force:true}) }
 })

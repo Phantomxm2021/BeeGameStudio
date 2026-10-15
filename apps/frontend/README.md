@@ -53,9 +53,25 @@ bun run dev
 bun run build
 bun run preview
 bun run test:run
+bun run typecheck
+bun run check
 ```
 
 The app package still supports npm-compatible scripts because Vite tooling does, but BeeGame development in this repository should use Bun.
+
+`bun run check` runs type checking, all frontend tests and the production build.
+The frontend CI workflow runs these checks and bundles the shared UI inspector.
+`bun run lint` remains a separate check while the existing lint backlog is resolved.
+
+## Code ownership
+
+- `App.tsx` and page components compose views and handle navigation.
+- `hooks/` owns React state and interactions with services; for example, skill settings load only while their section is open.
+- `services/` owns API transport and conversion of server data.
+- `components/Demiurge/Landing/types.ts` owns the intake and authentication view contracts. Copy construction and session recovery live beside it, so child components do not depend on the landing page implementation.
+- `packages/scene-editor/src/ui-preview/` owns the UI renderer, atlas/font loading and browser inspection entry shared by the editor and runtime checker. It must not import frontend pages, stores or service adapters. The frontend adapter re-exports its UI node contract for existing callers.
+
+Keep rendering and inspection behavior in that shared implementation rather than copying it between the app and runtime host.
 
 ## SaaS Boundaries
 

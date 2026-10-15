@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
 import { relative, resolve } from 'node:path'
+import { ZodError } from 'zod/v4'
 import { CURRENT_CONTENT_CHECKER_ENTRY, CONTENT_BINDING_ENTRY, MEDIA_PRODUCTION_ENTRY, RESOURCE_PRODUCTION_ENTRY } from '../content-checker-runtime'
 import { writeProjectAssetCommand } from '../project-asset-command'
 import { openResourceLibraryAccess } from '../resource-library-access'
@@ -9,6 +10,8 @@ import type { createAgentMeasurement } from './agent-measurement'
 import type { openImageGenerationAccess } from '../../image-generation/access'
 import { bundleContentConsumer, contentConsumerCommand } from '../game-content-consumer-cli'
 import { sharedPlaywright } from '../shared-playwright'
+import type { LayoutConstraints } from '../ui-layout-audit'
+import type { ResourceCatalogPack, ResourceCatalogPage } from '@bee-game-studio/beegame-resource-core'
 
 export type AgentPreviewAccess = ReturnType<typeof openPreviewTestAccess>
 export type AgentImageAccess = ReturnType<typeof openImageGenerationAccess>
@@ -17,7 +20,9 @@ export type AgentImageAccess = ReturnType<typeof openImageGenerationAccess>
  * Native execution already supplies the shared checker/Sharp environment. */
 export async function openAgentTools(input: {
   workspacePath: string
+  constraints?: LayoutConstraints
   libraryBaseUrl?: string
+  readInitialCatalog?: boolean
   getAuthToken: () => string | undefined | Promise<string | undefined>
   sessionId?: string
   openPreview?: () => AgentPreviewAccess | Promise<AgentPreviewAccess>
@@ -90,12 +95,15 @@ export async function openAgentTools(input: {
           const record=await input.measurement!.measure(body)
           return Response.json(await input.measurement!.inspect(record.id),{headers:{'Cache-Control':'no-store'}})
         } catch(error) {
-          return Response.json({error:error instanceof Error?error.message:'Measurement failed; no automatic retry'},{status:409})
+          // Keep the existing text error; expose validator facts without double parsing or echoing inputs.
+          const issues=error instanceof ZodError ? error.issues.map(({path,code,message})=>({path,code,message})) : undefined
+          return Response.json({error:error instanceof Error?error.message:'Measurement failed; no automatic retry',
+            ...(issues?{issues}:{})},{status:409})
         }
       }})
       revokeMeasurement=await publishProjectPreviewCapability(root,input.sessionId,measurementServer.url.origin+'/'+token,'measurement')
-      const help='Optional static-Web source-copy build + browser smoke: node <this-entry> --request <stable-id> --artifact <public-build-folder> [--report <existing-file>]... . Runs saved package.json build, replaces only that build folder. Does not install dependencies or execute a model. reports/ is evidence excluded from source copies; game/build inputs belong outside it. Selected reports are separately hashed; edits invalidate their receipt. Finalize them first; do not append receipt IDs/hashes to measured files. --inspect <measurement-ID-or-unique-request-key> [--details] reads any saved receipt in this Run and current freshness without build/browser/model work. Reused keys require the exact measurement ID from handoff; details reads observations, not another test. A same-turn request retry inspects without replay; changed inputs need an intended new request. Native/SSR, gameplay, report semantics and quality are NOT certified.';
-      const consumptionHelp='Optional --consumption-json JSON reuses actual static-Web drivers without a Task. A valid scoped example: {"checks":["ui-data-consumption"],"uiProbes":[{"document":"content/ui/menu.json","nodeId":"play","selector":"#play","viewport":[1280,720]}]}. UI checks saved DOM geometry and visible text fit on selected nodes/states; unselected registry screens/viewports remain explicitly outside coverage. Optional UI-only coordinateRoot:"#logical-root" selects an independent unpadded DOM ancestor for a fixed logical canvas scaled/letterboxed into the window; logical dimensions come from saved root referenceResolution/layout.size. Its positive axis-aligned mapping must remain stable through perturbation/restoration. Without coordinateRoot, geometry is compared in window CSS pixels. Unsupported roots remain unverified; mapping is not proof of intended whole-frame adaptation. Optional steps:[{click:selector}] reach actual states, not a gameplay solver. pixel-data-consumption uses pixelProbes with componentId for bound static 2D images/Tilemaps; procedural Canvas graphics are unsupported. font-data-consumption uses uiProbes for explicitly bound custom-font plain DOM text; system fonts/rich text are unsupported. audio-data-consumption uses audioProbes with componentId, playSteps and stopSteps for encoded HTML audio bindings; WebAudio synthesis/concurrency/listening are unsupported. Select applicable inputs only. Probes change isolated responses, not project sources. --inspect ID [--details] records coverage and unmeasured drivers; geometry/asset causality is not complete gameplay or quality.';
+      const help='Optional static-Web source-copy build + browser smoke: node <this-entry> --request <stable-id> --artifact <public-build-folder> [--report <existing-file>]... . Runs saved package.json build, replaces only that build folder. Does not install dependencies or execute a model. reports/ is evidence excluded from source copies; game/build inputs belong outside it. Selected reports are separately hashed; edits invalidate their receipt. Finalize them first; do not append receipt IDs/hashes to measured files. --inspect <measurement-ID-or-unique-request-key> [--details] reads any saved receipt in this Run and current freshness without build/browser/model work. Default inspection includes failed check identities and reasons; --details adds raw observations, not another test. Reused keys require the exact measurement ID from handoff. A same-turn request retry inspects without replay; changed inputs need an intended new request. Native/SSR, gameplay, report semantics and quality are NOT certified.';
+      const consumptionHelp='Optional --consumption-json JSON reuses actual static-Web drivers without a Task. JSON shape example (replace selectors with actual game controls): {"checks":["ui-data-consumption"],"uiProbes":[{"document":"content/ui/menu.json","nodeId":"play","selector":"#play","viewport":[1280,720],"steps":[{"click":"#start"}]}]}. Put steps INSIDE each uiProbes item, not at the consumption JSON root. UI checks saved DOM geometry and visible text fit on selected nodes/states; unselected registry screens/viewports remain explicitly outside coverage. The saved node must already be active and non-collapsed at the selected viewport; click steps reach runtime states but cannot make an inactive saved-layout node eligible for this geometry probe. Verify dynamic-only states through an interaction test. Optional UI-only coordinateRoot:"#logical-root" selects an independent unpadded DOM ancestor for a fixed logical canvas scaled/letterboxed into the window; logical dimensions come from saved root referenceResolution/layout.size. Its positive axis-aligned mapping must remain stable through perturbation/restoration. Without coordinateRoot, geometry is compared in window CSS pixels. Unsupported roots remain unverified; mapping is not proof of intended whole-frame adaptation. Probe steps reach actual states, not a gameplay solver. scene-data-consumption uses sceneProbes with document, nodeId, selector of the actual Canvas, viewport and optional click steps; it checks whether disabling a saved 2D Scene node changes stable rendered pixels, not whether its appearance is correct. pixel-data-consumption uses pixelProbes with componentId for bound static 2D images/Tilemaps; procedural Canvas graphics are unsupported by that resource/geometry driver. font-data-consumption uses uiProbes for explicitly bound custom-font plain DOM text; system fonts/rich text are unsupported. Audio JSON example: {"checks":["audio-data-consumption"],"audioProbes":[{"document":"content/scenes/level.json","nodeId":"board","componentId":"sound","selector":"#clip","viewport":[960,540],"playSteps":[{"click":"#start"}],"stopSteps":[{"click":"#stop"}]}]}. Replace the document, saved node/component IDs, HTML audio selector, viewport and controls with actual project inputs. playSteps and stopSteps are non-empty arrays of {click:"selector"} only; wait steps are not supported. The saved audio-source component must bind an encoded assetRef and explicit data.volume (0..1) / data.loop. These probes verify encoded HTML audio bindings, not WebAudio synthesis, concurrency or listening quality. Select applicable inputs only. Probes change isolated responses, not project sources. --inspect ID [--details] records coverage and unmeasured drivers; geometry/asset causality is not complete gameplay or quality.';
       await writeFile(resolve(directory,'measure.mjs'),[
         'import {realpath,readFile} from "node:fs/promises";',
         'const help='+JSON.stringify(help+'\n'+consumptionHelp+'\n--artifact is project-relative (e.g. dist), not an absolute path. Probes accept optional deviceScaleFactor (positive number, default 1); receipts record observed browser conditions and the declared click path. Other pixel densities and unselected gameplay remain untested.')+';',
@@ -137,27 +145,37 @@ export async function openAgentTools(input: {
       if (!input.sessionId) throw Error('Preview requires the bound native session')
       preview = await input.openPreview()
       revokePreview = await publishProjectPreviewCapability(root, input.sessionId, preview.baseUrl)
+      const keyboardHelp = '--keyboard-sample <JSON> runs one fixed production-preview desktop keyboard sample, without a project script/callback. JSON: {startSelector?,readySelector,key,holdMs,observeMs,viewport?:{width,height}}. Use actual selectors and one arrow, Space, letter or digit. holdMs 100..5000; observeMs >=100; total <=120000 ms. Click start if supplied, wait for visible ready target, key down/hold/up, then wait real host time. Retains input timestamps, silent video, stills and observation.json even on failure. No state/clock injection, automatic retry, build, installation or model call. Observed is not gameplay/input-effect/completion acceptance; touch remains untested.'
+      const countdownBlurHelp = '--countdown-blur-sample <JSON> runs one fixed production-preview countdown/iframe-blur sample. JSON: {startSelector,countdownSelector,playingSelector,countdownMs,observeMs?:500,viewport?:{width,height}}. Supply actual unique CSS selectors and source-derived full countdownMs (100..30000); observeMs 100..5000. Click start, observe countdown, click a temporary host focus target, verify real blur during countdown, wait countdownMs+250 real host milliseconds, capture BEFORE restoring focus, restore iframe focus and observe. Saves focus events, DOM indicator text/visibility, silent video, stills and observation.json even on failure. No game pause hooks, synthetic events, clock/frame changes, project scripts, retries, builds, installation or model calls. Missing blur, missed countdown or interrupted focus means incomplete, never PASS. Observed means sampling completed, not pause/resume acceptance; wrong selectors/duration and hidden-tab behavior remain unverified.'
       // Long usage is available on demand, not repeated in every model input.
       await writeFile(resolve(directory, 'preview.mjs'),
         'const args=process.argv.slice(2);\n'+
+        'if((args[0]==="--sprite-sample" && args.length>=6)||(args[0]==="--sprite-capture" && args.length===1)){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {resolvePreviewApi}=await import(new URL("./preview-test-client.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));const api=await resolvePreviewApi();if(!(await fetch(api+"/status",{redirect:"error"})).ok)throw Error("Preview capability expired");const {createSpriteSample,captureSpriteSample}=await import(new URL("./sprite-sample.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));console.log(JSON.stringify(args[0]==="--sprite-sample"?await createSpriteSample(args[1],args[2],Number(args[3]),args.slice(4)):await captureSpriteSample(),null,2));}catch(error){console.log(JSON.stringify({status:"error",error:error.message,quality:"unverified"}));process.exitCode=1;}} else '+
         'if(args[0]==="--inspect" && args.length===2){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {inspectPreviewTest}=await import(new URL("./preview-test-command.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));console.log(JSON.stringify(await inspectPreviewTest(args[1]),null,2));}catch(error){console.log(JSON.stringify({error:error.message,quality:"unverified"}));process.exitCode=1;}} else '+
         'if(args[0]==="--run" && args[1]){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {runPreviewTest}=await import(new URL("./preview-test-command.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));const result=await runPreviewTest(args[1],args.slice(2));console.log(JSON.stringify(result,null,2));if(result.exitCode!==0)process.exitCode=1;}catch(error){console.log(JSON.stringify({status:"error",error:error.message,execution:"unconfirmed; inspect retained files before any new execution",quality:"unverified"}));process.exitCode=1;}}\n'+
-        'else if(args.length===1 && args[0]==="--client")console.log('+JSON.stringify(JSON.stringify({
-          runtime:'node',helperModule:new URL('../preview-test-client.mjs',import.meta.url).href,
+        'else if(args[0]==="--keyboard-sample" && args.length===2){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {captureKeyboardSample}=await import(new URL("./preview-play-capture.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));const result=await captureKeyboardSample(JSON.parse(args[1]));console.log(JSON.stringify(result,null,2));if(result.status!=="observed")process.exitCode=1;}catch(error){console.log(JSON.stringify({status:"error",error:error.message,quality:"unverified"}));process.exitCode=1;}}\n'+
+        'else if(args[0]==="--countdown-blur-sample" && args.length===2){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {captureCountdownBlurSample}=await import(new URL("./preview-play-capture.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));const result=await captureCountdownBlurSample(JSON.parse(args[1]));console.log(JSON.stringify(result,null,2));if(result.status!=="observed")process.exitCode=1;}catch(error){console.log(JSON.stringify({status:"error",error:error.message,quality:"unverified"}));process.exitCode=1;}}\n'+
+        'else if(args[0]==="--snapshot" && args.length===4){try{if(!process.env.BEEGAME_CONTENT_CHECKER_MODULE)throw Error("BGS tool runtime is unavailable");const {capturePreviewSnapshot}=await import(new URL("./preview-test-command.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE));const result=await capturePreviewSnapshot(args[1],Number(args[2]),Number(args[3]));console.log(JSON.stringify(result,null,2));if(result.status!=="observed")process.exitCode=1;}catch(error){console.log(JSON.stringify({status:"error",error:error.message,quality:"unverified"}));process.exitCode=1;}}\n'+
+        'else if(args.length===1 && args[0]==="--client")console.log(JSON.stringify({...'+JSON.stringify({
+          runtime:'node',
           playwrightModule:sharedPlaywright().moduleUrl,
           environment:{helper:'BEEGAME_PREVIEW_TEST_MODULE',playwright:'BEEGAME_PLAYWRIGHT_MODULE',capability:'BEEGAME_PREVIEW_CAPABILITY_FILE'},
+          playCapture:'withPlayCapture({mode,viewport?,outputParent?,audio?,audioLimitMs?}, async ({page,gameFrame,mark,captureFrame,runtimeErrors}) => {...})',
           runCommand:'node '+JSON.stringify(entry('preview.mjs'))+' --run <project-test.mjs> [args...]',
           scope:'Existing test tooling only; no browser, build, test or model executed. Capability still requires the active project turn.',
-        })) +');\n'+
-        'else if(args.length===1 && args[0]==="--help")console.log('+JSON.stringify('Optional --run <project-test.mjs> [args...] executes once with Node, retaining stdout/stderr and execution.json. --inspect <execution.json> reads the saved receipt and current input identity without executing it. Exit code is not test quality; scripts choose assertions and use the existing helper for current access.\n'+preview.instruction)+');\n'+
-        'else {console.error("Use --help for the Preview API, --client for Node helper/module paths, or --run <project-test.mjs> [args...]");process.exitCode=1;}\n', { flag: 'wx', mode: 0o600 })
+        }) +',helperModule:process.env.BEEGAME_PREVIEW_TEST_MODULE || new URL("./preview-test-client.mjs",process.env.BEEGAME_CONTENT_CHECKER_MODULE).href}));\n'+
+        'else if(args.length===1 && args[0]==="--help")console.log('+JSON.stringify(countdownBlurHelp+'\n'+keyboardHelp+'\nFor an explicitly requested standalone sprite sample in a NEW project: --sprite-sample <assets/sheet.png> <assets/atlas.json> <frame-ms> <frame-id> <frame-id> ... writes a dependency-free static player/build script without overwriting an app. Select equal-size prepared frames in playback order (50..500 ms, 2..32 frames). It neither generates nor repairs artwork. Use the existing measure entry with --artifact dist once, then --sprite-capture records actual production Preview and asserts frame coverage, pause and resume, retaining observations even on failure. No project test script, installations, model or automatic retries. Visual motion quality stays unverified.\nOptional --snapshot development|production <width> <height> captures the actual first-load viewport and runtime error counts into a unique .beegame/tmp/preview-snapshot-* directory, without a project test script. This is a visual diagnostic, not a pass, playtest or freshness receipt. --run <project-test.mjs> [args...] executes once with Node, retaining stdout/stderr and execution.json. --inspect <execution.json> reads the saved test receipt and current input identity without executing it. Exit code is not test quality; scripts choose assertions and use the existing helper for current access.\n'+preview.instruction)+');\n'+
+        'else {console.error("Use --help, --countdown-blur-sample <JSON>, --keyboard-sample <JSON>, --snapshot <mode> <width> <height>, --client, or --run <project-test.mjs> [args...]");process.exitCode=1;}\n', { flag: 'wx', mode: 0o600 })
     }
     await writeProjectAssetCommand(resolve(directory, 'assets.mjs'), {
       ...(library ? { libraryBaseUrl: library.baseUrl } : {}),
       ...(image ? {imageEndpoint:image.endpoint} : {}),
       mediaCommand: 'bun ' + JSON.stringify(entry('media.mjs')),
     })
-    for (const [name, source] of [['check-content.mjs', CURRENT_CONTENT_CHECKER_ENTRY],
+    const { platform, inputs, orientation, dimension } = input.constraints ?? {}
+    const contentEntry = CURRENT_CONTENT_CHECKER_ENTRY.replace("{ profile: 'current' }",
+      JSON.stringify({ profile: 'current', confirmed: { platform, inputs, orientation, dimension } }))
+    for (const [name, source] of [['check-content.mjs', contentEntry],
       ['bind-content.mjs',CONTENT_BINDING_ENTRY],
       ['media.mjs', MEDIA_PRODUCTION_ENTRY], ['resources.mjs', RESOURCE_PRODUCTION_ENTRY]] as const)
       await writeFile(resolve(directory, name), source, { flag: 'wx', mode: 0o600 })
@@ -168,16 +186,24 @@ export async function openAgentTools(input: {
       contentConsumerCommand(root, entry('content-consumer.mjs')), { flag: 'wx', mode: 0o600 })
     return {
       directory: relative(root, directory),
+      // Keep the locator outside compactable message history. Capabilities
+      // still expire normally; this is only the current turn's tool location.
+      systemContext: 'Current BGS tools directory (relative to project root): '+JSON.stringify(relative(root, directory))+'. '+
+        'Run entries with --help: bun assets.mjs, check-content.mjs, bind-content.mjs, consumer.mjs, media.mjs, resources.mjs'+
+        (input.measurement ? '; node measure.mjs, handoff.mjs' : '')+(preview ? '; node preview.mjs' : '')+
+        '. Prefix each filename with that directory; keep project root as cwd. Bridges expire at turn end.',
       turnContext: [
         'Optional BGS project tools (project root; --help):',
         ...(input.measurement ? ['Static Web source-copy build and smoke measurement (no separate prebuild): node '+JSON.stringify(entry('measure.mjs'))+' --help; --inspect reads without rerunning.'] : []),
         ...(input.measurement ? ['Read-only task/evidence: node '+JSON.stringify(entry('handoff.mjs'))+' [FILE ...] [--details]; task facts, optional sources.'] : []),
         'Assets: bun ' + JSON.stringify(entry('assets.mjs')) + ' --help (catalog/download, local hashes). ' + libraryState,
-        'Content: bun ' + JSON.stringify(entry('check-content.mjs')) + ' --help; --format projectGuide batches source navigation. --authority is identity, not design approval. Web consumer: bun '+JSON.stringify(entry('consumer.mjs'))+' --help.',
+        ...(input.readInitialCatalog ? [library ? await initialCatalogContext(library.baseUrl) :
+          'Initial built-in resource catalog: unavailable. ' + libraryState + ' This is not an empty catalog.'] : []),
+        'Content: bun ' + JSON.stringify(entry('check-content.mjs')) + ' --help; --format projectGuide batches source navigation. Web consumer: bun '+JSON.stringify(entry('consumer.mjs'))+' --help.',
         'Batch binding (BGS JSON): bun '+JSON.stringify(entry('bind-content.mjs'))+' --help; --inspect gives saved hashes/IDs.',
         'Media: bun ' + JSON.stringify(entry('media.mjs')) + ' --help (images/atlas). Resources: bun ' + JSON.stringify(entry('resources.mjs')) + ' --help (audio, fonts, registration). Existing safety/source contracts apply.',
-        preview ? 'Browser Preview (Web only): node ' + JSON.stringify(entry('preview.mjs')) + ' --help / --client / --run <test.mjs> [args...] (Node, retained output). Native CLI/MCP separate.' : 'Managed browser Preview is unavailable; native tools remain available.',
-        image ? 'AI images: assets.mjs cost/generate --help; keep a stable requestId for recovery. Opening the bridge does not charge.' : 'AI image generation is unavailable.',
+        preview ? 'Browser Preview (Web only): node ' + JSON.stringify(entry('preview.mjs')) + ' --help / --snapshot <mode> <width> <height> / --sprite-sample / --sprite-capture / --client / --run <test.mjs> [args...] (Node, retained output). Native CLI/MCP separate.' : 'Managed browser Preview is unavailable; native tools remain available.',
+        image ? 'AI image bridge is configured, not yet verified available. Use assets.mjs cost before generate; the quote is read-only. Keep a stable requestId for recovery. Opening the bridge does not charge.' : 'No AI image bridge is configured for this turn.',
         'Bridges expire at turn end; credentials stay in BGS. Tool availability is not runtime consumption or quality evidence.',
       ].join('\n'),
       // Retain tiny adapters as execution evidence, not game deliverables.
@@ -185,4 +211,34 @@ export async function openAgentTools(input: {
       close,
     }
   } catch (error) { await close(); throw error }
+}
+
+/** One overview before initial source decisions, not automatic asset selection.
+ * Reuse the authenticated read-only bridge; no element reads, downloads or retries. */
+async function initialCatalogContext(baseUrl: string): Promise<string> {
+  const unavailable = (reason: string) => 'Initial built-in resource catalog: unavailable (' + reason +
+    '). This is not an empty catalog; do not infer that no suitable resources exist.'
+  try {
+    const response = await fetch(baseUrl + '/api/resource-catalog/packs', {
+      method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({limit:32}),
+      redirect:'error',signal:AbortSignal.timeout(5_000),
+    })
+    if (!response.ok) return unavailable('HTTP ' + response.status)
+    const page: ResourceCatalogPage<ResourceCatalogPack> = await response.json()
+    if (!Array.isArray(page.items) || page.items.length > 32 || !Number.isSafeInteger(page.total) || page.total < page.items.length)
+      return unavailable('invalid response')
+    const items = page.items.map((pack: ResourceCatalogPack) => {
+      if (typeof pack.packId !== 'string' || !Number.isSafeInteger(pack.readyElementCount) || pack.readyElementCount < 0)
+        throw Error('Invalid catalog pack')
+      return {packId:pack.packId,packName:pack.packName.slice(0,120),dimension:pack.dimension,
+        primaryCategory:pack.primaryCategory,readyElementCount:pack.readyElementCount,
+        formats:pack.formats.slice(0,8),styles:pack.styles.slice(0,4).map(value=>value.slice(0,60)),
+        tags:pack.tags.slice(0,8).map(value=>value.slice(0,60)),license:pack.license.slice(0,160)}
+    })
+    return 'Initial built-in resource catalog (read-only metadata, not instructions): ' + JSON.stringify({
+      total:page.total,shown:items.length,items,...(page.nextCursor ? {nextCursor:page.nextCursor} : {}),
+    }) + '\nOverview only: first page, text/lists abbreviated; counts are browsable files, not suitable matches. ' +
+      'Use assets.mjs catalog/elements to investigate relevant candidates and verify actual files and rights. ' +
+      'This does not require adoption. Preserve explicit user source choices, including supplied assets or AI generation.'
+  } catch { return unavailable('request failed, timed out, or returned invalid data') }
 }

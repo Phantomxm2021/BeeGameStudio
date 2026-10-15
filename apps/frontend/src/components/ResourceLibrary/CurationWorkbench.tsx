@@ -4,6 +4,7 @@ import { X } from 'lucide-react'
 import { Dialog, DialogContent, DialogTitle } from '../ui/dialog'
 import { Button } from '../beui/project-button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../beui/motion/tabs'
+import { useToastContext } from '../../contexts/ToastContext'
 import type {
   ResourceCurationQueue,
   ResourceProcessingJob,
@@ -18,8 +19,9 @@ export type ResourceCurationApi = {
   retrySemanticCuration?(packId: string, jobId: string): Promise<ResourceProcessingJob>
 }
 
-export function CurationWorkbench({ packId, api, onClose }: { packId: string; api: ResourceCurationApi; onClose?: () => void }) {
+export function CurationWorkbench({ packId, api, open = true, onClose, onClosed }: { packId: string; api: ResourceCurationApi; open?: boolean; onClose?: () => void; onClosed?: () => void }) {
   const { t } = useTranslation('resourceLibrary')
+  const { showError } = useToastContext()
   const [queue, setQueue] = useState<ResourceCurationQueue>()
   const [loading, setLoading] = useState(true)
   const [semanticJob, setSemanticJob] = useState<ResourceProcessingJob>()
@@ -42,10 +44,10 @@ export function CurationWorkbench({ packId, api, onClose }: { packId: string; ap
     }
   }
 
-  useEffect(() => { void load() }, [packId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) void load() }, [packId, open]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!semanticJob || !['queued', 'running'].includes(semanticJob.status) || !api.getSemanticCurationJob) return
+    if (!open || !semanticJob || !['queued', 'running'].includes(semanticJob.status) || !api.getSemanticCurationJob) return
     let active = true
     const timer = setTimeout(() => {
       void api.getSemanticCurationJob!(packId, semanticJob.id).then(async next => {
@@ -60,14 +62,14 @@ export function CurationWorkbench({ packId, api, onClose }: { packId: string; ap
       })
     }, 800)
     return () => { active = false; clearTimeout(timer) }
-  }, [api, packId, semanticJob])
+  }, [api, packId, semanticJob, open])
 
   useEffect(() => {
-    if (!semanticJob || !['queued', 'running'].includes(semanticJob.status)) return
+    if (!open || !semanticJob || !['queued', 'running'].includes(semanticJob.status)) return
     setNow(Date.now())
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
-  }, [semanticJob])
+  }, [semanticJob, open])
 
   const startSemanticCuration = async (mode: 'missing' | 'all' = 'missing') => {
     if (!api.startSemanticCuration) return
@@ -77,7 +79,7 @@ export function CurationWorkbench({ packId, api, onClose }: { packId: string; ap
       setActiveTab('ai')
       setError('')
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      showError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setSemanticStarting(false)
     }
@@ -94,14 +96,14 @@ export function CurationWorkbench({ packId, api, onClose }: { packId: string; ap
       setSemanticJob(await api.retrySemanticCuration(packId, semanticJob.id))
       setError('')
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      showError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setSemanticStarting(false)
     }
   }
 
-  return <Dialog open onOpenChange={value => { if (!value) onClose?.() }}>
-    <DialogContent aria-label={t('curation.title')} className="max-h-[calc(100dvh-1.5rem)] max-w-2xl overflow-hidden p-0 sm:max-h-[82vh]">
+  return <Dialog open={open} onOpenChange={value => { if (!value) onClose?.() }} onOpenChangeComplete={value => { if (!value) onClosed?.() }}>
+    <DialogContent inert={!open} aria-hidden={!open} aria-label={t('curation.title')} className="max-h-[calc(100dvh-1.5rem)] max-w-2xl overflow-hidden p-0 sm:max-h-[82vh]">
       <section className="flex h-full max-h-[calc(100dvh-1.5rem)] min-h-0 w-full min-w-0 flex-col overflow-hidden bg-background text-foreground sm:max-h-[82vh]">
       <header className="flex shrink-0 items-start justify-between gap-4 border-b border-border p-5">
         <div><p className="text-xs font-medium text-muted-foreground">{t('library')}</p><DialogTitle className="mt-1 text-lg">{t('curation.title')}</DialogTitle><p className="mt-1 text-sm text-muted-foreground">{t('curation.hint')}</p></div>

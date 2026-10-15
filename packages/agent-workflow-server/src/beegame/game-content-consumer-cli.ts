@@ -19,6 +19,14 @@ export const CONTENT_CONSUMER_API = {
     fetchContentDocument: 'await fetchContentDocument(index object, documentId, absolute indexUrl, fetcher?) -> one on-demand document',
     contentDocumentPath: 'contentDocumentPath(index object, documentId) -> registered content-relative path',
   },
+  layout: {
+    initializeUiLayout: 'await initializeUiLayout() -> void; initialize shared container allocation before resolving layouts.',
+    resolveUiNodesForViewport: 'resolveUiNodesForViewport(nodes, rootId, {width,height}, {measureText?}?) -> responsive nodes with allocated local layout; preserves source, not host bounds.',
+    inspectUiLayout: 'inspectUiLayout(nodes, rootId, {width,height}, {measureText?, camera?}?) -> geometry array: id, active, layout, corners, bounds, outsideViewport, outsideParent, outsideContentArea, belowMinimumControlSize, textFit, overlapCandidates, occludedBy. Join authored style/text/role by id.',
+    createUiTextMeasurer: 'createUiTextMeasurer(canvas2dContext, fontFamilyForNode?) -> measureText(node): {width,height}; load actual fonts first. Intrinsic text/newlines only.',
+    inspectUiLayoutInBrowser: 'await inspectUiLayoutInBrowser(nodes, rootId, {width,height}, {fontFamily, fontFaces?, textSamples?, camera?}) -> {viewport,nodes,textMeasurements,note}; initializes layout. fontFaces: Record keyed by assetRef, or JSON.stringify([assetRef,member]) for explicit members; faces loaded and registered. textSamples maps authored text node IDs to string[].',
+    notes: 'Logical host pixels. camera: {nodeId,input,scene?,tileSet?} links the game-view to an authored 2D Camera. Candidate-font metrics are preliminary. No wrapping/clipping, interaction or aesthetic verdict; use actual rendering for those.',
+  },
   scene: {
     sceneWorldTransforms2d: 'sceneWorldTransforms2d(data.nodes) -> {poses: Map<nodeId, affine matrix>, rects: Map<nodeId, resolved rect>}',
     inspectSceneLayout2d: 'inspectSceneLayout2d(data, {width,height}) -> {cameraNodeId, view, worldToScreen, nodes, requiredVisibility?, note}; nodes include screenBounds/worldBounds/fullyInside/geometryUnavailable',
@@ -37,6 +45,7 @@ Minimal UI (example source and copied module both in src/):
   surface.render(readUiData(savedDocument), {width: hostWidth, height: hostHeight}, {state, onAction: (action, nodeId) => handleAction(action, nodeId)});
   surface.dispose();
 Use actual host logical pixels. The shared implementation handles anchors/pivots/stretch, hierarchy, responsive/container allocation, enabled subtrees and numeric CSS font units. state maps binding keys to values; onAction handles declared click actions. Supply loaded fonts/assets when referenced. Unsupported roles/styles/behaviors fail explicitly; consult exported PRODUCTION_SURFACE_CAPABILITIES. Do not silently drop fields to make rendering succeed.
+Custom UI rendering can reuse initializeUiLayout() and resolveUiNodesForViewport(data.nodes, data.rootId, {width: hostWidth, height: hostHeight}); use inspectUiLayout for composed bounds/transforms. Recompute on host resize instead of reimplementing anchors/containers or scaling the entire HUD with the world. Scene camera framing remains a separate gameplay choice.
 Scene geometry (custom rendering/gameplay stays yours):
   readSceneData(savedDocument) validates the envelope;
   sceneWorldTransforms2d(data.nodes) returns composed parent-local transforms;

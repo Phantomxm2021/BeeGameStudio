@@ -2,9 +2,11 @@ import { expect, test } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { existsSync } from 'node:fs'
 import { createAgentWorkflowApp } from '../app'
-import { readProjectDelivery } from '../beegame/project-delivery'
 import { createLocalWorkflowStore } from '../beegame/workflow-v3/store'
+import { discussionMessagesSinceMeasurement } from '../beegame/workflow-v3/measured-build'
+import type { AgentMeasurement } from '../beegame/workflow-v3/state'
 
 test('formal project bootstrap starts the same V3 native goal as the explicit route', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-formal-v3-bootstrap-'))
@@ -38,7 +40,7 @@ test('formal project bootstrap starts the same V3 native goal as the explicit ro
     const body = await response.json() as { session: { id: string }; project: { root_path: string } }
     for (let i = 0; i < 100 && prompts.length === 0; i++) await Bun.sleep(5)
     expect(prompts).toHaveLength(1)
-    expect(prompts[0]).toContain('Develop the game from this complete confirmed goal')
+    expect(prompts[0]).toContain('first assignment ends at visual-direction handoff')
     expect(prompts[0]).not.toContain('current milestone and its deliverables')
     const run = await store.read('formal-game', 'owner')
     expect(run?.chatSessionId).toBe(body.session.id)
@@ -50,20 +52,26 @@ test('formal project bootstrap starts the same V3 native goal as the explicit ro
     }
     expect(JSON.parse(run!.requirements.text)).toMatchObject({ idea: 'Make a small game',
       selected_option: { title: 'Selected game' }, resource_library_usage: 'optional' })
-    expect(await readProjectDelivery(body.project.root_path, join(root, 'dashboard'))).toBeUndefined()
+    expect(existsSync(join(root, 'dashboard', 'project-delivery'))).toBe(false)
     for (let i = 0; i < 100 && !(await store.read('formal-game', 'owner'))?.agentTurns?.[0]?.finishedAt; i++) await Bun.sleep(5)
     const settled = (await store.read('formal-game', 'owner'))!
     const followup = await app.request('/api/projects/formal-game/workflow-v3/agent/messages', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
         requestKey: 'plain-chat-1', runId: settled.id, chatSessionId: settled.chatSessionId,
         expectedVersion: settled.version, requirementsRevision: settled.requirements.revision,
-        intent: 'message', text: 'Why is the game difficult?',
+        text: 'Why is the game difficult?',
       }),
     })
     expect(followup.status, await followup.clone().text()).toBe(202)
     for (let i = 0; i < 100 && prompts.length < 2; i++) await Bun.sleep(5)
     expect(prompts[1]).toContain('Why is the game difficult?')
-    expect(await readProjectDelivery(body.project.root_path, join(root, 'dashboard'))).toBeUndefined()
+    for (let i = 0; i < 100 && !(await store.read('formal-game', 'owner'))?.agentTurns?.[1]?.quiescedAt; i++) await Bun.sleep(5)
+    const afterChat = (await store.read('formal-game', 'owner'))!
+    expect(afterChat.agentTurns?.[1]).toMatchObject({ status: 'ended', message: { intent: 'message' } })
+    expect(discussionMessagesSinceMeasurement(afterChat,
+      { requirementsRevision: settled.requirements.revision } as AgentMeasurement))
+      .toEqual([{ requestKey: 'plain-chat-1', text: 'Why is the game difficult?' }])
+    expect(existsSync(join(root, 'dashboard', 'project-delivery'))).toBe(false)
   } finally {
     for (const cleanup of cleanups.reverse()) await cleanup()
     await rm(root, { recursive: true, force: true })

@@ -154,6 +154,17 @@ export interface BeeGameDeploymentReadiness {
   allowed: boolean
   issues: string[]
   destination: 'remote' | 'local'
+  confirmationRequired?: {
+    measurementId: string
+    requirementsRevision: string
+    messages: Array<{ requestKey: string; text: string }>
+  }
+}
+
+export type BeeGameDeploymentDiscussionConfirmation = {
+  measurementId: string
+  requirementsRevision: string
+  discussionConfirmation: { messageRequestKeys: string[] }
 }
 
 export interface BeeGameAssetRequirementPayload {
@@ -496,6 +507,10 @@ export const api = {
    */
   getProjects: () => beeGameAdapter.getProjects(),
 
+  getProjectPage: (offset: number, search = '') => beeGameAdapter.getProjectPage(offset, search),
+
+  getProjectMetadata: (projectId: string) => beeGameAdapter.getProjectMetadata(projectId),
+
   bootstrapProjectFromBrief: (
     data: Parameters<typeof beeGameAdapter.bootstrapProjectFromBrief>[0],
   ) => beeGameAdapter.bootstrapProjectFromBrief(data),
@@ -596,7 +611,7 @@ export const api = {
   stopProjectPreview: (projectId: string) =>
     beeGameAdapter.stopProjectPreview(projectId),
 
-  deployProject: (projectId: string) => beeGameAdapter.deployProject(projectId),
+  deployProject: (projectId: string, confirmation?: BeeGameDeploymentDiscussionConfirmation) => beeGameAdapter.deployProject(projectId, confirmation),
   getDeploymentReadiness: (projectId: string) => beeGameAdapter.getDeploymentReadiness(projectId),
 
   listProjectDeployments: (projectId: string) =>

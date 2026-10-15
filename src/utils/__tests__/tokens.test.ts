@@ -36,6 +36,7 @@ const {
   getCurrentUsage,
   doesMostRecentAssistantMessageExceed200k,
   getAssistantMessageContentLength,
+  tokenCountWithEstimation,
 } = await import('../tokens')
 
 // ─── Helpers ────────────────────────────────────────────────────────────
@@ -72,6 +73,50 @@ function makeUserMessage(text: string) {
     message: { role: 'user' as const, content: text },
   }
 }
+
+describe('post-compact context estimation', () => {
+  test('zeroed resume usage does not hide the summary and preserved context', () => {
+    const retained = makeAssistantMessage(
+      [{ type: 'text', text: 'working tail' }],
+      {
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+    )
+    const resumed = [
+      makeUserMessage('original constraints'),
+      makeUserMessage('summary and historical evidence'),
+      retained,
+      makeUserMessage('tool result'),
+    ]
+    const { usage, ...withoutUsage } = retained.message
+    const uninterrupted = resumed.map(message =>
+      message === retained ? { ...retained, message: withoutUsage } : message,
+    )
+    expect(tokenCountWithEstimation(resumed as any)).toBe(400)
+    expect(tokenCountWithEstimation(resumed as any)).toBe(
+      tokenCountWithEstimation(uninterrupted as any),
+    )
+    // Context estimation must not change usage used by accounting/UI.
+    expect(retained.message.usage).toBe(usage)
+  })
+
+  test('a real cache-only usage anchor still includes the subsequent results', () => {
+    const messages = [
+      makeUserMessage('summary'),
+      makeAssistantMessage([{ type: 'text', text: 'continue' }], {
+        input_tokens: 0,
+        output_tokens: 20,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 5000,
+      }),
+      makeUserMessage('new result'),
+    ]
+    expect(tokenCountWithEstimation(messages as any)).toBe(5120)
+  })
+})
 
 // ─── getTokenCountFromUsage ─────────────────────────────────────────────
 

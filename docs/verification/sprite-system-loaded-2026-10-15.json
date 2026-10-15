@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-15",
+  "scope": "Startup and loading checks only",
+  "restarted": {
+    "runtimePid": 50048,
+    "runtimePort": 62174,
+    "frontendPid": 50050,
+    "frontendPort": 62173
+  },
+  "unchangedServices": {
+    "billing": 47439,
+    "skills": 47440,
+    "resources": 47441
+  },
+  "health": {
+    "runtime": 200,
+    "frontend": 200,
+    "billing": 200,
+    "skills": 200,
+    "resources": 200
+  },
+  "runtime": {
+    "pid": 50048,
+    "cwd": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/claude-code-main/.worktrees/ir-workflow-integration",
+    "hashes": {
+      "sprite-sample.mjs": "72a6fad89346b6d153143de12246c23c4cb5699cf7fe84a3394b09ab37b67183",
+      "preview-play-capture.mjs": "a2bb30c45d5b36ca48f4c34545b859622cd52fee6a9c6380297a72319b995687",
+      "preview-test-client.mjs": "776e07a00982ae39ca45391912e0af91e941296d7130b1f4e3023160a0e2bd9c"
+    },
+    "sampleExport": true,
+    "captureExport": true,
+    "sampleEntry": true,
+    "captureEntry": true,
+    "executionUsesInstalledRecorder": true,
+    "installedRecorderAvailable": true,
+    "previewStartCalls": 0,
+    "generationCalls": 0
+  },
+  "frontend": {
+    "servedUpdatedPanel": true,
+    "panelRetainsRejection": true,
+    "dashboardPropagatesRejection": true
+  },
+  "limitations": [
+    "No existing project was opened or edited by these checks.",
+    "No sample creation, capture, browser playtest, image generation or model task was executed.",
+    "Runtime verification executed in the new server process; frontend verification inspected the modules served by Vite, not a new UI acceptance run."
+  ]
+}

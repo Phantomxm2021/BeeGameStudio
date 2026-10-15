@@ -112,6 +112,7 @@ import { ImageGenerationService } from './image-generation/service'
 import { createImageGenerationProvider } from './image-generation'
 import { openImageGenerationAccess } from './image-generation/access'
 import { loadRuntimeImageConfig } from './image-generation/runtime-config'
+import { loadPersonalImageConnection, publicPersonalImageConnection, savePersonalImageConnection } from './image-generation/personal-connection'
 import { createImageBillingClient } from '@bee-game-studio/beegame-billing-core/image-billing'
 import {
   discoverMcpServers,
@@ -200,7 +201,6 @@ import {
   saveBeeGameIntakeJob,
 } from './beegame/intake-job-store'
 import { BEEGAME_USER_RESPONSE_SCOPE } from './beegame/user-response-scope'
-import { readProjectDelivery } from './beegame/project-delivery'
 import { projectRuntimeDisplayReason } from './beegame/project-runtime-display'
 
 type JsonObject = Record<string, unknown>
@@ -659,10 +659,16 @@ export function createAgentWorkflowApp(
     // Evaluated only for an authorized production turn, after app setup.
     // Reuse the existing candidate Preview; no Task or engine routing.
     openAgentPreview: value => openProjectPreviewAccess(value),
-    openAgentImage: value => openImageGenerationAccess({userId:value.user.id,projectId:value.projectId,
-      workspacePath:value.workspacePath,service:imageGeneration,
-      loadConfig:()=>loadRuntimeImageConfig(dashboardDataRoot,{remote:Boolean(supabaseStore),billing:billingConfig},
-        (url,init)=>serviceFetch(url,init))}),
+    openAgentImage: value => {
+      const personal = loadPersonalImageConnection(getUserDashboardDataRoot(dashboardDataRoot, value.user.id))
+      return openImageGenerationAccess({ userId: value.user.id, projectId: value.projectId,
+        workspacePath: value.workspacePath, service: imageGeneration, source: personal.source,
+        requiredQuality: value.visualHandoffVersion === 1 ? 'low' : undefined,
+        screenOrientation: value.screenOrientation,
+        loadConfig: personal.source === 'byok' ? async () => personal.config :
+          () => loadRuntimeImageConfig(dashboardDataRoot, { remote: Boolean(supabaseStore), billing: billingConfig },
+            (url, init) => serviceFetch(url, init)) })
+    },
     preview: measuredPreview,
     store: v3Store, sessions: beeGameSessions, getUser: getCurrentUser,
     getProject: (request, user, projectId) => getOwnedProjectMetadata(request, user, projectId, dashboardRepository),
@@ -673,8 +679,14 @@ export function createAgentWorkflowApp(
       return credential ? options => credential.getValidAccessToken(options) : undefined
     },
     assertNoLegacyRun: async workspace => {
-      if (await readProjectDelivery(workspace, dashboardDataRoot))
+      const legacyState = join(dashboardDataRoot, 'project-delivery',
+        createHash('sha256').update(await realpath(workspace)).digest('hex'), 'state.json')
+      try {
+        await stat(legacyState)
         throw new Error('Existing legacy delivery must not be silently migrated to V3')
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
     },
     persistMode: async (request, user, project, run) => {
       if (!supabaseStore) await dashboardRepository.upsertProject(request, user, { ...project, runtime_snapshot: {
@@ -686,8 +698,11 @@ export function createAgentWorkflowApp(
   // Route before legacy handlers: rejection must precede file/state/queue mutations.
   app.use('/api/projects/:id/*', async (c, next) => {
     const tail = c.req.path.split('/').slice(4).join('/')
+    // The wildcard also matches the project root. Account-scoped deletion is
+    // lifecycle cleanup, not legacy scheduling; its handler verifies ownership.
+    const isProjectDeletion = c.req.method === 'DELETE' && tail === ''
     if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) && !tail.startsWith('workflow-v3') &&
-        tail !== 'session/ensure' && !(c.req.method === 'PUT' && tail === 'game-content/document') && !tail.startsWith('permissions/')) {
+        !isProjectDeletion && tail !== 'session/ensure' && !(c.req.method === 'PUT' && tail === 'game-content/document') && !tail.startsWith('permissions/')) {
       try { await v3Routes.assertLegacy(c.req.param('id')!, getCurrentUser(c.req.raw).id, c.req.raw) }
       catch (error) {
         if (error instanceof WorkflowError) return c.json({ error: error.message, code: error.code }, error.status)
@@ -1508,6 +1523,26 @@ export function createAgentWorkflowApp(
     }
   })
 
+  app.get('/api/image-generation/connection', c => {
+    c.header('Cache-Control', 'no-store')
+    try {
+      return c.json(publicPersonalImageConnection(loadPersonalImageConnection(getCurrentUserDataRoot(c.req.raw))))
+    } catch { return c.json({ error: 'Personal image connection could not be loaded' }, 503) }
+  })
+
+  app.put('/api/image-generation/connection', async c => {
+    c.header('Cache-Control', 'no-store')
+    try {
+      const body = await readJson(c.req.raw)
+      if (body?.source === 'byok') {
+        const previous = loadPersonalImageConnection(getCurrentUserDataRoot(c.req.raw))
+        const url = typeof body.baseUrl === 'string' ? body.baseUrl : previous.config.baseUrl
+        await assertPermittedOutboundUrl(url)
+      }
+      return c.json(savePersonalImageConnection(getCurrentUserDataRoot(c.req.raw), body))
+    } catch { return c.json({ error: 'Personal image connection could not be saved; check provider, HTTPS endpoint, model and key' }, 400) }
+  })
+
   app.put('/api/image-generation/settings', async c => {
     const user = getCurrentUser(c.req.raw)
     if (user.role !== 'owner' || requirePermission(user, ROUTE_PERMISSION.modelConfig))
@@ -1592,7 +1627,8 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/mcp-servers/discover', async c => {
-    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
+    // Host configuration files are not user-scoped, unlike saved MCP entries.
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'workspace.manage')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(
       await discoverMcpServers({
@@ -1604,7 +1640,8 @@ export function createAgentWorkflowApp(
   })
 
   app.get('/api/mcp-servers/discover-active', async c => {
-    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'mcp.manage')
+    // Loopback discovery probes the server host, not the caller's device.
+    const forbidden = requirePermission(getCurrentUser(c.req.raw), 'workspace.manage')
     if (forbidden) return c.json(forbidden, 403)
     const user = getCurrentUser(c.req.raw)
     const servers = await dashboardRepository.listMcpServers(c.req.raw, user)
@@ -1641,7 +1678,7 @@ export function createAgentWorkflowApp(
     const saved = await dashboardRepository.upsertMcpServer(
       c.req.raw,
       user,
-      toMcpServerInput(body),
+      { ...toMcpServerInput(body), id: undefined },
     )
     await dashboardRepository.appendAuditEvent(c.req.raw, user, {
       actorId: user.id,
@@ -1664,6 +1701,10 @@ export function createAgentWorkflowApp(
     const error = await validateMcpServerBody(body, hasPermittedOutboundUrl)
     if (error) return c.json({ error }, 400)
     const user = getCurrentUser(c.req.raw)
+    const ownedServers = await dashboardRepository.listMcpServers(c.req.raw, user)
+    if (!ownedServers.some(server => server.id === c.req.param('id'))) {
+      return c.json({ error: 'MCP server not found' }, 404)
+    }
     const saved = await dashboardRepository.upsertMcpServer(c.req.raw, user, {
       ...toMcpServerInput(body),
       id: c.req.param('id'),
@@ -1819,6 +1860,28 @@ export function createAgentWorkflowApp(
     const forbidden = requirePermission(user, 'project.read')
     if (forbidden) return c.json(forbidden, 403)
     return c.json(await dashboardRepository.listProjects(c.req.raw, user))
+  })
+
+  app.get('/api/projects/page', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    const offset = Number(c.req.query('offset') ?? 0)
+    const limit = Number(c.req.query('limit') ?? 20)
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+      return c.json({ error: 'Invalid project page' }, 400)
+    }
+    return c.json(await dashboardRepository.listProjectsPage(
+      c.req.raw, user, offset, limit, c.req.query('search')?.trim() ?? '',
+    ))
+  })
+
+  app.get('/api/projects/:id/metadata', async c => {
+    const user = getCurrentUser(c.req.raw)
+    const forbidden = requirePermission(user, 'project.read')
+    if (forbidden) return c.json(forbidden, 403)
+    const project = await dashboardRepository.getProject(c.req.raw, user, c.req.param('id'))
+    return project ? c.json(project) : c.json({ error: 'Project not found' }, 404)
   })
 
   app.get('/api/resource-packs/:packId/impact', async c => {
@@ -2080,8 +2143,7 @@ export function createAgentWorkflowApp(
     if (forbidden) return c.json(forbidden, 403)
     const body = await readJson(c.req.raw)
     const user = getCurrentUser(c.req.raw)
-    const projects = await dashboardRepository.listProjects(c.req.raw, user)
-    const existing = projects.find(project => project.id === c.req.param('id'))
+    const existing = await dashboardRepository.getProject(c.req.raw, user, c.req.param('id'))
     if (!existing) return c.json({ error: 'Project not found' }, 404)
     try {
       const nextProject = {
@@ -4559,9 +4621,7 @@ async function getOwnedProjectMetadata(
   projectId: string,
   repository: DashboardRepository,
 ): Promise<BeeGameProjectMetadata | undefined> {
-  return (await repository.listProjects(request, user)).find(
-    project => project.id === projectId,
-  )
+  return repository.getProject(request, user, projectId)
 }
 
 async function ensureBeeGameProjectSession(input: {

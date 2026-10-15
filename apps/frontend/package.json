@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
+    "check": "bun run typecheck && bun run test:run --maxWorkers=2 && bun run build",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",

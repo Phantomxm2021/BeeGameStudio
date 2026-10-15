@@ -23,8 +23,6 @@ let mockedAuthenticationStatus: 'initializing' | 'authenticated' | 'anonymous' =
 let mockedIsDark = true;
 const bootstrapProject = vi.fn().mockResolvedValue('proj_1');
 const setToastCallbacks = vi.fn();
-const loadHistory = vi.fn();
-let activeLoadHistory = loadHistory;
 const { getChatHistory } = vi.hoisted(() => ({
   getChatHistory: vi.fn().mockResolvedValue([]),
 }));
@@ -75,20 +73,6 @@ vi.mock('./store/systemStore', () => ({
   },
 }));
 
-vi.mock('./store/chatStore', () => ({
-  useChatStore: Object.assign((selector?: (state: { loadHistory: typeof loadHistory; messages: never[] }) => unknown) => {
-    const state = {
-    loadHistory: activeLoadHistory,
-    messages: [],
-    };
-    return selector ? selector(state) : state;
-  }, {
-    getState: () => ({
-      messages: [],
-    }),
-  }),
-}));
-
 vi.mock('./contexts/ToastContext', () => ({
   useToastContext: () => ({
     showError,
@@ -119,9 +103,15 @@ vi.mock('./components/Demiurge/LandingView', () => ({
   LandingView: () => <div data-testid="landing-view" />,
 }));
 
+// App routing/auth tests also render WorkspaceLoadingPage. Its canvas avatar
+// has separate interaction/renderer tests; JSDOM does not implement Path2D.
+vi.mock('./components/Demiurge/Landing/DotsAvatar', () => ({
+  DotsAvatar: () => null,
+}));
+
 vi.mock('./components/Demiurge/DashboardView', () => ({
-  DashboardView: ({ lang, onSetLang }: { lang: string; onSetLang: (language: 'en') => void }) => (
-    <div data-testid="dashboard-view" data-language={lang}>
+  DashboardView: ({ lang, projectId, onSetLang }: { lang: string; projectId: string; onSetLang: (language: 'en') => void }) => (
+    <div data-testid="dashboard-view" data-language={lang} data-project-id={projectId}>
       <button onClick={() => onSetLang('en')}>Switch to English</button>
     </div>
   ),
@@ -146,7 +136,6 @@ describe('App view routing', () => {
     mockedHasLoadedProjects = true;
     activeLoadProjects = loadProjects;
     activeLoadCurrentUser = loadCurrentUser;
-    activeLoadHistory = loadHistory;
     getChatHistory.mockReset().mockResolvedValue([]);
     window.history.pushState({}, '', '/');
   });
@@ -214,16 +203,10 @@ describe('App view routing', () => {
     expect(screen.getByLabelText('Restoring project workspace')).toBeInTheDocument();
   });
 
-  it('reloads the active project transcript when hot reload replaces the chat store', async () => {
-    const { rerender } = render(<App />);
-    await waitFor(() => expect(getChatHistory).toHaveBeenCalledTimes(1));
-
-    const replacement = vi.fn();
-    activeLoadHistory = replacement;
-    rerender(<App />);
-
-    await waitFor(() => expect(getChatHistory).toHaveBeenCalledTimes(2));
-    expect(replacement).toHaveBeenCalledWith([]);
+  it('leaves transcript loading to the mounted workspace session', async () => {
+    render(<App />);
+    await screen.findByTestId('dashboard-view');
+    expect(getChatHistory).not.toHaveBeenCalled();
   });
 
   it('shows a recovery state and retries a temporarily unavailable authentication service', async () => {
@@ -339,27 +322,12 @@ describe('App view routing', () => {
     expect(loadActivities).not.toHaveBeenCalled();
   });
 
-  it('does not commit late chat history after switching projects', async () => {
-    let resolveFirstHistory: (value: unknown) => void = () => undefined;
-    getChatHistory.mockImplementation((projectId: string) => {
-      if (projectId === 'proj_1') {
-        return new Promise((resolve) => { resolveFirstHistory = resolve; });
-      }
-      return Promise.resolve([{ id: 'new-project-message' }]);
-    });
-
+  it('routes project changes without issuing transcript requests from the app shell', async () => {
     const { rerender } = render(<App />);
-    await waitFor(() => expect(getChatHistory).toHaveBeenCalledWith('proj_1'));
-
+    expect(await screen.findByTestId('dashboard-view')).toHaveAttribute('data-project-id', 'proj_1');
     mockedActiveProjectId = 'proj_2';
     rerender(<App />);
-    await waitFor(() => expect(loadHistory).toHaveBeenCalledWith([{ id: 'new-project-message' }]));
-
-    await act(async () => {
-      resolveFirstHistory([{ id: 'old-project-message' }]);
-      await Promise.resolve();
-    });
-
-    expect(loadHistory).not.toHaveBeenCalledWith([{ id: 'old-project-message' }]);
+    expect(screen.getByTestId('dashboard-view')).toHaveAttribute('data-project-id', 'proj_2');
+    expect(getChatHistory).not.toHaveBeenCalled();
   });
 });

@@ -2,8 +2,9 @@ import { test, expect } from 'bun:test'
 import { mkdtemp, mkdir, writeFile, cp, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { taskSchema, createRun, publishPlan, claimTask, finishTask, V3_PROTOCOL, type TaskSpec } from './state'
-import { runChecks, checkIsCurrent, assertFreshDependencies, readVersion } from './checks'
+import { taskSchema, type TaskSpec } from './state'
+import { checkIsCurrent } from './checks'
+import { runChecks } from './checker-test-driver'
 import { uiLayoutFixture, sceneLayoutFixture } from '../fixtures/layout-fixture'
 import { assetManifestAuthoringExamples } from '../asset-manifest-authoring-contract'
 import { writeBeeGameAssetManifest } from '../asset-contracts'
@@ -69,26 +70,15 @@ test('actual package bytes/resources checked without eight documents; additions 
     expect(result.observation).toContain('Not runtime data consumption')
     expect(result.artifacts?.[0]?.path).toBe('dist')
     expect(await checkIsCurrent(root, result)).toBe(true)
-    const original = createRun({ projectId: 'package-dependency', ownerId: 'owner', workspacePath: root, chatSessionId: 'chat', requestKey: 'run',
-      text: 'Synthetic packaging and consumer', constraints: {}, ids: ['req.loop'] })
-    const producer = { ...artifactTask, id: 'package', kind: 'game.develop' as const, writablePaths: ['dist/**'] }
-    const consumer: TaskSpec = { id: 'consumer', kind: 'game.verify', goal: 'Consume measured package', dependsOn: ['package'], requirementIds: ['req.loop'],
-      inputs: [], writablePaths: ['verification.json'], expectedOutputs: ['verification.json'], checks: ['artifact-json'] }
-    const planned = publishPlan(original, { protocol: V3_PROTOCOL, baseRevision: 0, requirementsRevision: original.requirements.revision, tasks: [producer, consumer] })
-    const claimed = claimTask(planned, { taskId: 'package', requestKey: 'package', workerId: 'worker', sessionId: 'synthetic', inputVersions: [] })
-    const accepted = finishTask(claimed, claimed.writer!.attemptId, claimed.fence, { checks: [result], outputs: [await readVersion(root, 'dist/index.html')] }, true)
-    await assertFreshDependencies(accepted, consumer)
     await writeFile(join(root, 'dist/new.js'), 'new output')
     expect(await checkIsCurrent(root, result)).toBe(false)
-    // index.html did not change. The measured directory still invalidates its consumer.
-    await expect(assertFreshDependencies(accepted, consumer)).rejects.toThrow('package')
+    // index.html did not change. The measured directory still invalidates the check.
     await rm(join(root, 'dist/new.js'))
     await writeFile(join(root, 'content/ui/extra.json'), '{}')
     expect(await checkIsCurrent(root, result)).toBe(false)
     await rm(join(root, 'content/ui/extra.json'))
     await writeFile(join(root, 'assets/runtime/example/resource.json'), '{"changed":true}')
     expect(await checkIsCurrent(root, result)).toBe(false)
-    await expect(assertFreshDependencies(accepted, consumer)).rejects.toThrow('package')
     const stale = (await runChecks(root, artifactTask, [])).checks[0]!
     expect(stale.status).toBe('failed'); expect(stale.observation).toContain('Packaged bytes differ')
   } finally { await rm(root, { recursive: true, force: true }) }

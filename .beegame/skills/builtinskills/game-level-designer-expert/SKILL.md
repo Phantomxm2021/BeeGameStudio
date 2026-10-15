@@ -11,6 +11,8 @@ This skill focuses on **moment-to-moment gameplay experience**.
 
 It optimizes spatial flow, tension rhythm, and player learning curves.
 
+Use only the methods relevant to the current assignment. For an existing-level fix, inspect the affected route or encounter rather than redesigning the whole level or requiring a full design report. Follow the task's actual scope and responsibilities; a public example does not add mechanics, production stages or tool availability.
+
 ---
 
 ## 1. Spatial Flow Design
@@ -44,7 +46,7 @@ When a game has a learning progression, introduce, combine, and test mechanics a
 
 ## 4. Difficulty Curve
 
-Avoid sudden spikes.
+Avoid unintended or insufficiently communicated difficulty spikes that conflict with the intended experience. Deliberate escalation or surprise can be valid design choices.
 
 Required actions and hazards should be legible enough for the intended fairness, even when the game deliberately uses surprise.
 
@@ -56,21 +58,18 @@ Choose 2D grid/tile placement, free-form scene objects, or 3D spatial layout acc
 
 ## 5. Practical approach
 
-Establish what the player can do, place the critical route and affordances, and check them against the documented movement rules and geometry. When a playable game exists and runtime verification is part of the task, verify a representative traversal or encounter there; otherwise identify what still needs runtime observation. For an existing-level fix, check the affected route rather than redesigning the entire level.
-
-For each planned level or reusable scene, describe its gameplay purpose, spatial arrangement, camera framing, entry/exit or completion path, and relevant encounter/teaching beats. Tie those decisions to the actual abilities and rules; state what still needs runtime verification.
+For each planned level or reusable scene, relate its gameplay purpose, spatial arrangement, camera framing, entry/exit or completion path and relevant encounter/teaching beats to the actual player abilities and rules. Place the critical route and affordances, then check them against the documented movement and geometry. When a playable game exists and runtime verification is in scope, verify the relevant traversal or encounter there; otherwise state which observations remain unavailable.
 
 Use a spatial representation suited to the task: a dimensioned description, grid, region graph or placement specification. Relate the intended route, challenge and pacing to that arrangement and the movement/obstacle rules. When assigned Scene JSON, save those relationships, identities, logical sizes, collision geometry and Camera in the actual linked source. Continue that source through later binding work instead of translating a second map. Static connectivity does not establish runtime safety, traversal or pacing. Use a small route calculation or solver only for a consequential reachability or rule question it can actually answer; do not build a parallel game or universal simulator for routine planning.
 
-For a concrete consequential geometry uncertainty in BGS Scene data, use the current supplied check-content entry with `--layout-draft workspace-relative-scene-file width height`, or `--camera-draft workspace-relative-camera-file width height` for framing only. The legacy location `.beegame/delivery/check-content.mjs` applies only when present; do not search host implementation or generate old delivery files to acquire it. Native engine/framework geometry uses its own actual representation and checks. Reuse the supplied contract or retrieve relevant fields together with `--format sceneDocument sceneVocabulary sceneVisibilityContract`; do not probe bundled implementation. Choose Scene data for a Scene question, not an invented UI allocation. Static 2D inspection needs explicit visual size and scale; a collider does not prove visible sprite bounds. Missing TileSet/resource bounds remain unverified until resources arrive, unless a minimal actual sample resolves the concrete dependency. No guessed image size or extra calculation appendix establishes 3D visibility or XR comfort.
+For a concrete consequential geometry uncertainty in BGS Scene data, use the current supplied check-content entry with `--layout-draft workspace-relative-scene-file width height`, or `--camera-draft workspace-relative-camera-file width height` for framing only. Resolve its exact path from the active task's tools and read `--help`; do not guess a fixed delivery path or reuse an expired turn's adapter. Native engine/framework geometry uses its own actual representation and checks. Reuse the supplied contract or retrieve relevant fields together with `--format sceneDocument sceneVocabulary sceneVisibilityContract`; do not probe bundled implementation. Choose Scene data for a Scene question, not an invented UI allocation. Static XY inspection needs explicit visual size and scale; a collider does not prove visible sprite bounds. It does not establish occlusion, dynamic camera behavior, traversal, 3D visibility or XR comfort. Missing TileSet/resource bounds remain unverified until resources arrive, unless a minimal actual sample resolves the concrete dependency; guessed image sizes or extra calculation appendices do not close that gap.
 
 Use the actual play-area allocation for camera framing, including host offset; BGS UI expresses this as game-view. Before UI's allocation exists, state visibility requirements and space needs rather than treating them as final. With linked Scene/UI inputs available, use the same Scene through layoutCamera and the shared calculator, including requiredVisibleNodeIds when applicable. Reconcile world scale and safe overlays; do not maintain another region-size or camera-offset table. Later resource binding must preserve logical geometry or identify a necessary owner revision. Different screen shapes can use different arrangements without changing gameplay scale or rules.
 
 Keep the document focused on the resulting design and its reasons, not a long calculation transcript. Distinguish geometric distance, traversable distance and playtime assumptions; leave untested timing and game feel identified as such. Design-time calculations do not require implementing the game or building a new verification framework. Choose the method and representation freely; this is not a mandated file format or production stage.
 
-Use only the relevant steps for the current request; prioritize player flow
-without requiring a full level-design report for a focused fix.
-
 ## Reference Files
 
-Read [spatial and teaching examples](references/encounter-design-patterns.md) when establishing a route, mechanic lesson or encounter. Select the applicable example; combat escalation is not the default for puzzles or traversal.
+Read [spatial and teaching examples](references/encounter-design-patterns.md) when establishing a route, mechanic lesson or encounter. Its canal-crossing exercise connects player action, camera, environment resources and observation through explicit tradeoffs; use it for that reasoning question, not as a level template. Select the applicable example; combat escalation is not the default for puzzles or traversal.
+
+For several connected activities, use the same reference's [two-room route exercise](references/encounter-design-patterns.md#worked-route-reasoning-two-rooms-and-a-return) to compare topology, information order, return travel and variation. A local geometry repair does not require reorganizing the whole level.

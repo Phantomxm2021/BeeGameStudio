@@ -7,8 +7,13 @@ vi.mock('./Landing/CreditStoreModal', () => ({ CreditStoreModal: () => null }));
 vi.mock('./Landing/ProjectHistoryModal', () => ({ ProjectHistoryModal: () => null }));
 vi.mock('./Landing/ProfileModal', () => ({ ProfileModal: () => null }));
 vi.mock('./Landing/AccountActionsMenu', () => ({ AccountActionsMenu: () => null }));
+vi.mock('./Landing/DotsAvatar', () => ({ DotsAvatar: ({ mood, label }: { mood: string; label: string }) =>
+  <div role="img" aria-label={label} data-mood={mood} /> }));
 vi.mock('../beui/motion/theme-toggle', () => ({ ThemeToggle: () => null }));
-vi.mock('../Workspace/WorkspaceDeploymentDialog', () => ({ WorkspaceDeploymentDialog: () => null }));
+vi.mock('../Workspace/WorkspaceDeploymentDialog', () => ({ WorkspaceDeploymentDialog: ({ isOpen, onDeploy }: {
+  isOpen: boolean; onDeploy: (confirmation: unknown) => void;
+}) => isOpen ? <button onClick={() => onDeploy({ measurementId: 'measured', requirementsRevision: 'revision',
+  discussionConfirmation: { messageRequestKeys: ['question-1'] } })}>test discussion publish</button> : null }));
 
 const props = {
   projectId: 'project',
@@ -18,6 +23,22 @@ const props = {
 const live = { status: 'passed', build_url: '/previews/session/game/' };
 
 describe('dashboard header', () => {
+  it('retains a rejected Preview reason across idle polls, clears on retry and does not leak to another project', async () => {
+    const reason = 'Exportable sources changed: tests/capture.mjs';
+    const onStartPreview = vi.fn().mockRejectedValueOnce(new Error(reason)).mockResolvedValue(undefined);
+    const { rerender } = render(<BeeGameLivePreviewPage {...props} onStartPreview={onStartPreview} />);
+    fireEvent.click(screen.getByRole('button', { name: '播放预览' }));
+    await waitFor(() => expect(screen.getByText(reason)).toBeVisible());
+    rerender(<BeeGameLivePreviewPage {...props} buildReport={null} onStartPreview={onStartPreview} />);
+    expect(screen.getByText(reason)).toBeVisible();
+    rerender(<BeeGameLivePreviewPage {...props} projectId="other" onStartPreview={onStartPreview} />);
+    expect(screen.queryByText(reason)).not.toBeInTheDocument();
+    rerender(<BeeGameLivePreviewPage {...props} onStartPreview={onStartPreview} />);
+    fireEvent.click(screen.getByRole('button', { name: '播放预览' }));
+    await waitFor(() => expect(onStartPreview).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(reason)).not.toBeInTheDocument();
+  });
+
   it('does not expose the retired production-review action', () => {
     render(<BeeGameLivePreviewPage {...props} />);
     expect(screen.queryByRole('button', { name: '制作验收' })).not.toBeInTheDocument();
@@ -50,12 +71,12 @@ describe('dashboard header', () => {
     render(<BeeGameLivePreviewPage {...props} status="running" isAgentWorking onStartPreview={onStartPreview} />);
     expect(screen.getByText('Bee Game Studio工作中')).toBeInTheDocument();
     const avatar = screen.getByRole('img');
-    expect(avatar).toHaveAttribute('data-state', 'working');
+    expect(avatar).toHaveAttribute('data-mood', 'thinking');
     fireEvent.click(screen.getByRole('button', { name: '播放预览' }));
     expect(screen.getByText('Bee Game Studio工作中')).toBeInTheDocument();
     expect(screen.queryByText('正在准备预览')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('beegame-preview-surface'));
-    expect(avatar).toHaveAttribute('data-state', 'working');
+    expect(avatar).toHaveAttribute('data-mood', 'thinking');
     await act(async () => finish());
   });
 
@@ -142,9 +163,25 @@ describe('dashboard header', () => {
     fireEvent.click(trigger);
     const panel = within(screen.getByTestId('beegame-project-hint'));
     for (const label of ['项目运行时间', '已消耗 Credit', '输入 Tokens', '缓存输入 Tokens', '输出']) expect(panel.getByText(label)).toBeInTheDocument();
-    for (const value of ['2小时 0分钟', '1.25', '100', '200', '300']) expect(panel.getByText(value)).toBeInTheDocument();
+    for (const value of ['2小时 0分钟', '1.25', '100', '250', '300']) expect(panel.getByText(value)).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('labels live session tokens separately from settled project totals', () => {
+    render(<BeeGameLivePreviewPage {...props} tokenUsageScope="session" settledProjectTokens={900}
+      credits={{ consumedCredits: 0.5 }} tokenUsage={{ input_tokens: 12, cached_input_tokens: 34, output_tokens: 5, total_tokens: 51 }} />);
+    fireEvent.click(screen.getByTestId('beegame-project-info-trigger'));
+    const panel = within(screen.getByTestId('beegame-project-hint'));
+    expect(panel.getByText('输入 Tokens（当前会话）')).toBeInTheDocument();
+    expect(panel.getByText('项目已结算 Tokens')).toBeInTheDocument();
+    expect(panel.getByText('900')).toBeInTheDocument();
+  });
+
+  it('does not round a small confirmed credit debit down to zero', () => {
+    render(<BeeGameLivePreviewPage {...props} credits={{ consumedCredits: 0.0001 }} />);
+    fireEvent.click(screen.getByTestId('beegame-project-info-trigger'));
+    expect(within(screen.getByTestId('beegame-project-hint')).getByText('0.0001')).toBeInTheDocument();
   });
 
   it('does not turn unavailable usage into zero', () => {
@@ -175,6 +212,17 @@ describe('dashboard header', () => {
     expect(control.getByRole('button', { name: '停止预览' })).toBeEnabled();
     expect(control.getByRole('button', { name: '部署' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: '独立窗口预览' })).not.toBeInTheDocument();
+  });
+
+  it('forwards post-measurement discussion confirmation through the page deploy handler', async () => {
+    const onDeployProject = vi.fn();
+    render(<BeeGameLivePreviewPage {...props} onDeployProject={onDeployProject} />);
+    fireEvent.click(screen.getByRole('button', { name: '部署' }));
+    fireEvent.click(screen.getByRole('button', { name: 'test discussion publish' }));
+    await waitFor(() => expect(onDeployProject).toHaveBeenCalledWith({
+      measurementId: 'measured', requirementsRevision: 'revision',
+      discussionConfirmation: { messageRequestKeys: ['question-1'] },
+    }));
   });
 
   it('disables deploy in the segmented control when publishing is unavailable', () => {

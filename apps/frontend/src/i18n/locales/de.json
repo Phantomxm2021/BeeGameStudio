@@ -740,6 +740,10 @@
     "customStyle": "Eigenen Stil hinzufügen",
     "customGameType": "Eigenen Spieltyp hinzufügen",
     "create": "Paket erstellen",
+    "createMoreInfo": "Weitere Informationen",
+    "createContinue": "Weiter",
+    "createBack": "Zurück zu den Basisdaten",
+    "createAddTag": "Tag hinzufügen",
     "creating": "Wird erstellt…",
     "createRequired": "Name, Stil und Spieltyp eingeben und eine Hauptkategorie wählen.",
     "update": "Paket speichern",
@@ -771,6 +775,7 @@
     "list": {
       "all": "Alle Ressourcenpakete",
       "search": "Ressourcenpakete suchen",
+      "filter": "Filtern",
       "empty": "Keine Ressourcenpakete",
       "emptyHint": "Erstelle ein Paket, um Spielressourcen zu organisieren.",
       "previous": "Zurück",

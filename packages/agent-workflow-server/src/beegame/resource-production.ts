@@ -191,7 +191,7 @@ export async function produceResources(workspace: string, value: unknown, fetche
     const media = await produceMedia(root, atlas, undefined, true)
     await saveNew(root, registrationOutput, bytes)
     return { ...media, registrationRequest: registrationOutput,
-      next: 'Shared resources owner: resources.mjs --register-from ' + registrationOutput }
+      next: 'Shared resources owner: use the supplied resources.mjs entry with --register-from ' + registrationOutput }
   }
   if (request.operation === 'register') {
     // The existing registry owns serialization/validation. Guard its exact
@@ -230,7 +230,8 @@ export async function produceResources(workspace: string, value: unknown, fetche
     } catch (error) { failures.push({ item: cue.id, error: String(error) }) }
   } else for (const job of request.jobs) try {
     await assetPath(root, job.output)
-    fontUrl(job.url); fontUrl(job.licenseUrl)
+    try { fontUrl(job.url) } catch (error) { throw Error('fonts.jobs.url: ' + String(error)) }
+    try { fontUrl(job.licenseUrl) } catch (error) { throw Error('fonts.jobs.licenseUrl: ' + String(error)) }
     const provenancePath = job.output + '.source.json'
     let cached: any
     try { cached = JSON.parse(await readFile(await assetPath(root, provenancePath), 'utf8')) }
@@ -260,16 +261,18 @@ export async function produceResources(workspace: string, value: unknown, fetche
       ['Composition, anti-aliasing, seamless loop sound and listening quality. This renders explicit synthesis recipes, not arbitrary high-quality music.'] }
 }
 
-export const RESOURCE_HELP = `Usage: bun <resources-entry> --capabilities | request.json
-  bun .beegame/delivery/resources.mjs --register-from registration-1.json registration-2.json
-  bun .beegame/delivery/resources.mjs --list [RESOURCE-ID ...] [--details]
+export const RESOURCE_HELP = `Usage: bun <resources-entry> --capabilities
+  bun <resources-entry> request.json
+  bun <resources-entry> --register-from registration-1.json registration-2.json
+  bun <resources-entry> --list [RESOURCE-ID ...] [--details]
 --list reads the current registry without writing: all IDs/fulfills/default roots/statuses/file counts. Specified IDs also return exact member paths. --details returns full selected records including hashes/provenance. Do not cat every resource module or reread large persisted output merely to find binding operands.
 No package installation is needed. Existing image processing/atlas packing stays at media.mjs.
 atlas: media.mjs atlas fields plus resource:{id,fulfills,provisional,reason,selection_reason,asset_kind?,dimension?,styles?,source?}, registrationOutput:"assets/atlas-registration.json". Produces the actual atlas/frame table and a ready-to-register request with exact output paths. No manual rectangles, hashes or registry edits. Workers only produce these request files; the shared owner combines them with --register-from. Existing images/media.mjs remain supported.
 register: {operation:"register",resources:[{id,fulfills,root_path,file_paths,provisional,reason,selection_reason,asset_kind?,dimension?,styles?,source?}],projectTarget?,requirements?}.
+selection_reason is a non-empty string array, not a string. Encoded audio (including recipe-rendered WAV) uses asset_kind:"audio-clip" (or music/ambience/voice), never "audio". Structured synthesis JSON uses audio-cue/audio-bank and is not encoded playback evidence.
 Workers return only their resources; projectTarget and requirements belong to the shared owner, not one audio/visual group. The owner may supply a separate configuration request with resources:[] and combine it with all workers using --register-from owner-config.json visual-registration.json audio-registration.json. This is one registration batch, not repeated initialization.
 projectTarget uses the Manifest project's project_target fields: {platform,runtime,asset_format_capabilities,resource_library_usage,runtime_asset_root,generated_asset_root}. For a Web consumer proven to load PNG/WAV/WOFF2/JSON, an example is {platform:"web",runtime:"react",asset_format_capabilities:["png","wav","woff2","json"],resource_library_usage:"optional",runtime_asset_root:"assets/runtime",generated_asset_root:"assets/generated"}. This example is NOT platform evidence or permission to broaden an existing target. Use the actual approved runtime and all required supported formats, including fonts and metadata; never infer global capabilities from one worker's file extensions.
-Use --contract for exact requirement objects/enums without creating a Manifest; assets/manifest/CONTRACT.md remains a legacy saved reference. Use the actual resources/media entries supplied in the project context rather than creating legacy wrappers. Every fulfills ID must be an actual requirement id, not its display name or a resource id. Existing targets/requirements cannot be silently redefined. Hashes and registry modules are computed, never supplied. Web resources use source:{type:"web",source_url,page_url,license,license_url?,retrieved_at}; fonts are not agent-authored.
+Use --contract for exact requirement objects/enums without creating a Manifest. Use the actual resources/media entries supplied in the project context. Every fulfills ID must be an actual requirement id, not its display name or a resource id. Existing targets/requirements cannot be silently redefined. Hashes and registry modules are computed, never supplied. Web resources use source:{type:"web",source_url,page_url,license,license_url?,retrieved_at}; fonts are not agent-authored.
 Registration stdout lists resource IDs, file counts and the canonical manifest location; source facts, full paths and computed hashes remain in its modules. Append --details only when those full values are needed. Do not grep bundled implementations to discover these input fields.
 audio: {operation:"audio",recipe:{format:"beegame-programmatic-audio-v1",cues:[{id,duration_ms,loop?:{start_ms,end_ms},voices:[{source:{type:"oscillator",waveform:"sine"|"square"|"triangle"|"sawtooth",frequency_hz,end_frequency_hz?},start_ms,duration_ms,gain,attack_ms?,release_ms?,pan?}]}]},outputs:{"cue-id":"assets/runtime/cue.wav"},sampleRate?:44100}.
 Noise source is {type:"noise",color:"white"|"pink"|"brown"}. Sample rates 22050/44100/48000; stereo PCM16. Peak normalization is reported. Loop metadata is returned for runtime binding, not an assertion of seamless audio. Repeated identical bytes reuse files; different bytes require a new path.
@@ -315,7 +318,10 @@ export async function runResourceProductionCli(args = process.argv.slice(2)) {
       : result)); if (!result.valid) process.exitCode = 1
   } catch (error) {
     const issues = error && typeof error === 'object' && 'issues' in error && Array.isArray(error.issues)
-      ? error.issues.map((issue: any) => `${issue.path?.join('.') || 'request'}: ${issue.message}`) : [String(error)]
+      ? error.issues.map((issue: unknown) => typeof issue === 'string' ? issue :
+          issue && typeof issue === 'object' && 'message' in issue && typeof issue.message === 'string'
+            ? `${'path' in issue && Array.isArray(issue.path) ? issue.path.join('.') || 'request' : 'request'}: ${issue.message}`
+            : String(issue)) : [String(error)]
     console.log(JSON.stringify({ valid: false, issues })); process.exitCode = 1
   }
 }

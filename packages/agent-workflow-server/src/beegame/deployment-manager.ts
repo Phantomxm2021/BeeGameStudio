@@ -120,6 +120,7 @@ type DeploymentInput = {
    * Publish never builds; revalidate the selection before exposing its copy. */
   measured?: {
     runId: string; measurementId: string; artifact: { path: string; sha256: string }
+    discussionConfirmation?: { requirementsRevision: string; messageRequestKeys: string[] }
     validate(): Promise<void>
   }
 }
@@ -348,6 +349,7 @@ export class BeeGameDeploymentManager {
 
       const result = input.measured ? {exitCode:0,stderr:'',stdout:JSON.stringify({protocol:'bgs.workflow.v3',
         runId:input.measured.runId,measurementId:input.measured.measurementId,artifact:input.measured.artifact,
+        ...(input.measured.discussionConfirmation?{discussionConfirmation:input.measured.discussionConfirmation}:{}),
         quality:'unverified',operation:'User-requested publication of measured bytes; no rebuild or quality certification.'})} :
         input.acceptance ? { exitCode: 0, stdout: 'Publishing the accepted build without rebuilding.', stderr: '' } : await this.runner(plan.command, {
         cwd: plan.cwd,

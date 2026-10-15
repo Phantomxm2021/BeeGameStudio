@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  closeProjectEditorRoute,
   getProjectEditorRoute,
   getProjectEditorFileRoute,
   getProjectRouteId,
@@ -12,6 +13,35 @@ import {
 
 describe('workspaceRoute', () => {
   beforeEach(() => window.history.replaceState({}, '', '/'));
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+  it.each(['scene', 'ui'] as const)('closes a separate %s editor tab instead of navigating it to the project', editor => {
+    window.history.replaceState({}, '', `/?project=project-1&editor=${editor}&editorFile=content.json`);
+    const close = vi.spyOn(window, 'close').mockImplementation(() => { vi.stubGlobal('closed', true); });
+    closeProjectEditorRoute('project-1');
+    expect(close).toHaveBeenCalledOnce();
+    expect(getProjectEditorRoute('project-1')).toBe(editor);
+  });
+
+  it('returns to the project when the browser refuses to close a manually opened tab', () => {
+    window.history.replaceState({}, '', '/?project=project-1&editor=scene&editorFile=content.json');
+    vi.stubGlobal('closed', false);
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+    closeProjectEditorRoute('project-1');
+    expect(close).toHaveBeenCalledOnce();
+    expect(getProjectRouteId()).toBe('project-1');
+    expect(getProjectEditorRoute()).toBeNull();
+    expect(getProjectEditorFileRoute()).toBeNull();
+  });
+
+  it('exits an in-page editor without closing the project tab', () => {
+    openProjectEditorRoute('project-1', 'ui');
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {});
+    closeProjectEditorRoute('project-1');
+    expect(close).not.toHaveBeenCalled();
+    expect(getProjectRouteId()).toBe('project-1');
+    expect(getProjectEditorRoute()).toBeNull();
+  });
 
   it('makes the project dashboard and editors refreshable', () => {
     openProjectRoute('project-1');

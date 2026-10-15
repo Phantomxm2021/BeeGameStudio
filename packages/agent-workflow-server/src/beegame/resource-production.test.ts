@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { produceResources, mergeRegistrationRequests, listRegisteredResources } from './resource-production'
-import { assetManifestAuthoringExamples } from './asset-manifest-authoring-contract'
+import { assetManifestAuthoringExamples, renderAssetManifestAuthoringContract } from './asset-manifest-authoring-contract'
 import { readBeeGameAssetManifest } from './asset-contracts'
 import { materializeContentCheckerEntry } from './scene-ui-content-authoring'
 import { sharedContentChecker } from './content-checker-runtime'
@@ -29,6 +29,7 @@ test('atlas output supplies exact registration paths and merges through the real
     const result: any = await produceResources(root, request)
     expect((await produceResources(root, request) as any).registrationRequest).toBe(request.registrationOutput)
     expect(result.registrationRequest).toBe(request.registrationOutput)
+    expect(result.next).toContain('supplied resources.mjs entry with --register-from')
     const prepared = JSON.parse(await readFile(join(root, request.registrationOutput), 'utf8'))
     expect(prepared.resources[0].file_paths).toEqual([request.output, request.metadata])
     expect(prepared.resources[0]).not.toHaveProperty('local_file_hashes')
@@ -137,6 +138,9 @@ test('font acquisition rejects redirects, arbitrary origins, bad headers and pat
   try {
     for (const job of [{ ...fontJob, url: 'http://127.0.0.1/font' }, { ...fontJob, output: '../font.woff2' }])
       expect((await produceResources(root, { operation: 'fonts', jobs: [job] }, fetcher)).valid).toBe(false)
+    const invalidLicense = await produceResources(root, { operation: 'fonts', jobs: [{ ...fontJob,
+      licenseUrl: 'https://github.com/google/fonts/blob/main/OFL.txt' }] }, fetcher) as any
+    expect(invalidLicense.failures[0].error).toContain('fonts.jobs.licenseUrl')
     expect(calls).toBe(0)
     expect((await produceResources(root, { operation: 'fonts', jobs: [fontJob] }, fetcher)).valid).toBe(false)
     expect(calls).toBe(1)
@@ -210,9 +214,49 @@ test('materialized resource CLI exposes real capabilities and renders without in
     const value = JSON.parse(await new Response(capabilities.stdout).text())
     expect(await capabilities.exited).toBe(0)
     expect(value).toMatchObject({ registration: true, audioSynthesisWav: true, aiMusicGeneration: false })
+    const help = Bun.spawn([process.execPath, '.beegame/delivery/resources.mjs', '--help'], { cwd: root, env, stdout: 'pipe', stderr: 'pipe' })
+    expect(await new Response(help.stdout).text()).not.toContain('.beegame/delivery/resources.mjs')
+    expect(await help.exited).toBe(0)
+    expect(renderAssetManifestAuthoringContract()).not.toContain('.beegame/delivery/resources.mjs')
     await writeFile(join(root, 'request.json'), JSON.stringify({ operation: 'audio', recipe, outputs: { cue: 'assets/runtime/cue.wav' } }))
     const child = Bun.spawn([process.execPath, '.beegame/delivery/resources.mjs', 'request.json'], { cwd: root, env, stdout: 'pipe', stderr: 'pipe' })
     expect(JSON.parse(await new Response(child.stdout).text()).valid).toBe(true)
     expect(await child.exited).toBe(0)
   } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('resource CLI preserves native manifest issues instead of request: undefined', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-resource-diagnostic-'))
+  try {
+    await materializeContentCheckerEntry(root)
+    const fixture = assetManifestAuthoringExamples().canonical
+    const item = fixture.resources[0]!
+    await mkdir(join(root, 'assets/runtime/example'), { recursive: true })
+    await writeFile(join(root, item.root_path), '{}')
+    await writeFile(join(root, 'request.json'), JSON.stringify({ operation: 'register',
+      resources: [{ id: item.id, fulfills: item.fulfills, root_path: item.root_path, file_paths: item.file_paths,
+        provisional: false, reason: 'Synthetic registration', selection_reason: ['Synthetic test'], dimension: '2d' }],
+      projectTarget: fixture.project_target, requirements: fixture.requirements }))
+    const env = { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: (await sharedContentChecker()).moduleUrl }
+    const child = Bun.spawn([process.execPath, '.beegame/delivery/resources.mjs', 'request.json'], { cwd: root, env, stdout: 'pipe', stderr: 'pipe' })
+    const result = JSON.parse(await new Response(child.stdout).text())
+    expect(await child.exited).toBe(1)
+    expect(result.valid).toBe(false)
+    expect(result.issues.join(' ')).toContain('dimension')
+    expect(result.issues.join(' ')).not.toContain('undefined')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('missing project target points to the supplied contract, not an absent saved path', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-resource-target-diagnostic-'))
+  try {
+    const fixture = assetManifestAuthoringExamples().canonical
+    const item = fixture.resources[0]!
+    await mkdir(join(root, 'assets/runtime/example'), { recursive: true })
+    await writeFile(join(root, item.root_path), '{}')
+    await expect(produceResources(root, { operation: 'register', resources: [{
+      id:item.id, fulfills:item.fulfills, root_path:item.root_path, file_paths:item.file_paths,
+      provisional:false, reason:'Synthetic', selection_reason:['Synthetic fixture'],
+    }] })).rejects.toThrow('--contract')
+  } finally { await rm(root, { recursive:true, force:true }) }
 })

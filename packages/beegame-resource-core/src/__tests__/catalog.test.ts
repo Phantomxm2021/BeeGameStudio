@@ -26,6 +26,44 @@ const elements: ResourceElement[] = [
 ]
 
 describe('resource catalog browsing', () => {
+  test('browses technically ready unclassified audio without claiming a semantic match', () => {
+    const audioPack: ResourcePack = { ...packs[1]!, primaryCategory: 'audio', categories: ['audio'] }
+    const audio: ResourceElement = {
+      ...element('unclassified', audioPack.id, 'audio/clip.ogg', 'audio', 'audio-clip', [], []),
+      kind: 'audio', usageTagsMode: 'inherit',
+    }
+    const request = { filters: { formats: ['ogg'] } }
+    const summary = browseResourceCatalogPacks([audioPack], [audio], request)
+    expect(summary.items[0]).toMatchObject({ readyElementCount: 1, formats: ['ogg'], usageTags: [] })
+    expect(browseResourcePackElements([audioPack], [audio], audioPack.id, request).items)
+      .toEqual([expect.objectContaining({ elementId: audio.id, usageTags: [] })])
+    expect(browseResourcePackElements([audioPack], [audio], audioPack.id, { filters: { usageTags: ['sound-effect'] } }).total).toBe(0)
+    expect(matchResourceRequirements([audioPack], [audio], {
+      requirements: [{ requirementId: 'sound', profile: { dimensions: ['agnostic'], assetKinds: ['audio-clip'], usageTags: ['sound-effect'], capabilities: [], styles: [] } }],
+      deliveryCapabilities: [{ sourceFormat: 'ogg', disposition: 'direct', targetFormat: 'ogg' }],
+    }).groups[0]).toMatchObject({ status: 'no-match', bundles: [] })
+  })
+
+  test('unclassified browsing retains technical checks and the explicit manual-only exclusion', () => {
+    const unclassified = { ...elements[0]!, usageTags: [], usageTagsMode: 'inherit' as const }
+    const invalid: ResourceElement[] = [
+      { ...unclassified, id: 'no-hash', specs: {} },
+      { ...unclassified, id: 'no-kind', assetKind: undefined },
+      { ...unclassified, id: 'hidden', status: 'hidden' },
+      { ...unclassified, id: 'failed', status: 'failed' },
+      { ...unclassified, id: 'missing-dependency', dependencies: ['absent'] },
+      { ...unclassified, id: 'failed-dependency', dependencies: ['failed'] },
+      { ...unclassified, id: 'unmapped-reference', specs: { ...unclassified.specs, externalReferences: '["missing.png"]' } },
+      { ...unclassified, id: 'manual', usageTagsMode: 'manual-only' },
+    ]
+    const result = browseResourcePackElements(packs, [unclassified, ...invalid], unclassified.packId, {})
+    expect(result.items.map(item => item.elementId)).toEqual([unclassified.id])
+    const staleInherited = { ...unclassified, usageTags: ['environment' as const] }
+    expect(browseResourcePackElements(packs, [staleInherited], unclassified.packId, {}).items[0]?.usageTags).toEqual([])
+    expect(browseResourceCatalogPacks(packs, [staleInherited], {}).facets.usageTags).toEqual([])
+    expect(browseResourcePackElements(packs, [staleInherited], unclassified.packId, { filters: { usageTags: ['environment'] } }).total).toBe(0)
+  })
+
   test('browses Packs without project roles and exposes facets for iterative discovery', () => {
     const page = browseResourceCatalogPacks(packs, elements, { limit: 1 })
 

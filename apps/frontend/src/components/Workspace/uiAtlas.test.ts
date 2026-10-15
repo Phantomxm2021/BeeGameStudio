@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { uiAtlasImages, uiImageKey, resolveUiImage } from './uiAtlas';
+import { uiAtlasImages, uiImageKey, resolveUiImage } from '../../../../../packages/scene-editor/src/ui-preview/uiAtlas';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 

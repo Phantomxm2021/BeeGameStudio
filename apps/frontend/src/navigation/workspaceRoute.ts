@@ -96,6 +96,12 @@ export function openProjectEditorFileRoute(
 }
 
 export function closeProjectEditorRoute(projectId: string): void {
+  // Document routes open in their own tab; keep in-page editors in the project tab.
+  if (getProjectEditorFileRoute(projectId)) {
+    window.close();
+    if (window.closed) return;
+  }
+  // Manually opened tabs may not be script-closable.
   openProjectRoute(projectId, { replace: true });
 }
 

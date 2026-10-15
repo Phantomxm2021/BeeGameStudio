@@ -1,11 +1,11 @@
-import { uiNodeKind, supportsTextNode, supportsImageNode, isVisualNode, isTransformNode, isNineSliceRole, uiNodeText, nodeSize, uiFontSize, nodeAnchor, nodePosition, uiPaintChildren, renderUiNode, uiNodeImageSource, resolveNodeImage, type UiNodeKind } from './UiContentRenderer';
-import './UiContentRenderer.css';
-import { loadUiFont, loadUiImage } from './uiResourceLoading';
+import { uiNodeKind, supportsTextNode, supportsImageNode, isVisualNode, isTransformNode, isNineSliceRole, uiNodeText, nodeSize, uiFontSize, nodeAnchor, nodePosition, uiPaintChildren, renderUiNode, uiNodeImageSource, resolveNodeImage, type UiNodeKind } from '../../../../../packages/scene-editor/src/ui-preview/UiContentRenderer';
+import '../../../../../packages/scene-editor/src/ui-preview/UiContentRenderer.css';
+import { loadUiFont, loadUiImage } from '../../../../../packages/scene-editor/src/ui-preview/uiResourceLoading';
 import { uiFontKey } from '../../../../../packages/scene-editor/src/ui-font-reference';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Matrix4 } from 'three';
 import { resolveUiNodesForViewport, initializeUiLayout, createUiTextMeasurer, uiAnchor, uiLocalMatrix } from '@beegame/scene-editor';
-import { uiImageKey } from './uiAtlas';
+import { uiImageKey } from '../../../../../packages/scene-editor/src/ui-preview/uiAtlas';
 import { mapEditorAssets } from './editorAssetLoading';
 import { currentKeyboardLabels, resolveUnityNavigationAction, wheelPixels } from '@beegame/scene-editor/platform';
 import {
@@ -23,6 +23,7 @@ import {
   Menu,
   Magnet,
   Maximize2,
+  Monitor,
   MousePointer2,
   MousePointerBan,
   Mouse,
@@ -87,6 +88,13 @@ const PREVIEW_VIEWPORTS: Record<Exclude<ViewportMode, 'base' | 'custom'>, [numbe
   'phone-landscape': [844, 390],
   'tablet-portrait': [768, 1024],
 };
+const VIEWPORT_LABELS: Record<ViewportMode, string> = {
+  base: 'Base',
+  'phone-portrait': 'Phone · portrait',
+  'phone-landscape': 'Phone · landscape',
+  'tablet-portrait': 'Tablet · portrait',
+  custom: 'Custom',
+};
 
 const UI_IMAGE = /\.(?:png|jpe?g|webp|gif|avif|bmp|svg)$/i;
 const UI_FONT = /\.(?:woff2?|ttf|otf)$/i;
@@ -136,6 +144,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
   const [current, setCurrent] = useState<UiSnapshot>();
   const [selectedId, setSelectedId] = useState('');
   const [viewportMode, setViewportMode] = useState<ViewportMode>('base');
+  const [viewportSettingsOpen, setViewportSettingsOpen] = useState(false);
   const [customViewport, setCustomViewport] = useState<[number, number]>([960, 540]);
   const [assetUrls, setAssetUrls] = useState<Record<string, string>>({});
   const [assetOptions, setAssetOptions] = useState<UiAssetOption[]>([]);
@@ -410,6 +419,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
   const rootCompactBreakpoint = current?.document.data.nodes.find(node => node.id === current.document.data.rootId)?.data?.compactMaxWidth;
   const previewSize = viewportMode === 'base' ? canvasSize(current?.document)
     : viewportMode === 'custom' ? customViewport : PREVIEW_VIEWPORTS[viewportMode];
+  const [previewWidth, previewHeight] = previewSize;
   const previewLayout = useMemo(() => {
     if (!current) return { nodes: [], error: '' };
     const needsMeasurement = current.document.data.nodes.some(node => node.text !== undefined && !node.layout?.size &&
@@ -421,11 +431,11 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
     }) : undefined;
     try {
       return { nodes: resolveUiNodesForViewport(current.document.data.nodes, current.document.data.rootId,
-        { width: previewSize[0], height: previewSize[1] }, { measureText }), error: '' };
+        { width: previewWidth, height: previewHeight }, { measureText }), error: '' };
     } catch (error) {
       return { nodes: [], error: error instanceof Error ? error.message : String(error) };
     }
-  }, [current, viewportMode, previewSize[0], previewSize[1], fontFamilies]);
+  }, [current, previewWidth, previewHeight, fontFamilies]);
   const previewNodes = previewLayout.nodes;
   const previewSelected = previewNodes.find(node => node.id === selectedId);
   const children = useMemo(() => childIds(current?.document.data.nodes ?? []), [current]);
@@ -963,6 +973,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
         if (closeRequested) return;
         if (document.querySelector('.ui-editor-overlay [aria-expanded="true"][aria-haspopup="listbox"]')) return;
         if (contextMenuOpen) setContextMenuOpen(false);
+        else if (viewportSettingsOpen) setViewportSettingsOpen(false);
         else if (imagePickerOpen) setImagePickerOpen(false);
         else if (screenMenuOpen) setScreenMenuOpen(false);
         else if (addMenuOpen) setAddMenuOpen(false);
@@ -971,7 +982,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
         else closeEditor();
         return;
       }
-      if (menuOpen || imagePickerOpen || contextMenuOpen || closeRequested) return;
+      if (menuOpen || imagePickerOpen || viewportSettingsOpen || contextMenuOpen || closeRequested) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void save(); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
         event.preventDefault();
@@ -1018,7 +1029,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
       if (currentRef.current?.path === next.path) applyCurrent(mergeSaved(currentRef.current));
       setDocuments(value => value.map(item => item.path === next.path ? mergeSaved(item) : item));
       savedContentRef.current[next.path] = JSON.stringify(next.document);
-      setMessage('Saved');
+      setMessage('Saved to content files. Rebuild and verify to confirm the changes take effect in the game.');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1179,8 +1190,7 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
             </EditorMenuPopup>
           </MenuPrimitive.Root>
           <span className="ui-editor-toolbar-divider" />
-          <EditorSelect label="Viewport" ariaLabel="Preview viewport" value={viewportMode} onValueChange={value => setViewportMode(value as ViewportMode)} options={[[ 'base', 'Base' ], [ 'custom', 'Custom' ], [ 'phone-portrait', 'Phone · portrait' ], [ 'phone-landscape', 'Phone · landscape' ], [ 'tablet-portrait', 'Tablet · portrait' ]]} />
-          {viewportMode === 'custom' ? <div className="ui-editor-viewport-size"><EditorInput aria-label="Preview width" type="number" min="1" value={customViewport[0]} onChange={event => setCustomViewport(([_, height]) => [Math.max(1, Number(event.target.value)), height])} /><span>×</span><EditorInput aria-label="Preview height" type="number" min="1" value={customViewport[1]} onChange={event => setCustomViewport(([width]) => [width, Math.max(1, Number(event.target.value))])} /></div> : null}
+          <Button variant="ghost" size="sm" type="button" aria-label="Preview viewport" aria-haspopup="dialog" aria-expanded={viewportSettingsOpen} title="Viewport settings" onClick={() => setViewportSettingsOpen(true)}><Monitor size={16} /><span>{VIEWPORT_LABELS[viewportMode]}</span></Button>
           <span className="ui-editor-toolbar-divider" />
           <Button variant="ghost" size="sm" type="button" aria-pressed={gizmoMode === 'hand'} className={gizmoMode === 'hand' ? 'active' : ''} aria-label="Hand tool" title="Hand / Pan (Q)" onClick={() => setGizmoMode('hand')}><Hand size={16} /></Button>
           <Button variant="ghost" size="sm" type="button" disabled={viewportMode !== 'base'} aria-pressed={gizmoMode === 'move' && viewportMode === 'base'} className={gizmoMode === 'move' && viewportMode === 'base' ? 'active' : ''} aria-label="Move tool" title="Move (W)" onClick={() => setGizmoMode('move')}><Move size={16} /></Button>
@@ -1405,8 +1415,32 @@ export function UiEditorOverlay({ projectId, onClose, initialDocumentPath }: UiE
             <span title="Hold Shift while dragging a scale handle to preserve proportions"><Scaling size={13} /><kbd aria-label="Shift">{keyboard.shift}</kbd><span>Drag · Proportional</span></span>
           </div>
         </footer>
-        <div className="ui-editor-notice" role="alert">{/^(Saved|Saving…|Duplicated|Added |Deleted |$)/.test(message) ? frameIssues.join('; ') : message}</div>
+        <div className="ui-editor-notice" role="alert">{/^(Saved$|Saving…$|Duplicated$|Added |Deleted |$)/.test(message) ? frameIssues.join('; ') : message}</div>
       </main>
+      <Dialog open={viewportSettingsOpen} onOpenChange={setViewportSettingsOpen}>
+        <DialogContent className="ui-editor-viewport-dialog" onKeyDown={event => event.stopPropagation()}>
+          <div className="ui-editor-viewport-dialog-header">
+            <div><DialogTitle>Viewport settings</DialogTitle><DialogDescription>Choose a preview size. Your base layout stays unchanged.</DialogDescription></div>
+            <Button variant="ghost" size="icon" aria-label="Close viewport settings" onClick={() => setViewportSettingsOpen(false)}><X size={16} /></Button>
+          </div>
+          <div className="ui-editor-viewport-options" role="radiogroup" aria-label="Viewport type">
+            {(Object.entries(VIEWPORT_LABELS) as [ViewportMode, string][]).map(([mode, label]) => {
+              const size = mode === 'base' ? canvasSize(current?.document) : mode === 'custom' ? customViewport : PREVIEW_VIEWPORTS[mode];
+              return <div key={mode} className="ui-editor-viewport-option">
+                <label>
+                  <input type="radio" name="ui-preview-viewport" aria-label={label} checked={viewportMode === mode} onChange={() => setViewportMode(mode)} />
+                  <span>{label}</span>{mode !== 'custom' ? <small>{size[0]} × {size[1]}</small> : null}
+                </label>
+                {mode === 'custom' ? <div className="ui-editor-viewport-size" onFocusCapture={() => setViewportMode('custom')}>
+                  <EditorInput aria-label="Preview width" type="number" min="1" value={customViewport[0]} onChange={event => setCustomViewport(([_, height]) => [Math.max(1, Number(event.target.value)), height])} />
+                  <span>×</span>
+                  <EditorInput aria-label="Preview height" type="number" min="1" value={customViewport[1]} onChange={event => setCustomViewport(([width]) => [width, Math.max(1, Number(event.target.value))])} />
+                </div> : null}
+              </div>;
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={imagePickerOpen} onOpenChange={setImagePickerOpen}>
         <DialogContent className="ui-editor-asset-dialog" onKeyDown={event => event.stopPropagation()}>
           <div className="ui-editor-asset-dialog-header">

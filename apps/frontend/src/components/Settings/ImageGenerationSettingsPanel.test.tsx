@@ -4,6 +4,8 @@ import { useRef, useState } from 'react';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { ImageGenerationSettingsPanel, type ImageSettingsHandle, type ImageSettingsState } from './ImageGenerationSettingsPanel';
 import { getImageGenerationSettings, saveImageGenerationSettings, type ImageGenerationSettings } from '../../services/imageGenerationApi';
+const { showError } = vi.hoisted(() => ({ showError: vi.fn() }));
+vi.mock('../../contexts/ToastContext', () => ({ useToastContext: () => ({ showError }) }));
 vi.mock('../../services/imageGenerationApi', () => ({ getImageGenerationSettings: vi.fn(), saveImageGenerationSettings: vi.fn() }));
 const config: ImageGenerationSettings = { provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-image-2.5-flare', quality: 'medium', size: '1024x1024', hasApiKey: true };
 const onSaved = vi.fn();
@@ -26,6 +28,20 @@ beforeEach(() => {
   vi.mocked(saveImageGenerationSettings).mockImplementation(async input => ({ ...input, hasApiKey: Boolean(input.apiKey) || config.hasApiKey }));
 });
 describe('image settings', () => {
+  it('preserves the selected provider and unsaved credentials when changing language', async () => {
+    const { rerender } = render(<ImageGenerationSettingsPanel language="zh" />);
+    await screen.findByDisplayValue(config.model);
+    await choose('Vercel AI Gateway');
+    await screen.findByDisplayValue('vercel-model');
+    await userEvent.type(screen.getByLabelText('API Key'), 'unsaved-image-key');
+
+    rerender(<ImageGenerationSettingsPanel language="en" />);
+    await waitFor(() => expect(screen.getByLabelText('API Key')).toHaveValue('unsaved-image-key'));
+    expect(screen.getByLabelText('Model')).toHaveValue('vercel-model');
+    expect(getImageGenerationSettings).toHaveBeenCalledTimes(2);
+    expect(saveImageGenerationSettings).not.toHaveBeenCalled();
+  });
+
   it('uses the parent save action and preserves omitted credentials', async () => {
     render(<Harness />);
     await screen.findByDisplayValue(config.model);
@@ -86,12 +102,13 @@ describe('image settings', () => {
       billing: expect.objectContaining({ fixedCreditsByVariant: expect.objectContaining({ 'medium:1024x1024': 9 }) }),
     })));
   });
-  it('keeps the form open and uses the global destructive status style on failure', async () => {
+  it('keeps the form open and reports save failure through the global toast', async () => {
     vi.mocked(saveImageGenerationSettings).mockRejectedValue(new Error('not shown raw'));
     render(<Harness />);
     await screen.findByDisplayValue(config.model);
     await userEvent.click(screen.getByRole('button', { name: '保存设置' }));
-    expect(await screen.findByRole('alert')).toHaveClass('text-destructive');
+    await waitFor(() => expect(showError).toHaveBeenCalledWith('保存失败，请检查配置、加密密钥和服务状态。'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(onSaved).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '保存设置' })).toBeEnabled();
   });

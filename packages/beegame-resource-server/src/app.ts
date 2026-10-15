@@ -13,8 +13,6 @@ import {
   resolveResourceSemanticVisualKind,
   browseResourcePackElements,
   browseResourceCatalogPacks,
-  browseResourceCatalogPackSummaries,
-  hasElementCatalogFilters,
   ResourceCatalogCursorError,
   evaluateResourcePackPublishReadiness,
   matchResourceRequirements,
@@ -141,13 +139,9 @@ export function createBeeGameResourceServerApp(
       }
       if (request.method === 'POST' && pathname === '/api/resource-catalog/packs') {
         const catalogRequest = parseCatalogRequest(await request.json())
-        if (
-          options.repository.listCatalogPacks &&
-          !hasElementCatalogFilters(catalogRequest.filters)
-        ) {
-          return corsResponse(Response.json(browseResourceCatalogPackSummaries(await options.repository.listCatalogPacks(), catalogRequest)), options.corsOrigin)
-        }
-        const packs = await options.repository.listPacks()
+        // Use the same readiness as element browsing. The SQL summary omits
+        // unresolved external references and can otherwise overstate counts.
+        const packs = (await options.repository.listPacks()).filter(pack => pack.status === 'published')
         const elements = (await Promise.all(packs.map(pack => options.repository.listElements(pack.id)))).flat()
         return corsResponse(Response.json(browseResourceCatalogPacks(packs, elements, catalogRequest)), options.corsOrigin)
       }
@@ -178,11 +172,11 @@ export function createBeeGameResourceServerApp(
         const packId = decodeURIComponent(explorePackMatch[1])
         const pack = await options.repository.getPack(packId)
         if (!pack || pack.status !== 'published') return corsResponse(jsonError(404, 'not_found', 'Published Resource Pack not found'), options.corsOrigin)
-        const [catalog, folders] = await Promise.all([
-          options.repository.listCatalogPacks?.(),
+        const [elements, folders] = await Promise.all([
+          options.repository.listElements(packId),
           options.repository.listFolders(packId),
         ])
-        const summary = catalog?.find(candidate => candidate.packId === packId)
+        const summary = browseResourceCatalogPacks([pack], elements, {}).items[0]
         return corsResponse(Response.json({ pack, folders, summary: summary ?? null }), options.corsOrigin)
       }
       if (request.method === 'POST' && pathname === '/api/resource-library/resolve'

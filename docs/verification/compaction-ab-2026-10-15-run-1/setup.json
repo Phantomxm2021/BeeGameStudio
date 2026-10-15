@@ -1,0 +1,169 @@
+{
+  "sourceSha256": "294d2e277087e496a329daa1069018e1aabe9947f54514f9d430e2864a280fad",
+  "prefixPhysicalLines": 327,
+  "selectedMessages": 319,
+  "projectedMessages": 217,
+  "inputSha256": "0f74529599cb1688d53fcfd295bb4279312872f34729ff0b261b8efd1e0d1e5b",
+  "historicalToolNames": [
+    "Bash",
+    "Edit",
+    "Read",
+    "Skill",
+    "TodoWrite",
+    "Write"
+  ],
+  "promptCharacters": {
+    "A": 6361,
+    "B": 2916
+  },
+  "preservedHistoricalMessages": 2,
+  "preservedTailMessages": 8,
+  "versions": {
+    "A": {
+      "repository": "https://github.com/claude-code-best/claude-code",
+      "commit": "34b3dc99bf40c57c0b78f3b5b1d70471ebc2d06d",
+      "localRef": "tmp/claude-code-main",
+      "label": "v2.8.4",
+      "limitation": "Locally available pinned source, not verified latest GitHub main; third-party repository, not official Anthropic source."
+    },
+    "B": {
+      "head": "053094a8365368e527f3de0af7aecdae3d0a4b7b",
+      "includesUncommittedChanges": true,
+      "limitation": "File fingerprints identify relevant current contents, not an immutable complete runtime snapshot. Recheck before any execution; stop if changed."
+    },
+    "alignmentManifest": {
+      "declaredCommit": "3bb6b5746238c418138eb96d57765d79012edd96",
+      "availableInLocalObjectDatabase": false,
+      "decision": "Do not substitute the manifest SHA for the actually available baseline."
+    },
+    "files": [
+      {
+        "path": "bun.lock",
+        "upstreamSha256": "8f33f16c6ed9047fe317df4abe870b18ca890bd9519acd20e982eeb81e691614",
+        "localSha256": "1fd01e0dc7f23d657eedb8b1032da63300cf7047bbbcb39a3380ffd3382504fc"
+      },
+      {
+        "path": "package.json",
+        "upstreamSha256": "af4e76703f3b79ec17a23b15569974af8037f75cf4564041938b289d73980a0b",
+        "localSha256": "6c428efb2b9f744123464f282e3dfb52c0879b9248bfbeca64c5f6bfd28aedc0"
+      },
+      {
+        "path": "src/query.ts",
+        "upstreamSha256": "6e06e02885411a93af15096a2cba949c0a273e3ae9ccdaed17cb97b16fd9a9db",
+        "localSha256": "a47462968949fae80c1abac41f2c0339738d534e6e03b0868e13f70a674585f9"
+      },
+      {
+        "path": "src/services/compact/apiMicrocompact.ts",
+        "upstreamSha256": "c3d1ccf2851eba5adf024ed429963019091225fb896bb55a9e0798811b778160",
+        "localSha256": "570da3ceb2d9a1a797e1eed17a9233f9cbd653a3202b7cfe1b34f49b0423f852"
+      },
+      {
+        "path": "src/services/compact/autoCompact.ts",
+        "upstreamSha256": "81e7eac76b680ba71f96853c30efae1d55777b75e06ada7141b375271ff10155",
+        "localSha256": "81e7eac76b680ba71f96853c30efae1d55777b75e06ada7141b375271ff10155"
+      },
+      {
+        "path": "src/services/compact/cachedMicrocompact.ts",
+        "upstreamSha256": "aef7b271bbde5ec284a142877204cb8daf6a82df645e4642aff7429b199056ec",
+        "localSha256": "aef7b271bbde5ec284a142877204cb8daf6a82df645e4642aff7429b199056ec"
+      },
+      {
+        "path": "src/services/compact/compact.ts",
+        "upstreamSha256": "a08ef94b2894488c6f45490f63af30b16293ab1bd86c3422679acc2101e31211",
+        "localSha256": "94722ed5b59ce335beee48fd26f3fc475b85bb9e3eb7e6af44fa2252f228ed28"
+      },
+      {
+        "path": "src/services/compact/compactWarningHook.ts",
+        "upstreamSha256": "54b868f85798c3a6da9280b7e654373131ecc15233d8787139cff73b4a84100d",
+        "localSha256": "54b868f85798c3a6da9280b7e654373131ecc15233d8787139cff73b4a84100d"
+      },
+      {
+        "path": "src/services/compact/compactWarningState.ts",
+        "upstreamSha256": "c5cd4f8b99973899cafde2355796afe1a3e1112c0cc8ecae9e8e9c86d74eb7d3",
+        "localSha256": "c5cd4f8b99973899cafde2355796afe1a3e1112c0cc8ecae9e8e9c86d74eb7d3"
+      },
+      {
+        "path": "src/services/compact/grouping.ts",
+        "upstreamSha256": "af1541451a5e127f4303049fe771fc2d472319d91ca27feebb954c532eaf3695",
+        "localSha256": "af1541451a5e127f4303049fe771fc2d472319d91ca27feebb954c532eaf3695"
+      },
+      {
+        "path": "src/services/compact/microCompact.ts",
+        "upstreamSha256": "90e6c9b5a93546b46ae689084c7c967972e583784b20bacbf88c58c8b053b7fa",
+        "localSha256": "8fb54724d4fba7c5f0cfb6ae95519fc0794c8b56990cfbfacbdeb3daecdcf8e3"
+      },
+      {
+        "path": "src/services/compact/postCompactCleanup.ts",
+        "upstreamSha256": "ba5f590f7bc12b0b92dbff105ff62d0c9cb1c2eebf93533e08f656c7ff397766",
+        "localSha256": "39be6ec71e5b80c70b1e6b5404c94462671e8e516986a4401caff0b3c53d0334"
+      },
+      {
+        "path": "src/services/compact/preservedContext.ts",
+        "upstreamSha256": null,
+        "localSha256": "52b55538aae7573496107d22158336063cd88af958d8df2a750e48c5e0ed3159"
+      },
+      {
+        "path": "src/services/compact/prompt.ts",
+        "upstreamSha256": "d30c3db139ec82af9ee1db35504fcb55d76a50aa0b1e3318c238aa47abdac772",
+        "localSha256": "1100637f25b20600394ae22174e15939b8f624eb1e9d258f96717102d1509ee0"
+      },
+      {
+        "path": "src/services/compact/reactiveCompact.ts",
+        "upstreamSha256": "b539a4882ea422faf9fcbcc17303510d9445c415d3b337ae803324b5b96d2ca6",
+        "localSha256": "b539a4882ea422faf9fcbcc17303510d9445c415d3b337ae803324b5b96d2ca6"
+      },
+      {
+        "path": "src/services/compact/sessionMemoryCompact.ts",
+        "upstreamSha256": "7e2d60891ed049b1153cd33b8189825f90bbf7a97ce51e78b8bb17aec2d296a0",
+        "localSha256": "7e2d60891ed049b1153cd33b8189825f90bbf7a97ce51e78b8bb17aec2d296a0"
+      },
+      {
+        "path": "src/services/compact/snipCompact.ts",
+        "upstreamSha256": "9f25adb9a59832504a5704c175b8d4d0741c06ee94cdb6736c35cba58bcb90ea",
+        "localSha256": "9f25adb9a59832504a5704c175b8d4d0741c06ee94cdb6736c35cba58bcb90ea"
+      },
+      {
+        "path": "src/services/compact/snipProjection.ts",
+        "upstreamSha256": "0d60707c9473708f596fca7ec748ff3787f668a51aa603e1582fd343711722ec",
+        "localSha256": "0d60707c9473708f596fca7ec748ff3787f668a51aa603e1582fd343711722ec"
+      },
+      {
+        "path": "src/services/compact/timeBasedMCConfig.ts",
+        "upstreamSha256": "aede0336973766a4ae25d2625156d3f9300736896ed4691b566e1c98472fd6f9",
+        "localSha256": "aede0336973766a4ae25d2625156d3f9300736896ed4691b566e1c98472fd6f9"
+      },
+      {
+        "path": "src/types/message.ts",
+        "upstreamSha256": "78c8c1e1583dddfccb4daa87b8cfd089eff90eb4f4897b1053451f9f31999aa2",
+        "localSha256": "54a903becd18be4b1bbee0b553bd19999966a3717ab080632786b30524973e29"
+      },
+      {
+        "path": "src/utils/sessionStorage.ts",
+        "upstreamSha256": "2e06c6c1cc9662f6f576aee5410e63a5c2a61a8cbfbdbe2f7bea4057023fe973",
+        "localSha256": "b98efcce61c4e035c1427b20b0f3e344ad3fdd10dd17a6e1a06c1ce5cd24f38b"
+      },
+      {
+        "path": "src/utils/tokens.ts",
+        "upstreamSha256": "68dde6e361db05d287b7e027646663ee5f0988f284971c519faac01cd23f2e6b",
+        "localSha256": "1959f8385ce683568a2346d04ae83b4edcf7e846794f296a8d9654c3364d3048"
+      }
+    ]
+  },
+  "model": "ark-code-latest",
+  "endpointHost": "ark.cn-beijing.volces.com",
+  "endpointPath": "/api/coding/v1/messages",
+  "summaryMaxTokens": 16384,
+  "continuationMaxTokens": 4096,
+  "maxContinuationRounds": 3,
+  "temperature": 0,
+  "thinking": "disabled",
+  "cacheControlRequested": false,
+  "limitations": [
+    "One paired diagnostic sample; not a statistical or task-completion evaluation.",
+    "Pinned upstream v2.8.4, not verified latest main. Provider alias ark-code-latest does not identify an immutable underlying model.",
+    "Text projection removes historic thinking and replaces five historical images with markers, as the source fallback summary path does. Original system prompt, exact historical tool schemas, cache-sharing fork, restored files/skills/hooks and production transport normalization are not replayed. Visual retention is not evaluated.",
+    "Historical tool schemas are inert placeholders shared by both arms; only ReadTranscript is executable. No project/product write is possible.",
+    "Full-compaction prompt and retention composition are compared; this is not an end-to-end production compactor invocation.",
+    "Provider usage is measured for this diagnostic only. Costs remain unknown without billing evidence; cache differences are reported, not assumed equal."
+  ]
+}

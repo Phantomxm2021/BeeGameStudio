@@ -1,5 +1,6 @@
 import {
   Check,
+  ChevronRight,
   Circle,
   FileText,
   Globe2,
@@ -12,6 +13,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useId, useState } from "react";
 import { EASE_OUT, SPRING_LAYOUT } from "@/components/beui/registry/lib/ease";
 import { cn } from "@/components/beui/registry/lib/utils";
 import type {
@@ -215,6 +217,22 @@ function TraceIcon({ kind }: { kind: AgentActivityTrace["kind"] }) {
 }
 
 function TraceRow({ item }: { item: AgentActivityTrace }) {
+  const [open, setOpen] = useState(false);
+  const contentId = useId();
+  if (item.content !== undefined || item.onSelect) {
+    return <div className="min-w-0">
+      <button type="button"
+        aria-expanded={item.content !== undefined ? open : undefined}
+        aria-controls={item.content !== undefined ? contentId : undefined}
+        onClick={() => item.onSelect ? item.onSelect() : setOpen(!open)}
+        className="group flex min-h-9 max-w-full items-start gap-2.5 rounded-md py-1.5 text-left text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <span aria-hidden="true" className="mt-0.5 grid size-4 shrink-0 place-items-center opacity-75">{item.icon ?? <TraceIcon kind={item.kind} />}</span>
+        <span className="min-w-0 line-clamp-2 break-words leading-6 [overflow-wrap:anywhere]">{item.label}</span>
+        <ChevronRight aria-hidden="true" className={cn("mt-1 size-4 shrink-0 opacity-70 transition-transform", open && "rotate-90")} />
+      </button>
+      {item.content !== undefined && open && <div id={contentId} className="ml-[26px] min-w-0 pb-3 pt-1 text-sm leading-relaxed text-muted-foreground">{item.content}</div>}
+    </div>;
+  }
   return (
     <div className="grid min-h-8 grid-cols-[1rem_auto_minmax(0,1fr)] items-center gap-2.5 rounded-md px-1.5 py-0.5">
       <span

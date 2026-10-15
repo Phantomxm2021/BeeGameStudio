@@ -123,13 +123,12 @@ export function McpSettingsPanel({
 }) {
   const [activeServerMenuId, setActiveServerMenuId] = useState('');
   return (
-    <div className="space-y-4 py-2">
-      <p className="type-callout max-w-2xl text-muted-foreground">{copy.intro}</p>
+    <div className="flex min-h-0 flex-1 flex-col gap-4 py-2">
+      {servers.length ? <p className="type-callout max-w-2xl text-muted-foreground">{copy.intro}</p> : null}
 
-      <div className="divide-y divide-border border-y border-border">
-        <div className="type-caption-1 py-3 text-muted-foreground">{copy.configured}</div>
-        {servers.length ? (
-          servers.map(server => (
+      {servers.length ? (
+        <div className="divide-y divide-border border-y border-border">
+          {servers.map(server => (
             <div key={server.id} className="flex items-center justify-between gap-3 py-3">
               <button
                 type="button"
@@ -234,11 +233,14 @@ export function McpSettingsPanel({
                 ) : null}
               </div>
             </div>
-          ))
-        ) : (
-          <div className="type-callout py-4 text-muted-foreground">{copy.noServers}</div>
-        )}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className={`flex min-h-48 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-muted/20 px-4 py-8 text-center text-muted-foreground ${activeDiscovered.length || discovered.length ? '' : 'flex-1'}`} data-testid="mcp-empty-state">
+          <Network className="size-6" aria-hidden="true" />
+          <p className="type-footnote">{copy.noServers}</p>
+        </div>
+      )}
 
       {activeDiscovered.length ? (
         <div className="divide-y divide-border border-y border-border">
@@ -462,6 +464,7 @@ export function McpServerFormPopover({
               </Button>
               <Button
                 type="button"
+                className="rounded-full"
                 onClick={onSave}
                 disabled={saveDisabled}
               >

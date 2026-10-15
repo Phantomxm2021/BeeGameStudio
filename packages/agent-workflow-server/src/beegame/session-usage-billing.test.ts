@@ -51,6 +51,49 @@ test('failed terminal debit is retained and settled before the next turn bill', 
   } finally { await manager.dispose(); await rm(root, { recursive: true, force: true }) }
 })
 
+test('completed model messages debit observed usage before a long native turn ends without charging it twice', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'bgs-live-session-bill-'))
+  let release!: () => void, checkpoint!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const observed = new Promise<void>(resolve => { checkpoint = resolve })
+  let charged = 0, previous = 0
+  const manager = new BeeGameSessionManager({ async start(input) { return { stop() {}, async submit(turn) {
+    input.onNativeUsage?.({ prompt_tokens: 100, completion_tokens: 20, cache_read_tokens: 0, cache_creation_tokens: 0, total_tokens: 120 })
+    await turn.onMessage({ type: 'assistant', message: { id: 'first-message', content: [{ type: 'text', text: 'Working' }] } })
+    checkpoint()
+    await gate
+    input.onNativeUsage?.({ prompt_tokens: 150, completion_tokens: 30, cache_read_tokens: 0, cache_creation_tokens: 0, total_tokens: 180 })
+    await turn.onMessage({ type: 'result', subtype: 'success', result: 'Done' })
+  } } } }, root, () => ({}), { recordUsage(owner, input) {
+    const delta = input.usage.total_tokens - previous
+    previous = input.usage.total_tokens
+    return { duplicate: false, cumulativeUsage: input.usage, cumulativeWeightedTokens: previous, creditsMicro: previous,
+      event: { id: input.idempotencyKey, idempotencyKey: input.idempotencyKey, userId: owner, sessionId: input.sessionId,
+        pricingVersion: 'fixture', usageSource: 'runtime_snapshot', usage: input.usage,
+        delta: { ...input.usage, total_tokens: delta }, weightedTokens: previous, weightedTokensDelta: delta,
+        creditsMicro: delta, createdAt: new Date().toISOString(), metadata: {} } }
+  }, debitRealtimeUsage(owner, input) {
+    const delta = input.usage.total_tokens - charged
+    charged += delta
+    return { duplicate: false, cumulativeUsage: input.usage, cumulativeWeightedTokens: charged, creditsMicro: charged,
+      event: { id: input.idempotencyKey, idempotencyKey: input.idempotencyKey, userId: owner, sessionId: input.sessionId,
+        pricingVersion: 'fixture', usageSource: 'runtime_snapshot', usage: input.usage,
+        delta: { ...input.usage, total_tokens: delta }, weightedTokens: charged, weightedTokensDelta: delta,
+        creditsMicro: delta, createdAt: new Date().toISOString(), metadata: {} } }
+  } })
+  try {
+    const session = manager.start({ workspacePath: root, userId: 'owner' })
+    await manager.sendWithDisplay(session.id, 'Work')
+    await observed
+    for (let i = 0; i < 100 && charged < 120; i++) await Bun.sleep(5)
+    expect(charged).toBe(120)
+    release()
+    await manager.waitForSessionIdle(session.id)
+    await manager.dispose()
+    expect(charged).toBe(180)
+  } finally { release(); await manager.dispose(); await rm(root, { recursive: true, force: true }) }
+})
+
 test('child progress survives missing terminal receipt without assigning unknown usage to the main agent', async () => {
   const root = await mkdtemp(join(tmpdir(), 'bgs-usage-attribution-'))
   const manager = new BeeGameSessionManager({ async start(input) { return { stop() {}, async submit(turn) {

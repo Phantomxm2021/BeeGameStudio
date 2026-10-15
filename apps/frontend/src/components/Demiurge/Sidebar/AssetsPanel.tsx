@@ -1,4 +1,4 @@
-import { memo, useRef, useState } from 'react';
+import { memo, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { motion } from 'motion/react';
 import { ArrowLeft, Box, CheckCircle2, CircleAlert, Cuboid, FileJson, Image, Info, Music, Upload } from 'lucide-react';
@@ -12,6 +12,7 @@ import { useBeeGameText } from '../../../i18n/useBeeGameTranslations';
 import { Skeleton } from '../../ui/skeleton';
 import { Button } from '../../beui/project-button';
 import { ArtifactEmptyCard } from './ArtifactEmptyCard';
+import { useToastContext } from '../../../contexts/ToastContext';
 
 interface AssetsPanelProps {
     manifest: BeeGameAssetManifestPayload | null;
@@ -138,14 +139,13 @@ function ResourceUploadButton({
   onUpload: (file: File) => Promise<void>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [error, setError] = useState('');
+  const { showError } = useToastContext();
   const handleFile = async (file?: File) => {
     if (!file) return;
-    setError('');
     try {
       await onUpload(file);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      showError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       if (inputRef.current) inputRef.current.value = '';
     }
@@ -166,11 +166,6 @@ function ResourceUploadButton({
           onChange={event => void handleFile(event.currentTarget.files?.[0])}
         />
       </label>
-      {error ? (
-        <div role="alert" className="type-caption-2 max-w-56 text-right text-[var(--destructive)]">
-          {error}
-        </div>
-      ) : null}
     </div>
   );
 }

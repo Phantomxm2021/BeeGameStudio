@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronLeft, File, Info, Search, X } from 'lucide-react';
+import { ChevronLeft, File, Info, Search, SlidersHorizontal, X } from 'lucide-react';
 import {
   resourceLibraryApi,
   ResourceLibraryApiError,
@@ -27,6 +27,7 @@ import { WorkspaceLoadingPage } from '../Common/WorkspaceLoadingPage';
 import { Dialog, DialogContent, DialogTitle } from '../ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../beui/motion/tabs';
 import { ProjectSelect } from '../beui/project-select';
+import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from '../beui/registry/components/motion/popover-morph';
 import {
   createResourceUploadTask,
   listResourceUploadTasks,
@@ -160,10 +161,11 @@ export function buildSafePublishFix(element: ResourceElement, allElements: reado
 }
 
 export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPackId = getResourcePackRoute(), onBack }: ResourceLibraryViewProps) {
+  const { showError } = useToastContext();
   const { t } = useTranslation('resourceLibrary');
   const copy = {
     all: t('list.all'), search: t('list.search'), empty: t('list.empty'), emptyHint: t('list.emptyHint'), previous: t('list.previous'), next: t('list.next'),
-    allDimensions: t('list.allDimensions'), allStatuses: t('list.allStatuses'), allGameTypes: t('list.allGameTypes'), allTags: t('list.allTags'),
+    filter: t('list.filter'), allDimensions: t('list.allDimensions'), allStatuses: t('list.allStatuses'), allGameTypes: t('list.allGameTypes'), allTags: t('list.allTags'),
     draft: t('list.draft'), published: t('list.published'), archived: t('list.archived'),
   };
   const [packs, setPacks] = useState<ResourcePackSummary[]>([]);
@@ -185,8 +187,8 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
   const [elementUpload, setElementUpload] = useState<ElementUploadStatus | null>(null);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [publishReadiness, setPublishReadiness] = useState<ResourcePublishReadiness | null>(null);
-  const [archiveImpact, setArchiveImpact] = useState<BeeGameResourcePackImpactPayload | null>(null);
+  const [publishReadiness, setPublishReadiness] = useState<(ResourcePublishReadiness & { open?: boolean }) | null>(null);
+  const [archiveImpact, setArchiveImpact] = useState<(BeeGameResourcePackImpactPayload & { open?: boolean }) | null>(null);
   const editPackButtonRef = useRef<HTMLButtonElement>(null);
 
   const packSessionRef = useRef(0);
@@ -390,8 +392,8 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
     return (
       <>
       <EditResourcePackDialog open={editDialogOpen} pack={selectedPack} finalFocus={() => editPackButtonRef.current} onClose={() => setEditDialogOpen(false)} onUploadCover={async (file) => { const uploaded = await apiClient.uploadPackCover(selectedPack.id, file); setSelectedPack(uploaded); setPacks((current) => current.map((item) => item.id === uploaded.id ? uploaded : item)); return uploaded; }} onSave={async (input) => { const saved = await apiClient.updatePack(selectedPack.id, input); setSelectedPack(saved); setPacks((current) => current.map((item) => item.id === saved.id ? saved : item)); return saved; }} />
-      {archiveImpact ? <ArchivePackDialog pack={selectedPack} impact={archiveImpact} onClose={() => setArchiveImpact(null)} onArchive={async () => { const archived = await apiClient.archivePack(selectedPack.id); setSelectedPack(archived); setPacks((current) => current.map((item) => item.id === archived.id ? archived : item)); setArchiveImpact(null); }} /> : null}
-      {publishReadiness ? <PublishReadinessDialog report={publishReadiness} autoFixableCount={elements.filter(element => Boolean(buildSafePublishFix(element, elements))).length} onClose={() => setPublishReadiness(null)} onSelectElement={(elementId) => { const element = elements.find((item) => item.id === elementId); if (element) setSelectedElement(element); setPublishReadiness(null); }} onAutoFix={async () => {
+      {archiveImpact ? <ArchivePackDialog pack={selectedPack} impact={archiveImpact} open={archiveImpact.open !== false} onClose={() => setArchiveImpact(current => current && { ...current, open: false })} onClosed={() => setArchiveImpact(null)} onArchive={async () => { const archived = await apiClient.archivePack(selectedPack.id); setSelectedPack(archived); setPacks((current) => current.map((item) => item.id === archived.id ? archived : item)); }} /> : null}
+      {publishReadiness ? <PublishReadinessDialog report={publishReadiness} open={publishReadiness.open !== false} onClosed={() => setPublishReadiness(null)} autoFixableCount={elements.filter(element => Boolean(buildSafePublishFix(element, elements))).length} onClose={() => setPublishReadiness(current => current && { ...current, open: false })} onSelectElement={(elementId) => { const element = elements.find((item) => item.id === elementId); if (element) setSelectedElement(element); setPublishReadiness(current => current && { ...current, open: false }); }} onAutoFix={async () => {
         const fixes = elements.map(element => ({ element, fix: buildSafePublishFix(element, elements) })).filter((entry): entry is { element: ResourceElement; fix: Partial<ResourceElement> } => Boolean(entry.fix));
         if (fixes.length) {
           const updated = await Promise.all(fixes.map(({ element, fix }) => apiClient.updateElement(selectedPack.id, element.id, fix)));
@@ -423,7 +425,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         onClearElement={() => setSelectedElement(null)}
         editPackButtonRef={editPackButtonRef}
         onEditPack={() => setEditDialogOpen(true)}
-        onArchivePack={async () => { try { setArchiveImpact(await beeGameApi.getResourcePackImpact(selectedPack.id)); } catch (cause) { setError(cause instanceof Error ? cause.message : t('errors.impactLoadFailed')); } }}
+        onArchivePack={async () => { try { setArchiveImpact(await beeGameApi.getResourcePackImpact(selectedPack.id)); } catch (cause) { showError(cause instanceof Error ? cause.message : t('errors.impactLoadFailed')); } }}
         onAddFiles={(files, destination) => void uploadElements(files, destination)}
         onAddFileEntries={uploadQueuedElements}
         onDropFiles={(files, destination) => void uploadElements(files, destination)}
@@ -434,7 +436,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         folders={folders}
         onCreateFolder={async (name) => { const folder = await apiClient.createFolder(selectedPack.id, { name }); setFolders((current) => [...current, folder]); }}
         onUpdateElement={async (elementId, body) => { const updated = await apiClient.updateElement(selectedPack.id, elementId, body); setElements((current) => current.map((item) => item.id === updated.id ? updated : item)); setSelectedElement(updated); }}
-        onPublish={async () => { const report = await apiClient.getPublishReadiness(selectedPack.id); if (!report.canPublish) { setPublishReadiness(report); return; } const published = await apiClient.publishPack(selectedPack.id); setSelectedPack(published); setPacks((current) => current.map((item) => item.id === published.id ? published : item)); }}
+        onPublish={async () => { try { const report = await apiClient.getPublishReadiness(selectedPack.id); if (!report.canPublish) { setPublishReadiness(report); return; } const published = await apiClient.publishPack(selectedPack.id); setSelectedPack(published); setPacks((current) => current.map((item) => item.id === published.id ? published : item)); } catch (cause) { showError(cause instanceof Error ? cause.message : t('errors.loadFailed')); } }}
         onRefreshWorkspace={async () => { const [nextFolders, nextElements] = await Promise.all([apiClient.listFolders(selectedPack.id), apiClient.listElements(selectedPack.id)]); setFolders(nextFolders); setElements(nextElements); setLoadedElementCategories([...new Set(nextElements.map((element) => element.category))]); setSelectedElement((current) => current ? nextElements.find((element) => element.id === current.id) ?? null : null); }}
       /></>
     );
@@ -442,7 +444,7 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
 
   return (
     <section className="relative min-h-full bg-background px-4 py-5 text-foreground sm:px-6 sm:py-6">
-      <CreateResourcePackDialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} onCreate={async (input) => { const created = await apiClient.createPack(input); setPacks((current) => [created, ...current]); return created; }} />
+      <CreateResourcePackDialog open={createDialogOpen} availableTags={tagOptions} onClose={() => setCreateDialogOpen(false)} onCreate={async (input) => { const created = await apiClient.createPack(input); setPacks((current) => [created, ...current]); return created; }} />
       {error ? (
         <div
           role="alert"
@@ -455,25 +457,38 @@ export function ResourceLibraryView({ apiClient = resourceLibraryApi, initialPac
         <div className="flex items-center gap-2 text-xl font-semibold">
           {onBack ? <button type="button" aria-label={t('list.backToWorkspace')} title={t('list.backToWorkspace')} onClick={onBack} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><ChevronLeft className="h-5 w-5" aria-hidden="true" /></button> : null}
           <span>{copy.all}</span>
-          <button type="button" aria-label={t('create')} onClick={() => setCreateDialogOpen(true)} className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground transition hover:bg-accent">+</button>
+          <button type="button" aria-label={t('create')} onClick={() => setCreateDialogOpen(true)} className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border text-muted-foreground transition hover:bg-accent">+</button>
         </div>
         <div className="flex-1" />
-        <label className="flex h-9 w-64 min-w-48 items-center gap-2 rounded-lg border border-input bg-background px-3 text-muted-foreground">
+        <label className="flex h-9 w-64 min-w-48 items-center gap-2 rounded-full border border-input bg-background px-3 text-muted-foreground focus-within:ring-2 focus-within:ring-ring">
           <Search className="h-4 w-4" />
           <input aria-label={copy.search} value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={copy.search} className="type-input min-w-0 flex-1 bg-transparent outline-none" />
         </label>
-        <div aria-label={copy.allDimensions} className="flex rounded-lg border border-border p-0.5">
-          {(['all', '2D', '3D'] as const).map((value) => (
-            <button key={value} type="button" onClick={() => { setDimension(value); setPage(1); }} className={`rounded-md px-3 py-1.5 text-xs ${dimension === value ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent'}`}>
-              {value === 'all' ? copy.allDimensions : value}
+        <MorphPopover>
+          <MorphPopoverTrigger>
+            <button type="button" className={`inline-flex h-9 items-center gap-2 rounded-full border px-3 text-xs font-medium transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${dimension !== 'all' || statusFilter !== 'all' || gameTypeFilter || tagFilter ? 'border-primary text-foreground' : 'border-border text-muted-foreground'}`}>
+              <SlidersHorizontal className="size-4" aria-hidden="true" />{copy.filter}
             </button>
-          ))}
-        </div>
-        <ProjectSelect ariaLabel={copy.allStatuses} value={statusFilter} onValueChange={value => { setStatusFilter(value as typeof statusFilter); setPage(1); }} options={[{ value: 'all', label: copy.allStatuses }, { value: 'draft', label: copy.draft }, { value: 'published', label: copy.published }, { value: 'archived', label: copy.archived }]} triggerClassName="h-9 rounded-lg text-xs" />
-        {gameTypeOptions.length > 0 ? <ProjectSelect ariaLabel={copy.allGameTypes} value={gameTypeFilter} onValueChange={value => { setGameTypeFilter(value); setPage(1); }} options={[{ value: '', label: copy.allGameTypes }, ...gameTypeOptions.map(gameType => ({ value: gameType, label: gameType }))]} className="max-w-44" triggerClassName="h-9 rounded-lg text-xs" /> : null}
-        {tagOptions.length > 0 ? <ProjectSelect ariaLabel={copy.allTags} value={tagFilter} onValueChange={value => { setTagFilter(value); setPage(1); }} options={[{ value: '', label: copy.allTags }, ...tagOptions.map(tag => ({ value: tag, label: tag }))]} className="max-w-40" triggerClassName="h-9 rounded-lg text-xs" /> : null}
+          </MorphPopoverTrigger>
+          <MorphPopoverContent ariaLabel={copy.filter} align="end" onOpenAutoFocus={content => content.focus()} className="w-72 bg-popover p-3 text-popover-foreground">
+            <div className="max-h-[min(60vh,420px)] space-y-3 overflow-y-auto">
+              <div role="group" aria-label={copy.allDimensions} className="flex flex-wrap gap-1.5">
+                {(['all', '2D', '3D'] as const).map(value => <button key={value} type="button" aria-pressed={dimension === value} onClick={() => { setDimension(value); setPage(1); }} className={`rounded-full px-2.5 py-1 text-xs transition ${dimension === value ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent'}`}>{value === 'all' ? copy.allDimensions : value}</button>)}
+              </div>
+              <div role="group" aria-label={copy.allStatuses} className="flex flex-wrap gap-1.5 border-t border-border pt-3">
+                {(['all', 'draft', 'published', 'archived'] as const).map(value => <button key={value} type="button" aria-pressed={statusFilter === value} onClick={() => { setStatusFilter(value); setPage(1); }} className={`rounded-full px-2.5 py-1 text-xs transition ${statusFilter === value ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent'}`}>{value === 'all' ? copy.allStatuses : copy[value]}</button>)}
+              </div>
+              {gameTypeOptions.length > 0 ? <div role="group" aria-label={copy.allGameTypes} className="flex flex-wrap gap-1.5 border-t border-border pt-3">
+                {['', ...gameTypeOptions].map(value => <button key={value} type="button" aria-pressed={gameTypeFilter === value} onClick={() => { setGameTypeFilter(value); setPage(1); }} className={`max-w-full truncate rounded-full px-2.5 py-1 text-xs transition ${gameTypeFilter === value ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent'}`}>{value || copy.allGameTypes}</button>)}
+              </div> : null}
+              {tagOptions.length > 0 ? <div role="group" aria-label={copy.allTags} className="flex flex-wrap gap-1.5 border-t border-border pt-3">
+                {['', ...tagOptions].map(value => <button key={value} type="button" aria-pressed={tagFilter === value} onClick={() => { setTagFilter(value); setPage(1); }} className={`max-w-full truncate rounded-full px-2.5 py-1 text-xs transition ${tagFilter === value ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent'}`}>{value || copy.allTags}</button>)}
+              </div> : null}
+            </div>
+          </MorphPopoverContent>
+        </MorphPopover>
       </div>
-      <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
         {pagedPacks.map((pack) => (
           <PackCard key={pack.id} pack={pack} onOpen={() => void openPack(pack)} />
         ))}
@@ -497,7 +512,7 @@ export function ResourceLibraryPage({ onBack }: { onBack: () => void }) {
     <Dialog open onOpenChange={open => { if (!open) onBack(); }}>
       <DialogContent
         aria-label={t('library')}
-        className="inset-0 left-0 top-0 h-dvh max-h-none w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden rounded-none border-0 p-0"
+        className="inset-0 left-0 top-0 h-dvh max-h-none w-screen max-w-none translate-x-0 translate-y-0 overflow-hidden rounded-none border-0 p-0 transition-opacity duration-200 data-[ending-style]:scale-100 data-[starting-style]:scale-100 motion-reduce:transition-none"
       >
         <div className="h-full min-h-0 overflow-y-auto bg-background text-foreground">
           <ResourceLibraryView initialPackId={initialPackId} onBack={onBack} />
@@ -518,7 +533,7 @@ function EmptyState({ onImport, title, hint, importLabel }: { onImport: () => vo
   );
 }
 
-function PublishReadinessDialog({ report, autoFixableCount, onClose, onSelectElement, onAutoFix }: { report: ResourcePublishReadiness; autoFixableCount: number; onClose: () => void; onSelectElement: (elementId: string) => void; onAutoFix: () => Promise<ResourcePublishReadiness> }) {
+function PublishReadinessDialog({ report, open, autoFixableCount, onClose, onClosed, onSelectElement, onAutoFix }: { report: ResourcePublishReadiness; open: boolean; onClosed: () => void; autoFixableCount: number; onClose: () => void; onSelectElement: (elementId: string) => void; onAutoFix: () => Promise<ResourcePublishReadiness> }) {
   const { t } = useTranslation('resourceLibrary');
   const [activeReport, setActiveReport] = useState(report);
   const [isFixing, setIsFixing] = useState(false);
@@ -526,7 +541,7 @@ function PublishReadinessDialog({ report, autoFixableCount, onClose, onSelectEle
   const IssueList = ({ issues, tone }: { issues: readonly { code: string; message: string; elementId?: string }[]; tone: 'blocking' | 'warning' }) => <ul className="space-y-2">{issues.map((issue, index) => <li key={`${issue.code}-${issue.elementId || index}`} className={`flex items-start gap-2 rounded-lg border px-3 py-2 type-caption-2 ${tone === 'blocking' ? 'border-destructive/40 bg-destructive/10 text-destructive' : 'border-warning/40 bg-warning/10 text-warning'}`}><span className="mt-0.5">{tone === 'blocking' ? '×' : '!'}</span><span className="min-w-0 flex-1">{issue.message}</span>{issue.elementId ? <button type="button" onClick={() => onSelectElement(issue.elementId!)} className="shrink-0 text-foreground underline underline-offset-2">{t('detail.locate')}</button> : null}</li>)}</ul>;
   const canAutoFix = autoFixableCount > 0;
   const autoFix = async () => { setIsFixing(true); try { setActiveReport(await onAutoFix()); } finally { setIsFixing(false); } };
-  return <Dialog open onOpenChange={open => { if (!open) onClose() }}><DialogContent aria-label={t('detail.publishCheck')} className="max-w-md p-5"><section className="w-full text-foreground"><div className="flex items-start justify-between gap-4 border-b border-border pb-4"><div><p className="text-xs font-medium text-muted-foreground">{t('library')}</p><DialogTitle className="mt-1 text-lg">{t('detail.publishCheck')}</DialogTitle><p className="mt-1 text-sm text-muted-foreground">{t('detail.publishHint')}</p></div><button type="button" aria-label={t('detail.closePublishCheck')} onClick={onClose} className="grid h-8 w-8 place-items-center rounded-full border border-border text-muted-foreground hover:bg-accent"><X className="size-4" aria-hidden="true" /></button></div>{canAutoFix ? <div className="mt-4 rounded-lg border border-info-500/30 bg-muted p-3"><p className="text-sm text-muted-foreground">{t('detail.autoFixHint', { count: autoFixableCount })}</p><button type="button" disabled={isFixing} onClick={() => void autoFix()} className="rounded-md border border-transparent bg-primary text-primary-foreground type-button mt-3 w-full px-4 py-2 disabled:opacity-50">{t(isFixing ? 'detail.autoFixing' : 'detail.autoFix')}</button></div> : null}<div className="max-h-[52vh] space-y-4 overflow-y-auto py-4">{activeReport.blocking.length ? <section><h3 className="mb-2 text-sm font-medium text-destructive">{t('detail.blocking')} · {activeReport.blocking.length}</h3><IssueList issues={activeReport.blocking} tone="blocking" /></section> : <p className="rounded-lg border border-success-500/30 bg-muted px-3 py-2 text-sm text-foreground dark:text-foreground">{t('detail.allResolved')}</p>}{activeReport.warnings.length ? <section><h3 className="mb-2 text-sm font-medium text-warning">{t('detail.warnings')} · {activeReport.warnings.length}</h3><IssueList issues={activeReport.warnings} tone="warning" /></section> : null}</div><button type="button" onClick={onClose} className="rounded-md border border-border bg-secondary text-secondary-foreground type-button w-full px-4 py-2">{t('detail.backToFix')}</button></section></DialogContent></Dialog>
+  return <Dialog open={open} onOpenChange={value => { if (!value) onClose() }} onOpenChangeComplete={value => { if (!value) onClosed() }}><DialogContent inert={!open} aria-hidden={!open} aria-label={t('detail.publishCheck')} className="max-w-md p-5"><section className="w-full text-foreground"><div className="flex items-start justify-between gap-4 border-b border-border pb-4"><div><p className="text-xs font-medium text-muted-foreground">{t('library')}</p><DialogTitle className="mt-1 text-lg">{t('detail.publishCheck')}</DialogTitle><p className="mt-1 text-sm text-muted-foreground">{t('detail.publishHint')}</p></div><button type="button" aria-label={t('detail.closePublishCheck')} onClick={onClose} className="grid h-8 w-8 place-items-center rounded-full border border-border text-muted-foreground hover:bg-accent"><X className="size-4" aria-hidden="true" /></button></div>{canAutoFix ? <div className="mt-4 rounded-lg border border-info-500/30 bg-muted p-3"><p className="text-sm text-muted-foreground">{t('detail.autoFixHint', { count: autoFixableCount })}</p><button type="button" disabled={isFixing} onClick={() => void autoFix()} className="rounded-md border border-transparent bg-primary text-primary-foreground type-button mt-3 w-full px-4 py-2 disabled:opacity-50">{t(isFixing ? 'detail.autoFixing' : 'detail.autoFix')}</button></div> : null}<div className="max-h-[52vh] space-y-4 overflow-y-auto py-4">{activeReport.blocking.length ? <section><h3 className="mb-2 text-sm font-medium text-destructive">{t('detail.blocking')} · {activeReport.blocking.length}</h3><IssueList issues={activeReport.blocking} tone="blocking" /></section> : <p className="rounded-lg border border-success-500/30 bg-muted px-3 py-2 text-sm text-foreground dark:text-foreground">{t('detail.allResolved')}</p>}{activeReport.warnings.length ? <section><h3 className="mb-2 text-sm font-medium text-warning">{t('detail.warnings')} · {activeReport.warnings.length}</h3><IssueList issues={activeReport.warnings} tone="warning" /></section> : null}</div><button type="button" onClick={onClose} className="rounded-md border border-border bg-secondary text-secondary-foreground type-button w-full px-4 py-2">{t('detail.backToFix')}</button></section></DialogContent></Dialog>
 }
 
 function PackCard({ pack, onOpen }: { pack: ResourcePackSummary; onOpen: () => void }) {
@@ -538,18 +553,18 @@ function PackCard({ pack, onOpen }: { pack: ResourcePackSummary; onOpen: () => v
       type="button"
       aria-label={pack.name}
       onClick={onOpen}
-      className="group grid aspect-[4/3] overflow-hidden rounded-xl border border-border bg-card text-left transition hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="group grid h-[220px] min-w-0 grid-rows-[minmax(0,1fr)_72px] overflow-hidden rounded-xl border border-border bg-card text-left transition hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <div className="relative min-h-0 overflow-hidden bg-muted">
-        {hasCover ? (/(mp4|webm)/i.test(pack.coverPath!) ? <video src={pack.coverPath} muted autoPlay loop playsInline onError={() => setCoverUnavailable(true)} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]" /> : <img src={pack.coverPath} alt="" onError={() => setCoverUnavailable(true)} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]" />) : <div className="grid h-full place-items-center text-5xl text-muted-foreground" aria-hidden="true">✦</div>}
-        <div className="absolute right-3 top-3 flex items-center gap-2">
-          <span className="rounded-md border border-border bg-background/90 px-2 py-1 text-xs text-foreground shadow-sm">{t('list.elements', { count: pack.elementCount })}</span>
-          <span className={`rounded-md border px-2 py-1 text-xs shadow-sm ${pack.status === 'published' ? 'border-success-500/30 bg-muted text-foreground dark:text-foreground' : pack.status === 'archived' ? 'border-warning-500/30 bg-muted text-warning' : 'border-border bg-background/90 text-muted-foreground'}`}>{t(`list.${pack.status}`)}</span>
+        {hasCover ? (/(mp4|webm)/i.test(pack.coverPath!) ? <video src={pack.coverPath} muted autoPlay loop playsInline onError={() => setCoverUnavailable(true)} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]" /> : <img src={pack.coverPath} alt="" onError={() => setCoverUnavailable(true)} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.02]" />) : <div className="grid h-full place-items-center text-4xl text-muted-foreground" aria-hidden="true">✦</div>}
+        <div className="absolute right-2 top-2 flex max-w-[calc(100%-1rem)] items-center gap-1">
+          <span className="min-w-0 truncate rounded-full bg-background/90 px-2 py-0.5 text-[10px] font-medium leading-4 text-foreground shadow-sm">{t('list.elements', { count: pack.elementCount })}</span>
+          <span className={`shrink-0 rounded-full bg-background/90 px-2 py-0.5 text-[10px] font-medium leading-4 shadow-sm ${pack.status === 'published' ? 'text-foreground' : pack.status === 'archived' ? 'text-warning' : 'text-muted-foreground'}`}>{t(`list.${pack.status}`)}</span>
         </div>
       </div>
-      <div className="min-w-0 border-t border-border bg-card p-4">
-        <h2 className="truncate text-base font-semibold text-foreground">{pack.name}</h2>
-        <p className="mt-1 truncate text-sm text-muted-foreground">v{pack.version || '—'} · {pack.license || t('list.unlicensed')} · {t(`primaryCategories.${pack.primaryCategory}`)}</p>
+      <div className="flex h-[72px] min-w-0 flex-col justify-center border-t border-border bg-card px-3">
+        <h2 className="truncate text-sm font-semibold text-foreground">{pack.name}</h2>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">v{pack.version || '—'} · {pack.license || t('list.unlicensed')} · {t(`primaryCategories.${pack.primaryCategory}`)}</p>
       </div>
     </button>
   );
@@ -608,7 +623,7 @@ function PackBrowser({
   onDismissUploads: () => void;
   onPublish: () => Promise<void>;
 }) {
-  const { showSuccess } = useToastContext();
+  const { showError, showSuccess } = useToastContext();
   const { t } = useTranslation('resourceLibrary');
   const categories = useMemo(() => [...new Set([...loadedElementCategories, ...elements.map((element) => element.category)].filter((category) => category.trim().length > 0))], [elements, loadedElementCategories]);
   const explorerTree = useMemo(() => buildExplorerTree(pack, folders, elements, (category) => t(`categories.${category}`, { defaultValue: category })), [elements, folders, pack, t]);
@@ -624,13 +639,14 @@ function PackBrowser({
   const [resourceAttempt, setResourceAttempt] = useState(0);
   const [boundTextureUrls, setBoundTextureUrls] = useState<Record<string, string>>({});
   const [externalResources, setExternalResources] = useState<{ bindingsKey: string; urls: Record<string, string> }>({ bindingsKey: '', urls: {} });
-  const [renameTarget, setRenameTarget] = useState<{ type: 'folder' | 'file'; mode: 'create' | 'rename'; name: string; folder?: ResourceFolder; element?: ResourceElement } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{ open?: boolean; type: 'folder' | 'file'; mode: 'create' | 'rename'; name: string; folder?: ResourceFolder; element?: ResourceElement } | null>(null);
   const [selectedElementIds, setSelectedElementIds] = useState<string[]>([]);
   const selectedElements = useMemo(() => elements.filter(element => selectedElementIds.includes(element.id)), [elements, selectedElementIds]);
   const [moveError, setMoveError] = useState('');
   const [inspectionJob, setInspectionJob] = useState<ResourceProcessingJob | null>(null);
   const refreshedProcessingJobsRef = useRef(new Set<string>());
   const [curationOpen, setCurationOpen] = useState(false);
+  const [curationMounted, setCurationMounted] = useState(false);
   const [pendingCurationCount, setPendingCurationCount] = useState(0);
   const [usageTagOptions, setUsageTagOptions] = useState<string[]>([]);
   const dependencyBindingsKey = JSON.stringify(selectedElement?.dependencyBindings ?? []);
@@ -820,7 +836,7 @@ function PackBrowser({
     const results = await Promise.allSettled(moves.map(item => onUpdateElement(item.id, { path: `${folder.path}/${item.name}` })));
     await onRefreshWorkspace();
     const failed = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
-    if (failed.length) setMoveError(t('errors.moveFailed', { count: failed.length }));
+    if (failed.length) showError(t('errors.moveFailed', { count: failed.length }));
     else setSelectedElementIds(moves.map(item => item.id));
   };
   const inspectUnprocessedElements = async () => {
@@ -828,7 +844,7 @@ function PackBrowser({
     if (!pending.length) return;
     setMoveError('');
     try { setInspectionJob(await apiClient.startProcessingJob(pack.id, pending.map(element => element.id))); }
-    catch (cause) { setMoveError(cause instanceof Error ? cause.message : String(cause)); }
+    catch (cause) { showError(cause instanceof Error ? cause.message : String(cause)); }
   };
   const destinationForNode = (node: { id: string; folder?: ResourceFolder }): UploadDestination => {
     const category = node.folder
@@ -846,7 +862,7 @@ function PackBrowser({
     if (!files.length) return;
     const selected = files.map((file) => ({ file, parts: browserRelativePathParts(file) }));
     if (selected.some(({ parts }) => parts.length < 2)) {
-      setMoveError(t('errors.directoryMissing'));
+      showError(t('errors.directoryMissing'));
       return;
     }
     setMoveError('');
@@ -875,7 +891,7 @@ function PackBrowser({
       if (createdFolder) await onRefreshWorkspace();
       await onAddFileEntries(entries);
     } catch (cause) {
-      setMoveError(cause instanceof Error ? cause.message : String(cause));
+      showError(cause instanceof Error ? cause.message : String(cause));
     }
   };
   const contextLabels = { upload: t('detail.uploadFiles'), uploadFolder: t('detail.uploadFolder'), rename: t('detail.rename'), inspect: t('detail.reinspect'), inspectAll: t('detail.inspectAll'), delete: t('detail.delete'), newFolder: t('detail.newFolder') };
@@ -903,13 +919,13 @@ function PackBrowser({
           <button ref={editPackButtonRef} type="button" className="h-9 border-0 px-3 text-xs font-medium text-foreground transition-colors hover:bg-accent" onClick={event => { event.currentTarget.focus(); onEditPack(); }}>{t('list.editPack')}</button>
           <button type="button" disabled={pack.status === 'published'} className="h-9 border-l border-border px-3 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:text-muted-foreground" onClick={() => void onPublish()}>{t(pack.status === 'archived' ? 'list.republish' : 'list.publish')}</button>
           </div>
-          {apiClient.getCurationQueue ? <button type="button" onClick={() => setCurationOpen(true)} className="h-9 rounded-lg border border-info-500/30 px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted dark:text-foreground">{t('list.curation')}{pendingCurationCount ? ` · ${pendingCurationCount}` : ''}</button> : null}
+          {apiClient.getCurationQueue ? <button type="button" onClick={() => { setCurationMounted(true); setCurationOpen(true); }} className="h-9 rounded-lg border border-info-500/30 px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted dark:text-foreground">{t('list.curation')}{pendingCurationCount ? ` · ${pendingCurationCount}` : ''}</button> : null}
           {pack.status !== 'archived' ? <button type="button" onClick={() => void onArchivePack()} className="h-9 rounded-lg border border-warning/40 px-3 text-xs font-medium text-warning transition-colors hover:bg-warning/10">{t('list.archivePack')}</button> : <span className="text-xs text-warning">{t('list.archived')}</span>}
         </div>
       </header>
       <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[236px_minmax(0,1fr)]">
         <aside className="flex min-h-0 max-h-64 flex-col overflow-hidden border-b border-border bg-surface-1 md:max-h-none md:border-b-0 md:border-r">
-          <div ref={explorerHostRef} className="min-h-0 flex-1 overflow-hidden"><ResourcePackExplorer tree={explorerTree} height={explorerHeight} selectedElementId={selectedElement?.id} selectedElementIds={selectedElementIds} onElement={onElement} onSelectionChange={(items) => { setSelectedElementIds(items.map(item => item.id)); if (items.length !== 1) onClearElement(); }} labels={contextLabels} onCreateFolder={() => setRenameTarget({ type: 'folder', mode: 'create', name: '' })} onUploadToFolder={startFolderUpload} onUploadFolderToFolder={startFolderDirectoryUpload} onDropFilesToFolder={(files, node) => { if (!node.folder) return; const category = elements.find(element => element.path.startsWith(`${node.folder!.path}/`))?.category || categories[0] || 'models'; onAddFiles(files, { category, folderPath: node.folder.path }); }} onRenameFolder={(node) => node.folder && renameFolder(node.folder)} onDeleteFolder={(node) => node.folder && void deleteFolder(node.folder)} onRenameElement={renameElement} onInspectElement={(element) => { setMoveError(''); void apiClient.inspectElement(pack.id, element.id).then(async updated => { await onRefreshWorkspace(); if (selectedElement?.id === updated.id) onElement(updated); }).catch(cause => setMoveError(cause instanceof Error ? cause.message : String(cause))); }} onInspectAll={() => { void inspectUnprocessedElements(); }} onDeleteElement={(element) => void deleteElement(element)} onMoveElements={(items, node) => node.folder && void moveElements(items, node.folder)} /></div>
+          <div ref={explorerHostRef} className="min-h-0 flex-1 overflow-hidden"><ResourcePackExplorer tree={explorerTree} height={explorerHeight} selectedElementId={selectedElement?.id} selectedElementIds={selectedElementIds} onElement={onElement} onSelectionChange={(items) => { setSelectedElementIds(items.map(item => item.id)); if (items.length !== 1) onClearElement(); }} labels={contextLabels} onCreateFolder={() => setRenameTarget({ type: 'folder', mode: 'create', name: '' })} onUploadToFolder={startFolderUpload} onUploadFolderToFolder={startFolderDirectoryUpload} onDropFilesToFolder={(files, node) => { if (!node.folder) return; const category = elements.find(element => element.path.startsWith(`${node.folder!.path}/`))?.category || categories[0] || 'models'; onAddFiles(files, { category, folderPath: node.folder.path }); }} onRenameFolder={(node) => node.folder && renameFolder(node.folder)} onDeleteFolder={(node) => node.folder && void deleteFolder(node.folder)} onRenameElement={renameElement} onInspectElement={(element) => { setMoveError(''); void apiClient.inspectElement(pack.id, element.id).then(async updated => { await onRefreshWorkspace(); if (selectedElement?.id === updated.id) onElement(updated); }).catch(cause => showError(cause instanceof Error ? cause.message : String(cause))); }} onInspectAll={() => { void inspectUnprocessedElements(); }} onDeleteElement={(element) => void deleteElement(element)} onMoveElements={(items, node) => node.folder && void moveElements(items, node.folder)} /></div>
           <input ref={fileInputRef} aria-label={t('list.selectFiles')} type="file" multiple className="hidden" onChange={(event) => { onAddFiles(Array.from(event.target.files || []), uploadDestination); event.target.value = ''; }} />
           <input ref={folderInputRef} aria-label={t('list.selectFolder')} type="file" multiple {...directoryInputAttributes} className="hidden" onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ''; void uploadDirectorySelection(files); }} />
         </aside>
@@ -929,7 +945,7 @@ function PackBrowser({
                 ...((input.addUsageTags?.length || input.removeUsageTags?.length) ? { usageTags: [...new Set(normaliseUsageTags(element.usageTags).filter(tag => !input.removeUsageTags?.includes(tag)).concat(input.addUsageTags || []))] } : {}),
               })));
               const failed = results.filter(result => result.status === 'rejected').length;
-              if (failed) setMoveError(t('errors.batchSaveFailed', { count: failed }));
+              if (failed) showError(t('errors.batchSaveFailed', { count: failed }));
               else await onRefreshWorkspace();
             }} /> : null}
             {selectedElements.length > 1 ? null : selectedElement ? (
@@ -942,8 +958,8 @@ function PackBrowser({
       </div>
       {uploadStatus ? <UploadProgressCover status={uploadStatus} onRetryFailed={onRetryFailedUploads} onCancel={onCancelUploads} onDismiss={onDismissUploads} /> : null}
       {inspectionJob ? <InspectionProgressCover job={inspectionJob} elements={elements} onClose={() => setInspectionJob(null)} onCancel={async () => setInspectionJob(await apiClient.cancelProcessingJob(pack.id, inspectionJob.id))} onRetry={async () => setInspectionJob(await apiClient.retryProcessingJob(pack.id, inspectionJob.id))} /> : null}
-      {curationOpen && apiClient.getCurationQueue ? <CurationWorkbench packId={pack.id} api={apiClient as ResourceCurationApi} onClose={() => { setCurationOpen(false); void onRefreshWorkspace(); void apiClient.getCurationQueue?.(pack.id).then(queue => setPendingCurationCount(queue.counts.pendingItems)); }} /> : null}
-      {renameTarget ? <RenameResourceDialog open resourceType={renameTarget.type} mode={renameTarget.mode} initialName={renameTarget.name} onClose={() => setRenameTarget(null)} onRename={async (name) => { if (renameTarget.mode === 'create') { await onCreateFolder(name); return; } if (renameTarget.folder) { if (name !== renameTarget.folder.name) { await apiClient.updateFolder(pack.id, renameTarget.folder.id, { name }); await onRefreshWorkspace(); } return; } if (renameTarget.element) { if (name === renameTarget.element.name) return; const separator = renameTarget.element.path.lastIndexOf('/'); await onUpdateElement(renameTarget.element.id, { name, path: `${separator >= 0 ? renameTarget.element.path.slice(0, separator + 1) : ''}${name}` }); } }} /> : null}
+      {curationMounted && apiClient.getCurationQueue ? <CurationWorkbench packId={pack.id} api={apiClient as ResourceCurationApi} open={curationOpen} onClose={() => setCurationOpen(false)} onClosed={() => { setCurationMounted(false); void onRefreshWorkspace(); void apiClient.getCurationQueue?.(pack.id).then(queue => setPendingCurationCount(queue.counts.pendingItems)); }} /> : null}
+      {renameTarget ? <RenameResourceDialog open={renameTarget.open !== false} onClosed={() => setRenameTarget(null)} resourceType={renameTarget.type} mode={renameTarget.mode} initialName={renameTarget.name} onClose={() => setRenameTarget(current => current && { ...current, open: false })} onRename={async (name) => { if (renameTarget.mode === 'create') { await onCreateFolder(name); return; } if (renameTarget.folder) { if (name !== renameTarget.folder.name) { await apiClient.updateFolder(pack.id, renameTarget.folder.id, { name }); await onRefreshWorkspace(); } return; } if (renameTarget.element) { if (name === renameTarget.element.name) return; const separator = renameTarget.element.path.lastIndexOf('/'); await onUpdateElement(renameTarget.element.id, { name, path: `${separator >= 0 ? renameTarget.element.path.slice(0, separator + 1) : ''}${name}` }); } }} /> : null}
     </section>
   );
 }
@@ -972,11 +988,11 @@ function UploadProgressCover({ status, onRetryFailed, onCancel, onDismiss }: { s
   </div>;
 }
 
-function ArchivePackDialog({ pack, impact, onClose, onArchive }: { pack: ResourcePackSummary; impact: BeeGameResourcePackImpactPayload; onClose: () => void; onArchive: () => Promise<void> }) {
+function ArchivePackDialog({ pack, impact, open, onClose, onClosed, onArchive }: { pack: ResourcePackSummary; open: boolean; onClosed: () => void; impact: BeeGameResourcePackImpactPayload; onClose: () => void; onArchive: () => Promise<void> }) {
   const { t } = useTranslation('resourceLibrary');
+  const { showError } = useToastContext();
   const [archiving, setArchiving] = useState(false)
-  const [error, setError] = useState('')
-  return <Dialog open onOpenChange={open => { if (!open) onClose() }}><DialogContent aria-label={t('list.archivePack')} className="max-w-md p-6"><div className="w-full text-foreground"><DialogTitle className="text-lg">{t('detail.archiveTitle', { name: pack.name })}</DialogTitle><p className="mt-3 text-sm text-muted-foreground">{t('detail.archiveHint')}</p>{impact.references.length ? <div className="mt-4 max-h-44 overflow-y-auto rounded-lg border border-warning-500/30 bg-muted p-3"><p className="text-sm text-warning">{t('detail.archiveReferences', { count: impact.projectCount })}</p><div className="mt-2 space-y-1">{impact.references.map(reference => <p key={`${reference.projectId}:${reference.resourceId}`} className="text-xs text-muted-foreground">{reference.projectName} · {reference.resourceId} · v{reference.packVersion}</p>)}</div></div> : <p className="mt-4 text-sm text-muted-foreground">{t('detail.archiveNone')}</p>}{impact.unreadableProjects.length ? <div className="mt-4 rounded-lg border border-warning-500/30 bg-muted p-3"><p className="text-sm text-warning">{t('detail.archiveInvalid', { count: impact.unreadableProjects.length })}</p><div className="mt-2 space-y-1">{impact.unreadableProjects.map(project => <p key={project.projectId} className="text-xs text-muted-foreground">{project.projectName}</p>)}</div></div> : null}{error ? <p role="alert" className="mt-4 text-sm text-destructive">{error}</p> : null}<div className="mt-6 flex justify-end gap-2"><button type="button" disabled={archiving} onClick={onClose} className="rounded-md border border-border bg-secondary text-secondary-foreground type-button px-4 py-2">{t('detail.cancel')}</button><button type="button" disabled={archiving} onClick={() => { setArchiving(true); void onArchive().catch(cause => setError(cause instanceof Error ? cause.message : String(cause))).finally(() => setArchiving(false)); }} className="rounded-lg border border-warning-500/30 bg-muted px-4 py-2 text-sm text-warning disabled:opacity-60">{t(archiving ? 'detail.archiving' : 'detail.confirmArchive')}</button></div></div></DialogContent></Dialog>
+  return <Dialog open={open} onOpenChange={value => { if (!value) onClose() }} onOpenChangeComplete={value => { if (!value) onClosed() }}><DialogContent inert={!open} aria-hidden={!open} aria-label={t('list.archivePack')} className="max-w-md p-6"><div className="w-full text-foreground"><DialogTitle className="text-lg">{t('detail.archiveTitle', { name: pack.name })}</DialogTitle><p className="mt-3 text-sm text-muted-foreground">{t('detail.archiveHint')}</p>{impact.references.length ? <div className="mt-4 max-h-44 overflow-y-auto rounded-lg border border-warning-500/30 bg-muted p-3"><p className="text-sm text-warning">{t('detail.archiveReferences', { count: impact.projectCount })}</p><div className="mt-2 space-y-1">{impact.references.map(reference => <p key={`${reference.projectId}:${reference.resourceId}`} className="text-xs text-muted-foreground">{reference.projectName} · {reference.resourceId} · v{reference.packVersion}</p>)}</div></div> : <p className="mt-4 text-sm text-muted-foreground">{t('detail.archiveNone')}</p>}{impact.unreadableProjects.length ? <div className="mt-4 rounded-lg border border-warning-500/30 bg-muted p-3"><p className="text-sm text-warning">{t('detail.archiveInvalid', { count: impact.unreadableProjects.length })}</p><div className="mt-2 space-y-1">{impact.unreadableProjects.map(project => <p key={project.projectId} className="text-xs text-muted-foreground">{project.projectName}</p>)}</div></div> : null}<div className="mt-6 flex justify-end gap-2"><button type="button" disabled={archiving} onClick={onClose} className="rounded-md border border-border bg-secondary text-secondary-foreground type-button px-4 py-2">{t('detail.cancel')}</button><button type="button" disabled={archiving} onClick={() => { setArchiving(true); void onArchive().then(onClose).catch(cause => showError(cause instanceof Error ? cause.message : String(cause))).finally(() => setArchiving(false)); }} className="rounded-lg border border-warning-500/30 bg-muted px-4 py-2 text-sm text-warning disabled:opacity-60">{t(archiving ? 'detail.archiving' : 'detail.confirmArchive')}</button></div></div></DialogContent></Dialog>
 }
 
 function BatchElementInspector({ pack, elements, usageTagOptions, onApply }: { pack: ResourcePackSummary; elements: ResourceElement[]; usageTagOptions: readonly string[]; onApply: (input: { kind?: string; status?: string; dimensionOverride?: ResourceElement['dimensionOverride']; styleOverride?: string | null; addUsageTags?: string[]; removeUsageTags?: string[] }) => Promise<void> }) {

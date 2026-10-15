@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, test, vi } from 'vitest'
 import type { ResourcePackSummary } from '../../services/resourceLibraryApi'
 import { EditResourcePackDialog } from './EditResourcePackDialog'
+vi.mock('../../contexts/ToastContext', () => ({ useToastContext: () => ({ showError: vi.fn() }) }))
 
 const pack: ResourcePackSummary = {
   id: 'pack-1', name: 'Forest Pack',

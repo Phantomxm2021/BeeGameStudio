@@ -195,6 +195,7 @@ export type ProjectEventMessageType =
   | 'tool_start' // Tool invocation started
   | 'tool_end' // Tool invocation completed
   | 'usage' // Token usage statistics
+  | 'billing_update' // Authoritative credit debit completed
   | 'human_gate' // Human approval gate open
   | 'error' // Runtime error event
   | 'p2p_route' // Peer-to-peer routing event

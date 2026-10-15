@@ -36,7 +36,7 @@ export const BEEGAME_RESOURCE_STATUSES = [
   'verified',
   'failed',
 ] as const
-const AUDIO_ASSET_KINDS = new Set([
+export const AUDIO_ASSET_KINDS = new Set([
   'audio-clip',
   'audio-cue',
   'audio-bank',
@@ -50,7 +50,7 @@ const PLAYABLE_AUDIO_ASSET_KINDS = new Set([
   'ambience',
   'voice',
 ])
-const AUDIO_FILE_EXTENSIONS = new Set([
+export const AUDIO_FILE_EXTENSIONS = new Set([
   '.aac',
   '.flac',
   '.m4a',
@@ -59,6 +59,12 @@ const AUDIO_FILE_EXTENSIONS = new Set([
   '.opus',
   '.wav',
 ])
+
+/** Read compatibility only; new registrations must use canonical audio kinds. */
+export function isReadableAudioResource(kind: string | undefined, rootPath: string): boolean {
+  return AUDIO_ASSET_KINDS.has(kind ?? '') ||
+    (kind === 'audio' && AUDIO_FILE_EXTENSIONS.has(extname(rootPath).toLowerCase()))
+}
 
 export type BeeGameResourceStatus = (typeof BEEGAME_RESOURCE_STATUSES)[number]
 
@@ -797,7 +803,7 @@ function validateAcquisitionProfile(
   issues: string[],
 ): void {
   if (!isRecord(value)) {
-    issues.push(`${path} must be an object.`)
+    issues.push(`${path} must be an object with dimensions, asset_kinds and styles arrays; use resources.mjs --contract for exact fields and enums.`)
     return
   }
   validateEnumArray(
@@ -899,7 +905,7 @@ function validateEnumArray(
     )
   )
     issues.push(
-      `${path} must be ${requireOne ? 'a non-empty' : 'an'} array of canonical values.`,
+      `${path} must be ${requireOne ? 'a non-empty' : 'an'} array of canonical values (case-sensitive). ${allowed.length <= 8 ? `Allowed: ${allowed.join(', ')}.` : 'Use resources.mjs --contract for the exact allowed values.'}`,
     )
 }
 
@@ -984,15 +990,14 @@ function validateResource(
     value.dimension !== undefined &&
     !(RESOURCE_DIMENSIONS as readonly unknown[]).includes(value.dimension)
   )
-    issues.push(`${path}.dimension must be a canonical resource dimension.`)
+    issues.push(`${path}.dimension must be a canonical resource dimension (case-sensitive). Allowed: ${RESOURCE_DIMENSIONS.join(', ')}.`)
   const assetKind = trimmedString(value.asset_kind)
   if (value.asset_kind !== undefined && !assetKind)
     issues.push(`${path}.asset_kind must be a trimmed non-empty string.`)
   // Existing encoded-audio records remain readable, without rewriting their
   // type or content-addressed modules. New registration stays strict above.
-  const legacyEncodedAudio = assetKind === 'audio' && AUDIO_FILE_EXTENSIONS.has(extname(rootPath).toLowerCase())
   if ((AUDIO_FILE_EXTENSIONS.has(extname(rootPath).toLowerCase()) || assetKind?.startsWith('audio')) &&
-      !AUDIO_ASSET_KINDS.has(assetKind ?? '') && !legacyEncodedAudio)
+      !isReadableAudioResource(assetKind, rootPath))
     issues.push(`${path}.asset_kind: unsupported audio type ${assetKind ?? '(missing)'}; use audio-clip for encoded files or a canonical audio-cue/audio-bank/music/ambience/voice type.`)
   if (value.usage_tags !== undefined)
     validateDescriptiveTags(value.usage_tags, `${path}.usage_tags`, issues)
@@ -1187,7 +1192,7 @@ function requireProjectTarget(
 ): BeeGameAssetProjectTarget {
   if (!manifest.project_target)
     throw new Error(
-      'project_target must be established before resource production. The shared owner supplies projectTarget and requirements in a register request (resources may be []), then combines worker requests with resources.mjs --register-from. See resources.mjs --help or assets/manifest/CONTRACT.md; do not infer global formats from one worker.',
+      'project_target must be established before resource production. The shared owner supplies projectTarget and requirements in a register request (resources may be []), then combines worker requests using the supplied resources.mjs entry with --register-from. Use that entry with --help or --contract; do not infer global formats from one worker.',
     )
   return manifest.project_target
 }

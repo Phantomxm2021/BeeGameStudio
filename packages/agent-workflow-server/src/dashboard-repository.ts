@@ -251,6 +251,34 @@ export class DashboardRepository {
       : this.getProjectStore(request).listProjects()
   }
 
+  async listProjectsPage(
+    request: Request,
+    user: BeeGameUserContext,
+    offset: number,
+    limit: number,
+    search = '',
+  ): Promise<{ items: BeeGameProjectMetadata[]; hasMore: boolean; total: number | null }> {
+    const supabase = this.supabaseForRequest(request)
+    const page = supabase
+      ? await supabase.listProjectsPage(user.id, offset, limit + 1, search)
+      : {
+          items: this.getProjectStore(request).listProjectsPage(offset, limit + 1, search),
+          total: this.getProjectStore(request).countProjects(search),
+        }
+    return { items: page.items.slice(0, limit), hasMore: page.items.length > limit, total: page.total }
+  }
+
+  async getProject(
+    request: Request,
+    user: BeeGameUserContext,
+    id: string,
+  ): Promise<BeeGameProjectMetadata | undefined> {
+    const supabase = this.supabaseForRequest(request)
+    return supabase
+      ? supabase.getProject(user.id, id)
+      : this.getProjectStore(request).getProject(id)
+  }
+
   async getProjectLifecycleOverview(
     request: Request,
     user: BeeGameUserContext,

@@ -1,0 +1,41 @@
+{
+  "scope": "System-only minimal sprite sample and Preview rejection visibility repair",
+  "date": "2026-10-15",
+  "boundaries": {
+    "generatedProjectsModified": false,
+    "paidModelOrImageRuns": false,
+    "dependencyDownloads": false,
+    "productionServicesRestarted": false,
+    "newWorkflowFramework": false
+  },
+  "changes": [
+    "Existing preview.mjs exposes --sprite-sample PNG ATLAS FRAME_MS FRAME_ID... for an explicitly requested new standalone sample. It refuses existing package/build/output files.",
+    "Dependency-free static player consumes the existing rectangle-only atlas format, with no grid assumption or artwork modification. Existing Sharp inspects decoded image/alpha.",
+    "Existing measurement and Preview are reused. --sprite-capture runs a fixed host-owned driver, retaining samples and video under .beegame/tmp, with real frame-coverage, pause and resume assertions.",
+    "Full samples stay in observation.json; CLI output is a compact summary. Assertions and missing recording dependencies fail explicitly without installation or retry.",
+    "Project execution seeds only the pinned Playwright version's already-installed FFmpeg into its private cache. Host cache permissions are not expanded.",
+    "Dashboard propagates Preview start rejection to the panel. The panel retains the message across idle polling and clears it on retry; another project does not display it."
+  ],
+  "previewDiagnosis": {
+    "backend": "A post-measurement tests/capture.mjs addition is an exportable-source change; Preview correctly returns HTTP 409 measurement-stale even when runtime artifact bytes are unchanged.",
+    "transport": "The adapter preserves the backend error message, status and code.",
+    "display": "Dashboard previously caught the rejection and only emitted a 3000-ms Toast. The panel's callback then resolved; it had neither an error state nor a failed build report and returned to standby.",
+    "historicalLimit": "Source and offline regressions establish the lost persistent error state. They do not prove whether a Toast was briefly visible during the historical run."
+  },
+  "offlineVerification": [
+    "sprite-sample.test.ts: existing atlas format and invalid input; non-overwrite and byte-preserving build; actual managed static Preview server; real sandboxed browser playback; deliberately broken pause/resume; missing FFmpeg; retained evidence; unchanged exportable sources and artifact hashes",
+    "project-execution-access.test.ts: existing project sandbox, cache/read boundaries and shell tests passed",
+    "agent-measurement.test.ts (measurement read API): settled interrupted Preview stays allowed; temporary evidence stays current; late project test source returns the exact 409 rejection",
+    "agent-tools.test.ts (autonomous tools): existing auth, capability and context regression passed",
+    "skill-play-capture.test.ts: both existing helper compatibility and actual video/audio/failed-driver evidence regressions passed",
+    "BeeGameLivePreviewPage.test.tsx and beeGameAdapter.test.ts: 85 tests passed, including rejection transport, persistent panel message, retry and project separation",
+    "Frontend tsc --noEmit --project tsconfig.app.json --incremental false passed",
+    "Node syntax checks and git diff --check passed"
+  ],
+  "limits": [
+    "Offline synthetic fixtures only; no new image-generation or real-project end-to-end acceptance was performed.",
+    "The sample supports PNG and explicitly ordered equal-size, untrimmed, unrotated frames, 2..32 frames at 50..500 ms each. It is not a general animation engine.",
+    "Mechanical playback checks do not certify pose quality, natural motion, identity consistency or aesthetics. Existing repeated-pose artwork remains unchanged and unaccepted.",
+    "Running BGS services were not restarted; this record verifies source changes, not deployment of the new runtime."
+  ]
+}

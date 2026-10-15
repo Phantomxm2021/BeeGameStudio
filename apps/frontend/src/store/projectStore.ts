@@ -48,6 +48,9 @@ const upsertProject = (projects: Project[], project: Project): Project[] => {
   return [project, ...projects.filter((item) => item.id !== project.id)];
 };
 
+const sortProjectHistory = (projects: Project[]): Project[] =>
+  [...projects].sort((left, right) => right.created_at - left.created_at);
+
 const PROJECT_OPEN_TIMEOUT_MS = 10_000;
 const runtimeStateRequests = new Map<string, ReturnType<typeof api.getProjectRuntimeState>>();
 
@@ -85,7 +88,7 @@ const withProjectOpenTimeout = async (operation: Promise<unknown>): Promise<void
  * Project store state interface
  */
 interface ProjectState {
-  /** List of all projects */
+  /** Projects loaded so far, plus a deep-linked active project when necessary. */
   projects: Project[];
 
   /** ID of the currently active project */
@@ -96,6 +99,12 @@ interface ProjectState {
 
   /** Whether the URL's project route has been resolved against the server list. */
   hasLoadedProjects: boolean;
+
+  /** Pagination state for the account's project history. */
+  projectsHasMore: boolean;
+  projectsTotal: number | null;
+  pagedProjectIds: string[];
+  isLoadingMoreProjects: boolean;
 
   /** Whether a project open/switch operation is in progress */
   isOpeningProject: boolean;
@@ -122,11 +131,11 @@ interface ProjectState {
   ) => void;
 
   /**
-   * Load all projects from the backend
-   * If no active project is set, automatically sets the first project as active
+   * Load the first project-history page and restore the URL's selected project.
    * Requirements: 3.1
    */
   loadProjects: () => Promise<void>;
+  loadMoreProjects: () => Promise<void>;
 
   /**
    * Load pending user permissions for a specific project
@@ -183,6 +192,7 @@ interface ProjectState {
    * Requirements: 3.6
    */
   deleteProject: (projectId: string) => Promise<void>;
+  deleteProjects: (projectIds: string[]) => Promise<{ deletedIds: string[]; failedIds: string[] }>;
 
   /**
    * Rename a project locally (usually triggered by WebSocket event)
@@ -205,6 +215,10 @@ export const useProjectStore = create<ProjectState>()(
       activeProjectId: null,
       isLoading: false,
       hasLoadedProjects: false,
+      projectsHasMore: false,
+      projectsTotal: null,
+      pagedProjectIds: [],
+      isLoadingMoreProjects: false,
       isOpeningProject: false,
       pendingPermissions: [],
       projectStatus: null,
@@ -217,20 +231,52 @@ export const useProjectStore = create<ProjectState>()(
 
       loadProjects: async () => {
         try {
-          set({ isLoading: true, hasLoadedProjects: false });
-          const rawProjects = (await api.getProjects()) as unknown as Project[];
-          const projects = rawProjects.map(normalizeProjectTimestamp);
+          set({ isLoading: true, hasLoadedProjects: false, projects: [], projectsHasMore: false, projectsTotal: null, pagedProjectIds: [] });
+          const page = await api.getProjectPage(0);
+          const projects = page.items.map(normalizeProjectTimestamp);
           const requestedProjectId = getProjectRouteId();
+          const requestedProject = requestedProjectId && !projects.some((p) => p.id === requestedProjectId)
+            ? await api.getProjectMetadata(requestedProjectId).catch((error: unknown) => {
+                if (getProjectStoreErrorStatus(error) === 404) return null;
+                throw error;
+              })
+            : null;
+          if (requestedProject) projects.push(normalizeProjectTimestamp(requestedProject));
           const hasRequestedProject = !!requestedProjectId && projects.some((p) => p.id === requestedProjectId);
           set({
-            projects,
+            projects: sortProjectHistory(projects),
             activeProjectId: hasRequestedProject ? requestedProjectId : null,
+            projectsHasMore: page.hasMore,
+            projectsTotal: page.total,
+            pagedProjectIds: page.items.map(project => project.id),
             isLoading: false,
             hasLoadedProjects: true,
           });
         } catch (error) {
           console.error('Failed to load projects:', error);
           set({ isLoading: false, hasLoadedProjects: true });
+          throw error;
+        }
+      },
+
+      loadMoreProjects: async () => {
+        const { projectsHasMore, isLoadingMoreProjects, pagedProjectIds } = get();
+        if (!projectsHasMore || isLoadingMoreProjects) return;
+        set({ isLoadingMoreProjects: true });
+        try {
+          const page = await api.getProjectPage(pagedProjectIds.length);
+          set(state => {
+            const knownIds = new Set(state.projects.map(project => project.id));
+            return {
+              projects: sortProjectHistory([...state.projects, ...page.items.map(normalizeProjectTimestamp).filter(project => !knownIds.has(project.id))]),
+              projectsHasMore: page.hasMore,
+              projectsTotal: page.total ?? state.projectsTotal,
+              pagedProjectIds: [...state.pagedProjectIds, ...page.items.map(project => project.id)],
+              isLoadingMoreProjects: false,
+            };
+          });
+        } catch (error) {
+          set({ isLoadingMoreProjects: false });
           throw error;
         }
       },
@@ -333,12 +379,17 @@ export const useProjectStore = create<ProjectState>()(
           // Mandatory opening signal as per integration guide
           await withProjectOpenTimeout(api.openProject(normalizedProjectId));
 
-          set({
+          const missingProject = !get().projects.some(project => project.id === normalizedProjectId)
+            ? normalizeProjectTimestamp(await api.getProjectMetadata(normalizedProjectId))
+            : null;
+
+          set(state => ({
+            projects: missingProject ? sortProjectHistory([...state.projects, missingProject]) : state.projects,
             activeProjectId: normalizedProjectId,
             isOpeningProject: false,
             pendingPermissions: [],
             projectStatus: null,
-          });
+          }));
           openProjectRoute(normalizedProjectId);
           // Clear current messages to prepare for loading new project's history
           useChatStore.getState().clearMessages();
@@ -365,6 +416,23 @@ export const useProjectStore = create<ProjectState>()(
 
       syncActiveProjectFromRoute: () => {
         const requestedProjectId = getProjectRouteId();
+        if (requestedProjectId && !get().projects.some(project => project.id === requestedProjectId)) {
+          void api.getProjectMetadata(requestedProjectId).then(project => {
+            if (getProjectRouteId() !== requestedProjectId) return;
+            set(state => ({ projects: sortProjectHistory([...state.projects, normalizeProjectTimestamp(project)]) }));
+            get().syncActiveProjectFromRoute();
+          }).catch(error => {
+            if (getProjectStoreErrorStatus(error) !== 404) {
+              console.error('Failed to restore project route:', error);
+              get().showToastError?.('无法恢复项目，请稍后重试');
+              return;
+            }
+            if (getProjectRouteId() !== requestedProjectId) return;
+            set({ activeProjectId: null, pendingPermissions: [], projectStatus: null });
+            useChatStore.getState().clearMessages();
+          });
+          return;
+        }
         const nextProjectId = requestedProjectId && get().projects.some(project => project.id === requestedProjectId)
           ? requestedProjectId
           : null;
@@ -394,6 +462,7 @@ export const useProjectStore = create<ProjectState>()(
 
           set((state) => ({
             projects: upsertProject(state.projects, bootstrappedProject),
+            projectsTotal: state.projectsTotal === null ? null : state.projectsTotal + 1,
             activeProjectId: newProjectId,
             isLoading: false,
           }));
@@ -413,16 +482,8 @@ export const useProjectStore = create<ProjectState>()(
             timestamp: bootstrapTimestamp + 1,
             type: 'system_status',
           });
-          Promise.allSettled([
-            api.getProjects().then((rawProjects) => {
-              const projects = (rawProjects as unknown as Project[]).map(normalizeProjectTimestamp);
-              set((state) => ({
-                projects,
-                activeProjectId: projects.some((project) => project.id === newProjectId) ? newProjectId : state.activeProjectId,
-              }));
-            }),
-            get().loadProjectRuntimeState(newProjectId),
-          ]).catch((error) => console.error('Failed to refresh bootstrap project state:', error));
+          void get().loadProjectRuntimeState(newProjectId).catch((error) =>
+            console.error('Failed to refresh bootstrap project state:', error));
 
           return { status: 'started', projectId: newProjectId };
         } catch (error) {
@@ -435,11 +496,8 @@ export const useProjectStore = create<ProjectState>()(
       updateProject: async (projectId, data) => {
         try {
           set({ isLoading: true });
-          await api.updateProject(projectId, data);
-
-          // Reload projects to ensure consistency with backend
-          const projects = ((await api.getProjects()) as unknown as Project[]).map(normalizeProjectTimestamp);
-          set({ projects, isLoading: false });
+          const project = normalizeProjectTimestamp(await api.updateProject(projectId, data));
+          set(state => ({ projects: state.projects.map(item => item.id === projectId ? project : item), isLoading: false }));
 
           // Show success toast
           // Requirements: 12.4
@@ -475,6 +533,8 @@ export const useProjectStore = create<ProjectState>()(
 
             return {
               projects: filteredProjects,
+              pagedProjectIds: state.pagedProjectIds.filter(id => id !== projectId),
+              projectsTotal: state.projectsTotal === null ? null : Math.max(0, state.projectsTotal - 1),
               activeProjectId: newActiveId,
               isLoading: false
             };
@@ -498,6 +558,49 @@ export const useProjectStore = create<ProjectState>()(
           set({ isLoading: false });
           throw error;
         }
+      },
+
+      deleteProjects: async (projectIds) => {
+        const ids = [...new Set(projectIds)];
+        const deletedIds: string[] = [];
+        const failedIds: string[] = [];
+        if (ids.length === 0) return { deletedIds, failedIds };
+        set({ isLoading: true });
+        // Reuse the account-scoped endpoint without navigating or toasting
+        // after each item. A failed request must leave its project intact.
+        for (const id of ids) {
+          try {
+            await api.deleteProject(id);
+            deletedIds.push(id);
+          } catch (error) {
+            console.error('Failed to delete project:', id, error);
+            failedIds.push(id);
+          }
+        }
+        const deleted = new Set(deletedIds);
+        const previousActiveId = get().activeProjectId;
+        const activeWasDeleted = previousActiveId !== null && deleted.has(previousActiveId);
+        set(state => {
+          const remaining = state.projects.filter(project => !deleted.has(project.id));
+          return {
+            projects: remaining,
+            pagedProjectIds: state.pagedProjectIds.filter(id => !deleted.has(id)),
+            projectsTotal: state.projectsTotal === null ? null : Math.max(0, state.projectsTotal - deletedIds.length),
+            isLoading: false,
+            ...(activeWasDeleted ? {
+              activeProjectId: remaining[0]?.id ?? null,
+              pendingPermissions: [],
+              projectStatus: null,
+            } : {}),
+          };
+        });
+        if (activeWasDeleted) {
+          useChatStore.getState().clearMessages();
+          const activeId = get().activeProjectId;
+          if (activeId) openProjectRoute(activeId, { replace: true });
+          else openIdeaHomeRoute({ replace: true });
+        }
+        return { deletedIds, failedIds };
       },
 
       renameProjectLocally: (projectId, newName) => {

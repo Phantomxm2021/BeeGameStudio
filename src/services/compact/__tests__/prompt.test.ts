@@ -2,7 +2,29 @@ import { mock, describe, expect, test } from 'bun:test'
 
 mock.module('bun:bundle', () => ({ feature: () => false }))
 
-const { formatCompactSummary } = await import('../prompt')
+const { formatCompactSummary, getCompactPrompt, getPartialCompactPrompt } =
+  await import('../prompt')
+
+test('continuation prompts replace the code recap without dropping constraints or custom instructions', () => {
+  for (const prompt of [
+    getCompactPrompt('Keep the exact receipt ID'),
+    getPartialCompactPrompt('Keep the exact receipt ID'),
+    getPartialCompactPrompt('Keep the exact receipt ID', 'up_to'),
+  ]) {
+    expect(prompt).toContain('Do NOT call any tools')
+    expect(prompt).toContain('Keep the exact receipt ID')
+    expect(prompt).toContain(
+      'Unknown is not failed, successful or permission to resubmit',
+    )
+    expect(prompt).toContain('Do not copy saved source code')
+    expect(prompt).toContain('never truncate constraints')
+    expect(prompt).not.toContain('Important Code Snippet')
+    expect(prompt).not.toContain('9. Optional Next Step')
+  }
+  expect(getPartialCompactPrompt()).not.toContain(
+    'retained separately by the full-compaction path',
+  )
+})
 
 describe('formatCompactSummary', () => {
   test('strips <analysis>...</analysis> block', () => {

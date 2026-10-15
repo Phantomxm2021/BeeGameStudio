@@ -70,6 +70,8 @@ test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1')('beforeNavigate captu
   const saved = '{"fontSize":17,"cameraCenter":100}'
   let sourceRequests = 0
   const fixture = Bun.serve({hostname:'127.0.0.1',port:0,fetch:request => {
+    if (new URL(request.url).pathname === '/diagnostic-missing')
+      return new Response('Missing fixture asset', {status:404, headers:{'access-control-allow-origin':'*'}})
     if (new URL(request.url).pathname === '/data.json') {
       sourceRequests++
       return new Response(saved,{headers:{'content-type':'application/json','access-control-allow-origin':'*'}})
@@ -107,18 +109,53 @@ test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1')('beforeNavigate captu
       }
       // No beforeNavigate callback: the helper itself still observes errors
       // in the first game load, not just a later reload chosen by the author.
-      await withPreviewPage(options,async({gameFrame,runtimeErrors})=>{
+      await withPreviewPage({...options,beforeNavigate:async({context})=>{
+        await context.route('**/diagnostic-abort*',route=>route.abort());
+      }},async({gameFrame,runtimeErrors,runtimeErrorDetails})=>{
         await gameFrame.locator('#label[data-ready="true"]').waitFor();
         assert.equal(runtimeErrors.pageErrors,1);assert.equal(runtimeErrors.consoleErrors,1);
+        assert.equal(runtimeErrorDetails.pageErrors[0].message,'BOOT_FIXTURE_ERROR');
+        assert.equal(runtimeErrorDetails.consoleErrors[0].message,'BOOT_CONSOLE_FIXTURE');
         await gameFrame.evaluate(()=>{console.error('LATE_CONSOLE_FIXTURE')});
         await new Promise(r=>setTimeout(r,50));
         assert.equal(runtimeErrors.consoleErrors,2);
+        await gameFrame.evaluate(api=>{
+          console.error('Diagnostic https://reader:pass-secret@example.test/previews/grant-secret/resource.png?token=query-secret#hash-secret Bearer bearer-secret password="password-secret" '+ 'x'.repeat(800));
+          console.error(api+'/host?key=cap-secret');
+          console.error('{"api_key":"json-secret","cookie":"session=cookie-secret"}');
+          for(let i=0;i<8;i++)console.error('Repeated diagnostic '+i);
+        },options.apiUrl);
+        await gameFrame.evaluate(async()=>{
+          await fetch('./diagnostic-abort?token=request-secret').catch(()=>{});
+          await fetch('./diagnostic-missing?token=http-secret');
+        });
+        await new Promise(r=>setTimeout(r,50));
+        assert.ok(runtimeErrors.consoleErrors>=13);
+        assert.equal(runtimeErrorDetails.consoleErrors.length,5);
+        assert.ok(runtimeErrorDetails.consoleErrors.every(item=>item.message.length<=500));
+        assert.ok(runtimeErrorDetails.failedRequests.some(item=>item.url.endsWith('/diagnostic-abort') && item.method==='GET' && item.failure.includes('ERR_FAILED')));
+        assert.ok(runtimeErrorDetails.httpErrors.some(item=>item.url.endsWith('/diagnostic-missing') && item.status===404));
+        const retained=JSON.stringify(runtimeErrorDetails);
+        for(const secret of ['pass-secret','grant-secret','query-secret','hash-secret','bearer-secret','password-secret','cap-secret','json-secret','cookie-secret','request-secret','http-secret',options.apiUrl])
+          assert.ok(!retained.includes(secret),'Diagnostic leaked '+secret);
       });
       // Even a callback that ignores all errors and returns PASS cannot claim
       // a clean initial load in fail mode. Observe mode remains diagnostic.
       await assert.rejects(withPreviewPage({...options,runtimeErrorPolicy:'fail'},async({gameFrame})=>{
         await gameFrame.locator('#label[data-ready="true"]').waitFor();return 'AUTHOR_PASS';
-      }),/PREVIEW_RUNTIME_ERRORS.*"pageErrors":1/);
+      }),error=>{
+        assert.match(error.message,/PREVIEW_RUNTIME_ERRORS.*"pageErrors":1/);
+        assert.match(error.message,/BOOT_FIXTURE_ERROR/);
+        assert.equal(error.runtimeErrors.pageErrors,1);
+        return true;
+      });
+      await assert.rejects(withPreviewPage(options,async({gameFrame})=>{
+        await gameFrame.locator('#label[data-ready="true"]').waitFor();throw Error('assertion failed');
+      }),error=>{
+        assert.equal(error.message,'assertion failed');
+        assert.equal(error.runtimeErrorDetails.pageErrors[0].message,'BOOT_FIXTURE_ERROR');
+        return true;
+      });
       await assert.rejects(withPreviewPage({...options,beforeNavigate:()=>{throw Error('setup failed')}},()=>{
         throw Error('inspect must not run');
       }),/setup failed/);
@@ -136,7 +173,7 @@ test.skipIf(process.env.BEEGAME_TEST_REAL_BROWSER !== '1')('beforeNavigate captu
       const [code,out,err]=await Promise.all([child.exited,new Response(child.stdout).text(),new Response(child.stderr).text()])
       expect(code,err).toBe(0)
       expect(out).toContain('STARTUP_OBSERVATION_PASS')
-      expect(sourceRequests).toBe(3)
+      expect(sourceRequests).toBe(4)
       expect(saved).toBe('{"fontSize":17,"cameraCenter":100}')
     } finally {clearTimeout(timer)}
   } finally {await capability.close();fixture.stop(true);await rm(workspace,{recursive:true,force:true})}

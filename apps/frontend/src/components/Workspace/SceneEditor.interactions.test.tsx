@@ -42,6 +42,7 @@ describe('Scene Editor interaction regressions', () => {
     expect(screen.queryByText(/Rejected:/)).toBeNull();
     fireEvent.keyDown(screen.getByTestId('scene-editor'), { key: 's', metaKey: true });
     await waitFor(() => expect(save).toHaveBeenCalledOnce());
+    expect(await screen.findByText('Saved to content files. Rebuild and verify to confirm the changes take effect in the game.')).toBeInTheDocument();
     const text = save.mock.calls[0][0].nodes.flower.components[0];
     expect(text).not.toHaveProperty('fontAssetId');
     expect(text.properties).not.toHaveProperty('font');

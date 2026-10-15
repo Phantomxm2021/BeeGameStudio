@@ -274,7 +274,7 @@ export function ClassicIdeaPromptForm({
                         <MorphPopover open={isModeMenuOpen} onOpenChange={setIsModeMenuOpen}>
                             <MorphPopoverTrigger>
                                 <button type="button" className={styles.modeButton}
-                                    data-hidden={sendDetached} aria-hidden={sendDetached} tabIndex={sendDetached ? -1 : 0}
+                                    hidden={sendDetached} aria-hidden={sendDetached} tabIndex={sendDetached ? -1 : 0}
                                     aria-label={t(creationMode === 'creative' ? 'intake.prompt.creativeMode' : 'intake.prompt.blueprintMode')}>
                                     {creationMode === 'creative' ? <Lightbulb aria-hidden="true" /> : <LayoutTemplate aria-hidden="true" />}
                                     <span>{t(creationMode === 'creative' ? 'intake.prompt.creativeMode' : 'intake.prompt.blueprintMode')}</span>

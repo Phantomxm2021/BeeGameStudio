@@ -414,6 +414,7 @@ export type ResourceCatalogPack = {
   primaryCategory: ResourcePackPrimaryCategory
   categories: readonly ResourceCategory[]
   tags: readonly string[]
+  /** Technically browsable elements, including those without semantic usage tags; not a match count. */
   readyElementCount: number
   assetKinds: readonly ResourceAssetKind[]
   usageTags: readonly ResourceUsageTag[]

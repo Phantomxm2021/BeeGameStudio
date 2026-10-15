@@ -117,6 +117,7 @@ function getSummary(
 }
 
 export function AgentActivity({
+  variant = "default",
   items,
   contentType: initialContentType,
   status = "working",
@@ -147,20 +148,22 @@ export function AgentActivity({
     onOpenChange,
   });
   const working = status === "working";
-  const expanded = working || currentOpen;
+  const timeline = variant === "timeline";
+  const expanded = timeline ? currentOpen : working || currentOpen;
   const contentType = items.length
     ? getContentType(items)
     : (initialContentType ?? "mixed");
   const cappedHeight = Math.min(contentHeight, Math.max(0, maxHeight));
   // Keep short working activities compact; only cap the viewport once the
   // streamed content actually exceeds the beUI maximum height.
-  const viewportHeight = cappedHeight;
-  const capped = contentHeight > maxHeight;
-  const streamOffset = working
+  const viewportHeight = timeline ? contentHeight : cappedHeight;
+  const capped = !timeline && contentHeight > maxHeight;
+  const streamOffset = working && !timeline
     ? Math.min(0, viewportHeight - contentHeight)
     : 0;
 
   useLayoutEffect(() => {
+    if (timeline) return;
     const node = contentRef.current;
     if (!node) return;
 
@@ -171,14 +174,14 @@ export function AgentActivity({
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+  }, [timeline]);
 
   useEffect(() => {
-    if (previousStatus.current === "working" && status === "complete") {
+    if (previousStatus.current === "working" && status === "complete" && (!timeline || collapseOnComplete)) {
       setOpen(!collapseOnComplete);
     }
     previousStatus.current = status;
-  }, [collapseOnComplete, setOpen, status]);
+  }, [collapseOnComplete, setOpen, status, timeline]);
 
   const toggle = () => {
     const next = !currentOpen;
@@ -198,10 +201,11 @@ export function AgentActivity({
     <div
       data-state={working ? "working" : expanded ? "open" : "closed"}
       data-content={contentType}
+      data-variant={variant}
       aria-busy={working}
-      className={cn("w-full text-sm", className)}
+      className={cn("w-full text-sm", timeline && "py-1 text-[15px]", className)}
     >
-      {working ? (
+      {working && !timeline ? (
         <div
           id={triggerId}
           role="status"
@@ -218,16 +222,16 @@ export function AgentActivity({
           aria-expanded={expanded}
           aria-controls={contentId}
           onClick={toggle}
-          className="group flex h-7 min-w-0 items-center gap-1.5 rounded-md text-left font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          className={cn("group flex h-7 min-w-0 items-center gap-1.5 rounded-md text-left font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background", timeline && "h-auto min-h-7 gap-2 py-1 font-normal")}
         >
           <span className="truncate">
-            {renderCompletedStatus
+            {working ? (renderWorkingStatus ? renderWorkingStatus({ label: liveLabel, duration }) : liveLabel) : renderCompletedStatus
               ? renderCompletedStatus({ summary: completedSummary, duration })
               : completedSummary}
           </span>
           <motion.span
             aria-hidden="true"
-            animate={{ rotate: expanded ? 180 : 0 }}
+            animate={{ rotate: timeline ? (expanded ? 0 : -90) : (expanded ? 180 : 0) }}
             transition={reduce ? { duration: 0 } : SPRING_SWAP}
             className="inline-flex shrink-0 text-muted-foreground/70 group-hover:text-foreground"
           >
@@ -241,15 +245,17 @@ export function AgentActivity({
         role="region"
         aria-labelledby={triggerId}
         open={expanded}
-        openHeight={viewportHeight}
+        openHeight={timeline ? "auto" : viewportHeight}
       >
         <div
           ref={viewportRef}
+          tabIndex={timeline && expanded ? 0 : undefined}
           className={cn(
-            "scrollbar-hide pr-1",
-            capped && expanded && !working ? "overflow-y-auto" : "overflow-y-hidden",
+            "pr-1",
+            timeline ? "overflow-y-auto overscroll-y-contain focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+              : cn("scrollbar-hide", capped && expanded && !working ? "overflow-y-auto" : "overflow-y-hidden"),
           )}
-          style={{ height: viewportHeight, maskImage, WebkitMaskImage: maskImage }}
+          style={{ height: timeline ? undefined : viewportHeight, maxHeight: timeline ? Math.max(0, maxHeight) : undefined, maskImage, WebkitMaskImage: maskImage }}
         >
           <motion.div
             ref={contentRef}
@@ -257,7 +263,7 @@ export function AgentActivity({
             initial={false}
             animate={{ y: streamOffset }}
             transition={reduce ? { duration: 0 } : SPRING_LAYOUT}
-            className={cn("space-y-0.5 py-2", contentClassName)}
+            className={cn("space-y-0.5 py-2", timeline && "my-2 ml-1 border-l-2 border-foreground/10 py-0 pl-4", contentClassName)}
           >
             <AnimatePresence mode="popLayout">
               {items.map((item) => (
@@ -265,7 +271,7 @@ export function AgentActivity({
                   layout="position"
                   key={item.id}
                   role="listitem"
-                  initial={reduce ? { opacity: 1 } : { opacity: 0, y: 6 }}
+                  initial={timeline ? false : reduce ? { opacity: 1 } : { opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3 }}
                   transition={

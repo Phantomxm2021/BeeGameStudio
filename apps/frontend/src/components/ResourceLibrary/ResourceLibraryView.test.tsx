@@ -3,11 +3,15 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import type { ReactElement } from 'react'
-import { buildSafePublishFix, ResourceLibraryView } from './ResourceLibraryView'
+import { buildSafePublishFix, ResourceLibraryPage, ResourceLibraryView } from './ResourceLibraryView'
 import { closeResourcePackRoute } from './resourceLibraryRoute'
-import { ResourceLibraryApiError, type ResourceElement, type ResourcePackSummary } from '../../services/resourceLibraryApi'
+import { resourceLibraryApi, ResourceLibraryApiError, type ResourceElement, type ResourcePackSummary } from '../../services/resourceLibraryApi'
 import { ToastProvider } from '../../contexts/ToastContext'
 import i18n from '../../i18n'
+import { api as beeGameApi } from '../../services/api'
+
+// Canvas rendering is independent of this workspace's dialog lifecycle.
+vi.mock('../Demiurge/Landing/DotsAvatar', () => ({ DotsAvatar: ({ label }: { label: string }) => <div role="img" aria-label={label} /> }))
 
 const pack: ResourcePackSummary = { id: 'pack-1', name: 'Example Pack',
   styles: ['Stylized'], gameTypes: ['adventure'], dimension: '2D', primaryCategory: 'world-scene', categories: ['models'], version: '1.0.0', status: 'published', elementCount: 1 }
@@ -25,6 +29,69 @@ function renderResourceLibrary(view: ReactElement) {
 
 describe('ResourceLibraryView workspace', () => {
   afterEach(() => { cleanup(); closeResourcePackRoute() })
+
+  test('uses opacity-only motion for the full-screen page without postponing navigation', async () => {
+    const listPacks = vi.spyOn(resourceLibraryApi, 'listPacks').mockResolvedValue([])
+    const onBack = vi.fn()
+    try {
+      renderResourceLibrary(<ResourceLibraryPage onBack={onBack} />)
+      const popup = await screen.findByRole('dialog')
+      expect(popup).toHaveClass('transition-opacity', 'duration-200', 'data-[starting-style]:scale-100', 'data-[ending-style]:scale-100', 'motion-reduce:transition-none')
+      expect(popup).not.toHaveClass('transition-[opacity,transform,scale]', 'data-[starting-style]:scale-[0.98]')
+      fireEvent.click(await screen.findByRole('button', { name: i18n.t('resourceLibrary:list.backToWorkspace') }))
+      expect(onBack).toHaveBeenCalledTimes(1)
+      expect(listPacks).toHaveBeenCalledTimes(1)
+    } finally { listPacks.mockRestore() }
+  })
+
+  test.each(['rename', 'curation', 'publish', 'archive'] as const)('retains the %s dialog until its exit finishes', async (kind) => {
+    const user = userEvent.setup()
+    const original = Object.getOwnPropertyDescriptor(Element.prototype, 'getAnimations')
+    let finishClose!: () => void
+    let closingObserved = false
+    const finished = new Promise<void>(resolve => { finishClose = resolve })
+    Object.defineProperty(Element.prototype, 'getAnimations', {
+      configurable: true,
+      value: function (this: Element) {
+        if (!this.hasAttribute('data-ending-style')) return []
+        closingObserved = true
+        return [{ finished, pending: true, playState: 'running' }]
+      },
+    })
+    const impact = vi.spyOn(beeGameApi, 'getResourcePackImpact').mockResolvedValue({ packId: pack.id, projectCount: 0, references: [], unreadableProjects: [] })
+    try {
+      const draft = { ...pack, status: 'draft' }
+      renderResourceLibrary(<ResourceLibraryView apiClient={{ ...api,
+        listPacks: async () => [draft], getPack: async () => draft,
+        getPublishReadiness: async () => ({ canPublish: false, blocking: [], warnings: [] }),
+        getCurationQueue: async () => ({ items: [], counts: { pendingItems: 0, missingSemanticTags: 0, technicalIssues: 0, dependencyIssues: 0 }, usageTagOptions: [] }),
+      }} />)
+      await user.click(await screen.findByRole('button', { name: 'Example Pack' }))
+      if (kind === 'rename') {
+        fireEvent.contextMenu(screen.getByRole('tree', { name: 'Pack files' }))
+        await user.click(screen.getByText(i18n.t('resourceLibrary:detail.newFolder'), { exact: true }))
+      } else {
+        await user.click(screen.getByRole('button', { name: i18n.t(`resourceLibrary:list.${kind === 'curation' ? 'curation' : kind === 'publish' ? 'publish' : 'archivePack'}`) }))
+      }
+      const popup = await screen.findByRole('dialog')
+      await waitFor(() => expect(popup).not.toHaveAttribute('data-starting-style'))
+      const closeName = i18n.t(`resourceLibrary:${kind === 'curation' ? 'curation.close' : kind === 'publish' ? 'detail.closePublishCheck' : 'detail.cancel'}`)
+      await user.click(within(popup).getByRole('button', { name: closeName }))
+      await waitFor(() => expect(closingObserved).toBe(true))
+      expect(popup).toBeInTheDocument()
+      expect(popup).toHaveAttribute('inert')
+      expect(popup).toHaveAttribute('aria-hidden', 'true')
+      expect(popup).toHaveClass('transition-[opacity,transform,scale]')
+      await act(async () => { finishClose() })
+      await waitFor(() => expect(popup).not.toBeInTheDocument())
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.getByRole('tree', { name: 'Pack files' })).toBeInTheDocument()
+    } finally {
+      impact.mockRestore()
+      if (original) Object.defineProperty(Element.prototype, 'getAnimations', original)
+      else Reflect.deleteProperty(Element.prototype, 'getAnimations')
+    }
+  })
 
   test('shows the loading page instead of a partial resource-pack list', async () => {
     let resolvePacks!: (packs: ResourcePackSummary[]) => void

@@ -740,6 +740,10 @@
     "customStyle": "カスタムスタイルを追加",
     "customGameType": "カスタムジャンルを追加",
     "create": "パックを作成",
+    "createMoreInfo": "詳細情報",
+    "createContinue": "続ける",
+    "createBack": "基本情報に戻る",
+    "createAddTag": "タグを追加",
     "creating": "作成中…",
     "createRequired": "名前、スタイル、ゲームジャンルを入力し、主なカテゴリを選択してください。",
     "update": "パックを保存",
@@ -771,6 +775,7 @@
     "list": {
       "all": "すべてのリソースパック",
       "search": "リソースパックを検索",
+      "filter": "絞り込み",
       "empty": "リソースパックはありません",
       "emptyHint": "パックを作成してゲーム素材を整理しましょう。",
       "previous": "前へ",

@@ -419,6 +419,8 @@ export const ChatPanel = memo(({
                                     disabled={isComposerDisabled}
                                 />
                                 <PromptInput
+                                    compact
+                                    minRows={1}
                                     textareaRef={textareaRef}
                                     value={chatInput}
                                     onValueChange={onChatInputChange}
@@ -452,8 +454,8 @@ export const ChatPanel = memo(({
                                                 variant="ghost"
                                                 size="icon"
                                                 aria-label={attachFileLabel}
-                                                title="V3 后续消息暂不支持附件"
-                                                disabled
+                                                title={attachFileLabel}
+                                                disabled={isComposerDisabled || !onAddAttachments}
                                                 onClick={() => attachmentInputRef.current?.click()}
                                                 className="h-8 w-8 rounded-full border border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                                                 data-testid="beegame-chat-attach-button"

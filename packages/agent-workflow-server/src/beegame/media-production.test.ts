@@ -60,6 +60,40 @@ test('image crop, explicit resize, padding and overlay have verified output dime
   expect([...data.subarray((2 * 6 + 2) * 4, (2 * 6 + 2) * 4 + 4)]).toEqual([0, 0, 255, 255])
 })
 
+test('sprite crops and packing preserve transparent frame space and intentional airborne offsets', async () => {
+  // Mechanical fixture, not generated artwork or a visual-quality acceptance sample.
+  const root = await fixture()
+  const names = ['contact', 'air', 'recovery']
+  const offsets = [4, 0, 4]
+  const mark = await sharp({ create: { width: 2, height: 3, channels: 4, background: '#00aabb' } }).png().toBuffer()
+  const source = await sharp({ create: { width: 24, height: 10, channels: 4, background: '#00000000' } })
+    .composite(offsets.map((top, i) => ({ input: mark, left: i * 8 + 2, top }))).png().toBuffer()
+  await writeFile(join(root, 'assets/motion-source.png'), source)
+  await produceMedia(root, { operation: 'images', jobs: names.map((name, i) => ({
+    input: 'assets/motion-source.png', crop: { left: i * 8, top: 0, width: 8, height: 10 },
+    padding: { top: 2, bottom: 2, left: 2, right: 2 }, output: 'assets/' + name + '.png',
+  })) }, sharp)
+  await produceMedia(root, { operation: 'atlas', group: 'motion',
+    frames: names.map(id => ({ id, input: 'assets/' + id + '.png' })),
+    output: 'assets/motion.png', metadata: 'assets/motion.json',
+    maxWidth: 32, maxHeight: 32, padding: 1, filtering: 'linear',
+  }, sharp)
+  const table = parseSpriteSheet(JSON.parse(await readFile(join(root, 'assets/motion.json'), 'utf8')))
+  for (const [i, name] of names.entries()) {
+    const frame = spriteSheetSelection(table, { frame: name }).frame!
+    expect(frame).toMatchObject({ width: 12, height: 14 })
+    const packed = await sharp(join(root, 'assets/motion.png'))
+      .extract({ left: frame.x, top: frame.y, width: frame.width, height: frame.height }).raw().toBuffer()
+    const prepared = await sharp(join(root, 'assets/' + name + '.png')).raw().toBuffer()
+    expect(packed).toEqual(prepared)
+    const visibleRows = []
+    for (let y = 0; y < frame.height; y++)
+      if (packed[(y * frame.width + 4) * 4 + 3]) visibleRows.push(y)
+    expect(visibleRows).toEqual([offsets[i]! + 2, offsets[i]! + 3, offsets[i]! + 4])
+  }
+  expect(await readFile(join(root, 'assets/motion-source.png'))).toEqual(source)
+})
+
 test('invalid regions, duplicate normalized names, size and filtering fail before output', async () => {
   const root = await fixture()
   for (const [request, message] of [

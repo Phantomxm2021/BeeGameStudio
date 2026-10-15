@@ -6,22 +6,19 @@ import type { CHECK_IDS, CheckResult, TaskSpec } from './state'
 export const CHECK_VERSIONS = {
   'artifact-json': 'v3-slice.1',
   'content-schema': 'v3-slice.1',
-  'content-structure': 'v3-content.1',
-  'content-layout': 'v3-content.1',
-  'content-resources': 'v3-content.1',
+  'content-structure': 'v3-content.2',
+  'content-layout': 'v3-content.2',
+  'content-resources': 'v3-content.3',
   build: 'v3-slice.1',
   'rule-tests': 'v3-slice.1',
-  'runtime-smoke': 'v3-static-artifact.2',
-  'delivery-package': 'v3-static-artifact.1',
-  'ui-data-consumption': 'v3-ui-dom-consumption.5',
+  'runtime-smoke': 'v3-static-artifact.3',
+  'delivery-package': 'v3-static-artifact.2',
+  'ui-data-consumption': 'v3-ui-dom-consumption.7',
+  'scene-data-consumption': 'v3-scene-visible-causality.1',
   'pixel-data-consumption': 'v3-canvas-image-consumption.3',
   'font-data-consumption': 'v3-dom-font-consumption.1',
-  'audio-data-consumption': 'v3-html-audio-consumption.1',
-  'review-findings': 'v3-directed-review.2',
-  'repair-verification': 'v3-directed-repair.1',
-  'skill-use': 'native-tool-lifecycle.1',
-  'content-binding': 'v3-task-binding.1',
-} as const satisfies Record<(typeof CHECK_IDS)[number] | 'skill-use' | 'content-binding', string>
+  'audio-data-consumption': 'v3-html-audio-consumption.3',
+} as const satisfies Record<(typeof CHECK_IDS)[number], string>
 export const EDITABLE_BUILD_CHECK_VERSION = 'v3-editable-build.1' as const
 
 export function currentCheckVersion(id: keyof typeof CHECK_VERSIONS, task?: Pick<TaskSpec, 'editableProject'>): string {

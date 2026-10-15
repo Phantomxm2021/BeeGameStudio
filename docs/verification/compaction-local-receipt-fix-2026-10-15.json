@@ -1,0 +1,126 @@
+{
+  "kind": "read-only-original-prefix-retention-audit",
+  "sourceSha256": "294d2e277087e496a329daa1069018e1aabe9947f54514f9d430e2864a280fad",
+  "sourceUnchanged": true,
+  "physicalBoundaryLine": 328,
+  "metrics": {
+    "before": {
+      "historicalCharacters": 22843,
+      "workingCharacters": 6038,
+      "records": 26,
+      "observations": [
+        {
+          "sourceLine": 281,
+          "retained": true,
+          "bodyRetention": "latest",
+          "fields": null,
+          "hasExactCallInput": false,
+          "rawResult": "revisions updated 5820ba383201\n{\n  \"scope\": \"design-layout-geometry\",\n  \"runtimeVerified\": false,\n  "
+        },
+        {
+          "sourceLine": 303,
+          "retained": false,
+          "bodyRetention": null,
+          "fields": null,
+          "hasExactCallInput": false
+        },
+        {
+          "sourceLine": 307,
+          "retained": false,
+          "bodyRetention": null,
+          "fields": null,
+          "hasExactCallInput": false
+        }
+      ]
+    },
+    "after": {
+      "historicalCharacters": 36006,
+      "workingCharacters": 6038,
+      "records": 36,
+      "observations": [
+        {
+          "sourceLine": 281,
+          "retained": true,
+          "bodyRetention": null,
+          "fields": [
+            "\"scope\": \"design-layout-geometry\"",
+            "\"valid\": false",
+            "\"scope\": \"scene-layout-batch\"",
+            "\"valid\": true"
+          ],
+          "hasExactCallInput": false
+        },
+        {
+          "sourceLine": 303,
+          "retained": true,
+          "bodyRetention": null,
+          "fields": [
+            "valid: True"
+          ],
+          "hasExactCallInput": true
+        },
+        {
+          "sourceLine": 307,
+          "retained": true,
+          "bodyRetention": "latest",
+          "fields": null,
+          "hasExactCallInput": true,
+          "rawResult": "rev 9ae049f46b79\ncurrent valid: True []"
+        }
+      ]
+    },
+    "repeatedRoundtrips": [
+      {
+        "records": 36,
+        "historicalCharacters": 36006
+      },
+      {
+        "records": 36,
+        "historicalCharacters": 36006
+      },
+      {
+        "records": 36,
+        "historicalCharacters": 36006
+      },
+      {
+        "records": 36,
+        "historicalCharacters": 36006
+      },
+      {
+        "records": 36,
+        "historicalCharacters": 36006
+      }
+    ]
+  },
+  "sourceBeforeSha256": "536f5e0caf1ae595272acc41015f2397afdbf0b40acf125947b300729bef15d0",
+  "sourceAfterSha256": "7b53eea5dcb5a56d57f5a9f1ec06c01b0b702d2ecc3c94ddfe8aeab46c04c47c",
+  "paidCalls": 0,
+  "limitations": [
+    "No generated summary or model continuation tested.",
+    "Character lengths are not token counts or measured savings.",
+    "No inferred resolution, current validation or persisted-session replay.",
+    "Existing compacted sessions cannot recover previously omitted observations without reading the original transcript.",
+    "Retains exact commands for plain validation records; history with many such commands can cost more context. No claim of net token optimization.",
+    "Different check results are not programmatically declared to supersede each other. Correct final model interpretation remains unverified."
+  ],
+  "testAfterSha256": "b17d67a947278de56c8e52d0ef442501c9ea897f71f811668786df50729e1cf4",
+  "tests": {
+    "command": "BGS_COMPACT_AUDIT_TRANSCRIPT=<original JSONL> bun test src/services/compact/__tests__",
+    "pass": 79,
+    "fail": 0,
+    "skip": 0,
+    "assertions": 513
+  },
+  "lint": "biome lint src/services/compact/preservedContext.ts: passed",
+  "implementation": [
+    "Recognize literal line-oriented Bash valid: True/False observations, including labeled current valid; Read/prose/unpaired outputs are not recognized by this new detector.",
+    "Keep plain validation invocation input to distinguish check scope; retain literal fields when older bodies become source pointers.",
+    "Retain structured scope/inputHash/documentRevision observations in pointers. Do not infer resolution or current validity."
+  ],
+  "tradeoff": {
+    "historicalCharacterIncrease": 13163,
+    "notTokenOrCurrencyMeasurement": true,
+    "rejectedBroaderVariant": "Preserving full calls for all JSON validation records raised historical characters to 47304; narrowed to plain-text validation calls, 36006."
+  },
+  "deployment": "Not restarted or deployed. Source edits are in the integration worktree; no production settings, thresholds, GitHub source or kitty artifacts changed."
+}

@@ -13,7 +13,7 @@ import {
 import { CreditStoreModal } from './Landing/CreditStoreModal';
 import { ProjectHistoryModal } from './Landing/ProjectHistoryModal';
 import { ProfileModal } from './Landing/ProfileModal';
-import type { BeeGameDeploymentPayload, BuildReportPayload } from '../../services/api';
+import type { BeeGameDeploymentDiscussionConfirmation, BeeGameDeploymentPayload, BuildReportPayload } from '../../services/api';
 import type { TokenUsage } from '../../types/message';
 import { useSystemStore } from '../../store/systemStore';
 import { useProjectStore } from '../../store/projectStore';
@@ -57,12 +57,14 @@ interface BeeGameLivePreviewPageProps {
   buildReport?: BuildReportPayload | null;
   projectTarget?: string;
   tokenUsage?: TokenUsage | null;
+  tokenUsageScope?: 'project' | 'session';
+  settledProjectTokens?: number;
   projectCreatedAt?: number;
   deployments?: BeeGameDeploymentPayload[];
   previewRefreshNonce?: number;
   onStartPreview?: () => void | Promise<void>;
   onStopPreview?: () => void | Promise<void>;
-  onDeployProject?: () => void | Promise<void>;
+  onDeployProject?: (confirmation?: BeeGameDeploymentDiscussionConfirmation) => void | Promise<void>;
   onRollbackDeployment?: (deploymentId: string) => void | Promise<void>;
   onFixDeploymentFailure?: () => void | Promise<void>;
   onFixConsoleError?: (message: string) => Promise<boolean | void>;
@@ -133,6 +135,8 @@ export function BeeGameLivePreviewPage({
   credits,
   accountCreditBalance,
   tokenUsage,
+  tokenUsageScope = 'project',
+  settledProjectTokens,
   projectCreatedAt,
   isSyncing,
   isInteractionLocked = false,
@@ -167,10 +171,15 @@ export function BeeGameLivePreviewPage({
   const [isDeploymentDialogOpen, setDeploymentDialogOpen] = useState(false);
   const [stoppedPreviewUrl, setStoppedPreviewUrl] = useState('');
   const [isStartingPreview, setStartingPreview] = useState(false);
+  const [previewStartError, setPreviewStartError] = useState<{ projectId: string; message: string } | null>(null);
   const [isStoppingPreview, setStoppingPreview] = useState(false);
   const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
   const uiText = useBeeGameText(lang);
   const labels = uiText.livePreview as Record<string, string>;
+  const tokenScopeSuffix = tokenUsageScope === 'session'
+    ? lang.startsWith('zh') ? '（当前会话）' : lang.startsWith('ja') ? '（現在のセッション）' : ' (current session)'
+    : '';
+  const settledTokenLabel = lang.startsWith('zh') ? '项目已结算 Tokens' : lang.startsWith('ja') ? 'プロジェクト決済済み Tokens' : 'Project settled Tokens';
   const backHomeLabel = lang.startsWith('zh') ? '返回主页' : 'Back to home';
   const currentUser = useSystemStore(state => state.currentUser);
   const loadCurrentUser = useSystemStore(state => state.loadCurrentUser);
@@ -186,9 +195,10 @@ export function BeeGameLivePreviewPage({
     }
   }, [previewRefreshNonce, previewUrl]);
   const isPreviewLocallyStopped = Boolean(previewUrl && stoppedPreviewUrl === previewUrl);
+  const startError = previewStartError?.projectId === projectId ? previewStartError.message : '';
   const previewState = isStartingPreview
     ? 'starting'
-    : isPreviewLocallyStopped
+    : startError ? 'failed' : isPreviewLocallyStopped
       ? 'stopped'
       : getPreviewState(status, buildReport);
   const canShowPreview = previewState === 'live' && Boolean(previewUrl);
@@ -213,7 +223,7 @@ export function BeeGameLivePreviewPage({
             ? labels.live
             : labels.standby;
   const previewDetailText =
-    previewState === 'failed' ? buildReport?.failure_reason || buildReport?.summary || labels.noPreview : '';
+    previewState === 'failed' ? startError || buildReport?.failure_reason || buildReport?.summary || labels.noPreview : '';
   const handleStop = async () => {
     if (!canStopPreview || isInteractionLocked) return;
     setStoppingPreview(true);
@@ -227,16 +237,19 @@ export function BeeGameLivePreviewPage({
   const handlePlay = async () => {
     if (isInteractionLocked || isWorkspaceBusy || isStartingPreview) return;
     setStoppedPreviewUrl('');
+    setPreviewStartError(null);
     setStartingPreview(true);
     try {
       await onStartPreview?.();
+    } catch (error) {
+      setPreviewStartError({ projectId, message: error instanceof Error ? error.message : String(error) });
     } finally {
       setStartingPreview(false);
     }
   };
-  const handleDeploy = async () => {
+  const handleDeploy = async (confirmation?: BeeGameDeploymentDiscussionConfirmation) => {
     if (isInteractionLocked || isWorkspaceBusy) return;
-    await onDeployProject?.();
+    await onDeployProject?.(confirmation);
   };
   const closeAccountSurfaces = () => {
     setSettingsOpen(false);
@@ -292,9 +305,10 @@ export function BeeGameLivePreviewPage({
                 <div className="mt-2">
                   <ProjectElapsedRow startedAt={projectCreatedAt} label={labels.projectRunTime} detail={labels.projectRunTimeDetail} lang={lang} />
                   <ProjectHintRow label={labels.consumedCredits} value={formatCreditAmount(credits?.consumedCredits)} />
-                  <ProjectHintRow label={labels.inputTokens} value={formatUsage(tokenUsage?.input_tokens ?? tokenUsage?.prompt_tokens)} />
-                  <ProjectHintRow label={labels.cachedInputTokens} value={formatUsage(tokenUsage?.cache_read_tokens ?? tokenUsage?.cached_input_tokens)} />
-                  <ProjectHintRow label={labels.outputTokens} value={formatUsage(tokenUsage?.output_tokens ?? tokenUsage?.completion_tokens)} />
+                  <ProjectHintRow label={`${labels.inputTokens}${tokenScopeSuffix}`} value={formatUsage(tokenUsage?.input_tokens ?? tokenUsage?.prompt_tokens)} />
+                  <ProjectHintRow label={`${labels.cachedInputTokens}${tokenScopeSuffix}`} value={formatUsage(tokenUsage?.cached_input_tokens ?? tokenUsage?.cache_read_tokens)} />
+                  <ProjectHintRow label={`${labels.outputTokens}${tokenScopeSuffix}`} value={formatUsage(tokenUsage?.output_tokens ?? tokenUsage?.completion_tokens)} />
+                  {settledProjectTokens !== undefined ? <ProjectHintRow label={settledTokenLabel} value={formatUsage(settledProjectTokens)} /> : null}
                 </div>
               </div>
             </MorphPopoverContent>
@@ -430,6 +444,7 @@ export function BeeGameLivePreviewPage({
       />
       <WorkspaceDeploymentDialog
         projectId={projectId}
+        projectName={projectName}
         isOpen={isDeploymentDialogOpen}
         deployments={deployments}
         labels={labels}
@@ -448,7 +463,7 @@ export function BeeGameLivePreviewPage({
 
 
 function formatCreditAmount(value?: number): string {
-  return value === undefined ? '—' : Math.max(0, value).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return value === undefined ? '—' : Math.max(0, value).toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
 
 function formatUsage(value?: number): string {

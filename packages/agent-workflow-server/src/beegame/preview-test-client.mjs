@@ -1,4 +1,5 @@
 import { readFile, realpath } from 'node:fs/promises';
+export { withPlayCapture } from './preview-play-capture.mjs';
 
 export async function resolvePreviewApi(apiUrl) {
   if (apiUrl === undefined) {
@@ -43,17 +44,49 @@ export async function withPreviewPage({ apiUrl, mode, contextOptions = {}, befor
   const { chromium } = await import(moduleUrl);
   const browser = await chromium.connectOverCDP(endpoint);
   let context;
+  const runtimeErrors = { pageErrors: 0, consoleErrors: 0, failedRequests: 0, httpErrors: 0 };
+  const runtimeErrorDetails = { pageErrors: [], consoleErrors: [], failedRequests: [], httpErrors: [] };
+  // Keep small diagnostic samples, not console objects, headers, bodies or
+  // stacks. Counts remain complete even after each category's five samples.
+  const diagnosticText = value => String(value ?? '')
+    .replace(/https?:\/\/[^\s"'<>]+/g, value => {
+      try { const url = new URL(value); return url.origin + url.pathname; }
+      catch { return '[url]'; }
+    })
+    .split(apiUrl).join('[preview-api]')
+    .replace(/\/previews\/[^/\s"'<>]+/g, '/previews/[redacted]')
+    .replace(/\b(?:data|blob):[^\s"'<>]+/g, '[inline-url]')
+    .replace(/\bBearer\s+[^\s,;"']+/gi, 'Bearer [redacted]')
+    .replace(/\b(?:authorization|api[-_ ]?key|access[-_ ]?token|token|secret|password|cookie)["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, '[credential redacted]')
+    .replace(/(?:\/Users|\/home|\/private|\/tmp|[A-Za-z]:\\)[^\s,;:()]+/g, '[local-path]')
+    .split('\n')[0].slice(0, 500);
+  const record = (kind, detail) => {
+    runtimeErrors[kind]++;
+    if (runtimeErrorDetails[kind].length < 5) runtimeErrorDetails[kind].push(detail());
+  };
   try {
-    context = await browser.newContext(contextOptions);
-    const page = await context.newPage();
-    // Capture from the first navigation even if inspect installs its own
-    // listeners late. Counts only: no console payloads, URLs or credentials are
-    // copied into host logs. They are observations, never an automatic verdict.
-    const runtimeErrors = { pageErrors: 0, consoleErrors: 0, failedRequests: 0, httpErrors: 0 };
-    page.on('pageerror', () => runtimeErrors.pageErrors++);
-    page.on('console', message => { if (message.type() === 'error') runtimeErrors.consoleErrors++; });
-    page.on('requestfailed', () => runtimeErrors.failedRequests++);
-    page.on('response', response => { if (response.status() >= 400) runtimeErrors.httpErrors++; });
+    let page;
+    try {
+      context = await browser.newContext(contextOptions);
+      // Recorder availability is checked lazily on page creation by Playwright.
+      page = await context.newPage();
+    }
+    catch (error) {
+      if (contextOptions.recordVideo) throw new Error('Preview recording unavailable: ' + String(error.message).split('\n')[0] + '. No installation or retry was attempted; repair the host recording runtime before another capture.');
+      throw error;
+    }
+    // Observe before navigation; diagnostics do not replace any assertions.
+    page.on('pageerror', error => record('pageErrors', () => ({ name: diagnosticText(error.name), message: diagnosticText(error.message) })));
+    page.on('console', message => { if (message.type() === 'error') record('consoleErrors', () => ({
+      message: diagnosticText(message.text()), url: diagnosticText(message.location().url),
+      line: message.location().lineNumber, column: message.location().columnNumber,
+    })); });
+    page.on('requestfailed', request => record('failedRequests', () => ({
+      url: diagnosticText(request.url()), method: request.method(), failure: diagnosticText(request.failure()?.errorText),
+    })));
+    page.on('response', response => { if (response.status() >= 400) record('httpErrors', () => ({
+      url: diagnosticText(response.url()), status: response.status(), method: response.request().method(),
+    })); });
     // Install startup error listeners and context routes before the game's
     // first request. Registering them in inspect is too late for boot failures.
     await beforeNavigate?.({ page, context });
@@ -77,13 +110,18 @@ export async function withPreviewPage({ apiUrl, mode, contextOptions = {}, befor
       coarsePointer: matchMedia('(pointer: coarse)').matches, hover: matchMedia('(hover: hover)').matches,
     }));
     const result = await inspect({ page, frame: page.frameLocator(preview.frameSelector), gameFrame,
-      environment: preview.environment, observedEnvironment: await observeEnvironment(), observeEnvironment, runtimeErrors, context, browser });
+      environment: preview.environment, observedEnvironment: await observeEnvironment(), observeEnvironment, runtimeErrors, runtimeErrorDetails, context, browser });
     // Opt-in for tests claiming a clean runtime. A late user listener cannot
     // hide the helper's initial-load observations. Diagnostic callers keep the
     // original observe-only contract; this is not a gameplay/quality verdict.
     if (runtimeErrorPolicy === 'fail' && Object.values(runtimeErrors).some(count => count > 0))
-      throw new Error('PREVIEW_RUNTIME_ERRORS: ' + JSON.stringify(runtimeErrors));
+      throw new Error('PREVIEW_RUNTIME_ERRORS: ' + JSON.stringify({ ...runtimeErrors, runtimeErrorDetails }));
     return result;
+  } catch (error) {
+    // Preserve observations when navigation or an assertion fails before a
+    // caller can return them. Keep the original failure, not a success report.
+    if (error instanceof Error) Object.assign(error, { runtimeErrors, runtimeErrorDetails });
+    throw error;
   } finally {
     try { await context?.close(); }
     finally { await browser.close(); }

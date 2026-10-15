@@ -30,7 +30,7 @@ export interface SceneEditorProps {
 export declare const SceneEditor: ComponentType<SceneEditorProps>;
 
 export { spriteSheetSelection, parseSpriteSheet, atlasFrameName } from '../../../../packages/scene-editor/src/sprite-sheet';
-export { uiAnchor, uiLocalMatrix, uiPaintOrder } from '../../../../packages/scene-editor/src/content-coordinates';
+export { canvasReferenceSize, uiAnchor, uiLocalMatrix, uiPaintOrder } from '../../../../packages/scene-editor/src/content-coordinates';
 export { resolveUiNodesForViewport } from '../../../../packages/scene-editor/src/ui-responsive';
 export { initializeUiLayout } from '../../../../packages/scene-editor/src/ui-container-layout';
 export { createUiTextMeasurer } from '../../../../packages/scene-editor/src/ui-text-measurement';

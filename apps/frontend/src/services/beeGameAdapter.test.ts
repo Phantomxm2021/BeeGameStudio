@@ -39,6 +39,66 @@ it('routes ordinary project chat through V3 without asking the user for an inten
   })
 })
 
+it('resumes a stopped V3 run before dispatching an explicit new message', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    session: { id: 'chat-1', cwd: '/workspace', status: 'stopped', turnStatus: 'idle' },
+  })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+    id: 'run-1', version: 7, planRevision: 2, chatSessionId: 'chat-1', paused: { at: 'now' },
+    requirements: { revision: 'revision-1' }, agentTurns: [{ attemptId: 'first', status: 'interrupted' }],
+  } })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+    id: 'run-1', version: 8, planRevision: 2, chatSessionId: 'chat-1',
+    requirements: { revision: 'revision-1' }, agentTurns: [{ attemptId: 'first', status: 'interrupted' }],
+  } })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    runId: 'run-1', turn: { attemptId: 'next' },
+  }), { status: 202 }))
+  const result = await beeGameAdapter.sendMessage({ project_id: 'project', content: 'Continue this slice',
+    client_message_id: 'client-2' })
+  expect(result.task_id).toBe('next')
+  expect(authenticatedFetchMock.mock.calls.map(([url]) => url)).toEqual([
+    '/api/projects/project/session/ensure',
+    '/api/projects/project/workflow-v3',
+    '/api/projects/project/workflow-v3/resume',
+    '/api/projects/project/workflow-v3/agent/messages',
+  ])
+  expect(JSON.parse(authenticatedFetchMock.mock.calls[2]![1]!.body as string)).toEqual({ planRevision: 2 })
+  expect(JSON.parse(authenticatedFetchMock.mock.calls[3]![1]!.body as string)).toMatchObject({
+    requestKey: 'client-2', expectedVersion: 8, text: 'Continue this slice',
+  })
+})
+
+it('forwards a chat attachment to V3 without adding a user-facing intent', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    session: { id: 'chat-1', cwd: '/workspace', status: 'running', turnStatus: 'idle' },
+  })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ run: {
+    id: 'run-1', version: 7, planRevision: 2, chatSessionId: 'chat-1',
+    requirements: { revision: 'revision-1' }, agentTurns: [{ attemptId: 'first', status: 'ended' }],
+  } })))
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+    runId: 'run-1', turn: { attemptId: 'next' },
+  }), { status: 202 }))
+  const attachment = { type: 'file' as const, mediaType: 'text/plain', filename: 'note.txt', data: 'SGVsbG8=' }
+  await beeGameAdapter.sendMessage({ project_id: 'project', content: '', attachments: [attachment] })
+  const body = JSON.parse(authenticatedFetchMock.mock.calls[2]![1]!.body as string)
+  expect(body).toMatchObject({ text: '', attachments: [attachment] })
+  expect(body).not.toHaveProperty('intent')
+})
+
+it('forwards only the explicit release-time discussion confirmation when publishing', async () => {
+  authenticatedFetchMock.mockReset()
+  authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ id: 'deployment-1' }), { status: 202 }))
+  const confirmation = { measurementId: 'measurement-1', requirementsRevision: 'revision-2',
+    discussionConfirmation: { messageRequestKeys: ['question-1'] } }
+  await beeGameAdapter.deployProject('project', confirmation)
+  expect(authenticatedFetchMock.mock.calls[0]![0]).toBe('/api/projects/project/deployments')
+  expect(JSON.parse(authenticatedFetchMock.mock.calls[0]![1]!.body as string)).toEqual(confirmation)
+})
+
 it('requires the current project artifact index instead of reconstructing an older server response', async () => {
   authenticatedFetchMock.mockReset()
   authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Index unavailable' }), { status: 404 }))
@@ -121,6 +181,34 @@ describe('transcriptEventsToHistory', () => {
     const history = transcriptEventsToHistory('project', events)
     expect(history).toHaveLength(2)
     expect(history.map(message => message.content)).toEqual(['修复按钮', '修复按钮'])
+  })
+
+  it('shows the idea instead of the workflow goal transport JSON in user chat', () => {
+    const brief = JSON.stringify({ kind: 'confirmed_build_brief', idea: '做一个萤石驿站游戏', settings: { orientation: 'landscape' } })
+    const events = [
+      { id: 1, sessionId: 'main', type: 'user.message', text: brief,
+        createdAt: new Date(1000).toISOString(), payload: { type: 'user.message', displayKind: 'workflow_v3_goal', displayText: brief } },
+      { id: 2, sessionId: 'main', type: 'user.message', text: brief,
+        createdAt: new Date(2000).toISOString(), payload: { type: 'user.message', displayKind: 'project_request', displayText: brief } },
+    ]
+    const history = transcriptEventsToHistory('project', events)
+    expect(history.map(message => message.content)).toEqual(['做一个萤石驿站游戏', brief])
+  })
+
+  it('recovers the original idea from a saved initial goal without exposing internal prompt JSON', () => {
+    // A user may intentionally author JSON; unwrap only the system brief once.
+    const idea = '{"idea":"做一个小游戏","controls":"方向键"}'
+    const brief = JSON.stringify({ kind: 'confirmed_build_brief', idea, settings: { orientation: 'landscape' } })
+    const prompt = 'This first assignment delivers one representative playable slice.\n\nConfirmed full goal:\n' + brief
+    const events = [
+      { id: 1, sessionId: 'main', type: 'user.message', text: prompt,
+        createdAt: new Date(1000).toISOString(), payload: { type: 'user.message', displayKind: 'workflow_v3_goal',
+          displayText: prompt, confirmedBriefContext: brief } },
+      { id: 2, sessionId: 'main', type: 'user.message', text: idea,
+        createdAt: new Date(2000).toISOString(), payload: { type: 'user.message', displayKind: 'workflow_v3_message',
+          displayText: idea, confirmedBriefContext: brief } },
+    ]
+    expect(transcriptEventsToHistory('project', events).map(message => message.content)).toEqual([idea, idea])
   })
   const nativeThinking = (id: number, status: string, text: string) => ({
     id, sessionId: 'native-session', turnId: 'native-turn',
@@ -648,6 +736,17 @@ describe('transcriptEventsToHistory', () => {
     }))
   })
 
+  it('forwards confirmed credit debits without rendering them as chat messages', async () => {
+    const event = { ...nativeEvent(1, 'system.status', {
+      type: 'billing.realtime_debited', creditsMicro: 500,
+    }), text: 'Realtime usage debited' }
+    const history = transcriptEventsToHistory('project', [event])
+    expect(history).toEqual([])
+    authenticatedFetchMock.mockResolvedValueOnce(Response.json({ events: [event], workspacePath: '' }))
+    const result = await beeGameAdapter.pollMessages('billing-test', 0)
+    expect(result.messages).toContainEqual(expect.objectContaining({ type: 'billing_update' }))
+  })
+
   it('breaks a silent SSE socket after the heartbeat deadline so the hook can reconnect', async () => {
     vi.useFakeTimers()
     try {
@@ -709,6 +808,16 @@ describe('transcriptEventsToHistory', () => {
       expect(useChatStore.getState().messages[0].subagentActivity?.entries.map(e => e.id)).toEqual(['read-old', 'read-new'])
       expect(useChatStore.getState().messages[0].toolStatus).toBe('completed')
     } finally { useChatStore.getState().clearMessages() }
+  })
+
+  it('preserves the Preview rejection reason and code without retrying', async () => {
+    authenticatedFetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      code: 'measurement-stale', error: 'Exportable sources changed: tests/capture.mjs',
+    }), { status: 409, headers: { 'content-type': 'application/json' } }))
+    await expect(beeGameAdapter.startProjectPreview('rejected-preview')).rejects.toMatchObject({
+      status: 409, code: 'measurement-stale', message: 'Exportable sources changed: tests/capture.mjs',
+    })
+    expect(authenticatedFetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('requests Scene/UI file metadata without downloading document bodies', async () => {

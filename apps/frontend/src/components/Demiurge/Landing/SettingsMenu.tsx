@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { motion } from 'motion/react';
+import { EASE_OUT } from '../../beui/registry/lib/ease';
 import { ModelConnectionsPanel, type ModelConnectionsHandle, type ModelConnectionsSaveState } from '../../Settings/ModelConnectionsPanel';
+import { PersonalImageConnectionPanel, type PersonalImageConnectionHandle, type PersonalImageConnectionSaveState } from '../../Settings/PersonalImageConnectionPanel';
 import {
   BookOpenText,
   Cpu,
@@ -7,6 +10,7 @@ import {
   Globe,
   KeyRound,
   Info,
+  Image,
   MoreHorizontal,
   Pencil,
   Network,
@@ -51,13 +55,8 @@ import {
   type McpServerInput,
   type McpServerTestResult,
 } from '../../../services/mcpServersApi';
-import {
-  deleteUserSkill,
-  importUserSkillPackage,
-  listUserSkills,
-  updateUserSkillEnabled,
-  type UserSkill,
-} from '../../../services/userSkillsApi';
+import { useUserSkillsSettings } from '../../../hooks/useUserSkillsSettings';
+import { useSettingsSectionLoad } from '../../../hooks/useSettingsSectionLoad';
 import {
   createInvitation,
   deleteInvitation,
@@ -125,8 +124,8 @@ interface SettingsMenuProps {
   canManageCredits?: boolean;
 }
 
-type SettingsSection = 'personal' | 'connections' | 'skills' | 'platform';
-type SettingsTab = 'general' | 'runtime' | 'mcp' | 'skills' | 'model' | 'image' | 'invitations' | 'projects' | 'credit';
+type SettingsSection = 'personal' | 'connections' | 'image-connection' | 'skills' | 'mcp' | 'platform';
+type SettingsTab = 'general' | 'runtime' | 'skills' | 'model' | 'image' | 'invitations' | 'projects' | 'credit';
 type McpFormAnchor =
   | { kind: 'new'; rect: PopoverAnchorRect }
   | { kind: 'edit'; serverId: string; rect: PopoverAnchorRect }
@@ -159,7 +158,8 @@ export function SettingsMenu({
   const billingCopy = getBillingSettingsCopy(translateSettings);
   const projectLifecycleCopy = getProjectLifecycleSettingsCopy(translateSettings);
   const userSkillsCopy = getUserSkillsSettingsCopy(translateSettings);
-  const { showError, showSuccess } = useToastContext();
+  const adminCopy = getAdminSettingsCopy(translateSettings);
+  const { showError } = useToastContext();
   const currentUser = useSystemStore(state => state.currentUser);
   const isDark = useSystemStore(state => state.isDark);
   const toggleTheme = useSystemStore(state => state.toggleTheme);
@@ -170,7 +170,8 @@ export function SettingsMenu({
   const effectiveCanManageSecrets = canManageSecrets ?? (canOpenPlatformSettings && hasPermission('secrets.manage'));
   const effectiveCanManageRuntimeSettings =
     canManageRuntimeSettings ?? (canOpenPlatformSettings && hasPermission('runtime_settings.manage'));
-  const effectiveCanManageMcp = canManageMcp ?? (canOpenPlatformSettings && hasPermission('mcp.manage'));
+  const effectiveCanManageMcp = canManageMcp ?? Boolean(currentUser && hasPermission('mcp.manage'));
+  const canDiscoverHostMcp = canOpenPlatformSettings && hasPermission('workspace.manage');
   const effectiveCanManageSkills = canManageSkills ?? Boolean(currentUser);
   const effectiveCanManageModelConfig =
     canManageModelConfig ?? (canOpenPlatformSettings && hasPermission('model_config.manage'));
@@ -183,7 +184,6 @@ export function SettingsMenu({
     effectiveCanManageWorkspace ||
     effectiveCanManageSecrets ||
     effectiveCanManageRuntimeSettings ||
-    effectiveCanManageMcp ||
     effectiveCanManageModelConfig ||
     effectiveCanManageInvitations ||
     effectiveCanReadAudit ||
@@ -193,7 +193,6 @@ export function SettingsMenu({
   const [selectedModelConfigId, setSelectedModelConfigId] = useState('');
   const [modelAction, setModelAction] = useState<'create' | 'details' | 'rename' | 'delete' | null>(null);
   const [activeModelPopoverId, setActiveModelPopoverId] = useState<string | null>(null);
-  const [modelsLoading, setModelsLoading] = useState(false);
   const [name, setName] = useState('');
   const [provider, setProvider] = useState<ModelProviderKind>('openai-compatible');
   const [baseUrl, setBaseUrl] = useState('');
@@ -211,6 +210,8 @@ export function SettingsMenu({
   const [imageSettingsState, setImageSettingsState] = useState<ImageSettingsState>({ busy: false, canSave: false });
   const modelConnectionsRef = useRef<ModelConnectionsHandle>(null);
   const [modelConnectionSaveState, setModelConnectionSaveState] = useState<ModelConnectionsSaveState>({ visible: false, disabled: true, busy: false });
+  const imageConnectionRef = useRef<PersonalImageConnectionHandle>(null);
+  const [imageConnectionSaveState, setImageConnectionSaveState] = useState<PersonalImageConnectionSaveState>({ disabled: true, busy: false });
   const [workspacePath, setWorkspacePath] = useState('');
   const [workspaceStatus, setWorkspaceStatus] = useState('');
   const [webSearchAdapter, setWebSearchAdapter] = useState<WebSearchAdapter>('tavily');
@@ -236,10 +237,12 @@ export function SettingsMenu({
   const [mcpHealthById, setMcpHealthById] = useState<Record<string, McpServerTestResult>>({});
   const [testingMcpServerId, setTestingMcpServerId] = useState('');
   const [isScanningActiveMcp, setIsScanningActiveMcp] = useState(false);
-  const [userSkills, setUserSkills] = useState<UserSkill[]>([]);
-  const [isSavingUserSkill, setIsSavingUserSkill] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [activeSection, setActiveSection] = useState<SettingsSection>('personal');
+  const {
+    userSkills, loading: skillsLoading, isSavingUserSkill, handleImportUserSkill, handleToggleUserSkill, handleDeleteUserSkill,
+  } = useUserSkillsSettings({ isOpen, allowed: effectiveCanManageSkills, selected: activeSection === 'skills',
+    userId: currentUser?.id, copy: userSkillsCopy });
   const userSkillImportInputRef = useRef<HTMLInputElement | null>(null);
   const [invitationRequired, setInvitationRequired] = useState(false);
   const [invitations, setInvitations] = useState<InvitationRecord[]>([]);
@@ -262,17 +265,16 @@ export function SettingsMenu({
   const [isSavingBillingPack, setIsSavingBillingPack] = useState(false);
   const mcpAutoSaveTimerRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    let cancelled = false;
-    if (effectiveCanManageModelConfig) {
-      setModelsLoading(true);
+  const modelsLoading = useSettingsSectionLoad({
+    isOpen, allowed: effectiveCanManageModelConfig,
+    selected: activeSection === 'platform' && activeTab === 'model', userId: currentUser?.id,
+    load: isCurrent => {
       setModelAction(null);
       setActiveModelPopoverId(null);
       setApiKey('');
-      void listModelConfigs()
+      return listModelConfigs()
         .then(configs => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setExistingConfigs(configs);
           const defaultConfig = configs.find(config => config.isDefault) || configs[0];
           if (!defaultConfig) return;
@@ -289,32 +291,39 @@ export function SettingsMenu({
           setAuthMethods(defaultConfig.authMethods ?? ['platform']);
         })
         .catch(() => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setExistingConfigs([]);
             setSelectedModelConfigId('');
             setApiKeyPreview('');
             setStatus(lang.startsWith('zh') ? '无法读取模型配置，请关闭设置后重试。' : 'Could not load model configurations. Reopen Settings to try again.');
           }
-        })
-        .finally(() => { if (!cancelled) setModelsLoading(false); });
-    }
-    if (effectiveCanManageWorkspace) {
-      void getBeeGameWorkspaceSettings()
+        });
+    },
+  });
+  const workspaceLoading = useSettingsSectionLoad({
+    isOpen, allowed: effectiveCanManageWorkspace,
+    selected: activeSection === 'platform' && activeTab === 'general', userId: currentUser?.id,
+    load: isCurrent => {
+      return getBeeGameWorkspaceSettings()
         .then(settings => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setWorkspacePath(settings.workspacePath);
           setWorkspaceStatus('');
         })
         .catch(error => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setWorkspaceStatus(error instanceof Error ? error.message : text.workspaceReadFailed);
           }
         });
-    }
-    if (effectiveCanManageSecrets) {
-      void getWebToolsConfig()
+    },
+  });
+  const webToolsLoading = useSettingsSectionLoad({
+    isOpen, allowed: effectiveCanManageSecrets,
+    selected: activeSection === 'platform' && activeTab === 'general', userId: currentUser?.id,
+    load: isCurrent => {
+      return getWebToolsConfig()
         .then(config => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setWebSearchAdapter(config.webSearchAdapter || 'tavily');
           setBraveApiKeyPreview(config.braveApiKeyPreview || '');
           setExaApiKeyPreview(config.exaApiKeyPreview || '');
@@ -323,28 +332,36 @@ export function SettingsMenu({
           setWebToolsStatus('');
         })
         .catch(error => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setWebToolsStatus(error instanceof Error ? error.message : text.webToolsReadFailed);
           }
         });
-    }
-    if (effectiveCanManageRuntimeSettings) {
-      void getRuntimeSettings()
+    },
+  });
+  const runtimeLoading = useSettingsSectionLoad({
+    isOpen, allowed: effectiveCanManageRuntimeSettings,
+    selected: activeSection === 'platform' && activeTab === 'runtime', userId: currentUser?.id,
+    load: isCurrent => {
+      return getRuntimeSettings()
         .then(config => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setRuntimeSettings(normalizeRuntimeSettings(config));
           setRuntimeSettingsStatus('');
         })
         .catch(error => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setRuntimeSettingsStatus(error instanceof Error ? error.message : 'Runtime settings unavailable');
           }
         });
-    }
-    if (effectiveCanManageInvitations) {
-      void Promise.all([getInvitationPublicSettings(), listInvitations()])
+    },
+  });
+  const invitationsLoading = useSettingsSectionLoad({
+    isOpen, allowed: effectiveCanManageInvitations,
+    selected: activeSection === 'platform' && activeTab === 'invitations', userId: currentUser?.id,
+    load: isCurrent => {
+      return Promise.all([getInvitationPublicSettings(), listInvitations()])
         .then(([settings, records]) => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setInvitationRequired(settings.required);
           setInvitations(records);
           setNewInvitationCode('');
@@ -353,15 +370,19 @@ export function SettingsMenu({
           setInvitationStatus('');
         })
         .catch(error => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.unavailable);
           }
         });
-    }
-    if (effectiveCanManageMcp) {
-      void listMcpServers()
+    },
+  });
+  const mcpLoading = useSettingsSectionLoad({
+    isOpen, allowed: effectiveCanManageMcp,
+    selected: activeSection === 'mcp', userId: currentUser?.id,
+    load: isCurrent => {
+      return listMcpServers()
         .then(servers => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setMcpServers(servers);
           setMcpForm(createEmptyMcpForm());
           setMcpFormAnchor(null);
@@ -370,93 +391,82 @@ export function SettingsMenu({
           setMcpStatus('');
         })
         .catch(error => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setMcpStatus(error instanceof Error ? error.message : 'MCP settings unavailable');
           }
         });
-    }
-    if (effectiveCanManageSkills) {
-      void listUserSkills()
-        .then(skills => {
-          if (cancelled) return;
-          setUserSkills(uniqueUserSkills(skills));
-        })
-        .catch(error => {
-          if (!cancelled) {
-            setUserSkills([]);
-            showError(error instanceof Error ? error.message : userSkillsCopy.unavailable);
-          }
-        });
-    }
-    if (effectiveCanManageLifecycle) {
-      void getProjectLifecycleOverview()
+    },
+  });
+  const lifecycleLoading = useSettingsSectionLoad({
+    isOpen, allowed: effectiveCanManageLifecycle,
+    selected: activeSection === 'platform' && activeTab === 'projects', userId: currentUser?.id,
+    load: isCurrent => {
+      return getProjectLifecycleOverview()
         .then(overview => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setProjectLifecycleOverview(overview);
           setProjectLifecycleStatus('');
         })
         .catch(error => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setProjectLifecycleOverview(null);
             setProjectLifecycleStatus(error instanceof Error ? error.message : projectLifecycleCopy.unavailable);
           }
         });
-    }
-    if (effectiveCanManageCredits) {
-      void getCreditSummary()
+    },
+  });
+  const creditsLoading = useSettingsSectionLoad({
+    isOpen, allowed: effectiveCanManageCredits,
+    selected: activeSection === 'platform' && activeTab === 'credit', userId: currentUser?.id,
+    load: isCurrent => {
+      const summary = getCreditSummary()
         .then(summary => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setUsageSummary(summary);
           setBillingStatus('');
         })
         .catch(error => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setUsageSummary(null);
             setBillingStatus(error instanceof Error ? error.message : billingCopy.auditUnavailable);
           }
         });
-      void Promise.all([getBillingCreditPacks(), getBillingEvents()])
+      const billing = Promise.all([getBillingCreditPacks(), getBillingEvents()])
         .then(([packs, events]) => {
-          if (cancelled) return;
+          if (!isCurrent()) return;
           setBillingCreditPacks(packs.packs);
           setBillingEvents(events.events);
           setBillingPackForm(createEmptyBillingPackForm());
         })
         .catch(error => {
-          if (!cancelled) {
+          if (isCurrent()) {
             setBillingCreditPacks([]);
             setBillingEvents([]);
             setBillingStatus(error instanceof Error ? error.message : billingCopy.billingUnavailable);
           }
         });
-    }
+      return Promise.all([summary, billing]);
+    },
+  });
+
+  const isLoadingCurrentSection = activeSection === 'skills' ? skillsLoading
+    : activeSection === 'mcp' ? mcpLoading
+    : activeSection !== 'platform' ? false
+    : activeTab === 'general' ? workspaceLoading || webToolsLoading
+    : activeTab === 'runtime' ? runtimeLoading
+    : activeTab === 'model' ? modelsLoading
+    : activeTab === 'invitations' ? invitationsLoading
+    : activeTab === 'projects' ? lifecycleLoading
+    : activeTab === 'credit' ? creditsLoading : false;
+
+  useEffect(() => {
     return () => {
-      cancelled = true;
       if (mcpAutoSaveTimerRef.current !== null) {
         window.clearTimeout(mcpAutoSaveTimerRef.current);
         mcpAutoSaveTimerRef.current = null;
       }
     };
-  }, [
-    effectiveCanManageMcp,
-    effectiveCanManageSkills,
-    effectiveCanManageModelConfig,
-    effectiveCanManageInvitations,
-    effectiveCanManageCredits,
-    effectiveCanManageLifecycle,
-    effectiveCanManageRuntimeSettings,
-    effectiveCanManageSecrets,
-    effectiveCanManageWorkspace,
-    effectiveCanReadAudit,
-    isOpen,
-    billingCopy.auditUnavailable,
-    billingCopy.billingUnavailable,
-    projectLifecycleCopy.unavailable,
-    showError,
-    text.webToolsReadFailed,
-    text.workspaceReadFailed,
-    userSkillsCopy.unavailable,
-  ]);
+  }, [isOpen, effectiveCanManageMcp, currentUser?.id]);
 
   const openModelConfig = (action: NonNullable<typeof modelAction>, config?: ModelConfig) => {
     setSelectedModelConfigId(config?.id ?? ''); setName(config?.name ?? ''); setProvider(config?.provider ?? 'openai-compatible');
@@ -480,7 +490,7 @@ export function SettingsMenu({
       }
       setModelAction(null);
       setActiveModelPopoverId(null);
-    } catch (error) { setStatus(formatModelConfigError(error, text)); }
+    } catch (error) { showError(formatModelConfigError(error, text)); }
     finally { setIsSaving(false); }
   };
 
@@ -523,7 +533,7 @@ export function SettingsMenu({
       setApiKey('');
       return true;
     } catch (error) {
-      setStatus(formatModelConfigError(error, text));
+      showError(formatModelConfigError(error, text));
       return false;
     } finally {
       setIsSaving(false);
@@ -546,7 +556,7 @@ export function SettingsMenu({
       setExaApiKey('');
       return true;
     } catch (error) {
-      setWebToolsStatus(error instanceof Error ? error.message : text.webSearchSaveFailed);
+      showError(error instanceof Error ? error.message : text.webSearchSaveFailed);
       return false;
     } finally {
       setIsSavingWebTools(false);
@@ -561,7 +571,7 @@ export function SettingsMenu({
       setRuntimeSettings(normalizeRuntimeSettings(saved));
       return true;
     } catch (error) {
-      setRuntimeSettingsStatus(error instanceof Error ? error.message : 'Runtime settings save failed');
+      showError(error instanceof Error ? error.message : 'Runtime settings save failed');
       return false;
     } finally {
       setIsSavingRuntimeSettings(false);
@@ -577,7 +587,7 @@ export function SettingsMenu({
       setInvitationStatus(saved.required ? adminCopy.invitation.enabledStatus : adminCopy.invitation.disabledStatus);
       return true;
     } catch (error) {
-      setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.saveFailed);
+      showError(error instanceof Error ? error.message : adminCopy.invitation.saveFailed);
       return false;
     } finally {
       setIsSavingInvitations(false);
@@ -587,12 +597,12 @@ export function SettingsMenu({
   const handleCreateInvitation = async () => {
     const code = newInvitationCode.trim();
     if (!code) {
-      setInvitationStatus(adminCopy.invitation.codeRequired);
+      showError(adminCopy.invitation.codeRequired);
       return;
     }
     const maxUses = parsePositiveInteger(newInvitationMaxUses);
     if (newInvitationMaxUses.trim() && maxUses === null) {
-      setInvitationStatus(adminCopy.invitation.maxUsesInvalid);
+      showError(adminCopy.invitation.maxUsesInvalid);
       return;
     }
     setInvitationStatus('');
@@ -608,7 +618,7 @@ export function SettingsMenu({
       setNewInvitationLabel('');
       setNewInvitationMaxUses('');
     } catch (error) {
-      setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.createFailed);
+      showError(error instanceof Error ? error.message : adminCopy.invitation.createFailed);
     } finally {
       setIsSavingInvitations(false);
     }
@@ -621,7 +631,7 @@ export function SettingsMenu({
       const updated = await updateInvitation({ id: invitation.id, enabled: !invitation.enabled });
       setInvitations(current => current.map(item => (item.id === updated.id ? updated : item)));
     } catch (error) {
-      setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.updateFailed);
+      showError(error instanceof Error ? error.message : adminCopy.invitation.updateFailed);
     } finally {
       setIsSavingInvitations(false);
     }
@@ -634,7 +644,7 @@ export function SettingsMenu({
       await deleteInvitation(id);
       setInvitations(current => current.filter(item => item.id !== id));
     } catch (error) {
-      setInvitationStatus(error instanceof Error ? error.message : adminCopy.invitation.deleteFailed);
+      showError(error instanceof Error ? error.message : adminCopy.invitation.deleteFailed);
     } finally {
       setIsSavingInvitations(false);
     }
@@ -654,7 +664,7 @@ export function SettingsMenu({
       setProjectRetentionResult(result);
       setProjectLifecycleStatus(projectLifecycleCopy.dryRunStatus(result.summary.deploymentRecordsPlannedForDeletion));
     } catch (error) {
-      setProjectLifecycleStatus(error instanceof Error ? error.message : projectLifecycleCopy.dryRunFailed);
+      showError(error instanceof Error ? error.message : projectLifecycleCopy.dryRunFailed);
     } finally {
       setIsProjectRetentionRunning(false);
     }
@@ -669,7 +679,7 @@ export function SettingsMenu({
       setProjectLifecycleStatus(projectLifecycleCopy.runStatus(result.summary.deploymentRecordsDeleted));
       await refreshProjectLifecycleOverview();
     } catch (error) {
-      setProjectLifecycleStatus(error instanceof Error ? error.message : projectLifecycleCopy.runFailed);
+      showError(error instanceof Error ? error.message : projectLifecycleCopy.runFailed);
     } finally {
       setIsProjectRetentionRunning(false);
     }
@@ -694,7 +704,7 @@ export function SettingsMenu({
       if (testAfterSave) void handleTestMcpServer(saved);
       return true;
     } catch (error) {
-      setMcpStatus(error instanceof Error ? error.message : 'MCP server save failed');
+      showError(error instanceof Error ? error.message : 'MCP server save failed');
       return false;
     } finally {
       setIsSavingMcp(false);
@@ -731,28 +741,12 @@ export function SettingsMenu({
         return next;
       });
     } catch (error) {
-      setMcpStatus(error instanceof Error ? error.message : 'MCP server delete failed');
+      showError(error instanceof Error ? error.message : 'MCP server delete failed');
     } finally {
       setIsSavingMcp(false);
     }
   };
 
-  const handleImportUserSkill = async (file: File) => {
-    if (!file.name.toLowerCase().endsWith('.zip')) {
-      showError(userSkillsCopy.importFailed);
-      return;
-    }
-    setIsSavingUserSkill(true);
-    try {
-      const saved = await importUserSkillPackage(file);
-      setUserSkills(current => uniqueUserSkills([saved, ...current.filter(skill => skill.id !== saved.id)]));
-      showSuccess(userSkillsCopy.imported(file.name));
-    } catch (error) {
-      showError(error instanceof Error ? error.message : userSkillsCopy.importFailed);
-    } finally {
-      setIsSavingUserSkill(false);
-    }
-  };
 
   const handleImportUserSkillInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0];
@@ -760,30 +754,7 @@ export function SettingsMenu({
     if (file) void handleImportUserSkill(file);
   };
 
-  const handleToggleUserSkill = async (skill: UserSkill) => {
-    setIsSavingUserSkill(true);
-    try {
-      const saved = await updateUserSkillEnabled(skill.id, !skill.enabled);
-      setUserSkills(current => uniqueUserSkills(current.map(item => (item.id === saved.id ? saved : item))));
-    } catch (error) {
-      showError(error instanceof Error ? error.message : userSkillsCopy.saveFailed);
-    } finally {
-      setIsSavingUserSkill(false);
-    }
-  };
 
-  const handleDeleteUserSkill = async (skill: UserSkill) => {
-    setIsSavingUserSkill(true);
-    try {
-      await deleteUserSkill(skill.id);
-      setUserSkills(current => current.filter(item => item.id !== skill.id));
-      showSuccess(userSkillsCopy.deleted);
-    } catch (error) {
-      showError(error instanceof Error ? error.message : userSkillsCopy.deleteFailed);
-    } finally {
-      setIsSavingUserSkill(false);
-    }
-  };
 
   const handleTestMcpServer = async (server: McpServerConfig) => {
     setMcpStatus('');
@@ -814,7 +785,7 @@ export function SettingsMenu({
       setActiveMcpServers(discovered);
       if (!discovered.length) setMcpStatus(mcpCopy.form.noActiveDiscovered);
     } catch (error) {
-      setMcpStatus(error instanceof Error ? error.message : 'MCP active scan failed');
+      showError(error instanceof Error ? error.message : 'MCP active scan failed');
     } finally {
       setIsScanningActiveMcp(false);
     }
@@ -834,7 +805,7 @@ export function SettingsMenu({
         ),
       );
     } catch (error) {
-      setMcpStatus(error instanceof Error ? error.message : 'MCP server import failed');
+      showError(error instanceof Error ? error.message : 'MCP server import failed');
     } finally {
       setIsSavingMcp(false);
     }
@@ -852,7 +823,7 @@ export function SettingsMenu({
         current.map(item => (item.endpoint === server.endpoint ? { ...item, exists: true } : item)),
       );
     } catch (error) {
-      setMcpStatus(error instanceof Error ? error.message : 'MCP server import failed');
+      showError(error instanceof Error ? error.message : 'MCP server import failed');
     } finally {
       setIsSavingMcp(false);
     }
@@ -865,15 +836,16 @@ export function SettingsMenu({
   const savedPrefix = `${text.savedPrefix}${text.savedPrefixSeparator}`;
   const capabilityCopy = settingsObject<RuntimeCapabilityCopy>('runtimeCapabilities');
   const mcpCopy = settingsObject<McpSettingsCopy>('mcp');
-  const adminCopy = getAdminSettingsCopy(translateSettings);
   const sectionTabs = useMemo(
     () => [
       { id: 'personal' as const, label: text.settingsGeneral, icon: Globe },
       ...(currentUser ? [{ id: 'connections' as const, label: lang.startsWith('zh') ? '模型连接' : 'Model connections', icon: KeyRound }] : []),
+      ...(currentUser ? [{ id: 'image-connection' as const, label: lang.startsWith('zh') ? 'AI 生图' : 'AI Images', icon: Image }] : []),
       ...(effectiveCanManageSkills ? [{ id: 'skills' as const, label: userSkillsCopy.tab, icon: BookOpenText }] : []),
+      ...(effectiveCanManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
       ...(hasPlatformSettings ? [{ id: 'platform' as const, label: adminCopy.platform, icon: ShieldCheck }] : []),
     ],
-    [adminCopy.platform, currentUser, lang, effectiveCanManageSkills, hasPlatformSettings, text.settingsGeneral, userSkillsCopy.tab],
+    [adminCopy.platform, currentUser, lang, effectiveCanManageSkills, effectiveCanManageMcp, hasPlatformSettings, mcpCopy.title, text.settingsGeneral, userSkillsCopy.tab],
   );
   const platformTabs = useMemo(() => {
     return [
@@ -884,46 +856,43 @@ export function SettingsMenu({
       ...(effectiveCanManageRuntimeSettings
         ? [{ id: 'runtime' as const, label: capabilityCopy.title, icon: Cpu }]
         : []),
-      ...(effectiveCanManageMcp ? [{ id: 'mcp' as const, label: mcpCopy.title, icon: Network }] : []),
       ...(effectiveCanManageModelConfig ? [{ id: 'model' as const, label: text.settingsModel, icon: KeyRound }] : []),
-      ...(effectiveCanManageModelConfig ? [{ id: 'image' as const, label: lang.startsWith('zh') ? 'AI 生图' : 'AI Images', icon: Cpu }] : []),
+      ...(effectiveCanManageModelConfig ? [{ id: 'image' as const, label: lang.startsWith('zh') ? '生图服务' : 'Image service', icon: Cpu }] : []),
       ...(effectiveCanManageLifecycle
         ? [{ id: 'projects' as const, label: projectLifecycleCopy.tab, icon: FolderOpen }]
         : []),
       ...(effectiveCanManageCredits ? [{ id: 'credit' as const, label: billingCopy.tab, icon: ReceiptText }] : []),
     ];
   }, [
-    effectiveCanManageWorkspace,
-    effectiveCanManageSecrets,
-    effectiveCanManageMcp,
     effectiveCanManageModelConfig,
     lang,
     effectiveCanManageInvitations,
     effectiveCanManageCredits,
     effectiveCanManageLifecycle,
     effectiveCanManageRuntimeSettings,
-    effectiveCanReadAudit,
     adminCopy.deployment,
+    adminCopy.invitation.tab,
     billingCopy.tab,
     capabilityCopy.title,
-    mcpCopy.title,
     projectLifecycleCopy.tab,
     text.settingsModel,
   ]);
   const activeTabLabel =
     activeSection === 'connections' ? (lang.startsWith('zh') ? '模型连接' : 'Model connections') : activeSection === 'personal'
       ? text.settingsGeneral
+      : activeSection === 'image-connection'
+        ? (lang.startsWith('zh') ? 'AI 生图' : 'AI Images')
       : activeSection === 'skills'
         ? userSkillsCopy.title
+        : activeSection === 'mcp'
+          ? mcpCopy.title
         : activeTab === 'image'
-          ? (lang.startsWith('zh') ? 'AI 生图' : 'AI Images')
+          ? (lang.startsWith('zh') ? '生图服务' : 'Image service')
         : activeTab === 'general'
           ? adminCopy.deployment
           : activeTab === 'runtime'
             ? capabilityCopy.title
-            : activeTab === 'mcp'
-              ? mcpCopy.title
-              : activeTab === 'skills'
+            : activeTab === 'skills'
                 ? userSkillsCopy.title
                 : activeTab === 'invitations'
                   ? adminCopy.invitation.tab
@@ -938,9 +907,7 @@ export function SettingsMenu({
       ? effectiveCanManageSecrets && isSavingWebTools
       : activeTab === 'runtime'
         ? isSavingRuntimeSettings
-        : activeTab === 'mcp'
-          ? false
-          : activeTab === 'skills'
+        : activeTab === 'skills'
             ? false
             : activeTab === 'invitations'
               ? isSavingInvitations
@@ -958,9 +925,7 @@ export function SettingsMenu({
         (effectiveCanManageSecrets && !!webSearchKeyField && !webSearchKeyValue.trim() && !webSearchKeyPreview)
       : activeTab === 'runtime'
         ? isSavingCurrentTab
-        : activeTab === 'mcp'
-          ? false
-          : activeTab === 'skills'
+        : activeTab === 'skills'
             ? true
             : activeTab === 'invitations'
               ? isSavingCurrentTab
@@ -987,7 +952,6 @@ export function SettingsMenu({
       if (saved) onClose();
       return;
     }
-    if (activeTab === 'mcp') return;
     if (activeTab === 'image') {
       if (await imageSettingsRef.current?.save()) onClose();
       return;
@@ -1010,7 +974,7 @@ export function SettingsMenu({
     const priceId = billingPackForm.priceId.trim();
     const credits = Number(billingPackForm.credits);
     if (!priceId || !Number.isFinite(credits) || credits <= 0) {
-      setBillingStatus(billingCopy.positiveCreditsRequired);
+      showError(billingCopy.positiveCreditsRequired);
       return;
     }
     setIsSavingBillingPack(true);
@@ -1030,7 +994,7 @@ export function SettingsMenu({
       setBillingPackForm(createEmptyBillingPackForm());
       setBillingStatus(billingCopy.packSaved);
     } catch (error) {
-      setBillingStatus(error instanceof Error ? error.message : billingCopy.packSaveFailed);
+      showError(error instanceof Error ? error.message : billingCopy.packSaveFailed);
     } finally {
       setIsSavingBillingPack(false);
     }
@@ -1046,10 +1010,15 @@ export function SettingsMenu({
       setActiveTab('general');
       return;
     }
+    if (!effectiveCanManageMcp && activeSection === 'mcp') {
+      setActiveSection('personal');
+      setActiveTab('general');
+      return;
+    }
     if (activeSection === 'platform' && !platformTabs.some(tab => tab.id === activeTab)) {
       setActiveTab(platformTabs[0]?.id ?? 'general');
     }
-  }, [activeSection, activeTab, effectiveCanManageSkills, hasPlatformSettings, platformTabs]);
+  }, [activeSection, activeTab, effectiveCanManageSkills, effectiveCanManageMcp, hasPlatformSettings, platformTabs]);
 
   const modelConfigEditor = (
     <>
@@ -1105,10 +1074,9 @@ export function SettingsMenu({
           })}
         </fieldset>
       </div>
-      {status ? <p role="status" className="mt-3 text-sm text-destructive">{status}</p> : null}
       <div className="mt-5 flex justify-end gap-3">
         <button type="button" disabled={isSaving} onClick={closeModelConfig} className="rounded-lg px-3 py-2 text-sm text-muted-foreground disabled:opacity-50">{lang.startsWith('zh') ? '取消' : 'Cancel'}</button>
-        <button type="button" disabled={isSaveDisabled} onClick={() => void handleSaveSettings()} className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{isSaving ? text.saving : text.saveSettings}</button>
+        <button type="button" disabled={isSaveDisabled} onClick={() => void handleSaveSettings()} className="rounded-full bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{isSaving ? text.saving : text.saveSettings}</button>
       </div>
     </>
   );
@@ -1125,10 +1093,9 @@ export function SettingsMenu({
       </form> : null}
       {modelAction === 'create' || modelAction === 'details' ? modelConfigEditor : null}
       {modelAction === 'rename' || modelAction === 'delete' ? <>
-        {status ? <p role="status" className="mt-3 text-sm text-destructive">{status}</p> : null}
         <div className="mt-5 flex justify-end gap-3">
           <button type="button" disabled={isSaving} onClick={closeModelConfig} className="rounded-lg px-3 py-2 text-sm text-muted-foreground disabled:opacity-50">{lang.startsWith('zh') ? '取消' : 'Cancel'}</button>
-          <button type="button" disabled={isSaving || (modelAction === 'rename' && !name.trim())} onClick={() => void handleModelListAction()} className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50">{isSaving ? text.saving : modelAction === 'delete' ? (lang.startsWith('zh') ? '删除' : 'Delete') : text.saveSettings}</button>
+          <button type="button" disabled={isSaving || (modelAction === 'rename' && !name.trim())} onClick={() => void handleModelListAction()} className={`${modelAction === 'delete' ? 'rounded-lg' : 'rounded-full'} bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50`}>{isSaving ? text.saving : modelAction === 'delete' ? (lang.startsWith('zh') ? '删除' : 'Delete') : text.saveSettings}</button>
         </div>
       </> : null}
     </div>
@@ -1194,9 +1161,10 @@ export function SettingsMenu({
           </aside>
 
           <main data-testid="settings-modal-content" className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <fieldset disabled={isLoadingCurrentSection} aria-busy={isLoadingCurrentSection} className="contents">
             <header className="shrink-0 px-6 pb-3 pt-5">
-              <div className="flex items-start justify-between gap-4">
-                <div>
+              <div className="flex items-end justify-between gap-4">
+                <div className="min-w-0">
                   <div className="text-xs text-muted-foreground">
                     {activeSection === 'platform'
                       ? adminCopy.platform
@@ -1209,7 +1177,7 @@ export function SettingsMenu({
                 {activeSection === 'platform' && activeTab === 'model' && effectiveCanManageModelConfig ? (
                   <MorphPopover open={modelAction === 'create'} onOpenChange={open => open ? openModelConfig('create') : closeModelConfig()}>
                     <MorphPopoverTrigger>
-                      <button type="button" aria-label={lang.startsWith('zh') ? '添加模型配置' : 'Add model configuration'} title={lang.startsWith('zh') ? '添加模型配置' : 'Add model configuration'} disabled={modelsLoading || isSaving} className="mt-2 inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-transparent text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
+                      <button type="button" aria-label={lang.startsWith('zh') ? '添加模型配置' : 'Add model configuration'} title={lang.startsWith('zh') ? '添加模型配置' : 'Add model configuration'} disabled={modelsLoading || isSaving} className="inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-transparent text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
                         <Plus className="size-5" />
                       </button>
                     </MorphPopoverTrigger>
@@ -1218,8 +1186,8 @@ export function SettingsMenu({
                     </MorphPopoverContent>
                   </MorphPopover>
                 ) : null}
-                {activeSection === 'platform' && activeTab === 'mcp' && effectiveCanManageMcp ? (
-                  <div className="relative mt-2">
+                {activeSection === 'mcp' && effectiveCanManageMcp ? (
+                  <div className="relative">
                     <button
                       type="button"
                       aria-label={mcpCopy.form.actions}
@@ -1232,9 +1200,9 @@ export function SettingsMenu({
                         setIsMcpActionMenuOpen(current => !current);
                         event.currentTarget.dataset.anchor = 'mcp-actions';
                       }}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-background text-foreground shadow-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="inline-flex size-9 items-center justify-center rounded-full bg-transparent text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
-                      <Plus className="h-4 w-4" />
+                      <Plus className="size-5" />
                     </button>
                     {isMcpActionMenuOpen ? (
                       <>
@@ -1244,7 +1212,7 @@ export function SettingsMenu({
                           className="absolute right-0 top-12 z-[260] w-56 overflow-hidden rounded-lg border border-border bg-background p-1.5 shadow-lg"
                           onMouseDown={event => event.stopPropagation()}
                         >
-                          <button
+                          {canDiscoverHostMcp ? <button
                             type="button"
                             role="menuitem"
                             onClick={() => {
@@ -1256,8 +1224,8 @@ export function SettingsMenu({
                           >
                             <Network className="h-4 w-4 text-orange-300" />
                             {isScanningActiveMcp ? mcpCopy.form.scanning : mcpCopy.form.scanActive}
-                          </button>
-                          <div className="my-1 h-px bg-border" />
+                          </button> : null}
+                          {canDiscoverHostMcp ? <div className="my-1 h-px bg-border" /> : null}
                           <button
                             type="button"
                             role="menuitem"
@@ -1298,7 +1266,7 @@ export function SettingsMenu({
                   </div>
                 ) : null}
                 {activeSection === 'skills' && effectiveCanManageSkills ? (
-                  <div>
+                  <div className="shrink-0">
                     <input
                       ref={userSkillImportInputRef}
                       aria-label={userSkillsCopy.importFileLabel}
@@ -1313,9 +1281,9 @@ export function SettingsMenu({
                       title={userSkillsCopy.importFileLabel}
                       onClick={() => userSkillImportInputRef.current?.click()}
                       disabled={isSavingUserSkill}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-background text-foreground shadow-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex size-9 items-center justify-center rounded-full bg-transparent text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <FaPlus className="h-4 w-4" />
+                      <FaPlus className="size-5" />
                     </button>
                   </div>
                 ) : null}
@@ -1324,9 +1292,13 @@ export function SettingsMenu({
 
             <div className="mx-6 h-px shrink-0 bg-border" />
 
-            <div
+            <motion.div
+              key={`${activeSection}-${activeTab}`}
               data-testid="settings-modal-scroll-area"
-              className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-2 [scrollbar-gutter:stable]"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.16, ease: EASE_OUT }}
+              className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-2 ${activeSection === 'mcp' || activeSection === 'connections' || activeSection === 'skills' ? 'flex flex-col' : ''}`}
             >
               {activeSection === 'personal' && activeTab === 'general' ? (
                 <div className="divide-y divide-border">
@@ -1348,6 +1320,7 @@ export function SettingsMenu({
               ) : null}
 
               {activeSection === 'connections' && currentUser ? <ModelConnectionsPanel key={currentUser.id} ref={modelConnectionsRef} language={lang} onSaveStateChange={setModelConnectionSaveState} /> : null}
+              {activeSection === 'image-connection' && currentUser ? <PersonalImageConnectionPanel key={currentUser.id} ref={imageConnectionRef} language={lang} onSaveStateChange={setImageConnectionSaveState} /> : null}
 
               {activeSection === 'platform' && activeTab === 'general' ? (
                 <div className="divide-y divide-border">
@@ -1481,7 +1454,7 @@ export function SettingsMenu({
                 <p role="status" className="mt-3 text-sm text-destructive">{status}</p>
               ) : null}
 
-              {activeSection === 'platform' && activeTab === 'mcp' && effectiveCanManageMcp ? (
+              {activeSection === 'mcp' && effectiveCanManageMcp ? (
                 <McpSettingsPanel
                   copy={mcpCopy}
                   servers={mcpServers}
@@ -1528,10 +1501,9 @@ export function SettingsMenu({
                   onDelete={skill => void handleDeleteUserSkill(skill)}
                 />
               ) : null}
-            </div>
-            {(activeSection === 'connections' && modelConnectionSaveState.visible || activeSection === 'platform' &&
+            </motion.div>
+            {(activeSection === 'image-connection' || activeSection === 'connections' && modelConnectionSaveState.visible || activeSection === 'platform' &&
             activeTab !== 'model' &&
-            activeTab !== 'mcp' &&
             activeTab !== 'projects' &&
             activeTab !== 'credit' &&
             (activeTab !== 'general' || hasGeneralSaveAction)) ? (
@@ -1539,14 +1511,15 @@ export function SettingsMenu({
                 <button
                   type="button"
                   aria-label={text.saveSettings}
-                  onClick={activeSection === 'connections' ? () => modelConnectionsRef.current?.saveByok() : handleSaveSettings}
-                  disabled={activeSection === 'connections' ? modelConnectionSaveState.disabled : isSaveDisabled}
-                  className="rounded-md border border-transparent bg-primary text-primary-foreground inline-flex h-11 items-center px-6 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={activeSection === 'image-connection' ? () => void imageConnectionRef.current?.save() : activeSection === 'connections' ? () => modelConnectionsRef.current?.saveByok() : handleSaveSettings}
+                  disabled={activeSection === 'image-connection' ? imageConnectionSaveState.disabled : activeSection === 'connections' ? modelConnectionSaveState.disabled : isSaveDisabled}
+                  className="rounded-full border border-transparent bg-primary text-primary-foreground inline-flex h-11 items-center px-6 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {activeSection === 'connections' ? modelConnectionSaveState.busy ? text.saving : text.saveSettings : isSavingCurrentTab ? text.saving : text.saveSettings}
+                  {activeSection === 'image-connection' ? imageConnectionSaveState.busy ? text.saving : text.saveSettings : activeSection === 'connections' ? modelConnectionSaveState.busy ? text.saving : text.saveSettings : isSavingCurrentTab ? text.saving : text.saveSettings}
                 </button>
               </div>
             ) : null}
+            </fieldset>
           </main>
         </div>
       </DialogContent>
@@ -1554,7 +1527,7 @@ export function SettingsMenu({
   );
 }
 
-function formatModelConfigError(error: unknown, text: Record<string, any>): string {
+function formatModelConfigError(error: unknown, text: Record<string, string>): string {
   if (!(error instanceof Error)) return text.modelSaveFailed;
   const apiError = error as Error & { code?: string; hostname?: string };
   const messages: Record<string, unknown> = {
@@ -1814,17 +1787,6 @@ function mcpFormToInput(form: McpServerForm): McpServerInput {
   };
 }
 
-function uniqueUserSkills(skills: UserSkill[]): UserSkill[] {
-  const seen = new Set<string>();
-  const unique: UserSkill[] = [];
-  for (const skill of skills) {
-    const key = skill.slug || skill.name;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(skill);
-  }
-  return unique.sort((left, right) => left.name.localeCompare(right.name));
-}
 
 
 function mcpServerToInput(server: McpServerConfig): McpServerInput {

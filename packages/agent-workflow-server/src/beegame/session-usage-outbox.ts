@@ -7,7 +7,7 @@ type BillingInput = Parameters<NonNullable<BeeGameSessionUsageBillingBackend['re
 type BillingResult = Awaited<ReturnType<NonNullable<BeeGameSessionUsageBillingBackend['recordUsage']>>>
 export type PendingSessionUsage = { userId: string; input: Omit<BillingInput, 'authToken'> }
 
-/** Durable terminal bills only; never stores credentials or schedules model work. */
+/** Durable usage snapshots; never stores credentials or schedules model work. */
 export class SessionUsageOutbox {
   private readonly pending = new Map<string, PendingSessionUsage[]>()
   private readonly active = new Map<string, Promise<void>>()

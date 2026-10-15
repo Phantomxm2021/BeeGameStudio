@@ -740,6 +740,10 @@
     "customStyle": "Adicionar estilo personalizado",
     "customGameType": "Adicionar tipo de jogo",
     "create": "Criar pacote",
+    "createMoreInfo": "Mais informações",
+    "createContinue": "Continuar",
+    "createBack": "Voltar às informações básicas",
+    "createAddTag": "Adicionar etiqueta",
     "creating": "A criar…",
     "createRequired": "Introduza nome, estilo e tipo de jogo e escolha uma categoria principal.",
     "update": "Guardar pacote",
@@ -771,6 +775,7 @@
     "list": {
       "all": "Todos os pacotes de recursos",
       "search": "Pesquisar pacotes",
+      "filter": "Filtrar",
       "empty": "Nenhum pacote de recursos",
       "emptyHint": "Crie um pacote para organizar os recursos do jogo.",
       "previous": "Anterior",

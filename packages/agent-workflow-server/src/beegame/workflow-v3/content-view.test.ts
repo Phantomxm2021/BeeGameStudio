@@ -76,17 +76,22 @@ test('content path traversal, index aliases and symlinks never expose project/ho
     await expect(readContentView(root)).rejects.toThrow('symlinks')
   } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }) }
 })
-test('V3 source route retains ownership/store/workspace checks and refuses writers without launching or mutating state', async () => {
+test('V3 source route reads stable saved files during a writer but keeps editing locked', async () => {
   const { root } = await fixture()
-  let starts = 0, writes = 0, reads = 0, mode = 'v3', actor = 'owner', changeOnRead = false
+  let starts = 0, writes = 0, reads = 0, mode = 'v3', actor = 'owner', changeOnRead = false, changeFileOnRead = false
   let run: Run | undefined = createRun({ projectId: 'p', ownerId: 'owner', workspacePath: root, chatSessionId: 'chat', requestKey: 'r', text: 'Source view', constraints: {}, ids: ['req.view'] })
   const sessions = new BeeGameSessionManager({ async start() { starts++; throw Error('No native run allowed') } }, root, async () => ({}), {}, true)
   const app = new Hono()
-  const routes = registerV3Routes(app, { store: { async read() { reads++; if (changeOnRead && reads % 3 === 0 && run) return { ...run, version: run.version + 1 }; return run }, async commit() { writes++ } },
+  const routes = registerV3Routes(app, { store: { async read() { reads++;
+    if (changeFileOnRead && reads % 3 === 0) await writeFile(join(root, 'content/ui/menu.json'), JSON.stringify({ ...uiLayoutFixture(), id: 'changed' }))
+    if (changeOnRead && reads % 3 === 0 && run) return { ...run, version: run.version + 1 }
+    return run }, async commit() { writes++ } },
     sessions, getUser: () => ({ id: actor, role: 'owner' }), getProject: async (_req, user) => user.id === 'owner' ? ({ id: 'p', name: 'Synthetic', root_path: root, created_at: 0,
       runtime_snapshot: mode === 'v3' ? { workflow_protocol: 'bgs.workflow.v3' } : undefined } as any) : undefined,
     getAuthToken: () => undefined, getValidAuthToken: () => undefined, assertNoLegacyRun: async () => {}, persistMode: async () => {}, readBody: r => r.json() })
   app.get('/view', async c => { try { return c.json(await routes.contentView(c.req.raw, 'p', false) ?? { legacy: true }) }
+    catch (e: any) { return c.json({ code: e.code }, e.status ?? 500) } })
+  app.get('/metadata', async c => { try { return c.json(await routes.contentView(c.req.raw, 'p', true) ?? { legacy: true }) }
     catch (e: any) { return c.json({ code: e.code }, e.status ?? 500) } })
   try {
     expect((await app.request('/view')).status).toBe(200)
@@ -101,10 +106,24 @@ test('V3 source route retains ownership/store/workspace checks and refuses write
     expect((await (await app.request('/view')).json()).readOnly).toBe(true)
     delete run!.paused
     run = { ...run!, writer: { taskId: 't', attemptId: 'a', sessionId: 's', workerId: 'w', fence: 1, planRevision: 1 } } as Run
-    expect((await app.request('/view')).status).toBe(409)
+    const writerView = await (await app.request('/view')).json()
+    expect(writerView.state).toBe('draft')
+    expect(writerView.readOnly).toBe(true)
+    expect(writerView.documents).toHaveLength(2)
+    expect(writerView).not.toHaveProperty('editing')
+    const fileList = await (await app.request('/metadata')).json()
+    expect(fileList.readOnly).toBe(true)
+    expect(fileList.documents.map((d: { path: string }) => d.path)).toEqual(['scenes/level.json', 'ui/menu.json'])
+    expect(fileList.documents[0]).not.toHaveProperty('document')
     delete run.writer
     changeOnRead = true; reads = 0
+    const advancedRunView = await (await app.request('/view')).json()
+    expect(advancedRunView.state).toBe('draft')
+    expect(advancedRunView.readOnly).toBe(true)
+    expect(advancedRunView).not.toHaveProperty('editing')
+    changeOnRead = false; changeFileOnRead = true; reads = 0
     expect((await app.request('/view')).status).toBe(409)
+    changeFileOnRead = false
     changeOnRead = false; actor = 'other'
     expect((await app.request('/view')).status).toBe(404)
     actor = 'owner'; run = undefined

@@ -11,7 +11,6 @@ import { initializeUiLayout } from '../../../scene-editor/src/ui-container-layou
 import type { inspectUiLayout } from '../../../scene-editor/src/ui-layout-inspection'
 import { materializeSceneUiFormat } from './scene-ui-content-authoring'
 import { CONTENT_CHECKER_ENTRY, sharedContentChecker } from './content-checker-runtime'
-import { DESIGN_HANDOFF_INSTRUCTION, checkDesignHandoffDraft, designHandoffPath } from './design-handoff'
 import { sceneLayoutFixture, uiLayoutFixture, writeDesignDocumentFixture, writeDesignDocumentsFixture } from './fixtures/layout-fixture'
 
 test('camera draft accepts the actual Scene envelope and standalone Camera; diagnoses the selected source without writes',()=>{
@@ -84,12 +83,9 @@ test('input identity follows saved sources/links, not a generator public copy, a
   expect(changed.runtimeVerified).toBe(false)
   expect(publicBefore).toContain('wrong-copy')
   const format=runGameContentCommand(root,['--format','index']) as any
-  expect(format.value.documentRevision).toContain('--authority')
-  expect(format.value.assetManifestRevision).toContain('--authority')
-  expect(CONTENT_CHECK_HELP).toContain('NOT JSON')
-  expect(CONTENT_CHECK_HELP).toContain('--authority [--inputs]')
-  expect(CONTENT_CHECK_HELP).toContain('legacy revision metadata')
-  expect(CONTENT_CHECK_HELP).toContain('does not certify design or quality')
+  expect(format.value.documentRevision).toContain('--package-metadata')
+  expect(format.value.assetManifestRevision).toContain('--package-metadata')
+  expect(CONTENT_CHECK_HELP).toContain('not design agreement, runtime or quality acceptance')
 })
 
 test('input snapshots do not follow links outside the project or change validity claims',()=>{
@@ -121,7 +117,7 @@ test('Scene batch discovers saved paths with spaces, reports all inputs and neve
   expect(result.runtimeVerified).toBe(false)
   expect(() => runGameContentCommand(root, ['--scene-layouts', '960 540'])).toThrow('Usage')
   expect(() => runGameContentCommand(root, ['--scene-layouts', '0', '540'])).toThrow('positive')
-  expect(CONTENT_CHECK_HELP).toContain('measurements:[{source,scene?,viewport,nodes}]')
+  expect(CONTENT_CHECK_HELP).toContain('--scene-layouts')
 })
 
 test('batch inspection checks missing planned pages and matches confirmed host settings', async () => {
@@ -166,50 +162,6 @@ test('Scene planning uses each saved Camera viewport once; explicit common targe
   expect(failure.runtimeVerified).toBe(false)
 })
 
-test('final technical CLI shares completion coverage checking without host version requirements', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'handoff-cli-final-')); roots.push(root)
-  await writeDesignDocumentsFixture(root)
-  const args = ['--check-handoff-drafts', 'docs/TECHNICAL_DESIGN.md', '--final-technical']
-  expect(runGameContentCommand(root, args)).toMatchObject({ valid: true })
-  const file = join(root, designHandoffPath('TECHNICAL_DESIGN.md'))
-  const original = JSON.parse(readFileSync(file, 'utf8'))
-  for (const mode of ['uncovered', 'duplicate', 'unknown'] as const) {
-    const index = structuredClone(original)
-    if (mode === 'uncovered') index.implementationItems.pop()
-    if (mode === 'duplicate') index.implementationItems.push(structuredClone(index.implementationItems[0]))
-    if (mode === 'unknown') index.implementationItems[0].requirementRefs[0].id = 'unknown-output'
-    writeFileSync(file, JSON.stringify(index))
-    const saved = readFileSync(file, 'utf8')
-    const result = runGameContentCommand(root, args) as any
-    expect(result.valid).toBe(false)
-    expect(result.issues).toEqual(checkDesignHandoffDraft(root, 'TECHNICAL_DESIGN.md', { finalTechnical: true }).issues)
-    expect(readFileSync(file, 'utf8')).toBe(saved)
-    if (mode === 'uncovered')
-      expect(runGameContentCommand(root, ['--check-handoff-drafts', 'TECHNICAL_DESIGN.md'])).toMatchObject({ valid: true })
-  }
-  for (const invalid of [
-    ['--check-handoff-drafts', '--final-technical'],
-    ['--check-handoff-drafts', 'UI_UX_SPEC.md', '--final-technical'],
-    ['--check-handoff-drafts', '--final-technical', 'TECHNICAL_DESIGN.md'],
-  ]) expect(() => runGameContentCommand(root, invalid)).toThrow()
-})
-
-test('handoff draft CLI accepts document names and their docs paths without changing files', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'handoff-cli-path-')); roots.push(root)
-  await writeDesignDocumentFixture(root, 'UI_UX_SPEC.md')
-  const file = join(root, '.beegame/design-handoffs/UI_UX_SPEC.json')
-  const before = readFileSync(file, 'utf8')
-  const expected = runGameContentCommand(root, ['--check-handoff-drafts', 'UI_UX_SPEC.md'])
-  expect(expected).toMatchObject({ valid: true })
-  expect(runGameContentCommand(root, ['--check-handoff-drafts', 'docs/UI_UX_SPEC.md'])).toEqual(expected)
-  for (const argument of ['../docs/UI_UX_SPEC.md', '/docs/UI_UX_SPEC.md', 'content/UI_UX_SPEC.md', 'docs/UNKNOWN.md']) {
-    const result = runGameContentCommand(root, ['--check-handoff-drafts', argument]) as any
-    expect(result.valid).toBe(false)
-    expect(result.issues.join(' ')).toContain('Expected NAME.md or docs/NAME.md')
-    expect(result.issues.join(' ')).toContain('UI_UX_SPEC.md')
-  }
-  expect(readFileSync(file, 'utf8')).toBe(before)
-})
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'content-inspection-'))
   roots.push(root)
@@ -325,19 +277,6 @@ test('draft geometry checks targets without unfinished prose; final Review still
   expect(readFileSync(path, 'utf8')).toBe(before)
 })
 
-test('handoff contract help exits successfully without a document or resource prerequisite', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'bgs-handoff-help-')); roots.push(root)
-  await materializeSceneUiFormat(root)
-  const runtime = await sharedContentChecker()
-  const child = Bun.spawn([process.execPath, join(root, '.beegame/delivery/check-content.mjs'), '--design-handoff-help'],
-    { cwd: root, env: { ...process.env, BEEGAME_CONTENT_CHECKER_MODULE: runtime.moduleUrl }, stdout: 'pipe', stderr: 'pipe' })
-  const [output, error, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
-  expect(error).toBe('')
-  expect(exit).toBe(0)
-  expect(JSON.parse(output)).toMatchObject({ ok: true, scope: 'design-handoff-help' })
-  expect(JSON.parse(output).instruction).toBe(DESIGN_HANDOFF_INSTRUCTION)
-})
-
 test('format entry reads one actual contract section without full Content or resource prerequisites', async () => {
   const root = mkdtempSync(join(tmpdir(), 'bgs-format-section-')); roots.push(root)
   await materializeSceneUiFormat(root)
@@ -351,11 +290,7 @@ test('format entry reads one actual contract section without full Content or res
   for (const section of ['missing', '__proto__']) expect(() => runGameContentCommand(root, ['--format', section])).toThrow()
   expect(() => runGameContentCommand(root, ['--format', 'coordinates', 'extra'])).toThrow()
   expect(() => runGameContentCommand(root, ['--format', 'section', 'coordinates'])).toThrow('example: --format coordinates')
-  for (const instructions of [CONTENT_CHECK_HELP]) {
-    const example = instructions.match(/bun \.beegame\/delivery\/check-content\.mjs --format coordinates/)
-    expect(example).not.toBeNull()
-    expect(runGameContentCommand(root, example![0].split(' ').slice(2))).toMatchObject({ ok: true, value: format.coordinates })
-  }
+  expect(CONTENT_CHECK_HELP).toContain('--format [SECTION ...]')
   expect(runGameContentCommand(root, ['--format', 'coordinates', 'runtimeConsumption', 'coordinates']))
     .toEqual({ ok: true, scope: 'content-format-selection',
       values: { coordinates: format.coordinates, runtimeConsumption: format.runtimeConsumption } })
@@ -416,35 +351,11 @@ test('published linked UI and Tilemap examples run through real draft checks wit
   expect(brokenLink.issues.join(' ')).toContain('camera')
 })
 
-test('final task diagnostics identify malformed tasks and expose valid sources without losing other coverage', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'bgs-task-diagnostics-')); roots.push(root)
-  await writeDesignDocumentsFixture(root)
-  const path = join(root, '.beegame/design-handoffs/TECHNICAL_DESIGN.json')
-  const index = JSON.parse(readFileSync(path, 'utf8'))
-  index.implementationItems[0].requirementRefs = []
-  const before = JSON.stringify(index)
-  writeFileSync(path, before)
-  const result = runGameContentCommand(root, ['--check-handoff-drafts', 'TECHNICAL_DESIGN.md', '--final-technical']) as any
-  expect(result.valid).toBe(false)
-  expect(result.issues.join('\n')).toContain('implementationItems.0.requirementRefs (id: "fixture-GDD")')
-  expect(result.issues.join('\n')).toContain('GDD.md#play has no implementation item')
-  expect(result.issues.join('\n')).not.toContain('AUDIO_DESIGN.md#ready has no implementation item')
-  expect(result.availableRequirements).toContainEqual({ document: 'GDD.md', id: 'play', section: 'Design' })
-  expect(result.availableRequirements).toContainEqual({ document: 'TECHNICAL_DESIGN.md', id: 'ready', section: 'Design' })
-  expect(result.issues.join('\n')).not.toContain('"origin":')
-  expect(readFileSync(path, 'utf8')).toBe(before)
-  index.implementationItems[0].requirementRefs = [{ document: 'GDD.md', id: 'play' }]
-  writeFileSync(path, JSON.stringify(index))
-  const valid = runGameContentCommand(root, ['--check-handoff-drafts', 'TECHNICAL_DESIGN.md', '--final-technical']) as any
-  expect(valid).toMatchObject({ valid: true, issues: [] })
-  expect(valid.availableRequirements).toBeUndefined()
-})
 
 test('help examples execute without resources/index and document actual result shapes', async () => {
   await initializeUiLayout()
   const root = mkdtempSync(join(tmpdir(), 'content-help-')); roots.push(root)
-  const examples = CONTENT_CHECK_HELP.split('\n').map(line => line.replace('Minimal Scene draft: ', ''))
-    .filter(line => line.startsWith('{"schema"')).map(line => JSON.parse(line))
+  const examples = [CONTENT_DRAFT_EXAMPLES.ui, CONTENT_DRAFT_EXAMPLES.scene]
   expect(examples).toHaveLength(2)
   writeFileSync(join(root, 'menu.json'), JSON.stringify(examples[0]))
   writeFileSync(join(root, 'scene.json'), JSON.stringify(examples[1]))
@@ -460,7 +371,7 @@ test('help examples execute without resources/index and document actual result s
       textFit: { unmeasured: ['play'], exceedsIntrinsicBounds: [] },
     } })
   }
-  expect(CONTENT_CHECK_HELP).toContain('NOT authored role/style/text')
+  expect(CONTENT_CHECK_HELP).toContain('not the generated runtime bundle')
 })
 
 test('draft structure checks the selected batch only and detects shared component IDs before Review', () => {

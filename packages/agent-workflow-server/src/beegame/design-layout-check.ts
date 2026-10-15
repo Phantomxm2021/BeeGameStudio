@@ -2,14 +2,14 @@ import { readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { inspectUiLayout, isUiControl, rectanglesIntersect } from '../../../scene-editor/src/ui-layout-inspection'
 import { parseBeeGameContentDocument } from './game-content-schema'
-import { auditUiInteractiveBounds, isViewportPair, readUiLayoutCameras, type UiDocument, type LayoutDiagnostic, type LayoutMeasurement } from './ui-layout-audit'
+import { auditUiInteractiveBounds, isViewportPair, readUiLayoutCameras, requiredTouchViewport, type LayoutConstraints, type UiDocument, type LayoutDiagnostic, type LayoutMeasurement } from './ui-layout-audit'
 import { designSupportingFiles } from './design-handoff'
 import { sceneCameraInput2d } from '../../../scene-editor/src/scene-layout-inspection'
 import { sceneLayoutDraftIssues, contentDraftStructureIssues } from './game-content-package'
 
 /** One shared calculator for the same UI files during design and Content.
  * Neither boundary trusts an Agent-supplied geometry PASS. */
-export function checkDesignLayouts(workspacePath: string, confirmed?: { orientation?: unknown; dimension?: unknown }, deferTileSets = false, details = false, paths?: readonly string[]) {
+export function checkDesignLayouts(workspacePath: string, confirmed?: LayoutConstraints, deferTileSets = false, details = false, paths?: readonly string[]) {
   const directory = 'content/ui'
   const issues: string[] = []
   const deferred: string[] = []
@@ -71,7 +71,11 @@ export function checkDesignLayouts(workspacePath: string, confirmed?: { orientat
       if (confirmed?.orientation && orientation !== confirmed.orientation) throw new Error('Layout orientation differs from the confirmed brief')
       const targets = root.data?.targetViewports
       if (!Array.isArray(targets) || !targets.length || !targets.every(isViewportPair))
-        throw new Error('root.data.targetViewports must include the smallest supported size and relevant transition sizes for this composition')
+        throw new Error('root.data.targetViewports must be a non-empty array of positive [width, height] pairs, for example [[960, 540]], not {width, height} objects. Choose the smallest supported size and relevant transition sizes for this composition.')
+      // Extend only the parsed inspection copy, never saved project data. This
+      // also feeds the existing camera/underlay inspectors at the same size.
+      const phone = requiredTouchViewport(confirmed)
+      if (phone && !targets.some(size => size[0] === phone[0] && size[1] === phone[1])) targets.push(phone)
       const reference = root.data?.referenceResolution ?? root.layout?.size
       targetsChecked.push({ source: name, viewports: [reference, ...targets] })
       for (const size of [reference, ...targets]) {
@@ -193,7 +197,7 @@ export function checkDesignLayouts(workspacePath: string, confirmed?: { orientat
 
 /** The prose owns coverage/meaning; one linked UI source owns computed geometry.
  * Links also put these files in the existing revision and version/hash scope. */
-export function checkReviewUiLayouts(workspace: string, confirmed?: { orientation?: unknown; dimension?: unknown }, deferTileSets = true, details = false) {
+export function checkReviewUiLayouts(workspace: string, confirmed?: LayoutConstraints, deferTileSets = true, details = false) {
   const check = checkDesignLayouts(workspace, confirmed, deferTileSets, details)
   const issues = [...check.issues]
   const savedFiles = new Set<string>(check.files)
@@ -247,7 +251,7 @@ export function checkReviewSceneLayouts(workspace: string) {
     note: 'Scene schema, identity, hierarchy and authored Camera selection only. 2D required visibility uses linked UI game-view targets; dynamic traversal, 3D/XR framing and resource-dependent bounds need later checks.' }
 }
 
-export function checkReviewDesignLayouts(workspace: string, confirmed?: { orientation?: unknown; dimension?: unknown }, deferTileSets = true, details = false) {
+export function checkReviewDesignLayouts(workspace: string, confirmed?: LayoutConstraints, deferTileSets = true, details = false) {
   const ui = checkReviewUiLayouts(workspace, confirmed, deferTileSets, details), scene = checkReviewSceneLayouts(workspace)
   const issues = [...ui.issues, ...scene.issues]
   const connected = new Set<string>()

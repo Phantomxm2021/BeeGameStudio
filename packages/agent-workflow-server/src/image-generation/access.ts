@@ -2,21 +2,52 @@ import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import type { ImageGenerationConfig } from './config'
 import type { ImageGenerationService } from './service'
-import { ImageAttemptError } from './attempt'
+import { ImageAttemptError, ImageRequestValidationError } from './attempt'
+import { readBeeGameAssetManifestSync } from '../beegame/asset-contracts'
 import { ImageServiceError } from './service'
 import { createImagePromptRecord } from './prompt-record'
 import { ImageConfigurationError } from './runtime-config'
 import { ImageReferenceError, readProjectReferenceImage } from './reference-image'
 import { CREDIT_FACE_VALUE_PER_USD, fixedImageChargeCreditsMicro } from './pricing'
+import { compileUiReferenceBoard } from './ui-reference-board.mjs'
 
 const generation = z.object({
   requestId: z.string().trim().min(1).max(200),
-  prompt: z.string().trim().min(1).max(32000),
+  purpose: z.enum(['reference', 'experiment', 'production']).optional(),
+  requirementIds: z.array(z.string().trim().min(1)).min(1).max(128).optional(),
+  prompt: z.string().trim().min(1).max(32000).optional(),
+  uiReference: z.unknown().optional(),
   background: z.enum(['auto', 'opaque', 'transparent']).optional(),
   quality: z.enum(['auto', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
   size: z.enum(['1024x1024', '1024x1536', '1536x1024']).optional(),
   referenceImagePath: z.string().trim().min(1).max(512).optional(),
-}).strict()
+}).strict().refine(value => (value.prompt !== undefined) !== (value.uiReference !== undefined),
+  { message: 'Use exactly one of prompt or uiReference' })
+
+// PNG can be one part of a 3D/XR need, but cannot supply its model, rig or motion.
+const pngKinds = new Set(['image', 'texture', 'sprite', 'sprite-sheet', 'sprite-atlas'])
+export function validateImageResourceIntent(workspace: string, request: z.infer<typeof generation>) {
+  if (!request.purpose) throw new ImageRequestValidationError('New image requests need purpose: reference, experiment or production.')
+  if (request.purpose !== 'production') {
+    if (request.requirementIds?.length) throw new ImageRequestValidationError('References and experiments do not fulfill production requirements.')
+    return
+  }
+  if (request.uiReference !== undefined) throw new ImageRequestValidationError('A UI reference board is not a production resource.')
+  if (!request.requirementIds?.length) throw new ImageRequestValidationError('Production images must identify existing Manifest requirementIds.')
+  let manifest
+  try { manifest = readBeeGameAssetManifestSync(workspace) }
+  catch { throw new ImageRequestValidationError('Production images require readable existing Manifest requirements; register requirements with resources: [] if no files exist yet.') }
+  for (const id of request.requirementIds) {
+    const requirement = manifest.requirements.find(item => item.id === id)
+    if (!requirement) throw new ImageRequestValidationError('Unknown production requirement: '+id)
+    const profile = requirement.acquisition_profile
+    if (profile.sourcing_policy && !profile.sourcing_policy.allowed_source_kinds.includes('agent-authored'))
+      throw new ImageRequestValidationError('Requirement disallows agent-authored images: '+id)
+    const kinds = [...profile.asset_kinds, ...(profile.coverage ?? []).flatMap(item => item.asset_kinds ?? [])]
+    if (!kinds.some(kind => pngKinds.has(kind)))
+      throw new ImageRequestValidationError('PNG cannot provide the declared resource kind for '+id+'; identify a bitmap part in the existing requirement.')
+  }
+}
 
 /** Short-lived, user/project-scoped capability. The Agent never receives provider or billing keys. */
 export function openImageGenerationAccess(input: {
@@ -24,6 +55,8 @@ export function openImageGenerationAccess(input: {
   projectId: string
   workspacePath: string
   requiredQuality?: 'low'
+  screenOrientation?: 'Landscape' | 'Portrait'
+  source?: 'platform' | 'byok'
   loadConfig: () => Promise<ImageGenerationConfig>
   service: ImageGenerationService
 }) {
@@ -44,20 +77,22 @@ export function openImageGenerationAccess(input: {
             ? undefined : requestedQuality
           const size = query.get('size') ?? config.size
           let quotedCreditsMicro: number | null = null
-          if (config.provider === 'cloudflare' && config.billing) {
+          if (input.source !== 'byok' && config.provider === 'cloudflare' && config.billing) {
             try { if (quality) quotedCreditsMicro = fixedImageChargeCreditsMicro(config.billing, quality, size) }
             catch { /* Unpriced variant is unavailable, without an upstream call. */ }
           }
-          const available = Boolean(quality && config.apiKey && config.billing && (config.provider !== 'cloudflare' || quotedCreditsMicro !== null))
+          const available = Boolean(quality && config.apiKey && (input.source === 'byok' ||
+            (config.billing && (config.provider !== 'cloudflare' || quotedCreditsMicro !== null))))
           return Response.json({ available,
             provider: config.provider, model: config.model, quality: requestedQuality, size,
             referenceImageSupported: config.provider === 'cloudflare',
             ...(config.provider === 'cloudflare' ? { availableSizes: ['1024x1024', '1024x1536', '1536x1024'] } : {}),
             ...(config.provider === 'cloudflare' ? { quotedCreditsMicro,
               ...(config.billing && quotedCreditsMicro === null ? { unavailableReason: 'No fixed Credit price configured for this quality and size' } : {}) } : {}),
-            maxRequestCredits: config.billing?.maxRequestCredits ?? null,
+            maxRequestCredits: input.source === 'byok' ? null : config.billing?.maxRequestCredits ?? null,
             creditFaceValuePerUsd: CREDIT_FACE_VALUE_PER_USD,
-            modelPriceMultiplier: config.billing?.markupMultiplier ?? null },
+            modelPriceMultiplier: input.source === 'byok' ? null : config.billing?.markupMultiplier ?? null,
+            billingSource: input.source === 'byok' ? 'external' : 'platform' },
           { headers: { 'cache-control': 'no-store' } })
         } catch {
           return Response.json({ error: 'Image generation configuration unavailable' }, { status: 503 })
@@ -65,33 +100,44 @@ export function openImageGenerationAccess(input: {
       }
       if (request.method !== 'POST') return new Response('POST required', { status: 405 })
       const parsed = generation.safeParse(await request.json().catch(() => null))
-      if (!parsed.success) return Response.json({ error: 'Expected requestId, prompt and optional background/quality/size/referenceImagePath' }, { status: 400 })
+      if (!parsed.success) return Response.json({ error: 'Expected requestId, exactly one of prompt or uiReference, and optional background/quality/size/referenceImagePath' }, { status: 400 })
       if (input.requiredQuality && parsed.data.quality && parsed.data.quality !== input.requiredQuality)
         return Response.json({ error: `This delivery milestone requires quality ${input.requiredQuality}` }, { status: 422 })
-      const normalizedRequest = { ...parsed.data,
-        ...(input.requiredQuality ? { quality: input.requiredQuality } : {}) }
+      let normalizedRequest
+      try {
+        normalizedRequest = { ...(parsed.data.uiReference === undefined ? { ...parsed.data, prompt: parsed.data.prompt! } :
+          compileUiReferenceBoard(parsed.data, input.screenOrientation).request),
+          purpose: parsed.data.purpose, requirementIds: parsed.data.requirementIds,
+          ...(input.requiredQuality ? { quality: input.requiredQuality } : {}) }
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : 'Invalid UI reference specification' }, { status: 400 })
+      }
       let stage = 'configuration'
       let config: ImageGenerationConfig | undefined
       let recorded = false
       let recordOk = true
       try {
-        const { requestId, referenceImagePath, ...imageRequest } = normalizedRequest
+        const { requestId, referenceImagePath, purpose, requirementIds, ...imageRequest } = normalizedRequest
         config = await input.loadConfig()
         stage = 'reference-image'
         const referenceImage = referenceImagePath
           ? await readProjectReferenceImage(input.workspacePath, referenceImagePath) : undefined
         recordOk = record(normalizedRequest, config, { event: 'request-received',
+          purpose, requirementIds,
           ...(referenceImage ? { referenceImageSha256: referenceImage.sha256 } : {}) })
         recorded = true
         stage = 'generation-or-billing'
         const result = await input.service.generate({ ownerId: input.userId, projectId: input.projectId,
-          requestId, config, request: { ...imageRequest,
+          requestId, config, validateNewRequest: () => validateImageResourceIntent(input.workspacePath, parsed.data),
+          request: { ...imageRequest,
             ...(input.requiredQuality ? { quality: input.requiredQuality } : {}),
-            ...(referenceImage ? { referenceImage } : {}) } })
+            ...(referenceImage ? { referenceImage } : {}) } }, input.source ?? 'platform')
         recordOk = record(normalizedRequest, config, { event: 'image-returned', model: result.model,
           providerRequestId: result.providerRequestId, mimeType: result.mimeType,
           note: result.billingState === 'pending'
             ? 'Image delivered; billing reconciliation pending. Reservation retained; do not regenerate.'
+            : result.billingState === 'external'
+              ? 'Generated with the user-owned provider key; upstream billing is external to platform Credits.'
             : 'May be a recovered result; final file selection is recorded in Asset Manifest.' }) && recordOk
         return new Response(Buffer.from(result.bytes), { headers: {
           'content-type': result.mimeType, 'cache-control': 'no-store',
@@ -103,12 +149,18 @@ export function openImageGenerationAccess(input: {
         const attempt = error instanceof ImageAttemptError ? error : undefined
         const configuration = error instanceof ImageConfigurationError ? error : undefined
         const reference = error instanceof ImageReferenceError ? error : undefined
+        if (error instanceof ImageRequestValidationError) {
+          record(normalizedRequest, config, { event: 'delivery-failed', code: 'resource-intent', upstreamSubmitted: false })
+          return Response.json({ error: error.message, code: 'resource-intent', requestId: parsed.data.requestId,
+            note: 'No provider submission or new Credit reservation. Correct the input; do not change a paid request ID.' }, { status: 422 })
+        }
         const details = { stage: error instanceof ImageServiceError ? error.stage : stage,
           code: reference?.code ?? configuration?.code ?? attempt?.code ?? attempt?.reason
             ?? (error instanceof ImageServiceError ? error.stage : 'configuration-or-billing-failed'),
           upstreamStatus: attempt?.status, diagnosticId: configuration?.diagnosticId ?? attempt?.diagnosticId,
           ...(configuration?.facts ?? {}),
           replayed: attempt?.replayed ?? false, outcome: attempt?.reason }
+        if (attempt?.recoveryRequestId) Object.assign(details, { recoveryRequestId: attempt.recoveryRequestId })
         console.warn('[image-generation]', { event: 'delivery-failed', projectId: input.projectId, requestId: parsed.data.requestId,
           ...details })
         if (!recorded) recordOk = record(normalizedRequest, config, { event: 'request-received' })
@@ -125,12 +177,18 @@ export function openImageGenerationAccess(input: {
   return {
     endpoint,
     instruction: [
-      'Optional AI image generation is available with platform credentials and billing held by the host. Agent chooses whether, when and what to generate.',
+      input.source === 'byok'
+        ? 'Optional AI image generation uses the user-owned provider key. The provider bills the user directly; platform image Credits are not charged. Agent chooses whether, when and what to generate.'
+        : 'Optional AI image generation uses platform credentials and Credits billing held by the host. Agent chooses whether, when and what to generate.',
       ...(input.requiredQuality ? [`For this delivery milestone, image quality is ${input.requiredQuality}; other quality requests are unavailable.`] : []),
-      'Use the optional project asset command described in the current project context. Its cost command shows availability and, for Cloudflare, the exact fixed Credit price for the requested quality and size. Generate displays that price before reserving the same amount. Reuse one stable requestId for recovery; only an intentionally different artwork gets a new ID. Non-2xx responses are not images.',
+      input.source === 'byok'
+        ? 'Use the optional project asset command described in the current project context. Its cost command shows availability, not the external provider price. Reuse one stable requestId for recovery; only an intentionally different artwork gets a new ID. Non-2xx responses are not images.'
+        : 'Use the optional project asset command described in the current project context. Its cost command shows availability and, for Cloudflare, the exact fixed Credit price for the requested quality and size. Generate displays that price before reserving the same amount. Reuse one stable requestId for recovery; only an intentionally different artwork gets a new ID. Non-2xx responses are not images.',
       'Cloudflare GPT Image 2.5 Flare can generate a new image or edit a reference image. Its documented background options are auto, opaque and transparent; choose per asset rather than treating transparency as mandatory. It supports low, medium, high, xhigh, max or auto quality and 1024x1024, 1024x1536, 1536x1024 or auto size. This BGS capability outputs PNG and accepts at most one project reference image; the configured price and milestone may restrict quality and size. Inspect the returned image, including actual alpha when transparency matters; the model does not supply reliable atlas frame coordinates. Official provider details: https://developers.cloudflare.com/ai/models/openai/gpt-image-2.5-flare/',
       'For image editing, you may pass an existing project-relative PNG under assets/ as referenceImagePath; no visual board is required. The provider must support reference images; the cost command reports availability. Do not submit host paths or regenerate an unknown paid attempt.',
-      'The host records requests and billing outcomes in assets/ai-generation-prompts.md; no manual maintenance is needed. Register only the actual selected file and hash in the Manifest.',
+      'The host records requests and billing source in assets/ai-generation-prompts.md; no manual maintenance is needed. Register only the actual selected file and hash in the Manifest.',
+      'New image requests declare purpose: reference, experiment or production. Production requests include existing Manifest requirementIds for compatible bitmap parts, including textures used in 3D/XR. References/experiments carry no requirementIds and do not complete runtime resources. A PNG cannot supply a model, rig, animation behavior or device interaction. Old paid requests remain recoverable without new metadata; these fields never change billing identity.',
+      'UI reference boards use the structured uiReference input documented by assets.mjs --help. The host compiles their fixed equal-cell grid from project reference dimensions and the explicit screen/state list. Use ui-board-plan to inspect the prompt and chosen canvas without generation, then quote that size and submit the same structured input. Do not hand-author an asymmetric board prompt. Generated pixels still require visual inspection.',
     ].join('\n'),
     close() {
       closed = true

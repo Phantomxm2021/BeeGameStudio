@@ -48,7 +48,7 @@ try {
     await new Promise(resolve=>setTimeout(resolve,100));
   }
   await click('load');const run=JSON.parse(await page.locator('#run').innerText()).run;
-  assert.equal(run.planRevision,0);assert.deepEqual(run.tasks,{});assert.deepEqual(run.attempts,[]);
+  assert.equal(run.planRevision,0);assert.equal(['plans','tasks','attempts'].some(key=>key in run),false);
   assert.equal(run.agentTurns.length,1);assert.equal(run.agentTurns[0].status,'ended',JSON.stringify(run.agentTurns[0]));
   assert.equal(run.deliveryEligible,false);assert.ok(answered);
   await click('read-measurement');const firstMeasurement=await result();
@@ -141,7 +141,7 @@ try {
   const scene=JSON.parse(await page.locator('#document-json').inputValue());scene.data.nodes[1].transform.position[0]=30;
   await page.locator('#document-json').fill(JSON.stringify(scene));await click('save');
   const edited=(await api('workflow-v3')).run;
-  assert.equal(edited.agentTurns.length,2,'editor does not dispatch a model');assert.deepEqual(edited.tasks,{});assert.deepEqual(edited.attempts,[]);
+  assert.equal(edited.agentTurns.length,2,'editor does not dispatch a model');assert.equal(['plans','tasks','attempts'].some(key=>key in edited),false);
   assert.equal(edited.sourceEdits.length,2);assert.equal(edited.requirements.revision,run.requirements.revision,'source save does not silently rewrite requirements');
   await prepareMessage('change','Change target from three to four; preserve the explicitly saved UI height 64 and scene x=30, update the rule check, rebuild and measure, preserving notes');
   await click('submit-message',true);const changed=await waitTurn(3);
@@ -187,7 +187,7 @@ try {
   assert.equal(continued.requirements.revision,stopped.requirements.revision);
   assert.equal(new Set(continued.agentTurns.map(t=>t.nativeSessionId)).size,focusedContinuation?2:1);
   assert.equal(continued.agentTurns[4].message.contextMode??'resume',focusedContinuation?'focused':'resume');
-  assert.equal(continued.deliveryEligible,false);assert.deepEqual(continued.tasks,{});assert.deepEqual(continued.plans,[]);
+  assert.equal(continued.deliveryEligible,false);assert.equal(['plans','tasks','attempts'].some(key=>key in continued),false);
   await page.locator('#measurement').selectOption(continued.agentTurns[4].measurements.at(-1).id);
   await click('read-measurement');assert.equal((await result()).freshness.current,true);
   await click('project-export');assert.ok((await result()).bytes>0);

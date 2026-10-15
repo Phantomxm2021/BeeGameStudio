@@ -2,7 +2,7 @@ import {expect,test} from 'bun:test'
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
-import {runChecks} from './checks'
+import { runChecks } from './checker-test-driver'
 import {uiLayoutFixture} from '../fixtures/layout-fixture'
 import {taskSchema,type TaskSpec} from './state'
 import {prepareFontProbes} from './font-consumption'
@@ -10,12 +10,17 @@ import {prepareFontProbes} from './font-consumption'
 // Independent synthetic CSS surface, not a copy or repair of the paid game.
 for(const mode of ['identity','scaled','letterbox','axis-scale','offset-root','root-size-fallback',
   'ignore','wrong-center','wrong-position','overflow','self','unrelated','missing','invalid-selector','rotate','perspective',
-  'border','wrong-root-size','changing-basis','source-size-conflict','no-reference','legacy-window','hidden-target-wrapper','ancestor-clipped'] as const)
+  'border','wrong-root-size','changing-basis','source-size-conflict','no-reference','legacy-window','hidden-target-wrapper','ancestor-clipped',
+  'phone-required','phone-valid','missing-minimum'] as const)
 test('UI reference coordinates preserve causality: '+mode,async()=>{
   const root=await mkdtemp(join(tmpdir(),'bgs-ui-coordinate-'))
   try {
     const windowSize:[number,number]=mode==='identity'?[1280,720]:['letterbox','axis-scale','offset-root','changing-basis'].includes(mode)?[1000,800]:[960,540]
-    const ui=uiLayoutFixture() as any
+    const ui=uiLayoutFixture(mode==='phone-valid'?96:52) as any
+    // Coordinate-causality fixtures keep a permissive declared minimum so a
+    // separate size failure cannot hide their specific geometry diagnostics.
+    if(!['identity','scaled','phone-required','phone-valid','missing-minimum'].includes(mode))ui.data.nodes[0].data.minimumControlSize=[20,20]
+    if(mode==='missing-minimum')delete ui.data.nodes[0].data.minimumControlSize
     ui.data.nodes[0].layout.size=[1280,720]
     ui.data.nodes[0].data.referenceResolution=[1280,720]
     ui.data.nodes[0].data.targetViewports=[windowSize]
@@ -41,7 +46,7 @@ test('UI reference coordinates preserve causality: '+mode,async()=>{
       (mode==='axis-scale'?'"scale(.6,.8)"':'"scale("+scale+")"')+
       (mode==='offset-root'?'+" translate(12px,8px)"':mode==='rotate'?'+" rotate(2deg)"':mode==='changing-basis'?'+(p[0]?" translate(8px,0)":"")':'')+';'+
       'b.style.width=s[0]+"px";b.style.height=s[1]+"px";b.style.left=('+ (mode==='wrong-center'?'innerWidth/2':'640')+
-      '-s[0]/2+p[0]'+(mode==='wrong-position'?'*2':'')+')+"px";b.style.top=(360-s[1]/2+p[1])+"px";})</script>'
+      '-s[0]/2+p[0]'+(mode==='wrong-position'?'*2':'')+')+"px";b.style.top=(360-s[1]/2+p[1])+"px";if(n.enabled===false)b.style.display="none";})</script>'
     const targetHtml=['hidden-target-wrapper','ancestor-clipped'].includes(mode)?html.replace('<button id="play">',
       '<div style="'+(mode==='hidden-target-wrapper'?'opacity:0':'position:absolute;left:0;top:0;width:1280px;height:345px;overflow:hidden')+'"><button id="play">')
       .replace('</button>','</button></div>'):html
@@ -52,15 +57,16 @@ test('UI reference coordinates preserve causality: '+mode,async()=>{
       uiProbes:[{document:'content/ui/menu.json',nodeId:'play',selector:'#play',viewport:windowSize,
         ...(mode==='legacy-window'?{}:{coordinateRoot})}]}
     expect(taskSchema.safeParse(task).success).toBe(true)
-    const result=(await runChecks(root,task,[])).checks[0]!
-    const expected=['identity','scaled','letterbox','axis-scale','offset-root','root-size-fallback'].includes(mode)?'passed':
-      ['ignore','wrong-center','wrong-position','overflow','legacy-window'].includes(mode)?'failed':'unverified'
+    const result=(await runChecks(root,task,[],undefined,mode.startsWith('phone-')?{platform:'Web',inputs:['Touch'],orientation:'Landscape'}:{})).checks[0]!
+    const expected=['identity','letterbox','axis-scale','offset-root','root-size-fallback','phone-valid'].includes(mode)?'passed':
+      ['scaled','phone-required','ignore','wrong-center','wrong-position','overflow','legacy-window'].includes(mode)?'failed':'unverified'
     expect(result.status,result.observation).toBe(expected)
     if(mode==='source-size-conflict'||mode==='no-reference')expect(result.observation).toContain('[coordinateRoot]')
+    else if(mode==='missing-minimum')expect(result.observation).toContain('[minimumControlSize]')
     else {
       const probe=JSON.parse(result.observation).probes[0]
       expect(probe.coordinateDomain).toBe(mode==='legacy-window'?'window CSS pixels':'saved logical UI pixels')
-      if(expected==='passed'){
+      if(['identity','scaled','letterbox','axis-scale','offset-root','root-size-fallback','phone-valid'].includes(mode)){
         for(const key of ['left','top','right','bottom'])expect(probe.before[key]).toBeCloseTo(probe.expectedBefore[key],3)
         expect(probe.before).toEqual(probe.restored)
         expect(probe.changed).toHaveLength(2)
@@ -82,6 +88,13 @@ test('UI reference coordinates preserve causality: '+mode,async()=>{
       if(mode==='overflow')expect(probe.textFit.before.status).toBe('failed')
       if(mode==='hidden-target-wrapper')expect(probe.reason).toContain('ancestor is hidden')
       if(mode==='ancestor-clipped')expect(probe.textFit.before.status).toBe('unverified')
+      if(mode.startsWith('phone-')) {
+        const phone=JSON.parse(result.observation).probes.find((value:any)=>value.viewport.join('x')==='844x390')
+        expect(phone.status).toBe(mode==='phone-valid'?'passed':'failed')
+        expect(phone.controlSize.minimum).toEqual([44,44])
+        expect(phone.conditions.environment.maxTouchPoints).toBeGreaterThan(0)
+        expect(phone.controlSize.before[1]).toBeCloseTo((mode==='phone-valid'?96:52)*390/720,1)
+      }
       if(mode==='ignore')expect(probe.reason).toContain('position')
     }
     expect(await readFile(join(root,'content/ui/menu.json'),'utf8')).toBe(body)

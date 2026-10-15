@@ -1,0 +1,56 @@
+{
+  "projectId": "project_1791984588327_1fdzoi",
+  "requestId": "after-rain-ui-board-2",
+  "workflow": "Existing BGS project Chat, updated local system, one authorized low-quality generation, no paid retry; normal project agent ended without game implementation.",
+  "result": "FAIL: four approximately equal panels in a 2x2 grid, but actual frame aspect ratios and spacing do not match the computed request.",
+  "projectEvidence": {
+    "viewport": [1280, 720],
+    "source": "docs/UI_UX_SPEC.md and content/ui/hud.json",
+    "screens": "One main screen, no menus; agent selected keyboard intro, touch controls, near-bell hint and awakened narration as four representative HUD states.",
+    "structuredRequest": ".beegame/tmp/reg/ui-board-2-request.json",
+    "actualPromptRecord": "assets/ai-generation-prompts.md"
+  },
+  "requestedGeometry": {
+    "canvas": [1536, 1024],
+    "columns": 2,
+    "rows": 2,
+    "frame": [724, 407.25],
+    "ratio": 1.7777777777777777,
+    "gap": 24,
+    "origins": [[32, 92.75], [780, 92.75], [32, 524], [780, 524]]
+  },
+  "observedGeometry": {
+    "canvas": [1536, 1024],
+    "method": "Read-only sharp RGB decoding. Within each image quadrant, identify artwork rows/columns with more than half their pixels having min(R,G,B)<220. Threshold sensitivity checked at 205 and 235; boundary uncertainty about 1px, much smaller than the observed error. No image transformed or written.",
+    "framesAtThreshold220": [
+      {"x": 38, "y": 50, "width": 711, "height": 441},
+      {"x": 787, "y": 50, "width": 712, "height": 441},
+      {"x": 38, "y": 526, "width": 712, "height": 441},
+      {"x": 787, "y": 526, "width": 712, "height": 441}
+    ],
+    "approximateRatio": "1.61, roughly 9% below 16:9",
+    "approximateGaps": {"horizontal": 37, "vertical": 35},
+    "visualObservations": "Four requested representative states visible, no hero panel or separate props strip. Chinese glyph defects remain. This does not establish exhaustive runtime state coverage or gameplay acceptance."
+  },
+  "agentReviewLimitation": "BGS agent visually claimed 16:9 and matching margins/slots, while explicitly saying it did not measure pixels. Independent measurement contradicts that claim.",
+  "charges": {
+    "confirmedImageCredits": 4,
+    "imageBillingState": "settled",
+    "balanceBefore": 36875.0225,
+    "balanceAfter": 36851.627,
+    "accountBalanceDecrease": 23.3955,
+    "cumulativeDecreaseFromEarlierTestBaseline": 155.4808,
+    "priorTestCap": 200,
+    "note": "Account balance change includes more than the image fee; no separate full per-component billing audit performed."
+  },
+  "files": {
+    "workspace": "/Users/nswell/Documents/PhantomsXR/Projects/InternalProjects/Others/BeeGameStudio/Projects/users/30fb0202-1f77-414f-82da-f92936e7bba3/after-rain-spirit-courtyard--6ed9a6663f94",
+    "newImage": "assets/visual/ui-board-2.png",
+    "newImageSha256": "0da0fa42f603a8f60a270f4d76a75ba5dac3506d13efc6f1973d1daae9fe65c7",
+    "unchangedOldImageHashesBeforeAndAfter": {
+      "assets/visual/design-board.png": "dc10fd36eed1484dd04ede5b02ba893adc1cb66393ab9e46d0c5afae74c10188",
+      "assets/visual/ui-board.png": "8ad412c748b63982a8b8a7db7576923c6dbd94778b63364e3a2f1b0ab50e7360"
+    },
+    "manualProductEditsThisTurn": false
+  }
+}

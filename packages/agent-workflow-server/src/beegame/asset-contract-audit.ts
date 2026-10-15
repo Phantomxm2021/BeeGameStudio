@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, statSync, realpathSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { inflateSync } from 'node:zlib'
+import { candidateCoversObligation, type ResourceCoverageObligation } from '@bee-game-studio/beegame-resource-core'
+import { inspectResourceBytes } from '../../../beegame-resource-server/src/resource-inspection'
 import { parseSpriteSheet, validateSpriteSheetBounds } from '../../../scene-editor/src/sprite-sheet'
 import { readTileSetResource } from './tilemap-contract'
 import {
@@ -9,12 +11,14 @@ import {
   readBeeGameAssetManifestModulePathsSync,
   readBeeGameAssetManifestSync,
   type BeeGameAssetManifest,
+  type BeeGameProjectResource,
 } from './asset-contracts'
 
 export type AssetRequirementAudit = {
   id: string
   required: boolean
   issues: string[]
+  structure?: { status: 'passed' | 'failed' | 'unverified'; observations: string[] }
 }
 
 export type AssetResourceAudit = {
@@ -25,6 +29,7 @@ export type AssetResourceAudit = {
   filePaths: string[]
   provisional: boolean
   issues: string[]
+  fileEvidence: Array<{ path: string; sha256: string; facts: Record<string, string | number | boolean> }>
 }
 
 export type AssetContractAudit = {
@@ -104,6 +109,7 @@ export function auditAssetContract(workspacePath: string, resourceIds?: readonly
   for (const id of resourceIds ?? []) if (!selectedResources.some(resource => resource.id === id)) empty.issues.push(`Unknown resource: ${id}`)
   const resources = selectedResources.map(resource => {
     const issues: string[] = []
+    const fileEvidence: AssetResourceAudit['fileEvidence'] = []
     if (resource.technical_facts?.artifactClass === 'content-definition')
       issues.push(
         'Game Content Package definitions must not be declared as resources; remove the content-definition from the Manifest.',
@@ -144,6 +150,11 @@ export function auditAssetContract(workspacePath: string, resourceIds?: readonly
           } catch (error) { issues.push(`${filePath}: ${error instanceof Error ? error.message : String(error)}`) }
         }
         const expected = resource.local_file_hashes?.[filePath]
+        if (stats.isFile() && stats.size) {
+          const bytes = readFileSync(absolute)
+          fileEvidence.push({ path: filePath, sha256: createHash('sha256').update(bytes).digest('hex'),
+            facts: inspectResourceBytes(filePath, bytes) })
+        }
         if (expected && stats.isFile()) {
           const actual = createHash('sha256')
             .update(readFileSync(absolute))
@@ -167,10 +178,11 @@ export function auditAssetContract(workspacePath: string, resourceIds?: readonly
       filePaths: resource.file_paths,
       provisional: resource.provisional,
       issues,
+      fileEvidence,
     }
   })
   const selectedRequirements = resourceIds ? manifest.requirements.filter(requirement => selectedResources.some(resource => resource.fulfills.includes(requirement.id))) : manifest.requirements
-  const requirements = selectedRequirements.map(requirement => ({
+  const requirements: AssetRequirementAudit[] = selectedRequirements.map(requirement => ({
     id: requirement.id,
     required: requirement.required !== false,
     issues: [] as string[],
@@ -210,6 +222,43 @@ export function auditAssetContract(workspacePath: string, resourceIds?: readonly
         )
     }
   }
+  for (const requirement of selectedRequirements) {
+    const row = requirementAuditById.get(requirement.id)!
+    const bound = selectedResources.filter(resource => resource.fulfills.includes(requirement.id))
+    const profile = requirement.acquisition_profile
+    const obligations: ResourceCoverageObligation[] = profile.coverage?.length
+      ? profile.coverage.map(part => ({ assetKinds: part.asset_kinds, usageTags: part.usage_tags,
+          capabilities: part.capabilities, relationKinds: part.relation_kinds, embeddedKinds: part.embedded_kinds }))
+      : [{ assetKinds: profile.asset_kinds, capabilities: profile.capabilities as ResourceCoverageObligation['capabilities'] }]
+    const observations: string[] = []
+    let unknown = !bound.length
+    for (const [index, obligation] of obligations.entries()) {
+      const candidates = bound.filter(resource => !obligation.assetKinds?.length || !resource.asset_kind ||
+        obligation.assetKinds.some(kind => kind === resource.asset_kind))
+      const declarations = candidates.map(resource => candidateCoversObligation({
+        assetKind: resource.asset_kind, usageTags: resource.usage_tags ?? [], capabilities: resource.capabilities ?? [],
+        relations: (resource.relation_kinds ?? []).map(kind => ({kind})),
+        contentProfile: { components: [
+          ...(resource.embedded_kinds ?? []).map(kind => ({kind})),
+          ...(Array.isArray(resource.content_profile?.components)
+            ? resource.content_profile.components.filter((item): item is {kind:string} => !!item && typeof item.kind === 'string') : []),
+        ] },
+      }, obligation))
+      // Declared coverage and file evidence are separate. Missing labels alone
+      // are not proof a format lacks the requested structure.
+      const evidence = candidates.map((resource, index) => {
+        const item = inspectObligation(resource, resources.find(row => row.id === resource.id)!, obligation)
+        return !declarations[index] && item.status === 'passed'
+          ? { status: 'unverified', reason: resource.id+': declared coverage incomplete' } : item
+      })
+      const status = evidence.some(item => item.status === 'passed') ? 'passed' :
+        (evidence.length && evidence.every(item => item.status === 'failed')) || (bound.length && !candidates.length) ? 'failed' : 'unverified'
+      observations.push('Part '+(index+1)+': '+status+(evidence.length ? '; '+evidence.map(item => item.reason).join('; ') : '; no declared binding covers this obligation'))
+      if (status === 'failed') row.issues.push('Required structure has incompatible declared kinds or contradicts local file evidence for part '+(index+1)+'.')
+      if (status === 'unverified') unknown = true
+    }
+    row.structure = { status: row.issues.length ? 'failed' : unknown ? 'unverified' : 'passed', observations }
+  }
   const issues = [
     ...empty.issues,
     ...requirements.flatMap(requirement =>
@@ -228,6 +277,49 @@ export function auditAssetContract(workspacePath: string, resourceIds?: readonly
     bindings,
     issues,
   }
+}
+
+function inspectObligation(resource: BeeGameProjectResource, audit: AssetResourceAudit, obligation: ResourceCoverageObligation) {
+  if (audit.issues.length) return { status: 'failed', reason: resource.id+': invalid local files' } as const
+  if (resource.provisional || resource.status !== 'verified' || !audit.fileEvidence.length)
+    return { status: 'unverified', reason: resource.id+': provisional or unavailable file evidence' } as const
+  const root = audit.fileEvidence.find(file => file.path === resource.root_path)
+  const facts = root?.facts ?? {}
+  const kind = resource.asset_kind ?? ''
+  if (obligation.assetKinds?.length && !obligation.assetKinds.some(value => value === kind))
+    return { status: 'unverified', reason: resource.id+': no compatible declared resource kind' } as const
+  const png = !!facts.width && !!facts.height && root?.path.toLowerCase().endsWith('.png')
+  const gltf = typeof facts.meshCount === 'number'
+  let unknown = Boolean(facts.externalReferences), contradiction = false
+  if (obligation.assetKinds?.length) {
+    if (png) {
+      if (!['image','texture','sprite','sprite-sheet','sprite-atlas'].includes(kind)) contradiction = true
+    } else if (gltf) {
+      const count = ({mesh:'meshCount',model:'meshCount',rig:'skinCount','animation-clip':'animationCount',
+        'animation-library':'animationCount',material:'materialCount'} as Record<string,string>)[kind]
+      if (count) contradiction ||= Number(facts[count]) === 0
+      else unknown = true
+    } else if (!(kind === 'data' && root?.path.endsWith('.json'))) unknown = true
+  }
+  const counts: Record<string,string> = {rigged:'skinCount',skinned:'skinCount','contains-animations':'animationCount',
+    'contains-materials':'materialCount','contains-textures':'embeddedTextureCount','morph-targets':'morphTargetCount',
+    mesh:'meshCount',skeleton:'skinCount','animation-clip':'animationCount',material:'materialCount',texture:'embeddedTextureCount'}
+  for (const need of [...(obligation.capabilities ?? []), ...(obligation.embeddedKinds ?? [])]) {
+    const count = counts[need]
+    if (count && gltf) {
+      if (!Number(facts[count])) {
+        // External textures can exist without being embedded.
+        if (need === 'contains-textures' && facts.externalReferences) unknown = true
+        else contradiction = true
+      }
+    } else unknown = true
+  }
+  if (obligation.relationKinds?.length) unknown = true
+  // An atlas's named rectangles establish addressing, never a timed sequence.
+  // Unsupported facts stay unknown, including animation timing/rig compatibility.
+  return { status: contradiction ? 'failed' : unknown ? 'unverified' : 'passed',
+    reason: resource.id+': '+(contradiction ? 'required components absent from inspected root' :
+      unknown ? 'required facts are not established by supported file inspection' : 'structural file/header facts only; runtime use/quality unverified') } as const
 }
 
 function projectFile(workspace: string, filePath: string): string | undefined {

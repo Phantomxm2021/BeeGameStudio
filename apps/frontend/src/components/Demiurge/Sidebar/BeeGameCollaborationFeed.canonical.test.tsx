@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ChatDisplayMessage } from '../viewModels/displayModels';
 import { BeeGameCollaborationFeed } from './BeeGameCollaborationFeed';
 import { toChatDisplayMessages } from '../../../viewModels/displayModels';
@@ -17,6 +17,150 @@ vi.mock('img-fx', async () => {
 
 const CHECKLIST_TURN_ID = 'beegame-turn-beegame_191b560f8a9046b18e1efed2fafa8f07-1';
 
+// Detail assertions explicitly opt in by expanding the user-facing disclosure.
+const renderWithActivitiesExpanded: typeof render = (...args) => {
+  const result = render(...args);
+  result.container.querySelectorAll('[data-variant="default"] > button[aria-expanded="false"]')
+    .forEach(button => fireEvent.click(button));
+  return result;
+};
+
+it('uses native activity following while working and a collapsed disclosure after completion', async () => {
+  const message: ChatDisplayMessage = { id: 'default-fold', sender: 'beegame', content: 'Inspecting files.',
+    turnId: 'default-fold-turn', timestamp: Date.now() };
+  const { container, rerender } = render(<BeeGameCollaborationFeed messages={[message]} isLoading />);
+  const activity = container.querySelector('[data-variant="default"]') as HTMLElement;
+  expect(within(activity).getByRole('status')).toHaveTextContent('Working');
+  expect(within(activity).queryByRole('button', { name: /^Working/ })).not.toBeInTheDocument();
+  const viewport = activity.querySelector('[role="region"] > div') as HTMLElement;
+  expect(viewport).toHaveClass('overflow-y-hidden');
+  await waitFor(() => expect(screen.getByText('Inspecting files.')).toBeVisible());
+  const messages: ChatDisplayMessage[] = [message,
+    { ...message, id: 'fold-tool', type: 'tool', toolName: 'Read', toolStatus: 'completed', content: '' },
+    { ...message, id: 'fold-final', content: 'Final answer.' },
+  ];
+  rerender(<BeeGameCollaborationFeed messages={messages} isLoading />);
+  expect(activity).toContainElement(screen.getByText('Final answer.'));
+  rerender(<BeeGameCollaborationFeed messages={messages} />);
+  const heading = within(activity).getByRole('button', { name: /^(Worked|Activity)/ });
+  expect(heading).toHaveAttribute('aria-expanded', 'false');
+  await waitFor(() => expect(screen.getByText('Final answer.')).toBeVisible());
+  fireEvent.click(heading);
+  expect(heading).toHaveAttribute('aria-expanded', 'true');
+  await waitFor(() => expect(screen.getByText('Inspecting files.')).toBeVisible());
+});
+
+it('follows growing activity with the native measured transform', async () => {
+  let height = 300;
+  let resize: (() => void) | undefined;
+  const measuredHeight = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(() => height);
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(private callback: () => void) {}
+    observe(node: HTMLElement) { if (node.getAttribute('role') === 'list') resize = this.callback; }
+    disconnect() {}
+    unobserve() {}
+  });
+  try {
+    const { container, unmount } = render(<BeeGameCollaborationFeed isLoading messages={[
+      { id: 'follow-text', sender: 'beegame', content: 'Inspecting files.', timestamp: 1000, turnId: 'follow' },
+      { id: 'follow-tool', sender: 'beegame', content: '', type: 'tool', toolName: 'Read',
+        toolStatus: 'running', timestamp: 2000, turnId: 'follow' },
+    ]} />);
+    const activity = container.querySelector('[data-variant="default"]') as HTMLElement;
+    const list = within(activity).getByRole('list');
+    expect(activity).toHaveAttribute('data-content', 'mixed');
+    expect(activity.querySelector('[role="region"] > div')).toHaveStyle({ height: '208px' });
+    await waitFor(() => expect(list).toHaveStyle({ transform: 'translateY(-92px)' }));
+    expect(resize).toBeDefined();
+    height = 420;
+    act(() => resize!());
+    await waitFor(() => expect(list).toHaveStyle({ transform: 'translateY(-212px)' }));
+    unmount();
+  } finally {
+    measuredHeight.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
+it('consolidates a streaming turn and moves only the final message outside on completion', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  const messages: ChatDisplayMessage[] = [
+    { id: 'process-a', sender: 'beegame', content: 'Inspecting files.', timestamp: 1000, turnId: 'one' },
+    { id: 'read-a', sender: 'beegame', content: '', type: 'tool', toolName: 'Read', toolStatus: 'completed', timestamp: 2000, turnId: 'one' },
+    { id: 'process-b', sender: 'beegame', content: 'Applying the change.', timestamp: 3000, turnId: 'one' },
+    { id: 'edit-b', sender: 'beegame', content: '', type: 'tool', toolName: 'Edit', toolStatus: 'completed', timestamp: 4000, turnId: 'one' },
+    { id: 'final', sender: 'beegame', content: 'Done. Verified.', timestamp: 5000, turnId: 'one',
+      contentBlocks: [{ type: 'text', text: 'Done.' }, { type: 'text', text: 'Verified.' }] },
+  ];
+  const { container, rerender } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={messages} isLoading />);
+  const activity = container.querySelector('[data-variant="default"]') as HTMLElement;
+  expect(container.querySelectorAll('[data-variant="default"]')).toHaveLength(1);
+  expect(activity).toContainElement(screen.getByText('Done.'));
+  expect(screen.queryByRole('button', { name: 'Copy response' })).not.toBeInTheDocument();
+  const rows = within(activity).getAllByRole('listitem');
+  expect(rows.map(row => row.textContent)).toEqual(['Inspecting files.', 'Read', 'Applying the change.', 'Edit', 'Done.', 'Verified.']);
+  rerender(<BeeGameCollaborationFeed messages={messages} />);
+  expect(container.querySelectorAll('[data-variant="default"]')).toHaveLength(1);
+  expect(within(activity).getByRole('button', { name: /^Worked/ })).toHaveAttribute('aria-expanded', 'false');
+  await waitFor(() => expect(screen.getByText('Done.')).toBeVisible());
+  expect(screen.getByText('Verified.')).toBeVisible();
+  expect(activity).not.toContainElement(screen.getByText('Done.'));
+  fireEvent.click(screen.getByRole('button', { name: 'Copy response' }));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith('Done.\n\nVerified.'));
+});
+
+it('does not pull a previous reply into activity when the next user turn is waiting', () => {
+  const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed isLoading messages={[
+    { id: 'previous', sender: 'beegame', content: 'Earlier answer.', timestamp: 1000, turnId: 'earlier' },
+    { id: 'next-user', sender: 'user', content: 'Next request.', timestamp: 2000 },
+  ]} />);
+  expect(container.querySelector('[data-variant="default"]')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Copy response' })).toBeInTheDocument();
+  expect(screen.getByTestId('beegame-loading-message')).toBeInTheDocument();
+});
+
+it('keeps the native working status live and exposes the completed log through disclosure', () => {
+  vi.useFakeTimers();
+  try {
+    const startedAt = Date.now() - 330_000;
+    const start: ChatDisplayMessage = { id: 'start', sender: 'beegame', type: 'tool', content: '',
+      timestamp: startedAt, turnId: 'live-turn', toolUseId: 'live-tool', toolName: 'Bash', toolStatus: 'running',
+      toolInput: { command: 'node verify.mjs', description: 'Checking the product URL' } };
+    const { rerender } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[start]} lang="en" />);
+    const heading = screen.getByRole('status');
+    expect(heading).toHaveTextContent('Working for 5m 30s');
+    expect(screen.getByRole('button', { name: 'Checking the product URL' })).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(1000));
+    expect(heading).toHaveTextContent('Working for 5m 31s');
+    const end = { ...start, id: 'end', timestamp: Date.now(), toolStatus: 'completed' as const, toolOutput: 'OK' };
+    rerender(<BeeGameCollaborationFeed messages={[start, end]} lang="en" />);
+    const completedHeading = screen.getByRole('button', { name: 'Worked for 5m 31s' });
+    expect(completedHeading).toHaveAttribute('aria-expanded', 'false');
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(completedHeading).toHaveTextContent('Worked for 5m 31s');
+    fireEvent.click(completedHeading);
+    expect(screen.getAllByRole('button', { name: 'Checking the product URL' })).toHaveLength(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('renders host evidence independently of an all-passed author answer in saved history', () => {
+  const common={sessionId:'evidence-session',turnId:'evidence-turn',createdAt:new Date(1000).toISOString()};
+  const hostText='BGS 宿主检查｜本轮执行已结束，不等于游戏验收通过\naudio-data-consumption: 未验证\n游戏质量仍未验证。';
+  const events=[{...common,id:1,type:'assistant.message',text:'全部通过，已交付。',payload:{type:'assistant.message'}},
+    {...common,id:2,type:'turn.completed',text:'Turn ended'},
+    {...common,id:3,type:'system.status',text:hostText,payload:{type:'system.status',subtype:'host_evidence',quality:'unverified',deliveryEligible:false}}];
+  const messages=toChatDisplayMessages(normalizeChatHistory(transcriptEventsToHistory('evidence',events)));
+  renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={messages} lang="zh" />);
+  expect(screen.getByText('全部通过，已交付。')).toBeVisible();
+  const host=screen.getByTestId('beegame-host-evidence');
+  expect(host).toBeVisible();
+  expect(host).toHaveTextContent('audio-data-consumption: 未验证');
+  expect(host).toHaveTextContent('游戏质量仍未验证');
+});
+
 it('shows child tools only inside the subagent detail while keeping main tools in chat', () => {
   const event = (id: number, type: string, payload: Record<string, unknown>) => ({
     id, type, payload, text: '', sessionId: 'routing-session', turnId: 'routing-turn',
@@ -32,9 +176,10 @@ it('shows child tools only inside the subagent detail while keeping main tools i
     event(13, 'tool.completed', { toolName: 'Bash', toolUseID: 'main-tool', input: { command: 'bun test' }, output: 'main result' }),
   ];
   const messages = toChatDisplayMessages(normalizeChatHistory(transcriptEventsToHistory('routing', events)));
-  render(<BeeGameCollaborationFeed messages={messages} lang="en" />);
+  renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={messages} lang="en" />);
   expect(screen.queryByText('Ran 11 tools')).not.toBeInTheDocument();
-  expect(screen.getByText('Ran 1 tool')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /bun test/ })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /child-0/ })).not.toBeInTheDocument();
   expect(screen.getAllByTestId('beegame-subagent-row')).toHaveLength(1);
   fireEvent.click(within(screen.getByTestId('beegame-subagent-row')).getByRole('button'));
   const activity = screen.getByTestId('subagent-activity-list');
@@ -47,37 +192,33 @@ it('shows child tools only inside the subagent detail while keeping main tools i
   expect(screen.queryByText('main result')).not.toBeInTheDocument();
 });
 
-it('keeps completed, failed and running work in its original position without an execution archive', () => {
+it('keeps a mixed activity and final answer in their original positions', () => {
   const messages: ChatDisplayMessage[] = [
     { id: 'compact-thought', sender: 'beegame', type: 'thought', thought: 'Inspecting files', content: 'Thinking', timestamp: 1, turnId: 'compact-turn' },
     { id: 'compact-read', sender: 'system', type: 'tool', toolName: 'Read', toolStatus: 'completed', content: 'Read', timestamp: 2, turnId: 'compact-turn' },
     { id: 'compact-check', sender: 'system', type: 'tool', toolName: 'Bash', toolStatus: 'failed', content: 'Check failed', timestamp: 3, turnId: 'compact-turn' },
     { id: 'compact-answer', sender: 'beegame', content: '检查失败，尚未完成验收。', timestamp: 4, turnId: 'compact-turn' },
   ];
-  const { container, rerender } = render(<BeeGameCollaborationFeed messages={messages} lang="zh" />);
+  const { container, rerender } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={messages} lang="zh" />);
   expect(screen.queryByRole('button', { name: /执行记录/ })).not.toBeInTheDocument();
   expect(screen.getByText('检查失败，尚未完成验收。')).toBeVisible();
   expect(screen.getByText(/1 次失败/)).toBeVisible();
   const activities = container.querySelectorAll('[data-content]');
-  expect(activities).toHaveLength(2);
-  expect(activities[0]).toHaveAttribute('data-content', 'text');
-  expect(activities[1]).toHaveAttribute('data-content', 'tool');
+  expect(activities).toHaveLength(1);
+  expect(activities[0]).toHaveAttribute('data-content', 'trace');
   const answer = screen.getByTestId('beegame-agent-message-compact-answer');
-  expect(activities[0].compareDocumentPosition(activities[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(activities[1].compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(activities[0].compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   rerender(<BeeGameCollaborationFeed messages={messages.map(message => message.id === 'compact-check'
     ? { ...message, toolStatus: 'running' } : message)} lang="zh" isLoading />);
   expect(screen.queryByRole('button', { name: /执行记录/ })).not.toBeInTheDocument();
   expect(container.querySelectorAll('[data-content]')[0]).toBe(activities[0]);
-  expect(container.querySelectorAll('[data-content]')[1]).toBe(activities[1]);
   rerender(<BeeGameCollaborationFeed messages={messages} lang="zh" />);
   expect(container.querySelectorAll('[data-content]')[0]).toBe(activities[0]);
-  expect(container.querySelectorAll('[data-content]')[1]).toBe(activities[1]);
   expect(screen.queryByRole('button', { name: /执行记录/ })).not.toBeInTheDocument();
 });
 
 it('shows the actual platform handoff error instead of a generic context label', () => {
-  render(<BeeGameCollaborationFeed messages={[{
+  renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[{
     id: 'delivery-error', sender: 'system', taskKind: 'delivery_error',
     content: '交付未能继续：测试清理失败', timestamp: Date.now(),
   }]} lang="zh" />);
@@ -87,7 +228,7 @@ it('shows the actual platform handoff error instead of a generic context label',
 it('shows native context compaction as a live marker and then a completed separator', () => {
   const marker: ChatDisplayMessage = { id: 'compaction', sender: 'system', content: 'compacting',
     taskKind: 'context_compaction', type: 'system_status', streamStatus: 'streaming', timestamp: Date.now() };
-  const { rerender } = render(<BeeGameCollaborationFeed messages={[marker]} isLoading lang="zh" />);
+  const { rerender } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[marker]} isLoading lang="zh" />);
   expect(screen.getByTestId('beegame-compaction-marker')).toHaveTextContent('正在压缩上下文');
   expect(screen.getByTestId('beegame-compaction-marker')).toHaveAttribute('role', 'status');
   rerender(<BeeGameCollaborationFeed messages={[{ ...marker, content: 'compacted', streamStatus: 'complete' }]} lang="zh" />);
@@ -96,7 +237,7 @@ it('shows native context compaction as a live marker and then a completed separa
 });
 
 it('renders delivery milestone and stop markers as separators', () => {
-  render(<BeeGameCollaborationFeed lang="zh" messages={[
+  renderWithActivitiesExpanded(<BeeGameCollaborationFeed lang="zh" messages={[
     { id: 'phase-author', sender: 'system', content: 'author', taskKind: 'delivery_phase', timestamp: 1 },
     { id: 'session-stop', sender: 'system', content: 'stopped', taskKind: 'session_lifecycle', timestamp: 2 },
   ]} />);
@@ -105,7 +246,7 @@ it('renders delivery milestone and stop markers as separators', () => {
 });
 
 it('labels the integrated sample without declaring a quality pass', () => {
-  render(<BeeGameCollaborationFeed lang="zh" messages={[
+  renderWithActivitiesExpanded(<BeeGameCollaborationFeed lang="zh" messages={[
     { id: 'phase-sample', sender: 'system', content: 'playable', taskKind: 'delivery_phase', timestamp: 1 },
   ]} />);
   expect(screen.getByTestId('beegame-context-separator')).toHaveTextContent('代表性可玩样板');
@@ -118,14 +259,14 @@ it('keeps distinct references after history conversion and renders them with the
     sources: [{ title: 'Guide A', url: 'https://example.com/a' }],
     citations: [{ title: 'Guide B', url: 'https://example.com/b' }],
   }]));
-  render(<BeeGameCollaborationFeed messages={messages} />);
+  renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={messages} />);
   fireEvent.click(screen.getByRole('button', { name: /2 sources/i }));
   expect(screen.getByRole('link', { name: /Guide A/ })).toHaveAttribute('href', 'https://example.com/a');
   expect(screen.getByRole('link', { name: /Guide B/ })).toHaveAttribute('href', 'https://example.com/b');
 });
 
 it('shows attachment-only user messages without treating documents as images', () => {
-  render(<BeeGameCollaborationFeed messages={[{ id: 'upload', sender: 'user', content: '', timestamp: Date.now(),
+  renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[{ id: 'upload', sender: 'user', content: '', timestamp: Date.now(),
     attachments: [
       { type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'scene.png' },
       { type: 'file', mediaType: 'application/pdf', data: 'aGVsbG8=', filename: 'brief.pdf' },
@@ -137,7 +278,7 @@ it('shows attachment-only user messages without treating documents as images', (
 });
 
 it('keeps a Bottts avatar stable for a subtask and falls back if the image cannot load', () => {
-  render(<BeeGameCollaborationFeed messages={[{ id: 'avatar-task', sender: 'beegame', type: 'tool',
+  renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[{ id: 'avatar-task', sender: 'beegame', type: 'tool',
     content: 'Agent', timestamp: 100, toolName: 'Agent', toolStatus: 'running', isSubagentTool: true }]} lang="zh" />);
   const badge = within(screen.getByTestId('beegame-subagent-disclosure-avatar-task')).getByRole('button');
   const avatar = badge.querySelector('img')!;
@@ -151,7 +292,7 @@ it('keeps a Bottts avatar stable for a subtask and falls back if the image canno
 });
 
 it('lays out consecutive subagents in one wrapping horizontal row', () => {
-  render(<BeeGameCollaborationFeed messages={[
+  renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[
     { id: 'first-subagent', sender: 'beegame', type: 'tool', content: 'Agent', timestamp: 100,
       toolName: 'Agent', toolStatus: 'running', isSubagentTool: true },
     { id: 'second-subagent', sender: 'beegame', type: 'tool', content: 'Agent', timestamp: 101,
@@ -167,7 +308,7 @@ it('lays out consecutive subagents in one wrapping horizontal row', () => {
 });
 
 it('shows the latest assistant-response time below the Streaming Response content', () => {
-  const { container } = render(<BeeGameCollaborationFeed messages={[
+  const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[
     { id: 'response-time', sender: 'beegame', content: 'A response with a time.', timestamp: Date.UTC(2026, 8, 23, 1, 42) },
   ]} lang="zh" />);
   expect(container.querySelector('time')).toHaveTextContent('09:42');
@@ -176,7 +317,7 @@ it('shows the latest assistant-response time below the Streaming Response conten
 it('paces a live response without replaying completed history', () => {
   const streaming = { id: 'smooth-response', sender: 'beegame', content: 'A complete streamed sentence.',
     timestamp: Date.now(), streamStatus: 'streaming' as const };
-  const { rerender } = render(<BeeGameCollaborationFeed messages={[streaming]} streamingMessageId={streaming.id} />);
+  const { rerender } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[streaming]} streamingMessageId={streaming.id} />);
   expect(screen.getByTestId('beegame-agent-message-smooth-response')).not.toHaveTextContent(streaming.content);
   rerender(<BeeGameCollaborationFeed messages={[{ ...streaming, streamStatus: 'complete' }]} />);
   expect(screen.getByRole('button', { name: 'Copy response' })).toBeInTheDocument();
@@ -193,7 +334,7 @@ it('keeps each completed turn footer when a paged transcript includes older resp
     { id: 'recovered-older-response', sender: 'beegame', content: 'Older answer',
       turnId: 'older-turn', sequence: 400, timestamp: Date.UTC(2026, 8, 23, 4, 55) },
   ]));
-  const { container } = render(<BeeGameCollaborationFeed messages={messages} />);
+  const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={messages} />);
   expect(Array.from(container.querySelectorAll('time')).map(node => node.textContent)).toEqual(['12:55', '17:59']);
   expect(container.querySelectorAll('[data-slot="message"]').item(container.querySelectorAll('[data-slot="message"]').length - 1))
     .toHaveTextContent('Latest answer');
@@ -204,14 +345,14 @@ it('keeps a response anchor when an older page prepends activity in the same tur
     content: 'Read', toolName: 'Read', turnId: 'same-turn', timestamp: 200 };
   const older = { id: 'older-thought', sender: 'beegame', type: 'thought' as const,
     content: 'Checking', turnId: 'same-turn', timestamp: 100 };
-  const { container, rerender } = render(<BeeGameCollaborationFeed messages={[latest]} />);
+  const { container, rerender } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[latest]} />);
   const before = container.querySelector('[data-slot="message"]')?.getAttribute('data-history-anchor-id');
   rerender(<BeeGameCollaborationFeed messages={[older, latest]} />);
   expect(container.querySelector('[data-slot="message"]')).toHaveAttribute('data-history-anchor-id', before);
 });
 
 it('shows a time on each completed text turn, not on tool or thinking-only activity', () => {
-  const { container } = render(<BeeGameCollaborationFeed messages={[
+  const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[
     { id: 'earlier', sender: 'beegame', content: 'I will inspect this.', turnId: 'turn-1', timestamp: Date.UTC(2026, 8, 23, 11, 22) },
     { id: 'tool', sender: 'system', type: 'tool', content: 'Read completed', toolName: 'Read', toolStatus: 'completed',
       turnId: 'turn-2', timestamp: Date.UTC(2026, 8, 23, 11, 22, 30) },
@@ -224,7 +365,7 @@ it('shows a time on each completed text turn, not on tool or thinking-only activ
 
 it('keeps completed delivery-turn times when automatic continuation messages are hidden', () => {
   const at = (hour: number, minute: number) => Date.UTC(2026, 8, 25, hour - 8, minute);
-  const { container } = render(<BeeGameCollaborationFeed lang="zh" messages={[
+  const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed lang="zh" messages={[
     { id: 'request', sender: 'user', content: '做一个贪吃蛇游戏', timestamp: at(14, 36) },
     { id: 'author-answer', sender: 'beegame', content: '文档完成', turnId: 'author', timestamp: at(14, 51) },
     { id: 'review-phase', sender: 'system', content: 'review', taskKind: 'delivery_phase', timestamp: at(14, 51) },
@@ -243,7 +384,7 @@ it('keeps completed delivery-turn times when automatic continuation messages are
 });
 
 it('keeps one footer when a context marker splits a response within the same turn', () => {
-  const { container } = render(<BeeGameCollaborationFeed lang="zh" messages={[
+  const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed lang="zh" messages={[
     { id: 'before', sender: 'beegame', content: '第一段', turnId: 'same-turn', timestamp: Date.UTC(2026, 8, 25, 6, 51) },
     { id: 'compaction', sender: 'system', content: 'compacted', taskKind: 'context_compaction', timestamp: Date.UTC(2026, 8, 25, 6, 52) },
     { id: 'after', sender: 'beegame', content: '第二段', turnId: 'same-turn', timestamp: Date.UTC(2026, 8, 25, 6, 53) },
@@ -253,18 +394,18 @@ it('keeps one footer when a context marker splits a response within the same tur
   expect(screen.getAllByRole('button', { name: 'Copy response' })).toHaveLength(1);
 });
 
-it('timestamps the completed Streaming Response footer even while the agent is still working', () => {
-  const { container } = render(<BeeGameCollaborationFeed messages={[
+it('keeps interim prose in the activity without a final footer while the turn is working', () => {
+  const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[
     { id: 'interim', sender: 'beegame', content: 'I will inspect this.', timestamp: Date.UTC(2026, 8, 23, 11, 22) },
   ]} isLoading lang="zh" />);
-  const time = container.querySelector('time');
-  const copy = screen.getByRole('button', { name: 'Copy response' });
-  expect(time).toHaveTextContent('19:22');
-  expect(Boolean(copy.compareDocumentPosition(time) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  expect(container.querySelector('time')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Copy response' })).not.toBeInTheDocument();
+  expect(container.querySelector('[data-variant="default"]')).toContainElement(screen.getByText('I will inspect this.'));
+  expect(screen.queryByTestId('beegame-loading-message')).not.toBeInTheDocument();
 });
 
 it('uses the turn completion time for the response footer, not the first text block time', () => {
-  const { container } = render(<BeeGameCollaborationFeed lang="zh" messages={[
+  const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed lang="zh" messages={[
     { id: 'answer', sender: 'beegame', content: '文档完成', turnId: 'author',
       timestamp: Date.UTC(2026, 8, 25, 6, 50, 55), turnCompletedAt: Date.UTC(2026, 8, 25, 6, 51, 10) },
   ]} />);
@@ -272,7 +413,7 @@ it('uses the turn completion time for the response footer, not the first text bl
 });
 
 it('places copy and edit actions below, not inside, the user-message bubble', () => {
-  render(<BeeGameCollaborationFeed
+  renderWithActivitiesExpanded(<BeeGameCollaborationFeed
     messages={[{ id: 'editable', sender: 'user', content: 'A test message', rewindAvailable: true, timestamp: Date.UTC(2026, 8, 23, 1, 42) }]}
     onEditMessage={() => undefined}
     lang="zh"
@@ -294,7 +435,7 @@ it('places copy and edit actions below, not inside, the user-message bubble', ()
 });
 
 it('offers Edit only for the latest user message, even after an Agent response', () => {
-  render(<BeeGameCollaborationFeed messages={[
+  renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[
     { id: 'older', sender: 'user', content: 'First request', rewindAvailable: true, timestamp: 1 },
     { id: 'answer', sender: 'beegame', content: 'First answer', timestamp: 2 },
     { id: 'latest', sender: 'user', content: 'Second request', rewindAvailable: true, timestamp: 3 },
@@ -307,7 +448,7 @@ it('offers Edit only for the latest user message, even after an Agent response',
 });
 
 it('does not offer a false Edit action for a historical message without a rollback checkpoint', () => {
-  render(<BeeGameCollaborationFeed messages={[
+  renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[
     { id: 'legacy', sender: 'user', content: 'Old request', timestamp: 1 },
   ]} onEditMessage={() => undefined} />);
   expect(within(screen.getByTestId('beegame-user-message-legacy'))
@@ -318,7 +459,7 @@ it('immediately replaces the selected user bubble with the BeUI editor and submi
   const onEditDraftChange = vi.fn();
   const onSubmitEdit = vi.fn();
   const onCancelEdit = vi.fn();
-  render(<BeeGameCollaborationFeed
+  renderWithActivitiesExpanded(<BeeGameCollaborationFeed
     messages={[{ id: 'inline-edit', sender: 'user', content: 'Original message', rewindAvailable: true, timestamp: Date.now() }]}
     editingMessageId="inline-edit"
     editDraft="Updated message"
@@ -346,12 +487,16 @@ it('immediately replaces the selected user bubble with the BeUI editor and submi
   expect(onCancelEdit).toHaveBeenCalledOnce();
 });
 const IMPLEMENTATION_TURN_ID = 'beegame-turn-beegame_0889307bbd6142f186543e33306e9b01-1';
-it('shows tool screenshots outside the collapsed tool activity', async () => {
-  render(<BeeGameCollaborationFeed messages={[{ id: 'screenshot', sender: 'beegame', content: 'Read', timestamp: Date.now(),
+it('keeps tool screenshots inside the collapsible turn activity', async () => {
+  const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[{ id: 'screenshot', sender: 'beegame', content: 'Read', timestamp: Date.now(),
     type: 'tool', toolName: 'Read', toolUseId: 'read-image', toolStatus: 'completed',
     attachments: [{ type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', filename: 'screenshot.png' }],
   }]} />);
   expect(await screen.findByRole('img', { name: 'screenshot.png' })).toBeVisible();
+  const activity = container.querySelector('[data-variant="default"]') as HTMLElement;
+  expect(activity).toContainElement(screen.getByRole('img', { name: 'screenshot.png' }));
+  fireEvent.click(within(activity).getByRole('button', { name: 'Activity', exact: true }));
+  await waitFor(() => expect(screen.queryByRole('img', { name: 'screenshot.png' })).not.toBeInTheDocument());
 });
 const FAILURE_TURN_ID = 'beegame-turn-beegame_bcc8df40769c4754895fac37064035d5-1';
 const CHECKLIST_MIXED_MESSAGE_ID = '021789434990692846a816464a9af9c0791e0f68a2ce03cbd3227';
@@ -360,7 +505,7 @@ const IMPLEMENTATION_MIXED_MESSAGE_ID = '0217894385633113d0449b03f13da7ad7c0359f
 
 describe('BeeGameCollaborationFeed canonical transcript', () => {
   it('filters paths from assistant and subagent output without changing user-authored text', () => {
-    const { container } = render(<BeeGameCollaborationFeed messages={[
+    const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[
       { id: 'user-path', sender: 'user', content: 'Please inspect src/Game.tsx', timestamp: 1 },
       { id: 'assistant-path', sender: 'beegame', content: 'Updated src/Game.tsx at /Users/alice/Game/src/Game.tsx', timestamp: 2 },
       { id: 'subagent-path', sender: 'beegame', type: 'tool', content: 'Agent', timestamp: 3,
@@ -380,7 +525,7 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
   });
 
   it('keeps only Copy in the assistant response footer', () => {
-    render(<BeeGameCollaborationFeed
+    renderWithActivitiesExpanded(<BeeGameCollaborationFeed
       messages={[{ id: 'assistant-response', sender: 'beegame', content: 'Answer', timestamp: Date.now() }]}
     />);
 
@@ -401,7 +546,7 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
       const message: ChatDisplayMessage = { id: 'badge-task', sender: 'beegame', type: 'tool',
         content: 'Agent', timestamp: 100, toolName: 'Agent', isSubagentTool: true,
         toolStatus, completionReason, subagentPrompt: 'Inspect assets' };
-      const { rerender } = render(<BeeGameCollaborationFeed messages={[message]} lang="zh" />);
+      const { rerender } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[message]} lang="zh" />);
       const pill = screen.getByTestId('beegame-subagent-disclosure-badge-task');
       const badge = within(pill).getByRole('button');
       const name = badge.querySelector('.truncate')?.textContent;
@@ -429,16 +574,17 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
     });
 
   it('labels cancelled tools as stopped rather than failed', () => {
-    render(<BeeGameCollaborationFeed messages={[
+    renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[
       { id: 'cancelled', sender: 'beegame', type: 'tool', content: 'Bash', timestamp: 100,
         toolName: 'Bash', toolStatus: 'failed', completionReason: 'stopped' },
     ]} lang="en" />);
-    expect(screen.getByText('1 tool calls · 1 stopped')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Activity.*1 stopped/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Bash.*Stopped/ })).toBeInTheDocument();
     expect(screen.queryByText(/1 failed/)).not.toBeInTheDocument();
   });
 
   it('keeps a native background task name consistent between the pill and detail', () => {
-    render(<BeeGameCollaborationFeed messages={[
+    renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[
       { id: 'shell-task', sender: 'beegame', type: 'tool', content: 'Task', timestamp: 100,
         toolName: 'Task', toolStatus: 'running', isSubagentTool: true, subagentPrompt: 'Check build' },
     ]} lang="en" />);
@@ -452,33 +598,32 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
   });
 
   it('preserves an unavailable native tool call without classifying its diagnostic text', () => {
-    render(<BeeGameCollaborationFeed messages={[
+    renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[
       { id: 'invalid-tool', sender: 'system', type: 'tool', timestamp: 100,
         content: 'TodoWrite传统" string="true failed', toolName: 'TodoWrite传统" string="true', toolStatus: 'failed',
         toolOutput: '<tool_use_error>Error: No such tool available: TodoWrite传统" string="true</tool_use_error>' },
     ]} lang="zh" />);
-    fireEvent.click(screen.getByRole('button', { name: /1 次失败/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'TodoWrite传统" string="true' }));
+    fireEvent.click(screen.getByRole('button', { name: /TodoWrite传统" string="true.*失败/ }));
     expect(screen.getByText(/No such tool available: TodoWrite传统/)).toBeInTheDocument();
   });
 
   it('does not turn unknown or subsecond thinking duration into 0 seconds', () => {
-    render(<BeeGameCollaborationFeed messages={[
+    renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[
       { id: 'unknown', sender: 'beegame', type: 'thought', content: 'unknown timing', timestamp: 100, streamStatus: 'complete' },
       { id: 'short', sender: 'beegame', type: 'thought', content: 'short thinking', timestamp: 200, streamStatus: 'complete', thinkingDurationMs: 365 },
     ]} lang="en" />);
-    expect(screen.getByText('Thought')).toBeInTheDocument();
-    expect(screen.getByText('Thought · less than 1s')).toBeInTheDocument();
-    expect(screen.queryByText(/Thought.*0s/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Thought', exact: true })).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Activity', exact: true })).toBeInTheDocument();
+    expect(screen.getByText('Worked for less than 1s')).toBeInTheDocument();
+    expect(screen.queryByText(/Worked.*0s/)).not.toBeInTheDocument();
   });
 
   it('opens full failed tool input/output in the shared drawer', () => {
-    const { container } = render(<BeeGameCollaborationFeed messages={[
+    renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[
       { id: 'tool-detail', sender: 'beegame', type: 'tool', content: 'Read failed', timestamp: 100,
         toolName: 'Read', toolDetail: 'manifest.json', toolStatus: 'failed', toolInput: { path: 'manifest.json' }, toolOutput: 'Detailed failure, not a completed step' },
     ]} lang="en" />);
-    fireEvent.click(container.querySelector('[data-content] > button')!);
-    fireEvent.click(screen.getByRole('button', { name: 'manifest.json' }));
+    fireEvent.click(screen.getByRole('button', { name: /Read manifest.json.*Failed/ }));
     expect(screen.getByText('Input')).toBeInTheDocument();
     expect(screen.getByText('Output')).toBeInTheDocument();
     expect(screen.getByText('Detailed failure, not a completed step')).toBeInTheDocument();
@@ -487,7 +632,7 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
     const message: ChatDisplayMessage = { id: 'subagent-live', sender: 'beegame', content: 'Subagent: Audit assets',
       type: 'tool', timestamp: Date.now(), toolName: 'Agent', toolStatus: 'running', isSubagentTool: true,
       subagentPrompt: 'Audit assets', subagentTrace: 'Read manifest.json', subagentOutput: 'Agent input streaming' };
-    const { rerender } = render(<BeeGameCollaborationFeed messages={[message]} />);
+    const { rerender } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[message]} />);
     const badge = within(screen.getByTestId('beegame-subagent-disclosure-subagent-live')).getByRole('button', { name: /Working/ });
     expect(badge).toHaveAttribute('data-subagent-state', 'running');
     const avatar = badge.querySelector('img');
@@ -506,7 +651,8 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
     expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Completed');
     expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Checked hashes and palette');
     expect(screen.getByTestId('beegame-agent-run-detail')).toHaveTextContent('Audit passed');
-    expect(within(screen.getByTestId('beegame-subagent-disclosure-subagent-live')).getByRole('button', { name: /Completed/ }))
+    // Native activity collapses on completion; the open detail drawer remains live.
+    expect(screen.getByTestId('beegame-subagent-disclosure-subagent-live').querySelector('[role="button"]'))
       .toBe(badge);
     expect(badge).toHaveAttribute('data-subagent-state', 'completed');
     expect(badge.querySelector('img')).toBe(avatar);
@@ -518,7 +664,7 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
   it('shows a tool in the already-open subagent drawer while it is still running, then updates it in place', () => {
     const message: ChatDisplayMessage = { id: 'subagent-running-tools', sender: 'beegame', content: 'Inspect assets',
       type: 'tool', timestamp: 1, toolName: 'Agent', toolStatus: 'running', isSubagentTool: true, subagentPrompt: 'Inspect assets' };
-    const { rerender } = render(<BeeGameCollaborationFeed messages={[message]} />);
+    const { rerender } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={[message]} />);
     fireEvent.click(within(screen.getByTestId('beegame-subagent-disclosure-subagent-running-tools')).getByRole('button'));
     const entry = { id: 'slow-bash', kind: 'tool' as const, toolName: 'Bash', command: 'bun test slow.test.ts', status: 'running' as const };
     rerender(<BeeGameCollaborationFeed messages={[{ ...message, subagentActivity: { entries: [entry], truncated: false } }]} />);
@@ -568,39 +714,40 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
   });
 
   it('renders the canonical activity and markdown result in response order without an execution archive', async () => {
-    render(<BeeGameCollaborationFeed messages={sampleMessages} />);
+    renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={sampleMessages} />);
     const checklistTurn = screen.getAllByTestId(/^beegame-agent-turn-/)
       .find((turn) => turn.textContent?.includes('11 个经验证的验收场景'));
     expect(checklistTurn).toBeDefined();
     const activities = checklistTurn!.querySelectorAll('[data-content]');
     const activity = activities[0] as HTMLElement;
-    const toolActivity = activities[1] as HTMLElement;
     expect(activity).toBeInTheDocument();
-    expect(activities).toHaveLength(2);
-    expect(activities[0]).toHaveAttribute('data-content', 'text');
-    expect(activities[1]).toHaveAttribute('data-content', 'tool');
+    expect(activities).toHaveLength(1);
+    expect(activity).toHaveAttribute('data-content', 'mixed');
     expect([...activities].every((candidate) => !candidate.textContent?.includes('Running tools'))).toBe(true);
     expect([...activities].every((candidate) => !candidate.textContent?.includes('Run Tool'))).toBe(true);
-    expect(toolActivity).toHaveTextContent('Edit');
+    const tool = await within(activity).findByRole('button', { name: /Write/ });
+    await waitFor(() => expect(tool).toBeVisible());
     expect(screen.queryByRole('button', { name: /Execution details|执行记录/ })).not.toBeInTheDocument();
-    fireEvent.click(within(activity).getByRole('button'));
+    fireEvent.click(within(activity).getByRole('button', { name: 'Thought', exact: true }));
     await waitFor(() => expect(within(activity).getByText(/11 verified acceptance scenarios/)).toBeVisible());
     expect(screen.getByTestId(`beegame-agent-message-beegame-assistant-beegame_191b560f8a9046b18e1efed2fafa8f07-${CHECKLIST_MIXED_MESSAGE_ID}-block-1`)).toBeInTheDocument();
     expect(screen.getByTestId(`beegame-agent-message-beegame-assistant-beegame_191b560f8a9046b18e1efed2fafa8f07-${CHECKLIST_FINAL_MESSAGE_ID}-block-0`)).toBeInTheDocument();
     expect(screen.getByTestId(`beegame-agent-message-beegame-assistant-beegame_0889307bbd6142f186543e33306e9b01-${IMPLEMENTATION_MIXED_MESSAGE_ID}-block-1`)).toBeInTheDocument();
     expect(within(checklistTurn!).getByText(/11 个经验证的验收场景/)).toBeInTheDocument();
-    expect([...activities].every((candidate) => !candidate.textContent?.includes('11 个经验证的验收场景') && !candidate.textContent?.includes('Checklist 候选文件已写入'))).toBe(true);
+    expect(activity).toHaveTextContent('11 个经验证的验收场景');
+    expect(activity).not.toHaveTextContent('Checklist 候选文件已写入');
     expect(within(checklistTurn!).getByText(/Checklist 候选文件已写入/)).toBeInTheDocument();
     const intermediate = screen.getByTestId(`beegame-agent-message-beegame-assistant-beegame_191b560f8a9046b18e1efed2fafa8f07-${CHECKLIST_MIXED_MESSAGE_ID}-block-1`);
     const final = screen.getByTestId(`beegame-agent-message-beegame-assistant-beegame_191b560f8a9046b18e1efed2fafa8f07-${CHECKLIST_FINAL_MESSAGE_ID}-block-0`);
-    expect(activity.compareDocumentPosition(intermediate) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(intermediate.compareDocumentPosition(toolActivity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(toolActivity.compareDocumentPosition(final) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(activity).toContainElement(intermediate);
+    expect(activity).not.toContainElement(final);
+    expect(intermediate.compareDocumentPosition(tool) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tool.compareDocumentPosition(final) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(checklistTurn!).queryByTestId('beegame-file-diff')).not.toBeInTheDocument();
     expect(screen.queryByText('LLM generated')).not.toBeInTheDocument();
   });
 
-  it('keeps Think and every tool call out of a mixed activity', () => {
+  it('keeps thoughts and tools together in one chronological activity', () => {
     const messages = [
       {
         id: 'think-before-tool',
@@ -636,12 +783,20 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
       },
     ] satisfies ChatDisplayMessage[];
 
-    const { container } = render(<BeeGameCollaborationFeed messages={messages} />);
+    const { container } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={messages} />);
 
-    expect(container.querySelector('[data-content="mixed"]')).not.toBeInTheDocument();
-    expect(container.querySelectorAll('[data-content="text"]')).toHaveLength(2);
-    expect(container.querySelectorAll('[data-content="tool"]')).toHaveLength(1);
-    expect(screen.getByText('Ran 1 tool')).toBeInTheDocument();
+    const activity = container.querySelector('[data-content="trace"]')!;
+    expect(container.querySelectorAll('[data-content]')).toHaveLength(1);
+    expect(activity).toHaveTextContent('Worked for 3s');
+    expect(within(activity as HTMLElement).queryByText('Checking the content package.')).not.toBeInTheDocument();
+    const thoughts = within(activity as HTMLElement).getAllByRole('button', { name: 'Thought', exact: true });
+    fireEvent.click(thoughts[0]);
+    fireEvent.click(thoughts[1]);
+    const firstThought = within(activity as HTMLElement).getByText('Checking the content package.');
+    const tool = within(activity as HTMLElement).getByText('ls -R content');
+    const secondThought = within(activity as HTMLElement).getByText('Content directory is absent.');
+    expect(firstThought.compareDocumentPosition(tool) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tool.compareDocumentPosition(secondThought) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('uses full calendar dates for date separators', () => {
@@ -653,7 +808,7 @@ describe('BeeGameCollaborationFeed canonical transcript', () => {
       ...sameDayMessages,
       { id: 'next', sender: 'user', content: 'next', timestamp: Date.parse('2026-09-14T16:01:00.000Z') },
     ] satisfies ChatDisplayMessage[];
-    const { rerender } = render(<BeeGameCollaborationFeed messages={sameDayMessages} />);
+    const { rerender } = renderWithActivitiesExpanded(<BeeGameCollaborationFeed messages={sameDayMessages} />);
     expect(screen.getAllByTestId('beegame-date-separator')).toHaveLength(1);
     rerender(<BeeGameCollaborationFeed messages={crossDayMessages} />);
     expect(screen.getAllByTestId('beegame-date-separator')).toHaveLength(2);

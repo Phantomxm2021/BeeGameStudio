@@ -252,7 +252,7 @@ test.skipIf(process.platform !== 'darwin')('project shell supports Git and local
     expect(access.settings.sandbox.filesystem.allowRead).not.toContain(join(checker.root, '..'))
     const help = await run(`${JSON.stringify(process.execPath)} ${CONTENT_CHECKER_PATH} --help`)
     expect(help.code, help.stderr || help.stdout).toBe(0)
-    expect(help.stdout).toContain('Usage: bun .beegame/delivery/check-content.mjs')
+    expect(help.stdout).toContain('Usage: bun <supplied-check-content-entry>')
     await writeFile(join(workspace, 'ui.json'), JSON.stringify(uiLayoutFixture()))
     const geometry = await run(`${JSON.stringify(process.execPath)} ${CONTENT_CHECKER_PATH} --layout-draft ui.json 960 540`)
     expect(geometry.code, geometry.stderr || geometry.stdout).toBe(0)
@@ -295,9 +295,9 @@ test.skipIf(process.platform !== 'darwin')('project shell supports Git and local
     const nodeClient = await run(`${JSON.stringify(node)} --input-type=module -e 'const {chromium}=await import(process.env.BEEGAME_PLAYWRIGHT_MODULE); console.log(typeof chromium.connectOverCDP)'`)
     expect(nodeClient.code, nodeClient.stderr).toBe(0)
     expect(nodeClient.stdout.trim()).toBe('function')
-    const helper = await run(`${JSON.stringify(node)} --input-type=module -e 'const {withPreviewPage}=await import(process.env.BEEGAME_PREVIEW_TEST_MODULE); console.log(typeof withPreviewPage)'`)
+    const helper = await run(`${JSON.stringify(node)} --input-type=module -e 'const {withPreviewPage,withPlayCapture}=await import(process.env.BEEGAME_PREVIEW_TEST_MODULE); console.log(typeof withPreviewPage,typeof withPlayCapture)'`)
     expect(helper.code, helper.stderr).toBe(0)
-    expect(helper.stdout.trim()).toBe('function')
+    expect(helper.stdout.trim()).toBe('function function')
     for (const command of ['cat ../host-source.ts', 'cat escape.ts',
       'printf bad > ../host-source.ts', 'printf bad > escape.ts',
       '/bin/bash -c "cat ../host-source.ts"']) {

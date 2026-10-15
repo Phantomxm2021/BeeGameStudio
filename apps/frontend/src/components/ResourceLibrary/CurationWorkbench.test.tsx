@@ -5,6 +5,7 @@ import { describe, expect, test, vi } from 'vitest'
 import React from 'react'
 import { CurationWorkbench, type ResourceCurationApi } from './CurationWorkbench'
 import type { ResourceCurationQueue } from '../../services/resourceLibraryApi'
+vi.mock('../../contexts/ToastContext', () => ({ useToastContext: () => ({ showError: vi.fn() }) }))
 
 const queue: ResourceCurationQueue = {
   items: [

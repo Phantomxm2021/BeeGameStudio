@@ -249,6 +249,13 @@ function validateDeclaredAssetReferences(
   }
 }
 
+/** Declaration consistency is checkable even before a resource manifest exists. */
+export function undeclaredAssetReferenceIssues(path: string, document: BeeGameContentDocument): string[] {
+  const issues: string[] = []
+  validateDeclaredAssetReferences(path, document.data, new Set(document.assetRefs), issues)
+  return issues
+}
+
 function validateAssetMembers(
   path: string,
   value: unknown,
@@ -635,10 +642,10 @@ export function auditBeeGameContentPackage(
     }
   }
   if (index.documentRevision !== authority.documentRevision)
-    issues.push(`${BEEGAME_CONTENT_INDEX}: documentRevision does not match authority. Run the current project check-content.mjs --authority after final design saves; use its documentRevision, not a guessed hash. Refresh the index before building/measuring; if sources change again, the previous build/evidence is not current.`)
+    issues.push(`${BEEGAME_CONTENT_INDEX}: documentRevision does not match the supplied source revision. Refresh the index metadata from current saved inputs before building/measuring; if sources change again, the previous build/evidence is not current.`)
   if (index.assetManifestRevision !== authority.assetManifestRevision)
     issues.push(
-      `${BEEGAME_CONTENT_INDEX}: assetManifestRevision does not match authority. Run the current project check-content.mjs --authority after final Manifest saves; use its assetManifestRevision, not a guessed hash. Refresh the index before building/measuring.`,
+      `${BEEGAME_CONTENT_INDEX}: assetManifestRevision does not match the supplied Manifest revision. Refresh the index metadata from the actual saved Manifest before building/measuring.`,
     )
   const documents: BeeGameContentDocument[] = []
   const documentPathById = new Map<string, string>()

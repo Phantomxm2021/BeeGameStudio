@@ -10,6 +10,7 @@ import type { WaitingPermissionState } from '../../utils/waitingPermission';
 import type { ChatDisplayMessage, ProjectRuntimeDisplayModel, PermissionDisplayModel } from '../../viewModels/displayModels';
 import { useChatStore } from '../../store/chatStore';
 import { normalizeChatHistory } from '../../utils/chatHistory';
+import { useToastContext } from '../../contexts/ToastContext';
 
 // Modular Panels
 import { ChatPanel } from './Sidebar/ChatPanel';
@@ -179,6 +180,7 @@ export function RightSidebar({
     const assetUploadRequestRef = useRef(0);
 
     const uiText = useBeeGameText(lang);
+    const { showError } = useToastContext();
 
     useEffect(() => {
         const syncEditorRoute = () => {
@@ -489,7 +491,7 @@ export function RightSidebar({
             document.body.removeChild(a);
         } catch (error) {
             console.error('Artifact download failed:', error);
-            alert(uiText.artifactDownloadFailed);
+            showError(uiText.artifactDownloadFailed);
         }
     };
 
@@ -541,10 +543,13 @@ export function RightSidebar({
                 }
             }
             setEditorFiles(files);
-        } catch {
+        } catch (error) {
             if (!controller.signal.aborted && activeProjectRef.current === projectId) {
+                console.error('Failed to load Scene/UI files:', error);
                 setEditorFiles([]);
-                setEditorFilesError(lang === 'zh' ? '无法加载文件列表，请重试。' : 'Unable to load files. Please try again.');
+                const message = lang === 'zh' ? '无法加载文件列表，请重试。' : 'Unable to load files. Please try again.';
+                const reason = error instanceof Error ? error.message.trim() : '';
+                setEditorFilesError(reason ? `${message} ${reason}` : message);
             }
         } finally {
             if (!controller.signal.aborted && activeProjectRef.current === projectId) setIsEditorFilesLoading(false);
@@ -568,6 +573,7 @@ export function RightSidebar({
         } catch (error) {
             if (activeProjectRef.current === requestProjectId && assetUploadRequestRef.current === requestId) {
                 console.error('Failed to upload project asset:', error);
+                showError(uiText.assets.uploadFailed);
             }
         } finally {
             if (activeProjectRef.current === requestProjectId && assetUploadRequestRef.current === requestId) {

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import sharp from 'sharp'
 import { imageConfigSchema, type ImageGenerationConfig } from './config'
@@ -13,7 +13,10 @@ export type ImageAttemptInput = {
   config: ImageGenerationConfig
   request: ImageRequest
   recoverOnly?: boolean
+  /** Host preflight for new work only; never part of the paid request digest. */
+  validateNewRequest?: () => void
 }
+export class ImageRequestValidationError extends Error {}
 type StoredResult = Omit<ImageResult, 'bytes'> & { base64: string }
 type Record = {
   digest: string
@@ -26,7 +29,8 @@ type Record = {
 
 export class ImageAttemptError extends Error {
   constructor(readonly reason: 'conflict' | 'unknown' | 'rejected' | 'invalid-image', readonly status?: number,
-    readonly diagnosticId?: string, readonly code?: string, readonly replayed = false) {
+    readonly diagnosticId?: string, readonly code?: string, readonly replayed = false,
+    readonly recoveryRequestId?: string) {
     super(`Image generation attempt: ${reason}`)
   }
 }
@@ -39,6 +43,13 @@ export class ImageAttemptError extends Error {
 export class ImageAttemptStore {
   private readonly active = new Map<string, Promise<ImageResult>>()
   constructor(private readonly root: string, private readonly provider: ImageGenerationProvider) {}
+
+  validateNewRequest(input: ImageAttemptInput): void {
+    const identity = createHash('sha256').update(JSON.stringify([input.ownerId, input.projectId, input.requestId])).digest('hex')
+    // A local receipt (including an incomplete one) belongs to the existing
+    // recovery path. Do not reinterpret its intent against today's Manifest.
+    if (!existsSync(join(this.root, identity))) input.validateNewRequest?.()
+  }
 
   async generate(input: ImageAttemptInput): Promise<ImageResult> {
     const config = imageConfigSchema.parse(input.config)

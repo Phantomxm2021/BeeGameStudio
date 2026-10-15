@@ -1,6 +1,6 @@
 import { readFile, realpath } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { assertFreshDependencies, checkIsCurrent, versionsMatch } from './checks'
+import { checkIsCurrent, versionsMatch } from './checks'
 import { STATIC_ARTIFACT_CHECK_VERSION, staticArtifactFiles } from './runtime-checks'
 import { createZipArchive } from '../session-manager'
 import { digest, WorkflowError, type Run, type CheckResult, type FileVersion, type AgentMeasurement } from './state'
@@ -8,20 +8,15 @@ import { projectFiles, projectDependencies, sameFiles, changedProjectPaths } fro
 import { EDITABLE_BUILD_CHECK_VERSION, CHECK_VERSIONS } from './check-versions'
 import { artifactDigest } from '../runtime-acceptance'
 
-/** One source of measurement selection for Preview, feedback and export. */
-export async function selectMeasuredBuild(run: Run, taskId: string, attemptId: string, busy = false) {
-  if (run.writer || busy) throw new WorkflowError('workspace-busy', 'Wait for the current writer to stop before previewing or exporting')
-  const task = run.tasks[taskId], attempt = run.attempts.find(a => a.attemptId === attemptId && a.taskId === taskId)
-  const smoke = attempt?.checks?.find(c => c.id === 'runtime-smoke' && c.status === 'passed' && c.version === STATIC_ARTIFACT_CHECK_VERSION)
-  const artifact = smoke?.artifacts?.find(a => a.path === task?.spec.runtimeArtifact)
-  if (task?.attemptId !== attemptId || task.status !== 'succeeded' || attempt?.status !== 'succeeded' ||
-      !task.spec.runtimeArtifact || !artifact || !smoke?.coverage?.files.length)
-    throw new WorkflowError('preview-unverified', 'Select the current successful attempt with measured runtime-smoke evidence; a build or author PASS is insufficient')
-  await assertFreshDependencies(run, { ...task.spec, dependsOn: [taskId] })
-  return { task, attempt, smoke, artifact }
+export function blockingRegisteredContentChecks(measurement: AgentMeasurement) {
+  return measurement.checks.filter(check =>
+    ['content-structure','content-layout','content-resources'].includes(check.id) &&
+    (check.status === 'failed' || check.status === 'execution-error' ||
+      check.id === 'content-structure' && check.status === 'unverified'))
 }
+
 export async function selectAgentMeasuredBuild(run: Run, measurementId: string, busy = false,
-  purpose: 'delivery' | 'preview' | 'publication' = 'delivery') {
+  purpose: 'delivery' | 'preview' | 'publication' = 'delivery', confirmedMessages?: string[]) {
   if(run.writer || busy)throw new WorkflowError('workspace-busy','Wait for the native writer and owned tools to stop')
   const turn=run.agentTurns?.find(t=>t.measurements?.some(m=>m.id===measurementId))
   const measurement=turn?.measurements?.find(m=>m.id===measurementId)
@@ -41,16 +36,46 @@ export async function selectAgentMeasuredBuild(run: Run, measurementId: string, 
     throw new WorkflowError('preview-unverified',purpose === 'delivery'
       ? 'Select a completed native turn with actual source-build and runtime-smoke evidence, not an author PASS or incomplete/failed turn'
       : 'Select a settled native turn with completed source-build and runtime-smoke evidence; an active writer, author PASS or failed measurement is insufficient')
-  const freshness=await inspectAgentMeasurementInputs(run,measurement)
+  const freshness=await inspectAgentMeasurementInputs(run,measurement,
+    purpose === 'publication' ? confirmedMessages : undefined)
   if(!freshness.current)
     throw new WorkflowError(freshness.code,freshness.reason)
+  if (purpose !== 'preview') {
+    const invalid = blockingRegisteredContentChecks(measurement)
+    if (invalid.length) throw new WorkflowError('content-check-failed',
+      'Saved Scene/UI checks need repair before delivery: '+invalid.map(check => check.id+' '+check.status+': '+check.observation).join('; ')+
+      '. Inspect the measurement, repair affected sources and measure the new version. Preview remains available for diagnosis.')
+  }
   return {turn,measurement,build,smoke,artifact}
+}
+
+/** Only plain, completed native chat messages can be confirmed as discussion.
+ * An explicit change, attachment, missing history or broken revision chain
+ * cannot be reclassified to reuse older measurement evidence. */
+export function discussionMessagesSinceMeasurement(run: Run, measurement: AgentMeasurement) {
+  if (measurement.requirementsRevision === run.requirements.revision) return []
+  const result: Array<{requestKey:string;text:string}> = [], visited = new Set<string>()
+  let revision = measurement.requirementsRevision
+  while (revision !== run.requirements.revision) {
+    if (visited.has(revision)) return null
+    visited.add(revision)
+    const change = run.requirementChanges?.find(item => item.before.revision === revision)
+    const turn = run.agentTurns?.find(item => item.requestKey === change?.requestKey)
+    if (!change || change.actorId !== run.ownerId || !turn?.quiescedAt || !turn.finishedAt || turn.status !== 'ended' ||
+        turn.message?.intent !== 'message' || turn.message.attachmentDigests?.length ||
+        turn.message.requirementsRevision !== change.before.revision ||
+        turn.requirementsRevision !== change.after.revision)
+      return null
+    result.push({requestKey:change.requestKey,text:turn.message.text})
+    revision = change.after.revision
+  }
+  return result
 }
 
 /** Read current inputs without building, settling the writer or certifying
  * quality. Also usable BEFORE native exit so handoff does not require another
  * model turn. Preview/export still require an ended, quiesced native writer. */
-export async function inspectAgentMeasurementInputs(run: Run, measurement: AgentMeasurement) {
+export async function inspectAgentMeasurementInputs(run: Run, measurement: AgentMeasurement, confirmedMessages?: string[]) {
   const fail=(code:string,reason:string)=>({current:false,code,reason})
   const latest=run.agentTurns?.flatMap(t=>t.measurements ?? []).findLast(m=>m.runtimeArtifact===measurement.runtimeArtifact)
   if(latest?.id!==measurement.id)return fail('measurement-superseded','A newer measurement exists for this artifact; inspect its result, not an earlier PASS')
@@ -63,7 +88,10 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
   const consumption=measurement.consumption?.checks??[]
   const incomplete=consumption.filter(id=>!measurement.checks.some(c=>c.id===id && c.status==='passed' && c.version===CHECK_VERSIONS[id]))
   if(incomplete.length)return fail('preview-unverified','Requested consumption checks have not passed: '+incomplete.join(', ')+'. Build/smoke is not consumption proof.')
-  const requirementsChanged=measurement.requirementsRevision!==run.requirements.revision
+  const discussion=confirmedMessages?.length ? discussionMessagesSinceMeasurement(run,measurement) : null
+  const discussionConfirmed=Boolean(discussion?.length &&
+    discussion.length===confirmedMessages?.length && discussion.every((item,index)=>item.requestKey===confirmedMessages?.[index]))
+  const requirementsChanged=measurement.requirementsRevision!==run.requirements.revision && !discussionConfirmed
   const sourceSaveChanged=measurement.sourceEditId!==run.sourceEdits?.at(-1)?.attemptId
   // Input reads may fail (permissions, aliases, concurrent filesystem changes).
   // Keep saved evidence inspectable with an explicitly negative freshness;
@@ -80,8 +108,13 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
     // Export identity and observed runtime evidence are different facts. A
     // source-only edit must not be described as changed runtime bytes. These
     // comparisons do not accept a new build or rerun/reuse any test.
-    const checkInputs=await Promise.all([build,smoke,...consumption.map(id=>measurement.checks.find(c=>c.id===id)!)].map(async check=>({
-      id:check.id,savedStatus:check.status,inputsMatch:(check.id!=='build'||!changedSources.length&&!dependenciesChanged) && await checkIsCurrent(run.workspacePath,check,
+    const contentChecks=measurement.checks.filter(check =>
+      ['content-structure','content-layout','content-resources'].includes(check.id))
+    const checkInputs=await Promise.all([build,smoke,...contentChecks,...consumption.map(id=>measurement.checks.find(c=>c.id===id)!)].map(async check=>({
+      // Source/dependency drift has its own comparison above. It does not
+      // change the saved check's inputs or checker version, so do not report
+      // the same edit as an additional, unrelated build-check failure.
+      id:check.id,savedStatus:check.status,inputsMatch:await checkIsCurrent(run.workspacePath,check,
         check.id==='build'?{editableProject:true}:undefined),
     })))
     const artifactMatches=await artifactDigest(run.workspacePath,artifact.path,true).then(hash=>hash===artifact.sha256,()=>false)
@@ -92,15 +125,22 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
     // A new requirement must not hide concurrent source/report changes. Return
     // the whole deterministic comparison once, rather than forcing mtime guesses
     // and another request for each successive stale cause. No build is executed.
+    // A settled plain message can be confirmed for publication, but the host
+    // cannot decide from its text whether it changed the goal. Keep the gate
+    // closed while distinguishing that decision from an actual input change.
+    const pendingDiscussion=requirementsChanged && discussionMessagesSinceMeasurement(run,measurement)?.length &&
+      !sourceSaveChanged && !changedReports.length && !changedSources.length && !dependenciesChanged &&
+      !buildOrArtifactChanged
     const reasons=[
       ...(changedReports.length?['Reports changed or are missing: '+changedReports.join(', ')+'. Finalize evidence before measuring; the receipt is already saved in BGS, not in these files.']:[]),
-      ...(requirementsChanged || sourceSaveChanged?['Requirements or an authorized source save changed; remeasure affected results']:[]),
+      ...(pendingDiscussion?['A settled chat message followed this measurement. Confirm that it did not change the game before publication; if it did, remeasure the affected results.']:[]),
+      ...(!pendingDiscussion && (requirementsChanged || sourceSaveChanged)?['Requirements or an authorized source save changed; remeasure affected results']:[]),
       ...(changedSources.length?['Exportable sources changed: '+changedSources.join(', ')]:[]),
       ...(dependenciesChanged?['Installed dependencies changed']:[]),
       ...(!artifactMatches?['Measured artifact bytes changed or are unreadable']:[]),
       ...(changes.checkInputs.length?['Saved check inputs or checker versions differ: '+changes.checkInputs.join(', ')]:[]),
     ]
-    return {current:!reasons.length,code:reasons.length?'measurement-stale':'current',changes,
+    return {current:!reasons.length,code:pendingDiscussion?'discussion-confirmation-required':reasons.length?'measurement-stale':'current',changes,
       evidence:{artifactMatches,exportableSourcesMatch:!changedSources.length&&!dependenciesChanged,checks:checkInputs,
         scope:'Saved input identity only; matching checks describe the recorded artifact and conditions, not current source-to-build correspondence, new requirements, a new execution or game quality. Changed sources still require a verified build before export.'},
       reason:reasons.length?reasons.join('; '):'Source/build/report inputs match now; this is not game-quality acceptance or permission to ignore later edits.'}
@@ -122,15 +162,6 @@ export async function measuredFiles(run: Run, selected: {artifact: FileVersion; 
   }
   return files
 }
-export async function exportMeasuredBuild(run: Run, taskId: string, attemptId: string,
-  guard: { read(): Promise<Run | undefined>; busy(run: Run): boolean }, kind: 'static' | 'project' = 'static') {
-  const selected = await selectMeasuredBuild(run, taskId, attemptId, guard.busy(run))
-  const build = selected.attempt.checks?.find(c => c.id==='build' && c.status==='passed' && c.version===EDITABLE_BUILD_CHECK_VERSION)
-  const proof = build?.projectBuild
-  const reports = [...new Set([...(proof?.excludedReports ?? []), ...run.plans.flatMap(p=>p.plan.tasks.flatMap(t=>t.reviewReport?[t.reviewReport]:[]))])].sort()
-  return exportSelection(run,selected,proof,reports,{taskId,attemptId,planRevision:run.planRevision},guard,kind,
-    ()=>selectMeasuredBuild(run,taskId,attemptId,guard.busy(run)),Boolean(selected.task.spec.editableProject))
-}
 export async function exportAgentMeasuredBuild(run:Run,measurementId:string,
   guard:{read():Promise<Run|undefined>;busy(run:Run):boolean},kind:'static'|'project'='static') {
   const selected=await selectAgentMeasuredBuild(run,measurementId,guard.busy(run))
@@ -142,7 +173,7 @@ export async function exportAgentMeasuredBuild(run:Run,measurementId:string,
     guard,kind,()=>selectAgentMeasuredBuild(run,measurementId,guard.busy(run)),true)
 }
 async function exportSelection(run:Run,selected:{smoke:CheckResult;artifact:FileVersion},proof:CheckResult['projectBuild'],
-  reports:string[],identity:{attemptId:string;taskId?:string;planRevision?:number;measurementId?:string;requirementsRevision?:string;reports?:FileVersion[];
+  reports:string[],identity:{attemptId:string;measurementId?:string;requirementsRevision?:string;reports?:FileVersion[];
     consumption?:AgentMeasurement['consumption'];consumptionChecks?:Array<Omit<CheckResult,'inputs'>>},
   guard:{read():Promise<Run|undefined>;busy(run:Run):boolean},kind:'static'|'project',validate:()=>Promise<unknown>,editable:boolean) {
   const files = await measuredFiles(run, selected), entries = []
