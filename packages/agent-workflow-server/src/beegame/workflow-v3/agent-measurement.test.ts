@@ -26,6 +26,7 @@ import {createAgentWorkflowApp} from '../../app'
 import {writeBeeGameAssetManifest} from '../asset-contracts'
 import {DESIGN_ACCEPTANCE_PATH} from '../design-handoff'
 import {initializeProjectGuide,refreshProjectGuide} from './project-guide'
+import {CHECK_VERSIONS} from './check-versions'
 
 const JSZip=createRequire(import.meta.resolve('exceljs'))('jszip')
 const builder="import{cp,mkdir}from'node:fs/promises';await mkdir('dist',{recursive:true});await cp('src/index.html','dist/index.html');"
@@ -56,6 +57,48 @@ async function fixture(script=builder,previousTurns:AgentTurn[]=[],requireEditab
     async close(){await measurement.close();await rm(root,{recursive:true,force:true})}}
 }
 const request={requestKey:'measure-1',runtimeArtifact:'dist',reportPaths:['README.md']}
+
+test('unverified optional probes allow only diagnostic measured Preview; failure, missing checks and stale bytes remain blocked',async()=>{
+  const f=await fixture()
+  try {
+    const record=await f.measurement.measure(request)
+    const saved=await f.settle()
+    const run=structuredClone(saved), measured=run.agentTurns![0]!.measurements![0]!
+    // Synthetic checker facts test selection policy, not font consumption.
+    measured.consumption={checks:['font-data-consumption']}
+    measured.checks.push({id:'font-data-consumption',version:CHECK_VERSIONS['font-data-consumption'],
+      status:'unverified',inputs:[],observation:'Canvas fonts are outside this DOM-font driver',
+      coverage:{files:[],limitations:['No actual font verdict']},createdAt:new Date().toISOString()})
+    const selected=await selectAgentMeasuredBuild(run,record.id,false,'preview')
+    expect(selected.limitations.join(' ')).toContain('font-data-consumption')
+    expect(measurementSummary(measured)).toMatchObject({quality:'unverified',deliveryEligible:false,
+      checkStatuses:expect.arrayContaining([{id:'font-data-consumption',status:'unverified'}])})
+    for(const purpose of ['delivery','publication'] as const)
+      await expect(selectAgentMeasuredBuild(run,record.id,false,purpose)).rejects.toThrow('consumption checks')
+    const preview=createMeasuredPreview({origin:'http://localhost:12345',capabilities:createPreviewCapabilityManager(),
+      readRun:async()=>run,isBusy:()=>false})
+    try {
+      const opened=await preview.openAgent(run,record.id)
+      expect(opened.limitations.join(' ')).toContain('Diagnostic Preview is not consumption or delivery acceptance')
+      expect((await preview.handle(new Request(opened.url)))!.status).toBe(200)
+      const probe=measured.checks.at(-1)!
+      for(const status of ['failed','execution-error'] as const) {
+        probe.status=status
+        await expect(selectAgentMeasuredBuild(run,record.id,false,'preview')).rejects.toThrow('consumption checks')
+      }
+      probe.status='unverified';probe.version='obsolete-driver'
+      await expect(selectAgentMeasuredBuild(run,record.id,false,'preview')).rejects.toThrow('checker versions')
+      probe.version=CHECK_VERSIONS['font-data-consumption']
+      measured.checks.pop()
+      await expect(selectAgentMeasuredBuild(run,record.id,false,'preview')).rejects.toThrow('consumption checks')
+      measured.checks.push(probe)
+      await writeFile(join(f.workspace,'dist/index.html'),'<button>Changed after measurement</button>')
+      await expect(selectAgentMeasuredBuild(run,record.id,false,'preview')).rejects.toThrow('artifact bytes changed')
+      expect((await preview.handle(new Request(opened.url)))!.status).toBe(409)
+    }finally{preview.dispose()}
+    expect((await f.current()).agentTurns![0]!.measurements).toHaveLength(1)
+  }finally{await f.close()}
+},30000)
 
 test.each(['closed','paused','stale'] as const)('design finalize respects the existing %s writer boundary',async state=>{
   const f=await fixture()
@@ -255,10 +298,13 @@ test.each([false,true])('V3 ordinary deployment publishes exact measured bytes w
 
 test('publication may confirm only settled plain chat after measurement, never changed source or explicit requirements',async()=>{
   const f=await fixture(),cleanups:Array<()=>void|Promise<void>>=[]
+  const preview=createMeasuredPreview({origin:'http://localhost:12345',capabilities:createPreviewCapabilityManager(),
+    readRun:f.current,isBusy:()=>false})
   let published=0
   try {
     const record=await f.measurement.measure(request)
     await f.settle()
+    const originalPreview=await preview.openAgent(await f.current(),record.id)
     const app=createAgentWorkflowApp({currentUserResolver:async()=>({id:'owner',role:'owner'}),workflowV3Store:f.store,
       dashboardDataRoot:join(f.root,'dashboard'),defaultWorkspacePath:f.root,modelConfigStore:false,skillsConfig:false,
       sessionRunner:{async start(){throw Error('No native execution')}},
@@ -288,6 +334,18 @@ test('publication may confirm only settled plain chat after measurement, never c
     expect(pending).toMatchObject({current:false,code:'discussion-confirmation-required',
       changes:{requirements:true,sources:[],reports:[],artifact:false}})
     expect(pending.reason).toContain('Confirm that it did not change the game')
+    expect(pending.reason).toContain('a question alone does not require a rebuild')
+    try {
+      const status=await preview.status('measure','owner')
+      expect(status.preview?.url).toBe(originalPreview.url)
+      expect(status.preview?.limitations.join(' ')).toContain('Later chat requirements remain unconfirmed')
+      const opened=await preview.openAgent(discussed,record.id)
+      expect(opened.url).toBe(originalPreview.url)
+      expect(opened.limitations.join(' ')).toContain('Later chat requirements remain unconfirmed')
+      expect((await preview.handle(new Request(opened.url)))!.status).toBe(200)
+      await expect(selectAgentMeasuredBuild(discussed,record.id)).rejects.toThrow('Confirm that it did not change the game')
+      expect((await f.current()).agentTurns!.flatMap(t=>t.measurements??[])).toHaveLength(1)
+    }finally{preview.dispose()}
     expect(await agentTurnHandoffReason(discussed,discussed.agentTurns!.at(-1)!)).toContain('discussion-confirmation-required')
     expect((await inspectAgentMeasurementInputs(discussed,record,['question-1'])).current).toBe(true)
     const attached=structuredClone(discussed)

@@ -37,7 +37,7 @@ export async function selectAgentMeasuredBuild(run: Run, measurementId: string, 
       ? 'Select a completed native turn with actual source-build and runtime-smoke evidence, not an author PASS or incomplete/failed turn'
       : 'Select a settled native turn with completed source-build and runtime-smoke evidence; an active writer, author PASS or failed measurement is insufficient')
   const freshness=await inspectAgentMeasurementInputs(run,measurement,
-    purpose === 'publication' ? confirmedMessages : undefined)
+    purpose === 'publication' ? confirmedMessages : undefined, purpose)
   if(!freshness.current)
     throw new WorkflowError(freshness.code,freshness.reason)
   if (purpose !== 'preview') {
@@ -46,7 +46,13 @@ export async function selectAgentMeasuredBuild(run: Run, measurementId: string, 
       'Saved Scene/UI checks need repair before delivery: '+invalid.map(check => check.id+' '+check.status+': '+check.observation).join('; ')+
       '. Inspect the measurement, repair affected sources and measure the new version. Preview remains available for diagnosis.')
   }
-  return {turn,measurement,build,smoke,artifact}
+  const limitations = purpose==='preview' ? [
+    ...('changes' in freshness && freshness.changes.requirements
+      ? ['Later chat requirements remain unconfirmed. This Preview inspects unchanged measured bytes, not acceptance of the later request.'] : []),
+    ...('unverifiedChecks' in freshness && freshness.unverifiedChecks.length
+      ? ['Selected probes remain unverified: '+freshness.unverifiedChecks.join(', ')+'. Diagnostic Preview is not consumption or delivery acceptance.'] : []),
+  ] : []
+  return {turn,measurement,build,smoke,artifact,limitations}
 }
 
 /** Only plain, completed native chat messages can be confirmed as discussion.
@@ -75,7 +81,8 @@ export function discussionMessagesSinceMeasurement(run: Run, measurement: AgentM
 /** Read current inputs without building, settling the writer or certifying
  * quality. Also usable BEFORE native exit so handoff does not require another
  * model turn. Preview/export still require an ended, quiesced native writer. */
-export async function inspectAgentMeasurementInputs(run: Run, measurement: AgentMeasurement, confirmedMessages?: string[]) {
+export async function inspectAgentMeasurementInputs(run: Run, measurement: AgentMeasurement, confirmedMessages?: string[],
+  purpose: 'delivery' | 'preview' | 'publication' = 'delivery') {
   const fail=(code:string,reason:string)=>({current:false,code,reason})
   const latest=run.agentTurns?.flatMap(t=>t.measurements ?? []).findLast(m=>m.runtimeArtifact===measurement.runtimeArtifact)
   if(latest?.id!==measurement.id)return fail('measurement-superseded','A newer measurement exists for this artifact; inspect its result, not an earlier PASS')
@@ -87,7 +94,13 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
     return fail('preview-unverified','Measurement is incomplete or failed; inspect saved checks. No automatic rebuild or retry.')
   const consumption=measurement.consumption?.checks??[]
   const incomplete=consumption.filter(id=>!measurement.checks.some(c=>c.id===id && c.status==='passed' && c.version===CHECK_VERSIONS[id]))
-  if(incomplete.length)return fail('preview-unverified','Requested consumption checks have not passed: '+incomplete.join(', ')+'. Build/smoke is not consumption proof.')
+  const unverifiedChecks=incomplete.filter(id=>measurement.checks.some(c=>c.id===id &&
+    c.status==='unverified' && c.version===CHECK_VERSIONS[id]))
+  // Diagnostic Preview is not delivery. Current, explicitly unverified probes
+  // need not force a renderer change just to inspect a passed build/smoke.
+  // Missing, failed, errored or obsolete checks still fail closed.
+  const consumptionBlocked=incomplete.length>0 &&
+    !(purpose==='preview' && incomplete.length===unverifiedChecks.length)
   const discussion=confirmedMessages?.length ? discussionMessagesSinceMeasurement(run,measurement) : null
   const discussionConfirmed=Boolean(discussion?.length &&
     discussion.length===confirmedMessages?.length && discussion.every((item,index)=>item.requestKey===confirmedMessages?.[index]))
@@ -110,7 +123,8 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
     // comparisons do not accept a new build or rerun/reuse any test.
     const contentChecks=measurement.checks.filter(check =>
       ['content-structure','content-layout','content-resources'].includes(check.id))
-    const checkInputs=await Promise.all([build,smoke,...contentChecks,...consumption.map(id=>measurement.checks.find(c=>c.id===id)!)].map(async check=>({
+    const checkInputs=await Promise.all([build,smoke,...contentChecks,
+      ...consumption.flatMap(id=>measurement.checks.filter(c=>c.id===id))].map(async check=>({
       // Source/dependency drift has its own comparison above. It does not
       // change the saved check's inputs or checker version, so do not report
       // the same edit as an additional, unrelated build-check failure.
@@ -131,19 +145,30 @@ export async function inspectAgentMeasurementInputs(run: Run, measurement: Agent
     const pendingDiscussion=requirementsChanged && discussionMessagesSinceMeasurement(run,measurement)?.length &&
       !sourceSaveChanged && !changedReports.length && !changedSources.length && !dependenciesChanged &&
       !buildOrArtifactChanged
+    const previewDiscussion=purpose==='preview' && pendingDiscussion
     const reasons=[
       ...(changedReports.length?['Reports changed or are missing: '+changedReports.join(', ')+'. Finalize evidence before measuring; the receipt is already saved in BGS, not in these files.']:[]),
-      ...(pendingDiscussion?['A settled chat message followed this measurement. Confirm that it did not change the game before publication; if it did, remeasure the affected results.']:[]),
+      ...(pendingDiscussion && !previewDiscussion?['Source/build/report inputs are unchanged after a settled chat message. Confirm that it did not change the game before publication; a question alone does not require a rebuild. If it changed requirements, remeasure affected results.']:[]),
       ...(!pendingDiscussion && (requirementsChanged || sourceSaveChanged)?['Requirements or an authorized source save changed; remeasure affected results']:[]),
       ...(changedSources.length?['Exportable sources changed: '+changedSources.join(', ')]:[]),
       ...(dependenciesChanged?['Installed dependencies changed']:[]),
       ...(!artifactMatches?['Measured artifact bytes changed or are unreadable']:[]),
       ...(changes.checkInputs.length?['Saved check inputs or checker versions differ: '+changes.checkInputs.join(', ')]:[]),
+      ...(consumptionBlocked?['Requested consumption checks have not passed: '+incomplete.join(', ')+'. Build/smoke observations remain separate from consumption evidence. Inspect actual failures and coverage; an unsupported probe does not mandate a renderer change or automatic retry.']:[]),
     ]
-    return {current:!reasons.length,code:pendingDiscussion?'discussion-confirmation-required':reasons.length?'measurement-stale':'current',changes,
+    const inputChanges=sourceSaveChanged || changedReports.length || changedSources.length || dependenciesChanged || buildOrArtifactChanged
+    const code=!reasons.length ? 'current'
+      : consumptionBlocked && !inputChanges && (!requirementsChanged || pendingDiscussion) ? 'preview-unverified'
+      : pendingDiscussion && !previewDiscussion ? 'discussion-confirmation-required' : 'measurement-stale'
+    return {current:!reasons.length,code,changes,
+      unverifiedChecks,
       evidence:{artifactMatches,exportableSourcesMatch:!changedSources.length&&!dependenciesChanged,checks:checkInputs,
         scope:'Saved input identity only; matching checks describe the recorded artifact and conditions, not current source-to-build correspondence, new requirements, a new execution or game quality. Changed sources still require a verified build before export.'},
-      reason:reasons.length?reasons.join('; '):'Source/build/report inputs match now; this is not game-quality acceptance or permission to ignore later edits.'}
+      reason:reasons.length?reasons.join('; '):previewDiscussion
+        ? 'Unchanged measured build is available for diagnostic Preview only; later chat requirements remain unconfirmed. No new requirement or delivery acceptance.'
+        : unverifiedChecks.length
+          ? 'Build/source/report inputs are current for diagnostic Preview; selected probes remain unverified: '+unverifiedChecks.join(', ')+'. No consumption or delivery acceptance.'
+          : 'Source/build/report inputs match now; this is not game-quality acceptance or permission to ignore later edits.'}
   } catch(error) {
     return fail('measurement-inspection-failed','Current inputs could not be inspected; saved checks are historical, not current acceptance: '+
       (error instanceof Error?error.message:String(error)))

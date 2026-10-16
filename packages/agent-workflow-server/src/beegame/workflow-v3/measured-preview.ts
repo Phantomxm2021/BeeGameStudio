@@ -56,6 +56,10 @@ export function createMeasuredPreview(input: {
     const selected = await selectAgentMeasuredBuild(run,entry.view.measurementId,input.isBusy(run),'preview')
     if (selected.artifact.path !== entry.view.artifact.path || selected.artifact.sha256 !== entry.view.artifact.sha256)
       throw new WorkflowError('preview-stale', 'Measured artifact changed; explicitly reopen after verification')
+    // A later plain message may keep the same measured URL inspectable.
+    // Refresh its diagnostic caveats even when reusing an existing capability.
+    for (const limitation of selected.limitations)
+      if (!entry.view.limitations.includes(limitation)) entry.view.limitations.push(limitation)
     return run
   }
   async function open(run: Run, measurementId: string): Promise<MeasuredPreview> {
@@ -84,6 +88,7 @@ export function createMeasuredPreview(input: {
       const url = new URL(origin); url.hostname = hostname
       const view: MeasuredPreview = { id: hostname.split('.')[0]!, runId: run.id, attemptId:selected.turn.attemptId, measurementId,
         artifact: selected.artifact, url: url.toString(), limitations: [...(selected.smoke.coverage?.limitations ?? []),
+          ...selected.limitations,
           ...(selected.turn.status !== 'ended'
             ? ['The native turn did not succeed. This Preview only inspects current measured bytes; export and publication remain unavailable.'] : []),
           'Sandbox Preview only. Loading is not game acceptance; no storage/same-origin privileges, HTML injection or new runtime verdict. Explicit user publication is separate.'] }
