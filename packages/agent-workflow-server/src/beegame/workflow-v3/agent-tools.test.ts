@@ -60,7 +60,10 @@ test('design handoff exposes early requirements and final implementation coverag
     expect(await design('finalize')).toMatchObject({valid:true})
     expect(await design('implementation')).toMatchObject({valid:true,globalSources:baseline.requirements.map((r:any)=>'docs/'+r.document)})
     await rm(join(root, 'docs/AUDIO_DESIGN.md'))
-    expect(await design('baseline')).toMatchObject({valid:false,requirements:[]})
+    const partial = await design('baseline') as any
+    expect(partial.valid).toBe(false)
+    expect(partial.requirements).toHaveLength(7)
+    expect(partial.requirements.some((item:any)=>item.document==='AUDIO_DESIGN.md')).toBe(false)
   } finally { await rm(root, {recursive:true,force:true}) }
 })
 
@@ -758,4 +761,30 @@ test('failed adapter preparation revokes an already opened Preview rather than l
     await expect(access(projectPreviewCapabilityPath(root,'synthetic-preview'))).rejects.toThrow()
     await expect(fetch(preview.baseUrl+'/status')).rejects.toThrow()
   }finally{await preview.close();await rm(root,{recursive:true,force:true})}
+})
+
+
+test('technical planning remains readable before its document/index exists and metadata repair stays explicit', async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'bgs-planning-inputs-')))
+  try {
+    await writeDesignDocumentsFixture(root)
+    await rm(join(root, 'docs/TECHNICAL_DESIGN.md'))
+    await rm(join(root, designHandoffPath('TECHNICAL_DESIGN.md')))
+    const gdd = join(root, 'docs/GDD.md')
+    await writeFile(gdd, (await readFile(gdd, 'utf8')).replace('- Version: v1.0\n', ''))
+    const original = await readFile(gdd, 'utf8')
+    const design = openDesignActions(root)
+    const draft = await design('draft', ['TECHNICAL_DESIGN.md']) as any
+    expect(draft.valid).toBe(false)
+    expect(draft.availableRequirements).toHaveLength(7)
+    const baseline = await design('baseline') as any
+    expect(baseline.valid).toBe(false)
+    expect(baseline.requirements).toHaveLength(7)
+    expect(baseline.issues.join(' ')).toContain('handoff.mjs --design finalize GDD.md')
+    expect(baseline.issues.join(' ')).toContain('do not add or synchronize version headers manually')
+    expect(await readFile(gdd, 'utf8')).toBe(original)
+    expect(await design('finalize', ['GDD.md'])).toMatchObject({valid:true,finalized:['GDD.md']})
+    expect((await design('baseline') as any).issues.join(' ')).not.toContain('finalize GDD.md')
+    await expect(access(join(root, 'docs/TECHNICAL_DESIGN.md'))).rejects.toThrow()
+  } finally { await rm(root, {recursive:true,force:true}) }
 })

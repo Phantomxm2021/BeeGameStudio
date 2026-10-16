@@ -369,7 +369,7 @@ test('numeric document version comparison stays available for released-baseline 
   expect(isHigherDocumentVersion('1.0.1', '1.0')).toBe(true)
   expect(isHigherDocumentVersion('1.0.0', '1.0')).toBe(false)
   expect(isHigherDocumentVersion('0.9', '1.0')).toBe(false)
-  expect(() => designDocumentVersion('- Version: v1.0\n- Version: v1.1')).toThrow('one document header')
+  expect(() => designDocumentVersion('- Version: v1.0\n- Version: v1.1')).toThrow('handoff.mjs --design finalize DOCUMENT.md')
 })
 test('first completed author write gets host metadata without needing version or hash double-entry', () => fixture(async workspace => {
   await rm(join(workspace, 'docs/GDD.md'))
@@ -576,3 +576,20 @@ test.each(['content/ui/menu.json', './content/ui/menu.json', 'ui-alias.json'])(
       await put(name, h => h.evidence = [])
     }
   }))
+
+
+test.each(['missing-document', 'missing-index', 'malformed-index'] as const)(
+  'technical draft preserves independently valid planning inputs: %s', mode => fixture(async workspace => {
+    const tech = join(workspace, mode === 'missing-document' ? 'docs/TECHNICAL_DESIGN.md' : designHandoffPath('TECHNICAL_DESIGN.md'))
+    if (mode === 'malformed-index') await writeFile(tech, '{')
+    else await rm(tech)
+    const ui = designHandoffFixture('UI_UX_SPEC.md')
+    ui.outputs[0]!.section = 'Absent heading'
+    await writeFile(join(workspace, designHandoffPath('UI_UX_SPEC.md')), JSON.stringify(ui))
+    const result = checkDesignHandoffDraft(workspace, 'TECHNICAL_DESIGN.md', {finalTechnical:true})
+    expect(result.valid).toBe(false)
+    expect(result.availableRequirements?.some(item=>item.document==='GDD.md')).toBe(true)
+    expect(result.availableRequirements?.some(item=>item.document==='UI_UX_SPEC.md')).toBe(false)
+    expect(result.availableRequirements?.some(item=>item.document==='TECHNICAL_DESIGN.md')).toBe(false)
+  }),
+)

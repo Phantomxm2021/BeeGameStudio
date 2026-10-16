@@ -63,12 +63,6 @@ export function checkDesignHandoffDraft(workspace: string, name: string, options
       } catch (error) { issues.push(`Cannot check task coverage against ${sibling}: ${error instanceof Error ? error.message : String(error)}`) }
     }
     issues.push(...implementationIssues(indexes, finalTechnical))
-    if (finalTechnical && issues.length) for (const source of PROJECT_DOCUMENTS) {
-      const index = indexes[source]
-      for (const output of index?.handoff.outputs ?? []) if (index!.headings.has(output.section) &&
-          output.acceptance && index!.headings.has(output.acceptance.section))
-        availableRequirements.push({ document: source, id: output.id, section: output.section })
-    }
     if (!handoff.outputs?.length) issues.push('required owned delivery outcomes are missing')
     for (const output of handoff.outputs ?? []) if (!output.acceptance)
       issues.push(`output ${output.id} needs an acceptance section for its owned delivery`)
@@ -82,20 +76,27 @@ export function checkDesignHandoffDraft(workspace: string, name: string, options
       catch (error) { issues.push(`evidence ${evidence.id} (${evidence.path}): ${error instanceof Error ? error.message : String(error)}`) }
     }
   } catch (error) { issues.push(error instanceof Error ? error.message : String(error)) }
+  // Planning inputs must not depend on the technical plan already existing.
+  // These are readable source pointers, not a released/accepted baseline.
+  if (name === 'TECHNICAL_DESIGN.md' && options.finalTechnical) {
+    const sources = checkDesignHandoff(workspace, PROJECT_DOCUMENTS, { technicalBaseline: true, planningInputs: true })
+    availableRequirements.push(...(sources.availableRequirements ?? []).map(({ document, id, outputSection }) =>
+      ({ document, id, section: outputSection })))
+  }
   return { valid: !issues.length, issues: issues.map(issue => issue.startsWith(name + ':') ? issue : `${name}: ${issue}`),
     ...(availableRequirements.length ? { availableRequirements } : {}) }
 }
 
 export const DESIGN_INDEX_INSTRUCTION = `Keep decisions, dependencies, open questions, limits and human-readable tables in docs/<NAME>.md. Save only the downstream index at .beegame/design-handoffs/<NAME without .md>.json; do not embed bgs-handoff JSON in prose.
 Minimal new index envelope: {"outputs":[{"id":"owned-outcome","section":"Exact saved heading","acceptance":{"section":"Exact saved acceptance heading","method":"test"}}],"evidence":[]}. Replace example IDs/headings with actual owned outcomes. Do not add a top-level document/path field; the sidecar filename identifies its document. Only final TECHNICAL_DESIGN owns implementationItems; other authors do not add them. Preserve existing valid fields when editing. Only version 2 is accepted; an absent version means a current draft. A section uses its full saved heading, including numbering. The host canonicalizes a uniquely matching title differing only by leading chapter numbering; missing or ambiguous titles remain invalid. The host adds metadata only after validation; it does not discard invalid fields or repair malformed indexes.
-Write outputs:[{id,section,acceptance?:{section,method:"test"|"target-runtime"|"inspection"}}] and, where retained evidence is needed, evidence:[{id,kind:"contract"|"documentation"|"capability",path:workspace-relative retained file,source,section?:actual prose heading,pointer?:JSON pointer,expected?:value}]. IDs are local to their document. Headings point to the authoritative decisions and expectations; do not copy their rules into JSON. Do not mirror states, events, parameters, resources, inputs, consumes, pending, limits, platformFacts or readiness in the index. The host sets format version 2, document header/documentVersion and evidence sha256 after an authorized completed write. It advances versions on material changes to prose, the index or referenced retained evidence; unchanged documents keep their version. Authors do not calculate or synchronize versions/hashes.
+Write outputs:[{id,section,acceptance?:{section,method:"test"|"target-runtime"|"inspection"}}] and, where retained evidence is needed, evidence:[{id,kind:"contract"|"documentation"|"capability",path:workspace-relative retained file,source,section?:actual prose heading,pointer?:JSON pointer,expected?:value}]. IDs are local to their document. Headings point to the authoritative decisions and expectations; do not copy their rules into JSON. Do not mirror states, events, parameters, resources, inputs, consumes, pending, limits, platformFacts or readiness in the index. After saving a document and its index, explicitly call handoff.mjs --design finalize DOCUMENT.md. Only that command sets format version 2, document header/documentVersion and evidence sha256; ordinary Write/Edit and read-only baseline/draft do not finalize metadata. It advances versions on material changes to prose, the index or referenced retained evidence; unchanged documents keep their version. Authors do not calculate or synchronize versions/hashes.
 Register every necessary owned release outcome in outputs with acceptance pointing to an actual prose heading explaining conditions/actions, observable expected results and necessary boundaries/recovery. Keep explanatory prose out of the required checklist. Use an independently checkable behavior, page/state interaction, professional treatment or technical integration, not "implement all gameplay/UI" or one item per function, constant or sentence. Existing version 2 indexes remain readable but their coarse or unindexed expectations are not certified as a new complete checklist. Use test for deterministic rules/calculations, target-runtime for actual presentation/input/audio and end-to-end play, inspection for directly examinable resources or retained provenance. Prose review is not runtime evidence; no completed runtime check is required while authoring.`
 
 export const DESIGN_HANDOFF_INSTRUCTION = DESIGN_INDEX_INSTRUCTION + `
 Read reference pictures with the native Read tool at their actual saved paths, just as you read the linked design documents. A document link, filename, hash or generation record is not an image read. If a picture is missing, unreadable or unsupported, report the exact path and read error; do not claim to have inspected it or silently substitute another image. Existing and user-supplied references do not need AI source certification. Use the available AI image tools when generation is needed within the authorized scope and budget. UI/Scene source and runtime consumption checks remain separate from reading reference pictures.
 Use game-implementation-planning to consolidate tasks in TECHNICAL_DESIGN.md after selected visual designs, corresponding resources and UI/Scene sources exist. Compare the original confirmed scope and all applicable professional/visual/content inputs, not just output IDs; do not silently omit or defer necessary work. Only the final technical author adds implementationItems:[{id,section,dependsOn:[existing task IDs],requirementRefs:[{document:actual design filename,id:owned output ID}]}] to its existing index. New tasks state dependsOn explicitly (empty when independent); legacy absence is not independence. Each task points to a concise technical section using the planning Skill's six-part task description. Reference exact owner sections and actual content/resource IDs/pictures; keep shared cross-task interfaces once in their existing source, including actual names, producer/consumer and consequential types/units. Do not duplicate rules, numeric tables or layouts in the index. Foundations and player-visible behavior are both valid tasks; do not split functions/fields or force every task to launch a full game. Cover every registered required output, including technical ones; program checks declared coverage/references/dependencies, not original completeness or semantic adequacy.
 Implementation uses game-plan-execution with the supplied --design implementation and native Read on its task/source locations; no new task API, delivery-plan file or task database. Confirm dependency outputs actually work before consuming them; task ticks and file existence are not proof. Preserve confirmed design and consume its actual content/resources. Use the same task IDs in the existing execution list with concise progress and retained result paths; do not write execution logs into finalized design records. Resume from actual partial code and current evidence, checking unknown gaps rather than replaying completed work. Reuse current results across applicable tasks; keep pending integration unverified. Final checks compare the whole confirmed scope with original designs and actual runtime results; one successful player route cannot replace other promised outcomes.
-Contract evidence checks its JSON pointer against expected. Capability evidence retains an actual JSON observation {observation:"target-runtime",check,passed:true,expected,observed}; expected and observed must agree. Documentation retains source bytes with an HTTPS source URL and precise source location. Live content/ui and content/scenes JSON are design sources, not immutable evidence: create them only after selected actual visual designs and corresponding resources exist, then link them from their owning UI_UX_SPEC.md or LEVEL_SCENE_DESIGN.md sections. During document authoring use prose/sketches for space requirements, not early UI/Scene JSON. Author layout and bindings from those designs and actual asset metrics, check the saved sources, then finalize technical tasks before implementation handoff. Host-generated hashes bind bytes, not source authority, observation authenticity or semantic adequacy. Unsupported consequential assumptions, their owner, needed-by point and authorized fallback remain in prose; do not silently substitute a fallback. User decisions must trace to actual user authorization. Version 1 sidecars are rejected instead of silently converted.`
+Contract evidence checks its JSON pointer against expected. Capability evidence retains an actual JSON observation {observation:"target-runtime",check,passed:true,expected,observed}; expected and observed must agree. Documentation retains source bytes with an HTTPS source URL and precise source location. Live content/ui and content/scenes JSON are design sources, not immutable evidence: create them only after selected actual visual designs and corresponding resources exist, then link them from their owning UI_UX_SPEC.md or LEVEL_SCENE_DESIGN.md sections. During document authoring use prose/sketches for space requirements, not early UI/Scene JSON. Author layout and bindings from those designs and actual asset metrics, check the saved sources, then finalize technical tasks before implementation handoff. Technical notes before these inputs are drafts, not final implementationItems. Missing content calls for authoring that content; do not restart valid professional documents. Todo ticks are navigation, never proof that the files or prerequisite outputs exist. Host-generated hashes bind bytes, not source authority, observation authenticity or semantic adequacy. Unsupported consequential assumptions, their owner, needed-by point and authorized fallback remain in prose; do not silently substitute a fallback. User decisions must trace to actual user authorization. Version 1 sidecars are rejected instead of silently converted.`
 
 function hash(body: string | Buffer) { return createHash('sha256').update(body).digest('hex') }
 function readRetained(workspace: string, path: string) {
@@ -147,7 +148,7 @@ export function designHandoffPath(name: string) {
 }
 export function designDocumentVersion(body: string): string {
   const versions = [...body.matchAll(/^\s*-\s*(?:Version|版本)\s*[:：]\s*v?((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))?)\s*$/gim)]
-  if (versions.length !== 1) throw new Error('Expected one document header version: - Version: v1.0 (or - 版本：v1.0)')
+  if (versions.length !== 1) throw new Error('Missing or malformed host version metadata. Save the document/index, then run handoff.mjs --design finalize DOCUMENT.md for this owner; do not add or synchronize version headers manually.')
   const version = versions[0]![1]!
   if (version.split('.').some(n => !Number.isSafeInteger(Number(n)))) throw new Error('Invalid document version')
   return version
@@ -285,7 +286,7 @@ function documentHandoff(workspace: string, name: DesignDocument, body: string) 
   const documentVersion = designDocumentVersion(body), sidecar = readFileSync(designFilePath(realpathSync(workspace), designHandoffPath(name)))
   const raw = JSON.parse(sidecar.toString('utf8'))
   if (raw?.documentVersion !== undefined && raw.documentVersion !== documentVersion)
-    throw new Error('Handoff documentVersion must match document header ' + documentVersion)
+    throw new Error(`Handoff documentVersion must match document header ${documentVersion}. Run handoff.mjs --design finalize ${name}; do not synchronize host metadata manually.`)
   return { handoff: parseHandoff(name, raw), headings, sidecar }
 }
 
@@ -438,17 +439,18 @@ function evidenceDigest(workspace: string, evidence: DesignHandoff['evidence'][n
 
 /** Index/evidence integrity only. Prose decisions and dependencies need semantic review. */
 export function checkDesignHandoff(workspace: string, documents: readonly DesignDocument[], _options: {
-  nextConsumers?: readonly string[]; technicalBaseline?: boolean; inputs?: readonly string[]; digestVersion?: 1 | 2
+  nextConsumers?: readonly string[]; technicalBaseline?: boolean; inputs?: readonly string[]; digestVersion?: 1 | 2; planningInputs?: boolean
 } = {}) {
   const issues: string[] = [], snapshots: Record<string, string> = {}, evidenceHashes: Record<string, string> = {}, documentVersions: Record<string, string> = {}
   const indexes: Partial<Record<DesignDocument, IndexedDesign>> = {}
+  const availableRequirements: ReturnType<typeof readDesignAcceptanceRequirements> = []
   for (const name of documents) {
     try {
       const root = realpathSync(workspace)
       const bytes = readFileSync(designFilePath(root, `docs/${name}`))
       snapshots[name] = hash(bytes)
       try { documentVersions[name] = designDocumentVersion(bytes.toString('utf8')) }
-      catch (error) { issues.push(`${name}: ${error instanceof Error ? error.message : String(error)}`) }
+      catch (error) { issues.push(`${name}: ${error instanceof Error ? error.message.replace('DOCUMENT.md', name) : String(error)}`) }
       const path = designHandoffPath(name)
       designFilePath(root, path)
       try { snapshots[name] = hash(JSON.stringify([hash(bytes), hash(readRetained(workspace, path))])) }
@@ -473,10 +475,16 @@ export function checkDesignHandoff(workspace: string, documents: readonly Design
       } catch (error) { issues.push(`${name}: ${error instanceof Error ? error.message : String(error)}`) }
       const raw = JSON.parse(readRetained(workspace, path).toString('utf8'))
       if (documentVersions[name] && raw?.documentVersion !== undefined && raw.documentVersion !== documentVersions[name])
-        issues.push(`${name}: Handoff documentVersion must match document header ${documentVersions[name]}`)
+        issues.push(`${name}: Handoff documentVersion must match document header ${documentVersions[name]}. Run handoff.mjs --design finalize ${name}; do not synchronize host metadata manually.`)
       const h = diagnosticHandoff(name, raw, issues)
       indexes[name] = { handoff: h, headings }
       if (h.outputs) issues.push(...outputIssues(name, h.outputs, headings))
+      // Keep independently addressable inputs even when a sibling or host
+      // metadata is incomplete. Duplicate IDs and broken pointers are excluded.
+      for (const output of _options.planningInputs ? h.outputs ?? [] : []) if (output.acceptance && headings.has(output.section) &&
+          headings.has(output.acceptance.section) && h.outputs!.filter(item => item.id === output.id).length === 1)
+        availableRequirements.push({ document: name, id: output.id, outputSection: output.section,
+          ...output.acceptance, documentSha256: hash(bytes), handoffSha256: hash(readRetained(workspace, path)) })
       const evidenceIds = new Set<string>()
       for (const evidence of h.evidence ?? []) {
         if (evidenceIds.has(evidence.id)) issues.push(`${name}: duplicate evidence ID ${evidence.id}`)
@@ -498,7 +506,7 @@ export function checkDesignHandoff(workspace: string, documents: readonly Design
   }
   const completeDesign = PROJECT_DOCUMENTS.every(name => documents.includes(name)) && !_options.technicalBaseline
   issues.push(...implementationIssues(indexes, completeDesign))
-  return { valid: !issues.length, issues, snapshots, evidenceHashes, documentVersions, digestVersion: _options.digestVersion ?? DESIGN_DIGEST_VERSION,
+  return { valid: !issues.length, issues, ...(_options.planningInputs ? { availableRequirements } : {}), snapshots, evidenceHashes, documentVersions, digestVersion: _options.digestVersion ?? DESIGN_DIGEST_VERSION,
     revision: hash(JSON.stringify([snapshots, evidenceHashes])),
     note: 'Checks output/acceptance pointers, local IDs and retained evidence bytes/declared observations. Version 1 and retired business mirrors are rejected. Prose completeness, dependencies, source authority, observation authenticity, semantic adequacy and experience quality remain review/owner judgments.' }
 }
