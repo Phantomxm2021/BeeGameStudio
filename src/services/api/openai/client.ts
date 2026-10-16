@@ -1,4 +1,6 @@
 import OpenAI from 'openai'
+import { getSessionId } from '../../../bootstrap/state.js'
+import { getOpenCodeGoHeaders } from '../opencodeGo.js'
 import { openaiAdapter } from 'src/services/providerUsage/adapters/openai.js'
 import { updateProviderBuckets } from 'src/services/providerUsage/store.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
@@ -21,10 +23,18 @@ let cachedClient: OpenAI | null = null
  * The cast to `typeof fetch` is safe: OpenAI SDK only calls the function form,
  * not the static `preconnect` method that Bun/Node's `fetch` type declares.
  */
-function wrapFetchForUsage(base: typeof fetch): typeof fetch {
+function wrapFetchForUsage(base: typeof fetch, baseUrl: string | undefined): typeof fetch {
   const wrapped = async (
     ...args: Parameters<typeof fetch>
   ): Promise<Response> => {
+    // Read the session for each request: the SDK client survives conversation switches.
+    const goHeaders = getOpenCodeGoHeaders(baseUrl, getSessionId())
+    if (Object.keys(goHeaders).length) {
+      const headers = new Headers(args[0] instanceof Request ? args[0].headers : undefined)
+      new Headers(args[1]?.headers).forEach((value, key) => headers.set(key, value))
+      for (const [key, value] of Object.entries(goHeaders)) headers.set(key, value)
+      args[1] = { ...args[1], headers }
+    }
     const res = await base(...args)
     try {
       updateProviderBuckets('openai', openaiAdapter.parseHeaders(res.headers))
@@ -47,7 +57,7 @@ export function getOpenAIClient(options?: {
   const baseURL = process.env.OPENAI_BASE_URL
 
   const baseFetch = options?.fetchOverride ?? (globalThis.fetch as typeof fetch)
-  const wrappedFetch = wrapFetchForUsage(baseFetch)
+  const wrappedFetch = wrapFetchForUsage(baseFetch, baseURL)
 
   const client = new OpenAI({
     apiKey,

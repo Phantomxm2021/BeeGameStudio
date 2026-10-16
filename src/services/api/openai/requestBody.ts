@@ -5,6 +5,7 @@
  */
 import type { ChatCompletionCreateParamsStreaming } from 'openai/resources/chat/completions/completions.mjs'
 import { isEnvTruthy, isEnvDefinedFalsy } from '../../../utils/envUtils.js'
+import { isOpenCodeGoBaseUrl } from '../opencodeGo.js'
 
 /**
  * Detect whether thinking mode should be enabled for this model.
@@ -60,8 +61,11 @@ export function resolveOpenAIMaxTokens(
  * Build the request body for OpenAI chat.completions.create().
  * Extracted for testability — the thinking mode params are injected here.
  *
- * Three thinking-mode formats are sent simultaneously; each endpoint uses the
- * format it recognizes and ignores the others:
+ * OpenCode Go uses its managed model defaults; do not inject the vendor-specific
+ * thinking options used by generic compatible endpoints.
+ *
+ * For other endpoints, three thinking-mode formats are sent simultaneously;
+ * each endpoint uses the format it recognizes and ignores the others:
  * - Official DeepSeek API:    `thinking: { type: 'enabled' }`
  * - Self-hosted DeepSeek:     `enable_thinking: true` + `chat_template_kwargs: { thinking: true }`
  * - MiMo (Xiaomi):            `chat_template_kwargs: { enable_thinking: true }`
@@ -69,6 +73,7 @@ export function resolveOpenAIMaxTokens(
  */
 export function buildOpenAIRequestBody(params: {
   model: string
+  baseUrl?: string
   messages: any[]
   tools: any[]
   toolChoice: any
@@ -86,6 +91,7 @@ export function buildOpenAIRequestBody(params: {
 } {
   const {
     model,
+    baseUrl,
     messages,
     tools,
     toolChoice,
@@ -107,7 +113,7 @@ export function buildOpenAIRequestBody(params: {
     stream_options: { include_usage: true },
     // Enable chain-of-thought output for DeepSeek and MiMo models.
     // When active, temperature/top_p/presence_penalty/frequency_penalty are ignored.
-    ...(enableThinking && {
+    ...(enableThinking && !isOpenCodeGoBaseUrl(baseUrl) && {
       // Official DeepSeek API format
       thinking: { type: 'enabled' },
       // Self-hosted DeepSeek-V3.2 format

@@ -9,6 +9,7 @@ import {
   type ModelProviderKind,
 } from '@bee-game-studio/agent-workflow'
 import { realpath } from 'node:fs/promises'
+import { OPENCODE_GO_ID } from '@bee-game-studio/agent-workflow/opencode-go'
 import { PERSONAL_BYOK_ID, PERSONAL_CHATGPT_ID, PERSONAL_CLAUDE_ID, isPersonalModelId, personalModelAvailable, personalModelConfig, preferredModelId, resolveModelConnection } from './model-connections'
 import { loadLocalImageSettings, saveLocalImageSettings, selectImageConfig, updateImageSettings } from './image-generation/config-store'
 import type { ImageProviderKind } from './image-generation/config'
@@ -590,7 +591,7 @@ export class DashboardRepository {
     if (management) return configs
     const root = this.options.getUserDataRoot(request)
     const preferred = preferredModelId(root)
-    const personal = [PERSONAL_BYOK_ID, PERSONAL_CLAUDE_ID, PERSONAL_CHATGPT_ID]
+    const personal = [PERSONAL_BYOK_ID, PERSONAL_CLAUDE_ID, PERSONAL_CHATGPT_ID, OPENCODE_GO_ID]
       .filter(id => personalModelAvailable(root, user.id, id))
       .map(id => personalModelConfig(root, user.id, id)!)
     const published = [...configs.filter(config => config.published !== false), ...personal]

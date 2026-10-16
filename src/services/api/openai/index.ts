@@ -396,6 +396,7 @@ export async function* queryModelOpenAI(
           }).chat.completions.create(
             buildOpenAIRequestBody({
               model: openaiModel,
+              baseUrl: process.env.OPENAI_BASE_URL,
               messages: openaiMessages,
               tools: openaiTools,
               toolChoice: openaiToolChoice,

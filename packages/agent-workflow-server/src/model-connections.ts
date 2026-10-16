@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { mapStoredModelConfigToRuntime, validateModelAccess, type ModelAuthMethod, type ModelProviderKind, type ModelTierMap, type PublicModelConfig } from '@bee-game-studio/agent-workflow'
+import { OPENCODE_GO_ID, OPENCODE_GO_PROFILES, isOpenCodeGoProvider } from '@bee-game-studio/agent-workflow/opencode-go'
 import { getOauthConfig, OAUTH_BETA_HEADER } from '../../../src/constants/oauth'
 import { decryptSecret, encryptSecret } from './security/secret-crypto'
 
@@ -11,22 +12,24 @@ type Connections = { defaultModelId?: string; connections: Record<string, Connec
 export const PERSONAL_BYOK_ID = 'personal-byok'
 export const PERSONAL_CLAUDE_ID = 'personal-claude-subscription'
 export const PERSONAL_CHATGPT_ID = 'personal-chatgpt-subscription'
-export function isPersonalModelId(id: string) { return id === PERSONAL_BYOK_ID || id === PERSONAL_CLAUDE_ID || id === PERSONAL_CHATGPT_ID }
+export function isPersonalModelId(id: string) { return id === PERSONAL_BYOK_ID || id === PERSONAL_CLAUDE_ID || id === PERSONAL_CHATGPT_ID || id === OPENCODE_GO_ID }
 export function personalModelConfig(root: string, ownerId: string, id: string, providerOverride?: ModelProviderKind): PublicModelConfig | undefined {
   if (!isPersonalModelId(id)) return undefined
   const connection = read(root).connections[id]
-  const method = id === PERSONAL_BYOK_ID ? 'byok' : id === PERSONAL_CLAUDE_ID ? 'claude-subscription' : 'chatgpt-subscription'
+  const method = (id === PERSONAL_BYOK_ID || id === OPENCODE_GO_ID) ? 'byok' : id === PERSONAL_CLAUDE_ID ? 'claude-subscription' : 'chatgpt-subscription'
   const provider = method === 'byok' ? providerOverride ?? connection?.provider ?? 'anthropic-compatible' : method === 'claude-subscription' ? 'anthropic-compatible' : 'openai-compatible'
+  if (id === OPENCODE_GO_ID && !isOpenCodeGoProvider(provider)) throw new Error('Unsupported OpenCode Go protocol')
+  const go = id === OPENCODE_GO_ID ? OPENCODE_GO_PROFILES[provider as keyof typeof OPENCODE_GO_PROFILES] : undefined
   const now = new Date(0)
-  return { id, ownerId, name: method === 'byok' ? 'BYOK' : method === 'claude-subscription' ? 'Claude subscription' : 'ChatGPT subscription', provider,
-    published: true, authMethods: [method], ...(connection?.baseUrl ? { baseUrl: connection.baseUrl } : {}), models: connection?.models ?? {},
+  return { id, ownerId, name: go ? 'OpenCode Go' : method === 'byok' ? 'BYOK' : method === 'claude-subscription' ? 'Claude subscription' : 'ChatGPT subscription', provider,
+    published: true, authMethods: [method], ...(go ? { baseUrl: go.baseUrl } : connection?.baseUrl ? { baseUrl: connection.baseUrl } : {}), models: connection?.models ?? go?.defaults ?? {},
     apiKeyPreview: '', isDefault: preferredModelId(root) === id, createdAt: now, updatedAt: now }
 }
 export function personalModelAvailable(root: string, ownerId: string, id: string) {
   const config = personalModelConfig(root, ownerId, id)
   if (!config) return false
   const status = connectionStatus(root, config)
-  return !status.disabled && status.method === config.authMethods?.[0] && (id === PERSONAL_BYOK_ID ? status.hasKey && !!config.models.fast && !!config.models.balanced && !!config.models.strong : id === PERSONAL_CLAUDE_ID ? status.claudeConnected : status.chatgptConnected)
+  return !status.disabled && status.method === config.authMethods?.[0] && ((id === PERSONAL_BYOK_ID || id === OPENCODE_GO_ID) ? status.hasKey && !!config.models.fast && !!config.models.balanced && !!config.models.strong : id === PERSONAL_CLAUDE_ID ? status.claudeConnected : status.chatgptConnected)
 }
 
 // This lives in the authenticated user's existing runtime data root, never a project.
@@ -34,7 +37,20 @@ function file(root: string) { return join(root, '.runtime', 'model-connections.j
 function read(root: string): Connections {
   const path = file(root)
   if (!existsSync(path)) return { connections: {} }
-  return JSON.parse(readFileSync(path, 'utf8'))
+  const state = JSON.parse(readFileSync(path, 'utf8')) as Connections
+  const go = state.connections[OPENCODE_GO_ID]
+  // Correct connections saved by the initial Go integration, preserving their
+  // encrypted key only when it is bound to that exact previous official route.
+  if (go?.method === 'byok' && isOpenCodeGoProvider(go.provider)) {
+    const previousUrl = go.provider === 'anthropic-compatible'
+      ? 'https://opencode.ai/inference/go/anthropic'
+      : 'https://opencode.ai/inference/go/openai/v1'
+    if (go.baseUrl === previousUrl && go.endpoint === endpoint({ provider: go.provider, baseUrl: previousUrl })) {
+      go.baseUrl = OPENCODE_GO_PROFILES[go.provider].baseUrl
+      go.endpoint = endpoint({ provider: go.provider, baseUrl: go.baseUrl })
+    }
+  }
+  return state
 }
 function writePrivate(path: string, value: unknown) {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
@@ -43,7 +59,7 @@ function writePrivate(path: string, value: unknown) {
   renameSync(temp, path)
 }
 export function preferredModelId(root: string) { return read(root).defaultModelId }
-function endpoint(config: PublicModelConfig, baseUrl = config.baseUrl) { return createHash('sha256').update(`${config.provider}\n${baseUrl ?? ''}`).digest('hex') }
+function endpoint(config: Pick<PublicModelConfig, 'provider' | 'baseUrl'>, baseUrl = config.baseUrl) { return createHash('sha256').update(`${config.provider}\n${baseUrl ?? ''}`).digest('hex') }
 function validateByokUrl(value: string) {
   const url = new URL(value)
   if (url.protocol !== 'https:' || url.username || url.password || url.hash) throw new Error('Use an HTTPS endpoint without embedded credentials or fragments')
@@ -103,6 +119,14 @@ export async function fetchClaudeSubscriptionUsage(root: string, fetchImpl: type
   }
 }
 export function saveConnection(root: string, config: PublicModelConfig, method: ModelAuthMethod, key?: string, preferred = false, byok?: { baseUrl?: string; models?: ModelTierMap }) {
+  if (config.id === OPENCODE_GO_ID) {
+    if (method !== 'byok' || !isOpenCodeGoProvider(config.provider)) throw new Error('OpenCode Go requires an API key and a supported protocol')
+    const profile = OPENCODE_GO_PROFILES[config.provider]
+    if (config.baseUrl !== profile.baseUrl || (byok?.baseUrl !== undefined && byok.baseUrl !== profile.baseUrl)) throw new Error('Use the official OpenCode Go endpoint')
+    const models = validateByokModels(byok?.models ?? config.models)
+    if (Object.values(models).some(model => !(profile.models as readonly string[]).includes(model))) throw new Error('Choose an OpenCode Go model supported by this protocol')
+    byok = { baseUrl: profile.baseUrl, models }
+  }
   const allowed = validateModelAccess(config.provider, config.authMethods)
   if (config.published === false || !allowed.includes(method)) throw new Error('This model authentication method is not published')
   const state = read(root)

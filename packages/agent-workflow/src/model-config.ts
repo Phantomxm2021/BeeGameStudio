@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { OPENCODE_GO_PROFILES } from './opencode-go'
 
 export type ModelProviderKind =
   | 'anthropic-compatible'
@@ -234,7 +235,9 @@ export function mapStoredModelConfigToRuntime(
         modelType: 'anthropic',
         env: compactEnv({
           ANTHROPIC_BASE_URL: record.baseUrl,
-          ANTHROPIC_AUTH_TOKEN: record.apiKey,
+          // Go's Messages gateway reads x-api-key; let the SDK supply it.
+          [record.baseUrl?.replace(/\/$/, '') === OPENCODE_GO_PROFILES['anthropic-compatible'].baseUrl
+            ? 'ANTHROPIC_API_KEY' : 'ANTHROPIC_AUTH_TOKEN']: record.apiKey,
           BGS_DEFAULT_FAST_MODEL: record.models.fast,
           BGS_DEFAULT_BALANCED_MODEL: record.models.balanced,
           BGS_DEFAULT_STRONG_MODEL: record.models.strong,

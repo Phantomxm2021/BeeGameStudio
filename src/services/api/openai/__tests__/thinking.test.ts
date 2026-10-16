@@ -229,6 +229,31 @@ describe('buildOpenAIRequestBody — thinking params', () => {
     expect('prompt_cache_key' in body).toBe(false)
   })
 
+  test('Go uses managed thinking defaults while preserving streaming and tool calling', () => {
+    const tools = [{ type: 'function', function: { name: 'sum', parameters: { type: 'object', properties: {} } } }]
+    for (const baseUrl of ['https://opencode.ai/zen/go/v1', 'https://opencode.ai/zen/go/v1/']) {
+      const body = buildOpenAIRequestBody({ ...baseParams, model: 'mimo-v2.6-flash', baseUrl,
+        tools, toolChoice: 'auto', enableThinking: true, maxTokens: 1024 })
+      expect(body).not.toHaveProperty('baseUrl')
+      expect(body.thinking).toBeUndefined()
+      expect(body.enable_thinking).toBeUndefined()
+      expect(body.chat_template_kwargs).toBeUndefined()
+      expect(body.stream).toBe(true)
+      expect(body.stream_options).toEqual({ include_usage: true })
+      expect(body.tools).toEqual(tools)
+      expect(body.tool_choice).toBe('auto')
+      expect(body.max_tokens).toBe(1024)
+    }
+  })
+
+  test('other compatible endpoints retain their existing thinking configuration', () => {
+    const body = buildOpenAIRequestBody({ ...baseParams, model: 'mimo-v2.6-flash',
+      baseUrl: 'https://compatible.example/v1', enableThinking: true, maxTokens: 1024 })
+    expect(body.thinking).toEqual({ type: 'enabled' })
+    expect(body.enable_thinking).toBe(true)
+    expect(body.chat_template_kwargs).toEqual({ thinking: true, enable_thinking: true })
+  })
+
   test('includes vLLM/self-hosted thinking format when enabled', () => {
     const body = buildOpenAIRequestBody({ ...baseParams, enableThinking: true })
     expect(body.enable_thinking).toBe(true)

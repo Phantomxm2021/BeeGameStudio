@@ -1,3 +1,4 @@
+import { OPENCODE_GO_ID, OPENCODE_GO_PROFILES } from '@bee-game-studio/agent-workflow/opencode-go';
 import { createRef } from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -19,6 +20,7 @@ const catalog = (): api.CatalogModel[] => [
   { id: 'personal-byok', name: 'BYOK', provider: 'openai-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: connection() },
   { id: 'personal-claude-subscription', name: 'Claude subscription', provider: 'anthropic-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['claude-subscription'], connection: connection() },
   { id: 'personal-chatgpt-subscription', name: 'ChatGPT subscription', provider: 'openai-compatible', models: {}, apiKeyPreview: '', isDefault: false, authMethods: ['chatgpt-subscription'], connection: connection() },
+  { id: OPENCODE_GO_ID, name: 'OpenCode Go', provider: 'anthropic-compatible', baseUrl: OPENCODE_GO_PROFILES['anthropic-compatible'].baseUrl, models: OPENCODE_GO_PROFILES['anthropic-compatible'].defaults, apiKeyPreview: '', isDefault: false, authMethods: ['byok'], connection: connection() },
 ];
 const waitForCatalog = async () => { await act(async () => { await vi.mocked(api.listModelCatalog).mock.results[0]?.value; }); };
 beforeEach(() => {
@@ -157,4 +159,57 @@ it('shows real Claude subscription usage when available and does not invent Chat
   await userEvent.selectOptions(screen.getByLabelText('Connection type'), 'chatgpt-subscription');
   expect(screen.queryByLabelText('Claude subscription usage')).not.toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'View ChatGPT usage' })).toHaveAttribute('href', 'https://chatgpt.com/settings/usage');
+});
+
+it('saves Go through the existing footer and restricts model choices to the selected protocol', async () => {
+  const ref = createRef<ModelConnectionsHandle>();
+  const saveState = vi.fn();
+  render(<><ModelConnectionsPanel ref={ref} language="en" onSaveStateChange={saveState} /><button onClick={() => ref.current?.saveByok()}>Footer save</button></>);
+  await waitForCatalog();
+  await userEvent.selectOptions(screen.getByLabelText('Connection type'), 'opencode-go');
+  expect(screen.queryByLabelText('Base URL')).not.toBeInTheDocument();
+  expect(saveState).toHaveBeenLastCalledWith({ visible: true, disabled: true, busy: false });
+  expect(screen.getByLabelText('Fast model')).toHaveValue('qwen3.8-flash');
+  expect(screen.queryByRole('option', { name: 'kimi-k3' })).not.toBeInTheDocument();
+  await userEvent.selectOptions(screen.getByLabelText('Protocol'), 'openai-compatible');
+  expect(screen.getByLabelText('Strong model')).toHaveValue('kimi-k3');
+  expect(screen.queryByRole('option', { name: 'minimax-m3' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('option', { name: 'gpt-6-luna' })).not.toBeInTheDocument();
+  await userEvent.type(screen.getByLabelText('OpenCode Go API Key'), 'go-fixture-key');
+  expect(saveState).toHaveBeenLastCalledWith({ visible: true, disabled: false, busy: false });
+  await userEvent.click(screen.getByRole('button', { name: 'Footer save' }));
+  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith(OPENCODE_GO_ID, 'byok', 'go-fixture-key', true, { provider: 'openai-compatible', baseUrl: OPENCODE_GO_PROFILES['openai-compatible'].baseUrl, models: OPENCODE_GO_PROFILES['openai-compatible'].defaults }));
+  expect(screen.getByLabelText('OpenCode Go API Key')).toHaveValue('');
+  expect(api.startModelLogin).not.toHaveBeenCalled();
+});
+
+it('restores a preferred Go connection and requires a key again when switching protocol', async () => {
+  const result = catalog();
+  const go = result.find(item => item.id === OPENCODE_GO_ID)!;
+  go.connection = connection('byok', { hasKey: true, isPreferred: true, baseUrl: go.baseUrl, models: { fast: 'minimax-m3', balanced: 'qwen3.7-plus', strong: 'qwen3.8-max' } });
+  vi.mocked(api.listModelCatalog).mockResolvedValue(result);
+  const saveState = vi.fn();
+  render(<ModelConnectionsPanel language="en" onSaveStateChange={saveState} />);
+  expect(await screen.findByLabelText('Protocol')).toHaveValue('anthropic-compatible');
+  expect(screen.getByLabelText('Fast model')).toHaveValue('minimax-m3');
+  expect(saveState).toHaveBeenLastCalledWith({ visible: true, disabled: false, busy: false });
+  await userEvent.selectOptions(screen.getByLabelText('Protocol'), 'openai-compatible');
+  expect(saveState).toHaveBeenLastCalledWith({ visible: true, disabled: true, busy: false });
+});
+
+it('reactivates a saved Go connection separately from ordinary BYOK and reports failed saves', async () => {
+  const result = catalog();
+  const go = result.find(item => item.id === OPENCODE_GO_ID)!;
+  go.connection = connection('byok', { hasKey: true, models: go.models, baseUrl: go.baseUrl });
+  vi.mocked(api.listModelCatalog).mockResolvedValue(result);
+  const ref = createRef<ModelConnectionsHandle>();
+  render(<><ModelConnectionsPanel ref={ref} language="en" /><button onClick={() => ref.current?.saveByok()}>Footer save</button></>);
+  await waitForCatalog();
+  await userEvent.selectOptions(screen.getByLabelText('Connection type'), 'opencode-go');
+  await waitFor(() => expect(api.saveModelConnection).toHaveBeenCalledWith(OPENCODE_GO_ID, 'byok', undefined, true, { provider: go.provider, baseUrl: go.baseUrl, models: go.models }));
+  vi.mocked(api.saveModelConnection).mockRejectedValueOnce(new Error('save failed'));
+  await userEvent.type(screen.getByLabelText('OpenCode Go API Key'), 'replacement-key');
+  await userEvent.click(screen.getByRole('button', { name: 'Footer save' }));
+  await waitFor(() => expect(showError).toHaveBeenCalledWith('Could not save the OpenCode Go connection. Check the configuration.'));
+  expect(screen.getByLabelText('OpenCode Go API Key')).toHaveValue('replacement-key');
 });

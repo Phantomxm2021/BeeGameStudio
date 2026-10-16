@@ -6,15 +6,27 @@ import {
   importModelConfigSnapshot,
   listModelConfigs,
   mapModelConfigToRuntime,
+  mapStoredModelConfigToRuntime,
   resetAgentWorkflow,
   updateModelConfig,
 } from '../index'
+import { OPENCODE_GO_PROFILES } from '../opencode-go'
 
 describe('agent workflow model configs', () => {
   const legacyRuntimeEnvPrefix = ['CLAU', 'DE_CODE_USE_'].join('')
 
   beforeEach(() => {
     resetAgentWorkflow()
+  })
+
+  test('uses SDK API-key auth only for the exact Go Anthropic endpoint', () => {
+    const go = OPENCODE_GO_PROFILES['anthropic-compatible'].baseUrl
+    for (const baseUrl of [go, `${go}/`, 'https://compatible.example', `${go}/other`, 'https://opencode.ai.evil.test/zen/go']) {
+      const env = mapStoredModelConfigToRuntime({ provider: 'anthropic-compatible', baseUrl, apiKey: 'fixture-secret', models: {} }).env
+      const isGo = baseUrl === go || baseUrl === `${go}/`
+      expect(env[isGo ? 'ANTHROPIC_API_KEY' : 'ANTHROPIC_AUTH_TOKEN']).toBe('fixture-secret')
+      expect(env).not.toHaveProperty(isGo ? 'ANTHROPIC_AUTH_TOKEN' : 'ANTHROPIC_API_KEY')
+    }
   })
 
   test('masks API keys while preserving runtime mapping internally', () => {

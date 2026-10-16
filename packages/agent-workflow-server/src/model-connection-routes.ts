@@ -1,6 +1,7 @@
 import type { Hono } from 'hono'
 import type { DashboardRepository } from './dashboard-repository'
 import type { BeeGameUserContext } from './auth/user-context'
+import { OPENCODE_GO_ID, isOpenCodeGoProvider } from '@bee-game-studio/agent-workflow/opencode-go'
 import { connectionStatus, disconnectAccount, disconnectConnection, fetchClaudeSubscriptionUsage, ModelConnectionLogins, PERSONAL_BYOK_ID, PERSONAL_CHATGPT_ID, PERSONAL_CLAUDE_ID, personalModelConfig, saveConnection } from './model-connections'
 import type { ModelAuthMethod, ModelProviderKind } from '@bee-game-studio/agent-workflow'
 
@@ -28,7 +29,7 @@ export function registerModelConnectionRoutes(app: Hono, options: {
     const user = options.getUser(request)
     const root = options.getRoot(request)
     const published = (await options.repository.listModelConfigs(request, user)).filter(config => config.published !== false)
-    const personal = [PERSONAL_BYOK_ID, PERSONAL_CLAUDE_ID, PERSONAL_CHATGPT_ID].filter(id => !published.some(config => config.id === id)).map(id => personalModelConfig(root, user.id, id)!)
+    const personal = [PERSONAL_BYOK_ID, PERSONAL_CLAUDE_ID, PERSONAL_CHATGPT_ID, OPENCODE_GO_ID].filter(id => !published.some(config => config.id === id)).map(id => personalModelConfig(root, user.id, id)!)
     return [...published, ...personal]
   }
   app.get('/api/model-catalog', async c => c.json((await catalog(c.req.raw)).map(config => ({
@@ -45,14 +46,19 @@ export function registerModelConnectionRoutes(app: Hono, options: {
     try {
       const body = await c.req.json()
       const root = options.getRoot(c.req.raw)
-      const config = c.req.param('id') === PERSONAL_BYOK_ID
-        ? personalModelConfig(root, options.getUser(c.req.raw).id, PERSONAL_BYOK_ID, body.provider as ModelProviderKind)
+      const id = c.req.param('id')
+      if (id === OPENCODE_GO_ID && (!isOpenCodeGoProvider(body.provider) || !body.models)) return c.json({ error: 'Choose an OpenCode Go protocol and three models' }, 400)
+      const config = id === PERSONAL_BYOK_ID || id === OPENCODE_GO_ID
+        ? personalModelConfig(root, options.getUser(c.req.raw).id, id, body.provider as ModelProviderKind)
         : (await catalog(c.req.raw)).find(item => item.id === c.req.param('id'))
       if (!config) return c.json({ error: 'Published model not found' }, 404)
       if (typeof body.method !== 'string' || (body.apiKey !== undefined && typeof body.apiKey !== 'string') || (body.baseUrl !== undefined && typeof body.baseUrl !== 'string') || (body.models !== undefined && (!body.models || typeof body.models !== 'object' || ['fast', 'balanced', 'strong'].some(tier => typeof body.models[tier] !== 'string')))) return c.json({ error: 'Invalid connection' }, 400)
       if (body.method !== 'byok' && (body.baseUrl !== undefined || body.models !== undefined)) return c.json({ error: 'Personal endpoint and models require BYOK' }, 400)
       if (c.req.param('id') === PERSONAL_BYOK_ID && (!['anthropic-compatible', 'openai-compatible', 'gemini', 'grok'].includes(body.provider) || !body.baseUrl || !body.models)) return c.json({ error: 'BYOK requires provider, URL, key and three models' }, 400)
-      if (body.method === 'byok' && body.baseUrl) await options.assertPermittedUrl?.(body.baseUrl)
+      if (body.method === 'byok' && body.baseUrl) {
+        try { await options.assertPermittedUrl?.(body.baseUrl) }
+        catch { return c.json({ error: 'Model provider endpoint is blocked by the deployment outbound policy. Check the host allowlist and DNS configuration.' }, 400) }
+      }
       const result = saveConnection(root, config, body.method as ModelAuthMethod, body.apiKey, body.preferred === true, { baseUrl: body.baseUrl, models: body.models })
       options.changed(options.getUser(c.req.raw).id)
       return c.json(result)

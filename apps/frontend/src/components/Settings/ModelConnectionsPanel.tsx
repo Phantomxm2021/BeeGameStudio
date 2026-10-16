@@ -1,5 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { ProjectSelect } from '../beui/project-select';
+import { OPENCODE_GO_ID } from '@bee-game-studio/agent-workflow/opencode-go';
+import { OpenCodeGoPanel } from './OpenCodeGoPanel';
 import { ModelConfigPanel } from './ModelConfigPanel';
 import { useToastContext } from '../../contexts/ToastContext';
 import { cancelModelLogin, completeModelLogin, listModelCatalog, readClaudeSubscriptionUsage, readModelLogin, saveModelConnection, startModelLogin, type CatalogModel, type ClaudeSubscriptionUsage, type ModelAuthMethod, type ModelLogin, type ModelProviderKind, type ModelTierMap } from '../../services/modelConfigApi';
@@ -7,13 +9,14 @@ import { cancelModelLogin, completeModelLogin, listModelCatalog, readClaudeSubsc
 const BYOK_ID = 'personal-byok';
 const CLAUDE_ID = 'personal-claude-subscription';
 const CHATGPT_ID = 'personal-chatgpt-subscription';
-type Mode = 'official' | 'byok' | 'claude-subscription' | 'chatgpt-subscription';
-const personalIds = [BYOK_ID, CLAUDE_ID, CHATGPT_ID];
+type Mode = 'official' | 'byok' | 'claude-subscription' | 'chatgpt-subscription' | 'opencode-go';
+const personalIds = [BYOK_ID, CLAUDE_ID, CHATGPT_ID, OPENCODE_GO_ID];
 
 export type ModelConnectionsHandle = { saveByok: () => void };
 export type ModelConnectionsSaveState = { visible: boolean; disabled: boolean; busy: boolean };
 
 export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { language: string; onSaveStateChange?: (state: ModelConnectionsSaveState) => void }>(function ModelConnectionsPanel({ language, onSaveStateChange }, ref) {
+  const goRef = useRef<ModelConnectionsHandle>(null);
   const { showError } = useToastContext();
   const zh = language.startsWith('zh');
   const copy = (cn: string, en: string) => zh ? cn : en;
@@ -50,7 +53,8 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
     void refresh().then(result => {
       if (!mounted.current) return;
       const active = result.find(item => item.connection.isPreferred) ?? result.find(item => item.isDefault);
-      if (active?.id === BYOK_ID) setMode('byok');
+      if (active?.id === OPENCODE_GO_ID) setMode('opencode-go');
+      else if (active?.id === BYOK_ID) setMode('byok');
       else if (active?.id === CLAUDE_ID) setMode('claude-subscription');
       else if (active?.id === CHATGPT_ID) setMode('chatgpt-subscription');
       else setMode('official');
@@ -99,6 +103,10 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
     setMode(next); setStatus('');
     if (next === 'official' && officialId) void run(() => activate(officialId, 'platform'), () => setMode(previous));
     if (next === 'byok' && byok?.connection.hasKey && byokComplete) void run(() => activate(BYOK_ID, 'byok', { provider, baseUrl: baseUrl.trim(), models: tiers }), () => setMode(previous));
+    if (next === 'opencode-go') {
+      const go = models.find(item => item.id === OPENCODE_GO_ID);
+      if (go?.connection.hasKey && go.baseUrl) void run(() => activate(OPENCODE_GO_ID, 'byok', { provider: go.provider, baseUrl: go.baseUrl!, models: go.connection.models ?? go.models }), () => setMode(previous));
+    }
     if (next === 'claude-subscription' || next === 'chatgpt-subscription') {
       const id = next === 'claude-subscription' ? CLAUDE_ID : CHATGPT_ID;
       const account = models.find(item => item.id === id);
@@ -127,11 +135,12 @@ export const ModelConnectionsPanel = forwardRef<ModelConnectionsHandle, { langua
     catch { showError(copy('复制失败，请手动复制设备码。', 'Copy failed. Select the device code manually.')); }
   };
   const saveByok = () => void run(async () => { await saveModelConnection(BYOK_ID, 'byok', key, true, { provider, baseUrl: baseUrl.trim(), models: tiers }); setKey(''); await refresh(); });
-  useImperativeHandle(ref, () => ({ saveByok }));
-  useEffect(() => { onSaveStateChange?.({ visible: mode === 'byok', disabled: busy || !byokComplete, busy }); }, [mode, busy, byokComplete, onSaveStateChange]);
+  useImperativeHandle(ref, () => ({ saveByok: () => mode === 'opencode-go' ? goRef.current?.saveByok() : saveByok() }));
+  useEffect(() => { if (mode === 'opencode-go') return; onSaveStateChange?.({ visible: mode === 'byok', disabled: busy || !byokComplete, busy }); }, [mode, busy, byokComplete, onSaveStateChange]);
 
   return <div className="flex min-h-0 flex-1 flex-col gap-4 py-4">
-    <ProjectSelect ariaLabel={copy('连接方式', 'Connection type')} value={mode} disabled={busy || !!login} triggerClassName="h-10" onValueChange={value => switchMode(value as Mode)} options={[{ value: 'official', label: 'Bee Game Studio LLM' }, { value: 'byok', label: 'BYOK' }, { value: 'claude-subscription', label: 'Claude account with subscription' }, { value: 'chatgpt-subscription', label: 'ChatGPT account with subscription' }]} />
+    <ProjectSelect ariaLabel={copy('连接方式', 'Connection type')} value={mode} disabled={busy || !!login} triggerClassName="h-10" onValueChange={value => switchMode(value as Mode)} options={[{ value: 'official', label: 'Bee Game Studio LLM' }, { value: 'byok', label: 'BYOK' }, { value: 'opencode-go', label: 'OpenCode Go' }, { value: 'claude-subscription', label: 'Claude account with subscription' }, { value: 'chatgpt-subscription', label: 'ChatGPT account with subscription' }]} />
+    {mode === 'opencode-go' && <OpenCodeGoPanel ref={goRef} language={language} config={models.find(item => item.id === OPENCODE_GO_ID)} busy={busy} setBusy={setBusy} refresh={refresh} onSaveStateChange={onSaveStateChange} />}
     {mode === 'byok' && <div className="space-y-3">
       <ModelConfigPanel labels={{ provider: copy('服务商', 'Provider'), baseUrl: copy('接口 URL', 'Base URL'), apiKey: 'API Key', models: copy('模型', 'Models'), fast: copy('快速', 'Fast'), balanced: copy('均衡', 'Balanced'), strong: copy('强力', 'Strong'), fastModel: copy('快速模型', 'Fast model'), balancedModel: copy('均衡模型', 'Balanced model'), strongModel: copy('强力模型', 'Strong model') }} provider={provider} baseUrl={baseUrl} apiKey={key} fastModel={tiers.fast ?? ''} balancedModel={tiers.balanced ?? ''} strongModel={tiers.strong ?? ''} apiKeyPreview={byok?.connection.hasKey && !keyRequired ? '••••' : ''} savedPrefix={copy('已保存：', 'Saved: ')} onProviderChange={setProvider} onBaseUrlChange={setBaseUrl} onApiKeyChange={setKey} onFastModelChange={value => setTiers(current => ({ ...current, fast: value }))} onBalancedModelChange={value => setTiers(current => ({ ...current, balanced: value }))} onStrongModelChange={value => setTiers(current => ({ ...current, strong: value }))} onSubmit={event => { event.preventDefault(); if (byokComplete && !busy) saveByok(); }} />
     </div>}

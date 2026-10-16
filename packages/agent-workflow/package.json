@@ -7,6 +7,7 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./opencode-go": "./src/opencode-go.ts",
     "./native-diagnostics": "./src/native-diagnostics.ts",
     "./standard-cli-usage": "./src/standard-cli-usage.ts",
     "./standard-cli-cache": "./src/standard-cli-cache.ts",
