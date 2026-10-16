@@ -28,6 +28,13 @@ const message = (type: ProjectEventMessage['type'], overrides: Partial<ProjectEv
 })
 
 describe('standalone chat projection', () => {
+  it('does not present settled host cleanup as a user stopping the task', () => {
+    const stopped = event({ type: 'session.stopped', payload: { type: 'session.stopped', reason: 'agent_goal_settled' } });
+    expect(projectEventMessages('project-a', stopped)).toEqual([]);
+    expect(projectEventMessages('project-a', { ...stopped, payload: { type: 'session.stopped', reason: 'user_pause' } }))
+      .toContainEqual(expect.objectContaining({ type: 'status', status: 'stopped' }));
+  });
+
   it('keeps failure identity and error presentation identical in live output and history', () => {
     const [failure] = projectEventMessages('project-a', event({ type: 'turn.failed', text: 'API Error: Connection error.' }));
     expect(failure).toMatchObject({ type: 'error', message_id: 'beegame-failure-main-turn-a',

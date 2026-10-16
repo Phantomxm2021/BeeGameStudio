@@ -5046,7 +5046,13 @@ async function collectProjectChatTimelineEvents(input: {
   beeGameSessions: BeeGameSessionManager
 }): Promise<BeeGameEvent[]> {
   const mainEvents = await getProjectRuntimeEvents(input)
-  return appendProjectChatTimeline(input.workspacePath, mainEvents, input.after)
+  const timeline = await appendProjectChatTimeline(input.workspacePath, mainEvents, input.after)
+  const savedLanguage = mainEvents.find(event => event.type === 'session.started')?.payload?.language
+  const language = input.beeGameSessions.language(input.sessionId) ??
+    (isBeeGameSessionLanguage(savedLanguage) ? savedLanguage : undefined)
+  // Existing journal rows retain their original text. Apply today's display
+  // formatting after reading them, without rewriting durable evidence/cursors.
+  return timeline.map(event => formatBeeGameEventForDisplay(event, language))
 }
 
 // Keep this below Bun's/default reverse-proxy idle window. Otherwise a quiet
@@ -5469,7 +5475,8 @@ function deriveBeeGameRuntimeStatus(
   // not turn a failed native turn into an idle, successful-looking project.
   const outcome = events.findLast(event =>
     ['turn.started', 'turn.completed', 'turn.empty', 'turn.failed',
-      'session.started', 'session.stopped', 'session.failed'].includes(event.type))
+      'session.started', 'session.stopped', 'session.failed'].includes(event.type) &&
+    !(event.type === 'session.stopped' && event.payload?.reason === 'agent_goal_settled'))
   if (outcome?.type === 'turn.failed' || outcome?.type === 'session.failed') {
     return {
       phase: 'paused',

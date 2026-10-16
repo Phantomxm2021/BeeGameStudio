@@ -39,6 +39,13 @@
     "account": "계정"
   },
   "beegame": {
+    "modelRequestError": {
+      "capacity": "선택한 모델의 처리 용량이 가득 찼습니다. 다른 모델을 사용해 주세요.",
+      "retry": "재시도",
+      "retryNow": "지금 재시도",
+      "retryIn": "{{seconds}}초 후 재시도",
+      "retrying": "재시도 중…"
+    },
     "previewTitle": "미리보기",
     "collabFlow": "협업 흐름",
     "deliverables": "결과물",

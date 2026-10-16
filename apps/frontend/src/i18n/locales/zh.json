@@ -701,6 +701,13 @@
     "account": "账号"
   },
   "beegame": {
+    "modelRequestError": {
+      "capacity": "所选模型当前已满负荷，请尝试其他模型。",
+      "retry": "重试",
+      "retryNow": "立即重试",
+      "retryIn": "{{seconds}} 秒后重试",
+      "retrying": "重试中…"
+    },
     "subagentActivity": {
       "legacy": "此记录为纯文本，缺少来源信息，按原文保留。",
       "recent": "仅显示最近活动；较早记录或过长输出已省略。",

@@ -701,6 +701,13 @@
     "account": "Account"
   },
   "beegame": {
+    "modelRequestError": {
+      "capacity": "Selected model is at capacity. Please try a different model.",
+      "retry": "Retry",
+      "retryNow": "Retry now",
+      "retryIn": "Retry in {{seconds}}s",
+      "retrying": "Retrying…"
+    },
     "subagentActivity": {
       "legacy": "Plain-text record: source metadata is unavailable; shown as-is.",
       "recent": "Recent activity only; earlier records or long outputs have been omitted.",

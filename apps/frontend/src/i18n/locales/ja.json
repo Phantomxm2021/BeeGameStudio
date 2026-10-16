@@ -39,6 +39,13 @@
     "account": "アカウント"
   },
   "beegame": {
+    "modelRequestError": {
+      "capacity": "選択したモデルは処理能力の上限に達しています。別のモデルをお試しください。",
+      "retry": "再試行",
+      "retryNow": "今すぐ再試行",
+      "retryIn": "{{seconds}}秒後に再試行",
+      "retrying": "再試行中…"
+    },
     "previewTitle": "プレビュー",
     "collabFlow": "コラボレーション",
     "deliverables": "成果物",

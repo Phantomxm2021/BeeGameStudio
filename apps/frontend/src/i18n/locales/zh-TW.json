@@ -638,6 +638,13 @@
     "account": "帳號"
   },
   "beegame": {
+    "modelRequestError": {
+      "capacity": "所選模型目前已滿載，請嘗試其他模型。",
+      "retry": "重試",
+      "retryNow": "立即重試",
+      "retryIn": "{{seconds}} 秒後重試",
+      "retrying": "重試中…"
+    },
     "userQuestion": {
       "custom": "或輸入你自己的回答…",
       "submit": "提交回答",

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CircleAlert, RotateCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import type { Language } from '../AgentsConfig';
 
 export type ModelRequestRetryControl = {
     messageId: string;
@@ -10,9 +12,13 @@ export type ModelRequestRetryControl = {
 };
 
 /** Only a newly observed native failure can arm the timer. History is manual. */
-export function RuntimeErrorNotice({ content, retry, zh }: {
-    content: string; retry?: ModelRequestRetryControl; zh: boolean;
+export function RuntimeErrorNotice({ content, retry, lang }: {
+    content: string; retry?: ModelRequestRetryControl; lang: Language;
 }) {
+    const { i18n } = useTranslation('beegame');
+    const t = i18n.getFixedT(lang, 'beegame');
+    const message = /model_coming_soon|at capacity|overloaded_error/i.test(content)
+        ? t('modelRequestError.capacity') : content;
     const [remaining, setRemaining] = useState(10_000);
     const [pending, setPending] = useState(false);
     const latest = useRef(retry);
@@ -44,17 +50,19 @@ export function RuntimeErrorNotice({ content, retry, zh }: {
         }, 100);
         return () => clearInterval(timer);
     }, [armed, fire]);
-    return <div role="alert" className="my-2 flex min-w-0 items-start gap-2 rounded-xl bg-[var(--surface-2)] px-3 py-2.5 text-sm text-[var(--text-primary)]">
-        <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-[var(--text-muted)]" />
-        <p className="min-w-0 flex-1 break-words whitespace-pre-wrap">{content}</p>
+    return <div role="alert" className="my-2 flex min-w-0 items-center gap-3 rounded-xl bg-[var(--surface-2)] px-3 py-2.5 text-sm text-[var(--text-primary)]">
+        <CircleAlert aria-hidden="true" className="size-4 shrink-0 text-[var(--text-muted)]" />
+        <p className="min-w-0 flex-1 break-words whitespace-pre-wrap leading-5">{message}</p>
         {retry && <div className="flex shrink-0 items-center gap-1">
             <button type="button" disabled={retry.disabled || pending} onClick={() => void fire()}
-                aria-label={zh ? '立即重试' : 'Retry now'}
-                className="relative isolate flex h-7 min-w-24 items-center justify-center gap-1.5 overflow-hidden rounded-full border border-[var(--border)] px-2 text-xs disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
+                aria-label={t('modelRequestError.retryNow')}
+                className="relative isolate flex h-8 min-w-24 items-center justify-center gap-1.5 overflow-hidden rounded-full border border-[var(--border)] px-3 text-sm leading-5 whitespace-nowrap tabular-nums disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]">
                 {armed && <span data-testid="retry-progress" aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 -z-10 bg-blue-500/15 transition-[width] duration-100 ease-linear motion-reduce:transition-none"
                     style={{ width: `${(1 - remaining / 10_000) * 100}%` }} />}
-                <RotateCw aria-hidden="true" className={`size-3 ${pending ? 'animate-spin' : ''}`} />
-                {pending ? (zh ? '重试中…' : 'Retrying…') : armed ? `Retry in ${Math.ceil(remaining / 1000)}s` : 'Retry'}
+                {pending && <RotateCw aria-hidden="true" className="size-3.5 animate-spin" />}
+                {pending ? t('modelRequestError.retrying') : armed
+                    ? t('modelRequestError.retryIn', { seconds: Math.ceil(remaining / 1000) })
+                    : t('modelRequestError.retry')}
             </button>
         </div>}
     </div>;

@@ -39,6 +39,13 @@
     "account": "Cuenta"
   },
   "beegame": {
+    "modelRequestError": {
+      "capacity": "El modelo seleccionado está al límite de su capacidad. Prueba con otro modelo.",
+      "retry": "Reintentar",
+      "retryNow": "Reintentar ahora",
+      "retryIn": "Reintentar en {{seconds}} s",
+      "retrying": "Reintentando…"
+    },
     "previewTitle": "Vista previa",
     "collabFlow": "Colaboración",
     "deliverables": "Entregables",

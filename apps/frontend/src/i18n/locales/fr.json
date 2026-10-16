@@ -39,6 +39,13 @@
     "account": "Compte"
   },
   "beegame": {
+    "modelRequestError": {
+      "capacity": "Le modèle sélectionné est saturé. Veuillez essayer un autre modèle.",
+      "retry": "Réessayer",
+      "retryNow": "Réessayer maintenant",
+      "retryIn": "Réessayer dans {{seconds}} s",
+      "retrying": "Nouvelle tentative…"
+    },
     "previewTitle": "Aperçu",
     "collabFlow": "Collaboration",
     "deliverables": "Livrables",

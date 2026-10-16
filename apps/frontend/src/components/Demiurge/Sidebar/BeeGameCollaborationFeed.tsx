@@ -695,7 +695,7 @@ export const BeeGameCollaborationFeed = memo(({
 
                     ) : entry.kind === 'context' ? (
                         entry.message.type === 'error'
-                            ? <RuntimeErrorNotice key={entry.message.id} content={displayText(entry.message.content)} zh={lang.startsWith('zh')}
+                            ? <RuntimeErrorNotice key={entry.message.id} content={displayText(entry.message.content)} lang={lang}
                                 retry={retry?.messageId === entry.message.id ? retry : undefined} />
                             : entry.message.taskKind === 'context_compaction'
                             ? <CompactionMarker key={entry.message.id} message={entry.message} text={text} isLoading={isLoading} />

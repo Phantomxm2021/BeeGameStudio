@@ -506,6 +506,8 @@ function eventToProjectEventMessagesBase(
         } as ProjectEventMessage,
       ]
     case 'session.stopped':
+      // Host cleanup follows an already terminal native turn; it is not a user stop.
+      if (getPayloadString(event, 'reason') === 'agent_goal_settled') return []
       return [
         { type: 'context_update', task_id: taskId, project_id: projectId,
           sender: 'system', message_id: `beegame-session-stop-${event.sessionId}-${event.id}`,
